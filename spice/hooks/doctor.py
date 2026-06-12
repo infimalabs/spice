@@ -123,7 +123,15 @@ def _ensure_state_excluded(repo_root: Path) -> list[str]:
 
 
 def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
+    from spice.serve.typecheck import serve_web_js_targets
+
     checks: list[DoctorCheck] = []
+    serve_web_present = bool(serve_web_js_targets(repo_root))
+    npm_note = (
+        "serve web TypeScript checkJs backend"
+        if serve_web_present
+        else "optional; this repo has no serve web checkJs sources"
+    )
     for label, binary, required, note in (
         ("tool.git", "git", True, "required for repository checks"),
         ("tool.agent-driver", DRIVER.binary(), True, f"driver={DRIVER.name}"),
@@ -133,7 +141,7 @@ def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
         ("tool.tts", "say", False, "optional macOS speech"),
         ("tool.ruff", "ruff", True, "pre-commit formatter/linter"),
         ("tool.lizard", "lizard", True, "complexity scan backend"),
-        ("tool.npm", "npm", True, "serve web TypeScript checkJs backend"),
+        ("tool.npm", "npm", serve_web_present, npm_note),
     ):
         located = find_tool(binary)
         if located:

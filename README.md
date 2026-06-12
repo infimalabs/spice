@@ -143,7 +143,10 @@ declaring mounted commands and pre-commit policy:
 fmt-cs = ["dotnet", "format", "--verify-no-changes"]
 
 [tool.spice.policy]
-pre_commit = ["fmt-cs", { label = "assets", run = ["python3", "-m", "tools.assets"] }]
+pre_commit = [
+    { label = "format C#", mount = "fmt-cs", when = ["*.cs"] },
+    { label = "assets", run = ["python3", "-m", "tools.assets"], when = ["Assets/*"] },
+]
 pre_commit_success = [{ label = "clear asset sticky state", run = ["python3", "-m", "tools.assets", "--clear-sticky"] }]
 
 [tool.spice.policy.pre_commit_builtins]
@@ -152,11 +155,20 @@ formatters = false
 ```
 
 Built-in pre-commit keys are `repo-shape`, `staging`, `repo-docs`,
-`formatters`, `env-policy`, `file-shape`, `complexity`, and `magic-numbers`.
-They run before extension steps unless an individual built-in is disabled or
-replaced in tracked policy. `pre_commit_success` uses the same command shape as
+`formatters`, `local-paths`, `serve-web-typecheck`, `env-policy`,
+`file-shape`, `complexity`, and `magic-numbers` (`serve-web-typecheck`
+no-ops in repos without the serve static sources it gates). They run before
+extension steps unless an individual built-in is disabled or replaced in
+tracked policy. `pre_commit_success` uses the same command shape as
 `pre_commit`, but runs only after the whole gate has passed, alongside sticky
 state cleanup.
+
+Extension steps run from the repo root and receive the staged paths,
+newline-separated, in the `SPICE_STAGED_PATHS` environment variable. A step
+with `when` globs runs only when a staged path matches (fnmatch against the
+repo-relative path, `*` crosses directory separators) and receives just the
+matching paths; a step without `when` always runs and receives every staged
+path.
 
 ## Status
 

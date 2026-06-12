@@ -215,3 +215,20 @@ def _check(report: doctor.DoctorReport, name: str) -> doctor.DoctorCheck:
 
 def _run(repo: Path, *args: str) -> None:
     subprocess.run(args, cwd=repo, check=True, capture_output=True, text=True)
+
+
+def test_doctor_treats_npm_as_optional_without_serve_web_sources(
+    tmp_path, monkeypatch
+):
+    real_find_tool = doctor.find_tool
+    monkeypatch.setattr(
+        doctor,
+        "find_tool",
+        lambda name: None if name == "npm" else real_find_tool(name),
+    )
+
+    checks = doctor._binary_checks(tmp_path)
+    npm = next(check for check in checks if check.name == "tool.npm")
+
+    assert npm.status == "warn"
+    assert "no serve web checkJs sources" in npm.detail

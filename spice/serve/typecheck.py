@@ -37,7 +37,14 @@ TSC_CHECKJS_ARGS = (
 )
 
 
-def serve_web_typecheck_argv() -> tuple[str, ...]:
+def serve_web_js_targets(repo_root: Path) -> tuple[str, ...]:
+    """The serve static sources present in this repo; empty for target repos."""
+    return tuple(p for p in SERVE_WEB_JS_PATHS if (repo_root / p).is_file())
+
+
+def serve_web_typecheck_argv(
+    targets: tuple[str, ...] = SERVE_WEB_JS_PATHS,
+) -> tuple[str, ...]:
     npm = find_tool("npm")
     if not npm:
         raise SpiceError(
@@ -53,12 +60,17 @@ def serve_web_typecheck_argv() -> tuple[str, ...]:
         "tsc",
         "--",
         *TSC_CHECKJS_ARGS,
-        *SERVE_WEB_JS_PATHS,
+        *targets,
     )
 
 
 def run_serve_web_typecheck(repo_root: Path) -> None:
-    argv = serve_web_typecheck_argv()
+    targets = serve_web_js_targets(repo_root)
+    if not targets:
+        # The checkJs lane gates spice's own static sources; a target repo
+        # without them has nothing in this lane.
+        return
+    argv = serve_web_typecheck_argv(targets)
     result = subprocess.run(
         list(argv),
         capture_output=True,

@@ -445,8 +445,21 @@ def test_dev_serve_web_typecheck_parser_exposes_command():
     assert args.dev_command == "serve-web-typecheck"
 
 
+def test_serve_web_typecheck_skips_repo_without_sources(tmp_path, monkeypatch):
+    from spice.serve import typecheck
+
+    monkeypatch.setattr(typecheck, "find_tool", lambda name: None)
+
+    assert typecheck.run_serve_web_typecheck(tmp_path) is None
+
+
 def test_serve_web_typecheck_invokes_typescript_checkjs(tmp_path, monkeypatch):
     from spice.serve import typecheck
+
+    for relative in typecheck.SERVE_WEB_JS_PATHS:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("// serve static source\n", encoding="utf-8")
 
     calls = []
     monkeypatch.setattr(typecheck, "find_tool", lambda name: "/usr/bin/npm")
