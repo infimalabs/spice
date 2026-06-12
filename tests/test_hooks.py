@@ -416,6 +416,8 @@ def test_reference_transaction_blocks_upstream_merged_current_branch_rewind(tmp_
         "reference-transaction guard refused to abandon upstream-merged commits "
         "on current branch refs/heads/main"
     ) in result.stderr
+    assert "task boundary has advanced origin/upstream" in result.stderr
+    assert "continue with an append-only commit" in result.stderr
     assert _git(repo, "rev-parse", "HEAD").stdout.strip() == protected
 
 
