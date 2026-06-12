@@ -17,6 +17,7 @@ from spice.policy import (
     flex_limit,
 )
 from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
+from spice.studies.fileloc import scan_loc_violations
 from spice.studies.magicnums import scan_text_magic_numbers
 
 MAGIC_HIGH_THRESHOLD = 100
@@ -43,6 +44,25 @@ def test_sticky_paths_follow_renames():
         {Path("old.py")}, {Path("old.py"): Path("new.py")}
     )
     assert sticky == {Path("old.py"), Path("new.py")}
+
+
+def test_binary_assets_are_byte_gated_but_not_line_gated(tmp_path):
+    rel_path = Path("screenshot.png")
+    (tmp_path / rel_path).write_bytes(b"\x89PNG\r\n\x1a\n\0" + b"\n" * 2000)
+
+    findings = scan_loc_violations(
+        [rel_path],
+        root=tmp_path,
+        limit=10,
+        flex_limit_value=10,
+        byte_limit=100,
+        byte_flex_limit_value=100,
+    )
+
+    assert len(findings) == 1
+    assert findings[0].line_count == 0
+    assert not findings[0].over_line_limit
+    assert findings[0].over_byte_limit
 
 
 def test_sticky_function_keys_follow_renames():
