@@ -1,0 +1,346 @@
+#!/usr/bin/env sh
+
+set -eu
+
+export PYTHONDONTWRITEBYTECODE=1
+
+die() {
+  printf '%s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+usage: ./scripts/release [patch|minor]
+       ./scripts/release prepare [patch|minor]
+       ./scripts/release publish [--notes-file PATH]
+       ./scripts/release github [version] [--notes-file PATH]
+
+Prepare and/or publish a spice release.
+
+  patch|minor         bump, validate, commit, push, and publish in one pass
+  prepare patch|minor bump, validate, and commit, but stop before push/publish
+  publish             validate the current prepared version, then push/publish
+  github [version]    create/push the annotated tag and GitHub Release
+
+Environment:
+  SPICE_RELEASE_NOTES_FILE  path to a release-notes file to publish verbatim
+EOF
+}
+
+ensure_notes_file() {
+  path="$1"
+  [ -n "$path" ] || return 0
+  [ -f "$path" ] || die "release notes file not found: $path"
+}
+
+read_pypi_token() {
+  python3 - <<'PY'
+import configparser
+from pathlib import Path
+
+path = Path.home() / ".pypirc"
+config = configparser.RawConfigParser()
+if not config.read(path):
+    raise SystemExit(f"missing {path}")
+if not config.has_section("pypi"):
+    raise SystemExit(f"{path} is missing [pypi]")
+
+token = config.get("pypi", "password", fallback="").strip()
+if not token.startswith("pypi-"):
+    raise SystemExit("expected a PyPI token in ~/.pypirc [pypi].password")
+
+print(token)
+PY
+}
+
+wait_for_pypi() {
+  target="$1"
+
+  TARGET_VERSION="$target" python3 - <<'PY'
+import json
+import os
+import time
+import urllib.request
+
+target = os.environ["TARGET_VERSION"]
+url = "https://pypi.org/pypi/spice/json"
+
+for _ in range(20):
+    with urllib.request.urlopen(url, timeout=20) as response:
+        version = json.load(response)["info"]["version"]
+    print(f"PyPI reports {version}")
+    if version == target:
+        raise SystemExit(0)
+    time.sleep(3)
+
+raise SystemExit(f"PyPI never reported {target}")
+PY
+}
+
+run_constitution_gate() {
+  uv run pytest
+  uv run ruff check .
+}
+
+run_artifact_gate() {
+  version="$1"
+  sdist="dist/spice-${version}.tar.gz"
+  wheel="dist/spice-${version}-py3-none-any.whl"
+
+  rm -rf dist
+  uv build --python 3.12
+  uvx twine check "$sdist" "$wheel"
+
+  tmpdir="$(mktemp -d)"
+  cleanup() {
+    rm -rf "$tmpdir"
+  }
+  trap cleanup EXIT INT TERM
+
+  uv venv --python 3.12 "$tmpdir/venv"
+  uv pip install --python "$tmpdir/venv/bin/python" "$wheel"
+  "$tmpdir/venv/bin/spice" --help >/dev/null
+  "$tmpdir/venv/bin/spice" task --help >/dev/null
+  "$tmpdir/venv/bin/spice" session --help >/dev/null
+}
+
+release_commit_for_version() {
+  version="$1"
+  commit="$(git log --format='%H' --grep "^release: bump to ${version}\$" -n 1)"
+  if [ -z "$commit" ]; then
+    # Initial release of the version already in pyproject: no bump commit
+    # exists, so the release points at the validated HEAD.
+    commit="$(git rev-parse HEAD)"
+  fi
+  printf '%s\n' "$commit"
+}
+
+previous_release_tag() {
+  current_tag="$1"
+
+  git tag --list 'v*' --sort=-v:refname | while IFS= read -r tag; do
+    [ -n "$tag" ] || continue
+    [ "$tag" = "$current_tag" ] && continue
+    printf '%s\n' "$tag"
+    break
+  done
+}
+
+write_release_notes() {
+  version="$1"
+  release_commit="$2"
+  current_tag="$3"
+  notes_file="$4"
+  previous_tag="$(previous_release_tag "$current_tag")"
+
+  {
+    printf '## Highlights\n\n'
+    if [ -n "$previous_tag" ]; then
+      git log --format='- %s (`%h`)' "${previous_tag}..${release_commit}" \
+        | sed '/^- release: bump to /d'
+    else
+      git log --format='- %s (`%h`)' -n 5 "${release_commit}" \
+        | sed '/^- release: bump to /d'
+    fi
+
+    printf '\n## Package Notes\n\n'
+    printf -- '- PyPI release: `spice==%s`\n' "$version"
+    printf -- '- Release commit: `%s`\n' "$(git rev-parse --short "$release_commit")"
+    if [ -n "$previous_tag" ]; then
+      printf -- '- Compare from: `%s`\n' "$previous_tag"
+    fi
+  } >"$notes_file"
+}
+
+publish_github_release() {
+  version="$1"
+  tag="v${version}"
+  release_commit="$(release_commit_for_version "$version")"
+  notes_override="${2:-}"
+  [ -n "$release_commit" ] || die "unable to find release commit for ${version}"
+
+  existing_tag="$(git tag --list "$tag")"
+  if [ -n "$existing_tag" ]; then
+    tagged_commit="$(git rev-list -n 1 "$tag")"
+    [ "$tagged_commit" = "$release_commit" ] \
+      || die "tag ${tag} already exists on ${tagged_commit}, not ${release_commit}"
+  else
+    git tag -a "$tag" "$release_commit" -m "release: ${tag}"
+  fi
+
+  git push origin "$tag"
+
+  release_view_output="$(gh release view "$tag" --json url --jq .url 2>&1)" || true
+  case "$release_view_output" in
+    https://*)
+      existing_release_url="$release_view_output"
+      ;;
+    *)
+      existing_release_url=""
+      ;;
+  esac
+  if [ -n "$existing_release_url" ]; then
+    printf 'GitHub release exists: %s\n' "$existing_release_url"
+    return 0
+  fi
+
+  if [ -n "$notes_override" ]; then
+    gh release create "$tag" --title "$tag" --notes-file "$notes_override"
+    return 0
+  fi
+
+  notes_file="$(mktemp)"
+  cleanup_notes() {
+    rm -f "$notes_file"
+  }
+  trap cleanup_notes EXIT INT TERM
+
+  write_release_notes "$version" "$release_commit" "$tag" "$notes_file"
+  gh release create "$tag" --title "$tag" --notes-file "$notes_file"
+  rm -f "$notes_file"
+  trap - EXIT INT TERM
+}
+
+publish_release() {
+  version="$1"
+  sdist="dist/spice-${version}.tar.gz"
+  wheel="dist/spice-${version}-py3-none-any.whl"
+  token="$(read_pypi_token)"
+  notes_override="${2:-}"
+
+  git push origin main
+
+  export UV_PUBLISH_TOKEN="$token"
+  uv publish --dry-run "$sdist" "$wheel"
+  uv publish "$sdist" "$wheel"
+  wait_for_pypi "$version"
+  publish_github_release "$version" "$notes_override"
+  git status --short --branch
+}
+
+mode=""
+bump=""
+release_version=""
+notes_file="${SPICE_RELEASE_NOTES_FILE:-}" # env-policy: allow
+
+if [ "$#" -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
+  usage
+  exit 0
+fi
+
+case "$#" in
+  1)
+    case "$1" in
+      patch|minor)
+        mode="release"
+        bump="$1"
+        ;;
+      publish)
+        mode="publish"
+        ;;
+      github)
+        mode="github"
+        ;;
+      *)
+        usage
+        exit 64
+        ;;
+    esac
+    ;;
+  2)
+    case "$1:$2" in
+      prepare:patch|prepare:minor)
+        mode="prepare"
+        bump="$2"
+        ;;
+      publish:--notes-file)
+        usage
+        exit 64
+        ;;
+      github:*)
+        mode="github"
+        release_version="$2"
+        ;;
+      *)
+        usage
+        exit 64
+        ;;
+    esac
+    ;;
+  3)
+    case "$1:$2" in
+      publish:--notes-file)
+        mode="publish"
+        notes_file="$3"
+        ;;
+      github:--notes-file)
+        mode="github"
+        notes_file="$3"
+        ;;
+      *)
+        usage
+        exit 64
+        ;;
+    esac
+    ;;
+  4)
+    case "$1:$3" in
+      github:--notes-file)
+        mode="github"
+        release_version="$2"
+        notes_file="$4"
+        ;;
+      *)
+        usage
+        exit 64
+        ;;
+    esac
+    ;;
+  *)
+    usage
+    exit 64
+esac
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+branch="$(git branch --show-current)"
+[ "$branch" = "main" ] || die "refusing to release from $branch"
+
+status="$(git status --porcelain)"
+[ -z "$status" ] || die "refusing to release with a dirty worktree"
+
+ensure_notes_file "$notes_file"
+
+git pull --ff-only origin main
+
+case "$mode" in
+  prepare|release)
+    run_constitution_gate
+    version="$(uv version --bump "$bump" --no-sync --short)"
+    run_artifact_gate "$version"
+    git add pyproject.toml uv.lock
+    git commit -m "release: bump to ${version}"
+    if [ "$mode" = "prepare" ]; then
+      printf 'prepared release %s; review, then run ./scripts/release publish\n' "$version"
+      git status --short --branch
+      exit 0
+    fi
+    publish_release "$version" "$notes_file"
+    ;;
+  publish)
+    version="$(uv version --short)"
+    run_constitution_gate
+    run_artifact_gate "$version"
+    publish_release "$version" "$notes_file"
+    ;;
+  github)
+    if [ -n "$release_version" ]; then
+      version="$release_version"
+    else
+      version="$(uv version --short)"
+    fi
+    publish_github_release "$version" "$notes_file"
+    ;;
+esac
