@@ -58,6 +58,15 @@ from spice.sessions.util import format_float, format_int
 
 PROXY_BIN_ENV = "SPICE_PROXY_BIN"  # env-policy: allow
 DEFAULT_PROXY_BIN = "rtk"
+PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
+PYTHON_ROUTE_FAILURE = (
+    "import sys;"
+    "sys.stderr.write("
+    "'spice agent run: refusing to run python from global PATH; expected "
+    "the venv interpreter at {venv_python} or an explicit interpreter path\\n'"
+    ");"
+    "raise SystemExit(127)"
+)
 
 AGENT_RUN_INBOX_REPEAT_SECONDS = 15.0
 AGENT_RUN_CONTEXT_METER_CACHE_SECONDS = 15.0
@@ -121,7 +130,7 @@ def build_agent_run_command(
 ) -> list[str]:
     args = normalize_agent_run_args(raw_args)
     spice_route = is_spice_route(args)
-    routed_args = worktree_spice_route_command(args, repo_root=repo_root)
+    routed_args = worktree_route_command(args, repo_root=repo_root)
     proxy = proxy_bin()
     resolved_proxy = shutil.which(proxy)
     if resolved_proxy is None:
@@ -161,6 +170,14 @@ def is_spice_route(args: Sequence[str]) -> bool:
     return args[:1] == ["spice"] or args[: len(_UV_RUN_SPICE)] == _UV_RUN_SPICE
 
 
+def worktree_route_command(
+    args: Sequence[str], *, repo_root: Path | None = None
+) -> list[str]:
+    return worktree_python_route_command(
+        worktree_spice_route_command(args, repo_root=repo_root), repo_root=repo_root
+    )
+
+
 def worktree_spice_route_command(
     args: Sequence[str], *, repo_root: Path | None = None
 ) -> list[str]:
@@ -171,6 +188,37 @@ def worktree_spice_route_command(
             repo_root, list(args[len(_UV_RUN_SPICE) :])
         ) or list(args)
     return list(args)
+
+
+def worktree_python_route_command(
+    args: Sequence[str], *, repo_root: Path | None = None
+) -> list[str]:
+    if args[:1] and args[0] in PYTHON_ROUTE_COMMANDS:
+        return [*python_route_command_prefix(repo_root), *args[1:]]
+    if len(args) >= 2 and args[0] == "proxy" and args[1] in PYTHON_ROUTE_COMMANDS:
+        return ["proxy", *python_route_command_prefix(repo_root), *args[2:]]
+    return list(args)
+
+
+def python_route_command_prefix(repo_root: Path | None) -> list[str]:
+    if worktree_spice_source(repo_root) is not None:
+        return [sys.executable]
+    venv_python = default_venv_python(repo_root)
+    if venv_python.is_file() and os.access(venv_python, os.X_OK):
+        return [str(venv_python)]
+    return [
+        sys.executable,
+        "-c",
+        PYTHON_ROUTE_FAILURE.format(venv_python=str(venv_python)),
+    ]
+
+
+def default_venv_python(repo_root: Path | None) -> Path:
+    if "VIRTUAL_ENV" in os.environ:
+        return Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python"
+    if repo_root is None:
+        return Path(".venv") / "bin" / "python"
+    return repo_root / ".venv" / "bin" / "python"
 
 
 def normalize_agent_run_args(raw_args: Sequence[str]) -> list[str]:
