@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spice"
+version = "0.1.0"
+description = "Simultaneous Production, Integration, and Control Environment: an agent harness for coding repositories."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "lizard>=1.21",
+    "ruff>=0.11",
+    "watchfiles>=1.1",
+]
+
+[project.scripts]
+spice = "spice.cli.entry:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["spice*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"spice.agent" = ["*.md"]
+"spice.serve.static" = ["*.css", "*.js", "*.ico"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.spice.policy]
+package_roots = ["spice"]
+
+[tool.spice.agent]
+model = "gpt-5.5"
+thinking = "xhigh"
+
+[tool.spice.tasks]
+stems = ["session", "mail", "hooks", "studies", "cli", "lifecycle", "tests"]

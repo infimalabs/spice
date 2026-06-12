@@ -1,0 +1,256 @@
+"""File shape pressure: lines and bytes, flex headroom, sticky breaches.
+
+A file may grow to the flex limit (base ×1.5), but a file that ever breached
+flex stays held to the base limit until it shrinks back under it. Breach
+state persists in the git dir (`spice/file-loc-sticky.json`,
+`spice/file-byte-sticky.json`), follows staged renames, and is re-evaluated
+(and pruned) by every fully passing pre-commit gate.
+
+Library seam: target-repo tools may import the public finding dataclass,
+scan helpers, counters, and `render_loc_board`; underscored names remain
+private.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+from spice.flexstate import (
+    flex_limit,
+    git_state_path,
+    load_sticky_items,
+    save_sticky_items,
+    sticky_items_after_flex_breaches,
+    sticky_paths_after_renames,
+)
+from spice.policy import FILE_BYTE_LIMIT, FILE_LOC_LIMIT
+from spice.studies.walk import is_excluded_path, staged_renames
+
+FILE_LOC_VERSION = 1
+FILE_LOC_STICKY_STATE_GIT_PATH = "spice/file-loc-sticky.json"
+FILE_BYTE_STICKY_STATE_GIT_PATH = "spice/file-byte-sticky.json"
+
+
+@dataclass(frozen=True)
+class LocFinding:
+    path: str
+    line_count: int
+    byte_count: int
+    over_line_limit: bool
+    over_byte_limit: bool
+    line_limit: int
+    byte_limit: int
+
+
+def count_file_lines(path: Path) -> int:
+    return len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+
+
+def count_file_bytes(path: Path) -> int:
+    return len(path.read_bytes())
+
+
+def _load_sticky(root: Path, git_path: str) -> set[Path]:
+    return load_sticky_items(
+        root=root,
+        state_path=None,
+        git_path=git_path,
+        entries_key="paths",
+        decode=lambda raw: Path(raw) if isinstance(raw, str) else None,
+        version=FILE_LOC_VERSION,
+    )
+
+
+def _save_sticky(paths: set[Path], root: Path, git_path: str) -> None:
+    save_sticky_items(
+        paths,
+        root=root,
+        state_path=None,
+        git_path=git_path,
+        entries_key="paths",
+        encode=lambda path: path.as_posix(),
+        version=FILE_LOC_VERSION,
+    )
+
+
+def scan_staged_loc_violations(
+    paths: list[Path],
+    *,
+    root: Path,
+    limit: int = FILE_LOC_LIMIT,
+    flex_limit_value: int | None = None,
+    byte_limit: int = FILE_BYTE_LIMIT,
+    byte_flex_limit_value: int | None = None,
+) -> list[LocFinding]:
+    """Scan staged paths, updating sticky state with new flex breaches."""
+    line_flex = flex_limit_value if flex_limit_value is not None else flex_limit(limit)
+    byte_flex = (
+        byte_flex_limit_value
+        if byte_flex_limit_value is not None
+        else flex_limit(byte_limit)
+    )
+    renames = staged_renames(root)
+    line_sticky = sticky_paths_after_renames(
+        _load_sticky(root, FILE_LOC_STICKY_STATE_GIT_PATH), renames
+    )
+    byte_sticky = sticky_paths_after_renames(
+        _load_sticky(root, FILE_BYTE_STICKY_STATE_GIT_PATH), renames
+    )
+    updated_line_sticky = _after_breaches(
+        paths, line_sticky, root=root, flex=line_flex, measure=count_file_lines
+    )
+    updated_byte_sticky = _after_breaches(
+        paths,
+        byte_sticky,
+        root=root,
+        flex=byte_flex,
+        measure=count_file_bytes,
+    )
+    if updated_line_sticky != line_sticky:
+        _save_sticky(updated_line_sticky, root, FILE_LOC_STICKY_STATE_GIT_PATH)
+    if updated_byte_sticky != byte_sticky:
+        _save_sticky(updated_byte_sticky, root, FILE_BYTE_STICKY_STATE_GIT_PATH)
+    return scan_loc_violations(
+        paths,
+        root=root,
+        limit=limit,
+        flex_limit_value=line_flex,
+        byte_limit=byte_limit,
+        byte_flex_limit_value=byte_flex,
+        sticky_paths=updated_line_sticky,
+        byte_sticky_paths=updated_byte_sticky,
+    )
+
+
+def _after_breaches(
+    paths: list[Path],
+    sticky: set[Path],
+    *,
+    root: Path,
+    flex: int,
+    measure: Callable[[Path], int],
+) -> set[Path]:
+    return sticky_items_after_flex_breaches(
+        paths,
+        sticky,
+        key_for_item=lambda path: path,
+        is_breach=lambda path: (root / path).exists() and measure(root / path) > flex,
+    )
+
+
+def scan_loc_violations(
+    paths: list[Path],
+    *,
+    root: Path,
+    limit: int = FILE_LOC_LIMIT,
+    flex_limit_value: int | None = None,
+    byte_limit: int = FILE_BYTE_LIMIT,
+    byte_flex_limit_value: int | None = None,
+    sticky_paths: set[Path] | None = None,
+    byte_sticky_paths: set[Path] | None = None,
+) -> list[LocFinding]:
+    findings: list[LocFinding] = []
+    line_flex = flex_limit_value if flex_limit_value is not None else flex_limit(limit)
+    byte_flex = (
+        byte_flex_limit_value
+        if byte_flex_limit_value is not None
+        else flex_limit(byte_limit)
+    )
+    sticky_paths = sticky_paths or set()
+    byte_sticky_paths = byte_sticky_paths or set()
+    for rel_path in paths:
+        if is_excluded_path(rel_path, repo_root=root):
+            continue
+        abs_path = root / rel_path
+        if not abs_path.exists():
+            continue
+        active_line_limit = limit if rel_path in sticky_paths else line_flex
+        active_byte_limit = byte_limit if rel_path in byte_sticky_paths else byte_flex
+        line_count = count_file_lines(abs_path)
+        byte_count = count_file_bytes(abs_path)
+        over_lines = line_count > active_line_limit
+        over_bytes = byte_count > active_byte_limit
+        if not (over_lines or over_bytes):
+            continue
+        findings.append(
+            LocFinding(
+                path=rel_path.as_posix(),
+                line_count=line_count,
+                byte_count=byte_count,
+                over_line_limit=over_lines,
+                over_byte_limit=over_bytes,
+                line_limit=active_line_limit,
+                byte_limit=active_byte_limit,
+            )
+        )
+    return findings
+
+
+def clear_file_loc_sticky_state(
+    *, root: Path, limit: int = FILE_LOC_LIMIT, byte_limit: int = FILE_BYTE_LIMIT
+) -> None:
+    _clear_sticky(
+        root, FILE_LOC_STICKY_STATE_GIT_PATH, limit=limit, measure=count_file_lines
+    )
+    _clear_sticky(
+        root,
+        FILE_BYTE_STICKY_STATE_GIT_PATH,
+        limit=byte_limit,
+        measure=count_file_bytes,
+    )
+
+
+def _clear_sticky(
+    root: Path, git_path: str, *, limit: int, measure: Callable[[Path], int]
+) -> None:
+    state_path = git_state_path(git_path, root=root)
+    if not state_path.exists():
+        return
+    sticky = _load_sticky(root, git_path)
+    retained = {
+        rel_path
+        for rel_path in sticky
+        if (root / rel_path).exists() and measure(root / rel_path) > limit
+    }
+    if retained:
+        _save_sticky(retained, root, git_path)
+    else:
+        state_path.unlink()
+
+
+def render_loc_board(
+    findings: list[LocFinding],
+    *,
+    limit: int = FILE_LOC_LIMIT,
+    flex_limit_value: int | None = None,
+    byte_limit: int = FILE_BYTE_LIMIT,
+    byte_flex_limit_value: int | None = None,
+) -> str:
+    if not findings:
+        line_flex = (
+            flex_limit_value if flex_limit_value is not None else flex_limit(limit)
+        )
+        byte_flex = (
+            byte_flex_limit_value
+            if byte_flex_limit_value is not None
+            else flex_limit(byte_limit)
+        )
+        return (
+            f"file-loc: ok (line_limit {limit} flex {line_flex} "
+            f"byte_limit {byte_limit} byte_flex {byte_flex})"
+        )
+    lines = [f"file-loc: {len(findings)} violation(s)"]
+    for finding in findings:
+        reasons = []
+        if finding.over_line_limit:
+            reasons.append(f"{finding.line_count} lines > {finding.line_limit}")
+        if finding.over_byte_limit:
+            reasons.append(f"{finding.byte_count} bytes > {finding.byte_limit}")
+        lines.append(f"  FAIL  {finding.path}: {'; '.join(reasons)}")
+    lines.append(
+        "  a file that breached flex stays held to the base limit until it "
+        "shrinks back under it; split by naming the seam"
+    )
+    return "\n".join(lines)

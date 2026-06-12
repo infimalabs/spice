@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "spice-serve",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "spice", "serve", "--port", "8799"],
+      "port": 8799
+    }
+  ]
+}

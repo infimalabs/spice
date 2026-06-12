@@ -1,0 +1,632 @@
+"""Task control-plane lifecycle, allocator, and git publication behavior."""
+
+from __future__ import annotations
+
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from spice.cli.parser import build_parser
+from spice.agent.driver import DRIVER
+from spice.errors import SpiceError
+from spice.tasks import alloc, config, gitsync, identity, ops, render, tw
+
+pytestmark = pytest.mark.skipif(
+    shutil.which("task") is None, reason="Taskwarrior binary is required"
+)
+
+ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+PEER_ACTOR = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+
+@pytest.fixture
+def task_repo(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    backend = tmp_path / "task-backend"
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    monkeypatch.setenv("CODEX_TURN_ID", "turn-a")
+    config.set_backend(str(backend))
+    try:
+        yield repo
+    finally:
+        config.set_backend(None)
+
+
+def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatch):
+    handle = ops.add(
+        "Exercise task phase flow",
+        project="task.unit",
+        priority="medium",
+        acceptance=["phase flow is covered"],
+    )
+    claimed = ops.claim(handle)
+    head = _git(task_repo, "rev-parse", "HEAD")
+    claimed_row = identity.resolve(handle)
+
+    assert claimed == handle
+    assert claimed_row["claim_by"] == ACTOR_A
+    assert claimed_row["claim_head"] == head
+
+    done_output = ops.done(handle, validation=["pytest task flow passed"])
+    review_row = identity.resolve(handle)
+    uuid = identity.uuid_of(review_row)
+
+    assert f"advanced {handle} -> review" in done_output
+    assert review_row["phase"] == "review"
+    assert str(review_row["phase_i"]) == "1"
+    assert review_row["review_author"] == ACTOR_A
+    assert review_row["validation"] == "pytest task flow passed"
+    assert review_row["done_head"] == head
+    assert review_row["done_merge_head"] == head
+    assert review_row["done_ref"] == head
+
+    with pytest.raises(SpiceError, match="authored the review"):
+        ops.claim(handle)
+
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+    assigned = ops.next_task()
+
+    assert identity.render_handle(assigned or {}) == handle
+    assert assigned["claim_by"] == ACTOR_A
+
+    review_output = ops.review(handle, finding="clean", note="review passed")
+    completed_row = tw.export([uuid])[0]
+
+    assert f"reviewed {handle} clean; completed {handle}" in review_output
+    assert completed_row["status"] == "completed"
+    assert completed_row["review_by"] == ACTOR_A
+    assert completed_row["review_finding"] == "clean"
+    assert completed_row["review_note"] == "review passed"
+
+
+def test_task_add_stores_description_and_caps_title(task_repo):
+    overlong = "A" * (ops.TASK_TITLE_LIMIT + 1)
+    with pytest.raises(SpiceError, match="move detail into --description"):
+        ops.add(
+            overlong,
+            project="task.unit",
+            priority="medium",
+            acceptance=["title cap is enforced"],
+        )
+
+    body = "Longer context reviewers should keep current."
+    handle = ops.add(
+        "Short subject",
+        project="task.unit",
+        description=body,
+        priority="medium",
+        acceptance=["description is stored"],
+    )
+    row = identity.resolve(handle)
+
+    assert row["description"] == "Short subject"
+    assert row["task_description"] == body
+    shown = render.render_show(handle)
+    assert "title Short subject" in shown
+    assert f"description {body}" in shown
+
+
+def test_task_add_rewrites_inbox_attachment_refs_to_archive_paths(task_repo):
+    live_abs = (
+        task_repo
+        / ".spice"
+        / "inbox"
+        / "20260102T000000000004Z.attachments"
+        / "01-image.png"
+    )
+    archived_abs = (
+        task_repo
+        / ".spice"
+        / "inbox"
+        / "archive"
+        / "20260102T000000000004Z.attachments"
+        / "01-image.png"
+    )
+    live_rel = ".spice/inbox/20260102T000000000004Z.attachments/02-image.png"
+    archived_rel = (
+        ".spice/inbox/archive/20260102T000000000004Z.attachments/02-image.png"
+    )
+
+    handle = ops.add(
+        "Preserve attachment references",
+        project="task.unit",
+        description=(
+            f"Screenshot/reference attachment: {live_abs}. "
+            f"Relative reference: {live_rel}; already archived: "
+            ".spice/inbox/archive/20260102T000000000004Z.attachments/03-image.png."
+        ),
+        priority="medium",
+        acceptance=[f"Resolve {live_rel} without broad searches."],
+    )
+    row = identity.resolve(handle)
+
+    assert str(archived_abs) in row["task_description"]
+    assert str(live_abs) not in row["task_description"]
+    assert f"{archived_rel};" in row["task_description"]
+    assert "archive/archive" not in row["task_description"]
+    assert row["acceptance"] == f"Resolve {archived_rel} without broad searches."
+
+
+def test_task_note_rewrites_inbox_attachment_refs_to_archive_paths(task_repo):
+    handle = ops.add(
+        "Track attachment note",
+        project="task.unit",
+        priority="medium",
+        acceptance=["notes are normalized"],
+    )
+
+    ops.note(
+        handle,
+        (
+            "Screenshot reference: "
+            ".spice/inbox/20260102T000000000005Z.attachments/01-image.png"
+        ),
+    )
+    shown = render.render_show(handle)
+
+    assert (
+        ".spice/inbox/archive/20260102T000000000005Z.attachments/01-image.png" in shown
+    )
+    assert ".spice/inbox/20260102T000000000005Z.attachments" not in shown
+
+
+def test_repo_configured_per_stem_default_flow_feeds_task_add(task_repo):
+    (task_repo / "pyproject.toml").write_text(
+        "[tool.spice.tasks]\n"
+        'stems = ["qa"]\n'
+        "\n"
+        "[tool.spice.tasks.flows]\n"
+        'qa = ["todo", "verify", "review"]\n',
+        encoding="utf-8",
+    )
+
+    handle = ops.add(
+        "Exercise configured flow",
+        project="qa.pipeline",
+        priority="medium",
+        acceptance=["configured flow is applied"],
+    )
+    row = identity.resolve(handle)
+    catalog = config.task_project_validation_catalog()
+
+    assert config.resolve_flow(None, "qa.pipeline") == ["todo", "verify", "review"]
+    assert ops.phases_of(row) == ["todo", "verify", "review"]
+    assert catalog["perStemFlows"]["qa"] == ["todo", "verify", "review"]
+
+
+def test_repo_configured_per_stem_default_flow_rejects_unknown_phase(task_repo):
+    (task_repo / "pyproject.toml").write_text(
+        "[tool.spice.tasks]\n"
+        'stems = ["qa"]\n'
+        "\n"
+        "[tool.spice.tasks.flows]\n"
+        'qa = ["todo", "ship", "review"]\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError, match="phase 'ship' is not approved"):
+        config.resolve_flow(None, "qa.pipeline")
+
+
+def test_allocator_spreads_from_peer_cell_then_sticks_to_last_cell():
+    ready = [
+        _row("same-crowded", project="task.alpha", phase="todo", urgency=10),
+        _row("different", project="task.beta", phase="todo", urgency=9),
+        _row("same-project", project="task.alpha", phase="review", urgency=8),
+        _row("outside-band", project="task.gamma", phase="todo", urgency=1),
+    ]
+    claimed = [
+        _row(
+            "last",
+            project="task.alpha",
+            phase="todo",
+            urgency=1,
+            claim_at="2026-01-01T00:00:00Z",
+            claim_by=ACTOR_A,
+        )
+    ]
+    active = [
+        _row(
+            "peer",
+            project="task.alpha",
+            phase="todo",
+            urgency=1,
+            claim_by=PEER_ACTOR,
+        )
+    ]
+
+    ordered = alloc.order(ready, ACTOR_A, claimed, active)
+
+    assert [row["description"] for row in ordered] == [
+        "different",
+        "same-project",
+        "same-crowded",
+        "outside-band",
+    ]
+
+
+def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
+    agent_head = _git(repo, "rev-parse", "HEAD")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "baseline.txt").write_text("baseline work\n", encoding="utf-8")
+    _run(peer, "git", "add", "baseline.txt")
+    _run(peer, "git", "commit", "-m", "baseline work")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000001Z",
+        repo_root=repo,
+        meta={
+            "title": "Publish task work",
+            "description": "Longer merge body for reviewers.",
+            "actor": ACTOR_A,
+            "phase": "todo",
+            "project": "task.unit",
+        },
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert captured["done_head"] == agent_head
+    assert captured["done_ref"] == merge_head
+    assert captured["done_upstream"] == "origin/main"
+    assert captured["done_upstream_head"] == upstream_head
+    assert _git(repo, "rev-parse", "HEAD") == merge_head
+    assert _merge_parents(repo, merge_head) == [upstream_head, agent_head]
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert _git(repo, "status", "--porcelain") == ""
+    message = _git(repo, "log", "-1", "--format=%B", merge_head)
+    assert message == (
+        "Publish task work\n\n"
+        "Task: TASK-20260101T000000000001Z\n"
+        "Task-Phase: todo\n"
+        "Task-Project: task.unit\n"
+        f"Task-Session: {ACTOR_A}"
+    )
+
+
+def test_merge_message_omits_task_description_body():
+    message = gitsync._compose_message(
+        "TASK-20260101T000000000003Z",
+        {
+            "title": "Fix image labels",
+            "description": (
+                "Operator steering 20260612T043642083543Z: the labels "
+                "input_image and view_image look clickable but do not navigate.\n\n"
+                "Archived screenshot references: "
+                ".spice/inbox/archive/20260612T043642083543Z.attachments/"
+                "01-image.png and "
+                ".spice/inbox/archive/20260612T043642083543Z.attachments/"
+                "02-image.png.\n\n"
+                "Keep the rendered image context stable for reviewers."
+            ),
+            "actor": ACTOR_A,
+            "phase": "todo",
+            "project": "serve.ui",
+        },
+    )
+
+    assert message == (
+        "Fix image labels\n\n"
+        "Task: TASK-20260101T000000000003Z\n"
+        "Task-Phase: todo\n"
+        "Task-Project: serve.ui\n"
+        f"Task-Session: {ACTOR_A}"
+    )
+
+
+def test_merge_message_uses_fallback_subject_and_trailers_only():
+    message = gitsync._compose_message(
+        "TASK-20260101T000000000004Z",
+        {
+            "title": "",
+            "description": (
+                "Operator steering 20260612T054500966259Z: final task merge "
+                "commit bodies currently include the task description, which "
+                "can read well but carries too many transient details such as "
+                "'operator steering ...' wording and links/paths to .spice "
+                "inbox artifacts that will not exist for readers later. Adjust "
+                "task completion/merge commit body generation."
+            ),
+            "actor": ACTOR_A,
+            "phase": "todo",
+            "project": "task",
+        },
+    )
+
+    assert message == (
+        "Integrate TASK-20260101T000000000004Z\n\n"
+        "Task: TASK-20260101T000000000004Z\n"
+        "Task-Phase: todo\n"
+        "Task-Project: task\n"
+        f"Task-Session: {ACTOR_A}"
+    )
+
+
+def test_task_review_help_requires_description_check(capsys):
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["task", "review", "--help"])
+
+    help_text = capsys.readouterr().out
+    assert "verify the task description is current" in help_text
+    assert "description=..." in help_text
+    assert (
+        "Findings other than clean require at least one --then follow-up" in help_text
+    )
+
+
+def test_unclean_review_requires_followup_tracking(task_repo, monkeypatch):
+    handle = _review_claim(task_repo, monkeypatch)
+
+    with pytest.raises(SpiceError, match="unclean task review requires --then"):
+        ops.review(handle, finding="changes", note="needs work")
+
+    row = identity.resolve(handle)
+    assert row["phase"] == "review"
+    assert str(row.get("review_by") or "") == ""
+
+
+def test_unclean_review_spawns_dependent_followup(task_repo, monkeypatch):
+    handle = _review_claim(task_repo, monkeypatch)
+    reviewed_uuid = identity.uuid_of(identity.resolve(handle))
+
+    output = ops.review(
+        handle,
+        finding="changes",
+        note="needs coverage",
+        then=[
+            "title=Add review coverage | project=task.unit | "
+            "acceptance=Regression covers the requested review change"
+        ],
+    )
+    spawned = next(
+        line.split()[1] for line in output.splitlines() if line.startswith("spawned ")
+    )
+    followup = identity.resolve(spawned)
+    reviewed = tw.export([reviewed_uuid])[0]
+
+    assert f"reviewed {handle} changes; completed {handle}" in output
+    assert followup["description"] == "Add review coverage"
+    assert reviewed_uuid in followup.get("depends", [])
+    assert reviewed["status"] == "completed"
+    assert reviewed["review_finding"] == "changes"
+
+
+def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
+    _run(peer, "git", "add", "README.md")
+    _run(peer, "git", "commit", "-m", "baseline work")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    with pytest.raises(gitsync.MergeConflict) as exc_info:
+        gitsync.integrate_and_publish("TASK-20260101T000000000002Z", repo_root=repo)
+
+    message = str(exc_info.value)
+    assert "README.md" in message
+    assert "git status --short" in message
+    assert "git add -- README.md" in message
+    assert 'spice task done TASK-20260101T000000000002Z --validation "..."' in message
+    assert _git(repo, "rev-parse", "--verify", "MERGE_HEAD") == upstream_head
+    assert _git(repo, "status", "--porcelain") == "UU README.md"
+
+    (repo / "README.md").write_text("resolved work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(
+        repo,
+        "git",
+        "commit",
+        "-m",
+        "Resolve baseline overlap for TASK-20260101T000000000002Z",
+    )
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000002Z", repo_root=repo
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert captured["done_upstream_head"] == upstream_head
+    assert _merge_parents(repo, merge_head)[0] == upstream_head
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def _row(
+    description: str,
+    *,
+    project: str,
+    phase: str,
+    urgency: float,
+    claim_at: str = "",
+    claim_by: str = "",
+) -> dict[str, object]:
+    return {
+        "description": description,
+        "project": project,
+        "phase": phase,
+        "urgency": urgency,
+        "claim_at": claim_at,
+        "claim_by": claim_by,
+    }
+
+
+def _init_repo(path: Path) -> Path:
+    path.mkdir()
+    _run(path, "git", "init", "-b", "main")
+    _configure_git_identity(path)
+    (path / "README.md").write_text("initial\n", encoding="utf-8")
+    _run(path, "git", "add", "README.md")
+    _run(path, "git", "commit", "-m", "initial")
+    return path
+
+
+def _configure_git_identity(repo: Path) -> None:
+    _run(repo, "git", "config", "user.email", "spice@example.test")
+    _run(repo, "git", "config", "user.name", "Spice Tests")
+
+
+def _merge_parents(repo: Path, commit: str) -> list[str]:
+    line = _git(repo, "rev-list", "--parents", "-n", "1", commit)
+    return line.split()[1:]
+
+
+def _review_claim(task_repo: Path, monkeypatch) -> str:
+    assert task_repo.is_dir()
+    handle = ops.add(
+        "Review follow-up invariant",
+        project="task.unit",
+        priority="medium",
+        acceptance=["review follow-up tracking is enforced"],
+    )
+    ops.claim(handle)
+    ops.done(handle, validation=["implementation validated"])
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+    assigned = ops.next_task()
+    assert identity.render_handle(assigned or {}) == handle
+    return handle
+
+
+def _uda_map(args: list[str]) -> dict[str, str]:
+    return dict(arg.split(":", 1) for arg in args)
+
+
+def _git(repo: Path, *args: str) -> str:
+    return _run(repo, "git", *args).stdout.strip()
+
+
+def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
+
+
+def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
+    args = build_parser().parse_args(
+        ["task", "add", "--title", "Alias title lands", "--project", "task.unit"]
+    )
+
+    assert args.func(args) == 0
+    created = capsys.readouterr().out.split()[1]
+    row = identity.resolve(created)
+
+    assert row["description"] == "Alias title lands"
+
+
+def test_task_add_takes_exactly_one_title_form(task_repo):
+    args = build_parser().parse_args(
+        ["task", "add", "Positional title", "--title", "Flag title"]
+    )
+
+    with pytest.raises(SpiceError, match="positional title or --title"):
+        args.func(args)
+
+
+def test_task_oops_description_records_triage_context(task_repo, capsys):
+    args = build_parser().parse_args(
+        [
+            "task",
+            "oops",
+            "wrapper",
+            "hiccup",
+            "--description",
+            "Longer triage context for the board.",
+        ]
+    )
+
+    assert args.func(args) == 0
+    out = capsys.readouterr().out
+    created = re.search(r"OOPS-\S+", out).group(0)
+    row = identity.resolve(created)
+
+    assert row["description"] == "wrapper hiccup"
+    assert row["task_description"] == "Longer triage context for the board."
+
+
+def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
+    _run(peer, "git", "add", "README.md")
+    _run(peer, "git", "commit", "-m", "baseline work")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    with pytest.raises(gitsync.MergeConflict):
+        gitsync.integrate_and_publish("TASK-20260101T000000000003Z", repo_root=repo)
+
+    conflicted = (repo / "README.md").read_text(encoding="utf-8")
+    assert "<<<<<<<" in conflicted
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "Resolve baseline overlap, badly")
+
+    with pytest.raises(SpiceError, match="conflict markers") as exc_info:
+        gitsync.integrate_and_publish("TASK-20260101T000000000003Z", repo_root=repo)
+
+    message = str(exc_info.value)
+    assert "README.md" in message
+    assert "git add -- README.md" in message
+    assert "git commit --amend --no-edit" in message
+    assert (
+        _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == upstream_head
+    )
+
+    (repo / "README.md").write_text("resolved work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "--amend", "--no-edit")
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000003Z", repo_root=repo
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert _merge_parents(repo, merge_head)[0] == upstream_head
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
