@@ -45,7 +45,14 @@ class LocFinding:
 
 
 def count_file_lines(path: Path) -> int:
-    return len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+    raw = path.read_bytes()
+    if _is_binary_blob(raw):
+        return 0
+    return len(raw.decode("utf-8", errors="replace").splitlines())
+
+
+def _is_binary_blob(raw: bytes) -> bool:
+    return b"\0" in raw
 
 
 def count_file_bytes(path: Path) -> int:
