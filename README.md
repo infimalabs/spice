@@ -113,7 +113,7 @@ or first add the helper to this seam with tests and a stability note.
 | Steering | filesystem inbox under `.spice/inbox/` | Durable operator messages; items retire only when the agent semantically ACKs their key in its transcript. |
 | Tasks | `spice task …` | Phase-native Taskwarrior board shared by all worktrees; `task next` is allocator-owned; git sync happens at task boundaries. |
 | Sessions | `spice session` | Transcript forensics: the no-arg briefing is the primary rehydration product, with context-pressure metering. |
-| Cockpit | `spice serve` | Localhost web UI: lanes over worktrees, live transcript streams, lifetime control (Renew / Steer / Drive), task-filter routing, fused lane groups backed by server-side teams; `spice serve teams` and `spice serve browser-artifact-path <file>` expose operator diagnostics for smoke runs. |
+| Interface | `spice serve` | Localhost web UI: lanes over worktrees, live transcript streams, lifetime control (Renew / Steer / Drive), task-filter routing, fused lane groups backed by server-side teams; `spice serve teams` and `spice serve browser-artifact-path <file>` expose operator diagnostics for smoke runs. |
 | Conscience | `spice maxim …` | Builtin maxims judged against assistant prose by a local model; violations come back as inbox steering. |
 | Constitution | `spice dev pre-commit` / `spice study …` | Namespace packages, path shape, LOC/byte/complexity flex+sticky gates, magic-number ratchet, env-literal inventory, commit-message policy. |
 
@@ -123,9 +123,9 @@ Session analysis is intentionally tiered. The current tier includes
 Deeper report families that depend on richer topic/bucket modeling belong in
 a separate analytics tier after the basic phase/message surfaces harden.
 
-## Cockpit
+## Interface
 
-`spice serve` is the operator cockpit for the loop. It can compose multiple
+`spice serve` is the operator interface for the loop. It can compose multiple
 agents into a single Drive lane, split worktrees into parallel lanes, route by
 task filter, show live transcript attachments, and expose the control surfaces
 needed to steer or audit a running session.
@@ -137,12 +137,12 @@ needed to steer or audit a running session.
 
 | Lane controls | Steering and ACKs |
 | --- | --- |
-| <img src="docs/screenshots/spice-cockpit-routing-controls.png" alt="Cockpit routing controls with filters, metrics, info, and assignment chips"> | <img src="docs/screenshots/spice-live-review-steering.png" alt="Live cockpit showing steering and ACK flow"> |
+| <img src="docs/screenshots/spice-interface-routing-controls.png" alt="Interface routing controls with filters, metrics, info, and assignment chips"> | <img src="docs/screenshots/spice-live-review-steering.png" alt="Live interface showing steering and ACK flow"> |
 | <sub>Filters, metrics, info, and worktree assignment live in the lane header.</sub> | <sub>Operator steering, ACKs, labels, and transcript controls stay visible in the live stream.</sub> |
 
 | Attachments in transcript | Live image evidence |
 | --- | --- |
-| <img src="docs/screenshots/spice-filters-attachment-gallery.png" alt="Filters and attachment gallery"> | <img src="docs/screenshots/spice-live-attachments-multilane.png" alt="Multi-lane cockpit with live image attachments"> |
+| <img src="docs/screenshots/spice-filters-attachment-gallery.png" alt="Filters and attachment gallery"> | <img src="docs/screenshots/spice-live-attachments-multilane.png" alt="Multi-lane interface with live image attachments"> |
 | <sub>Transcript attachments remain browsable inside the lane.</sub> | <sub>Screenshots, browser captures, and diagnostics stay part of the operating record.</sub> |
 
 ## The constitution
