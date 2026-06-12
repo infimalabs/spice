@@ -45,7 +45,10 @@ def handle_reference_transaction(
             listed = ", ".join(_short_oid(repo_root, commit) for commit in protected)
             raise SpiceError(
                 "reference-transaction guard refused to abandon "
-                f"upstream-merged commits on current branch {current_ref}: {listed}"
+                f"upstream-merged commits on current branch {current_ref}: {listed}. "
+                "This is expected when a task boundary has advanced "
+                "origin/upstream; keep those commits and continue with an "
+                "append-only commit instead of amending or resetting backwards."
             )
     return 0
 
