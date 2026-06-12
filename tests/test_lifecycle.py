@@ -367,6 +367,72 @@ def test_wrapper_routes_worktree_spice_commands_through_python_module(
     assert uv_spice_command == [sys.executable, "-m", "spice", "task", "status"]
 
 
+def test_wrapper_routes_worktree_python_commands_through_active_interpreter(
+    tmp_path, monkeypatch
+):
+    _write_spice_product_shape(tmp_path)
+    monkeypatch.setattr(wrap, "proxy_bin", lambda: "missing-spice-proxy")
+
+    python_command = wrap.build_agent_run_command(
+        ["python", "-m", "pip", "--version"], repo_root=tmp_path
+    )
+    python3_command = wrap.build_agent_run_command(
+        ["python3", "-m", "pip", "--version"], repo_root=tmp_path
+    )
+    proxy_python_command = wrap.build_agent_run_command(
+        ["proxy", "python", "-m", "pip", "--version"], repo_root=tmp_path
+    )
+
+    assert python_command == [sys.executable, "-m", "pip", "--version"]
+    assert python3_command == [sys.executable, "-m", "pip", "--version"]
+    assert proxy_python_command == [sys.executable, "-m", "pip", "--version"]
+
+
+def test_wrapper_proxy_receives_worktree_python_interpreter(tmp_path, monkeypatch):
+    _write_spice_product_shape(tmp_path)
+    monkeypatch.setenv(wrap.PROXY_BIN_ENV, "rtk-test")
+    monkeypatch.setattr(
+        wrap.shutil,
+        "which",
+        lambda proxy: "/opt/bin/rtk-test" if proxy == "rtk-test" else None,
+    )
+
+    assert wrap.build_agent_run_command(
+        ["python", "-m", "pip", "--version"], repo_root=tmp_path
+    ) == ["/opt/bin/rtk-test", sys.executable, "-m", "pip", "--version"]
+    assert wrap.build_agent_run_command(
+        ["proxy", "python", "-m", "pip", "--version"], repo_root=tmp_path
+    ) == ["/opt/bin/rtk-test", "proxy", sys.executable, "-m", "pip", "--version"]
+
+
+def test_wrapper_routes_target_repo_python_commands_through_repo_venv(
+    tmp_path, monkeypatch
+):
+    venv_python = tmp_path / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_python.chmod(0o755)
+    monkeypatch.setattr(wrap, "proxy_bin", lambda: "missing-spice-proxy")
+
+    assert wrap.build_agent_run_command(
+        ["python", "--version"], repo_root=tmp_path
+    ) == [
+        str(venv_python),
+        "--version",
+    ]
+
+
+def test_wrapper_refuses_target_repo_python_without_repo_venv(tmp_path, monkeypatch):
+    monkeypatch.setattr(wrap, "proxy_bin", lambda: "missing-spice-proxy")
+
+    command = wrap.build_agent_run_command(["python", "--version"], repo_root=tmp_path)
+
+    assert command[:2] == [sys.executable, "-c"]
+    assert "refusing to run python from global PATH" in command[2]
+    assert str(tmp_path / ".venv" / "bin" / "python") in command[2]
+    assert command[3:] == ["--version"]
+
+
 def test_wrapper_plain_commands_inherit_worktree_spice_pythonpath(tmp_path):
     _write_spice_product_shape(tmp_path)
 

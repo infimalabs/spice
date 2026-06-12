@@ -27,6 +27,11 @@ in your `pyproject.toml` under `[tool.spice.*]` tables. Entrypoint resolution
 is worktree-true: when the current repo is the spice source checkout, generated
 shims and supervisor children put that checkout first on `PYTHONPATH` and run
 `python -m spice`; ordinary target repos use the installed product.
+In a spice source checkout, `./spice.sh python …` and `./spice.sh python3 …`
+also resolve to the same checkout venv interpreter used by the harness itself.
+In ordinary target repos, those aliases require `.venv/bin/python` under the
+repo root; use an explicit interpreter path if a probe intentionally needs some
+other Python.
 
 A project can set its default supervised-agent launch model and thinking in
 tracked config, either by editing `pyproject.toml` or by running
