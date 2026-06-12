@@ -63,7 +63,7 @@ PYTHON_ROUTE_FAILURE = (
     "import sys;"
     "sys.stderr.write("
     "'spice agent run: refusing to run python from global PATH; expected "
-    "the repo venv at {venv_python} or an explicit interpreter path\\n'"
+    "the venv interpreter at {venv_python} or an explicit interpreter path\\n'"
     ");"
     "raise SystemExit(127)"
 )
@@ -203,24 +203,22 @@ def worktree_python_route_command(
 def python_route_command_prefix(repo_root: Path | None) -> list[str]:
     if worktree_spice_source(repo_root) is not None:
         return [sys.executable]
-    venv_python = repo_venv_python(repo_root)
-    if venv_python is not None:
+    venv_python = default_venv_python(repo_root)
+    if venv_python.is_file() and os.access(venv_python, os.X_OK):
         return [str(venv_python)]
-    expected = (
-        "<repo>/.venv/bin/python"
-        if repo_root is None
-        else str(repo_root / ".venv" / "bin" / "python")
-    )
-    return [sys.executable, "-c", PYTHON_ROUTE_FAILURE.format(venv_python=expected)]
+    return [
+        sys.executable,
+        "-c",
+        PYTHON_ROUTE_FAILURE.format(venv_python=str(venv_python)),
+    ]
 
 
-def repo_venv_python(repo_root: Path | None) -> Path | None:
+def default_venv_python(repo_root: Path | None) -> Path:
+    if "VIRTUAL_ENV" in os.environ:
+        return Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python"
     if repo_root is None:
-        return None
-    python = repo_root / ".venv" / "bin" / "python"
-    if python.is_file() and os.access(python, os.X_OK):
-        return python
-    return None
+        return Path(".venv") / "bin" / "python"
+    return repo_root / ".venv" / "bin" / "python"
 
 
 def normalize_agent_run_args(raw_args: Sequence[str]) -> list[str]:

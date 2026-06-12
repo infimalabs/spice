@@ -29,9 +29,9 @@ shims and supervisor children put that checkout first on `PYTHONPATH` and run
 `python -m spice`; ordinary target repos use the installed product.
 In a spice source checkout, `./spice.sh python …` and `./spice.sh python3 …`
 also resolve to the same checkout venv interpreter used by the harness itself.
-In ordinary target repos, those aliases require `.venv/bin/python` under the
-repo root; use an explicit interpreter path if a probe intentionally needs some
-other Python.
+In ordinary target repos, those aliases use `$VIRTUAL_ENV/bin/python` when set,
+otherwise `.venv/bin/python` under the repo root; use an explicit interpreter
+path if a probe intentionally needs some other Python.
 
 A project can set its default supervised-agent launch model and thinking in
 tracked config, either by editing `pyproject.toml` or by running
