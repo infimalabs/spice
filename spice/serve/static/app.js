@@ -1,4 +1,4 @@
-// spice serve UI — operator cockpit over worktree lanes.
+// spice serve UI — operator interface over worktree lanes.
 //
 // A lane is an operator-owned container over one concrete worktree target; an
 // agent (thread) is an occupant of the lane, not the lane itself. Which lanes

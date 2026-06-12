@@ -188,7 +188,7 @@ authored-tree → study guards) and `dev commit-msg`. The opinions, exactly:
 | lifecycle | `spice/agent/{lifecycle,renewal,activation,gitshadow,watchdog,driver}.py` |
 | conscience | `spice/agent/maxims.py`, `spice/agent/maximcli.py` |
 | tasks | `spice/tasks/` |
-| serve | `spice/serve/` + lane-cockpit static UI (app.{render,stream,lanes,shell,groups,audio}.js) |
+| serve | `spice/serve/` + lane-interface static UI (app.{render,stream,lanes,shell,groups,audio}.js) |
 | forensics | `spice/sessions/` (briefing, sweep, summary, tokens, turns, compactions, user-log, commits) |
 | constitution | `spice/studies/`, `spice/hooks/`, `spice/policy.py` |
 | infra | `spice/{paths,config,configcli,locking,flexstate,procs,worktrees}.py` |
