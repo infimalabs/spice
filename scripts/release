@@ -64,7 +64,7 @@ import time
 import urllib.request
 
 target = os.environ["TARGET_VERSION"]
-url = "https://pypi.org/pypi/spice/json"
+url = "https://pypi.org/pypi/spice-harness/json"
 
 for _ in range(20):
     with urllib.request.urlopen(url, timeout=20) as response:
@@ -85,8 +85,8 @@ run_constitution_gate() {
 
 run_artifact_gate() {
   version="$1"
-  sdist="dist/spice-${version}.tar.gz"
-  wheel="dist/spice-${version}-py3-none-any.whl"
+  sdist="dist/spice_harness-${version}.tar.gz"
+  wheel="dist/spice_harness-${version}-py3-none-any.whl"
 
   rm -rf dist
   uv build --python 3.12
@@ -145,7 +145,7 @@ write_release_notes() {
     fi
 
     printf '\n## Package Notes\n\n'
-    printf -- '- PyPI release: `spice==%s`\n' "$version"
+    printf -- '- PyPI release: `spice-harness==%s`\n' "$version"
     printf -- '- Release commit: `%s`\n' "$(git rev-parse --short "$release_commit")"
     if [ -n "$previous_tag" ]; then
       printf -- '- Compare from: `%s`\n' "$previous_tag"
@@ -204,8 +204,8 @@ publish_github_release() {
 
 publish_release() {
   version="$1"
-  sdist="dist/spice-${version}.tar.gz"
-  wheel="dist/spice-${version}-py3-none-any.whl"
+  sdist="dist/spice_harness-${version}.tar.gz"
+  wheel="dist/spice_harness-${version}-py3-none-any.whl"
   token="$(read_pypi_token)"
   notes_override="${2:-}"
 

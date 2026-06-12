@@ -128,7 +128,7 @@ authored-tree → study guards) and `dev commit-msg`. The opinions, exactly:
 ## Design principles
 
 0. **Standalone product, not a repo organ.** spice is installed once
-   (`uv tool install spice`) and operates on any repo from outside. A target
+   (`uv tool install spice-harness`) and operates on any repo from outside. A target
    repo contains only what spice
    writes into it: runtime state under `.spice/`, hook shims that call
    `spice dev pre-commit`, and an optional `spice.sh` shim. The worktree

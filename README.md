@@ -15,7 +15,7 @@ from those two surfaces.
 ## Install
 
 ```sh
-pip install spice        # or: uv tool install spice
+pip install spice-harness    # or: uv tool install spice-harness
 cd /path/to/your/repo
 spice init               # hooks, spice.sh shim, state scaffolding
 spice dev doctor         # verify drivers, backends, and policy
