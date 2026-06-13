@@ -593,6 +593,7 @@ function renderSpiceMenuTeamGroup(group) {
   container.className = group.unassigned
     ? "spice-menu-team spice-menu-team--unassigned"
     : "spice-menu-team";
+  if (!group.unassigned) wireSpiceMenuTeamDropTarget(container, group);
   const header = document.createElement("div");
   header.className = "spice-menu-team-header";
   const label = document.createElement("span");
@@ -673,7 +674,115 @@ function renderTargetChoice(target, group = null) {
     });
   });
   button.classList.toggle("target-choice--open", alreadyOpen);
+  wireSpiceMenuTargetDrag(button, target);
   return button;
+}
+
+function wireSpiceMenuTargetDrag(button, target) {
+  button.draggable = true;
+  button.classList.add("target-choice--draggable");
+  button.dataset.spiceMenuDragTargetId = target.id;
+  button.append(spiceMenuTargetDragAffordance());
+  button.addEventListener("dragstart", (event) => {
+    spiceMenuDragTargetId = target.id;
+    button.classList.add("target-choice--dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", target.id);
+      event.dataTransfer.setData("application/x-spice-target-id", target.id);
+    }
+  });
+  button.addEventListener("dragend", () => {
+    spiceMenuDragTargetId = "";
+    button.classList.remove("target-choice--dragging");
+    clearSpiceMenuTeamDropHighlights();
+  });
+}
+
+function spiceMenuTargetDragAffordance() {
+  const marker = document.createElement("span");
+  marker.className = "target-choice-drag-affordance";
+  marker.setAttribute("aria-hidden", "true");
+  marker.textContent = "↕";
+  return marker;
+}
+
+function wireSpiceMenuTeamDropTarget(container, group) {
+  container.dataset.spiceMenuTeamId = group.teamId;
+  container.addEventListener("dragenter", (event) => {
+    if (!spiceMenuCanDropOnTeam(group, spiceMenuDragTargetId)) return;
+    event.preventDefault();
+    container.classList.add("spice-menu-team--drop-ready");
+  });
+  container.addEventListener("dragover", (event) => {
+    if (!spiceMenuCanDropOnTeam(group, spiceMenuDragTargetId)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    container.classList.add("spice-menu-team--drop-ready");
+  });
+  container.addEventListener("dragleave", (event) => {
+    if (
+      event.relatedTarget instanceof Node &&
+      container.contains(event.relatedTarget)
+    )
+      return;
+    container.classList.remove("spice-menu-team--drop-ready");
+  });
+  container.addEventListener("drop", (event) => {
+    const targetId = spiceMenuDroppedTargetId(event);
+    if (!spiceMenuCanDropOnTeam(group, targetId)) return;
+    event.preventDefault();
+    container.classList.remove("spice-menu-team--drop-ready");
+    moveTargetToMenuTeam(group.teamId, targetId).catch(() => {
+      setGlobalTransientStatus("move to team failed");
+      refreshServerTopology().catch(() => {});
+    });
+  });
+}
+
+function clearSpiceMenuTeamDropHighlights() {
+  const dropTargets = document.querySelectorAll(".spice-menu-team--drop-ready");
+  for (const element of dropTargets)
+    element.classList.remove("spice-menu-team--drop-ready");
+}
+
+function spiceMenuDroppedTargetId(event) {
+  return (
+    event.dataTransfer?.getData("application/x-spice-target-id") ||
+    event.dataTransfer?.getData("text/plain") ||
+    spiceMenuDragTargetId ||
+    ""
+  );
+}
+
+function spiceMenuCanDropOnTeam(group, targetId) {
+  if (!group.teamId || !targetId) return false;
+  const target = targetById.get(targetId);
+  if (!target) return false;
+  return (target.teamId || "") !== group.teamId;
+}
+
+async function moveTargetToMenuTeam(teamId, targetId) {
+  const target = targetById.get(targetId);
+  if (!target || !teamId) throw new Error("move target requires team and target");
+  await requestTeamCommand(
+    teamCommandPayload("moveAgentToTeam", {
+      teamId,
+      agentId: targetTeamAgentId(target),
+      agentAliases: targetTeamAgentAliases(target),
+    }),
+  );
+  await refreshServerTopology();
+  setGlobalTransientStatus("team updated");
+}
+
+function targetTeamAgentId(target) {
+  return canonicalThreadActorId(target.threadId) || target.id;
+}
+
+function targetTeamAgentAliases(target) {
+  const actor = canonicalThreadActorId(target.threadId);
+  return actor && actor !== target.id ? [target.id] : [];
 }
 
 function targetChoiceButton(target, actionLabel, onClick, role = "menuitem") {
