@@ -122,6 +122,12 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     button_start = css.index(".spice-menu-button {")
     button_end = css.index(".spice-menu-icon {", button_start)
     button_rules = css[button_start:button_end]
+    icon_start = css.index(".spice-menu-icon {")
+    icon_end = css.index(".spice-menu-label {", icon_start)
+    icon_rules = css[icon_start:icon_end]
+    label_start = css.index(".spice-menu-label {")
+    label_end = css.index(".icon-button svg", label_start)
+    label_rules = css[label_start:label_end]
 
     assert 'id="fast-mode-toggle"' not in html
     assert 'class="add-lane"' not in html
@@ -153,6 +159,12 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
         "color: color-mix(in srgb, var(--accent-strong) 76%, var(--fg));"
         in button_rules
     )
+    assert "gap: 5px;" in button_rules
+    assert "height: 30px;" in button_rules
+    assert "padding: 0 10px 0 8px;" in button_rules
+    assert "font-size: 15px;" in icon_rules
+    assert "color: currentColor;" in label_rules
+    assert "font-size: 17px;" in label_rules
     assert ".spice-menu-button:hover,\n.spice-menu-button:focus-visible {" in css
     assert (
         "background: color-mix(in srgb, var(--control) 82%, var(--accent) 18%);"
@@ -200,7 +212,7 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
         "  border-color: var(--border-soft);\n"
         "  box-shadow: inset 0 0 0 1px var(--border-soft);" in css
     )
-    assert "height: 38px;" in css
+    assert "height: 30px;" in button_rules
 
 
 def test_static_spice_menu_replaces_picker_lane():
