@@ -916,8 +916,10 @@ def test_static_composer_menu_replaces_header_remove_control():
         in app_shell
     )
     assert "function syncComposerBandMenuState(band)" in app_shell
-    assert 'label: "Close",' in app_shell
-    assert 'label: "Split out",' in app_shell
+    assert 'label: "Leave all teams",' in app_shell
+    assert 'label: "Create new team",' in app_shell
+    assert '"Remove " + label + " from all teams"' in app_shell
+    assert '"Move only " + label + " to a new team"' in app_shell
     assert "border-radius: 50%;" in button_rule
     assert "height: 22px;" in button_rule
     assert "width: 22px;" in button_rule
