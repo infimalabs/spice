@@ -465,6 +465,30 @@ def test_static_message_accents_follow_team_slots_for_single_member_teams():
     assert "messageOccupantAccent(accentSlot)" in app_render
 
 
+def test_static_message_accent_palette_names_all_six_team_slots():
+    css = _serve_css_text()
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+
+    assert "--team-teal-accent: #007c89;" in css
+    assert "--team-plum-accent: #8a4fbf;" in css
+    assert "--team-teal-accent: #5fd6d0;" in css
+    assert "--team-plum-accent: #d1a3ff;" in css
+    assert '"var(--team-teal-accent)",' in app_render
+    assert '"var(--team-plum-accent)",' in app_render
+    assert "if (index < messageOccupantAccentPalette.length)" in app_render
+    assert "return messageOccupantAccentPalette[index];" in app_render
+    assert (
+        'throw new Error("team slot accent requires one of six team slots");'
+        in app_render
+    )
+    assert "generatedMessageAccentHueStep" not in app_render
+    assert "oklch(72% 0.14 " not in app_render
+    assert (
+        "messageOccupantAccentPalette[index % messageOccupantAccentPalette.length]"
+        not in app_render
+    )
+
+
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
     css = _serve_css_text()
 

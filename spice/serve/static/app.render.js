@@ -14,6 +14,8 @@ const messageOccupantAccentPalette = [
   "var(--final-accent)",
   "var(--say-accent)",
   "var(--warn)",
+  "var(--team-teal-accent)",
+  "var(--team-plum-accent)",
 ];
 let globalTransientStatusTimer = null;
 
@@ -231,7 +233,9 @@ function renderMessage(lane, item) {
 
 function messageOccupantAccent(occupant) {
   const index = Math.max(0, Number(occupant) || 0);
-  return messageOccupantAccentPalette[index % messageOccupantAccentPalette.length];
+  if (index < messageOccupantAccentPalette.length)
+    return messageOccupantAccentPalette[index];
+  throw new Error("team slot accent requires one of six team slots");
 }
 
 function messageDomId(key) {
