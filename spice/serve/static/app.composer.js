@@ -51,6 +51,7 @@ function syncComposerShard(lane, shard, member) {
   const primary = composerShardPrimaryBand(shard, member.targetId);
   primary.className = "composer-band composer-band--primary";
   primary.dataset.composerPrimaryTargetId = member.targetId;
+  syncComposerBandAccent(primary, lane, member);
   const header = composerPrimaryBandHeader(lane, member);
   const previousHeader = primary.querySelector(".composer-band-header--primary");
   if (previousHeader) previousHeader.replaceWith(header);
@@ -64,6 +65,24 @@ function syncComposerShard(lane, shard, member) {
   }
   textarea.placeholder = laneComposePlaceholder(member);
   lane.shardTextareas.set(member.targetId, textarea);
+}
+
+function syncComposerBandAccent(band, lane, member) {
+  band.style.setProperty("--composer-header-accent", composerMemberAccent(lane, member));
+}
+
+function composerMemberAccent(lane, member) {
+  return messageOccupantAccent(composerMemberAccentIndex(lane, member));
+}
+
+function composerMemberAccentIndex(lane, member) {
+  const host = laneGroupHost(lane);
+  if (member.targetThreadId && host.occupants?.has(member.targetThreadId))
+    return laneOccupantOrdinal(host, member.targetThreadId);
+  const index = laneGroupMemberTargetIds(host).indexOf(member.targetId);
+  if (index < 0)
+    throw new Error("composer header accent requires a lane group member");
+  return index;
 }
 
 function composerShardQuoteStack(shard, targetId) {
@@ -733,6 +752,7 @@ function syncComposerQuoteBand(band, lane, targetId, member, draft) {
   band.className = "composer-band composer-band--quote";
   band.title = draft.quoteText || draft.preview;
   band.dataset.composerQuoteBandDraftId = draft.id;
+  syncComposerBandAccent(band, lane, member);
   const header = composerQuoteBandHeader(lane, targetId, member, draft);
   const previousHeader = band.querySelector(".composer-band-header--quote");
   if (previousHeader) previousHeader.replaceWith(header);

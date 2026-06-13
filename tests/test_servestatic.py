@@ -360,8 +360,6 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
     )
     assert "grid-template-columns: auto minmax(0, 1fr) auto;" in primary_header_rule
     assert "grid-template-columns: auto minmax(0, 1fr) auto;" in quote_header_rule
-    assert ".composer-band--primary textarea,\n.composer-band--quote textarea {" in css
-    assert "border-top-color: var(--accent);" in css
     assert ".composer-latest-time--empty {" in css
     assert "text-decoration: none;" in css
     assert "function latestComposerMessage(member)" in app_shell
@@ -378,6 +376,52 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
     )
     assert 'href: messageKey ? "#" + messageDomId(messageKey) : "",' in app_shell
     assert 'anchor.title = "Jump to quoted message";' in app_shell
+
+
+def test_static_composer_headers_use_agent_accent_border():
+    css = _serve_css_text()
+    app_shell = _shell_and_composer_text()
+    band_start = css.index(".composer-band {")
+    band_rule = css[band_start : css.index("}", band_start)]
+    header_start = css.index(".composer-band-header {")
+    header_rule = css[header_start : css.index("}", header_start)]
+    textarea_start = css.index(".composer-shard textarea {")
+    textarea_rule = css[textarea_start : css.index("}", textarea_start)]
+
+    assert "--composer-header-accent: var(--border-soft);" in band_rule
+    assert "border-bottom: 2px solid" in header_rule
+    assert (
+        "color-mix(in srgb, var(--composer-header-accent) 64%, var(--border-soft))"
+        in header_rule
+    )
+    assert "border-top" not in textarea_rule
+    assert "function syncComposerBandAccent(band, lane, member)" in app_shell
+    assert (
+        'band.style.setProperty("--composer-header-accent", '
+        "composerMemberAccent(lane, member));" in app_shell
+    )
+    assert "function composerMemberAccent(lane, member)" in app_shell
+    assert (
+        "return messageOccupantAccent(composerMemberAccentIndex(lane, member));"
+        in app_shell
+    )
+    assert "function composerMemberAccentIndex(lane, member)" in app_shell
+    assert (
+        "if (member.targetThreadId && host.occupants?.has(member.targetThreadId))"
+        in app_shell
+    )
+    assert "return laneOccupantOrdinal(host, member.targetThreadId);" in app_shell
+    assert (
+        "const index = laneGroupMemberTargetIds(host).indexOf(member.targetId);"
+        in app_shell
+    )
+    assert (
+        'throw new Error("composer header accent requires a lane group member");'
+        in app_shell
+    )
+    assert "return index;" in app_shell
+    assert "syncComposerBandAccent(primary, lane, member);" in app_shell
+    assert "syncComposerBandAccent(band, lane, member);" in app_shell
 
 
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
