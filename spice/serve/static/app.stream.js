@@ -284,6 +284,8 @@ function mergePayloadMessages(lane, payload) {
     stampMessageProducer(item, lane, threadId);
     upsertKnownMessage(lane, item, "newest");
   }
+  mergeOperatorRequests(lane, payload);
+  sortKnownMessages(lane);
   trimKnownMessages(lane);
 }
 
@@ -294,9 +296,18 @@ function mergeOlderPayloadMessages(lane, payload) {
     stampMessageProducer(item, lane, threadId);
     if (upsertKnownMessage(lane, item, "oldest")) added += 1;
   }
+  mergeOperatorRequests(lane, payload);
+  sortKnownMessages(lane);
   if (added > 0) lane.retainedMessageLimit += added;
   trimKnownMessages(lane);
   return added;
+}
+
+function mergeOperatorRequests(lane, payload) {
+  for (const item of payload.operatorRequests || []) {
+    stampMessageProducer(item, lane, "");
+    upsertKnownMessage(lane, item, "newest");
+  }
 }
 
 function upsertKnownMessage(lane, item, position) {
@@ -312,6 +323,23 @@ function upsertKnownMessage(lane, item, position) {
   lane.knownMessageKeys.add(item.key);
   noteLaneOccupantMessage(lane, item.threadId);
   return true;
+}
+
+function sortKnownMessages(lane) {
+  lane.knownMessages.sort(compareStreamItemsNewestFirst);
+}
+
+function compareStreamItemsNewestFirst(left, right) {
+  const delta = streamItemTimestampMs(right) - streamItemTimestampMs(left);
+  if (delta) return delta;
+  const indexDelta = Number(right.index || 0) - Number(left.index || 0);
+  if (indexDelta) return indexDelta;
+  return String(right.key || "").localeCompare(String(left.key || ""));
+}
+
+function streamItemTimestampMs(item) {
+  const parsed = Date.parse(item.timestamp || "");
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function trimKnownMessages(lane) {
@@ -376,6 +404,7 @@ function noteLaneOccupantMessage(lane, threadId) {
 
 function stampMessageProducer(item, lane, threadId) {
   item.producerTargetId = lane.targetId;
+  if (item.kind === "operator") return;
   if (!item.threadId && threadId) item.threadId = threadId;
 }
 
