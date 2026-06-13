@@ -200,6 +200,29 @@ Set `formatter = true` on a command step that rewrites matching staged files;
 after it exits successfully, the gate re-stages those same `SPICE_STAGED_PATHS`
 so the formatted content lands in the commit.
 
+## Release
+
+Releases are cut from a clean `main` worktree with `./scripts/release`.
+
+```sh
+./scripts/release prepare patch   # bump, validate, commit, stop before publish
+./scripts/release publish         # validate the prepared version, then publish
+./scripts/release patch           # one-pass bump, validate, commit, publish
+./scripts/release minor           # same flow for a minor release
+```
+
+Use a patch release when the shipped contract is unchanged: bug fixes,
+documentation clarifications, packaging fixes, or internal test/build/tooling
+changes that do not give operators a new capability and do not alter CLI,
+configuration, UI, task/session semantics, or the public library seam.
+
+Use a minor release when users can do something new or observe changed
+behavior: new commands or flags, new configuration, new `spice serve` or task
+workflow behavior, additions to the public library seam, changed output or
+artifacts, or any compatibility break while the project only has patch/minor
+release lanes. If a release contains both patch-level fixes and minor-level
+surface changes, choose minor.
+
 ## Status
 
 Work in progress: an extraction-in-progress toward a standalone, releasable

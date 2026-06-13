@@ -23,6 +23,12 @@ Prepare and/or publish a spice release.
   publish             validate the current prepared version, then push/publish
   github [version]    create/push the annotated tag and GitHub Release
 
+Bump guidance:
+  patch               shipped contract is unchanged: fixes, docs, packaging,
+                      or internal test/build/tooling changes
+  minor               users can do something new or observe changed behavior;
+                      choose minor when mixed with patch-level fixes
+
 Environment:
   SPICE_RELEASE_NOTES_FILE  path to a release-notes file to publish verbatim
 EOF
