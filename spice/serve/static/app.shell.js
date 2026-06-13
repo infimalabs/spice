@@ -840,8 +840,19 @@ function syncComposerShardOrder(container, shards) {
   }
 }
 
-function laneComposePlaceholder(lane) {
-  return "Steer " + laneMemberTargetLabel(lane);
+function laneComposePlaceholder(member) {
+  const label = laneMemberTargetLabel(member);
+  const status = laneComposePlaceholderStatus(member);
+  return [label, status].filter(Boolean).join("\n");
+}
+
+function laneComposePlaceholderStatus(member) {
+  const parts = [];
+  const pending = lanePendingDisplayCount(member);
+  if (pending > 0) parts.push(pending + " pending");
+  const status = (member.lastRenderedStatusLine || {}).agentProcessStatus || "";
+  if (status) parts.push(status);
+  return parts.join(", ");
 }
 
 function syncComposerPlaceholders(lane) {
@@ -1136,10 +1147,11 @@ function renderComposerQuoteBands(lane) {
 }
 
 function syncComposerQuoteStack(lane, stack, targetId) {
+  const member = laneStates.get(targetId) || lane;
   const bands = composerQuoteDraftsForTarget(lane, targetId).map((draft) => {
     let band = composerQuoteBandElementForDraft(stack, draft.id);
-    if (!band) band = composerQuoteBand(lane, targetId, draft);
-    else syncComposerQuoteBand(band, lane, targetId, draft);
+    if (!band) band = composerQuoteBand(lane, targetId, member, draft);
+    else syncComposerQuoteBand(band, lane, targetId, member, draft);
     return band;
   });
   syncComposerQuoteBandOrder(stack, bands);
@@ -1321,13 +1333,13 @@ function syncComposerBandMenuState(band) {
   syncComposerBandMenuDismissHandler();
 }
 
-function composerQuoteBand(lane, targetId, draft) {
+function composerQuoteBand(lane, targetId, member, draft) {
   const band = document.createElement("div");
-  syncComposerQuoteBand(band, lane, targetId, draft);
+  syncComposerQuoteBand(band, lane, targetId, member, draft);
   return band;
 }
 
-function syncComposerQuoteBand(band, lane, targetId, draft) {
+function syncComposerQuoteBand(band, lane, targetId, member, draft) {
   band.className = "composer-band composer-band--quote";
   band.title = draft.quoteText || draft.preview;
   band.dataset.composerQuoteBandDraftId = draft.id;
@@ -1346,6 +1358,7 @@ function syncComposerQuoteBand(band, lane, targetId, draft) {
     if (document.activeElement !== textarea && textarea.value !== (draft.text || ""))
       textarea.value = draft.text || "";
   }
+  textarea.placeholder = laneComposePlaceholder(member);
 }
 
 function composerQuoteBandHeader(lane, targetId, draft) {
@@ -1379,7 +1392,6 @@ function createComposerQuoteTextarea(lane, targetId, draft) {
   const textarea = document.createElement("textarea");
   textarea.rows = 2;
   textarea.value = draft.text || "";
-  textarea.placeholder = "Reply with quoted context";
   textarea.dataset.quoteDraftId = draft.id;
   textarea.addEventListener("focus", () => expandLanePane(lane));
   textarea.addEventListener("input", () => {
