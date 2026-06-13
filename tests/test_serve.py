@@ -153,6 +153,7 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert "Simultaneous Production, Integration, and Control Environment" not in html
     assert "<h1>spice</h1>" not in html
     assert ">+</button>" not in html
+    assert 'aria-label="Open teams"' in html
     assert 'id="open-lane" class="spice-menu-button"' in html
     assert 'aria-haspopup="menu" aria-expanded="false"' in html
     assert 'class="spice-menu-icon" aria-hidden="true">🌶️</span>' in html
@@ -255,9 +256,16 @@ def test_static_spice_menu_replaces_picker_lane():
         "if (!sameStringSets(openBefore, laneStateTargetIds())) renderSpiceMenu();"
         in app_lanes
     )
+    assert (
+        'lane.element.scrollIntoView({ block: "nearest", inline: "nearest" });'
+        in app_lanes
+    )
     assert "if (laneStates.size) closeSpiceMenu();" not in app_lanes
     assert "function setFastModeEnabled(enabled)" in app_lanes
     assert "function createEmptyTeamFromMenu()" in app_lanes
+    assert "function spiceMenuTeamGroups(choices)" in app_lanes
+    assert "function renderSpiceMenuTeamGroup(group)" in app_lanes
+    assert "function spiceMenuTeamDetail(group)" in app_lanes
     assert "const laneGrid = lanesEl.getBoundingClientRect();" in app_lanes
     assert "const visibleLane = visibleLaneElements()[0] || null;" in app_lanes
     assert "spiceMenuMinimumLaneWidthPx()" in app_lanes
@@ -284,6 +292,22 @@ def test_static_spice_menu_replaces_picker_lane():
         'teamCommandPayload("createTeam", {\n      config: defaultTeamConfig(),'
         in app_lanes
     )
+    assert 'heading.textContent = "open team";' in app_lanes
+    assert '? "loading teams"\n      : "team list unavailable";' in app_lanes
+    assert 'list.textContent = "no agents available";' in app_lanes
+    assert (
+        'label.textContent = group.unassigned\n    ? "agents without team"' in app_lanes
+    )
+    assert '    ? "open one to create a new team"' in app_lanes
+    assert '"open any member; " + count + " agents open together"' in app_lanes
+    assert "const alreadyOpen = laneStates.has(target.id);" in app_lanes
+    assert 'if (alreadyOpen) actionLabel = "Show team";' in app_lanes
+    assert (
+        'else if (group && !group.unassigned) actionLabel = "Open team";' in app_lanes
+    )
+    assert 'button.classList.toggle("target-choice--open", alreadyOpen);' in app_lanes
+    assert 'if (laneStates.has(target.id)) parts.push("open");' in app_lanes
+    assert 'setGlobalTransientStatus("open team failed");' in app_lanes
     assert (
         'function targetChoiceButton(target, actionLabel, onClick, role = "menuitem")'
         in app_lanes
@@ -293,6 +317,11 @@ def test_static_spice_menu_replaces_picker_lane():
     assert "openPickerLane" not in app_lanes
     assert "renderPickerChoices" not in app_shell
     assert ".spice-context-menu" in css
+    assert ".spice-menu-team {" in css
+    assert ".spice-menu-team--unassigned {" in css
+    assert ".spice-menu-team-header {" in css
+    assert ".spice-menu-team-targets {" in css
+    assert ".target-choice--open {" in css
     assert '.spice-menu-action[aria-checked="true"]' in css
     assert ".picker" not in css
 

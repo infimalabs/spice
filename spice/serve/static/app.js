@@ -2,7 +2,7 @@
 //
 // A lane is an operator-owned container over one concrete worktree target; an
 // agent (thread) is an occupant of the lane, not the lane itself. Which lanes
-// exist is server truth: opening a tree creates a team, fusing lanes merges
+// exist is server truth: opening an agent creates a team, fusing lanes merges
 // teams, closing a lane closes its team. One WebSocket live bus carries
 // request/response (requestId echo) plus push frames; new transcript lines
 // render the moment they land.
