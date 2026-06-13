@@ -280,6 +280,13 @@ function breakLaneGroup(lane) {
 async function splitLaneGroupOnServer(host, members) {
   if (members.length < 2) return;
   if (!host.teamId) throw new Error("split team requires host team id");
+  await updateLaneGroupConfigOnServer(host);
+  for (const member of members.slice(1)) {
+    await splitComposerAgentFromTeamOnServer(host, member);
+  }
+}
+
+async function updateLaneGroupConfigOnServer(host) {
   await requestTeamCommand(
     teamCommandPayload("updateTeamConfig", {
       teamId: host.teamId,
@@ -291,14 +298,30 @@ async function splitLaneGroupOnServer(host, members) {
       },
     }),
   );
-  for (const member of members.slice(1)) {
-    await requestTeamCommand(
-      teamCommandPayload("splitTeam", {
-        sourceTeamId: host.teamId,
-        agentIds: [laneTeamAgentId(member)],
-      }),
-    );
+}
+
+function splitComposerAgentFromTeam(lane, targetId) {
+  const host = laneGroupHost(lane);
+  const member = laneStates.get(targetId);
+  if (!member) return;
+  if (laneGroupMemberLanes(host).length < 2) return;
+  if (laneComposerTargetDraftText(host, targetId).trim()) {
+    if (!window.confirm(unsafeDraftWarningText())) return;
   }
+  splitComposerAgentFromTeamOnServer(host, member).catch(() => {
+    setLaneTransientStatus(host, "split composer failed");
+  });
+}
+
+async function splitComposerAgentFromTeamOnServer(host, member) {
+  if (!host.teamId) throw new Error("split composer requires host team id");
+  await updateLaneGroupConfigOnServer(host);
+  await requestTeamCommand(
+    teamCommandPayload("splitTeam", {
+      sourceTeamId: host.teamId,
+      agentIds: [laneTeamAgentId(member)],
+    }),
+  );
 }
 
 async function mergeLaneGroupsOnServer(sourceLane, targetLane) {

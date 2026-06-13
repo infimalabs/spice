@@ -695,6 +695,7 @@ function syncComposerShard(lane, shard, member) {
   const previousHeader = primary.querySelector(".composer-band-header--primary");
   if (previousHeader) previousHeader.replaceWith(header);
   else primary.prepend(header);
+  syncComposerBandMenuState(primary);
   let textarea = primary.querySelector("textarea");
   syncComposerAttachmentStrip(primary, lane, member.targetId, textarea);
   if (!textarea) {
@@ -731,9 +732,21 @@ function composerPrimaryBandHeader(lane, member) {
   const header = composerBandHeader({
     className: "composer-band-header--primary",
     title: label,
-    removeTitle: "Remove " + label + " from team",
-    removeLabel: "Remove " + label + " from team",
-    onRemove: () => removeComposerAgentFromTeam(lane, member.targetId),
+    menuTitle: "Composer actions for " + label,
+    menuLabel: "Composer actions for " + label,
+    menuActions: [
+      {
+        label: "Close",
+        detail: "Remove " + label + " from team",
+        onClick: () => removeComposerAgentFromTeam(lane, member.targetId),
+      },
+      {
+        label: "Split out",
+        detail: "Move only " + label + " to its own lane",
+        disabled: laneGroupMemberLanes(laneGroupHost(lane)).length < 2,
+        onClick: () => splitComposerAgentFromTeam(lane, member.targetId),
+      },
+    ],
   });
   header.title = "Drag composer to move this agent to another lane";
   if (typeof wireComposerMoveDrag === "function")
@@ -1120,10 +1133,10 @@ function composerQuoteDraftsForTarget(lane, targetId) {
 function composerBandHeader({
   className,
   title,
-  removeTitle,
-  removeLabel,
-  onRemove,
-  beforeRemove = [],
+  menuTitle,
+  menuLabel,
+  menuActions,
+  beforeMenu = [],
 }) {
   const header = document.createElement("div");
   header.className = "composer-band-header " + className;
@@ -1133,18 +1146,70 @@ function composerBandHeader({
   label.className = "composer-band-title";
   label.textContent = title;
   body.append(label);
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.className = "composer-band-remove";
-  remove.title = removeTitle;
-  remove.setAttribute("aria-label", removeLabel);
-  remove.textContent = "×";
-  remove.addEventListener("click", (event) => {
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "composer-band-menu-button";
+  trigger.title = menuTitle;
+  trigger.setAttribute("aria-label", menuLabel);
+  trigger.setAttribute("aria-haspopup", "menu");
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.textContent = "☰";
+  trigger.addEventListener("click", (event) => {
     event.stopPropagation();
-    onRemove();
+    toggleComposerBandMenu(trigger, menuActions || []);
   });
-  header.append(...beforeRemove, body, remove);
+  header.append(...beforeMenu, body, trigger);
   return header;
+}
+
+function toggleComposerBandMenu(trigger, actions) {
+  const band = trigger.closest(".composer-band");
+  if (!band) return;
+  const open = trigger.getAttribute("aria-expanded") === "true";
+  closeComposerBandMenu(band);
+  if (open) return;
+  const menu = document.createElement("div");
+  menu.className = "composer-band-menu";
+  menu.setAttribute("role", "menu");
+  for (const action of actions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "composer-band-menu-action spice-menu-action";
+    button.setAttribute("role", "menuitem");
+    button.disabled = Boolean(action.disabled);
+    if (action.detail) button.title = action.detail;
+    button.innerHTML =
+      '<span class="spice-menu-action-label"></span>' +
+      '<span class="spice-menu-action-detail"></span>';
+    button.querySelector(".spice-menu-action-label").textContent = action.label;
+    button.querySelector(".spice-menu-action-detail").textContent =
+      action.detail || "";
+    button.addEventListener("click", () => {
+      closeComposerBandMenu(band);
+      action.onClick();
+    });
+    menu.append(button);
+  }
+  const textarea = band.querySelector("textarea");
+  band.insertBefore(menu, textarea || null);
+  band.classList.add("composer-band--menu-open");
+  trigger.setAttribute("aria-expanded", "true");
+}
+
+function closeComposerBandMenu(band) {
+  band.querySelector(".composer-band-menu")?.remove();
+  band.classList.remove("composer-band--menu-open");
+  const trigger = band.querySelector(".composer-band-menu-button");
+  if (trigger) trigger.setAttribute("aria-expanded", "false");
+}
+
+function syncComposerBandMenuState(band) {
+  const open = [...band.children].some((child) =>
+    child.classList?.contains("composer-band-menu"),
+  );
+  band.classList.toggle("composer-band--menu-open", open);
+  const trigger = band.querySelector(".composer-band-menu-button");
+  if (trigger) trigger.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
 function composerQuoteBand(lane, targetId, draft) {
@@ -1161,6 +1226,7 @@ function syncComposerQuoteBand(band, lane, targetId, draft) {
   const previousHeader = band.querySelector(".composer-band-header--quote");
   if (previousHeader) previousHeader.replaceWith(header);
   else band.prepend(header);
+  syncComposerBandMenuState(band);
   let textarea = band.querySelector("textarea");
   syncComposerAttachmentStrip(band, lane, targetId, textarea);
   if (!textarea) {
@@ -1190,10 +1256,16 @@ function composerQuoteBandHeader(lane, targetId, draft) {
   const header = composerBandHeader({
     className: "composer-band-header--quote",
     title: draft.preview || "quoted message",
-    removeTitle: "Remove quoted message",
-    removeLabel: "Remove quoted message",
-    onRemove: () => removeComposerQuoteDraft(lane, targetId, draft.id),
-    beforeRemove: [time],
+    menuTitle: "Quoted composer actions",
+    menuLabel: "Quoted composer actions",
+    menuActions: [
+      {
+        label: "Remove quote",
+        detail: draft.preview || "quoted message",
+        onClick: () => removeComposerQuoteDraft(lane, targetId, draft.id),
+      },
+    ],
+    beforeMenu: [time],
   });
   return header;
 }
