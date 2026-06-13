@@ -21,6 +21,8 @@ _INDEX_HTML = """<!doctype html>
   <link rel="icon" href="/static/favicon.ico" sizes="any">
   <link rel="manifest" href="/static/site.webmanifest">
   <link rel="stylesheet" href="/static/index.css">
+  <link rel="stylesheet" href="/static/composer.css">
+  <link rel="stylesheet" href="/static/messages.css">
   <link rel="stylesheet" href="/static/status-colors.css">
 </head>
 <body>

@@ -1,0 +1,415 @@
+/* ---- composer: shards left, control rail stuck right ---- */
+.lane-composer {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+}
+/* Shards align horizontally — one column per agent, squeezed side by side —
+   and each shard stacks its quotes above the draft in stream order. */
+.composer-shards {
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 6px;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px var(--lane-pane-compose-edge-gap);
+  scrollbar-width: thin;
+}
+.lane--composer-drop .composer-shards {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+.composer-shard {
+  display: flex;
+  flex: 1 0 142px;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  min-height: 0;
+  min-width: 142px;
+  overflow-y: auto;
+  position: relative;
+  scrollbar-width: thin;
+}
+.composer-shards--move-drop-active {
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.composer-shard--composer-drop-left::before,
+.composer-shard--composer-drop-right::after {
+  background: var(--accent);
+  border-radius: 999px;
+  bottom: 4px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  top: 4px;
+  width: 4px;
+  z-index: 4;
+}
+.composer-shard--composer-drop-left::before { left: -5px; }
+.composer-shard--composer-drop-right::after { right: -5px; }
+.composer-shard--dragging {
+  opacity: 0.46;
+}
+.composer-shard--drag-ghost {
+  box-shadow: 0 18px 42px color-mix(in srgb, #000 32%, transparent);
+  left: 0;
+  margin: 0;
+  max-height: calc(100vh - 20px);
+  opacity: 0.98;
+  overflow: hidden;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  transform-origin: top left;
+  z-index: 60;
+}
+.composer-quote-stack { display: contents; }
+.composer-band {
+  background: var(--control);
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 100%;
+  height: 100%;
+  min-height: 96px;
+  min-width: 0;
+  overflow: hidden;
+}
+.composer-band--primary {
+  flex: 0 0 100%;
+}
+.composer-band--quote {
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  flex: 0 0 100%;
+}
+.composer-band--drag-ready {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.composer-band--dragging {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 34%, transparent);
+  opacity: 0.62;
+}
+.composer-band--drag-ghost {
+  box-shadow: 0 18px 42px color-mix(in srgb, #000 32%, transparent);
+  left: 0;
+  opacity: 0.98;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  transform-origin: top left;
+  z-index: 60;
+}
+.composer-band-header {
+  align-items: center;
+  color: var(--fg);
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  height: 30px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 0 5px 0 8px;
+}
+.composer-band-header--attachments {
+  gap: 4px;
+  padding-left: 3px;
+}
+.composer-band-header--primary {
+  cursor: grab;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.composer-band-header--quote {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.composer-band-body {
+  align-items: center;
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+.composer-band-title {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-band-body--attachments .composer-band-title {
+  display: none;
+}
+.composer-quote-time {
+  color: var(--accent-strong);
+  font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: pre;
+}
+.composer-latest-time--empty {
+  color: var(--muted);
+  text-decoration: none;
+}
+.composer-band-menu-button,
+.composer-band-close-button {
+  align-items: center;
+  background: color-mix(in srgb, var(--control) 92%, var(--bg));
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 13px;
+  height: 22px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 22px;
+}
+.composer-band-menu-button:hover,
+.composer-band-menu-button:focus-visible,
+.composer-band-close-button:hover,
+.composer-band-close-button:focus-visible {
+  background: var(--control);
+  border-color: var(--border-soft);
+  color: var(--fg);
+}
+.composer-band-menu-button[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent) 20%, var(--control));
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  box-shadow: inset 0 1px 3px color-mix(in srgb, #000 34%, transparent);
+  color: var(--fg);
+  transform: translateY(1px);
+}
+.composer-band--menu-open textarea,
+.composer-band--menu-open .composer-attachments {
+  display: none;
+}
+.composer-band-menu {
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 7px;
+}
+.composer-band-menu-action {
+  align-items: flex-start;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 2px;
+  justify-content: center;
+  min-height: 30px;
+  padding: 5px 7px;
+  text-align: left;
+}
+.composer-band-menu-action .spice-menu-action-detail {
+  display: none;
+}
+.composer-band-menu-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.composer-shard textarea {
+  background: var(--control);
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  border-radius: 0;
+  color: var(--fg);
+  flex: 1;
+  font: inherit;
+  font-size: 14px;
+  min-height: 0;
+  padding: 7px 9px;
+  resize: none;
+  width: 100%;
+}
+.composer-band--primary textarea,
+.composer-band--quote textarea {
+  border-top-color: var(--accent);
+}
+.composer-attachments {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 1px 0;
+  scrollbar-width: thin;
+}
+.composer-attachments[hidden] {
+  display: none;
+}
+.composer-attachment-list {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  height: 100%;
+  min-width: min-content;
+}
+.composer-attachment-chip {
+  align-items: center;
+  background: color-mix(in srgb, var(--control) 84%, var(--bg));
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  display: inline-flex;
+  flex: 0 0 26px;
+  height: 26px;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  width: 26px;
+}
+.composer-attachment-chip img {
+  display: block;
+  border-radius: 3px;
+  flex: 0 0 100%;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.composer-attachment-name {
+  display: none;
+}
+.composer-attachment-remove {
+  align-items: center;
+  background: color-mix(in srgb, var(--control) 80%, transparent);
+  border: 0;
+  border-radius: 50%;
+  color: var(--fg);
+  display: inline-flex;
+  font-size: 10px;
+  height: 12px;
+  justify-content: center;
+  line-height: 1;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  width: 12px;
+}
+.composer-attachment-chip:hover .composer-attachment-remove,
+.composer-attachment-remove:focus-visible {
+  opacity: 1;
+}
+.composer-attachment-remove:hover,
+.composer-attachment-remove:focus-visible {
+  background: color-mix(in srgb, var(--warn) 70%, var(--control));
+  color: var(--bg);
+}
+.composer-band--drop-ready {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+@media (max-width: 720px) {
+  .lane-composer {
+    gap: 6px;
+    grid-template-columns: minmax(0, 1fr) 82px;
+  }
+  .composer-shards { gap: 5px; }
+  .composer-shard {
+    flex-basis: min(72vw, 220px);
+    min-width: min(72vw, 220px);
+  }
+}
+.composer-controls {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  overflow: hidden;
+  padding:
+    var(--lane-pane-control-pad)
+    0
+    var(--lane-pane-compose-edge-gap);
+}
+.stack-slider {
+  --control-state-accent: var(--accent);
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 0;
+  height: var(--lane-pane-control-item-height);
+  min-height: var(--lane-pane-control-item-height);
+  padding: 4px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--pill-radius);
+  background: var(--control);
+  cursor: ew-resize;
+  flex: 0 0 var(--lane-pane-control-item-height);
+  overflow: hidden;
+}
+.submit-action {
+  --control-state-accent: var(--accent);
+}
+.stack-slider input {
+  width: 96px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: ew-resize;
+  accent-color: var(--control-state-accent);
+}
+.stack-slider--armed,
+.submit-action--armed {
+  --control-state-accent: var(--final-accent);
+}
+.stack-slider--maxed,
+.submit-action--maxed {
+  --control-state-accent: var(--control-max-accent);
+}
+.stack-slider--armed,
+.stack-slider--maxed {
+  background: color-mix(in srgb, var(--control-state-accent) 18%, var(--control));
+  border-color: color-mix(in srgb, var(--control-state-accent) 70%, var(--border));
+}
+.stack-slider span {
+  color: var(--muted);
+  font: 11px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+  text-transform: lowercase;
+}
+.stack-slider.stack-slider--armed span,
+.stack-slider.stack-slider--maxed span {
+  color: var(--control-state-accent);
+}
+.primary {
+  border-radius: var(--pill-radius);
+  color: var(--button-accent-fg);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-top: 0;
+  flex: 0 0 var(--lane-pane-control-item-height);
+  height: var(--lane-pane-control-item-height);
+  min-height: var(--lane-pane-control-item-height);
+  min-width: 6ch;
+  padding: 5px 16px;
+  text-align: center;
+}
+.primary.submit-action {
+  background: var(--control-state-accent, var(--accent));
+  border-color: var(--control-state-accent, var(--accent));
+}
+button.primary.submit-action:hover,
+button.primary.submit-action:focus-visible {
+  background: var(--control-state-accent, var(--accent));
+  border-color: var(--control-state-accent, var(--accent));
+  color: var(--button-accent-fg);
+}
