@@ -156,6 +156,40 @@ def test_task_list_all_marks_completed_and_deleted_rows(monkeypatch):
     assert "[todo]" not in deleted_line
 
 
+def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
+    row = _row(
+        "Creator context",
+        project="task.render",
+        incepted="20260612T065825463453Z",
+        status="pending",
+        phase="todo",
+    )
+    row.update(
+        {
+            "task_description": "",
+            "phase_i": "0",
+            "urgency": "9.2",
+            "origin_thread": "origin-thread",
+            "origin_worktree": "/tmp/origin",
+            "claim_thread": "claim-thread",
+            "claim_worktree": "/tmp/claim",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+
+    output = render.render_show("TASK-test")
+
+    assert (
+        "rehydrate:\n  creator context, run: spice session briefing origin-thread"
+        in (output)
+    )
+    assert "--start 2026-06-12T06:53:25.463453Z" in output
+    assert "--end 2026-06-12T07:03:25.463453Z" in output
+
+
 def test_task_show_replaces_sentinel_rehydrate_commands(monkeypatch):
     sentinel = "0" * 32
     row = _row(
@@ -186,14 +220,9 @@ def test_task_show_replaces_sentinel_rehydrate_commands(monkeypatch):
 
     output = render.render_show("TASK-test")
 
-    assert (
-        "origin_rehydrate - "
-        "(no origin session exists; sentinel thread has no transcript)" in output
-    )
-    assert (
-        "claim_rehydrate - "
-        "(no claim session exists; sentinel thread has no transcript)" in output
-    )
+    assert "rehydrate:" in output
+    assert "creator context: unavailable (sentinel thread has no transcript)" in output
+    assert "claim context: unavailable (sentinel thread has no transcript)" in output
     assert f"spice session briefing {sentinel}" not in output
     assert f"spice session turns {sentinel}" not in output
 
