@@ -84,8 +84,10 @@ BUILTIN_MAXIM_BAGS: dict[str, MaximBag] = {
         name="fallbacks",
         words=frozenset({"fallback", "fallbacks", "option", "optional", "options"}),
         message=(
-            "DO NOT add fallbacks or defensive secondary paths; commit to the one "
-            "correct path and let it fail loudly when its assumptions break."
+            "DO NOT hide uncertainty behind quiet defensive secondary paths; "
+            "intentional defaults and explicit resolver order are fine when the "
+            "contract calls for them. Otherwise commit to the one correct path "
+            "and let violated assumptions fail loudly."
         ),
     ),
     "modes": MaximBag(
