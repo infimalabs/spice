@@ -136,6 +136,9 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     )
     mobile_header_end = css.index("  .app-header .meta", mobile_header_start)
     mobile_header_rules = css[mobile_header_start:mobile_header_end]
+    mobile_filter_start = css.index("  .filter-strip {", mobile_header_start)
+    mobile_filter_end = css.index("  .swimlanes", mobile_filter_start)
+    mobile_filter_rules = css[mobile_filter_start:mobile_filter_end]
 
     assert 'id="fast-mode-toggle"' not in html
     assert 'class="add-lane"' not in html
@@ -223,8 +226,11 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
         "  box-shadow: inset 0 0 0 1px var(--border-soft);" in css
     )
     assert "height: 30px;" in button_rules
-    assert "min-height: 50px;" in mobile_header_rules
+    assert "flex-wrap: nowrap;" in mobile_header_rules
+    assert "min-height: 46px;" in mobile_header_rules
     assert "padding: 8px;" in mobile_header_rules
+    assert "flex: 1 1 auto;" in mobile_filter_rules
+    assert "min-width: 0;" in mobile_filter_rules
 
 
 def test_static_spice_menu_replaces_picker_lane():
