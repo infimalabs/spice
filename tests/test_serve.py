@@ -1025,6 +1025,7 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
     assert "function laneComposePlaceholderStatus(member)" in app_shell
     assert "const pending = lanePendingDisplayCount(member);" in app_shell
     assert 'parts.push(pending + " pending");' in app_shell
+    assert 'if (pending > 0) parts.push(pending + " pending");' not in app_shell
     assert (
         'const status = (member.lastRenderedStatusLine || {}).agentProcessStatus || "";'
         in app_shell
