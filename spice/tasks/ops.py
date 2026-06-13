@@ -687,9 +687,7 @@ def oops(
     origin: str = "",
     tags: list[str] | None = None,
 ) -> str:
-    severity = (severity or "medium").strip()
-    if severity not in config.SEVERITIES:
-        raise SpiceError(f"invalid severity: {severity}")
+    severity = config.map_severity(severity)
     oops_tags = ["oops", severity, *([kind] if kind else []), *(tags or [])]
     handle = _add_one(
         title=text,

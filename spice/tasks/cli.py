@@ -307,7 +307,11 @@ def _configure_oops_parser(actions: Any) -> None:
         default="",
         help="Longer description stored on the oops row for triage context.",
     )
-    oops.add_argument("--severity", default="medium", choices=list(config.SEVERITIES))
+    oops.add_argument(
+        "--severity",
+        default="medium",
+        help="Severity: critical/high/medium/low or H/M/L.",
+    )
     oops.add_argument("--kind", default="")
     oops.add_argument("--surface", default="")
     oops.add_argument("--command", dest="oops_command", default="")
