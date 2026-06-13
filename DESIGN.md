@@ -31,6 +31,17 @@ re-published with
 escalated priority (`urgent`, then `critical`) after every 3 silent
 assistant messages.
 
+**Steering fidelity.** Operators author inbox steering through the serve UI's
+draft composers, which exist for the durability requirement, not for typing
+comfort. **Quoting beats retyping** — lower movement and higher fidelity, since
+the operator references the exact thing rather than risking a lossy copy of it;
+images beat descriptions by the same logic; sharded composers let one
+instruction be assembled non-linearly from several sources into a single
+coherent markdown payload. The record this leaves has to survive **compaction,
+thread handoff, and the organic evolution of the latest thinking** — and a
+record expensive for the human to produce won't be produced well under load. So
+the high-fidelity gesture is made the cheap one.
+
 Agent ← harness delivery rides the agent's own command executions: `spice.sh`
 wraps every shell command, routing through a token-optimizing proxy (`rtk`)
 and injecting into stderr (a) pending inbox steering, (b) context-pressure warnings
@@ -101,6 +112,17 @@ narration mode and a global sequential speech queue.
 
 ### 5. The constitution (hygiene as executable opinion)
 
+The constitution governs **seams, not interiors**. The high-performance core of
+anything tends to look disgusting — denormalized, locality-hugging,
+indirection-free — because that ugliness *is* the performance; every dereference
+a regularized structure adds is a cache miss waiting to happen. The gates don't
+forbid an ugly hot loop. They forbid an ugly *unbounded* one. File-shape
+pressure, naming, complexity ceilings, and the no-shims rule keep the whole
+**legible and convergent** for a swarm of agents; the body of a bounded, named
+routine is free to be as gnarly as performance demands. Beauty at the system
+level may contain ugliness at the instruction level, and the gate is drawn
+exactly at that boundary.
+
 Quality gates are the hook backend, not a ritual: `.githooks` shims call
 `dev pre-commit` (repo shape → staging → policy → formatters → assets →
 authored-tree → study guards) and `dev commit-msg`. The opinions, exactly:
@@ -124,6 +146,43 @@ authored-tree → study guards) and `dev commit-msg`. The opinions, exactly:
   migration trails.
 - A successful gate clears sticky state it no longer needs; `dirty` renders
   the same pressure against the uncommitted tree as steering, not as a block.
+
+## Why this shape
+
+The one idea above isn't arbitrary; four theses generate it.
+
+1. **The keyboard is the bottleneck, not the implementer.** The bit rate
+   between a human and a computer through any keyboard plateaued long ago and is
+   abysmally small. The implementer is now fast and cheap; the human's output
+   channel is the scarce resource. Every operator-facing decision minimizes
+   human movement and maximizes the fidelity of what that movement leaves
+   behind.
+
+2. **The spec is an evolving fixed point, not an input.** You don't know what
+   you want until you watch it fail, so the target isn't authored ahead of the
+   work — it's the state the steer→build→observe loop converges to, the point at
+   which what the agents produce no longer provokes a correction. `f(x) = x`
+   reads "I looked and had nothing to steer." Failure is the gradient; each
+   disliked output is a force on the iteration. The operator **corrals** the
+   basin — shaping the space so the dynamics converge — rather than naming the
+   point.
+
+3. **Spec and observation are one surface.** Spec-driven development trusts
+   intent and does not test behavior; observation-driven development trusts
+   behavior and drifts for want of a target. The transcript is both at once —
+   what happened, and, the moment the operator quotes-and-steers off it, what is
+   now wanted. Not two phases: one record read from either end, with the
+   operator as the minimal-movement hinge. This is *why* the transcript is the
+   single source of truth and the filesystem the single channel of steering —
+   those two surfaces are the observation and the spec, fused, and their fixed
+   point is the deliverable.
+
+4. **A human babysitting agents is toil.** Operating an agent fleet is an
+   operations problem, so spice imports operations discipline: observability
+   over belief, supervision over hope, fail-loud over fail-silent, fungible
+   restartable workers with externalized state — cattle, not pets. "Obsolete the
+   operator" isn't a slogan; it's the fixed point of the correction loop, the
+   state where required human steering reaches zero.
 
 ## Design principles
 
@@ -236,6 +295,18 @@ authored-tree → study guards) and `dev commit-msg`. The opinions, exactly:
 - Repo-truth docs (`AGENTS.md` by default; widened via tracked
   `[tool.spice.policy] repo_truth_docs`) are capped at 5000 characters —
   the constitution governs more than source files.
+
+## What spice is not
+
+- **Not an IDE** — a thing you overhear and steer, not one you sit inside and
+  type in.
+- **Not an agent SDK or framework** — it doesn't help you build an agent; it
+  operates the ones you already run.
+- **Not spec-driven development** — the spec is the loop's fixed point, read off
+  the transcript, not authored ahead of it.
+
+spice is a third thing: an **operations console for a fleet of agents**. The
+editor-versus-framework split has no bin for it.
 
 ## Dependencies
 
