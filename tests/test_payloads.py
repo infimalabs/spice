@@ -198,7 +198,9 @@ def test_ack_context_payload_round_trips_inbox_attachments(tmp_path):
     assert attachment["url"].startswith("/api/work/trees/wt/files/image?path=")
 
 
-def test_messages_payload_omits_operator_request_stream_cards(monkeypatch, tmp_path):
+def test_messages_payload_reports_inbox_status_without_streaming_requests(
+    monkeypatch, tmp_path
+):
     repo = tmp_path / "repo"
     repo.mkdir()
     pending_name = "20260104T000000000006Z.txt"
@@ -234,10 +236,31 @@ def test_messages_payload_omits_operator_request_stream_cards(monkeypatch, tmp_p
         _Target(id="wt", repo_root=repo),
         limit=5,
     )
-
+    assert set(payload) == {
+        "messages",
+        "targetWorktreeName",
+        "targetBranch",
+        "targetAgentName",
+        "targetThreadId",
+        "taskFilters",
+        "laneFilterVersion",
+        "teamId",
+        "teamRevision",
+        "configRevision",
+        "lifetime",
+        "taskFilterInventory",
+        "laneMetrics",
+        "laneInfo",
+        "agentProcessStatus",
+        "error",
+        "pendingInboxCount",
+        "agentEnsure",
+        "statusLine",
+    }
     assert payload["messages"] == []
     assert payload["pendingInboxCount"] == 1
-    assert "operatorRequests" not in payload
+    assert payload["statusLine"]["pendingInboxCount"] == 1
+    assert payload["statusLine"]["pendingInboxLabel"] == "1"
 
 
 def test_ack_context_payload_finds_archived_inbox_item_by_dropped_z_alias(tmp_path):
