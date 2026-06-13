@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import contextlib
+import hashlib
 import json
 import mimetypes
 import os
@@ -23,6 +24,7 @@ INBOX_ATTACHMENT_MANIFEST = "manifest.json"
 INBOX_ATTACHMENT_MAX_ITEMS = 8
 INBOX_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024
 INBOX_ATTACHMENT_NAME_MAX_CHARS = 96
+DURABLE_ATTACHMENT_METADATA = "metadata.json"
 
 _DATA_URL_PREFIX_RE = re.compile(
     r"^data:(?P<content_type>[^;,]+)(?:;[^,]*)?;base64,(?P<data>.*)$",
@@ -204,6 +206,27 @@ def archive_inbox_attachment_references(text: str) -> str:
     return _INBOX_LIVE_ATTACHMENT_REF_RE.sub(_archive_inbox_attachment_reference, text)
 
 
+def durable_inbox_attachment_references(
+    text: str, *, repo_root: Path, artifact_root: Path
+) -> str:
+    """Copy resolvable inbox attachment refs into the shared task artifact store."""
+    if not text:
+        return text
+    replacements: list[tuple[int, int, str]] = []
+    for start, end, ref, punctuation in _inbox_attachment_reference_matches(text):
+        stored = _store_durable_inbox_attachment(
+            ref, repo_root=repo_root, artifact_root=artifact_root
+        )
+        if stored is not None:
+            replacements.append((start, end, f"{stored.as_posix()}{punctuation}"))
+    if not replacements:
+        return archive_inbox_attachment_references(text)
+    result = text
+    for start, end, replacement in reversed(replacements):
+        result = f"{result[:start]}{replacement}{result[end:]}"
+    return archive_inbox_attachment_references(result)
+
+
 def find_archived_inbox_attachment_references(text: str) -> tuple[str, ...]:
     """Return archived inbox attachment references without surrounding punctuation."""
     if not text:
@@ -225,6 +248,96 @@ def _archive_inbox_attachment_reference(match: re.Match[str]) -> str:
         tail = tail[:-1]
     separator = "\\" if head.endswith("\\") else "/"
     return f"{head}archive{separator}{tail}{punctuation}"
+
+
+def _inbox_attachment_reference_matches(text: str) -> list[tuple[int, int, str, str]]:
+    matches: list[tuple[int, int, str, str]] = []
+    for match in _INBOX_LIVE_ATTACHMENT_REF_RE.finditer(text):
+        raw = f"{match.group('head')}{match.group('tail')}"
+        ref, punctuation = _split_ref_punctuation(raw)
+        matches.append((match.start(), match.end(), ref, punctuation))
+    for match in _INBOX_ARCHIVED_ATTACHMENT_REF_RE.finditer(text):
+        raw = match.group("ref")
+        ref, punctuation = _split_ref_punctuation(raw)
+        matches.append((match.start(), match.end(), ref, punctuation))
+    matches.sort(key=lambda item: item[0])
+    return _drop_overlapping_matches(matches)
+
+
+def _split_ref_punctuation(ref: str) -> tuple[str, str]:
+    punctuation = ""
+    while ref.endswith(tuple(_TRAILING_REF_PUNCTUATION)):
+        punctuation = f"{ref[-1]}{punctuation}"
+        ref = ref[:-1]
+    return ref, punctuation
+
+
+def _drop_overlapping_matches(
+    matches: list[tuple[int, int, str, str]],
+) -> list[tuple[int, int, str, str]]:
+    kept: list[tuple[int, int, str, str]] = []
+    last_end = -1
+    for match in matches:
+        if match[0] < last_end:
+            continue
+        kept.append(match)
+        last_end = match[1]
+    return kept
+
+
+def _store_durable_inbox_attachment(
+    ref: str, *, repo_root: Path, artifact_root: Path
+) -> Path | None:
+    source = _resolve_inbox_attachment_ref(ref, repo_root=repo_root)
+    if source is None:
+        return None
+    data = source.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    filename = _durable_attachment_filename(source.name)
+    artifact_dir = artifact_root / digest
+    artifact_path = artifact_dir / filename
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    if not artifact_path.exists():
+        _write_bytes_fsynced(artifact_path, data)
+    metadata_path = artifact_dir / DURABLE_ATTACHMENT_METADATA
+    if not metadata_path.exists():
+        _write_text_fsynced(
+            metadata_path,
+            json.dumps(
+                {
+                    "sha256": digest,
+                    "filename": filename,
+                    "source": str(source),
+                    "size": len(data),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+        )
+    fsync_directory(artifact_dir)
+    fsync_directory(artifact_dir.parent)
+    return artifact_path
+
+
+def _resolve_inbox_attachment_ref(ref: str, *, repo_root: Path) -> Path | None:
+    path = Path(ref.replace("\\", "/"))
+    candidates = [path if path.is_absolute() else repo_root / path]
+    archived = archive_inbox_attachment_references(ref)
+    if archived != ref:
+        archived_path = Path(archived.replace("\\", "/"))
+        candidates.append(
+            archived_path if archived_path.is_absolute() else repo_root / archived_path
+        )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def _durable_attachment_filename(raw: str) -> str:
+    cleaned = _SAFE_ATTACHMENT_NAME_RE.sub("-", Path(raw).name).strip(".-")
+    return cleaned[:INBOX_ATTACHMENT_NAME_MAX_CHARS] or "attachment"
 
 
 def _attachment_payload(item: Mapping[str, Any]) -> tuple[str, str]:
