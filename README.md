@@ -214,8 +214,9 @@ Releases are cut from a clean `main` worktree with `./scripts/release`.
 
 For curated GitHub release notes, generate the draft after `prepare` and edit
 from that file instead of relying on session memory. The draft is built from
-first-parent commit subjects in the exact previous-release-tag-to-release-commit
-range and records that range in the package notes.
+first-parent commits in the exact previous-release-tag-to-release-commit range,
+grouped by landed task project metadata, and records that range in the package
+notes.
 
 Use a patch release when the shipped contract is unchanged: bug fixes,
 documentation clarifications, packaging fixes, or internal test/build/tooling
