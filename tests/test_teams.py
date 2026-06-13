@@ -68,6 +68,30 @@ def test_assigning_agent_with_target_alias_retires_stale_membership(tmp_path):
     assert store.team_state(source.team_id).status == "closed"
 
 
+def test_team_command_service_imports_agent_into_empty_team(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    service = TeamCommandService(store)
+    source = store.create_team(members=["target-a"])
+    empty = store.create_team()
+
+    result = service.apply(
+        {
+            "command": "moveAgentToTeam",
+            "teamId": empty.team_id,
+            "agentId": "thread-a",
+            "agentAliases": ["target-a"],
+        }
+    )
+
+    open_members = {
+        team.team_id: {member.agent_id for member in team.members}
+        for team in result.snapshot.teams
+    }
+    assert open_members == {empty.team_id: {"thread-a"}}
+    assert store.current_team_for_agent("thread-a") == empty.team_id
+    assert store.team_state(source.team_id).status == "closed"
+
+
 def test_team_command_service_reorders_team_agents(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     service = TeamCommandService(store)

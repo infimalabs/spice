@@ -179,6 +179,7 @@ function laneMessageQuery(lane) {
 
 async function subscribeLaneToLiveBus(lane) {
   if (!isLaneOpen(lane)) return;
+  if (lane.emptyTeam) return;
   lane.liveBusSubscribed = true;
   try {
     const response = await liveBusRequest("lane.subscribe", {
@@ -194,13 +195,18 @@ async function subscribeLaneToLiveBus(lane) {
 
 function resubscribeLiveBusLanes() {
   for (const lane of laneStates.values()) {
-    if (isLaneOpen(lane)) subscribeLaneToLiveBus(lane);
+    if (isLaneOpen(lane) && !lane.emptyTeam) subscribeLaneToLiveBus(lane);
   }
 }
 
 function configureLiveBusLanes() {
   for (const lane of laneStates.values()) {
-    if (!isLaneOpen(lane) || !lane.liveBusSubscribed || !liveBusIsOpen())
+    if (
+      lane.emptyTeam ||
+      !isLaneOpen(lane) ||
+      !lane.liveBusSubscribed ||
+      !liveBusIsOpen()
+    )
       continue;
     liveBusRequest("lane.configure", {
       targetId: lane.targetId,
