@@ -1079,6 +1079,22 @@ def test_static_message_speech_routes_to_producer_lane():
     assert "await playSpeech(entry.targetLane, text);" in app_audio
 
 
+def test_static_operator_requests_merge_and_render_as_stream_items():
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+
+    assert "function mergeOperatorRequests(lane, payload)" in app_stream
+    assert "for (const item of payload.operatorRequests || [])" in app_stream
+    assert 'if (item.kind === "operator") return;' in app_stream
+    assert 'if (item.kind === "operator") article.classList.add("operator");' in (
+        app_render
+    )
+    assert 'button.textContent = "Operator";' in app_render
+    assert 'if (kind === "operator") add("REQUEST", "operator-badge");' in app_render
+    assert ".messages article.operator" in css
+
+
 def test_static_manual_speech_playback_aborts_active_entry():
     app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
 

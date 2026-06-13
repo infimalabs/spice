@@ -49,12 +49,16 @@ def _message(timestamp: str, *, kind: str = "assistant", ack_count: int = 0):
 class _Status:
     running: bool
     started_at: str
+    process_status: str = "idle"
+    thread_id: str = ""
 
 
 @dataclass(frozen=True)
 class _Target:
     id: str
     repo_root: Path | None = None
+    name: str = "repo"
+    branch: str = "main"
 
 
 class _State:
@@ -63,6 +67,7 @@ class _State:
     ) -> None:
         self._sends = sends
         self.team_store = team_store or ServeTeamStore()
+        self.pending_agent_ensure_attempts: dict[str, float] = {}
 
     def lane_send_count(self, target_id: str) -> int:
         return self._sends
@@ -191,6 +196,57 @@ def test_ack_context_payload_round_trips_inbox_attachments(tmp_path):
     assert attachment["contentType"] == "image/png"
     assert attachment["path"].startswith(".spice/inbox/")
     assert attachment["url"].startswith("/api/work/trees/wt/files/image?path=")
+
+
+def test_messages_payload_includes_pending_and_archived_operator_requests(
+    monkeypatch, tmp_path
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    pending_name = "20260104T000000000006Z.txt"
+    archived_name = "20260104T000000000007Z.txt"
+    write_inbox_item(
+        repo,
+        pending_name,
+        compose_inbox_text(body="pending request", priority="urgent", stop=False),
+    )
+    write_inbox_item(
+        repo,
+        archived_name,
+        compose_inbox_text(body="archived request", priority=None, stop=False),
+    )
+    archive_ackd_inbox_items(repo, [inbox_item_key(archived_name)])
+    monkeypatch.setattr(
+        payloads, "resolve_thread_id_for_target", lambda _state, _target: ""
+    )
+    monkeypatch.setattr(
+        payloads,
+        "ensure_agent_for_pending_inbox",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        payloads,
+        "agent_status",
+        lambda _repo: _Status(running=False, started_at=""),
+    )
+    monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
+
+    payload = payloads.messages_payload_for_worktree(
+        _State(),
+        _Target(id="wt", repo_root=repo),
+        limit=5,
+    )
+    requests = {item["request_key"]: item for item in payload["operatorRequests"]}
+
+    assert payload["messages"] == []
+    assert requests[inbox_item_key(pending_name)]["kind"] == "operator"
+    assert requests[inbox_item_key(pending_name)]["request_state"] == "pending"
+    assert requests[inbox_item_key(pending_name)]["request_priority"] == "urgent"
+    assert requests[inbox_item_key(pending_name)]["display_text"] == "pending request"
+    assert requests[inbox_item_key(archived_name)]["request_state"] == "archived"
+    assert requests[inbox_item_key(archived_name)]["display_html"] == (
+        "<p>archived request</p>"
+    )
 
 
 def test_ack_context_payload_finds_archived_inbox_item_by_dropped_z_alias(tmp_path):

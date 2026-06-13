@@ -9,11 +9,14 @@ from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.config import configured_say_voice
 from spice.mail.inbox import (
+    InboxItem,
     collect_archived_inbox_items,
     collect_inbox_items,
+    inbox_item_key,
     inbox_item_key_aliases,
     inbox_request_body,
     inbox_request_priority,
+    one_line_preview,
     pending_inbox_count,
 )
 from spice.serve.attachments import inbox_attachment_payloads
@@ -25,6 +28,7 @@ from spice.serve.worktrees import WorktreeTarget
 from spice.tasks import config as task_config
 
 ACK_CONTEXT_ARCHIVE_LIMIT = 50
+OPERATOR_REQUEST_ARCHIVE_LIMIT = 50
 
 LANE_METRIC_SPARKLINE_BUCKETS = 12
 LANE_METRIC_SPARKLINE_BUCKET_SECONDS = 60
@@ -360,6 +364,7 @@ def messages_payload_for_worktree(
     status = agent_status(target.repo_root)
     return {
         "messages": [item.to_payload() for item in items],
+        "operatorRequests": operator_request_payloads_for_worktree(target),
         "targetWorktreeName": target.name,
         "targetBranch": target.branch or target.name,
         "targetAgentName": _agent_name_for_target(target),
@@ -383,6 +388,75 @@ def messages_payload_for_worktree(
             state, target, items=items, error=error, pending_count=pending
         ),
     }
+
+
+def operator_request_payloads_for_worktree(
+    target: WorktreeTarget,
+) -> list[dict[str, Any]]:
+    pending_items = collect_inbox_items(str(target.repo_root))
+    archived_items = collect_archived_inbox_items(
+        str(target.repo_root), limit=OPERATOR_REQUEST_ARCHIVE_LIMIT
+    )
+    by_key: dict[str, tuple[InboxItem, str]] = {}
+    for state, items in (("pending", pending_items), ("archived", archived_items)):
+        for item in items:
+            key = inbox_item_key(item.name)
+            if key not in by_key:
+                by_key[key] = (item, state)
+    ordered = sorted(
+        by_key.values(),
+        key=lambda entry: (_operator_request_mtime(entry[0]), entry[0].name),
+        reverse=True,
+    )
+    return [
+        _operator_request_payload(item, state=state, target=target)
+        for item, state in ordered
+    ]
+
+
+def _operator_request_payload(
+    item: InboxItem, *, state: str, target: WorktreeTarget
+) -> dict[str, Any]:
+    body = inbox_request_body(item.text)
+    priority = inbox_request_priority(item.text) or ""
+    mtime = _operator_request_mtime(item)
+    timestamp = datetime.fromtimestamp(mtime, UTC).isoformat(timespec="microseconds")
+    return {
+        "key": f"operator:{inbox_item_key(item.name)}",
+        "index": int(mtime * 1_000_000),
+        "timestamp": timestamp.replace("+00:00", "Z"),
+        "kind": "operator",
+        "source_kind": f"operator_inbox_{state}",
+        "text": body,
+        "display_text": body,
+        "display_html": render_message_html(body, worktree_id=target.id),
+        "preamble_html": "",
+        "preview": one_line_preview(body),
+        "image_only": False,
+        "ack_count": 0,
+        "ack_keys": [],
+        "ack_utterances": [],
+        "ack_segments": [],
+        "say_count": 0,
+        "say_utterances": [],
+        "speech_utterances": [],
+        "plan_items": [],
+        "request_key": inbox_item_key(item.name),
+        "request_state": state,
+        "request_priority": priority,
+        "attachments": inbox_attachment_payloads(
+            item.attachments,
+            repo_root=target.repo_root,
+            worktree_id=target.id,
+        ),
+    }
+
+
+def _operator_request_mtime(item: InboxItem) -> float:
+    try:
+        return item.source_path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def ack_context_payload_for_worktree(
