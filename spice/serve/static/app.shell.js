@@ -824,23 +824,34 @@ function composerAttachmentStrip(lane, targetId) {
 }
 
 function syncComposerAttachmentStrip(parent, lane, targetId, beforeNode) {
-  let wrap = [...parent.children].find(
-    (child) => child.dataset && child.dataset.composerAttachmentsTargetId !== undefined,
+  let wrap = parent.querySelector(
+    "[data-composer-attachments-target-id]",
   );
   if (!wrap) {
     wrap = composerAttachmentStrip(lane, targetId);
-    parent.insertBefore(wrap, beforeNode || null);
-    return;
   }
   wrap.dataset.composerAttachmentsTargetId = targetId;
   fillComposerAttachmentStrip(wrap, lane, targetId);
-  if (beforeNode && wrap.nextElementSibling !== beforeNode)
+  const body = parent.querySelector(".composer-band-body");
+  if (body) {
+    if (wrap.parentElement !== body) body.append(wrap);
+    fillComposerAttachmentStrip(wrap, lane, targetId);
+    return;
+  }
+  if (!wrap.parentElement) parent.insertBefore(wrap, beforeNode || null);
+  else if (beforeNode && wrap.nextElementSibling !== beforeNode)
     parent.insertBefore(wrap, beforeNode);
 }
 
 function fillComposerAttachmentStrip(wrap, lane, targetId) {
   const attachments = composerAttachmentDraftsForTarget(lane, targetId);
   wrap.hidden = attachments.length === 0;
+  wrap
+    .closest(".composer-band-body")
+    ?.classList.toggle("composer-band-body--attachments", attachments.length > 0);
+  wrap
+    .closest(".composer-band-header")
+    ?.classList.toggle("composer-band-header--attachments", attachments.length > 0);
   if (!attachments.length) {
     wrap.replaceChildren();
     return;
@@ -1116,9 +1127,12 @@ function composerBandHeader({
 }) {
   const header = document.createElement("div");
   header.className = "composer-band-header " + className;
+  const body = document.createElement("div");
+  body.className = "composer-band-body";
   const label = document.createElement("span");
   label.className = "composer-band-title";
   label.textContent = title;
+  body.append(label);
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "composer-band-remove";
@@ -1129,7 +1143,7 @@ function composerBandHeader({
     event.stopPropagation();
     onRemove();
   });
-  header.append(...beforeRemove, label, remove);
+  header.append(...beforeRemove, body, remove);
   return header;
 }
 
