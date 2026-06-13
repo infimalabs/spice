@@ -190,6 +190,42 @@ def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
     assert "--end 2026-06-12T07:03:25.463453Z" in output
 
 
+def test_task_show_keeps_creator_rehydrate_for_same_claim_thread(monkeypatch):
+    row = _row(
+        "Same thread context",
+        project="task.render",
+        incepted="20260612T065825463453Z",
+        status="pending",
+        phase="todo",
+    )
+    row.update(
+        {
+            "task_description": "",
+            "phase_i": "0",
+            "urgency": "9.2",
+            "origin_thread": "same-thread",
+            "origin_worktree": "/tmp/repo",
+            "claim_thread": "same-thread",
+            "claim_worktree": "/tmp/repo",
+            "claim_context_start": "2026-06-12T08:15:18.621994Z",
+            "claim_context_end": "2026-06-12T08:25:18.621994Z",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+
+    output = render.render_show("TASK-test")
+
+    assert "creator context, run: spice session briefing same-thread" in output
+    assert "--start 2026-06-12T06:53:25.463453Z" in output
+    assert "--end 2026-06-12T07:03:25.463453Z" in output
+    assert "claim context, run: spice session briefing same-thread" in output
+    assert "--start 2026-06-12T08:15:18.621994Z" in output
+    assert "--end 2026-06-12T08:25:18.621994Z" in output
+
+
 def test_task_show_replaces_sentinel_rehydrate_commands(monkeypatch):
     sentinel = "0" * 32
     row = _row(

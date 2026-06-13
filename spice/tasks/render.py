@@ -132,21 +132,7 @@ def _iso_for_render(when: datetime) -> str:
     return when.isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def _origin_differs_from_claim(row: dict[str, Any]) -> bool:
-    origin_thread = _f(row, "origin_thread")
-    origin_worktree = _f(row, "origin_worktree")
-    current_thread = _f(row, "claim_thread") or tw.current_actor()
-    current_worktree = _f(row, "claim_worktree") or str(config.repo_root())
-    if origin_thread and current_thread and origin_thread != current_thread:
-        return True
-    return bool(
-        origin_worktree and current_worktree and origin_worktree != current_worktree
-    )
-
-
 def _origin_rehydrate_lines(row: dict[str, Any]) -> list[str]:
-    if not _origin_differs_from_claim(row):
-        return []
     thread = _f(row, "origin_thread")
     if not thread:
         return []
