@@ -173,7 +173,12 @@ button.primary:hover {
 .filter-pill--drainable { border-color: var(--good); color: var(--good); }
 .filter-pill--undrainable { color: var(--muted); }
 .filter-pill--private { border-style: dashed; }
-.filter-pill-count { font-weight: 600; }
+.filter-pill-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 2ch;
+  text-align: right;
+}
 
 /* ---- swimlanes ---- */
 .swimlanes {
@@ -404,9 +409,11 @@ button.primary:hover {
   color: var(--fg);
   cursor: pointer;
   display: inline-flex;
+  flex: 0 1 10rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   gap: 8px;
+  justify-content: space-between;
   line-height: 1.1;
   max-width: 100%;
   min-height: 30px;
@@ -462,8 +469,9 @@ button.primary:hover {
   box-sizing: border-box;
   display: inline-grid;
   flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
   height: 20px;
-  min-width: 20px;
+  min-width: calc(2ch + 10px);
   padding: 0 5px;
   place-items: center;
 }

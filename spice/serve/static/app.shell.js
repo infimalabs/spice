@@ -135,6 +135,7 @@ function createLaneState(targetId, hint = null, options = {}) {
     filterPickerOverlayPositionHandler: null,
     filterPickerOverlayDismissHandler: null,
     selectedFilterRemovals: new Set(),
+    renderedFilterPaneFingerprint: "",
     shardTextareas: new Map(),
     shardAttachments: new Map(),
     quoteDrafts: new Map(),

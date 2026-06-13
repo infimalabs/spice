@@ -872,13 +872,26 @@ function taskFilterStemPillsFromInventory(inventory) {
 
 function renderFilterPills() {
   if (!filterStripEl) return;
-  filterStripEl.setAttribute(
-    "aria-hidden",
-    taskFilterStemPills.length ? "false" : "true",
-  );
+  const pillModels = taskFilterStemPills.map((stem) => ({
+    stem,
+    drainability: taskFilterStemDrainability(stem),
+  }));
+  const hidden = pillModels.length ? "false" : "true";
+  const fingerprint = JSON.stringify({
+    hidden,
+    pills: pillModels.map((model) => ({
+      name: model.stem.name,
+      openTaskCount: Math.max(0, Number(model.stem.openTaskCount) || 0),
+      drainable: model.drainability.drainable,
+      drainableCount: model.drainability.count,
+    })),
+  });
+  filterStripEl.setAttribute("aria-hidden", hidden);
+  if (fingerprint === renderedFilterPillsFingerprint) return;
+  renderedFilterPillsFingerprint = fingerprint;
   const nodes = [];
-  for (const stem of taskFilterStemPills) {
-    const drainability = taskFilterStemDrainability(stem);
+  for (const model of pillModels) {
+    const { stem, drainability } = model;
     const pill = document.createElement("span");
     const classes = ["filter-pill"];
     if (stem.name === "agent") classes.push("filter-pill--private");
