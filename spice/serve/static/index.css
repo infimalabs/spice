@@ -14,6 +14,8 @@
   --final-tint: color-mix(in srgb, var(--final-accent) 8%, var(--panel));
   --say-accent: #8b5f00;
   --say-tint: color-mix(in srgb, var(--say-accent) 8%, var(--panel));
+  --team-teal-accent: #007c89;
+  --team-plum-accent: #8a4fbf;
   --control-max-accent: var(--say-accent);
   --maxim-accent: var(--say-accent);
   --good: var(--accent);
@@ -35,6 +37,8 @@
     --accent-strong: #95d5b2;
     --final-accent: #8ea2ff;
     --say-accent: #f2c14e;
+    --team-teal-accent: #5fd6d0;
+    --team-plum-accent: #d1a3ff;
     --warn: #e0734f;
     --control: #141915;
     --button-accent-fg: #101411;
