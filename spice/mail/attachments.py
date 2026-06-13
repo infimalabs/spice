@@ -40,6 +40,16 @@ _INBOX_LIVE_ATTACHMENT_REF_RE = re.compile(
     r"(?:[/\\][^\s`\"'<>\]\)]*)?"
     r")"
 )
+_INBOX_ARCHIVED_ATTACHMENT_REF_RE = re.compile(
+    r"(?P<ref>"
+    r"(?:"
+    r"/[^\s`\"'<>\]\)]*?\.spice[/\\]inbox[/\\]archive[/\\]|"
+    r"(?:\.\.?[/\\])*\.spice[/\\]inbox[/\\]archive[/\\]"
+    r")"
+    r"[^\s`\"'<>\]\)]*?\.attachments"
+    r"(?:[/\\][^\s`\"'<>\]\)]*)?"
+    r")"
+)
 _TRAILING_REF_PUNCTUATION = ".,;:"
 
 
@@ -192,6 +202,18 @@ def archive_inbox_attachment_references(text: str) -> str:
     if not text:
         return text
     return _INBOX_LIVE_ATTACHMENT_REF_RE.sub(_archive_inbox_attachment_reference, text)
+
+
+def find_archived_inbox_attachment_references(text: str) -> tuple[str, ...]:
+    """Return archived inbox attachment references without surrounding punctuation."""
+    if not text:
+        return ()
+    refs: list[str] = []
+    for match in _INBOX_ARCHIVED_ATTACHMENT_REF_RE.finditer(text):
+        ref = match.group("ref").rstrip(_TRAILING_REF_PUNCTUATION)
+        if ref:
+            refs.append(ref)
+    return tuple(refs)
 
 
 def _archive_inbox_attachment_reference(match: re.Match[str]) -> str:
