@@ -22,6 +22,7 @@ from spice.serve.payloads import (
     task_filter_inventory,
 )
 from spice.serve.steering import submit_steering_message
+from spice.serve.teams import ServeTeamStore
 from spice.tasks import tw
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
@@ -57,8 +58,11 @@ class _Target:
 
 
 class _State:
-    def __init__(self, sends: int) -> None:
+    def __init__(
+        self, sends: int = 0, team_store: ServeTeamStore | None = None
+    ) -> None:
         self._sends = sends
+        self.team_store = team_store or ServeTeamStore()
 
     def lane_send_count(self, target_id: str) -> int:
         return self._sends
@@ -105,8 +109,16 @@ def test_uptime_reads_zero_while_agent_is_off():
     assert _agent_uptime_seconds(status, []) == 0
 
 
-def test_lane_metrics_payload_counts_acks_sends_and_tool_calls():
+def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
     latest = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.record_agent_metric_delta(
+        "agent-a",
+        acked=2,
+        sends=3,
+        tool_calls=2,
+        message_timestamps=[latest.timestamp()] * 4,
+    )
     items = [
         _message(_stamp(latest), ack_count=2),
         _message(_stamp(latest), kind="presence:function_call"),
@@ -115,7 +127,11 @@ def test_lane_metrics_payload_counts_acks_sends_and_tool_calls():
     ]
     status = _Status(running=False, started_at="")
     metrics = lane_metrics_payload(
-        _State(sends=3), _Target(id="wt"), thread_id="", items=items, status=status
+        _State(team_store=store),
+        _Target(id="wt"),
+        thread_id="agent-a",
+        items=items,
+        status=status,
     )
     assert metrics["acked"] == 2
     assert metrics["sends"] == 3

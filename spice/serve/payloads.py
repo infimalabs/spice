@@ -29,13 +29,6 @@ ACK_CONTEXT_ARCHIVE_LIMIT = 50
 LANE_METRIC_SPARKLINE_BUCKETS = 12
 LANE_METRIC_SPARKLINE_BUCKET_SECONDS = 60
 TASK_ACTOR_FIELDS = ("claim_by", "claim_thread", "review_author", "review_by")
-TOOL_CALL_KINDS = frozenset(
-    {
-        "presence:function_call",
-        "presence:custom_tool_call",
-        "presence:web_search_call",
-    }
-)
 
 
 def task_filter_inventory() -> dict[str, Any]:
@@ -248,15 +241,19 @@ def lane_metrics_payload(
     items: list[message_reader.AssistantMessage],
     status: Any,
 ) -> dict[str, Any]:
-    """Live lane counters: tasks drained, steering ACKed, operator sends, tool
-    calls, agent uptime, and a per-minute message sparkline."""
+    """Lane counters from durable per-agent metrics plus live process uptime."""
+    summary = state.team_store.lane_metric_summary(
+        thread_id,
+        bucket_count=LANE_METRIC_SPARKLINE_BUCKETS,
+        bucket_seconds=LANE_METRIC_SPARKLINE_BUCKET_SECONDS,
+    )
     return {
         "drained": _drained_task_count(thread_id),
-        "acked": sum(max(0, item.ack_count) for item in items),
-        "sends": state.lane_send_count(target.id),
-        "toolCalls": sum(1 for item in items if item.kind in TOOL_CALL_KINDS),
+        "acked": summary.acked,
+        "sends": summary.sends,
+        "toolCalls": summary.tool_calls,
         "uptimeSeconds": _agent_uptime_seconds(status, items),
-        "sparkline": _message_sparkline(items),
+        "sparkline": list(summary.sparkline),
     }
 
 

@@ -269,6 +269,7 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
         f"/api/work/trees/{target.id}/files/image?path="
     )
     assert state.lane_send_count(target.id) == 1
+    assert state.team_store.lane_metric_summary(THREAD_A, bucket_count=12).sends == 1
     assert pending_inbox_count(repo) == 1
     assert inbox_request_body(items[0].text) == "inspect this image"
     assert items[0].attachments[0].path.read_bytes() == b"image-bytes"
