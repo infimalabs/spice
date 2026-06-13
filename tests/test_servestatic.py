@@ -407,10 +407,15 @@ def test_static_composer_headers_use_agent_accent_border():
     )
     assert "function composerMemberAccentIndex(lane, member)" in app_shell
     assert (
-        "if (member.targetThreadId && host.occupants?.has(member.targetThreadId))"
+        "if (member.targetThreadId) {\n"
+        "    const occupant = ensureLaneOccupant(host, member.targetThreadId);"
         in app_shell
     )
-    assert "return laneOccupantOrdinal(host, member.targetThreadId);" in app_shell
+    assert (
+        'throw new Error("composer header accent requires member targetThreadId");'
+        in app_shell
+    )
+    assert "return occupant.ordinal;" in app_shell
     assert (
         "const index = laneGroupMemberTargetIds(host).indexOf(member.targetId);"
         in app_shell
