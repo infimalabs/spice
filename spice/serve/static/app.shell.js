@@ -787,7 +787,13 @@ function syncComposerShardOrder(container, shards) {
 function laneComposePlaceholder(lane) {
   const statusLine = lane.lastRenderedStatusLine || {};
   const status = statusLine.agentProcessStatus || "unknown";
-  return lanePendingDisplayCount(lane) + " pending, " + status;
+  return (
+    laneMemberTargetLabel(lane) +
+    "\n" +
+    lanePendingDisplayCount(lane) +
+    " pending, " +
+    status
+  );
 }
 
 function syncComposerPlaceholders(lane) {
