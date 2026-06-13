@@ -1,0 +1,31 @@
+.agent-status-pip,
+.composer-quote-time[data-agent-status] {
+  --agent-status-color: var(--muted);
+  --agent-status-halo-color: color-mix(in srgb, var(--muted) 18%, var(--panel));
+}
+
+.agent-status-pip {
+  background: var(--agent-status-color);
+  box-shadow: 0 0 0 2px var(--agent-status-halo-color);
+}
+
+.agent-status-pip[data-agent-status="running"],
+.composer-quote-time[data-agent-status="running"] {
+  --agent-status-color: #2f9e44;
+  --agent-status-halo-color: color-mix(in srgb, #2f9e44 18%, transparent);
+}
+
+.agent-status-pip[data-agent-status="running-stale"],
+.composer-quote-time[data-agent-status="running-stale"] {
+  --agent-status-color: #d99a00;
+  --agent-status-halo-color: color-mix(in srgb, #d99a00 20%, transparent);
+}
+
+.agent-status-pip[data-agent-status="idle"],
+.composer-quote-time[data-agent-status="idle"] {
+  --agent-status-color: color-mix(in srgb, var(--muted) 92%, var(--panel));
+}
+
+.composer-quote-time[data-agent-status] {
+  color: var(--agent-status-color);
+}
