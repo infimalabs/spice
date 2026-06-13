@@ -868,6 +868,15 @@ function syncComposerPlaceholders(lane) {
     const member = laneStates.get(targetId) || lane;
     textarea.placeholder = laneComposePlaceholder(member);
   }
+  for (const stack of lane.element.querySelectorAll(
+    "[data-composer-quote-stack-target-id]",
+  )) {
+    const targetId = stack.dataset.composerQuoteStackTargetId || "";
+    const member = laneStates.get(targetId) || lane;
+    for (const textarea of stack.querySelectorAll("textarea[data-quote-draft-id]")) {
+      textarea.placeholder = laneComposePlaceholder(member);
+    }
+  }
 }
 
 function laneComposerDraftText(lane) {
