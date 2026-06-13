@@ -67,6 +67,19 @@ def test_quiet_and_narrate_keep_their_speech_contracts():
     ]
 
 
+def test_manual_speech_playback_reads_all_display_paragraphs():
+    item = {
+        "kind": "assistant",
+        "display_text": "First paragraph.\n\nMiddle paragraph.\n\nLast paragraph.",
+    }
+
+    assert _message_speech_utterances(item) == [
+        "First paragraph.",
+        "Middle paragraph.",
+        "Last paragraph.",
+    ]
+
+
 def test_speech_session_updates_page_title_and_media_metadata():
     assert _speech_session_title_states() == {
         "activeTitle": "spice - Matilda",
@@ -85,12 +98,37 @@ def test_normal_speech_queue_preserves_entries_while_audio_is_active():
     assert _normal_speech_queue_requests() == ["first", "second"]
 
 
+def test_speech_queue_preserves_couple_pending_entries_across_agents():
+    assert _speech_queue_requests_for_entries(
+        [
+            {"lane": "a", "key": "active-key", "text": "active"},
+            {"lane": "b", "key": "bravo-key", "text": "bravo"},
+            {"lane": "a", "key": "alpha-key", "text": "alpha"},
+        ]
+    ) == ["active", "bravo", "alpha"]
+
+
+def test_speech_queue_clears_global_pending_backlog_when_behind():
+    assert _speech_queue_requests_for_entries(
+        [
+            {"lane": "a", "key": "active-key", "text": "active"},
+            {"lane": "b", "key": "bravo-key", "text": "bravo"},
+            {"lane": "a", "key": "alpha-key", "text": "alpha"},
+            {"lane": "b", "key": "current-key", "text": "current"},
+        ]
+    ) == ["active", "current"]
+
+
 def _prepare_speech(text: str) -> str:
     return _node_call("prepareSpeechText", text)
 
 
 def _speech_utterances_for_item(item: dict[str, object]) -> list[str]:
     return _node_call("speechUtterancesForItem", item)
+
+
+def _message_speech_utterances(item: dict[str, object]) -> list[str]:
+    return _node_call("messageSpeechUtterances", item)
 
 
 def _automatic_speech_utterances(mode: str, item: dict[str, object]) -> list[str]:
@@ -373,6 +411,118 @@ vm.runInContext(fs.readFileSync(path, "utf8"), context);
     if result.returncode != 0:
         raise AssertionError(
             "node normal speech queue failed:\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    return json.loads(result.stdout)
+
+
+def _speech_queue_requests_for_entries(entries: list[dict[str, str]]) -> list[str]:
+    script = """
+const fs = require("fs");
+const vm = require("vm");
+const path = process.argv[1];
+const entries = JSON.parse(process.argv[2]);
+const requests = [];
+const audioInstances = [];
+const finalText = entries[entries.length - 1].text;
+const failTimer = setTimeout(() => {
+  console.error("queued speech did not finish");
+  process.exit(1);
+}, 1000);
+let firstRequestedResolve;
+let firstAudioResolve;
+let finalRequestedResolve;
+const firstRequested = new Promise((resolve) => {
+  firstRequestedResolve = resolve;
+});
+const firstAudioReady = new Promise((resolve) => {
+  firstAudioResolve = resolve;
+});
+const finalRequested = new Promise((resolve) => {
+  finalRequestedResolve = resolve;
+});
+
+class FakeAudio {
+  constructor() {
+    this.listeners = {};
+    this.index = audioInstances.length;
+    audioInstances.push(this);
+    if (this.index === 0) firstAudioResolve();
+  }
+  addEventListener(name, callback) {
+    this.listeners[name] = callback;
+  }
+  play() {
+    if (this.index > 0) queueMicrotask(() => this.listeners.ended());
+    return Promise.resolve();
+  }
+}
+
+const context = {
+  Blob: class {},
+  Audio: FakeAudio,
+  URL: {
+    createObjectURL: () => "blob:audio",
+    revokeObjectURL: () => {},
+  },
+  document: { querySelectorAll: () => [] },
+  fetch: async (url, options) => {
+    const text = JSON.parse(options.body).text;
+    requests.push(text);
+    if (requests.length === 1) firstRequestedResolve();
+    if (text === finalText) finalRequestedResolve();
+    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+  },
+  isPresenceMessage: () => false,
+  laneEffectiveSpeechMode: () => "speak",
+  laneGroupHost: (lane) => lane,
+  queueMicrotask,
+  targetApi: (targetId, suffix) => targetId + suffix,
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(path, "utf8"), context);
+
+(async () => {
+  const lanes = new Map();
+  const laneFor = (id) => {
+    if (!lanes.has(id)) {
+      lanes.set(id, {
+        targetId: "lane-" + id,
+        speechAbortVersion: 0,
+        spokenMessageKeys: new Set(),
+      });
+    }
+    return lanes.get(id);
+  };
+  const [active, ...pending] = entries;
+  context.enqueueSpeech(laneFor(active.lane), active.key, [active.text]);
+  await firstRequested;
+  await firstAudioReady;
+  for (const entry of pending)
+    context.enqueueSpeech(laneFor(entry.lane), entry.key, [entry.text]);
+  await Promise.resolve();
+  if (requests.length !== 1) {
+    throw new Error("queued speech requested before active audio ended");
+  }
+  audioInstances[0].listeners.ended();
+  await finalRequested;
+  clearTimeout(failTimer);
+  process.stdout.write(JSON.stringify(requests));
+})().catch((error) => {
+  clearTimeout(failTimer);
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});
+"""
+    result = subprocess.run(
+        ["node", "-e", script, str(AUDIO_JS), json.dumps(entries)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            "node speech queue backlog failed:\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
     return json.loads(result.stdout)

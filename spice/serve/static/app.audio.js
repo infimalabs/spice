@@ -13,6 +13,7 @@ const speechQueue = [];
 let speechBusy = false;
 let currentSpeech = null;
 const defaultDocumentTitle = "spice";
+const speechQueueBacklogClearThreshold = 2;
 const hoursPerHalfDay = 12;
 const gitHashContextChars = 16;
 
@@ -50,13 +51,17 @@ function automaticSpeechUtterances(lane, item) {
 function speechUtterancesForItem(item, options = {}) {
   if (item.image_only) return [];
   const includeDisplayBody = Boolean(options.includeDisplayBody);
+  const includeFullDisplayBody = Boolean(options.includeFullDisplayBody);
   const utterances = [];
   for (const utterance of item.speech_utterances || []) {
     appendSpeechUtterance(utterances, utterance);
   }
-  if (!utterances.length && includeDisplayBody) {
+  if (!utterances.length && (includeDisplayBody || includeFullDisplayBody)) {
     const displayBody = item.display_text || item.text;
-    for (const utterance of edgeSpeechParagraphs(displayBody)) {
+    const paragraphs = includeFullDisplayBody
+      ? speechParagraphs(displayBody)
+      : edgeSpeechParagraphs(displayBody);
+    for (const utterance of paragraphs) {
       appendSpeechUtterance(utterances, utterance);
     }
   }
@@ -172,6 +177,8 @@ function speakUtcDateTime(year, month, day, hour, minute, second) {
 }
 
 function enqueueSpeech(lane, messageKey, texts, targetLane = lane) {
+  if (speechQueue.length >= speechQueueBacklogClearThreshold)
+    speechQueue.length = 0;
   speechQueue.push({
     lane,
     targetLane,
@@ -199,7 +206,7 @@ function messageIsCurrentSpeech(lane, item) {
 }
 
 function messageSpeechUtterances(item) {
-  return speechUtterancesForItem(item, { includeDisplayBody: true });
+  return speechUtterancesForItem(item, { includeFullDisplayBody: true });
 }
 
 function applySpeechButtonState(button, playing) {
