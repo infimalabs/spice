@@ -748,11 +748,44 @@ function composerPrimaryBandHeader(lane, member) {
         onClick: () => splitComposerAgentFromTeam(lane, member.targetId),
       },
     ],
+    beforeMenu: composerPrimaryHeaderBeforeMenu(member),
   });
   header.title = "Drag composer to move this agent to another lane";
   if (typeof wireComposerMoveDrag === "function")
     wireComposerMoveDrag(lane, header, member.targetId);
   return header;
+}
+
+function composerPrimaryHeaderBeforeMenu(member) {
+  const latest = latestComposerMessage(member);
+  return [
+    latest
+      ? composerPrimaryLatestMessageLink(latest)
+      : composerPrimaryLatestMessageNote(),
+  ];
+}
+
+function composerPrimaryLatestMessageLink(latest) {
+  const time = document.createElement("a");
+  time.href = "#" + messageDomId(latest.key);
+  time.title = "Jump to latest message";
+  time.className = "composer-quote-time composer-latest-time";
+  time.dataset.relativeTimestamp = latest.timestamp || "";
+  time.dataset.relativeFallback = "message";
+  setRelativeTimeText(time);
+  return time;
+}
+
+function composerPrimaryLatestMessageNote() {
+  const note = document.createElement("span");
+  note.className = "composer-quote-time composer-latest-time composer-latest-time--empty";
+  note.textContent = "no messages";
+  note.title = "No latest message";
+  return note;
+}
+
+function latestComposerMessage(member) {
+  return member.knownMessages.find((item) => !isPresenceMessage(item));
 }
 
 function createComposerPrimaryTextarea(lane, targetId) {

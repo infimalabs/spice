@@ -973,6 +973,35 @@ def test_static_composer_pending_placeholder_omits_parentheses():
     )
 
 
+def test_static_primary_composer_links_latest_message_like_quote_composers():
+    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+
+    assert "beforeMenu: composerPrimaryHeaderBeforeMenu(member)," in app_shell
+    assert "function composerPrimaryHeaderBeforeMenu(member)" in app_shell
+    assert "const latest = latestComposerMessage(member);" in app_shell
+    assert "composerPrimaryLatestMessageLink(latest)" in app_shell
+    assert "composerPrimaryLatestMessageNote()" in app_shell
+    assert "function composerPrimaryLatestMessageLink(latest)" in app_shell
+    assert 'const time = document.createElement("a");' in app_shell
+    assert 'time.href = "#" + messageDomId(latest.key);' in app_shell
+    assert 'time.title = "Jump to latest message";' in app_shell
+    assert 'time.className = "composer-quote-time composer-latest-time";' in app_shell
+    assert 'time.dataset.relativeFallback = "message";' in app_shell
+    assert "function composerPrimaryLatestMessageNote()" in app_shell
+    assert 'note.textContent = "no messages";' in app_shell
+    assert 'note.title = "No latest message";' in app_shell
+    assert ".composer-latest-time--empty {" in css
+    assert "text-decoration: none;" in css
+    assert "function latestComposerMessage(member)" in app_shell
+    assert (
+        "return member.knownMessages.find((item) => !isPresenceMessage(item));"
+        in app_shell
+    )
+    assert 'href: messageKey ? "#" + messageDomId(messageKey) : "",' in app_shell
+    assert 'anchor.title = "Jump to quoted message";' in app_shell
+
+
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
 
