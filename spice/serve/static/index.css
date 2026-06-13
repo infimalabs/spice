@@ -1204,6 +1204,7 @@ button.primary.submit-action:focus-visible {
   min-width: 0;
 }
 .message-footer-left { gap: 5px; }
+.message-footer-right { justify-content: flex-end; }
 .message-agent-name {
   background: none;
   border: none;
