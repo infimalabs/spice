@@ -25,11 +25,16 @@
   display: none;
 }
 .empty-team-importer {
+  align-self: start;
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+  border: 1px dashed color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: 7px;
   display: flex;
-  flex: 1 1 auto;
   flex-direction: column;
   gap: 6px;
-  min-width: min(100%, 220px);
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 10px;
 }
 .empty-team-importer-heading {
   color: var(--muted);

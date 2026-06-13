@@ -297,7 +297,7 @@ def test_static_spice_menu_replaces_picker_lane():
     assert ".picker" not in css
 
 
-def test_static_empty_teams_render_importer_composer_area():
+def test_static_empty_teams_render_importer_in_message_stream():
     css = (STATIC_ROOT / "composer.css").read_text(encoding="utf-8")
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
@@ -316,6 +316,9 @@ def test_static_empty_teams_render_importer_composer_area():
     )
     assert "function emptyTeamImportPanel(lane)" in app_shell
     assert "function emptyTeamImportChoice(lane, target)" in app_shell
+    assert "lane.shardsEl.replaceChildren();" in app_shell
+    assert "renderMessagesIfChanged(lane);" in app_shell
+    assert "lane.shardsEl.replaceChildren(emptyTeamImportPanel(lane))" not in app_shell
     assert 'const button = targetChoiceButton(\n    target,\n    "Import",' in app_shell
     assert '    "",\n  );' in app_shell
     assert "button.dataset.emptyTeamImportTargetId = target.id;" in app_shell
@@ -326,10 +329,19 @@ def test_static_empty_teams_render_importer_composer_area():
         "if (isLaneOpen(lane) && !lane.emptyTeam) subscribeLaneToLiveBus(lane);"
         in app_stream
     )
+    assert "function renderEmptyTeamMessages(lane)" in app_stream
+    assert "function emptyTeamMessageFingerprint(lane)" in app_stream
+    assert (
+        "lane.messagesEl.replaceChildren(\n"
+        "    emptyTeamImportPanel(lane),\n"
+        "    lane.historySentinelEl,\n"
+        "  );"
+    ) in app_stream
     assert "if (lane.emptyTeam) {\n    syncEmptyTeamLane(lane);" in app_groups
     assert ".lane--empty-team .composer-controls" in css
     assert "display: none;" in css
     assert ".empty-team-importer" in css
+    assert "grid-column: 1 / -1;" in css
     assert ".empty-team-import-list" in css
 
 

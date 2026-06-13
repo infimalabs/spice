@@ -533,6 +533,10 @@ function renderMessagesIfChanged(lane) {
     renderMessagesIfChanged(host);
     return;
   }
+  if (lane.emptyTeam) {
+    renderEmptyTeamMessages(lane);
+    return;
+  }
   const renderItems = laneIsFusedHost(lane)
     ? laneGroupMergedMessages(lane)
     : lane.knownMessages;
@@ -550,6 +554,35 @@ function renderMessagesIfChanged(lane) {
   restoreMessageViewportAnchor(lane, viewportAnchor);
   syncLaneHistoryObserver(lane);
   lane.renderedMessageFingerprint = fingerprint;
+}
+
+function renderEmptyTeamMessages(lane) {
+  renderLaneViewShell(lane);
+  const fingerprint = emptyTeamMessageFingerprint(lane);
+  if (fingerprint === lane.renderedMessageFingerprint) return;
+  const viewportAnchor = captureMessageViewportAnchor(lane);
+  suppressLanePaneScrollIntentForFrame(lane);
+  lane.messagesEl.replaceChildren(
+    emptyTeamImportPanel(lane),
+    lane.historySentinelEl,
+  );
+  restoreMessageViewportAnchor(lane, viewportAnchor);
+  syncLaneHistoryObserver(lane);
+  lane.renderedMessageFingerprint = fingerprint;
+}
+
+function emptyTeamMessageFingerprint(lane) {
+  return JSON.stringify({
+    emptyTeam: true,
+    teamId: lane.teamId || "",
+    targets: targets.map((target) => [
+      target.id || "",
+      target.agentName || "",
+      target.branch || "",
+      target.status || "",
+      target.pendingInboxCount || 0,
+    ]),
+  });
 }
 
 function captureMessageViewportAnchor(lane) {
