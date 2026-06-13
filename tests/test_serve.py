@@ -314,11 +314,18 @@ def test_static_empty_teams_render_importer_in_message_stream():
     assert (
         'element.className = emptyTeam ? "lane lane--empty-team" : "lane";' in app_shell
     )
+    empty_team_sync_start = app_shell.index(
+        "function syncEmptyTeamLane(lane, team = {}) {"
+    )
+    empty_team_sync_end = app_shell.index("function emptyTeamImportPanel(lane) {")
+    empty_team_sync = app_shell[empty_team_sync_start:empty_team_sync_end]
     assert "function emptyTeamImportPanel(lane)" in app_shell
     assert "function emptyTeamImportChoice(lane, target)" in app_shell
-    assert "lane.shardsEl.replaceChildren();" in app_shell
-    assert "renderMessagesIfChanged(lane);" in app_shell
-    assert "lane.shardsEl.replaceChildren(emptyTeamImportPanel(lane))" not in app_shell
+    assert "lane.shardsEl.replaceChildren();" in empty_team_sync
+    assert "renderMessagesIfChanged(lane);" in empty_team_sync
+    assert empty_team_sync.index(
+        "lane.shardsEl.replaceChildren();"
+    ) < empty_team_sync.index("renderMessagesIfChanged(lane);")
     assert 'const button = targetChoiceButton(\n    target,\n    "Import",' in app_shell
     assert '    "",\n  );' in app_shell
     assert "button.dataset.emptyTeamImportTargetId = target.id;" in app_shell
@@ -331,6 +338,16 @@ def test_static_empty_teams_render_importer_in_message_stream():
     )
     assert "function renderEmptyTeamMessages(lane)" in app_stream
     assert "function emptyTeamMessageFingerprint(lane)" in app_stream
+    assert "targets: targets.map(emptyTeamTargetFingerprint)," in app_stream
+    assert "function emptyTeamTargetFingerprint(target)" in app_stream
+    assert 'target.displayName || "",' in app_stream
+    assert 'target.threadId || "",' in app_stream
+    assert 'target.lastAssistantAt || "",' in app_stream
+    assert 'statusLine.lastAssistantAt || "",' in app_stream
+    assert "target.pendingCount || 0," in app_stream
+    assert "target.pendingInboxCount || 0," in app_stream
+    assert 'target.agentProcessStatus || "",' in app_stream
+    assert 'target.bindingStatus || "",' in app_stream
     assert (
         "lane.messagesEl.replaceChildren(\n"
         "    emptyTeamImportPanel(lane),\n"
