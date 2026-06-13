@@ -113,7 +113,7 @@ def test_task_add_stores_description_and_caps_title(task_repo):
     assert f"description {body}" in shown
 
 
-def test_task_add_rewrites_inbox_attachment_refs_to_archive_paths(task_repo):
+def test_task_add_copies_inbox_attachment_refs_to_durable_store(task_repo):
     live_abs = (
         task_repo
         / ".spice"
@@ -131,8 +131,15 @@ def test_task_add_rewrites_inbox_attachment_refs_to_archive_paths(task_repo):
     )
     live_rel = ".spice/inbox/20260102T000000000004Z.attachments/02-image.png"
     archived_rel = (
-        ".spice/inbox/archive/20260102T000000000004Z.attachments/02-image.png"
+        ".spice/inbox/archive/20260102T000000000004Z.attachments/03-image.png"
     )
+    for path, data in (
+        (live_abs, b"absolute-live"),
+        (task_repo / live_rel, b"relative-live"),
+        (task_repo / archived_rel, b"archived"),
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
 
     handle = ops.add(
         "Preserve attachment references",
@@ -140,40 +147,49 @@ def test_task_add_rewrites_inbox_attachment_refs_to_archive_paths(task_repo):
         description=(
             f"Screenshot/reference attachment: {live_abs}. "
             f"Relative reference: {live_rel}; already archived: "
-            ".spice/inbox/archive/20260102T000000000004Z.attachments/03-image.png."
+            f"{archived_rel}."
         ),
         priority="medium",
         acceptance=[f"Resolve {live_rel} without broad searches."],
     )
     row = identity.resolve(handle)
+    paths = _durable_artifact_paths(row["task_description"], row["acceptance"])
 
-    assert str(archived_abs) in row["task_description"]
+    assert len(paths) == 4
+    assert len(set(paths)) == 3
+    assert all(path.is_file() for path in paths)
+    assert all(
+        config.backend_root() / "artifacts" / "attachments" in path.parents
+        for path in paths
+    )
+    assert archived_abs not in paths
     assert str(live_abs) not in row["task_description"]
-    assert f"{archived_rel};" in row["task_description"]
-    assert "archive/archive" not in row["task_description"]
-    assert row["acceptance"] == f"Resolve {archived_rel} without broad searches."
+    assert ".spice/inbox/" not in row["task_description"]
+    assert ".spice/inbox/" not in row["acceptance"]
 
 
-def test_task_note_rewrites_inbox_attachment_refs_to_archive_paths(task_repo):
+def test_task_note_copies_inbox_attachment_refs_to_durable_store(task_repo):
     handle = ops.add(
         "Track attachment note",
         project="task.unit",
         priority="medium",
         acceptance=["notes are normalized"],
     )
+    live_rel = ".spice/inbox/20260102T000000000005Z.attachments/01-image.png"
+    live_path = task_repo / live_rel
+    live_path.parent.mkdir(parents=True, exist_ok=True)
+    live_path.write_bytes(b"note-image")
 
     ops.note(
         handle,
-        (
-            "Screenshot reference: "
-            ".spice/inbox/20260102T000000000005Z.attachments/01-image.png"
-        ),
+        f"Screenshot reference: {live_rel}",
     )
     shown = render.render_show(handle)
+    paths = _durable_artifact_paths(shown)
 
-    assert (
-        ".spice/inbox/archive/20260102T000000000005Z.attachments/01-image.png" in shown
-    )
+    assert len(paths) == 1
+    assert paths[0].is_file()
+    assert paths[0].read_bytes() == b"note-image"
     assert ".spice/inbox/20260102T000000000005Z.attachments" not in shown
 
 
@@ -465,6 +481,16 @@ def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
     assert _merge_parents(repo, merge_head)[0] == upstream_head
     assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
     assert _git(repo, "status", "--porcelain") == ""
+
+
+def _durable_artifact_paths(*texts: str) -> list[Path]:
+    paths: list[Path] = []
+    for text in texts:
+        for token in re.split(r"\s+", str(text)):
+            candidate = token.strip(".,;:")
+            if "/artifacts/attachments/" in candidate:
+                paths.append(Path(candidate))
+    return paths
 
 
 def _row(

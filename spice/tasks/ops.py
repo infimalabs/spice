@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Sequence
 
 from spice.agent.driver import DRIVER
 from spice.agent.identity import canonical_thread_id
 from spice.errors import SpiceError
-from spice.mail.attachments import archive_inbox_attachment_references
+from spice.mail.attachments import durable_inbox_attachment_references
 from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
 from spice.tasks import config, gitsync, identity, tw
 
@@ -23,7 +24,7 @@ TASK_TITLE_LIMIT = COMMIT_MESSAGE_WRAP_LIMIT
 def annotate(target: str, text: str) -> None:
     """Annotate via `-- ` so attribute-like text (e.g. "depends: X") stays
     literal."""
-    text = archive_inbox_attachment_references(text)
+    text = _task_text(text)
     tw.run([target, "annotate", "--", text])
 
 
@@ -217,12 +218,24 @@ def _task_title(title: str, *, context: str = "") -> str:
     return value
 
 
+def _task_artifact_root() -> Path:
+    return config.backend_root() / "artifacts" / "attachments"
+
+
+def _task_text(text: str) -> str:
+    return durable_inbox_attachment_references(
+        text,
+        repo_root=config.repo_root(),
+        artifact_root=_task_artifact_root(),
+    )
+
+
 def _task_description(description: str | None) -> str:
-    return archive_inbox_attachment_references((description or "").strip())
+    return _task_text((description or "").strip())
 
 
 def _task_acceptance(acceptance: Sequence[str]) -> list[str]:
-    return [archive_inbox_attachment_references(item) for item in acceptance]
+    return [_task_text(item) for item in acceptance]
 
 
 def default_project(actor: str) -> str:
