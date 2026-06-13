@@ -768,16 +768,20 @@ button.primary:hover {
     min-width: 0;
   }
   .swimlanes {
-    gap: 0;
+    --mobile-lane-gap: 8px;
+    --mobile-lane-gutter: 4px;
+
+    /* Padding narrows the flex content box; 100% lane + gap = viewport stride. */
+    gap: var(--mobile-lane-gap);
     overscroll-behavior-x: contain;
-    padding: 0 0 8px;
-    scroll-padding-inline: 0;
+    padding: 0 var(--mobile-lane-gutter) 8px;
+    scroll-padding-inline: var(--mobile-lane-gutter);
     scroll-snap-type: x proximity;
     touch-action: pan-x pan-y;
   }
   .lane {
     border-color: var(--border-soft);
-    border-radius: 0;
+    border-radius: 7px;
     flex: 0 0 100%;
     min-width: 100%;
     scroll-snap-align: start;
