@@ -13,6 +13,7 @@ usage() {
   cat <<'EOF'
 usage: ./scripts/release [patch|minor]
        ./scripts/release prepare [patch|minor]
+       ./scripts/release notes [version] [--output PATH]
        ./scripts/release publish [--notes-file PATH]
        ./scripts/release github [version] [--notes-file PATH]
 
@@ -20,6 +21,7 @@ Prepare and/or publish a spice release.
 
   patch|minor         bump, validate, commit, push, and publish in one pass
   prepare patch|minor bump, validate, and commit, but stop before push/publish
+  notes [version]     generate a release-notes draft from the previous tag
   publish             validate the current prepared version, then push/publish
   github [version]    create/push the annotated tag and GitHub Release
 
@@ -139,22 +141,24 @@ write_release_notes() {
   current_tag="$3"
   notes_file="$4"
   previous_tag="$(previous_release_tag "$current_tag")"
+  release_short="$(git rev-parse --short "$release_commit")"
 
   {
     printf '## Highlights\n\n'
     if [ -n "$previous_tag" ]; then
-      git log --format='- %s (`%h`)' "${previous_tag}..${release_commit}" \
+      git log --first-parent --reverse --format='- %s (`%h`)' "${previous_tag}..${release_commit}" \
         | sed '/^- release: bump to /d'
     else
-      git log --format='- %s (`%h`)' -n 5 "${release_commit}" \
+      git log --first-parent --reverse --format='- %s (`%h`)' -n 5 "${release_commit}" \
         | sed '/^- release: bump to /d'
     fi
 
     printf '\n## Package Notes\n\n'
     printf -- '- PyPI release: `spice-harness==%s`\n' "$version"
-    printf -- '- Release commit: `%s`\n' "$(git rev-parse --short "$release_commit")"
+    printf -- '- Release commit: `%s`\n' "$release_short"
     if [ -n "$previous_tag" ]; then
-      printf -- '- Compare from: `%s`\n' "$previous_tag"
+      printf -- '- Commit range: `%s..%s`\n' "$previous_tag" "$release_short"
+      printf -- '- Commit source: first-parent history\n'
     fi
   } >"$notes_file"
 }
@@ -229,6 +233,7 @@ mode=""
 bump=""
 release_version=""
 notes_file="${SPICE_RELEASE_NOTES_FILE:-}" # env-policy: allow
+notes_output=""
 
 if [ "$#" -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
   usage
@@ -244,6 +249,9 @@ case "$#" in
         ;;
       publish)
         mode="publish"
+        ;;
+      notes)
+        mode="notes"
         ;;
       github)
         mode="github"
@@ -263,6 +271,14 @@ case "$#" in
       publish:--notes-file)
         usage
         exit 64
+        ;;
+      notes:--output)
+        usage
+        exit 64
+        ;;
+      notes:*)
+        mode="notes"
+        release_version="$2"
         ;;
       github:*)
         mode="github"
@@ -284,6 +300,10 @@ case "$#" in
         mode="github"
         notes_file="$3"
         ;;
+      notes:--output)
+        mode="notes"
+        notes_output="$3"
+        ;;
       *)
         usage
         exit 64
@@ -296,6 +316,11 @@ case "$#" in
         mode="github"
         release_version="$2"
         notes_file="$4"
+        ;;
+      notes:--output)
+        mode="notes"
+        release_version="$2"
+        notes_output="$4"
         ;;
       *)
         usage
@@ -317,7 +342,11 @@ branch="$(git branch --show-current)"
 status="$(git status --porcelain)"
 [ -z "$status" ] || die "refusing to release with a dirty worktree"
 
-ensure_notes_file "$notes_file"
+case "$mode" in
+  release|publish|github)
+    ensure_notes_file "$notes_file"
+    ;;
+esac
 
 git pull --ff-only origin main
 
@@ -329,11 +358,36 @@ case "$mode" in
     git add pyproject.toml uv.lock
     git commit -m "release: bump to ${version}"
     if [ "$mode" = "prepare" ]; then
-      printf 'prepared release %s; review, then run ./scripts/release publish\n' "$version"
+      printf 'prepared release %s; review, then run ./scripts/release notes > /tmp/spice-release-%s-notes.md\n' "$version" "$version"
+      printf 'curate the draft notes, then run ./scripts/release publish --notes-file /tmp/spice-release-%s-notes.md\n' "$version"
       git status --short --branch
       exit 0
     fi
     publish_release "$version" "$notes_file"
+    ;;
+  notes)
+    if [ -n "$release_version" ]; then
+      version="$release_version"
+    else
+      version="$(uv version --short)"
+    fi
+    release_commit="$(release_commit_for_version "$version")"
+    [ -n "$release_commit" ] || die "unable to find release commit for ${version}"
+    tag="v${version}"
+    if [ -n "$notes_output" ]; then
+      write_release_notes "$version" "$release_commit" "$tag" "$notes_output"
+      printf 'wrote release notes draft for %s to %s\n' "$version" "$notes_output"
+    else
+      notes_file="$(mktemp)"
+      cleanup_notes() {
+        rm -f "$notes_file"
+      }
+      trap cleanup_notes EXIT INT TERM
+      write_release_notes "$version" "$release_commit" "$tag" "$notes_file"
+      cat "$notes_file"
+      rm -f "$notes_file"
+      trap - EXIT INT TERM
+    fi
     ;;
   publish)
     version="$(uv version --short)"
