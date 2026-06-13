@@ -192,7 +192,8 @@ function syncEmptyTeamLane(lane, team = {}) {
   lane.shardAttachments.clear();
   lane.quoteDrafts.clear();
   lane.shardsEl.classList.remove("composer-shards--move-drop-active");
-  lane.shardsEl.replaceChildren(emptyTeamImportPanel(lane));
+  lane.shardsEl.replaceChildren();
+  lane.renderedMessageFingerprint = "";
   lane.statusPreviewEl.hidden = false;
   lane.statusPreviewEl.textContent = "choose an agent to import";
   lane.statusTimeEl.hidden = true;
@@ -200,6 +201,7 @@ function syncEmptyTeamLane(lane, team = {}) {
   lane.statusSeparatorEl.hidden = true;
   lane.pipEl.dataset.agentStatus = "unstarted";
   syncLaneEffectiveControls(lane);
+  renderMessagesIfChanged(lane);
 }
 
 function emptyTeamImportPanel(lane) {
