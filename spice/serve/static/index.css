@@ -799,8 +799,6 @@ button.primary:hover {
     --lane-pane-control-item-height: 34px;
     --lane-pane-control-gap: 5px;
   }
-  .stack-slider { padding: 3px 5px; }
-  .stack-slider input { width: 68px; }
   .primary {
     min-width: 0;
     padding: 5px 8px;

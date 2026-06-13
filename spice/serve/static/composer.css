@@ -367,6 +367,10 @@
   cursor: ew-resize;
   accent-color: var(--control-state-accent);
 }
+@media (max-width: 720px) {
+  .stack-slider { padding: 3px 5px; }
+  .stack-slider input { width: 68px; }
+}
 .stack-slider--armed,
 .submit-action--armed {
   --control-state-accent: var(--final-accent);
