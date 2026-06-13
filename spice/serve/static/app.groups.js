@@ -360,7 +360,8 @@ function wireComposerMoveDrag(host, handle, targetId) {
     if (event.target.closest("button, a")) return;
     if (event.button !== undefined && event.button !== 0) return;
     event.preventDefault();
-    beginComposerMoveDrag(host, targetId, event, handle);
+    const state = beginComposerMoveDrag(host, targetId, event, handle);
+    state.pointerCleanup = wireComposerMovePointerDocumentEvents(handle);
     handle.setPointerCapture(event.pointerId);
   });
   handle.addEventListener("pointermove", (event) => {
@@ -386,6 +387,9 @@ function wireComposerMoveDrag(host, handle, targetId) {
 }
 
 function beginComposerMoveDrag(host, targetId, event, handle) {
+  const sourceBand = handle.closest(".composer-band");
+  const sourceShard = sourceBand?.closest(".composer-shard") || null;
+  const rect = (sourceShard || sourceBand)?.getBoundingClientRect() || null;
   composerMoveDragState = {
     host,
     targetId,
@@ -394,10 +398,39 @@ function beginComposerMoveDrag(host, targetId, event, handle) {
     startY: event.clientY,
     dragging: false,
     dropTarget: null,
+    sourceBand,
+    sourceShard,
+    dragGhost: null,
+    ghostOffsetX: rect ? event.clientX - rect.left : 0,
+    ghostOffsetY: rect ? event.clientY - rect.top : 0,
+    pointerCleanup: null,
     mouseCleanup: null,
   };
-  handle.closest(".composer-band")?.classList.add("composer-band--drag-ready");
+  sourceBand?.classList.add("composer-band--drag-ready");
   return composerMoveDragState;
+}
+
+function wireComposerMovePointerDocumentEvents(handle) {
+  const onMove = (event) => {
+    if (!composerMoveDragMatches(event)) return;
+    updateComposerMoveDragFromEvent(composerMoveDragState, event, handle);
+  };
+  const onUp = (event) => {
+    if (!composerMoveDragMatches(event)) return;
+    finishComposerMoveDrag(composerMoveDragState, event.clientX, event.clientY);
+  };
+  const onCancel = (event) => {
+    if (!composerMoveDragMatches(event)) return;
+    clearComposerMoveDrag(composerMoveDragState);
+  };
+  document.addEventListener("pointermove", onMove);
+  document.addEventListener("pointerup", onUp);
+  document.addEventListener("pointercancel", onCancel);
+  return () => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    document.removeEventListener("pointercancel", onCancel);
+  };
 }
 
 function wireComposerMoveMouseDocumentEvents(handle) {
@@ -422,8 +455,13 @@ function updateComposerMoveDragFromEvent(state, event, handle) {
     Math.abs(event.clientX - state.startX) >= laneDragThresholdPx ||
     Math.abs(event.clientY - state.startY) >= laneDragThresholdPx;
   if (!state.dragging && !moved) return;
-  state.dragging = true;
-  handle.closest(".composer-band")?.classList.add("composer-band--dragging");
+  if (!state.dragging) {
+    state.dragging = true;
+    state.sourceBand?.classList.add("composer-band--dragging");
+    state.sourceShard?.classList.add("composer-shard--dragging");
+    ensureComposerMoveDragGhost(state);
+  }
+  updateComposerMoveDragGhost(state, event.clientX, event.clientY);
   updateComposerMoveDragTarget(state, event.clientX, event.clientY);
   event.preventDefault();
 }
@@ -436,9 +474,15 @@ function composerMoveDragMatches(event) {
 
 function updateComposerMoveDragTarget(state, clientX, clientY) {
   clearLaneFuseHighlights();
+  clearComposerMoveDropHighlights();
   state.dropTarget = null;
   const sourceMember = laneStates.get(state.targetId);
   if (!sourceMember) return;
+  const reorderTarget = composerReorderDropTarget(state, clientX, clientY);
+  if (reorderTarget) {
+    if (reorderTarget.kind !== "noop") state.dropTarget = reorderTarget;
+    return;
+  }
   const under = visibleLaneElements().find((element) => {
     const rect = element.getBoundingClientRect();
     return (
@@ -452,8 +496,106 @@ function updateComposerMoveDragTarget(state, clientX, clientY) {
   const underLane = /** @type {HTMLElement} */ (under);
   const targetLane = laneStates.get(underLane.dataset.targetId || "");
   if (!targetLane || !composerCanMoveToLane(sourceMember, targetLane)) return;
-  state.dropTarget = targetLane;
+  state.dropTarget = { kind: "move", lane: targetLane };
   underLane.classList.add("lane--composer-drop");
+}
+
+function composerReorderDropTarget(state, clientX, clientY) {
+  const host = laneGroupHost(state.host);
+  const members = laneGroupMemberLanes(host);
+  if (members.length < 2 || !host.shardsEl) return null;
+  const shardsRect = host.shardsEl.getBoundingClientRect();
+  if (
+    clientX < shardsRect.left ||
+    clientX > shardsRect.right ||
+    clientY < shardsRect.top ||
+    clientY > shardsRect.bottom
+  )
+    return null;
+  const visualShards = [...host.shardsEl.querySelectorAll(".composer-shard")]
+    .map((element) => ({
+      element,
+      rect: element.getBoundingClientRect(),
+      targetId: element.dataset.shardTargetId || "",
+    }))
+    .filter((item) => item.targetId && item.rect.width && item.rect.height)
+    .sort((left, right) => left.rect.left - right.rect.left);
+  if (visualShards.length < 2) return null;
+  if (!visualShards.some((item) => item.targetId === state.targetId))
+    return null;
+  const zone = composerVisualInsertionZone(visualShards, clientX, clientY);
+  if (!zone) return null;
+  host.shardsEl.classList.add("composer-shards--move-drop-active");
+  zone.shard.element.classList.add(
+    zone.side === "left"
+      ? "composer-shard--composer-drop-left"
+      : "composer-shard--composer-drop-right",
+  );
+  const currentVisualIds = visualShards.map((item) => item.targetId);
+  const sourceIndex = currentVisualIds.indexOf(state.targetId);
+  const visualIdsWithoutSource = currentVisualIds.filter(
+    (targetId) => targetId !== state.targetId,
+  );
+  let insertionIndex = zone.index;
+  if (sourceIndex < insertionIndex) insertionIndex -= 1;
+  insertionIndex = Math.max(
+    0,
+    Math.min(visualIdsWithoutSource.length, insertionIndex),
+  );
+  const nextVisualIds = visualIdsWithoutSource.slice();
+  nextVisualIds.splice(insertionIndex, 0, state.targetId);
+  const nextLogicalIds = composerVisualIdsToLogicalIds(host.shardsEl, nextVisualIds);
+  const currentLogicalIds = members.map((member) => member.targetId);
+  if (sameStringArrays(nextLogicalIds, currentLogicalIds))
+    return { kind: "noop" };
+  return { kind: "reorder", host, orderedTargetIds: nextLogicalIds };
+}
+
+function composerVisualInsertionZone(visualShards, clientX, clientY) {
+  const hit = visualShards.find(
+    (item) =>
+      clientX >= item.rect.left &&
+      clientX <= item.rect.right &&
+      clientY >= item.rect.top &&
+      clientY <= item.rect.bottom,
+  );
+  if (hit) {
+    const before = clientX < hit.rect.left + hit.rect.width / 2;
+    return {
+      index: visualShards.indexOf(hit) + (before ? 0 : 1),
+      shard: hit,
+      side: before ? "left" : "right",
+    };
+  }
+  const first = visualShards[0];
+  const last = visualShards[visualShards.length - 1];
+  if (clientX < first.rect.left)
+    return { index: 0, shard: first, side: "left" };
+  if (clientX > last.rect.right)
+    return { index: visualShards.length, shard: last, side: "right" };
+  for (let index = 0; index < visualShards.length - 1; index += 1) {
+    const left = visualShards[index];
+    const right = visualShards[index + 1];
+    if (clientX < left.rect.right || clientX > right.rect.left) continue;
+    const closerToLeft =
+      clientX - left.rect.right <= right.rect.left - clientX;
+    return {
+      index: index + 1,
+      shard: closerToLeft ? left : right,
+      side: closerToLeft ? "right" : "left",
+    };
+  }
+  return null;
+}
+
+function composerVisualIdsToLogicalIds(shardsEl, visualIds) {
+  const direction = window.getComputedStyle(shardsEl).flexDirection || "";
+  return direction.includes("reverse") ? visualIds.slice().reverse() : visualIds;
+}
+
+function sameStringArrays(left, right) {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
 }
 
 function composerCanMoveToLane(sourceMember, targetLane) {
@@ -467,7 +609,16 @@ function finishComposerMoveDrag(state, clientX, clientY) {
   const { host, targetId, dropTarget, dragging } = state;
   clearComposerMoveDrag(state);
   if (!dragging || !dropTarget) return;
-  moveComposerToTeamOnServer(host, dropTarget, targetId).catch(() => {
+  if (dropTarget.kind === "reorder") {
+    reorderComposersOnServer(dropTarget.host, dropTarget.orderedTargetIds).catch(
+      () => {
+        setLaneTransientStatus(dropTarget.host, "reorder composer failed");
+        refreshTeamSnapshot({ force: true }).catch(() => {});
+      },
+    );
+    return;
+  }
+  moveComposerToTeamOnServer(host, dropTarget.lane, targetId).catch(() => {
     setLaneTransientStatus(host, "move composer failed");
     refreshTeamSnapshot({ force: true }).catch(() => {});
   });
@@ -489,32 +640,132 @@ async function moveComposerToTeamOnServer(sourceHost, targetLane, targetId) {
 }
 
 function moveComposerOptimisticUi(sourceHost, targetLane, member) {
+  const sourceGroupHost = laneGroupHost(sourceHost);
+  const destinationGroupHost = laneGroupHost(targetLane);
   const sourceMembers = laneGroupMemberLanes(laneGroupHost(sourceHost)).filter(
     (candidate) => candidate.targetId !== member.targetId,
   );
   const destinationMembers = [
-    ...laneGroupMemberLanes(laneGroupHost(targetLane)).filter(
+    ...laneGroupMemberLanes(destinationGroupHost).filter(
       (candidate) => candidate.targetId !== member.targetId,
     ),
     member,
   ];
+  reconcileLaneGroups(
+    currentLaneGroupRunsWithReplacements(
+      new Map([
+        [
+          sourceGroupHost.targetId,
+          sourceMembers.map((candidate) => candidate.targetId),
+        ],
+        [
+          destinationGroupHost.targetId,
+          destinationMembers.map((candidate) => candidate.targetId),
+        ],
+      ]),
+    ),
+  );
+}
+
+async function reorderComposersOnServer(host, orderedTargetIds) {
+  const teamId = laneGroupHost(host).teamId;
+  const members = orderedTargetIds
+    .map((targetId) => laneStates.get(targetId))
+    .filter(Boolean);
+  if (!teamId || members.length !== orderedTargetIds.length)
+    throw new Error("reorder composers requires a complete team");
+  reorderComposerOptimisticUi(host, orderedTargetIds);
+  await requestTeamCommand(
+    teamCommandPayload("reorderTeamAgents", {
+      teamId,
+      agentIds: members.map((member) => laneTeamAgentId(member)),
+    }),
+  );
+}
+
+function reorderComposerOptimisticUi(host, orderedTargetIds) {
+  const groupHost = laneGroupHost(host);
+  reconcileLaneGroups(
+    currentLaneGroupRunsWithReplacements(
+      new Map([[groupHost.targetId, orderedTargetIds]]),
+    ),
+  );
+}
+
+function currentLaneGroupRunsWithReplacements(replacements) {
   const runs = [];
-  if (sourceMembers.length > 1)
-    runs.push(sourceMembers.map((candidate) => candidate.targetId));
-  if (destinationMembers.length > 1)
-    runs.push(destinationMembers.map((candidate) => candidate.targetId));
-  reconcileLaneGroups(runs);
+  const seenHosts = new Set();
+  for (const lane of laneStates.values()) {
+    const host = laneGroupHost(lane);
+    if (seenHosts.has(host.targetId)) continue;
+    seenHosts.add(host.targetId);
+    const memberTargetIds =
+      replacements.get(host.targetId) ||
+      laneGroupMemberLanes(host).map((member) => member.targetId);
+    if (memberTargetIds.length > 1) runs.push(memberTargetIds);
+  }
+  return runs;
+}
+
+function ensureComposerMoveDragGhost(state) {
+  const source = state.sourceShard || state.sourceBand;
+  if (state.dragGhost || !source) return;
+  const rect = source.getBoundingClientRect();
+  const ghost = source.cloneNode(true);
+  for (const element of [ghost, ...ghost.querySelectorAll(".composer-band")])
+    element.classList.remove(
+      "composer-band--drag-ready",
+      "composer-band--dragging",
+      "composer-band--drop-ready",
+      "composer-band--menu-open",
+      "composer-shard--dragging",
+    );
+  ghost.classList.add(
+    state.sourceShard ? "composer-shard--drag-ghost" : "composer-band--drag-ghost",
+  );
+  ghost.style.width = Math.max(1, Math.round(rect.width)) + "px";
+  ghost.style.height = Math.max(1, Math.round(rect.height)) + "px";
+  for (const element of ghost.querySelectorAll("textarea, button, a"))
+    element.setAttribute("tabindex", "-1");
+  document.body.append(ghost);
+  state.dragGhost = ghost;
+}
+
+function updateComposerMoveDragGhost(state, clientX, clientY) {
+  if (!state.dragGhost) return;
+  const left = Math.round(clientX - state.ghostOffsetX);
+  const top = Math.round(clientY - state.ghostOffsetY);
+  state.dragGhost.style.transform = "translate(" + left + "px, " + top + "px)";
 }
 
 function clearComposerMoveDrag(state) {
   if (!state) return;
+  if (state.pointerCleanup) state.pointerCleanup();
   if (state.mouseCleanup) state.mouseCleanup();
-  const band = document
-    .querySelector('[data-composer-primary-target-id="' + state.targetId + '"]')
-    ?.closest(".composer-band");
-  if (band) band.classList.remove("composer-band--drag-ready", "composer-band--dragging");
+  if (state.dragGhost) state.dragGhost.remove();
+  const band =
+    state.sourceBand ||
+    document
+      .querySelector('[data-composer-primary-target-id="' + state.targetId + '"]')
+      ?.closest(".composer-band");
+  if (band)
+    band.classList.remove("composer-band--drag-ready", "composer-band--dragging");
+  state.sourceShard?.classList.remove("composer-shard--dragging");
   clearLaneFuseHighlights();
+  clearComposerMoveDropHighlights();
   composerMoveDragState = null;
+}
+
+function clearComposerMoveDropHighlights() {
+  for (const element of lanesEl.querySelectorAll(
+    ".composer-shards--move-drop-active, .composer-shard--composer-drop-left, .composer-shard--composer-drop-right",
+  )) {
+    element.classList.remove(
+      "composer-shards--move-drop-active",
+      "composer-shard--composer-drop-left",
+      "composer-shard--composer-drop-right",
+    );
+  }
 }
 
 // ---- drag: reorder in the middle, fuse on the edge fifths ------------------------

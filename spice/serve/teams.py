@@ -421,6 +421,33 @@ class ServeTeamStore:
                 {"sourceTeamId": source_team_id},
             )
 
+    def reorder_team_agents(self, team_id: str, agent_ids: Iterable[str]) -> int:
+        ordered_agent_ids = [_normalized_id(agent, "agent_id") for agent in agent_ids]
+        if len(set(ordered_agent_ids)) != len(ordered_agent_ids):
+            raise SpiceError("reorder requires unique agent ids")
+        with self.connect() as connection:
+            self._require_team(connection, team_id)
+            rows = connection.execute(
+                "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY joined_at",
+                (team_id,),
+            ).fetchall()
+            current_agent_ids = [str(row["agent_id"]) for row in rows]
+            if set(ordered_agent_ids) != set(current_agent_ids):
+                raise SpiceError("reorder requires exactly the current team members")
+            now = time.time()
+            for index, agent_id in enumerate(ordered_agent_ids):
+                connection.execute(
+                    "UPDATE memberships SET joined_at = ? "
+                    "WHERE team_id = ? AND agent_id = ?",
+                    (now + index * 0.000001, team_id, agent_id),
+                )
+            return self._record_event(
+                connection,
+                "reorderTeamAgents",
+                team_id,
+                {"agentIds": ordered_agent_ids},
+            )
+
     def update_team_config(self, team_id: str, config: TeamConfig) -> int:
         with self.connect() as connection:
             self._require_team(connection, team_id)
@@ -962,6 +989,9 @@ class TeamCommandService:
                 _required(payload, "sourceTeamId"),
                 _required(payload, "destinationTeamId"),
             )
+        elif command == "reorderTeamAgents":
+            agent_ids = [str(item) for item in payload.get("agentIds") or [] if item]
+            self.store.reorder_team_agents(_required(payload, "teamId"), agent_ids)
         elif command == "updateTeamConfig":
             team_id = _required(payload, "teamId")
             current = self.store.team_config(team_id)

@@ -44,6 +44,14 @@ from spice.serve.worktrees import WorktreeTarget
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 THREAD_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+SERVE_CSS_FILES = ("index.css", "composer.css", "messages.css", "status-colors.css")
+
+
+def _serve_css_text() -> str:
+    return "\n".join(
+        (STATIC_ROOT / filename).read_text(encoding="utf-8")
+        for filename in SERVE_CSS_FILES
+    )
 
 
 @dataclass(frozen=True)
@@ -117,7 +125,7 @@ def test_serve_parser_accepts_until_path(tmp_path):
 
 def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     html = render_index_html()
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     header_start = css.index(".app-header {")
     header_end = css.index(".app-header .meta", header_start)
@@ -234,7 +242,7 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
 
 
 def test_static_spice_menu_replaces_picker_lane():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
@@ -835,7 +843,9 @@ def test_index_links_and_serves_packaged_favicon():
     send_static_asset(handler, "favicon.ico")
 
     assert '<link rel="icon" href="/static/favicon.ico" sizes="any">' in html
-    assert html.index("/static/index.css") < html.index("/static/status-colors.css")
+    assert html.index("/static/index.css") < html.index("/static/composer.css")
+    assert html.index("/static/composer.css") < html.index("/static/messages.css")
+    assert html.index("/static/messages.css") < html.index("/static/status-colors.css")
     assert favicon.is_file()
     assert handler.status == HTTPStatus.OK
     assert handler.headers["Content-Length"] == str(favicon.stat().st_size)
@@ -844,7 +854,7 @@ def test_index_links_and_serves_packaged_favicon():
 
 
 def test_static_css_has_narrow_viewport_affordances():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
 
     assert "@media (max-width: 720px)" in css
     assert "scroll-snap-type: x mandatory" in css
@@ -853,7 +863,7 @@ def test_static_css_has_narrow_viewport_affordances():
 
 
 def test_static_css_centers_two_pip_lane_light_stack():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     stack_start = css.index(".lane-pip-stack {")
     stack_end = css.index(".agent-status-pip {", stack_start)
     stack_rules = css[stack_start:stack_end]
@@ -867,7 +877,7 @@ def test_static_css_centers_two_pip_lane_light_stack():
 
 
 def test_static_messages_use_compact_image_grid():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
 
     assert "grid-template-columns: repeat(" in css
@@ -881,7 +891,7 @@ def test_static_messages_use_compact_image_grid():
 
 
 def test_static_draft_composers_use_14px_font():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     selector = ".composer-shard textarea {"
     start = css.index(selector)
     end = css.index("}", start)
@@ -891,7 +901,7 @@ def test_static_draft_composers_use_14px_font():
 
 
 def test_static_composer_shards_reverse_visually_without_retargeting():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
     composer_start = css.index(".lane-composer {")
     composer_end = css.index("/* Shards", composer_start)
@@ -912,7 +922,7 @@ def test_static_composer_shards_reverse_visually_without_retargeting():
 
 
 def test_static_composer_attachment_thumbnails_fill_header():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
 
     attachments_start = css.index(".composer-attachments {")
@@ -941,7 +951,7 @@ def test_static_composer_attachment_thumbnails_fill_header():
 
 
 def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
     button_start = css.index(
@@ -1032,13 +1042,34 @@ def test_static_composer_header_drag_suppresses_browser_selection():
 
     assert (
         "event.preventDefault();\n"
-        "    beginComposerMoveDrag(host, targetId, event, handle);"
+        "    const state = beginComposerMoveDrag(host, targetId, event, handle);"
     ) in pointer_block
+    assert (
+        "state.pointerCleanup = wireComposerMovePointerDocumentEvents(handle);"
+        in pointer_block
+    )
     assert "handle.setPointerCapture(event.pointerId);" in pointer_block
 
 
+def test_static_composer_drag_has_ghost_drop_zones_and_reorder_command():
+    css = _serve_css_text()
+    app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+
+    assert ".composer-shard--drag-ghost" in css
+    assert ".composer-shard--composer-drop-left::before" in css
+    assert ".composer-shard--composer-drop-right::after" in css
+    assert ".lane--composer-drop .composer-shards" in css
+    assert "function composerReorderDropTarget(state, clientX, clientY)" in app_groups
+    assert 'state.dropTarget = { kind: "move", lane: targetLane };' in app_groups
+    assert 'teamCommandPayload("reorderTeamAgents", {' in app_groups
+    assert "orderedTargetIds" in app_groups
+    assert 'state.sourceShard?.classList.add("composer-shard--dragging");' in app_groups
+    assert "wireComposerMoveDrag(lane, header, member.targetId);" in app_shell
+
+
 def test_static_relative_times_are_monospace_and_padded():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
 
     assert 'return String(value).padStart(2, "\xa0") + unit;' in app_render
@@ -1095,7 +1126,7 @@ def test_static_sync_composer_placeholders_refreshes_existing_quote_textareas():
 
 
 def test_static_primary_composer_links_latest_message_like_quote_composers():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     status_css = (STATIC_ROOT / "status-colors.css").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
     primary_header_start = css.index(".composer-band-header--primary {")
@@ -1171,7 +1202,7 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
 
 
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
 
     assert ".message-footer-right { justify-content: flex-end; }" in css
     assert (
@@ -1198,7 +1229,7 @@ def test_static_cmd_enter_submits_focused_composer_target_only():
 
 
 def test_static_css_adds_visible_nested_quote_depth():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     ack_selector = ".ack-quote {\n  background"
     ack_start = css.index(ack_selector)
     ack_rule = css[ack_start : css.index("}", ack_start)]
@@ -1279,7 +1310,7 @@ def test_static_message_speech_routes_to_producer_lane():
 def test_static_stream_uses_message_payload_and_standard_badges():
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     merge_start = app_stream.index("function mergePayloadMessages")
     merge_end = app_stream.index("function upsertKnownMessage", merge_start)
     badge_start = app_render.index("function renderBadges")
@@ -1359,7 +1390,7 @@ def test_static_manual_speech_playback_aborts_active_entry():
 
 
 def test_static_speech_sync_updates_now_playing_message_accent():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
     start = css.index(".messages article.now-playing")
     end = css.index(".messages article[data-occupant]", start)
@@ -1375,7 +1406,7 @@ def test_static_speech_sync_updates_now_playing_message_accent():
 
 
 def test_static_compaction_divider_spans_grid_and_uses_agent_accent():
-    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    css = _serve_css_text()
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
 
     assert "grid-column: 1 / -1;" in css
