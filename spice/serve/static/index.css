@@ -690,6 +690,47 @@ button.primary:hover {
   flex-direction: column;
   gap: 6px;
 }
+.spice-menu-team {
+  background: color-mix(in srgb, var(--accent) 4%, var(--control));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+}
+.spice-menu-team--unassigned {
+  background: color-mix(in srgb, var(--fg) 3%, var(--control));
+  border-color: color-mix(in srgb, var(--muted) 28%, var(--border));
+  border-style: dashed;
+}
+.spice-menu-team-header {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0 2px;
+}
+.spice-menu-team-label {
+  color: var(--fg);
+  font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.spice-menu-team-detail {
+  color: var(--muted);
+  flex: none;
+  font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.spice-menu-team-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .spice-menu-action {
   align-items: center;
   background: var(--control);
@@ -740,6 +781,9 @@ button.primary:hover {
 .target-choice--running .target-choice-signal { background: var(--good); }
 .target-choice--pending .target-choice-signal { background: var(--warn); }
 .target-choice--idle .target-choice-signal { background: var(--accent); }
+.target-choice--open {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+}
 .target-choice-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .target-choice-copy span { color: var(--muted); font-size: 11px; }
 

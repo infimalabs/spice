@@ -1,5 +1,5 @@
 // Targets, the spice context menu, and server-team-backed lane topology. Which lanes
-// are open is server truth: opening a tree creates a team, the team snapshot
+// are open is server truth: opening an agent creates a team, the team snapshot
 // reconciles lanes (including fused groups), closing a lane closes its team.
 // localStorage keeps only per-target hints (speech mode, selected view).
 
@@ -17,14 +17,14 @@ async function refreshServerTopology() {
 function refreshTargets() {
   if (targetsLoadPromise) return targetsLoadPromise;
   targetsLoading = true;
-  if (!targetsLoaded) globalStatusEl.textContent = "loading work trees";
+  if (!targetsLoaded) globalStatusEl.textContent = "loading teams";
   if (spiceMenuEl) renderSpiceMenu();
   targetsLoadPromise = (async () => {
     try {
       const response = await liveBusRequest("targets.refresh");
       applyTargetsPayload(response.payload || {});
     } catch (error) {
-      setGlobalTransientStatus("work tree refresh failed");
+      setGlobalTransientStatus("team refresh failed");
     } finally {
       targetsLoading = false;
       targetsLoadPromise = null;
@@ -215,11 +215,14 @@ function laneTeamAgentAliases(lane) {
 
 async function openTargetTeam(targetId) {
   if (laneStates.has(targetId)) {
+    const lane = laneStates.get(targetId);
+    if (lane)
+      lane.element.scrollIntoView({ block: "nearest", inline: "nearest" });
     closeSpiceMenu();
     return;
   }
   const target = targetById.get(targetId);
-  if (!target) throw new Error("open tree requires a known target");
+  if (!target) throw new Error("open team requires a known target");
   sessionOpenTargetIds.add(targetId);
   try {
     await refreshTeamSnapshot({ force: true });
@@ -259,7 +262,7 @@ function closeLane(lane) {
     teamCommandPayload("closeTeam", { teamId: lane.teamId }),
   ).catch(() => {
     lane.serverCloseRequested = false;
-    setLaneTransientStatus(lane, "close tree failed");
+    setLaneTransientStatus(lane, "close team failed");
   });
 }
 
@@ -523,23 +526,106 @@ function renderSpiceMenuTargets() {
   section.className = "spice-menu-section spice-menu-targets";
   const heading = document.createElement("div");
   heading.className = "spice-menu-heading";
-  heading.textContent = "open tree";
+  heading.textContent = "open team";
   const list = document.createElement("div");
   list.className = "spice-menu-target-list";
   if (!targetsLoaded) {
     list.textContent = targetsLoading
-      ? "loading work trees"
-      : "work tree list unavailable";
+      ? "loading teams"
+      : "team list unavailable";
   } else {
-    const openIds = new Set(laneStates.keys());
     const choices = targets
-      .filter((target) => !openIds.has(target.id))
+      .slice()
       .sort(compareTargetChoices);
-    list.replaceChildren(...choices.map(renderTargetChoice));
-    if (!choices.length) list.textContent = "all work trees are open";
+    const groups = spiceMenuTeamGroups(choices);
+    list.replaceChildren(...groups.map(renderSpiceMenuTeamGroup));
+    if (!groups.length) list.textContent = "no agents available";
   }
   section.append(heading, list);
   return section;
+}
+
+function spiceMenuTeamGroups(choices) {
+  const grouped = new Map();
+  const unassigned = [];
+  for (const target of choices) {
+    const teamId = target.teamId || "";
+    if (!teamId) {
+      unassigned.push(target);
+      continue;
+    }
+    if (!grouped.has(teamId)) {
+      grouped.set(teamId, {
+        teamId,
+        totalCount: targets.filter((item) => item.teamId === teamId).length,
+        targets: [],
+        unassigned: false,
+      });
+    }
+    grouped.get(teamId).targets.push(target);
+  }
+  const groups = [...grouped.values()];
+  for (const group of groups) group.targets.sort(compareTargetChoices);
+  groups.sort(compareSpiceMenuTeamGroups);
+  if (unassigned.length) {
+    unassigned.sort(compareTargetChoices);
+    groups.push({
+      teamId: "",
+      totalCount: unassigned.length,
+      targets: unassigned,
+      unassigned: true,
+    });
+  }
+  return groups;
+}
+
+function compareSpiceMenuTeamGroups(left, right) {
+  const byChoice = compareTargetChoices(
+    left.targets[0] || {},
+    right.targets[0] || {},
+  );
+  if (byChoice) return byChoice;
+  return String(left.teamId || "").localeCompare(String(right.teamId || ""));
+}
+
+function renderSpiceMenuTeamGroup(group) {
+  const container = document.createElement("section");
+  container.className = group.unassigned
+    ? "spice-menu-team spice-menu-team--unassigned"
+    : "spice-menu-team";
+  const header = document.createElement("div");
+  header.className = "spice-menu-team-header";
+  const label = document.createElement("span");
+  label.className = "spice-menu-team-label";
+  label.textContent = group.unassigned
+    ? "agents without team"
+    : spiceMenuTeamTitle(group);
+  const detail = document.createElement("span");
+  detail.className = "spice-menu-team-detail";
+  detail.textContent = group.unassigned
+    ? "open one to create a new team"
+    : spiceMenuTeamDetail(group);
+  const choices = document.createElement("div");
+  choices.className = "spice-menu-team-targets";
+  choices.replaceChildren(
+    ...group.targets.map((target) => renderTargetChoice(target, group)),
+  );
+  header.append(label, detail);
+  container.append(header, choices);
+  return container;
+}
+
+function spiceMenuTeamTitle(group) {
+  const names = group.targets.map(targetChoiceName);
+  const visible = names.slice(0, 2).join(" + ");
+  const overflow = names.length > 2 ? " +" + (names.length - 2) : "";
+  return "team " + visible + overflow;
+}
+
+function spiceMenuTeamDetail(group) {
+  const count = Math.max(group.totalCount || 0, group.targets.length);
+  if (count <= 1) return "opens this team";
+  return "open any member; " + count + " agents open together";
 }
 
 function setFastModeEnabled(enabled) {
@@ -576,12 +662,18 @@ function defaultTeamConfig() {
   };
 }
 
-function renderTargetChoice(target) {
-  return targetChoiceButton(target, "Open", () => {
+function renderTargetChoice(target, group = null) {
+  const alreadyOpen = laneStates.has(target.id);
+  let actionLabel = "Create team";
+  if (alreadyOpen) actionLabel = "Show team";
+  else if (group && !group.unassigned) actionLabel = "Open team";
+  const button = targetChoiceButton(target, actionLabel, () => {
     openTargetTeam(target.id).catch(() => {
-      setGlobalTransientStatus("open tree failed");
+      setGlobalTransientStatus("open team failed");
     });
   });
+  button.classList.toggle("target-choice--open", alreadyOpen);
+  return button;
 }
 
 function targetChoiceButton(target, actionLabel, onClick, role = "menuitem") {
@@ -589,7 +681,7 @@ function targetChoiceButton(target, actionLabel, onClick, role = "menuitem") {
   button.type = "button";
   const status = targetChoiceStatus(target);
   const metadata = targetChoiceMetadata(target);
-  const name = target.branch || target.displayName || target.id;
+  const name = targetChoiceName(target);
   button.className = "target-choice target-choice--" + status;
   if (role) button.setAttribute("role", role);
   button.title = actionLabel + " " + name + "; " + metadata;
@@ -602,8 +694,13 @@ function targetChoiceButton(target, actionLabel, onClick, role = "menuitem") {
   return button;
 }
 
+function targetChoiceName(target) {
+  return target.branch || target.displayName || target.id;
+}
+
 function targetChoiceMetadata(target) {
   const parts = [];
+  if (laneStates.has(target.id)) parts.push("open");
   const activity = relativeTime(targetChoiceLastAssistantAt(target));
   if (activity) parts.push(activity.trim());
   else if (!target.threadId) parts.push("never");

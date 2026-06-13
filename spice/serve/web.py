@@ -36,7 +36,7 @@ _INDEX_HTML = """<!doctype html>
       <span class="spice-menu-label">spice</span>
     </button>
   </header>
-  <main id="swimlanes" class="swimlanes" aria-label="Open trees"></main>
+  <main id="swimlanes" class="swimlanes" aria-label="Open teams"></main>
   <script src="/static/app.render.js"></script>
   <script src="/static/app.stream.js"></script>
   <script src="/static/app.lanes.js"></script>
