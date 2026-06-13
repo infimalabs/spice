@@ -206,10 +206,17 @@ Releases are cut from a clean `main` worktree with `./scripts/release`.
 
 ```sh
 ./scripts/release prepare patch   # bump, validate, commit, stop before publish
-./scripts/release publish         # validate the prepared version, then publish
+./scripts/release notes > /tmp/spice-release-notes.md
+./scripts/release publish --notes-file /tmp/spice-release-notes.md
 ./scripts/release patch           # one-pass bump, validate, commit, publish
 ./scripts/release minor           # same flow for a minor release
 ```
+
+For curated GitHub release notes, generate the draft after `prepare` and edit
+from that file instead of relying on session memory. The draft is built from
+first-parent commits in the exact previous-release-tag-to-release-commit range,
+grouped by landed task project metadata, and records that range in the package
+notes.
 
 Use a patch release when the shipped contract is unchanged: bug fixes,
 documentation clarifications, packaging fixes, or internal test/build/tooling

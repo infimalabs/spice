@@ -13,6 +13,7 @@ usage() {
   cat <<'EOF'
 usage: ./scripts/release [patch|minor]
        ./scripts/release prepare [patch|minor]
+       ./scripts/release notes [version] [--output PATH]
        ./scripts/release publish [--notes-file PATH]
        ./scripts/release github [version] [--notes-file PATH]
 
@@ -20,6 +21,7 @@ Prepare and/or publish a spice release.
 
   patch|minor         bump, validate, commit, push, and publish in one pass
   prepare patch|minor bump, validate, and commit, but stop before push/publish
+  notes [version]     generate a release-notes draft grouped by task project
   publish             validate the current prepared version, then push/publish
   github [version]    create/push the annotated tag and GitHub Release
 
@@ -140,23 +142,91 @@ write_release_notes() {
   notes_file="$4"
   previous_tag="$(previous_release_tag "$current_tag")"
 
-  {
-    printf '## Highlights\n\n'
-    if [ -n "$previous_tag" ]; then
-      git log --format='- %s (`%h`)' "${previous_tag}..${release_commit}" \
-        | sed '/^- release: bump to /d'
-    else
-      git log --format='- %s (`%h`)' -n 5 "${release_commit}" \
-        | sed '/^- release: bump to /d'
-    fi
+  RELEASE_VERSION="$version" \
+    RELEASE_COMMIT="$release_commit" \
+    CURRENT_TAG="$current_tag" \
+    PREVIOUS_TAG="$previous_tag" \
+    python3 - <<'PY' >"$notes_file"
+from collections import OrderedDict
+import os
+import subprocess
 
-    printf '\n## Package Notes\n\n'
-    printf -- '- PyPI release: `spice-harness==%s`\n' "$version"
-    printf -- '- Release commit: `%s`\n' "$(git rev-parse --short "$release_commit")"
-    if [ -n "$previous_tag" ]; then
-      printf -- '- Compare from: `%s`\n' "$previous_tag"
-    fi
-  } >"$notes_file"
+
+def git(*args: str) -> str:
+    return subprocess.check_output(["git", *args], text=True).strip()
+
+
+def short(commit: str) -> str:
+    return git("rev-parse", "--short", commit)
+
+
+def commit_records(previous_tag: str, release_commit: str) -> list[tuple[str, str, str]]:
+    format_arg = "--format=%H%x1f%s%x1f%(trailers:key=Task-Project,valueonly)%x1e"
+    if previous_tag:
+        args = [
+            "log",
+            "--first-parent",
+            "--reverse",
+            format_arg,
+            f"{previous_tag}..{release_commit}",
+        ]
+    else:
+        args = [
+            "log",
+            "--first-parent",
+            "--reverse",
+            "-n",
+            "5",
+            format_arg,
+            release_commit,
+        ]
+
+    raw = subprocess.check_output(["git", *args], text=True)
+    records = []
+    for record in raw.split("\x1e"):
+        record = record.strip("\n")
+        if not record:
+            continue
+        commit, subject, project = (record.split("\x1f", 2) + ["", "", ""])[:3]
+        if subject.startswith("release: bump to "):
+            continue
+        records.append((commit, subject, project.strip() or "general"))
+    return records
+
+
+version = os.environ["RELEASE_VERSION"]
+release_commit = os.environ["RELEASE_COMMIT"]
+current_tag = os.environ["CURRENT_TAG"]
+previous_tag = os.environ["PREVIOUS_TAG"]
+release_short = short(release_commit)
+
+groups: OrderedDict[str, OrderedDict[str, list[str]]] = OrderedDict()
+for commit, subject, project in commit_records(previous_tag, release_commit):
+    project_subjects = groups.setdefault(project, OrderedDict())
+    project_subjects.setdefault(subject, []).append(short(commit))
+
+print("## Highlights\n")
+if groups:
+    for project, subjects in groups.items():
+        print(f"### {project}\n")
+        for subject, commits in subjects.items():
+            refs = ", ".join(f"`{commit}`" for commit in commits)
+            print(f"- {subject} ({refs})")
+        print()
+else:
+    print("- No non-release commits found.\n")
+
+print("## Package Notes\n")
+print(f"- PyPI release: `spice-harness=={version}`")
+print(f"- Release commit: `{release_short}`")
+if previous_tag:
+    print(f"- Commit range: `{previous_tag}..{release_short}`")
+else:
+    print(f"- Commit range: latest first-parent commits ending at `{release_short}`")
+print("- Commit source: first-parent history grouped by `Task-Project` metadata")
+if current_tag:
+    print(f"- Release tag: `{current_tag}`")
+PY
 }
 
 publish_github_release() {
@@ -229,6 +299,7 @@ mode=""
 bump=""
 release_version=""
 notes_file="${SPICE_RELEASE_NOTES_FILE:-}" # env-policy: allow
+notes_output=""
 
 if [ "$#" -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
   usage
@@ -244,6 +315,9 @@ case "$#" in
         ;;
       publish)
         mode="publish"
+        ;;
+      notes)
+        mode="notes"
         ;;
       github)
         mode="github"
@@ -263,6 +337,14 @@ case "$#" in
       publish:--notes-file)
         usage
         exit 64
+        ;;
+      notes:--output)
+        usage
+        exit 64
+        ;;
+      notes:*)
+        mode="notes"
+        release_version="$2"
         ;;
       github:*)
         mode="github"
@@ -284,6 +366,10 @@ case "$#" in
         mode="github"
         notes_file="$3"
         ;;
+      notes:--output)
+        mode="notes"
+        notes_output="$3"
+        ;;
       *)
         usage
         exit 64
@@ -296,6 +382,11 @@ case "$#" in
         mode="github"
         release_version="$2"
         notes_file="$4"
+        ;;
+      notes:--output)
+        mode="notes"
+        release_version="$2"
+        notes_output="$4"
         ;;
       *)
         usage
@@ -317,7 +408,11 @@ branch="$(git branch --show-current)"
 status="$(git status --porcelain)"
 [ -z "$status" ] || die "refusing to release with a dirty worktree"
 
-ensure_notes_file "$notes_file"
+case "$mode" in
+  release|publish|github)
+    ensure_notes_file "$notes_file"
+    ;;
+esac
 
 git pull --ff-only origin main
 
@@ -329,11 +424,36 @@ case "$mode" in
     git add pyproject.toml uv.lock
     git commit -m "release: bump to ${version}"
     if [ "$mode" = "prepare" ]; then
-      printf 'prepared release %s; review, then run ./scripts/release publish\n' "$version"
+      printf 'prepared release %s; review, then run ./scripts/release notes > /tmp/spice-release-%s-notes.md\n' "$version" "$version"
+      printf 'curate the draft notes, then run ./scripts/release publish --notes-file /tmp/spice-release-%s-notes.md\n' "$version"
       git status --short --branch
       exit 0
     fi
     publish_release "$version" "$notes_file"
+    ;;
+  notes)
+    if [ -n "$release_version" ]; then
+      version="$release_version"
+    else
+      version="$(uv version --short)"
+    fi
+    release_commit="$(release_commit_for_version "$version")"
+    [ -n "$release_commit" ] || die "unable to find release commit for ${version}"
+    tag="v${version}"
+    if [ -n "$notes_output" ]; then
+      write_release_notes "$version" "$release_commit" "$tag" "$notes_output"
+      printf 'wrote release notes draft for %s to %s\n' "$version" "$notes_output"
+    else
+      notes_file="$(mktemp)"
+      cleanup_notes() {
+        rm -f "$notes_file"
+      }
+      trap cleanup_notes EXIT INT TERM
+      write_release_notes "$version" "$release_commit" "$tag" "$notes_file"
+      cat "$notes_file"
+      rm -f "$notes_file"
+      trap - EXIT INT TERM
+    fi
     ;;
   publish)
     version="$(uv version --short)"
