@@ -927,6 +927,11 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
     )
     button_end = css.index(".composer-band-menu-button:hover", button_start)
     button_rule = css[button_start:button_end]
+    action_start = css.index(".composer-band-menu-action {")
+    action_end = css.index(
+        ".composer-band-menu-action .spice-menu-action-detail", action_start
+    )
+    action_rule = css[action_start:action_end]
 
     assert "trailingControl: composerBandMenuTrigger(" in app_shell
     assert (
@@ -979,6 +984,7 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
         ".composer-band--menu-open textarea,\n.composer-band--menu-open .composer-attachments {"
         in css
     )
+    assert "font-size: 12px;" in action_rule
     assert (
         ".composer-band-menu-action .spice-menu-action-detail {\n  display: none;"
         in css

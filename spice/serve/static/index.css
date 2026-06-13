@@ -544,6 +544,7 @@ button.primary:hover {
 .composer-band-menu-action {
   align-items: flex-start;
   flex-direction: column;
+  font-size: 12px;
   gap: 2px;
   justify-content: center;
   min-height: 30px;
