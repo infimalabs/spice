@@ -730,9 +730,10 @@ function composerShardPrimaryBand(shard, targetId) {
 
 function composerPrimaryBandHeader(lane, member) {
   const label = laneMemberTargetLabel(member);
+  const latest = latestComposerMessage(member);
   const header = composerBandHeader({
     className: "composer-band-header--primary",
-    title: label,
+    title: composerPrimaryHeaderTitle(latest),
     menuTitle: "Composer actions for " + label,
     menuLabel: "Composer actions for " + label,
     menuActions: [
@@ -748,7 +749,7 @@ function composerPrimaryBandHeader(lane, member) {
         onClick: () => splitComposerAgentFromTeam(lane, member.targetId),
       },
     ],
-    beforeMenu: composerPrimaryHeaderBeforeMenu(member),
+    beforeMenu: composerPrimaryHeaderBeforeMenu(latest),
   });
   header.title = "Drag composer to move this agent to another lane";
   if (typeof wireComposerMoveDrag === "function")
@@ -756,8 +757,11 @@ function composerPrimaryBandHeader(lane, member) {
   return header;
 }
 
-function composerPrimaryHeaderBeforeMenu(member) {
-  const latest = latestComposerMessage(member);
+function composerPrimaryHeaderTitle(latest) {
+  return latest ? composerQuotePreview(latest) : "No assistant messages yet";
+}
+
+function composerPrimaryHeaderBeforeMenu(latest) {
   return [
     latest
       ? composerPrimaryLatestMessageLink(latest)
