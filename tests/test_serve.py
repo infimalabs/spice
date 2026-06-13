@@ -935,7 +935,9 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
     )
     assert 'trigger.className = "composer-band-menu-button";' in app_shell
     assert 'trigger.setAttribute("aria-haspopup", "menu");' in app_shell
-    assert 'trigger.textContent = "☰";' in app_shell
+    assert "trigger.replaceChildren(composerBandMenuIcon());" in app_shell
+    assert "function composerBandMenuIcon()" in app_shell
+    assert 'icon.className = "composer-band-menu-icon";' in app_shell
     assert 'menu.className = "composer-band-menu";' in app_shell
     assert (
         'button.className = "composer-band-menu-action spice-menu-action";' in app_shell
@@ -970,6 +972,8 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
     assert "border-radius: 50%;" in button_rule
     assert "height: 22px;" in button_rule
     assert "width: 22px;" in button_rule
+    assert 'icon.style.height = "8px";' in app_shell
+    assert 'icon.style.width = "11px";' in app_shell
     assert (
         ".composer-band-close-button:hover,\n.composer-band-close-button:focus-visible {"
         in css

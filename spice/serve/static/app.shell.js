@@ -1223,12 +1223,26 @@ function composerBandMenuTrigger(menuTitle, menuLabel, menuActions) {
   trigger.setAttribute("aria-label", menuLabel);
   trigger.setAttribute("aria-haspopup", "menu");
   trigger.setAttribute("aria-expanded", "false");
-  trigger.textContent = "☰";
+  trigger.replaceChildren(composerBandMenuIcon());
   trigger.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleComposerBandMenu(trigger, menuActions || []);
   });
   return trigger;
+}
+
+function composerBandMenuIcon() {
+  const icon = document.createElement("span");
+  icon.className = "composer-band-menu-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.style.background =
+    "linear-gradient(currentColor, currentColor) 0 0 / 100% 1.5px no-repeat, " +
+    "linear-gradient(currentColor, currentColor) 0 50% / 100% 1.5px no-repeat, " +
+    "linear-gradient(currentColor, currentColor) 0 100% / 100% 1.5px no-repeat";
+  icon.style.display = "block";
+  icon.style.height = "8px";
+  icon.style.width = "11px";
+  return icon;
 }
 
 function composerBandCloseButton(closeTitle, closeLabel, onClose) {
