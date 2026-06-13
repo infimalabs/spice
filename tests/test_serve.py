@@ -857,8 +857,11 @@ def test_static_css_has_narrow_viewport_affordances():
     css = _serve_css_text()
 
     assert "@media (max-width: 720px)" in css
-    assert "scroll-snap-type: x mandatory" in css
-    assert "flex: 0 0 100%" in css
+    assert "scroll-snap-type: x proximity" in css
+    assert "scroll-padding-inline: 6px" in css
+    assert "touch-action: pan-x pan-y" in css
+    assert "flex: 0 0 calc(100% - 12px)" in css
+    assert "border-radius: 7px" in css
     assert "height: 100dvh" in css
 
 
