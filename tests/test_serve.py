@@ -1041,6 +1041,27 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
     )
 
 
+def test_static_sync_composer_placeholders_refreshes_existing_quote_textareas():
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    sync_start = app_shell.index("function syncComposerPlaceholders(lane) {")
+    sync_body = app_shell[
+        sync_start : app_shell.index(
+            "\n}\n\nfunction laneComposerDraftText", sync_start
+        )
+    ]
+
+    assert "for (const [targetId, textarea] of lane.shardTextareas)" in sync_body
+    assert "[data-composer-quote-stack-target-id]" in sync_body
+    assert (
+        'const targetId = stack.dataset.composerQuoteStackTargetId || "";' in sync_body
+    )
+    assert 'stack.querySelectorAll("textarea[data-quote-draft-id]")' in sync_body
+    assert sync_body.count("const member = laneStates.get(targetId) || lane;") == 2
+    assert (
+        sync_body.count("textarea.placeholder = laneComposePlaceholder(member);") == 2
+    )
+
+
 def test_static_primary_composer_links_latest_message_like_quote_composers():
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
