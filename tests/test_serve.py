@@ -955,6 +955,15 @@ def test_static_composer_pending_placeholder_omits_parentheses():
     )
 
 
+def test_static_message_footer_controls_stay_right_aligned_on_mobile():
+    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+
+    assert ".message-footer-right { justify-content: flex-end; }" in css
+    assert (
+        ".message-footer-left,\n  .message-footer-right {\n    flex: 1 1 100%;" in css
+    )
+
+
 def test_static_cmd_enter_submits_focused_composer_target_only():
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
