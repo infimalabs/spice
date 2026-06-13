@@ -77,8 +77,12 @@ function composerMemberAccent(lane, member) {
 
 function composerMemberAccentIndex(lane, member) {
   const host = laneGroupHost(lane);
-  if (member.targetThreadId && host.occupants?.has(member.targetThreadId))
-    return laneOccupantOrdinal(host, member.targetThreadId);
+  if (member.targetThreadId) {
+    const occupant = ensureLaneOccupant(host, member.targetThreadId);
+    if (!occupant)
+      throw new Error("composer header accent requires member targetThreadId");
+    return occupant.ordinal;
+  }
   const index = laneGroupMemberTargetIds(host).indexOf(member.targetId);
   if (index < 0)
     throw new Error("composer header accent requires a lane group member");
