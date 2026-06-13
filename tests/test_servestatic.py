@@ -1,13 +1,11 @@
-"""Static serve web contracts."""
+"""Static serve UI contracts."""
 
 from __future__ import annotations
 
 import subprocess
-from http import HTTPStatus
-from io import BytesIO
 from pathlib import Path
 
-from spice.serve.web import STATIC_ROOT, render_index_html, send_static_asset
+from spice.serve.web import STATIC_ROOT
 
 SERVE_CSS_FILES = ("index.css", "composer.css", "messages.css", "status-colors.css")
 
@@ -19,196 +17,11 @@ def _serve_css_text() -> str:
     )
 
 
-class _StaticHandler:
-    def __init__(self) -> None:
-        self.status: HTTPStatus | None = None
-        self.headers: dict[str, str] = {}
-        self.body = BytesIO()
-        self.wfile = self.body
-
-    def send_error(self, status: HTTPStatus) -> None:
-        self.status = status
-
-    def send_response(self, status: HTTPStatus) -> None:
-        self.status = status
-
-    def send_header(self, name: str, value: str) -> None:
-        self.headers[name] = value
-
-    def end_headers(self) -> None:
-        pass
-
-
-def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
-    html = render_index_html()
-    css = _serve_css_text()
-    app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
-    header_start = css.index(".app-header {")
-    header_end = css.index(".app-header .meta", header_start)
-    header_rules = css[header_start:header_end]
-    button_start = css.index(".spice-menu-button {")
-    button_end = css.index(".spice-menu-icon {", button_start)
-    button_rules = css[button_start:button_end]
-    icon_start = css.index(".spice-menu-icon {")
-    icon_end = css.index(".spice-menu-label {", icon_start)
-    icon_rules = css[icon_start:icon_end]
-    label_start = css.index(".spice-menu-label {")
-    label_end = css.index(".icon-button svg", label_start)
-    label_rules = css[label_start:label_end]
-    mobile_header_start = css.index(
-        "  .app-header {", css.index("@media (max-width: 720px)")
+def _shell_and_composer_text() -> str:
+    return "\n".join(
+        (STATIC_ROOT / filename).read_text(encoding="utf-8")
+        for filename in ("app.shell.js", "app.composer.js")
     )
-    mobile_header_end = css.index("  .app-header .meta", mobile_header_start)
-    mobile_header_rules = css[mobile_header_start:mobile_header_end]
-    mobile_filter_start = css.index("  .filter-strip {", mobile_header_start)
-    mobile_filter_end = css.index("  .swimlanes", mobile_filter_start)
-    mobile_filter_rules = css[mobile_filter_start:mobile_filter_end]
-
-    assert 'id="fast-mode-toggle"' not in html
-    assert 'class="add-lane"' not in html
-    assert "<title>spice</title>" in html
-    assert "Simultaneous Production, Integration, and Control Environment" not in html
-    assert "<h1>spice</h1>" not in html
-    assert ">+</button>" not in html
-    assert 'id="open-lane" class="spice-menu-button"' in html
-    assert 'aria-haspopup="menu" aria-expanded="false"' in html
-    assert 'class="spice-menu-icon" aria-hidden="true">🌶️</span>' in html
-    assert '<span class="spice-menu-label">spice</span>' in html
-    assert 'querySelector("#fast-mode-toggle")' not in app_js
-    assert 'openLaneButton.addEventListener("click", (event) => {' in app_js
-    assert "button.primary:hover {\n  background: var(--accent-strong);" in css
-    assert "button.primary:hover,\n.spice-menu-button:hover" not in css
-    assert "min-height: 50px;" in header_rules
-    assert "padding: 7px 10px;" in header_rules
-    assert (
-        "background: color-mix(in srgb, var(--control) 90%, var(--accent) 10%);"
-        in button_rules
-    )
-    assert (
-        "border-color: color-mix(in srgb, var(--border) 52%, transparent);"
-        in button_rules
-    )
-    assert (
-        "box-shadow: inset 0 0 0 1px "
-        "color-mix(in srgb, var(--accent) 8%, transparent);" in button_rules
-    )
-    assert (
-        "color: color-mix(in srgb, var(--accent-strong) 76%, var(--fg));"
-        in button_rules
-    )
-    assert "gap: 4px;" in button_rules
-    assert "height: 30px;" in button_rules
-    assert "padding: 0 8px 0 6px;" in button_rules
-    assert "font-size: 15px;" in icon_rules
-    assert "color: currentColor;" in label_rules
-    assert "font-size: 17px;" in label_rules
-    assert ".spice-menu-button:hover,\n.spice-menu-button:focus-visible {" in css
-    assert (
-        "background: color-mix(in srgb, var(--control) 82%, var(--accent) 18%);"
-        in button_rules
-    )
-    assert (
-        "border-color: color-mix(in srgb, var(--border) 64%, transparent);"
-        in button_rules
-    )
-    assert (
-        "box-shadow: inset 0 0 0 1px "
-        "color-mix(in srgb, var(--accent) 12%, transparent);" in button_rules
-    )
-    assert ".spice-menu-button:active {" in css
-    assert (
-        "background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);"
-        in button_rules
-    )
-    assert (
-        "border-color: var(--border-soft);\n"
-        "  box-shadow: inset 0 0 0 1px var(--border-soft);" in button_rules
-    )
-    assert '.spice-menu-button[aria-expanded="true"] {' in button_rules
-    assert (
-        '.spice-menu-button[aria-expanded="true"] {\n'
-        "  background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);\n"
-        "  border-color: var(--border-soft);\n"
-        "  box-shadow: inset 0 0 0 1px var(--border-soft);" in button_rules
-    )
-    assert "var(--final-accent)" not in button_rules
-    assert "color: currentColor;" in css
-    assert (
-        ".spice-menu-button--fast:hover,\n"
-        ".spice-menu-button--fast:focus-visible {" in css
-    )
-    assert ".spice-menu-button--fast:active {" in css
-    assert '.spice-menu-button--fast[aria-expanded="true"] {' in css
-    assert (
-        "background: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);"
-        in css
-    )
-    assert (
-        '.spice-menu-button--fast[aria-expanded="true"] {\n'
-        "  background: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);\n"
-        "  border-color: var(--border-soft);\n"
-        "  box-shadow: inset 0 0 0 1px var(--border-soft);" in css
-    )
-    assert "height: 30px;" in button_rules
-    assert "flex-wrap: nowrap;" in mobile_header_rules
-    assert "min-height: 46px;" in mobile_header_rules
-    assert "padding: 8px;" in mobile_header_rules
-    assert "flex: 1 1 auto;" in mobile_filter_rules
-    assert "min-width: 0;" in mobile_filter_rules
-
-
-def test_static_spice_menu_replaces_picker_lane():
-    css = _serve_css_text()
-    app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
-    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
-    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
-
-    assert "let spiceMenuEl = null;" in app_js
-    assert "let fastModeEnabled = false;" in app_js
-    assert "function openSpiceMenu()" in app_lanes
-    assert "function laneStateTargetIds()" in app_lanes
-    assert "function sameStringSets(left, right)" in app_lanes
-    assert (
-        "if (!sameStringSets(openBefore, laneStateTargetIds())) renderSpiceMenu();"
-        in app_lanes
-    )
-    assert "if (laneStates.size) closeSpiceMenu();" not in app_lanes
-    assert "function setFastModeEnabled(enabled)" in app_lanes
-    assert "function createEmptyTeamFromMenu()" in app_lanes
-    assert "const laneGrid = lanesEl.getBoundingClientRect();" in app_lanes
-    assert "const visibleLane = visibleLaneElements()[0] || null;" in app_lanes
-    assert "spiceMenuMinimumLaneWidthPx()" in app_lanes
-    assert 'spiceMenuEl.style.height = height + "px";' in app_lanes
-    assert "function cssPixelValue(value)" in app_lanes
-    assert (
-        'teamCommandPayload("createTeam", {\n      config: defaultTeamConfig(),'
-        in app_lanes
-    )
-    assert 'button.setAttribute("role", "menuitem");' in app_lanes
-    assert 'className = "lane picker"' not in app_lanes
-    assert "openPickerLane" not in app_lanes
-    assert "renderPickerChoices" not in app_shell
-    assert ".spice-context-menu" in css
-    assert '.spice-menu-action[aria-checked="true"]' in css
-    assert ".picker" not in css
-
-
-def test_index_links_and_serves_packaged_favicon():
-    html = render_index_html()
-    favicon = STATIC_ROOT / "favicon.ico"
-    handler = _StaticHandler()
-
-    send_static_asset(handler, "favicon.ico")
-
-    assert '<link rel="icon" href="/static/favicon.ico" sizes="any">' in html
-    assert html.index("/static/index.css") < html.index("/static/composer.css")
-    assert html.index("/static/composer.css") < html.index("/static/messages.css")
-    assert html.index("/static/messages.css") < html.index("/static/status-colors.css")
-    assert favicon.is_file()
-    assert handler.status == HTTPStatus.OK
-    assert handler.headers["Content-Length"] == str(favicon.stat().st_size)
-    assert "icon" in handler.headers["Content-Type"]
-    assert handler.body.getvalue().startswith(b"\x00\x00\x01\x00")
 
 
 def test_static_css_has_narrow_viewport_affordances():
@@ -268,7 +81,7 @@ def test_static_draft_composers_use_14px_font():
 
 def test_static_composer_shards_reverse_visually_without_retargeting():
     css = _serve_css_text()
-    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_shell = _shell_and_composer_text()
     composer_start = css.index(".lane-composer {")
     composer_end = css.index("/* Shards", composer_start)
     composer_rule = css[composer_start:composer_end]
@@ -289,7 +102,7 @@ def test_static_composer_shards_reverse_visually_without_retargeting():
 
 def test_static_composer_attachment_thumbnails_fill_header():
     css = _serve_css_text()
-    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_shell = _shell_and_composer_text()
 
     attachments_start = css.index(".composer-attachments {")
     attachments_end = css.index(".composer-attachments[hidden]", attachments_start)
@@ -318,7 +131,7 @@ def test_static_composer_attachment_thumbnails_fill_header():
 
 def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
     css = _serve_css_text()
-    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_shell = _shell_and_composer_text()
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
     button_start = css.index(
         ".composer-band-menu-button,\n.composer-band-close-button {"
@@ -420,7 +233,7 @@ def test_static_composer_header_drag_suppresses_browser_selection():
 def test_static_composer_drag_has_ghost_drop_zones_and_reorder_command():
     css = _serve_css_text()
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
-    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_shell = _shell_and_composer_text()
 
     assert ".composer-shard--drag-ghost" in css
     assert ".composer-shard--composer-drop-left::before" in css
@@ -447,7 +260,7 @@ def test_static_relative_times_are_monospace_and_padded():
 
 
 def test_static_composer_placeholders_use_uniform_agent_status_copy():
-    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_shell = _shell_and_composer_text()
 
     assert "const label = laneMemberTargetLabel(member);" in app_shell
     assert 'return [label, status].filter(Boolean).join("\\n");' in app_shell
@@ -471,7 +284,7 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
 
 
 def test_static_sync_composer_placeholders_refreshes_existing_quote_textareas():
-    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_shell = _shell_and_composer_text()
     sync_start = app_shell.index("function syncComposerPlaceholders(lane) {")
     sync_body = app_shell[
         sync_start : app_shell.index(
@@ -494,7 +307,7 @@ def test_static_sync_composer_placeholders_refreshes_existing_quote_textareas():
 def test_static_primary_composer_links_latest_message_like_quote_composers():
     css = _serve_css_text()
     status_css = (STATIC_ROOT / "status-colors.css").read_text(encoding="utf-8")
-    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_shell = _shell_and_composer_text()
     primary_header_start = css.index(".composer-band-header--primary {")
     primary_header_rule = css[
         primary_header_start : css.index("}", primary_header_start)
@@ -578,7 +391,7 @@ def test_static_message_footer_controls_stay_right_aligned_on_mobile():
 
 def test_static_cmd_enter_submits_focused_composer_target_only():
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
-    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_shell = _shell_and_composer_text()
 
     assert (
         "lane.formEl.addEventListener("

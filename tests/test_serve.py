@@ -37,11 +37,20 @@ from spice.serve.app import (
 )
 from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
 from spice.serve.teams import ServeTeamStore, TeamCommandService
+from spice.serve.web import STATIC_ROOT, render_index_html, send_static_asset
 from spice.serve.worktrees import WorktreeTarget
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 THREAD_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+SERVE_CSS_FILES = ("index.css", "composer.css", "messages.css", "status-colors.css")
+
+
+def _serve_css_text() -> str:
+    return "\n".join(
+        (STATIC_ROOT / filename).read_text(encoding="utf-8")
+        for filename in SERVE_CSS_FILES
+    )
 
 
 @dataclass(frozen=True)
@@ -111,6 +120,200 @@ def test_serve_parser_accepts_until_path(tmp_path):
 
     assert args.command == "serve"
     assert args.until == stop_path
+
+
+def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
+    html = render_index_html()
+    css = _serve_css_text()
+    app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    header_start = css.index(".app-header {")
+    header_end = css.index(".app-header .meta", header_start)
+    header_rules = css[header_start:header_end]
+    button_start = css.index(".spice-menu-button {")
+    button_end = css.index(".spice-menu-icon {", button_start)
+    button_rules = css[button_start:button_end]
+    icon_start = css.index(".spice-menu-icon {")
+    icon_end = css.index(".spice-menu-label {", icon_start)
+    icon_rules = css[icon_start:icon_end]
+    label_start = css.index(".spice-menu-label {")
+    label_end = css.index(".icon-button svg", label_start)
+    label_rules = css[label_start:label_end]
+    mobile_header_start = css.index(
+        "  .app-header {", css.index("@media (max-width: 720px)")
+    )
+    mobile_header_end = css.index("  .app-header .meta", mobile_header_start)
+    mobile_header_rules = css[mobile_header_start:mobile_header_end]
+    mobile_filter_start = css.index("  .filter-strip {", mobile_header_start)
+    mobile_filter_end = css.index("  .swimlanes", mobile_filter_start)
+    mobile_filter_rules = css[mobile_filter_start:mobile_filter_end]
+
+    assert 'id="fast-mode-toggle"' not in html
+    assert 'class="add-lane"' not in html
+    assert "<title>spice</title>" in html
+    assert "Simultaneous Production, Integration, and Control Environment" not in html
+    assert "<h1>spice</h1>" not in html
+    assert ">+</button>" not in html
+    assert 'id="open-lane" class="spice-menu-button"' in html
+    assert 'aria-haspopup="menu" aria-expanded="false"' in html
+    assert 'class="spice-menu-icon" aria-hidden="true">🌶️</span>' in html
+    assert '<span class="spice-menu-label">spice</span>' in html
+    assert 'querySelector("#fast-mode-toggle")' not in app_js
+    assert 'openLaneButton.addEventListener("click", (event) => {' in app_js
+    assert "button.primary:hover {\n  background: var(--accent-strong);" in css
+    assert "button.primary:hover,\n.spice-menu-button:hover" not in css
+    assert "min-height: 50px;" in header_rules
+    assert "padding: 7px 10px;" in header_rules
+    assert (
+        "background: color-mix(in srgb, var(--control) 90%, var(--accent) 10%);"
+        in button_rules
+    )
+    assert (
+        "border-color: color-mix(in srgb, var(--border) 52%, transparent);"
+        in button_rules
+    )
+    assert (
+        "box-shadow: inset 0 0 0 1px "
+        "color-mix(in srgb, var(--accent) 8%, transparent);" in button_rules
+    )
+    assert (
+        "color: color-mix(in srgb, var(--accent-strong) 76%, var(--fg));"
+        in button_rules
+    )
+    assert "gap: 4px;" in button_rules
+    assert "height: 30px;" in button_rules
+    assert "padding: 0 8px 0 6px;" in button_rules
+    assert "font-size: 15px;" in icon_rules
+    assert "color: currentColor;" in label_rules
+    assert "font-size: 17px;" in label_rules
+    assert ".spice-menu-button:hover,\n.spice-menu-button:focus-visible {" in css
+    assert (
+        "background: color-mix(in srgb, var(--control) 82%, var(--accent) 18%);"
+        in button_rules
+    )
+    assert (
+        "border-color: color-mix(in srgb, var(--border) 64%, transparent);"
+        in button_rules
+    )
+    assert (
+        "box-shadow: inset 0 0 0 1px "
+        "color-mix(in srgb, var(--accent) 12%, transparent);" in button_rules
+    )
+    assert ".spice-menu-button:active {" in css
+    assert (
+        "background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);"
+        in button_rules
+    )
+    assert (
+        "border-color: var(--border-soft);\n"
+        "  box-shadow: inset 0 0 0 1px var(--border-soft);" in button_rules
+    )
+    assert '.spice-menu-button[aria-expanded="true"] {' in button_rules
+    assert (
+        '.spice-menu-button[aria-expanded="true"] {\n'
+        "  background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);\n"
+        "  border-color: var(--border-soft);\n"
+        "  box-shadow: inset 0 0 0 1px var(--border-soft);" in button_rules
+    )
+    assert "var(--final-accent)" not in button_rules
+    assert "color: currentColor;" in css
+    assert (
+        ".spice-menu-button--fast:hover,\n"
+        ".spice-menu-button--fast:focus-visible {" in css
+    )
+    assert ".spice-menu-button--fast:active {" in css
+    assert '.spice-menu-button--fast[aria-expanded="true"] {' in css
+    assert (
+        "background: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);"
+        in css
+    )
+    assert (
+        '.spice-menu-button--fast[aria-expanded="true"] {\n'
+        "  background: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);\n"
+        "  border-color: var(--border-soft);\n"
+        "  box-shadow: inset 0 0 0 1px var(--border-soft);" in css
+    )
+    assert "height: 30px;" in button_rules
+    assert "flex-wrap: nowrap;" in mobile_header_rules
+    assert "min-height: 46px;" in mobile_header_rules
+    assert "padding: 8px;" in mobile_header_rules
+    assert "flex: 1 1 auto;" in mobile_filter_rules
+    assert "min-width: 0;" in mobile_filter_rules
+
+
+def test_static_spice_menu_replaces_picker_lane():
+    css = _serve_css_text()
+    app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+
+    assert "let spiceMenuEl = null;" in app_js
+    assert "let fastModeEnabled = false;" in app_js
+    assert "function openSpiceMenu()" in app_lanes
+    assert "function laneStateTargetIds()" in app_lanes
+    assert "function sameStringSets(left, right)" in app_lanes
+    assert (
+        "if (!sameStringSets(openBefore, laneStateTargetIds())) renderSpiceMenu();"
+        in app_lanes
+    )
+    assert "if (laneStates.size) closeSpiceMenu();" not in app_lanes
+    assert "function setFastModeEnabled(enabled)" in app_lanes
+    assert "function createEmptyTeamFromMenu()" in app_lanes
+    assert "const laneGrid = lanesEl.getBoundingClientRect();" in app_lanes
+    assert "const visibleLane = visibleLaneElements()[0] || null;" in app_lanes
+    assert "spiceMenuMinimumLaneWidthPx()" in app_lanes
+    assert 'spiceMenuEl.style.height = height + "px";' in app_lanes
+    assert "function cssPixelValue(value)" in app_lanes
+    assert (
+        'teamCommandPayload("createTeam", {\n      config: defaultTeamConfig(),'
+        in app_lanes
+    )
+    assert (
+        'function targetChoiceButton(target, actionLabel, onClick, role = "menuitem")'
+        in app_lanes
+    )
+    assert 'if (role) button.setAttribute("role", role);' in app_lanes
+    assert 'className = "lane picker"' not in app_lanes
+    assert "openPickerLane" not in app_lanes
+    assert "renderPickerChoices" not in app_shell
+    assert ".spice-context-menu" in css
+    assert '.spice-menu-action[aria-checked="true"]' in css
+    assert ".picker" not in css
+
+
+def test_static_empty_teams_render_importer_composer_area():
+    css = (STATIC_ROOT / "composer.css").read_text(encoding="utf-8")
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
+
+    assert 'const emptyTeamTargetPrefix = "empty-team:";' in app_lanes
+    assert "function ensureEmptyTeamLane(team)" in app_shell
+    assert "const targetId = emptyTeamTargetId(team.teamId);" in app_lanes
+    assert "ensureEmptyTeamLane(team);" in app_lanes
+    assert "if (!targetById.has(lane.targetId) && !lane.emptyTeam)" in app_lanes
+    assert "if (lane.emptyTeam) syncEmptyTeamLane(lane);" in app_lanes
+    assert "function addEmptyTeamLane(team)" in app_shell
+    assert (
+        'element.className = emptyTeam ? "lane lane--empty-team" : "lane";' in app_shell
+    )
+    assert "function emptyTeamImportPanel(lane)" in app_shell
+    assert "function emptyTeamImportChoice(lane, target)" in app_shell
+    assert 'const button = targetChoiceButton(\n    target,\n    "Import",' in app_shell
+    assert '    "",\n  );' in app_shell
+    assert "button.dataset.emptyTeamImportTargetId = target.id;" in app_shell
+    assert 'teamCommandPayload("moveAgentToTeam", {' in app_shell
+    assert "agentAliases: emptyTeamImportAliases(target)," in app_shell
+    assert "if (lane.emptyTeam) return;" in app_stream
+    assert (
+        "if (isLaneOpen(lane) && !lane.emptyTeam) subscribeLaneToLiveBus(lane);"
+        in app_stream
+    )
+    assert "if (lane.emptyTeam) {\n    syncEmptyTeamLane(lane);" in app_groups
+    assert ".lane--empty-team .composer-controls" in css
+    assert "display: none;" in css
+    assert ".empty-team-importer" in css
+    assert ".empty-team-import-list" in css
 
 
 def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
@@ -674,6 +877,26 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
             {"limit": 9, "before": "oldest", "expected_thread_id": "thread"},
         ),
     ]
+
+
+def test_index_links_and_serves_packaged_favicon():
+    html = render_index_html()
+    favicon = STATIC_ROOT / "favicon.ico"
+    handler = _StaticHandler()
+
+    send_static_asset(handler, "favicon.ico")
+
+    assert '<link rel="icon" href="/static/favicon.ico" sizes="any">' in html
+    assert html.index("/static/index.css") < html.index("/static/composer.css")
+    assert html.index("/static/composer.css") < html.index("/static/messages.css")
+    assert html.index("/static/messages.css") < html.index("/static/status-colors.css")
+    assert html.index("/static/app.shell.js") < html.index("/static/app.composer.js")
+    assert html.index("/static/app.composer.js") < html.index("/static/app.controls.js")
+    assert favicon.is_file()
+    assert handler.status == HTTPStatus.OK
+    assert handler.headers["Content-Length"] == str(favicon.stat().st_size)
+    assert "icon" in handler.headers["Content-Type"]
+    assert handler.body.getvalue().startswith(b"\x00\x00\x01\x00")
 
 
 def _repo(tmp_path: Path) -> Path:

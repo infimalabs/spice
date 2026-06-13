@@ -125,6 +125,10 @@ function laneMemberTargetLabel(member) {
 
 function syncFusedLaneChrome(lane) {
   if (!lane || isShadowLane(lane)) return;
+  if (lane.emptyTeam) {
+    syncEmptyTeamLane(lane);
+    return;
+  }
   const members = laneGroupMemberLanes(lane);
   const fused = members.length > 1;
   syncLaneLights(lane, fused ? members : []);
