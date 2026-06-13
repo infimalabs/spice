@@ -492,6 +492,10 @@ button.primary:hover {
   text-underline-offset: 2px;
   white-space: pre;
 }
+.composer-latest-time--empty {
+  color: var(--muted);
+  text-decoration: none;
+}
 .composer-band-menu-button {
   align-items: center;
   background: color-mix(in srgb, var(--control) 92%, var(--bg));
