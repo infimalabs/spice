@@ -59,6 +59,7 @@ const laneTemplate =
   "</div>";
 
 const laneViewGlyphs = { compose: "✎", filters: "❒", metrics: "▦", info: "ⓘ" };
+let composerBandMenuDismissHandler = null;
 
 function createLaneState(targetId, hint = null) {
   const target = targetById.get(targetId) || {};
@@ -1166,6 +1167,7 @@ function toggleComposerBandMenu(trigger, actions) {
   const band = trigger.closest(".composer-band");
   if (!band) return;
   const open = trigger.getAttribute("aria-expanded") === "true";
+  closeComposerBandMenusExcept(band);
   closeComposerBandMenu(band);
   if (open) return;
   const menu = document.createElement("div");
@@ -1194,6 +1196,7 @@ function toggleComposerBandMenu(trigger, actions) {
   band.insertBefore(menu, textarea || null);
   band.classList.add("composer-band--menu-open");
   trigger.setAttribute("aria-expanded", "true");
+  syncComposerBandMenuDismissHandler();
 }
 
 function closeComposerBandMenu(band) {
@@ -1201,6 +1204,41 @@ function closeComposerBandMenu(band) {
   band.classList.remove("composer-band--menu-open");
   const trigger = band.querySelector(".composer-band-menu-button");
   if (trigger) trigger.setAttribute("aria-expanded", "false");
+  syncComposerBandMenuDismissHandler();
+}
+
+function closeComposerBandMenusExcept(exceptBand) {
+  for (const band of document.querySelectorAll(".composer-band--menu-open")) {
+    if (band !== exceptBand) closeComposerBandMenu(band);
+  }
+  syncComposerBandMenuDismissHandler();
+}
+
+function syncComposerBandMenuDismissHandler() {
+  const hasOpenMenu = document.querySelector(".composer-band--menu-open");
+  if (hasOpenMenu && !composerBandMenuDismissHandler) {
+    composerBandMenuDismissHandler = dismissComposerBandMenusOnPointerDown;
+    document.addEventListener("pointerdown", composerBandMenuDismissHandler, true);
+  } else if (!hasOpenMenu && composerBandMenuDismissHandler) {
+    document.removeEventListener(
+      "pointerdown",
+      composerBandMenuDismissHandler,
+      true,
+    );
+    composerBandMenuDismissHandler = null;
+  }
+}
+
+function dismissComposerBandMenusOnPointerDown(event) {
+  const target = event.target;
+  if (!(target instanceof Node)) return;
+  for (const band of document.querySelectorAll(".composer-band--menu-open")) {
+    const menu = band.querySelector(".composer-band-menu");
+    const trigger = band.querySelector(".composer-band-menu-button");
+    if (menu?.contains(target) || trigger?.contains(target)) continue;
+    closeComposerBandMenu(band);
+  }
+  syncComposerBandMenuDismissHandler();
 }
 
 function syncComposerBandMenuState(band) {
@@ -1210,6 +1248,7 @@ function syncComposerBandMenuState(band) {
   band.classList.toggle("composer-band--menu-open", open);
   const trigger = band.querySelector(".composer-band-menu-button");
   if (trigger) trigger.setAttribute("aria-expanded", open ? "true" : "false");
+  syncComposerBandMenuDismissHandler();
 }
 
 function composerQuoteBand(lane, targetId, draft) {
