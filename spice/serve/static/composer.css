@@ -95,6 +95,7 @@
 }
 .composer-quote-stack { display: contents; }
 .composer-band {
+  --composer-header-accent: var(--border-soft);
   background: var(--control);
   border: 1px solid var(--border-soft);
   border-radius: 7px;
@@ -133,6 +134,8 @@
 }
 .composer-band-header {
   align-items: center;
+  border-bottom: 2px solid
+    color-mix(in srgb, var(--composer-header-accent) 64%, var(--border-soft));
   color: var(--fg);
   display: grid;
   gap: 6px;
@@ -248,7 +251,6 @@
 .composer-shard textarea {
   background: var(--control);
   border: 0;
-  border-top: 1px solid var(--border-soft);
   border-radius: 0;
   color: var(--fg);
   flex: 1;
@@ -258,10 +260,6 @@
   padding: 7px 9px;
   resize: none;
   width: 100%;
-}
-.composer-band--primary textarea,
-.composer-band--quote textarea {
-  border-top-color: var(--accent);
 }
 .composer-attachments {
   align-items: center;
