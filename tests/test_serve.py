@@ -966,6 +966,24 @@ def test_static_composer_menu_replaces_header_remove_control():
     assert "agentIds: [laneTeamAgentId(member)]," in app_groups
 
 
+def test_static_composer_header_drag_suppresses_browser_selection():
+    app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
+
+    pointer_start = app_groups.index(
+        'handle.addEventListener("pointerdown", (event) => {'
+    )
+    pointer_end = app_groups.index(
+        'handle.addEventListener("pointermove", (event) => {', pointer_start
+    )
+    pointer_block = app_groups[pointer_start:pointer_end]
+
+    assert (
+        "event.preventDefault();\n"
+        "    beginComposerMoveDrag(host, targetId, event, handle);"
+    ) in pointer_block
+    assert "handle.setPointerCapture(event.pointerId);" in pointer_block
+
+
 def test_static_relative_times_are_monospace_and_padded():
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
