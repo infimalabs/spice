@@ -733,27 +733,41 @@ function composerPrimaryBandHeader(lane, member) {
   const header = composerBandHeader({
     className: "composer-band-header--primary",
     title: label,
-    menuTitle: "Composer actions for " + label,
-    menuLabel: "Composer actions for " + label,
-    menuActions: [
-      {
-        label: "Leave all teams",
-        detail: "Remove " + label + " from all teams",
-        onClick: () => removeComposerAgentFromTeam(lane, member.targetId),
-      },
-      {
-        label: "Create new team",
-        detail: "Move only " + label + " to a new team",
-        disabled: laneGroupMemberLanes(laneGroupHost(lane)).length < 2,
-        onClick: () => splitComposerAgentFromTeam(lane, member.targetId),
-      },
-    ],
     beforeMenu: composerPrimaryHeaderBeforeMenu(member),
+    trailingControl: composerBandMenuTrigger(
+      "Composer actions for " + label,
+      "Composer actions for " + label,
+      composerPrimaryMenuActions(lane, member, label),
+    ),
   });
   header.title = "Drag composer to move this agent to another lane";
   if (typeof wireComposerMoveDrag === "function")
     wireComposerMoveDrag(lane, header, member.targetId);
   return header;
+}
+
+function composerPrimaryMenuActions(lane, member, label) {
+  const leave = composerBandMenuAction(
+    "Leave all teams",
+    "Remove " + label + " from all teams",
+  );
+  leave.onClick = () => removeComposerAgentFromTeam(lane, member.targetId);
+
+  const create = composerBandMenuAction(
+    "Create new team",
+    "Move only " + label + " to a new team",
+  );
+  create.disabled = laneGroupMemberLanes(laneGroupHost(lane)).length < 2;
+  create.onClick = () => splitComposerAgentFromTeam(lane, member.targetId);
+
+  return [leave, create];
+}
+
+function composerBandMenuAction(label, detail) {
+  const action = {};
+  action.label = label;
+  action.detail = detail;
+  return action;
 }
 
 function composerPrimaryHeaderBeforeMenu(member) {
@@ -1169,10 +1183,8 @@ function composerQuoteDraftsForTarget(lane, targetId) {
 function composerBandHeader({
   className,
   title,
-  menuTitle,
-  menuLabel,
-  menuActions,
   beforeMenu = [],
+  trailingControl = null,
 }) {
   const header = document.createElement("div");
   header.className = "composer-band-header " + className;
@@ -1182,6 +1194,12 @@ function composerBandHeader({
   label.className = "composer-band-title";
   label.textContent = title;
   body.append(label);
+  header.append(...beforeMenu, body);
+  if (trailingControl) header.append(trailingControl);
+  return header;
+}
+
+function composerBandMenuTrigger(menuTitle, menuLabel, menuActions) {
   const trigger = document.createElement("button");
   trigger.type = "button";
   trigger.className = "composer-band-menu-button";
@@ -1194,8 +1212,21 @@ function composerBandHeader({
     event.stopPropagation();
     toggleComposerBandMenu(trigger, menuActions || []);
   });
-  header.append(...beforeMenu, body, trigger);
-  return header;
+  return trigger;
+}
+
+function composerBandCloseButton(closeTitle, closeLabel, onClose) {
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "composer-band-close-button";
+  close.title = closeTitle;
+  close.setAttribute("aria-label", closeLabel || closeTitle);
+  close.textContent = "×";
+  close.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onClose();
+  });
+  return close;
 }
 
 function toggleComposerBandMenu(trigger, actions) {
@@ -1330,16 +1361,12 @@ function composerQuoteBandHeader(lane, targetId, draft) {
   const header = composerBandHeader({
     className: "composer-band-header--quote",
     title: draft.preview || "quoted message",
-    menuTitle: "Quoted composer actions",
-    menuLabel: "Quoted composer actions",
-    menuActions: [
-      {
-        label: "Remove quote",
-        detail: draft.preview || "quoted message",
-        onClick: () => removeComposerQuoteDraft(lane, targetId, draft.id),
-      },
-    ],
     beforeMenu: [time],
+    trailingControl: composerBandCloseButton(
+      "Remove quote",
+      "Remove quoted composer",
+      () => removeComposerQuoteDraft(lane, targetId, draft.id),
+    ),
   });
   return header;
 }
