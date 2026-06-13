@@ -892,6 +892,9 @@ def test_static_composer_menu_replaces_header_remove_control():
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
+    button_start = css.index(".composer-band-menu-button {")
+    button_end = css.index(".composer-band-menu-button:hover", button_start)
+    button_rule = css[button_start:button_end]
 
     assert 'trigger.className = "composer-band-menu-button";' in app_shell
     assert 'trigger.setAttribute("aria-haspopup", "menu");' in app_shell
@@ -917,6 +920,9 @@ def test_static_composer_menu_replaces_header_remove_control():
     assert 'label: "Create new team",' in app_shell
     assert '"Remove " + label + " from all teams"' in app_shell
     assert '"Move only " + label + " to a new team"' in app_shell
+    assert "border-radius: 50%;" in button_rule
+    assert "height: 22px;" in button_rule
+    assert "width: 22px;" in button_rule
     assert '.composer-band-menu-button[aria-expanded="true"] {' in css
     assert (
         ".composer-band--menu-open textarea,\n.composer-band--menu-open .composer-attachments {"
