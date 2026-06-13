@@ -994,9 +994,12 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
     assert ".composer-latest-time--empty {" in css
     assert "text-decoration: none;" in css
     assert "function latestComposerMessage(member)" in app_shell
+    assert "return member.knownMessages.find(isComposerLatestMessage);" in app_shell
+    assert "function isComposerLatestMessage(item)" in app_shell
+    assert 'return item.kind === "assistant" || item.kind === "final";' in app_shell
     assert (
         "return member.knownMessages.find((item) => !isPresenceMessage(item));"
-        in app_shell
+        not in (app_shell)
     )
     assert 'href: messageKey ? "#" + messageDomId(messageKey) : "",' in app_shell
     assert 'anchor.title = "Jump to quoted message";' in app_shell
