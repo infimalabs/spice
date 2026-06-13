@@ -902,8 +902,10 @@ def test_static_composer_menu_replaces_header_remove_control():
     )
     assert "if (action.detail) button.title = action.detail;" in app_shell
     assert "function syncComposerBandMenuState(band)" in app_shell
-    assert 'label: "Close",' in app_shell
-    assert 'label: "Split out",' in app_shell
+    assert 'label: "Leave all teams",' in app_shell
+    assert 'label: "Create new team",' in app_shell
+    assert '"Remove " + label + " from all teams"' in app_shell
+    assert '"Move only " + label + " to a new team"' in app_shell
     assert '.composer-band-menu-button[aria-expanded="true"] {' in css
     assert (
         ".composer-band--menu-open textarea,\n.composer-band--menu-open .composer-attachments {"

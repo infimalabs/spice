@@ -736,13 +736,13 @@ function composerPrimaryBandHeader(lane, member) {
     menuLabel: "Composer actions for " + label,
     menuActions: [
       {
-        label: "Close",
-        detail: "Remove " + label + " from team",
+        label: "Leave all teams",
+        detail: "Remove " + label + " from all teams",
         onClick: () => removeComposerAgentFromTeam(lane, member.targetId),
       },
       {
-        label: "Split out",
-        detail: "Move only " + label + " to its own lane",
+        label: "Create new team",
+        detail: "Move only " + label + " to a new team",
         disabled: laneGroupMemberLanes(laneGroupHost(lane)).length < 2,
         onClick: () => splitComposerAgentFromTeam(lane, member.targetId),
       },
