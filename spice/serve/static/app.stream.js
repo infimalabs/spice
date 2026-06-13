@@ -372,7 +372,41 @@ function laneMessageAttributionAgentCount(lane) {
 }
 
 function laneShouldAttributeMessages(lane) {
-  return laneMessageAttributionAgentCount(lane) > 1;
+  return (
+    Boolean(laneGroupHost(lane).teamId) ||
+    laneMessageAttributionAgentCount(lane) > 1
+  );
+}
+
+function laneMemberAccentIndex(lane, member) {
+  const host = laneGroupHost(lane);
+  const index = laneGroupMemberTargetIds(host).indexOf(member.targetId);
+  if (index < 0)
+    throw new Error("team slot accent requires a lane group member");
+  return index;
+}
+
+function laneMessageAccentIndex(lane, item) {
+  const host = laneGroupHost(lane);
+  const targetId = laneMessageProducerTargetId(host, item);
+  if (targetId) {
+    const index = laneGroupMemberTargetIds(host).indexOf(targetId);
+    if (index >= 0) return index;
+  }
+  return laneOccupantOrdinal(host, item.threadId);
+}
+
+function laneMessageProducerTargetId(lane, item) {
+  if (item.producerTargetId) return item.producerTargetId;
+  const threadId = item.threadId || "";
+  if (!threadId) return "";
+  const host = laneGroupHost(lane);
+  const member = laneGroupMemberLanes(host).find(
+    (candidate) =>
+      candidate.targetThreadId === threadId ||
+      candidate.activeThreadId === threadId,
+  );
+  return member ? member.targetId : "";
 }
 
 function noteLaneOccupantMessage(lane, threadId) {
@@ -659,11 +693,12 @@ function messageFingerprintParts(lane, item) {
     timestamp: item.timestamp,
     kind: item.kind,
     threadId: item.threadId || "",
-    occupant: laneOccupantOrdinal(lane, item.threadId),
+    accentSlot: laneMessageAccentIndex(lane, item),
     displayHtml: item.display_html,
     displayText: item.display_text,
     ackCount: item.ack_count,
     sayCount: item.say_count,
+    attributed: laneShouldAttributeMessages(lane),
     attributionAgents: laneMessageAttributionAgentCount(lane),
     ackContexts: (item.ack_keys || []).map((key) => {
       const context = ackContextForKey(lane, key);

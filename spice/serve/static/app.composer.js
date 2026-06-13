@@ -72,21 +72,7 @@ function syncComposerBandAccent(band, lane, member) {
 }
 
 function composerMemberAccent(lane, member) {
-  return messageOccupantAccent(composerMemberAccentIndex(lane, member));
-}
-
-function composerMemberAccentIndex(lane, member) {
-  const host = laneGroupHost(lane);
-  if (member.targetThreadId) {
-    const occupant = ensureLaneOccupant(host, member.targetThreadId);
-    if (!occupant)
-      throw new Error("composer header accent requires member targetThreadId");
-    return occupant.ordinal;
-  }
-  const index = laneGroupMemberTargetIds(host).indexOf(member.targetId);
-  if (index < 0)
-    throw new Error("composer header accent requires a lane group member");
-  return index;
+  return messageOccupantAccent(laneMemberAccentIndex(lane, member));
 }
 
 function composerShardQuoteStack(shard, targetId) {

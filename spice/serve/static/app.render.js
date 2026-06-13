@@ -215,12 +215,12 @@ function renderMessage(lane, item) {
   article.dataset.messageKey = item.key;
   article.id = messageDomId(item.key);
   if (item.threadId) article.dataset.threadId = item.threadId;
-  if (item.threadId && laneShouldAttributeMessages(lane)) {
-    const occupant = laneOccupantOrdinal(lane, item.threadId);
-    article.dataset.occupant = String(occupant);
+  if (laneShouldAttributeMessages(lane)) {
+    const accentSlot = laneMessageAccentIndex(lane, item);
+    article.dataset.accentSlot = String(accentSlot);
     article.style.setProperty(
       "--message-occupant-accent",
-      messageOccupantAccent(occupant),
+      messageOccupantAccent(accentSlot),
     );
   }
   if (messageIsCurrentSpeech(lane, item)) article.classList.add("now-playing");
@@ -486,9 +486,9 @@ function renderCompactionDivider(lane, item) {
   const divider = document.createElement("div");
   divider.className = "compaction-divider";
   divider.title = item.timestamp;
-  const occupant = laneOccupantOrdinal(lane, item.threadId);
-  divider.dataset.occupant = String(occupant);
-  divider.style.setProperty("--compaction-accent", messageOccupantAccent(occupant));
+  const accentSlot = laneMessageAccentIndex(lane, item);
+  divider.dataset.accentSlot = String(accentSlot);
+  divider.style.setProperty("--compaction-accent", messageOccupantAccent(accentSlot));
   const time = document.createElement("time");
   time.dateTime = item.timestamp;
   time.dataset.relativeTimestamp = item.timestamp;

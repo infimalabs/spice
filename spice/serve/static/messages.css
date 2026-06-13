@@ -56,7 +56,7 @@
   border-color: color-mix(in srgb, var(--control-state-accent) 70%, var(--border));
   box-shadow: inset 3px 0 0 var(--control-state-accent);
 }
-.messages article[data-occupant] {
+.messages article[data-accent-slot] {
   border-right-color: var(--message-occupant-accent);
   border-right-width: 3px;
   padding-right: 16px;
