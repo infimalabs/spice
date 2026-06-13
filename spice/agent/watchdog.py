@@ -131,12 +131,34 @@ def process_supervised_assistant_message(
 ) -> None:
     archive_ackd_inbox_items_from_assistant_message(repo_root, message_text)
     try:
+        record_supervised_lane_metrics(repo_root)
+    except Exception as exc:  # pragma: no cover - supervisor-visible metric failure
+        log_handle.write(f"spice metrics supervisor error: {exc}\n")
+        log_handle.flush()
+    try:
         publish_maxim_hits_as_inbox(
             repo_root, message_text, reminder_gate=reminder_gate
         )
     except Exception as exc:  # pragma: no cover - defensive supervisor logging
         log_handle.write(f"spice maxim supervisor error: {exc}\n")
         log_handle.flush()
+
+
+def record_supervised_lane_metrics(repo_root: Path) -> None:
+    from spice.agent.lifecycle import agent_status
+    from spice.serve.messages import transcript_path_for_thread
+    from spice.serve.metrics import record_transcript_metrics_for_agent
+    from spice.serve.teams import ServeTeamStore
+
+    agent_id = agent_status(repo_root).thread_id
+    if not agent_id:
+        raise RuntimeError(f"could not resolve supervised agent id for {repo_root}")
+    transcript_path = transcript_path_for_thread(agent_id)
+    if transcript_path is None:
+        raise RuntimeError(f"could not resolve transcript for {agent_id}")
+    record_transcript_metrics_for_agent(
+        ServeTeamStore(), agent_id=agent_id, transcript_path=transcript_path
+    )
 
 
 class AgentStdoutMessageScanner:

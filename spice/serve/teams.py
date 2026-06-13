@@ -17,6 +17,7 @@ import json
 import sqlite3
 import time
 import uuid as uuidlib
+from collections import Counter
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,6 +57,13 @@ CREATE TABLE IF NOT EXISTS memberships (
     joined_at REAL NOT NULL,
     PRIMARY KEY (team_id, agent_id)
 );
+CREATE TABLE IF NOT EXISTS team_agent_history (
+    team_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    first_seen_at REAL NOT NULL,
+    last_seen_at REAL NOT NULL,
+    PRIMARY KEY (team_id, agent_id)
+);
 CREATE TABLE IF NOT EXISTS renewals (
     agent_id TEXT PRIMARY KEY,
     team_id TEXT NOT NULL,
@@ -64,7 +72,44 @@ CREATE TABLE IF NOT EXISTS renewals (
     successor_agent_id TEXT NOT NULL DEFAULT '',
     revision INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_metrics (
+    agent_id TEXT PRIMARY KEY,
+    acked INTEGER NOT NULL DEFAULT 0,
+    sends INTEGER NOT NULL DEFAULT 0,
+    tool_calls INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_metric_buckets (
+    agent_id TEXT NOT NULL,
+    bucket_start INTEGER NOT NULL,
+    messages INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (agent_id, bucket_start)
+);
+CREATE TABLE IF NOT EXISTS team_agent_metrics (
+    team_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    acked INTEGER NOT NULL DEFAULT 0,
+    sends INTEGER NOT NULL DEFAULT 0,
+    tool_calls INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (team_id, agent_id)
+);
+CREATE TABLE IF NOT EXISTS team_agent_metric_buckets (
+    team_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    bucket_start INTEGER NOT NULL,
+    messages INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (team_id, agent_id, bucket_start)
+);
+CREATE TABLE IF NOT EXISTS agent_metric_cursors (
+    agent_id TEXT PRIMARY KEY,
+    source_path TEXT NOT NULL,
+    offset INTEGER NOT NULL,
+    updated_at REAL NOT NULL
+);
 """
+
+METRIC_BUCKET_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -134,6 +179,15 @@ class TeamRenewalState:
     ancestor_thread_id: str
     successor_agent_id: str
     revision: int
+
+
+@dataclass(frozen=True)
+class LaneMetricSummary:
+    agent_ids: tuple[str, ...]
+    acked: int
+    sends: int
+    tool_calls: int
+    sparkline: tuple[int, ...]
 
 
 def team_database_path() -> Path:
@@ -261,6 +315,7 @@ class ServeTeamStore:
             "INSERT INTO memberships (team_id, agent_id, joined_at) VALUES (?, ?, ?)",
             (team_id, agent_id, time.time()),
         )
+        self._note_team_agent_history_locked(connection, team_id, agent_id)
         self._close_empty_teams_locked(
             connection,
             [
@@ -460,6 +515,115 @@ class ServeTeamStore:
             revision=revision,
         )
 
+    # ---- lane metrics --------------------------------------------------
+
+    def record_agent_metric_delta(
+        self,
+        agent_id: str,
+        *,
+        acked: int = 0,
+        sends: int = 0,
+        tool_calls: int = 0,
+        message_timestamps: Iterable[float] = (),
+    ) -> None:
+        agent_id = _normalized_id(agent_id, "agent_id")
+        acked = _nonnegative_int(acked)
+        sends = _nonnegative_int(sends)
+        tool_calls = _nonnegative_int(tool_calls)
+        buckets = Counter(
+            _metric_bucket_start(timestamp) for timestamp in message_timestamps
+        )
+        if acked == sends == tool_calls == 0 and not buckets:
+            return
+        now = time.time()
+        with self.connect() as connection:
+            self._record_agent_metric_delta_locked(
+                connection,
+                agent_id,
+                acked=acked,
+                sends=sends,
+                tool_calls=tool_calls,
+                buckets=buckets,
+                now=now,
+            )
+            row = connection.execute(
+                "SELECT team_id FROM memberships WHERE agent_id = ?", (agent_id,)
+            ).fetchone()
+            if row is not None:
+                self._record_team_agent_metric_delta_locked(
+                    connection,
+                    str(row["team_id"]),
+                    agent_id,
+                    acked=acked,
+                    sends=sends,
+                    tool_calls=tool_calls,
+                    buckets=buckets,
+                    now=now,
+                )
+
+    def agent_metric_cursor(self, agent_id: str, source_path: str) -> int:
+        agent_id = _normalized_id(agent_id, "agent_id")
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT source_path, offset FROM agent_metric_cursors "
+                "WHERE agent_id = ?",
+                (agent_id,),
+            ).fetchone()
+        if row is None or str(row["source_path"]) != source_path:
+            return 0
+        return max(0, int(row["offset"] or 0))
+
+    def record_agent_metric_cursor(
+        self, agent_id: str, *, source_path: str, offset: int
+    ) -> None:
+        agent_id = _normalized_id(agent_id, "agent_id")
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT INTO agent_metric_cursors "
+                "(agent_id, source_path, offset, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(agent_id) DO UPDATE SET "
+                "source_path = excluded.source_path, "
+                "offset = excluded.offset, "
+                "updated_at = excluded.updated_at",
+                (agent_id, source_path, max(0, int(offset)), time.time()),
+            )
+
+    def lane_metric_summary(
+        self,
+        agent_id: str,
+        *,
+        bucket_count: int,
+        bucket_seconds: int = METRIC_BUCKET_SECONDS,
+    ) -> LaneMetricSummary:
+        if not str(agent_id or "").strip():
+            return LaneMetricSummary(
+                agent_ids=(),
+                acked=0,
+                sends=0,
+                tool_calls=0,
+                sparkline=tuple(0 for _ in range(max(0, bucket_count))),
+            )
+        agent_id = _normalized_id(agent_id, "agent_id")
+        bucket_count = max(1, int(bucket_count))
+        bucket_seconds = max(1, int(bucket_seconds))
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT team_id FROM memberships WHERE agent_id = ?", (agent_id,)
+            ).fetchone()
+            if row is not None:
+                return self._team_lane_metric_summary_locked(
+                    connection,
+                    str(row["team_id"]),
+                    bucket_count=bucket_count,
+                    bucket_seconds=bucket_seconds,
+                )
+            return self._agent_lane_metric_summary_locked(
+                connection,
+                (agent_id,),
+                bucket_count=bucket_count,
+                bucket_seconds=bucket_seconds,
+            )
+
     # ---- reads ---------------------------------------------------------
 
     def current_team_for_agent(self, agent_id: str) -> str | None:
@@ -527,6 +691,149 @@ class ServeTeamStore:
             raise SpiceError(f"unknown team: {team_id}")
         return row
 
+    def _note_team_agent_history_locked(
+        self, connection: sqlite3.Connection, team_id: str, agent_id: str
+    ) -> None:
+        now = time.time()
+        connection.execute(
+            "INSERT INTO team_agent_history "
+            "(team_id, agent_id, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(team_id, agent_id) DO UPDATE SET "
+            "last_seen_at = excluded.last_seen_at",
+            (team_id, agent_id, now, now),
+        )
+
+    def _record_agent_metric_delta_locked(
+        self,
+        connection: sqlite3.Connection,
+        agent_id: str,
+        *,
+        acked: int,
+        sends: int,
+        tool_calls: int,
+        buckets: Counter[int],
+        now: float,
+    ) -> None:
+        connection.execute(
+            "INSERT INTO agent_metrics "
+            "(agent_id, acked, sends, tool_calls, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(agent_id) DO UPDATE SET "
+            "acked = agent_metrics.acked + excluded.acked, "
+            "sends = agent_metrics.sends + excluded.sends, "
+            "tool_calls = agent_metrics.tool_calls + excluded.tool_calls, "
+            "updated_at = excluded.updated_at",
+            (agent_id, acked, sends, tool_calls, now),
+        )
+        for bucket_start, count in buckets.items():
+            connection.execute(
+                "INSERT INTO agent_metric_buckets "
+                "(agent_id, bucket_start, messages) VALUES (?, ?, ?) "
+                "ON CONFLICT(agent_id, bucket_start) DO UPDATE SET "
+                "messages = agent_metric_buckets.messages + excluded.messages",
+                (agent_id, bucket_start, int(count)),
+            )
+
+    def _record_team_agent_metric_delta_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_id: str,
+        agent_id: str,
+        *,
+        acked: int,
+        sends: int,
+        tool_calls: int,
+        buckets: Counter[int],
+        now: float,
+    ) -> None:
+        connection.execute(
+            "INSERT INTO team_agent_metrics "
+            "(team_id, agent_id, acked, sends, tool_calls, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(team_id, agent_id) DO UPDATE SET "
+            "acked = team_agent_metrics.acked + excluded.acked, "
+            "sends = team_agent_metrics.sends + excluded.sends, "
+            "tool_calls = team_agent_metrics.tool_calls + excluded.tool_calls, "
+            "updated_at = excluded.updated_at",
+            (team_id, agent_id, acked, sends, tool_calls, now),
+        )
+        for bucket_start, count in buckets.items():
+            connection.execute(
+                "INSERT INTO team_agent_metric_buckets "
+                "(team_id, agent_id, bucket_start, messages) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(team_id, agent_id, bucket_start) DO UPDATE SET "
+                "messages = team_agent_metric_buckets.messages + excluded.messages",
+                (team_id, agent_id, bucket_start, int(count)),
+            )
+
+    def _team_lane_metric_summary_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_id: str,
+        *,
+        bucket_count: int,
+        bucket_seconds: int,
+    ) -> LaneMetricSummary:
+        agent_rows = connection.execute(
+            "SELECT agent_id FROM team_agent_metrics WHERE team_id = ? "
+            "UNION SELECT agent_id FROM memberships WHERE team_id = ? "
+            "ORDER BY agent_id",
+            (team_id, team_id),
+        ).fetchall()
+        agent_ids = tuple(str(row["agent_id"]) for row in agent_rows)
+        totals = connection.execute(
+            "SELECT COALESCE(SUM(acked), 0) AS acked, "
+            "COALESCE(SUM(sends), 0) AS sends, "
+            "COALESCE(SUM(tool_calls), 0) AS tool_calls "
+            "FROM team_agent_metrics WHERE team_id = ?",
+            (team_id,),
+        ).fetchone()
+        bucket_rows = connection.execute(
+            "SELECT bucket_start, SUM(messages) AS messages "
+            "FROM team_agent_metric_buckets WHERE team_id = ? "
+            "GROUP BY bucket_start ORDER BY bucket_start",
+            (team_id,),
+        ).fetchall()
+        return _lane_metric_summary_from_rows(
+            agent_ids,
+            totals,
+            bucket_rows,
+            bucket_count=bucket_count,
+            bucket_seconds=bucket_seconds,
+        )
+
+    def _agent_lane_metric_summary_locked(
+        self,
+        connection: sqlite3.Connection,
+        agent_ids: tuple[str, ...],
+        *,
+        bucket_count: int,
+        bucket_seconds: int,
+    ) -> LaneMetricSummary:
+        placeholders = ",".join("?" for _ in agent_ids)
+        totals = connection.execute(
+            "SELECT COALESCE(SUM(acked), 0) AS acked, "
+            "COALESCE(SUM(sends), 0) AS sends, "
+            "COALESCE(SUM(tool_calls), 0) AS tool_calls "
+            f"FROM agent_metrics WHERE agent_id IN ({placeholders})",
+            agent_ids,
+        ).fetchone()
+        bucket_rows = connection.execute(
+            "SELECT bucket_start, SUM(messages) AS messages "
+            "FROM agent_metric_buckets "
+            f"WHERE agent_id IN ({placeholders}) "
+            "GROUP BY bucket_start ORDER BY bucket_start",
+            agent_ids,
+        ).fetchall()
+        return _lane_metric_summary_from_rows(
+            agent_ids,
+            totals,
+            bucket_rows,
+            bucket_count=bucket_count,
+            bucket_seconds=bucket_seconds,
+        )
+
 
 def _config_from_row(row: sqlite3.Row) -> TeamConfig:
     try:
@@ -551,6 +858,57 @@ def _normalized_id(value: str, field_name: str) -> str:
     if not normalized:
         raise SpiceError(f"{field_name} must be non-empty")
     return normalized
+
+
+def _nonnegative_int(value: int) -> int:
+    return max(0, int(value or 0))
+
+
+def _metric_bucket_start(timestamp: float) -> int:
+    raw = max(0, int(float(timestamp)))
+    return raw - (raw % METRIC_BUCKET_SECONDS)
+
+
+def _metric_sparkline(
+    rows: Iterable[tuple[int, int]],
+    *,
+    bucket_count: int,
+    bucket_seconds: int,
+) -> tuple[int, ...]:
+    values = [0] * bucket_count
+    bucket_rows = [(bucket, count) for bucket, count in rows if count > 0]
+    if not bucket_rows:
+        return tuple(values)
+    latest = max(bucket for bucket, _count in bucket_rows)
+    start = latest - ((bucket_count - 1) * bucket_seconds)
+    for bucket, count in bucket_rows:
+        index = (bucket - start) // bucket_seconds
+        values[max(0, min(index, bucket_count - 1))] += count
+    return tuple(values)
+
+
+def _lane_metric_summary_from_rows(
+    agent_ids: tuple[str, ...],
+    totals: sqlite3.Row | None,
+    bucket_rows: Iterable[sqlite3.Row],
+    *,
+    bucket_count: int,
+    bucket_seconds: int,
+) -> LaneMetricSummary:
+    return LaneMetricSummary(
+        agent_ids=agent_ids,
+        acked=int(totals["acked"] or 0) if totals else 0,
+        sends=int(totals["sends"] or 0) if totals else 0,
+        tool_calls=int(totals["tool_calls"] or 0) if totals else 0,
+        sparkline=_metric_sparkline(
+            (
+                (int(row["bucket_start"]), int(row["messages"] or 0))
+                for row in bucket_rows
+            ),
+            bucket_count=bucket_count,
+            bucket_seconds=bucket_seconds,
+        ),
+    )
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,41 @@
 from spice.serve.teams import ServeTeamStore, TeamCommandService
 
 
+def test_lane_metrics_aggregate_removed_lifetime_team_members(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(members=["agent-a"])
+    store.record_agent_metric_delta("agent-a", acked=1, sends=2, tool_calls=3)
+    store.assign_agent(team.team_id, "agent-b")
+    store.record_agent_metric_delta("agent-b", acked=4, sends=5, tool_calls=6)
+    store.remove_agent(team.team_id, "agent-a")
+
+    summary = store.lane_metric_summary("agent-b", bucket_count=12)
+
+    assert summary.agent_ids == ("agent-a", "agent-b")
+    assert summary.acked == 5
+    assert summary.sends == 7
+    assert summary.tool_calls == 9
+
+
+def test_lane_metrics_do_not_pull_prior_team_counts_after_agent_moves(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    source = store.create_team(members=["agent-a"])
+    destination = store.create_team(members=["agent-b"])
+    store.record_agent_metric_delta("agent-a", acked=10, sends=10, tool_calls=10)
+
+    store.assign_agent(destination.team_id, "agent-a")
+    store.record_agent_metric_delta("agent-a", acked=1, sends=2, tool_calls=3)
+
+    destination_summary = store.lane_metric_summary("agent-b", bucket_count=12)
+    moved_summary = store.lane_metric_summary("agent-a", bucket_count=12)
+
+    assert store.team_state(source.team_id).status == "closed"
+    assert destination_summary.acked == 1
+    assert moved_summary.acked == 1
+    assert moved_summary.sends == 2
+    assert moved_summary.tool_calls == 3
+
+
 def test_assigning_agent_to_new_team_moves_single_open_membership(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     source = store.create_team(members=["agent-a"])

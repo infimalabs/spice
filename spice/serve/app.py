@@ -115,10 +115,12 @@ class ServeState:
         with self.cache_lock:
             self.cached_targets = None
 
-    def record_lane_send(self, target_id: str) -> None:
+    def record_lane_send(self, target_id: str, *, agent_id: str = "") -> None:
         with self.cache_lock:
             count = self.lane_send_counts.get(target_id, 0)
             self.lane_send_counts[target_id] = count + 1
+        if agent_id:
+            self.team_store.record_agent_metric_delta(agent_id, sends=1)
 
     def lane_send_count(self, target_id: str) -> int:
         with self.cache_lock:
@@ -248,7 +250,6 @@ def work_tree_send_response_payload(
         )
     except (RuntimeError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}, steering_submit_error_status(exc)
-    state.record_lane_send(target.id)
     response_payload = sent_steering_response_payload(
         sent,
         state=state,
@@ -257,8 +258,17 @@ def work_tree_send_response_payload(
         force_new=force_new,
     )
     agent_ensure = response_payload.get("agentEnsure")
+    ensured_thread_id = (
+        str(agent_ensure.get("threadId") or "").strip()
+        if isinstance(agent_ensure, dict)
+        else ""
+    )
+    send_agent_id = (
+        ensured_thread_id or payloads.resolve_thread_id_for_target(state, target) or ""
+    )
+    state.record_lane_send(target.id, agent_id=send_agent_id)
     if renew_intent and force_new and isinstance(agent_ensure, dict):
-        successor = str(agent_ensure.get("threadId") or "").strip()
+        successor = ensured_thread_id
         if successor:
             try:
                 state.team_store.record_started_renewal(
@@ -415,6 +425,7 @@ def lane_signature_for_target(
             tuple(team_facts.get("taskFilters", [])),
             team_facts.get("lifetime", ""),
         ),
+        _path_signature(state.team_store.path),
     )
 
 

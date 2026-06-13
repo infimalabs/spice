@@ -174,6 +174,29 @@ def read_assistant_messages(
     )
 
 
+def read_metric_messages_from_offset(
+    transcript_path: Path,
+    *,
+    start_offset: int,
+    worktree_id: str | None = None,
+) -> tuple[list[AssistantMessage], int]:
+    """Read metric-relevant transcript records from a byte offset to EOF."""
+    messages: list[AssistantMessage] = []
+    file_size = transcript_path.stat().st_size
+    if file_size < start_offset:
+        start_offset = 0
+    with transcript_path.open(encoding="utf-8", errors="replace") as handle:
+        handle.seek(start_offset)
+        while True:
+            line_offset = handle.tell()
+            line = handle.readline()
+            if not line:
+                return messages, handle.tell()
+            message = _build_message(line_offset, line, worktree_id=worktree_id)
+            if message is not None:
+                messages.append(message)
+
+
 def _read_locked(
     transcript_path: Path,
     *,
