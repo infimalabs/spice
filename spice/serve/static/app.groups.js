@@ -359,6 +359,7 @@ function wireComposerMoveDrag(host, handle, targetId) {
   handle.addEventListener("pointerdown", (event) => {
     if (event.target.closest("button, a")) return;
     if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
     beginComposerMoveDrag(host, targetId, event, handle);
     handle.setPointerCapture(event.pointerId);
   });
