@@ -15,7 +15,6 @@ from spice.tasks import config as task_config
 AGENT_A = "agent-a"
 ANCESTOR_THREAD = "ancestor-thread-a"
 EXIT_OK = 0
-EMPTY_REVISION = 0
 TASK_FILTERS = ("serve.ui", "task.review")
 TEAM_ID = "team-main"
 
@@ -67,14 +66,36 @@ def test_empty_team_diagnostics_have_stable_sections(tmp_path):
 
     payload = team_diagnostics_payload(store=store)
     text = render_team_diagnostics(payload)
+    team = payload["teams"][0]
 
-    assert payload["globalRevision"] == EMPTY_REVISION
-    assert payload["events"] == []
+    assert payload["globalRevision"] == 1
+    assert len(payload["events"]) == 1
+    assert payload["events"][0]["kind"] == "createTeam"
+    assert payload["events"][0]["payload"] == {"members": []}
+    assert len(payload["teams"]) == 1
+    assert team["status"] == "open"
+    assert team["members"] == []
+    assert payload["members"] == []
     assert payload["effectiveRoutes"] == []
-    assert "events:\n  (none)" in text
-    assert "teams:\n  (none)" in text
+    assert payload["taskDrainFilters"] == [
+        {
+            "teamId": team["teamId"],
+            "lifetime": "Steer",
+            "taskFilters": [],
+            "filterTerms": [],
+            "filterArgs": [],
+            "applies": False,
+        }
+    ]
+    assert payload["renewals"] == []
+    assert "events:\n  revision=1 kind=createTeam team=" in text
+    assert 'payload={"members": []}' in text
+    assert "teams:\n  team " in text
+    assert " status=open " in text
+    assert "members:\n  (none)" in text
     assert "effective routes:\n  (none)" in text
-    assert "taskdrain filters:\n  (none)" in text
+    assert "taskdrain team=" in text
+    assert " lifetime=Steer applies=no " in text
     assert "renewals:\n  (none)" in text
 
 
@@ -89,7 +110,9 @@ def test_serve_teams_cli_json_uses_task_backend(tmp_path, capsys):
 
     assert result == EXIT_OK
     assert data["storePath"] == str(backend / TEAM_DATABASE_FILENAME)
-    assert data["globalRevision"] == EMPTY_REVISION
+    assert data["globalRevision"] == 1
+    assert len(data["teams"]) == 1
+    assert data["teams"][0]["members"] == []
 
 
 def test_serve_teams_parser_dispatches_json_subcommand(tmp_path):
