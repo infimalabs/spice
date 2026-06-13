@@ -211,7 +211,6 @@ function renderMessage(lane, item) {
   if (item.ack_count) article.classList.add("acked");
   if (item.say_count) article.classList.add("said");
   if (item.kind === "final") article.classList.add("final");
-  if (item.kind === "operator") article.classList.add("operator");
   if (item.image_only) article.classList.add("image-only");
   article.dataset.messageKey = item.key;
   article.id = messageDomId(item.key);
@@ -241,12 +240,6 @@ function messageDomId(key) {
 
 function renderMessageContent(lane, item) {
   const frag = document.createDocumentFragment();
-  if (item.kind === "operator") {
-    frag.append(makeMessageBody(item.display_html, item.display_text || item.text));
-    const attachments = renderAckAttachments(item.attachments || []);
-    if (attachments) frag.append(attachments);
-    return frag;
-  }
   const segments = item.ack_segments || [];
   if (!segments.length) {
     frag.append(
@@ -360,12 +353,6 @@ function renderMessageAgentName(item) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "message-agent-name";
-  if (item.kind === "operator") {
-    button.textContent = "Operator";
-    button.title = "Operator request";
-    button.disabled = true;
-    return button;
-  }
   const name = agentNameForThread(threadId) || "Agent";
   button.textContent = name;
   if (!threadId) {
@@ -476,8 +463,7 @@ function renderBadges(ackCount, sayCount, kind, maximAckCount) {
     !maximAckCount &&
     !visibleAckCount &&
     !sayCount &&
-    kind !== "final" &&
-    kind !== "operator"
+    kind !== "final"
   )
     return null;
   const badges = document.createElement("div");
@@ -490,7 +476,6 @@ function renderBadges(ackCount, sayCount, kind, maximAckCount) {
   };
   if (maximAckCount) add("MAXIM", "maxim-badge");
   if (kind === "final") add("FINAL", "final-badge");
-  if (kind === "operator") add("REQUEST", "operator-badge");
   if (visibleAckCount)
     add(visibleAckCount + "\u00a0ACK" + (visibleAckCount === 1 ? "" : "s"));
   if (sayCount) add(sayCount + " SAY" + (sayCount === 1 ? "" : "s"), "say-badge");

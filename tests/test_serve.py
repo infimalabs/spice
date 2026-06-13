@@ -1129,20 +1129,22 @@ def test_static_message_speech_routes_to_producer_lane():
     assert "await playSpeech(entry.targetLane, text);" in app_audio
 
 
-def test_static_operator_requests_merge_and_render_as_stream_items():
+def test_static_operator_request_stream_cards_are_removed():
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
 
-    assert "function mergeOperatorRequests(lane, payload)" in app_stream
-    assert "for (const item of payload.operatorRequests || [])" in app_stream
-    assert 'if (item.kind === "operator") return;' in app_stream
-    assert 'if (item.kind === "operator") article.classList.add("operator");' in (
+    assert "function mergeOperatorRequests(lane, payload)" not in app_stream
+    assert "payload.operatorRequests" not in app_stream
+    assert 'if (item.kind === "operator") return;' not in app_stream
+    assert 'if (item.kind === "operator") article.classList.add("operator");' not in (
         app_render
     )
-    assert 'button.textContent = "Operator";' in app_render
-    assert 'if (kind === "operator") add("REQUEST", "operator-badge");' in app_render
-    assert ".messages article.operator" in css
+    assert 'button.textContent = "Operator";' not in app_render
+    assert 'if (kind === "operator") add("REQUEST", "operator-badge");' not in (
+        app_render
+    )
+    assert ".messages article.operator" not in css
 
 
 def test_static_manual_speech_playback_aborts_active_entry():
