@@ -434,11 +434,12 @@ function positionSpiceMenu() {
   spiceMenuEl.style.width = width + "px";
   spiceMenuEl.style.left = left + "px";
   spiceMenuEl.style.top = top + "px";
-  spiceMenuEl.style.height = height + "px";
+  spiceMenuEl.style.height = visibleLane ? height + "px" : "";
   spiceMenuEl.style.maxHeight = height + "px";
 }
 
 function spiceMenuWidth(visibleLane, laneLeft, laneWidth, margin) {
+  if (!visibleLane && spiceMenuUsesViewportWidth()) return window.innerWidth;
   const availableWidth = visibleLane
     ? Math.max(1, window.innerWidth - laneLeft - margin)
     : Math.max(1, window.innerWidth - margin * 2);
@@ -450,11 +451,16 @@ function spiceMenuWidth(visibleLane, laneLeft, laneWidth, margin) {
 
 function spiceMenuLeft(visibleLane, laneLeft, width, margin) {
   if (visibleLane) return laneLeft;
+  if (spiceMenuUsesViewportWidth()) return 0;
   const buttonRect = openLaneButton.getBoundingClientRect();
   return Math.max(
     margin,
     Math.min(buttonRect.right - width, window.innerWidth - width - margin),
   );
+}
+
+function spiceMenuUsesViewportWidth() {
+  return window.matchMedia("(max-width: 720px)").matches;
 }
 
 function spiceMenuMinimumLaneWidthPx() {
