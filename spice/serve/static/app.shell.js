@@ -785,7 +785,11 @@ function composerPrimaryLatestMessageNote() {
 }
 
 function latestComposerMessage(member) {
-  return member.knownMessages.find((item) => !isPresenceMessage(item));
+  return member.knownMessages.find(isComposerLatestMessage);
+}
+
+function isComposerLatestMessage(item) {
+  return item.kind === "assistant" || item.kind === "final";
 }
 
 function createComposerPrimaryTextarea(lane, targetId) {
