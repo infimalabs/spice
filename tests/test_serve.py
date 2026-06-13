@@ -901,6 +901,17 @@ def test_static_composer_menu_replaces_header_remove_control():
         'button.className = "composer-band-menu-action spice-menu-action";' in app_shell
     )
     assert "if (action.detail) button.title = action.detail;" in app_shell
+    assert "let composerBandMenuDismissHandler = null;" in app_shell
+    assert "closeComposerBandMenusExcept(band);" in app_shell
+    assert (
+        'document.addEventListener("pointerdown", composerBandMenuDismissHandler, true);'
+        in app_shell
+    )
+    assert "function dismissComposerBandMenusOnPointerDown(event)" in app_shell
+    assert (
+        "if (menu?.contains(target) || trigger?.contains(target)) continue;"
+        in app_shell
+    )
     assert "function syncComposerBandMenuState(band)" in app_shell
     assert 'label: "Close",' in app_shell
     assert 'label: "Split out",' in app_shell
