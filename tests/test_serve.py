@@ -248,6 +248,7 @@ def test_static_spice_menu_replaces_picker_lane():
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
 
     assert "let spiceMenuEl = null;" in app_js
+    assert 'let spiceMenuDragTargetId = "";' in app_js
     assert "let fastModeEnabled = false;" in app_js
     assert "function openSpiceMenu()" in app_lanes
     assert "function laneStateTargetIds()" in app_lanes
@@ -266,6 +267,9 @@ def test_static_spice_menu_replaces_picker_lane():
     assert "function spiceMenuTeamGroups(choices)" in app_lanes
     assert "function renderSpiceMenuTeamGroup(group)" in app_lanes
     assert "function spiceMenuTeamDetail(group)" in app_lanes
+    assert "function wireSpiceMenuTargetDrag(button, target)" in app_lanes
+    assert "function wireSpiceMenuTeamDropTarget(container, group)" in app_lanes
+    assert "function moveTargetToMenuTeam(teamId, targetId)" in app_lanes
     assert "const laneGrid = lanesEl.getBoundingClientRect();" in app_lanes
     assert "const visibleLane = visibleLaneElements()[0] || null;" in app_lanes
     assert "spiceMenuMinimumLaneWidthPx()" in app_lanes
@@ -306,6 +310,21 @@ def test_static_spice_menu_replaces_picker_lane():
         'else if (group && !group.unassigned) actionLabel = "Open team";' in app_lanes
     )
     assert 'button.classList.toggle("target-choice--open", alreadyOpen);' in app_lanes
+    assert "wireSpiceMenuTargetDrag(button, target);" in app_lanes
+    assert "button.draggable = true;" in app_lanes
+    assert 'event.dataTransfer.effectAllowed = "move";' in app_lanes
+    assert (
+        'event.dataTransfer.setData("application/x-spice-target-id", target.id);'
+        in app_lanes
+    )
+    assert "container.dataset.spiceMenuTeamId = group.teamId;" in app_lanes
+    assert 'container.classList.add("spice-menu-team--drop-ready");' in app_lanes
+    assert 'teamCommandPayload("moveAgentToTeam", {' in app_lanes
+    assert "agentId: targetTeamAgentId(target)," in app_lanes
+    assert "agentAliases: targetTeamAgentAliases(target)," in app_lanes
+    assert "await refreshServerTopology();" in app_lanes
+    assert 'setGlobalTransientStatus("team updated");' in app_lanes
+    assert 'setGlobalTransientStatus("move to team failed");' in app_lanes
     assert 'if (laneStates.has(target.id)) parts.push("open");' in app_lanes
     assert 'setGlobalTransientStatus("open team failed");' in app_lanes
     assert (
@@ -319,9 +338,13 @@ def test_static_spice_menu_replaces_picker_lane():
     assert ".spice-context-menu" in css
     assert ".spice-menu-team {" in css
     assert ".spice-menu-team--unassigned {" in css
+    assert ".spice-menu-team--drop-ready {" in css
     assert ".spice-menu-team-header {" in css
     assert ".spice-menu-team-targets {" in css
     assert ".target-choice--open {" in css
+    assert ".target-choice--draggable" in css
+    assert ".target-choice--dragging {" in css
+    assert ".target-choice-drag-affordance {" in css
     assert '.spice-menu-action[aria-checked="true"]' in css
     assert ".picker" not in css
 
