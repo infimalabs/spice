@@ -36,6 +36,11 @@ def policy_table(repo_root: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def maxims_table(repo_root: Path) -> dict[str, Any]:
+    value = read_tool_table(repo_root).get("maxims")
+    return value if isinstance(value, dict) else {}
+
+
 def tasks_table(repo_root: Path) -> dict[str, Any]:
     value = read_tool_table(repo_root).get("tasks")
     return value if isinstance(value, dict) else {}

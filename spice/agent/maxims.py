@@ -14,12 +14,16 @@ import random
 import re
 import string
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from spice.config import configured_judge_bin
 from spice.errors import SpiceError
+from spice.paths import repo_root_from_cwd
+from spice.repocfg import maxims_table, string_list
 
 DEFAULT_MAX_ATTEMPTS = 2
 PARALLEL_MAXIM_JUDGES = 2
@@ -39,76 +43,193 @@ DEFAULT_PROMPT_TEMPLATE = "\n".join(DEFAULT_PROMPT_LINES) + "\n"
 JudgeBackend = Callable[[str], str]
 SubprocessRunner = Callable[..., "subprocess.CompletedProcess[str]"]
 
-# Built-in maxims keyed by a *bag* of high-signal words that should each
-# trigger the maxim. Bags declare every supported spelling explicitly; the hot
-# path only tokenizes prose and intersects observed words with the registered
-# key set. Each value is a standalone maxim meant to be fed verbatim into a
-# verdict, e.g. ``spice maxim agree "$(spice maxim show fallback)" "<text>"``.
-BUILTIN_MAXIMS: dict[frozenset[str], str] = {
-    frozenset(
-        {
-            "delay",
-            "delayed",
-            "delaying",
-            "delays",
-            "poll",
-            "polled",
-            "polling",
-            "polls",
-            "sleep",
-            "sleeping",
-            "sleeps",
-            "slept",
-        }
-    ): (
-        "DO NOT add polling, busy-waits, or retry loops to paper over timing; "
-        "react to the real signal or restructure the flow so the wait is "
-        "unnecessary."
+
+@dataclass(frozen=True)
+class MaximBag:
+    name: str
+    words: frozenset[str]
+    message: str
+
+
+# Built-in maxims keyed by a stable bag name. Bags declare every supported
+# spelling explicitly; the hot path only tokenizes prose and intersects
+# observed words with the registered key set. Each message is fed verbatim into
+# a verdict, e.g. ``spice maxim agree "$(spice maxim show fallback)" "<text>"``.
+BUILTIN_MAXIM_BAGS: dict[str, MaximBag] = {
+    "polling": MaximBag(
+        name="polling",
+        words=frozenset(
+            {
+                "delay",
+                "delayed",
+                "delaying",
+                "delays",
+                "poll",
+                "polled",
+                "polling",
+                "polls",
+                "sleep",
+                "sleeping",
+                "sleeps",
+                "slept",
+            }
+        ),
+        message=(
+            "DO NOT add polling, busy-waits, or retry loops to paper over timing; "
+            "react to the real signal or restructure the flow so the wait is "
+            "unnecessary."
+        ),
     ),
-    frozenset({"fallback", "fallbacks", "option", "optional", "options"}): (
-        "DO NOT add fallbacks or defensive secondary paths; commit to the one "
-        "correct path and let it fail loudly when its assumptions break."
+    "fallbacks": MaximBag(
+        name="fallbacks",
+        words=frozenset({"fallback", "fallbacks", "option", "optional", "options"}),
+        message=(
+            "DO NOT add fallbacks or defensive secondary paths; commit to the one "
+            "correct path and let it fail loudly when its assumptions break."
+        ),
     ),
-    frozenset({"mode", "modes"}): (
-        "DO NOT add modes that split behavior into broad parallel paths; model "
-        "the concrete state, capability, or intent and update callers to one "
-        "explicit contract."
+    "modes": MaximBag(
+        name="modes",
+        words=frozenset({"mode", "modes"}),
+        message=(
+            "DO NOT add modes that split behavior into broad parallel paths; model "
+            "the concrete state, capability, or intent and update callers to one "
+            "explicit contract."
+        ),
     ),
-    frozenset({"compatibilities", "compatibility", "compatible"}): (
-        "DO NOT preserve backwards compatibility; this is unreleased software, "
-        "so move to the latest thinking and update every caller instead of "
-        "carrying the old contract forward."
+    "backwards-compat": MaximBag(
+        name="backwards-compat",
+        words=frozenset({"compatibilities", "compatibility", "compatible"}),
+        message=(
+            "DO NOT preserve backwards compatibility; this is unreleased software, "
+            "so move to the latest thinking and update every caller instead of "
+            "carrying the old contract forward."
+        ),
     ),
-    frozenset(
-        {
-            "shim",
-            "shimmed",
-            "shimming",
-            "shims",
-        }
-    ): (
-        "DO NOT add shims, adapters, or bridges between an old shape and a new "
-        "one; replace the old shape outright and delete it."
+    "shims": MaximBag(
+        name="shims",
+        words=frozenset(
+            {
+                "shim",
+                "shimmed",
+                "shimming",
+                "shims",
+            }
+        ),
+        message=(
+            "DO NOT add shims, adapters, or bridges between an old shape and a new "
+            "one; replace the old shape outright and delete it."
+        ),
     ),
-    frozenset({"alias", "aliased", "aliases", "aliasing"}): (
-        "DO NOT add aliases that keep an old name alongside a new one; rename "
-        "in place and update every reference so only one name survives."
+    "aliases": MaximBag(
+        name="aliases",
+        words=frozenset({"alias", "aliased", "aliases", "aliasing"}),
+        message=(
+            "DO NOT add aliases that keep an old name alongside a new one; rename "
+            "in place and update every reference so only one name survives."
+        ),
     ),
-    frozenset({"legacy", "legacies"}): (
-        "DO NOT retain legacy code, dead branches, or commented-out history; "
-        "delete it and update to the latest thinking."
+    "legacy": MaximBag(
+        name="legacy",
+        words=frozenset({"legacy", "legacies"}),
+        message=(
+            "DO NOT retain legacy code, dead branches, or commented-out history; "
+            "delete it and update to the latest thinking."
+        ),
     ),
 }
 
+BUILTIN_MAXIMS: dict[frozenset[str], str] = {
+    bag.words: bag.message for bag in BUILTIN_MAXIM_BAGS.values()
+}
 
-def _flatten_bag_keys(bags: dict[frozenset[str], str]) -> dict[str, frozenset[str]]:
-    return {key.lower(): bag for bag in bags for key in bag}
+
+def _flatten_bag_keys(bags: Mapping[str, MaximBag]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for name, bag in bags.items():
+        for word in bag.words:
+            owner = lookup.setdefault(word, name)
+            if owner != name:
+                raise SpiceError(
+                    f"maxim trigger word {word!r} appears in both "
+                    f"{owner!r} and {name!r}"
+                )
+    return lookup
 
 
-_KEY_TO_BAG: dict[str, frozenset[str]] = _flatten_bag_keys(BUILTIN_MAXIMS)
-_MAXIM_KEYS = frozenset(_KEY_TO_BAG)
-_BAG_ORDER = {bag: index for index, bag in enumerate(BUILTIN_MAXIMS)}
 _WORD_REGEX = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]+(?![A-Za-z0-9_])")
+_MAXIM_WORD_RE = re.compile(r"^[a-z]+$")
+
+
+def resolved_maxim_bags(repo_root: Path | None = None) -> dict[str, MaximBag]:
+    """Return built-in maxim bags merged with tracked repo configuration."""
+    root = repo_root if repo_root is not None else repo_root_from_cwd()
+    bags = dict(BUILTIN_MAXIM_BAGS)
+    if root is None:
+        return bags
+    for raw_name, raw_config in maxims_table(root).items():
+        name = _normalize_bag_name(raw_name)
+        if not isinstance(raw_config, dict):
+            raise SpiceError(f"[tool.spice.maxims.{name}] must be a table")
+        base = bags.get(name)
+        bags[name] = MaximBag(
+            name=name,
+            words=_configured_words(raw_config, base, name),
+            message=_configured_message(raw_config, base, name),
+        )
+    _flatten_bag_keys(bags)
+    return bags
+
+
+def _normalize_bag_name(raw: Any) -> str:
+    name = str(raw or "").strip().casefold()
+    if not name:
+        raise SpiceError("[tool.spice.maxims] bag names must be non-empty")
+    return name
+
+
+def _configured_words(
+    raw_config: Mapping[str, Any], base: MaximBag | None, name: str
+) -> frozenset[str]:
+    if "words" not in raw_config:
+        if base is None:
+            raise SpiceError(f"[tool.spice.maxims.{name}] requires words")
+        return base.words
+    words = []
+    for word in string_list(raw_config.get("words")):
+        normalized = word.casefold()
+        if not _MAXIM_WORD_RE.fullmatch(normalized):
+            raise SpiceError(
+                f"[tool.spice.maxims.{name}] words must be alphabetic; got {word!r}"
+            )
+        if normalized not in words:
+            words.append(normalized)
+    if not words:
+        raise SpiceError(f"[tool.spice.maxims.{name}] words must be non-empty")
+    return frozenset(words)
+
+
+def _configured_message(
+    raw_config: Mapping[str, Any], base: MaximBag | None, name: str
+) -> str:
+    raw = raw_config.get("message")
+    if raw is None:
+        if base is None:
+            raise SpiceError(f"[tool.spice.maxims.{name}] requires message")
+        return base.message
+    message = str(raw or "").strip()
+    if not message:
+        raise SpiceError(f"[tool.spice.maxims.{name}] message must be non-empty")
+    return message
+
+
+def _resolved_lookup(
+    repo_root: Path | None = None,
+) -> tuple[dict[str, MaximBag], dict[str, str], dict[str, int]]:
+    bags = resolved_maxim_bags(repo_root)
+    key_to_name = _flatten_bag_keys(bags)
+    bag_order = {name: index for index, name in enumerate(bags)}
+    return bags, key_to_name, bag_order
 
 
 @dataclass(frozen=True)
@@ -286,52 +407,76 @@ def evaluate_maxim_any_violation(
     )
 
 
+def maxim_names(repo_root: Path | None = None) -> list[str]:
+    """Return every stable name and trigger word that resolves a maxim."""
+    bags, key_to_name, _bag_order = _resolved_lookup(repo_root)
+    return sorted(set(bags) | set(key_to_name))
+
+
+def configured_maxim(name: str, *, repo_root: Path | None = None) -> str:
+    """Resolve a configured maxim by stable name or trigger word.
+
+    Any trigger word in the variation bag works, so ``compatibility`` and
+    ``compatible`` both resolve to the same built-in maxim by default.
+    """
+    bags, key_to_name, _bag_order = _resolved_lookup(repo_root)
+    selector = name.strip().casefold()
+    bag = bags.get(selector)
+    if bag is not None:
+        return bag.message
+    bag_name = key_to_name.get(selector)
+    if bag_name is None:
+        known = ", ".join(maxim_names(repo_root))
+        raise SpiceError(f"unknown maxim {name!r}; configured maxims are: {known}")
+    return bags[bag_name].message
+
+
 def builtin_maxim_names() -> list[str]:
-    """Return every name (across every variation bag) that resolves a maxim."""
-    return sorted(_KEY_TO_BAG)
+    """Return every built-in/configured name that resolves a maxim."""
+    return maxim_names()
 
 
 def builtin_maxim(name: str) -> str:
-    """Resolve a built-in maxim by short name, case-insensitively.
-
-    Any key in the variation bag works, so ``compatibility`` and
-    ``compatible`` both resolve to the same maxim.
-    """
-    bag = _KEY_TO_BAG.get(name.strip().lower())
-    if bag is None:
-        known = ", ".join(builtin_maxim_names())
-        raise SpiceError(f"unknown maxim {name!r}; built-in maxims are: {known}")
-    return BUILTIN_MAXIMS[bag]
+    """Resolve a built-in/configured maxim by short name."""
+    return configured_maxim(name)
 
 
-def triggered_maxims(statements: Sequence[str]) -> list[frozenset[str]]:
+def triggered_maxims(
+    statements: Sequence[str], *, repo_root: Path | None = None
+) -> list[MaximBag]:
     """Return matched maxim bags, in declared order.
 
     The scan tokenizes the prose once, then intersects the observed whole
     words with the explicitly registered key set. Variation support belongs
     in the maxim's frozenset bag, not in match-time word mutation.
     """
+    bags, key_to_name, bag_order = _resolved_lookup(repo_root)
     words = {
         match.group(0).casefold()
         for statement in statements
         for match in _WORD_REGEX.finditer(statement)
     }
-    seen = {_KEY_TO_BAG[key] for key in words & _MAXIM_KEYS}
-    return sorted(seen, key=_BAG_ORDER.__getitem__)
+    seen = {key_to_name[key] for key in words & set(key_to_name)}
+    return [bags[name] for name in sorted(seen, key=bag_order.__getitem__)]
 
 
-def resolve_maxim(maxim: str) -> str:
-    """Expand a built-in short name to its maxim text.
+def resolve_maxim(maxim: str, *, repo_root: Path | None = None) -> str:
+    """Expand a configured short name to its maxim text.
 
     Any key in the variation bag matches (case-insensitive). Any other
     single-word value is rejected, since a real maxim is never one word;
     multi-word values pass through unchanged.
     """
-    bag = _KEY_TO_BAG.get(maxim.strip().lower())
+    bags, key_to_name, _bag_order = _resolved_lookup(repo_root)
+    selector = maxim.strip().casefold()
+    bag = bags.get(selector)
     if bag is not None:
-        return BUILTIN_MAXIMS[bag]
+        return bag.message
+    bag_name = key_to_name.get(selector)
+    if bag_name is not None:
+        return bags[bag_name].message
     if len(maxim.split()) <= 1:
-        known = ", ".join(builtin_maxim_names())
+        known = ", ".join(maxim_names(repo_root))
         raise SpiceError(
             f"maxim {maxim!r} is a single word but not a known short name; "
             f"pass a full maxim or one of: {known}"

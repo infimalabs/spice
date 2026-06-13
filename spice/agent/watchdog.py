@@ -7,7 +7,7 @@ Every message gets two treatments:
 * ACK'd inbox keys are archived immediately (the operator sees inbox items retire
   the moment the agent acknowledges it);
 * the assistant-authored prose (clipped at generated tool-output boundaries)
-  is trigger-scanned against the built-in maxims and, on a hit, adjudicated
+  is trigger-scanned against the configured maxims and, on a hit, adjudicated
   by the local judge — violations are published back into the agent's inbox
   as `[MAXIM]` reminders, at most once per compaction epoch, with self-echo
   suppressed.
@@ -22,7 +22,7 @@ from typing import Callable, TextIO, cast
 
 from spice.agent.driver import DRIVER
 from spice.agent.maxims import (
-    BUILTIN_MAXIMS,
+    MaximBag,
     evaluate_maxim_any_violation,
     triggered_maxims,
 )
@@ -196,13 +196,13 @@ def publish_maxim_hits_as_inbox(
         return []
     if any(prefix in statement_text for prefix in REMINDER_SUPPRESSION_PREFIXES):
         return []
-    hits = triggered_maxims([statement_text])
+    hits = triggered_maxims([statement_text], repo_root=repo_root)
     if not hits:
         return []
     violations = [
         hit
         for hit in hits
-        if not evaluate_maxim_any_violation(BUILTIN_MAXIMS[hit], statement_text).agrees
+        if not evaluate_maxim_any_violation(hit.message, statement_text).agrees
     ]
     if not violations:
         return []
@@ -232,8 +232,8 @@ def _is_generated_tool_output_boundary(line: str) -> bool:
     return stripped.startswith(GENERATED_TOOL_OUTPUT_BOUNDARY_PREFIXES)
 
 
-def _maxim_inbox_body(hits: list[frozenset[str]]) -> str:
-    reminders = dict.fromkeys(_one_line_maxim(BUILTIN_MAXIMS[hit]) for hit in hits)
+def _maxim_inbox_body(hits: list[MaximBag]) -> str:
+    reminders = dict.fromkeys(_one_line_maxim(hit.message) for hit in hits)
     return " ".join([WATCHDOG_REMINDER_PREFIX, *reminders]) + "\n"
 
 
