@@ -1033,9 +1033,15 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
     quote_header_start = css.index(".composer-band-header--quote {")
     quote_header_rule = css[quote_header_start : css.index("}", quote_header_start)]
 
-    assert "beforeMenu: composerPrimaryHeaderBeforeMenu(member)," in app_shell
-    assert "function composerPrimaryHeaderBeforeMenu(member)" in app_shell
     assert "const latest = latestComposerMessage(member);" in app_shell
+    assert "title: composerPrimaryHeaderTitle(latest)," in app_shell
+    assert "function composerPrimaryHeaderTitle(latest)" in app_shell
+    assert (
+        'return latest ? composerQuotePreview(latest) : "No assistant messages yet";'
+        in app_shell
+    )
+    assert "beforeMenu: composerPrimaryHeaderBeforeMenu(latest)," in app_shell
+    assert "function composerPrimaryHeaderBeforeMenu(latest)" in app_shell
     assert "composerPrimaryLatestMessageLink(latest)" in app_shell
     assert "composerPrimaryLatestMessageNote()" in app_shell
     assert "function composerPrimaryLatestMessageLink(latest)" in app_shell

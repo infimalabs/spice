@@ -730,10 +730,11 @@ function composerShardPrimaryBand(shard, targetId) {
 
 function composerPrimaryBandHeader(lane, member) {
   const label = laneMemberTargetLabel(member);
+  const latest = latestComposerMessage(member);
   const header = composerBandHeader({
     className: "composer-band-header--primary",
-    title: label,
-    beforeMenu: composerPrimaryHeaderBeforeMenu(member),
+    title: composerPrimaryHeaderTitle(latest),
+    beforeMenu: composerPrimaryHeaderBeforeMenu(latest),
     trailingControl: composerBandMenuTrigger(
       "Composer actions for " + label,
       "Composer actions for " + label,
@@ -770,8 +771,11 @@ function composerBandMenuAction(label, detail) {
   return action;
 }
 
-function composerPrimaryHeaderBeforeMenu(member) {
-  const latest = latestComposerMessage(member);
+function composerPrimaryHeaderTitle(latest) {
+  return latest ? composerQuotePreview(latest) : "No assistant messages yet";
+}
+
+function composerPrimaryHeaderBeforeMenu(latest) {
   return [
     latest
       ? composerPrimaryLatestMessageLink(latest)
