@@ -259,6 +259,11 @@ def test_static_spice_menu_replaces_picker_lane():
     assert "if (laneStates.size) closeSpiceMenu();" not in app_lanes
     assert "function setFastModeEnabled(enabled)" in app_lanes
     assert "function createEmptyTeamFromMenu()" in app_lanes
+    assert "const laneGrid = lanesEl.getBoundingClientRect();" in app_lanes
+    assert "const visibleLane = visibleLaneElements()[0] || null;" in app_lanes
+    assert "spiceMenuMinimumLaneWidthPx()" in app_lanes
+    assert 'spiceMenuEl.style.height = height + "px";' in app_lanes
+    assert "function cssPixelValue(value)" in app_lanes
     assert (
         'teamCommandPayload("createTeam", {\n      config: defaultTeamConfig(),'
         in app_lanes
