@@ -167,11 +167,11 @@ declaring mounted commands and pre-commit policy:
 
 ```toml
 [tool.spice.commands]
-fmt-cs = ["dotnet", "format", "--verify-no-changes"]
+fmt-cs = ["dotnet", "format"]
 
 [tool.spice.policy]
 pre_commit = [
-    { label = "format C#", mount = "fmt-cs", when = ["*.cs"] },
+    { label = "format C#", mount = "fmt-cs", formatter = true, when = ["*.cs"] },
     { label = "assets", run = ["python3", "-m", "tools.assets"], when = ["Assets/*"] },
 ]
 pre_commit_success = [{ label = "clear asset sticky state", run = ["python3", "-m", "tools.assets", "--clear-sticky"] }]
@@ -196,6 +196,9 @@ with `when` globs runs only when a staged path matches (fnmatch against the
 repo-relative path, `*` crosses directory separators) and receives just the
 matching paths; a step without `when` always runs and receives every staged
 path.
+Set `formatter = true` on a command step that rewrites matching staged files;
+after it exits successfully, the gate re-stages those same `SPICE_STAGED_PATHS`
+so the formatted content lands in the commit.
 
 ## Status
 
