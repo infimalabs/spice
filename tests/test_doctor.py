@@ -217,9 +217,7 @@ def _run(repo: Path, *args: str) -> None:
     subprocess.run(args, cwd=repo, check=True, capture_output=True, text=True)
 
 
-def test_doctor_treats_npm_as_optional_without_serve_web_sources(
-    tmp_path, monkeypatch
-):
+def test_doctor_treats_npm_as_optional_without_serve_web_sources(tmp_path, monkeypatch):
     real_find_tool = doctor.find_tool
     monkeypatch.setattr(
         doctor,

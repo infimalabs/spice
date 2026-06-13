@@ -8,11 +8,11 @@ from typing import Any
 
 from spice.agent.maxims import (
     ALL_MAXIM,
-    BUILTIN_MAXIMS,
     DEFAULT_PROMPT_TEMPLATE,
     META_MAXIMS,
     builtin_maxim,
     evaluate_maxim,
+    resolved_maxim_bags,
     resolve_maxim,
     triggered_maxims,
 )
@@ -29,7 +29,7 @@ def configure_maxim_parser(subparsers: Any) -> None:
         help="Judge statements against a maxim, or show the built-in maxims.",
         description=(
             "`agree`/`disagree` adjudicate one or more statements against a "
-            "maxim using the local judge model; `show` prints the built-in "
+            "maxim using the local judge model; `show` prints the configured "
             "maxims so a short name can be piped straight into a verb."
         ),
     )
@@ -63,12 +63,12 @@ def configure_maxim_parser(subparsers: Any) -> None:
 
     show = actions.add_parser(
         "show",
-        help="Show built-in maxims; name one to print it for use in a verb.",
+        help="Show configured maxims; name one to print it for use in a verb.",
     )
     show.add_argument(
         "name",
         nargs="?",
-        help="Short name (e.g. fallback, alias). Omit to list every built-in.",
+        help="Short name (e.g. fallback, alias). Omit to list every configured maxim.",
     )
     show.set_defaults(func=run_maxim_show_cli)
 
@@ -79,7 +79,7 @@ def _add_verdict_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "The maxim to judge against. A built-in short name (e.g. fallback) "
             "expands to its full maxim; 'all'/'any' scan the statements for "
-            "built-in bad words and judge each matched maxim; otherwise pass "
+            "configured trigger words and judge each matched maxim; otherwise pass "
             "full maxim text."
         ),
     )
@@ -157,7 +157,7 @@ def _judge_triggered_maxims(
 ) -> int:
     unmet_flags: list[bool] = []
     for bag in triggered_maxims(statements):
-        maxim = BUILTIN_MAXIMS[bag]
+        maxim = bag.message
         offending = _first_break(
             maxim, statements, want_agreement=want_agreement, template=template
         )
@@ -201,7 +201,10 @@ def run_maxim_show_cli(args: argparse.Namespace) -> int:
 
 
 def _render_maxim_listing() -> str:
-    rows = [("/".join(sorted(bag)), text) for bag, text in BUILTIN_MAXIMS.items()]
+    rows = [
+        (f"{name} ({'/'.join(sorted(bag.words))})", bag.message)
+        for name, bag in resolved_maxim_bags().items()
+    ]
     width = max(len(name) for name, _ in rows)
     return "\n".join(f"{name.ljust(width)}  {text}" for name, text in rows)
 
