@@ -58,6 +58,7 @@ class CommandStep:
     argv: tuple[str, ...]
     repo_root: Path
     staged_paths: tuple[Path, ...] = ()
+    formatter: bool = False
 
 
 def handle_pre_commit(repo_root: Path) -> int:
@@ -279,6 +280,7 @@ def _configured_command_steps(
             argv=command.argv,
             repo_root=command.repo_root,
             staged_paths=paths,
+            formatter=command.formatter,
         )
         key = f"{key_prefix}-{index}"
         steps.append(_command_pre_commit_step(key, command))
@@ -319,13 +321,19 @@ def _command_step_from_table(
         if not isinstance(mount, str):
             raise SpiceError(f"{context}: mount must be a mounted command name")
         command = _mounted_command_step(repo_root, mount)
-        return CommandStep(label=label, argv=command.argv, repo_root=repo_root)
+        return CommandStep(
+            label=label,
+            argv=command.argv,
+            repo_root=repo_root,
+            formatter=_formatter_from_table(raw, context=context),
+        )
 
     raw_argv = raw.get("run", raw.get("argv"))
     return CommandStep(
         label=label,
         argv=_command_argv(raw_argv, context=context),
         repo_root=repo_root,
+        formatter=_formatter_from_table(raw, context=context),
     )
 
 
@@ -350,6 +358,13 @@ def _command_argv(raw: Any, *, context: str) -> tuple[str, ...]:
     return argv
 
 
+def _formatter_from_table(raw: dict[str, Any], *, context: str) -> bool:
+    formatter = raw.get("formatter", False)
+    if isinstance(formatter, bool):
+        return formatter
+    raise SpiceError(f"{context}: formatter must be true or false")
+
+
 def _run_policy_command_step(command: CommandStep) -> None:
     env = os.environ.copy()
     env[STAGED_PATHS_ENV] = "\n".join(path.as_posix() for path in command.staged_paths)
@@ -362,6 +377,8 @@ def _run_policy_command_step(command: CommandStep) -> None:
         check=False,
     )
     if result.returncode == 0:
+        if command.formatter:
+            _restage_command_paths(command)
         return
     output = "\n".join(
         part for part in (result.stdout.strip(), result.stderr.strip()) if part
@@ -370,6 +387,17 @@ def _run_policy_command_step(command: CommandStep) -> None:
     if output:
         message += ":\n" + output
     raise SpiceError(message)
+
+
+def _restage_command_paths(command: CommandStep) -> None:
+    if not command.staged_paths:
+        return
+    subprocess.run(
+        ["git", "add", "--", *(path.as_posix() for path in command.staged_paths)],
+        capture_output=True,
+        cwd=command.repo_root,
+        check=True,
+    )
 
 
 def _normalize_step_key(raw: Any) -> str:

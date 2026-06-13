@@ -219,6 +219,33 @@ def test_policy_pre_commit_extensions_receive_filtered_staged_paths(
     ]
 
 
+def test_policy_formatter_extensions_restage_rewritten_staged_paths(
+    tmp_path, monkeypatch
+):
+    repo = _git_init(tmp_path / "repo")
+    formatter = _write_staged_formatter(tmp_path, "class Program { }\n")
+    _write_repo_file(
+        repo,
+        "pyproject.toml",
+        "[tool.spice.policy]\n"
+        "pre_commit = [\n"
+        '  { label = "cs formatter", '
+        f"run = {_argv_toml(sys.executable, str(formatter))}, "
+        'formatter = true, when = ["*.cs"] },\n'
+        "]\n",
+    )
+    _write_repo_file(repo, "src/main.cs", "class Program{}\n")
+    _git(repo, "add", ".")
+    _patch_pre_commit_builtin_noops(monkeypatch)
+
+    assert precommit.handle_pre_commit(repo) == 0
+
+    indexed = _git(repo, "show", ":src/main.cs").stdout
+    worktree = (repo / "src/main.cs").read_text(encoding="utf-8")
+    assert indexed == "class Program { }\n"
+    assert worktree == indexed
+
+
 def test_policy_pre_commit_extensions_wait_for_staging_guard(tmp_path, monkeypatch):
     repo = _git_init(tmp_path / "repo")
     recorder = _write_staged_paths_recorder(tmp_path)
@@ -650,6 +677,19 @@ def _write_staged_paths_recorder(tmp_path):
         encoding="utf-8",
     )
     return recorder
+
+
+def _write_staged_formatter(tmp_path, replacement: str):
+    formatter = tmp_path / "format_staged.py"
+    staged_paths_env = "SPICE_" + "STAGED_PATHS"
+    formatter.write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        f"for raw in os.environ[{staged_paths_env!r}].splitlines():\n"
+        f"    Path(raw).write_text({replacement!r}, encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    return formatter
 
 
 def _repo_with_pushed_tip(tmp_path: Path) -> tuple[Path, str, str]:
