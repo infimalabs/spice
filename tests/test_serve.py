@@ -890,6 +890,27 @@ def test_static_draft_composers_use_14px_font():
     assert "font-size: 14px;" in textarea_rule
 
 
+def test_static_composer_shards_reverse_visually_without_retargeting():
+    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    composer_start = css.index(".lane-composer {")
+    composer_end = css.index("/* Shards", composer_start)
+    composer_rule = css[composer_start:composer_end]
+    shards_start = css.index(".composer-shards {")
+    shards_end = css.index(".composer-shard {", shards_start)
+    shards_rule = css[shards_start:shards_end]
+    sync_start = app_shell.index("function syncComposerShards(lane, members)")
+    sync_end = app_shell.index("function composerShardElementForTarget", sync_start)
+    sync_body = app_shell[sync_start:sync_end]
+
+    assert "grid-template-columns: minmax(0, 1fr) auto;" in composer_rule
+    assert "flex-direction: row-reverse;" in shards_rule
+    assert "const shards = wanted.map((member) => {" in sync_body
+    assert "syncComposerShard(lane, shard, member);" in sync_body
+    assert "syncComposerShardOrder(lane.shardsEl, shards);" in sync_body
+    assert ".reverse()" not in sync_body
+
+
 def test_static_composer_attachment_thumbnails_fill_header():
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")

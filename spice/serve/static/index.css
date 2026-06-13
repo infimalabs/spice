@@ -397,6 +397,7 @@ button.primary:hover {
    and each shard stacks its quotes above the draft in stream order. */
 .composer-shards {
   display: flex;
+  flex-direction: row-reverse;
   gap: 6px;
   min-height: 0;
   overflow-x: auto;
