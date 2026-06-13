@@ -261,6 +261,16 @@ def test_static_spice_menu_replaces_picker_lane():
     assert "const laneGrid = lanesEl.getBoundingClientRect();" in app_lanes
     assert "const visibleLane = visibleLaneElements()[0] || null;" in app_lanes
     assert "spiceMenuMinimumLaneWidthPx()" in app_lanes
+    assert (
+        "function spiceMenuWidth(visibleLane, laneLeft, laneWidth, margin)" in app_lanes
+    )
+    assert "function spiceMenuLeft(visibleLane, laneLeft, width, margin)" in app_lanes
+    assert "if (visibleLane) return laneLeft;" in app_lanes
+    assert "openLaneButton.getBoundingClientRect();" in app_lanes
+    assert (
+        "Math.min(buttonRect.right - width, window.innerWidth - width - margin)"
+        in app_lanes
+    )
     assert 'spiceMenuEl.style.height = height + "px";' in app_lanes
     assert "function cssPixelValue(value)" in app_lanes
     assert (
