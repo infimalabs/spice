@@ -29,10 +29,15 @@ def test_static_css_has_narrow_viewport_affordances():
 
     assert "@media (max-width: 720px)" in css
     assert "scroll-snap-type: x proximity" in css
-    assert "scroll-padding-inline: 0" in css
+    assert "--mobile-lane-gap: 8px" in css
+    assert "--mobile-lane-gutter: 4px" in css
+    assert "gap: var(--mobile-lane-gap)" in css
+    assert "padding: 0 var(--mobile-lane-gutter) 8px" in css
+    assert "scroll-padding-inline: var(--mobile-lane-gutter)" in css
     assert "touch-action: pan-x pan-y" in css
     assert "flex: 0 0 100%" in css
-    assert "border-radius: 0" in css
+    assert "min-width: 100%" in css
+    assert "border-radius: 7px" in css
     assert "height: 100dvh" in css
 
 
