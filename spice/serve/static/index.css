@@ -461,6 +461,7 @@ button.primary:hover {
 }
 .composer-band-header--primary {
   cursor: grab;
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 .composer-band-header--quote {
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -566,6 +567,10 @@ button.primary:hover {
   padding: 7px 9px;
   resize: none;
   width: 100%;
+}
+.composer-band--primary textarea,
+.composer-band--quote textarea {
+  border-top-color: var(--accent);
 }
 .composer-attachments {
   align-items: center;

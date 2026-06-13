@@ -996,22 +996,21 @@ def test_static_relative_times_are_monospace_and_padded():
     assert "font-variant-numeric: tabular-nums;" in css
 
 
-def test_static_composer_pending_placeholder_omits_parentheses():
+def test_static_primary_composer_placeholder_uses_compact_action_copy():
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
 
-    assert 'laneMemberTargetLabel(lane) +\n    "\\n"' in app_shell
-    assert (
-        'lanePendingDisplayCount(lane) +\n    " pending, " +\n    status' in app_shell
-    )
-    assert (
-        'return "(" + lanePendingDisplayCount(lane) + " pending, " + status + ")";'
-        not in app_shell
-    )
+    assert 'return "Steer " + laneMemberTargetLabel(lane);' in app_shell
 
 
 def test_static_primary_composer_links_latest_message_like_quote_composers():
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    primary_header_start = css.index(".composer-band-header--primary {")
+    primary_header_rule = css[
+        primary_header_start : css.index("}", primary_header_start)
+    ]
+    quote_header_start = css.index(".composer-band-header--quote {")
+    quote_header_rule = css[quote_header_start : css.index("}", quote_header_start)]
 
     assert "beforeMenu: composerPrimaryHeaderBeforeMenu(member)," in app_shell
     assert "function composerPrimaryHeaderBeforeMenu(member)" in app_shell
@@ -1027,6 +1026,10 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
     assert "function composerPrimaryLatestMessageNote()" in app_shell
     assert 'note.textContent = "no messages";' in app_shell
     assert 'note.title = "No latest message";' in app_shell
+    assert "grid-template-columns: auto minmax(0, 1fr) auto;" in primary_header_rule
+    assert "grid-template-columns: auto minmax(0, 1fr) auto;" in quote_header_rule
+    assert ".composer-band--primary textarea,\n.composer-band--quote textarea {" in css
+    assert "border-top-color: var(--accent);" in css
     assert ".composer-latest-time--empty {" in css
     assert "text-decoration: none;" in css
     assert "function latestComposerMessage(member)" in app_shell
