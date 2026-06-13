@@ -1147,7 +1147,6 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         "    stampMessageProducer(item, lane, threadId);\n"
         '    upsertKnownMessage(lane, item, "newest");\n'
         "  }\n"
-        "  sortKnownMessages(lane);\n"
         "  trimKnownMessages(lane);\n"
         "}\n"
         "\n"
@@ -1158,7 +1157,6 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         "    stampMessageProducer(item, lane, threadId);\n"
         '    if (upsertKnownMessage(lane, item, "oldest")) added += 1;\n'
         "  }\n"
-        "  sortKnownMessages(lane);\n"
         "  if (added > 0) lane.retainedMessageLimit += added;\n"
         "  trimKnownMessages(lane);\n"
         "  return added;\n"
