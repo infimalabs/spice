@@ -887,6 +887,35 @@ def test_static_composer_attachment_thumbnails_fill_header():
     assert "display: none;" in name_rule
 
 
+def test_static_composer_menu_replaces_header_remove_control():
+    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
+
+    assert 'trigger.className = "composer-band-menu-button";' in app_shell
+    assert 'trigger.setAttribute("aria-haspopup", "menu");' in app_shell
+    assert 'trigger.textContent = "☰";' in app_shell
+    assert 'menu.className = "composer-band-menu";' in app_shell
+    assert (
+        'button.className = "composer-band-menu-action spice-menu-action";' in app_shell
+    )
+    assert "if (action.detail) button.title = action.detail;" in app_shell
+    assert "function syncComposerBandMenuState(band)" in app_shell
+    assert 'label: "Close",' in app_shell
+    assert 'label: "Split out",' in app_shell
+    assert '.composer-band-menu-button[aria-expanded="true"] {' in css
+    assert (
+        ".composer-band--menu-open textarea,\n.composer-band--menu-open .composer-attachments {"
+        in css
+    )
+    assert (
+        ".composer-band-menu-action .spice-menu-action-detail {\n  display: none;"
+        in css
+    )
+    assert 'teamCommandPayload("splitTeam", {' in app_groups
+    assert "agentIds: [laneTeamAgentId(member)]," in app_groups
+
+
 def test_static_relative_times_are_monospace_and_padded():
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
