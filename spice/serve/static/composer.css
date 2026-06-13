@@ -18,6 +18,31 @@
   padding: 2px 2px var(--lane-pane-compose-edge-gap);
   scrollbar-width: thin;
 }
+.lane--empty-team .lane-composer {
+  grid-template-columns: minmax(0, 1fr);
+}
+.lane--empty-team .composer-controls {
+  display: none;
+}
+.empty-team-importer {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: min(100%, 220px);
+}
+.empty-team-importer-heading {
+  color: var(--muted);
+  font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+.empty-team-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+}
 .lane--composer-drop .composer-shards {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 42%, transparent);
 }

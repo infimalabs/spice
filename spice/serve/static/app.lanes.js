@@ -3,6 +3,12 @@
 // reconciles lanes (including fused groups), closing a lane closes its team.
 // localStorage keeps only per-target hints (speech mode, selected view).
 
+const emptyTeamTargetPrefix = "empty-team:";
+
+function emptyTeamTargetId(teamId) {
+  return emptyTeamTargetPrefix + teamId;
+}
+
 async function refreshServerTopology() {
   await refreshTargets();
   await refreshTeamSnapshot({ force: true });
@@ -37,14 +43,16 @@ function applyTargetsPayload(payload) {
     payload.taskFilterInventory || {},
   );
   for (const lane of [...laneStates.values()]) {
-    if (!targetById.has(lane.targetId)) closeLaneCore(lane);
+    if (!targetById.has(lane.targetId) && !lane.emptyTeam) closeLaneCore(lane);
   }
   renderFilterPills();
   for (const lane of laneStates.values()) {
-    renderLaneChrome(
-      lane,
-      lane.latestPayload || targetPayloadShim(targetById.get(lane.targetId)),
-    );
+    if (lane.emptyTeam) syncEmptyTeamLane(lane);
+    else
+      renderLaneChrome(
+        lane,
+        lane.latestPayload || targetPayloadShim(targetById.get(lane.targetId)),
+      );
   }
   if (spiceMenuEl) renderSpiceMenu();
 }
@@ -114,7 +122,13 @@ function applyTeamSnapshotPayload(payload, options = {}) {
   const groupRuns = [];
   for (const team of teams) {
     const memberTargetIds = teamMemberTargetIds(team);
-    if (!memberTargetIds.length) continue;
+    if (!memberTargetIds.length) {
+      if (!team.teamId) continue;
+      const targetId = emptyTeamTargetId(team.teamId);
+      openTargetIds.add(targetId);
+      ensureEmptyTeamLane(team);
+      continue;
+    }
     for (const targetId of memberTargetIds) {
       openTargetIds.add(targetId);
       ensureTeamMemberLane(targetId, team, hints.get(targetId));
@@ -515,24 +529,28 @@ function defaultTeamConfig() {
 }
 
 function renderTargetChoice(target) {
+  return targetChoiceButton(target, "Open", () => {
+    openTargetTeam(target.id).catch(() => {
+      setGlobalTransientStatus("open tree failed");
+    });
+  });
+}
+
+function targetChoiceButton(target, actionLabel, onClick, role = "menuitem") {
   const button = document.createElement("button");
   button.type = "button";
   const status = targetChoiceStatus(target);
   const metadata = targetChoiceMetadata(target);
   const name = target.branch || target.displayName || target.id;
   button.className = "target-choice target-choice--" + status;
-  button.setAttribute("role", "menuitem");
-  button.title = "Open " + name + " lane; " + metadata;
+  if (role) button.setAttribute("role", role);
+  button.title = actionLabel + " " + name + "; " + metadata;
   button.innerHTML =
     '<span class="target-choice-signal" aria-hidden="true"></span>' +
     '<span class="target-choice-copy"><strong></strong><span></span></span>';
   button.querySelector("strong").textContent = name;
   button.querySelector(".target-choice-copy span").textContent = metadata;
-  button.addEventListener("click", () => {
-    openTargetTeam(target.id).catch(() => {
-      setGlobalTransientStatus("open tree failed");
-    });
-  });
+  button.addEventListener("click", onClick);
   return button;
 }
 

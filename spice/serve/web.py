@@ -41,6 +41,7 @@ _INDEX_HTML = """<!doctype html>
   <script src="/static/app.stream.js"></script>
   <script src="/static/app.lanes.js"></script>
   <script src="/static/app.shell.js"></script>
+  <script src="/static/app.composer.js"></script>
   <script src="/static/app.controls.js"></script>
   <script src="/static/app.panes.js"></script>
   <script src="/static/app.groups.js"></script>
