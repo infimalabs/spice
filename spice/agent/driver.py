@@ -16,9 +16,13 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
+import sys
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+
+from spice.paths import atomic_write_json, state_dir
 
 
 @dataclass(frozen=True)
@@ -138,7 +142,7 @@ class CodexDriver(AgentDriver):
     ) -> list[str]:
         config_overrides = [
             f'model_reasoning_effort="{reasoning_effort or self.default_reasoning_effort}"',
-            *playwright_mcp_config_overrides(),
+            *playwright_mcp_config_overrides(repo_root),
         ]
         if personality:
             config_overrides.append(f'personality="{personality}"')
@@ -169,7 +173,7 @@ class CodexDriver(AgentDriver):
         return [*command, prompt]
 
 
-def playwright_mcp_config_overrides() -> list[str]:
+def playwright_mcp_config_overrides(repo_root: Path) -> list[str]:
     return [
         (
             f"mcp_servers.{PLAYWRIGHT_MCP_SERVER_NAME}.command="
@@ -177,9 +181,42 @@ def playwright_mcp_config_overrides() -> list[str]:
         ),
         (
             f"mcp_servers.{PLAYWRIGHT_MCP_SERVER_NAME}.args="
-            f"{json.dumps(list(PLAYWRIGHT_MCP_ARGS), separators=(',', ':'))}"
+            f"{json.dumps(playwright_mcp_args(repo_root), separators=(',', ':'))}"
         ),
     ]
+
+
+def playwright_mcp_args(repo_root: Path) -> list[str]:
+    args = list(PLAYWRIGHT_MCP_ARGS)
+    config_path = write_playwright_mcp_config(repo_root)
+    if config_path is not None:
+        args.extend(["--config", str(config_path)])
+    return args
+
+
+def write_playwright_mcp_config(repo_root: Path) -> Path | None:
+    color_scheme = operator_color_scheme()
+    if color_scheme is None:
+        return None
+    return atomic_write_json(
+        state_dir(repo_root) / "agent" / "playwright-mcp.json",
+        {"browser": {"contextOptions": {"colorScheme": color_scheme}}},
+    )
+
+
+def operator_color_scheme() -> str | None:
+    if sys.platform != "darwin":
+        return None
+    try:
+        result = subprocess.run(
+            ["defaults", "read", "-g", "AppleInterfaceStyle"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except OSError:
+        return None
+    return "dark" if result.stdout.strip().lower() == "dark" else "light"
 
 
 def _rollout_filename_thread_id(name: str) -> str:

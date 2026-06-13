@@ -2,6 +2,7 @@
 
 import argparse
 import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -9,12 +10,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from spice.agent import driver as agent_driver
 from spice.agent import lifecycle, sidechannel, wrap
 from spice.agent.driver import (
     DRIVER,
     PLAYWRIGHT_MCP_ARGS,
     PLAYWRIGHT_MCP_COMMAND,
     PLAYWRIGHT_MCP_SERVER_NAME,
+    playwright_mcp_args,
+    write_playwright_mcp_config,
 )
 from spice.agent.gitshadow import (
     append_git_config_pairs,
@@ -29,7 +33,10 @@ SUPERVISOR_PID = 3333
 SUPERVISED_AGENT_PID = 4444
 
 
-def test_codex_driver_command_pins_fast_service_tier_and_playwright_mcp(tmp_path):
+def test_codex_driver_command_pins_fast_service_tier_and_playwright_mcp(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(agent_driver, "operator_color_scheme", lambda: "dark")
     prompt = "[$spice](/tmp/skill.md)"
     command = DRIVER.build_exec_command(
         repo_root=tmp_path,
@@ -52,17 +59,41 @@ def test_codex_driver_command_pins_fast_service_tier_and_playwright_mcp(tmp_path
     ) in configs
     assert (
         f"mcp_servers.{PLAYWRIGHT_MCP_SERVER_NAME}.args="
-        f'["--yes","@playwright/mcp@latest","--headless"]'
+        f'["--yes","@playwright/mcp@latest","--headless","--config",'
+        f'"{tmp_path / ".spice" / "agent" / "playwright-mcp.json"}"]'
     ) in configs
     assert list(PLAYWRIGHT_MCP_ARGS) == [
         "--yes",
         "@playwright/mcp@latest",
         "--headless",
     ]
+    assert json.loads(
+        (tmp_path / ".spice" / "agent" / "playwright-mcp.json").read_text(
+            encoding="utf-8"
+        )
+    ) == {"browser": {"contextOptions": {"colorScheme": "dark"}}}
     assert 'personality="pragmatic"' in configs
     assert 'service_tier="fast"' in configs
     assert command[command.index("--enable") + 1] == "fast_mode"
     assert command[-3:] == ["resume", "thread-1", prompt]
+
+
+def test_playwright_mcp_args_write_light_scheme_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_driver, "operator_color_scheme", lambda: "light")
+
+    config_path = write_playwright_mcp_config(tmp_path)
+
+    assert config_path == tmp_path / ".spice" / "agent" / "playwright-mcp.json"
+    assert json.loads(config_path.read_text(encoding="utf-8")) == {
+        "browser": {"contextOptions": {"colorScheme": "light"}}
+    }
+    assert playwright_mcp_args(tmp_path) == [
+        "--yes",
+        "@playwright/mcp@latest",
+        "--headless",
+        "--config",
+        str(config_path),
+    ]
 
 
 def test_ensure_agent_dry_run_covers_start_resume_and_renew(tmp_path, monkeypatch):
