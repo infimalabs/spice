@@ -109,10 +109,13 @@ def _is_sentinel_thread(thread: str) -> bool:
     )
 
 
+def _rehydrate_label(label: str) -> str:
+    return "creator context" if label == "origin" else f"{label} context"
+
+
 def _sentinel_rehydrate_line(label: str) -> str:
     return (
-        f"{label}_rehydrate - "
-        f"(no {label} session exists; sentinel thread has no transcript)"
+        f"  {_rehydrate_label(label)}: unavailable (sentinel thread has no transcript)"
     )
 
 
@@ -151,9 +154,11 @@ def _origin_rehydrate_lines(row: dict[str, Any]) -> list[str]:
         return [_sentinel_rehydrate_line("origin")]
     window = _incepted_context_window(row)
     if window is None:
-        return [f"origin_rehydrate {_briefing_command(thread)}"]
+        return [f"  creator context, run: {_briefing_command(thread)}"]
     start, end = window
-    return [f"origin_rehydrate {_briefing_command(thread, start=start, end=end)}"]
+    return [
+        f"  creator context, run: {_briefing_command(thread, start=start, end=end)}"
+    ]
 
 
 def _claim_rehydrate_lines(row: dict[str, Any]) -> list[str]:
@@ -168,11 +173,11 @@ def _claim_rehydrate_lines(row: dict[str, Any]) -> list[str]:
         return []
     if thread and start and end:
         lines.append(
-            f"claim_rehydrate {_briefing_command(thread, start=start, end=end)}"
+            f"  claim context, run: {_briefing_command(thread, start=start, end=end)}"
         )
     if thread and turn and turn != thread:
         lines.append(
-            "claim_rehydrate_turn "
+            "  claim turn, run: "
             f"spice session turns {shlex.quote(thread)} "
             f"--turn-id {shlex.quote(turn)} --view full"
         )
@@ -180,7 +185,10 @@ def _claim_rehydrate_lines(row: dict[str, Any]) -> list[str]:
 
 
 def _rehydrate_lines(row: dict[str, Any]) -> list[str]:
-    return [*_origin_rehydrate_lines(row), *_claim_rehydrate_lines(row)]
+    lines = [*_origin_rehydrate_lines(row), *_claim_rehydrate_lines(row)]
+    if not lines:
+        return []
+    return ["rehydrate:", *lines]
 
 
 def _attachment_texts(row: dict[str, Any]) -> list[str]:
