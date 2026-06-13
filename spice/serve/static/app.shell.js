@@ -1128,7 +1128,7 @@ function addComposerQuoteDraft(lane, targetId, item) {
 }
 
 function composerQuotePreview(item) {
-  return String(item.display_text || item.text || "assistant message")
+  return String(item.preview || item.display_text || item.text || "assistant message")
     .replace(/\s+/g, " ")
     .trim();
 }
