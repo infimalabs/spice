@@ -109,12 +109,12 @@ button.primary:hover {
   display: inline-flex;
   flex: 0 0 auto;
   font-weight: 700;
-  gap: 7px;
-  height: 38px;
+  gap: 5px;
+  height: 30px;
   justify-content: center;
   letter-spacing: 0;
   line-height: 1;
-  padding: 0 14px 0 11px;
+  padding: 0 10px 0 8px;
   white-space: nowrap;
 }
 .spice-menu-button:hover,
@@ -137,13 +137,13 @@ button.primary:hover {
   color: var(--fg);
 }
 .spice-menu-icon {
-  font-size: 18px;
+  font-size: 15px;
   line-height: 1;
 }
 .spice-menu-label {
   color: currentColor;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 21px;
+  font-size: 17px;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
