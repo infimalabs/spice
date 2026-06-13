@@ -398,19 +398,45 @@ function renderSpiceMenu() {
 function positionSpiceMenu() {
   if (!spiceMenuEl) return;
   const margin = 8;
-  const anchor = openLaneButton.getBoundingClientRect();
-  const width = Math.min(360, window.innerWidth - margin * 2);
-  const left = Math.max(
-    margin,
-    Math.min(window.innerWidth - width - margin, anchor.right - width),
+  const laneGrid = lanesEl.getBoundingClientRect();
+  const laneGridStyle = window.getComputedStyle(lanesEl);
+  const paddingLeft = cssPixelValue(laneGridStyle.paddingLeft);
+  const paddingTop = cssPixelValue(laneGridStyle.paddingTop);
+  const paddingBottom = cssPixelValue(laneGridStyle.paddingBottom);
+  const visibleLane = visibleLaneElements()[0] || null;
+  const laneWidth = visibleLane
+    ? visibleLane.getBoundingClientRect().width
+    : spiceMenuMinimumLaneWidthPx();
+  const left = laneGrid.left + paddingLeft;
+  const top = laneGrid.top + paddingTop;
+  const availableWidth = Math.max(1, window.innerWidth - left - margin);
+  const width = Math.min(
+    availableWidth,
+    Math.max(spiceMenuMinimumLaneWidthPx(), laneWidth),
   );
+  const availableHeight = Math.max(1, window.innerHeight - top - margin);
+  const laneGridHeight = Math.max(
+    1,
+    laneGrid.height - paddingTop - paddingBottom,
+  );
+  const height = Math.min(availableHeight, laneGridHeight);
   spiceMenuEl.style.width = width + "px";
   spiceMenuEl.style.left = left + "px";
-  spiceMenuEl.style.top = anchor.bottom + margin + "px";
-  const rect = spiceMenuEl.getBoundingClientRect();
-  if (rect.bottom <= window.innerHeight - margin) return;
-  spiceMenuEl.style.top =
-    Math.max(margin, anchor.top - rect.height - margin) + "px";
+  spiceMenuEl.style.top = top + "px";
+  spiceMenuEl.style.height = height + "px";
+  spiceMenuEl.style.maxHeight = height + "px";
+}
+
+function spiceMenuMinimumLaneWidthPx() {
+  const fontSize =
+    Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) ||
+    16;
+  return 20 * fontSize;
+}
+
+function cssPixelValue(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function renderSpiceMenuActions() {
