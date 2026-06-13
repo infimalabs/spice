@@ -109,12 +109,12 @@ button.primary:hover {
   display: inline-flex;
   flex: 0 0 auto;
   font-weight: 700;
-  gap: 5px;
+  gap: 4px;
   height: 30px;
   justify-content: center;
   letter-spacing: 0;
   line-height: 1;
-  padding: 0 10px 0 8px;
+  padding: 0 8px 0 6px;
   white-space: nowrap;
 }
 .spice-menu-button:hover,
