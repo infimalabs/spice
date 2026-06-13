@@ -171,10 +171,9 @@ def test_lane_subscription_watch_wakes_stopped_agent_for_external_inbox_write(
 
         pushed = _wait_for_watch_push(connection)
         assert pushed["payload"]["pendingInboxCount"] == 1
+        assert pushed["payload"]["statusLine"]["pendingInboxCount"] == 1
+        assert pushed["payload"]["statusLine"]["pendingInboxLabel"] == "1"
         assert pushed["payload"]["agentEnsure"]["threadId"] == THREAD_ID
-        assert pushed["payload"]["operatorRequests"][0]["display_text"] == (
-            "external steering"
-        )
         assert ensure_calls == [
             {"target": target, "fast_mode": False, "force_new": False}
         ]

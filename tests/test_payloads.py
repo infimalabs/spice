@@ -198,7 +198,7 @@ def test_ack_context_payload_round_trips_inbox_attachments(tmp_path):
     assert attachment["url"].startswith("/api/work/trees/wt/files/image?path=")
 
 
-def test_messages_payload_includes_pending_and_archived_operator_requests(
+def test_messages_payload_reports_inbox_status_without_streaming_requests(
     monkeypatch, tmp_path
 ):
     repo = tmp_path / "repo"
@@ -236,17 +236,31 @@ def test_messages_payload_includes_pending_and_archived_operator_requests(
         _Target(id="wt", repo_root=repo),
         limit=5,
     )
-    requests = {item["request_key"]: item for item in payload["operatorRequests"]}
-
+    assert set(payload) == {
+        "messages",
+        "targetWorktreeName",
+        "targetBranch",
+        "targetAgentName",
+        "targetThreadId",
+        "taskFilters",
+        "laneFilterVersion",
+        "teamId",
+        "teamRevision",
+        "configRevision",
+        "lifetime",
+        "taskFilterInventory",
+        "laneMetrics",
+        "laneInfo",
+        "agentProcessStatus",
+        "error",
+        "pendingInboxCount",
+        "agentEnsure",
+        "statusLine",
+    }
     assert payload["messages"] == []
-    assert requests[inbox_item_key(pending_name)]["kind"] == "operator"
-    assert requests[inbox_item_key(pending_name)]["request_state"] == "pending"
-    assert requests[inbox_item_key(pending_name)]["request_priority"] == "urgent"
-    assert requests[inbox_item_key(pending_name)]["display_text"] == "pending request"
-    assert requests[inbox_item_key(archived_name)]["request_state"] == "archived"
-    assert requests[inbox_item_key(archived_name)]["display_html"] == (
-        "<p>archived request</p>"
-    )
+    assert payload["pendingInboxCount"] == 1
+    assert payload["statusLine"]["pendingInboxCount"] == 1
+    assert payload["statusLine"]["pendingInboxLabel"] == "1"
 
 
 def test_ack_context_payload_finds_archived_inbox_item_by_dropped_z_alias(tmp_path):

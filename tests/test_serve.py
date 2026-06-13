@@ -1129,20 +1129,76 @@ def test_static_message_speech_routes_to_producer_lane():
     assert "await playSpeech(entry.targetLane, text);" in app_audio
 
 
-def test_static_operator_requests_merge_and_render_as_stream_items():
+def test_static_stream_uses_message_payload_and_standard_badges():
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    merge_start = app_stream.index("function mergePayloadMessages")
+    merge_end = app_stream.index("function upsertKnownMessage", merge_start)
+    badge_start = app_render.index("function renderBadges")
+    badge_end = app_render.index("function renderCompactionDivider", badge_start)
+    final_css_start = css.index(".messages article.final {")
+    final_css_end = css.index(".messages article.said {", final_css_start)
 
-    assert "function mergeOperatorRequests(lane, payload)" in app_stream
-    assert "for (const item of payload.operatorRequests || [])" in app_stream
-    assert 'if (item.kind === "operator") return;' in app_stream
-    assert 'if (item.kind === "operator") article.classList.add("operator");' in (
-        app_render
+    assert app_stream[merge_start:merge_end] == (
+        "function mergePayloadMessages(lane, payload) {\n"
+        '  const threadId = payload.targetThreadId || lane.activeThreadId || "";\n'
+        "  for (const item of [...(payload.messages || [])].reverse()) {\n"
+        "    stampMessageProducer(item, lane, threadId);\n"
+        '    upsertKnownMessage(lane, item, "newest");\n'
+        "  }\n"
+        "  sortKnownMessages(lane);\n"
+        "  trimKnownMessages(lane);\n"
+        "}\n"
+        "\n"
+        "function mergeOlderPayloadMessages(lane, payload) {\n"
+        '  const threadId = payload.targetThreadId || lane.activeThreadId || "";\n'
+        "  let added = 0;\n"
+        "  for (const item of payload.messages || []) {\n"
+        "    stampMessageProducer(item, lane, threadId);\n"
+        '    if (upsertKnownMessage(lane, item, "oldest")) added += 1;\n'
+        "  }\n"
+        "  sortKnownMessages(lane);\n"
+        "  if (added > 0) lane.retainedMessageLimit += added;\n"
+        "  trimKnownMessages(lane);\n"
+        "  return added;\n"
+        "}\n"
+        "\n"
     )
-    assert 'button.textContent = "Operator";' in app_render
-    assert 'if (kind === "operator") add("REQUEST", "operator-badge");' in app_render
-    assert ".messages article.operator" in css
+    assert app_render[badge_start:badge_end] == (
+        "function renderBadges(ackCount, sayCount, kind, maximAckCount) {\n"
+        "  const visibleAckCount = Math.max(0, ackCount - maximAckCount);\n"
+        "  if (\n"
+        "    !maximAckCount &&\n"
+        "    !visibleAckCount &&\n"
+        "    !sayCount &&\n"
+        '    kind !== "final"\n'
+        "  )\n"
+        "    return null;\n"
+        '  const badges = document.createElement("div");\n'
+        '  badges.className = "badges";\n'
+        "  const add = (label, className) => {\n"
+        '    const badge = document.createElement("span");\n'
+        '    badge.className = className ? "badge " + className : "badge";\n'
+        "    badge.textContent = label;\n"
+        "    badges.append(badge);\n"
+        "  };\n"
+        '  if (maximAckCount) add("MAXIM", "maxim-badge");\n'
+        '  if (kind === "final") add("FINAL", "final-badge");\n'
+        "  if (visibleAckCount)\n"
+        '    add(visibleAckCount + "\\u00a0ACK" + (visibleAckCount === 1 ? "" : "s"));\n'
+        '  if (sayCount) add(sayCount + " SAY" + (sayCount === 1 ? "" : "s"), "say-badge");\n'
+        "  return badges;\n"
+        "}\n"
+        "\n"
+    )
+    assert css[final_css_start:final_css_end] == (
+        ".messages article.final {\n"
+        "  background: var(--final-tint);\n"
+        "  border-color: var(--final-accent);\n"
+        "  box-shadow: inset 0 3px 0 var(--final-accent);\n"
+        "}\n"
+    )
 
 
 def test_static_manual_speech_playback_aborts_active_entry():
