@@ -932,7 +932,10 @@ def test_static_relative_times_are_monospace_and_padded():
 def test_static_composer_pending_placeholder_omits_parentheses():
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
 
-    assert 'return lanePendingDisplayCount(lane) + " pending, " + status;' in app_shell
+    assert 'laneMemberTargetLabel(lane) +\n    "\\n"' in app_shell
+    assert (
+        'lanePendingDisplayCount(lane) +\n    " pending, " +\n    status' in app_shell
+    )
     assert (
         'return "(" + lanePendingDisplayCount(lane) + " pending, " + status + ")";'
         not in app_shell
