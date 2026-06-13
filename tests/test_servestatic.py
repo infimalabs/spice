@@ -393,6 +393,7 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
 def test_static_composer_headers_use_agent_accent_border():
     css = _serve_css_text()
     app_shell = _shell_and_composer_text()
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     band_start = css.index(".composer-band {")
     band_rule = css[band_start : css.index("}", band_start)]
     header_start = css.index(".composer-band-header {")
@@ -415,30 +416,53 @@ def test_static_composer_headers_use_agent_accent_border():
     assert "function composerMemberAccent(lane, member)" in app_shell
     assert (
         "return messageOccupantAccent(composerMemberAccentIndex(lane, member));"
-        in app_shell
-    )
-    assert "function composerMemberAccentIndex(lane, member)" in app_shell
-    assert (
-        "if (member.targetThreadId) {\n"
-        "    const occupant = ensureLaneOccupant(host, member.targetThreadId);"
-        in app_shell
+        not in app_shell
     )
     assert (
-        'throw new Error("composer header accent requires member targetThreadId");'
+        "return messageOccupantAccent(laneMemberAccentIndex(lane, member));"
         in app_shell
     )
-    assert "return occupant.ordinal;" in app_shell
+    assert "function laneMemberAccentIndex(lane, member)" in app_stream
     assert (
         "const index = laneGroupMemberTargetIds(host).indexOf(member.targetId);"
-        in app_shell
+        in app_stream
     )
     assert (
-        'throw new Error("composer header accent requires a lane group member");'
-        in app_shell
+        'throw new Error("team slot accent requires a lane group member");'
+        in app_stream
     )
-    assert "return index;" in app_shell
+    assert "return index;" in app_stream
     assert "syncComposerBandAccent(primary, lane, member);" in app_shell
     assert "syncComposerBandAccent(band, lane, member);" in app_shell
+
+
+def test_static_message_accents_follow_team_slots_for_single_member_teams():
+    css = _serve_css_text()
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+
+    assert ".messages article[data-accent-slot]" in css
+    assert ".messages article[data-occupant]" not in css
+    assert "Boolean(laneGroupHost(lane).teamId)" in app_stream
+    assert "laneMessageAttributionAgentCount(lane) > 1" in app_stream
+    assert "function laneMessageAccentIndex(lane, item)" in app_stream
+    assert "function laneMessageProducerTargetId(lane, item)" in app_stream
+    assert "if (item.producerTargetId) return item.producerTargetId;" in app_stream
+    assert (
+        "candidate.targetThreadId === threadId ||\n"
+        "      candidate.activeThreadId === threadId" in app_stream
+    )
+    assert (
+        "const index = laneGroupMemberTargetIds(host).indexOf(targetId);" in app_stream
+    )
+    assert "return laneOccupantOrdinal(host, item.threadId);" in app_stream
+    assert "accentSlot: laneMessageAccentIndex(lane, item)," in app_stream
+    assert "attributed: laneShouldAttributeMessages(lane)," in app_stream
+    assert "const accentSlot = laneMessageAccentIndex(lane, item);" in app_render
+    assert "if (item.threadId && laneShouldAttributeMessages(lane))" not in app_render
+    assert "if (laneShouldAttributeMessages(lane))" in app_render
+    assert "article.dataset.accentSlot = String(accentSlot);" in app_render
+    assert "messageOccupantAccent(accentSlot)" in app_render
 
 
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
@@ -633,7 +657,7 @@ def test_static_speech_sync_updates_now_playing_message_accent():
     css = _serve_css_text()
     app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
     start = css.index(".messages article.now-playing")
-    end = css.index(".messages article[data-occupant]", start)
+    end = css.index(".messages article[data-accent-slot]", start)
     now_playing = css[start:end]
 
     assert "function syncNowPlayingMessages()" in app_audio
@@ -652,6 +676,9 @@ def test_static_compaction_divider_spans_grid_and_uses_agent_accent():
     assert "grid-column: 1 / -1;" in css
     assert "grid-template-columns: minmax(16px, 1fr) auto minmax(16px, 1fr)" in css
     assert "background: var(--compaction-accent, var(--border));" in css
+    assert "const accentSlot = laneMessageAccentIndex(lane, item);" in app_render
+    assert "divider.dataset.accentSlot = String(accentSlot);" in app_render
+    assert "messageOccupantAccent(accentSlot)" in app_render
     assert 'compactionAgentLabel(lane, item) + " compacted context"' in app_render
     assert "--compaction-accent" in app_render
 
