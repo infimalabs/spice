@@ -2,6 +2,7 @@
 
 from spice.mail.acks import archive_ackd_inbox_items
 from spice.mail.attachments import (
+    find_archived_inbox_attachment_references,
     inbox_attachment_dir,
     prepare_inbox_attachments,
 )
@@ -152,6 +153,22 @@ def test_inbox_attachment_readout_rows_render_clickable_reference(tmp_path):
     assert ">paste.png</a>" in html
     archive_ackd_inbox_items(tmp_path, [inbox_item_key(name)])
     assert archived_path.is_file()
+
+
+def test_find_archived_inbox_attachment_references_strips_sentence_punctuation():
+    refs = find_archived_inbox_attachment_references(
+        "Open .spice/inbox/archive/20260102T000000000004Z.attachments/"
+        "01-image.png. Also "
+        "/tmp/repo/.spice/inbox/archive/20260102T000000000004Z.attachments/"
+        "02-image.png; ignore live "
+        ".spice/inbox/20260102T000000000004Z.attachments/03-image.png."
+    )
+
+    assert refs == (
+        ".spice/inbox/archive/20260102T000000000004Z.attachments/01-image.png",
+        "/tmp/repo/.spice/inbox/archive/"
+        "20260102T000000000004Z.attachments/02-image.png",
+    )
 
 
 def test_reading_does_not_clear_pending(tmp_path):

@@ -198,6 +198,52 @@ def test_task_show_replaces_sentinel_rehydrate_commands(monkeypatch):
     assert f"spice session turns {sentinel}" not in output
 
 
+def test_task_show_resolves_relative_archived_attachments_to_origin(monkeypatch):
+    first_ref = ".spice/inbox/archive/20260102T000000000004Z.attachments/01-image.png"
+    second_ref = ".spice/inbox/archive/20260102T000000000004Z.attachments/02-image.png"
+    third_ref = ".spice/inbox/archive/20260102T000000000004Z.attachments/03-image.png"
+    absolute_ref = (
+        "/tmp/origin/.spice/inbox/archive/"
+        "20260102T000000000004Z.attachments/04-image.png"
+    )
+    row = _row(
+        "Portable attachments",
+        project="task.render",
+        incepted="20260612T065825463453Z",
+        status="pending",
+        phase="todo",
+    )
+    row.update(
+        {
+            "task_description": f"Inspect {first_ref}. Already absolute {absolute_ref}",
+            "acceptance": f"Open {second_ref};",
+            "phase_i": "0",
+            "urgency": "9.2",
+            "origin_thread": "origin-thread",
+            "origin_worktree": "/tmp/origin",
+            "claim_thread": "claim-thread",
+            "claim_worktree": "/tmp/claim",
+            "annotations": [
+                {"description": f"note: {third_ref}:"},
+                {"description": f"duplicate: {first_ref}"},
+            ],
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+
+    output = render.render_show("TASK-test")
+
+    assert "origin_attachments:" in output
+    assert f"  {first_ref} -> /tmp/origin/{first_ref}" in output
+    assert f"  {second_ref} -> /tmp/origin/{second_ref}" in output
+    assert f"  {third_ref} -> /tmp/origin/{third_ref}" in output
+    assert f"{absolute_ref} ->" not in output
+    assert output.count(f"{first_ref} ->") == 1
+
+
 def _row(
     description: str,
     *,
