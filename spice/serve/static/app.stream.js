@@ -575,14 +575,24 @@ function emptyTeamMessageFingerprint(lane) {
   return JSON.stringify({
     emptyTeam: true,
     teamId: lane.teamId || "",
-    targets: targets.map((target) => [
-      target.id || "",
-      target.agentName || "",
-      target.branch || "",
-      target.status || "",
-      target.pendingInboxCount || 0,
-    ]),
+    targets: targets.map(emptyTeamTargetFingerprint),
   });
+}
+
+function emptyTeamTargetFingerprint(target) {
+  const statusLine = target.statusLine || {};
+  return [
+    target.id || "",
+    target.branch || "",
+    target.displayName || "",
+    target.threadId || "",
+    target.lastAssistantAt || "",
+    statusLine.lastAssistantAt || "",
+    target.pendingCount || 0,
+    target.pendingInboxCount || 0,
+    target.agentProcessStatus || "",
+    target.bindingStatus || "",
+  ];
 }
 
 function captureMessageViewportAnchor(lane) {
