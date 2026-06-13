@@ -91,7 +91,6 @@ function browserStorage() {
 async function init() {
   await connectLiveBus();
   await refreshServerTopology();
-  if (!laneStates.size) openSpiceMenu();
   setInterval(updateLiveRelativeTimes, relativeTimeTickMs);
 }
 

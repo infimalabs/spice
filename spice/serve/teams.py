@@ -246,28 +246,38 @@ class ServeTeamStore:
         members: Iterable[str] = (),
     ) -> TeamState:
         config = config or TeamConfig()
-        resolved_team_id = team_id or f"team-{uuidlib.uuid4().hex[:TEAM_ID_HEX_CHARS]}"
         with self.connect() as connection:
-            connection.execute(
-                "INSERT INTO teams (team_id, status, created_at, revision, "
-                "config_revision, lifetime, speech_mode, selected_view, "
-                "task_filters, shell_settings) VALUES (?, 'open', ?, 0, 0, ?, ?, ?, ?, ?)",
-                (
-                    resolved_team_id,
-                    time.time(),
-                    config.lifetime,
-                    config.speech_mode,
-                    config.selected_view,
-                    json.dumps(list(config.task_filters)),
-                    json.dumps(config.shell_settings),
-                ),
-            )
-            for agent_id in members:
-                self._assign_locked(connection, resolved_team_id, agent_id)
-            self._record_event(
-                connection, "createTeam", resolved_team_id, {"members": list(members)}
-            )
-            return self._team_state_locked(connection, resolved_team_id)
+            return self._create_team_locked(connection, team_id, config, members)
+
+    def _create_team_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_id: str | None,
+        config: TeamConfig,
+        members: Iterable[str],
+    ) -> TeamState:
+        resolved_team_id = team_id or f"team-{uuidlib.uuid4().hex[:TEAM_ID_HEX_CHARS]}"
+        member_list = list(members)
+        connection.execute(
+            "INSERT INTO teams (team_id, status, created_at, revision, "
+            "config_revision, lifetime, speech_mode, selected_view, "
+            "task_filters, shell_settings) VALUES (?, 'open', ?, 0, 0, ?, ?, ?, ?, ?)",
+            (
+                resolved_team_id,
+                time.time(),
+                config.lifetime,
+                config.speech_mode,
+                config.selected_view,
+                json.dumps(list(config.task_filters)),
+                json.dumps(config.shell_settings),
+            ),
+        )
+        for agent_id in member_list:
+            self._assign_locked(connection, resolved_team_id, agent_id)
+        self._record_event(
+            connection, "createTeam", resolved_team_id, {"members": member_list}
+        )
+        return self._team_state_locked(connection, resolved_team_id)
 
     def close_team(self, team_id: str) -> int:
         with self.connect() as connection:
@@ -276,7 +286,9 @@ class ServeTeamStore:
                 "UPDATE teams SET status = 'closed' WHERE team_id = ?", (team_id,)
             )
             connection.execute("DELETE FROM memberships WHERE team_id = ?", (team_id,))
-            return self._record_event(connection, "closeTeam", team_id, {})
+            revision = self._record_event(connection, "closeTeam", team_id, {})
+            replacement = self._ensure_open_team_locked(connection)
+            return replacement.revision if replacement else revision
 
     def assign_agent(
         self, team_id: str, agent_id: str, aliases: Iterable[str] = ()
@@ -361,9 +373,11 @@ class ServeTeamStore:
                     "DELETE FROM memberships WHERE agent_id = ?", (alias_id,)
                 )
             self._close_empty_teams_locked(connection, [team_id])
-            return self._record_event(
+            revision = self._record_event(
                 connection, "removeAgent", team_id, {"agentId": agent_id}
             )
+            replacement = self._ensure_open_team_locked(connection)
+            return replacement.revision if replacement else revision
 
     def split_team(
         self,
@@ -677,6 +691,7 @@ class ServeTeamStore:
 
     def team_snapshot(self, *, since_revision: int | None = None) -> TeamSnapshot:
         with self.connect() as connection:
+            self._ensure_open_team_locked(connection)
             revision_row = connection.execute(
                 "SELECT MAX(revision) AS r FROM events"
             ).fetchone()
@@ -688,6 +703,17 @@ class ServeTeamStore:
                 self._team_state_locked(connection, row["team_id"]) for row in rows
             )
         return TeamSnapshot(global_revision=global_revision, teams=teams)
+
+    def _ensure_open_team_locked(
+        self, connection: sqlite3.Connection
+    ) -> TeamState | None:
+        row = connection.execute(
+            "SELECT team_id FROM teams WHERE status = 'open' "
+            "ORDER BY created_at LIMIT 1"
+        ).fetchone()
+        if row is not None:
+            return None
+        return self._create_team_locked(connection, None, TeamConfig(), ())
 
     def _team_state_locked(
         self, connection: sqlite3.Connection, team_id: str

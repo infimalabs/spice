@@ -24,6 +24,18 @@ def _shell_and_composer_text() -> str:
     )
 
 
+def test_static_initial_bootstrap_waits_for_server_topology():
+    app = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert (
+        "async function init() {\n"
+        "  await connectLiveBus();\n"
+        "  await refreshServerTopology();\n"
+        "  setInterval(updateLiveRelativeTimes, relativeTimeTickMs);\n"
+        "}\n"
+    ) in app
+
+
 def test_static_css_has_narrow_viewport_affordances():
     css = _serve_css_text()
 

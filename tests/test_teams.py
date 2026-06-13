@@ -1,6 +1,22 @@
 from spice.serve.teams import ServeTeamStore, TeamCommandService
 
 
+def test_empty_team_snapshot_creates_initial_empty_team(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+
+    snapshot = store.team_snapshot()
+    followup = store.team_snapshot()
+
+    assert snapshot.global_revision == 1
+    assert len(snapshot.teams) == 1
+    team = snapshot.teams[0]
+    assert team.status == "open"
+    assert team.members == ()
+    assert team.revision == snapshot.global_revision
+    assert followup.global_revision == snapshot.global_revision
+    assert [followup_team.team_id for followup_team in followup.teams] == [team.team_id]
+
+
 def test_lane_metrics_aggregate_removed_lifetime_team_members(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(members=["agent-a"])
@@ -125,9 +141,36 @@ def test_removing_final_agent_closes_team(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(members=["agent-a"])
 
-    store.remove_agent(team.team_id, "agent-a")
+    revision = store.remove_agent(team.team_id, "agent-a")
+    snapshot = store.team_snapshot()
 
     assert store.team_state(team.team_id).status == "closed"
+    assert snapshot.global_revision == revision
+    assert len(snapshot.teams) == 1
+    replacement = snapshot.teams[0]
+    assert replacement.team_id != team.team_id
+    assert replacement.status == "open"
+    assert replacement.members == ()
+
+
+def test_team_command_service_close_final_team_returns_replacement_empty_team(
+    tmp_path,
+):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    service = TeamCommandService(store)
+    created = service.apply({"command": "createTeam", "members": ["agent-a"]})
+    team = created.snapshot.teams[0]
+
+    result = service.apply({"command": "closeTeam", "teamId": team.team_id})
+
+    assert store.team_state(team.team_id).status == "closed"
+    assert result.revision == result.snapshot.global_revision
+    assert result.revision > created.revision
+    assert len(result.snapshot.teams) == 1
+    replacement = result.snapshot.teams[0]
+    assert replacement.team_id != team.team_id
+    assert replacement.status == "open"
+    assert replacement.members == ()
 
 
 def test_team_command_service_keeps_revisioned_config_history(tmp_path):
