@@ -159,9 +159,9 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
         "color: color-mix(in srgb, var(--accent-strong) 76%, var(--fg));"
         in button_rules
     )
-    assert "gap: 5px;" in button_rules
+    assert "gap: 4px;" in button_rules
     assert "height: 30px;" in button_rules
-    assert "padding: 0 10px 0 8px;" in button_rules
+    assert "padding: 0 8px 0 6px;" in button_rules
     assert "font-size: 15px;" in icon_rules
     assert "color: currentColor;" in label_rules
     assert "font-size: 17px;" in label_rules
