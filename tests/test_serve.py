@@ -918,14 +918,21 @@ def test_static_composer_attachment_thumbnails_fill_header():
     assert "display: none;" in name_rule
 
 
-def test_static_composer_menu_replaces_header_remove_control():
+def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
-    button_start = css.index(".composer-band-menu-button {")
+    button_start = css.index(
+        ".composer-band-menu-button,\n.composer-band-close-button {"
+    )
     button_end = css.index(".composer-band-menu-button:hover", button_start)
     button_rule = css[button_start:button_end]
 
+    assert "trailingControl: composerBandMenuTrigger(" in app_shell
+    assert (
+        "function composerBandMenuTrigger(menuTitle, menuLabel, menuActions)"
+        in app_shell
+    )
     assert 'trigger.className = "composer-band-menu-button";' in app_shell
     assert 'trigger.setAttribute("aria-haspopup", "menu");' in app_shell
     assert 'trigger.textContent = "☰";' in app_shell
@@ -946,13 +953,27 @@ def test_static_composer_menu_replaces_header_remove_control():
         in app_shell
     )
     assert "function syncComposerBandMenuState(band)" in app_shell
-    assert 'label: "Leave all teams",' in app_shell
-    assert 'label: "Create new team",' in app_shell
+    assert 'composerBandMenuAction(\n    "Leave all teams",' in app_shell
+    assert 'composerBandMenuAction(\n    "Create new team",' in app_shell
     assert '"Remove " + label + " from all teams"' in app_shell
     assert '"Move only " + label + " to a new team"' in app_shell
+    assert "trailingControl: composerBandCloseButton(" in app_shell
+    assert (
+        "function composerBandCloseButton(closeTitle, closeLabel, onClose)" in app_shell
+    )
+    assert 'close.className = "composer-band-close-button";' in app_shell
+    assert 'close.textContent = "×";' in app_shell
+    assert '"Remove quote",\n      "Remove quoted composer",' in app_shell
+    assert "() => removeComposerQuoteDraft(lane, targetId, draft.id)" in app_shell
+    assert 'menuTitle: "Quoted composer actions",' not in app_shell
+    assert 'label: "Remove quote",' not in app_shell
     assert "border-radius: 50%;" in button_rule
     assert "height: 22px;" in button_rule
     assert "width: 22px;" in button_rule
+    assert (
+        ".composer-band-close-button:hover,\n.composer-band-close-button:focus-visible {"
+        in css
+    )
     assert '.composer-band-menu-button[aria-expanded="true"] {' in css
     assert (
         ".composer-band--menu-open textarea,\n.composer-band--menu-open .composer-attachments {"

@@ -496,7 +496,8 @@ button.primary:hover {
   color: var(--muted);
   text-decoration: none;
 }
-.composer-band-menu-button {
+.composer-band-menu-button,
+.composer-band-close-button {
   align-items: center;
   background: color-mix(in srgb, var(--control) 92%, var(--bg));
   border: 1px solid transparent;
@@ -511,7 +512,9 @@ button.primary:hover {
   width: 22px;
 }
 .composer-band-menu-button:hover,
-.composer-band-menu-button:focus-visible {
+.composer-band-menu-button:focus-visible,
+.composer-band-close-button:hover,
+.composer-band-close-button:focus-visible {
   background: var(--control);
   border-color: var(--border-soft);
   color: var(--fg);
