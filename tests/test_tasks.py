@@ -193,6 +193,32 @@ def test_task_note_copies_inbox_attachment_refs_to_durable_store(task_repo):
     assert ".spice/inbox/20260102T000000000005Z.attachments" not in shown
 
 
+def test_task_add_reports_unresolved_attachment_ref(task_repo):
+    missing = ".spice/inbox/20260102T000000000006Z.attachments/01-image.png"
+
+    with pytest.raises(SpiceError, match=re.escape(missing)):
+        ops.add(
+            "Track missing attachment",
+            project="task.unit",
+            description=f"Screenshot reference: {missing}",
+            priority="medium",
+            acceptance=["missing attachment is reported"],
+        )
+
+
+def test_task_note_reports_unresolved_attachment_ref(task_repo):
+    handle = ops.add(
+        "Track missing attachment note",
+        project="task.unit",
+        priority="medium",
+        acceptance=["missing note attachment is reported"],
+    )
+    missing = ".spice/inbox/20260102T000000000007Z.attachments/01-image.png"
+
+    with pytest.raises(SpiceError, match=re.escape(missing)):
+        ops.note(handle, f"Screenshot reference: {missing}")
+
+
 def test_repo_configured_per_stem_default_flow_feeds_task_add(task_repo):
     (task_repo / "pyproject.toml").write_text(
         "[tool.spice.tasks]\n"

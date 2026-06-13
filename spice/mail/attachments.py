@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from spice.errors import SpiceError
 from spice.paths import fsync_directory
 
 INBOX_ATTACHMENT_DIR_SUFFIX = ".attachments"
@@ -212,19 +213,24 @@ def durable_inbox_attachment_references(
     """Copy resolvable inbox attachment refs into the shared task artifact store."""
     if not text:
         return text
+    matches = _inbox_attachment_reference_matches(text)
+    if not matches:
+        return text
     replacements: list[tuple[int, int, str]] = []
-    for start, end, ref, punctuation in _inbox_attachment_reference_matches(text):
+    for start, end, ref, punctuation in matches:
         stored = _store_durable_inbox_attachment(
             ref, repo_root=repo_root, artifact_root=artifact_root
         )
-        if stored is not None:
-            replacements.append((start, end, f"{stored.as_posix()}{punctuation}"))
-    if not replacements:
-        return archive_inbox_attachment_references(text)
+        if stored is None:
+            raise SpiceError(
+                "cannot copy inbox attachment reference into durable artifact "
+                f"store: {ref}"
+            )
+        replacements.append((start, end, f"{stored.as_posix()}{punctuation}"))
     result = text
     for start, end, replacement in reversed(replacements):
         result = f"{result[:start]}{replacement}{result[end:]}"
-    return archive_inbox_attachment_references(result)
+    return result
 
 
 def find_archived_inbox_attachment_references(text: str) -> tuple[str, ...]:
