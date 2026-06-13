@@ -252,11 +252,102 @@ def integrate_and_publish(
     if flagged:
         raise SpiceError(_conflict_marker_refusal(label, flagged))
     branch = baseline.split("/", 1)[1]
-    push = _run(root, "push", remote, f"{merge_head}:{branch}")
-    if push.returncode != 0:
-        raise SpiceError(_fail(f"publish task work to {baseline}", push))
+    merge_head, upstream_head = _publish_task_merge(
+        root,
+        remote=remote,
+        baseline=baseline,
+        branch=branch,
+        label=label,
+        merge_head=merge_head,
+        upstream_head=upstream_head,
+        message=message,
+    )
     return SyncResult(
         uda_args=_capture(agent_head, merge_head, baseline, upstream_head)
+    )
+
+
+def _publish_task_merge(
+    repo_root: Path,
+    *,
+    remote: str,
+    baseline: str,
+    branch: str,
+    label: str,
+    merge_head: str,
+    upstream_head: str,
+    message: str,
+) -> tuple[str, str]:
+    push = _run(repo_root, "push", remote, f"{merge_head}:{branch}")
+    if push.returncode == 0:
+        return merge_head, upstream_head
+    if not _is_non_fast_forward_push(push):
+        raise SpiceError(_fail(f"publish task work to {baseline}", push))
+    return _retry_publish_after_race(
+        repo_root,
+        remote=remote,
+        baseline=baseline,
+        branch=branch,
+        label=label,
+        merge_head=merge_head,
+        previous_upstream_head=upstream_head,
+        message=message,
+        first_push=push,
+    )
+
+
+def _retry_publish_after_race(
+    repo_root: Path,
+    *,
+    remote: str,
+    baseline: str,
+    branch: str,
+    label: str,
+    merge_head: str,
+    previous_upstream_head: str,
+    message: str,
+    first_push: subprocess.CompletedProcess[str],
+) -> tuple[str, str]:
+    fetch = _run(repo_root, "fetch", remote)
+    if fetch.returncode != 0:
+        raise SpiceError(_publish_race_recovery(label, remote, baseline, first_push))
+    fresh_upstream_head = _read(repo_root, "rev-parse", baseline)
+    if not fresh_upstream_head or fresh_upstream_head == previous_upstream_head:
+        raise SpiceError(_publish_race_recovery(label, remote, baseline, first_push))
+    if fresh_upstream_head == merge_head:
+        return merge_head, fresh_upstream_head
+
+    merge = _run(repo_root, "merge", "--no-ff", "--no-commit", "-m", message, baseline)
+    if merge.returncode != 0:
+        raise MergeConflict(_merge_conflict_recovery(label, repo_root))
+    merged_tree = _read(repo_root, "write-tree")
+    if not merged_tree:
+        raise SpiceError("could not write publish-race merged tree")
+    abort = _run(repo_root, "merge", "--abort")
+    if abort.returncode != 0:
+        raise SpiceError(_fail("clear publish-race merge state", abort))
+    retry_head = _synthesize_and_fast_forward(
+        repo_root, merged_tree, fresh_upstream_head, merge_head, message
+    )
+    flagged = _conflict_marker_paths(repo_root, fresh_upstream_head, retry_head)
+    if flagged:
+        raise SpiceError(_conflict_marker_refusal(label, flagged))
+    retry_push = _run(repo_root, "push", remote, f"{retry_head}:{branch}")
+    if retry_push.returncode != 0:
+        if _is_non_fast_forward_push(retry_push):
+            raise SpiceError(
+                _publish_race_recovery(label, remote, baseline, retry_push)
+            )
+        raise SpiceError(_fail(f"publish task work to {baseline}", retry_push))
+    return retry_head, fresh_upstream_head
+
+
+def _is_non_fast_forward_push(completed: subprocess.CompletedProcess[str]) -> bool:
+    output = (completed.stdout + "\n" + completed.stderr).lower()
+    return (
+        "non-fast-forward" in output
+        or "fetch first" in output
+        or "stale info" in output
     )
 
 
@@ -310,6 +401,25 @@ def _conflict_marker_refusal(label: str, paths: list[str]) -> str:
         f"  git add -- {joined}",
         "  git commit --amend --no-edit",
         f'  spice task done {label} --validation "..."',
+    ]
+    return "\n".join(lines)
+
+
+def _publish_race_recovery(
+    label: str,
+    remote: str,
+    baseline: str,
+    completed: subprocess.CompletedProcess[str],
+) -> str:
+    lines = [
+        f"{baseline} advanced while publishing task work; the task state was "
+        "not advanced",
+        "next commands:",
+        f"  git fetch {remote}",
+        f"  git merge {baseline}",
+        f'  spice task done {label} --validation "..."',
+        "git push output:",
+        _fail(f"publish task work to {baseline}", completed),
     ]
     return "\n".join(lines)
 

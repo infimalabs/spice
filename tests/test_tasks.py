@@ -347,6 +347,65 @@ def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path)
     )
 
 
+def test_integrate_and_publish_retries_non_fast_forward_publish_race(
+    tmp_path, monkeypatch
+):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
+    agent_head = _git(repo, "rev-parse", "HEAD")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    real_run = gitsync._run
+    push_attempts = 0
+
+    def racing_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        nonlocal push_attempts
+        if args and args[0] == "push" and repo_root == repo:
+            push_attempts += 1
+            if push_attempts == 1:
+                (peer / "baseline.txt").write_text(
+                    "baseline raced ahead\n", encoding="utf-8"
+                )
+                _run(peer, "git", "add", "baseline.txt")
+                _run(peer, "git", "commit", "-m", "baseline raced ahead")
+                _run(peer, "git", "push", "origin", "main")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", racing_run)
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000004Z",
+        repo_root=repo,
+        meta={
+            "title": "Publish raced task work",
+            "actor": ACTOR_A,
+            "phase": "todo",
+            "project": "task.unit",
+        },
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+    raced_upstream = _git(peer, "rev-parse", "HEAD")
+    first_retry_parent, second_retry_parent = _merge_parents(repo, merge_head)
+
+    assert push_attempts == 2
+    assert captured["done_head"] == agent_head
+    assert captured["done_upstream_head"] == raced_upstream
+    assert first_retry_parent == raced_upstream
+    assert _merge_parents(repo, second_retry_parent)[1] == agent_head
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert _git(repo, "status", "--porcelain") == ""
+
+
 def test_merge_message_omits_task_description_body():
     message = gitsync._compose_message(
         "TASK-20260101T000000000003Z",
