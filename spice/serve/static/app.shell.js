@@ -849,7 +849,7 @@ function laneComposePlaceholder(member) {
 function laneComposePlaceholderStatus(member) {
   const parts = [];
   const pending = lanePendingDisplayCount(member);
-  if (pending > 0) parts.push(pending + " pending");
+  parts.push(pending + " pending");
   const status = (member.lastRenderedStatusLine || {}).agentProcessStatus || "";
   if (status) parts.push(status);
   return parts.join(", ");
