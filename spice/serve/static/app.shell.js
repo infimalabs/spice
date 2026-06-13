@@ -734,7 +734,7 @@ function composerPrimaryBandHeader(lane, member) {
   const header = composerBandHeader({
     className: "composer-band-header--primary",
     title: composerPrimaryHeaderTitle(latest),
-    beforeMenu: composerPrimaryHeaderBeforeMenu(latest),
+    beforeMenu: composerPrimaryHeaderBeforeMenu(latest, member),
     trailingControl: composerBandMenuTrigger(
       "Composer actions for " + label,
       "Composer actions for " + label,
@@ -775,31 +775,39 @@ function composerPrimaryHeaderTitle(latest) {
   return latest ? composerQuotePreview(latest) : "No assistant messages yet";
 }
 
-function composerPrimaryHeaderBeforeMenu(latest) {
+function composerPrimaryHeaderBeforeMenu(latest, member) {
   return [
     latest
-      ? composerPrimaryLatestMessageLink(latest)
-      : composerPrimaryLatestMessageNote(),
+      ? composerPrimaryLatestMessageLink(latest, member)
+      : composerPrimaryLatestMessageNote(member),
   ];
 }
 
-function composerPrimaryLatestMessageLink(latest) {
+function composerPrimaryLatestMessageLink(latest, member) {
   const time = document.createElement("a");
   time.href = "#" + messageDomId(latest.key);
   time.title = "Jump to latest message";
   time.className = "composer-quote-time composer-latest-time";
   time.dataset.relativeTimestamp = latest.timestamp || "";
   time.dataset.relativeFallback = "message";
+  syncComposerHeaderStatus(time, member);
   setRelativeTimeText(time);
   return time;
 }
 
-function composerPrimaryLatestMessageNote() {
+function composerPrimaryLatestMessageNote(member) {
   const note = document.createElement("span");
   note.className = "composer-quote-time composer-latest-time composer-latest-time--empty";
   note.textContent = "no messages";
   note.title = "No latest message";
+  syncComposerHeaderStatus(note, member);
   return note;
+}
+
+function syncComposerHeaderStatus(element, member) {
+  const statusLine = member.lastRenderedStatusLine || {};
+  element.dataset.agentStatus =
+    statusLine.agentVisualStatus || statusLine.agentProcessStatus || "unknown";
 }
 
 function latestComposerMessage(member) {
@@ -1343,7 +1351,7 @@ function syncComposerQuoteBand(band, lane, targetId, member, draft) {
   band.className = "composer-band composer-band--quote";
   band.title = draft.quoteText || draft.preview;
   band.dataset.composerQuoteBandDraftId = draft.id;
-  const header = composerQuoteBandHeader(lane, targetId, draft);
+  const header = composerQuoteBandHeader(lane, targetId, member, draft);
   const previousHeader = band.querySelector(".composer-band-header--quote");
   if (previousHeader) previousHeader.replaceWith(header);
   else band.prepend(header);
@@ -1361,7 +1369,7 @@ function syncComposerQuoteBand(band, lane, targetId, member, draft) {
   textarea.placeholder = laneComposePlaceholder(member);
 }
 
-function composerQuoteBandHeader(lane, targetId, draft) {
+function composerQuoteBandHeader(lane, targetId, member, draft) {
   let time;
   if (draft.href) {
     const anchor = document.createElement("a");
@@ -1374,6 +1382,7 @@ function composerQuoteBandHeader(lane, targetId, draft) {
   time.className = "composer-quote-time";
   time.dataset.relativeTimestamp = draft.timestamp || "";
   time.dataset.relativeFallback = "quote";
+  syncComposerHeaderStatus(time, member);
   setRelativeTimeText(time);
   const header = composerBandHeader({
     className: "composer-band-header--quote",

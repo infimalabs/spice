@@ -835,6 +835,7 @@ def test_index_links_and_serves_packaged_favicon():
     send_static_asset(handler, "favicon.ico")
 
     assert '<link rel="icon" href="/static/favicon.ico" sizes="any">' in html
+    assert html.index("/static/index.css") < html.index("/static/status-colors.css")
     assert favicon.is_file()
     assert handler.status == HTTPStatus.OK
     assert handler.headers["Content-Length"] == str(favicon.stat().st_size)
@@ -1049,6 +1050,7 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
 
 def test_static_primary_composer_links_latest_message_like_quote_composers():
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    status_css = (STATIC_ROOT / "status-colors.css").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
     primary_header_start = css.index(".composer-band-header--primary {")
     primary_header_rule = css[
@@ -1064,19 +1066,42 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
         'return latest ? composerQuotePreview(latest) : "No assistant messages yet";'
         in app_shell
     )
-    assert "beforeMenu: composerPrimaryHeaderBeforeMenu(latest)," in app_shell
-    assert "function composerPrimaryHeaderBeforeMenu(latest)" in app_shell
-    assert "composerPrimaryLatestMessageLink(latest)" in app_shell
-    assert "composerPrimaryLatestMessageNote()" in app_shell
-    assert "function composerPrimaryLatestMessageLink(latest)" in app_shell
+    assert "beforeMenu: composerPrimaryHeaderBeforeMenu(latest, member)," in app_shell
+    assert "function composerPrimaryHeaderBeforeMenu(latest, member)" in app_shell
+    assert "composerPrimaryLatestMessageLink(latest, member)" in app_shell
+    assert "composerPrimaryLatestMessageNote(member)" in app_shell
+    assert "function composerPrimaryLatestMessageLink(latest, member)" in app_shell
     assert 'const time = document.createElement("a");' in app_shell
     assert 'time.href = "#" + messageDomId(latest.key);' in app_shell
     assert 'time.title = "Jump to latest message";' in app_shell
     assert 'time.className = "composer-quote-time composer-latest-time";' in app_shell
     assert 'time.dataset.relativeFallback = "message";' in app_shell
-    assert "function composerPrimaryLatestMessageNote()" in app_shell
+    assert "function composerPrimaryLatestMessageNote(member)" in app_shell
     assert 'note.textContent = "no messages";' in app_shell
     assert 'note.title = "No latest message";' in app_shell
+    assert "function syncComposerHeaderStatus(element, member)" in app_shell
+    assert "const statusLine = member.lastRenderedStatusLine || {};" in app_shell
+    assert (
+        'statusLine.agentVisualStatus || statusLine.agentProcessStatus || "unknown"'
+        in app_shell
+    )
+    assert "syncComposerHeaderStatus(time, member);" in app_shell
+    assert "syncComposerHeaderStatus(note, member);" in app_shell
+    assert "composerQuoteBandHeader(lane, targetId, member, draft)" in app_shell
+    assert ".agent-status-pip,\n.composer-quote-time[data-agent-status] {" in status_css
+    assert "--agent-status-color: var(--muted);" in status_css
+    assert (
+        '.agent-status-pip[data-agent-status="running"],\n'
+        '.composer-quote-time[data-agent-status="running"] {' in status_css
+    )
+    assert (
+        '.agent-status-pip[data-agent-status="idle"],\n'
+        '.composer-quote-time[data-agent-status="idle"] {' in status_css
+    )
+    assert (
+        ".composer-quote-time[data-agent-status] {\n  color: var(--agent-status-color);"
+        in status_css
+    )
     assert "grid-template-columns: auto minmax(0, 1fr) auto;" in primary_header_rule
     assert "grid-template-columns: auto minmax(0, 1fr) auto;" in quote_header_rule
     assert ".composer-band--primary textarea,\n.composer-band--quote textarea {" in css
