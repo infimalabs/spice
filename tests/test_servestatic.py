@@ -489,6 +489,56 @@ def test_static_message_accent_palette_names_all_six_team_slots():
     )
 
 
+def test_static_filter_lists_skip_noop_rewrites_and_preserve_scroll():
+    css = _serve_css_text()
+    app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_panes = (STATIC_ROOT / "app.panes.js").read_text(encoding="utf-8")
+
+    filter_count_start = css.index(".filter-pill-count {")
+    filter_count_rule = css[filter_count_start : css.index("}", filter_count_start)]
+    chip_start = css.index(".lane-filter-chip {")
+    chip_rule = css[chip_start : css.index("}", chip_start)]
+    chip_count_start = css.index(".lane-filter-chip-count {")
+    chip_count_rule = css[chip_count_start : css.index("}", chip_count_start)]
+
+    assert 'let renderedFilterPillsFingerprint = "";' in app_js
+    assert "const pillModels = taskFilterStemPills.map((stem) => ({" in app_lanes
+    assert "if (fingerprint === renderedFilterPillsFingerprint) return;" in app_lanes
+    assert "renderedFilterPillsFingerprint = fingerprint;" in app_lanes
+    assert 'renderedFilterPaneFingerprint: "",' in app_shell
+    assert "function laneFilterPaneRenderModel(lane)" in app_panes
+    assert (
+        "if (model.fingerprint === lane.renderedFilterPaneFingerprint) return;"
+        in app_panes
+    )
+    assert "lane.renderedFilterPaneFingerprint = model.fingerprint;" in app_panes
+    assert "function laneFilterPickerResultsScrollTop(picker)" in app_panes
+    assert (
+        "function restoreLaneFilterPickerResultsScroll(picker, scrollTop)" in app_panes
+    )
+    assert (
+        "restoreLaneFilterPickerResultsScroll(picker, previousScrollTop);" in app_panes
+    )
+    assert (
+        "if (input instanceof HTMLElement) input.focus({ preventScroll: true });"
+        in app_panes
+    )
+    assert "function compareLaneFilterPickerActions(left, right)" in app_panes
+    assert (
+        "const actions = [...existing, ...stems].sort(compareLaneFilterPickerActions);"
+        in app_panes
+    )
+    assert "font-variant-numeric: tabular-nums;" in filter_count_rule
+    assert "min-width: 2ch;" in filter_count_rule
+    assert "text-align: right;" in filter_count_rule
+    assert "flex: 0 1 10rem;" in chip_rule
+    assert "justify-content: space-between;" in chip_rule
+    assert "font-variant-numeric: tabular-nums;" in chip_count_rule
+    assert "min-width: calc(2ch + 10px);" in chip_count_rule
+
+
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
     css = _serve_css_text()
 

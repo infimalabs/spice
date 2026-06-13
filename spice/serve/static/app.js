@@ -49,6 +49,7 @@ let targetsLoaded = false;
 let targetsLoading = false;
 let targetsLoadPromise = null;
 let taskFilterStemPills = [];
+let renderedFilterPillsFingerprint = "";
 let spiceMenuEl = null;
 let spiceMenuPositionHandler = null;
 let spiceMenuDismissHandler = null;

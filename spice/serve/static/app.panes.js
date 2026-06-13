@@ -66,16 +66,16 @@ function laneTaskFilterOpenCount(lane, filter) {
 
 function renderLaneFiltersPane(lane) {
   if (!lane.filtersChipsEl) return;
-  const filters = laneAssignedTaskFilters(lane);
-  const pickerAssignedFilters = laneFilterPickerAssignedFilters(lane, filters);
+  const model = laneFilterPaneRenderModel(lane);
+  if (model.fingerprint === lane.renderedFilterPaneFingerprint) return;
+  lane.renderedFilterPaneFingerprint = model.fingerprint;
+  const { driving, filters, pickerAssignedFilters, privateQueues } = model;
   for (const filter of [...lane.selectedFilterRemovals]) {
     if (!filters.includes(filter)) lane.selectedFilterRemovals.delete(filter);
   }
   lane.filtersSummaryEl.textContent = filters.length
     ? filters.length + " assigned"
     : "private only";
-  const driving = laneEffectiveLifetime(lane) === "Drive";
-  const privateQueues = lanePrivateQueues(lane);
   lane.filtersQueueEl.textContent =
     (driving ? "driving" : "idle") +
     " " +
@@ -91,6 +91,59 @@ function renderLaneFiltersPane(lane) {
   }
   lane.filtersChipsEl.replaceChildren(...chips);
   syncLaneFilterAssignOverlay(lane, filters);
+}
+
+function laneFilterPaneRenderModel(lane) {
+  const filters = laneAssignedTaskFilters(lane);
+  const pickerAssignedFilters = laneFilterPickerAssignedFilters(lane, filters);
+  const privateQueues = lanePrivateQueues(lane);
+  const removals = [...lane.selectedFilterRemovals].sort();
+  const pending = [...lane.filterPickerPendingAssignments].sort();
+  const availableFilters = laneAvailableTaskFilters(lane, pickerAssignedFilters);
+  const driving = laneEffectiveLifetime(lane) === "Drive";
+  const pickerActions = lane.filterPickerOpen
+    ? laneFilterPickerActions(
+        lane,
+        pickerAssignedFilters,
+        lane.filterPickerQuery,
+      ).map(laneFilterPickerActionFingerprint)
+    : [];
+  return {
+    driving,
+    filters,
+    pickerAssignedFilters,
+    privateQueues,
+    fingerprint: JSON.stringify({
+      availableFilters,
+      availableOpenTaskCount: laneFilterAvailableOpenTaskCount(
+        lane,
+        pickerAssignedFilters,
+      ),
+      canCreate: laneFilterCanCreate(lane),
+      driving,
+      filterCounts: filters.map((filter) => [
+        filter,
+        laneTaskFilterOpenCount(lane, filter),
+      ]),
+      filters,
+      pickerActions,
+      pickerFooter: lane.filterPickerOpen ? laneFilterPickerFooterText(lane) : "",
+      pickerOpen: lane.filterPickerOpen,
+      pickerQuery: lane.filterPickerQuery || "",
+      pending,
+      privateQueues,
+      removals,
+    }),
+  };
+}
+
+function laneFilterPickerActionFingerprint(action) {
+  return [
+    action.kind || "",
+    action.filter || "",
+    action.label || "",
+    action.detail || "",
+  ];
 }
 
 function laneFilterChip(lane, filter) {
@@ -142,6 +195,11 @@ function laneFilterPrivateChip(queue) {
 }
 
 function syncLaneFilterAssignOverlay(lane, assignedFilters) {
+  const previousPicker = lane.filterPickerOverlayEl;
+  const previousScrollTop = laneFilterPickerResultsScrollTop(previousPicker);
+  const refocusSearch =
+    previousPicker &&
+    document.activeElement === previousPicker.querySelector(".lane-filter-search");
   destroyLaneFilterAssignOverlay(lane);
   if (!lane.filterPickerOpen) return;
   const picker = renderLaneFilterPicker(lane, assignedFilters);
@@ -157,6 +215,21 @@ function syncLaneFilterAssignOverlay(lane, assignedFilters) {
   document.addEventListener("focusin", dismiss, true);
   document.addEventListener("pointerdown", dismiss, true);
   position();
+  restoreLaneFilterPickerResultsScroll(picker, previousScrollTop);
+  if (refocusSearch) {
+    const input = picker.querySelector(".lane-filter-search");
+    if (input instanceof HTMLElement) input.focus({ preventScroll: true });
+  }
+}
+
+function laneFilterPickerResultsScrollTop(picker) {
+  const results = picker?.querySelector(".lane-filter-results");
+  return results ? results.scrollTop : 0;
+}
+
+function restoreLaneFilterPickerResultsScroll(picker, scrollTop) {
+  const results = picker?.querySelector(".lane-filter-results");
+  if (results) results.scrollTop = scrollTop;
 }
 
 function destroyLaneFilterAssignOverlay(lane) {
@@ -422,7 +495,16 @@ function laneFilterPickerActions(lane, assignedFilters, query) {
       detail: laneTaskFilterOpenCount(lane, stem) + " tasks · stem",
     }));
   const create = laneFilterCreateAction(lane, assigned, normalized);
-  return create ? [...existing, ...stems, create] : [...existing, ...stems];
+  const actions = [...existing, ...stems].sort(compareLaneFilterPickerActions);
+  return create ? [...actions, create] : actions;
+}
+
+function compareLaneFilterPickerActions(left, right) {
+  return (
+    String(left.label || "").localeCompare(String(right.label || "")) ||
+    String(left.kind || "").localeCompare(String(right.kind || "")) ||
+    String(left.filter || "").localeCompare(String(right.filter || ""))
+  );
 }
 
 function laneFilterCreateAction(lane, assigned, query) {
