@@ -119,6 +119,9 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     html = render_index_html()
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
     app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    header_start = css.index(".app-header {")
+    header_end = css.index(".app-header .meta", header_start)
+    header_rules = css[header_start:header_end]
     button_start = css.index(".spice-menu-button {")
     button_end = css.index(".spice-menu-icon {", button_start)
     button_rules = css[button_start:button_end]
@@ -128,6 +131,11 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     label_start = css.index(".spice-menu-label {")
     label_end = css.index(".icon-button svg", label_start)
     label_rules = css[label_start:label_end]
+    mobile_header_start = css.index(
+        "  .app-header {", css.index("@media (max-width: 720px)")
+    )
+    mobile_header_end = css.index("  .app-header .meta", mobile_header_start)
+    mobile_header_rules = css[mobile_header_start:mobile_header_end]
 
     assert 'id="fast-mode-toggle"' not in html
     assert 'class="add-lane"' not in html
@@ -143,6 +151,8 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert 'openLaneButton.addEventListener("click", (event) => {' in app_js
     assert "button.primary:hover {\n  background: var(--accent-strong);" in css
     assert "button.primary:hover,\n.spice-menu-button:hover" not in css
+    assert "min-height: 50px;" in header_rules
+    assert "padding: 7px 10px;" in header_rules
     assert (
         "background: color-mix(in srgb, var(--control) 90%, var(--accent) 10%);"
         in button_rules
@@ -213,6 +223,8 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
         "  box-shadow: inset 0 0 0 1px var(--border-soft);" in css
     )
     assert "height: 30px;" in button_rules
+    assert "min-height: 50px;" in mobile_header_rules
+    assert "padding: 8px;" in mobile_header_rules
 
 
 def test_static_spice_menu_replaces_picker_lane():

@@ -82,7 +82,7 @@ button.primary:hover {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 54px;
+  min-height: 50px;
   padding: 7px 10px;
 }
 .app-header .meta { color: var(--muted); flex: 1; font-size: 12px; text-align: right; }
@@ -1405,8 +1405,8 @@ button.primary.submit-action:focus-visible {
     flex-wrap: wrap;
     gap: 7px;
     height: auto;
-    min-height: 54px;
-    padding: 7px 8px;
+    min-height: 50px;
+    padding: 8px;
   }
   .app-header .meta {
     flex: 1 1 8rem;
