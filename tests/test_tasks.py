@@ -631,6 +631,21 @@ def test_task_oops_description_records_triage_context(task_repo, capsys):
     assert row["task_description"] == "Longer triage context for the board."
 
 
+def test_task_oops_accepts_priority_style_severity_shorthand(task_repo, capsys):
+    args = build_parser().parse_args(
+        ["task", "oops", "wrapper", "hiccup", "--severity", "H"]
+    )
+
+    assert args.func(args) == 0
+    out = capsys.readouterr().out
+    created = re.search(r"OOPS-\S+", out).group(0)
+    row = identity.resolve(created)
+
+    assert "[high]" in out
+    assert row["priority"] == "H"
+    assert "high" in row["tags"]
+
+
 def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
     remote = tmp_path / "remote.git"
     _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))

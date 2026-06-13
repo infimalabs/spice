@@ -56,6 +56,7 @@ PRIORITY_MAP = {
 }
 SEVERITY_PRIORITY = {"critical": "H", "high": "H", "medium": "M", "low": "L"}
 SEVERITIES = ("low", "medium", "high", "critical")
+SEVERITY_SHORTHANDS = {"h": "high", "m": "medium", "l": "low"}
 SLA_DUE_SECONDS = {
     "H": 86400,  # high/critical: tomorrow
     "M": 604800,  # medium: one week
@@ -153,6 +154,17 @@ def map_priority(raw: str) -> str:
             f"invalid priority {raw!r} (use high/medium/low/none or H/M/L)"
         )
     return mapped
+
+
+def map_severity(raw: str) -> str:
+    value = (raw or "medium").strip()
+    if value.lower() in SEVERITY_SHORTHANDS:
+        return SEVERITY_SHORTHANDS[value.lower()]
+    if value.lower() in SEVERITIES:
+        return value.lower()
+    raise SpiceError(
+        f"invalid severity {raw!r} (use critical/high/medium/low or H/M/L)"
+    )
 
 
 def parse_duration(text: str) -> int:
