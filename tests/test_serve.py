@@ -858,6 +858,35 @@ def test_static_draft_composers_use_14px_font():
     assert "font-size: 14px;" in textarea_rule
 
 
+def test_static_composer_attachment_thumbnails_fill_header():
+    css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+
+    attachments_start = css.index(".composer-attachments {")
+    attachments_end = css.index(".composer-attachments[hidden]", attachments_start)
+    attachments_rule = css[attachments_start:attachments_end]
+    list_start = css.index(".composer-attachment-list {")
+    list_end = css.index(".composer-attachment-chip {", list_start)
+    list_rule = css[list_start:list_end]
+    chip_start = css.index(".composer-attachment-chip {")
+    chip_end = css.index(".composer-attachment-chip img", chip_start)
+    chip_rule = css[chip_start:chip_end]
+    name_start = css.index(".composer-attachment-name {")
+    name_end = css.index("}", name_start)
+    name_rule = css[name_start:name_end]
+
+    assert 'body.className = "composer-band-body";' in app_shell
+    assert 'const body = parent.querySelector(".composer-band-body");' in app_shell
+    assert "composer-band-header--attachments" in app_shell
+    assert ".composer-band-body--attachments .composer-band-title" in css
+    assert "overflow-x: auto;" in attachments_rule
+    assert "height: 100%;" in attachments_rule
+    assert "gap: 2px;" in list_rule
+    assert "height: 26px;" in chip_rule
+    assert "width: 26px;" in chip_rule
+    assert "display: none;" in name_rule
+
+
 def test_static_relative_times_are_monospace_and_padded():
     css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")

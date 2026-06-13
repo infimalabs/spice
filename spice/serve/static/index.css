@@ -455,11 +455,22 @@ button.primary:hover {
   min-width: 0;
   padding: 0 5px 0 8px;
 }
+.composer-band-header--attachments {
+  gap: 4px;
+  padding-left: 3px;
+}
 .composer-band-header--primary {
   cursor: grab;
 }
 .composer-band-header--quote {
   grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.composer-band-body {
+  align-items: center;
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 .composer-band-title {
   color: var(--muted);
@@ -469,6 +480,9 @@ button.primary:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.composer-band-body--attachments .composer-band-title {
+  display: none;
 }
 .composer-quote-time {
   color: var(--accent-strong);
@@ -513,11 +527,14 @@ button.primary:hover {
 }
 .composer-attachments {
   align-items: center;
-  border-top: 1px solid var(--border-soft);
   display: flex;
-  min-height: 22px;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
   overflow-x: auto;
-  padding: 2px 6px;
+  overflow-y: hidden;
+  padding: 1px 0;
   scrollbar-width: thin;
 }
 .composer-attachments[hidden] {
@@ -525,58 +542,61 @@ button.primary:hover {
 }
 .composer-attachment-list {
   display: flex;
-  flex: 1;
-  gap: 4px;
-  min-width: 0;
+  flex: 0 0 auto;
+  gap: 2px;
+  height: 100%;
+  min-width: min-content;
 }
 .composer-attachment-chip {
   align-items: center;
-  background: color-mix(in srgb, var(--control) 88%, var(--bg));
+  background: color-mix(in srgb, var(--control) 84%, var(--bg));
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: 4px;
   display: inline-flex;
-  flex: 0 1 112px;
-  gap: 4px;
-  height: 18px;
-  min-width: 0;
+  flex: 0 0 26px;
+  height: 26px;
   overflow: hidden;
-  padding: 1px 3px 1px 2px;
+  padding: 0;
   position: relative;
+  width: 26px;
 }
 .composer-attachment-chip img {
   display: block;
-  border-radius: 50%;
-  flex: 0 0 14px;
-  height: 14px;
+  border-radius: 3px;
+  flex: 0 0 100%;
+  height: 100%;
   object-fit: cover;
-  width: 14px;
+  width: 100%;
 }
 .composer-attachment-name {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: none;
 }
 .composer-attachment-remove {
   align-items: center;
-  background: transparent;
+  background: color-mix(in srgb, var(--control) 80%, transparent);
   border: 0;
   border-radius: 50%;
-  color: var(--muted);
+  color: var(--fg);
   display: inline-flex;
-  flex: 0 0 14px;
-  font-size: 12px;
-  height: 14px;
+  font-size: 10px;
+  height: 12px;
   justify-content: center;
+  line-height: 1;
+  opacity: 0;
   padding: 0;
-  width: 14px;
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  width: 12px;
+}
+.composer-attachment-chip:hover .composer-attachment-remove,
+.composer-attachment-remove:focus-visible {
+  opacity: 1;
 }
 .composer-attachment-remove:hover,
 .composer-attachment-remove:focus-visible {
-  color: var(--fg);
+  background: color-mix(in srgb, var(--warn) 70%, var(--control));
+  color: var(--bg);
 }
 .composer-band--drop-ready {
   outline: 1px solid var(--accent);
