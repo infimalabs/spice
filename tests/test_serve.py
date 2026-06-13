@@ -1017,10 +1017,27 @@ def test_static_relative_times_are_monospace_and_padded():
     assert "font-variant-numeric: tabular-nums;" in css
 
 
-def test_static_primary_composer_placeholder_uses_compact_action_copy():
+def test_static_composer_placeholders_use_uniform_agent_status_copy():
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
 
-    assert 'return "Steer " + laneMemberTargetLabel(lane);' in app_shell
+    assert "const label = laneMemberTargetLabel(member);" in app_shell
+    assert 'return [label, status].filter(Boolean).join("\\n");' in app_shell
+    assert "function laneComposePlaceholderStatus(member)" in app_shell
+    assert "const pending = lanePendingDisplayCount(member);" in app_shell
+    assert 'parts.push(pending + " pending");' in app_shell
+    assert (
+        'const status = (member.lastRenderedStatusLine || {}).agentProcessStatus || "";'
+        in app_shell
+    )
+    assert "if (status) parts.push(status);" in app_shell
+    assert 'return "Steer " + laneMemberTargetLabel(lane);' not in app_shell
+    assert 'textarea.placeholder = "Reply with quoted context";' not in app_shell
+    assert "const member = laneStates.get(targetId) || lane;" in app_shell
+    assert "syncComposerQuoteBand(band, lane, targetId, member, draft);" in app_shell
+    assert "createComposerQuoteTextarea(lane, targetId, draft);" in app_shell
+    assert (
+        app_shell.count("textarea.placeholder = laneComposePlaceholder(member);") >= 3
+    )
 
 
 def test_static_primary_composer_links_latest_message_like_quote_composers():
