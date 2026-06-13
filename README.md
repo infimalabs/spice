@@ -12,6 +12,60 @@ a repository, and it provides a closed loop around the agents working there:
 supervision, coordination, conscience, and hygiene are derived mechanically
 from those two surfaces.
 
+## Why
+
+You rarely know what you want until you watch it fail. Writing the spec up
+front doesn't change that — it commits the misunderstanding to a document you
+then have to maintain. And the channel you'd write it through, a human at a
+keyboard, has a bit rate that plateaued decades ago and is the slowest link in
+the loop.
+
+spice takes the other route. The operator doesn't name the destination; they
+**corral** the agents toward it — watching what the agents emit and turning
+what they don't like into steering with the smallest possible gesture. The
+target is an **evolving fixed point**: the state the loop settles into when
+nothing it produces still provokes a correction. The spec is the *output* of
+that process, never its input.
+
+### Neither spec-driven nor observation-driven — both
+
+Spec-driven development is waterfall for agents: it front-loads a written
+specification and assumes the implementer's speed is the bottleneck. The
+implementer's speed was never why waterfall failed — the discovery problem
+was. Cheap implementation doesn't remove discovery; it lets you generate
+precisely-wrong code at scale and maintain a precisely-wrong document beside
+it. **All intent, no evidence.**
+
+Its mirror — observation-driven development, steering only by what the running
+system emits — fails the other way. With no target, you chase telemetry, fix
+whatever is in front of you, and never converge, because nothing is being
+converged toward. **All evidence, no intent.**
+
+spice is the fusion. The transcript is one surface that is both: emitted
+behavior, and — the moment you quote-and-steer off it — declared intent.
+Observation supplies the truth and the gradient; the spec supplies the
+direction. The work lands at the **fixed point** where observed reality stops
+diverging from evolving intent. Intent kept honest by evidence; evidence
+kept on course by intent.
+
+## Is this for you
+
+spice is opinionated on purpose, and the opinions are load-bearing: you can't
+drive a loop to a fixed point with minimal human input without encoding taste
+firmly enough for the machine to apply it for you. That makes spice a poor
+neutral tool and a sharp fit for one kind of operator.
+
+It fits if you'd rather **operate a fleet than hand-write code**, you locate
+the craft in the **structure** rather than the keystrokes, you share its code
+posture — small bounded seams, ugly-fast cores allowed, no shims, fallbacks,
+or legacy — you trust **listening over writing**, and you run a supported
+agent driver (today: Codex).
+
+It will fight you if your craft lives in the text, you want a tool that bends
+to your opinions instead of supplying its own, you're on a different agent, or
+you need something stable and supported today. That isn't a defect — it's the
+tool selecting its operator.
+
 ## Install
 
 ```sh
@@ -234,4 +288,6 @@ surface changes, choose minor.
 
 Work in progress: an extraction-in-progress toward a standalone, releasable
 product. Surfaces are still settling; the loop described above is real and
-exercised daily, and this repository is its own first target.
+exercised daily, and this repository is its own first target. spice was
+extracted from daily use driving a real project, not designed top-down — the
+source of both its coherence and its opinions.
