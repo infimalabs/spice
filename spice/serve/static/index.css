@@ -496,7 +496,7 @@ button.primary:hover {
   align-items: center;
   background: color-mix(in srgb, var(--control) 92%, var(--bg));
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: 50%;
   color: var(--muted);
   display: inline-flex;
   font-size: 13px;
