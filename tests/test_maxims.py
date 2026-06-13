@@ -67,6 +67,15 @@ words = ["detour"]
     assert hit.message == bag.message
 
 
+def test_builtin_fallback_maxim_allows_explicit_defaults_and_resolver_order():
+    message = maxims.builtin_maxim("fallback")
+
+    assert "quiet defensive secondary paths" in message
+    assert "intentional defaults" in message
+    assert "explicit resolver order" in message
+    assert "fail loudly" in message
+
+
 def test_repo_config_overrides_builtin_message_for_show_and_meta_judge(
     tmp_path, monkeypatch, capsys
 ):
