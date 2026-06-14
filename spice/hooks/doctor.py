@@ -12,7 +12,6 @@ from typing import Callable
 
 from spice.agent.driver import DRIVER
 from spice.agent.lifecycle import packaged_skill_path
-from spice.agent.wrap import proxy_bin
 from spice.config import configured_judge_bin, git_worktree_config_get
 from spice.errors import SpiceError
 from spice.hooks.install import HOOK_ARGS, hook_shim_content, hooks_dir
@@ -135,7 +134,6 @@ def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
     for label, binary, required, note in (
         ("tool.git", "git", True, "required for repository checks"),
         ("tool.agent-driver", DRIVER.binary(), True, f"driver={DRIVER.name}"),
-        ("tool.proxy", proxy_bin(), False, "optional; absent means passthrough"),
         ("tool.taskwarrior", "task", True, "required for the task control plane"),
         ("tool.judge", configured_judge_bin(repo_root), True, "maxim judging"),
         ("tool.tts", "say", False, "optional macOS speech"),

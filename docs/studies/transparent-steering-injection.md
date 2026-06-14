@@ -18,8 +18,8 @@ string, it reexecs the original shell command through:
 spice agent run -- <shell> -c "<original command>"
 ```
 
-That makes steering injection, context warnings, git-shadow routing, proxy
-routing, and configured wrapper functions run before the requested command.
+That makes steering injection, context warnings, git-shadow routing, and
+configured wrapper functions run before the requested command.
 
 ## Shells
 

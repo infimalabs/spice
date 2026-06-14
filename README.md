@@ -83,8 +83,8 @@ current repo is the spice source checkout, generated shims and supervisor
 children put that checkout first on `PYTHONPATH` and run `python -m spice`;
 ordinary target repos use the installed product. Agent shell startup hooks
 reexec zsh/bash commands through `spice agent run -- <cmd>` so steering,
-context warnings, git-shadow routing, proxy routing, and configured wrapper
-groups run before the requested command.
+context warnings, git-shadow routing, and configured wrapper groups run before
+the requested command.
 
 A project can set its default supervised-agent launch model and thinking in
 tracked config, either by editing `pyproject.toml` or by running
@@ -161,7 +161,7 @@ or first add the helper to this seam with tests and a stability note.
 
 | Surface | Command | What it does |
 | --- | --- | --- |
-| Command surface | `spice agent run -- <cmd>` | Runs shell commands with proxy routing, git-shadow env, configured wrapper groups, and steering injection on stderr. |
+| Command surface | `spice agent run -- <cmd>` | Runs shell commands with git-shadow env, configured wrapper groups, and steering injection on stderr. |
 | Lifecycle | `spice agent ensure` / `supervise` | One worktree-bound agent per worktree, started under a neutral skill prompt, watched by a durable supervisor. |
 | Steering | filesystem inbox under `.spice/inbox/` | Durable operator messages; items retire only when the agent semantically ACKs their key in its transcript. |
 | Tasks | `spice task …` | Phase-native Taskwarrior board shared by all worktrees; `task next` is allocator-owned; git sync happens at task boundaries. |

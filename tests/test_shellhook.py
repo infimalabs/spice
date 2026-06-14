@@ -70,7 +70,6 @@ def test_wrapper_routes_worktree_spice_commands_through_python_module(
     tmp_path, monkeypatch
 ):
     _write_spice_product_shape(tmp_path)
-    monkeypatch.setattr(wrap, "proxy_bin", lambda: "missing-spice-proxy")
 
     spice_command = wrap.build_agent_run_command(
         ["spice", "task", "status"], repo_root=tmp_path
@@ -87,7 +86,6 @@ def test_wrapper_routes_worktree_python_commands_through_active_interpreter(
     tmp_path, monkeypatch
 ):
     _write_spice_product_shape(tmp_path)
-    monkeypatch.setattr(wrap, "proxy_bin", lambda: "missing-spice-proxy")
 
     python_command = wrap.build_agent_run_command(
         ["python", "-m", "pip", "--version"], repo_root=tmp_path
@@ -104,21 +102,15 @@ def test_wrapper_routes_worktree_python_commands_through_active_interpreter(
     assert proxy_python_command == [sys.executable, "-m", "pip", "--version"]
 
 
-def test_wrapper_proxy_receives_worktree_python_interpreter(tmp_path, monkeypatch):
+def test_wrapper_proxy_marker_drops_after_worktree_python_routing(tmp_path):
     _write_spice_product_shape(tmp_path)
-    monkeypatch.setenv(wrap.PROXY_BIN_ENV, "rtk-test")
-    monkeypatch.setattr(
-        wrap.shutil,
-        "which",
-        lambda proxy: "/opt/bin/rtk-test" if proxy == "rtk-test" else None,
-    )
 
     assert wrap.build_agent_run_command(
         ["python", "-m", "pip", "--version"], repo_root=tmp_path
-    ) == ["/opt/bin/rtk-test", sys.executable, "-m", "pip", "--version"]
+    ) == [sys.executable, "-m", "pip", "--version"]
     assert wrap.build_agent_run_command(
         ["proxy", "python", "-m", "pip", "--version"], repo_root=tmp_path
-    ) == ["/opt/bin/rtk-test", "proxy", sys.executable, "-m", "pip", "--version"]
+    ) == [sys.executable, "-m", "pip", "--version"]
 
 
 def test_wrapper_routes_target_repo_python_commands_through_virtualenv_default(
@@ -129,7 +121,6 @@ def test_wrapper_routes_target_repo_python_commands_through_virtualenv_default(
     venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
     venv_python.chmod(0o755)
     monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "active-env"))
-    monkeypatch.setattr(wrap, "proxy_bin", lambda: "missing-spice-proxy")
 
     assert wrap.build_agent_run_command(
         ["python", "--version"], repo_root=tmp_path
@@ -147,7 +138,6 @@ def test_wrapper_routes_target_repo_python_commands_through_repo_venv(
     venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
     venv_python.chmod(0o755)
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
-    monkeypatch.setattr(wrap, "proxy_bin", lambda: "missing-spice-proxy")
 
     assert wrap.build_agent_run_command(
         ["python", "--version"], repo_root=tmp_path
@@ -159,7 +149,6 @@ def test_wrapper_routes_target_repo_python_commands_through_repo_venv(
 
 def test_wrapper_refuses_target_repo_python_without_repo_venv(tmp_path, monkeypatch):
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
-    monkeypatch.setattr(wrap, "proxy_bin", lambda: "missing-spice-proxy")
 
     command = wrap.build_agent_run_command(["python", "--version"], repo_root=tmp_path)
 
@@ -189,6 +178,22 @@ def test_wrapper_plain_commands_scrub_shell_reexec_environment(tmp_path, monkeyp
     assert "ZDOTDIR" not in env
     assert "BASH_ENV" not in env
     assert env[SHELL_TRACE_ENV] == "preserved"
+
+
+def test_wrapper_preserves_shell_hook_environment_for_reexec_stage(
+    tmp_path, monkeypatch
+):
+    _write_spice_product_shape(tmp_path)
+    monkeypatch.setenv("ZDOTDIR", "hook")
+    monkeypatch.setenv("BASH_ENV", "hook")
+    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
+
+    env = wrap.build_agent_run_environment(["zsh", "-c", "true"], repo_root=tmp_path)
+
+    assert env is not None
+    assert env["ZDOTDIR"] == "hook"
+    assert env["BASH_ENV"] == "hook"
+    assert env[shellhook.SHELL_HOOK_REEXEC_STAGE_ENV] == "1"
 
 
 def test_agent_environment_inherits_worktree_spice_pythonpath(tmp_path, monkeypatch):
@@ -550,7 +555,7 @@ def test_zsh_login_hook_reexec_restores_across_startup_files(tmp_path):
     subprocess.run([zsh, "-lc", "sleep 0.1"], check=True, env=env)
 
     lines = _trace_lines(trace, expected_prefix="real:")
-    assert lines[0].startswith("fake:unset:unset:-m spice agent run --")
+    assert lines[0].startswith(f"fake:{hook_dir}:unset:-m spice agent run --")
     assert lines[1:] == ["real:.zshenv", "real:.zprofile", "real:.zlogin"]
 
 
@@ -628,9 +633,41 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
     lines = _trace_lines(trace, expected_prefix="ran:")
     agent_run_lines = [line for line in lines if "-m spice agent run --" in line]
     assert len(agent_run_lines) == 1
-    assert agent_run_lines[0].startswith("fake:unset:unset:")
+    assert agent_run_lines[0].startswith(f"fake:{hook_dir}:unset:")
     assert f" {zsh} -c " in agent_run_lines[0]
     assert "ran:unset:unset" in lines
+
+
+def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    trace = tmp_path / "trace.log"
+    fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    rtk = bin_dir / "rtk"
+    rtk.write_text(
+        (f'#!/bin/sh\nprintf \'rtk:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n'),
+        encoding="utf-8",
+    )
+    rtk.chmod(0o755)
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    env = {
+        "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
+        shellhook.ZDOTDIR_ENV: str(hook_dir),
+        SHELL_TRACE_ENV: str(trace),
+        **shellhook.shell_steering_runtime_environment(
+            base_env={},
+            python_command=[str(fake_python)],
+            repo_root=tmp_path,
+        ),
+    }
+
+    subprocess.run([zsh, "-c", "grep needle /dev/null"], check=True, env=env)
+
+    lines = _trace_lines(trace, expected_prefix="rtk:")
+    assert "rtk:grep needle /dev/null" in lines
 
 
 def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_path):
@@ -662,7 +699,9 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
     lines = _trace_lines(trace, expected_prefix="ran:")
     agent_run_lines = [line for line in lines if "-m spice agent run --" in line]
     assert len(agent_run_lines) == 1
-    assert agent_run_lines[0].startswith("fake:unset:unset:")
+    assert agent_run_lines[0].startswith(
+        f"fake:unset:{hook_dir / shellhook.BASH_HOOK_NAME}:"
+    )
     assert f" {bash} -c " in agent_run_lines[0]
     assert "ran:unset" in lines
 
