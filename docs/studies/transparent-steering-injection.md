@@ -129,7 +129,9 @@ Two complementary layers, both set once at the driver-launch seam (C):
 1. **Env interposition (A1 + A2)** as the *universal substrate* — `ZDOTDIR`
    `.zshenv` + `BASH_ENV`, each invoking the existing side-channel relay
    (`inject_agent_side_channel`, already implemented). Driver-agnostic, proven,
-   per-command, unavoidable. This alone makes `./spice.sh` optional.
+   per-command, unavoidable. This **replaces** the wrapper as the steering
+   delivery path — the wrapper's injection role is then deleted (it persists
+   only for proxy/git-shadow routing); no dual-path bridge is kept.
 2. **Claude `UserPromptSubmit` + `PreToolUse(Bash)` hooks (B5 + B6)** as the
    *Claude-native upgrade* — steering into context at turn start (earlier than
    any command) plus per-tool refresh, with an optional hard ACK gate. Best
@@ -140,10 +142,12 @@ recommended.
 
 ### Implementation sketch (for a follow-up build task, not this spike)
 
-- New thin command, e.g. `spice agent steer-dump`, mirroring the wrapper's
-  `inject_agent_side_channel()`: resolve repo_root from cwd, connect to the
-  side-channel marker socket, relay payload to stderr; fast no-op when no
-  marker/socket exists.
+- **Extract** the single existing injection entrypoint
+  (`inject_agent_side_channel()`: resolve repo_root from cwd, connect to the
+  side-channel marker socket, relay payload to stderr, fast no-op when no
+  marker/socket exists) into one callable invoked by *both* `.zshenv`/`BASH_ENV`
+  and the wrapper. One shape, not a mirrored copy — do not add a parallel
+  `steer-dump` alongside the existing logic.
 - `.zshenv`/`BASH_ENV` body: guard, then call `steer-dump`.
   - **Recursion/noise guard:** `SHLVL`/breadcrumb so nested shells and scripts
     do not re-inject; lean on the existing 15s on-disk repeat-suppression for
@@ -161,8 +165,9 @@ recommended.
 - Never touch the agent's stdin.
 - ACK semantics unchanged: items retire only on a transcript `ACK <key>`.
 - Existing 15s repeat-suppression remains the single rate-limiter.
-- Keep the wrapper working — it stays correct and becomes belt-and-suspenders,
-  not the sole path.
+- When the substrate lands, **delete** the wrapper's steering-injection role
+  outright rather than keeping it as a parallel path; the wrapper remains only
+  for proxy/git-shadow routing. Replace the old shape, do not bridge it.
 
 ## Open questions for the operator
 
