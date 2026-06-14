@@ -40,6 +40,7 @@ from spice.mail.inbox import (
     inbox_item_key,
     inbox_item_key_aliases,
     inbox_payload_items,
+    notify_inbox_changed,
 )
 from spice.sessions.util import first_text, normalize_timestamp
 
@@ -148,6 +149,7 @@ def archive_ackd_inbox_items(
     if not to_archive:
         return []
     consume_inbox_items(inbox_payload_items(to_archive))
+    notify_inbox_changed(repo_root)
     return [inbox_item_key(item.name) for item in to_archive]
 
 

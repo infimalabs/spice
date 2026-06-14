@@ -523,6 +523,7 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
     assert env[shellhook.BASH_ENV_ENV] == str(hook_dir / shellhook.BASH_HOOK_NAME)
     zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
     assert "spice agent steer --repo-root" in zshenv
+    assert shellhook.SHELL_STEER_STARTED_ENV in zshenv
     assert "--watch --parent-pid $$ &" in zshenv
     assert (
         str(tmp_path / ".spice" / "agents" / "codex" / "side-channel" / "socket")
@@ -555,6 +556,7 @@ def test_configured_agent_environment_installs_driver_shell_steering_hooks(
     zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
     bashenv = (hook_dir / shellhook.BASH_HOOK_NAME).read_text(encoding="utf-8")
     assert "spice agent steer --repo-root" in zshenv
+    assert shellhook.SHELL_STEER_STARTED_ENV in zshenv
     assert "--watch --parent-pid $$ &" in zshenv
     assert (
         str(tmp_path / ".spice" / "agents" / "claude" / "side-channel" / "socket")
@@ -566,7 +568,9 @@ def test_configured_agent_environment_installs_driver_shell_steering_hooks(
     assert f". {real_bash_env}" in bashenv
 
 
-def test_zshenv_hook_emits_once_then_restores_for_nested_shells(tmp_path):
+def test_zshenv_hook_flushes_and_watches_once_then_restores_for_nested_shells(
+    tmp_path,
+):
     zsh = shutil.which("zsh")
     if zsh is None:
         pytest.skip("zsh is not installed")
@@ -594,6 +598,7 @@ def test_zshenv_hook_emits_once_then_restores_for_nested_shells(tmp_path):
         python_command=[str(fake_python)],
     )
     command = (
+        "sleep 0.1; "
         "printf 'after:%s:%s\\n' "
         f'"${{{shellhook.ZDOTDIR_ENV}-unset}}" '
         f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
@@ -611,13 +616,53 @@ def test_zshenv_hook_emits_once_then_restores_for_nested_shells(tmp_path):
 
     lines = _trace_lines(trace, expected_prefix="fake:")
     fake_lines = [line for line in lines if line.startswith("fake:")]
-    assert len(fake_lines) == 1
-    assert "--watch --parent-pid" in fake_lines[0]
+    flush_lines = [line for line in fake_lines if "--watch --parent-pid" not in line]
+    watch_lines = [line for line in fake_lines if "--watch --parent-pid" in line]
+    assert len(flush_lines) == 1
+    assert len(watch_lines) == 1
     assert "after:unset:unset" in lines
     assert lines.count("real-zshenv:unset") == 2
 
 
-def test_bash_env_hook_emits_once_then_restores_for_nested_shells(tmp_path):
+def test_zsh_login_hook_flushes_and_watches_once_across_startup_files(tmp_path):
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    home = tmp_path / "home"
+    home.mkdir()
+    trace = tmp_path / "trace.log"
+    fake_python = _fake_steer_python(tmp_path)
+    marker = shellhook.shell_steering_marker_path(
+        tmp_path, driver_state_dirname="codex"
+    )
+    marker.parent.mkdir(parents=True)
+    marker.write_text("/tmp/spice-side.sock\n", encoding="utf-8")
+    hook_dir = shellhook.write_shell_steering_files(
+        tmp_path,
+        driver_state_dirname="codex",
+        base_env={"HOME": str(home)},
+        python_command=[str(fake_python)],
+    )
+    env = {
+        "HOME": str(home),
+        "PATH": os.environ.get("PATH", ""),
+        shellhook.ZDOTDIR_ENV: str(hook_dir),
+        SHELL_TRACE_ENV: str(trace),
+    }
+
+    subprocess.run([zsh, "-lc", "sleep 0.1"], check=True, env=env)
+
+    lines = _trace_lines(trace, expected_prefix="fake:")
+    fake_lines = [line for line in lines if line.startswith("fake:")]
+    flush_lines = [line for line in fake_lines if "--watch --parent-pid" not in line]
+    watch_lines = [line for line in fake_lines if "--watch --parent-pid" in line]
+    assert len(flush_lines) == 1
+    assert len(watch_lines) == 1
+
+
+def test_bash_env_hook_flushes_and_watches_once_then_restores_for_nested_shells(
+    tmp_path,
+):
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("bash is not installed")
@@ -646,6 +691,7 @@ def test_bash_env_hook_emits_once_then_restores_for_nested_shells(tmp_path):
         python_command=[str(fake_python)],
     )
     command = (
+        "sleep 0.1; "
         "printf 'after:%s\\n' "
         f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
         f'>> "${{{SHELL_TRACE_ENV}}}"; '
@@ -662,8 +708,10 @@ def test_bash_env_hook_emits_once_then_restores_for_nested_shells(tmp_path):
 
     lines = _trace_lines(trace, expected_prefix="fake:")
     fake_lines = [line for line in lines if line.startswith("fake:")]
-    assert len(fake_lines) == 1
-    assert "--watch --parent-pid" in fake_lines[0]
+    flush_lines = [line for line in fake_lines if "--watch --parent-pid" not in line]
+    watch_lines = [line for line in fake_lines if "--watch --parent-pid" in line]
+    assert len(flush_lines) == 1
+    assert len(watch_lines) == 1
     assert f"after:{real_bash_env}" in lines
     assert lines.count(f"real-bash:{real_bash_env}") == 2
 
@@ -1002,6 +1050,7 @@ def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch)
 
     thread.join(timeout=1.0)
     assert "Inbox Steering" in output
+    assert output.count("Inbox Steering") == 1
     assert not thread.is_alive()
 
 

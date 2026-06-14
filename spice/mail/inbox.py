@@ -348,10 +348,17 @@ def write_inbox_item(
     try:
         target_path = _atomic_publish_inbox_item(tmp_path, directory / target_name)
         write_inbox_attachments(target_path, attachments)
+        notify_inbox_changed(repo_root)
     finally:
         with contextlib.suppress(FileNotFoundError):
             tmp_path.unlink()
     return target_path
+
+
+def notify_inbox_changed(repo_root: Path | None) -> None:
+    from spice.agent.sidechannelnotify import notify_agent_side_channel
+
+    notify_agent_side_channel(repo_root)
 
 
 def resend_inbox_item(

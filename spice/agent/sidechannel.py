@@ -18,8 +18,9 @@ import socket
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 
+from spice.agent.sidechannelnotify import SIDE_CHANNEL_NOTIFY_EVENT
 from spice.agent.wrap import (
     AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
     AGENT_RUN_INBOX_REPEAT_SECONDS,
@@ -31,7 +32,6 @@ from spice.agent.wrap import (
 
 SOCKET_READ_BYTES = 8192
 LISTENER_ACCEPT_TIMEOUT_S = 0.1
-WATCH_POLL_SECONDS = 1.0
 
 
 class AgentSideChannelServer:
@@ -42,13 +42,27 @@ class AgentSideChannelServer:
         payload_factory: Callable[[Path], str] | None = None,
     ) -> None:
         self.repo_root = repo_root
-        self.payload_factory = payload_factory or render_side_channel_payload
+        self.payload_factory = payload_factory
         self.socket_marker_path = side_channel_marker_path(repo_root)
         socket_name = f"spice-agent-side-{os.getpid()}.sock"
         self.socket_path = Path(tempfile.gettempdir()) / socket_name
         self._listener: socket.socket | None = None
         self._thread: Thread | None = None
         self._stopping = Event()
+        self._stream_wakeup_lock = Lock()
+        self._stream_wakeup_sockets: set[socket.socket] = set()
+        self._payload_lock = Lock()
+        self._inbox_injector = AgentInboxInjector(
+            self.repo_root,
+            stderr=io.StringIO(),
+            repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
+        )
+        self._context_injector = AgentContextMeterInjector(
+            self.repo_root,
+            stderr=io.StringIO(),
+            repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
+            meter_factory=agent_context_meter,
+        )
 
     def __enter__(self) -> AgentSideChannelServer:
         self.start()
@@ -76,6 +90,7 @@ class AgentSideChannelServer:
 
     def stop(self) -> None:
         self._stopping.set()
+        self._wake_streams()
         if self._listener is not None:
             with contextlib.suppress(OSError):
                 self._listener.close()
@@ -111,6 +126,9 @@ class AgentSideChannelServer:
                 return
             payload = parse_side_channel_hello(line)
             if payload:
+                if SIDE_CHANNEL_NOTIFY_EVENT in payload:
+                    self._wake_streams()
+                    return
                 diagnostic = side_channel_binding_diagnostic(self.repo_root, payload)
                 if diagnostic:
                     with contextlib.suppress(OSError):
@@ -119,10 +137,17 @@ class AgentSideChannelServer:
                 if "streamUntilParentExit" in payload:
                     self._stream_payloads(connection)
                     return
-                message = self.payload_factory(self.repo_root)
-                if message:
-                    with contextlib.suppress(OSError):
-                        connection.sendall(message.encode("utf-8", errors="replace"))
+                if self.payload_factory is not None:
+                    message = self.payload_factory(self.repo_root)
+                    if message:
+                        with contextlib.suppress(OSError):
+                            connection.sendall(
+                                message.encode("utf-8", errors="replace")
+                            )
+                    return
+                writer = _SocketTextWriter(connection)
+                with contextlib.suppress(OSError):
+                    self._inject_payload(writer, force=False)
                 return
             elif line:
                 with contextlib.suppress(OSError):
@@ -130,29 +155,58 @@ class AgentSideChannelServer:
             _echo_connection(connection)
 
     def _stream_payloads(self, connection: socket.socket) -> None:
+        try:
+            wake_reader, wake_writer = socket.socketpair()
+        except OSError:
+            return
+        self._register_stream_wakeup(wake_writer)
         writer = _SocketTextWriter(connection)
-        inbox = AgentInboxInjector(
-            self.repo_root,
-            stderr=writer,
-            repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
-        )
-        context = AgentContextMeterInjector(
-            self.repo_root,
-            stderr=writer,
-            repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
-            meter_factory=agent_context_meter,
-        )
-        force = True
-        while not self._stopping.is_set():
-            if _connection_is_closed(connection):
-                return
+        try:
             try:
-                inbox.inject(force=force)
-                context.inject(force=force)
+                self._inject_payload(writer, force=False)
             except OSError:
                 return
-            force = False
-            self._stopping.wait(WATCH_POLL_SECONDS)
+            while not self._stopping.is_set():
+                try:
+                    readable, _, _ = select.select([connection, wake_reader], [], [])
+                except OSError:
+                    return
+                if connection in readable and _connection_has_closed(connection):
+                    return
+                if wake_reader in readable:
+                    _drain_wakeup(wake_reader)
+                    try:
+                        self._inject_payload(writer, force=False)
+                    except OSError:
+                        return
+        finally:
+            self._unregister_stream_wakeup(wake_writer)
+            with contextlib.suppress(OSError):
+                wake_reader.close()
+            with contextlib.suppress(OSError):
+                wake_writer.close()
+
+    def _register_stream_wakeup(self, wake_writer: socket.socket) -> None:
+        with self._stream_wakeup_lock:
+            self._stream_wakeup_sockets.add(wake_writer)
+
+    def _unregister_stream_wakeup(self, wake_writer: socket.socket) -> None:
+        with self._stream_wakeup_lock:
+            self._stream_wakeup_sockets.discard(wake_writer)
+
+    def _wake_streams(self) -> None:
+        with self._stream_wakeup_lock:
+            wake_writers = list(self._stream_wakeup_sockets)
+        for wake_writer in wake_writers:
+            with contextlib.suppress(OSError):
+                wake_writer.sendall(b"\0")
+
+    def _inject_payload(self, writer: _SocketTextWriter, *, force: bool) -> None:
+        with self._payload_lock:
+            self._inbox_injector.stderr = writer
+            self._context_injector.stderr = writer
+            self._inbox_injector.inject(force=force)
+            self._context_injector.inject(force=force)
 
     def _write_socket_marker(self) -> None:
         temp_path = self.socket_marker_path.with_name(
@@ -245,19 +299,18 @@ class _SocketTextWriter:
         return None
 
 
-def _connection_is_closed(connection: socket.socket) -> bool:
-    try:
-        readable, _, _ = select.select([connection], [], [], 0)
-    except OSError:
-        return True
-    if not readable:
-        return False
+def _connection_has_closed(connection: socket.socket) -> bool:
     try:
         return not connection.recv(1, socket.MSG_PEEK)
     except BlockingIOError:
         return False
     except OSError:
         return True
+
+
+def _drain_wakeup(wake_reader: socket.socket) -> None:
+    with contextlib.suppress(OSError):
+        wake_reader.recv(SOCKET_READ_BYTES)
 
 
 def _read_line(connection: socket.socket) -> bytes:
