@@ -541,6 +541,7 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
     chip_count_rule = css[chip_count_start : css.index("}", chip_count_start)]
 
     assert 'let renderedFilterPillsFingerprint = "";' in app_js
+    assert 'const taskFilterHeaderExtraStems = ["agent"];' in app_lanes
     assert "const pillModels = taskFilterStemPills.map((stem) => ({" in app_lanes
     assert "if (fingerprint === renderedFilterPillsFingerprint) return;" in app_lanes
     assert "renderedFilterPillsFingerprint = fingerprint;" in app_lanes

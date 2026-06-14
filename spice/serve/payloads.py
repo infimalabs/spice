@@ -51,15 +51,18 @@ def task_filter_inventory() -> dict[str, Any]:
         if project:
             counts[project] = counts.get(project, 0) + 1
     assignable_stems = set(task_config.assignable_stems())
+    visible_stems = set(task_config.approved_stems())
     for project, count in sorted(counts.items()):
         stem = project.split(".", 1)[0]
-        if stem not in assignable_stems:
+        if stem not in visible_stems:
             continue
-        filters.append({"name": project, "primaryStem": stem, "openTaskCount": count})
         entry = stems.setdefault(
             stem, {"name": stem, "openTaskCount": 0, "filters": []}
         )
         entry["openTaskCount"] += count
+        if stem not in assignable_stems:
+            continue
+        filters.append({"name": project, "primaryStem": stem, "openTaskCount": count})
         if project not in entry["filters"]:
             entry["filters"].append(project)
     return {
