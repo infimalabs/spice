@@ -93,9 +93,10 @@ def test_config_agent_writes_project_scope(tmp_path, monkeypatch, capsys):
         "thinking": "high",
     }
     assert (
-        capsys.readouterr().out == "agent project model=gpt-project thinking=high\n"
-        "agent worktree model=- thinking=-\n"
-        "agent effective model=gpt-project thinking=high\n"
+        capsys.readouterr().out
+        == "agent project driver=- model=gpt-project thinking=high\n"
+        "agent worktree driver=- model=- thinking=-\n"
+        "agent effective driver=- model=gpt-project thinking=high\n"
     )
 
 
@@ -118,7 +119,26 @@ def test_config_agent_writes_worktree_scope(tmp_path, monkeypatch, capsys):
         "thinking": "low",
     }
     assert (
-        capsys.readouterr().out == "agent project model=- thinking=-\n"
-        "agent worktree model=gpt-worktree thinking=low\n"
-        "agent effective model=gpt-worktree thinking=low\n"
+        capsys.readouterr().out == "agent project driver=- model=- thinking=-\n"
+        "agent worktree driver=- model=gpt-worktree thinking=low\n"
+        "agent effective driver=- model=gpt-worktree thinking=low\n"
     )
+
+
+def test_config_agent_writes_driver_scope(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    result = handle_config(
+        argparse.Namespace(
+            config_action="agent",
+            scope="worktree",
+            clear=False,
+            model=None,
+            thinking=None,
+            driver="claude",
+        )
+    )
+
+    assert result == 0
+    assert config.configured_agent_driver(tmp_path) == "claude"
+    assert "agent worktree driver=claude" in capsys.readouterr().out

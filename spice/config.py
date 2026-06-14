@@ -33,6 +33,8 @@ DEFAULT_AGENT_PERSONALITY = "pragmatic"
 AGENT_MODEL_KEY = "model"
 AGENT_THINKING_KEY = "thinking"
 AGENT_DRIVER_KEY = "driver"
+AGENT_DRIVER_CHOICES = ("codex", "claude")
+AGENT_LAUNCH_KEYS = (AGENT_MODEL_KEY, AGENT_THINKING_KEY, AGENT_DRIVER_KEY)
 
 JUDGE_KEY = "judge"
 JUDGE_BIN_KEY = "bin"
@@ -160,7 +162,7 @@ def configured_agent_driver(repo_root: Path | None = None) -> str:
 def worktree_agent_config(repo_root: Path) -> dict[str, str]:
     return {
         key: value
-        for key in (AGENT_MODEL_KEY, AGENT_THINKING_KEY)
+        for key in AGENT_LAUNCH_KEYS
         if (value := _agent_worktree_value(repo_root, key))
     }
 
@@ -168,7 +170,7 @@ def worktree_agent_config(repo_root: Path) -> dict[str, str]:
 def project_agent_config(repo_root: Path) -> dict[str, str]:
     return {
         key: value
-        for key in (AGENT_MODEL_KEY, AGENT_THINKING_KEY)
+        for key in AGENT_LAUNCH_KEYS
         if (value := _agent_project_value(repo_root, key))
     }
 
@@ -179,6 +181,7 @@ def effective_agent_config(repo_root: Path) -> dict[str, str]:
         for key, value in {
             AGENT_MODEL_KEY: configured_agent_model(repo_root),
             AGENT_THINKING_KEY: configured_agent_thinking(repo_root),
+            AGENT_DRIVER_KEY: configured_agent_driver(repo_root),
         }.items()
         if value
     }
@@ -196,7 +199,7 @@ def update_project_agent_config(repo_root: Path, values: Mapping[str, str]) -> P
     project_values = {
         key: value.strip()
         for key, value in values.items()
-        if key in (AGENT_MODEL_KEY, AGENT_THINKING_KEY) and value.strip()
+        if key in AGENT_LAUNCH_KEYS and value.strip()
     }
     if not project_values:
         return repo_root / "pyproject.toml"
@@ -206,7 +209,7 @@ def update_project_agent_config(repo_root: Path, values: Mapping[str, str]) -> P
 def clear_project_agent_config(repo_root: Path) -> Path:
     return _rewrite_project_agent_table(
         repo_root,
-        {AGENT_MODEL_KEY: "", AGENT_THINKING_KEY: ""},
+        dict.fromkeys(AGENT_LAUNCH_KEYS, ""),
         clear=True,
     )
 

@@ -41,10 +41,15 @@ def configure_config_parser(subparsers: Any) -> None:
 
     agent = actions.add_parser(
         "agent",
-        help="Configure agent launch settings (model, thinking).",
+        help="Configure agent launch settings (driver, model, thinking).",
     )
     agent.add_argument("--model", help="Model override for agent launches.")
     agent.add_argument("--thinking", help="Thinking effort for agent launches.")
+    agent.add_argument(
+        "--driver",
+        choices=config.AGENT_DRIVER_CHOICES,
+        help="Agent CLI this worktree drives when SPICE_AGENT_DRIVER is unset.",
+    )
     agent.add_argument(
         "--scope",
         choices=("worktree", "project"),
@@ -105,6 +110,8 @@ def handle_config(args: argparse.Namespace) -> int:
             values[config.AGENT_MODEL_KEY] = args.model.strip()
         if args.thinking and args.thinking.strip():
             values[config.AGENT_THINKING_KEY] = args.thinking.strip()
+        if getattr(args, "driver", None):
+            values[config.AGENT_DRIVER_KEY] = str(args.driver)
         if not values:
             print(_agent_config_summary(repo_root))
             return 0
@@ -146,6 +153,7 @@ def _agent_config_summary(repo_root: Path) -> str:
 def _agent_scope_line(scope: str, values: dict[str, str]) -> str:
     return (
         f"agent {scope} "
+        f"driver={values.get(config.AGENT_DRIVER_KEY) or '-'} "
         f"model={values.get(config.AGENT_MODEL_KEY) or '-'} "
         f"thinking={values.get(config.AGENT_THINKING_KEY) or '-'}"
     )
