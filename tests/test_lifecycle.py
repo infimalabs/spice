@@ -7,7 +7,9 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+from threading import Thread
 from types import SimpleNamespace
 
 import pytest
@@ -521,6 +523,7 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
     assert env[shellhook.BASH_ENV_ENV] == str(hook_dir / shellhook.BASH_HOOK_NAME)
     zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
     assert "spice agent steer --repo-root" in zshenv
+    assert "--watch --parent-pid $$ &" in zshenv
     assert (
         str(tmp_path / ".spice" / "agents" / "codex" / "side-channel" / "socket")
         in zshenv
@@ -552,11 +555,11 @@ def test_configured_agent_environment_installs_driver_shell_steering_hooks(
     zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
     bashenv = (hook_dir / shellhook.BASH_HOOK_NAME).read_text(encoding="utf-8")
     assert "spice agent steer --repo-root" in zshenv
+    assert "--watch --parent-pid $$ &" in zshenv
     assert (
         str(tmp_path / ".spice" / "agents" / "claude" / "side-channel" / "socket")
         in zshenv
     )
-    assert f"export {shellhook.SPICE_STEER_EMITTED_ENV}=1" in zshenv
     assert f"export {shellhook.ZDOTDIR_ENV}={real_zdotdir}" in zshenv
     assert f". {real_zdotdir / '.zshenv'}" in zshenv
     assert f"export {shellhook.BASH_ENV_ENV}={real_bash_env}" in bashenv
@@ -574,8 +577,7 @@ def test_zshenv_hook_emits_once_then_restores_for_nested_shells(tmp_path):
     (home / ".zshenv").write_text(
         (
             "print -r -- "
-            f'"real-zshenv:${{{shellhook.ZDOTDIR_ENV}-unset}}:'
-            f'${{{shellhook.SPICE_STEER_EMITTED_ENV}:-}}" '
+            f'"real-zshenv:${{{shellhook.ZDOTDIR_ENV}-unset}}" '
             f'>> "${{{SHELL_TRACE_ENV}}}"\n'
         ),
         encoding="utf-8",
@@ -592,10 +594,9 @@ def test_zshenv_hook_emits_once_then_restores_for_nested_shells(tmp_path):
         python_command=[str(fake_python)],
     )
     command = (
-        "printf 'after:%s:%s:%s\\n' "
+        "printf 'after:%s:%s\\n' "
         f'"${{{shellhook.ZDOTDIR_ENV}-unset}}" '
         f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
-        f'"${{{shellhook.SPICE_STEER_EMITTED_ENV}:-}}" '
         f'>> "${{{SHELL_TRACE_ENV}}}"; '
         f"{shutil.which('zsh') or zsh} -c 'true'"
     )
@@ -608,10 +609,12 @@ def test_zshenv_hook_emits_once_then_restores_for_nested_shells(tmp_path):
 
     subprocess.run([zsh, "-c", command], check=True, env=env)
 
-    lines = trace.read_text(encoding="utf-8").splitlines()
-    assert sum(line.startswith("fake:") for line in lines) == 1
-    assert "after:unset:unset:1" in lines
-    assert lines.count("real-zshenv:unset:1") == 2
+    lines = _trace_lines(trace, expected_prefix="fake:")
+    fake_lines = [line for line in lines if line.startswith("fake:")]
+    assert len(fake_lines) == 1
+    assert "--watch --parent-pid" in fake_lines[0]
+    assert "after:unset:unset" in lines
+    assert lines.count("real-zshenv:unset") == 2
 
 
 def test_bash_env_hook_emits_once_then_restores_for_nested_shells(tmp_path):
@@ -625,9 +628,8 @@ def test_bash_env_hook_emits_once_then_restores_for_nested_shells(tmp_path):
     real_bash_env = tmp_path / "real-bash-env"
     real_bash_env.write_text(
         (
-            "printf 'real-bash:%s:%s\\n' "
+            "printf 'real-bash:%s\\n' "
             f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
-            f'"${{{shellhook.SPICE_STEER_EMITTED_ENV}:-}}" '
             f'>> "${{{SHELL_TRACE_ENV}}}"\n'
         ),
         encoding="utf-8",
@@ -644,9 +646,8 @@ def test_bash_env_hook_emits_once_then_restores_for_nested_shells(tmp_path):
         python_command=[str(fake_python)],
     )
     command = (
-        "printf 'after:%s:%s\\n' "
+        "printf 'after:%s\\n' "
         f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
-        f'"${{{shellhook.SPICE_STEER_EMITTED_ENV}:-}}" '
         f'>> "${{{SHELL_TRACE_ENV}}}"; '
         f"{bash} -c 'true'"
     )
@@ -659,10 +660,12 @@ def test_bash_env_hook_emits_once_then_restores_for_nested_shells(tmp_path):
 
     subprocess.run([bash, "-c", command], check=True, env=env)
 
-    lines = trace.read_text(encoding="utf-8").splitlines()
-    assert sum(line.startswith("fake:") for line in lines) == 1
-    assert f"after:{real_bash_env}:1" in lines
-    assert lines.count(f"real-bash:{real_bash_env}:1") == 2
+    lines = _trace_lines(trace, expected_prefix="fake:")
+    fake_lines = [line for line in lines if line.startswith("fake:")]
+    assert len(fake_lines) == 1
+    assert "--watch --parent-pid" in fake_lines[0]
+    assert f"after:{real_bash_env}" in lines
+    assert lines.count(f"real-bash:{real_bash_env}") == 2
 
 
 def test_agent_binding_error_reports_stale_launch_cwd_and_ignores_prompt_skill(
@@ -762,43 +765,6 @@ def test_wrapper_missing_proxy_plain_exec_still_injects_steering(tmp_path, monke
     assert events == [
         ("inject", tmp_path, stderr),
         ("popen", ["find", ".", "-maxdepth", "0", "-print"], None),
-        ("wait", None, None),
-    ]
-
-
-def test_wrapper_skips_side_channel_after_shell_hook_emitted(tmp_path, monkeypatch):
-    monkeypatch.setenv(
-        shellhook.SPICE_STEER_EMITTED_ENV, shellhook.SPICE_STEER_EMITTED_VALUE
-    )
-    monkeypatch.setenv(wrap.PROXY_BIN_ENV, "missing-rtk")
-    monkeypatch.setattr(wrap.shutil, "which", lambda _proxy: None)
-    events: list[tuple[str, object, object | None]] = []
-    stderr = io.StringIO()
-
-    class FakeProcess:
-        def wait(self) -> int:
-            events.append(("wait", None, None))
-            return 0
-
-    def fake_popen(command: list[str]) -> FakeProcess:
-        events.append(("popen", command, None))
-        return FakeProcess()
-
-    def fake_side_channel(repo_root, *, stderr):
-        events.append(("inject", repo_root, stderr))
-
-    monkeypatch.setattr(wrap, "inject_agent_side_channel", fake_side_channel)
-
-    exit_code = wrap.run_agent_command(
-        tmp_path,
-        ["true"],
-        popen_factory=fake_popen,
-        stderr=stderr,
-    )
-
-    assert exit_code == 0
-    assert events == [
-        ("popen", ["true"], None),
         ("wait", None, None),
     ]
 
@@ -1013,6 +979,32 @@ def test_side_channel_server_payload_reaches_wrapper_stderr(tmp_path, monkeypatc
     assert stderr.getvalue() == f"side payload for {tmp_path.name}\n"
 
 
+def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch):
+    stderr = io.StringIO()
+    monkeypatch.chdir(tmp_path)
+
+    with sidechannel.AgentSideChannelServer(tmp_path):
+        thread = Thread(
+            target=wrap.watch_agent_side_channel,
+            kwargs={
+                "repo_root": tmp_path,
+                "parent_pid": os.getpid(),
+                "stderr": stderr,
+            },
+        )
+        thread.start()
+        write_inbox_item(
+            tmp_path,
+            "20260101T000000000003Z.txt",
+            compose_inbox_text(body="late steering", priority=None, stop=False),
+        )
+        output = _eventually(lambda: stderr.getvalue(), contains="late steering")
+
+    thread.join(timeout=1.0)
+    assert "Inbox Steering" in output
+    assert not thread.is_alive()
+
+
 def _config_values(command: list[str]) -> list[str]:
     return [
         command[index + 1] for index, part in enumerate(command) if part == "--config"
@@ -1035,8 +1027,7 @@ def _fake_steer_python(tmp_path: Path) -> Path:
     path.write_text(
         (
             "#!/bin/sh\n"
-            "printf 'fake:%s:%s:%s:%s\\n' "
-            f'"${{{shellhook.SPICE_STEER_EMITTED_ENV}:-}}" '
+            "printf 'fake:%s:%s:%s\\n' "
             f'"${{{shellhook.ZDOTDIR_ENV}-unset}}" '
             f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
             '"$*" '
@@ -1046,6 +1037,32 @@ def _fake_steer_python(tmp_path: Path) -> Path:
     )
     path.chmod(0o755)
     return path
+
+
+def _trace_lines(trace: Path, *, expected_prefix: str) -> list[str]:
+    return _eventually(
+        lambda: (
+            trace.read_text(encoding="utf-8").splitlines() if trace.exists() else []
+        ),
+        contains=expected_prefix,
+    )
+
+
+def _eventually(factory, *, contains: str):
+    deadline = time.monotonic() + 2.0
+    latest = factory()
+    while time.monotonic() < deadline:
+        if _contains(latest, contains):
+            return latest
+        time.sleep(0.05)
+        latest = factory()
+    return latest
+
+
+def _contains(value, needle: str) -> bool:
+    if isinstance(value, str):
+        return needle in value
+    return any(needle in item for item in value)
 
 
 def _status(*, thread_id: str = "", running: bool = False):

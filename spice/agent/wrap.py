@@ -37,10 +37,6 @@ from spice.agent.gitshadow import (
     scrub_agent_git_shadow_environment,
 )
 from spice.agent.identity import ambient_thread_id
-from spice.agent.shellhook import (
-    SPICE_STEER_EMITTED_ENV,
-    SPICE_STEER_EMITTED_VALUE,
-)
 from spice.mail.inbox import inbox_dir, inbox_item_key
 from spice.paths import (
     STATE_DIRNAME,
@@ -48,6 +44,7 @@ from spice.paths import (
     worktree_spice_python_command,
     worktree_spice_source,
 )
+from spice.procs import process_id_is_running
 from spice.sessions.meter import (
     ContextMeter,
     active_context_percent,
@@ -76,6 +73,7 @@ AGENT_RUN_INBOX_REPEAT_SECONDS = 15.0
 AGENT_RUN_CONTEXT_METER_CACHE_SECONDS = 15.0
 AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS = 15.0 * 60.0
 AGENT_RUN_SIDE_CHANNEL_READ_BYTES = 8192
+AGENT_STEER_WATCH_SOCKET_TIMEOUT_SECONDS = 1.0
 INTERRUPTED_EXIT_CODE = 130
 _UV_RUN_SPICE = ["uv", "run", "spice"]
 
@@ -116,8 +114,7 @@ def run_agent_command(
 ) -> int:
     command = build_agent_run_command(raw_args, repo_root=repo_root)
     environment = build_agent_run_environment(raw_args, repo_root=repo_root)
-    if should_inject_agent_side_channel():
-        inject_agent_side_channel(repo_root, stderr=stderr)
+    inject_agent_side_channel(repo_root, stderr=stderr)
     if environment is None:
         process = popen_factory(command)
     else:
@@ -165,10 +162,6 @@ def build_agent_run_environment(
     if worktree_spice_source(repo_root) is not None:
         return worktree_env
     return None
-
-
-def should_inject_agent_side_channel() -> bool:
-    return os.environ.get(SPICE_STEER_EMITTED_ENV) != SPICE_STEER_EMITTED_VALUE
 
 
 def is_direct_git_route(args: Sequence[str]) -> bool:
@@ -270,6 +263,47 @@ def emit_agent_side_channel(
     inject_agent_side_channel(repo_root, stderr=stderr)
 
 
+def watch_agent_side_channel(
+    repo_root: Path | None,
+    *,
+    parent_pid: int,
+    stderr: TextIO = sys.stderr,
+) -> None:
+    socket_path = active_agent_side_channel_socket_path(repo_root)
+    if socket_path is None:
+        return
+    side_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        side_socket.connect(str(socket_path))
+        side_socket.settimeout(AGENT_STEER_WATCH_SOCKET_TIMEOUT_SECONDS)
+        side_socket.sendall(
+            json.dumps(
+                agent_side_channel_hello(
+                    repo_root,
+                    runner="agent.steer",
+                    stream_until_parent_exit=parent_pid,
+                ),
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+        while process_id_is_running(parent_pid):
+            try:
+                chunk = side_socket.recv(AGENT_RUN_SIDE_CHANNEL_READ_BYTES)
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+            if not chunk:
+                return
+            write_side_channel_chunk(stderr, chunk)
+    except OSError:
+        return
+    finally:
+        with contextlib.suppress(OSError):
+            side_socket.close()
+
+
 def active_agent_side_channel_socket_path(repo_root: Path | None) -> Path | None:
     if repo_root is None:
         return None
@@ -283,15 +317,23 @@ def active_agent_side_channel_socket_path(repo_root: Path | None) -> Path | None
     return Path(raw_socket_path)
 
 
-def agent_side_channel_hello(repo_root: Path | None) -> dict[str, object]:
-    return {
+def agent_side_channel_hello(
+    repo_root: Path | None,
+    *,
+    runner: str = "agent.run",
+    stream_until_parent_exit: int | None = None,
+) -> dict[str, object]:
+    hello: dict[str, object] = {
         "type": "hello",
         "pid": os.getpid(),
         "ppid": os.getppid(),
-        "runner": "agent.run",
+        "runner": runner,
         "cwd": os.getcwd(),
         "repoRoot": str(repo_root) if repo_root is not None else "",
     }
+    if stream_until_parent_exit is not None:
+        hello["streamUntilParentExit"] = stream_until_parent_exit
+    return hello
 
 
 def write_side_channel_chunk(stderr: TextIO, chunk: bytes) -> None:

@@ -13,6 +13,7 @@ import contextlib
 import io
 import json
 import os
+import select
 import socket
 import tempfile
 from collections.abc import Callable
@@ -30,6 +31,7 @@ from spice.agent.wrap import (
 
 SOCKET_READ_BYTES = 8192
 LISTENER_ACCEPT_TIMEOUT_S = 0.1
+WATCH_POLL_SECONDS = 1.0
 
 
 class AgentSideChannelServer:
@@ -114,6 +116,9 @@ class AgentSideChannelServer:
                     with contextlib.suppress(OSError):
                         connection.sendall(diagnostic.encode("utf-8", errors="replace"))
                     return
+                if "streamUntilParentExit" in payload:
+                    self._stream_payloads(connection)
+                    return
                 message = self.payload_factory(self.repo_root)
                 if message:
                     with contextlib.suppress(OSError):
@@ -123,6 +128,31 @@ class AgentSideChannelServer:
                 with contextlib.suppress(OSError):
                     connection.sendall(line)
             _echo_connection(connection)
+
+    def _stream_payloads(self, connection: socket.socket) -> None:
+        writer = _SocketTextWriter(connection)
+        inbox = AgentInboxInjector(
+            self.repo_root,
+            stderr=writer,
+            repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
+        )
+        context = AgentContextMeterInjector(
+            self.repo_root,
+            stderr=writer,
+            repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
+            meter_factory=agent_context_meter,
+        )
+        force = True
+        while not self._stopping.is_set():
+            if _connection_is_closed(connection):
+                return
+            try:
+                inbox.inject(force=force)
+                context.inject(force=force)
+            except OSError:
+                return
+            force = False
+            self._stopping.wait(WATCH_POLL_SECONDS)
 
     def _write_socket_marker(self) -> None:
         temp_path = self.socket_marker_path.with_name(
@@ -200,6 +230,34 @@ def render_side_channel_payload(repo_root: Path) -> str:
         meter_factory=agent_context_meter,
     ).inject(force=True)
     return stderr.getvalue()
+
+
+class _SocketTextWriter:
+    def __init__(self, connection: socket.socket) -> None:
+        self.connection = connection
+
+    def write(self, text: str) -> int:
+        if text:
+            self.connection.sendall(text.encode("utf-8", errors="replace"))
+        return len(text)
+
+    def flush(self) -> None:
+        return None
+
+
+def _connection_is_closed(connection: socket.socket) -> bool:
+    try:
+        readable, _, _ = select.select([connection], [], [], 0)
+    except OSError:
+        return True
+    if not readable:
+        return False
+    try:
+        return not connection.recv(1, socket.MSG_PEEK)
+    except BlockingIOError:
+        return False
+    except OSError:
+        return True
 
 
 def _read_line(connection: socket.socket) -> bytes:
