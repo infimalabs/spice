@@ -154,15 +154,13 @@ function lanePendingDisplayCount(lane) {
 
 function setLaneStatus(lane, statusLine) {
   const preview = statusLine.preview || "";
+  const previewHasTime = Boolean(preview && statusLine.lastAssistantAt);
   const status = statusLine.error
     ? { error: statusLine.error, time: "", preview: "" }
     : {
         error: "",
-        time:
-          preview && statusLine.lastAssistantAt
-            ? relativeTime(statusLine.lastAssistantAt)
-            : "",
-        preview,
+        time: previewHasTime ? relativeTime(statusLine.lastAssistantAt) : "",
+        preview: previewHasTime ? preview : "",
       };
   const fingerprint = status.error + "\u0000" + status.time + "\u0000" + status.preview;
   if (fingerprint === lane.renderedStatusFingerprint) return;

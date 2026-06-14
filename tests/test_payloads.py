@@ -28,7 +28,13 @@ from spice.tasks import tw
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 
 
-def _message(timestamp: str, *, kind: str = "assistant", ack_count: int = 0):
+def _message(
+    timestamp: str,
+    *,
+    kind: str = "assistant",
+    ack_count: int = 0,
+    preview: str = "",
+):
     return AssistantMessage(
         key=f"{timestamp}#0",
         index=0,
@@ -42,6 +48,7 @@ def _message(timestamp: str, *, kind: str = "assistant", ack_count: int = 0):
         say_count=0,
         say_utterances=[],
         kind=kind,
+        preview=preview,
     )
 
 
@@ -112,6 +119,27 @@ def test_uptime_measures_started_at_to_latest_message():
 def test_uptime_reads_zero_while_agent_is_off():
     status = _Status(running=False, started_at="2026-06-10T12:00:00.000000Z")
     assert _agent_uptime_seconds(status, []) == 0
+
+
+def test_status_line_pairs_activity_preview_with_activity_timestamp(
+    tmp_path, monkeypatch
+):
+    latest = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
+    target = _Target(id="wt", repo_root=tmp_path)
+    items = [_message(latest, kind="presence:reasoning", preview="thinking")]
+    monkeypatch.setattr(
+        payloads,
+        "agent_status",
+        lambda _repo: _Status(running=True, started_at="", process_status="running"),
+    )
+    monkeypatch.setattr(payloads, "pending_inbox_count", lambda _repo: 0)
+
+    line = payloads.status_line_payload(_State(), target, items=items, error=None)
+
+    assert line["lastAssistantAt"] == latest
+    assert line["preview"] == "thinking"
+    assert line["latestActivityPreview"] == "thinking"
+    assert line["latestMessagePreview"] == ""
 
 
 def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
