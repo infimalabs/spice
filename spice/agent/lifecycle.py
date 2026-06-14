@@ -53,8 +53,8 @@ from spice.procs import (
 # The launch prompt must link a file inside the agent's own worktree: an
 # absolute path into another checkout follows that checkout's edits and
 # reinstalls, which is exactly the cross-worktree trust failure this file
-# exists to prevent. A repo that tracks the file in git owns it (its copy is
-# never rewritten); otherwise spice keeps it fresh from the packaged source.
+# exists to prevent. Spice keeps this copy fresh from the packaged source,
+# regardless of whether the worktree happens to track the path.
 WORKTREE_SKILL_RELATIVE_PATH = Path(".agents") / "skills" / "spice" / "SKILL.md"
 PACKAGED_SKILL_RESOURCE = ("spice.agent", "SKILL.md")
 AGENT_STATE_FILE = "state.json"
@@ -576,9 +576,9 @@ def worktree_skill_path(repo_root: Path) -> Path:
 def materialize_worktree_skill(repo_root: Path) -> Path | None:
     """The worktree's skill file, kept fresh; None when the tree can't hold one.
 
-    A git-tracked copy is repo-owned and used verbatim. An untracked copy is
-    rewritten whenever it drifts from the packaged source, so reinstalling
-    spice updates every worktree on its next activation or launch.
+    The file is rewritten whenever it drifts from the packaged source, so
+    reinstalling spice updates every worktree on its next activation or launch.
+    An up-to-date copy is returned without rewriting.
     """
     target = worktree_skill_path(repo_root)
     packaged = packaged_skill_path()
@@ -589,31 +589,11 @@ def materialize_worktree_skill(repo_root: Path) -> Path | None:
         if target.is_file():
             if target.read_text(encoding="utf-8") == content:
                 return target
-            if _skill_is_repo_owned(repo_root):
-                return target
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
     except OSError:
         return target if target.is_file() else None
     return target
-
-
-def _skill_is_repo_owned(repo_root: Path) -> bool:
-    completed = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo_root),
-            "ls-files",
-            "--error-unmatch",
-            "--",
-            WORKTREE_SKILL_RELATIVE_PATH.as_posix(),
-        ],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    return completed.returncode == 0
 
 
 def packaged_skill_path() -> Path:

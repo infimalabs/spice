@@ -1,0 +1,83 @@
+"""Worktree skill materialization contracts."""
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from spice.agent import lifecycle
+from spice.errors import SpiceError
+
+
+def test_available_skill_path_materializes_into_the_worktree(tmp_path):
+    located = lifecycle.available_skill_path(tmp_path, required=True)
+
+    expected = tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH
+    assert located == expected.resolve()
+    assert located.read_text(
+        encoding="utf-8"
+    ) == lifecycle.packaged_skill_path().read_text(encoding="utf-8")
+
+
+def test_available_skill_path_required_fails_without_worktree_skill(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        lifecycle, "packaged_skill_path", lambda: tmp_path / "missing-package.md"
+    )
+
+    with pytest.raises(SpiceError, match="missing spice skill at"):
+        lifecycle.available_skill_path(tmp_path, required=True)
+
+
+def test_available_skill_path_refreshes_tracked_skill_when_it_drifts(tmp_path):
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    target = tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_text("---\nname: spice\n---\nrepo-owned skill\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", "--", target.as_posix()], check=True
+    )
+
+    located = lifecycle.available_skill_path(tmp_path, required=True)
+
+    assert located == target.resolve()
+    assert target.read_text(
+        encoding="utf-8"
+    ) == lifecycle.packaged_skill_path().read_text(encoding="utf-8")
+
+
+def test_materialize_worktree_skill_refreshes_stale_copies(tmp_path):
+    target = tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_text("stale content from an older install\n", encoding="utf-8")
+
+    located = lifecycle.materialize_worktree_skill(tmp_path)
+
+    assert located == target.resolve()
+    assert target.read_text(
+        encoding="utf-8"
+    ) == lifecycle.packaged_skill_path().read_text(encoding="utf-8")
+
+
+def test_materialize_worktree_skill_leaves_current_copy_untouched(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        lifecycle.packaged_skill_path().read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    original_write_text = Path.write_text
+
+    def fail_if_target_is_rewritten(self, *args, **kwargs):
+        if self == target:
+            raise AssertionError("materialize_worktree_skill rewrote current content")
+        return original_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_if_target_is_rewritten)
+
+    located = lifecycle.materialize_worktree_skill(tmp_path)
+
+    assert located == target.resolve()
