@@ -53,6 +53,22 @@ def test_static_css_has_narrow_viewport_affordances():
     assert "height: 100dvh" in css
 
 
+def test_mobile_header_pill_scroller_is_sole_grower():
+    css = _serve_css_text()
+    mobile_start = css.index("@media (max-width: 720px)")
+
+    meta_start = css.index(".app-header .meta {", mobile_start)
+    meta_rule = css[meta_start : css.index("}", meta_start)]
+    strip_start = css.index(".filter-strip {", mobile_start)
+    strip_rule = css[strip_start : css.index("}", strip_start)]
+
+    # The status text must not grow, or it splits the header width with the
+    # pill scroller (the bug: the scroller only filled ~half the width).
+    assert "flex: 0 1 8rem;" in meta_rule
+    assert "flex: 1 1 auto;" in strip_rule
+    assert "min-width: 0;" in strip_rule
+
+
 def test_static_css_centers_two_pip_lane_light_stack():
     css = _serve_css_text()
     stack_start = css.index(".lane-pip-stack {")

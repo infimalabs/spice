@@ -826,7 +826,9 @@ button.primary:hover {
     padding: 8px;
   }
   .app-header .meta {
-    flex: 1 1 8rem;
+    /* Status text is secondary: hold up to 8rem and truncate, but never grow
+       into the pill scroller's space — the pills claim all the free width. */
+    flex: 0 1 8rem;
     min-width: 0;
     overflow: hidden;
     text-align: left;
@@ -834,6 +836,8 @@ button.primary:hover {
     white-space: nowrap;
   }
   .filter-strip {
+    /* Sole grower in the header row: fill the width left after meta + menu
+       before the pills overflow into their horizontal scroller. */
     flex: 1 1 auto;
     min-width: 0;
   }
