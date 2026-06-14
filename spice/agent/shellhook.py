@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
-import json
 import os
+import re
 import shlex
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from spice.errors import SpiceError
+from spice.repocfg import agent_table, agent_wrapper_definitions_table
 
 ZDOTDIR_ENV = "ZDOTDIR"
 BASH_ENV_ENV = "BASH_ENV"
 BASH_HOOK_NAME = "bash_env"
 ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zlogin")
+AGENT_WRAPPERS_KEY = "wrappers"
 SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
-SHELL_HOOK_AGENT_RUN_ARGV_ENV = "SPICE_SHELL_HOOK_AGENT_RUN_ARGV"  # env-policy: allow
+SHELL_HOOK_REPO_ROOT_ENV = "SPICE_SHELL_HOOK_REPO_ROOT"  # env-policy: allow
 SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV = (
     "SPICE_SHELL_HOOK_ORIGINAL_ZDOTDIR"  # env-policy: allow
 )
@@ -30,6 +32,8 @@ SHELL_HOOK_SURFACE_FILES = {
     "zlogin": ".zlogin",
 }
 SHELL_HOOK_SURFACES = tuple(SHELL_HOOK_SURFACE_FILES)
+CONFIG_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
+SHELL_FUNCTION_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
 def apply_shell_steering_environment(
@@ -39,7 +43,7 @@ def apply_shell_steering_environment(
     base_env: Mapping[str, str],
 ) -> dict[str, str]:
     env = dict(base_env)
-    env.update(shell_steering_runtime_environment(base_env=env))
+    env.update(shell_steering_runtime_environment(base_env=env, repo_root=repo_root))
     hook_dir = packaged_shell_steering_hook_dir()
     env[ZDOTDIR_ENV] = str(hook_dir)
     env[BASH_ENV_ENV] = str(hook_dir / BASH_HOOK_NAME)
@@ -64,23 +68,17 @@ def shell_steering_runtime_environment(
     *,
     base_env: Mapping[str, str],
     python_command: Sequence[str] | None = None,
+    repo_root: Path | None = None,
 ) -> dict[str, str]:
-    agent_run_command = [
-        *(python_command or (sys.executable,)),
-        "-m",
-        "spice",
-        "agent",
-        "run",
-        "--",
-    ]
-    return {
-        SHELL_HOOK_PYTHON_ENV: sys.executable,
-        SHELL_HOOK_AGENT_RUN_ARGV_ENV: json.dumps(
-            agent_run_command, separators=(",", ":")
-        ),
+    python = single_python_executable(python_command or (sys.executable,))
+    env = {
+        SHELL_HOOK_PYTHON_ENV: python,
         SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV: base_env.get(ZDOTDIR_ENV, ""),
         SHELL_HOOK_ORIGINAL_BASH_ENV_ENV: base_env.get(BASH_ENV_ENV, ""),
     }
+    if repo_root is not None:
+        env[SHELL_HOOK_REPO_ROOT_ENV] = str(repo_root.resolve())
+    return env
 
 
 def render_shell_steering_hook_for_surface(
@@ -108,6 +106,7 @@ def render_shell_steering_hook_for_surface(
         restore_lines=restore_lines,
         real_source_path=real_source_path_for_surface(surface, environment),
         self_path=self_path_for_surface(surface, environment),
+        wrapper_lines=wrapper_lines_for_environment(environment),
     )
 
 
@@ -117,24 +116,166 @@ def required_shell_hook_env(environment: Mapping[str, str], name: str) -> str:
     return environment[name]
 
 
-def agent_run_command_from_env(environment: Mapping[str, str]) -> list[str]:
-    raw = required_shell_hook_env(environment, SHELL_HOOK_AGENT_RUN_ARGV_ENV)
-    try:
-        loaded = json.loads(raw)
-    except json.JSONDecodeError as exc:
+def agent_run_command_from_env(environment: Mapping[str, str]) -> str:
+    python = required_shell_hook_env(environment, SHELL_HOOK_PYTHON_ENV).strip()
+    if not python:
+        raise SpiceError(f"spice shell hook: {SHELL_HOOK_PYTHON_ENV} must be non-empty")
+    return f"{shell_quote(python)} -m spice agent run --"
+
+
+def single_python_executable(command: Sequence[str]) -> str:
+    if len(command) != 1:
         raise SpiceError(
-            f"spice shell hook: {SHELL_HOOK_AGENT_RUN_ARGV_ENV} must be JSON argv"
-        ) from exc
-    if not isinstance(loaded, list):
-        raise SpiceError(
-            f"spice shell hook: {SHELL_HOOK_AGENT_RUN_ARGV_ENV} must be JSON argv"
+            f"spice shell hook: {SHELL_HOOK_PYTHON_ENV} must be one executable path"
         )
-    command = [str(part) for part in loaded if isinstance(part, str) and part]
-    if not command:
-        raise SpiceError(
-            f"spice shell hook: {SHELL_HOOK_AGENT_RUN_ARGV_ENV} must be non-empty"
+    python = str(command[0]).strip()
+    if not python:
+        raise SpiceError(f"spice shell hook: {SHELL_HOOK_PYTHON_ENV} must be non-empty")
+    return python
+
+
+def wrapper_lines_for_environment(environment: Mapping[str, str]) -> list[str]:
+    raw_root = environment.get(SHELL_HOOK_REPO_ROOT_ENV, "").strip()
+    if not raw_root:
+        return []
+    return render_agent_wrapper_lines(Path(raw_root).expanduser())
+
+
+def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
+    agent_settings = agent_table(repo_root)
+    if AGENT_WRAPPERS_KEY not in agent_settings:
+        return []
+    ordered_groups = config_string_list(
+        agent_settings.get(AGENT_WRAPPERS_KEY),
+        label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY}",
+    )
+    if not ordered_groups:
+        return []
+    definitions = agent_wrapper_definitions_table(repo_root)
+    lines: list[str] = []
+    seen_selectors: dict[str, str] = {}
+    for group_name in ordered_groups:
+        require_config_name(
+            group_name,
+            label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY} group",
         )
-    return command
+        raw_group = definitions.get(group_name)
+        if not isinstance(raw_group, dict):
+            raise SpiceError(
+                f"spice shell hook: missing tool.spice.wrappers.{group_name}"
+            )
+        lines.extend(
+            render_agent_wrapper_group_lines(
+                group_name=group_name,
+                group=raw_group,
+                seen_selectors=seen_selectors,
+            )
+        )
+    return lines
+
+
+def render_agent_wrapper_group_lines(
+    *,
+    group_name: str,
+    group: Mapping[str, object],
+    seen_selectors: dict[str, str],
+) -> list[str]:
+    lines: list[str] = []
+    for raw_wrapper, raw_selectors in group.items():
+        wrapper = str(raw_wrapper).strip()
+        require_shell_function_name(
+            wrapper,
+            label=f"tool.spice.wrappers.{group_name} wrapper",
+        )
+        if not isinstance(raw_selectors, list):
+            raise SpiceError(
+                "spice shell hook: "
+                f"tool.spice.wrappers.{group_name}.{wrapper} must be a list"
+            )
+        selectors = config_string_list(
+            raw_selectors,
+            label=f"tool.spice.wrappers.{group_name}.{wrapper}",
+        )
+        if not selectors:
+            raise SpiceError(
+                "spice shell hook: "
+                f"tool.spice.wrappers.{group_name}.{wrapper} has no commands"
+            )
+        for selector in selectors:
+            lines.extend(
+                render_agent_wrapper_selector_lines(
+                    group_name=group_name,
+                    wrapper=wrapper,
+                    selector=selector,
+                    seen_selectors=seen_selectors,
+                )
+            )
+    return lines
+
+
+def render_agent_wrapper_selector_lines(
+    *,
+    group_name: str,
+    wrapper: str,
+    selector: str,
+    seen_selectors: dict[str, str],
+) -> list[str]:
+    config_path = f"tool.spice.wrappers.{group_name}.{wrapper}"
+    if "/" in selector:
+        raise SpiceError(
+            "spice shell hook: path selector "
+            f"{selector!r} in {config_path} requires the redirector stage"
+        )
+    require_shell_function_name(
+        selector,
+        label=f"{config_path} command",
+    )
+    if selector == wrapper:
+        raise SpiceError(
+            "spice shell hook: wrapper "
+            f"{wrapper!r} cannot intercept itself in {config_path}"
+        )
+    previous = seen_selectors.get(selector)
+    if previous is not None:
+        raise SpiceError(
+            "spice shell hook: command "
+            f"{selector!r} is configured by both {previous} and {config_path}"
+        )
+    seen_selectors[selector] = config_path
+    return [
+        "",
+        f"{selector}() {{",
+        f'  {wrapper} {selector} "$@"',
+        "}",
+    ]
+
+
+def require_shell_function_name(value: str, *, label: str) -> None:
+    if SHELL_FUNCTION_NAME_RE.fullmatch(value):
+        return
+    raise SpiceError(f"spice shell hook: {label} {value!r} is not a shell function")
+
+
+def require_config_name(value: str, *, label: str) -> None:
+    if CONFIG_NAME_RE.fullmatch(value):
+        return
+    raise SpiceError(f"spice shell hook: {label} {value!r} is not a config name")
+
+
+def config_string_list(raw: object, *, label: str) -> list[str]:
+    if not isinstance(raw, list):
+        raise SpiceError(f"spice shell hook: {label} must be a list")
+    values: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            raise SpiceError(f"spice shell hook: {label} entries must be strings")
+        value = item.strip()
+        if not value:
+            raise SpiceError(f"spice shell hook: {label} entries must be non-empty")
+        if value in values:
+            raise SpiceError(f"spice shell hook: {label} repeats entry {value!r}")
+        values.append(value)
+    return values
 
 
 def real_source_path_for_surface(
@@ -180,10 +321,11 @@ def restore_env_line(name: str, value: str) -> str:
 
 def render_shell_steering_hook(
     *,
-    agent_run_command: Sequence[str],
+    agent_run_command: str,
     restore_lines: Sequence[str],
     real_source_path: Path | None,
     self_path: Path,
+    wrapper_lines: Sequence[str] = (),
 ) -> str:
     lines = [
         "# Generated by spice; do not edit.",
@@ -203,13 +345,13 @@ def render_shell_steering_hook(
                 "fi",
             ]
         )
+    lines.extend(wrapper_lines)
     return "\n".join(lines) + "\n"
 
 
 def agent_run_reexec_lines(
-    *, agent_run_command: Sequence[str], restore_lines: Sequence[str]
+    *, agent_run_command: str, restore_lines: Sequence[str]
 ) -> list[str]:
-    command = shell_command(agent_run_command)
     restored = [f"  {line}" for line in restore_lines]
     return [
         'if [ -n "${ZSH_EXECUTION_STRING-}" ]; then',
@@ -227,11 +369,11 @@ def agent_run_reexec_lines(
         "    exit 127",
         "  fi",
         "  if [[ -o login ]]; then",
-        f'    exec {command} "$_spice_shell_bin" -lc "$ZSH_EXECUTION_STRING"',
+        f'    exec {agent_run_command} "$_spice_shell_bin" -lc "$ZSH_EXECUTION_STRING"',
         ('    printf "%s\\n" "spice shell hook: failed to exec agent run" >&2'),
         "    exit 127",
         "  fi",
-        f'  exec {command} "$_spice_shell_bin" -c "$ZSH_EXECUTION_STRING"',
+        f'  exec {agent_run_command} "$_spice_shell_bin" -c "$ZSH_EXECUTION_STRING"',
         '  printf "%s\\n" "spice shell hook: failed to exec agent run" >&2',
         "  exit 127",
         "fi",
@@ -246,11 +388,11 @@ def agent_run_reexec_lines(
         "    exit 127",
         "  fi",
         "  if shopt -q login_shell; then",
-        f'    exec {command} "$_spice_shell_bin" -lc "$BASH_EXECUTION_STRING"',
+        f'    exec {agent_run_command} "$_spice_shell_bin" -lc "$BASH_EXECUTION_STRING"',
         ('    printf "%s\\n" "spice shell hook: failed to exec agent run" >&2'),
         "    exit 127",
         "  fi",
-        f'  exec {command} "$_spice_shell_bin" -c "$BASH_EXECUTION_STRING"',
+        f'  exec {agent_run_command} "$_spice_shell_bin" -c "$BASH_EXECUTION_STRING"',
         '  printf "%s\\n" "spice shell hook: failed to exec agent run" >&2',
         "  exit 127",
         "fi",
