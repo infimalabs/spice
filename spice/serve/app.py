@@ -15,7 +15,7 @@ from threading import Event, Lock
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from spice.agent.driver import ALL_DRIVERS
+from spice.agent.driver import ALL_DRIVERS, SPICE_AGENT_DRIVER_ENV
 from spice.agent.lifecycle import agent_status
 from spice.agent.renewal import renewal_handoff_request_text, renewal_steering_text
 from spice.errors import SpiceError
@@ -145,10 +145,12 @@ class ServeState:
 
 
 def run_serve(args: argparse.Namespace) -> int:
-    # The operator server is never an agent; a leaked ambient thread id (from
-    # any driver) would make every spawned process claim that identity.
+    # The operator server is never an agent and never a single-driver lane; a
+    # leaked ambient thread id or driver override would make every worktree
+    # inherit process-local agent state instead of its own config.
     for driver in ALL_DRIVERS:
         os.environ.pop(driver.thread_id_env, None)
+    os.environ.pop(SPICE_AGENT_DRIVER_ENV, None)
     backend = getattr(args, "task_backend", None)
     if backend is not None:
         from spice.tasks import config as task_config

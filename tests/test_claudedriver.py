@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
 from spice.agent.driver import (
     CLAUDE_DRIVER,
     CLAUDE_FALLBACK_CONTEXT_WINDOW,
@@ -54,6 +56,17 @@ def test_driver_for_reads_each_worktree_config(tmp_path, monkeypatch):
 
     assert driver_for(codex_repo).name == "codex"
     assert driver_for(claude_repo).name == "claude"
+
+
+def test_driver_for_rejects_unknown_configured_driver(tmp_path, monkeypatch):
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    from spice.config import update_section
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    update_section(tmp_path, "agent", {"driver": "cloude"})
+
+    with pytest.raises(RuntimeError, match="unknown agent driver 'cloude'"):
+        driver_for(tmp_path)
 
 
 def test_claude_command_starts_headless_stream_json_with_effort(tmp_path):

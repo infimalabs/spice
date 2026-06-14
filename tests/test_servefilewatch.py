@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
+import os
 from pathlib import Path
 import threading
 
@@ -107,3 +108,29 @@ def test_serve_exits_after_watched_file_changes(monkeypatch, tmp_path: Path) -> 
     assert watch_roots == [tmp_path]
     assert fake_server.shutdown_count == 1
     assert fake_server.closed is True
+
+
+def test_serve_scrubs_agent_driver_environment(monkeypatch, tmp_path: Path) -> None:
+    fake_server = FakeServer()
+    fake_server.shutdown_event.set()
+    monkeypatch.setattr(serve_app, "_ServeHttpServer", lambda *_args: fake_server)
+    monkeypatch.setattr(
+        serve_app, "start_exit_file_watch", lambda *_args, **_kwargs: None
+    )
+    for driver in serve_app.ALL_DRIVERS:
+        monkeypatch.setenv(driver.thread_id_env, "ambient-thread")
+    monkeypatch.setenv(serve_app.SPICE_AGENT_DRIVER_ENV, "codex")
+
+    result = run_serve(
+        Namespace(
+            host="127.0.0.1",
+            port=0,
+            until=None,
+            task_backend=None,
+        )
+    )
+
+    assert result == 0
+    assert serve_app.SPICE_AGENT_DRIVER_ENV not in os.environ
+    for driver in serve_app.ALL_DRIVERS:
+        assert driver.thread_id_env not in os.environ
