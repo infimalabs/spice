@@ -53,6 +53,25 @@ def test_static_css_has_narrow_viewport_affordances():
     assert "height: 100dvh" in css
 
 
+def test_audio_playback_enforces_single_owner():
+    app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
+
+    # A new clip claims sole ownership: it bumps the generation token and
+    # hard-stops any in-flight clip before creating the next one.
+    play_start = app_audio.index("function playAudioBuffer(")
+    play_rule = app_audio[play_start : app_audio.index("\n}", play_start)]
+    assert "const generation = (playbackGeneration += 1);" in play_rule
+    assert "stopActivePlayback();" in play_rule
+    assert "activePlaybackAudio = audio;" in play_rule
+    # A late-resolving play() that lost the race stops itself.
+    assert "if (generation !== playbackGeneration) stopOrphanedPlayback(audio);" in (
+        play_rule
+    )
+    # finish is idempotent so the pause/ended/error events cannot double-resolve.
+    assert "if (settled) return;" in play_rule
+    assert "function stopActivePlayback()" in app_audio
+
+
 def test_mobile_header_pill_scroller_is_sole_grower():
     css = _serve_css_text()
     mobile_start = css.index("@media (max-width: 720px)")
