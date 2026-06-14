@@ -8,6 +8,7 @@ usage the context meter folds into pressure.
 
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
@@ -16,8 +17,11 @@ from spice.agent.driver import (
     CLAUDE_DRIVER,
     CLAUDE_FALLBACK_CONTEXT_WINDOW,
     CODEX_DRIVER,
+    PLAYWRIGHT_MCP_COMMAND,
+    PLAYWRIGHT_MCP_SERVER_NAME,
     SPICE_AGENT_DRIVER_ENV,
     driver_for,
+    playwright_mcp_args,
     select_driver,
 )
 
@@ -82,6 +86,21 @@ def test_claude_command_starts_headless_stream_json_with_effort(tmp_path):
     assert command[command.index("--permission-mode") + 1] == "bypassPermissions"
     # Codex-shaped `xhigh` maps onto Claude's `max` rather than crashing launch.
     assert command[command.index("--effort") + 1] == "max"
+    assert command[-1] == "follow the skill"
+
+
+def test_claude_command_registers_playwright_mcp_server(tmp_path):
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path,
+        prompt="follow the skill",
+        model="haiku",
+    )
+    payload = json.loads(command[command.index("--mcp-config") + 1])
+    server = payload["mcpServers"][PLAYWRIGHT_MCP_SERVER_NAME]
+
+    assert server["command"] == PLAYWRIGHT_MCP_COMMAND
+    assert server["args"] == playwright_mcp_args(tmp_path)
+    # The MCP config is a flag, not the trailing prompt.
     assert command[-1] == "follow the skill"
 
 

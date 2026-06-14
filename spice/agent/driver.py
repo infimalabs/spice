@@ -355,6 +355,8 @@ class ClaudeDriver(AgentDriver):
             model or self.default_model,
             "--permission-mode",
             "bypassPermissions",
+            "--mcp-config",
+            claude_mcp_config_json(repo_root),
         ]
         effort = claude_effort(reasoning_effort or self.default_reasoning_effort)
         if effort:
@@ -582,6 +584,25 @@ def playwright_mcp_config_overrides(repo_root: Path) -> list[str]:
             f"{json.dumps(playwright_mcp_args(repo_root), separators=(',', ':'))}"
         ),
     ]
+
+
+def claude_mcp_config_json(repo_root: Path) -> str:
+    """The Claude `--mcp-config` payload registering the Playwright MCP server.
+
+    Claude Code takes MCP servers as a JSON document (an `mcpServers` map)
+    rather than Codex's dotted `--config` overrides. This mirrors the same
+    server name, command, and args so both drivers expose an identical
+    `playwright` server for the activation browser-validation contract.
+    """
+    config = {
+        "mcpServers": {
+            PLAYWRIGHT_MCP_SERVER_NAME: {
+                "command": PLAYWRIGHT_MCP_COMMAND,
+                "args": playwright_mcp_args(repo_root),
+            }
+        }
+    }
+    return json.dumps(config, separators=(",", ":"))
 
 
 def playwright_mcp_args(repo_root: Path) -> list[str]:
