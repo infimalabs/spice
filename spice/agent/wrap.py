@@ -32,6 +32,10 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from spice.agent.driver import driver_for
+from spice.agent.sidechannelnotify import (
+    active_agent_side_channel_socket_path,
+    side_channel_marker_path as side_channel_marker_path,
+)
 from spice.agent.gitshadow import (
     agent_git_shadow_environment,
     scrub_agent_git_shadow_environment,
@@ -44,7 +48,6 @@ from spice.paths import (
     worktree_spice_python_command,
     worktree_spice_source,
 )
-from spice.procs import process_id_is_running
 from spice.sessions.meter import (
     ContextMeter,
     active_context_percent,
@@ -73,7 +76,6 @@ AGENT_RUN_INBOX_REPEAT_SECONDS = 15.0
 AGENT_RUN_CONTEXT_METER_CACHE_SECONDS = 15.0
 AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS = 15.0 * 60.0
 AGENT_RUN_SIDE_CHANNEL_READ_BYTES = 8192
-AGENT_STEER_WATCH_SOCKET_TIMEOUT_SECONDS = 1.0
 INTERRUPTED_EXIT_CODE = 130
 _UV_RUN_SPICE = ["uv", "run", "spice"]
 
@@ -95,10 +97,6 @@ def context_meter_cache_path(repo_root: Path) -> Path:
 
 def context_warning_state_path(repo_root: Path) -> Path:
     return agent_state_dir(repo_root) / "context-warning.json"
-
-
-def side_channel_marker_path(repo_root: Path) -> Path:
-    return agent_state_dir(repo_root) / "side-channel" / "socket"
 
 
 def proxy_bin() -> str:
@@ -275,7 +273,6 @@ def watch_agent_side_channel(
     side_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         side_socket.connect(str(socket_path))
-        side_socket.settimeout(AGENT_STEER_WATCH_SOCKET_TIMEOUT_SECONDS)
         side_socket.sendall(
             json.dumps(
                 agent_side_channel_hello(
@@ -287,13 +284,8 @@ def watch_agent_side_channel(
             ).encode("utf-8")
             + b"\n"
         )
-        while process_id_is_running(parent_pid):
-            try:
-                chunk = side_socket.recv(AGENT_RUN_SIDE_CHANNEL_READ_BYTES)
-            except TimeoutError:
-                continue
-            except OSError:
-                return
+        while True:
+            chunk = side_socket.recv(AGENT_RUN_SIDE_CHANNEL_READ_BYTES)
             if not chunk:
                 return
             write_side_channel_chunk(stderr, chunk)
@@ -302,19 +294,6 @@ def watch_agent_side_channel(
     finally:
         with contextlib.suppress(OSError):
             side_socket.close()
-
-
-def active_agent_side_channel_socket_path(repo_root: Path | None) -> Path | None:
-    if repo_root is None:
-        return None
-    marker_path = side_channel_marker_path(repo_root)
-    try:
-        raw_socket_path = marker_path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    if not raw_socket_path:
-        return None
-    return Path(raw_socket_path)
 
 
 def agent_side_channel_hello(
@@ -390,18 +369,24 @@ class AgentInboxInjector:
             and pending_keys <= suppressed_keys
         ):
             return
-        self.signature = signature
         display_filter = set[str]() if new_pending_keys else suppressed_keys
         from spice.mail.readout import print_inbox_readout
 
-        with contextlib.redirect_stdout(self.stderr):
-            displayed_keys = print_inbox_readout(
-                self.repo_root,
-                quiet=True,
-                displayed_keys=display_filter,
-            )
-        self._record_displayed_keys(signature, displayed_keys, now=now)
-        self._prune_display_state(pending_keys)
+        displayed_keys = print_inbox_readout(
+            self.repo_root,
+            quiet=True,
+            displayed_keys=display_filter,
+            file=self.stderr,
+        )
+        self.stderr.flush()
+        displayed_signature = inbox_pending_signature(self.repo_root)
+        displayed_pending_keys = {
+            inbox_key
+            for inbox_key, _row_signature in _signature_rows(displayed_signature)
+        }
+        self.signature = displayed_signature
+        self._record_displayed_keys(displayed_signature, displayed_keys, now=now)
+        self._prune_display_state(displayed_pending_keys)
 
     def _suppressed_keys(self, signature: InboxSignature, *, now: float) -> set[str]:
         suppressed: set[str] = set()
