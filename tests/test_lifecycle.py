@@ -414,13 +414,11 @@ def test_side_channel_binding_diagnostic_refuses_wrong_repo_root(tmp_path):
     assert "steering_delivery=refused" in diagnostic
 
 
-def test_wrapper_missing_proxy_plain_exec_starts_side_channel_watch(
+def test_wrapper_proxy_marker_plain_exec_starts_side_channel_watch(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setenv(wrap.PROXY_BIN_ENV, "missing-rtk")
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
-    monkeypatch.setattr(wrap.shutil, "which", lambda _proxy: None)
     events: list[tuple[str, object, object | None]] = []
     stderr = io.StringIO()
     watch_thread = object()
@@ -474,16 +472,7 @@ def test_wrapper_missing_proxy_plain_exec_starts_side_channel_watch(
     ]
 
 
-def test_wrapper_resolves_proxy_steps_aside_for_implicit_find_and_keeps_explicit_passthrough(
-    monkeypatch,
-):
-    monkeypatch.setenv(wrap.PROXY_BIN_ENV, "rtk-test")
-    monkeypatch.setattr(
-        wrap.shutil,
-        "which",
-        lambda proxy: "/opt/bin/rtk-test" if proxy == "rtk-test" else None,
-    )
-
+def test_wrapper_drops_proxy_marker_and_leaves_plain_commands_native():
     assert wrap.build_agent_run_command(["find", ".", "-maxdepth", "0", "-print"]) == [
         "find",
         ".",
@@ -513,25 +502,13 @@ def test_wrapper_resolves_proxy_steps_aside_for_implicit_find_and_keeps_explicit
     ]
     assert wrap.build_agent_run_command(
         ["proxy", "find", ".", "-maxdepth", "0", "-print"]
-    ) == ["/opt/bin/rtk-test", "proxy", "find", ".", "-maxdepth", "0", "-print"]
-    assert wrap.build_agent_run_command(["rg", "needle"]) == [
-        "/opt/bin/rtk-test",
-        "rg",
-        "needle",
-    ]
+    ) == ["find", ".", "-maxdepth", "0", "-print"]
+    assert wrap.build_agent_run_command(["rg", "needle"]) == ["rg", "needle"]
 
 
-def test_wrapper_runs_implicit_find_natively_even_when_proxy_is_installed(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setenv(wrap.PROXY_BIN_ENV, "rtk-test")
+def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
-    monkeypatch.setattr(
-        wrap.shutil,
-        "which",
-        lambda proxy: "/opt/bin/rtk-test" if proxy == "rtk-test" else None,
-    )
     events: list[tuple[str, object, object | None]] = []
     stderr = io.StringIO()
     watch_thread = object()
@@ -758,8 +735,6 @@ def test_run_agent_command_streams_later_side_channel_while_child_runs(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv(wrap.PROXY_BIN_ENV, "missing-rtk")
-    monkeypatch.setattr(wrap.shutil, "which", lambda _proxy: None)
     stderr = io.StringIO()
     ready = tmp_path / "ready"
     results: list[int] = []
@@ -799,8 +774,6 @@ def test_run_agent_command_does_not_duplicate_initial_side_channel_with_watch(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv(wrap.PROXY_BIN_ENV, "missing-rtk")
-    monkeypatch.setattr(wrap.shutil, "which", lambda _proxy: None)
     write_inbox_item(
         tmp_path,
         "20260101T000000000005Z.txt",
@@ -825,8 +798,6 @@ def test_run_agent_command_dumps_initial_inbox_without_side_channel_server(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv(wrap.PROXY_BIN_ENV, "missing-rtk")
-    monkeypatch.setattr(wrap.shutil, "which", lambda _proxy: None)
     write_inbox_item(
         tmp_path,
         "20260101T000000000006Z.txt",

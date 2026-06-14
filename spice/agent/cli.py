@@ -29,7 +29,7 @@ def configure_agent_parser(subparsers: Any) -> None:
 
     run = actions.add_parser(
         "run",
-        help="Run an agent shell command with proxy routing and steering injection.",
+        help="Run an agent shell command with steering injection.",
     )
     run.add_argument("args", nargs=argparse.REMAINDER)
     run.set_defaults(func=handle_agent)

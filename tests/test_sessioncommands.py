@@ -86,11 +86,11 @@ def test_command_pipeline_audit_uses_spice_wrapper_contract():
         "spice agent run -- rg foo | sed -n '1,5p'"
     )
     assert commandaudit.command_starts_with_wrapper(
-        "PATH=/tmp/bin SPICE_PROXY_BIN=rtk-test spice agent run -- git status"
+        "PATH=/tmp/bin SPICE_TRACE=1 spice agent run -- git status"
     )
     assert commandaudit.pipeline_is_canonical_wrapper(
         "PATH=/tmp/bin spice agent run -- rg foo | "
-        "SPICE_PROXY_BIN=rtk-test spice agent run -- sed -n '1,5p'"
+        "SPICE_TRACE=1 spice agent run -- sed -n '1,5p'"
     )
     assert (
         commandaudit.command_label(

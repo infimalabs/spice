@@ -3,8 +3,6 @@
 Shell startup hooks reexec zsh/bash commands through
 `spice agent run -- <cmd…>`. The command surface:
 
-* routes the command through a token-optimizing proxy (`rtk` by default,
-  `SPICE_PROXY_BIN` to override, plain exec when the proxy is not installed);
 * gives direct `git` invocations the agent git-shadow environment, and gives
   nested `spice` invocations a scrubbed one (harness internals must see real
   upstream config);
@@ -24,7 +22,6 @@ import contextlib
 import json
 import os
 import select
-import shutil
 import socket
 import subprocess
 import sys
@@ -44,6 +41,7 @@ from spice.agent.gitshadow import (
     scrub_agent_git_shadow_environment,
 )
 from spice.agent.identity import ambient_thread_id
+from spice.agent.shellhook import SHELL_HOOK_REEXEC_STAGE_ENV
 from spice.mail.inbox import inbox_dir, inbox_item_key
 from spice.paths import (
     STATE_DIRNAME,
@@ -63,8 +61,6 @@ from spice.sessions.meter import (
 )
 from spice.sessions.util import format_float, format_int
 
-PROXY_BIN_ENV = "SPICE_PROXY_BIN"  # env-policy: allow
-DEFAULT_PROXY_BIN = "rtk"
 PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
 SHELL_REEXEC_ENV_NAMES = ("ZDOTDIR", "BASH_ENV")
 PYTHON_ROUTE_FAILURE = (
@@ -101,10 +97,6 @@ def context_meter_cache_path(repo_root: Path) -> Path:
 
 def context_warning_state_path(repo_root: Path) -> Path:
     return agent_state_dir(repo_root) / "context-warning.json"
-
-
-def proxy_bin() -> str:
-    return os.environ.get(PROXY_BIN_ENV, DEFAULT_PROXY_BIN)
 
 
 def run_agent_command(
@@ -155,21 +147,8 @@ def build_agent_run_command(
     raw_args: Sequence[str], *, repo_root: Path | None = None
 ) -> list[str]:
     args = normalize_agent_run_args(raw_args)
-    spice_route = is_spice_route(args)
     routed_args = worktree_route_command(args, repo_root=repo_root)
-    proxy = proxy_bin()
-    resolved_proxy = shutil.which(proxy)
-    if resolved_proxy is None:
-        # No proxy installed: drop the explicit `proxy` verb and run the
-        # command exactly as given. The injection channels still apply.
-        return routed_args[1:] if routed_args[:1] == ["proxy"] else routed_args
-    if args[:1] == ["proxy"]:
-        return [resolved_proxy, "proxy", *routed_args[1:]]
-    if spice_route:
-        return [resolved_proxy, "proxy", *routed_args]
-    if requires_native_find_semantics(args):
-        return routed_args
-    return [resolved_proxy, *routed_args]
+    return routed_args[1:] if routed_args[:1] == ["proxy"] else routed_args
 
 
 def build_agent_run_environment(
@@ -194,14 +173,18 @@ def build_agent_run_environment(
 def scrub_agent_run_recursion_environment(
     environment: dict[str, str] | None,
 ) -> dict[str, str] | None:
+    preserve_shell_hook = os.environ.get(SHELL_HOOK_REEXEC_STAGE_ENV) == "1"
     if environment is None:
-        if not any(name in os.environ for name in SHELL_REEXEC_ENV_NAMES):
+        if preserve_shell_hook or not any(
+            name in os.environ for name in SHELL_REEXEC_ENV_NAMES
+        ):
             return None
         environment = dict(os.environ)
     else:
         environment = dict(environment)
-    for name in SHELL_REEXEC_ENV_NAMES:
-        environment.pop(name, None)
+    if not preserve_shell_hook:
+        for name in SHELL_REEXEC_ENV_NAMES:
+            environment.pop(name, None)
     return environment
 
 
@@ -269,10 +252,6 @@ def normalize_agent_run_args(raw_args: Sequence[str]) -> list[str]:
     if args[:1] == ["--"]:
         return args[1:]
     return args
-
-
-def requires_native_find_semantics(args: Sequence[str]) -> bool:
-    return args[:1] == ["find"]
 
 
 def start_agent_side_channel_watch(
