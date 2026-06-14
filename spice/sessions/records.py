@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import driver_for_transcript
 from spice.sessions.util import first_text, int_or_zero, normalize_timestamp
 
 COMMIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
@@ -83,6 +83,7 @@ class CommitRecord:
 
 
 def iter_events(path: Path) -> Iterator[dict[str, Any]]:
+    driver = driver_for_transcript(path)
     with path.open(encoding="utf-8", errors="replace") as handle:
         for line in handle:
             try:
@@ -91,7 +92,7 @@ def iter_events(path: Path) -> Iterator[dict[str, Any]]:
                 continue
             if not isinstance(obj, dict):
                 continue
-            event = DRIVER.normalize_transcript_line(obj)
+            event = driver.normalize_transcript_line(obj)
             if event is not None:
                 yield event
 

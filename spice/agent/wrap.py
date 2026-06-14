@@ -31,7 +31,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, TextIO
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import driver_for
 from spice.agent.gitshadow import (
     agent_git_shadow_environment,
     scrub_agent_git_shadow_environment,
@@ -84,7 +84,7 @@ ContextMeterFactory = Callable[[Path | None], ContextMeter | None]
 
 
 def agent_state_dir(repo_root: Path) -> Path:
-    return repo_root / STATE_DIRNAME / "agents" / DRIVER.state_dirname
+    return repo_root / STATE_DIRNAME / "agents" / driver_for(repo_root).state_dirname
 
 
 def context_meter_cache_path(repo_root: Path) -> Path:
@@ -475,7 +475,7 @@ def agent_context_meter(repo_root: Path | None) -> ContextMeter | None:
     if cached is not None:
         return cached
     try:
-        transcript_path = DRIVER.thread_transcript_path(thread_id)
+        transcript_path = driver_for(repo_root).thread_transcript_path(thread_id)
     except (RuntimeError, SystemExit):
         return None
     try:

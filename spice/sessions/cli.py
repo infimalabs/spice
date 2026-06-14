@@ -11,7 +11,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import driver_for_transcript
 from spice.agent.identity import canonical_thread_id
 from spice.sessions import analysis
 from spice.sessions import commandaudit, commandrecords
@@ -29,7 +29,7 @@ from spice.sessions.meter import (
     collect_context_meter,
     context_pressure_level,
 )
-from spice.sessions.resolve import resolve_files
+from spice.sessions.resolve import resolve_files, resolve_thread_transcript
 from spice.sessions.util import format_float, format_int, normalize_timestamp
 
 DEFAULT_SWEEP_WINDOWS = 4
@@ -367,9 +367,10 @@ def render_thread_summary(thread_id: str) -> str:
     canonical = canonical_thread_id(thread_id)
     display_id = canonical or thread_id.strip()
     try:
-        transcript = DRIVER.thread_transcript_path(display_id)
+        transcript = resolve_thread_transcript(display_id)
     except SystemExit as exc:
         raise SystemExit(f"Could not resolve thread {display_id}: {exc}") from exc
+    driver = driver_for_transcript(transcript)
     turns = records.collect_turns([transcript])
     compactions = records.collect_compactions([transcript])
     meter = collect_context_meter([transcript])
@@ -377,7 +378,7 @@ def render_thread_summary(thread_id: str) -> str:
     lines = [
         "Thread",
         f"  id={display_id}",
-        f"  driver={DRIVER.name}",
+        f"  driver={driver.name}",
         f"  transcript={transcript}",
     ]
     window_start = turns[0].start_ts if turns else "-"

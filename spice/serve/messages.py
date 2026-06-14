@@ -19,7 +19,12 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import (
+    ALL_DRIVERS,
+    AgentDriver,
+    driver_for,
+    driver_for_transcript,
+)
 from spice.mail.acks import split_ack_message
 from spice.mail.watch import (
     extract_assistant_text,
@@ -112,11 +117,24 @@ class RolloutCursor:
     lock: RLock = field(default_factory=RLock, repr=False)
 
 
-def transcript_path_for_thread(thread_id: str) -> Path | None:
-    try:
-        return DRIVER.thread_transcript_path(thread_id)
-    except (RuntimeError, SystemExit):
-        return None
+def transcript_path_for_thread(
+    thread_id: str, repo_root: Path | None = None
+) -> Path | None:
+    """Locate a thread's transcript, preferring the worktree's driver.
+
+    A thread id resolves under exactly one driver (a Codex rollout or a Claude
+    session), so when the worktree's configured driver does not find it the
+    other shipped drivers are tried — the lookup never depends on a
+    process-global driver.
+    """
+    preferred = driver_for(repo_root)
+    ordered = [preferred, *(d for d in ALL_DRIVERS if d is not preferred)]
+    for driver in ordered:
+        try:
+            return driver.thread_transcript_path(thread_id)
+        except (RuntimeError, SystemExit):
+            continue
+    return None
 
 
 def assistant_messages_for_thread_id(
@@ -127,8 +145,9 @@ def assistant_messages_for_thread_id(
     before: str | None = None,
     cursor: RolloutCursor | None = None,
     worktree_id: str | None = None,
+    repo_root: Path | None = None,
 ) -> tuple[list[AssistantMessage], str | None]:
-    path = transcript_path_for_thread(thread_id)
+    path = transcript_path_for_thread(thread_id, repo_root)
     if path is None or not path.is_file():
         return [], f"Could not resolve transcript for {thread_id}"
     return (
@@ -182,6 +201,7 @@ def read_metric_messages_from_offset(
 ) -> tuple[list[AssistantMessage], int]:
     """Read metric-relevant transcript records from a byte offset to EOF."""
     messages: list[AssistantMessage] = []
+    driver = driver_for_transcript(transcript_path)
     file_size = transcript_path.stat().st_size
     if file_size < start_offset:
         start_offset = 0
@@ -192,7 +212,9 @@ def read_metric_messages_from_offset(
             line = handle.readline()
             if not line:
                 return messages, handle.tell()
-            message = _build_message(line_offset, line, worktree_id=worktree_id)
+            message = _build_message(
+                line_offset, line, driver=driver, worktree_id=worktree_id
+            )
             if message is not None:
                 messages.append(message)
 
@@ -263,6 +285,7 @@ def _read_from_offset(
     worktree_id: str | None,
 ) -> list[AssistantMessage]:
     messages: list[AssistantMessage] = []
+    driver = driver_for_transcript(transcript_path)
     try:
         file_size = transcript_path.stat().st_size
         if file_size < start_offset:
@@ -274,7 +297,9 @@ def _read_from_offset(
                 line = handle.readline()
                 if not line:
                     break
-                message = _build_message(line_offset, line, worktree_id=worktree_id)
+                message = _build_message(
+                    line_offset, line, driver=driver, worktree_id=worktree_id
+                )
                 if message is not None:
                     messages.append(message)
                     messages = _trim_chronological(messages, limit)
@@ -340,6 +365,7 @@ def _scan_span(
 ) -> tuple[list[AssistantMessage], AssistantMessage | None]:
     visible: list[AssistantMessage] = []
     latest_presence: AssistantMessage | None = None
+    driver = driver_for_transcript(transcript_path)
     with transcript_path.open(encoding="utf-8", errors="replace") as handle:
         handle.seek(start)
         if start:
@@ -351,7 +377,9 @@ def _scan_span(
             line = handle.readline()
             if not line:
                 break
-            message = _build_message(line_offset, line, worktree_id=worktree_id)
+            message = _build_message(
+                line_offset, line, driver=driver, worktree_id=worktree_id
+            )
             if message is None:
                 continue
             if message.kind.startswith("presence:"):
@@ -401,7 +429,7 @@ def _line_has_tool_output_image(transcript_path: Path, offset: int) -> bool:
     loaded = _load_json_line(line)
     if loaded is None:
         return False
-    event = DRIVER.normalize_transcript_line(loaded)
+    event = driver_for_transcript(transcript_path).normalize_transcript_line(loaded)
     if event is None or event.get("type") != "response_item":
         return False
     payload = event.get("payload")
@@ -455,12 +483,12 @@ def activity_status(messages: list[AssistantMessage]) -> str:
 
 
 def _build_message(
-    offset: int, line: str, *, worktree_id: str | None = None
+    offset: int, line: str, *, driver: AgentDriver, worktree_id: str | None = None
 ) -> AssistantMessage | None:
     loaded = _load_json_line(line)
     if loaded is None:
         return None
-    event = DRIVER.normalize_transcript_line(loaded)
+    event = driver.normalize_transcript_line(loaded)
     if event is None:
         return None
     timestamp = str(event.get("timestamp") or "")
@@ -472,7 +500,7 @@ def _build_message(
     if event.get("type") != "response_item":
         return None
     payload = event.get("payload") or {}
-    text = extract_assistant_text(line)
+    text = extract_assistant_text(line, driver)
     source_kind = "assistant_text"
     if text is None:
         text = assistant_image_markdown(

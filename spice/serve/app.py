@@ -15,7 +15,7 @@ from threading import Event, Lock
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import ALL_DRIVERS
 from spice.agent.lifecycle import agent_status
 from spice.agent.renewal import renewal_handoff_request_text, renewal_steering_text
 from spice.errors import SpiceError
@@ -145,9 +145,10 @@ class ServeState:
 
 
 def run_serve(args: argparse.Namespace) -> int:
-    # The operator server is never an agent; a leaked ambient thread id would
-    # make every spawned process claim that identity.
-    os.environ.pop(DRIVER.thread_id_env, None)
+    # The operator server is never an agent; a leaked ambient thread id (from
+    # any driver) would make every spawned process claim that identity.
+    for driver in ALL_DRIVERS:
+        os.environ.pop(driver.thread_id_env, None)
     backend = getattr(args, "task_backend", None)
     if backend is not None:
         from spice.tasks import config as task_config
@@ -458,7 +459,7 @@ def serve_metrics_text(state: ServeState) -> str:
         thread_id = payloads.resolve_thread_id_for_target(state, target) or ""
         if thread_id:
             bound = 1
-            transcript_path = transcript_path_for_thread(thread_id)
+            transcript_path = transcript_path_for_thread(thread_id, target.repo_root)
             if transcript_path is not None and transcript_path.is_file():
                 rollout_present = 1
         pending += pending_inbox_count(target.repo_root)
@@ -634,7 +635,11 @@ class _ServeHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.BAD_REQUEST, "offset and item are required")
             return
         thread_id = payloads.resolve_thread_id_for_target(self.state, target)
-        path = transcript_path_for_thread(thread_id) if thread_id else None
+        path = (
+            transcript_path_for_thread(thread_id, target.repo_root)
+            if thread_id
+            else None
+        )
         if path is None:
             self.send_error(HTTPStatus.NOT_FOUND, "target thread is not bound")
             return

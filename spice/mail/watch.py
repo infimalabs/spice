@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import AgentDriver, driver_for
 from spice.agent.identity import canonical_thread_id
 from spice.config import say_command_args
 from spice.mail.acks import extract_ack_segments_from_text
@@ -144,7 +144,7 @@ class _AckWatchState:
         self.on_ack = on_ack
 
     def process_line(self, line: str) -> None:
-        text = extract_assistant_text(line)
+        text = extract_assistant_text(line, driver_for(self.target_repo_root))
         if text is None:
             return
         self.total_messages += 1
@@ -233,7 +233,7 @@ def _safe_loads(line: str) -> dict[str, Any] | None:
     return obj if isinstance(obj, dict) else None
 
 
-def extract_assistant_text(line: str) -> str | None:
+def extract_assistant_text(line: str, driver: AgentDriver) -> str | None:
     """Return the assistant prose carried by a transcript JSONL `line`, or None.
 
     Cheap substring prefilter first: an overwhelming majority of transcript
@@ -246,7 +246,7 @@ def extract_assistant_text(line: str) -> str | None:
     obj = _safe_loads(line)
     if obj is None:
         return None
-    event = DRIVER.normalize_transcript_line(obj)
+    event = driver.normalize_transcript_line(obj)
     if event is None:
         return None
     payload = event.get("payload") or {}

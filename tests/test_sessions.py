@@ -15,9 +15,11 @@ from spice.sessions.cli import _print_timeline, render_thread_summary
 from spice.sessions.meter import (
     ActiveContextSnapshot,
     active_context_percent,
+    collect_context_meter,
     context_pressure_level,
     context_pressure_should_warn,
 )
+from spice.sessions import records
 from spice.sessions.util import first_text, normalize_timestamp
 from spice.tasks.identity import (
     INCEPTED_RE,
@@ -237,6 +239,45 @@ def test_session_thread_falls_back_to_session_index(tmp_path, monkeypatch):
     assert f"id={THREAD_CANONICAL}" in summary
     assert f"transcript={transcript.resolve()}" in summary
     assert "latest_user=investigate thread" in summary
+
+
+def test_session_thread_resolves_claude_transcript_by_driver_owner(
+    tmp_path, monkeypatch
+):
+    claude_home = tmp_path / "claude"
+    transcript = (
+        claude_home / "projects" / "-private-tmp-spice-sup" / f"{THREAD_DASHED}.jsonl"
+    )
+    _write_claude_thread_transcript(transcript)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
+
+    summary = render_thread_summary(THREAD_DASHED)
+
+    assert f"id={THREAD_CANONICAL}" in summary
+    assert "driver=claude" in summary
+    assert f"transcript={transcript.resolve()}" in summary
+    assert "turns=1 compactions=0" in summary
+    assert "latest_user=investigate claude" in summary
+    assert "latest_assistant=claude done" in summary
+    assert "latest_final=claude done" in summary
+
+
+def test_session_records_and_meter_parse_claude_transcript_owner(tmp_path, monkeypatch):
+    claude_home = tmp_path / "claude"
+    transcript = (
+        claude_home / "projects" / "-private-tmp-spice-sup" / f"{THREAD_DASHED}.jsonl"
+    )
+    _write_claude_thread_transcript(transcript)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
+
+    turns = records.collect_turns([transcript])
+    meter = collect_context_meter([transcript])
+
+    assert turns[0].user_messages == ["investigate claude"]
+    assert turns[0].final_answers == ["claude done"]
+    assert meter.snapshot_count == 1
+    assert meter.latest_snapshot is not None
+    assert meter.latest_snapshot.total_tokens == 1000 + 250 + 75
 
 
 def test_session_thread_reports_missing_driver_state(tmp_path, monkeypatch):
@@ -515,6 +556,35 @@ def _write_thread_transcript(path) -> None:
             "payload": {
                 "type": "task_complete",
                 "last_agent_message": "thread done",
+            },
+        },
+    ]
+    path.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
+    )
+
+
+def _write_claude_thread_transcript(path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    events = [
+        {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "type": "user",
+            "message": {"role": "user", "content": "investigate claude"},
+        },
+        {
+            "timestamp": "2026-01-01T00:00:01Z",
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "stop_reason": "end_turn",
+                "content": [{"type": "text", "text": "claude done"}],
+                "usage": {
+                    "input_tokens": 1000,
+                    "cache_read_input_tokens": 250,
+                    "cache_creation_input_tokens": 0,
+                    "output_tokens": 75,
+                },
             },
         },
     ]

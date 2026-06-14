@@ -21,7 +21,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Callable, Protocol, TextIO, cast
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import AgentDriver, driver_for
 from spice.agent.maxims import (
     MaximBag,
     evaluate_maxim_any_violation,
@@ -111,6 +111,7 @@ def _tee_agent_stdout(
     with log_path.open("a", encoding="utf-8", errors="replace") as log_handle:
         reminder_gate = MaximReminderGate()
         scanner = make_stdout_scanner(
+            driver_for(repo_root),
             lambda text: process_supervised_assistant_message(
                 repo_root, text, log_handle, reminder_gate
             ),
@@ -155,7 +156,7 @@ def record_supervised_lane_metrics(repo_root: Path) -> None:
     agent_id = agent_status(repo_root).thread_id
     if not agent_id:
         raise RuntimeError(f"could not resolve supervised agent id for {repo_root}")
-    transcript_path = transcript_path_for_thread(agent_id)
+    transcript_path = transcript_path_for_thread(agent_id, repo_root)
     if transcript_path is None:
         raise RuntimeError(f"could not resolve transcript for {agent_id}")
     record_transcript_metrics_for_agent(
@@ -170,18 +171,19 @@ class StdoutScanner(Protocol):
 
 
 def make_stdout_scanner(
+    driver: AgentDriver,
     on_message: Callable[[str], None],
     *,
     on_compaction: Callable[[], None],
 ) -> StdoutScanner:
-    """Pick the scanner matching the driver's `exec` stdout format."""
-    if DRIVER.stdout_format == "json":
+    """Pick the scanner matching this worktree's driver's stdout format."""
+    if driver.stdout_format == "json":
         return JsonStdoutScanner(
             on_message,
-            DRIVER.normalize_transcript_line,
+            driver.normalize_transcript_line,
             on_compaction=on_compaction,
         )
-    return AgentStdoutMessageScanner(on_message, on_compaction=on_compaction)
+    return AgentStdoutMessageScanner(driver, on_message, on_compaction=on_compaction)
 
 
 class JsonStdoutScanner:
@@ -237,10 +239,12 @@ class AgentStdoutMessageScanner:
 
     def __init__(
         self,
+        driver: AgentDriver,
         on_message: Callable[[str], None],
         *,
         on_compaction: Callable[[], None] | None = None,
     ) -> None:
+        self._driver = driver
         self.on_message = on_message
         self._on_compaction = on_compaction or (lambda: None)
         self._capturing = False
@@ -248,13 +252,13 @@ class AgentStdoutMessageScanner:
 
     def process_line(self, line: str) -> None:
         marker = line.rstrip("\r\n")
-        if marker == DRIVER.stdout_assistant_marker:
+        if marker == self._driver.stdout_assistant_marker:
             self._flush()
             self._capturing = True
             return
-        if marker in DRIVER.stdout_section_markers:
+        if marker in self._driver.stdout_section_markers:
             self._flush()
-            if marker == DRIVER.stdout_compaction_marker:
+            if marker == self._driver.stdout_compaction_marker:
                 self._on_compaction()
             return
         if self._capturing:

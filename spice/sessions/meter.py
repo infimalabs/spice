@@ -15,7 +15,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterator
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import driver_for_transcript
 from spice.sessions.util import (
     normalize_timestamp,
     safe_percent,
@@ -68,7 +68,7 @@ def collect_context_meter(files: list[Path]) -> ContextMeter:
                 snapshots.append(snapshot)
                 events.append((snapshot.ts, order, "snapshot", snapshot))
                 continue
-            compaction_ts = compaction_ts_from_object(obj)
+            compaction_ts = compaction_ts_from_object(path, obj)
             if compaction_ts is not None:
                 events.append((compaction_ts, order, "compaction", None))
     return _build_context_meter(files, sorted(events), snapshots)
@@ -145,7 +145,7 @@ def _iter_jsonl_lines_reverse(path: Path) -> Iterator[str]:
 def active_context_snapshot_from_object(
     path: Path, obj: dict[str, Any]
 ) -> ActiveContextSnapshot | None:
-    fields = DRIVER.context_snapshot_fields(obj)
+    fields = driver_for_transcript(path).context_snapshot_fields(obj)
     if fields is None:
         return None
     ts = normalize_timestamp(obj.get("timestamp"))
@@ -154,8 +154,8 @@ def active_context_snapshot_from_object(
     return ActiveContextSnapshot(source_file=str(path), ts=ts, **fields)
 
 
-def compaction_ts_from_object(obj: dict[str, Any]) -> str | None:
-    event = DRIVER.normalize_transcript_line(obj)
+def compaction_ts_from_object(path: Path, obj: dict[str, Any]) -> str | None:
+    event = driver_for_transcript(path).normalize_transcript_line(obj)
     if event is None or event.get("type") != "compacted":
         return None
     ts = normalize_timestamp(obj.get("timestamp"))

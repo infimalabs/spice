@@ -7,13 +7,11 @@ thread id to one, the stdout section markers its `exec` mode prints (for the
 watchdog scanner), how to read the session id from startup output, and how to
 phrase the neutral skill-invocation launch prompt.
 
-Two drivers ship: OpenAI Codex (the default) and Anthropic Claude Code. Which
-one `DRIVER` resolves to is chosen once at import from the `SPICE_AGENT_DRIVER`
-environment variable (`codex` | `claude`, default `codex`); the choice
-propagates to the supervisor subprocess through ordinary env inheritance.
-Adding a third driver is writing one more `AgentDriver` value, not adding a
-mode to any consumer — every caller imports the resolved `DRIVER` and nothing
-else.
+Two drivers ship: OpenAI Codex (the default) and Anthropic Claude Code.
+Process-local commands can use the legacy `DRIVER` fallback, while lane and
+transcript consumers resolve with `driver_for(repo_root)` or
+`driver_for_transcript(path)`. Adding a third driver is writing one more
+`AgentDriver` value, not adding broad mode branches to consumers.
 """
 
 from __future__ import annotations
@@ -68,6 +66,10 @@ class AgentDriver:
         self, thread_id: str, *, must_exist: bool = True
     ) -> Path:
         raise NotImplementedError
+
+    def owns_transcript(self, path: Path) -> bool:
+        """True iff `path` sits in this driver's transcript layout."""
+        return False
 
     def build_exec_command(self, **kwargs: object) -> list[str]:
         raise NotImplementedError
@@ -156,6 +158,9 @@ class CodexDriver(AgentDriver):
 
     def sessions_root(self) -> Path:
         return self.home() / "sessions"
+
+    def owns_transcript(self, path: Path) -> bool:
+        return path.name.startswith("rollout-") or self.sessions_root() in path.parents
 
     def thread_transcript_path(
         self, thread_id: str, *, must_exist: bool = True
@@ -295,6 +300,9 @@ class ClaudeDriver(AgentDriver):
 
     def projects_root(self) -> Path:
         return self.home() / "projects"
+
+    def owns_transcript(self, path: Path) -> bool:
+        return self.projects_root() in path.parents
 
     def thread_transcript_path(
         self, thread_id: str, *, must_exist: bool = True
@@ -658,24 +666,50 @@ _DRIVERS: dict[str, AgentDriver] = {
 }
 
 
-def select_driver(name: str = "") -> AgentDriver:
-    """Resolve the active driver: explicit name, then env, then worktree config.
+ALL_DRIVERS: tuple[AgentDriver, ...] = (CODEX_DRIVER, CLAUDE_DRIVER)
 
-    Configuration (`[tool.spice.agent] driver` or the worktree state) lets
-    `spice serve`/`agent ensure` pick a driver without the env var; the env
-    var still overrides it, and the default stays Codex.
+
+def select_driver(name: str = "") -> AgentDriver:
+    """Resolve a driver by explicit name, then env, then the cwd's config.
+
+    For the process-global fallback `DRIVER`. Per-worktree resolution (what the
+    server uses for each lane) is `driver_for(repo_root)` — the driver is a
+    per-worktree setting, never the server process's own location.
     """
     chosen = (name or os.environ.get(SPICE_AGENT_DRIVER_ENV, "")).strip().lower()
     if not chosen and not name:
-        chosen = _configured_driver_name()
+        chosen = _configured_driver_name(None)
     return _DRIVERS.get(chosen, CODEX_DRIVER)
 
 
-def _configured_driver_name() -> str:
+def driver_for(repo_root: Path | None) -> AgentDriver:
+    """The driver bound to a specific worktree.
+
+    Resolution: `SPICE_AGENT_DRIVER` (a deliberate global override, normally
+    unset), then *that worktree's* configured driver, then Codex. The server
+    discovers worktrees from the repo and calls this per target.repo_root, so
+    one repo can run a different driver in every worktree regardless of where —
+    or how — the server itself was launched.
+    """
+    name = os.environ.get(SPICE_AGENT_DRIVER_ENV, "").strip().lower()
+    if not name:
+        name = _configured_driver_name(repo_root)
+    return _DRIVERS.get(name, CODEX_DRIVER)
+
+
+def driver_for_transcript(path: Path) -> AgentDriver:
+    """The driver whose transcript layout owns `path` (Codex or Claude)."""
+    for driver in ALL_DRIVERS:
+        if driver.owns_transcript(path):
+            return driver
+    return CODEX_DRIVER
+
+
+def _configured_driver_name(repo_root: Path | None) -> str:
     try:
         from spice.config import configured_agent_driver
 
-        return (configured_agent_driver() or "").strip().lower()
+        return (configured_agent_driver(repo_root) or "").strip().lower()
     except Exception:
         return ""
 
