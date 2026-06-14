@@ -36,6 +36,93 @@ def task_repo(tmp_path, monkeypatch):
         config.set_backend(None)
 
 
+@pytest.fixture
+def remote_task_repo(tmp_path, monkeypatch):
+    """A task-wired worktree with a real upstream baseline (origin/main)."""
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "repo")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    backend = tmp_path / "task-backend"
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    monkeypatch.setenv("CODEX_TURN_ID", "turn-a")
+    config.set_backend(str(backend))
+    try:
+        yield repo
+    finally:
+        config.set_backend(None)
+
+
+def _make_orphan_commit(
+    repo: Path, name: str = "orphan.txt", subject: str = "orphan work"
+) -> str:
+    (repo / name).write_text(f"{subject}\n", encoding="utf-8")
+    _run(repo, "git", "add", name)
+    _run(repo, "git", "commit", "-m", subject)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def test_task_adopt_mints_task_over_orphan_then_done_captures_it(remote_task_repo):
+    orphan = _make_orphan_commit(remote_task_repo, subject="orphan fix worth keeping")
+    assert gitsync.commits_ahead_of_baseline(remote_task_repo) == 1
+
+    output = ops.adopt(project="task.unit")
+    handle = output.splitlines()[0].split()[-1]
+    row = identity.resolve(handle)
+
+    assert "adopted 1 orphan commit into" in output
+    assert f"next: spice task done {handle}" in output
+    assert row["claim_by"] == ACTOR_A
+    assert bool(row["start"])
+    assert row["description"] == "orphan fix worth keeping"
+    # The orphan was preserved, not fast-forwarded away.
+    assert _git(remote_task_repo, "rev-parse", "HEAD") == orphan
+
+    done_output = ops.done(handle, validation=["orphan captured"])
+    review_row = identity.resolve(handle)
+
+    assert f"advanced {handle} -> review" in done_output
+    assert review_row["done_head"] == orphan
+    assert (
+        _git(remote_task_repo, "ls-remote", "origin", "refs/heads/main").split()[0]
+        == review_row["done_merge_head"]
+    )
+
+
+def test_task_adopt_claims_existing_handle_over_orphan(remote_task_repo):
+    handle = ops.add(
+        "Pre-filed task awaiting its commit",
+        project="task.unit",
+        priority="medium",
+        acceptance=["orphan is folded into this task"],
+    )
+    orphan = _make_orphan_commit(remote_task_repo)
+
+    output = ops.adopt(handle)
+    row = identity.resolve(handle)
+
+    assert f"adopted 1 orphan commit into {handle}" in output
+    assert row["claim_by"] == ACTOR_A
+    assert bool(row["start"])
+    assert _git(remote_task_repo, "rev-parse", "HEAD") == orphan
+
+
+def test_task_adopt_refuses_when_no_orphan_commit(remote_task_repo):
+    with pytest.raises(SpiceError, match="nothing to adopt"):
+        ops.adopt(project="task.unit")
+
+
+def test_task_adopt_rejects_handle_with_new_task_fields(remote_task_repo):
+    handle = ops.add(
+        "Existing task", project="task.unit", priority="medium", acceptance=["x"]
+    )
+    _make_orphan_commit(remote_task_repo)
+    with pytest.raises(SpiceError, match="either an existing <handle> or new-task"):
+        ops.adopt(handle, project="task.unit")
+
+
 def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatch):
     handle = ops.add(
         "Exercise task phase flow",

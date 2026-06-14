@@ -487,6 +487,84 @@ def unclaim(handle: str) -> str:
     return identity.render_handle(row)
 
 
+# ---- adopt --------------------------------------------------------------
+
+
+def _adopt_default_title() -> str:
+    """A task title derived from the most recent orphan commit subject."""
+    subject = tw._git("log", "-1", "--format=%s").strip()
+    if not subject:
+        return "Adopt orphan commit"
+    return subject[:TASK_TITLE_LIMIT].strip()
+
+
+def adopt(
+    handle: str | None = None,
+    *,
+    title: str | None = None,
+    project: str | None = None,
+    description: str | None = None,
+    priority: str = config.DEFAULT_PRIORITY,
+) -> str:
+    """Fold existing orphan commit(s) into a task and capture them normally.
+
+    A commit made outside a claimed task's window (after `task done`, or before
+    any claim) is an orphan: `task next` refuses to start new work while it
+    sits ahead of the baseline. `adopt` claims a task — newly minted, or the
+    given handle — over those commits *without* the baseline fast-forward a
+    normal claim performs, so the orphan work is preserved rather than rejected
+    and the agent can complete it through the usual `task done`/`review` flow.
+    """
+    tw.require_clean_worktree("task adopt")
+    ahead = gitsync.commits_ahead_of_baseline()
+    if ahead == 0:
+        raise SpiceError(
+            "nothing to adopt: no local commits ahead of the baseline; "
+            "task adopt folds an existing orphan commit into a task"
+        )
+    actor = tw.current_actor()
+    _require_single_active_slot(actor, action="task adopt")
+    if handle is not None:
+        if title or project or description:
+            raise SpiceError(
+                "task adopt takes either an existing <handle> or new-task fields "
+                "(--title/--project/--description), not both"
+            )
+        row = identity.resolve(handle)
+        _require_pending(row, "adopt")
+        _require_manual_claim_allowed(row, actor)
+        owner = str(row.get("claim_by") or "")
+        if owner and owner != actor:
+            raise SpiceError(
+                f"task already claimed by {owner}; unclaim it before adopting"
+            )
+    else:
+        created = _add_one(
+            title=(title or "").strip() or _adopt_default_title(),
+            description=description,
+            project=project,
+            priority=priority,
+            flow=None,
+            tags=[],
+            after=[],
+            acceptance=[],
+            wait=None,
+            # Claim below without prepare_for_claim; the orphan commits must not
+            # be fast-forwarded away before the claim records them.
+            claim=False,
+        )
+        row = identity.resolve(created)
+    handle_text = identity.render_handle(row)
+    # Deliberately skip gitsync.prepare_for_claim: its baseline fast-forward
+    # would discard the very orphan commits adopt exists to capture.
+    do_claim(identity.uuid_of(row), actor, guard_unclaimed=False)
+    noun = "commit" if ahead == 1 else "commits"
+    return (
+        f"adopted {ahead} orphan {noun} into {handle_text}\n"
+        f'next: spice task done {handle_text} --validation "..."'
+    )
+
+
 # ---- done / advance -----------------------------------------------------
 
 
