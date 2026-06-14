@@ -1152,6 +1152,48 @@ def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch)
     assert not thread.is_alive()
 
 
+def test_side_channel_streams_to_each_connection_without_cross_suppression(
+    tmp_path, monkeypatch
+):
+    # Two overlapping connections share the same 15s window; with per-connection
+    # injectors each still gets the full readout (a shared injector would
+    # suppress the second). Short commands must never be cross-suppressed.
+    monkeypatch.chdir(tmp_path)
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000004Z.txt",
+        compose_inbox_text(body="multi connection steering", priority=None, stop=False),
+    )
+    stderr_a = io.StringIO()
+    stderr_b = io.StringIO()
+
+    with sidechannel.AgentSideChannelServer(tmp_path):
+        threads = [
+            Thread(
+                target=wrap.watch_agent_side_channel,
+                kwargs={
+                    "repo_root": tmp_path,
+                    "parent_pid": os.getpid(),
+                    "stderr": buf,
+                },
+            )
+            for buf in (stderr_a, stderr_b)
+        ]
+        for thread in threads:
+            thread.start()
+        out_a = _eventually(
+            lambda: stderr_a.getvalue(), contains="multi connection steering"
+        )
+        out_b = _eventually(
+            lambda: stderr_b.getvalue(), contains="multi connection steering"
+        )
+
+    for thread in threads:
+        thread.join(timeout=1.0)
+    assert "multi connection steering" in out_a
+    assert "multi connection steering" in out_b
+
+
 def test_run_agent_command_streams_later_side_channel_while_child_runs(
     tmp_path, monkeypatch
 ):

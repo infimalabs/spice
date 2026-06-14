@@ -47,18 +47,8 @@ class AgentSideChannelServer:
         self._stopping = Event()
         self._stream_wakeup_lock = Lock()
         self._stream_wakeup_sockets: set[socket.socket] = set()
+        # Serializes inject writes across concurrent stream connections.
         self._payload_lock = Lock()
-        self._inbox_injector = AgentInboxInjector(
-            self.repo_root,
-            stderr=io.StringIO(),
-            repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
-        )
-        self._context_injector = AgentContextMeterInjector(
-            self.repo_root,
-            stderr=io.StringIO(),
-            repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
-            meter_factory=agent_context_meter,
-        )
 
     def __enter__(self) -> AgentSideChannelServer:
         self.start()
@@ -146,9 +136,29 @@ class AgentSideChannelServer:
             return
         self._register_stream_wakeup(wake_writer)
         writer = _SocketTextWriter(connection)
+        # Per-connection injectors: each command's stream tracks its own
+        # repeat-suppression, so a quick command is never suppressed by a prior
+        # command's display while a long command still throttles its own repeats.
+        inbox_injector = AgentInboxInjector(
+            self.repo_root,
+            stderr=writer,
+            repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
+        )
+        context_injector = AgentContextMeterInjector(
+            self.repo_root,
+            stderr=writer,
+            repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
+            meter_factory=agent_context_meter,
+        )
+
+        def emit() -> None:
+            with self._payload_lock:
+                inbox_injector.inject(force=False)
+                context_injector.inject(force=False)
+
         try:
             try:
-                self._inject_payload(writer, force=False)
+                emit()
             except OSError:
                 return
             while not self._stopping.is_set():
@@ -161,7 +171,7 @@ class AgentSideChannelServer:
                 if wake_reader in readable:
                     _drain_wakeup(wake_reader)
                     try:
-                        self._inject_payload(writer, force=False)
+                        emit()
                     except OSError:
                         return
         finally:
@@ -185,13 +195,6 @@ class AgentSideChannelServer:
         for wake_writer in wake_writers:
             with contextlib.suppress(OSError):
                 wake_writer.sendall(b"\0")
-
-    def _inject_payload(self, writer: _SocketTextWriter, *, force: bool) -> None:
-        with self._payload_lock:
-            self._inbox_injector.stderr = writer
-            self._context_injector.stderr = writer
-            self._inbox_injector.inject(force=force)
-            self._context_injector.inject(force=force)
 
     def _write_socket_marker(self) -> None:
         temp_path = self.socket_marker_path.with_name(
