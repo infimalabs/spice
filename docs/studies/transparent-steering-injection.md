@@ -37,9 +37,11 @@ rather than falling back to an unwrapped command path.
 ## Wrapper Groups
 
 Repos may define wrapper groups under `[tool.spice.wrappers.<group>]` and let
-agents select groups with `[tool.spice.agent] wrappers = [...]`. When wrapper
-groups are defined and the agent does not set `wrappers`, the conventional
-`common` group is selected. An explicit empty list disables wrapper generation.
+agents select groups with `[tool.spice.agent] wrappers = [...]`. When the agent
+does not set `wrappers`, the built-in `common` group is selected. The built-in
+`common` group maps `rtk` to `run`, `proxy`, `grep`, `find`, and `git`; repos
+can override it by defining `[tool.spice.wrappers.common]`. An explicit empty
+list disables wrapper generation.
 
 Example:
 

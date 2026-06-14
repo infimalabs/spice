@@ -336,16 +336,25 @@ def test_shell_hook_renderer_adds_ordered_agent_wrapper_functions(tmp_path):
 
     rendered = shellhook.render_shell_steering_hook_for_surface("zshenv", env=env)
 
+    assert shellhook.render_agent_wrapper_lines(
+        tmp_path
+    ) == _expected_rtk_wrapper_lines(["grep", "find", "git"])
     assert '\ngrep() {\n  rtk grep "$@"\n}\n' in rendered
     assert '\nfind() {\n  rtk find "$@"\n}\n' in rendered
     assert '\ngit() {\n  rtk git "$@"\n}\n' in rendered
 
 
-def test_shell_hook_renderer_uses_common_agent_wrapper_default(tmp_path):
+def test_shell_hook_renderer_uses_builtin_common_agent_wrapper_default(tmp_path):
+    assert shellhook.render_agent_wrapper_lines(
+        tmp_path
+    ) == _expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"])
+
+
+def test_shell_hook_renderer_explicit_common_group_inherits_builtin_default(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
-        order=None,
-        groups={"common": {"rtk": ["grep"]}},
+        order=["common"],
+        groups={},
     )
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     env = {
@@ -360,28 +369,24 @@ def test_shell_hook_renderer_uses_common_agent_wrapper_default(tmp_path):
 
     rendered = shellhook.render_shell_steering_hook_for_surface("zshenv", env=env)
 
+    assert shellhook.render_agent_wrapper_lines(
+        tmp_path
+    ) == _expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"])
+    assert '\nrun() {\n  rtk run "$@"\n}\n' in rendered
+    assert '\nproxy() {\n  rtk proxy "$@"\n}\n' in rendered
     assert '\ngrep() {\n  rtk grep "$@"\n}\n' in rendered
 
 
-def test_shell_hook_renderer_fails_loudly_for_missing_common_wrapper_default(tmp_path):
+def test_shell_hook_renderer_project_common_group_overrides_builtin_default(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
         order=None,
-        groups={"custom": {"rtk": ["grep"]}},
+        groups={"common": {"rtk": ["grep"]}},
     )
-    hook_dir = shellhook.packaged_shell_steering_hook_dir()
-    env = {
-        shellhook.ZDOTDIR_ENV: str(hook_dir),
-        shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
-        **shellhook.shell_steering_runtime_environment(
-            base_env={},
-            python_command=["agent-python"],
-            repo_root=tmp_path,
-        ),
-    }
 
-    with pytest.raises(SpiceError, match="tool.spice.wrappers.common"):
-        shellhook.render_shell_steering_hook_for_surface("zshenv", env=env)
+    assert shellhook.render_agent_wrapper_lines(
+        tmp_path
+    ) == _expected_rtk_wrapper_lines(["grep"])
 
 
 def test_shell_hook_renderer_honors_empty_agent_wrapper_list(tmp_path):
@@ -716,6 +721,13 @@ def _write_agent_wrapper_config(
                 + "]"
             )
     (repo / "pyproject.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _expected_rtk_wrapper_lines(selectors: list[str]) -> list[str]:
+    lines: list[str] = []
+    for selector in selectors:
+        lines.extend(["", f"{selector}() {{", f'  rtk {selector} "$@"', "}"])
+    return lines
 
 
 def _fake_spice_python(tmp_path: Path, *, run_agent_commands: bool = False) -> Path:
