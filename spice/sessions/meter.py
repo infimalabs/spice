@@ -15,9 +15,8 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterator
 
+from spice.agent.driver import DRIVER
 from spice.sessions.util import (
-    int_or_none,
-    int_or_zero,
     normalize_timestamp,
     safe_percent,
 )
@@ -146,33 +145,18 @@ def _iter_jsonl_lines_reverse(path: Path) -> Iterator[str]:
 def active_context_snapshot_from_object(
     path: Path, obj: dict[str, Any]
 ) -> ActiveContextSnapshot | None:
-    payload = obj.get("payload") or {}
-    if payload.get("type") != "token_count":
-        return None
-    info = payload.get("info") or {}
-    last_usage = info.get("last_token_usage") or {}
-    total_tokens = int_or_none(last_usage.get("total_tokens"))
-    if total_tokens is None:
+    fields = DRIVER.context_snapshot_fields(obj)
+    if fields is None:
         return None
     ts = normalize_timestamp(obj.get("timestamp"))
     if not isinstance(ts, str):
         return None
-    total_usage = info.get("total_token_usage") or {}
-    return ActiveContextSnapshot(
-        source_file=str(path),
-        ts=ts,
-        input_tokens=int_or_zero(last_usage.get("input_tokens")),
-        cached_input_tokens=int_or_zero(last_usage.get("cached_input_tokens")),
-        output_tokens=int_or_zero(last_usage.get("output_tokens")),
-        reasoning_output_tokens=int_or_zero(last_usage.get("reasoning_output_tokens")),
-        total_tokens=total_tokens,
-        model_context_window=int_or_none(info.get("model_context_window")),
-        cumulative_total_tokens=int_or_zero(total_usage.get("total_tokens")),
-    )
+    return ActiveContextSnapshot(source_file=str(path), ts=ts, **fields)
 
 
 def compaction_ts_from_object(obj: dict[str, Any]) -> str | None:
-    if obj.get("type") != "compacted":
+    event = DRIVER.normalize_transcript_line(obj)
+    if event is None or event.get("type") != "compacted":
         return None
     ts = normalize_timestamp(obj.get("timestamp"))
     return ts if isinstance(ts, str) else None

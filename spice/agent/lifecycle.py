@@ -543,7 +543,7 @@ def agent_ensure_lock(repo_root: Path) -> Iterator[None]:
 
 
 def skill_invocation_prompt(skill_path: Path) -> str:
-    return f"[$spice]({skill_path})"
+    return DRIVER.skill_invocation_prompt(skill_path)
 
 
 def available_skill_path(repo_root: Path, *, required: bool) -> Path | None:

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
+from spice.agent.driver import DRIVER
 from spice.sessions.util import first_text, int_or_zero, normalize_timestamp
 
 COMMIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
@@ -88,8 +89,11 @@ def iter_events(path: Path) -> Iterator[dict[str, Any]]:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if isinstance(obj, dict):
-                yield obj
+            if not isinstance(obj, dict):
+                continue
+            event = DRIVER.normalize_transcript_line(obj)
+            if event is not None:
+                yield event
 
 
 def is_scaffolding_text(text: str) -> bool:

@@ -399,9 +399,12 @@ def _line_has_tool_output_image(transcript_path: Path, offset: int) -> bool:
     except OSError:
         return False
     loaded = _load_json_line(line)
-    if loaded is None or loaded.get("type") != "response_item":
+    if loaded is None:
         return False
-    payload = loaded.get("payload")
+    event = DRIVER.normalize_transcript_line(loaded)
+    if event is None or event.get("type") != "response_item":
+        return False
+    payload = event.get("payload")
     if not isinstance(payload, dict):
         return False
     markdown = tool_output_image_markdown(payload, worktree_id=None, source_offset=None)
@@ -457,15 +460,18 @@ def _build_message(
     loaded = _load_json_line(line)
     if loaded is None:
         return None
-    timestamp = str(loaded.get("timestamp") or "")
+    event = DRIVER.normalize_transcript_line(loaded)
+    if event is None:
+        return None
+    timestamp = str(event.get("timestamp") or "")
     key = f"{timestamp}#{offset}" if timestamp else str(offset)
-    if loaded.get("type") == "compacted":
+    if event.get("type") == "compacted":
         return _simple_message(
             key, offset, timestamp, kind="compaction", text="Context compacted"
         )
-    if loaded.get("type") != "response_item":
+    if event.get("type") != "response_item":
         return None
-    payload = loaded.get("payload") or {}
+    payload = event.get("payload") or {}
     text = extract_assistant_text(line)
     source_kind = "assistant_text"
     if text is None:

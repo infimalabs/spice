@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from spice.agent.driver import DRIVER
 from spice.agent.identity import canonical_thread_id
 from spice.config import say_command_args
 from spice.mail.acks import extract_ack_segments_from_text
@@ -245,8 +246,11 @@ def extract_assistant_text(line: str) -> str | None:
     obj = _safe_loads(line)
     if obj is None:
         return None
-    payload = obj.get("payload") or {}
-    if obj.get("type") != "response_item":
+    event = DRIVER.normalize_transcript_line(obj)
+    if event is None:
+        return None
+    payload = event.get("payload") or {}
+    if event.get("type") != "response_item":
         return None
     if payload.get("type") != "message" or payload.get("role") != "assistant":
         return None
