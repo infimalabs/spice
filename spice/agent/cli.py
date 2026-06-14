@@ -34,6 +34,13 @@ def configure_agent_parser(subparsers: Any) -> None:
     run.add_argument("args", nargs=argparse.REMAINDER)
     run.set_defaults(func=handle_agent)
 
+    steer = actions.add_parser(
+        "steer",
+        help="Emit side-channel steering for shell startup hooks.",
+    )
+    steer.add_argument("--repo-root", default="")
+    steer.set_defaults(func=handle_agent)
+
     ensure = actions.add_parser("ensure", help="Start or resume the worktree's agent.")
     ensure.add_argument("--dry-run", action="store_true")
     ensure.add_argument("--force-new", action="store_true")
@@ -66,6 +73,17 @@ def handle_agent(args: argparse.Namespace) -> int:
     action = args.agent_action
     if action == "supervise":
         return lifecycle.run_agent_supervisor(args)
+    if action == "steer":
+        from spice.agent.wrap import emit_agent_side_channel
+
+        raw_repo_root = str(getattr(args, "repo_root", "") or "")
+        repo_root = (
+            Path(raw_repo_root).expanduser().resolve()
+            if raw_repo_root
+            else require_repo_root()
+        )
+        emit_agent_side_channel(repo_root)
+        return 0
     repo_root = require_repo_root()
     if action == "status":
         print(render_agent_status(lifecycle.agent_status(repo_root)))

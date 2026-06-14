@@ -4,15 +4,19 @@ import argparse
 import io
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from spice.agent import cli as agent_cli
 from spice.agent import driver as agent_driver
-from spice.agent import lifecycle, sidechannel, wrap
+from spice.agent import lifecycle, shellhook, sidechannel, wrap
 from spice.agent.driver import (
+    CLAUDE_DRIVER,
     DRIVER,
     PLAYWRIGHT_MCP_ARGS,
     PLAYWRIGHT_MCP_COMMAND,
@@ -31,6 +35,7 @@ from spice.sessions.meter import ActiveContextSnapshot, ContextMeter
 DIRECT_AGENT_PID = 2222
 SUPERVISOR_PID = 3333
 SUPERVISED_AGENT_PID = 4444
+SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 
 
 def test_codex_driver_command_pins_fast_service_tier_and_playwright_mcp(
@@ -502,6 +507,164 @@ def test_agent_environment_inherits_worktree_spice_pythonpath(tmp_path, monkeypa
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path.resolve())
 
 
+def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
+
+    env = lifecycle.agent_environment(tmp_path)
+
+    hook_dir = tmp_path / ".spice" / "agents" / "codex" / "shell-hook"
+    assert env[shellhook.ZDOTDIR_ENV] == str(hook_dir)
+    assert env[shellhook.BASH_ENV_ENV] == str(hook_dir / shellhook.BASH_HOOK_NAME)
+    zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
+    assert "spice agent steer --repo-root" in zshenv
+    assert (
+        str(tmp_path / ".spice" / "agents" / "codex" / "side-channel" / "socket")
+        in zshenv
+    )
+
+
+def test_configured_agent_environment_installs_driver_shell_steering_hooks(
+    tmp_path, monkeypatch
+):
+    from spice.config import update_section
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    update_section(tmp_path, "agent", {"driver": "claude"})
+    real_zdotdir = tmp_path / "real-zdotdir"
+    real_zdotdir.mkdir()
+    real_bash_env = tmp_path / "real-bash-env"
+    real_bash_env.write_text("# real bash env\n", encoding="utf-8")
+    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
+    monkeypatch.setenv(shellhook.ZDOTDIR_ENV, str(real_zdotdir))
+    monkeypatch.setenv(shellhook.BASH_ENV_ENV, str(real_bash_env))
+
+    env = lifecycle.agent_environment(tmp_path)
+
+    hook_dir = tmp_path / ".spice" / "agents" / "claude" / "shell-hook"
+    assert env[shellhook.ZDOTDIR_ENV] == str(hook_dir)
+    assert env[shellhook.BASH_ENV_ENV] == str(hook_dir / shellhook.BASH_HOOK_NAME)
+    zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
+    bashenv = (hook_dir / shellhook.BASH_HOOK_NAME).read_text(encoding="utf-8")
+    assert "spice agent steer --repo-root" in zshenv
+    assert (
+        str(tmp_path / ".spice" / "agents" / "claude" / "side-channel" / "socket")
+        in zshenv
+    )
+    assert f"export {shellhook.SPICE_STEER_EMITTED_ENV}=1" in zshenv
+    assert f"export {shellhook.ZDOTDIR_ENV}={real_zdotdir}" in zshenv
+    assert f". {real_zdotdir / '.zshenv'}" in zshenv
+    assert f"export {shellhook.BASH_ENV_ENV}={real_bash_env}" in bashenv
+    assert f". {real_bash_env}" in bashenv
+
+
+def test_zshenv_hook_emits_once_then_restores_for_nested_shells(tmp_path):
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    home = tmp_path / "home"
+    home.mkdir()
+    trace = tmp_path / "trace.log"
+    fake_python = _fake_steer_python(tmp_path)
+    (home / ".zshenv").write_text(
+        (
+            "print -r -- "
+            f'"real-zshenv:${{{shellhook.ZDOTDIR_ENV}-unset}}:'
+            f'${{{shellhook.SPICE_STEER_EMITTED_ENV}:-}}" '
+            f'>> "${{{SHELL_TRACE_ENV}}}"\n'
+        ),
+        encoding="utf-8",
+    )
+    marker = shellhook.shell_steering_marker_path(
+        tmp_path, driver_state_dirname="claude"
+    )
+    marker.parent.mkdir(parents=True)
+    marker.write_text("/tmp/spice-side.sock\n", encoding="utf-8")
+    hook_dir = shellhook.write_shell_steering_files(
+        tmp_path,
+        driver_state_dirname="claude",
+        base_env={"HOME": str(home)},
+        python_command=[str(fake_python)],
+    )
+    command = (
+        "printf 'after:%s:%s:%s\\n' "
+        f'"${{{shellhook.ZDOTDIR_ENV}-unset}}" '
+        f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
+        f'"${{{shellhook.SPICE_STEER_EMITTED_ENV}:-}}" '
+        f'>> "${{{SHELL_TRACE_ENV}}}"; '
+        f"{shutil.which('zsh') or zsh} -c 'true'"
+    )
+    env = {
+        "HOME": str(home),
+        "PATH": os.environ.get("PATH", ""),
+        shellhook.ZDOTDIR_ENV: str(hook_dir),
+        SHELL_TRACE_ENV: str(trace),
+    }
+
+    subprocess.run([zsh, "-c", command], check=True, env=env)
+
+    lines = trace.read_text(encoding="utf-8").splitlines()
+    assert sum(line.startswith("fake:") for line in lines) == 1
+    assert "after:unset:unset:1" in lines
+    assert lines.count("real-zshenv:unset:1") == 2
+
+
+def test_bash_env_hook_emits_once_then_restores_for_nested_shells(tmp_path):
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is not installed")
+    home = tmp_path / "home"
+    home.mkdir()
+    trace = tmp_path / "trace.log"
+    fake_python = _fake_steer_python(tmp_path)
+    real_bash_env = tmp_path / "real-bash-env"
+    real_bash_env.write_text(
+        (
+            "printf 'real-bash:%s:%s\\n' "
+            f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
+            f'"${{{shellhook.SPICE_STEER_EMITTED_ENV}:-}}" '
+            f'>> "${{{SHELL_TRACE_ENV}}}"\n'
+        ),
+        encoding="utf-8",
+    )
+    marker = shellhook.shell_steering_marker_path(
+        tmp_path, driver_state_dirname="claude"
+    )
+    marker.parent.mkdir(parents=True)
+    marker.write_text("/tmp/spice-side.sock\n", encoding="utf-8")
+    hook_dir = shellhook.write_shell_steering_files(
+        tmp_path,
+        driver_state_dirname="claude",
+        base_env={"HOME": str(home), shellhook.BASH_ENV_ENV: str(real_bash_env)},
+        python_command=[str(fake_python)],
+    )
+    command = (
+        "printf 'after:%s:%s\\n' "
+        f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
+        f'"${{{shellhook.SPICE_STEER_EMITTED_ENV}:-}}" '
+        f'>> "${{{SHELL_TRACE_ENV}}}"; '
+        f"{bash} -c 'true'"
+    )
+    env = {
+        "HOME": str(home),
+        "PATH": os.environ.get("PATH", ""),
+        shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
+        SHELL_TRACE_ENV: str(trace),
+    }
+
+    subprocess.run([bash, "-c", command], check=True, env=env)
+
+    lines = trace.read_text(encoding="utf-8").splitlines()
+    assert sum(line.startswith("fake:") for line in lines) == 1
+    assert f"after:{real_bash_env}:1" in lines
+    assert lines.count(f"real-bash:{real_bash_env}:1") == 2
+
+
 def test_agent_binding_error_reports_stale_launch_cwd_and_ignores_prompt_skill(
     tmp_path,
 ):
@@ -601,6 +764,57 @@ def test_wrapper_missing_proxy_plain_exec_still_injects_steering(tmp_path, monke
         ("popen", ["find", ".", "-maxdepth", "0", "-print"], None),
         ("wait", None, None),
     ]
+
+
+def test_wrapper_skips_side_channel_after_shell_hook_emitted(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        shellhook.SPICE_STEER_EMITTED_ENV, shellhook.SPICE_STEER_EMITTED_VALUE
+    )
+    monkeypatch.setenv(wrap.PROXY_BIN_ENV, "missing-rtk")
+    monkeypatch.setattr(wrap.shutil, "which", lambda _proxy: None)
+    events: list[tuple[str, object, object | None]] = []
+    stderr = io.StringIO()
+
+    class FakeProcess:
+        def wait(self) -> int:
+            events.append(("wait", None, None))
+            return 0
+
+    def fake_popen(command: list[str]) -> FakeProcess:
+        events.append(("popen", command, None))
+        return FakeProcess()
+
+    def fake_side_channel(repo_root, *, stderr):
+        events.append(("inject", repo_root, stderr))
+
+    monkeypatch.setattr(wrap, "inject_agent_side_channel", fake_side_channel)
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        ["true"],
+        popen_factory=fake_popen,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0
+    assert events == [
+        ("popen", ["true"], None),
+        ("wait", None, None),
+    ]
+
+
+def test_agent_steer_cli_emits_side_channel_for_explicit_repo(tmp_path, monkeypatch):
+    events: list[Path] = []
+    monkeypatch.setattr(
+        wrap, "emit_agent_side_channel", lambda repo_root: events.append(repo_root)
+    )
+
+    exit_code = agent_cli.handle_agent(
+        argparse.Namespace(agent_action="steer", repo_root=str(tmp_path))
+    )
+
+    assert exit_code == 0
+    assert events == [tmp_path.resolve()]
 
 
 def test_wrapper_resolves_proxy_steps_aside_for_implicit_find_and_keeps_explicit_passthrough(
@@ -814,6 +1028,24 @@ def _write_spice_product_shape(repo: Path) -> None:
         path = repo / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# test spice product shape\n", encoding="utf-8")
+
+
+def _fake_steer_python(tmp_path: Path) -> Path:
+    path = tmp_path / "fake-python"
+    path.write_text(
+        (
+            "#!/bin/sh\n"
+            "printf 'fake:%s:%s:%s:%s\\n' "
+            f'"${{{shellhook.SPICE_STEER_EMITTED_ENV}:-}}" '
+            f'"${{{shellhook.ZDOTDIR_ENV}-unset}}" '
+            f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
+            '"$*" '
+            f'>> "${{{SHELL_TRACE_ENV}}}"\n'
+        ),
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
 
 
 def _status(*, thread_id: str = "", running: bool = False):
