@@ -41,7 +41,6 @@ from spice.agent.gitshadow import (
     scrub_agent_git_shadow_environment,
 )
 from spice.agent.identity import ambient_thread_id
-from spice.agent.shellhook import SHELL_HOOK_REEXEC_STAGE_ENV
 from spice.mail.inbox import inbox_dir, inbox_item_key
 from spice.paths import (
     STATE_DIRNAME,
@@ -103,12 +102,17 @@ def run_agent_command(
     repo_root: Path | None,
     raw_args: Sequence[str],
     *,
+    preserve_shell_hook_env: bool = False,
     popen_factory: ProcessFactory = subprocess.Popen,
     stderr: TextIO = sys.stderr,
 ) -> int:
     emit_initial_side_channel_payload(repo_root, stderr=stderr)
     command = build_agent_run_command(raw_args, repo_root=repo_root)
-    environment = build_agent_run_environment(raw_args, repo_root=repo_root)
+    environment = build_agent_run_environment(
+        raw_args,
+        repo_root=repo_root,
+        preserve_shell_hook_env=preserve_shell_hook_env,
+    )
     if environment is None:
         process = popen_factory(command)
     else:
@@ -152,7 +156,10 @@ def build_agent_run_command(
 
 
 def build_agent_run_environment(
-    raw_args: Sequence[str], *, repo_root: Path | None = None
+    raw_args: Sequence[str],
+    *,
+    repo_root: Path | None = None,
+    preserve_shell_hook_env: bool = False,
 ) -> dict[str, str] | None:
     args = normalize_agent_run_args(raw_args)
     worktree_env = worktree_spice_environment(repo_root)
@@ -167,22 +174,26 @@ def build_agent_run_environment(
         environment = worktree_env
     else:
         environment = None
-    return scrub_agent_run_recursion_environment(environment)
+    return scrub_agent_run_recursion_environment(
+        environment,
+        preserve_shell_hook_env=preserve_shell_hook_env,
+    )
 
 
 def scrub_agent_run_recursion_environment(
     environment: dict[str, str] | None,
+    *,
+    preserve_shell_hook_env: bool = False,
 ) -> dict[str, str] | None:
-    preserve_shell_hook = os.environ.get(SHELL_HOOK_REEXEC_STAGE_ENV) == "1"
     if environment is None:
-        if preserve_shell_hook or not any(
+        if preserve_shell_hook_env or not any(
             name in os.environ for name in SHELL_REEXEC_ENV_NAMES
         ):
             return None
         environment = dict(os.environ)
     else:
         environment = dict(environment)
-    if not preserve_shell_hook:
+    if not preserve_shell_hook_env:
         for name in SHELL_REEXEC_ENV_NAMES:
             environment.pop(name, None)
     return environment

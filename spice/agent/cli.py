@@ -31,6 +31,11 @@ def configure_agent_parser(subparsers: Any) -> None:
         "run",
         help="Run an agent shell command with steering injection.",
     )
+    run.add_argument(
+        "--preserve-shell-hook-env",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     run.add_argument("args", nargs=argparse.REMAINDER)
     run.set_defaults(func=handle_agent)
 
@@ -93,7 +98,13 @@ def handle_agent(args: argparse.Namespace) -> int:
     if action == "run":
         from spice.agent.wrap import run_agent_command
 
-        return run_agent_command(repo_root, getattr(args, "args", []))
+        return run_agent_command(
+            repo_root,
+            getattr(args, "args", []),
+            preserve_shell_hook_env=bool(
+                getattr(args, "preserve_shell_hook_env", False)
+            ),
+        )
     if action == "ensure":
         result = lifecycle.ensure_agent(
             repo_root,
