@@ -51,6 +51,11 @@ def agent_table(repo_root: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def agent_wrapper_definitions_table(repo_root: Path) -> dict[str, Any]:
+    value = read_tool_table(repo_root).get("wrappers")
+    return value if isinstance(value, dict) else {}
+
+
 def commands_table(repo_root: Path) -> dict[str, Any]:
     value = read_tool_table(repo_root).get("commands")
     return value if isinstance(value, dict) else {}
