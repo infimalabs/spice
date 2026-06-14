@@ -9,9 +9,11 @@ phrase the neutral skill-invocation launch prompt.
 
 Two drivers ship: OpenAI Codex (the default) and Anthropic Claude Code.
 Current-process commands resolve `DRIVER` once from their own environment and
-cwd; lane and transcript consumers must resolve with `driver_for(repo_root)` or
-`driver_for_transcript(path)`. Adding a third driver is writing one more
-`AgentDriver` value, not adding broad mode branches to consumers.
+cwd; lane consumers must resolve with `driver_for(repo_root)`, which checks env,
+configured driver, then the unbound-worktree Codex default. Transcript
+consumers resolve with `driver_for_transcript(path)`. Adding a third driver is
+writing one more `AgentDriver` value, not adding broad mode branches to
+consumers.
 """
 
 from __future__ import annotations
@@ -679,22 +681,24 @@ def select_driver(name: str = "") -> AgentDriver:
     chosen = (name or os.environ.get(SPICE_AGENT_DRIVER_ENV, "")).strip().lower()
     if not chosen and not name:
         chosen = _configured_driver_name(None)
-    return _DRIVERS.get(chosen, CODEX_DRIVER)
+    return _driver_named(chosen, source="current process")
 
 
 def driver_for(repo_root: Path | None) -> AgentDriver:
     """The driver bound to a specific worktree.
 
-    Resolution: `SPICE_AGENT_DRIVER` (a deliberate global override, normally
-    unset), then *that worktree's* configured driver, then Codex. The server
-    discovers worktrees from the repo and calls this per target.repo_root, so
-    one repo can run a different driver in every worktree regardless of where —
-    or how — the server itself was launched.
+    Resolution: `SPICE_AGENT_DRIVER` (a deliberate command-level override),
+    then *that worktree's* configured driver, then Codex for an unbound
+    worktree. The server discovers worktrees from the repo and calls this per
+    target.repo_root, so one repo can run a different driver in every worktree
+    regardless of where — or how — the server itself was launched.
     """
     name = os.environ.get(SPICE_AGENT_DRIVER_ENV, "").strip().lower()
+    source = SPICE_AGENT_DRIVER_ENV
     if not name:
         name = _configured_driver_name(repo_root)
-    return _DRIVERS.get(name, CODEX_DRIVER)
+        source = f"{repo_root or Path.cwd()} agent config"
+    return _driver_named(name, source=source)
 
 
 def driver_for_transcript(path: Path) -> AgentDriver:
@@ -706,12 +710,21 @@ def driver_for_transcript(path: Path) -> AgentDriver:
 
 
 def _configured_driver_name(repo_root: Path | None) -> str:
-    try:
-        from spice.config import configured_agent_driver
+    from spice.config import configured_agent_driver
 
-        return (configured_agent_driver(repo_root) or "").strip().lower()
-    except Exception:
-        return ""
+    return (configured_agent_driver(repo_root) or "").strip().lower()
+
+
+def _driver_named(name: str, *, source: str) -> AgentDriver:
+    if not name:
+        return CODEX_DRIVER
+    try:
+        return _DRIVERS[name]
+    except KeyError as exc:
+        expected = ", ".join(sorted(_DRIVERS))
+        raise RuntimeError(
+            f"unknown agent driver {name!r} from {source}; expected one of: {expected}"
+        ) from exc
 
 
 DRIVER: AgentDriver = select_driver()
