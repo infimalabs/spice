@@ -8,8 +8,8 @@ watchdog scanner), how to read the session id from startup output, and how to
 phrase the neutral skill-invocation launch prompt.
 
 Two drivers ship: OpenAI Codex (the default) and Anthropic Claude Code.
-Process-local commands can use the legacy `DRIVER` fallback, while lane and
-transcript consumers resolve with `driver_for(repo_root)` or
+Current-process commands resolve `DRIVER` once from their own environment and
+cwd; lane and transcript consumers must resolve with `driver_for(repo_root)` or
 `driver_for_transcript(path)`. Adding a third driver is writing one more
 `AgentDriver` value, not adding broad mode branches to consumers.
 """
@@ -672,8 +672,8 @@ ALL_DRIVERS: tuple[AgentDriver, ...] = (CODEX_DRIVER, CLAUDE_DRIVER)
 def select_driver(name: str = "") -> AgentDriver:
     """Resolve a driver by explicit name, then env, then the cwd's config.
 
-    For the process-global fallback `DRIVER`. Per-worktree resolution (what the
-    server uses for each lane) is `driver_for(repo_root)` — the driver is a
+    This is the process-global `DRIVER` resolver. Per-worktree resolution (what
+    the server uses for each lane) is `driver_for(repo_root)` — the driver is a
     per-worktree setting, never the server process's own location.
     """
     chosen = (name or os.environ.get(SPICE_AGENT_DRIVER_ENV, "")).strip().lower()
