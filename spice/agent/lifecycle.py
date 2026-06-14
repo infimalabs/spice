@@ -29,9 +29,9 @@ from pathlib import Path
 from threading import Thread
 from typing import Any, Iterator, Sequence, cast
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import driver_for
 from spice.agent.gitshadow import agent_git_shadow_environment
-from spice.agent.identity import ambient_thread_id, canonical_thread_id
+from spice.agent.identity import ambient_thread, ambient_thread_id, canonical_thread_id
 from spice.agent.watchdog import spawn_supervised_agent
 from spice.agent.wrap import agent_state_dir
 from spice.config import (
@@ -176,8 +176,9 @@ def ensure_agent(
     resolved_root = repo_root.resolve()
     with agent_ensure_lock(resolved_root):
         status = agent_status(resolved_root)
+        driver = driver_for(resolved_root)
         prompt_skill_path = resolve_agent_prompt_skill_path(resolved_root)
-        prompt = skill_invocation_prompt(prompt_skill_path)
+        prompt = skill_invocation_prompt(resolved_root, prompt_skill_path)
         if status.running:
             return AgentEnsureResult(
                 action="already-running",
@@ -187,16 +188,16 @@ def ensure_agent(
                 log_path=status.log_path,
             )
         resume_thread_id = "" if force_new else status.thread_id
-        service_tier = DRIVER.default_service_tier if fast_mode else ""
+        service_tier = driver.default_service_tier if fast_mode else ""
         # Resolution order: explicit argument > worktree-local config >
         # tracked project config > the driver's shipped default.
-        model = model or configured_agent_model(resolved_root) or DRIVER.default_model
+        model = model or configured_agent_model(resolved_root) or driver.default_model
         reasoning_effort = (
             reasoning_effort
             or configured_agent_thinking(resolved_root)
-            or DRIVER.default_reasoning_effort
+            or driver.default_reasoning_effort
         )
-        command = DRIVER.build_exec_command(
+        command = driver.build_exec_command(
             repo_root=resolved_root,
             prompt=prompt,
             thread_id=resume_thread_id,
@@ -269,7 +270,7 @@ def start_agent(
     process = spawn_agent(command, cwd=repo_root, log_path=log_path)
     require_started_process(process, log_path)
     started_thread_id = started_agent_thread_id(
-        log_path, fallback_thread_id=resume_thread_id
+        log_path, repo_root=repo_root, fallback_thread_id=resume_thread_id
     )
     write_agent_state(
         repo_root,
@@ -412,7 +413,9 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
         )
         require_started_process(process, log_path)
         started_thread_id = started_agent_thread_id(
-            log_path, fallback_thread_id=str(args.resume_thread_id or "")
+            log_path,
+            repo_root=repo_root,
+            fallback_thread_id=str(args.resume_thread_id or ""),
         )
         state = build_agent_state(
             process=process,
@@ -511,12 +514,16 @@ def head_text(path: Path, limit: int) -> str:
         return ""
 
 
-def started_agent_thread_id(log_path: Path, *, fallback_thread_id: str) -> str:
+def started_agent_thread_id(
+    log_path: Path, *, repo_root: Path, fallback_thread_id: str
+) -> str:
     if fallback_thread_id:
         return canonical_thread_id(fallback_thread_id)
     deadline = time.monotonic() + STARTUP_SESSION_ID_TIMEOUT_SECONDS
     while True:
-        thread_id = parse_agent_session_id(head_text(log_path, STARTUP_LOG_HEAD_BYTES))
+        thread_id = parse_agent_session_id(
+            head_text(log_path, STARTUP_LOG_HEAD_BYTES), repo_root
+        )
         if thread_id:
             return thread_id
         if time.monotonic() >= deadline:
@@ -524,8 +531,9 @@ def started_agent_thread_id(log_path: Path, *, fallback_thread_id: str) -> str:
         time.sleep(STARTUP_SESSION_ID_POLL_SECONDS)
 
 
-def parse_agent_session_id(text: str) -> str:
-    match = cast(re.Pattern[str], DRIVER.session_id_pattern).search(text)
+def parse_agent_session_id(text: str, repo_root: Path) -> str:
+    pattern = cast(re.Pattern[str], driver_for(repo_root).session_id_pattern)
+    match = pattern.search(text)
     return canonical_thread_id(match.group(1)) if match else ""
 
 
@@ -542,8 +550,8 @@ def agent_ensure_lock(repo_root: Path) -> Iterator[None]:
         handle.close()
 
 
-def skill_invocation_prompt(skill_path: Path) -> str:
-    return DRIVER.skill_invocation_prompt(skill_path)
+def skill_invocation_prompt(repo_root: Path, skill_path: Path) -> str:
+    return driver_for(repo_root).skill_invocation_prompt(skill_path)
 
 
 def available_skill_path(repo_root: Path, *, required: bool) -> Path | None:
@@ -676,10 +684,12 @@ def agent_process_status(
 
 
 def agent_environment(repo_root: Path | None = None) -> dict[str, str]:
-    if DRIVER.thread_id_env in os.environ:
+    ambient = ambient_thread()
+    if ambient is not None:
+        _thread_id, driver = ambient
         raise SpiceError(
-            f"refusing to spawn an agent with ambient {DRIVER.thread_id_env} set; "
-            f"unset {DRIVER.thread_id_env} before starting spice serve or "
+            f"refusing to spawn an agent with ambient {driver.thread_id_env} set; "
+            f"unset {driver.thread_id_env} before starting spice serve or "
             "agent ensure"
         )
     env = worktree_spice_environment(repo_root)

@@ -11,8 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Sequence
 
-from spice.agent.driver import DRIVER
-from spice.agent.identity import canonical_thread_id
+from spice.agent.identity import ambient_thread_id
 from spice.errors import SpiceError
 from spice.mail.attachments import durable_inbox_attachment_references
 from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
@@ -80,7 +79,7 @@ def claim_meta(actor: str) -> list[str]:
     until = _iso(at_dt + timedelta(seconds=config.CLAIM_TTL_SECONDS))
     start = _iso(at_dt - timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
     end = _iso(at_dt + timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
-    thread = canonical_thread_id(os.environ.get(DRIVER.thread_id_env))
+    thread = ambient_thread_id()
     if not thread:
         thread = tw.canonical_actor(config.SENTINEL_ACTOR)
     turn = (

@@ -65,6 +65,46 @@ def test_rollout_image_decodes_from_line_offset(tmp_path):
     assert result == (PNG_BYTES, "image/png")
 
 
+def test_claude_image_decodes_from_transcript_owner(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    raw = {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": base64.b64encode(PNG_BYTES).decode("ascii"),
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    line = json.dumps(raw)
+    transcript = (
+        tmp_path
+        / "claude"
+        / "projects"
+        / "-private-tmp-spice-sup"
+        / "11111111-2222-3333-4444-555555555555.jsonl"
+    )
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text(f"{line}\n", encoding="utf-8")
+
+    assert rollout_image_from_offset(transcript, offset=0, item_index=0) == (
+        PNG_BYTES,
+        "image/png",
+    )
+
+
 def test_markdown_reference_percent_encodes_delimiters():
     assert (
         markdown_image_reference("shot", "a (1) <b>.png")

@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import driver_for
 from spice.paths import STATE_DIRNAME
 
 RENEWAL_WIND_DOWN_TEXT = (
@@ -35,7 +35,13 @@ RENEWAL_REHYDRATION_TEMPLATE = (
 
 
 def renewal_request_path(repo_root: Path) -> Path:
-    return repo_root / STATE_DIRNAME / "agents" / DRIVER.state_dirname / "renew.json"
+    return (
+        repo_root
+        / STATE_DIRNAME
+        / "agents"
+        / driver_for(repo_root).state_dirname
+        / "renew.json"
+    )
 
 
 def write_agent_renewal_request(

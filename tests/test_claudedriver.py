@@ -15,6 +15,7 @@ from spice.agent.driver import (
     CLAUDE_FALLBACK_CONTEXT_WINDOW,
     CODEX_DRIVER,
     SPICE_AGENT_DRIVER_ENV,
+    driver_for,
     select_driver,
 )
 
@@ -37,6 +38,22 @@ def test_select_driver_reads_worktree_config(tmp_path, monkeypatch):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     update_section(tmp_path, "agent", {"driver": "claude"})
     assert select_driver().name == "claude"
+
+
+def test_driver_for_reads_each_worktree_config(tmp_path, monkeypatch):
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    from spice.config import update_section
+
+    codex_repo = tmp_path / "codex-repo"
+    claude_repo = tmp_path / "claude-repo"
+    codex_repo.mkdir()
+    claude_repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=codex_repo, check=True)
+    subprocess.run(["git", "init", "-q"], cwd=claude_repo, check=True)
+    update_section(claude_repo, "agent", {"driver": "claude"})
+
+    assert driver_for(codex_repo).name == "codex"
+    assert driver_for(claude_repo).name == "claude"
 
 
 def test_claude_command_starts_headless_stream_json_with_effort(tmp_path):

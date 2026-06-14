@@ -348,6 +348,7 @@ def messages_payload_for_worktree(
             before=before,
             cursor=state.rollout_cursor(thread_id) if not before else None,
             worktree_id=target.id,
+            repo_root=target.repo_root,
         )
     pending = pending_inbox_count(target.repo_root)
     agent_ensure = ensure_agent_for_pending_inbox(

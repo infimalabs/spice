@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spice.agent.driver import DRIVER
-from spice.agent.identity import ambient_thread_id, canonical_thread_id
+from spice.agent.driver import ALL_DRIVERS, AgentDriver, driver_for
+from spice.agent.identity import ambient_thread, canonical_thread_id
 from spice.sessions.util import dedupe_paths
 
 THREAD_ID_LENGTH = 32
@@ -27,9 +27,10 @@ def resolve_files(raw_files: list[str]) -> list[Path]:
     if raw_files:
         files = [resolve_file_input(value) for value in raw_files]
     else:
-        current = ambient_thread_id()
-        if current:
-            files = [DRIVER.thread_transcript_path(current)]
+        ambient = ambient_thread()
+        if ambient is not None:
+            current, driver = ambient
+            files = [driver.thread_transcript_path(current)]
         else:
             files = sorted(Path.cwd().glob("*.jsonl"))
     missing = [str(path) for path in files if not path.exists()]
@@ -47,5 +48,22 @@ def resolve_file_input(raw_value: str) -> Path:
     if path_candidate.exists():
         return path_candidate.resolve()
     if looks_like_thread_id(raw_value):
-        return DRIVER.thread_transcript_path(canonical_thread_id(raw_value))
+        return resolve_thread_transcript(canonical_thread_id(raw_value))
     return path_candidate.resolve()
+
+
+def resolve_thread_transcript(thread_id: str, repo_root: Path | None = None) -> Path:
+    canonical = canonical_thread_id(thread_id)
+    preferred = driver_for(repo_root or Path.cwd())
+    errors: list[str] = []
+    for driver in _ordered_drivers(preferred):
+        try:
+            return driver.thread_transcript_path(canonical)
+        except (RuntimeError, SystemExit) as exc:
+            errors.append(str(exc))
+    detail = errors[0] if errors else "no configured drivers"
+    raise SystemExit(detail)
+
+
+def _ordered_drivers(preferred: AgentDriver) -> list[AgentDriver]:
+    return [preferred, *(driver for driver in ALL_DRIVERS if driver is not preferred)]

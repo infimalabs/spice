@@ -158,7 +158,7 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
     monkeypatch.setattr(
         lifecycle,
         "started_agent_thread_id",
-        lambda _log_path, *, fallback_thread_id: "started-thread",
+        lambda _log_path, *, repo_root, fallback_thread_id: "started-thread",
     )
     monkeypatch.setattr(
         lifecycle, "reap_process_when_done", lambda proc: reaped.append(proc.pid)
@@ -297,7 +297,7 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     monkeypatch.setattr(
         lifecycle,
         "started_agent_thread_id",
-        lambda _log_path, *, fallback_thread_id: "supervised-thread",
+        lambda _log_path, *, repo_root, fallback_thread_id: "supervised-thread",
     )
     monkeypatch.setattr(
         sidechannel,

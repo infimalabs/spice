@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import driver_for_transcript
 
 DATA_IMAGE_RE = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
 
@@ -84,7 +84,7 @@ def rollout_image_from_offset(
         return None
     if not isinstance(loaded, dict):
         return None
-    event = DRIVER.normalize_transcript_line(loaded)
+    event = driver_for_transcript(rollout_path).normalize_transcript_line(loaded)
     if event is None or event.get("type") != "response_item":
         return None
     payload = event.get("payload")

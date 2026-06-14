@@ -7,7 +7,7 @@ import time
 from http import HTTPStatus
 from typing import Any
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import driver_for
 from spice.agent.lifecycle import agent_binding_error, agent_status, ensure_agent
 from spice.mail.inbox import inbox_request_priority, pending_inbox_count
 from spice.serve.attachments import inbox_attachment_payloads
@@ -23,7 +23,7 @@ def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
     binding_error = agent_binding_error(target.repo_root, status)
     return {
         "ok": True,
-        "provider": DRIVER.name,
+        "provider": driver_for(target.repo_root).name,
         "workTreeId": target.id,
         "status": status.process_status,
         "pid": status.pid or 0,
@@ -64,7 +64,7 @@ def agent_ensure_response_payload(
 def agent_ensure_payload(result: Any) -> dict[str, Any]:
     return {
         "ok": True,
-        "provider": DRIVER.name,
+        "provider": driver_for(result.status.repo_root).name,
         "action": result.action,
         "status": result.status.process_status,
         "pid": result.status.pid or 0,

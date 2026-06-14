@@ -469,7 +469,9 @@ def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkey
     monkeypatch.setattr(
         payloads, "resolve_thread_id_for_target", lambda *_args: THREAD_A
     )
-    monkeypatch.setattr(app, "transcript_path_for_thread", lambda _thread: rollout)
+    monkeypatch.setattr(
+        app, "transcript_path_for_thread", lambda _thread, _repo_root: rollout
+    )
     state.record_http_request("GET", "/")
     state.record_http_request("GET", f"/api/work/trees/{target.id}/acks")
     state.record_http_request("GET", f"/api/work/trees/{target.id}/not-a-route")
@@ -543,7 +545,9 @@ def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(payloads, "resolve_thread_id_for_target", lambda *_: THREAD_A)
-    monkeypatch.setattr(app, "transcript_path_for_thread", lambda _thread_id: rollout)
+    monkeypatch.setattr(
+        app, "transcript_path_for_thread", lambda _thread_id, _repo_root: rollout
+    )
     handler = _ImageHandler(state)
 
     app._ServeHandler._send_message_image(
