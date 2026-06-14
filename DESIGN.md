@@ -42,13 +42,13 @@ thread handoff, and the organic evolution of the latest thinking** — and a
 record expensive for the human to produce won't be produced well under load. So
 the high-fidelity gesture is made the cheap one.
 
-Agent ← harness delivery rides the agent's own command executions: `spice.sh`
-wraps every shell command, routing through a token-optimizing proxy (`rtk`)
-and injecting into stderr (a) pending inbox steering, (b) context-pressure warnings
-derived from the agent's own transcript token counts, and (c) the
-supervisor's side-channel payload over a Unix socket. The terminal is a
-duplex steering surface; the agent cannot run a command without hearing the
-operator.
+Agent ← harness delivery rides the agent's own command executions: shell
+startup hooks reexec zsh/bash commands through `spice agent run`, selected
+commands are routed through token-optimizing `rtk` shell wrappers, and stderr
+receives (a) pending inbox steering, (b) context-pressure warnings derived from
+the agent's own transcript token counts, and (c) the supervisor's side-channel
+payload over a Unix socket. The terminal is a duplex steering surface; the
+agent cannot run a command without hearing the operator.
 
 The reverse voice channel is `SAY: …` lines in assistant messages — spoken
 aloud through TTS, surfaced as badges in the UI, AND echoed as prose.
@@ -123,7 +123,7 @@ routine is free to be as gnarly as performance demands. Beauty at the system
 level may contain ugliness at the instruction level, and the gate is drawn
 exactly at that boundary.
 
-Quality gates are the hook backend, not a ritual: `.githooks` shims call
+Quality gates are the hook backend, not a ritual: `.spice/hooks` shims call
 `dev pre-commit` (repo shape → staging → policy → formatters → assets →
 authored-tree → study guards) and `dev commit-msg`. The opinions, exactly:
 
@@ -188,15 +188,15 @@ The one idea above isn't arbitrary; four theses generate it.
 
 0. **Standalone product, not a repo organ.** spice is installed once
    (`uv tool install spice-harness`) and operates on any repo from outside. A target
-   repo contains only what spice
-   writes into it: runtime state under `.spice/`, hook shims that call
-   `spice dev pre-commit`, and an optional `spice.sh` shim. The worktree
-   skill ships as package data (per-repo override honored); the supervisor
-   respawns via `python -m spice`; every self-referencing command string is
-   `spice …`. When the target repo is the spice source checkout, the checkout
-   wins over any installed editable copy by being first on `PYTHONPATH`;
-   ordinary target repos continue to use the installed product. The spice repo
-   itself is just another target of its own constitution.
+   repo contains only what spice writes into it: runtime state under `.spice/`,
+   generated `.spice/hooks` shims, and the worktree skill under
+   `.agents/skills/spice`. The worktree skill ships as package data (per-repo
+   override honored); the supervisor respawns via `python -m spice`; every
+   self-referencing command string is `spice …`. When the target repo is the
+   spice source checkout, the checkout wins over any installed editable copy by
+   being first on `PYTHONPATH`; ordinary target repos continue to use the
+   installed product. The spice repo itself is just another target of its own
+   constitution.
 1. **The driver seam.** Agent-CLI specifics (binary/argv, thread-id
    environment, rollout location and grammar, stdout section markers,
    session-id parsing) live in one `AgentDriver` value in
@@ -251,7 +251,7 @@ The one idea above isn't arbitrary; four theses generate it.
 | forensics | `spice/sessions/` (briefing, sweep, summary, tokens, turns, compactions, user-log, commits) |
 | constitution | `spice/studies/`, `spice/hooks/`, `spice/policy.py` |
 | infra | `spice/{paths,config,configcli,locking,flexstate,procs,worktrees}.py` |
-| bootstrap | `.githooks` shims, `.agents/skills/spice`, `spice.sh`, AGENTS.md |
+| bootstrap | `.spice/hooks` shims, `.agents/skills/spice`, AGENTS.md |
 
 ## Behavioral invariants
 
