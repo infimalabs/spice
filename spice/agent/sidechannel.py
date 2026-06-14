@@ -16,7 +16,6 @@ import os
 import select
 import socket
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
 from threading import Event, Lock, Thread
 
@@ -38,11 +37,8 @@ class AgentSideChannelServer:
     def __init__(
         self,
         repo_root: Path,
-        *,
-        payload_factory: Callable[[Path], str] | None = None,
     ) -> None:
         self.repo_root = repo_root
-        self.payload_factory = payload_factory
         self.socket_marker_path = side_channel_marker_path(repo_root)
         socket_name = f"spice-agent-side-{os.getpid()}.sock"
         self.socket_path = Path(tempfile.gettempdir()) / socket_name
@@ -137,17 +133,6 @@ class AgentSideChannelServer:
                 if "streamUntilParentExit" in payload:
                     self._stream_payloads(connection)
                     return
-                if self.payload_factory is not None:
-                    message = self.payload_factory(self.repo_root)
-                    if message:
-                        with contextlib.suppress(OSError):
-                            connection.sendall(
-                                message.encode("utf-8", errors="replace")
-                            )
-                    return
-                writer = _SocketTextWriter(connection)
-                with contextlib.suppress(OSError):
-                    self._inject_payload(writer, force=False)
                 return
             elif line:
                 with contextlib.suppress(OSError):

@@ -30,6 +30,7 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from threading import Thread
 from typing import Any, TextIO
 
 from spice.agent.driver import driver_for
@@ -113,17 +114,22 @@ def run_agent_command(
 ) -> int:
     command = build_agent_run_command(raw_args, repo_root=repo_root)
     environment = build_agent_run_environment(raw_args, repo_root=repo_root)
-    inject_agent_side_channel(repo_root, stderr=stderr)
     if environment is None:
         process = popen_factory(command)
     else:
         process = popen_factory(command, env=environment)
-    wait = getattr(process, "wait", None)
-    if wait is None:
-        returncode = process.poll()
-    else:
-        returncode = wait()
-    return int(returncode if returncode is not None else INTERRUPTED_EXIT_CODE)
+    watch_thread = start_agent_side_channel_watch(
+        repo_root, parent_pid=int(getattr(process, "pid", 0) or 0), stderr=stderr
+    )
+    try:
+        wait = getattr(process, "wait", None)
+        if wait is None:
+            returncode = process.poll()
+        else:
+            returncode = wait()
+        return int(returncode if returncode is not None else INTERRUPTED_EXIT_CODE)
+    finally:
+        join_agent_side_channel_watch(watch_thread)
 
 
 def build_agent_run_command(
@@ -233,33 +239,23 @@ def requires_native_find_semantics(args: Sequence[str]) -> bool:
     return args[:1] == ["find"]
 
 
-def inject_agent_side_channel(repo_root: Path | None, *, stderr: TextIO) -> None:
-    socket_path = active_agent_side_channel_socket_path(repo_root)
-    if socket_path is None:
-        return
-    hello = agent_side_channel_hello(repo_root)
-    side_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        side_socket.connect(str(socket_path))
-        side_socket.sendall(
-            json.dumps(hello, separators=(",", ":")).encode("utf-8") + b"\n"
-        )
-        while True:
-            chunk = side_socket.recv(AGENT_RUN_SIDE_CHANNEL_READ_BYTES)
-            if not chunk:
-                return
-            write_side_channel_chunk(stderr, chunk)
-    except OSError:
-        return
-    finally:
-        with contextlib.suppress(OSError):
-            side_socket.close()
+def start_agent_side_channel_watch(
+    repo_root: Path | None, *, parent_pid: int, stderr: TextIO
+) -> Thread | None:
+    if parent_pid <= 0 or active_agent_side_channel_socket_path(repo_root) is None:
+        return None
+    thread = Thread(
+        target=watch_agent_side_channel,
+        kwargs={"repo_root": repo_root, "parent_pid": parent_pid, "stderr": stderr},
+        daemon=True,
+    )
+    thread.start()
+    return thread
 
 
-def emit_agent_side_channel(
-    repo_root: Path | None, *, stderr: TextIO = sys.stderr
-) -> None:
-    inject_agent_side_channel(repo_root, stderr=stderr)
+def join_agent_side_channel_watch(thread: Thread | None) -> None:
+    if thread is not None:
+        thread.join(timeout=1.0)
 
 
 def watch_agent_side_channel(
@@ -281,7 +277,7 @@ def watch_agent_side_channel(
             json.dumps(
                 agent_side_channel_hello(
                     repo_root,
-                    runner="agent.steer",
+                    runner="agent.run.watch",
                     stream_until_parent_exit=parent_pid,
                 ),
                 separators=(",", ":"),
