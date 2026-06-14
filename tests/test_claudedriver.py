@@ -8,6 +8,8 @@ usage the context meter folds into pressure.
 
 from __future__ import annotations
 
+import subprocess
+
 from spice.agent.driver import (
     CLAUDE_DRIVER,
     CLAUDE_FALLBACK_CONTEXT_WINDOW,
@@ -17,12 +19,23 @@ from spice.agent.driver import (
 )
 
 
-def test_select_driver_defaults_to_codex_and_resolves_claude(monkeypatch):
+def test_select_driver_defaults_to_codex_and_resolves_claude(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     assert select_driver().name == "codex"
     assert select_driver("claude") is CLAUDE_DRIVER
     assert select_driver("CODEX") is CODEX_DRIVER
     monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "claude")
+    assert select_driver().name == "claude"
+
+
+def test_select_driver_reads_worktree_config(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    from spice.config import update_section
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    update_section(tmp_path, "agent", {"driver": "claude"})
     assert select_driver().name == "claude"
 
 
@@ -159,6 +172,58 @@ def test_claude_normalizes_thinking_and_tool_result_as_presence():
         CLAUDE_DRIVER.normalize_transcript_line(result)["payload"]["type"]
         == "function_call_output"
     )
+
+
+def test_claude_normalizes_tool_result_image_into_output_item():
+    raw = {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "content": [
+                        {"type": "text", "text": "shot"},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": "QUJD",
+                            },
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+    payload = CLAUDE_DRIVER.normalize_transcript_line(raw)["payload"]
+    assert payload["type"] == "function_call_output"
+    assert payload["output"][0]["image_url"]["url"] == "data:image/png;base64,QUJD"
+
+
+def test_claude_json_stdout_scanner_captures_assistant_prose():
+    from spice.agent.watchdog import JsonStdoutScanner
+
+    captured: list[str] = []
+    compactions: list[int] = []
+    scanner = JsonStdoutScanner(
+        captured.append,
+        CLAUDE_DRIVER.normalize_transcript_line,
+        on_compaction=lambda: compactions.append(1),
+    )
+    scanner.process_line(
+        '{"type":"assistant","message":{"role":"assistant",'
+        '"content":[{"type":"text","text":"hello operator"}]}}'
+    )
+    scanner.process_line(
+        '{"type":"assistant","message":{"role":"assistant",'
+        '"content":[{"type":"tool_use","name":"Bash","input":{}}]}}'
+    )
+    scanner.process_line('{"type":"system","subtype":"compact_boundary"}')
+    scanner.close()
+    assert captured == ["hello operator"]
+    assert len(compactions) == 1
 
 
 def test_claude_normalizes_compaction_and_skips_app_records():

@@ -32,6 +32,7 @@ AGENT_PERSONALITY_CHOICES = ("none", "friendly", "pragmatic")
 DEFAULT_AGENT_PERSONALITY = "pragmatic"
 AGENT_MODEL_KEY = "model"
 AGENT_THINKING_KEY = "thinking"
+AGENT_DRIVER_KEY = "driver"
 
 JUDGE_KEY = "judge"
 JUDGE_BIN_KEY = "bin"
@@ -135,6 +136,23 @@ def configured_agent_thinking(repo_root: Path | None = None) -> str:
     return (
         _agent_worktree_value(root, AGENT_THINKING_KEY)
         or _agent_project_value(root, AGENT_THINKING_KEY)
+        or ""
+    )
+
+
+def configured_agent_driver(repo_root: Path | None = None) -> str:
+    """Which agent driver this worktree binds: worktree state, then project.
+
+    Selects the agent CLI (`codex` | `claude`) when `SPICE_AGENT_DRIVER` is
+    unset. Worktree-local state wins so one clone can run a different driver
+    than the tracked project default without editing tracked history.
+    """
+    root = _root_or_current(repo_root)
+    if root is None:
+        return ""
+    return (
+        _agent_worktree_value(root, AGENT_DRIVER_KEY)
+        or _agent_project_value(root, AGENT_DRIVER_KEY)
         or ""
     )
 

@@ -49,6 +49,10 @@ class AgentDriver:
     stdout_compaction_marker: str
     session_id_pattern: re.Pattern[str]
     default_context_window: int = 0
+    # How the supervisor reassembles assistant messages from `exec` stdout:
+    # "marker" reads the driver's plain-text section markers; "json" parses
+    # one JSON event per line (a stream-json transcript echoed to stdout).
+    stdout_format: str = "marker"
 
     @property
     def state_dirname(self) -> str:
@@ -448,7 +452,46 @@ def _claude_assistant_event(
         )
     if block_type == "tool_use":
         return _claude_response_item(timestamp, _claude_tool_call_payload(block))
+    if block_type == "image":
+        item = _claude_image_item(block)
+        if item is not None:
+            return _claude_response_item(
+                timestamp,
+                {"type": "message", "role": "assistant", "content": [item]},
+            )
     return None
+
+
+def _claude_image_item(block: dict[str, Any]) -> dict[str, Any] | None:
+    """Canonical `image_url` item from a Claude image block, or None.
+
+    Claude stores `{source:{type:"base64",media_type,data}}` (or a `url`
+    source); the canonical item carries a `data:`/http URL the existing image
+    extraction already understands.
+    """
+    source = block.get("source")
+    if not isinstance(source, dict):
+        return None
+    if source.get("type") == "url":
+        url = source.get("url")
+        return {"type": "image", "image_url": {"url": str(url)}} if url else None
+    media_type = source.get("media_type")
+    data = source.get("data")
+    if not isinstance(media_type, str) or not isinstance(data, str):
+        return None
+    return {"type": "image", "image_url": {"url": f"data:{media_type};base64,{data}"}}
+
+
+def _claude_tool_result_images(content: Any) -> list[dict[str, Any]]:
+    if not isinstance(content, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "image":
+            item = _claude_image_item(block)
+            if item is not None:
+                items.append(item)
+    return items
 
 
 def _claude_tool_call_payload(block: dict[str, Any]) -> dict[str, Any]:
@@ -502,7 +545,13 @@ def _claude_user_event(
     if isinstance(content, list):
         block = next((item for item in content if isinstance(item, dict)), None)
         if block is not None and block.get("type") == "tool_result":
-            return _claude_response_item(timestamp, {"type": "function_call_output"})
+            return _claude_response_item(
+                timestamp,
+                {
+                    "type": "function_call_output",
+                    "output": _claude_tool_result_images(block.get("content")),
+                },
+            )
     return None
 
 
@@ -581,11 +630,11 @@ CODEX_DRIVER: AgentDriver = CodexDriver(
     session_id_pattern=re.compile(r"^session id:\s*(\S+)\s*$", re.MULTILINE),
 )
 
-# Claude's `stream-json` stdout is JSON lines, not the marker-delimited prose
-# Codex `exec` prints, so the watchdog's line-marker scanner finds nothing to
-# capture and degrades to a no-op — the transcript file remains the source of
-# truth for the UI and metrics. The session id is read from the `system`/`init`
-# line's `"session_id": "<uuid>"`, the first match in the startup log head.
+# Claude's `stream-json` stdout is one JSON event per line, so the watchdog
+# parses it (`stdout_format="json"`) rather than scanning plain-text markers —
+# assistant prose still reaches ACK archiving and maxim judging in real time.
+# The session id is read from the `system`/`init` line's `"session_id":
+# "<uuid>"`, the first match in the startup log head.
 CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
     name="claude",
     default_bin="claude",
@@ -594,11 +643,12 @@ CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
     default_model="claude-haiku-4-5",
     default_reasoning_effort="low",
     default_service_tier="",
-    stdout_assistant_marker="\0claude-assistant\0",
-    stdout_section_markers=frozenset({"\0claude-section\0"}),
-    stdout_compaction_marker="\0claude-compaction\0",
+    stdout_assistant_marker="",
+    stdout_section_markers=frozenset(),
+    stdout_compaction_marker="",
     session_id_pattern=re.compile(r'"session_id"\s*:\s*"([0-9a-fA-F-]{36})"'),
     default_context_window=200000,
+    stdout_format="json",
 )
 
 SPICE_AGENT_DRIVER_ENV = "SPICE_AGENT_DRIVER"  # env-policy: allow
@@ -609,8 +659,25 @@ _DRIVERS: dict[str, AgentDriver] = {
 
 
 def select_driver(name: str = "") -> AgentDriver:
+    """Resolve the active driver: explicit name, then env, then worktree config.
+
+    Configuration (`[tool.spice.agent] driver` or the worktree state) lets
+    `spice serve`/`agent ensure` pick a driver without the env var; the env
+    var still overrides it, and the default stays Codex.
+    """
     chosen = (name or os.environ.get(SPICE_AGENT_DRIVER_ENV, "")).strip().lower()
+    if not chosen and not name:
+        chosen = _configured_driver_name()
     return _DRIVERS.get(chosen, CODEX_DRIVER)
+
+
+def _configured_driver_name() -> str:
+    try:
+        from spice.config import configured_agent_driver
+
+        return (configured_agent_driver() or "").strip().lower()
+    except Exception:
+        return ""
 
 
 DRIVER: AgentDriver = select_driver()

@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from spice.agent.driver import DRIVER
+
 DATA_IMAGE_RE = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
 
 
@@ -80,9 +82,12 @@ def rollout_image_from_offset(
         loaded = json.loads(raw_line.decode("utf-8", errors="replace"))
     except json.JSONDecodeError:
         return None
-    if not isinstance(loaded, dict) or loaded.get("type") != "response_item":
+    if not isinstance(loaded, dict):
         return None
-    payload = loaded.get("payload")
+    event = DRIVER.normalize_transcript_line(loaded)
+    if event is None or event.get("type") != "response_item":
+        return None
+    payload = event.get("payload")
     if not isinstance(payload, dict):
         return None
     items = _image_content_items(payload)

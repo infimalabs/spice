@@ -15,10 +15,11 @@ Every message gets two treatments:
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from threading import Thread
-from typing import Callable, TextIO, cast
+from typing import Callable, Protocol, TextIO, cast
 
 from spice.agent.driver import DRIVER
 from spice.agent.maxims import (
@@ -29,6 +30,7 @@ from spice.agent.maxims import (
 from spice.mail.acks import archive_ackd_inbox_items_from_assistant_message
 from spice.mail.inbox import write_inbox_item
 from spice.procs import popen_new_process_group_kwargs
+from spice.sessions.util import first_text
 
 LEGACY_REMINDER_PREFIX = "WATCHDOG:"
 WATCHDOG_REMINDER_PREFIX = "[MAXIM]"
@@ -108,7 +110,7 @@ def _tee_agent_stdout(
         return
     with log_path.open("a", encoding="utf-8", errors="replace") as log_handle:
         reminder_gate = MaximReminderGate()
-        scanner = AgentStdoutMessageScanner(
+        scanner = make_stdout_scanner(
             lambda text: process_supervised_assistant_message(
                 repo_root, text, log_handle, reminder_gate
             ),
@@ -159,6 +161,70 @@ def record_supervised_lane_metrics(repo_root: Path) -> None:
     record_transcript_metrics_for_agent(
         ServeTeamStore(), agent_id=agent_id, transcript_path=transcript_path
     )
+
+
+class StdoutScanner(Protocol):
+    def process_line(self, line: str) -> None: ...
+
+    def close(self) -> None: ...
+
+
+def make_stdout_scanner(
+    on_message: Callable[[str], None],
+    *,
+    on_compaction: Callable[[], None],
+) -> StdoutScanner:
+    """Pick the scanner matching the driver's `exec` stdout format."""
+    if DRIVER.stdout_format == "json":
+        return JsonStdoutScanner(
+            on_message,
+            DRIVER.normalize_transcript_line,
+            on_compaction=on_compaction,
+        )
+    return AgentStdoutMessageScanner(on_message, on_compaction=on_compaction)
+
+
+class JsonStdoutScanner:
+    """Reassemble assistant messages from a stream-json `exec` stdout.
+
+    Each stdout line is one transcript event; the injected normalizer turns an
+    assistant-message line into canonical prose, which feeds ACK archiving and
+    maxim judging exactly as the marker scanner's reassembled blocks do.
+    """
+
+    def __init__(
+        self,
+        on_message: Callable[[str], None],
+        normalize: Callable[[dict], dict | None],
+        *,
+        on_compaction: Callable[[], None] | None = None,
+    ) -> None:
+        self.on_message = on_message
+        self._normalize = normalize
+        self._on_compaction = on_compaction or (lambda: None)
+
+    def process_line(self, line: str) -> None:
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(raw, dict):
+            return
+        event = self._normalize(raw)
+        if event is None:
+            return
+        if event.get("type") == "compacted":
+            self._on_compaction()
+            return
+        payload = event.get("payload") or {}
+        if payload.get("type") != "message" or payload.get("role") != "assistant":
+            return
+        text = first_text(payload.get("content"))
+        if text and text.strip():
+            self.on_message(text.strip())
+
+    def close(self) -> None:
+        return
 
 
 class AgentStdoutMessageScanner:
