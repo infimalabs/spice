@@ -65,6 +65,7 @@ from spice.sessions.util import format_float, format_int
 PROXY_BIN_ENV = "SPICE_PROXY_BIN"  # env-policy: allow
 DEFAULT_PROXY_BIN = "rtk"
 PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
+SHELL_REEXEC_ENV_NAMES = ("ZDOTDIR", "BASH_ENV")
 PYTHON_ROUTE_FAILURE = (
     "import sys;"
     "sys.stderr.write("
@@ -158,15 +159,32 @@ def build_agent_run_environment(
 ) -> dict[str, str] | None:
     args = normalize_agent_run_args(raw_args)
     worktree_env = worktree_spice_environment(repo_root)
+    environment: dict[str, str] | None
     if is_direct_git_route(args):
-        return agent_git_shadow_environment(repo_root, base_env=worktree_env)
-    if is_spice_route(args):
+        environment = agent_git_shadow_environment(repo_root, base_env=worktree_env)
+    elif is_spice_route(args):
         # Harness internals must see real upstream config.
         scrubbed = scrub_agent_git_shadow_environment(os.environ)
-        return worktree_spice_environment(repo_root, base_env=scrubbed)
-    if worktree_spice_source(repo_root) is not None:
-        return worktree_env
-    return None
+        environment = worktree_spice_environment(repo_root, base_env=scrubbed)
+    elif worktree_spice_source(repo_root) is not None:
+        environment = worktree_env
+    else:
+        environment = None
+    return scrub_agent_run_recursion_environment(environment)
+
+
+def scrub_agent_run_recursion_environment(
+    environment: dict[str, str] | None,
+) -> dict[str, str] | None:
+    if environment is None:
+        if not any(name in os.environ for name in SHELL_REEXEC_ENV_NAMES):
+            return None
+        environment = dict(os.environ)
+    else:
+        environment = dict(environment)
+    for name in SHELL_REEXEC_ENV_NAMES:
+        environment.pop(name, None)
+    return environment
 
 
 def is_direct_git_route(args: Sequence[str]) -> bool:
