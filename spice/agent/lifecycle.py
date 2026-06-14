@@ -32,6 +32,7 @@ from typing import Any, Iterator, Sequence, cast
 from spice.agent.driver import driver_for
 from spice.agent.gitshadow import agent_git_shadow_environment
 from spice.agent.identity import ambient_thread, ambient_thread_id, canonical_thread_id
+from spice.agent.shellhook import apply_shell_steering_environment
 from spice.agent.watchdog import spawn_supervised_agent
 from spice.agent.wrap import agent_state_dir
 from spice.config import (
@@ -692,8 +693,17 @@ def agent_environment(repo_root: Path | None = None) -> dict[str, str]:
             f"unset {driver.thread_id_env} before starting spice serve or "
             "agent ensure"
         )
-    env = worktree_spice_environment(repo_root)
-    return agent_git_shadow_environment(repo_root, base_env=env)
+    driver = driver_for(repo_root)
+    env = agent_git_shadow_environment(
+        repo_root, base_env=worktree_spice_environment(repo_root)
+    )
+    if repo_root is not None:
+        env = apply_shell_steering_environment(
+            repo_root,
+            driver_state_dirname=driver.state_dirname,
+            base_env=env,
+        )
+    return env
 
 
 def agent_supervisor_environment(repo_root: Path | None = None) -> dict[str, str]:

@@ -37,6 +37,10 @@ from spice.agent.gitshadow import (
     scrub_agent_git_shadow_environment,
 )
 from spice.agent.identity import ambient_thread_id
+from spice.agent.shellhook import (
+    SPICE_STEER_EMITTED_ENV,
+    SPICE_STEER_EMITTED_VALUE,
+)
 from spice.mail.inbox import inbox_dir, inbox_item_key
 from spice.paths import (
     STATE_DIRNAME,
@@ -112,7 +116,8 @@ def run_agent_command(
 ) -> int:
     command = build_agent_run_command(raw_args, repo_root=repo_root)
     environment = build_agent_run_environment(raw_args, repo_root=repo_root)
-    inject_agent_side_channel(repo_root, stderr=stderr)
+    if should_inject_agent_side_channel():
+        inject_agent_side_channel(repo_root, stderr=stderr)
     if environment is None:
         process = popen_factory(command)
     else:
@@ -160,6 +165,10 @@ def build_agent_run_environment(
     if worktree_spice_source(repo_root) is not None:
         return worktree_env
     return None
+
+
+def should_inject_agent_side_channel() -> bool:
+    return os.environ.get(SPICE_STEER_EMITTED_ENV) != SPICE_STEER_EMITTED_VALUE
 
 
 def is_direct_git_route(args: Sequence[str]) -> bool:
@@ -253,6 +262,12 @@ def inject_agent_side_channel(repo_root: Path | None, *, stderr: TextIO) -> None
     finally:
         with contextlib.suppress(OSError):
             side_socket.close()
+
+
+def emit_agent_side_channel(
+    repo_root: Path | None, *, stderr: TextIO = sys.stderr
+) -> None:
+    inject_agent_side_channel(repo_root, stderr=stderr)
 
 
 def active_agent_side_channel_socket_path(repo_root: Path | None) -> Path | None:
