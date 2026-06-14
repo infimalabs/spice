@@ -1065,8 +1065,11 @@ def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
     injector.inject(force=False)
 
     output = stderr.getvalue()
-    assert output.count("Inbox Steering") == 2
-    assert "20260101T000000000001Z" in output
+    # Full readout at t=0 and again after the 15s repeat interval (t=16); the
+    # suppressed inject at t=10 surfaces only a one-line pending count so the
+    # command never looks empty while steering waits.
+    assert output.count("operator steering") == 2
+    assert output.count("recently shown") == 1
     assert "Task offload: decide now whether this steering needs a task" in output
 
 
@@ -1142,7 +1145,9 @@ def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch)
 
     thread.join(timeout=1.0)
     assert "Inbox Steering" in output
-    assert output.count("Inbox Steering") == 1
+    # The late item's full readout streams exactly once; any later suppressed
+    # inject surfaces only the one-line pending count, not a second full readout.
+    assert output.count("late steering") == 1
     assert not thread.is_alive()
 
 
