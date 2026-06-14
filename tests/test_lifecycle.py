@@ -360,13 +360,22 @@ def test_wrapper_gitshadow_route_uses_shadow_and_spice_route_scrubs(
         wrap,
         "agent_git_shadow_environment",
         lambda repo_root, *, base_env=None: (
-            shadow_calls.append(repo_root) or {"route": "git", "repo": str(repo_root)}
+            shadow_calls.append(repo_root)
+            or {
+                "route": "git",
+                "repo": str(repo_root),
+                "ZDOTDIR": "hook",
+                "BASH_ENV": "hook",
+            }
         ),
     )
     monkeypatch.setattr(
         wrap,
         "scrub_agent_git_shadow_environment",
-        lambda env: scrub_calls.append(env) or {"route": "spice"},
+        lambda env: (
+            scrub_calls.append(env)
+            or {"route": "spice", "ZDOTDIR": "hook", "BASH_ENV": "hook"}
+        ),
     )
 
     git_env = wrap.build_agent_run_environment(["git", "status"], repo_root=tmp_path)
@@ -498,6 +507,19 @@ def test_wrapper_plain_commands_inherit_worktree_spice_pythonpath(tmp_path):
 
     assert env is not None
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path.resolve())
+
+
+def test_wrapper_plain_commands_scrub_shell_reexec_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZDOTDIR", "hook")
+    monkeypatch.setenv("BASH_ENV", "hook")
+    monkeypatch.setenv(SHELL_TRACE_ENV, "preserved")
+
+    env = wrap.build_agent_run_environment(["true"], repo_root=tmp_path)
+
+    assert env is not None
+    assert "ZDOTDIR" not in env
+    assert "BASH_ENV" not in env
+    assert env[SHELL_TRACE_ENV] == "preserved"
 
 
 def test_agent_environment_inherits_worktree_spice_pythonpath(tmp_path, monkeypatch):
@@ -847,6 +869,8 @@ def test_wrapper_missing_proxy_plain_exec_starts_side_channel_watch(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv(wrap.PROXY_BIN_ENV, "missing-rtk")
+    monkeypatch.setenv("ZDOTDIR", "hook")
+    monkeypatch.setenv("BASH_ENV", "hook")
     monkeypatch.setattr(wrap.shutil, "which", lambda _proxy: None)
     events: list[tuple[str, object, object | None]] = []
     stderr = io.StringIO()
@@ -859,8 +883,14 @@ def test_wrapper_missing_proxy_plain_exec_starts_side_channel_watch(
             events.append(("wait", None, None))
             return 7
 
-    def fake_popen(command: list[str]) -> FakeProcess:
-        events.append(("popen", command, None))
+    def fake_popen(command: list[str], env=None) -> FakeProcess:
+        events.append(
+            (
+                "popen",
+                command,
+                None if env is None else (env.get("ZDOTDIR"), env.get("BASH_ENV")),
+            )
+        )
         return FakeProcess()
 
     def fake_watch(repo_root, *, parent_pid, stderr):
@@ -882,7 +912,7 @@ def test_wrapper_missing_proxy_plain_exec_starts_side_channel_watch(
 
     assert exit_code == 7
     assert events == [
-        ("popen", ["find", ".", "-maxdepth", "0", "-print"], None),
+        ("popen", ["find", ".", "-maxdepth", "0", "-print"], (None, None)),
         ("watch", tmp_path, (123, stderr)),
         ("wait", None, None),
         ("join", watch_thread, None),
@@ -940,6 +970,8 @@ def test_wrapper_runs_implicit_find_natively_even_when_proxy_is_installed(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv(wrap.PROXY_BIN_ENV, "rtk-test")
+    monkeypatch.setenv("ZDOTDIR", "hook")
+    monkeypatch.setenv("BASH_ENV", "hook")
     monkeypatch.setattr(
         wrap.shutil,
         "which",
@@ -956,8 +988,14 @@ def test_wrapper_runs_implicit_find_natively_even_when_proxy_is_installed(
             events.append(("wait", None, None))
             return 0
 
-    def fake_popen(command: list[str]) -> FakeProcess:
-        events.append(("popen", command, None))
+    def fake_popen(command: list[str], env=None) -> FakeProcess:
+        events.append(
+            (
+                "popen",
+                command,
+                None if env is None else (env.get("ZDOTDIR"), env.get("BASH_ENV")),
+            )
+        )
         return FakeProcess()
 
     def fake_watch(repo_root, *, parent_pid, stderr):
@@ -979,7 +1017,7 @@ def test_wrapper_runs_implicit_find_natively_even_when_proxy_is_installed(
 
     assert exit_code == 0
     assert events == [
-        ("popen", ["find", ".", "-name", "*.py"], None),
+        ("popen", ["find", ".", "-name", "*.py"], (None, None)),
         ("watch", tmp_path, (321, stderr)),
         ("wait", None, None),
         ("join", watch_thread, None),
