@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 from typing import Any
 
@@ -34,15 +33,6 @@ def configure_agent_parser(subparsers: Any) -> None:
     )
     run.add_argument("args", nargs=argparse.REMAINDER)
     run.set_defaults(func=handle_agent)
-
-    steer = actions.add_parser(
-        "steer",
-        help="Emit side-channel steering for shell startup hooks.",
-    )
-    steer.add_argument("--repo-root", default="")
-    steer.add_argument("--watch", action="store_true")
-    steer.add_argument("--parent-pid", type=int, default=0)
-    steer.set_defaults(func=handle_agent)
 
     ensure = actions.add_parser("ensure", help="Start or resume the worktree's agent.")
     ensure.add_argument("--dry-run", action="store_true")
@@ -76,21 +66,6 @@ def handle_agent(args: argparse.Namespace) -> int:
     action = args.agent_action
     if action == "supervise":
         return lifecycle.run_agent_supervisor(args)
-    if action == "steer":
-        from spice.agent.wrap import emit_agent_side_channel, watch_agent_side_channel
-
-        raw_repo_root = str(getattr(args, "repo_root", "") or "")
-        repo_root = (
-            Path(raw_repo_root).expanduser().resolve()
-            if raw_repo_root
-            else require_repo_root()
-        )
-        if bool(getattr(args, "watch", False)):
-            parent_pid = int(getattr(args, "parent_pid", 0) or os.getppid())
-            watch_agent_side_channel(repo_root, parent_pid=parent_pid)
-            return 0
-        emit_agent_side_channel(repo_root)
-        return 0
     repo_root = require_repo_root()
     if action == "status":
         print(render_agent_status(lifecycle.agent_status(repo_root)))
