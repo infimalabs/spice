@@ -247,6 +247,7 @@ async function openTargetTeam(targetId) {
 }
 
 function closeLane(lane) {
+  if (lane.emptyTeam) return;
   const host = laneGroupHost(lane);
   const members = laneGroupMemberLanes(host);
   if (members.length > 1) {

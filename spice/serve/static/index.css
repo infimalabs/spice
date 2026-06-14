@@ -286,6 +286,11 @@ button.primary:hover {
   height: var(--lane-light-pip-size);
   width: var(--lane-light-pip-size);
 }
+.lane--empty-team .lane-pip-stack,
+.lane--empty-team [data-close-lane] {
+  pointer-events: none;
+  visibility: hidden;
+}
 
 .lane-mode-rail { display: flex; flex: 1; gap: 2px; }
 .lane-mode-rail {

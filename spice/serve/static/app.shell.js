@@ -200,7 +200,14 @@ function syncEmptyTeamLane(lane, team = {}) {
   lane.statusTimeEl.hidden = true;
   lane.statusErrorEl.hidden = true;
   lane.statusSeparatorEl.hidden = true;
-  lane.pipEl.dataset.agentStatus = "unstarted";
+  lane.pipEl.hidden = true;
+  lane.laneLightsEl.hidden = true;
+  lane.laneLightsEl.replaceChildren();
+  clearLaneLightGridLayout(lane.laneLightsEl);
+  lane.closeButtonEl.disabled = true;
+  lane.closeButtonEl.tabIndex = -1;
+  lane.closeButtonEl.setAttribute("aria-hidden", "true");
+  lane.closeButtonEl.title = "";
   syncLaneEffectiveControls(lane);
   renderMessagesIfChanged(lane);
 }
