@@ -525,6 +525,7 @@ def test_wrapper_plain_commands_scrub_shell_reexec_environment(tmp_path, monkeyp
 def test_agent_environment_inherits_worktree_spice_pythonpath(tmp_path, monkeypatch):
     _write_spice_product_shape(tmp_path)
     monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
 
     env = lifecycle.agent_environment(tmp_path)
 
