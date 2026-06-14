@@ -21,13 +21,23 @@ def test_command_records_pair_function_calls_with_exit_outputs(tmp_path):
             _call(
                 "2026-01-01T00:00:01Z",
                 "call-1",
-                "./spice.sh git status",
+                "spice agent run -- git status",
                 "/repo",
             ),
             _output("2026-01-01T00:00:02Z", "call-1", "Process exited with code 0"),
-            _call("2026-01-01T00:00:03Z", "call-2", "./spice.sh rg absent", "/repo"),
+            _call(
+                "2026-01-01T00:00:03Z",
+                "call-2",
+                "spice agent run -- rg absent",
+                "/repo",
+            ),
             _output("2026-01-01T00:00:04Z", "call-2", "Process exited with code 1"),
-            _call("2026-01-01T00:00:05Z", "call-3", "./spice.sh sleep 5", "/repo"),
+            _call(
+                "2026-01-01T00:00:05Z",
+                "call-3",
+                "spice agent run -- sleep 5",
+                "/repo",
+            ),
             _output(
                 "2026-01-01T00:00:06Z",
                 "call-3",
@@ -40,7 +50,7 @@ def test_command_records_pair_function_calls_with_exit_outputs(tmp_path):
                     "type": "exec_command_end",
                     "turn_id": "turn-b",
                     "cwd": "/repo",
-                    "command": ["./spice.sh", "pytest"],
+                    "command": ["spice", "agent", "run", "--", "pytest"],
                     "exit_code": "0",
                     "status": "completed",
                 },
@@ -59,43 +69,49 @@ def test_command_records_pair_function_calls_with_exit_outputs(tmp_path):
     ]
     assert [record.exit_code for record in completed] == [0, 1, 0]
     assert completed[0].turn_id == "turn-a"
-    assert completed[2].command == "./spice.sh pytest"
+    assert completed[2].command == "spice agent run -- pytest"
 
 
 def test_command_pipeline_audit_uses_spice_wrapper_contract():
     assert commandaudit.command_has_shell_pipeline(
-        "./spice.sh rg foo | ./spice.sh sed -n '1,5p'"
+        "spice agent run -- rg foo | spice agent run -- sed -n '1,5p'"
     )
     assert commandaudit.pipeline_is_canonical_wrapper(
-        "./spice.sh rg foo | ./spice.sh sed -n '1,5p'"
+        "spice agent run -- rg foo | spice agent run -- sed -n '1,5p'"
     )
     assert commandaudit.pipeline_is_canonical_wrapper(
         "spice agent run -- rg foo | spice agent run -- sed -n '1,5p'"
     )
     assert commandaudit.command_is_noncanonical_pipeline(
-        "./spice.sh rg foo | sed -n '1,5p'"
+        "spice agent run -- rg foo | sed -n '1,5p'"
     )
     assert commandaudit.command_starts_with_wrapper(
-        "PATH=/tmp/bin SPICE_PROXY_BIN=rtk-test ./spice.sh git status"
+        "PATH=/tmp/bin SPICE_PROXY_BIN=rtk-test spice agent run -- git status"
     )
     assert commandaudit.pipeline_is_canonical_wrapper(
-        "PATH=/tmp/bin ./spice.sh rg foo | "
-        "SPICE_PROXY_BIN=rtk-test ./spice.sh sed -n '1,5p'"
+        "PATH=/tmp/bin spice agent run -- rg foo | "
+        "SPICE_PROXY_BIN=rtk-test spice agent run -- sed -n '1,5p'"
     )
     assert (
-        commandaudit.command_label("PATH=/tmp/bin ./spice.sh rg foo | sed -n '1,5p'")
-        == "spice.sh rg"
+        commandaudit.command_label(
+            "PATH=/tmp/bin spice agent run -- rg foo | sed -n '1,5p'"
+        )
+        == "spice agent run"
     )
-    assert not commandaudit.command_has_shell_pipeline("./spice.sh test || true")
+    assert not commandaudit.command_has_shell_pipeline(
+        "spice agent run -- test || true"
+    )
     assert not commandaudit.command_starts_with_wrapper("./agent.sh git status")
 
     audit = commandaudit.audit_command_records(
         [
             _command_record("git status"),
-            _command_record("./spice.sh git status"),
             _command_record("spice agent run -- git status"),
-            _command_record("./spice.sh rg foo | ./spice.sh sed -n '1,5p'"),
-            _command_record("./spice.sh rg foo | sed -n '1,5p'"),
+            _command_record("spice agent run -- task status"),
+            _command_record(
+                "spice agent run -- rg foo | spice agent run -- sed -n '1,5p'"
+            ),
+            _command_record("spice agent run -- rg foo | sed -n '1,5p'"),
             _command_record("rg foo | sed -n '1,5p'"),
         ]
     )
@@ -106,7 +122,7 @@ def test_command_pipeline_audit_uses_spice_wrapper_contract():
     assert audit.shell_pipelines == 3
     assert audit.canonical_pipelines == 1
     assert audit.noncanonical_pipelines == 2
-    assert audit.top_noncanonical == ["spice.sh rg:1", "rg:1"]
+    assert audit.top_noncanonical == ["spice agent run:1", "rg:1"]
 
 
 def test_session_commands_summary_reports_wrapper_and_pipeline_pressure(
@@ -120,7 +136,7 @@ def test_session_commands_summary_reports_wrapper_and_pipeline_pressure(
     assert "Commands\n" in output
     assert "total=4 matched=4 filters=all failed=1 wrapper=3 non_wrapper=1" in output
     assert "pipelines=2 canonical_pipelines=1 noncanonical_pipelines=1" in output
-    assert "top_noncanonical=spice.sh rg:1" in output
+    assert "top_noncanonical=spice agent run:1" in output
 
 
 def test_session_commands_filtered_summary_names_population_and_filter(
@@ -149,7 +165,7 @@ def test_session_commands_filters_since_compaction_and_noncanonical_pipelines(
     output = capsys.readouterr().out
     assert "2026-01-01T00:00:04.000Z turn=turn-a exit=2" in output
     assert "wrapper=yes pipeline=noncanonical" in output
-    assert "cmd=./spice.sh rg foo | sed -n '1,5p'" in output
+    assert "cmd=spice agent run -- rg foo | sed -n '1,5p'" in output
 
 
 def test_session_commands_parser_exposes_current_flag_surface(tmp_path):
@@ -190,13 +206,15 @@ def _command_fixture(tmp_path):
             {"timestamp": "2026-01-01T00:00:02Z", "type": "compacted", "payload": {}},
             _command_end(
                 "2026-01-01T00:00:03Z",
-                "./spice.sh rg foo | ./spice.sh sed -n '1,5p'",
+                "spice agent run -- rg foo | spice agent run -- sed -n '1,5p'",
                 0,
             ),
             _command_end(
-                "2026-01-01T00:00:04Z", "./spice.sh rg foo | sed -n '1,5p'", 2
+                "2026-01-01T00:00:04Z",
+                "spice agent run -- rg foo | sed -n '1,5p'",
+                2,
             ),
-            _command_end("2026-01-01T00:00:05Z", "./spice.sh pytest", 0),
+            _command_end("2026-01-01T00:00:05Z", "spice agent run -- pytest", 0),
         ],
     )
     return transcript
