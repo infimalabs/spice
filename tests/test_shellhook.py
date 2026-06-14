@@ -1,17 +1,21 @@
 """Agent wrapper routing and shell steering contracts."""
 
+import json
 import os
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from spice.agent import cli as agent_cli
 from spice.agent import driver as agent_driver
 from spice.agent import lifecycle, shellhook, wrap
 from spice.agent.driver import CLAUDE_DRIVER, DRIVER
+from spice.errors import SpiceError
 
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
@@ -207,11 +211,22 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
 
     env = lifecycle.agent_environment(tmp_path)
 
-    hook_dir = tmp_path / ".spice" / "agents" / "codex" / "shell-hook"
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
     assert env[shellhook.ZDOTDIR_ENV] == str(hook_dir)
     assert env[shellhook.BASH_ENV_ENV] == str(hook_dir / shellhook.BASH_HOOK_NAME)
+    assert shellhook.SHELL_HOOK_AGENT_RUN_ARGV_ENV in env
+    assert json.loads(env[shellhook.SHELL_HOOK_AGENT_RUN_ARGV_ENV])[-5:] == [
+        "-m",
+        "spice",
+        "agent",
+        "run",
+        "--",
+    ]
+    assert env[shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV] == ""
+    assert env[shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV] == ""
     zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
-    assert "spice agent run --" in zshenv
+    assert "spice agent shell-hook zshenv" in zshenv
+    assert "spice agent run --" not in zshenv
     assert "spice agent steer" not in zshenv
     assert "--watch --parent-pid" not in zshenv
 
@@ -235,18 +250,116 @@ def test_configured_agent_environment_installs_driver_shell_steering_hooks(
 
     env = lifecycle.agent_environment(tmp_path)
 
-    hook_dir = tmp_path / ".spice" / "agents" / "claude" / "shell-hook"
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
     assert env[shellhook.ZDOTDIR_ENV] == str(hook_dir)
     assert env[shellhook.BASH_ENV_ENV] == str(hook_dir / shellhook.BASH_HOOK_NAME)
+    assert env[shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV] == str(real_zdotdir)
+    assert env[shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV] == str(real_bash_env)
     zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
     bashenv = (hook_dir / shellhook.BASH_HOOK_NAME).read_text(encoding="utf-8")
-    assert "spice agent run --" in zshenv
+    assert "spice agent shell-hook zshenv" in zshenv
+    assert "spice agent shell-hook bash_env" in bashenv
+    assert "spice agent run --" not in zshenv
     assert "spice agent steer" not in zshenv
     assert "--watch --parent-pid" not in zshenv
-    assert f"export {shellhook.ZDOTDIR_ENV}={real_zdotdir}" in zshenv
-    assert f". {real_zdotdir / '.zshenv'}" in zshenv
-    assert f"export {shellhook.BASH_ENV_ENV}={real_bash_env}" in bashenv
-    assert f". {real_bash_env}" in bashenv
+    rendered_zshenv = shellhook.render_shell_steering_hook_for_surface(
+        "zshenv", env=env
+    )
+    rendered_bashenv = shellhook.render_shell_steering_hook_for_surface(
+        shellhook.BASH_HOOK_NAME, env=env
+    )
+    assert f"export {shellhook.ZDOTDIR_ENV}={real_zdotdir}" in rendered_zshenv
+    assert f". {real_zdotdir / '.zshenv'}" in rendered_zshenv
+    assert f"export {shellhook.BASH_ENV_ENV}={real_bash_env}" in rendered_bashenv
+    assert f". {real_bash_env}" in rendered_bashenv
+
+
+def test_shell_steering_files_are_stable_across_original_env_changes():
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    first_zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
+    first_bashenv = (hook_dir / shellhook.BASH_HOOK_NAME).read_text(encoding="utf-8")
+
+    assert (hook_dir / ".zshenv").read_text(encoding="utf-8") == first_zshenv
+    assert (hook_dir / shellhook.BASH_HOOK_NAME).read_text(
+        encoding="utf-8"
+    ) == first_bashenv
+    assert "spice agent shell-hook zshenv" in first_zshenv
+    assert "spice agent shell-hook bash_env" in first_bashenv
+    assert "spice agent run --" not in first_zshenv
+    assert shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV not in first_bashenv
+    assert shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV not in first_bashenv
+
+
+def test_shell_hook_renderer_responds_to_runtime_environment_changes():
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    first_env = {
+        shellhook.ZDOTDIR_ENV: str(hook_dir),
+        shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
+        **shellhook.shell_steering_runtime_environment(
+            base_env={
+                shellhook.ZDOTDIR_ENV: "/real-zdotdir-one",
+                shellhook.BASH_ENV_ENV: "/real-bash-one",
+            },
+            python_command=["agent-python-one"],
+        ),
+    }
+    second_env = {
+        shellhook.ZDOTDIR_ENV: str(hook_dir),
+        shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
+        **shellhook.shell_steering_runtime_environment(
+            base_env={
+                shellhook.ZDOTDIR_ENV: "/real-zdotdir-two",
+                shellhook.BASH_ENV_ENV: "/real-bash-two",
+            },
+            python_command=["agent-python-two"],
+        ),
+    }
+
+    first = shellhook.render_shell_steering_hook_for_surface("zshenv", env=first_env)
+    second = shellhook.render_shell_steering_hook_for_surface("zshenv", env=second_env)
+
+    assert "agent-python-one -m spice agent run --" in first
+    assert ". /real-zdotdir-one/.zshenv" in first
+    assert "agent-python-two -m spice agent run --" in second
+    assert ". /real-zdotdir-two/.zshenv" in second
+
+
+def test_agent_shell_hook_cli_renders_dynamic_surface(monkeypatch, capsys):
+    runtime_env = shellhook.shell_steering_runtime_environment(
+        base_env={}, python_command=["agent-python"]
+    )
+    for name, value in runtime_env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv(shellhook.BASH_ENV_ENV, "/tmp/spice-hook/bash_env")
+
+    result = agent_cli.handle_agent(
+        SimpleNamespace(agent_action="shell-hook", surface=shellhook.BASH_HOOK_NAME)
+    )
+
+    assert result == 0
+    rendered = capsys.readouterr().out
+    assert "agent-python -m spice agent run --" in rendered
+    assert "cannot agent-run reexec noninteractive shell" in rendered
+
+
+def test_agent_shell_hook_cli_fails_loudly_without_runtime_state(monkeypatch):
+    for name in (
+        shellhook.SHELL_HOOK_AGENT_RUN_ARGV_ENV,
+        shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV,
+        shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(shellhook.BASH_ENV_ENV, "/tmp/spice-hook/bash_env")
+
+    with pytest.raises(SpiceError, match="missing required"):
+        agent_cli.handle_agent(
+            SimpleNamespace(agent_action="shell-hook", surface=shellhook.BASH_HOOK_NAME)
+        )
+
+
+def test_shell_hook_renderer_rejects_unsupported_surface():
+    with pytest.raises(SpiceError, match="unsupported shell-hook surface"):
+        shellhook.render_shell_steering_hook_for_surface("fish", env={})
 
 
 def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
@@ -265,12 +378,8 @@ def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
         ),
         encoding="utf-8",
     )
-    hook_dir = shellhook.write_shell_steering_files(
-        tmp_path,
-        driver_state_dirname="claude",
-        base_env={"HOME": str(home)},
-        python_command=[str(fake_python)],
-    )
+    base_env = {"HOME": str(home)}
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
     command = (
         "sleep 0.1; "
         "printf 'after:%s:%s\\n' "
@@ -284,6 +393,9 @@ def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
         "PATH": os.environ.get("PATH", ""),
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
+        **shellhook.shell_steering_runtime_environment(
+            base_env=base_env, python_command=[str(fake_python)]
+        ),
     }
 
     subprocess.run([zsh, "-c", command], check=True, env=env)
@@ -306,17 +418,16 @@ def test_zsh_login_hook_reexec_restores_across_startup_files(tmp_path):
             f"print -r -- 'real:{name}' >> \"${{{SHELL_TRACE_ENV}}}\"\n",
             encoding="utf-8",
         )
-    hook_dir = shellhook.write_shell_steering_files(
-        tmp_path,
-        driver_state_dirname="codex",
-        base_env={"HOME": str(home)},
-        python_command=[str(fake_python)],
-    )
+    base_env = {"HOME": str(home)}
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
     env = {
         "HOME": str(home),
         "PATH": os.environ.get("PATH", ""),
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
+        **shellhook.shell_steering_runtime_environment(
+            base_env=base_env, python_command=[str(fake_python)]
+        ),
     }
 
     subprocess.run([zsh, "-lc", "sleep 0.1"], check=True, env=env)
@@ -343,12 +454,8 @@ def test_bash_env_hook_reexec_restores_for_nested_shells(tmp_path):
         ),
         encoding="utf-8",
     )
-    hook_dir = shellhook.write_shell_steering_files(
-        tmp_path,
-        driver_state_dirname="claude",
-        base_env={"HOME": str(home), shellhook.BASH_ENV_ENV: str(real_bash_env)},
-        python_command=[str(fake_python)],
-    )
+    base_env = {"HOME": str(home), shellhook.BASH_ENV_ENV: str(real_bash_env)}
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
     command = (
         "sleep 0.1; "
         "printf 'after:%s\\n' "
@@ -361,6 +468,9 @@ def test_bash_env_hook_reexec_restores_for_nested_shells(tmp_path):
         "PATH": os.environ.get("PATH", ""),
         shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
         SHELL_TRACE_ENV: str(trace),
+        **shellhook.shell_steering_runtime_environment(
+            base_env=base_env, python_command=[str(fake_python)]
+        ),
     }
 
     subprocess.run([bash, "-c", command], check=True, env=env)
@@ -376,12 +486,8 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
         pytest.skip("zsh is not installed")
     trace = tmp_path / "trace.log"
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
-    hook_dir = shellhook.write_shell_steering_files(
-        tmp_path,
-        driver_state_dirname="codex",
-        base_env={},
-        python_command=[str(fake_python)],
-    )
+    base_env = {}
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
     command = (
         "printf 'ran:%s:%s\\n' "
         f'"${{{shellhook.ZDOTDIR_ENV}-unset}}" '
@@ -394,6 +500,9 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
         "SHELL": zsh,
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
+        **shellhook.shell_steering_runtime_environment(
+            base_env=base_env, python_command=[str(fake_python)]
+        ),
     }
 
     completed = subprocess.run([zsh, "-c", command], check=False, env=env)
@@ -413,12 +522,8 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
         pytest.skip("bash is not installed")
     trace = tmp_path / "trace.log"
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
-    hook_dir = shellhook.write_shell_steering_files(
-        tmp_path,
-        driver_state_dirname="codex",
-        base_env={},
-        python_command=[str(fake_python)],
-    )
+    base_env = {}
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
     command = (
         "printf 'ran:%s\\n' "
         f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
@@ -429,6 +534,9 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
         "PATH": os.environ.get("PATH", ""),
         shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
         SHELL_TRACE_ENV: str(trace),
+        **shellhook.shell_steering_runtime_environment(
+            base_env=base_env, python_command=[str(fake_python)]
+        ),
     }
 
     completed = subprocess.run([bash, "-c", command], check=False, env=env)
@@ -446,16 +554,14 @@ def test_bash_env_hook_fails_noninteractive_shell_without_execution_string(tmp_p
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("bash is not installed")
-    hook_dir = shellhook.write_shell_steering_files(
-        tmp_path,
-        driver_state_dirname="codex",
-        base_env={},
-    )
+    base_env = {}
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
     script = tmp_path / "script.sh"
     script.write_text("exit 0\n", encoding="utf-8")
     env = {
         "PATH": os.environ.get("PATH", ""),
         shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
+        **shellhook.shell_steering_runtime_environment(base_env=base_env),
     }
 
     completed = subprocess.run(
