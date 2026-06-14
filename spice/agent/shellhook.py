@@ -1,19 +1,35 @@
-"""Generated shell startup hooks for agent side-channel steering."""
+"""Shell startup hooks for agent side-channel steering."""
 
 from __future__ import annotations
 
+import json
+import os
 import shlex
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from spice.paths import atomic_write_text, state_dir
+from spice.errors import SpiceError
 
 ZDOTDIR_ENV = "ZDOTDIR"
 BASH_ENV_ENV = "BASH_ENV"
-SHELL_HOOK_DIRNAME = "shell-hook"
 BASH_HOOK_NAME = "bash_env"
 ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zlogin")
+SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
+SHELL_HOOK_AGENT_RUN_ARGV_ENV = "SPICE_SHELL_HOOK_AGENT_RUN_ARGV"  # env-policy: allow
+SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV = (
+    "SPICE_SHELL_HOOK_ORIGINAL_ZDOTDIR"  # env-policy: allow
+)
+SHELL_HOOK_ORIGINAL_BASH_ENV_ENV = (
+    "SPICE_SHELL_HOOK_ORIGINAL_BASH_ENV"  # env-policy: allow
+)
+SHELL_HOOK_SURFACE_FILES = {
+    BASH_HOOK_NAME: BASH_HOOK_NAME,
+    "zshenv": ".zshenv",
+    "zprofile": ".zprofile",
+    "zlogin": ".zlogin",
+}
+SHELL_HOOK_SURFACES = tuple(SHELL_HOOK_SURFACE_FILES)
 
 
 def apply_shell_steering_environment(
@@ -23,28 +39,32 @@ def apply_shell_steering_environment(
     base_env: Mapping[str, str],
 ) -> dict[str, str]:
     env = dict(base_env)
-    hook_dir = write_shell_steering_files(
-        repo_root,
-        driver_state_dirname=driver_state_dirname,
-        base_env=env,
-    )
+    env.update(shell_steering_runtime_environment(base_env=env))
+    hook_dir = packaged_shell_steering_hook_dir()
     env[ZDOTDIR_ENV] = str(hook_dir)
     env[BASH_ENV_ENV] = str(hook_dir / BASH_HOOK_NAME)
     return env
 
 
-def write_shell_steering_files(
-    repo_root: Path,
+def packaged_shell_steering_hook_dir() -> Path:
+    hook_dir = Path(__file__).resolve().parent / "shellhooks"
+    missing = [
+        name
+        for name in (*ZSH_HOOK_NAMES, BASH_HOOK_NAME)
+        if not (hook_dir / name).is_file()
+    ]
+    if missing:
+        raise SpiceError(
+            "spice shell hook: packaged hook files missing: " + ", ".join(missing)
+        )
+    return hook_dir
+
+
+def shell_steering_runtime_environment(
     *,
-    driver_state_dirname: str,
     base_env: Mapping[str, str],
     python_command: Sequence[str] | None = None,
-) -> Path:
-    resolved_root = repo_root.expanduser().resolve()
-    hook_dir = shell_steering_hook_dir(
-        resolved_root, driver_state_dirname=driver_state_dirname
-    )
-    hook_dir.mkdir(parents=True, exist_ok=True)
+) -> dict[str, str]:
     agent_run_command = [
         *(python_command or (sys.executable,)),
         "-m",
@@ -53,42 +73,95 @@ def write_shell_steering_files(
         "run",
         "--",
     ]
-    real_zdotdir = real_zdotdir_path(base_env)
-    original_zdotdir = base_env.get(ZDOTDIR_ENV, "")
-    original_bash_env = base_env.get(BASH_ENV_ENV, "")
-    for name in ZSH_HOOK_NAMES:
-        path = hook_dir / name
-        atomic_write_text(
-            path,
-            render_shell_steering_hook(
-                agent_run_command=agent_run_command,
-                restore_lines=[
-                    restore_env_line(ZDOTDIR_ENV, original_zdotdir),
-                    restore_env_line(BASH_ENV_ENV, original_bash_env),
-                ],
-                real_source_path=real_zdotdir / name,
-                self_path=path,
-            ),
-        )
-    bash_hook = hook_dir / BASH_HOOK_NAME
-    real_bash_env = Path(original_bash_env).expanduser() if original_bash_env else None
-    atomic_write_text(
-        bash_hook,
-        render_shell_steering_hook(
-            agent_run_command=agent_run_command,
-            restore_lines=[
-                restore_env_line(ZDOTDIR_ENV, original_zdotdir),
-                restore_env_line(BASH_ENV_ENV, original_bash_env),
-            ],
-            real_source_path=real_bash_env,
-            self_path=bash_hook,
+    return {
+        SHELL_HOOK_PYTHON_ENV: sys.executable,
+        SHELL_HOOK_AGENT_RUN_ARGV_ENV: json.dumps(
+            agent_run_command, separators=(",", ":")
         ),
+        SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV: base_env.get(ZDOTDIR_ENV, ""),
+        SHELL_HOOK_ORIGINAL_BASH_ENV_ENV: base_env.get(BASH_ENV_ENV, ""),
+    }
+
+
+def render_shell_steering_hook_for_surface(
+    surface: str, *, env: Mapping[str, str] | None = None
+) -> str:
+    environment = os.environ if env is None else env
+    if surface not in SHELL_HOOK_SURFACE_FILES:
+        raise SpiceError(
+            "unsupported shell-hook surface "
+            f"{surface!r}; expected one of {', '.join(SHELL_HOOK_SURFACES)}"
+        )
+    original_zdotdir = required_shell_hook_env(
+        environment, SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV
     )
-    return hook_dir
+    original_bash_env = required_shell_hook_env(
+        environment, SHELL_HOOK_ORIGINAL_BASH_ENV_ENV
+    )
+    agent_run_command = agent_run_command_from_env(environment)
+    restore_lines = [
+        restore_env_line(ZDOTDIR_ENV, original_zdotdir),
+        restore_env_line(BASH_ENV_ENV, original_bash_env),
+    ]
+    return render_shell_steering_hook(
+        agent_run_command=agent_run_command,
+        restore_lines=restore_lines,
+        real_source_path=real_source_path_for_surface(surface, environment),
+        self_path=self_path_for_surface(surface, environment),
+    )
 
 
-def shell_steering_hook_dir(repo_root: Path, *, driver_state_dirname: str) -> Path:
-    return state_dir(repo_root) / "agents" / driver_state_dirname / SHELL_HOOK_DIRNAME
+def required_shell_hook_env(environment: Mapping[str, str], name: str) -> str:
+    if name not in environment:
+        raise SpiceError(f"spice shell hook: missing required {name}")
+    return environment[name]
+
+
+def agent_run_command_from_env(environment: Mapping[str, str]) -> list[str]:
+    raw = required_shell_hook_env(environment, SHELL_HOOK_AGENT_RUN_ARGV_ENV)
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SpiceError(
+            f"spice shell hook: {SHELL_HOOK_AGENT_RUN_ARGV_ENV} must be JSON argv"
+        ) from exc
+    if not isinstance(loaded, list):
+        raise SpiceError(
+            f"spice shell hook: {SHELL_HOOK_AGENT_RUN_ARGV_ENV} must be JSON argv"
+        )
+    command = [str(part) for part in loaded if isinstance(part, str) and part]
+    if not command:
+        raise SpiceError(
+            f"spice shell hook: {SHELL_HOOK_AGENT_RUN_ARGV_ENV} must be non-empty"
+        )
+    return command
+
+
+def real_source_path_for_surface(
+    surface: str, environment: Mapping[str, str]
+) -> Path | None:
+    if surface == BASH_HOOK_NAME:
+        original_bash_env = required_shell_hook_env(
+            environment, SHELL_HOOK_ORIGINAL_BASH_ENV_ENV
+        )
+        return Path(original_bash_env).expanduser() if original_bash_env else None
+    original_zdotdir = required_shell_hook_env(
+        environment, SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV
+    )
+    base = (
+        Path(original_zdotdir).expanduser()
+        if original_zdotdir
+        else real_zdotdir_path(environment)
+    )
+    return base / SHELL_HOOK_SURFACE_FILES[surface]
+
+
+def self_path_for_surface(surface: str, environment: Mapping[str, str]) -> Path:
+    if surface == BASH_HOOK_NAME:
+        current_bash_env = required_shell_hook_env(environment, BASH_ENV_ENV)
+        return Path(current_bash_env).expanduser()
+    current_zdotdir = required_shell_hook_env(environment, ZDOTDIR_ENV)
+    return Path(current_zdotdir).expanduser() / SHELL_HOOK_SURFACE_FILES[surface]
 
 
 def real_zdotdir_path(base_env: Mapping[str, str]) -> Path:

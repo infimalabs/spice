@@ -29,7 +29,13 @@ include = ["spice*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"spice.agent" = ["*.md"]
+"spice.agent" = [
+    "*.md",
+    "shellhooks/.zshenv",
+    "shellhooks/.zprofile",
+    "shellhooks/.zlogin",
+    "shellhooks/bash_env",
+]
 "spice.serve.static" = ["*.css", "*.js", "*.ico"]
 
 [dependency-groups]

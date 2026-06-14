@@ -1,0 +1,14 @@
+# Packaged by spice; do not edit.
+: "${SPICE_SHELL_HOOK_PYTHON:?spice shell hook: missing SPICE_SHELL_HOOK_PYTHON}"
+_spice_shell_hook_code="$("$SPICE_SHELL_HOOK_PYTHON" -m spice agent shell-hook zlogin)" || {
+  _spice_shell_hook_status=$?
+  unset _spice_shell_hook_code
+  return "$_spice_shell_hook_status" 2>/dev/null || exit "$_spice_shell_hook_status"
+}
+eval "$_spice_shell_hook_code"
+_spice_shell_hook_status=$?
+unset _spice_shell_hook_code
+if [ "$_spice_shell_hook_status" -ne 0 ]; then
+  return "$_spice_shell_hook_status" 2>/dev/null || exit "$_spice_shell_hook_status"
+fi
+unset _spice_shell_hook_status
