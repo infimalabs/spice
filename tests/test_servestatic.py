@@ -626,6 +626,54 @@ def test_static_cmd_enter_submits_focused_composer_target_only():
     assert "lane.formEl.requestSubmit();" not in app_shell
 
 
+def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
+    app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    submit_start = app_controls.index("function submitLaneForm(")
+    submit_body = app_controls[
+        submit_start : app_controls.index(
+            "\n}\n\nfunction keyboardSubmitFocusTarget", submit_start
+        )
+    ]
+    focus_start = app_controls.index("function keyboardSubmitFocusTarget(")
+    focus_body = app_controls[focus_start : app_controls.index("\n}", focus_start)]
+    result_start = app_stream.index("function applyLaneSendResult(")
+    result_body = app_stream[
+        result_start : app_stream.index(
+            "\n}\n\nfunction focusAfterComposerReset", result_start
+        )
+    ]
+    focus_reset_start = app_stream.index("function focusAfterComposerReset(")
+    focus_reset_body = app_stream[
+        focus_reset_start : app_stream.index("\n}", focus_reset_start)
+    ]
+
+    assert "const focusAfterReset = keyboardSubmitFocusTarget(" in submit_body
+    assert "{ focusAfterReset }" in submit_body
+    assert 'if (event.type !== "keydown") return null;' in focus_body
+    assert "if (!(target instanceof HTMLTextAreaElement)) return null;" in focus_body
+    assert "if (!target.dataset.quoteDraftId) return null;" in focus_body
+    assert (
+        'throw new Error("keyboard quote submit requires main composer");' in focus_body
+    )
+    assert "return textarea;" in focus_body
+    assert (
+        "function enqueueSend(lane, payload, sourceLane = lane, options = {})"
+        in app_stream
+    )
+    assert "sendLanePayload(lane, payload, sourceLane, options);" in app_stream
+    assert "options = {}," in result_body
+    assert (
+        "resetLaneComposerDraft(sourceLane, lane.targetId);\n"
+        "  focusAfterComposerReset(options.focusAfterReset);"
+    ) in result_body
+    assert (
+        'throw new Error("composer focus target must remain in the document");'
+        in focus_reset_body
+    )
+    assert "element.focus({ preventScroll: true });" in focus_reset_body
+
+
 def test_static_css_adds_visible_nested_quote_depth():
     css = _serve_css_text()
     ack_selector = ".ack-quote {\n  background"
