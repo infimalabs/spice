@@ -36,9 +36,23 @@ def configure_dev_parser(subparsers: Any) -> None:
     pre_commit = actions.add_parser(
         "pre-commit",
         help="Hook backend for staged commit checks; commit normally to run it.",
-        recovery_examples=("spice dev pre-commit --hook",),
+        recovery_examples=("git commit", "spice dev pre-commit --help"),
     )
-    pre_commit.add_argument("--hook", action="store_true", help=argparse.SUPPRESS)
+    pre_commit.add_argument(
+        "--consider-simply-committing-instead",
+        action="store_true",
+        dest="consider_simply_committing_instead",
+        help=(
+            "Acknowledge this is a git hook backend; prefer committing "
+            "normally so the hook runs once."
+        ),
+    )
+    pre_commit.add_argument(
+        "--hook",
+        action="store_true",
+        dest="git_hook_entrypoint",
+        help=argparse.SUPPRESS,
+    )
     pre_commit.set_defaults(func=handle_dev)
 
     actions.add_parser(
@@ -97,6 +111,13 @@ def handle_dev(args: argparse.Namespace) -> int:
     if command == "pre-commit":
         from spice.hooks.precommit import handle_pre_commit
 
+        if not getattr(args, "git_hook_entrypoint", False) or not getattr(
+            args, "consider_simply_committing_instead", False
+        ):
+            raise SpiceError(
+                "spice dev pre-commit is a git hook backend; commit normally "
+                "to run it once"
+            )
         return handle_pre_commit(repo_root)
     if command == "serve-web-typecheck":
         from spice.serve.typecheck import run_serve_web_typecheck

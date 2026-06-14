@@ -5,6 +5,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -414,6 +415,15 @@ def test_install_hooks_writes_reference_transaction_shim(tmp_path):
     )
 
 
+def test_install_hooks_writes_pre_commit_git_hook_entrypoint_shim(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+
+    install_hooks_for_repo(repo)
+
+    content = (hooks_dir(repo) / "pre-commit").read_text(encoding="utf-8")
+    assert "dev pre-commit --consider-simply-committing-instead --hook" in content
+
+
 def test_install_hooks_prefer_worktree_spice_source_for_spice_checkout(tmp_path):
     repo = _git_init(tmp_path / "repo")
     _write_spice_product_shape(repo)
@@ -472,6 +482,56 @@ def test_dev_serve_web_typecheck_parser_exposes_command():
     args = build_parser().parse_args(["dev", "serve-web-typecheck"])
 
     assert args.dev_command == "serve-web-typecheck"
+
+
+def test_dev_pre_commit_parser_accepts_generated_git_hook_entrypoint_flag():
+    from spice.cli.parser import build_parser
+
+    args = build_parser().parse_args(
+        ["dev", "pre-commit", "--consider-simply-committing-instead", "--hook"]
+    )
+
+    assert args.dev_command == "pre-commit"
+    assert args.consider_simply_committing_instead is True
+    assert args.git_hook_entrypoint is True
+
+
+def test_dev_pre_commit_manual_run_pushes_to_commit(tmp_path, monkeypatch):
+    from spice.hooks import cli as hooks_cli
+
+    monkeypatch.setattr(hooks_cli, "require_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SpiceError, match="commit normally"):
+        hooks_cli.handle_dev(
+            SimpleNamespace(
+                dev_command="pre-commit",
+                consider_simply_committing_instead=False,
+                git_hook_entrypoint=False,
+            )
+        )
+
+
+def test_dev_pre_commit_generated_hook_entrypoint_runs_gate(tmp_path, monkeypatch):
+    from spice.hooks import cli as hooks_cli
+
+    calls: list[Path] = []
+    monkeypatch.setattr(hooks_cli, "require_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        precommit,
+        "handle_pre_commit",
+        lambda repo_root: calls.append(repo_root) or 0,
+    )
+
+    result = hooks_cli.handle_dev(
+        SimpleNamespace(
+            dev_command="pre-commit",
+            consider_simply_committing_instead=True,
+            git_hook_entrypoint=True,
+        )
+    )
+
+    assert result == 0
+    assert calls == [tmp_path]
 
 
 def test_serve_web_typecheck_skips_repo_without_sources(tmp_path, monkeypatch):

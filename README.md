@@ -168,7 +168,7 @@ or first add the helper to this seam with tests and a stability note.
 | Sessions | `spice session` | Transcript forensics: the no-arg briefing is the primary rehydration product, with context-pressure metering. |
 | Interface | `spice serve` | Localhost web UI: lanes over worktrees, live transcript streams, lifetime control (Renew / Steer / Drive), task-filter routing, fused lane groups backed by server-side teams; `spice serve teams` and `spice serve browser-artifact-path <file>` expose operator diagnostics for smoke runs. |
 | Conscience | `spice maxim …` | Builtin maxims judged against assistant prose by a local model; violations come back as inbox steering. |
-| Constitution | `spice dev pre-commit` / `spice study …` | Namespace packages, path shape, LOC/byte/complexity flex+sticky gates, magic-number ratchet, env-literal inventory, commit-message policy. |
+| Constitution | git pre-commit hook / `spice study …` | Namespace packages, path shape, LOC/byte/complexity flex+sticky gates, magic-number ratchet, env-literal inventory, commit-message policy. |
 
 Session analysis is intentionally tiered. The current tier includes
 `spice session phases` for contiguous working-phase spans and
