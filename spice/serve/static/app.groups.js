@@ -210,6 +210,9 @@ function fusedLaneStatusWord(status) {
 
 function syncLaneCloseButton(lane, fused) {
   lane.closeButtonEl.innerHTML = fused ? laneBreakIconSvg : laneCloseIconSvg;
+  lane.closeButtonEl.disabled = false;
+  lane.closeButtonEl.removeAttribute("aria-hidden");
+  lane.closeButtonEl.removeAttribute("tabindex");
   const label = fused ? "Split lane group" : "Close lane";
   lane.closeButtonEl.title = label;
   lane.closeButtonEl.setAttribute("aria-label", label);

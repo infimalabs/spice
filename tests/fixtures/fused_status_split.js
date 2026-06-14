@@ -58,6 +58,9 @@ function fakeLane(targetId, agentName, branchName, statusLine) {
       setAttribute(name, value) {
         this[name] = value;
       },
+      removeAttribute(name) {
+        delete this[name];
+      },
     },
   };
 }
