@@ -5,9 +5,9 @@ rules apply to the agents working here.
 
 ## Control plane
 
-- Run shell commands through `./spice.sh` (equivalently
-  `spice agent run -- <command>`). The wrapper injects pending inbox steering
-  and context pressure on stderr; bypassing it means missing steering.
+- Run shell commands normally. Spice shell startup hooks reexec zsh/bash
+  commands through `spice agent run -- <command>`, which injects pending inbox
+  steering and context pressure on stderr before the requested command.
 - `spice` is the canonical control plane. Start every session with:
   1. `spice agent activation`
   2. `spice session`

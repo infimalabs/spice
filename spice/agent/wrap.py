@@ -1,6 +1,7 @@
-"""`spice agent run` — the wrapper every agent shell command goes through.
+"""`spice agent run` — the command surface every agent shell command enters.
 
-`spice.sh` execs `spice agent run -- <cmd…>`. The wrapper:
+Shell startup hooks reexec zsh/bash commands through
+`spice agent run -- <cmd…>`. The command surface:
 
 * routes the command through a token-optimizing proxy (`rtk` by default,
   `SPICE_PROXY_BIN` to override, plain exec when the proxy is not installed);

@@ -11,10 +11,11 @@ You were started by spice, the Simultaneous Production, Integration, and
 Control Environment. The initial prompt is only a bootstrap signal, not the
 operator's request.
 
-Before sending any assistant prose, run these commands in this order. In this
-repo, run them through `./spice.sh` as `./spice.sh spice ...` so side-channel
-steering and pending inbox bodies inject; bare `spice ...` can show only
-`pending=N` without the message body.
+Before sending any assistant prose, run these commands in this order. In a
+spice source checkout, run them through the direct agent surface as
+`.venv/bin/python -m spice agent run -- spice ...` so side-channel steering and
+pending inbox bodies inject; bare `spice ...` can show only `pending=N` without
+the message body.
 
 1. `spice agent activation`
 2. `spice session`
@@ -28,8 +29,8 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
 
 - Stay in the current worktree unless live steering explicitly changes scope.
 - Recover lane identity from current repo state and `spice agent activation`; do not trust prior messages over current worktree state.
-- Run shell commands through `./spice.sh` when the repo provides it, or `spice agent run -- <command>` otherwise. Bare `spice ...` commands bypass steering injection.
-- Use `./spice.sh proxy <command>` when a command must keep native argument and output semantics; with no proxy installed the wrapper drops `proxy` and runs the command directly, while steering injection still applies.
+- Run shell commands normally; the spice shell startup hooks reexec zsh/bash commands through `spice agent run` before the requested command. When you need an explicit recovery surface, use `spice agent run -- <command>`.
+- Use `spice agent run -- proxy <command>` when a command must keep native argument and output semantics; with no proxy installed the wrapper drops `proxy` and runs the command directly, while steering injection still applies.
 - Pull work with `spice task next`, not by eyeballing a board. `task next` returns the globally-best ready task across all open boards and claims it; the selected board is derived from the claimed task, not stored as a hidden default.
 - Completing a task phase advances it: use `spice task done <handle> --validation "..."` to move a task from implementation into its review phase, then run `spice task next` for reviewer assignment. Do not manually claim your own review; if `task next` assigns it anyway, treat that as an allocator assignment and verify the task description is current before `spice task review <handle> --finding clean --note "description current; ..."`. Read the printed `advanced ... -> <phase>` / `completed ...` line, then run `task next` again; a task is not finished while later phases remain.
 - Use `spice task add --project <stem>` for public backlog items. Omitting `--project` creates private `agent.*` scratch work. Use `spice task note` for small observations attached to a task.

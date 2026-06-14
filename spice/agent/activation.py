@@ -49,9 +49,9 @@ def activation_browser_validation_lines() -> list[str]:
 def activation_command_surface_lines() -> list[str]:
     return [
         (
-            "command_wrapper=run every shell command through ./spice.sh "
-            "(or spice agent run -- <command>) so inbox steering and context "
-            "warnings inject; bare spice commands bypass the side channel"
+            "command_surface=run shell commands normally; spice shell startup "
+            "hooks reexec zsh/bash commands through spice agent run so inbox "
+            "steering and context warnings inject before the requested command"
         ),
         "session=spice session",
         "task_status=spice task status",
@@ -69,10 +69,10 @@ def activation_command_surface_lines() -> list[str]:
         ),
         (
             "pending_inbox_recovery=if spice session only shows pending=N "
-            "without bodies, run the next command through ./spice.sh to print "
-            "the pending steering readout"
+            "without bodies, run the next command through spice agent run -- "
+            "to print the pending steering readout"
         ),
-        "inbox_steering=automatic wrapper/side-channel injection; no public mail command",
+        "inbox_steering=automatic shell/side-channel injection; no public mail command",
         "side_channel=operator steering arrives through the supervisor socket",
         "initial_prompt_policy=skill_invocation_only",
     ]

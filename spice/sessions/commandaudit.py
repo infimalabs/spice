@@ -1,4 +1,4 @@
-"""Wrapper and pipeline audit for reconstructed shell commands."""
+"""Agent-run and pipeline audit for reconstructed shell commands."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from spice.sessions.commandrecords import CommandRecord
-
-WRAPPER_SCRIPT_BASENAME = "spice.sh"
 
 
 @dataclass(frozen=True)
@@ -165,8 +163,6 @@ def _parts_start_with_wrapper(parts: list[str]) -> bool:
     parts = _strip_leading_env_assignments(parts)
     if not parts:
         return False
-    if _is_wrapper_script_launcher(parts[0]):
-        return True
     return _parts_start_with_spice_agent_run(parts)
 
 
@@ -178,12 +174,6 @@ def _parts_start_with_spice_agent_run(parts: list[str]) -> bool:
     if len(parts) >= 5 and parts[:5] == ["uv", "run", "spice", "agent", "run"]:
         return len(parts) == 5 or parts[5] == "--"
     return False
-
-
-def _is_wrapper_script_launcher(command_name: str) -> bool:
-    return command_name == f"./{WRAPPER_SCRIPT_BASENAME}" or command_name.endswith(
-        f"/{WRAPPER_SCRIPT_BASENAME}"
-    )
 
 
 def _strip_leading_env_assignments(parts: list[str]) -> list[str]:
@@ -202,8 +192,6 @@ def command_label(command: str) -> str:
     parts = _strip_leading_env_assignments(shell_command_parts(command))
     if not parts:
         return "-"
-    if _is_wrapper_script_launcher(parts[0]) and len(parts) > 1:
-        return f"{WRAPPER_SCRIPT_BASENAME} {parts[1]}"
     if _parts_start_with_spice_agent_run(parts):
         return "spice agent run"
     return parts[0]

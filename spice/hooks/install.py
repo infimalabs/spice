@@ -5,8 +5,7 @@ worktree-local `core.hooksPath`, so nothing spice writes collides with hooks
 the repo may already track. The shims bake in the absolute interpreter of the
 installation that ran `spice init`, but when the repo itself provides spice
 source they put the worktree first on PYTHONPATH before running `python -m
-spice`. The tracked `spice.sh` shim uses the same precedence; ordinary target
-repos use the installed product.
+spice`; ordinary target repos use the installed product.
 """
 
 from __future__ import annotations
@@ -25,27 +24,6 @@ HOOK_ARGS = {
     "commit-msg": 'dev commit-msg "$1"',
     "reference-transaction": 'dev reference-transaction "$1"',
 }
-AGENT_SH = """#!/usr/bin/env sh
-set -eu
-
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-
-if [ -f "$repo_root/spice/__main__.py" ] && [ -f "$repo_root/spice/cli/entry.py" ] && [ -f "$repo_root/spice/agent/wrap.py" ]; then
-    if [ ! -x "$repo_root/.venv/bin/python" ]; then
-        echo "spice.sh: local spice checkout requires $repo_root/.venv/bin/python" >&2
-        exit 127
-    fi
-    export PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}"
-    if ! probe=$("$repo_root/.venv/bin/python" -c 'import spice.cli.entry, spice.agent.wrap' 2>&1); then
-        echo "spice.sh: the local spice checkout at $repo_root cannot import; repair the file named below (look for conflict markers), or run the installed spice entrypoint until the checkout is fixed" >&2
-        printf '%s\\n' "$probe" >&2
-        exit 127
-    fi
-    exec "$repo_root/.venv/bin/python" -m spice agent run -- "$@"
-fi
-
-exec spice agent run -- "$@"
-"""
 
 
 def hook_shim_content(repo_root: Path, args: str) -> str:
@@ -82,14 +60,6 @@ def install_hooks_for_repo(repo_root: Path) -> list[str]:
     return rows
 
 
-def write_agent_shim(repo_root: Path) -> Path:
-    path = repo_root / "spice.sh"
-    if not path.exists() or path.read_text(encoding="utf-8") != AGENT_SH:
-        path.write_text(AGENT_SH, encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    return path
-
-
 def _enable_worktree_config(repo_root: Path) -> None:
     # `git config --worktree` requires extensions.worktreeConfig in multi-
     # worktree repos; setting it in the common config is idempotent.
@@ -114,15 +84,13 @@ def exclude_rows() -> list[str]:
 
 
 def init_repo(repo_root: Path) -> list[str]:
-    """`spice init`: hooks, agent shim, skill copy, state scaffolding."""
+    """`spice init`: hooks, skill copy, state scaffolding."""
     from spice.agent.lifecycle import (
         WORKTREE_SKILL_RELATIVE_PATH,
         materialize_worktree_skill,
     )
 
     rows = install_hooks_for_repo(repo_root)
-    shim = write_agent_shim(repo_root)
-    rows.append(f"agent_shim={shim.relative_to(repo_root).as_posix()}")
     if materialize_worktree_skill(repo_root) is not None:
         rows.append(f"skill={WORKTREE_SKILL_RELATIVE_PATH.as_posix()}")
     # `.spice/` and the materialized skill copy are machine-local; exclude

@@ -71,21 +71,20 @@ tool selecting its operator.
 ```sh
 pip install spice-harness    # or: uv tool install spice-harness
 cd /path/to/your/repo
-spice init               # hooks, spice.sh shim, state scaffolding
+spice init               # hooks, skill copy, state scaffolding
 spice dev doctor         # verify drivers, backends, and policy
 ```
 
 `spice init` writes machine-local git hook shims under `.spice/` (ignored via
-`.git/info/exclude`) and a tracked `spice.sh` shim. Repo-tracked policy lives
-in your `pyproject.toml` under `[tool.spice.*]` tables. Entrypoint resolution
-is worktree-true: when the current repo is the spice source checkout, generated
-shims and supervisor children put that checkout first on `PYTHONPATH` and run
-`python -m spice`; ordinary target repos use the installed product.
-In a spice source checkout, `./spice.sh python …` and `./spice.sh python3 …`
-also resolve to the same checkout venv interpreter used by the harness itself.
-In ordinary target repos, those aliases use `$VIRTUAL_ENV/bin/python` when set,
-otherwise `.venv/bin/python` under the repo root; use an explicit interpreter
-path if a probe intentionally needs some other Python.
+`.git/info/exclude`), materializes the worktree skill copy, and prepares state
+scaffolding. Repo-tracked policy lives in your `pyproject.toml` under
+`[tool.spice.*]` tables. Entrypoint resolution is worktree-true: when the
+current repo is the spice source checkout, generated shims and supervisor
+children put that checkout first on `PYTHONPATH` and run `python -m spice`;
+ordinary target repos use the installed product. Agent shell startup hooks
+reexec zsh/bash commands through `spice agent run -- <cmd>` so steering,
+context warnings, git-shadow routing, proxy routing, and configured wrapper
+groups run before the requested command.
 
 A project can set its default supervised-agent launch model and thinking in
 tracked config, either by editing `pyproject.toml` or by running
@@ -162,7 +161,7 @@ or first add the helper to this seam with tests and a stability note.
 
 | Surface | Command | What it does |
 | --- | --- | --- |
-| Wrapper | `spice agent run -- <cmd>` (or `./spice.sh`) | Runs shell commands with proxy routing, git-shadow env, and steering injection on stderr. |
+| Command surface | `spice agent run -- <cmd>` | Runs shell commands with proxy routing, git-shadow env, configured wrapper groups, and steering injection on stderr. |
 | Lifecycle | `spice agent ensure` / `supervise` | One worktree-bound agent per worktree, started under a neutral skill prompt, watched by a durable supervisor. |
 | Steering | filesystem inbox under `.spice/inbox/` | Durable operator messages; items retire only when the agent semantically ACKs their key in its transcript. |
 | Tasks | `spice task …` | Phase-native Taskwarrior board shared by all worktrees; `task next` is allocator-owned; git sync happens at task boundaries. |
