@@ -218,6 +218,35 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     delete.add_argument("--reason", required=True)
     delete.set_defaults(func=handle)
 
+    adopt = actions.add_parser(
+        "adopt",
+        help="Fold an existing orphan commit into a (new or given) task.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "A commit made outside a claimed task's window (after task done, or "
+            "before a claim) is an orphan: task next refuses new work while it "
+            "sits ahead of the baseline. adopt claims a task over the orphan "
+            "WITHOUT the baseline fast-forward a normal claim performs, so the "
+            "work is captured through the usual task done/review flow instead of "
+            "a reset+redo. With no handle it mints a task (title defaults to the "
+            "orphan commit subject); with a handle it claims that task.\n\n"
+            "Examples:\n"
+            "  spice task adopt\n"
+            '  spice task adopt --project task.cli --title "Capture orphan fix"\n'
+            "  spice task adopt TASK-20260609T203539640394Z"
+        ),
+        recovery_examples=(
+            "spice task adopt",
+            "spice task adopt TASK-20260609T203539640394Z",
+        ),
+    )
+    adopt.add_argument("handle", nargs="?")
+    adopt.add_argument("--title")
+    adopt.add_argument("--project")
+    adopt.add_argument("--description", action="append", default=[])
+    adopt.add_argument("--priority", default=config.DEFAULT_PRIORITY)
+    adopt.set_defaults(func=handle)
+
 
 def _configure_add_parser(actions: Any) -> None:
     add = actions.add_parser(
@@ -463,6 +492,13 @@ _DISPATCH = {
     "claim": lambda a: ops.claim(a.handle, steal=a.steal),
     "unclaim": lambda a: ops.unclaim(a.handle),
     "delete": lambda a: ops.delete(a.handle, a.reason),
+    "adopt": lambda a: ops.adopt(
+        a.handle,
+        title=a.title,
+        project=a.project,
+        description=_description(list(a.description)) or None,
+        priority=a.priority,
+    ),
 }
 
 

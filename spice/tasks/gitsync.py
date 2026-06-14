@@ -112,6 +112,25 @@ def _worktree_dirty(repo_root: Path) -> bool:
     return _read(repo_root, "status", "--porcelain") != ""
 
 
+def commits_ahead_of_baseline(repo_root: Path | None = None) -> int:
+    """Count local commits ahead of the task baseline.
+
+    This is exactly the quantity ``prepare_for_claim`` refuses to start new
+    work over: commits on HEAD not yet recorded by a completed task. With no
+    configured remote there is no baseline to be ahead of, so the count is 0.
+    """
+    root = repo_root or config.repo_root()
+    resolved = _resolve_target(root)
+    if resolved is None:
+        return 0
+    _, baseline = resolved
+    ahead = _read(root, "rev-list", "--count", f"{baseline}..HEAD")
+    try:
+        return int(ahead)
+    except ValueError:
+        return 0
+
+
 def prepare_for_claim(repo_root: Path | None = None) -> SyncResult:
     """Fast-forward-only update to the current baseline before a claim records
     HEAD.
