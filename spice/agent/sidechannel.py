@@ -121,7 +121,12 @@ class AgentSideChannelServer:
                         connection.sendall(diagnostic.encode("utf-8", errors="replace"))
                     return
                 if "streamUntilParentExit" in payload:
-                    self._stream_payloads(connection)
+                    self._stream_payloads(
+                        connection,
+                        initial_payload_already_rendered=bool(
+                            payload.get("initialPayloadAlreadyRendered")
+                        ),
+                    )
                     return
                 return
             elif line:
@@ -129,7 +134,12 @@ class AgentSideChannelServer:
                     connection.sendall(line)
             _echo_connection(connection)
 
-    def _stream_payloads(self, connection: socket.socket) -> None:
+    def _stream_payloads(
+        self,
+        connection: socket.socket,
+        *,
+        initial_payload_already_rendered: bool = False,
+    ) -> None:
         try:
             wake_reader, wake_writer = socket.socketpair()
         except OSError:
@@ -157,10 +167,11 @@ class AgentSideChannelServer:
                 context_injector.inject(force=False)
 
         try:
-            try:
-                emit()
-            except OSError:
-                return
+            if not initial_payload_already_rendered:
+                try:
+                    emit()
+                except OSError:
+                    return
             while not self._stopping.is_set():
                 try:
                     readable, _, _ = select.select([connection, wake_reader], [], [])

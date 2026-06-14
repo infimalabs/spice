@@ -113,6 +113,7 @@ def run_agent_command(
     popen_factory: ProcessFactory = subprocess.Popen,
     stderr: TextIO = sys.stderr,
 ) -> int:
+    emit_initial_side_channel_payload(repo_root, stderr=stderr)
     command = build_agent_run_command(raw_args, repo_root=repo_root)
     environment = build_agent_run_environment(raw_args, repo_root=repo_root)
     if environment is None:
@@ -120,7 +121,10 @@ def run_agent_command(
     else:
         process = popen_factory(command, env=environment)
     watch_thread = start_agent_side_channel_watch(
-        repo_root, parent_pid=int(getattr(process, "pid", 0) or 0), stderr=stderr
+        repo_root,
+        parent_pid=int(getattr(process, "pid", 0) or 0),
+        stderr=stderr,
+        initial_payload_already_rendered=True,
     )
     try:
         wait = getattr(process, "wait", None)
@@ -131,6 +135,19 @@ def run_agent_command(
         return int(returncode if returncode is not None else INTERRUPTED_EXIT_CODE)
     finally:
         join_agent_side_channel_watch(watch_thread)
+
+
+def emit_initial_side_channel_payload(
+    repo_root: Path | None, *, stderr: TextIO = sys.stderr
+) -> None:
+    if repo_root is None:
+        return
+    from spice.agent.sidechannel import render_side_channel_payload
+
+    payload = render_side_channel_payload(repo_root)
+    if payload:
+        stderr.write(payload)
+        stderr.flush()
 
 
 def build_agent_run_command(
@@ -258,13 +275,22 @@ def requires_native_find_semantics(args: Sequence[str]) -> bool:
 
 
 def start_agent_side_channel_watch(
-    repo_root: Path | None, *, parent_pid: int, stderr: TextIO
+    repo_root: Path | None,
+    *,
+    parent_pid: int,
+    stderr: TextIO,
+    initial_payload_already_rendered: bool = False,
 ) -> Thread | None:
     if parent_pid <= 0 or active_agent_side_channel_socket_path(repo_root) is None:
         return None
     thread = Thread(
         target=watch_agent_side_channel,
-        kwargs={"repo_root": repo_root, "parent_pid": parent_pid, "stderr": stderr},
+        kwargs={
+            "repo_root": repo_root,
+            "parent_pid": parent_pid,
+            "stderr": stderr,
+            "initial_payload_already_rendered": initial_payload_already_rendered,
+        },
         daemon=True,
     )
     thread.start()
@@ -281,6 +307,7 @@ def watch_agent_side_channel(
     *,
     parent_pid: int,
     stderr: TextIO = sys.stderr,
+    initial_payload_already_rendered: bool = False,
 ) -> None:
     socket_path = active_agent_side_channel_socket_path(repo_root)
     if socket_path is None:
@@ -297,6 +324,7 @@ def watch_agent_side_channel(
                     repo_root,
                     runner="agent.run.watch",
                     stream_until_parent_exit=parent_pid,
+                    initial_payload_already_rendered=initial_payload_already_rendered,
                 ),
                 separators=(",", ":"),
             ).encode("utf-8")
@@ -329,6 +357,7 @@ def agent_side_channel_hello(
     *,
     runner: str = "agent.run",
     stream_until_parent_exit: int | None = None,
+    initial_payload_already_rendered: bool = False,
 ) -> dict[str, object]:
     hello: dict[str, object] = {
         "type": "hello",
@@ -340,6 +369,7 @@ def agent_side_channel_hello(
     }
     if stream_until_parent_exit is not None:
         hello["streamUntilParentExit"] = stream_until_parent_exit
+        hello["initialPayloadAlreadyRendered"] = initial_payload_already_rendered
     return hello
 
 
