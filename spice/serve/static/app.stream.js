@@ -711,7 +711,7 @@ function messageFingerprintParts(lane, item) {
 
 // ---- send -----------------------------------------------------------------------
 
-function enqueueSend(lane, payload, sourceLane = lane) {
+function enqueueSend(lane, payload, sourceLane = lane, options = {}) {
   if (!isLaneOpen(lane)) return;
   if (!payload.text.trim()) {
     setLaneTransientStatus(sourceLane, "Message text is required.");
@@ -722,10 +722,10 @@ function enqueueSend(lane, payload, sourceLane = lane) {
     return;
   }
   beginLanePendingSubmission(lane);
-  sendLanePayload(lane, payload, sourceLane);
+  sendLanePayload(lane, payload, sourceLane, options);
 }
 
-async function sendLanePayload(lane, payload, sourceLane = lane) {
+async function sendLanePayload(lane, payload, sourceLane = lane, options = {}) {
   lane.sendAwaitingBackendCount += 1;
   try {
     const response = await liveBusRequest("lane.send", {
@@ -734,7 +734,7 @@ async function sendLanePayload(lane, payload, sourceLane = lane) {
     });
     const result = response.result || {};
     if (!isLaneOpen(lane)) return;
-    applyLaneSendResult(lane, payload, result, sourceLane);
+    applyLaneSendResult(lane, payload, result, sourceLane, options);
     await refreshLane(lane);
   } catch (error) {
     if (isLaneOpen(lane)) {
@@ -749,7 +749,13 @@ async function sendLanePayload(lane, payload, sourceLane = lane) {
   }
 }
 
-function applyLaneSendResult(lane, payload, result, sourceLane = lane) {
+function applyLaneSendResult(
+  lane,
+  payload,
+  result,
+  sourceLane = lane,
+  options = {},
+) {
   applyTaskDrainRouteConfig(lane, result);
   if (!result.ok) {
     finishLanePendingSubmission(lane, { accepted: false });
@@ -757,6 +763,7 @@ function applyLaneSendResult(lane, payload, result, sourceLane = lane) {
     return;
   }
   resetLaneComposerDraft(sourceLane, lane.targetId);
+  focusAfterComposerReset(options.focusAfterReset);
   finishLanePendingSubmission(lane, {
     accepted: true,
     pendingInboxCount: result.pendingInboxCount,
@@ -782,6 +789,15 @@ function applyLaneSendResult(lane, payload, result, sourceLane = lane) {
       subscribeLaneToLiveBus(lane);
     }
   }
+}
+
+function focusAfterComposerReset(element) {
+  if (!element) return;
+  if (!(element instanceof HTMLElement))
+    throw new Error("composer focus target must be an element");
+  if (!document.contains(element))
+    throw new Error("composer focus target must remain in the document");
+  element.focus({ preventScroll: true });
 }
 
 // ---- task drain (lifetime + filter routing) -------------------------------------
