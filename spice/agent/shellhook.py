@@ -78,12 +78,42 @@ def shell_steering_runtime_environment(
     python = single_python_executable(python_command or (sys.executable,))
     env = {
         SHELL_HOOK_PYTHON_ENV: python,
-        SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV: base_env.get(ZDOTDIR_ENV, ""),
-        SHELL_HOOK_ORIGINAL_BASH_ENV_ENV: base_env.get(BASH_ENV_ENV, ""),
+        SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV: original_shell_startup_value(
+            base_env,
+            original_name=SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV,
+            active_name=ZDOTDIR_ENV,
+        ),
+        SHELL_HOOK_ORIGINAL_BASH_ENV_ENV: original_shell_startup_value(
+            base_env,
+            original_name=SHELL_HOOK_ORIGINAL_BASH_ENV_ENV,
+            active_name=BASH_ENV_ENV,
+        ),
     }
     if repo_root is not None:
         env[SHELL_HOOK_REPO_ROOT_ENV] = str(repo_root.resolve())
     return env
+
+
+def original_shell_startup_value(
+    base_env: Mapping[str, str], *, original_name: str, active_name: str
+) -> str:
+    for name in (original_name, active_name):
+        value = base_env.get(name, "")
+        if value and not is_generated_shell_hook_path(value):
+            return value
+    return ""
+
+
+def is_generated_shell_hook_path(value: str) -> bool:
+    path = Path(value).expanduser()
+    hook_dir = path.parent if path.name == BASH_HOOK_NAME else path
+    parts = hook_dir.parts
+    return (
+        len(parts) >= 3
+        and parts[-1] == "shellhooks"
+        and parts[-2] == "agent"
+        and parts[-3] == "spice"
+    )
 
 
 def render_shell_steering_hook_for_surface(
@@ -125,7 +155,7 @@ def agent_run_command_from_env(environment: Mapping[str, str]) -> str:
     python = required_shell_hook_env(environment, SHELL_HOOK_PYTHON_ENV).strip()
     if not python:
         raise SpiceError(f"spice shell hook: {SHELL_HOOK_PYTHON_ENV} must be non-empty")
-    return f"{shell_quote(python)} -m spice agent run --"
+    return f"{shell_quote(python)} -m spice agent run"
 
 
 def single_python_executable(command: Sequence[str]) -> str:
@@ -380,14 +410,14 @@ def agent_run_reexec_lines(*, agent_run_command: str) -> list[str]:
         "    fi",
         "    if [[ -o login ]]; then",
         (
-            f'      exec {agent_run_command} "$_spice_shell_bin" '
+            f'      exec {agent_run_command} --preserve-shell-hook-env -- "$_spice_shell_bin" '
             '-lc "$ZSH_EXECUTION_STRING"'
         ),
         ('      printf "%s\\n" "spice shell hook: failed to exec agent run" >&2'),
         "      exit 127",
         "    fi",
         (
-            f'    exec {agent_run_command} "$_spice_shell_bin" '
+            f'    exec {agent_run_command} --preserve-shell-hook-env -- "$_spice_shell_bin" '
             '-c "$ZSH_EXECUTION_STRING"'
         ),
         '    printf "%s\\n" "spice shell hook: failed to exec agent run" >&2',
@@ -405,14 +435,14 @@ def agent_run_reexec_lines(*, agent_run_command: str) -> list[str]:
         "    fi",
         "    if shopt -q login_shell; then",
         (
-            f'      exec {agent_run_command} "$_spice_shell_bin" '
+            f'      exec {agent_run_command} --preserve-shell-hook-env -- "$_spice_shell_bin" '
             '-lc "$BASH_EXECUTION_STRING"'
         ),
         ('      printf "%s\\n" "spice shell hook: failed to exec agent run" >&2'),
         "      exit 127",
         "    fi",
         (
-            f'    exec {agent_run_command} "$_spice_shell_bin" '
+            f'    exec {agent_run_command} --preserve-shell-hook-env -- "$_spice_shell_bin" '
             '-c "$BASH_EXECUTION_STRING"'
         ),
         '    printf "%s\\n" "spice shell hook: failed to exec agent run" >&2',
@@ -430,7 +460,6 @@ def agent_run_reexec_lines(*, agent_run_command: str) -> list[str]:
         "      ;;",
         "  esac",
         "fi",
-        f"unset {SHELL_HOOK_REEXEC_STAGE_ENV}",
     ]
 
 
