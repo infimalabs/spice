@@ -442,8 +442,14 @@ def test_wrapper_missing_proxy_plain_exec_starts_side_channel_watch(
         )
         return FakeProcess()
 
-    def fake_watch(repo_root, *, parent_pid, stderr):
-        events.append(("watch", repo_root, (parent_pid, stderr)))
+    def fake_watch(repo_root, *, parent_pid, stderr, initial_payload_already_rendered):
+        events.append(
+            (
+                "watch",
+                repo_root,
+                (parent_pid, stderr, initial_payload_already_rendered),
+            )
+        )
         return watch_thread
 
     def fake_join(thread):
@@ -462,7 +468,7 @@ def test_wrapper_missing_proxy_plain_exec_starts_side_channel_watch(
     assert exit_code == 7
     assert events == [
         ("popen", ["find", ".", "-maxdepth", "0", "-print"], (None, None)),
-        ("watch", tmp_path, (123, stderr)),
+        ("watch", tmp_path, (123, stderr, True)),
         ("wait", None, None),
         ("join", watch_thread, None),
     ]
@@ -547,8 +553,14 @@ def test_wrapper_runs_implicit_find_natively_even_when_proxy_is_installed(
         )
         return FakeProcess()
 
-    def fake_watch(repo_root, *, parent_pid, stderr):
-        events.append(("watch", repo_root, (parent_pid, stderr)))
+    def fake_watch(repo_root, *, parent_pid, stderr, initial_payload_already_rendered):
+        events.append(
+            (
+                "watch",
+                repo_root,
+                (parent_pid, stderr, initial_payload_already_rendered),
+            )
+        )
         return watch_thread
 
     def fake_join(thread):
@@ -567,7 +579,7 @@ def test_wrapper_runs_implicit_find_natively_even_when_proxy_is_installed(
     assert exit_code == 0
     assert events == [
         ("popen", ["find", ".", "-name", "*.py"], (None, None)),
-        ("watch", tmp_path, (321, stderr)),
+        ("watch", tmp_path, (321, stderr, True)),
         ("wait", None, None),
         ("join", watch_thread, None),
     ]
@@ -806,6 +818,31 @@ def test_run_agent_command_does_not_duplicate_initial_side_channel_with_watch(
     output = stderr.getvalue()
     assert exit_code == 0
     assert "initial steering" in output
+    assert output.count("Inbox Steering") == 1
+
+
+def test_run_agent_command_dumps_initial_inbox_without_side_channel_server(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(wrap.PROXY_BIN_ENV, "missing-rtk")
+    monkeypatch.setattr(wrap.shutil, "which", lambda _proxy: None)
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000006Z.txt",
+        compose_inbox_text(body="synchronous steering", priority=None, stop=False),
+    )
+    stderr = io.StringIO()
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        [sys.executable, "-c", ""],
+        stderr=stderr,
+    )
+
+    output = stderr.getvalue()
+    assert exit_code == 0
+    assert "synchronous steering" in output
     assert output.count("Inbox Steering") == 1
 
 
