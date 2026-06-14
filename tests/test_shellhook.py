@@ -341,6 +341,59 @@ def test_shell_hook_renderer_adds_ordered_agent_wrapper_functions(tmp_path):
     assert '\ngit() {\n  rtk git "$@"\n}\n' in rendered
 
 
+def test_shell_hook_renderer_uses_common_agent_wrapper_default(tmp_path):
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=None,
+        groups={"common": {"rtk": ["grep"]}},
+    )
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    env = {
+        shellhook.ZDOTDIR_ENV: str(hook_dir),
+        shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
+        **shellhook.shell_steering_runtime_environment(
+            base_env={},
+            python_command=["agent-python"],
+            repo_root=tmp_path,
+        ),
+    }
+
+    rendered = shellhook.render_shell_steering_hook_for_surface("zshenv", env=env)
+
+    assert '\ngrep() {\n  rtk grep "$@"\n}\n' in rendered
+
+
+def test_shell_hook_renderer_fails_loudly_for_missing_common_wrapper_default(tmp_path):
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=None,
+        groups={"custom": {"rtk": ["grep"]}},
+    )
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    env = {
+        shellhook.ZDOTDIR_ENV: str(hook_dir),
+        shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
+        **shellhook.shell_steering_runtime_environment(
+            base_env={},
+            python_command=["agent-python"],
+            repo_root=tmp_path,
+        ),
+    }
+
+    with pytest.raises(SpiceError, match="tool.spice.wrappers.common"):
+        shellhook.render_shell_steering_hook_for_surface("zshenv", env=env)
+
+
+def test_shell_hook_renderer_honors_empty_agent_wrapper_list(tmp_path):
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=[],
+        groups={"common": {"rtk": ["grep"]}},
+    )
+
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == []
+
+
 def test_shell_hook_renderer_fails_loudly_for_path_wrapper_selectors(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
@@ -643,12 +696,17 @@ def _write_spice_product_shape(repo: Path) -> None:
 
 
 def _write_agent_wrapper_config(
-    repo: Path, *, order: list[str], groups: dict[str, dict[str, list[str]]]
+    repo: Path, *, order: list[str] | None, groups: dict[str, dict[str, list[str]]]
 ) -> None:
-    lines = [
-        "[tool.spice.agent]",
-        "wrappers = [" + ", ".join(f'"{name}"' for name in order) + "]",
-    ]
+    lines: list[str] = []
+    if order is not None:
+        wrappers_value = "[" + ", ".join(f'"{name}"' for name in order) + "]"
+        lines.extend(
+            [
+                "[tool.spice.agent]",
+                f"wrappers = {wrappers_value}",
+            ]
+        )
     for group_name, entries in groups.items():
         lines.extend(["", f"[tool.spice.wrappers.{group_name}]"])
         for wrapper, selectors in entries.items():
