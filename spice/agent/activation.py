@@ -48,12 +48,30 @@ def activation_browser_validation_lines() -> list[str]:
 
 def activation_command_surface_lines() -> list[str]:
     return [
+        (
+            "command_wrapper=run every shell command through ./spice.sh "
+            "(or spice agent run -- <command>) so inbox steering and context "
+            "warnings inject; bare spice commands bypass the side channel"
+        ),
         "session=spice session",
         "task_status=spice task status",
         "task_next=spice task next",
         "task_show=spice task show <handle>",
         "tasks=spice task list",
         'task_done=spice task done <handle> --validation "..."',
+        (
+            "task_add_public=spice task add ... --project <stem>; omitting "
+            "--project creates private agent scratch work"
+        ),
+        (
+            "ack_inline=ACK pending inbox keys in any assistant message as "
+            "soon as understood; do not wait for final response"
+        ),
+        (
+            "pending_inbox_recovery=if spice session only shows pending=N "
+            "without bodies, run the next command through ./spice.sh to print "
+            "the pending steering readout"
+        ),
         "inbox_steering=automatic wrapper/side-channel injection; no public mail command",
         "side_channel=operator steering arrives through the supervisor socket",
         "initial_prompt_policy=skill_invocation_only",
