@@ -331,6 +331,7 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
             {"project": "serve.ui"},
             {"project": "serve.ui"},
             {"project": "task.review"},
+            {"project": "agent.abc123.task"},
         ],
     )
     inventory = task_filter_inventory()
@@ -339,5 +340,7 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
     assert inventory["openTaskCount"] == 3
     assert filters["serve.ui"] == 2
     assert filters["task.review"] == 1
+    assert "agent.abc123.task" not in filters
     assert stems["serve"] == 2
     assert stems["task"] == 1
+    assert stems["agent"] == 1
