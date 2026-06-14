@@ -1054,6 +1054,34 @@ def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch)
     assert not thread.is_alive()
 
 
+def test_side_channel_watch_exits_when_parent_pid_exits_without_shell_trap(
+    tmp_path, monkeypatch
+):
+    watcher = wrap._parent_exit_watcher(os.getpid())
+    if watcher is None:
+        pytest.skip("platform does not expose process-exit watch handles")
+    watcher.close()
+    stderr = io.StringIO()
+    monkeypatch.chdir(tmp_path)
+    parent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.1)"])
+
+    with sidechannel.AgentSideChannelServer(tmp_path):
+        thread = Thread(
+            target=wrap.watch_agent_side_channel,
+            kwargs={
+                "repo_root": tmp_path,
+                "parent_pid": parent.pid,
+                "stderr": stderr,
+            },
+        )
+        thread.start()
+        parent.wait(timeout=2.0)
+        thread.join(timeout=2.0)
+        alive = thread.is_alive()
+
+    assert not alive
+
+
 def _config_values(command: list[str]) -> list[str]:
     return [
         command[index + 1] for index, part in enumerate(command) if part == "--config"

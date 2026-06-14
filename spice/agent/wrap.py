@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import select
 import shutil
 import socket
 import subprocess
@@ -271,7 +272,10 @@ def watch_agent_side_channel(
     if socket_path is None:
         return
     side_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    parent_exit = _parent_exit_watcher(parent_pid)
     try:
+        if parent_pid > 0 and parent_exit is None and not _process_exists(parent_pid):
+            return
         side_socket.connect(str(socket_path))
         side_socket.sendall(
             json.dumps(
@@ -284,7 +288,15 @@ def watch_agent_side_channel(
             ).encode("utf-8")
             + b"\n"
         )
+        read_targets: list[object] = [side_socket]
+        if parent_exit is not None:
+            read_targets.append(parent_exit)
         while True:
+            readable, _, _ = select.select(read_targets, [], [])
+            if parent_exit is not None and parent_exit in readable:
+                return
+            if side_socket not in readable:
+                continue
             chunk = side_socket.recv(AGENT_RUN_SIDE_CHANNEL_READ_BYTES)
             if not chunk:
                 return
@@ -294,6 +306,8 @@ def watch_agent_side_channel(
     finally:
         with contextlib.suppress(OSError):
             side_socket.close()
+        if parent_exit is not None:
+            parent_exit.close()
 
 
 def agent_side_channel_hello(
@@ -323,6 +337,60 @@ def write_side_channel_chunk(stderr: TextIO, chunk: bytes) -> None:
         return
     stderr.write(chunk.decode("utf-8", errors="replace"))
     stderr.flush()
+
+
+class _ParentExitWatcher:
+    def __init__(self, handle: int | select.kqueue):
+        self.handle = handle
+
+    def fileno(self) -> int:
+        if isinstance(self.handle, int):
+            return self.handle
+        return self.handle.fileno()
+
+    def close(self) -> None:
+        if isinstance(self.handle, int):
+            with contextlib.suppress(OSError):
+                os.close(self.handle)
+            return
+        self.handle.close()
+
+
+def _parent_exit_watcher(parent_pid: int) -> _ParentExitWatcher | None:
+    if parent_pid <= 0:
+        return None
+    pidfd_open = getattr(os, "pidfd_open", None)
+    if pidfd_open is not None:
+        try:
+            return _ParentExitWatcher(pidfd_open(parent_pid))
+        except OSError:
+            return None
+    if hasattr(select, "kqueue") and hasattr(select, "KQ_FILTER_PROC"):
+        try:
+            kqueue = select.kqueue()
+            event = select.kevent(
+                parent_pid,
+                filter=select.KQ_FILTER_PROC,
+                flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE | select.KQ_EV_ONESHOT,
+                fflags=select.KQ_NOTE_EXIT,
+            )
+            kqueue.control([event], 0, 0)
+            return _ParentExitWatcher(kqueue)
+        except OSError:
+            with contextlib.suppress(UnboundLocalError):
+                kqueue.close()
+            return None
+    return None
+
+
+def _process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
 
 
 class AgentInboxInjector:
