@@ -450,6 +450,7 @@ class AgentInboxInjector:
             and signature == self.signature
             and pending_keys <= suppressed_keys
         ):
+            self._emit_pending_summary(len(pending_keys))
             return
         display_filter = set[str]() if new_pending_keys else suppressed_keys
         from spice.mail.readout import print_inbox_readout
@@ -469,6 +470,19 @@ class AgentInboxInjector:
         self.signature = displayed_signature
         self._record_displayed_keys(displayed_signature, displayed_keys, now=now)
         self._prune_display_state(displayed_pending_keys)
+
+    def _emit_pending_summary(self, count: int) -> None:
+        # Every pending item is inside its repeat-suppression window, so the full
+        # readout is withheld — but emit a one-line count so a quick command never
+        # *looks* empty while steering waits. The full readout returns on the next
+        # repeat or via `spice session`.
+        if count <= 0:
+            return
+        self.stderr.write(
+            f"Inbox Steering\n  pending={count} "
+            "(recently shown; full readout on repeat or run `spice session`)\n"
+        )
+        self.stderr.flush()
 
     def _suppressed_keys(self, signature: InboxSignature, *, now: float) -> set[str]:
         suppressed: set[str] = set()
