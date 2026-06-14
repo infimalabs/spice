@@ -12,6 +12,11 @@ const speechStopIconSvg =
 const speechQueue = [];
 let speechBusy = false;
 let currentSpeech = null;
+// Single-owner playback: at most one audio element may sound at a time. The
+// active element is hard-stopped before any new clip starts, and the token
+// lets a late-resolving play() that has since been superseded stop itself.
+let activePlaybackAudio = null;
+let playbackGeneration = 0;
 const defaultDocumentTitle = "spice";
 const speechQueueBacklogClearThreshold = 2;
 const hoursPerHalfDay = 12;
@@ -330,13 +335,36 @@ async function playSpeech(lane, text) {
   }
 }
 
+function stopActivePlayback() {
+  const audio = activePlaybackAudio;
+  activePlaybackAudio = null;
+  if (!audio) return;
+  try {
+    audio.pause();
+  } catch (error) {
+    // A failed pause still drops our reference; the clip is being discarded.
+  }
+}
+
 function playAudioBuffer(buffer) {
   return new Promise((resolve) => {
+    // Claim ownership before creating the clip: any in-flight clip is stopped,
+    // and the bumped token supersedes any of its still-pending play() requests.
+    const generation = (playbackGeneration += 1);
+    stopActivePlayback();
     const blob = new Blob([buffer], { type: "audio/mp4" });
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
+    activePlaybackAudio = audio;
+    let settled = false;
     const finish = () => {
+      if (settled) return;
+      settled = true;
+      audio.removeEventListener("ended", finish);
+      audio.removeEventListener("error", finish);
+      audio.removeEventListener("pause", finish);
       URL.revokeObjectURL(url);
+      if (activePlaybackAudio === audio) activePlaybackAudio = null;
       if (currentSpeech) {
         currentSpeech.audio = null;
         currentSpeech.finish = null;
@@ -350,6 +378,18 @@ function playAudioBuffer(buffer) {
     audio.addEventListener("ended", finish);
     audio.addEventListener("error", finish);
     audio.addEventListener("pause", finish);
-    audio.play().catch(finish);
+    audio.play().then(() => {
+      // If a newer clip claimed ownership while play() was pending, this one
+      // lost the race after starting: stop it so the two never overlap.
+      if (generation !== playbackGeneration) stopOrphanedPlayback(audio);
+    }, finish);
   });
+}
+
+function stopOrphanedPlayback(audio) {
+  try {
+    audio.pause();
+  } catch (error) {
+    // pause() fires the listener that settles this clip's promise; ignore.
+  }
 }
