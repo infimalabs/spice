@@ -36,6 +36,22 @@ def test_static_initial_bootstrap_waits_for_server_topology():
     ) in app
 
 
+def test_static_lane_status_preview_requires_relative_time():
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    start = app_render.index("function setLaneStatus(lane, statusLine) {")
+    body = app_render[
+        start : app_render.index("\n}\n\nfunction setLaneStatusText", start)
+    ]
+
+    assert (
+        "const previewHasTime = Boolean(preview && statusLine.lastAssistantAt);" in body
+    )
+    assert (
+        'time: previewHasTime ? relativeTime(statusLine.lastAssistantAt) : "",' in body
+    )
+    assert 'preview: previewHasTime ? preview : "",' in body
+
+
 def test_static_css_has_narrow_viewport_affordances():
     css = _serve_css_text()
 

@@ -126,16 +126,17 @@ def status_line_payload(
         else pending_inbox_count(target.repo_root)
     )
     binding_status = _binding_status(status.thread_id, binding_error)
+    latest_status = latest or latest_activity
     return {
         "bindingStatus": binding_status,
         "bound": bool(status.thread_id),
         "bindingError": binding_error,
         "rolloutStatus": "error" if binding_error or error else "ok",
         "activityStatus": message_reader.activity_status(items),
-        "lastAssistantAt": latest.timestamp if latest else "",
+        "lastAssistantAt": latest_status.timestamp if latest_status else "",
         "latestMessagePreview": latest.preview if latest else "",
         "latestActivityPreview": (latest_activity.preview if latest_activity else ""),
-        "preview": (latest or latest_activity).preview if items else "",
+        "preview": latest_status.preview if latest_status else "",
         "pendingInboxCount": pending,
         "pendingInboxLabel": str(pending),
         "agentProcessStatus": status.process_status,
