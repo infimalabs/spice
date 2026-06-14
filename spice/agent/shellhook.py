@@ -18,6 +18,9 @@ BASH_HOOK_NAME = "bash_env"
 ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zlogin")
 AGENT_WRAPPERS_KEY = "wrappers"
 DEFAULT_AGENT_WRAPPER_GROUP = "common"
+BUILTIN_AGENT_WRAPPER_GROUPS = {
+    DEFAULT_AGENT_WRAPPER_GROUP: {"rtk": ["run", "proxy", "grep", "find", "git"]},
+}
 SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
 SHELL_HOOK_REPO_ROOT_ENV = "SPICE_SHELL_HOOK_REPO_ROOT"  # env-policy: allow
 SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV = (
@@ -144,16 +147,17 @@ def wrapper_lines_for_environment(environment: Mapping[str, str]) -> list[str]:
 
 def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
     agent_settings = agent_table(repo_root)
-    definitions = agent_wrapper_definitions_table(repo_root)
+    definitions = {
+        **BUILTIN_AGENT_WRAPPER_GROUPS,
+        **agent_wrapper_definitions_table(repo_root),
+    }
     if AGENT_WRAPPERS_KEY in agent_settings:
         ordered_groups = config_string_list(
             agent_settings.get(AGENT_WRAPPERS_KEY),
             label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY}",
         )
-    elif definitions:
-        ordered_groups = [DEFAULT_AGENT_WRAPPER_GROUP]
     else:
-        ordered_groups = []
+        ordered_groups = [DEFAULT_AGENT_WRAPPER_GROUP]
     if not ordered_groups:
         return []
     lines: list[str] = []
