@@ -222,6 +222,49 @@ def test_wrapper_installs_shell_hook_environment_for_child_shell_commands(
     assert env[shellhook.SHELL_HOOK_REPO_ROOT_ENV] == str(tmp_path.resolve())
 
 
+def test_wrapper_redirects_zsh_compdump_outside_shellhooks_dir(tmp_path, monkeypatch):
+    monkeypatch.delenv("ZDOTDIR", raising=False)
+    monkeypatch.delenv("BASH_ENV", raising=False)
+    monkeypatch.delenv("ZSH_COMPDUMP", raising=False)
+    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    env = wrap.build_agent_run_environment(["zsh", "-c", "true"], repo_root=tmp_path)
+
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    assert env is not None
+    assert env["ZSH_COMPDUMP"] == str(tmp_path / ".zcompdump")
+    assert not env["ZSH_COMPDUMP"].startswith(str(hook_dir))
+
+
+def test_wrapper_redirects_zsh_compdump_to_original_zdotdir_when_set(
+    tmp_path, monkeypatch
+):
+    zdotdir = tmp_path / "zdotdir"
+    monkeypatch.setenv("ZDOTDIR", str(zdotdir))
+    monkeypatch.delenv("BASH_ENV", raising=False)
+    monkeypatch.delenv("ZSH_COMPDUMP", raising=False)
+    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
+
+    env = wrap.build_agent_run_environment(["zsh", "-c", "true"], repo_root=tmp_path)
+
+    assert env is not None
+    assert env["ZSH_COMPDUMP"] == str(zdotdir / ".zcompdump")
+
+
+def test_wrapper_preserves_caller_zsh_compdump_when_already_set(tmp_path, monkeypatch):
+    custom_dump = str(tmp_path / "custom" / ".zcompdump")
+    monkeypatch.delenv("ZDOTDIR", raising=False)
+    monkeypatch.delenv("BASH_ENV", raising=False)
+    monkeypatch.setenv("ZSH_COMPDUMP", custom_dump)
+    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
+
+    env = wrap.build_agent_run_environment(["zsh", "-c", "true"], repo_root=tmp_path)
+
+    assert env is not None
+    assert env["ZSH_COMPDUMP"] == custom_dump
+
+
 def test_agent_run_shell_command_loads_wrappers_without_manual_hook_env(
     tmp_path, monkeypatch
 ):
