@@ -64,7 +64,7 @@ def test_start_exit_file_watch_uses_watched_parent_events(
             (object(), str(watched_path)),
         }
 
-    monkeypatch.setattr(serve_filewatch, "watch", fake_watch)
+    monkeypatch.setattr(serve_filewatch, "_import_watch", lambda: fake_watch)
 
     thread = start_exit_file_watch(
         fake_server,
@@ -93,7 +93,7 @@ def test_serve_exits_after_watched_file_changes(monkeypatch, tmp_path: Path) -> 
         watch_roots.append(root)
         yield {(object(), str(watched_path))}
 
-    monkeypatch.setattr(serve_filewatch, "watch", fake_watch)
+    monkeypatch.setattr(serve_filewatch, "_import_watch", lambda: fake_watch)
 
     result = run_serve(
         Namespace(

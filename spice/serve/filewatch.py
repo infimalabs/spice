@@ -8,8 +8,6 @@ from pathlib import Path
 import stat
 from threading import Event, Thread
 
-from watchfiles import watch
-
 
 @dataclass(frozen=True)
 class FileWatchSnapshot:
@@ -47,11 +45,18 @@ def start_exit_file_watch(
     return thread
 
 
+def _import_watch():
+    from watchfiles import watch
+
+    return watch
+
+
 def _stop_when_file_changes(
     server: ThreadingHTTPServer,
     path: Path,
     stop_event: Event,
 ) -> None:
+    watch = _import_watch()
     target = _normalized_watch_path(path)
     root = _watch_root_for(path)
     for changes in watch(
