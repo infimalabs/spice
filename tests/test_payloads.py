@@ -142,6 +142,76 @@ def test_status_line_pairs_activity_preview_with_activity_timestamp(
     assert line["latestMessagePreview"] == ""
 
 
+def test_status_line_prefers_latest_claude_presence_over_visible_message(
+    tmp_path, monkeypatch
+):
+    claude_home = tmp_path / "claude"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
+    older = "2026-06-10T12:00:00.000Z"
+    latest = "2026-06-10T12:01:00.000Z"
+    transcript = (
+        claude_home
+        / "projects"
+        / "-private-tmp-spice-sup"
+        / "11111111-2222-3333-4444-555555555555.jsonl"
+    )
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "timestamp": older,
+                        "message": {
+                            "role": "assistant",
+                            "stop_reason": "end_turn",
+                            "content": [{"type": "text", "text": "older answer"}],
+                        },
+                    },
+                    separators=(",", ":"),
+                ),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "timestamp": latest,
+                        "message": {
+                            "role": "assistant",
+                            "stop_reason": "tool_use",
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "name": "Bash",
+                                    "input": {"command": "ls"},
+                                }
+                            ],
+                        },
+                    },
+                    separators=(",", ":"),
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    target = _Target(id="wt", repo_root=tmp_path)
+    monkeypatch.setattr(
+        payloads,
+        "agent_status",
+        lambda _repo: _Status(running=True, started_at="", process_status="running"),
+    )
+    monkeypatch.setattr(payloads, "pending_inbox_count", lambda _repo: 0)
+
+    items = message_reader.read_assistant_messages(transcript, limit=5)
+    line = payloads.status_line_payload(_State(), target, items=items, error=None)
+
+    assert items[0].kind == "presence:function_call"
+    assert line["lastAssistantAt"] == latest
+    assert line["preview"] == "Bash: ls"
+    assert line["latestActivityPreview"] == "Bash: ls"
+    assert line["latestMessagePreview"] == "older answer"
+
+
 def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
     latest = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")

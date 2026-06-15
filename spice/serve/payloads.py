@@ -129,7 +129,7 @@ def status_line_payload(
         else pending_inbox_count(target.repo_root)
     )
     binding_status = _binding_status(status.thread_id, binding_error)
-    latest_status = latest or latest_activity
+    latest_status = latest_activity or latest
     return {
         "bindingStatus": binding_status,
         "bound": bool(status.thread_id),
