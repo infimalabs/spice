@@ -160,18 +160,18 @@ def _runtime_resolution_check(repo_root: Path) -> DoctorCheck:
         return _ok(
             "runtime.spice",
             f"installed spice package -> {runtime}",
-            "python -m spice",
+            "spice dev doctor",
         )
     if runtime_uses_worktree_spice(repo_root):
         return _ok(
             "runtime.spice",
             f"worktree spice package -> {source}",
-            "python -m spice dev doctor",
+            "spice dev doctor",
         )
     return _fail(
         "runtime.spice",
         f"worktree spice package is {source}, but runtime loaded {runtime}",
-        "python -m spice dev doctor",
+        "spice dev doctor",
     )
 
 
@@ -200,12 +200,12 @@ def _installed_spice_source_check(repo_root: Path) -> DoctorCheck:
         return _ok(
             "runtime.installed-spice",
             f"installed spice package is {installed}; active runtime uses {worktree}",
-            "python -m spice dev doctor",
+            "spice dev doctor",
         )
     return _warn(
         "runtime.installed-spice",
         f"installed spice package is {installed}; worktree source is {worktree}",
-        "python -m spice dev doctor",
+        "spice dev doctor",
     )
 
 
