@@ -30,6 +30,7 @@ const defaultDocumentTitle = "spice";
 const speechQueueBacklogClearThreshold = 2;
 const hoursPerHalfDay = 12;
 const gitHashContextChars = 16;
+let speechMediaSessionHandlersInstalled = false;
 
 function queueSpeechForMessages(lane, messages) {
   const host = laneGroupHost(lane);
@@ -252,21 +253,54 @@ function syncSpeechSessionMetadata() {
     ? speechSessionTitle(currentSpeech)
     : defaultDocumentTitle;
   if (typeof document !== "undefined") document.title = title;
-  if (
-    typeof navigator === "undefined" ||
-    !navigator.mediaSession ||
-    typeof MediaMetadata === "undefined"
-  ) {
-    return;
-  }
+  const session = speechMediaSession();
+  if (!session) return;
+  ensureSpeechMediaSessionHandlers(session);
   try {
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title,
-      artist: "spice",
-    });
+    session.playbackState = speechMediaSessionPlaybackState();
+    if (typeof MediaMetadata !== "undefined")
+      session.metadata = new MediaMetadata({
+        title,
+        artist: "spice",
+      });
   } catch {
     return;
   }
+}
+
+function syncNarrationMediaSession() {
+  syncSpeechSessionMetadata();
+}
+
+function speechMediaSession() {
+  if (typeof navigator === "undefined") return null;
+  return navigator.mediaSession || null;
+}
+
+function ensureSpeechMediaSessionHandlers(session) {
+  if (
+    speechMediaSessionHandlersInstalled ||
+    typeof session.setActionHandler !== "function"
+  ) {
+    return;
+  }
+  session.setActionHandler("play", () => drainSpeechQueue());
+  session.setActionHandler("pause", () => stopAllSpeech());
+  session.setActionHandler("stop", () => stopAllSpeech());
+  speechMediaSessionHandlersInstalled = true;
+}
+
+function speechMediaSessionPlaybackState() {
+  return currentSpeech || narrationMediaSessionActive() ? "playing" : "none";
+}
+
+function narrationMediaSessionActive() {
+  if (typeof laneStates === "undefined") return false;
+  for (const lane of laneStates.values()) {
+    if (lane.closed) continue;
+    if (laneEffectiveSpeechMode(lane) === "narrate") return true;
+  }
+  return false;
 }
 
 function speechSessionTitle(entry) {
@@ -404,12 +438,13 @@ function playAudioBuffer(buffer) {
     };
     const onEnd = () => finish();
     const onPause = () => {
-      // An external pause (lock screen, OS media key, headset) is a stop: settle
-      // this clip and clear the whole queue. A pause we initiated is just a
-      // controlled settle and must not cascade into a reset.
+      // Without an active narration session, an external pause is a stop. With
+      // narration selected, mobile lock/background pauses are treated as
+      // recoverable interruptions so the shared speech queue keeps draining.
+      // Pauses we initiated are controlled settles and never cascade.
       const external = !intentionallyPaused.has(audio);
       finish();
-      if (external) stopAllSpeech();
+      if (external && !narrationMediaSessionActive()) stopAllSpeech();
     };
     if (currentSpeech) {
       currentSpeech.audio = audio;

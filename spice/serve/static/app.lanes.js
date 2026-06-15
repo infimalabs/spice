@@ -277,6 +277,7 @@ function closeLaneCore(lane) {
   abortLaneSpeech(lane);
   lane.element.remove();
   laneStates.delete(lane.targetId);
+  syncNarrationMediaSession();
   renderFilterPills();
 }
 
