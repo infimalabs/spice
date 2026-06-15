@@ -63,7 +63,6 @@ Repositories declare mounted commands in tracked `pyproject.toml`:
 ```toml
 [tool.spice.commands]
 release = ["uv", "run", "python", "-m", "spice.release"]
-deploy = "./scripts/deploy.sh"
 ```
 
 `spice release notes` runs the mounted command from the repository root with

@@ -30,8 +30,12 @@ def test_string_mounts_shlex_split(tmp_path):
 
 
 def test_list_mounts_pass_argv_verbatim(tmp_path):
-    repo = _repo_with_commands(tmp_path, 'deploy = ["./scripts/deploy.sh", "--env"]')
-    assert mounted_commands(repo) == {"deploy": ("./scripts/deploy.sh", "--env")}
+    repo = _repo_with_commands(
+        tmp_path, 'release = ["uv", "run", "python", "-m", "spice.release"]'
+    )
+    assert mounted_commands(repo) == {
+        "release": ("uv", "run", "python", "-m", "spice.release")
+    }
 
 
 def test_tool_family_mounts_use_one_namespace_owner(tmp_path):

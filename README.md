@@ -109,13 +109,13 @@ A repo can also mount its own tooling into the `spice` namespace:
 
 ```toml
 [tool.spice.commands]
-deploy = "./scripts/deploy.sh"
+release = ["uv", "run", "python", "-m", "spice.release"]
 bench = ["python", "-m", "myproj.bench"]
 ```
 
-`spice deploy --env staging` then runs the mounted command from the repo
-root with the remaining arguments passed through verbatim. Built-in verbs
-always win; a mount that shadows one fails loudly.
+`spice release notes` or `spice bench --suite smoke` then runs the mounted
+command from the repo root with the remaining arguments passed through
+verbatim. Built-in verbs always win; a mount that shadows one fails loudly.
 
 Mounted names are intentionally one-level verbs (`^[a-z][a-z0-9-]*$`), not
 nested command paths. A repo with a large tool family mounts one namespace
