@@ -1,8 +1,9 @@
 // Speech: one global sequential queue across lanes. Speak mode plays explicit
-// ACK utterances (plus final-answer bodies); narrate falls back to the body's
-// edge paragraphs — first and last — with markdown images described rather
-// than read. The transcript remains the record — playback is best-effort ear
-// candy and never blocks the stream.
+// ACK utterances, with final-answer bodies summarized to edge paragraphs;
+// narrate summarizes visible message bodies to edges. Manual play reads the
+// visible body. Markdown images are described rather than read. The transcript
+// remains the record — playback is best-effort ear candy and never blocks the
+// stream.
 
 const speechPlayIconSvg =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7Z" fill="currentColor"/></svg>';
@@ -49,29 +50,38 @@ function primeSpeechBoundary(lane) {
   lane.speechPrimed = true;
 }
 
-// Narration speaks edges, not essays: explicit ACK utterances win, and the
-// fallback reads only the first and last paragraphs of the body with markdown
-// images described rather than read aloud.
+// Automatic speech speaks edges, not essays: final answers and narrated bodies
+// read the first and last visible paragraphs. Non-final ACK messages use the
+// whole extracted ACK body; final ACK messages follow final-answer excerpting.
 function automaticSpeechUtterances(lane, item) {
   const mode = laneEffectiveSpeechMode(lane);
   if (mode === "quiet") return [];
+  if (item.kind === "final") {
+    return speechUtterancesForItem(item, {
+      includeDisplayBody: true,
+      includeAckUtterances: false,
+    });
+  }
+  if (itemHasAckUtterances(item)) return speechUtterancesForItem(item);
   if (mode === "narrate") {
     return speechUtterancesForItem(item, { includeDisplayBody: true });
   }
-  return speechUtterancesForItem(item, {
-    includeDisplayBody: item.kind === "final",
-  });
+  return speechUtterancesForItem(item);
 }
 
 function speechUtterancesForItem(item, options = {}) {
   if (item.image_only) return [];
   const includeDisplayBody = Boolean(options.includeDisplayBody);
   const includeFullDisplayBody = Boolean(options.includeFullDisplayBody);
+  const includeAckUtterances = options.includeAckUtterances !== false;
   const utterances = [];
-  for (const utterance of item.speech_utterances || []) {
-    appendSpeechUtterance(utterances, utterance);
+
+  if (includeAckUtterances) {
+    for (const utterance of item.ack_utterances || []) {
+      appendSpeechUtterance(utterances, utterance);
+    }
   }
-  if (!utterances.length && (includeDisplayBody || includeFullDisplayBody)) {
+  if (includeDisplayBody || includeFullDisplayBody) {
     const displayBody = item.display_text || item.text;
     const paragraphs = includeFullDisplayBody
       ? speechParagraphs(displayBody)
@@ -81,6 +91,13 @@ function speechUtterancesForItem(item, options = {}) {
     }
   }
   return utterances;
+}
+
+function itemHasAckUtterances(item) {
+  for (const utterance of item.ack_utterances || []) {
+    if (stripSpeechText(utterance)) return true;
+  }
+  return false;
 }
 
 function appendSpeechUtterance(utterances, raw) {
@@ -224,7 +241,10 @@ function messageIsCurrentSpeech(lane, item) {
 }
 
 function messageSpeechUtterances(item) {
-  return speechUtterancesForItem(item, { includeFullDisplayBody: true });
+  return speechUtterancesForItem(item, {
+    includeFullDisplayBody: true,
+    includeAckUtterances: false,
+  });
 }
 
 function applySpeechButtonState(button, playing) {
