@@ -313,14 +313,22 @@ def test_static_spice_menu_replaces_picker_lane():
     )
     assert 'button.classList.toggle("target-choice--open", alreadyOpen);' in app_lanes
     assert "wireSpiceMenuTargetDrag(button, target);" in app_lanes
-    assert "button.draggable = true;" in app_lanes
-    assert 'event.dataTransfer.effectAllowed = "move";' in app_lanes
+    assert 'button.style.touchAction = "none";' in app_lanes
+    assert 'button.addEventListener("click", (event) => {' in app_lanes
+    assert "suppressNextClick = true;" in app_lanes
+    assert "button.setPointerCapture(event.pointerId);" in app_lanes
+    assert 'button.addEventListener("pointerdown", (event) => {' in app_lanes
+    assert 'button.addEventListener("pointermove", (event) => {' in app_lanes
+    assert 'button.addEventListener("pointerup", (event) => {' in app_lanes
+    assert 'button.addEventListener("pointercancel", (event) => {' in app_lanes
+    assert "Math.abs(dx) < 6 && Math.abs(dy) < 6" in app_lanes
     assert (
-        'event.dataTransfer.setData("application/x-spice-target-id", target.id);'
+        "const el = document.elementFromPoint(event.clientX, event.clientY);"
         in app_lanes
     )
     assert "container.dataset.spiceMenuTeamId = group.teamId;" in app_lanes
     assert 'container.classList.add("spice-menu-team--drop-ready");' in app_lanes
+    assert "moveTargetToMenuTeam(teamId, target.id).catch(() => {" in app_lanes
     assert 'teamCommandPayload("moveAgentToTeam", {' in app_lanes
     assert "agentId: targetTeamAgentId(target)," in app_lanes
     assert "agentAliases: targetTeamAgentAliases(target)," in app_lanes
