@@ -4,6 +4,17 @@
 // localStorage keeps only per-target hints (speech mode, selected view).
 
 const emptyTeamTargetPrefix = "empty-team:";
+const targetChoiceStatusValues = [
+  "pending",
+  "running",
+  "running-stale",
+  "idle",
+  "stopped",
+  "unstarted",
+  "bound",
+  "unbound",
+  "unknown",
+];
 
 function emptyTeamTargetId(teamId) {
   return emptyTeamTargetPrefix + teamId;
@@ -867,19 +878,46 @@ function targetTeamAgentAliases(target) {
 function targetChoiceButton(target, actionLabel, onClick, role = "menuitem") {
   const button = document.createElement("button");
   button.type = "button";
-  const status = targetChoiceStatus(target);
-  const metadata = targetChoiceMetadata(target);
   const name = targetChoiceName(target);
-  button.className = "target-choice target-choice--" + status;
+  button.className = "target-choice";
+  button.dataset.targetChoiceId = target.id;
+  button.dataset.targetChoiceActionLabel = actionLabel;
   if (role) button.setAttribute("role", role);
-  button.title = actionLabel + " " + name + "; " + metadata;
   button.innerHTML =
     '<span class="target-choice-signal" aria-hidden="true"></span>' +
     '<span class="target-choice-copy"><strong></strong><span></span></span>';
   button.querySelector("strong").textContent = name;
-  button.querySelector(".target-choice-copy span").textContent = metadata;
+  updateTargetChoiceButtonPresentation(button, target, actionLabel);
   button.addEventListener("click", onClick);
   return button;
+}
+
+function updateLiveTargetChoiceMetadata() {
+  for (const element of document.querySelectorAll("[data-target-choice-id]")) {
+    const button = /** @type {HTMLElement} */ (element);
+    const target = targetById.get(button.dataset.targetChoiceId || "");
+    if (!target) continue;
+    updateTargetChoiceButtonPresentation(
+      button,
+      target,
+      button.dataset.targetChoiceActionLabel || "Open",
+    );
+  }
+}
+
+function updateTargetChoiceButtonPresentation(button, target, actionLabel) {
+  const status = targetChoiceStatus(target);
+  const metadata = targetChoiceMetadata(target);
+  setTargetChoiceStatusClass(button, status);
+  button.title = actionLabel + " " + targetChoiceName(target) + "; " + metadata;
+  const metadataEl = button.querySelector(".target-choice-copy span");
+  if (metadataEl) metadataEl.textContent = metadata;
+}
+
+function setTargetChoiceStatusClass(button, status) {
+  for (const value of targetChoiceStatusValues)
+    button.classList.remove("target-choice--" + value);
+  button.classList.add("target-choice--" + status);
 }
 
 function targetChoiceName(target) {
@@ -893,14 +931,70 @@ function targetChoiceMetadata(target) {
   if (activity) parts.push(activity.trim());
   else if (!target.threadId) parts.push("never");
   parts.push(targetChoiceStatusLabel(target));
-  if (target.pendingCount > 0) parts.push(target.pendingCount + " pending");
+  const pending = targetChoicePendingCount(target);
+  if (pending > 0) parts.push(pending + " pending");
   return parts.join(" · ");
 }
 
 function targetChoiceLastAssistantAt(target) {
-  return (
-    target.lastAssistantAt || (target.statusLine || {}).lastAssistantAt || ""
-  );
+  return targetChoiceStatusLine(target).lastAssistantAt || "";
+}
+
+function targetChoiceStatusLine(target) {
+  const statusLine = target.statusLine || {};
+  const laneStatusLine = targetChoiceLaneStatusLine(target);
+  const merged = { ...statusLine, ...laneStatusLine };
+  merged.lastAssistantAt =
+    laneStatusLine.lastAssistantAt ||
+    target.lastAssistantAt ||
+    statusLine.lastAssistantAt ||
+    "";
+  merged.agentProcessStatus =
+    laneStatusLine.agentProcessStatus ||
+    target.agentProcessStatus ||
+    statusLine.agentProcessStatus ||
+    "";
+  merged.agentVisualStatus =
+    laneStatusLine.agentVisualStatus ||
+    target.agentVisualStatus ||
+    statusLine.agentVisualStatus ||
+    merged.agentProcessStatus ||
+    "";
+  merged.activityStatus =
+    laneStatusLine.activityStatus || statusLine.activityStatus || "";
+  merged.bindingStatus =
+    laneStatusLine.bindingStatus ||
+    target.bindingStatus ||
+    statusLine.bindingStatus ||
+    "";
+  return merged;
+}
+
+function targetChoiceLaneStatusLine(target) {
+  const lane = laneStates.get(target.id);
+  return (lane && lane.lastRenderedStatusLine) || {};
+}
+
+function targetChoicePendingCount(target) {
+  const statusLine = target.statusLine || {};
+  const laneStatusLine = targetChoiceLaneStatusLine(target);
+  for (const value of [
+    laneStatusLine.pendingInboxCount,
+    target.pendingCount,
+    target.pendingInboxCount,
+    statusLine.pendingInboxCount,
+  ]) {
+    const count = normalizedTargetChoiceCount(value);
+    if (count !== null) return count;
+  }
+  return 0;
+}
+
+function normalizedTargetChoiceCount(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const count = Number(value);
+  if (!Number.isFinite(count)) return null;
+  return Math.max(0, count);
 }
 
 function compareTargetChoices(left, right) {
@@ -911,21 +1005,36 @@ function compareTargetChoices(left, right) {
 }
 
 function targetChoiceStatus(target) {
-  if (target.pendingCount > 0) return "pending";
-  const status = target.agentProcessStatus || "";
-  if (status === "running") return "running";
-  if (status === "idle") return "idle";
-  return target.bindingStatus === "bound" || target.threadId
+  if (targetChoicePendingCount(target) > 0) return "pending";
+  const statusLine = targetChoiceStatusLine(target);
+  if (statusLine.error) return "unknown";
+  const visualStatus = targetChoiceKnownStatus(liveAgentVisualStatus(statusLine));
+  if (visualStatus && visualStatus !== "unknown") return visualStatus;
+  const processStatus = targetChoiceKnownStatus(statusLine.agentProcessStatus);
+  if (processStatus && processStatus !== "unknown") return processStatus;
+  return statusLine.bindingStatus === "bound" || target.threadId
     ? "bound"
     : "unbound";
+}
+
+function targetChoiceKnownStatus(status) {
+  const value = String(status || "");
+  return targetChoiceStatusValues.includes(value) ? value : "";
 }
 
 function targetChoiceStatusLabel(target) {
   const status = targetChoiceStatus(target);
   if (status === "pending") return "steering queued";
-  if (status === "running") return "agent running";
-  if (status === "idle") return "agent idle";
+  if (
+    status === "running" ||
+    status === "running-stale" ||
+    status === "idle" ||
+    status === "stopped" ||
+    status === "unstarted"
+  )
+    return agentStatusLabel(status);
   if (status === "bound") return "agent bound";
+  if (status === "unknown") return "agent status unknown";
   return "agent unbound";
 }
 

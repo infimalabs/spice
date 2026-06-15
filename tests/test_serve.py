@@ -343,6 +343,25 @@ def test_static_spice_menu_team_groups_and_actions():
     assert '.spice-menu-action[aria-checked="true"]' in css
 
 
+def test_static_spice_menu_target_metadata_and_status_update_live():
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    css = _serve_css_text()
+
+    assert "button.dataset.targetChoiceId = target.id;" in app_lanes
+    assert "button.dataset.targetChoiceActionLabel = actionLabel;" in app_lanes
+    assert "function updateLiveTargetChoiceMetadata()" in app_lanes
+    assert 'document.querySelectorAll("[data-target-choice-id]")' in app_lanes
+    assert "updateTargetChoiceButtonPresentation(" in app_lanes
+    assert "function targetChoiceStatusLine(target)" in app_lanes
+    assert "lane.lastRenderedStatusLine" in app_lanes
+    assert "const pending = targetChoicePendingCount(target);" in app_lanes
+    assert "liveAgentVisualStatus(statusLine)" in app_lanes
+    assert "agentStatusLabel(status)" in app_lanes
+    assert "updateLiveTargetChoiceMetadata();" in app_render
+    assert ".target-choice--running-stale .target-choice-signal" in css
+
+
 def test_static_spice_menu_drag_manages_team_membership():
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     css = _serve_css_text()

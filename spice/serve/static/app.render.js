@@ -529,6 +529,7 @@ function updateLiveRelativeTimes() {
     if (lane.latestPayload)
       applyRetainedLaneStatus(lane, lane.latestPayload.statusLine || {});
   }
+  updateLiveTargetChoiceMetadata();
   for (const lane of laneStates.values()) syncFusedLaneStatusLine(lane);
 }
 
