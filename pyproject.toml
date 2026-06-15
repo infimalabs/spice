@@ -59,7 +59,6 @@ thinking = "xhigh"
 
 [tool.spice.wrappers.common]
 rtk = ["run", "proxy", "grep", "find", "git"]
-pytest = { command = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
 
 [tool.spice.tasks]
 stems = ["session", "mail", "hooks", "studies", "cli", "lifecycle", "tests"]
