@@ -249,6 +249,9 @@ class FakeAudio {
   addEventListener(name, callback) {
     this.listeners[name] = callback;
   }
+  removeEventListener(name) {
+    delete this.listeners[name];
+  }
   play() {
     if (this.index > 0) queueMicrotask(() => this.listeners.ended());
     return Promise.resolve();
@@ -348,6 +351,9 @@ class FakeAudio {
   }
   addEventListener(name, callback) {
     this.listeners[name] = callback;
+  }
+  removeEventListener(name) {
+    delete this.listeners[name];
   }
   play() {
     return Promise.resolve();
@@ -451,6 +457,9 @@ class FakeAudio {
   }
   addEventListener(name, callback) {
     this.listeners[name] = callback;
+  }
+  removeEventListener(name) {
+    delete this.listeners[name];
   }
   play() {
     if (this.index > 0) queueMicrotask(() => this.listeners.ended());
