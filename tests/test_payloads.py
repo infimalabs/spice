@@ -63,6 +63,7 @@ class _Target:
     id: str
     repo_root: Path | None = None
     name: str = "repo"
+    display_name: str = "repo"
     branch: str = "main"
 
 
@@ -76,6 +77,15 @@ class _State:
 
     def lane_send_count(self, target_id: str) -> int:
         return self._sends
+
+
+class _InventoryState(_State):
+    def __init__(self, target: _Target) -> None:
+        super().__init__()
+        self._target = target
+
+    def worktree_targets(self) -> list[_Target]:
+        return [self._target]
 
 
 def _stamp(when: datetime) -> str:
@@ -208,6 +218,65 @@ def test_status_line_prefers_latest_claude_presence_over_visible_message(
     assert line["preview"] == "Bash: ls"
     assert line["latestActivityPreview"] == "Bash: ls"
     assert line["latestMessagePreview"] == "older answer"
+
+
+def test_work_trees_payload_includes_latest_activity_for_global_menu(
+    tmp_path, monkeypatch
+):
+    latest = _stamp(datetime(2026, 6, 10, 12, 1, tzinfo=UTC))
+    target = _Target(id="wt", repo_root=tmp_path)
+    calls: list[dict[str, object]] = []
+
+    def fake_assistant_messages_for_thread_id(
+        thread_id: str, **kwargs: object
+    ) -> tuple[list[AssistantMessage], None]:
+        calls.append({"thread_id": thread_id, **kwargs})
+        return ([_message(latest, kind="presence:reasoning", preview="thinking")], None)
+
+    monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(payloads, "pending_inbox_count", lambda _repo: 0)
+    monkeypatch.setattr(
+        payloads,
+        "ensure_agent_for_pending_inbox",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        payloads,
+        "resolve_thread_id_for_target",
+        lambda _state, _target: "agent-a",
+    )
+    monkeypatch.setattr(
+        payloads,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id="agent-a",
+        ),
+    )
+    monkeypatch.setattr(payloads, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(payloads, "configured_say_voice", lambda _repo: "")
+    monkeypatch.setattr(
+        payloads.message_reader,
+        "assistant_messages_for_thread_id",
+        fake_assistant_messages_for_thread_id,
+    )
+
+    payload = payloads.work_trees_payload(_InventoryState(target))
+
+    work_tree = payload["workTrees"][0]
+    assert work_tree["lastAssistantAt"] == latest
+    assert work_tree["statusLine"]["lastAssistantAt"] == latest
+    assert work_tree["statusLine"]["preview"] == "thinking"
+    assert calls == [
+        {
+            "thread_id": "agent-a",
+            "limit": 1,
+            "worktree_id": "wt",
+            "repo_root": tmp_path,
+        }
+    ]
 
 
 def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):

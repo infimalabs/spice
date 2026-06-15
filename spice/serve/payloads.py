@@ -110,6 +110,19 @@ def team_facts_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
     }
 
 
+def target_activity_items(
+    target: WorktreeTarget, thread_id: str
+) -> tuple[list[message_reader.AssistantMessage], str | None]:
+    if not thread_id:
+        return [], None
+    return message_reader.assistant_messages_for_thread_id(
+        thread_id,
+        limit=1,
+        worktree_id=target.id,
+        repo_root=target.repo_root,
+    )
+
+
 def status_line_payload(
     state: Any,
     target: WorktreeTarget,
@@ -120,19 +133,39 @@ def status_line_payload(
 ) -> dict[str, Any]:
     status = agent_status(target.repo_root)
     binding_error = agent_binding_error(target.repo_root, status)
-    visible = [item for item in items if not item.kind.startswith("presence:")]
-    latest = visible[0] if visible else None
-    latest_activity = items[0] if items else None
     pending = (
         pending_count
         if pending_count is not None
         else pending_inbox_count(target.repo_root)
     )
-    binding_status = _binding_status(status.thread_id, binding_error)
+    return _status_line_payload_from_status(
+        status=status,
+        thread_id=status.thread_id,
+        binding_error=binding_error,
+        items=items,
+        error=error,
+        pending=pending,
+    )
+
+
+def _status_line_payload_from_status(
+    *,
+    status: Any,
+    thread_id: str,
+    binding_error: str,
+    items: list[message_reader.AssistantMessage],
+    error: str | None,
+    pending: int,
+) -> dict[str, Any]:
+    thread_id = thread_id or ""
+    visible = [item for item in items if not item.kind.startswith("presence:")]
+    latest = visible[0] if visible else None
+    latest_activity = items[0] if items else None
+    binding_status = _binding_status(thread_id, binding_error)
     latest_status = latest_activity or latest
     return {
         "bindingStatus": binding_status,
-        "bound": bool(status.thread_id),
+        "bound": bool(thread_id),
         "bindingError": binding_error,
         "rolloutStatus": "error" if binding_error or error else "ok",
         "activityStatus": message_reader.activity_status(items),
@@ -165,6 +198,15 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
         binding_error = agent_binding_error(target.repo_root, status)
         binding_status = _binding_status(thread_id, binding_error)
         team_facts = team_facts_for_actor(state.team_store, thread_id)
+        items, error = target_activity_items(target, thread_id)
+        status_line = _status_line_payload_from_status(
+            status=status,
+            thread_id=thread_id,
+            binding_error=binding_error,
+            items=items,
+            error=error,
+            pending=pending,
+        )
         work_trees.append(
             {
                 "id": target.id,
@@ -187,24 +229,10 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
                 "pendingLabel": str(pending),
                 "privateTaskCount": 0,
                 "agentProcessStatus": status.process_status,
+                "agentVisualStatus": status_line["agentVisualStatus"],
                 "agentEnsure": agent_ensure or {},
-                "lastAssistantAt": "",
-                "statusLine": {
-                    "bound": bool(thread_id),
-                    "bindingStatus": binding_status,
-                    "bindingError": binding_error,
-                    "pendingInboxCount": pending,
-                    "pendingInboxLabel": str(pending),
-                    "agentProcessStatus": status.process_status,
-                    "agentVisualStatus": status.process_status,
-                    "rolloutStatus": "error" if binding_error else "",
-                    "activityStatus": "",
-                    "lastAssistantAt": "",
-                    "latestMessagePreview": "",
-                    "latestActivityPreview": "",
-                    "preview": "",
-                    "error": binding_error,
-                },
+                "lastAssistantAt": status_line["lastAssistantAt"],
+                "statusLine": status_line,
             }
         )
     return {

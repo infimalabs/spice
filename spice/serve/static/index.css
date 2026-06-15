@@ -799,8 +799,11 @@ button.primary:hover {
   width: 14px;
 }
 .target-choice--running .target-choice-signal { background: var(--good); }
+.target-choice--running-stale .target-choice-signal { background: #d99a00; }
 .target-choice--pending .target-choice-signal { background: var(--warn); }
-.target-choice--idle .target-choice-signal { background: var(--accent); }
+.target-choice--idle .target-choice-signal {
+  background: color-mix(in srgb, var(--muted) 92%, var(--panel));
+}
 .target-choice--open {
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
 }
