@@ -136,9 +136,11 @@ def render_shell_steering_hook_for_surface(
         restore_env_line(ZDOTDIR_ENV, original_zdotdir),
         restore_env_line(BASH_ENV_ENV, original_bash_env),
     ]
+    rearm_lines = shell_hook_rearm_lines(environment)
     return render_shell_steering_hook(
         agent_run_command=agent_run_command,
         restore_lines=restore_lines,
+        rearm_lines=rearm_lines,
         real_source_path=real_source_path_for_surface(surface, environment),
         self_path=self_path_for_surface(surface, environment),
         wrapper_lines=wrapper_lines_for_environment(environment),
@@ -437,10 +439,19 @@ def restore_env_line(name: str, value: str) -> str:
     return f"unset {name}"
 
 
+def shell_hook_rearm_lines(environment: Mapping[str, str]) -> list[str]:
+    return [
+        restore_env_line(name, environment[name])
+        for name in (ZDOTDIR_ENV, BASH_ENV_ENV)
+        if environment.get(name)
+    ]
+
+
 def render_shell_steering_hook(
     *,
     agent_run_command: str,
     restore_lines: Sequence[str],
+    rearm_lines: Sequence[str] = (),
     real_source_path: Path | None,
     self_path: Path,
     wrapper_lines: Sequence[str] = (),
@@ -462,6 +473,7 @@ def render_shell_steering_hook(
                 "fi",
             ]
         )
+    lines.extend(rearm_lines)
     lines.extend(wrapper_lines)
     return "\n".join(lines) + "\n"
 

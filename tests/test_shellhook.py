@@ -1,5 +1,6 @@
 """Agent wrapper routing and shell steering contracts."""
 
+import io
 import os
 import shutil
 import subprocess
@@ -167,9 +168,12 @@ def test_wrapper_plain_commands_inherit_worktree_spice_pythonpath(tmp_path):
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path.resolve())
 
 
-def test_wrapper_plain_commands_scrub_shell_reexec_environment(tmp_path, monkeypatch):
+def test_wrapper_non_shell_commands_scrub_shell_reexec_environment(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
+    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
     monkeypatch.setenv(SHELL_TRACE_ENV, "preserved")
 
     env = wrap.build_agent_run_environment(["true"], repo_root=tmp_path)
@@ -177,6 +181,7 @@ def test_wrapper_plain_commands_scrub_shell_reexec_environment(tmp_path, monkeyp
     assert env is not None
     assert "ZDOTDIR" not in env
     assert "BASH_ENV" not in env
+    assert shellhook.SHELL_HOOK_REEXEC_STAGE_ENV not in env
     assert env[SHELL_TRACE_ENV] == "preserved"
 
 
@@ -200,20 +205,53 @@ def test_wrapper_preserves_shell_hook_environment_for_explicit_reexec_stage(
     assert env[shellhook.SHELL_HOOK_REEXEC_STAGE_ENV] == "1"
 
 
-def test_wrapper_scrubs_shell_hook_environment_when_stage_marker_leaks(
+def test_wrapper_installs_shell_hook_environment_for_child_shell_commands(
     tmp_path, monkeypatch
 ):
-    _write_spice_product_shape(tmp_path)
-    monkeypatch.setenv("ZDOTDIR", "hook")
-    monkeypatch.setenv("BASH_ENV", "hook")
+    monkeypatch.delenv("ZDOTDIR", raising=False)
+    monkeypatch.delenv("BASH_ENV", raising=False)
     monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
 
     env = wrap.build_agent_run_environment(["zsh", "-c", "true"], repo_root=tmp_path)
 
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
     assert env is not None
-    assert "ZDOTDIR" not in env
-    assert "BASH_ENV" not in env
+    assert env["ZDOTDIR"] == str(hook_dir)
+    assert env["BASH_ENV"] == str(hook_dir / shellhook.BASH_HOOK_NAME)
     assert env[shellhook.SHELL_HOOK_REEXEC_STAGE_ENV] == "1"
+    assert env[shellhook.SHELL_HOOK_REPO_ROOT_ENV] == str(tmp_path.resolve())
+
+
+def test_agent_run_shell_command_loads_wrappers_without_manual_hook_env(
+    tmp_path, monkeypatch
+):
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    trace = tmp_path / "trace.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    rtk = bin_dir / "rtk"
+    rtk.write_text(
+        f'#!/bin/sh\nprintf \'rtk:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+        encoding="utf-8",
+    )
+    rtk.chmod(0o755)
+    monkeypatch.delenv(shellhook.ZDOTDIR_ENV, raising=False)
+    monkeypatch.delenv(shellhook.BASH_ENV_ENV, raising=False)
+    monkeypatch.delenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, raising=False)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv(SHELL_TRACE_ENV, str(trace))
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        [zsh, "-c", "grep needle /dev/null"],
+        stderr=io.StringIO(),
+    )
+
+    assert exit_code == 0
+    lines = _trace_lines(trace, expected_prefix="rtk:")
+    assert "rtk:grep needle /dev/null" in lines
 
 
 def test_agent_environment_inherits_worktree_spice_pythonpath(tmp_path, monkeypatch):
@@ -630,7 +668,7 @@ def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
     subprocess.run([zsh, "-c", command], check=True, env=env)
 
     lines = _trace_lines(trace, expected_prefix="after:")
-    assert "after:unset:unset" in lines
+    assert f"after:{hook_dir}:unset" in lines
     assert lines.count("real-zshenv:unset") == 2
 
 
@@ -744,7 +782,7 @@ def test_bash_env_hook_reexec_restores_for_nested_shells(tmp_path):
     subprocess.run([bash, "-c", command], check=True, env=env)
 
     lines = _trace_lines(trace, expected_prefix="after:")
-    assert f"after:{real_bash_env}" in lines
+    assert f"after:{hook_dir / shellhook.BASH_HOOK_NAME}" in lines
     assert lines.count(f"real-bash:{real_bash_env}") == 2
 
 
@@ -785,7 +823,7 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
     assert len(agent_run_lines) == 1
     assert agent_run_lines[0].startswith(f"fake:{hook_dir}:unset:")
     assert f" {zsh} -c " in agent_run_lines[0]
-    assert "ran:unset:unset" in lines
+    assert f"ran:{hook_dir}:unset" in lines
 
 
 def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
@@ -857,7 +895,7 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
         f"fake:unset:{hook_dir / shellhook.BASH_HOOK_NAME}:"
     )
     assert f" {bash} -c " in agent_run_lines[0]
-    assert "ran:unset" in lines
+    assert f"ran:{hook_dir / shellhook.BASH_HOOK_NAME}" in lines
 
 
 def test_bash_env_hook_fails_noninteractive_shell_without_execution_string(tmp_path):
