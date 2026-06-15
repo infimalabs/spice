@@ -476,6 +476,47 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert items[0].attachments[0].path.read_bytes() == b"image-bytes"
 
 
+def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+
+    def fake_ensure(ensured_target, **kwargs):
+        assert ensured_target == target
+        return {
+            "ok": False,
+            "error": "Could not ensure agent: invalid config",
+        }, HTTPStatus.INTERNAL_SERVER_ERROR
+
+    monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+
+    payload, status = work_tree_send_response_payload(
+        state,
+        target,
+        {"text": "inspect this failure"},
+    )
+
+    assert status == HTTPStatus.OK
+    assert payload["ok"] is True
+    assert payload["requestText"] == "inspect this failure"
+    assert payload["pendingInboxCount"] == 0
+    assert payload["pendingInboxLabel"] == "0"
+    assert payload["agentEnsure"]["ok"] is False
+    assert payload["agentEnsure"]["error"] == "Could not ensure agent: invalid config"
+    assert payload["agentEnsure"]["deadletteredInboxKey"]
+    assert payload["agentEnsure"]["deadletterRequeueCommand"] == (
+        "spice agent requeue-deadletter "
+        f"{payload['agentEnsure']['deadletteredInboxKey']}"
+    )
+    assert collect_inbox_items(repo) == []
+    deadletters = collect_deadlettered_inbox_items(repo)
+    assert len(deadletters) == 1
+    assert inbox_request_body(deadletters[0].text) == "inspect this failure"
+
+
 def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
     target = _target(repo)
@@ -869,10 +910,66 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
 
     assert ensure_calls == INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD
     assert payload["agentEnsure"]["deadletteredInboxKey"] == "20260101T000000000001Z"
+    assert (
+        payload["agentEnsure"]["deadletterRequeueCommand"]
+        == "spice agent requeue-deadletter 20260101T000000000001Z"
+    )
+    assert (
+        payload["agentEnsure"]["creditFailureThreshold"]
+        == INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD
+    )
+    assert payload["pendingInboxCount"] == 0
+    assert payload["statusLine"]["pendingInboxCount"] == 0
+    assert payload["statusLine"]["pendingInboxLabel"] == "0"
     assert payload["agentEnsure"]["pendingInboxCount"] == 0
     assert pending_inbox_count(repo) == 0
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
         "20260101T000000000001Z.txt"
+    ]
+
+
+def test_pending_inbox_deadletters_after_generic_ensure_failure(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    write_inbox_item(
+        repo,
+        "20260101T000000000002Z.txt",
+        compose_inbox_text(body="external steering", priority=None, stop=False),
+    )
+    ensure_calls = 0
+
+    def fake_ensure(ensured_target, **kwargs):
+        nonlocal ensure_calls
+        ensure_calls += 1
+        assert ensured_target == target
+        return {
+            "ok": False,
+            "error": "Could not ensure agent: invalid config",
+        }, HTTPStatus.INTERNAL_SERVER_ERROR
+
+    monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+
+    payload = payloads.messages_payload_for_worktree(state, target, limit=5)
+
+    assert ensure_calls == 1
+    assert payload["agentEnsure"]["ok"] is False
+    assert payload["agentEnsure"]["error"] == "Could not ensure agent: invalid config"
+    assert "failure" not in payload["agentEnsure"]
+    assert payload["agentEnsure"]["deadletteredInboxKey"] == "20260101T000000000002Z"
+    assert (
+        payload["agentEnsure"]["deadletterRequeueCommand"]
+        == "spice agent requeue-deadletter 20260101T000000000002Z"
+    )
+    assert payload["agentEnsure"]["pendingInboxCount"] == 0
+    assert payload["agentEnsure"]["pendingInboxLabel"] == "0"
+    assert payload["pendingInboxCount"] == 0
+    assert payload["statusLine"]["pendingInboxCount"] == 0
+    assert payload["statusLine"]["pendingInboxLabel"] == "0"
+    assert pending_inbox_count(repo) == 0
+    assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
+        "20260101T000000000002Z.txt"
     ]
 
 

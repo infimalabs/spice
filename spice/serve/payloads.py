@@ -18,7 +18,10 @@ from spice.mail.inbox import (
 )
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve import messages as message_reader
-from spice.serve.agentapi import ensure_agent_for_pending_inbox
+from spice.serve.agentapi import (
+    ensure_agent_for_pending_inbox,
+    pending_inbox_count_after_agent_ensure,
+)
 from spice.serve.markdown import render_message_html
 from spice.serve.teams import ServeTeamStore
 from spice.serve.worktrees import WorktreeTarget
@@ -156,6 +159,7 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
             pending,
             attempt_cache=state.pending_agent_ensure_attempts,
         )
+        pending = pending_inbox_count_after_agent_ensure(pending, agent_ensure)
         thread_id = resolve_thread_id_for_target(state, target) or ""
         status = agent_status(target.repo_root)
         binding_error = agent_binding_error(target.repo_root, status)
@@ -361,6 +365,7 @@ def messages_payload_for_worktree(
         attempt_cache=state.pending_agent_ensure_attempts,
         fast_mode=fast_mode,
     )
+    pending = pending_inbox_count_after_agent_ensure(pending, agent_ensure)
     team_facts = team_facts_for_actor(state.team_store, thread_id)
     status = agent_status(target.repo_root)
     return {
