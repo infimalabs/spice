@@ -46,15 +46,6 @@ def configure_agent_parser(subparsers: Any) -> None:
     run.add_argument("args", nargs=argparse.REMAINDER)
     run.set_defaults(func=handle_agent)
 
-    shell_hook = actions.add_parser(
-        "shell-hook",
-        help="Render dynamic shell startup hook code for a supported surface.",
-    )
-    from spice.agent.shellhook import SHELL_HOOK_SURFACES
-
-    shell_hook.add_argument("surface", choices=SHELL_HOOK_SURFACES)
-    shell_hook.set_defaults(func=handle_agent)
-
     ensure = actions.add_parser("ensure", help="Start or resume the worktree's agent.")
     ensure.add_argument("--dry-run", action="store_true")
     ensure.add_argument("--force-new", action="store_true")
@@ -87,14 +78,6 @@ def handle_agent(args: argparse.Namespace) -> int:
     action = args.agent_action
     if action == "supervise":
         return lifecycle.run_agent_supervisor(args)
-    if action == "shell-hook":
-        from spice.agent.shellhook import render_shell_steering_hook_for_surface
-
-        print(
-            render_shell_steering_hook_for_surface(str(args.surface)),
-            end="",
-        )
-        return 0
     repo_root = require_repo_root()
     if action == "status":
         print(render_agent_status(lifecycle.agent_status(repo_root)))
