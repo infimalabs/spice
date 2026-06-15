@@ -265,7 +265,7 @@ async function applyLaneBusPayload(lane, payload, source) {
   renderMessagesIfChanged(lane);
   if (source === "watch" && (payload.messages || []).length)
     refreshServerTopology().catch(() => {});
-  if (wasSpeechPrimed && source === "watch") {
+  if (wasSpeechPrimed) {
     const fresh = (payload.messages || []).filter(
       (item) => item.key && !knownBefore.has(item.key),
     );
