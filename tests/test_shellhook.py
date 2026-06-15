@@ -406,10 +406,9 @@ def test_shell_hook_renderer_adds_ordered_agent_wrapper_functions(tmp_path):
 
 
 def test_shell_hook_renderer_uses_builtin_common_agent_wrapper_default(tmp_path):
-    assert (
-        shellhook.render_agent_wrapper_lines(tmp_path)
-        == _expected_builtin_common_wrapper_lines()
-    )
+    assert shellhook.render_agent_wrapper_lines(
+        tmp_path
+    ) == _expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"])
 
 
 def test_shell_hook_renderer_explicit_common_group_inherits_builtin_default(tmp_path):
@@ -431,14 +430,12 @@ def test_shell_hook_renderer_explicit_common_group_inherits_builtin_default(tmp_
 
     rendered = shellhook.render_shell_steering_hook_for_surface("zshenv", env=env)
 
-    assert (
-        shellhook.render_agent_wrapper_lines(tmp_path)
-        == _expected_builtin_common_wrapper_lines()
-    )
+    assert shellhook.render_agent_wrapper_lines(
+        tmp_path
+    ) == _expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"])
     assert '\nrun() {\n  rtk run "$@"\n}\n' in rendered
     assert '\nproxy() {\n  rtk proxy "$@"\n}\n' in rendered
     assert '\ngrep() {\n  rtk grep "$@"\n}\n' in rendered
-    assert '\npytest() {\n  "$SPICE_SHELL_HOOK_PYTHON" -m pytest "$@"\n}\n' in rendered
 
 
 def test_shell_hook_renderer_project_common_group_overrides_builtin_default(tmp_path):
@@ -451,6 +448,24 @@ def test_shell_hook_renderer_project_common_group_overrides_builtin_default(tmp_
     assert shellhook.render_agent_wrapper_lines(
         tmp_path
     ) == _expected_rtk_wrapper_lines(["grep"])
+
+
+def test_shell_hook_renderer_project_common_can_add_pytest_wrapper(tmp_path):
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=None,
+        groups={
+            "common": {
+                "rtk": ["run", "proxy", "grep", "find", "git"],
+                "pytest": {"command": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
+            }
+        },
+    )
+
+    assert (
+        shellhook.render_agent_wrapper_lines(tmp_path)
+        == _expected_project_common_with_pytest_wrapper_lines()
+    )
 
 
 def test_shell_hook_renderer_accepts_direct_command_wrapper(tmp_path):
@@ -915,7 +930,7 @@ def _toml_key(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _expected_builtin_common_wrapper_lines() -> list[str]:
+def _expected_project_common_with_pytest_wrapper_lines() -> list[str]:
     return [
         *_expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"]),
         *_expected_active_python_module_wrapper_lines(["pytest"]),

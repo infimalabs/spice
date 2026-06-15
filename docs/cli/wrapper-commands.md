@@ -46,13 +46,11 @@ list is configured, spice selects the built-in `common` group. An explicit empty
 list disables wrapper generation.
 
 The built-in `common` group maps `rtk` to the command selectors that benefit
-from RTK routing, and maps `pytest` through the active shell-hook Python module
-runner:
+from RTK routing:
 
 ```toml
 [tool.spice.wrappers.common]
 rtk = ["run", "proxy", "grep", "find", "git"]
-pytest = { command = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
 ```
 
 Selectors are command names, not paths. Path selectors such as `/bin/sh` fail
@@ -63,6 +61,14 @@ Wrapper entries may also be direct command wrappers with a `command = [...]`
 argv list; the hook shell-quotes each command word before rendering the
 function. A command word in `$NAME` form is rendered as a quoted shell variable
 reference for hook-provided values such as `$SPICE_SHELL_HOOK_PYTHON`.
+For example, a repository can opt into a local pytest wrapper without changing
+the global default:
+
+```toml
+[tool.spice.wrappers.common]
+rtk = ["run", "proxy", "grep", "find", "git"]
+pytest = { command = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
+```
 
 ## Mounted Commands
 

@@ -19,10 +19,7 @@ ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zlogin")
 AGENT_WRAPPERS_KEY = "wrappers"
 DEFAULT_AGENT_WRAPPER_GROUP = "common"
 BUILTIN_AGENT_WRAPPER_GROUPS = {
-    DEFAULT_AGENT_WRAPPER_GROUP: {
-        "rtk": ["run", "proxy", "grep", "find", "git"],
-        "pytest": {"command": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
-    },
+    DEFAULT_AGENT_WRAPPER_GROUP: {"rtk": ["run", "proxy", "grep", "find", "git"]},
 }
 SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
 SHELL_HOOK_REPO_ROOT_ENV = "SPICE_SHELL_HOOK_REPO_ROOT"  # env-policy: allow
