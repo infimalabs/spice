@@ -46,22 +46,44 @@ def test_speech_item_utterances_use_prepared_text_once():
 
 
 def test_speak_mode_speaks_ack_utterances_and_final_messages():
-    ack_item = {"kind": "assistant", "speech_utterances": ["ACK finished."]}
-    final_item = {"kind": "final", "display_text": "Final answer ready."}
+    ack_item = {
+        "kind": "assistant",
+        "ack_utterances": ["ACK first paragraph.\n\nACK last paragraph."],
+    }
+    final_item = {
+        "kind": "final",
+        "display_text": "First final paragraph.\n\nMiddle final paragraph.\n\nLast final paragraph.",
+    }
+    final_ack_item = {
+        "kind": "final",
+        "ack_utterances": ["ACK body should not override final excerpt."],
+        "display_text": "First final ACK paragraph.\n\nHidden middle.\n\nLast final ACK paragraph.",
+    }
 
-    assert _automatic_speech_utterances("speak", ack_item) == ["ACK finished."]
-    assert _automatic_speech_utterances("speak", final_item) == ["Final answer ready."]
+    assert _automatic_speech_utterances("speak", ack_item) == [
+        "ACK first paragraph. ACK last paragraph."
+    ]
+    assert _automatic_speech_utterances("speak", final_item) == [
+        "First final paragraph.",
+        "Last final paragraph.",
+    ]
+    assert _automatic_speech_utterances("speak", final_ack_item) == [
+        "First final ACK paragraph.",
+        "Last final ACK paragraph.",
+    ]
 
 
 def test_quiet_and_narrate_keep_their_speech_contracts():
     final_item = {"kind": "final", "display_text": "Final answer ready."}
     assistant_item = {
         "kind": "assistant",
+        "say_utterances": ["SAY this explicit update."],
         "display_text": "First paragraph.\n\nMiddle paragraph.\n\nLast paragraph.",
     }
 
     assert _automatic_speech_utterances("quiet", final_item) == []
     assert _automatic_speech_utterances("narrate", assistant_item) == [
+        "SAY this explicit update.",
         "First paragraph.",
         "Last paragraph.",
     ]
@@ -70,6 +92,7 @@ def test_quiet_and_narrate_keep_their_speech_contracts():
 def test_manual_speech_playback_reads_all_display_paragraphs():
     item = {
         "kind": "assistant",
+        "ack_utterances": ["ACK body should not override manual playback."],
         "display_text": "First paragraph.\n\nMiddle paragraph.\n\nLast paragraph.",
     }
 
