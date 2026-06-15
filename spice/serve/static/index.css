@@ -846,6 +846,11 @@ button.primary:hover {
     flex: 1 1 auto;
     min-width: 0;
   }
+  .spice-menu-button {
+    /* When no task pills are shown, the filter-strip grower is hidden and
+       nothing else fills the row — push the button to the trailing edge. */
+    margin-left: auto;
+  }
   .swimlanes {
     --mobile-lane-gap: 8px;
     --mobile-lane-gutter: 4px;
