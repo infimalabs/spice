@@ -823,6 +823,24 @@ def test_static_stream_uses_message_payload_and_standard_badges():
     )
 
 
+def test_static_stream_queues_fresh_speech_for_all_post_prime_sources():
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    apply_start = app_stream.index("async function applyLaneBusPayload")
+    apply_body = app_stream[
+        apply_start : app_stream.index("\n}\n\nfunction syncLaneThreadId", apply_start)
+    ]
+
+    assert 'if (source === "watch" && (payload.messages || []).length)' in apply_body
+    assert 'if (wasSpeechPrimed && source === "watch")' not in apply_body
+    assert "if (wasSpeechPrimed) {" in apply_body
+    assert (
+        "const fresh = (payload.messages || []).filter(\n"
+        "      (item) => item.key && !knownBefore.has(item.key),\n"
+        "    );" in apply_body
+    )
+    assert "queueSpeechForMessages(lane, fresh);" in apply_body
+
+
 def test_static_manual_speech_playback_aborts_active_entry():
     app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
 
