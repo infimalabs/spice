@@ -166,6 +166,24 @@ def pending_inbox_count(repo_root: str | Path | None) -> int:
     )
 
 
+def pending_operator_inbox_count(repo_root: str | Path | None) -> int:
+    """Pending items that justify resurrecting an idle agent.
+
+    Automated guidance (maxim and friends) is fully synthesized — it does not
+    come from the operator — so it is informational at launch and must never
+    start an off agent on its own. Only genuine operator steering resurrects an
+    idle lane; this gates the respawn path so automated guidance cannot drive a
+    restart storm on an agent that is out of credits or otherwise down.
+    """
+    if not repo_root:
+        return 0
+    return sum(
+        1
+        for item in collect_inbox_items(repo_root)
+        if not inbox_item_is_automated_guidance(item)
+    )
+
+
 def inbox_payload_rows(items: Sequence[InboxItem]) -> list[str]:
     if not items:
         return []

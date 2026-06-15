@@ -19,6 +19,7 @@ from spice.mail.inbox import (
     inbox_payload_rows,
     parse_inbox_payload,
     pending_inbox_count,
+    pending_operator_inbox_count,
     write_inbox_item,
 )
 from spice.serve.markdown import render_message_html
@@ -188,6 +189,41 @@ def test_inbox_payload_rows_prompt_immediate_task_offload(tmp_path):
     assert "decide now" in INBOX_TASK_HINT_ROW
     assert "scope/tracking changed" in INBOX_TASK_HINT_ROW
     assert "before resuming work" in INBOX_TASK_HINT_ROW
+
+
+def test_pending_operator_count_excludes_automated_guidance(tmp_path):
+    write_inbox_item(
+        tmp_path,
+        "20260103T000000000010Z.txt",
+        compose_inbox_text(
+            body="please pick up the new ask", priority=None, stop=False
+        ),
+    )
+    write_inbox_item(
+        tmp_path,
+        "20260103T000000000011Z.txt",
+        compose_inbox_text(
+            body="automated maxim guidance", priority="maxim", stop=False
+        ),
+    )
+
+    # Both items are pending, but only the genuine operator steering should be
+    # able to resurrect an idle agent; the maxim is informational at launch.
+    assert pending_inbox_count(str(tmp_path)) == 2
+    assert pending_operator_inbox_count(str(tmp_path)) == 1
+
+
+def test_pending_operator_count_zero_for_only_automated_guidance(tmp_path):
+    write_inbox_item(
+        tmp_path,
+        "20260103T000000000012Z.txt",
+        compose_inbox_text(
+            body="automated maxim guidance", priority="maxim", stop=False
+        ),
+    )
+
+    assert pending_inbox_count(str(tmp_path)) == 1
+    assert pending_operator_inbox_count(str(tmp_path)) == 0
 
 
 def test_inbox_payload_rows_suppress_task_offload_for_maxim_guidance(tmp_path):

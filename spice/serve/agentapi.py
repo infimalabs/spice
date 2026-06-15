@@ -9,7 +9,11 @@ from typing import Any
 
 from spice.agent.driver import driver_for
 from spice.agent.lifecycle import agent_binding_error, agent_status, ensure_agent
-from spice.mail.inbox import inbox_request_priority, pending_inbox_count
+from spice.mail.inbox import (
+    inbox_request_priority,
+    pending_inbox_count,
+    pending_operator_inbox_count,
+)
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve.markdown import render_message_html
 from spice.serve.steering import SentSteeringMessage
@@ -148,6 +152,12 @@ def ensure_agent_for_pending_inbox(
     agent up (or its renewed successor, under `force_new`).
     """
     if pending_count <= 0:
+        return None
+    # Automated guidance (maxim) is synthesized, not operator-sent: it must never
+    # resurrect an idle agent on its own, or a down/out-of-credits lane restarts
+    # in a loop driven by its own automated messages. Only genuine operator
+    # steering brings a lane up.
+    if pending_operator_inbox_count(target.repo_root) <= 0:
         return None
     status = agent_status(target.repo_root)
     if status.running:
