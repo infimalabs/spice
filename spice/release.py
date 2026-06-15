@@ -280,7 +280,9 @@ def render_release_notes(
 ) -> str:
     groups: OrderedDict[str, OrderedDict[str, list[str]]] = OrderedDict()
     for record in records:
-        project_subjects = groups.setdefault(record.project, OrderedDict())
+        project_subjects = groups.setdefault(
+            release_project_key(record.project), OrderedDict()
+        )
         project_subjects.setdefault(
             edited_release_highlight(record.subject), []
         ).append(shortish_commit(record.commit))
@@ -347,8 +349,22 @@ def edited_release_highlight(subject: str) -> str:
 def release_project_heading(project: str) -> str:
     if project in PROJECT_HEADINGS:
         return PROJECT_HEADINGS[project]
-    label = " ".join(project.replace("_", "-").split("-")).strip()
-    return label.title() if label else "General"
+    parts = [
+        segment
+        for dotted in project.replace("_", "-").split(".")
+        for segment in dotted.split("-")
+        if segment
+    ]
+    if not parts:
+        return "General"
+    return " ".join(PROJECT_HEADINGS.get(part, part.title()) for part in parts)
+
+
+def release_project_key(project: str) -> str:
+    key = project.strip().lower()
+    if not key or key.startswith("agent."):
+        return "general"
+    return key
 
 
 def capitalize_first(text: str) -> str:

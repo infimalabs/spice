@@ -81,6 +81,21 @@ def test_release_notes_group_edited_highlights_by_project():
                 subject="Fix speech excerpts for final ACK messages",
                 project="serve",
             ),
+            ReleaseRecord(
+                commit="4444444dddd",
+                subject="Fix narration media session retention",
+                project="serve.ui",
+            ),
+            ReleaseRecord(
+                commit="5555555eeee",
+                subject="Implement dynamic agent shell-hook surfaces",
+                project="task.cli",
+            ),
+            ReleaseRecord(
+                commit="6666666ffff",
+                subject="Show agent stem in active header pills",
+                project="agent.019ec753620c7cf2b18c06707ac93cbb.task",
+            ),
         ],
     )
 
@@ -91,6 +106,15 @@ def test_release_notes_group_edited_highlights_by_project():
     )
     assert "### CLI" in notes
     assert "- Added release tooling as spice command. (`2222222`)" in notes
+    assert "### Serve UI" in notes
+    assert "- Fixed narration media session retention. (`4444444`)" in notes
+    assert "### Task CLI" in notes
+    assert "- Implement dynamic agent shell-hook surfaces. (`5555555`)" in notes
+    assert "### General" in notes
+    assert "- Show agent stem in active header pills. (`6666666`)" in notes
     assert "- PyPI release: `spice-harness==0.3.0`" in notes
     assert "- Commit range: `v0.2.1..abcdef1`" in notes
     assert "- fix speech excerpts" not in notes
+    assert "Serve.Ui" not in notes
+    assert "Task.Cli" not in notes
+    assert "Agent." not in notes
