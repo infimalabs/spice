@@ -823,6 +823,18 @@ def test_static_stream_uses_message_payload_and_standard_badges():
     )
 
 
+def test_static_stream_reports_deadlettered_agent_ensure_failure():
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+
+    assert "function agentEnsureFailureStatus(ensure)" in app_stream
+    assert (
+        "setLaneTransientStatus(sourceLane, agentEnsureFailureStatus(ensure));"
+        in app_stream
+    )
+    assert 'parts.push("parked inbox " + ensure.deadletteredInboxKey);' in app_stream
+    assert 'parts.push("requeue: " + ensure.deadletterRequeueCommand);' in app_stream
+
+
 def test_static_stream_queues_fresh_speech_for_all_post_prime_sources():
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     apply_start = app_stream.index("async function applyLaneBusPayload")

@@ -148,6 +148,7 @@ def sent_steering_response_payload(
         fast_mode=fast_mode,
         force_new=force_new,
     )
+    pending = pending_inbox_count_after_agent_ensure(pending, agent_ensure)
     return sent_steering_payload(
         sent,
         target=target,
@@ -194,15 +195,45 @@ def ensure_agent_for_pending_inbox(
     payload, _status = agent_ensure_response_payload(
         target, fast_mode=fast_mode, force_new=force_new
     )
+    if payload.get("ok") is False:
+        return deadletter_failed_agent_ensure_payload(
+            target,
+            payload,
+            trigger_key=trigger_key,
+        )
+    return payload
+
+
+def deadletter_failed_agent_ensure_payload(
+    target: WorktreeTarget,
+    payload: dict[str, Any],
+    *,
+    trigger_key: str,
+) -> dict[str, Any]:
+    """Park the operator item that caused a failed automatic ensure."""
     if payload.get("failure") == AGENT_FAILURE_OUT_OF_CREDITS:
         payload["creditFailureThreshold"] = INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD
-        deadlettered = deadletter_inbox_item(target.repo_root, trigger_key)
-        if deadlettered:
-            payload["deadletteredInboxKey"] = deadlettered
-            payload["pendingInboxCount"] = pending_inbox_count(target.repo_root)
-            payload["pendingInboxLabel"] = str(payload["pendingInboxCount"])
-        return payload
+    deadlettered = deadletter_inbox_item(target.repo_root, trigger_key)
+    if deadlettered:
+        payload["deadletteredInboxKey"] = deadlettered
+        payload["deadletterRequeueCommand"] = (
+            f"spice agent requeue-deadletter {deadlettered}"
+        )
+        payload["pendingInboxCount"] = pending_inbox_count(target.repo_root)
+        payload["pendingInboxLabel"] = str(payload["pendingInboxCount"])
     return payload
+
+
+def pending_inbox_count_after_agent_ensure(
+    pending_count: int,
+    agent_ensure: dict[str, Any] | None,
+) -> int:
+    if not isinstance(agent_ensure, dict):
+        return pending_count
+    try:
+        return int(agent_ensure.get("pendingInboxCount", pending_count))
+    except (TypeError, ValueError):
+        return pending_count
 
 
 def _ensure_due(

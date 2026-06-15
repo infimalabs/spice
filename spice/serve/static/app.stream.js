@@ -778,7 +778,7 @@ function applyLaneSendResult(
   );
   const ensure = result.agentEnsure || {};
   if (ensure.ok === false)
-    setLaneTransientStatus(sourceLane, ensure.error || "agent launch failed");
+    setLaneTransientStatus(sourceLane, agentEnsureFailureStatus(ensure));
   if (ensure.threadId) {
     const changed = ensure.threadId !== lane.targetThreadId;
     lane.targetThreadId = ensure.threadId;
@@ -789,6 +789,15 @@ function applyLaneSendResult(
       subscribeLaneToLiveBus(lane);
     }
   }
+}
+
+function agentEnsureFailureStatus(ensure) {
+  const parts = [ensure.error || "agent launch failed"];
+  if (ensure.deadletteredInboxKey)
+    parts.push("parked inbox " + ensure.deadletteredInboxKey);
+  if (ensure.deadletterRequeueCommand)
+    parts.push("requeue: " + ensure.deadletterRequeueCommand);
+  return parts.join("; ");
 }
 
 function focusAfterComposerReset(element) {
