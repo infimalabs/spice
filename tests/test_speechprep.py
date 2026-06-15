@@ -119,6 +119,18 @@ def test_speech_queue_clears_global_pending_backlog_when_behind():
     ) == ["active", "current"]
 
 
+def test_stop_clears_pending_queue_across_lanes():
+    assert _stop_clears_pending_across_lanes() == ["active"]
+
+
+def test_external_pause_clears_pending_queue():
+    assert _external_pause_clears_pending() == ["active"]
+
+
+def test_speech_burst_never_overlaps_audio():
+    assert _burst_max_concurrent_audio() == 1
+
+
 def _prepare_speech(text: str) -> str:
     return _node_call("prepareSpeechText", text)
 
@@ -533,6 +545,295 @@ vm.runInContext(fs.readFileSync(path, "utf8"), context);
         raise AssertionError(
             "node speech queue backlog failed:\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    return json.loads(result.stdout)
+
+
+def _stop_clears_pending_across_lanes() -> list[str]:
+    script = """
+const fs = require("fs");
+const vm = require("vm");
+const path = process.argv[1];
+const requests = [];
+const audioInstances = [];
+const failTimer = setTimeout(() => {
+  console.error("active speech was not requested");
+  process.exit(1);
+}, 1000);
+let firstRequestedResolve;
+let firstAudioResolve;
+const firstRequested = new Promise((resolve) => {
+  firstRequestedResolve = resolve;
+});
+const firstAudioReady = new Promise((resolve) => {
+  firstAudioResolve = resolve;
+});
+
+class FakeAudio {
+  constructor() {
+    this.listeners = {};
+    this.index = audioInstances.length;
+    audioInstances.push(this);
+    if (this.index === 0) firstAudioResolve();
+  }
+  addEventListener(name, callback) {
+    this.listeners[name] = callback;
+  }
+  removeEventListener(name) {
+    delete this.listeners[name];
+  }
+  play() {
+    if (this.index > 0) queueMicrotask(() => this.listeners.ended());
+    return Promise.resolve();
+  }
+  pause() {
+    if (this.listeners.pause) this.listeners.pause();
+  }
+}
+
+const context = {
+  Blob: class {},
+  Audio: FakeAudio,
+  URL: {
+    createObjectURL: () => "blob:audio",
+    revokeObjectURL: () => {},
+  },
+  document: { querySelectorAll: () => [] },
+  fetch: async (url, options) => {
+    const text = JSON.parse(options.body).text;
+    requests.push(text);
+    if (text === "active") firstRequestedResolve();
+    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+  },
+  isPresenceMessage: () => false,
+  laneEffectiveSpeechMode: () => "speak",
+  laneGroupHost: (lane) => lane,
+  queueMicrotask,
+  setTimeout,
+  targetApi: (targetId, suffix) => targetId + suffix,
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(path, "utf8"), context);
+
+(async () => {
+  const laneA = { targetId: "lane-a", speechAbortVersion: 0, spokenMessageKeys: new Set() };
+  const laneB = { targetId: "lane-b", speechAbortVersion: 0, spokenMessageKeys: new Set() };
+  context.enqueueSpeech(laneA, "active-key", ["active"]);
+  await firstRequested;
+  await firstAudioReady;
+  context.enqueueSpeech(laneB, "bravo-key", ["bravo"]);
+  await Promise.resolve();
+  // Stop by toggling off the active message: the entire queue must clear, so
+  // the cross-lane "bravo" entry never reaches playback.
+  context.toggleMessageSpeech(laneA, "active-key", ["active"]);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  clearTimeout(failTimer);
+  process.stdout.write(JSON.stringify(requests));
+})().catch((error) => {
+  clearTimeout(failTimer);
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});
+"""
+    return _run_audio_script(script, "node stop-clears-queue failed")
+
+
+def _external_pause_clears_pending() -> list[str]:
+    script = """
+const fs = require("fs");
+const vm = require("vm");
+const path = process.argv[1];
+const requests = [];
+const audioInstances = [];
+const failTimer = setTimeout(() => {
+  console.error("active speech was not requested");
+  process.exit(1);
+}, 1000);
+let firstRequestedResolve;
+let firstAudioResolve;
+const firstRequested = new Promise((resolve) => {
+  firstRequestedResolve = resolve;
+});
+const firstAudioReady = new Promise((resolve) => {
+  firstAudioResolve = resolve;
+});
+
+class FakeAudio {
+  constructor() {
+    this.listeners = {};
+    this.index = audioInstances.length;
+    audioInstances.push(this);
+    if (this.index === 0) firstAudioResolve();
+  }
+  addEventListener(name, callback) {
+    this.listeners[name] = callback;
+  }
+  removeEventListener(name) {
+    delete this.listeners[name];
+  }
+  play() {
+    if (this.index > 0) queueMicrotask(() => this.listeners.ended());
+    return Promise.resolve();
+  }
+  pause() {
+    if (this.listeners.pause) this.listeners.pause();
+  }
+}
+
+const context = {
+  Blob: class {},
+  Audio: FakeAudio,
+  URL: {
+    createObjectURL: () => "blob:audio",
+    revokeObjectURL: () => {},
+  },
+  document: { querySelectorAll: () => [] },
+  fetch: async (url, options) => {
+    const text = JSON.parse(options.body).text;
+    requests.push(text);
+    if (text === "active") firstRequestedResolve();
+    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+  },
+  isPresenceMessage: () => false,
+  laneEffectiveSpeechMode: () => "speak",
+  laneGroupHost: (lane) => lane,
+  queueMicrotask,
+  setTimeout,
+  targetApi: (targetId, suffix) => targetId + suffix,
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(path, "utf8"), context);
+
+(async () => {
+  const laneA = { targetId: "lane-a", speechAbortVersion: 0, spokenMessageKeys: new Set() };
+  const laneB = { targetId: "lane-b", speechAbortVersion: 0, spokenMessageKeys: new Set() };
+  context.enqueueSpeech(laneA, "active-key", ["active"]);
+  await firstRequested;
+  await firstAudioReady;
+  context.enqueueSpeech(laneB, "bravo-key", ["bravo"]);
+  await Promise.resolve();
+  // An external pause (OS / media key) fires 'pause' on the active element
+  // without our intentional marker: it must stop everything, so the queued
+  // "bravo" never plays.
+  audioInstances[0].listeners.pause();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  clearTimeout(failTimer);
+  process.stdout.write(JSON.stringify(requests));
+})().catch((error) => {
+  clearTimeout(failTimer);
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});
+"""
+    return _run_audio_script(script, "node external-pause-clears-queue failed")
+
+
+def _burst_max_concurrent_audio() -> int:
+    script = """
+const fs = require("fs");
+const vm = require("vm");
+const path = process.argv[1];
+const audioInstances = [];
+let active = 0;
+let maxActive = 0;
+const failTimer = setTimeout(() => {
+  console.error("burst speech never settled");
+  process.exit(1);
+}, 1000);
+
+class FakeAudio {
+  constructor() {
+    this.listeners = {};
+    this.counted = false;
+    audioInstances.push(this);
+  }
+  addEventListener(name, callback) {
+    this.listeners[name] = callback;
+  }
+  removeEventListener(name) {
+    if (name === "pause" && this.counted) {
+      active -= 1;
+      this.counted = false;
+    }
+    delete this.listeners[name];
+  }
+  play() {
+    active += 1;
+    this.counted = true;
+    if (active > maxActive) maxActive = active;
+    queueMicrotask(() => {
+      if (this.listeners.ended) this.listeners.ended();
+    });
+    return Promise.resolve();
+  }
+  pause() {
+    if (this.listeners.pause) this.listeners.pause();
+  }
+}
+
+const context = {
+  Blob: class {},
+  Audio: FakeAudio,
+  URL: {
+    createObjectURL: () => "blob:audio",
+    revokeObjectURL: () => {},
+  },
+  document: { querySelectorAll: () => [] },
+  fetch: async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) }),
+  isPresenceMessage: () => false,
+  laneEffectiveSpeechMode: () => "speak",
+  laneGroupHost: (lane) => lane,
+  queueMicrotask,
+  setTimeout,
+  targetApi: (targetId, suffix) => targetId + suffix,
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(path, "utf8"), context);
+
+(async () => {
+  const lanes = new Map();
+  const laneFor = (id) => {
+    if (!lanes.has(id))
+      lanes.set(id, { targetId: "lane-" + id, speechAbortVersion: 0, spokenMessageKeys: new Set() });
+    return lanes.get(id);
+  };
+  // Burst many ACK/final-style utterances across lanes back to back.
+  const burst = [["a", "one"], ["b", "two"], ["a", "three"], ["b", "four"], ["a", "five"]];
+  for (let i = 0; i < burst.length; i += 1)
+    context.enqueueSpeech(laneFor(burst[i][0]), "key-" + i, [burst[i][1]]);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  clearTimeout(failTimer);
+  process.stdout.write(JSON.stringify(maxActive));
+})().catch((error) => {
+  clearTimeout(failTimer);
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});
+"""
+    result = subprocess.run(
+        ["node", "-e", script, str(AUDIO_JS)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            "node burst overlap check failed:\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    return json.loads(result.stdout)
+
+
+def _run_audio_script(script: str, failure: str) -> list[str]:
+    result = subprocess.run(
+        ["node", "-e", script, str(AUDIO_JS)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"{failure}:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
     return json.loads(result.stdout)
 

@@ -12,11 +12,20 @@ const speechStopIconSvg =
 const speechQueue = [];
 let speechBusy = false;
 let currentSpeech = null;
+// Bumped by every hard reset (stop, manual play, external pause). Each queued
+// entry records the epoch it was enqueued under; the drain abandons any entry
+// whose epoch is stale, so a single stop clears the whole pipeline regardless
+// of lane.
+let speechEpoch = 0;
 // Single-owner playback: at most one audio element may sound at a time. The
 // active element is hard-stopped before any new clip starts, and the token
 // lets a late-resolving play() that has since been superseded stop itself.
 let activePlaybackAudio = null;
 let playbackGeneration = 0;
+// Elements we pause deliberately (supersession or stop). Their 'pause' event is
+// a controlled settle; an unmarked 'pause' is an external stop (OS/media key)
+// and clears the entire queue.
+const intentionallyPaused = new WeakSet();
 const defaultDocumentTitle = "spice";
 const speechQueueBacklogClearThreshold = 2;
 const hoursPerHalfDay = 12;
@@ -190,17 +199,20 @@ function enqueueSpeech(lane, messageKey, texts, targetLane = lane) {
     messageKey,
     texts,
     abortVersion: lane.speechAbortVersion,
+    epoch: speechEpoch,
   });
   drainSpeechQueue();
 }
 
 function toggleMessageSpeech(lane, messageKey, texts, targetLane = lane) {
-  speechQueue.length = 0;
-  const activeSpeech = currentSpeech;
-  if (activeSpeech) abortLaneSpeech(activeSpeech.lane);
-  if (activeSpeech && activeSpeech.messageKey === messageKey) {
-    return;
-  }
+  // A manual play (or stop) is a hard reset: clear the entire queue and halt
+  // whatever is sounding, then — unless this was a toggle-off of the active
+  // message — play only this one message, uninterrupted.
+  const wasPlaying = Boolean(
+    currentSpeech && currentSpeech.messageKey === messageKey,
+  );
+  stopAllSpeech();
+  if (wasPlaying) return;
   enqueueSpeech(lane, messageKey, texts, targetLane);
 }
 
@@ -282,15 +294,31 @@ function abortLaneSpeech(lane) {
   if (currentSpeech && currentSpeech.lane === lane) stopCurrentSpeech();
 }
 
+// Hard reset of the whole speech pipeline: drop every queued entry across all
+// lanes, advance the epoch so any in-flight drain abandons its entry, and stop
+// whatever is currently sounding. Stop and manual play both route through here.
+function stopAllSpeech() {
+  speechQueue.length = 0;
+  speechEpoch += 1;
+  stopCurrentSpeech();
+}
+
 function stopCurrentSpeech() {
   if (currentSpeech && currentSpeech.audio) {
     try {
-      currentSpeech.audio.pause();
+      pauseIntentionally(currentSpeech.audio);
     } catch (error) {
       currentSpeech.audio = null;
     }
   }
   if (currentSpeech && currentSpeech.finish) currentSpeech.finish();
+}
+
+// Pause an element we own. The marker tells the element's 'pause' handler this
+// stop was ours (a controlled settle), not an external OS/media-key pause.
+function pauseIntentionally(audio) {
+  intentionallyPaused.add(audio);
+  audio.pause();
 }
 
 async function drainSpeechQueue() {
@@ -299,6 +327,7 @@ async function drainSpeechQueue() {
   try {
     while (speechQueue.length) {
       const entry = speechQueue.shift();
+      if (entry.epoch !== speechEpoch) continue;
       if (entry.abortVersion !== entry.lane.speechAbortVersion) continue;
       currentSpeech = {
         lane: entry.lane,
@@ -307,6 +336,7 @@ async function drainSpeechQueue() {
       };
       syncSpeechButtons();
       for (const text of entry.texts) {
+        if (entry.epoch !== speechEpoch) break;
         if (entry.abortVersion !== entry.lane.speechAbortVersion) break;
         await playSpeech(entry.targetLane, text);
       }
@@ -340,7 +370,7 @@ function stopActivePlayback() {
   activePlaybackAudio = null;
   if (!audio) return;
   try {
-    audio.pause();
+    pauseIntentionally(audio);
   } catch (error) {
     // A failed pause still drops our reference; the clip is being discarded.
   }
@@ -360,9 +390,10 @@ function playAudioBuffer(buffer) {
     const finish = () => {
       if (settled) return;
       settled = true;
-      audio.removeEventListener("ended", finish);
-      audio.removeEventListener("error", finish);
-      audio.removeEventListener("pause", finish);
+      intentionallyPaused.delete(audio);
+      audio.removeEventListener("ended", onEnd);
+      audio.removeEventListener("error", onEnd);
+      audio.removeEventListener("pause", onPause);
       URL.revokeObjectURL(url);
       if (activePlaybackAudio === audio) activePlaybackAudio = null;
       if (currentSpeech) {
@@ -371,24 +402,33 @@ function playAudioBuffer(buffer) {
       }
       resolve();
     };
+    const onEnd = () => finish();
+    const onPause = () => {
+      // An external pause (lock screen, OS media key, headset) is a stop: settle
+      // this clip and clear the whole queue. A pause we initiated is just a
+      // controlled settle and must not cascade into a reset.
+      const external = !intentionallyPaused.has(audio);
+      finish();
+      if (external) stopAllSpeech();
+    };
     if (currentSpeech) {
       currentSpeech.audio = audio;
       currentSpeech.finish = finish;
     }
-    audio.addEventListener("ended", finish);
-    audio.addEventListener("error", finish);
-    audio.addEventListener("pause", finish);
+    audio.addEventListener("ended", onEnd);
+    audio.addEventListener("error", onEnd);
+    audio.addEventListener("pause", onPause);
     audio.play().then(() => {
       // If a newer clip claimed ownership while play() was pending, this one
       // lost the race after starting: stop it so the two never overlap.
       if (generation !== playbackGeneration) stopOrphanedPlayback(audio);
-    }, finish);
+    }, onEnd);
   });
 }
 
 function stopOrphanedPlayback(audio) {
   try {
-    audio.pause();
+    pauseIntentionally(audio);
   } catch (error) {
     // pause() fires the listener that settles this clip's promise; ignore.
   }
