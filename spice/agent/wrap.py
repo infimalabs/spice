@@ -41,6 +41,12 @@ from spice.agent.gitshadow import (
     scrub_agent_git_shadow_environment,
 )
 from spice.agent.identity import ambient_thread_id
+from spice.agent.shellhook import (
+    BASH_ENV_ENV,
+    SHELL_HOOK_REEXEC_STAGE_ENV,
+    ZDOTDIR_ENV,
+    apply_shell_steering_environment,
+)
 from spice.mail.inbox import inbox_dir, inbox_item_key
 from spice.paths import (
     STATE_DIRNAME,
@@ -61,7 +67,9 @@ from spice.sessions.meter import (
 from spice.sessions.util import format_float, format_int
 
 PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
-SHELL_REEXEC_ENV_NAMES = ("ZDOTDIR", "BASH_ENV")
+SHELL_REEXEC_ENV_NAMES = (ZDOTDIR_ENV, BASH_ENV_ENV)
+SHELL_REEXEC_MARKER_ENV_NAMES = (SHELL_HOOK_REEXEC_STAGE_ENV,)
+SHELL_HOOK_COMMANDS = frozenset(("bash", "zsh"))
 PYTHON_ROUTE_FAILURE = (
     "import sys;"
     "sys.stderr.write("
@@ -162,6 +170,9 @@ def build_agent_run_environment(
     preserve_shell_hook_env: bool = False,
 ) -> dict[str, str] | None:
     args = normalize_agent_run_args(raw_args)
+    install_shell_hook_env = is_shell_hook_command(
+        build_agent_run_command(raw_args, repo_root=repo_root)
+    )
     worktree_env = worktree_spice_environment(repo_root)
     environment: dict[str, str] | None
     if is_direct_git_route(args):
@@ -176,6 +187,8 @@ def build_agent_run_environment(
         environment = None
     return scrub_agent_run_recursion_environment(
         environment,
+        repo_root=repo_root,
+        install_shell_hook_env=install_shell_hook_env,
         preserve_shell_hook_env=preserve_shell_hook_env,
     )
 
@@ -183,20 +196,40 @@ def build_agent_run_environment(
 def scrub_agent_run_recursion_environment(
     environment: dict[str, str] | None,
     *,
+    repo_root: Path | None = None,
+    install_shell_hook_env: bool = False,
     preserve_shell_hook_env: bool = False,
 ) -> dict[str, str] | None:
     if environment is None:
-        if preserve_shell_hook_env or not any(
-            name in os.environ for name in SHELL_REEXEC_ENV_NAMES
+        if not (
+            preserve_shell_hook_env
+            or install_shell_hook_env
+            or any(
+                name in os.environ
+                for name in (*SHELL_REEXEC_ENV_NAMES, *SHELL_REEXEC_MARKER_ENV_NAMES)
+            )
         ):
             return None
         environment = dict(os.environ)
     else:
         environment = dict(environment)
-    if not preserve_shell_hook_env:
-        for name in SHELL_REEXEC_ENV_NAMES:
-            environment.pop(name, None)
+    if preserve_shell_hook_env:
+        return environment
+    if install_shell_hook_env and repo_root is not None:
+        environment = apply_shell_steering_environment(
+            repo_root,
+            driver_state_dirname=driver_for(repo_root).state_dirname,
+            base_env=environment,
+        )
+        environment[SHELL_HOOK_REEXEC_STAGE_ENV] = "1"
+        return environment
+    for name in (*SHELL_REEXEC_ENV_NAMES, *SHELL_REEXEC_MARKER_ENV_NAMES):
+        environment.pop(name, None)
     return environment
+
+
+def is_shell_hook_command(args: Sequence[str]) -> bool:
+    return bool(args) and Path(args[0]).name in SHELL_HOOK_COMMANDS
 
 
 def is_direct_git_route(args: Sequence[str]) -> bool:
