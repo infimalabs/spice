@@ -1,5 +1,7 @@
 """Mounted commands: validation, built-in precedence, argv shapes."""
 
+from pathlib import Path
+
 import pytest
 
 from spice.cli.mounts import MOUNT_NAME_RE, mounted_commands
@@ -57,3 +59,13 @@ def test_empty_mount_fails_loudly(tmp_path):
     repo = _repo_with_commands(tmp_path, 'noop = ""')
     with pytest.raises(SpiceError, match="empty"):
         mounted_commands(repo)
+
+
+def test_wrapper_command_contract_is_linked_from_readme():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    contract = Path("docs/cli/wrapper-commands.md").read_text(encoding="utf-8")
+
+    assert "docs/cli/wrapper-commands.md" in readme
+    assert "spice agent run -- <cmd>" in contract
+    assert "[tool.spice.commands]" in contract
+    assert "spice agent run -- proxy <command>" in contract
