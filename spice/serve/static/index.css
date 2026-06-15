@@ -807,7 +807,17 @@ button.primary:hover {
 .target-choice--draggable { cursor: grab; }
 .target-choice--dragging {
   cursor: grabbing;
-  opacity: 0.58;
+  opacity: 0.42;
+}
+.target-choice-drag-ghost {
+  box-shadow: var(--shadow);
+  cursor: grabbing;
+  left: 0;
+  opacity: 0.96;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  z-index: 90;
 }
 .target-choice-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .target-choice-copy span { color: var(--muted); font-size: 11px; }
@@ -816,6 +826,19 @@ button.primary:hover {
   flex: none;
   font: 14px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   margin-left: auto;
+}
+.spice-menu-team-empty-drop {
+  border: 1px dashed color-mix(in srgb, var(--muted) 42%, var(--border));
+  border-radius: 8px;
+  color: var(--muted);
+  font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 9px 10px;
+  text-align: center;
+  text-transform: uppercase;
+}
+.spice-menu-team--drop-ready .spice-menu-team-empty-drop {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  color: var(--accent);
 }
 
 @media (max-width: 720px) {

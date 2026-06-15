@@ -294,6 +294,17 @@ def test_static_spice_menu_replaces_picker_lane():
     )
     assert 'spiceMenuEl.style.height = visibleLane ? height + "px" : "";' in app_lanes
     assert "function cssPixelValue(value)" in app_lanes
+    assert 'className = "lane picker"' not in app_lanes
+    assert "openPickerLane" not in app_lanes
+    assert "renderPickerChoices" not in app_shell
+    assert ".spice-context-menu" in css
+    assert ".picker" not in css
+
+
+def test_static_spice_menu_team_groups_and_actions():
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    css = _serve_css_text()
+
     assert (
         'teamCommandPayload("createTeam", {\n      config: defaultTeamConfig(),'
         in app_lanes
@@ -304,7 +315,11 @@ def test_static_spice_menu_replaces_picker_lane():
     assert (
         'label.textContent = group.unassigned\n    ? "agents without team"' in app_lanes
     )
-    assert '    ? "open one to create a new team"' in app_lanes
+    assert '    ? "drop here to remove from team"' in app_lanes
+    assert "function spiceMenuEmptyUnassignedDropHint()" in app_lanes
+    assert 'hint.className = "spice-menu-team-empty-drop";' in app_lanes
+    assert 'hint.textContent = "Drop agent here";' in app_lanes
+    assert "wireSpiceMenuTeamDropTarget(container, group);" in app_lanes
     assert '"open any member; " + count + " agents open together"' in app_lanes
     assert "const alreadyOpen = laneStates.has(target.id);" in app_lanes
     assert 'if (alreadyOpen) actionLabel = "Show team";' in app_lanes
@@ -312,11 +327,37 @@ def test_static_spice_menu_replaces_picker_lane():
         'else if (group && !group.unassigned) actionLabel = "Open team";' in app_lanes
     )
     assert 'button.classList.toggle("target-choice--open", alreadyOpen);' in app_lanes
+    assert 'if (laneStates.has(target.id)) parts.push("open");' in app_lanes
+    assert 'setGlobalTransientStatus("open team failed");' in app_lanes
+    assert (
+        'function targetChoiceButton(target, actionLabel, onClick, role = "menuitem")'
+        in app_lanes
+    )
+    assert 'if (role) button.setAttribute("role", role);' in app_lanes
+    assert ".spice-menu-team {" in css
+    assert ".spice-menu-team--unassigned {" in css
+    assert ".spice-menu-team--drop-ready {" in css
+    assert ".spice-menu-team-header {" in css
+    assert ".spice-menu-team-targets {" in css
+    assert ".target-choice--open {" in css
+    assert '.spice-menu-action[aria-checked="true"]' in css
+
+
+def test_static_spice_menu_drag_manages_team_membership():
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    css = _serve_css_text()
+
     assert "wireSpiceMenuTargetDrag(button, target);" in app_lanes
     assert 'button.style.touchAction = "none";' in app_lanes
     assert 'button.addEventListener("click", (event) => {' in app_lanes
     assert "suppressNextClick = true;" in app_lanes
     assert "button.setPointerCapture(event.pointerId);" in app_lanes
+    assert "dragState.dragGhost = createSpiceMenuTargetDragGhost(button);" in app_lanes
+    assert "updateSpiceMenuTargetDragGhost(dragState, event);" in app_lanes
+    assert "function createSpiceMenuTargetDragGhost(button)" in app_lanes
+    assert 'ghost.classList.add("target-choice-drag-ghost");' in app_lanes
+    assert "function updateSpiceMenuTargetDragGhost(state, event)" in app_lanes
+    assert "state.dragGhost?.remove();" in app_lanes
     assert 'button.addEventListener("pointerdown", (event) => {' in app_lanes
     assert 'button.addEventListener("pointermove", (event) => {' in app_lanes
     assert 'button.addEventListener("pointerup", (event) => {' in app_lanes
@@ -327,36 +368,32 @@ def test_static_spice_menu_replaces_picker_lane():
         in app_lanes
     )
     assert "container.dataset.spiceMenuTeamId = group.teamId;" in app_lanes
+    assert (
+        'container.dataset.spiceMenuUnassigned = group.unassigned ? "true" : "false";'
+        in app_lanes
+    )
+    assert "function spiceMenuDropTeamId(container)" in app_lanes
     assert 'container.classList.add("spice-menu-team--drop-ready");' in app_lanes
     assert "moveTargetToMenuTeam(teamId, target.id).catch(() => {" in app_lanes
     assert 'teamCommandPayload("moveAgentToTeam", {' in app_lanes
+    assert 'teamCommandPayload("removeAgentFromTeam", {' in app_lanes
     assert "agentId: targetTeamAgentId(target)," in app_lanes
     assert "agentAliases: targetTeamAgentAliases(target)," in app_lanes
     assert "await refreshServerTopology();" in app_lanes
-    assert 'setGlobalTransientStatus("team updated");' in app_lanes
-    assert 'setGlobalTransientStatus("move to team failed");' in app_lanes
-    assert 'if (laneStates.has(target.id)) parts.push("open");' in app_lanes
-    assert 'setGlobalTransientStatus("open team failed");' in app_lanes
     assert (
-        'function targetChoiceButton(target, actionLabel, onClick, role = "menuitem")'
+        'setGlobalTransientStatus(teamId ? "team updated" : "agent removed from team");'
         in app_lanes
     )
-    assert 'if (role) button.setAttribute("role", role);' in app_lanes
-    assert 'className = "lane picker"' not in app_lanes
-    assert "openPickerLane" not in app_lanes
-    assert "renderPickerChoices" not in app_shell
-    assert ".spice-context-menu" in css
-    assert ".spice-menu-team {" in css
-    assert ".spice-menu-team--unassigned {" in css
-    assert ".spice-menu-team--drop-ready {" in css
-    assert ".spice-menu-team-header {" in css
-    assert ".spice-menu-team-targets {" in css
-    assert ".target-choice--open {" in css
+    assert (
+        'setGlobalTransientStatus(\n          teamId ? "move to team failed" : "remove from team failed",'
+        in app_lanes
+    )
     assert ".target-choice--draggable" in css
     assert ".target-choice--dragging {" in css
+    assert ".target-choice-drag-ghost {" in css
     assert ".target-choice-drag-affordance {" in css
-    assert '.spice-menu-action[aria-checked="true"]' in css
-    assert ".picker" not in css
+    assert ".spice-menu-team-empty-drop {" in css
+    assert ".spice-menu-team--drop-ready .spice-menu-team-empty-drop {" in css
 
 
 def test_static_empty_teams_render_importer_in_message_stream():

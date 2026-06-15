@@ -569,15 +569,14 @@ function spiceMenuTeamGroups(choices) {
   const groups = [...grouped.values()];
   for (const group of groups) group.targets.sort(compareTargetChoices);
   groups.sort(compareSpiceMenuTeamGroups);
-  if (unassigned.length) {
-    unassigned.sort(compareTargetChoices);
+  unassigned.sort(compareTargetChoices);
+  if (choices.length)
     groups.push({
       teamId: "",
       totalCount: unassigned.length,
       targets: unassigned,
       unassigned: true,
     });
-  }
   return groups;
 }
 
@@ -595,7 +594,7 @@ function renderSpiceMenuTeamGroup(group) {
   container.className = group.unassigned
     ? "spice-menu-team spice-menu-team--unassigned"
     : "spice-menu-team";
-  if (!group.unassigned) wireSpiceMenuTeamDropTarget(container, group);
+  wireSpiceMenuTeamDropTarget(container, group);
   const header = document.createElement("div");
   header.className = "spice-menu-team-header";
   const label = document.createElement("span");
@@ -606,16 +605,26 @@ function renderSpiceMenuTeamGroup(group) {
   const detail = document.createElement("span");
   detail.className = "spice-menu-team-detail";
   detail.textContent = group.unassigned
-    ? "open one to create a new team"
+    ? "drop here to remove from team"
     : spiceMenuTeamDetail(group);
   const choices = document.createElement("div");
   choices.className = "spice-menu-team-targets";
-  choices.replaceChildren(
-    ...group.targets.map((target) => renderTargetChoice(target, group)),
+  const targetChoices = group.targets.map((target) =>
+    renderTargetChoice(target, group),
   );
+  if (group.unassigned && !targetChoices.length)
+    targetChoices.push(spiceMenuEmptyUnassignedDropHint());
+  choices.replaceChildren(...targetChoices);
   header.append(label, detail);
   container.append(header, choices);
   return container;
+}
+
+function spiceMenuEmptyUnassignedDropHint() {
+  const hint = document.createElement("div");
+  hint.className = "spice-menu-team-empty-drop";
+  hint.textContent = "Drop agent here";
+  return hint;
 }
 
 function spiceMenuTeamTitle(group) {
@@ -703,7 +712,10 @@ function wireSpiceMenuTargetDrag(button, target) {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
+      offsetX: event.clientX - button.getBoundingClientRect().left,
+      offsetY: event.clientY - button.getBoundingClientRect().top,
       dragging: false,
+      dragGhost: null,
       overContainer: null,
     };
     button.setPointerCapture(event.pointerId);
@@ -719,14 +731,16 @@ function wireSpiceMenuTargetDrag(button, target) {
       suppressNextClick = true;
       spiceMenuDragTargetId = target.id;
       button.classList.add("target-choice--dragging");
+      dragState.dragGhost = createSpiceMenuTargetDragGhost(button);
     }
+    updateSpiceMenuTargetDragGhost(dragState, event);
     const el = document.elementFromPoint(event.clientX, event.clientY);
     const container = /** @type {HTMLElement | null} */ (el?.closest("[data-spice-menu-team-id]") || null);
     if (container !== dragState.overContainer) {
       dragState.overContainer?.classList.remove("spice-menu-team--drop-ready");
       dragState.overContainer = null;
-      const teamId = container?.dataset.spiceMenuTeamId;
-      if (teamId && spiceMenuCanDropTargetOnTeamId(teamId, target.id)) {
+      const teamId = container ? spiceMenuDropTeamId(container) : "";
+      if (container && spiceMenuCanDropTargetOnTeamId(teamId, target.id)) {
         container.classList.add("spice-menu-team--drop-ready");
         dragState.overContainer = container;
       }
@@ -736,9 +750,13 @@ function wireSpiceMenuTargetDrag(button, target) {
   button.addEventListener("pointerup", (event) => {
     if (!dragState || event.pointerId !== dragState.pointerId) return;
     if (dragState.dragging && dragState.overContainer) {
-      const teamId = /** @type {HTMLElement} */ (dragState.overContainer).dataset.spiceMenuTeamId;
+      const teamId = spiceMenuDropTeamId(
+        /** @type {HTMLElement} */ (dragState.overContainer),
+      );
       moveTargetToMenuTeam(teamId, target.id).catch(() => {
-        setGlobalTransientStatus("move to team failed");
+        setGlobalTransientStatus(
+          teamId ? "move to team failed" : "remove from team failed",
+        );
         refreshServerTopology().catch(() => {});
       });
     }
@@ -757,7 +775,27 @@ function endMenuTargetDrag(button, state) {
   if (!state.dragging) return;
   spiceMenuDragTargetId = "";
   button.classList.remove("target-choice--dragging");
+  state.dragGhost?.remove();
+  state.dragGhost = null;
   clearSpiceMenuTeamDropHighlights();
+}
+
+function createSpiceMenuTargetDragGhost(button) {
+  const ghost = /** @type {HTMLElement} */ (button.cloneNode(true));
+  const rect = button.getBoundingClientRect();
+  ghost.classList.remove("target-choice--dragging");
+  ghost.classList.add("target-choice-drag-ghost");
+  ghost.style.width = rect.width + "px";
+  document.body.append(ghost);
+  return ghost;
+}
+
+function updateSpiceMenuTargetDragGhost(state, event) {
+  if (!state.dragGhost) return;
+  const left = event.clientX - state.offsetX;
+  const top = event.clientY - state.offsetY;
+  state.dragGhost.style.transform =
+    "translate(" + left + "px, " + top + "px)";
 }
 
 function spiceMenuTargetDragAffordance() {
@@ -770,6 +808,7 @@ function spiceMenuTargetDragAffordance() {
 
 function wireSpiceMenuTeamDropTarget(container, group) {
   container.dataset.spiceMenuTeamId = group.teamId;
+  container.dataset.spiceMenuUnassigned = group.unassigned ? "true" : "false";
 }
 
 function clearSpiceMenuTeamDropHighlights() {
@@ -779,24 +818,41 @@ function clearSpiceMenuTeamDropHighlights() {
 }
 
 function spiceMenuCanDropTargetOnTeamId(teamId, targetId) {
-  if (!teamId || !targetId) return false;
+  if (!targetId) return false;
   const target = targetById.get(targetId);
   if (!target) return false;
-  return (target.teamId || "") !== teamId;
+  return (target.teamId || "") !== (teamId || "");
 }
 
 async function moveTargetToMenuTeam(teamId, targetId) {
   const target = targetById.get(targetId);
-  if (!target || !teamId) throw new Error("move target requires team and target");
-  await requestTeamCommand(
-    teamCommandPayload("moveAgentToTeam", {
-      teamId,
-      agentId: targetTeamAgentId(target),
-      agentAliases: targetTeamAgentAliases(target),
-    }),
-  );
+  if (!target) throw new Error("move target requires target");
+  if (teamId) {
+    await requestTeamCommand(
+      teamCommandPayload("moveAgentToTeam", {
+        teamId,
+        agentId: targetTeamAgentId(target),
+        agentAliases: targetTeamAgentAliases(target),
+      }),
+    );
+  } else {
+    const currentTeamId = target.teamId || "";
+    if (!currentTeamId) throw new Error("remove target requires current team");
+    await requestTeamCommand(
+      teamCommandPayload("removeAgentFromTeam", {
+        teamId: currentTeamId,
+        agentId: targetTeamAgentId(target),
+        agentAliases: targetTeamAgentAliases(target),
+      }),
+    );
+  }
   await refreshServerTopology();
-  setGlobalTransientStatus("team updated");
+  setGlobalTransientStatus(teamId ? "team updated" : "agent removed from team");
+}
+
+function spiceMenuDropTeamId(container) {
+  if (container.dataset.spiceMenuUnassigned === "true") return "";
+  return container.dataset.spiceMenuTeamId || "";
 }
 
 function targetTeamAgentId(target) {
