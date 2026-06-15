@@ -40,11 +40,6 @@
   border-color: var(--final-accent);
   box-shadow: inset 0 3px 0 var(--final-accent);
 }
-.messages article.said {
-  background: var(--say-tint);
-  border-color: color-mix(in srgb, var(--say-accent) 55%, var(--border));
-  box-shadow: inset -3px 0 0 var(--say-accent);
-}
 .messages article.final.acked {
   background: color-mix(in srgb, var(--ack-tint) 50%, var(--final-tint));
   box-shadow:
@@ -258,7 +253,6 @@
   height: 32px;
   width: 32px;
 }
-.badge.say-badge { border-color: var(--say-accent); color: var(--say-accent); }
 .badge.final-badge { border-color: var(--final-accent); color: var(--final-accent); }
 .badge.maxim-badge {
   background: var(--maxim-accent);

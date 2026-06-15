@@ -209,7 +209,6 @@ function renderMessage(lane, item) {
   const article = document.createElement("article");
   const maximAckCount = itemMaximAckCount(lane, item);
   if (item.ack_count) article.classList.add("acked");
-  if (item.say_count) article.classList.add("said");
   if (item.kind === "final") article.classList.add("final");
   if (item.image_only) article.classList.add("image-only");
   article.dataset.messageKey = item.key;
@@ -331,7 +330,6 @@ function renderMessageFooter(lane, item, maximAckCount) {
   left.append(time);
   const badges = renderBadges(
     item.ack_count || 0,
-    item.say_count || 0,
     item.kind,
     maximAckCount,
   );
@@ -459,12 +457,11 @@ function itemMaximAckCount(lane, item) {
   return count;
 }
 
-function renderBadges(ackCount, sayCount, kind, maximAckCount) {
+function renderBadges(ackCount, kind, maximAckCount) {
   const visibleAckCount = Math.max(0, ackCount - maximAckCount);
   if (
     !maximAckCount &&
     !visibleAckCount &&
-    !sayCount &&
     kind !== "final"
   )
     return null;
@@ -480,7 +477,6 @@ function renderBadges(ackCount, sayCount, kind, maximAckCount) {
   if (kind === "final") add("FINAL", "final-badge");
   if (visibleAckCount)
     add(visibleAckCount + "\u00a0ACK" + (visibleAckCount === 1 ? "" : "s"));
-  if (sayCount) add(sayCount + " SAY" + (sayCount === 1 ? "" : "s"), "say-badge");
   return badges;
 }
 

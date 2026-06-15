@@ -697,7 +697,6 @@ function messageFingerprintParts(lane, item) {
     displayHtml: item.display_html,
     displayText: item.display_text,
     ackCount: item.ack_count,
-    sayCount: item.say_count,
     attributed: laneShouldAttributeMessages(lane),
     attributionAgents: laneMessageAttributionAgentCount(lane),
     ackContexts: (item.ack_keys || []).map((key) => {

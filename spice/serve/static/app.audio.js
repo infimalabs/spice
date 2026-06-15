@@ -1,5 +1,5 @@
 // Speech: one global sequential queue across lanes. Speak mode plays explicit
-// SAY/ACK utterances, with final-answer bodies summarized to edge paragraphs;
+// ACK utterances, with final-answer bodies summarized to edge paragraphs;
 // narrate summarizes visible message bodies to edges. Manual play reads the
 // visible body. Markdown images are described rather than read. The transcript
 // remains the record — playback is best-effort ear candy and never blocks the
@@ -73,27 +73,11 @@ function speechUtterancesForItem(item, options = {}) {
   if (item.image_only) return [];
   const includeDisplayBody = Boolean(options.includeDisplayBody);
   const includeFullDisplayBody = Boolean(options.includeFullDisplayBody);
-  const includeSayUtterances = options.includeSayUtterances !== false;
   const includeAckUtterances = options.includeAckUtterances !== false;
   const utterances = [];
 
-  if (includeSayUtterances) {
-    for (const utterance of item.say_utterances || []) {
-      appendSpeechUtterance(utterances, utterance);
-    }
-  }
   if (includeAckUtterances) {
     for (const utterance of item.ack_utterances || []) {
-      appendSpeechUtterance(utterances, utterance);
-    }
-  }
-  if (
-    includeSayUtterances &&
-    includeAckUtterances &&
-    !Array.isArray(item.say_utterances) &&
-    !Array.isArray(item.ack_utterances)
-  ) {
-    for (const utterance of item.speech_utterances || []) {
       appendSpeechUtterance(utterances, utterance);
     }
   }

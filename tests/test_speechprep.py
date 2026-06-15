@@ -35,7 +35,7 @@ def test_speech_text_preparation_speaks_utc_datetimes():
 def test_speech_item_utterances_use_prepared_text_once():
     result = _speech_utterances_for_item(
         {
-            "speech_utterances": [
+            "ack_utterances": [
                 "ACK [thread](spice-session://abc) at 2026-06-12T13:05Z",
                 "ACK [thread](spice-session://abc) at 2026-06-12T13:05Z",
             ]
@@ -77,13 +77,11 @@ def test_quiet_and_narrate_keep_their_speech_contracts():
     final_item = {"kind": "final", "display_text": "Final answer ready."}
     assistant_item = {
         "kind": "assistant",
-        "say_utterances": ["SAY this explicit update."],
         "display_text": "First paragraph.\n\nMiddle paragraph.\n\nLast paragraph.",
     }
 
     assert _automatic_speech_utterances("quiet", final_item) == []
     assert _automatic_speech_utterances("narrate", assistant_item) == [
-        "SAY this explicit update.",
         "First paragraph.",
         "Last paragraph.",
     ]
