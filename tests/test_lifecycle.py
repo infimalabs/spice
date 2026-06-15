@@ -487,7 +487,7 @@ def test_wrapper_proxy_marker_plain_exec_starts_side_channel_watch(
 
     assert exit_code == 7
     assert events == [
-        ("popen", ["find", ".", "-maxdepth", "0", "-print"], (None, None)),
+        ("popen", ["find", ".", "-maxdepth", "0", "-print"], None),
         ("watch", tmp_path, (123, stderr, True)),
         ("wait", None, None),
         ("join", watch_thread, None),
@@ -577,7 +577,7 @@ def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
 
     assert exit_code == 0
     assert events == [
-        ("popen", ["find", ".", "-name", "*.py"], (None, None)),
+        ("popen", ["find", ".", "-name", "*.py"], None),
         ("watch", tmp_path, (321, stderr, True)),
         ("wait", None, None),
         ("join", watch_thread, None),

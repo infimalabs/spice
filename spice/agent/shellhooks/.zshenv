@@ -18,11 +18,11 @@ if [ -z "${SPICE_SHELL_HOOK_REEXEC_STAGE-}" ]; then
       exit 127
     fi
     if [[ -o login ]]; then
-      exec "$SPICE_SHELL_HOOK_PYTHON" -m spice agent run --preserve-shell-hook-env -- "$_spice_shell_bin" -lc "$ZSH_EXECUTION_STRING"
+      exec "$SPICE_SHELL_HOOK_PYTHON" -m spice agent run -- "$_spice_shell_bin" -lc "$ZSH_EXECUTION_STRING"
       printf "%s\n" "spice shell hook: failed to exec agent run" >&2
       exit 127
     fi
-    exec "$SPICE_SHELL_HOOK_PYTHON" -m spice agent run --preserve-shell-hook-env -- "$_spice_shell_bin" -c "$ZSH_EXECUTION_STRING"
+    exec "$SPICE_SHELL_HOOK_PYTHON" -m spice agent run -- "$_spice_shell_bin" -c "$ZSH_EXECUTION_STRING"
     printf "%s\n" "spice shell hook: failed to exec agent run" >&2
     exit 127
   fi
