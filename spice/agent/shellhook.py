@@ -14,9 +14,10 @@ from spice.repocfg import agent_table, agent_wrapper_definitions_table
 
 ZDOTDIR_ENV = "ZDOTDIR"
 BASH_ENV_ENV = "BASH_ENV"
+HISTFILE_ENV = "HISTFILE"
 ZSH_COMPDUMP_ENV = "ZSH_COMPDUMP"
 BASH_HOOK_NAME = "bash_env"
-ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zlogin")
+ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zshrc", ".zlogin")
 AGENT_WRAPPERS_KEY = "wrappers"
 DEFAULT_AGENT_WRAPPER_GROUP = "common"
 BUILTIN_AGENT_WRAPPER_GROUPS = {
@@ -31,11 +32,15 @@ SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV = (
 SHELL_HOOK_ORIGINAL_BASH_ENV_ENV = (
     "SPICE_SHELL_HOOK_ORIGINAL_BASH_ENV"  # env-policy: allow
 )
+SHELL_HOOK_ORIGINAL_HISTFILE_ENV = (
+    "SPICE_SHELL_HOOK_ORIGINAL_HISTFILE"  # env-policy: allow
+)
 SHELL_HOOK_REEXEC_STAGE_ENV = "SPICE_SHELL_HOOK_REEXEC_STAGE"  # env-policy: allow
 SHELL_HOOK_SURFACE_FILES = {
     BASH_HOOK_NAME: BASH_HOOK_NAME,
     "zshenv": ".zshenv",
     "zprofile": ".zprofile",
+    "zshrc": ".zshrc",
     "zlogin": ".zlogin",
 }
 SHELL_HOOK_SURFACES = tuple(SHELL_HOOK_SURFACE_FILES)
@@ -91,22 +96,42 @@ def shell_steering_runtime_environment(
     repo_root: Path | None = None,
 ) -> dict[str, str]:
     python = single_python_executable(python_command or (sys.executable,))
+    original_zdotdir = original_shell_startup_value(
+        base_env,
+        original_name=SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV,
+        active_name=ZDOTDIR_ENV,
+    )
+    original_bash_env = original_shell_startup_value(
+        base_env,
+        original_name=SHELL_HOOK_ORIGINAL_BASH_ENV_ENV,
+        active_name=BASH_ENV_ENV,
+    )
     env = {
         SHELL_HOOK_PYTHON_ENV: python,
-        SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV: original_shell_startup_value(
-            base_env,
-            original_name=SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV,
-            active_name=ZDOTDIR_ENV,
-        ),
-        SHELL_HOOK_ORIGINAL_BASH_ENV_ENV: original_shell_startup_value(
-            base_env,
-            original_name=SHELL_HOOK_ORIGINAL_BASH_ENV_ENV,
-            active_name=BASH_ENV_ENV,
+        SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV: original_zdotdir,
+        SHELL_HOOK_ORIGINAL_BASH_ENV_ENV: original_bash_env,
+        SHELL_HOOK_ORIGINAL_HISTFILE_ENV: original_zsh_history_value(
+            base_env, original_zdotdir=original_zdotdir
         ),
     }
     if repo_root is not None:
         env[SHELL_HOOK_REPO_ROOT_ENV] = str(repo_root.resolve())
     return env
+
+
+def original_zsh_history_value(
+    base_env: Mapping[str, str], *, original_zdotdir: str
+) -> str:
+    for name in (SHELL_HOOK_ORIGINAL_HISTFILE_ENV, HISTFILE_ENV):
+        value = base_env.get(name, "")
+        if value and not is_generated_shell_hook_history_path(value):
+            return value
+    history_base = (
+        Path(original_zdotdir).expanduser()
+        if original_zdotdir
+        else user_home_path(base_env)
+    )
+    return str(history_base / ".zsh_history")
 
 
 def original_shell_startup_value(
@@ -117,6 +142,13 @@ def original_shell_startup_value(
         if value and not is_generated_shell_hook_path(value):
             return value
     return ""
+
+
+def is_generated_shell_hook_history_path(value: str) -> bool:
+    path = Path(value).expanduser()
+    return path.name == ".zsh_history" and is_generated_shell_hook_path(
+        str(path.parent)
+    )
 
 
 def is_generated_shell_hook_path(value: str) -> bool:
