@@ -845,6 +845,28 @@ def test_static_manual_speech_playback_aborts_active_entry():
     ) in app_audio
 
 
+def test_static_narration_mode_holds_media_session_state():
+    app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
+    app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+
+    assert "function syncNarrationMediaSession()" in app_audio
+    assert 'session.setActionHandler("pause", () => stopAllSpeech());' in app_audio
+    assert 'session.setActionHandler("stop", () => stopAllSpeech());' in app_audio
+    assert (
+        'return currentSpeech || narrationMediaSessionActive() ? "playing" : "none";'
+        in app_audio
+    )
+    assert 'laneEffectiveSpeechMode(lane) === "narrate"' in app_audio
+    assert (
+        "if (external && !narrationMediaSessionActive()) stopAllSpeech();" in app_audio
+    )
+    assert "syncNarrationMediaSession();" in app_controls
+    close_start = app_lanes.index("function closeLaneCore(lane) {")
+    close_body = app_lanes[close_start : app_lanes.index("\n}", close_start)]
+    assert "syncNarrationMediaSession();" in close_body
+
+
 def test_static_speech_sync_updates_now_playing_message_accent():
     css = _serve_css_text()
     app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")

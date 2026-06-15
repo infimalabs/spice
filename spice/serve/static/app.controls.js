@@ -55,6 +55,7 @@ function syncLaneEffectiveControls(lane) {
   lane.submitEl.textContent = lifetime;
   syncSubmitActionState(lane.submitEl, lifetimeAccentState);
   renderLaneViewShell(lane);
+  syncNarrationMediaSession();
 }
 
 function syncStackSliderState(input) {

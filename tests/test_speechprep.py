@@ -85,8 +85,19 @@ def test_speech_session_updates_page_title_and_media_metadata():
         "activeTitle": "spice - Matilda",
         "activeMediaTitle": "spice - Matilda",
         "activeMediaArtist": "spice",
+        "activePlaybackState": "playing",
         "idleTitle": "spice",
         "idleMediaTitle": "spice",
+        "idlePlaybackState": "none",
+    }
+
+
+def test_narration_mode_holds_media_session_playing_for_speak_lanes():
+    assert _narration_media_session_states() == {
+        "speakOnlyPlaybackState": "none",
+        "narrationPlaybackState": "playing",
+        "closedNarrationPlaybackState": "none",
+        "actions": ["play", "pause", "stop"],
     }
 
 
@@ -125,6 +136,10 @@ def test_stop_clears_pending_queue_across_lanes():
 
 def test_external_pause_clears_pending_queue():
     assert _external_pause_clears_pending() == ["active"]
+
+
+def test_external_pause_during_narration_preserves_speak_queue():
+    assert _external_pause_during_narration_preserves_pending() == ["active", "bravo"]
 
 
 def test_speech_burst_never_overlaps_audio():
@@ -205,12 +220,14 @@ const active = {
   activeTitle: context.document.title,
   activeMediaTitle: context.navigator.mediaSession.metadata.title,
   activeMediaArtist: context.navigator.mediaSession.metadata.artist,
+  activePlaybackState: context.navigator.mediaSession.playbackState,
 };
 vm.runInContext("currentSpeech = null; syncSpeechButtons();", context);
 process.stdout.write(JSON.stringify({
   ...active,
   idleTitle: context.document.title,
   idleMediaTitle: context.navigator.mediaSession.metadata.title,
+  idlePlaybackState: context.navigator.mediaSession.playbackState,
 }));
 """
     result = subprocess.run(
@@ -222,6 +239,66 @@ process.stdout.write(JSON.stringify({
     if result.returncode != 0:
         raise AssertionError(
             "node speech session title failed:\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    return json.loads(result.stdout)
+
+
+def _narration_media_session_states() -> dict[str, object]:
+    script = """
+const fs = require("fs");
+const vm = require("vm");
+const path = process.argv[1];
+const actions = [];
+class FakeMediaMetadata {
+  constructor(value) {
+    Object.assign(this, value);
+  }
+}
+const context = {
+  document: {
+    title: "spice",
+    querySelectorAll: () => [],
+  },
+  navigator: {
+    mediaSession: {
+      metadata: null,
+      playbackState: "none",
+      setActionHandler: (name) => actions.push(name),
+    },
+  },
+  MediaMetadata: FakeMediaMetadata,
+  laneStates: new Map(),
+  laneEffectiveSpeechMode: (lane) => lane.speechMode,
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(path, "utf8"), context);
+const speakLane = { targetId: "speak", speechMode: "speak" };
+const narrationLane = { targetId: "narrate", speechMode: "narrate" };
+context.laneStates.set("speak", speakLane);
+context.syncNarrationMediaSession();
+const speakOnlyPlaybackState = context.navigator.mediaSession.playbackState;
+context.laneStates.set("narrate", narrationLane);
+context.syncNarrationMediaSession();
+const narrationPlaybackState = context.navigator.mediaSession.playbackState;
+narrationLane.closed = true;
+context.syncNarrationMediaSession();
+process.stdout.write(JSON.stringify({
+  speakOnlyPlaybackState,
+  narrationPlaybackState,
+  closedNarrationPlaybackState: context.navigator.mediaSession.playbackState,
+  actions,
+}));
+"""
+    result = subprocess.run(
+        ["node", "-e", script, str(AUDIO_JS)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            "node narration media session states failed:\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
     return json.loads(result.stdout)
@@ -726,6 +803,104 @@ vm.runInContext(fs.readFileSync(path, "utf8"), context);
 });
 """
     return _run_audio_script(script, "node external-pause-clears-queue failed")
+
+
+def _external_pause_during_narration_preserves_pending() -> list[str]:
+    script = """
+const fs = require("fs");
+const vm = require("vm");
+const path = process.argv[1];
+const requests = [];
+const audioInstances = [];
+const failTimer = setTimeout(() => {
+  console.error("active speech was not requested");
+  process.exit(1);
+}, 1000);
+let firstRequestedResolve;
+let firstAudioResolve;
+const firstRequested = new Promise((resolve) => {
+  firstRequestedResolve = resolve;
+});
+const firstAudioReady = new Promise((resolve) => {
+  firstAudioResolve = resolve;
+});
+
+class FakeAudio {
+  constructor() {
+    this.listeners = {};
+    this.index = audioInstances.length;
+    audioInstances.push(this);
+    if (this.index === 0) firstAudioResolve();
+  }
+  addEventListener(name, callback) {
+    this.listeners[name] = callback;
+  }
+  removeEventListener(name) {
+    delete this.listeners[name];
+  }
+  play() {
+    if (this.index > 0) queueMicrotask(() => this.listeners.ended());
+    return Promise.resolve();
+  }
+  pause() {
+    if (this.listeners.pause) this.listeners.pause();
+  }
+}
+
+const narrationLane = {
+  targetId: "narration",
+  speechMode: "narrate",
+};
+const context = {
+  Blob: class {},
+  Audio: FakeAudio,
+  URL: {
+    createObjectURL: () => "blob:audio",
+    revokeObjectURL: () => {},
+  },
+  document: { querySelectorAll: () => [] },
+  fetch: async (url, options) => {
+    const text = JSON.parse(options.body).text;
+    requests.push(text);
+    if (text === "active") firstRequestedResolve();
+    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+  },
+  isPresenceMessage: () => false,
+  laneEffectiveSpeechMode: (lane) => lane.speechMode,
+  laneGroupHost: (lane) => lane,
+  laneStates: new Map([["narration", narrationLane]]),
+  queueMicrotask,
+  setTimeout,
+  targetApi: (targetId, suffix) => targetId + suffix,
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(path, "utf8"), context);
+
+(async () => {
+  const laneA = { targetId: "lane-a", speechMode: "speak", speechAbortVersion: 0, spokenMessageKeys: new Set() };
+  const laneB = { targetId: "lane-b", speechMode: "speak", speechAbortVersion: 0, spokenMessageKeys: new Set() };
+  context.enqueueSpeech(laneA, "active-key", ["active"]);
+  await firstRequested;
+  await firstAudioReady;
+  context.enqueueSpeech(laneB, "bravo-key", ["bravo"]);
+  await Promise.resolve();
+  // With any open lane in narration mode, a raw audio pause from mobile
+  // lock/backgrounding is recoverable: settle the clip but keep speak-only
+  // entries queued behind the shared narration session.
+  audioInstances[0].listeners.pause();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  clearTimeout(failTimer);
+  process.stdout.write(JSON.stringify(requests));
+})().catch((error) => {
+  clearTimeout(failTimer);
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});
+"""
+    return _run_audio_script(
+        script,
+        "node narration-external-pause-preserves-queue failed",
+    )
 
 
 def _burst_max_concurrent_audio() -> int:
