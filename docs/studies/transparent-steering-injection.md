@@ -40,8 +40,9 @@ Repos may define wrapper groups under `[tool.spice.wrappers.<group>]` and let
 agents select groups with `[tool.spice.agent] wrappers = [...]`. When the agent
 does not set `wrappers`, the built-in `common` group is selected. The built-in
 `common` group maps `rtk` to `run`, `proxy`, `grep`, `find`, and `git`; repos
-can override it by defining `[tool.spice.wrappers.common]`. An explicit empty
-list disables wrapper generation.
+can override it by defining `[tool.spice.wrappers.common]`, including local
+direct-command wrappers such as pytest. An explicit empty list disables wrapper
+generation.
 
 Example:
 
@@ -51,6 +52,7 @@ wrappers = ["common"]
 
 [tool.spice.wrappers.common]
 rtk = ["run", "proxy", "grep", "find", "git"]
+pytest = { command = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
 ```
 
 The hook renders command functions such as:
