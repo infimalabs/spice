@@ -24,6 +24,7 @@ BUILTIN_AGENT_WRAPPER_GROUPS = {
 }
 SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
 SHELL_HOOK_REPO_ROOT_ENV = "SPICE_SHELL_HOOK_REPO_ROOT"  # env-policy: allow
+SHELL_HOOK_WRAPPERS_ENV = "SPICE_SHELL_HOOK_WRAPPERS"  # env-policy: allow
 SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV = (
     "SPICE_SHELL_HOOK_ORIGINAL_ZDOTDIR"  # env-policy: allow
 )
@@ -50,6 +51,7 @@ def apply_shell_steering_environment(
 ) -> dict[str, str]:
     env = dict(base_env)
     env.update(shell_steering_runtime_environment(base_env=env, repo_root=repo_root))
+    env[SHELL_HOOK_WRAPPERS_ENV] = "\n".join(render_agent_wrapper_lines(repo_root))
     hook_dir = packaged_shell_steering_hook_dir()
     env[ZDOTDIR_ENV] = str(hook_dir)
     env[BASH_ENV_ENV] = str(hook_dir / BASH_HOOK_NAME)

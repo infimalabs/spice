@@ -321,6 +321,15 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
     assert env[shellhook.BASH_ENV_ENV] == str(hook_dir / shellhook.BASH_HOOK_NAME)
     assert env[shellhook.SHELL_HOOK_PYTHON_ENV] == sys.executable
     assert env[shellhook.SHELL_HOOK_REPO_ROOT_ENV] == str(tmp_path.resolve())
+    assert shellhook.SHELL_HOOK_WRAPPERS_ENV.startswith(
+        "SPICE_SHELL_HOOK_"  # env-policy: allow
+    )
+    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
+        shellhook.render_agent_wrapper_lines(tmp_path)
+    )
+    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
+        _expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"])
+    )
     assert env[shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV] == ""
     assert env[shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV] == ""
     zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
@@ -328,6 +337,36 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
     assert "spice agent run --" not in zshenv
     assert "spice agent steer" not in zshenv
     assert "--watch --parent-pid" not in zshenv
+
+
+def test_agent_environment_precomputes_configured_shell_wrapper_block(
+    tmp_path, monkeypatch
+):
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["common"],
+        groups={
+            "common": {
+                "rtk": ["grep", "git"],
+                "pytest": {"command": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
+            }
+        },
+    )
+    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
+
+    env = lifecycle.agent_environment(tmp_path)
+
+    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
+        shellhook.render_agent_wrapper_lines(tmp_path)
+    )
+    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
+        [
+            *_expected_rtk_wrapper_lines(["grep", "git"]),
+            *_expected_active_python_module_wrapper_lines(["pytest"]),
+        ]
+    )
 
 
 def test_configured_agent_environment_installs_driver_shell_steering_hooks(
