@@ -78,13 +78,13 @@ spice dev doctor         # verify drivers, backends, and policy
 `spice init` writes machine-local git hook shims under `.spice/` (ignored via
 `.git/info/exclude`), materializes the worktree skill copy, and prepares state
 scaffolding. Repo-tracked policy lives in your `pyproject.toml` under
-`[tool.spice.*]` tables. Entrypoint resolution is worktree-true: when the
-current repo is the spice source checkout, generated shims and supervisor
-children put that checkout first on `PYTHONPATH` and run `python -m spice`;
-ordinary target repos use the installed product. Agent shell startup hooks
-reexec zsh/bash commands through `spice agent run -- <cmd>` so steering,
-context warnings, git-shadow routing, and configured wrapper groups run before
-the requested command.
+`[tool.spice.*]` tables. The command surface is always `spice …`. Entrypoint
+resolution is worktree-true under the hood: generated shims and supervisor
+children load the spice source checkout first on `PYTHONPATH` when operating on
+that checkout; ordinary target repos use the installed product. Agent shell
+startup hooks reexec zsh/bash commands through `spice agent run -- <cmd>` so
+steering, context warnings, git-shadow routing, and configured wrapper groups
+run before the requested command.
 
 A project can set its default supervised-agent launch model and thinking in
 tracked config, either by editing `pyproject.toml` or by running

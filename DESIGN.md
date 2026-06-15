@@ -191,12 +191,12 @@ The one idea above isn't arbitrary; four theses generate it.
    repo contains only what spice writes into it: runtime state under `.spice/`,
    generated `.spice/hooks` shims, and the worktree skill under
    `.agents/skills/spice`. The worktree skill ships as package data (per-repo
-   override honored); the supervisor respawns via `python -m spice`; every
-   self-referencing command string is `spice …`. When the target repo is the
-   spice source checkout, the checkout wins over any installed editable copy by
-   being first on `PYTHONPATH`; ordinary target repos continue to use the
-   installed product. The spice repo itself is just another target of its own
-   constitution.
+   override honored); every operator- and agent-facing command string is
+   `spice …`. The supervisor's internal runtime load path is worktree-true:
+   when the target repo is the spice source checkout, the checkout wins over
+   any installed editable copy by being first on `PYTHONPATH`; ordinary target
+   repos continue to use the installed product. The spice repo itself is just
+   another target of its own constitution.
 1. **The driver seam.** Agent-CLI specifics (binary/argv, thread-id
    environment, rollout location and grammar, stdout section markers,
    session-id parsing) live in one `AgentDriver` value in

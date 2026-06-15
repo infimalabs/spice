@@ -9,6 +9,15 @@ from spice.agent import lifecycle
 from spice.errors import SpiceError
 
 
+def test_packaged_skill_uses_uniform_spice_command_surface():
+    text = lifecycle.packaged_skill_path().read_text(encoding="utf-8")
+
+    assert "using the\n`spice` command directly" in text
+    assert "agents should not switch entrypoints" in text
+    assert "only as a command-routing marker" in text
+    assert "It still goes through `agent run`" in text
+
+
 def test_available_skill_path_materializes_into_the_worktree(tmp_path):
     located = lifecycle.available_skill_path(tmp_path, required=True)
 
