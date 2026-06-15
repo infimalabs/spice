@@ -33,6 +33,7 @@ namespaces = true
     "*.md",
     "shellhooks/.zshenv",
     "shellhooks/.zprofile",
+    "shellhooks/.zshrc",
     "shellhooks/.zlogin",
     "shellhooks/bash_env",
 ]
