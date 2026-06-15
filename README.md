@@ -131,6 +131,9 @@ Do not encode families as dotted, spaced, or ad-hoc hyphenated spice mount
 names such as `lint.css`, `lint css`, or one mount per subcommand; those
 groupings belong behind the mounted repo tool's explicit contract.
 
+The detailed wrapper and mounted-command contract lives in
+[`docs/cli/wrapper-commands.md`](docs/cli/wrapper-commands.md).
+
 ### Library seam for repo tools
 
 Mounted commands and tracked pre-commit extensions may import a deliberately
