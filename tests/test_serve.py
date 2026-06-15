@@ -19,6 +19,8 @@ from spice.agent.renewal import (
 from spice.cli.parser import build_parser
 from spice.mail.inbox import (
     INBOX_CONTROL_DRAIN_QUEUE,
+    INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD,
+    collect_deadlettered_inbox_items,
     collect_inbox_items,
     compose_inbox_text,
     inbox_payload_rows,
@@ -837,6 +839,41 @@ def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
     assert payload["agentEnsure"]["threadId"] == THREAD_A
     assert ensure_calls == [{"target": target, "fast_mode": False, "force_new": False}]
     assert state.pending_agent_ensure_attempts[target.id] > 0
+
+
+def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    write_inbox_item(
+        repo,
+        "20260101T000000000001Z.txt",
+        compose_inbox_text(body="external steering", priority=None, stop=False),
+    )
+    ensure_calls = 0
+
+    def fake_ensure(ensured_target, **kwargs):
+        nonlocal ensure_calls
+        ensure_calls += 1
+        assert ensured_target == target
+        return {
+            "ok": False,
+            "failure": agentapi.AGENT_FAILURE_OUT_OF_CREDITS,
+            "error": "Could not ensure agent: usage limit reached",
+        }, HTTPStatus.PAYMENT_REQUIRED
+
+    monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+
+    payload = payloads.messages_payload_for_worktree(state, target, limit=5)
+
+    assert ensure_calls == INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD
+    assert payload["agentEnsure"]["deadletteredInboxKey"] == "20260101T000000000001Z"
+    assert payload["agentEnsure"]["pendingInboxCount"] == 0
+    assert pending_inbox_count(repo) == 0
+    assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
+        "20260101T000000000001Z.txt"
+    ]
 
 
 def test_status_line_reports_stale_agent_launch_cwd(tmp_path, monkeypatch):

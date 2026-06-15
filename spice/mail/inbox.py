@@ -33,6 +33,8 @@ from spice.paths import STATE_DIRNAME, fsync_directory
 
 INBOX_DIRNAME = "inbox"
 INBOX_ARCHIVE_DIRNAME = "archive"
+INBOX_DEADLETTER_DIRNAME = "deadletter"
+INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD = 1
 INBOX_ARCHIVE_PREVIEW_LIMIT = 120
 INBOX_ARCHIVE_DEFAULT_LIMIT = 6
 INBOX_COLLISION_MAX = 1000
@@ -129,6 +131,48 @@ def collect_archived_inbox_items(
         (
             path
             for path in _file_paths(archive_dir)
+            if path.suffix == ".txt" and inbox_path_is_fresh(path)
+        ),
+        key=lambda path: (_path_mtime(path), path.name),
+        reverse=True,
+    )[: max(0, limit)]
+    items: list[InboxItem] = []
+    for path in paths:
+        try:
+            text = path.read_text(errors="replace")
+        except FileNotFoundError:
+            continue
+        items.append(
+            InboxItem(
+                source_path=path,
+                archive_path=path,
+                name=path.name,
+                text=text,
+                attachments=collect_inbox_attachments(path),
+            )
+        )
+    return items
+
+
+def collect_deadlettered_inbox_items(
+    repo_root: str | Path | None, *, limit: int = INBOX_ARCHIVE_DEFAULT_LIMIT
+) -> list[InboxItem]:
+    if not repo_root:
+        return []
+    prune_stale_inbox_artifacts(repo_root)
+    return _collect_consumed_inbox_items(
+        inbox_dir(repo_root) / INBOX_DEADLETTER_DIRNAME,
+        limit=limit,
+    )
+
+
+def _collect_consumed_inbox_items(directory: Path, *, limit: int) -> list[InboxItem]:
+    if not directory.is_dir():
+        return []
+    paths = sorted(
+        (
+            path
+            for path in _file_paths(directory)
             if path.suffix == ".txt" and inbox_path_is_fresh(path)
         ),
         key=lambda path: (_path_mtime(path), path.name),
@@ -290,6 +334,28 @@ def inbox_archive_context_rows(items: Sequence[InboxItem]) -> list[str]:
     return rows
 
 
+def inbox_deadletter_context_rows(items: Sequence[InboxItem]) -> list[str]:
+    if not items:
+        return []
+    rows = [
+        "source=inbox_deadletter; status=parked_operator_steering; "
+        "requeue=spice agent requeue-deadletter <key>"
+    ]
+    for item in items:
+        payload = parse_inbox_payload(item.text)
+        text = one_line_preview(payload.body, limit=INBOX_ARCHIVE_PREVIEW_LIMIT)
+        priority = f" priority={payload.priority}" if payload.priority else ""
+        attachments = (
+            f" attachments={len(item.attachments)}" if item.attachments else ""
+        )
+        rows.append(
+            f"deadlettered_inbox key={inbox_item_key(item.name)} "
+            f"age={relative_time_for_path(item.source_path)}{priority}"
+            f"{attachments} text={text or '-'}"
+        )
+    return rows
+
+
 def inbox_item_key(name: str) -> str:
     path = Path(name)
     return path.stem or path.name
@@ -342,6 +408,73 @@ def consume_inbox_items(items: Sequence[dict[str, Any]]) -> None:
         with contextlib.suppress(FileNotFoundError):
             source.unlink()
         archive_inbox_attachments(source, archive)
+
+
+def deadletter_inbox_item(
+    repo_root: str | Path | None,
+    inbox_key: str,
+) -> str | None:
+    if not repo_root or not inbox_key:
+        return None
+    wanted = inbox_item_key_aliases(inbox_key)
+    for item in collect_inbox_items(repo_root):
+        if not (inbox_item_key_aliases(item.name) & wanted):
+            continue
+        consume_inbox_items(
+            [
+                {
+                    "source_path": str(item.source_path),
+                    "archive_dir": str(inbox_dir(repo_root) / INBOX_DEADLETTER_DIRNAME),
+                    "attachment_source_dir": str(
+                        inbox_attachment_dir(item.source_path)
+                    ),
+                    "attachment_archive_dir": str(
+                        inbox_attachment_dir(
+                            inbox_dir(repo_root) / INBOX_DEADLETTER_DIRNAME / item.name
+                        )
+                    ),
+                }
+            ]
+        )
+        notify_inbox_changed(Path(repo_root))
+        return inbox_item_key(item.name)
+    return None
+
+
+def requeue_deadlettered_inbox_item(
+    repo_root: str | Path | None,
+    inbox_key: str,
+) -> Path | None:
+    if not repo_root or not inbox_key:
+        return None
+    wanted = inbox_item_key_aliases(inbox_key)
+    for item in collect_deadlettered_inbox_items(repo_root, limit=INBOX_COLLISION_MAX):
+        if not (inbox_item_key_aliases(item.name) & wanted):
+            continue
+        attachments: list[InboxAttachmentInput] = []
+        for attachment in item.attachments:
+            try:
+                data = attachment.path.read_bytes()
+            except OSError:
+                continue
+            attachments.append(
+                InboxAttachmentInput(
+                    name=attachment.name,
+                    content_type=attachment.content_type,
+                    data=data,
+                )
+            )
+        written = write_inbox_item(
+            Path(repo_root),
+            item.name,
+            item.text,
+            attachments=attachments,
+        )
+        with contextlib.suppress(FileNotFoundError):
+            item.source_path.unlink()
+        remove_inbox_attachment_dir(item.source_path)
+        return written
+    return None
 
 
 def write_inbox_item(
@@ -592,7 +725,11 @@ def prune_stale_inbox_artifacts(repo_root: str | Path | None) -> None:
     if not repo_root:
         return
     directory = inbox_dir(repo_root)
-    for candidate in (directory, directory / INBOX_ARCHIVE_DIRNAME):
+    for candidate in (
+        directory,
+        directory / INBOX_ARCHIVE_DIRNAME,
+        directory / INBOX_DEADLETTER_DIRNAME,
+    ):
         if not candidate.is_dir():
             continue
         for path in _file_paths(candidate):
@@ -683,6 +820,6 @@ def inbox_timestamp() -> str:
 
 def valid_inbox_name(name: str) -> bool:
     path = Path(name)
-    if not name or name in {".", "..", INBOX_ARCHIVE_DIRNAME}:
+    if not name or name in {".", "..", INBOX_ARCHIVE_DIRNAME, INBOX_DEADLETTER_DIRNAME}:
         return False
     return path.name == name

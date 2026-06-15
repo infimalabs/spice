@@ -8,11 +8,21 @@ from http import HTTPStatus
 from typing import Any
 
 from spice.agent.driver import driver_for
-from spice.agent.lifecycle import agent_binding_error, agent_status, ensure_agent
+from spice.agent.lifecycle import (
+    AGENT_FAILURE_OUT_OF_CREDITS,
+    AgentOutOfCreditsError,
+    agent_binding_error,
+    agent_status,
+    ensure_agent,
+)
 from spice.mail.inbox import (
+    INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD,
+    collect_inbox_items,
+    deadletter_inbox_item,
+    inbox_item_is_automated_guidance,
+    inbox_item_key,
     inbox_request_priority,
     pending_inbox_count,
-    pending_operator_inbox_count,
 )
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve.markdown import render_message_html
@@ -56,6 +66,15 @@ def agent_ensure_response_payload(
             force_new=force_new,
             fast_mode=fast_mode,
             supervise_stdout=True,
+        )
+    except AgentOutOfCreditsError as exc:
+        return (
+            {
+                "ok": False,
+                "failure": AGENT_FAILURE_OUT_OF_CREDITS,
+                "error": f"Could not ensure agent: {exc}",
+            },
+            HTTPStatus.PAYMENT_REQUIRED,
         )
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         return (
@@ -157,7 +176,12 @@ def ensure_agent_for_pending_inbox(
     # resurrect an idle agent on its own, or a down/out-of-credits lane restarts
     # in a loop driven by its own automated messages. Only genuine operator
     # steering brings a lane up.
-    if pending_operator_inbox_count(target.repo_root) <= 0:
+    operator_items = [
+        item
+        for item in collect_inbox_items(target.repo_root)
+        if not inbox_item_is_automated_guidance(item)
+    ]
+    if not operator_items:
         return None
     status = agent_status(target.repo_root)
     if status.running:
@@ -166,9 +190,18 @@ def ensure_agent_for_pending_inbox(
         target.id, attempt_cache=attempt_cache, retry_seconds=retry_seconds
     ):
         return None
+    trigger_key = inbox_item_key(operator_items[0].name)
     payload, _status = agent_ensure_response_payload(
         target, fast_mode=fast_mode, force_new=force_new
     )
+    if payload.get("failure") == AGENT_FAILURE_OUT_OF_CREDITS:
+        payload["creditFailureThreshold"] = INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD
+        deadlettered = deadletter_inbox_item(target.repo_root, trigger_key)
+        if deadlettered:
+            payload["deadletteredInboxKey"] = deadlettered
+            payload["pendingInboxCount"] = pending_inbox_count(target.repo_root)
+            payload["pendingInboxLabel"] = str(payload["pendingInboxCount"])
+        return payload
     return payload
 
 

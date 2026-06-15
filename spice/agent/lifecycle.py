@@ -69,6 +69,11 @@ STARTUP_SESSION_ID_POLL_SECONDS = 0.05
 SUPERVISOR_STARTUP_TIMEOUT_SECONDS = 3.0
 STARTUP_LOG_HEAD_BYTES = 4096
 STARTUP_LOG_TAIL_BYTES = 4096
+AGENT_FAILURE_OUT_OF_CREDITS = "out-of-credits"
+
+
+class AgentOutOfCreditsError(SpiceError):
+    """Agent driver reported a credit/usage-limit startup failure."""
 
 
 @dataclass(frozen=True)
@@ -269,7 +274,7 @@ def start_agent(
         reap_process_when_done(supervisor)
         return log_path
     process = spawn_agent(command, cwd=repo_root, log_path=log_path)
-    require_started_process(process, log_path)
+    require_started_process(process, log_path, repo_root=repo_root)
     started_thread_id = started_agent_thread_id(
         log_path, repo_root=repo_root, fallback_thread_id=resume_thread_id
     )
@@ -389,11 +394,21 @@ def require_supervisor_started(
         if exit_code is not None:
             detail = tail_text(log_path, STARTUP_LOG_TAIL_BYTES)
             message = f"agent supervisor exited during startup with code {exit_code}"
-            raise SpiceError(f"{message}: {detail}" if detail else message)
+            raise agent_startup_error(
+                repo_root,
+                exit_code=exit_code,
+                message=message,
+                detail=detail,
+            )
         if time.monotonic() >= deadline:
             detail = tail_text(log_path, STARTUP_LOG_TAIL_BYTES)
             message = "agent supervisor did not publish agent state during startup"
-            raise SpiceError(f"{message}: {detail}" if detail else message)
+            raise agent_startup_error(
+                repo_root,
+                exit_code=0,
+                message=message,
+                detail=detail,
+            )
         time.sleep(STARTUP_SESSION_ID_POLL_SECONDS)
 
 
@@ -412,7 +427,7 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
             log_path=log_path,
             env=env,
         )
-        require_started_process(process, log_path)
+        require_started_process(process, log_path, repo_root=repo_root)
         started_thread_id = started_agent_thread_id(
             log_path,
             repo_root=repo_root,
@@ -478,14 +493,53 @@ def spawn_agent(
         log_handle.close()
 
 
-def require_started_process(process: subprocess.Popen[str], log_path: Path) -> None:
+def require_started_process(
+    process: subprocess.Popen[str],
+    log_path: Path,
+    *,
+    repo_root: Path | None = None,
+) -> None:
     time.sleep(STARTUP_GRACE_SECONDS)
     exit_code = process.poll()
     if exit_code is None:
         return
     detail = tail_text(log_path, STARTUP_LOG_TAIL_BYTES)
     message = f"agent exited during startup with code {exit_code}"
-    raise SpiceError(f"{message}: {detail}" if detail else message)
+    raise agent_startup_error(
+        repo_root,
+        exit_code=exit_code,
+        message=message,
+        detail=detail,
+    )
+
+
+def agent_startup_error(
+    repo_root: Path | None,
+    *,
+    exit_code: int,
+    message: str,
+    detail: str,
+) -> SpiceError:
+    rendered = f"{message}: {detail}" if detail else message
+    if (
+        repo_root is not None
+        and agent_process_failure_kind(repo_root, exit_code=exit_code, output=detail)
+        == AGENT_FAILURE_OUT_OF_CREDITS
+    ):
+        return AgentOutOfCreditsError(rendered)
+    return SpiceError(rendered)
+
+
+def agent_process_failure_kind(
+    repo_root: Path,
+    *,
+    exit_code: int,
+    output: str,
+) -> str:
+    return driver_for(repo_root).process_failure_kind(
+        exit_code=exit_code,
+        output=output,
+    )
 
 
 def reap_process_when_done(process: subprocess.Popen[str]) -> None:
