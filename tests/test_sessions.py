@@ -283,6 +283,10 @@ def test_session_records_and_meter_parse_claude_transcript_owner(tmp_path, monke
 def test_session_thread_reports_missing_driver_state(tmp_path, monkeypatch):
     codex_home = tmp_path / "codex"
     monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
+    # Pin the preferred driver so the assertion does not depend on the ambient
+    # worktree's configured driver (a claude-configured worktree would surface
+    # the claude resolver error first).
+    monkeypatch.setenv("SPICE_AGENT_DRIVER", "codex")  # env-policy: allow
 
     with pytest.raises(SystemExit) as exc:
         render_thread_summary(THREAD_CANONICAL)
