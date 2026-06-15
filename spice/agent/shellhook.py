@@ -19,7 +19,10 @@ ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zlogin")
 AGENT_WRAPPERS_KEY = "wrappers"
 DEFAULT_AGENT_WRAPPER_GROUP = "common"
 BUILTIN_AGENT_WRAPPER_GROUPS = {
-    DEFAULT_AGENT_WRAPPER_GROUP: {"rtk": ["run", "proxy", "grep", "find", "git"]},
+    DEFAULT_AGENT_WRAPPER_GROUP: {
+        "rtk": ["run", "proxy", "grep", "find", "git"],
+        "pytest": {"command": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
+    },
 }
 SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
 SHELL_HOOK_REPO_ROOT_ENV = "SPICE_SHELL_HOOK_REPO_ROOT"  # env-policy: allow
@@ -220,19 +223,29 @@ def render_agent_wrapper_group_lines(
     seen_selectors: dict[str, str],
 ) -> list[str]:
     lines: list[str] = []
-    for raw_wrapper, raw_selectors in group.items():
+    for raw_wrapper, raw_entry in group.items():
         wrapper = str(raw_wrapper).strip()
+        if isinstance(raw_entry, Mapping):
+            lines.extend(
+                render_agent_direct_wrapper_lines(
+                    group_name=group_name,
+                    selector=wrapper,
+                    entry=raw_entry,
+                    seen_selectors=seen_selectors,
+                )
+            )
+            continue
         require_shell_function_name(
             wrapper,
             label=f"tool.spice.wrappers.{group_name} wrapper",
         )
-        if not isinstance(raw_selectors, list):
+        if not isinstance(raw_entry, list):
             raise SpiceError(
                 "spice shell hook: "
-                f"tool.spice.wrappers.{group_name}.{wrapper} must be a list"
+                f"tool.spice.wrappers.{group_name}.{wrapper} must be a list or table"
             )
         selectors = config_string_list(
-            raw_selectors,
+            raw_entry,
             label=f"tool.spice.wrappers.{group_name}.{wrapper}",
         )
         if not selectors:
@@ -250,6 +263,43 @@ def render_agent_wrapper_group_lines(
                 )
             )
     return lines
+
+
+def render_agent_direct_wrapper_lines(
+    *,
+    group_name: str,
+    selector: str,
+    entry: Mapping[str, object],
+    seen_selectors: dict[str, str],
+) -> list[str]:
+    config_path = f"tool.spice.wrappers.{group_name}.{selector}"
+    require_shell_function_name(selector, label=f"{config_path} command")
+    extra = sorted(set(entry) - {"command"})
+    if extra:
+        raise SpiceError(
+            f"spice shell hook: {config_path} has unsupported keys: {', '.join(extra)}"
+        )
+    command_words = command_words_from_config(
+        entry.get("command"),
+        label=f"{config_path}.command",
+    )
+    if selector == command_words[0]:
+        raise SpiceError(
+            "spice shell hook: wrapper "
+            f"{selector!r} cannot intercept itself in {config_path}.command"
+        )
+    record_agent_wrapper_selector(
+        selector,
+        config_path,
+        seen_selectors=seen_selectors,
+    )
+    command = " ".join(shell_command_word(word) for word in command_words)
+    return [
+        "",
+        f"{selector}() {{",
+        f'  {command} "$@"',
+        "}",
+    ]
 
 
 def render_agent_wrapper_selector_lines(
@@ -274,6 +324,22 @@ def render_agent_wrapper_selector_lines(
             "spice shell hook: wrapper "
             f"{wrapper!r} cannot intercept itself in {config_path}"
         )
+    record_agent_wrapper_selector(
+        selector,
+        config_path,
+        seen_selectors=seen_selectors,
+    )
+    return [
+        "",
+        f"{selector}() {{",
+        f'  {shell_quote(wrapper)} {shell_quote(selector)} "$@"',
+        "}",
+    ]
+
+
+def record_agent_wrapper_selector(
+    selector: str, config_path: str, *, seen_selectors: dict[str, str]
+) -> None:
     previous = seen_selectors.get(selector)
     if previous is not None:
         raise SpiceError(
@@ -281,12 +347,24 @@ def render_agent_wrapper_selector_lines(
             f"{selector!r} is configured by both {previous} and {config_path}"
         )
     seen_selectors[selector] = config_path
-    return [
-        "",
-        f"{selector}() {{",
-        f'  {wrapper} {selector} "$@"',
-        "}",
-    ]
+
+
+def command_words_from_config(raw: object, *, label: str) -> list[str]:
+    words = config_string_list(raw, label=label)
+    for word in words:
+        if "/" in word:
+            raise SpiceError(
+                "spice shell hook: path wrapper command "
+                f"{word!r} in {label} requires the redirector stage"
+            )
+    return words
+
+
+def shell_command_word(word: str) -> str:
+    match = re.fullmatch(r"\$([A-Za-z_][A-Za-z0-9_]*)", word)
+    if match:
+        return '"$' + match.group(1) + '"'
+    return shell_quote(word)
 
 
 def require_shell_function_name(value: str, *, label: str) -> None:

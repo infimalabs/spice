@@ -45,16 +45,24 @@ The selected groups come from `[tool.spice.agent] wrappers = [...]`. When no
 list is configured, spice selects the built-in `common` group. An explicit empty
 list disables wrapper generation.
 
-The built-in `common` group maps `rtk` to these selectors:
+The built-in `common` group maps `rtk` to the command selectors that benefit
+from RTK routing, and maps `pytest` through the active shell-hook Python module
+runner:
 
 ```toml
 [tool.spice.wrappers.common]
 rtk = ["run", "proxy", "grep", "find", "git"]
+pytest = { command = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
 ```
 
 Selectors are command names, not paths. Path selectors such as `/bin/sh` fail
 loudly until a redirector stage exists. A wrapper cannot intercept itself, and
 duplicate selectors fail during hook rendering.
+
+Wrapper entries may also be direct command wrappers with a `command = [...]`
+argv list; the hook shell-quotes each command word before rendering the
+function. A command word in `$NAME` form is rendered as a quoted shell variable
+reference for hook-provided values such as `$SPICE_SHELL_HOOK_PYTHON`.
 
 ## Mounted Commands
 

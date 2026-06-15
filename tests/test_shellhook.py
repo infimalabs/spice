@@ -406,9 +406,10 @@ def test_shell_hook_renderer_adds_ordered_agent_wrapper_functions(tmp_path):
 
 
 def test_shell_hook_renderer_uses_builtin_common_agent_wrapper_default(tmp_path):
-    assert shellhook.render_agent_wrapper_lines(
-        tmp_path
-    ) == _expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"])
+    assert (
+        shellhook.render_agent_wrapper_lines(tmp_path)
+        == _expected_builtin_common_wrapper_lines()
+    )
 
 
 def test_shell_hook_renderer_explicit_common_group_inherits_builtin_default(tmp_path):
@@ -430,12 +431,14 @@ def test_shell_hook_renderer_explicit_common_group_inherits_builtin_default(tmp_
 
     rendered = shellhook.render_shell_steering_hook_for_surface("zshenv", env=env)
 
-    assert shellhook.render_agent_wrapper_lines(
-        tmp_path
-    ) == _expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"])
+    assert (
+        shellhook.render_agent_wrapper_lines(tmp_path)
+        == _expected_builtin_common_wrapper_lines()
+    )
     assert '\nrun() {\n  rtk run "$@"\n}\n' in rendered
     assert '\nproxy() {\n  rtk proxy "$@"\n}\n' in rendered
     assert '\ngrep() {\n  rtk grep "$@"\n}\n' in rendered
+    assert '\npytest() {\n  "$SPICE_SHELL_HOOK_PYTHON" -m pytest "$@"\n}\n' in rendered
 
 
 def test_shell_hook_renderer_project_common_group_overrides_builtin_default(tmp_path):
@@ -448,6 +451,18 @@ def test_shell_hook_renderer_project_common_group_overrides_builtin_default(tmp_
     assert shellhook.render_agent_wrapper_lines(
         tmp_path
     ) == _expected_rtk_wrapper_lines(["grep"])
+
+
+def test_shell_hook_renderer_accepts_direct_command_wrapper(tmp_path):
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["tests"],
+        groups={"tests": {"pytest": {"command": ["python", "-m", "pytest"]}}},
+    )
+
+    assert shellhook.render_agent_wrapper_lines(
+        tmp_path
+    ) == _expected_python_module_wrapper_lines(["pytest"])
 
 
 def test_shell_hook_renderer_honors_empty_agent_wrapper_list(tmp_path):
@@ -478,6 +493,27 @@ def test_shell_hook_renderer_fails_loudly_for_path_wrapper_selectors(tmp_path):
     }
 
     with pytest.raises(SpiceError, match="requires the redirector stage"):
+        shellhook.render_shell_steering_hook_for_surface("zshenv", env=env)
+
+
+def test_shell_hook_renderer_fails_loudly_for_path_wrapper_commands(tmp_path):
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["shells"],
+        groups={"shells": {"pytest": {"command": ["/bin/python", "-m", "pytest"]}}},
+    )
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    env = {
+        shellhook.ZDOTDIR_ENV: str(hook_dir),
+        shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
+        **shellhook.shell_steering_runtime_environment(
+            base_env={},
+            python_command=["agent-python"],
+            repo_root=tmp_path,
+        ),
+    }
+
+    with pytest.raises(SpiceError, match="path wrapper command"):
         shellhook.render_shell_steering_hook_for_surface("zshenv", env=env)
 
 
@@ -843,7 +879,7 @@ def _write_spice_product_shape(repo: Path) -> None:
 
 
 def _write_agent_wrapper_config(
-    repo: Path, *, order: list[str] | None, groups: dict[str, dict[str, list[str]]]
+    repo: Path, *, order: list[str] | None, groups: dict[str, dict[str, object]]
 ) -> None:
     lines: list[str] = []
     if order is not None:
@@ -856,19 +892,61 @@ def _write_agent_wrapper_config(
         )
     for group_name, entries in groups.items():
         lines.extend(["", f"[tool.spice.wrappers.{group_name}]"])
-        for wrapper, selectors in entries.items():
+        for wrapper, value in entries.items():
+            if isinstance(value, dict):
+                command = value["command"]
+                lines.append(
+                    f"{_toml_key(wrapper)} = {{ command = ["
+                    + ", ".join(f'"{word}"' for word in command)
+                    + "] }"
+                )
+                continue
             lines.append(
-                f"{wrapper} = ["
-                + ", ".join(f'"{selector}"' for selector in selectors)
+                f"{_toml_key(wrapper)} = ["
+                + ", ".join(f'"{selector}"' for selector in value)
                 + "]"
             )
     (repo / "pyproject.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _toml_key(value: str) -> str:
+    if shellhook.CONFIG_NAME_RE.fullmatch(value):
+        return value
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _expected_builtin_common_wrapper_lines() -> list[str]:
+    return [
+        *_expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"]),
+        *_expected_active_python_module_wrapper_lines(["pytest"]),
+    ]
 
 
 def _expected_rtk_wrapper_lines(selectors: list[str]) -> list[str]:
     lines: list[str] = []
     for selector in selectors:
         lines.extend(["", f"{selector}() {{", f'  rtk {selector} "$@"', "}"])
+    return lines
+
+
+def _expected_python_module_wrapper_lines(selectors: list[str]) -> list[str]:
+    lines: list[str] = []
+    for selector in selectors:
+        lines.extend(["", f"{selector}() {{", f'  python -m {selector} "$@"', "}"])
+    return lines
+
+
+def _expected_active_python_module_wrapper_lines(selectors: list[str]) -> list[str]:
+    lines: list[str] = []
+    for selector in selectors:
+        lines.extend(
+            [
+                "",
+                f"{selector}() {{",
+                f'  "$SPICE_SHELL_HOOK_PYTHON" -m {selector} "$@"',
+                "}",
+            ]
+        )
     return lines
 
 
