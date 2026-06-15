@@ -9,6 +9,13 @@ import time
 import pytest
 
 from spice.cli.parser import build_parser
+from spice.mail.inbox import (
+    collect_deadlettered_inbox_items,
+    collect_inbox_items,
+    compose_inbox_text,
+    deadletter_inbox_item,
+    write_inbox_item,
+)
 from spice.sessions import briefing as briefing_module
 from spice.sessions.briefing import render_briefing
 from spice.sessions.cli import _print_timeline, render_thread_summary
@@ -324,6 +331,50 @@ def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
     assert "Latest Ask\n  needle request" in briefing
     assert "Working Set\n  spice/sessions/briefing.py touches=1" in briefing
     assert "Git\n  branch=main upstream=- ahead=- behind=-\n  dirty=clean" in briefing
+
+
+def test_briefing_reports_deadlettered_inbox_items(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    write_inbox_item(
+        repo,
+        "20260101T000000000001Z.txt",
+        compose_inbox_text(body="operator steering", priority=None, stop=False),
+    )
+    deadletter_inbox_item(repo, "20260101T000000000001Z")
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing([], max_lines=200, max_bytes=20000)
+
+    assert "Inbox\n  pending=0" in briefing
+    assert "deadlettered=1" in briefing
+    assert "source=inbox_deadletter" in briefing
+    assert "requeue=spice agent requeue-deadletter <key>" in briefing
+    assert "deadlettered_inbox key=20260101T000000000001Z" in briefing
+
+
+def test_agent_requeue_deadletter_command_restores_pending_item(
+    tmp_path, monkeypatch, capsys
+):
+    repo = _init_git_repo(tmp_path / "repo")
+    write_inbox_item(
+        repo,
+        "20260101T000000000002Z.txt",
+        compose_inbox_text(body="operator steering", priority=None, stop=False),
+    )
+    deadletter_inbox_item(repo, "20260101T000000000002Z")
+    monkeypatch.chdir(repo)
+    args = build_parser().parse_args(
+        ["agent", "requeue-deadletter", "20260101T000000000002Z"]
+    )
+
+    assert args.func(args) == 0
+
+    output = capsys.readouterr().out
+    assert "requeued_deadletter key=20260101T000000000002Z" in output
+    assert [item.name for item in collect_inbox_items(repo)] == [
+        "20260101T000000000002Z.txt"
+    ]
+    assert collect_deadlettered_inbox_items(repo) == []
 
 
 def test_briefing_dirty_git_posture_includes_policy_pressure_and_ages(

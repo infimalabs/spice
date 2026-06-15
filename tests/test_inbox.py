@@ -7,19 +7,23 @@ from spice.mail.attachments import (
     prepare_inbox_attachments,
 )
 from spice.mail.inbox import (
+    collect_deadlettered_inbox_items,
     INBOX_CONTROL_DRAIN_QUEUE,
     INBOX_CONTINUE_NOTE,
     INBOX_GRACEFUL_NOTE,
     INBOX_TASK_HINT_ROW,
     collect_inbox_items,
     compose_inbox_text,
+    deadletter_inbox_item,
     inbox_dir,
+    inbox_deadletter_context_rows,
     inbox_item_key,
     inbox_item_key_aliases,
     inbox_payload_rows,
     parse_inbox_payload,
     pending_inbox_count,
     pending_operator_inbox_count,
+    requeue_deadlettered_inbox_item,
     write_inbox_item,
 )
 from spice.serve.markdown import render_message_html
@@ -224,6 +228,44 @@ def test_pending_operator_count_zero_for_only_automated_guidance(tmp_path):
 
     assert pending_inbox_count(str(tmp_path)) == 1
     assert pending_operator_inbox_count(str(tmp_path)) == 0
+
+
+def test_deadletter_excludes_item_from_pending_and_can_requeue(tmp_path):
+    name = "20260103T000000000014Z.txt"
+    composed = compose_inbox_text(body="operator steering", priority=None, stop=False)
+    attachments = prepare_inbox_attachments(
+        [
+            {
+                "name": "paste.png",
+                "contentType": "image/png",
+                "dataUrl": IMAGE_DATA_URL,
+            }
+        ]
+    )
+    write_inbox_item(tmp_path, name, composed, attachments=attachments)
+
+    assert deadletter_inbox_item(tmp_path, "20260103T000000000014") == inbox_item_key(
+        name
+    )
+    assert pending_inbox_count(tmp_path) == 0
+    assert pending_operator_inbox_count(tmp_path) == 0
+    assert collect_inbox_items(tmp_path) == []
+    deadletters = collect_deadlettered_inbox_items(tmp_path)
+    assert [item.name for item in deadletters] == [name]
+    assert deadletters[0].attachments[0].name == "paste.png"
+    rows = inbox_deadletter_context_rows(deadletters)
+    assert "requeue=spice agent requeue-deadletter <key>" in rows[0]
+    assert "deadlettered_inbox key=20260103T000000000014Z" in rows[1]
+
+    requeued = requeue_deadlettered_inbox_item(tmp_path, "20260103T000000000014Z")
+
+    assert requeued is not None
+    assert pending_inbox_count(tmp_path) == 1
+    assert pending_operator_inbox_count(tmp_path) == 1
+    assert collect_deadlettered_inbox_items(tmp_path) == []
+    item = collect_inbox_items(tmp_path)[0]
+    assert item.text == composed
+    assert item.attachments[0].path.read_bytes() == b"image-bytes"
 
 
 def test_inbox_payload_rows_suppress_task_offload_for_maxim_guidance(tmp_path):

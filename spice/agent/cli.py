@@ -27,6 +27,13 @@ def configure_agent_parser(subparsers: Any) -> None:
     )
     activation.set_defaults(func=handle_agent)
 
+    requeue_deadletter = actions.add_parser(
+        "requeue-deadletter",
+        help="Move a deadlettered inbox item back to pending.",
+    )
+    requeue_deadletter.add_argument("key")
+    requeue_deadletter.set_defaults(func=handle_agent)
+
     run = actions.add_parser(
         "run",
         help="Run an agent shell command with steering injection.",
@@ -94,6 +101,14 @@ def handle_agent(args: argparse.Namespace) -> int:
         return 0
     if action == "activation":
         print(render_activation_packet(repo_root))
+        return 0
+    if action == "requeue-deadletter":
+        from spice.mail.inbox import requeue_deadlettered_inbox_item
+
+        path = requeue_deadlettered_inbox_item(repo_root, str(args.key))
+        if path is None:
+            raise SpiceError(f"deadlettered inbox item not found: {args.key}")
+        print(f"requeued_deadletter key={path.stem} path={path}")
         return 0
     if action == "run":
         from spice.agent.wrap import run_agent_command

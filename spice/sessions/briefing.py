@@ -17,7 +17,9 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.mail.inbox import (
+    collect_deadlettered_inbox_items,
     collect_inbox_items,
+    inbox_deadletter_context_rows,
     format_relative_seconds,
     inbox_item_key,
     relative_time_for_path,
@@ -819,6 +821,7 @@ def _inbox_lines() -> list[str]:
     if repo_root is None:
         return []
     items = collect_inbox_items(str(repo_root))
+    deadletters = collect_deadlettered_inbox_items(str(repo_root))
     lines = ["Inbox", f"  pending={len(items)}"]
     for item in items:
         lines.append(
@@ -827,6 +830,9 @@ def _inbox_lines() -> list[str]:
         )
     if items:
         lines.append("  ACK by assistant message: ACK <key> [<key> ...]: <response>")
+    if deadletters:
+        lines.append(f"  deadlettered={len(deadletters)}")
+        lines.extend(f"  {line}" for line in inbox_deadletter_context_rows(deadletters))
     return lines
 
 

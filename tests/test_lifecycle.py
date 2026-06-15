@@ -157,7 +157,9 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
         ),
     )
     monkeypatch.setattr(
-        lifecycle, "require_started_process", lambda _process, _log_path: None
+        lifecycle,
+        "require_started_process",
+        lambda _process, _log_path, **_kwargs: None,
     )
     monkeypatch.setattr(
         lifecycle,
@@ -296,7 +298,9 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        lifecycle, "require_started_process", lambda _process, _log_path: None
+        lifecycle,
+        "require_started_process",
+        lambda _process, _log_path, **_kwargs: None,
     )
     monkeypatch.setattr(
         lifecycle,
@@ -339,6 +343,24 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     assert state["prompt_skill_path"] == str(skill_path)
     assert state["fast_mode"] is True
     assert thread.joined_timeouts == [1.0]
+
+
+def test_require_started_process_distinguishes_credit_failure(tmp_path, monkeypatch):
+    log_path = tmp_path / "agent.log"
+    log_path.write_text("Error: Claude AI usage limit reached\n", encoding="utf-8")
+    process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=1)
+
+    class FakeDriver:
+        def process_failure_kind(self, *, exit_code: int, output: str) -> str:
+            assert exit_code == 1
+            assert "usage limit reached" in output
+            return lifecycle.AGENT_FAILURE_OUT_OF_CREDITS
+
+    monkeypatch.setattr(lifecycle, "STARTUP_GRACE_SECONDS", 0)
+    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: FakeDriver())
+
+    with pytest.raises(lifecycle.AgentOutOfCreditsError, match="usage limit reached"):
+        lifecycle.require_started_process(process, log_path, repo_root=tmp_path)
 
 
 def test_agent_environment_refuses_ambient_thread(tmp_path, monkeypatch):

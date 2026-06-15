@@ -117,6 +117,23 @@ def test_claude_command_resumes_with_dashed_session_id(tmp_path):
     assert command[-1] == "continue"
 
 
+def test_claude_driver_classifies_out_of_credits_output():
+    assert (
+        CLAUDE_DRIVER.process_failure_kind(
+            exit_code=1,
+            output="Error: Claude AI usage limit reached for this account.",
+        )
+        == "out-of-credits"
+    )
+    assert (
+        CLAUDE_DRIVER.process_failure_kind(
+            exit_code=1,
+            output="Error: generic command failure",
+        )
+        == ""
+    )
+
+
 def test_claude_skill_prompt_instructs_reading_the_file(tmp_path):
     skill = tmp_path / "SKILL.md"
     prompt = CLAUDE_DRIVER.skill_invocation_prompt(skill)

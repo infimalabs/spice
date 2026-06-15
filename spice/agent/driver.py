@@ -49,6 +49,7 @@ class AgentDriver:
     stdout_compaction_marker: str
     session_id_pattern: re.Pattern[str]
     default_context_window: int = 0
+    out_of_credits_patterns: tuple[re.Pattern[str], ...] = ()
     # How the supervisor reassembles assistant messages from `exec` stdout:
     # "marker" reads the driver's plain-text section markers; "json" parses
     # one JSON event per line (a stream-json transcript echoed to stdout).
@@ -123,6 +124,16 @@ class AgentDriver:
             "model_context_window": _as_int(info.get("model_context_window"), None),
             "cumulative_total_tokens": _as_int(cumulative.get("total_tokens")),
         }
+
+    def process_failure_kind(self, *, exit_code: int, output: str) -> str:
+        del exit_code
+        return (
+            "out-of-credits"
+            if any(
+                pattern.search(output or "") for pattern in self.out_of_credits_patterns
+            )
+            else ""
+        )
 
 
 PLAYWRIGHT_MCP_SERVER_NAME = "playwright"
@@ -263,6 +274,14 @@ CLAUDE_EFFORT_ALIASES = {"minimal": "low", "xlow": "low", "xhigh": "max"}
 # standard tier (the driver's `default_context_window`) or the 1M beta. The
 # meter fits occupancy to the smallest tier that holds it.
 CLAUDE_FALLBACK_CONTEXT_WINDOW = 1_000_000
+CLAUDE_OUT_OF_CREDITS_PATTERNS = (
+    re.compile(r"\b(?:out of|insufficient)\s+credits?\b", re.IGNORECASE),
+    re.compile(
+        r"\bcredit balance\b.*\b(?:low|exhausted|insufficient)\b", re.IGNORECASE
+    ),
+    re.compile(r"\busage limit (?:reached|exceeded)\b", re.IGNORECASE),
+    re.compile(r"\bClaude AI usage limit reached\b", re.IGNORECASE),
+)
 
 
 def claude_effort(value: str) -> str:
@@ -679,6 +698,7 @@ CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
     stdout_compaction_marker="",
     session_id_pattern=re.compile(r'"session_id"\s*:\s*"([0-9a-fA-F-]{36})"'),
     default_context_window=200000,
+    out_of_credits_patterns=CLAUDE_OUT_OF_CREDITS_PATTERNS,
     stdout_format="json",
 )
 
