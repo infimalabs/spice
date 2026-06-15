@@ -70,6 +70,5 @@
  * @property {string=} displayBody
  * @property {string=} timestamp
  * @property {number=} ack_count
- * @property {number=} say_count
  * @property {MessageAttachment[]=} attachments
  */

@@ -20,7 +20,6 @@ rules apply to the agents working here.
 - Operator steering arrives as inbox items. Reading does not retire them;
   retire an item by ACKing its key in an assistant message:
   `ACK <key> [<key> ...]: <what you understood and did>`.
-- Use `SAY:` only for genuinely operator-worthy moments.
 - Context-pressure warnings are informational. Keep working; do not finish
   prematurely because pressure is high.
 

@@ -762,7 +762,7 @@ def test_static_stream_uses_message_payload_and_standard_badges():
     badge_start = app_render.index("function renderBadges")
     badge_end = app_render.index("function renderCompactionDivider", badge_start)
     final_css_start = css.index(".messages article.final {")
-    final_css_end = css.index(".messages article.said {", final_css_start)
+    final_css_end = css.index(".messages article.final.acked {", final_css_start)
 
     assert app_stream[merge_start:merge_end] == (
         "function mergePayloadMessages(lane, payload) {\n"
@@ -788,12 +788,11 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         "\n"
     )
     assert app_render[badge_start:badge_end] == (
-        "function renderBadges(ackCount, sayCount, kind, maximAckCount) {\n"
+        "function renderBadges(ackCount, kind, maximAckCount) {\n"
         "  const visibleAckCount = Math.max(0, ackCount - maximAckCount);\n"
         "  if (\n"
         "    !maximAckCount &&\n"
         "    !visibleAckCount &&\n"
-        "    !sayCount &&\n"
         '    kind !== "final"\n'
         "  )\n"
         "    return null;\n"
@@ -809,7 +808,6 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         '  if (kind === "final") add("FINAL", "final-badge");\n'
         "  if (visibleAckCount)\n"
         '    add(visibleAckCount + "\\u00a0ACK" + (visibleAckCount === 1 ? "" : "s"));\n'
-        '  if (sayCount) add(sayCount + " SAY" + (sayCount === 1 ? "" : "s"), "say-badge");\n'
         "  return badges;\n"
         "}\n"
         "\n"

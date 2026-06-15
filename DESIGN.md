@@ -50,9 +50,6 @@ the agent's own transcript token counts, and (c) the supervisor's side-channel
 payload over a Unix socket. The terminal is a duplex steering surface; the
 agent cannot run a command without hearing the operator.
 
-The reverse voice channel is `SAY: …` lines in assistant messages — spoken
-aloud through TTS, surfaced as badges in the UI, AND echoed as prose.
-
 ### 2. The lifecycle plane (worktree-bound agents)
 
 One agent inhabits one git worktree. `agent ensure` starts/resumes it under a
@@ -107,7 +104,7 @@ drainability. Messages stream live from the transcript (kqueue on macOS,
 watchfiles elsewhere) as envelopes: ACK segments laid out quote-then-response
 in the agent's order, presence records (tool calls/reasoning) that carry
 activity without consuming the visible budget, plan updates, compaction
-dividers, image extraction, FINAL/MAXIM/ACK/SAY badges, TTS playback with a
+dividers, image extraction, FINAL/MAXIM/ACK badges, TTS playback with a
 narration mode and a global sequential speech queue.
 
 ### 5. The constitution (hygiene as executable opinion)
@@ -228,7 +225,7 @@ The one idea above isn't arbitrary; four theses generate it.
    advertised as `spice mail`.
 8. **One coherent UI.** The lane model, live bus protocol, occupants,
    fusing, lifetime slider, filters, and speech share one visual language
-   (palette tokens, ACK/FINAL/SAY tint semantics), one coherent
+   (palette tokens, ACK/FINAL tint semantics), one coherent
    implementation sized to the essentials.
 9. **Mounted commands.** spice unifies a repo's custom tooling without
    owning it: `[tool.spice.commands]` in tracked `pyproject.toml` mounts repo
@@ -282,7 +279,7 @@ The one idea above isn't arbitrary; four theses generate it.
   paired view-image collapse, activity active/active-ish/inactive at 60s/5m,
   Drive drain suffix on explicit steering, ordinary empty-message rejection,
   team revisions monotonic, lifetime vocabulary `Renew|Steer|Drive`.
-- Narration speaks edges, not essays: explicit SAY/ACK utterances win;
+- Narration speaks edges, not essays: explicit ACK utterances win;
   the fallback reads only the first and last paragraphs of the body
   (final-answer bodies narrate even in speak mode); image markdown is
   described, never read; image-only messages stay silent. Every prose

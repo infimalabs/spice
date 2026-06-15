@@ -45,8 +45,6 @@ def _message(
         ack_count=ack_count,
         ack_keys=[],
         ack_utterances=[],
-        say_count=0,
-        say_utterances=[],
         kind=kind,
         preview=preview,
     )

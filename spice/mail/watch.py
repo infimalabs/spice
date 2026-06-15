@@ -8,9 +8,6 @@ messages elapse without `ACK <our-key>: …` matching the canonical detector in
 `spice.mail.acks`, the watcher republishes the inbox item under a fresh key —
 the receiving agent sees it again on its next mailbox peek. The cycle repeats
 until our key is ACK'd or the operator interrupts.
-
-With `--say`, the paragraph containing the ACK is piped into the configured
-speech command for immediate audible confirmation.
 """
 
 from __future__ import annotations
@@ -18,7 +15,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -27,7 +23,6 @@ from typing import Any, Callable
 
 from spice.agent.driver import AgentDriver, driver_for
 from spice.agent.identity import canonical_thread_id
-from spice.config import say_command_args
 from spice.mail.acks import extract_ack_segments_from_text
 from spice.mail.inbox import inbox_dir, resend_inbox_item
 from spice.sessions.util import first_text
@@ -258,56 +253,7 @@ def extract_assistant_text(line: str, driver: AgentDriver) -> str | None:
     return text or None
 
 
-# A line containing a SAY directive must (a) be an assistant message and
-# (b) embed an uppercase `SAY` token followed by space or colon. The
-# JSON-encoded form preserves both characters verbatim, so we can prefilter
-# without parsing.
-_SAY_LINE_RE = re.compile(r"^SAY(?:\s+|:\s*)(.+?)\s*$")
 _APP_DIRECTIVE_LINE_RE = re.compile(r"^\s*::[a-z][a-z0-9-]*\{.*\}\s*$")
-
-
-def line_might_carry_say_directive(line: str) -> bool:
-    """Cheap prefilter: transcript line could carry a `SAY`/`SAY:` directive."""
-    if not _line_might_carry_assistant_message(line):
-        return False
-    return "SAY " in line or "SAY:" in line
-
-
-def extract_say_directives(text: str) -> list[str]:
-    """Return every utterance carried by `SAY ...` / `SAY: ...` lines.
-
-    Only lines that START with the uppercase `SAY` token (followed by a space
-    or a colon) qualify. Prose that mentions `SAY` mid-sentence is
-    intentionally ignored — the directive shape is what marks the line as
-    intended for the operator's ear, not the content of the surrounding
-    paragraph.
-    """
-    utterances: list[str] = []
-    for line in text.splitlines():
-        match = _SAY_LINE_RE.match(line)
-        if not match:
-            continue
-        utterance = strip_app_directive_lines(match.group(1)).strip()
-        if utterance:
-            utterances.append(utterance)
-    return utterances
-
-
-def scrub_say_headers(message_text: str) -> str:
-    """Hide SAY markers while preserving the operator-facing utterance."""
-    lines: list[str] = []
-    for line in message_text.splitlines():
-        if _is_app_directive_line(line):
-            continue
-        match = _SAY_LINE_RE.match(line)
-        if not match:
-            lines.append(line)
-            continue
-        body = strip_app_directive_lines(match.group(1)).strip()
-        if body:
-            lines.append(_capitalize_scrubbed_command_body(body))
-    return "\n".join(lines).rstrip()
-
 
 _ACK_FALLBACK_UTTERANCE = "ACK"
 
@@ -345,44 +291,5 @@ def strip_app_directive_lines(text: str) -> str:
     return "\n".join(lines).rstrip()
 
 
-def strip_directive_lines(text: str) -> str:
-    """Drop SAY and app-control directive lines, leaving the spoken response.
-
-    Used for an ACK segment's speech utterance: a SAY that follows an ACK in
-    the same message is absorbed into that segment's content, but it belongs
-    to the SAY channel, so it must not be spoken (or printed raw) as part of
-    the ACK's own utterance.
-    """
-    lines = [
-        line
-        for line in text.splitlines()
-        if not _SAY_LINE_RE.match(line) and not _is_app_directive_line(line)
-    ]
-    return "\n".join(lines).strip()
-
-
 def _is_app_directive_line(line: str) -> bool:
     return _APP_DIRECTIVE_LINE_RE.match(line) is not None
-
-
-def _capitalize_scrubbed_command_body(body: str) -> str:
-    first = body[:1]
-    if not first.islower():
-        return body
-    return f"{first.title()}{body[1:]}"
-
-
-def speak_ack_paragraph(message_text: str, inbox_key: str) -> None:
-    utterance = extract_owned_ack_utterance(message_text, inbox_key)
-    if not utterance:
-        return
-    try:
-        subprocess.run(
-            say_command_args(),
-            input=strip_directive_lines(utterance) or utterance,
-            text=True,
-            check=False,
-        )
-    except FileNotFoundError:
-        # `say` is macOS-only; non-Darwin platforms gracefully no-op.
-        return

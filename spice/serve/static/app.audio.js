@@ -1,8 +1,8 @@
 // Speech: one global sequential queue across lanes. Speak mode plays explicit
-// SAY/ACK utterances (plus final-answer bodies); narrate falls back to the
-// body's edge paragraphs — first and last — with markdown images described
-// rather than read. The transcript remains the record — playback is
-// best-effort ear candy and never blocks the stream.
+// ACK utterances (plus final-answer bodies); narrate falls back to the body's
+// edge paragraphs — first and last — with markdown images described rather
+// than read. The transcript remains the record — playback is best-effort ear
+// candy and never blocks the stream.
 
 const speechPlayIconSvg =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7Z" fill="currentColor"/></svg>';
@@ -49,9 +49,9 @@ function primeSpeechBoundary(lane) {
   lane.speechPrimed = true;
 }
 
-// Narration speaks edges, not essays: explicit SAY/ACK utterances win, and
-// the fallback reads only the first and last paragraphs of the body with
-// markdown images described rather than read aloud.
+// Narration speaks edges, not essays: explicit ACK utterances win, and the
+// fallback reads only the first and last paragraphs of the body with markdown
+// images described rather than read aloud.
 function automaticSpeechUtterances(lane, item) {
   const mode = laneEffectiveSpeechMode(lane);
   if (mode === "quiet") return [];

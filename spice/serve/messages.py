@@ -2,11 +2,10 @@
 
 Each transcript line becomes at most one envelope keyed `timestamp#offset`
 (the byte offset doubles as a stable cursor). Visible envelopes are assistant
-prose (ACK-segmented, SAY-scrubbed), final answers, plan updates, and
-compaction dividers; tool calls and reasoning become *presence* records that
-carry activity previews without consuming the visible message budget. Files
-larger than the tail cap are scanned backwards in chunks so a season-long
-transcript stays cheap to page.
+prose (ACK-segmented), final answers, plan updates, and compaction dividers;
+tool calls and reasoning become *presence* records that carry activity previews
+without consuming the visible message budget. Files larger than the tail cap are
+scanned backwards in chunks so a season-long transcript stays cheap to page.
 """
 
 from __future__ import annotations
@@ -28,9 +27,7 @@ from spice.agent.driver import (
 from spice.mail.acks import split_ack_message
 from spice.mail.watch import (
     extract_assistant_text,
-    extract_say_directives,
-    scrub_say_headers,
-    strip_directive_lines,
+    strip_app_directive_lines,
 )
 from spice.serve.images import (
     assistant_image_markdown,
@@ -72,8 +69,6 @@ class AssistantMessage:
     ack_count: int
     ack_keys: list[str]
     ack_utterances: list[str]
-    say_count: int
-    say_utterances: list[str]
     kind: str = "assistant"
     preview: str = ""
     image_only: bool = False
@@ -84,7 +79,7 @@ class AssistantMessage:
 
     @property
     def speech_utterances(self) -> list[str]:
-        return [*self.say_utterances, *self.ack_utterances]
+        return self.ack_utterances
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -103,8 +98,6 @@ class AssistantMessage:
             "ack_keys": self.ack_keys,
             "ack_utterances": self.ack_utterances,
             "ack_segments": self.ack_segments,
-            "say_count": self.say_count,
-            "say_utterances": self.say_utterances,
             "speech_utterances": self.speech_utterances,
             "plan_items": self.plan_items,
         }
@@ -599,8 +592,7 @@ def _assistant_message(
     worktree_id: str | None = None,
 ) -> AssistantMessage:
     preamble, segments = split_ack_message(text)
-    preamble = scrub_say_headers(preamble)
-    say_utterances = extract_say_directives(text)
+    preamble = strip_app_directive_lines(preamble)
     ack_segments: list[dict[str, Any]] = []
     ack_keys: list[str] = []
     seen_keys: set[str] = set()
@@ -609,7 +601,7 @@ def _assistant_message(
     for segment in segments:
         # The ACK header is hidden in the UI, so capitalize the response's
         # first letter for display while keeping the spoken text verbatim.
-        body = _capitalize_first(scrub_say_headers(segment.content))
+        body = _capitalize_first(strip_app_directive_lines(segment.content))
         ack_segments.append(
             {
                 "keys": list(segment.keys),
@@ -620,7 +612,7 @@ def _assistant_message(
             if ack_key not in seen_keys:
                 seen_keys.add(ack_key)
                 ack_keys.append(ack_key)
-        spoken = strip_directive_lines(segment.content)
+        spoken = strip_app_directive_lines(segment.content).strip()
         if spoken:
             ack_utterances.append(spoken)
         if body:
@@ -642,8 +634,6 @@ def _assistant_message(
         ack_count=len(ack_keys),
         ack_keys=ack_keys,
         ack_utterances=ack_utterances,
-        say_count=len(say_utterances),
-        say_utterances=say_utterances,
         kind=kind,
         preview="image" if image_only else _preview_from_text(display_text),
         image_only=image_only,
@@ -666,8 +656,6 @@ def _simple_message(
         ack_count=0,
         ack_keys=[],
         ack_utterances=[],
-        say_count=0,
-        say_utterances=[],
         kind=kind,
         preview=text,
     )
@@ -692,8 +680,6 @@ def _presence_message(
         ack_count=0,
         ack_keys=[],
         ack_utterances=[],
-        say_count=0,
-        say_utterances=[],
         kind=f"presence:{kind}",
         preview=preview,
         source_kind=kind,
