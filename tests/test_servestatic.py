@@ -826,13 +826,23 @@ def test_static_stream_uses_message_payload_and_standard_badges():
 def test_static_manual_speech_playback_aborts_active_entry():
     app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
 
+    # Manual play is a hard reset: stopAllSpeech() clears the entire queue
+    # (all lanes) and halts current playback, then — unless this toggled the
+    # active message off — only this one message is enqueued.
     assert (
-        "function toggleMessageSpeech(lane, messageKey, texts, targetLane = lane) {\n"
-        "  speechQueue.length = 0;"
-    ) in app_audio
-    assert "const activeSpeech = currentSpeech;" in app_audio
-    assert "if (activeSpeech) abortLaneSpeech(activeSpeech.lane);" in app_audio
+        "function toggleMessageSpeech(lane, messageKey, texts, targetLane = lane) {"
+        in app_audio
+    )
+    assert "stopAllSpeech();" in app_audio
+    assert "if (wasPlaying) return;" in app_audio
     assert "enqueueSpeech(lane, messageKey, texts, targetLane);" in app_audio
+    assert (
+        "function stopAllSpeech() {\n"
+        "  speechQueue.length = 0;\n"
+        "  speechEpoch += 1;\n"
+        "  stopCurrentSpeech();\n"
+        "}"
+    ) in app_audio
 
 
 def test_static_speech_sync_updates_now_playing_message_accent():
