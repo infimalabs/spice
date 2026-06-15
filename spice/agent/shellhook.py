@@ -14,6 +14,7 @@ from spice.repocfg import agent_table, agent_wrapper_definitions_table
 
 ZDOTDIR_ENV = "ZDOTDIR"
 BASH_ENV_ENV = "BASH_ENV"
+ZSH_COMPDUMP_ENV = "ZSH_COMPDUMP"
 BASH_HOOK_NAME = "bash_env"
 ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zlogin")
 AGENT_WRAPPERS_KEY = "wrappers"
@@ -52,6 +53,18 @@ def apply_shell_steering_environment(
     hook_dir = packaged_shell_steering_hook_dir()
     env[ZDOTDIR_ENV] = str(hook_dir)
     env[BASH_ENV_ENV] = str(hook_dir / BASH_HOOK_NAME)
+    if ZSH_COMPDUMP_ENV not in base_env:
+        original_zdotdir = original_shell_startup_value(
+            base_env,
+            original_name=SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV,
+            active_name=ZDOTDIR_ENV,
+        )
+        dump_base = (
+            Path(original_zdotdir).expanduser()
+            if original_zdotdir
+            else user_home_path(base_env)
+        )
+        env[ZSH_COMPDUMP_ENV] = str(dump_base / ".zcompdump")
     return env
 
 
