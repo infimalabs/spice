@@ -5,21 +5,26 @@ Status: implemented contract.
 ## Contract
 
 Agent launch owns the shell environment. For an agent-bound worktree, launch
-sets `ZDOTDIR` and `BASH_ENV` to packaged spice shell startup files and records
-the original values in runtime environment variables. Those packaged files ask
-`spice agent shell-hook <surface>` to render the current hook body, then `eval`
-that body in the shell that is about to run the requested command.
+sets `ZDOTDIR` and `BASH_ENV` to packaged static spice shell startup files,
+records the original startup values in runtime environment variables, and
+precomputes configured wrapper functions into `SPICE_SHELL_HOOK_WRAPPERS`.
 
-The rendered hook restores the user's original `ZDOTDIR` and `BASH_ENV` before
-doing anything else. For non-interactive zsh and bash commands with an execution
-string, it reexecs the original shell command through:
+For the first non-interactive zsh or bash command shell with an execution
+string, the packaged hook sees `SPICE_SHELL_HOOK_REEXEC_STAGE` unset, sets it to
+`1`, and replaces the shell with:
 
 ```sh
 spice agent run -- <shell> -c "<original command>"
 ```
 
-That makes steering injection, context warnings, git-shadow routing, and
-configured wrapper functions run before the requested command.
+That gives `spice agent run` ownership of stderr for steering injection,
+context warnings, git-shadow routing, source-checkout routing, and wrapper setup
+before the requested command. Descendant shells inherit
+`SPICE_SHELL_HOOK_REEXEC_STAGE=1`; they do not reexec and do not inject steering
+again. Stage-2 startup restores the user's original `ZDOTDIR`, `BASH_ENV`, and
+zsh history file, sources the real startup file when present, rearms the
+packaged hook environment for later descendants, and evals
+`SPICE_SHELL_HOOK_WRAPPERS`.
 
 ## Shells
 
@@ -27,12 +32,14 @@ Supported surfaces:
 
 - `zshenv`
 - `zprofile`
+- `zshrc`
 - `zlogin`
 - `bash_env`
 
 zsh is covered through `ZDOTDIR` startup files; bash is covered through
-`BASH_ENV`. Unsupported surfaces fail loudly through `spice agent shell-hook`
-rather than falling back to an unwrapped command path.
+`BASH_ENV`. The `.zshrc` surface is stage-2 only for interactive shells. Missing
+packaged startup files fail at spawn, and static hooks fail loudly when required
+environment variables are missing or the command shell cannot be resolved.
 
 ## Wrapper Groups
 
@@ -55,7 +62,8 @@ rtk = ["run", "proxy", "grep", "find", "git"]
 pytest = { command = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
 ```
 
-The hook renders command functions such as:
+At spawn, spice renders command functions into `SPICE_SHELL_HOOK_WRAPPERS`; the
+stage-2 hook evals functions such as:
 
 ```sh
 grep() {
@@ -71,4 +79,7 @@ until that resolver exists.
 - Do not touch the agent's stdin.
 - ACK semantics are transcript-based: items retire only on `ACK <key>`.
 - The side-channel repeat policy remains the rate limiter.
+- `SPICE_SHELL_HOOK_REEXEC_STAGE` is the sole reexec gate.
+- `SPICE_SHELL_HOOK_WRAPPERS` is generated before shell startup; hooks eval it
+  but do not regenerate wrapper functions.
 - The direct shell-startup path is the only command-injection contract.

@@ -14,16 +14,22 @@ Spice has two command-extension surfaces with different owners:
 
 ## Agent Command Wrapper
 
-Agent launch installs shell startup hooks for zsh and bash. Non-interactive
-shell commands are reexecuted through:
+Agent launch installs static shell startup hooks for zsh and bash and
+precomputes configured wrapper functions into `SPICE_SHELL_HOOK_WRAPPERS`. The
+first non-interactive command shell with an execution string sees
+`SPICE_SHELL_HOOK_REEXEC_STAGE` unset, sets it, and reexecs through:
 
 ```sh
 spice agent run -- <shell> -c "<original command>"
 ```
 
 Agents normally run shell commands directly; the startup hooks perform this
-reexec. Use `spice agent run -- <command>` explicitly only when recovering a
-command path or inspecting wrapper behavior.
+reexec. Descendant shells inherit `SPICE_SHELL_HOOK_REEXEC_STAGE=1` and perform
+stage-2 startup only: source the user's real startup files, rearm the packaged
+hook environment, and eval `SPICE_SHELL_HOOK_WRAPPERS` without a second
+`agent run` hop or second steering injection. Use
+`spice agent run -- <command>` explicitly only when recovering a command path or
+inspecting wrapper behavior.
 
 The wrapper does this before running the requested command:
 
@@ -32,7 +38,7 @@ The wrapper does this before running the requested command:
 - routes git through the worktree shadow environment;
 - routes `spice` and `python` commands to the correct worktree source checkout
   or target repository virtual environment;
-- injects configured shell wrapper functions.
+- makes configured shell wrapper functions available.
 
 `spice agent run -- proxy <command>` is only a routing marker. It still goes
 through `agent run`; the marker lets configured shell wrapper functions choose
@@ -55,12 +61,13 @@ rtk = ["run", "proxy", "grep", "find", "git"]
 
 Selectors are command names, not paths. Path selectors such as `/bin/sh` fail
 loudly until a redirector stage exists. A wrapper cannot intercept itself, and
-duplicate selectors fail during hook rendering.
+duplicate selectors fail during wrapper generation.
 
 Wrapper entries may also be direct command wrappers with a `command = [...]`
-argv list; the hook shell-quotes each command word before rendering the
-function. A command word in `$NAME` form is rendered as a quoted shell variable
-reference for hook-provided values such as `$SPICE_SHELL_HOOK_PYTHON`.
+argv list; spice shell-quotes each command word while building
+`SPICE_SHELL_HOOK_WRAPPERS`. A command word in `$NAME` form is rendered as a
+quoted shell variable reference for hook-provided values such as
+`$SPICE_SHELL_HOOK_PYTHON`.
 For example, a repository can opt into a local pytest wrapper without changing
 the global default:
 
