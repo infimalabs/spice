@@ -798,7 +798,7 @@ def test_static_message_speech_routes_to_producer_lane():
     assert "function speechLaneForMessage(lane, item)" in app_render
     assert "const targetId = item.producerTargetId || lane.targetId;" in app_render
     assert "const speechLane = speechLaneForMessage(lane, item);" in app_render
-    assert "toggleMessageSpeech(lane, item.key, speech, speechLane)" in app_render
+    assert "toggleMessageSpeech(lane, item, speechLane)" in app_render
     assert (
         "function enqueueSpeech(lane, messageKey, texts, targetLane = lane)"
         in app_audio
@@ -910,10 +910,9 @@ def test_static_manual_speech_playback_aborts_active_entry():
     # Manual play is a hard reset: stopAllSpeech() clears the entire queue
     # (all lanes) and halts current playback, then — unless this toggled the
     # active message off — only this one message is enqueued.
-    assert (
-        "function toggleMessageSpeech(lane, messageKey, texts, targetLane = lane) {"
-        in app_audio
-    )
+    assert "function toggleMessageSpeech(lane, item, targetLane = lane) {" in app_audio
+    assert "const messageKey = item.key;" in app_audio
+    assert "const texts = messageSpeechUtterances(item);" in app_audio
     assert "stopAllSpeech();" in app_audio
     assert "if (wasPlaying) return;" in app_audio
     assert "enqueueSpeech(lane, messageKey, texts, targetLane);" in app_audio

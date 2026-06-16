@@ -389,7 +389,7 @@ function appendSpeechAction(parent, lane, item) {
   play.dataset.speechFor = item.key;
   applySpeechButtonState(play, messageIsCurrentSpeech(lane, item));
   play.addEventListener("click", () =>
-    toggleMessageSpeech(lane, item.key, speech, speechLane),
+    toggleMessageSpeech(lane, item, speechLane),
   );
   parent.append(play);
 }
