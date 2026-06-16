@@ -29,11 +29,12 @@ PROJECT_DELIMITER = "."
 SEGMENT_RE = re.compile(rf"^{PROJECT_SEGMENT_PATTERN}$")
 
 # Durable vocabulary. `task` and `serve` ship with the harness; `agent` is
-# reserved for automatic private task creation. A repo adds its own stems and
+# reserved for automatic private task creation and `oops` for deferred
+# tool-friction triage. A repo adds its own stems and
 # per-stem default flows through tracked `pyproject.toml` (`[tool.spice.tasks]`),
 # edited by a human — never invented by an agent.
-BASE_APPROVED_STEMS = ("task", "serve", "agent")
-INTERNAL_STEMS = ("agent",)
+BASE_APPROVED_STEMS = ("task", "serve", "agent", "oops")
+INTERNAL_STEMS = ("agent", "oops")
 APPROVED_PHASES = ("todo", "verify", "review", "oops")
 PHASE_SLOT_COUNT = 7  # phase_0 .. phase_6
 DEFAULT_FLOW = ("todo", "review")
@@ -42,7 +43,7 @@ PER_STEM_FLOWS: dict[str, tuple[str, ...]] = {}
 
 SENTINEL_ACTOR = "00000000-0000-0000-0000-000000000000"
 OOPS_WAIT = "2099-01-01T00:00:00"
-OOPS_PROJECT = "task.oops"
+OOPS_PROJECT = "oops"
 
 # Native Taskwarrior priorities (H/M/L, or unset). Word aliases map to them.
 DEFAULT_PRIORITY = "medium"
@@ -372,6 +373,11 @@ def validate_manual_creation_project(project: str) -> str:
     project = validate_project(project)
     stem = project.split(PROJECT_DELIMITER, 1)[0]
     if stem in INTERNAL_STEMS:
+        if stem != "agent":
+            raise SpiceError(
+                f"project stem {stem!r} is reserved for system task creation; "
+                f"use an assignable stem ({', '.join(assignable_stems())})"
+            )
         raise SpiceError(
             f"project stem {stem!r} is reserved for automatic private task creation; "
             f"omit --project for private work or use an assignable stem "
