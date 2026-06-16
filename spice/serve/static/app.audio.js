@@ -222,7 +222,10 @@ function enqueueSpeech(lane, messageKey, texts, targetLane = lane) {
   drainSpeechQueue();
 }
 
-function toggleMessageSpeech(lane, messageKey, texts, targetLane = lane) {
+function toggleMessageSpeech(lane, item, targetLane = lane) {
+  const messageKey = item.key;
+  const texts = messageSpeechUtterances(item);
+  if (!messageKey || !texts.length) return;
   // A manual play (or stop) is a hard reset: clear the entire queue and halt
   // whatever is sounding, then — unless this was a toggle-off of the active
   // message — play only this one message, uninterrupted.

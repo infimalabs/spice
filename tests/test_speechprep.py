@@ -88,16 +88,25 @@ def test_quiet_and_narrate_keep_their_speech_contracts():
 
 
 def test_manual_speech_playback_reads_all_display_paragraphs():
-    item = {
+    assistant_item = {
         "kind": "assistant",
         "ack_utterances": ["ACK body should not override manual playback."],
         "display_text": "First paragraph.\n\nMiddle paragraph.\n\nLast paragraph.",
     }
+    final_item = {
+        "kind": "final",
+        "display_text": "First final paragraph.\n\nMiddle final paragraph.\n\nLast final paragraph.",
+    }
 
-    assert _message_speech_utterances(item) == [
+    assert _message_speech_utterances(assistant_item) == [
         "First paragraph.",
         "Middle paragraph.",
         "Last paragraph.",
+    ]
+    assert _message_speech_utterances(final_item) == [
+        "First final paragraph.",
+        "Middle final paragraph.",
+        "Last final paragraph.",
     ]
 
 
@@ -404,7 +413,7 @@ vm.runInContext(fs.readFileSync(path, "utf8"), context);
   context.enqueueSpeech(lane, "old", ["old first", "old second"]);
   await firstRequested;
   await firstAudioReady;
-  context.toggleMessageSpeech(lane, "manual-key", ["manual"]);
+  context.toggleMessageSpeech(lane, { key: "manual-key", display_text: "manual" });
   await manualRequested;
   clearTimeout(failTimer);
   process.stdout.write(JSON.stringify(requests));
@@ -723,7 +732,7 @@ vm.runInContext(fs.readFileSync(path, "utf8"), context);
   await Promise.resolve();
   // Stop by toggling off the active message: the entire queue must clear, so
   // the cross-lane "bravo" entry never reaches playback.
-  context.toggleMessageSpeech(laneA, "active-key", ["active"]);
+  context.toggleMessageSpeech(laneA, { key: "active-key", display_text: "active" });
   await new Promise((resolve) => setTimeout(resolve, 30));
   clearTimeout(failTimer);
   process.stdout.write(JSON.stringify(requests));
