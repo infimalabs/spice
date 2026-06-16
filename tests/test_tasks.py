@@ -273,6 +273,111 @@ def test_manual_claim_skips_subscription_for_teamless_actor(task_repo):
     assert store.global_revision() == before
 
 
+def test_final_review_completion_gcs_auto_claim_filter(task_repo, monkeypatch):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A, PEER_ACTOR])
+    handle = ops.add(
+        "Review keeps project subscribed",
+        project="task.unit",
+        priority="medium",
+        acceptance=["review keeps auto filter until complete"],
+    )
+    ops.claim(handle)
+
+    ops.done(handle, validation=["implementation leaves review pending"])
+    review_config = store.team_config(team.team_id)
+
+    assert review_config.task_filters == ("task.unit",)
+    assert [entry.to_payload() for entry in review_config.task_filter_entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CLAIM},
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE},
+    ]
+
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(handle)
+    ops.review(handle, finding="clean", note="review complete")
+    final_config = store.team_config(team.team_id)
+
+    assert final_config.task_filters == ()
+    assert final_config.task_filter_entries == ()
+
+
+def test_empty_project_gc_removes_auto_sources_but_preserves_manual(
+    task_repo, monkeypatch
+):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(
+        members=[ACTOR_A, PEER_ACTOR],
+        config=TeamConfig(task_filters=("task.unit",)),
+    )
+    handle = ops.add(
+        "Manual filter survives auto gc",
+        project="task.unit",
+        priority="medium",
+        acceptance=["manual task filter survives empty-project gc"],
+    )
+    ops.claim(handle)
+    with_auto = store.team_config(team.team_id)
+
+    assert [entry.to_payload() for entry in with_auto.task_filter_entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CLAIM},
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE},
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_MANUAL},
+    ]
+
+    ops.done(handle, validation=["implementation complete"])
+    # Keep the manual source through the final review path while reclaiming auto.
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(handle)
+    ops.review(handle, finding="clean", note="manual survives")
+
+    final_config = store.team_config(team.team_id)
+
+    assert final_config.task_filters == ("task.unit",)
+    assert [entry.to_payload() for entry in final_config.task_filter_entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_MANUAL}
+    ]
+
+
+def test_delete_gcs_empty_auto_create_filter_after_project_subtree_empties(
+    task_repo,
+):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A])
+    store.add_task_filter(
+        team.team_id, "task.unit", source=TASK_FILTER_SOURCE_AUTO_CREATE
+    )
+    parent = ops.add(
+        "Parent task",
+        project="task.unit",
+        priority="medium",
+        acceptance=["parent deletion keeps filter while child pending"],
+    )
+    child = ops.add(
+        "Child task",
+        project="task.unit.child",
+        priority="medium",
+        acceptance=["child deletion empties parent subtree"],
+    )
+
+    ops.delete(parent, "parent abandoned")
+    still_live = store.team_config(team.team_id)
+
+    assert still_live.task_filters == ("task.unit", "task.unit.child")
+
+    ops.delete(child, "child abandoned")
+    emptied = store.team_config(team.team_id)
+    after_empty_revision = store.global_revision()
+    ops._gc_empty_project_task_filters("task.unit")
+
+    assert emptied.task_filters == ()
+    assert emptied.task_filter_entries == ()
+    assert store.global_revision() == after_empty_revision
+
+
 def test_drive_task_creation_subscribes_project_idempotently(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
