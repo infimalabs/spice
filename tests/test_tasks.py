@@ -459,6 +459,77 @@ def test_teamless_task_creation_skips_drive_subscription(task_repo):
     assert store.global_revision() == before
 
 
+def test_drive_create_allocate_review_and_gc_capstone(task_repo, monkeypatch):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(
+        members=[ACTOR_A, PEER_ACTOR], config=TeamConfig(lifetime="Drive")
+    )
+    handle = ops.add(
+        "Drive capstone task",
+        project="task.unit",
+        priority="medium",
+        acceptance=["drive lifecycle capstone"],
+    )
+    after_create = store.team_config(team.team_id)
+
+    assert after_create.task_filters == ("task.unit",)
+    assert [entry.to_payload() for entry in after_create.task_filter_entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE}
+    ]
+
+    assigned = ops.next_task()
+
+    assert identity.render_handle(assigned or {}) == handle
+
+    ops.done(handle, validation=["implementation complete"])
+    review_pending = store.team_config(team.team_id)
+
+    assert review_pending.task_filters == ("task.unit",)
+
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    review = ops.next_task()
+
+    assert identity.render_handle(review or {}) == handle
+
+    ops.review(handle, finding="clean", note="capstone review complete")
+    after_review = store.team_config(team.team_id)
+
+    assert after_review.task_filters == ()
+    assert after_review.task_filter_entries == ()
+
+
+def test_drain_visibility_and_empty_steer_private_fail_closed(task_repo, monkeypatch):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drain"))
+    store.create_team(members=[PEER_ACTOR], config=TeamConfig(lifetime="Steer"))
+    public = ops.add(
+        "Drain-visible public task",
+        project="serve.ui",
+        priority="medium",
+        acceptance=["drain sees assignable public work"],
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    private = ops.add(
+        "Peer private task",
+        priority="medium",
+        acceptance=["empty steer sees own private work"],
+    )
+
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    drain_assigned = ops.next_task()
+
+    assert identity.render_handle(drain_assigned or {}) == public
+    assert drain_assigned["project"] == "serve.ui"
+
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    steer_assigned = ops.next_task()
+
+    assert identity.render_handle(steer_assigned or {}) == private
+    assert steer_assigned["project"] == ops.default_project(PEER_ACTOR)
+
+
 def test_lifetime_filter_args_use_single_visibility_contract(task_repo):
     assert task_repo.is_dir()
     stored = ["project:task.unit"]
