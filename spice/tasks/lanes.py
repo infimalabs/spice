@@ -112,14 +112,19 @@ def _team_rc_overrides(shell_settings: dict[str, Any]) -> list[str]:
     return []
 
 
+def effective_filter_terms(route: RouteEntry | None) -> list[str]:
+    if not route:
+        return []
+    lifetime = _lifetime(route.get("lifetime")) if route.get("lifetime") else ""
+    if lifetime == "Drain":
+        return _clean_filter([f"project:{stem}" for stem in config.assignable_stems()])
+    return _clean_filter(_route_list(route, "filter"))
+
+
 def filter_args(route: RouteEntry | None) -> list[str] | None:
     if not route:
         return None
-    if route.get("lifetime") and _lifetime(route.get("lifetime")) == "Steer":
-        return None
-    if "filter" not in route:
-        return None
-    return filter_terms_args(_route_list(route, "filter"))
+    return filter_terms_args(effective_filter_terms(route))
 
 
 def filter_terms_args(filters: list[str]) -> list[str]:

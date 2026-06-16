@@ -12,7 +12,7 @@ import pytest
 from spice.cli.parser import build_parser
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
-from spice.tasks import alloc, config, gitsync, identity, ops, render, tw
+from spice.tasks import alloc, config, gitsync, identity, lanes, ops, render, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -171,6 +171,38 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     assert completed_row["review_by"] == ACTOR_A
     assert completed_row["review_finding"] == "clean"
     assert completed_row["review_note"] == "review passed"
+
+
+def test_lifetime_filter_args_use_single_visibility_contract(task_repo):
+    assert task_repo.is_dir()
+    stored = ["project:task.unit"]
+    private = f"project:{ops.default_project(ACTOR_A)}"
+
+    assert lanes.filter_args({"filter": stored, "lifetime": "Steer"}) == stored
+    assert lanes.filter_args({"filter": stored, "lifetime": "Drive"}) == stored
+    assert lanes.filter_args({"filter": stored, "lifetime": "Drain"}) == [
+        "(",
+        "project:serve",
+        "or",
+        "project:task",
+        ")",
+    ]
+    assert lanes.filter_args({"filter": [], "lifetime": "Steer"}) == []
+    assert ops.effective_filter_args(ACTOR_A, []) == [private]
+    assert ops.effective_filter_args(
+        ACTOR_A,
+        lanes.filter_args({"filter": stored, "lifetime": "Drain"}),
+    ) == [
+        "(",
+        private,
+        "or",
+        "(",
+        "project:serve",
+        "or",
+        "project:task",
+        ")",
+        ")",
+    ]
 
 
 def test_task_add_stores_description_and_caps_title(task_repo):
