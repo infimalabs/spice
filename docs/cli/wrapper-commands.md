@@ -51,8 +51,10 @@ The selected groups come from `[tool.spice.agent] wrappers = [...]`. When no
 list is configured, spice selects the built-in `common` group. An explicit empty
 list disables wrapper generation.
 
-The built-in `common` group maps `rtk` to the command selectors that benefit
-from RTK routing:
+The built-in `common` group maps `rtk` to a broad set of shell-function-safe
+command selectors that benefit from RTK routing, including common tools such as
+`git`, `grep`, `gh`, `npm`, `pytest`, `ruff`, `docker`, and `kubectl`. Repos
+that need exact control can override the group:
 
 ```toml
 [tool.spice.wrappers.common]
