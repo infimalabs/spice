@@ -33,6 +33,17 @@ TEAM_ID_HEX_CHARS = 12
 RENEWAL_STATE_REQUESTED = "requested"
 RENEWAL_STATE_PENDING = "pending"
 RENEWAL_STATE_STARTED = "started"
+TASK_FILTER_SOURCE_MANUAL = "manual"
+TASK_FILTER_SOURCE_AUTO_CREATE = "auto:create"
+TASK_FILTER_SOURCE_AUTO_CLAIM = "auto:claim"
+TASK_FILTER_SOURCES = frozenset(
+    {
+        TASK_FILTER_SOURCE_MANUAL,
+        TASK_FILTER_SOURCE_AUTO_CREATE,
+        TASK_FILTER_SOURCE_AUTO_CLAIM,
+    }
+)
+TEAM_SQLITE_BUSY_TIMEOUT_MS = 5000
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -59,6 +70,14 @@ CREATE TABLE IF NOT EXISTS memberships (
     agent_id TEXT NOT NULL,
     joined_at REAL NOT NULL,
     PRIMARY KEY (team_id, agent_id)
+);
+CREATE TABLE IF NOT EXISTS team_task_filters (
+    team_id TEXT NOT NULL,
+    project TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (team_id, project, source)
 );
 CREATE TABLE IF NOT EXISTS team_agent_history (
     team_id TEXT NOT NULL,
@@ -116,10 +135,20 @@ METRIC_BUCKET_SECONDS = 60
 
 
 @dataclass(frozen=True)
+class TeamTaskFilter:
+    project: str
+    source: str = TASK_FILTER_SOURCE_MANUAL
+
+    def to_payload(self) -> dict[str, str]:
+        return {"project": self.project, "source": self.source}
+
+
+@dataclass(frozen=True)
 class TeamConfig:
     lifetime: str = DEFAULT_LIFETIME
     speech_mode: str = DEFAULT_SPEECH_MODE
     task_filters: tuple[str, ...] = ()
+    task_filter_entries: tuple[TeamTaskFilter, ...] = ()
     selected_view: str = DEFAULT_SELECTED_VIEW
     shell_settings: dict[str, Any] = field(default_factory=dict)
 
@@ -128,6 +157,9 @@ class TeamConfig:
             "lifetime": self.lifetime,
             "speechMode": self.speech_mode,
             "taskFilters": list(self.task_filters),
+            "taskFilterEntries": [
+                entry.to_payload() for entry in self.task_filter_entries
+            ],
             "selectedView": self.selected_view,
             "shellSettings": dict(self.shell_settings),
             "revision": revision,
@@ -235,7 +267,10 @@ class ServeTeamStore:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         try:
+            connection.execute(f"PRAGMA busy_timeout = {TEAM_SQLITE_BUSY_TIMEOUT_MS}")
+            connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(_SCHEMA)
+            self._migrate_task_filter_sources_locked(connection)
             yield connection
             connection.commit()
         finally:
@@ -260,10 +295,86 @@ class ServeTeamStore:
         )
         return revision
 
+    def _current_revision_locked(self, connection: sqlite3.Connection) -> int:
+        row = connection.execute("SELECT MAX(revision) AS r FROM events").fetchone()
+        return int(row["r"] or 0)
+
     def global_revision(self) -> int:
         with self.connect() as connection:
-            row = connection.execute("SELECT MAX(revision) AS r FROM events").fetchone()
-            return int(row["r"] or 0)
+            return self._current_revision_locked(connection)
+
+    def _migrate_task_filter_sources_locked(
+        self, connection: sqlite3.Connection
+    ) -> None:
+        rows = connection.execute(
+            "SELECT team_id, task_filters FROM teams ORDER BY created_at"
+        ).fetchall()
+        now = time.time()
+        for row in rows:
+            team_id = str(row["team_id"])
+            existing = connection.execute(
+                "SELECT COUNT(*) AS count FROM team_task_filters WHERE team_id = ?",
+                (team_id,),
+            ).fetchone()
+            if existing and int(existing["count"] or 0) > 0:
+                continue
+            for project in _task_filter_projects_from_json(row["task_filters"]):
+                connection.execute(
+                    "INSERT OR IGNORE INTO team_task_filters "
+                    "(team_id, project, source, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (team_id, project, TASK_FILTER_SOURCE_MANUAL, now, now),
+                )
+            self._sync_task_filter_projection_locked(connection, team_id)
+
+    def _task_filter_entries_locked(
+        self, connection: sqlite3.Connection, team_id: str
+    ) -> tuple[TeamTaskFilter, ...]:
+        rows = connection.execute(
+            "SELECT project, source FROM team_task_filters "
+            "WHERE team_id = ? ORDER BY project, source",
+            (team_id,),
+        ).fetchall()
+        return tuple(
+            TeamTaskFilter(project=str(row["project"]), source=str(row["source"]))
+            for row in rows
+        )
+
+    def _task_filter_projects_locked(
+        self, connection: sqlite3.Connection, team_id: str
+    ) -> tuple[str, ...]:
+        rows = connection.execute(
+            "SELECT DISTINCT project FROM team_task_filters "
+            "WHERE team_id = ? ORDER BY project",
+            (team_id,),
+        ).fetchall()
+        return tuple(str(row["project"]) for row in rows)
+
+    def _sync_task_filter_projection_locked(
+        self, connection: sqlite3.Connection, team_id: str
+    ) -> tuple[str, ...]:
+        projects = self._task_filter_projects_locked(connection, team_id)
+        connection.execute(
+            "UPDATE teams SET task_filters = ? WHERE team_id = ?",
+            (json.dumps(list(projects)), team_id),
+        )
+        return projects
+
+    def _replace_task_filters_locked(
+        self, connection: sqlite3.Connection, team_id: str, projects: Iterable[str]
+    ) -> tuple[str, ...]:
+        connection.execute(
+            "DELETE FROM team_task_filters WHERE team_id = ?", (team_id,)
+        )
+        now = time.time()
+        for project in _validated_task_filter_projects(projects):
+            connection.execute(
+                "INSERT INTO team_task_filters "
+                "(team_id, project, source, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (team_id, project, TASK_FILTER_SOURCE_MANUAL, now, now),
+            )
+        return self._sync_task_filter_projection_locked(connection, team_id)
 
     # ---- commands ------------------------------------------------------
 
@@ -300,6 +411,9 @@ class ServeTeamStore:
                 json.dumps(list(config.task_filters)),
                 json.dumps(config.shell_settings),
             ),
+        )
+        self._replace_task_filters_locked(
+            connection, resolved_team_id, config.task_filters
         )
         for agent_id in member_list:
             self._assign_locked(connection, resolved_team_id, agent_id)
@@ -491,27 +605,120 @@ class ServeTeamStore:
                 {"agentIds": ordered_agent_ids},
             )
 
-    def update_team_config(self, team_id: str, config: TeamConfig) -> int:
+    def update_team_config(
+        self,
+        team_id: str,
+        config: TeamConfig,
+        *,
+        replace_task_filters: bool = False,
+    ) -> int:
         with self.connect() as connection:
             self._require_team(connection, team_id)
             connection.execute(
                 "UPDATE teams SET lifetime = ?, speech_mode = ?, selected_view = ?, "
-                "task_filters = ?, shell_settings = ?, "
+                "shell_settings = ?, "
                 "config_revision = config_revision + 1 WHERE team_id = ?",
                 (
                     config.lifetime,
                     config.speech_mode,
                     config.selected_view,
-                    json.dumps(list(config.task_filters)),
                     json.dumps(config.shell_settings),
                     team_id,
                 ),
             )
+            if replace_task_filters:
+                self._replace_task_filters_locked(
+                    connection, team_id, config.task_filters
+                )
+            task_filters = self._task_filter_projects_locked(connection, team_id)
             return self._record_event(
                 connection,
                 "updateTeamConfig",
                 team_id,
-                {"lifetime": config.lifetime, "taskFilters": list(config.task_filters)},
+                {"lifetime": config.lifetime, "taskFilters": list(task_filters)},
+            )
+
+    def add_task_filter(
+        self,
+        team_id: str,
+        project: str,
+        *,
+        source: str = TASK_FILTER_SOURCE_MANUAL,
+    ) -> int:
+        project = _validated_task_filter_project(project)
+        source = _validated_task_filter_source(source)
+        with self.connect() as connection:
+            self._require_team(connection, team_id)
+            now = time.time()
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO team_task_filters "
+                "(team_id, project, source, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (team_id, project, source, now, now),
+            )
+            if cursor.rowcount == 0:
+                return self._current_revision_locked(connection)
+            self._sync_task_filter_projection_locked(connection, team_id)
+            connection.execute(
+                "UPDATE teams SET config_revision = config_revision + 1 "
+                "WHERE team_id = ?",
+                (team_id,),
+            )
+            return self._record_event(
+                connection,
+                "addTaskFilter",
+                team_id,
+                {
+                    "project": project,
+                    "source": source,
+                    "taskFilters": list(
+                        self._task_filter_projects_locked(connection, team_id)
+                    ),
+                },
+            )
+
+    def remove_task_filter(
+        self,
+        team_id: str,
+        project: str,
+        *,
+        source: str | None = None,
+    ) -> int:
+        project = _validated_task_filter_project(project)
+        if source is not None:
+            source = _validated_task_filter_source(source)
+        with self.connect() as connection:
+            self._require_team(connection, team_id)
+            if source is None:
+                cursor = connection.execute(
+                    "DELETE FROM team_task_filters WHERE team_id = ? AND project = ?",
+                    (team_id, project),
+                )
+            else:
+                cursor = connection.execute(
+                    "DELETE FROM team_task_filters "
+                    "WHERE team_id = ? AND project = ? AND source = ?",
+                    (team_id, project, source),
+                )
+            if cursor.rowcount == 0:
+                return self._current_revision_locked(connection)
+            self._sync_task_filter_projection_locked(connection, team_id)
+            connection.execute(
+                "UPDATE teams SET config_revision = config_revision + 1 "
+                "WHERE team_id = ?",
+                (team_id,),
+            )
+            return self._record_event(
+                connection,
+                "removeTaskFilter",
+                team_id,
+                {
+                    "project": project,
+                    "source": source or "",
+                    "taskFilters": list(
+                        self._task_filter_projects_locked(connection, team_id)
+                    ),
+                },
             )
 
     # ---- renewal -------------------------------------------------------
@@ -777,7 +984,8 @@ class ServeTeamStore:
     def team_config(self, team_id: str) -> TeamConfig:
         with self.connect() as connection:
             row = self._require_team(connection, team_id)
-            return _config_from_row(row)
+            entries = self._task_filter_entries_locked(connection, team_id)
+            return _config_from_row(row, entries)
 
     def team_state(self, team_id: str) -> TeamState:
         with self.connect() as connection:
@@ -835,7 +1043,9 @@ class ServeTeamStore:
             status=str(row["status"]),
             revision=int(row["revision"]),
             config_revision=int(row["config_revision"]),
-            config=_config_from_row(row),
+            config=_config_from_row(
+                row, self._task_filter_entries_locked(connection, team_id)
+            ),
             members=tuple(
                 TeamMember(
                     agent_id=member["agent_id"],
@@ -1009,11 +1219,13 @@ class ServeTeamStore:
         )
 
 
-def _config_from_row(row: sqlite3.Row) -> TeamConfig:
-    try:
-        task_filters = tuple(json.loads(row["task_filters"]))
-    except (json.JSONDecodeError, TypeError):
-        task_filters = ()
+def _config_from_row(
+    row: sqlite3.Row, entries: Iterable[TeamTaskFilter] = ()
+) -> TeamConfig:
+    task_filter_entries = tuple(entries)
+    task_filters = tuple(dict.fromkeys(entry.project for entry in task_filter_entries))
+    if not task_filters:
+        task_filters = _task_filter_projects_from_json(row["task_filters"])
     try:
         shell_settings = json.loads(row["shell_settings"])
     except (json.JSONDecodeError, TypeError):
@@ -1022,9 +1234,46 @@ def _config_from_row(row: sqlite3.Row) -> TeamConfig:
         lifetime=str(row["lifetime"]),
         speech_mode=str(row["speech_mode"]),
         task_filters=task_filters,
+        task_filter_entries=task_filter_entries,
         selected_view=str(row["selected_view"]),
         shell_settings=shell_settings if isinstance(shell_settings, dict) else {},
     )
+
+
+def _task_filter_projects_from_json(raw: object) -> tuple[str, ...]:
+    try:
+        values = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return ()
+    if not isinstance(values, list):
+        return ()
+    return _validated_task_filter_projects(str(item) for item in values)
+
+
+def _validated_task_filter_projects(projects: Iterable[str]) -> tuple[str, ...]:
+    seen: dict[str, None] = {}
+    for project in projects:
+        value = str(project or "").strip()
+        if not value:
+            continue
+        seen.setdefault(_validated_task_filter_project(value), None)
+    return tuple(sorted(seen))
+
+
+def _validated_task_filter_project(project: str) -> str:
+    from spice.tasks import config as task_config
+
+    return task_config.validate_assignable_project(str(project or "").strip())
+
+
+def _validated_task_filter_source(source: str) -> str:
+    value = str(source or "").strip()
+    if value not in TASK_FILTER_SOURCES:
+        raise SpiceError(
+            "task filter source must be one of "
+            + ", ".join(sorted(TASK_FILTER_SOURCES))
+        )
+    return value
 
 
 def _normalized_id(value: str, field_name: str) -> str:
@@ -1143,7 +1392,11 @@ class TeamCommandService:
             team_id = _required(payload, "teamId")
             current = self.store.team_config(team_id)
             patch = payload.get("configPatch") or {}
-            self.store.update_team_config(team_id, _patched_config(current, patch))
+            self.store.update_team_config(
+                team_id,
+                _patched_config(current, patch),
+                replace_task_filters="taskFilters" in patch,
+            )
         elif command == "setAgentRenewalIntent":
             self.store.set_agent_renewal_request(
                 _required(payload, "agentId"),
@@ -1192,8 +1445,8 @@ def _config_from_payload(raw: Any) -> TeamConfig:
 def _patched_config(current: TeamConfig, patch: dict[str, Any]) -> TeamConfig:
     task_filters = current.task_filters
     if isinstance(patch.get("taskFilters"), list):
-        task_filters = tuple(
-            str(item) for item in patch["taskFilters"] if str(item or "").strip()
+        task_filters = _validated_task_filter_projects(
+            str(item) for item in patch["taskFilters"]
         )
     shell_settings = current.shell_settings
     if isinstance(patch.get("shellSettings"), dict):

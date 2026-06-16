@@ -315,6 +315,7 @@ def _apply_lifetime_to_team(
             selected_view=current.selected_view,
             shell_settings=current.shell_settings,
         ),
+        replace_task_filters=False,
     )
 
 
@@ -353,6 +354,7 @@ def work_tree_task_drain_response_payload(
                 selected_view=current.selected_view,
                 shell_settings=current.shell_settings,
             ),
+            replace_task_filters=True,
         )
     actor = payloads.resolve_thread_id_for_target(state, target) or ""
     facts = payloads.team_facts_for_actor(state.team_store, actor)
@@ -364,6 +366,7 @@ def work_tree_task_drain_response_payload(
         "memberAgents": [actor] if actor else [],
         "laneName": target.name,
         "taskFilters": facts.get("taskFilters", []),
+        "taskFilterEntries": facts.get("taskFilterEntries", []),
         "routeFilters": facts.get("taskFilters", []),
         "filterTerms": facts.get("taskFilters", []),
         "filterArgs": facts.get("taskFilters", []),

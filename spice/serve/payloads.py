@@ -106,6 +106,9 @@ def team_facts_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
         "teamRevision": team.revision,
         "configRevision": team.config_revision,
         "taskFilters": list(team.config.task_filters),
+        "taskFilterEntries": [
+            entry.to_payload() for entry in team.config.task_filter_entries
+        ],
         "lifetime": team.config.lifetime,
         "renewalIntent": renewal_intent_for_actor(store, actor),
     }

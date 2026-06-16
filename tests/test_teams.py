@@ -1,4 +1,17 @@
-from spice.serve.teams import ServeTeamStore, TeamCommandService
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
+
+from spice.errors import SpiceError
+from spice.serve.teams import (
+    TASK_FILTER_SOURCE_AUTO_CLAIM,
+    TASK_FILTER_SOURCE_AUTO_CREATE,
+    TASK_FILTER_SOURCE_MANUAL,
+    TEAM_SQLITE_BUSY_TIMEOUT_MS,
+    ServeTeamStore,
+    TeamCommandService,
+    TeamConfig,
+)
 
 
 def test_empty_team_snapshot_creates_initial_empty_team(tmp_path):
@@ -243,3 +256,143 @@ def test_team_command_service_keeps_revisioned_config_history(tmp_path):
     assert state.config_revision == 2
     assert state.config.lifetime == "Drive"
     assert state.config.selected_view == "metrics"
+
+
+def test_team_task_filter_api_tracks_sources_and_projection(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(
+        members=["agent-a"], config=TeamConfig(task_filters=("serve.ui",))
+    )
+
+    initial = store.team_config(team.team_id)
+    assert initial.task_filters == ("serve.ui",)
+    assert [entry.to_payload() for entry in initial.task_filter_entries] == [
+        {"project": "serve.ui", "source": TASK_FILTER_SOURCE_MANUAL}
+    ]
+
+    initial_revision = store.global_revision()
+    duplicate = store.add_task_filter(
+        team.team_id, "serve.ui", source=TASK_FILTER_SOURCE_MANUAL
+    )
+
+    assert duplicate == initial_revision
+    assert store.global_revision() == initial_revision
+
+    added_auto = store.add_task_filter(
+        team.team_id, "serve.ui", source=TASK_FILTER_SOURCE_AUTO_CREATE
+    )
+    with_auto = store.team_config(team.team_id)
+
+    assert added_auto > initial_revision
+    assert with_auto.task_filters == ("serve.ui",)
+    assert [entry.to_payload() for entry in with_auto.task_filter_entries] == [
+        {"project": "serve.ui", "source": TASK_FILTER_SOURCE_AUTO_CREATE},
+        {"project": "serve.ui", "source": TASK_FILTER_SOURCE_MANUAL},
+    ]
+
+    removed_auto = store.remove_task_filter(
+        team.team_id, "serve.ui", source=TASK_FILTER_SOURCE_AUTO_CREATE
+    )
+    manual_only = store.team_config(team.team_id)
+    duplicate_remove = store.remove_task_filter(
+        team.team_id, "serve.ui", source=TASK_FILTER_SOURCE_AUTO_CREATE
+    )
+
+    assert removed_auto > added_auto
+    assert duplicate_remove == removed_auto
+    assert manual_only.task_filters == ("serve.ui",)
+    assert [entry.to_payload() for entry in manual_only.task_filter_entries] == [
+        {"project": "serve.ui", "source": TASK_FILTER_SOURCE_MANUAL}
+    ]
+
+    store.remove_task_filter(team.team_id, "serve.ui")
+    empty = store.team_config(team.team_id)
+
+    assert empty.task_filters == ()
+    assert empty.task_filter_entries == ()
+
+
+def test_team_task_filter_api_preserves_concurrent_distinct_adds(tmp_path):
+    path = tmp_path / "teams.sqlite3"
+    store = ServeTeamStore(path=path)
+    team = store.create_team(members=["agent-a"])
+
+    def add(project: str) -> int:
+        return ServeTeamStore(path=path).add_task_filter(
+            team.team_id, project, source=TASK_FILTER_SOURCE_AUTO_CREATE
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        revisions = list(executor.map(add, ("serve.ui", "task.review")))
+
+    config = store.team_config(team.team_id)
+
+    assert len(set(revisions)) == 2
+    assert config.task_filters == ("serve.ui", "task.review")
+    assert [entry.to_payload() for entry in config.task_filter_entries] == [
+        {"project": "serve.ui", "source": TASK_FILTER_SOURCE_AUTO_CREATE},
+        {"project": "task.review", "source": TASK_FILTER_SOURCE_AUTO_CREATE},
+    ]
+
+
+def test_team_task_filter_api_validates_project_and_source(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(members=["agent-a"])
+
+    with pytest.raises(SpiceError, match="internal"):
+        store.add_task_filter(team.team_id, "agent.private")
+    with pytest.raises(SpiceError, match="task filter source"):
+        store.add_task_filter(team.team_id, "serve.ui", source="automatic")
+
+
+def test_team_store_connect_enables_wal_and_busy_timeout(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+
+    with store.connect() as connection:
+        journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+        busy_timeout = connection.execute("PRAGMA busy_timeout").fetchone()[0]
+
+    assert str(journal_mode).lower() == "wal"
+    assert int(busy_timeout) == TEAM_SQLITE_BUSY_TIMEOUT_MS
+
+
+def test_team_command_service_replaces_manual_task_filters(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    service = TeamCommandService(store)
+    created = service.apply(
+        {
+            "command": "createTeam",
+            "members": ["agent-a"],
+            "config": {"taskFilters": ["serve.ui"]},
+        }
+    )
+    team = created.snapshot.teams[0]
+    store.add_task_filter(
+        team.team_id, "task.review", source=TASK_FILTER_SOURCE_AUTO_CLAIM
+    )
+
+    service.apply(
+        {
+            "command": "updateTeamConfig",
+            "teamId": team.team_id,
+            "configPatch": {"lifetime": "Steer"},
+        }
+    )
+    lifetime_only = store.team_config(team.team_id)
+
+    assert lifetime_only.lifetime == "Steer"
+    assert lifetime_only.task_filters == ("serve.ui", "task.review")
+
+    service.apply(
+        {
+            "command": "updateTeamConfig",
+            "teamId": team.team_id,
+            "configPatch": {"taskFilters": ["task.review"]},
+        }
+    )
+    replaced = store.team_config(team.team_id)
+
+    assert replaced.task_filters == ("task.review",)
+    assert [entry.to_payload() for entry in replaced.task_filter_entries] == [
+        {"project": "task.review", "source": TASK_FILTER_SOURCE_MANUAL}
+    ]

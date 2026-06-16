@@ -12,6 +12,7 @@
  * @property {string=} agentName
  * @property {string=} threadId
  * @property {string[]=} taskFilters
+ * @property {TaskFilterEntry[]=} taskFilterEntries
  * @property {string=} laneFilterVersion
  * @property {TaskFilterInventory=} taskFilterInventory
  * @property {Object.<string, number>=} laneMetrics
@@ -26,6 +27,10 @@
  * @typedef {Object} TaskFilterInventory
  * @property {TaskFilterRecord[]=} filters
  * @property {TaskFilterStem[]=} stems
+ *
+ * @typedef {Object} TaskFilterEntry
+ * @property {string} project
+ * @property {string} source
  *
  * @typedef {Object} TaskFilterRecord
  * @property {string} filter
