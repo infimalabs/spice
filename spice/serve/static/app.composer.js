@@ -106,7 +106,7 @@ function composerPrimaryBandHeader(lane, member) {
     trailingControl: composerBandMenuTrigger(
       "Composer actions for " + label,
       "Composer actions for " + label,
-      composerPrimaryMenuActions(lane, member, label),
+      () => composerPrimaryMenuActions(lane, member, label),
     ),
   });
   header.title = "Drag composer to move this agent to another lane";
@@ -129,7 +129,15 @@ function composerPrimaryMenuActions(lane, member, label) {
   create.disabled = laneGroupMemberLanes(laneGroupHost(lane)).length < 2;
   create.onClick = () => splitComposerAgentFromTeam(lane, member.targetId);
 
-  return [leave, create];
+  const renew = composerBandMenuAction(
+    "Renew this agent",
+    composerRenewalActionDetail(member),
+  );
+  renew.pressed = composerRenewalIntentRequested(member);
+  renew.disabled = composerRenewalIntentInFlight(member);
+  renew.onClick = () => toggleComposerAgentRenewalIntent(lane, member);
+
+  return [leave, create, renew];
 }
 
 function composerBandMenuAction(label, detail) {
@@ -611,7 +619,9 @@ function composerBandMenuTrigger(menuTitle, menuLabel, menuActions) {
   trigger.replaceChildren(composerBandMenuIcon());
   trigger.addEventListener("click", (event) => {
     event.stopPropagation();
-    toggleComposerBandMenu(trigger, menuActions || []);
+    const actions =
+      typeof menuActions === "function" ? menuActions() : menuActions || [];
+    toggleComposerBandMenu(trigger, actions);
   });
   return trigger;
 }
@@ -652,13 +662,15 @@ function toggleComposerBandMenu(trigger, actions) {
   closeComposerBandMenu(band);
   if (open) return;
   const menu = document.createElement("div");
-  menu.className = "composer-band-menu";
+  menu.className = "composer-band-menu spice-menu-actions";
   menu.setAttribute("role", "menu");
   for (const action of actions) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "composer-band-menu-action spice-menu-action";
-    button.setAttribute("role", "menuitem");
+    const hasPressed = action.pressed !== undefined && action.pressed !== null;
+    button.setAttribute("role", hasPressed ? "menuitemcheckbox" : "menuitem");
+    if (hasPressed) button.setAttribute("aria-checked", String(action.pressed));
     button.disabled = Boolean(action.disabled);
     if (action.detail) button.title = action.detail;
     button.innerHTML =
@@ -852,6 +864,47 @@ function removeComposerAgentFromTeam(lane, targetId) {
     member.serverCloseRequested = false;
     setLaneTransientStatus(host, "remove agent from team failed");
   });
+}
+
+function toggleComposerAgentRenewalIntent(lane, member) {
+  const requested = !composerRenewalIntentRequested(member);
+  const host = laneGroupHost(lane);
+  requestTeamCommand(
+    teamCommandPayload("setAgentRenewalIntent", {
+      agentId: laneTeamAgentId(member),
+      requested,
+    }),
+  )
+    .then(() => {
+      setLaneTransientStatus(
+        host,
+        requested ? "renewal requested" : "renewal cleared",
+      );
+    })
+    .catch(() => {
+      setLaneTransientStatus(host, "renewal update failed");
+    });
+}
+
+function composerRenewalIntent(member) {
+  return (member && member.renewalIntent) || {};
+}
+
+function composerRenewalIntentRequested(member) {
+  return Boolean(composerRenewalIntent(member).requested);
+}
+
+function composerRenewalIntentInFlight(member) {
+  const state = String(composerRenewalIntent(member).state || "");
+  return Boolean(state && state !== "requested");
+}
+
+function composerRenewalActionDetail(member) {
+  const intent = composerRenewalIntent(member);
+  if (intent.requested) return "requested";
+  if (intent.state === "pending") return "handoff pending";
+  if (intent.state === "started") return "successor started";
+  return "request renewal";
 }
 
 function laneComposerSubmissionText(lane, targetId, draftText) {

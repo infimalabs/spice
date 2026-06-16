@@ -236,6 +236,11 @@
   overflow-y: auto;
   padding: 7px;
 }
+.composer-band-menu.spice-menu-actions {
+  align-content: start;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(118px, 100%), 1fr));
+}
 .composer-band-menu-action {
   align-items: flex-start;
   flex-direction: column;

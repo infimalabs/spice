@@ -700,7 +700,12 @@ button.primary:hover {
   font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
   text-transform: uppercase;
 }
-.spice-menu-actions,
+.spice-menu-actions {
+  align-content: start;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
+}
 .spice-menu-target-list {
   display: flex;
   flex-direction: column;
@@ -759,8 +764,12 @@ button.primary:hover {
   color: var(--fg);
   cursor: pointer;
   display: flex;
+  font-size: 12px;
+  line-height: 1.2;
+  gap: 8px;
   justify-content: space-between;
   min-height: 34px;
+  min-width: 0;
   padding: 7px 9px;
   text-align: left;
 }
@@ -776,7 +785,13 @@ button.primary:hover {
 }
 .spice-menu-action-detail {
   color: var(--muted);
+  flex: none;
   font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.spice-menu-action-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .target-choice {
   align-items: center;

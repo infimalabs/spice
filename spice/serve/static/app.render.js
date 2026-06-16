@@ -38,6 +38,7 @@ function renderLaneChrome(lane, payload) {
     lane.privateTaskCount = Math.max(0, Number(payload.privateTaskCount) || 0);
   if (payload.laneMetrics) lane.laneMetrics = payload.laneMetrics;
   if (payload.laneInfo) lane.laneInfo = payload.laneInfo;
+  if (payload.renewalIntent) lane.renewalIntent = payload.renewalIntent;
   if (payload.lifetime) applyServerLaneLifetime(lane, payload.lifetime);
   const statusLine = applyRetainedLaneStatus(lane, payload.statusLine || {});
   syncLaneBackendPending(lane, statusLine.pendingInboxCount || 0);
