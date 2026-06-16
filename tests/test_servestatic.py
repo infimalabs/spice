@@ -391,10 +391,26 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
 
     assert 'const agentLifetimeLabels = ["Steer", "Drive", "Drain"];' in app
+    assert 'Steer: "Manual filters only",' in app
+    assert 'Drive: "Auto-subscribe to projects this team creates or claims",' in app
+    assert 'Drain: "Boundary dissolved: see all assignable work",' in app
     assert "function agentLifetimeAutoManagesTasks(lifetime) {" in app
-    assert 'lifetime === "Drive" || lifetime === "Drain"' in app
+    assert 'return lifetime === "Drive";' in app
+    assert "function agentLifetimeUsesStoredTaskFilters(lifetime) {" in app
+    assert 'return lifetime === "Steer" || lifetime === "Drive";' in app
+    assert "function agentLifetimeDissolvesTaskBoundary(lifetime) {" in app
+    assert 'return lifetime === "Drain";' in app
+    assert "function agentLifetimeHelpText(lifetime) {" in app
     assert "data-lifetime-label>Drive</span>" in app_shell
     assert "data-submit>Drive</button>" in app_shell
+    assert "const lifetimeHelp = agentLifetimeHelpText(lifetime);" in app_controls
+    assert "lane.lifetimeRangeEl.title = lifetimeHelp;" in app_controls
+    assert '"Task subscription policy: " + lifetimeHelp' in app_controls
+    assert "lane.lifetimeLabelEl.title = lifetimeHelp;" in app_controls
+    assert (
+        'lane.submitEl.title = "Send with " + lifetime + ": " + lifetimeHelp;'
+        in app_controls
+    )
     assert "renewAgent" not in app_controls
     assert '"Renew"' not in app
 
@@ -611,11 +627,35 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
 
     assert 'let renderedFilterPillsFingerprint = "";' in app_js
     assert 'const taskFilterHeaderExtraStems = ["agent"];' in app_lanes
-    assert "const pillModels = taskFilterStemPills.map((stem) => ({" in app_lanes
+    assert "function filterPillModels()" in app_lanes
+    assert "return taskFilterStemPills.map(taskFilterStemPillModel);" in app_lanes
+    assert "function taskFilterStemPillModel(stem)" in app_lanes
+    assert "boundaryDissolved: Boolean(model.drainability.boundaryDissolved)" in (
+        app_lanes
+    )
+    assert "function taskFilterStemDrainability(stem)" in app_lanes
+    assert (
+        'if (stem.name !== "agent" && agentLifetimeDissolvesTaskBoundary(lifetime))'
+        in app_lanes
+    )
+    assert "boundaryDissolved = true;" in app_lanes
+    assert "agentLifetimeUsesStoredTaskFilters(lifetime)" in app_lanes
+    assert 'classes.push("filter-pill--implicit");' in app_lanes
+    assert '"drained by " + drainability.count' in app_lanes
+    assert '"not currently drained"' in app_lanes
     assert "if (fingerprint === renderedFilterPillsFingerprint) return;" in app_lanes
     assert "renderedFilterPillsFingerprint = fingerprint;" in app_lanes
     assert 'renderedFilterPaneFingerprint: "",' in app_shell
+    assert "agentLifetimeDissolvesTaskBoundary(lifetime) ||" in app_shell
     assert "function laneFilterPaneRenderModel(lane)" in app_panes
+    assert "function laneFilterPolicyLabel(lifetime)" in app_panes
+    assert 'return "all projects";' in app_panes
+    assert 'return "auto";' in app_panes
+    assert 'return "manual";' in app_panes
+    assert "function laneAssignableTaskFilterQueueCount(lane)" in app_panes
+    assert 'filterPolicy === "all projects"' in app_panes
+    assert '"all assignable"' in app_panes
+    assert 'filterPolicy + " " + queueCount + " queues"' in app_panes
     assert (
         "if (model.fingerprint === lane.renderedFilterPaneFingerprint) return;"
         in app_panes
@@ -645,6 +685,11 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
     assert (
         ".filter-pill--undrainable .filter-pill-count { background: var(--muted); }"
         in css
+    )
+    assert ".filter-pill--implicit {" in css
+    assert (
+        "box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--good) 42%, transparent);"
+        in (css)
     )
     assert "flex: 0 1 10rem;" not in chip_rule
     assert "justify-content: space-between;" not in chip_rule

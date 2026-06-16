@@ -748,10 +748,13 @@ function syncLaneViewBadge(lane, view, button) {
   }
   badge.textContent = count > 0 ? String(count) : "";
   badge.hidden = count <= 0;
-  const driving = agentLifetimeAutoManagesTasks(laneEffectiveLifetime(lane));
+  const lifetime = laneEffectiveLifetime(lane);
+  const activeFilters =
+    agentLifetimeDissolvesTaskBoundary(lifetime) ||
+    laneAssignedTaskFilters(lane).length > 0;
   badge.classList.toggle(
     "lane-mode-badge--inactive",
-    view === "filters" && !driving,
+    view === "filters" && !activeFilters,
   );
 }
 
