@@ -36,6 +36,43 @@ def test_task_list_parse_error_points_to_limit_example(capsys):
     assert "spice task list --limit 20" in error
 
 
+def test_task_add_after_leaves_trailing_title_positional():
+    args = build_parser().parse_args(
+        [
+            "task",
+            "add",
+            "--after",
+            "TASK-20260101T000000000001Z",
+            "Follow-up title",
+            "--project",
+            "task.unit",
+        ]
+    )
+
+    assert args.after == ["TASK-20260101T000000000001Z"]
+    assert args.title == "Follow-up title"
+
+
+def test_task_add_after_repeats_for_multiple_dependencies():
+    args = build_parser().parse_args(
+        [
+            "task",
+            "add",
+            "--after",
+            "TASK-20260101T000000000001Z",
+            "--after",
+            "TASK-20260101T000000000002Z",
+            "Follow-up title",
+        ]
+    )
+
+    assert args.after == [
+        "TASK-20260101T000000000001Z",
+        "TASK-20260101T000000000002Z",
+    ]
+    assert args.title == "Follow-up title"
+
+
 def test_task_list_limit_filters_project_stem_and_sorts_newest(monkeypatch):
     rows = [
         _row(
