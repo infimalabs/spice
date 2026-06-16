@@ -711,6 +711,74 @@ def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch)
     assert not thread.is_alive()
 
 
+def test_side_channel_watch_repeats_pending_inbox_on_stream_timeout(
+    tmp_path, monkeypatch
+):
+    stderr = io.StringIO()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sidechannel, "AGENT_RUN_INBOX_REPEAT_SECONDS", 0.05)
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000004Z.txt",
+        compose_inbox_text(body="repeat steering", priority=None, stop=False),
+    )
+
+    with sidechannel.AgentSideChannelServer(tmp_path):
+        thread = Thread(
+            target=wrap.watch_agent_side_channel,
+            kwargs={
+                "repo_root": tmp_path,
+                "parent_pid": os.getpid(),
+                "stderr": stderr,
+                "initial_payload_already_rendered": True,
+            },
+        )
+        thread.start()
+        output = _eventually(lambda: stderr.getvalue(), contains="repeat steering")
+
+    thread.join(timeout=1.0)
+    assert "Inbox Steering" in output
+    assert "repeat steering" in output
+    assert not thread.is_alive()
+
+
+def test_side_channel_watch_new_inbox_flushes_all_unread_and_resets_window(
+    tmp_path, monkeypatch
+):
+    stderr = io.StringIO()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sidechannel, "AGENT_RUN_INBOX_REPEAT_SECONDS", 10.0)
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000005Z.txt",
+        compose_inbox_text(body="first steering", priority=None, stop=False),
+    )
+
+    with sidechannel.AgentSideChannelServer(tmp_path):
+        thread = Thread(
+            target=wrap.watch_agent_side_channel,
+            kwargs={
+                "repo_root": tmp_path,
+                "parent_pid": os.getpid(),
+                "stderr": stderr,
+            },
+        )
+        thread.start()
+        _eventually(lambda: stderr.getvalue(), contains="first steering")
+        write_inbox_item(
+            tmp_path,
+            "20260101T000000000006Z.txt",
+            compose_inbox_text(body="second steering", priority=None, stop=False),
+        )
+        output = _eventually(lambda: stderr.getvalue(), contains="second steering")
+
+    thread.join(timeout=1.0)
+    assert output.count("first steering") == 2
+    assert output.count("second steering") == 1
+    assert "recently shown" not in output
+    assert not thread.is_alive()
+
+
 def test_side_channel_streams_to_each_connection_without_cross_suppression(
     tmp_path, monkeypatch
 ):
