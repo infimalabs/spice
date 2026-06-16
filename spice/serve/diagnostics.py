@@ -139,7 +139,9 @@ def _route_payloads(teams: Iterable[TeamState]) -> list[dict[str, Any]]:
     for team in teams:
         member_agents = [member.agent_id for member in team.members]
         configured_terms = _filter_terms(team)
-        effective_terms = configured_terms if team.config.lifetime == "Drive" else []
+        effective_terms = (
+            configured_terms if team.config.lifetime in {"Drive", "Drain"} else []
+        )
         for actor in member_agents:
             routes.append(
                 {
@@ -162,7 +164,7 @@ def _task_drain_filters(teams: Iterable[TeamState]) -> list[dict[str, Any]]:
     configs: list[dict[str, Any]] = []
     for team in teams:
         filter_terms = _filter_terms(team)
-        applies = team.config.lifetime == "Drive"
+        applies = team.config.lifetime in {"Drive", "Drain"}
         configs.append(
             {
                 "teamId": team.team_id,

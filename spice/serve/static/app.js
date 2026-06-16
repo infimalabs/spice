@@ -34,7 +34,7 @@ const laneStorageKey = "spice.serve.laneConfigs";
 const speechModes = ["quiet", "speak", "narrate"];
 const defaultSpeechMode = "speak";
 const maximPriority = "maxim";
-const agentLifetimeLabels = ["Renew", "Steer", "Drive"];
+const agentLifetimeLabels = ["Steer", "Drive", "Drain"];
 const defaultAgentLifetimeIndex = 1;
 const defaultAgentLifetime = agentLifetimeLabels[defaultAgentLifetimeIndex];
 const laneViewModes = ["compose", "filters", "metrics", "info"];
@@ -43,6 +43,10 @@ const composerAttachmentMaxItems = 8;
 const composerAttachmentMaxBytes = 8 * 1024 * 1024;
 
 const laneStates = new Map();
+
+function agentLifetimeAutoManagesTasks(lifetime) {
+  return lifetime === "Drive" || lifetime === "Drain";
+}
 let targets = [];
 let targetById = new Map();
 let targetsLoaded = false;

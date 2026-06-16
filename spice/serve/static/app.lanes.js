@@ -1114,7 +1114,7 @@ function taskFilterStemDrainability(stem) {
   let count = 0;
   for (const lane of laneStates.values()) {
     if (!isLaneOpen(lane) || isShadowLane(lane)) continue;
-    if (laneEffectiveLifetime(lane) !== "Drive") continue;
+    if (!agentLifetimeAutoManagesTasks(laneEffectiveLifetime(lane))) continue;
     const assigned = laneAssignedTaskFilters(lane);
     if (!assigned.some((filter) => covered.has(filter))) continue;
     count += laneGroupMemberLanes(lane).filter(laneMemberCanDrain).length;

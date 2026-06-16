@@ -78,6 +78,9 @@ class _State:
     def lane_send_count(self, target_id: str) -> int:
         return self._sends
 
+    def rollout_cursor(self, thread_id: str):
+        return None
+
 
 class _InventoryState(_State):
     def __init__(self, target: _Target) -> None:
@@ -311,6 +314,49 @@ def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
     assert sum(metrics["sparkline"]) == len(items)
 
 
+def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.create_team(members=["agent-a"])
+    store.set_agent_renewal_request("agent-a", requested=True)
+    monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(payloads, "pending_inbox_count", lambda _repo: 0)
+    monkeypatch.setattr(
+        payloads,
+        "ensure_agent_for_pending_inbox",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        payloads,
+        "resolve_thread_id_for_target",
+        lambda _state, _target: "agent-a",
+    )
+    monkeypatch.setattr(
+        payloads,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id="agent-a",
+        ),
+    )
+    monkeypatch.setattr(
+        payloads.message_reader,
+        "assistant_messages_for_thread_id",
+        lambda *_args, **_kwargs: ([], None),
+    )
+
+    payload = payloads.messages_payload_for_worktree(
+        _State(team_store=store),
+        _Target(id="wt", repo_root=tmp_path),
+        limit=5,
+    )
+
+    assert payload["renewalIntent"]["agentId"] == "agent-a"
+    assert payload["renewalIntent"]["requested"] is True
+    assert payload["renewalIntent"]["state"] == "requested"
+
+
 def test_sent_steering_payload_includes_image_attachments(tmp_path):
     sent = submit_steering_message(
         text="inspect this",
@@ -413,6 +459,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         "teamRevision",
         "configRevision",
         "lifetime",
+        "renewalIntent",
         "taskFilterInventory",
         "laneMetrics",
         "laneInfo",

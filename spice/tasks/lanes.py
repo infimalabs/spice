@@ -15,7 +15,7 @@ from spice.tasks import config
 
 FILTER_TERM_RE = re.compile(r"^[^\s()]+$")
 TAG_TERM_RE = re.compile(r"^\+[A-Za-z0-9_][A-Za-z0-9_]*$")
-ROUTE_LIFETIMES = frozenset({"Renew", "Steer", "Drive"})
+ROUTE_LIFETIMES = frozenset({"Steer", "Drive", "Drain"})
 RouteEntryValue = list[str] | str
 RouteEntry = dict[str, RouteEntryValue]
 
@@ -68,7 +68,7 @@ def _lifetime(raw: Any) -> str:
     if not value:
         return ""
     if value not in ROUTE_LIFETIMES:
-        raise SpiceError(f"route lifetime must be Renew, Steer, or Drive: {value!r}")
+        raise SpiceError(f"route lifetime must be Steer, Drive, or Drain: {value!r}")
     return value
 
 
@@ -115,7 +115,7 @@ def _team_rc_overrides(shell_settings: dict[str, Any]) -> list[str]:
 def filter_args(route: RouteEntry | None) -> list[str] | None:
     if not route:
         return None
-    if route.get("lifetime") and _lifetime(route.get("lifetime")) != "Drive":
+    if route.get("lifetime") and _lifetime(route.get("lifetime")) == "Steer":
         return None
     if "filter" not in route:
         return None

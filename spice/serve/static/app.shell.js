@@ -39,8 +39,8 @@ const laneTemplate =
   '      <div class="composer-shards" data-composer-shards></div>' +
   '      <div class="composer-controls">' +
   '        <label class="stack-slider"><input type="range" min="0" max="2" step="1" value="1" data-speech aria-label="Speech mode"><span data-speech-label>Speak</span></label>' +
-  '        <label class="stack-slider"><input type="range" min="0" max="2" step="1" value="1" data-lifetime aria-label="Agent lifetime"><span data-lifetime-label>Steer</span></label>' +
-  '        <button class="primary submit-action" type="submit" data-submit>Steer</button>' +
+  '        <label class="stack-slider"><input type="range" min="0" max="2" step="1" value="1" data-lifetime aria-label="Agent lifetime"><span data-lifetime-label>Drive</span></label>' +
+  '        <button class="primary submit-action" type="submit" data-submit>Drive</button>' +
   "      </div>" +
   "    </form>" +
   "  </section>" +
@@ -746,7 +746,7 @@ function syncLaneViewBadge(lane, view, button) {
   }
   badge.textContent = count > 0 ? String(count) : "";
   badge.hidden = count <= 0;
-  const driving = laneEffectiveLifetime(lane) === "Drive";
+  const driving = agentLifetimeAutoManagesTasks(laneEffectiveLifetime(lane));
   badge.classList.toggle(
     "lane-mode-badge--inactive",
     view === "filters" && !driving,
