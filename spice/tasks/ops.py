@@ -260,6 +260,7 @@ def _add_one(
     due: str | None = None,
     extra: list[str] | None = None,
     existing: set[str] | None = None,
+    system_project: bool = False,
 ) -> str:
     title = _task_title(title)
     body = _task_description(description)
@@ -267,11 +268,12 @@ def _add_one(
     if claim:
         _require_single_active_slot(actor, action="task add --claim")
     private_project = default_project(actor)
-    resolved_project = (
-        private_project
-        if project is None
-        else config.validate_manual_creation_project(project)
-    )
+    if project is None:
+        resolved_project = private_project
+    elif system_project:
+        resolved_project = config.validate_project(project)
+    else:
+        resolved_project = config.validate_manual_creation_project(project)
     phases = config.resolve_flow(flow, resolved_project)
     incepted = identity.mint_incepted(existing)
     if existing is not None:
@@ -485,7 +487,7 @@ def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
     project = str(row.get("project") or "").strip()
     if not project:
         return
-    if _project_is_internal(project):
+    if _project_is_subscription_excluded(project):
         return
 
     from spice.serve.teams import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CLAIM
@@ -499,7 +501,7 @@ def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
 
 def _subscribe_created_project(project: str, actor: str) -> None:
     project = str(project or "").strip()
-    if not project or _project_is_internal(project):
+    if not project or _project_is_subscription_excluded(project):
         return
 
     from spice.serve.teams import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CREATE
@@ -512,6 +514,12 @@ def _subscribe_created_project(project: str, actor: str) -> None:
     if team_config.lifetime != "Drive":
         return
     store.add_task_filter(team_id, project, source=TASK_FILTER_SOURCE_AUTO_CREATE)
+
+
+def _project_is_subscription_excluded(project: str) -> bool:
+    return _project_is_internal(project) or _project_filter_covers_project(
+        config.OOPS_PROJECT, project
+    )
 
 
 def _gc_empty_project_task_filters(project: str) -> None:
@@ -855,6 +863,7 @@ def oops(
         acceptance=[],
         wait=config.OOPS_WAIT,
         claim=False,
+        system_project=True,
     )
     row = identity.resolve(handle)
     uuid = identity.uuid_of(row)

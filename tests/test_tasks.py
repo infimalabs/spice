@@ -273,6 +273,21 @@ def test_manual_claim_skips_subscription_for_teamless_actor(task_repo):
     assert store.global_revision() == before
 
 
+def test_manual_claim_skips_oops_subscription(task_repo):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Steer"))
+    created = ops.oops("Manual oops claim target", description="triage only")
+    handle = created.split()[1]
+    before = store.global_revision()
+
+    claimed = ops.claim(handle)
+
+    assert claimed == handle
+    assert store.global_revision() == before
+    assert store.team_config(team.team_id).task_filters == ()
+
+
 def test_final_review_completion_gcs_auto_claim_filter(task_repo, monkeypatch):
     assert task_repo.is_dir()
     store = ServeTeamStore()
@@ -457,6 +472,21 @@ def test_teamless_task_creation_skips_drive_subscription(task_repo):
 
     assert identity.resolve(handle)["project"] == "task.unit"
     assert store.global_revision() == before
+
+
+def test_drive_oops_creation_skips_subscription(task_repo):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drive"))
+    before = store.global_revision()
+
+    created = ops.oops("Drive oops creation", description="triage only")
+    handle = created.split()[1]
+    row = identity.resolve(handle)
+
+    assert row["project"] == config.OOPS_PROJECT
+    assert store.global_revision() == before
+    assert store.team_config(team.team_id).task_filters == ()
 
 
 def test_drive_create_allocate_review_and_gc_capstone(task_repo, monkeypatch):
@@ -1164,6 +1194,7 @@ def test_task_oops_description_records_triage_context(task_repo, capsys):
 
     assert row["description"] == "wrapper hiccup"
     assert row["task_description"] == "Longer triage context for the board."
+    assert row["project"] == config.OOPS_PROJECT
 
 
 def test_task_oops_accepts_priority_style_severity_shorthand(task_repo, capsys):
@@ -1179,6 +1210,19 @@ def test_task_oops_accepts_priority_style_severity_shorthand(task_repo, capsys):
     assert "[high]" in out
     assert row["priority"] == "H"
     assert "high" in row["tags"]
+    assert row["project"] == config.OOPS_PROJECT
+
+
+def test_task_add_rejects_oops_system_project(task_repo):
+    assert task_repo.is_dir()
+
+    with pytest.raises(SpiceError, match="reserved for system task creation"):
+        ops.add(
+            "Manual oops project",
+            project=config.OOPS_PROJECT,
+            priority="medium",
+            acceptance=["oops is system-created only"],
+        )
 
 
 def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
