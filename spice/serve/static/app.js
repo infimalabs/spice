@@ -37,6 +37,11 @@ const maximPriority = "maxim";
 const agentLifetimeLabels = ["Steer", "Drive", "Drain"];
 const defaultAgentLifetimeIndex = 1;
 const defaultAgentLifetime = agentLifetimeLabels[defaultAgentLifetimeIndex];
+const agentLifetimeHelp = {
+  Steer: "Manual filters only",
+  Drive: "Auto-subscribe to projects this team creates or claims",
+  Drain: "Boundary dissolved: see all assignable work",
+};
 const laneViewModes = ["compose", "filters", "metrics", "info"];
 const defaultLaneViewMode = "compose";
 const composerAttachmentMaxItems = 8;
@@ -45,7 +50,19 @@ const composerAttachmentMaxBytes = 8 * 1024 * 1024;
 const laneStates = new Map();
 
 function agentLifetimeAutoManagesTasks(lifetime) {
-  return lifetime === "Drive" || lifetime === "Drain";
+  return lifetime === "Drive";
+}
+
+function agentLifetimeUsesStoredTaskFilters(lifetime) {
+  return lifetime === "Steer" || lifetime === "Drive";
+}
+
+function agentLifetimeDissolvesTaskBoundary(lifetime) {
+  return lifetime === "Drain";
+}
+
+function agentLifetimeHelpText(lifetime) {
+  return agentLifetimeHelp[lifetime] || agentLifetimeHelp[defaultAgentLifetime];
 }
 let targets = [];
 let targetById = new Map();

@@ -51,8 +51,16 @@ function syncLaneEffectiveControls(lane) {
     speechMode.charAt(0).toUpperCase() + speechMode.slice(1);
   lane.lifetimeRangeEl.value = String(agentLifetimeLabels.indexOf(lifetime));
   const lifetimeAccentState = syncStackSliderState(lane.lifetimeRangeEl);
+  const lifetimeHelp = agentLifetimeHelpText(lifetime);
+  lane.lifetimeRangeEl.title = lifetimeHelp;
+  lane.lifetimeRangeEl.setAttribute(
+    "aria-label",
+    "Task subscription policy: " + lifetimeHelp,
+  );
   lane.lifetimeLabelEl.textContent = lifetime;
+  lane.lifetimeLabelEl.title = lifetimeHelp;
   lane.submitEl.textContent = lifetime;
+  lane.submitEl.title = "Send with " + lifetime + ": " + lifetimeHelp;
   syncSubmitActionState(lane.submitEl, lifetimeAccentState);
   renderLaneViewShell(lane);
   syncNarrationMediaSession();

@@ -1070,18 +1070,17 @@ function taskFilterStemPillsFromInventory(inventory) {
 
 function renderFilterPills() {
   if (!filterStripEl) return;
-  const pillModels = taskFilterStemPills.map((stem) => ({
-    stem,
-    drainability: taskFilterStemDrainability(stem),
-  }));
+  const pillModels = filterPillModels();
   const hidden = pillModels.length ? "false" : "true";
   const fingerprint = JSON.stringify({
     hidden,
     pills: pillModels.map((model) => ({
-      name: model.stem.name,
-      openTaskCount: Math.max(0, Number(model.stem.openTaskCount) || 0),
+      kind: model.kind,
+      name: model.label,
+      openTaskCount: model.openTaskCount,
       drainable: model.drainability.drainable,
       drainableCount: model.drainability.count,
+      boundaryDissolved: Boolean(model.drainability.boundaryDissolved),
     })),
   });
   filterStripEl.setAttribute("aria-hidden", hidden);
@@ -1089,47 +1088,75 @@ function renderFilterPills() {
   renderedFilterPillsFingerprint = fingerprint;
   const nodes = [];
   for (const model of pillModels) {
-    const { stem, drainability } = model;
     const pill = document.createElement("span");
-    const classes = ["filter-pill"];
-    if (stem.name === "agent") classes.push("filter-pill--private");
+    const classes = ["filter-pill", ...model.classes];
+    if (
+      model.drainability.boundaryDissolved &&
+      model.drainability.drainable
+    )
+      classes.push("filter-pill--implicit");
     classes.push(
-      drainability.drainable
+      model.drainability.drainable
         ? "filter-pill--drainable"
         : "filter-pill--undrainable",
     );
     pill.className = classes.join(" ");
-    pill.title =
-      stem.openTaskCount +
-      " open across " +
-      stem.name +
-      ".*; " +
-      (drainability.drainable
-        ? "drainable by " + drainability.count
-        : "not drainable");
+    pill.title = model.title;
     pill.innerHTML =
       '<span class="filter-pill-label"></span>' +
       '<span class="filter-pill-count"></span>';
-    pill.querySelector(".filter-pill-label").textContent = stem.name;
-    pill.querySelector(".filter-pill-count").textContent = String(
-      stem.openTaskCount,
-    );
+    pill.querySelector(".filter-pill-label").textContent = model.label;
+    pill.querySelector(".filter-pill-count").textContent = String(model.openTaskCount);
     nodes.push(pill);
   }
   filterStripEl.replaceChildren(...nodes);
 }
 
+function filterPillModels() {
+  return taskFilterStemPills.map(taskFilterStemPillModel);
+}
+
+function taskFilterStemPillModel(stem) {
+  const drainability = taskFilterStemDrainability(stem);
+  const label = stem.name;
+  const openTaskCount = Math.max(0, Number(stem.openTaskCount) || 0);
+  const classes = [];
+  if (stem.name === "agent") classes.push("filter-pill--private");
+  return {
+    kind: "stem",
+    label,
+    openTaskCount,
+    classes,
+    drainability,
+    title:
+      openTaskCount +
+      " open across " +
+      label +
+      ".*; " +
+      (drainability.drainable
+        ? "drained by " + drainability.count
+        : "not currently drained"),
+  };
+}
+
 function taskFilterStemDrainability(stem) {
   const covered = new Set(uniqueStringList([stem.name, ...(stem.filters || [])]));
   let count = 0;
+  let boundaryDissolved = false;
   for (const lane of laneStates.values()) {
     if (!isLaneOpen(lane) || isShadowLane(lane)) continue;
-    if (!agentLifetimeAutoManagesTasks(laneEffectiveLifetime(lane))) continue;
+    const lifetime = laneEffectiveLifetime(lane);
+    if (stem.name !== "agent" && agentLifetimeDissolvesTaskBoundary(lifetime)) {
+      boundaryDissolved = true;
+      count += laneGroupMemberLanes(lane).filter(laneMemberCanDrain).length;
+      continue;
+    }
+    if (!agentLifetimeUsesStoredTaskFilters(lifetime)) continue;
     const assigned = laneAssignedTaskFilters(lane);
     if (!assigned.some((filter) => covered.has(filter))) continue;
     count += laneGroupMemberLanes(lane).filter(laneMemberCanDrain).length;
   }
-  return { drainable: count > 0, count };
+  return { drainable: count > 0, count, boundaryDissolved };
 }
 
 function laneMemberCanDrain(member) {

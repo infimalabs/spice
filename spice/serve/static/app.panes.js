@@ -69,18 +69,18 @@ function renderLaneFiltersPane(lane) {
   const model = laneFilterPaneRenderModel(lane);
   if (model.fingerprint === lane.renderedFilterPaneFingerprint) return;
   lane.renderedFilterPaneFingerprint = model.fingerprint;
-  const { driving, filters, pickerAssignedFilters, privateQueues } = model;
+  const { filterPolicy, filters, pickerAssignedFilters, privateQueues, queueCount } =
+    model;
   for (const filter of [...lane.selectedFilterRemovals]) {
     if (!filters.includes(filter)) lane.selectedFilterRemovals.delete(filter);
   }
-  lane.filtersSummaryEl.textContent = filters.length
-    ? filters.length + " assigned"
-    : "private only";
-  lane.filtersQueueEl.textContent =
-    (driving ? "driving" : "idle") +
-    " " +
-    (filters.length + privateQueues.length) +
-    " queues";
+  lane.filtersSummaryEl.textContent =
+    filterPolicy === "all projects"
+      ? "all assignable"
+      : filters.length
+        ? filters.length + " assigned"
+        : "private only";
+  lane.filtersQueueEl.textContent = filterPolicy + " " + queueCount + " queues";
   /** @type {(HTMLButtonElement | HTMLSpanElement)[]} */
   const chips = [laneFilterAssignChip(lane, pickerAssignedFilters)];
   for (const filter of filters) {
@@ -100,7 +100,11 @@ function laneFilterPaneRenderModel(lane) {
   const removals = [...lane.selectedFilterRemovals].sort();
   const pending = [...lane.filterPickerPendingAssignments].sort();
   const availableFilters = laneAvailableTaskFilters(lane, pickerAssignedFilters);
-  const driving = agentLifetimeAutoManagesTasks(laneEffectiveLifetime(lane));
+  const filterPolicy = laneFilterPolicyLabel(laneEffectiveLifetime(lane));
+  const queueCount =
+    filterPolicy === "all projects"
+      ? laneAssignableTaskFilterQueueCount(lane) + privateQueues.length
+      : filters.length + privateQueues.length;
   const pickerActions = lane.filterPickerOpen
     ? laneFilterPickerActions(
         lane,
@@ -109,10 +113,11 @@ function laneFilterPaneRenderModel(lane) {
       ).map(laneFilterPickerActionFingerprint)
     : [];
   return {
-    driving,
+    filterPolicy,
     filters,
     pickerAssignedFilters,
     privateQueues,
+    queueCount,
     fingerprint: JSON.stringify({
       availableFilters,
       availableOpenTaskCount: laneFilterAvailableOpenTaskCount(
@@ -120,7 +125,8 @@ function laneFilterPaneRenderModel(lane) {
         pickerAssignedFilters,
       ),
       canCreate: laneFilterCanCreate(lane),
-      driving,
+      filterPolicy,
+      queueCount,
       filterCounts: filters.map((filter) => [
         filter,
         laneTaskFilterOpenCount(lane, filter),
@@ -135,6 +141,22 @@ function laneFilterPaneRenderModel(lane) {
       removals,
     }),
   };
+}
+
+function laneFilterPolicyLabel(lifetime) {
+  if (agentLifetimeDissolvesTaskBoundary(lifetime)) return "all projects";
+  if (agentLifetimeAutoManagesTasks(lifetime)) return "auto";
+  return "manual";
+}
+
+function laneAssignableTaskFilterQueueCount(lane) {
+  const inventory = laneFilterInventory(lane);
+  if (!inventory) return 0;
+  const catalog = inventory.catalog || {};
+  const approved = new Set((catalog.approvedStems || []).filter(Boolean));
+  return (inventory.primaryStems || []).filter(
+    (stem) => stem.name && stem.name !== "agent" && approved.has(stem.name),
+  ).length;
 }
 
 function laneFilterPickerActionFingerprint(action) {
