@@ -248,6 +248,13 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
     assert 'composerBandMenuAction(\n    "Leave all teams",' in app_shell
     assert 'composerBandMenuAction(\n    "Create new team",' in app_shell
     assert 'composerBandMenuAction(\n    "Renew this agent",' in app_shell
+    assert "return [create, leave, renew];" in app_shell
+    assert app_shell.index('composerBandMenuAction(\n    "Create new team",') < (
+        app_shell.index('composerBandMenuAction(\n    "Leave all teams",')
+    )
+    assert app_shell.index('composerBandMenuAction(\n    "Leave all teams",') < (
+        app_shell.index('composerBandMenuAction(\n    "Renew this agent",')
+    )
     assert '"Remove " + label + " from all teams"' in app_shell
     assert '"Move only " + label + " to a new team"' in app_shell
     assert "toggleComposerAgentRenewalIntent(lane, member)" in app_shell
