@@ -319,6 +319,7 @@ def _add_one(
     args.extend(extra or [])
     args.append(title)
     tw.run(args)
+    _subscribe_created_project(resolved_project, actor)
     if claim:
         created = tw.export([f"incepted.is:{incepted}"])
         if created:
@@ -484,8 +485,7 @@ def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
     project = str(row.get("project") or "").strip()
     if not project:
         return
-    stem = project.split(config.PROJECT_DELIMITER, 1)[0]
-    if config.is_internal_project_stem(stem):
+    if _project_is_internal(project):
         return
 
     from spice.serve.teams import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CLAIM
@@ -497,12 +497,26 @@ def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
     store.add_task_filter(team_id, project, source=TASK_FILTER_SOURCE_AUTO_CLAIM)
 
 
+def _subscribe_created_project(project: str, actor: str) -> None:
+    project = str(project or "").strip()
+    if not project or _project_is_internal(project):
+        return
+
+    from spice.serve.teams import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CREATE
+
+    store = ServeTeamStore()
+    team_id = store.current_team_for_agent(actor)
+    if team_id is None:
+        return
+    team_config = store.team_config(team_id)
+    if team_config.lifetime != "Drive":
+        return
+    store.add_task_filter(team_id, project, source=TASK_FILTER_SOURCE_AUTO_CREATE)
+
+
 def _gc_empty_project_task_filters(project: str) -> None:
     project = str(project or "").strip()
-    if not project:
-        return
-    stem = project.split(config.PROJECT_DELIMITER, 1)[0]
-    if config.is_internal_project_stem(stem):
+    if not project or _project_is_internal(project):
         return
     try:
         project = config.validate_assignable_project(project)
@@ -528,6 +542,11 @@ def _gc_empty_project_task_filters(project: str) -> None:
                 filter_project, source=source
             ):
                 store.remove_task_filter(team_id, filter_project, source=source)
+
+
+def _project_is_internal(project: str) -> bool:
+    stem = project.split(config.PROJECT_DELIMITER, 1)[0]
+    return config.is_internal_project_stem(stem)
 
 
 def _project_filter_covers_project(filter_project: str, project: str) -> bool:
