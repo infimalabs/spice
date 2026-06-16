@@ -206,6 +206,12 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
         ".composer-band-menu-action .spice-menu-action-detail", action_start
     )
     action_rule = css[action_start:action_end]
+    shared_grid_start = css.index(".spice-menu-actions {")
+    shared_grid_end = css.index(".spice-menu-target-list {", shared_grid_start)
+    shared_grid_rule = css[shared_grid_start:shared_grid_end]
+    menu_grid_start = css.index(".composer-band-menu.spice-menu-actions {")
+    menu_grid_end = css.index(".composer-band-menu-action {", menu_grid_start)
+    menu_grid_rule = css[menu_grid_start:menu_grid_end]
 
     assert "trailingControl: composerBandMenuTrigger(" in app_shell
     assert (
@@ -217,11 +223,16 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
     assert "trigger.replaceChildren(composerBandMenuIcon());" in app_shell
     assert "function composerBandMenuIcon()" in app_shell
     assert 'icon.className = "composer-band-menu-icon";' in app_shell
-    assert 'menu.className = "composer-band-menu";' in app_shell
+    assert 'menu.className = "composer-band-menu spice-menu-actions";' in app_shell
     assert (
         'button.className = "composer-band-menu-action spice-menu-action";' in app_shell
     )
     assert "if (action.detail) button.title = action.detail;" in app_shell
+    assert (
+        'button.setAttribute("role", hasPressed ? "menuitemcheckbox" : "menuitem");'
+        in app_shell
+    )
+    assert 'button.setAttribute("aria-checked", String(action.pressed));' in app_shell
     assert "let composerBandMenuDismissHandler = null;" in app_shell
     assert "closeComposerBandMenusExcept(band);" in app_shell
     assert (
@@ -236,8 +247,14 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
     assert "function syncComposerBandMenuState(band)" in app_shell
     assert 'composerBandMenuAction(\n    "Leave all teams",' in app_shell
     assert 'composerBandMenuAction(\n    "Create new team",' in app_shell
+    assert 'composerBandMenuAction(\n    "Renew this agent",' in app_shell
     assert '"Remove " + label + " from all teams"' in app_shell
     assert '"Move only " + label + " to a new team"' in app_shell
+    assert "toggleComposerAgentRenewalIntent(lane, member)" in app_shell
+    assert 'teamCommandPayload("setAgentRenewalIntent", {' in app_shell
+    assert "agentId: laneTeamAgentId(member)," in app_shell
+    assert "requested," in app_shell
+    assert 'return "handoff pending";' in app_shell
     assert "trailingControl: composerBandCloseButton(" in app_shell
     assert (
         "function composerBandCloseButton(closeTitle, closeLabel, onClose)" in app_shell
@@ -253,6 +270,10 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
     assert "width: 22px;" in button_rule
     assert 'icon.style.height = "8px";' in app_shell
     assert 'icon.style.width = "11px";' in app_shell
+    assert "display: grid;" in shared_grid_rule
+    assert "grid-template-columns: repeat(auto-fit" in shared_grid_rule
+    assert "display: grid;" in menu_grid_rule
+    assert "grid-template-columns: repeat(auto-fit" in menu_grid_rule
     assert (
         ".composer-band-close-button:hover,\n.composer-band-close-button:focus-visible {"
         in css

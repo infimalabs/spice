@@ -82,6 +82,7 @@ function targetPayloadShim(target) {
     teamRevision: target.teamRevision || 0,
     configRevision: target.configRevision || 0,
     lifetime: target.lifetime || "",
+    renewalIntent: target.renewalIntent || {},
     taskFilterInventory: target.taskFilterInventory || {},
     laneMetrics: target.laneMetrics || {},
     laneInfo: target.laneInfo || { summaryRows: [], members: [] },
@@ -196,9 +197,11 @@ function ensureTeamMemberLane(targetId, team, hint = null) {
   const lane = laneStates.get(targetId);
   if (!lane) return;
   const config = team.config || {};
+  const member = teamMemberForTargetId(team, targetId);
   lane.teamId = String(team.teamId || "");
   lane.teamRevision = Math.max(0, Number(team.revision || 0));
   lane.configRevision = Math.max(0, Number(config.revision || 0));
+  if (member && member.renewalIntent) lane.renewalIntent = member.renewalIntent;
   if (Array.isArray(config.taskFilters))
     lane.taskFilters = uniqueStringList(config.taskFilters);
   if (config.lifetime && agentLifetimeLabels.includes(config.lifetime))
@@ -206,6 +209,13 @@ function ensureTeamMemberLane(targetId, team, hint = null) {
   if (!hint && config.speechMode && speechModes.includes(config.speechMode))
     lane.speechMode = config.speechMode;
   syncLaneEffectiveControls(lane);
+}
+
+function teamMemberForTargetId(team, targetId) {
+  for (const member of team.members || []) {
+    if (teamMemberTargetId(member) === targetId) return member;
+  }
+  return null;
 }
 
 function laneTeamAgentId(lane) {
