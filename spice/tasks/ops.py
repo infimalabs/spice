@@ -497,6 +497,45 @@ def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
     store.add_task_filter(team_id, project, source=TASK_FILTER_SOURCE_AUTO_CLAIM)
 
 
+def _gc_empty_project_task_filters(project: str) -> None:
+    project = str(project or "").strip()
+    if not project:
+        return
+    stem = project.split(config.PROJECT_DELIMITER, 1)[0]
+    if config.is_internal_project_stem(stem):
+        return
+    try:
+        project = config.validate_assignable_project(project)
+    except SpiceError:
+        return
+
+    from spice.serve.teams import (
+        TASK_FILTER_SOURCE_AUTO_CLAIM,
+        TASK_FILTER_SOURCE_AUTO_CREATE,
+        ServeTeamStore,
+    )
+
+    store = ServeTeamStore()
+    # Provenance is modeled now: empty-project GC reclaims ephemeral
+    # subscriptions without deleting manually curated Steer filters.
+    for source in (TASK_FILTER_SOURCE_AUTO_CREATE, TASK_FILTER_SOURCE_AUTO_CLAIM):
+        for filter_project in store.open_task_filter_projects(source=source):
+            if not _project_filter_covers_project(filter_project, project):
+                continue
+            if tw.export(["status:pending", f"project:{filter_project}"]):
+                continue
+            for team_id in store.open_team_ids_with_task_filter(
+                filter_project, source=source
+            ):
+                store.remove_task_filter(team_id, filter_project, source=source)
+
+
+def _project_filter_covers_project(filter_project: str, project: str) -> bool:
+    return project == filter_project or project.startswith(
+        filter_project + config.PROJECT_DELIMITER
+    )
+
+
 def unclaim(handle: str) -> str:
     row = identity.resolve(handle)
     uuid = identity.uuid_of(row)
@@ -623,7 +662,9 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
                 ]
             )
             return f"looped {handle} -> {phases[0]} (paced {pace}, waits until {wait})"
+        project = str(row.get("project") or "")
         tw.run([uuid, "done"])
+        _gc_empty_project_task_filters(project)
         return f"completed {handle}"
     nxt = phases[index + 1]
     # One atomic modify: advance the phase, deactivate, and release the claim.
@@ -838,9 +879,11 @@ def delete(handle: str, reason: str) -> str:
     row = identity.resolve(handle)
     _require_pending(row, "delete")
     uuid = identity.uuid_of(row)
+    project = str(row.get("project") or "")
     annotate(uuid, f"deleted: {reason}")
     tw.run([uuid, "modify", f"delete_reason:{reason}"])
     tw.run([uuid, "delete"])
+    _gc_empty_project_task_filters(project)
     return identity.render_handle(row)
 
 

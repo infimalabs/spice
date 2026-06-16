@@ -987,6 +987,42 @@ class ServeTeamStore:
             entries = self._task_filter_entries_locked(connection, team_id)
             return _config_from_row(row, entries)
 
+    def open_team_ids_with_task_filter(
+        self, project: str, *, source: str | None = None
+    ) -> tuple[str, ...]:
+        project = _validated_task_filter_project(project)
+        if source is not None:
+            source = _validated_task_filter_source(source)
+        source_clause = "" if source is None else " AND team_task_filters.source = ?"
+        params: tuple[str, ...] = (project,) if source is None else (project, source)
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT teams.team_id FROM teams "
+                "JOIN team_task_filters ON team_task_filters.team_id = teams.team_id "
+                "WHERE teams.status = 'open' AND team_task_filters.project = ?"
+                f"{source_clause} "
+                "ORDER BY teams.created_at",
+                params,
+            ).fetchall()
+        return tuple(str(row["team_id"]) for row in rows)
+
+    def open_task_filter_projects(
+        self, *, source: str | None = None
+    ) -> tuple[str, ...]:
+        if source is not None:
+            source = _validated_task_filter_source(source)
+        source_clause = "" if source is None else " AND team_task_filters.source = ?"
+        params: tuple[str, ...] = () if source is None else (source,)
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT team_task_filters.project FROM team_task_filters "
+                "JOIN teams ON teams.team_id = team_task_filters.team_id "
+                f"WHERE teams.status = 'open'{source_clause} "
+                "ORDER BY team_task_filters.project",
+                params,
+            ).fetchall()
+        return tuple(str(row["project"]) for row in rows)
+
     def team_state(self, team_id: str) -> TeamState:
         with self.connect() as connection:
             return self._team_state_locked(connection, team_id)
