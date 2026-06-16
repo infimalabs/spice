@@ -1050,7 +1050,7 @@ function targetChoiceStatusLabel(target) {
 
 // ---- global filter pills -----------------------------------------------------------
 
-const taskFilterHeaderExtraStems = ["agent"];
+const taskFilterHeaderExtraStems = ["agent", "oops"];
 
 function taskFilterStemPillsFromInventory(inventory) {
   const catalog = (inventory || {}).catalog || {};
@@ -1122,6 +1122,7 @@ function taskFilterStemPillModel(stem) {
   const openTaskCount = Math.max(0, Number(stem.openTaskCount) || 0);
   const classes = [];
   if (stem.name === "agent") classes.push("filter-pill--private");
+  if (stem.name === "oops") classes.push("filter-pill--system");
   return {
     kind: "stem",
     label,
@@ -1131,12 +1132,20 @@ function taskFilterStemPillModel(stem) {
     title:
       openTaskCount +
       " open across " +
-      label +
-      ".*; " +
+      taskFilterStemScopeLabel(label) +
+      "; " +
       (drainability.drainable
         ? "drained by " + drainability.count
         : "not currently drained"),
   };
+}
+
+function taskFilterStemScopeLabel(stemName) {
+  return stemName === "oops" ? "oops" : stemName + ".*";
+}
+
+function taskFilterStemIsSystem(stemName) {
+  return stemName === "agent" || stemName === "oops";
 }
 
 function taskFilterStemDrainability(stem) {
@@ -1146,7 +1155,10 @@ function taskFilterStemDrainability(stem) {
   for (const lane of laneStates.values()) {
     if (!isLaneOpen(lane) || isShadowLane(lane)) continue;
     const lifetime = laneEffectiveLifetime(lane);
-    if (stem.name !== "agent" && agentLifetimeDissolvesTaskBoundary(lifetime)) {
+    if (
+      !taskFilterStemIsSystem(stem.name) &&
+      agentLifetimeDissolvesTaskBoundary(lifetime)
+    ) {
       boundaryDissolved = true;
       count += laneGroupMemberLanes(lane).filter(laneMemberCanDrain).length;
       continue;

@@ -35,7 +35,7 @@ TASK_ACTOR_FIELDS = ("claim_by", "claim_thread", "review_author", "review_by")
 
 
 def task_filter_inventory() -> dict[str, Any]:
-    """Open-task counts per assignable project, plus the validation catalog."""
+    """Open-task counts per assignable project, plus system header signals."""
     catalog = task_config.task_project_validation_catalog()
     filters: list[dict[str, Any]] = []
     stems: dict[str, dict[str, Any]] = {}
@@ -51,6 +51,8 @@ def task_filter_inventory() -> dict[str, Any]:
     counts: dict[str, int] = {}
     for row in rows:
         project = str(row.get("project") or "")
+        if project == task_config.OOPS_PROJECT and not row.get("start"):
+            continue
         if project:
             counts[project] = counts.get(project, 0) + 1
     assignable_stems = set(task_config.assignable_stems())
