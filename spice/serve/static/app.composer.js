@@ -135,7 +135,9 @@ function composerPrimaryMenuActions(lane, member, label) {
   );
   renew.pressed = composerRenewalIntentRequested(member);
   renew.disabled = composerRenewalIntentInFlight(member);
-  renew.onClick = () => toggleComposerAgentRenewalIntent(lane, member);
+  renew.keepOpen = true;
+  renew.onClick = (requested) =>
+    toggleComposerAgentRenewalIntent(lane, member, requested);
 
   return [create, leave, renew];
 }
@@ -680,8 +682,16 @@ function toggleComposerBandMenu(trigger, actions) {
     button.querySelector(".spice-menu-action-detail").textContent =
       action.detail || "";
     button.addEventListener("click", () => {
-      closeComposerBandMenu(band);
-      action.onClick();
+      if (!action.keepOpen) closeComposerBandMenu(band);
+      const previousPressed = hasPressed
+        ? button.getAttribute("aria-checked") === "true"
+        : null;
+      const nextPressed = hasPressed ? !previousPressed : null;
+      if (hasPressed) syncComposerBandMenuActionPressed(button, nextPressed);
+      const result = action.onClick(nextPressed);
+      result?.catch?.(() => {
+        if (hasPressed) syncComposerBandMenuActionPressed(button, previousPressed);
+      });
     });
     menu.append(button);
   }
@@ -690,6 +700,10 @@ function toggleComposerBandMenu(trigger, actions) {
   band.classList.add("composer-band--menu-open");
   trigger.setAttribute("aria-expanded", "true");
   syncComposerBandMenuDismissHandler();
+}
+
+function syncComposerBandMenuActionPressed(button, pressed) {
+  button.setAttribute("aria-checked", String(Boolean(pressed)));
 }
 
 function closeComposerBandMenu(band) {
@@ -866,10 +880,13 @@ function removeComposerAgentFromTeam(lane, targetId) {
   });
 }
 
-function toggleComposerAgentRenewalIntent(lane, member) {
-  const requested = !composerRenewalIntentRequested(member);
+function toggleComposerAgentRenewalIntent(
+  lane,
+  member,
+  requested = !composerRenewalIntentRequested(member),
+) {
   const host = laneGroupHost(lane);
-  requestTeamCommand(
+  return requestTeamCommand(
     teamCommandPayload("setAgentRenewalIntent", {
       agentId: laneTeamAgentId(member),
       requested,
@@ -883,6 +900,7 @@ function toggleComposerAgentRenewalIntent(lane, member) {
     })
     .catch(() => {
       setLaneTransientStatus(host, "renewal update failed");
+      throw new Error("renewal update failed");
     });
 }
 

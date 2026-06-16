@@ -257,7 +257,18 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
     )
     assert '"Remove " + label + " from all teams"' in app_shell
     assert '"Move only " + label + " to a new team"' in app_shell
-    assert "toggleComposerAgentRenewalIntent(lane, member)" in app_shell
+    assert "renew.keepOpen = true;" in app_shell
+    assert (
+        "renew.onClick = (requested) =>\n"
+        "    toggleComposerAgentRenewalIntent(lane, member, requested);"
+    ) in app_shell
+    assert "if (!action.keepOpen) closeComposerBandMenu(band);" in app_shell
+    assert (
+        "if (hasPressed) syncComposerBandMenuActionPressed(button, nextPressed);"
+        in app_shell
+    )
+    assert "function syncComposerBandMenuActionPressed(button, pressed)" in app_shell
+    assert "requested = !composerRenewalIntentRequested(member)," in app_shell
     assert 'teamCommandPayload("setAgentRenewalIntent", {' in app_shell
     assert "agentId: laneTeamAgentId(member)," in app_shell
     assert "requested," in app_shell
