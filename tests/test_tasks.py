@@ -14,6 +14,7 @@ from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
 from spice.serve.teams import (
     TASK_FILTER_SOURCE_AUTO_CLAIM,
+    TASK_FILTER_SOURCE_AUTO_CREATE,
     TASK_FILTER_SOURCE_MANUAL,
     ServeTeamStore,
     TeamConfig,
@@ -184,7 +185,9 @@ def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
 ):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A, PEER_ACTOR])
+    team = store.create_team(
+        members=[ACTOR_A, PEER_ACTOR], config=TeamConfig(lifetime="Steer")
+    )
     handle = ops.add(
         "Manual claim out of lane",
         project="task.unit",
@@ -213,7 +216,8 @@ def test_task_next_auto_claim_does_not_rewrite_team_filters(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
     team = store.create_team(
-        members=[ACTOR_A], config=TeamConfig(task_filters=("task.unit",))
+        members=[ACTOR_A],
+        config=TeamConfig(lifetime="Steer", task_filters=("task.unit",)),
     )
     handle = ops.add(
         "Auto claim in lane",
@@ -266,6 +270,87 @@ def test_manual_claim_skips_subscription_for_teamless_actor(task_repo):
     claimed = ops.claim(handle)
 
     assert claimed == handle
+    assert store.global_revision() == before
+
+
+def test_drive_task_creation_subscribes_project_idempotently(task_repo):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drive"))
+
+    first = ops.add(
+        "Drive creates first task",
+        project="task.unit",
+        priority="medium",
+        acceptance=["drive creation subscribes"],
+    )
+    after_first = store.global_revision()
+    after_first_config = store.team_config(team.team_id)
+    second = ops.add(
+        "Drive creates second task",
+        project="task.unit",
+        priority="medium",
+        acceptance=["duplicate drive creation is idempotent"],
+    )
+    after_second = store.global_revision()
+
+    assert first != second
+    assert after_first_config.task_filters == ("task.unit",)
+    assert [entry.to_payload() for entry in after_first_config.task_filter_entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE}
+    ]
+    assert after_second == after_first
+
+
+def test_steer_task_creation_keeps_manual_subscription_boundary(task_repo):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Steer"))
+    before = store.global_revision()
+
+    handle = ops.add(
+        "Steer creates task",
+        project="task.unit",
+        priority="medium",
+        acceptance=["steer creation does not auto-subscribe"],
+    )
+
+    assert identity.resolve(handle)["project"] == "task.unit"
+    assert store.global_revision() == before
+    assert store.team_config(team.team_id).task_filters == ()
+
+
+def test_drain_task_creation_uses_effective_visibility_not_stored_filter(task_repo):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drain"))
+    before = store.global_revision()
+
+    handle = ops.add(
+        "Drain creates task",
+        project="task.unit",
+        priority="medium",
+        acceptance=["drain creation relies on computed visibility"],
+    )
+
+    assert identity.resolve(handle)["project"] == "task.unit"
+    assert store.global_revision() == before
+    assert store.team_config(team.team_id).task_filters == ()
+
+
+def test_teamless_task_creation_skips_drive_subscription(task_repo):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    before = store.global_revision()
+
+    handle = ops.add(
+        "Teamless creates task",
+        project="task.unit",
+        priority="medium",
+        acceptance=["teamless creation has no team subscription"],
+    )
+
+    assert identity.resolve(handle)["project"] == "task.unit"
     assert store.global_revision() == before
 
 
