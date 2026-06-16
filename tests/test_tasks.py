@@ -27,6 +27,7 @@ pytestmark = pytest.mark.skipif(
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 PEER_ACTOR = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+GIT_TIMEOUT_RETURN_CODE = 124
 
 
 @pytest.fixture
@@ -1173,6 +1174,41 @@ def test_task_add_takes_exactly_one_title_form(task_repo):
 
     with pytest.raises(SpiceError, match="positional title or --title"):
         args.func(args)
+
+
+def test_gitsync_network_commands_are_noninteractive_and_bounded(tmp_path, monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs):
+        seen["command"] = command
+        seen["env"] = kwargs["env"]
+        seen["timeout"] = kwargs.get("timeout")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gitsync.subprocess, "run", fake_run)
+
+    gitsync._run(tmp_path, "fetch", "origin")
+
+    env = seen["env"]
+    assert isinstance(env, dict)
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_SSH_COMMAND"] == gitsync.TASK_GIT_SSH_COMMAND
+    assert seen["timeout"] == gitsync.GIT_NETWORK_TIMEOUT_SECONDS
+
+
+def test_gitsync_network_timeout_returns_failed_process(tmp_path, monkeypatch):
+    def fake_run(command: list[str], **kwargs):
+        raise subprocess.TimeoutExpired(
+            command, kwargs["timeout"], output="partial", stderr="stalled"
+        )
+
+    monkeypatch.setattr(gitsync.subprocess, "run", fake_run)
+
+    completed = gitsync._run(tmp_path, "fetch", "origin")
+
+    assert completed.returncode == GIT_TIMEOUT_RETURN_CODE
+    assert completed.stdout == "partial"
+    assert "git fetch timed out after 30s" in completed.stderr
 
 
 def test_task_oops_description_records_triage_context(task_repo, capsys):

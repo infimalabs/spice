@@ -309,7 +309,13 @@ def _configure_add_parser(actions: Any) -> None:
     )
     add.add_argument("--flow")
     add.add_argument("--tag", action="append", default=[], dest="tags")
-    add.add_argument("--after", nargs="+", default=[])
+    add.add_argument(
+        "--after",
+        action="append",
+        default=[],
+        metavar="HANDLE",
+        help="Dependency handle; repeat --after for multiple dependencies.",
+    )
     add.add_argument("--acceptance", action="append", default=[])
     add.add_argument("--wait")
     add.add_argument(

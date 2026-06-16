@@ -29,6 +29,10 @@ from spice.agent.gitshadow import scrub_agent_git_shadow_environment
 from spice.errors import SpiceError
 from spice.tasks import config
 
+GIT_NETWORK_TIMEOUT_SECONDS = 30
+TASK_GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
+_NETWORK_COMMANDS = {"fetch", "push"}
+
 
 class MergeConflict(SpiceError):
     """A real content conflict the agent must resolve before the phase closes."""
@@ -42,14 +46,43 @@ class SyncResult:
 
 def _run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     # Preserve caller env while removing agent-facing git shadow config.
+    env = _control_plane_git_env()
+    command = ["git", "-C", str(repo_root), *args]
+    kwargs = {
+        "capture_output": True,
+        "check": False,
+        "env": env,
+        "text": True,
+    }
+    if args and args[0] in _NETWORK_COMMANDS:
+        kwargs["timeout"] = GIT_NETWORK_TIMEOUT_SECONDS
+    try:
+        return subprocess.run(command, **kwargs)
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            command,
+            124,
+            stdout=_timeout_text(exc.stdout),
+            stderr=(
+                _timeout_text(exc.stderr)
+                + f"git {args[0]} timed out after {GIT_NETWORK_TIMEOUT_SECONDS}s\n"
+            ),
+        )
+
+
+def _control_plane_git_env() -> dict[str, str]:
     env = scrub_agent_git_shadow_environment(os.environ)
-    return subprocess.run(
-        ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        check=False,
-        env=env,
-        text=True,
-    )
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_SSH_COMMAND"] = TASK_GIT_SSH_COMMAND
+    return env
+
+
+def _timeout_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
 
 
 def _read(repo_root: Path, *args: str) -> str:
