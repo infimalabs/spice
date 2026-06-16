@@ -139,9 +139,8 @@ def _route_payloads(teams: Iterable[TeamState]) -> list[dict[str, Any]]:
     for team in teams:
         member_agents = [member.agent_id for member in team.members]
         configured_terms = _filter_terms(team)
-        effective_terms = (
-            configured_terms if team.config.lifetime in {"Drive", "Drain"} else []
-        )
+        route = {"filter": configured_terms, "lifetime": team.config.lifetime}
+        effective_terms = lanes.effective_filter_terms(route)
         for actor in member_agents:
             routes.append(
                 {
@@ -153,6 +152,8 @@ def _route_payloads(teams: Iterable[TeamState]) -> list[dict[str, Any]]:
                     "lifetime": team.config.lifetime,
                     "configuredTaskFilters": list(team.config.task_filters),
                     "filterTerms": effective_terms,
+                    "configuredFilterTerms": configured_terms,
+                    "scope": _filter_scope(team.config.lifetime),
                     "filterArgs": lanes.filter_terms_args(effective_terms),
                     "routeFilters": [ops.default_project(actor), *effective_terms],
                 }
@@ -164,18 +165,26 @@ def _task_drain_filters(teams: Iterable[TeamState]) -> list[dict[str, Any]]:
     configs: list[dict[str, Any]] = []
     for team in teams:
         filter_terms = _filter_terms(team)
-        applies = team.config.lifetime in {"Drive", "Drain"}
+        effective_terms = lanes.effective_filter_terms(
+            {"filter": filter_terms, "lifetime": team.config.lifetime}
+        )
         configs.append(
             {
                 "teamId": team.team_id,
                 "lifetime": team.config.lifetime,
                 "taskFilters": list(team.config.task_filters),
                 "filterTerms": filter_terms,
-                "filterArgs": lanes.filter_terms_args(filter_terms) if applies else [],
-                "applies": applies,
+                "effectiveTerms": effective_terms,
+                "filterArgs": lanes.filter_terms_args(effective_terms),
+                "applies": True,
+                "scope": _filter_scope(team.config.lifetime),
             }
         )
     return configs
+
+
+def _filter_scope(lifetime: str) -> str:
+    return "all-assignable" if lifetime == "Drain" else "stored"
 
 
 def _filter_terms(team: TeamState) -> list[str]:
@@ -242,10 +251,12 @@ def _render_routes(routes: list[dict[str, Any]]) -> list[str]:
         return ["  (none)"]
     return [
         "  route {actor} team={teamId} lifetime={lifetime} "
-        "members={members} routeFilters={routeFilters} filterArgs={filterArgs}".format(
+        "scope={scope} members={members} routeFilters={routeFilters} "
+        "filterArgs={filterArgs}".format(
             actor=route["actor"],
             teamId=route["teamId"],
             lifetime=route["lifetime"],
+            scope=route["scope"],
             members=_csv(route["memberAgents"]),
             routeFilters=_csv(route["routeFilters"]),
             filterArgs=_csv(route["filterArgs"]),
@@ -259,13 +270,15 @@ def _render_task_drain_filters(filters: list[dict[str, Any]]) -> list[str]:
         return ["  (none)"]
     return [
         "  taskdrain team={teamId} lifetime={lifetime} applies={applies} "
-        "taskFilters={taskFilters} filterTerms={filterTerms} "
-        "filterArgs={filterArgs}".format(
+        "scope={scope} taskFilters={taskFilters} filterTerms={filterTerms} "
+        "effectiveTerms={effectiveTerms} filterArgs={filterArgs}".format(
             teamId=config["teamId"],
             lifetime=config["lifetime"],
             applies="yes" if config["applies"] else "no",
+            scope=config["scope"],
             taskFilters=_csv(config["taskFilters"]),
             filterTerms=_csv(config["filterTerms"]),
+            effectiveTerms=_csv(config["effectiveTerms"]),
             filterArgs=_csv(config["filterArgs"]),
         )
         for config in filters

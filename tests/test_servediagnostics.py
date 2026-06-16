@@ -52,10 +52,15 @@ def test_team_diagnostics_include_events_routes_and_taskdrain_filters(tmp_path):
         *expected_filter_terms,
     ]
     assert route["filterArgs"] == expected_filter_args
+    assert route["scope"] == "stored"
+    assert route["configuredFilterTerms"] == expected_filter_terms
     assert taskdrain["filterArgs"] == expected_filter_args
+    assert taskdrain["effectiveTerms"] == expected_filter_terms
+    assert taskdrain["scope"] == "stored"
     assert f"serve teams store={store.path} globalRevision={renewal.revision}" in text
     assert f"revision={created.revision} kind=createTeam team={TEAM_ID}" in text
     assert f"route {AGENT_A} team={TEAM_ID} lifetime=Drive" in text
+    assert "scope=stored" in text
     assert "routeFilters=agent.agenta.task,project:serve.ui,project:task.review" in text
     assert "taskdrain team=team-main lifetime=Drive applies=yes" in text
     assert f"renewal {AGENT_A} state=pending team={TEAM_ID}" in text
@@ -97,8 +102,10 @@ def test_empty_team_diagnostics_have_stable_sections(tmp_path):
             "lifetime": "Drive",
             "taskFilters": [],
             "filterTerms": [],
+            "effectiveTerms": [],
             "filterArgs": [],
             "applies": True,
+            "scope": "stored",
         }
     ]
     assert payload["renewals"] == []
@@ -111,6 +118,43 @@ def test_empty_team_diagnostics_have_stable_sections(tmp_path):
     assert "taskdrain team=" in text
     assert " lifetime=Drive applies=yes " in text
     assert "renewals:\n  (none)" in text
+
+
+def test_team_diagnostics_reports_drain_as_computed_effective_scope(tmp_path):
+    store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
+    store.create_team(
+        team_id=TEAM_ID,
+        members=[AGENT_A],
+        config=TeamConfig(lifetime="Drain", task_filters=("serve.ui",)),
+    )
+    expected_effective_terms = lanes.effective_filter_terms(
+        {"filter": [], "lifetime": "Drain"}
+    )
+    expected_filter_args = lanes.filter_terms_args(expected_effective_terms)
+
+    payload = team_diagnostics_payload(store=store)
+    text = render_team_diagnostics(payload)
+    route = payload["effectiveRoutes"][0]
+    taskdrain = payload["taskDrainFilters"][0]
+
+    assert route["scope"] == "all-assignable"
+    assert route["configuredFilterTerms"] == ["project:serve.ui"]
+    assert route["filterTerms"] == expected_effective_terms
+    assert route["filterArgs"] == expected_filter_args
+    assert route["routeFilters"] == [
+        ops.default_project(AGENT_A),
+        *expected_effective_terms,
+    ]
+    assert taskdrain["scope"] == "all-assignable"
+    assert taskdrain["filterTerms"] == ["project:serve.ui"]
+    assert taskdrain["effectiveTerms"] == expected_effective_terms
+    assert taskdrain["filterArgs"] == expected_filter_args
+    assert "route agent-a team=team-main lifetime=Drain scope=all-assignable" in text
+    assert (
+        "taskdrain team=team-main lifetime=Drain applies=yes scope=all-assignable"
+        in text
+    )
+    assert f"effectiveTerms={','.join(expected_effective_terms)}" in text
 
 
 def test_serve_teams_cli_json_uses_task_backend(tmp_path, capsys):
