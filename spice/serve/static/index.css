@@ -176,7 +176,9 @@ button.primary:hover {
   background: color-mix(in srgb, var(--good) 8%, transparent);
   box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--good) 42%, transparent);
 }
-.filter-pill--private { border-style: dashed; }
+.filter-pill--private,
+.filter-pill--system { border-style: dashed; }
+.filter-pill--system { color: var(--warn); }
 .filter-pill-count {
   background: var(--accent);
   border-radius: var(--pill-radius);

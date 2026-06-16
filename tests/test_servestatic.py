@@ -626,18 +626,20 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
     chip_count_rule = css[chip_count_start : css.index("}", chip_count_start)]
 
     assert 'let renderedFilterPillsFingerprint = "";' in app_js
-    assert 'const taskFilterHeaderExtraStems = ["agent"];' in app_lanes
+    assert 'const taskFilterHeaderExtraStems = ["agent", "oops"];' in app_lanes
     assert "function filterPillModels()" in app_lanes
     assert "return taskFilterStemPills.map(taskFilterStemPillModel);" in app_lanes
     assert "function taskFilterStemPillModel(stem)" in app_lanes
+    assert 'classes.push("filter-pill--system");' in app_lanes
+    assert "function taskFilterStemScopeLabel(stemName)" in app_lanes
+    assert 'return stemName === "oops" ? "oops" : stemName + ".*";' in app_lanes
+    assert "function taskFilterStemIsSystem(stemName)" in app_lanes
+    assert 'return stemName === "agent" || stemName === "oops";' in app_lanes
     assert "boundaryDissolved: Boolean(model.drainability.boundaryDissolved)" in (
         app_lanes
     )
     assert "function taskFilterStemDrainability(stem)" in app_lanes
-    assert (
-        'if (stem.name !== "agent" && agentLifetimeDissolvesTaskBoundary(lifetime))'
-        in app_lanes
-    )
+    assert "!taskFilterStemIsSystem(stem.name)" in app_lanes
     assert "boundaryDissolved = true;" in app_lanes
     assert "agentLifetimeUsesStoredTaskFilters(lifetime)" in app_lanes
     assert 'classes.push("filter-pill--implicit");' in app_lanes
@@ -687,6 +689,7 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
         in css
     )
     assert ".filter-pill--implicit {" in css
+    assert ".filter-pill--system { color: var(--warn); }" in css
     assert (
         "box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--good) 42%, transparent);"
         in (css)
