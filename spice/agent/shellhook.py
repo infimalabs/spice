@@ -20,7 +20,52 @@ ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zshrc", ".zlogin")
 AGENT_WRAPPERS_KEY = "wrappers"
 DEFAULT_AGENT_WRAPPER_GROUP = "common"
 BUILTIN_AGENT_WRAPPER_GROUPS = {
-    DEFAULT_AGENT_WRAPPER_GROUP: {"rtk": ["run", "proxy", "grep", "find", "git"]},
+    DEFAULT_AGENT_WRAPPER_GROUP: {
+        "rtk": [
+            "aws",
+            "cargo",
+            "curl",
+            "diff",
+            "docker",
+            "dotnet",
+            "env",
+            "find",
+            "gh",
+            "git",
+            "glab",
+            "go",
+            "golangci-lint",
+            "gradlew",
+            "grep",
+            "gt",
+            "jest",
+            "kubectl",
+            "lint",
+            "ls",
+            "mypy",
+            "next",
+            "npm",
+            "npx",
+            "pip",
+            "playwright",
+            "pnpm",
+            "prettier",
+            "prisma",
+            "proxy",
+            "psql",
+            "pytest",
+            "rake",
+            "rspec",
+            "rubocop",
+            "ruff",
+            "run",
+            "tree",
+            "tsc",
+            "vitest",
+            "wc",
+            "wget",
+        ]
+    },
 }
 SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
 SHELL_HOOK_REPO_ROOT_ENV = "SPICE_SHELL_HOOK_REPO_ROOT"  # env-policy: allow
@@ -44,7 +89,7 @@ SHELL_HOOK_SURFACE_FILES = {
 }
 SHELL_HOOK_SURFACES = tuple(SHELL_HOOK_SURFACE_FILES)
 CONFIG_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
-SHELL_FUNCTION_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+SHELL_FUNCTION_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 
 
 def apply_shell_steering_environment(

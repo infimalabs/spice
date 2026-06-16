@@ -344,7 +344,7 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
         shellhook.render_agent_wrapper_lines(tmp_path)
     )
     assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
-        _expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"])
+        _expected_rtk_wrapper_lines(_default_builtin_rtk_selectors())
     )
     assert env[shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV] == ""
     assert env[shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV] == ""
@@ -401,6 +401,8 @@ def test_configured_agent_environment_installs_driver_shell_steering_hooks(
     monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
     monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(shellhook.HISTFILE_ENV, raising=False)
+    monkeypatch.delenv(shellhook.SHELL_HOOK_ORIGINAL_HISTFILE_ENV, raising=False)
     monkeypatch.setenv(shellhook.ZDOTDIR_ENV, str(real_zdotdir))
     monkeypatch.setenv(shellhook.BASH_ENV_ENV, str(real_bash_env))
 
@@ -581,7 +583,7 @@ def test_agent_wrapper_lines_adds_ordered_agent_wrapper_functions(tmp_path):
 def test_agent_wrapper_lines_uses_builtin_common_default(tmp_path):
     assert shellhook.render_agent_wrapper_lines(
         tmp_path
-    ) == _expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"])
+    ) == _expected_rtk_wrapper_lines(_default_builtin_rtk_selectors())
 
 
 def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_path):
@@ -593,7 +595,7 @@ def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_
 
     assert shellhook.render_agent_wrapper_lines(
         tmp_path
-    ) == _expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"])
+    ) == _expected_rtk_wrapper_lines(_default_builtin_rtk_selectors())
 
 
 def test_agent_wrapper_lines_project_common_group_overrides_builtin_default(tmp_path):
@@ -1078,6 +1080,53 @@ def _expected_project_common_with_pytest_wrapper_lines() -> list[str]:
     return [
         *_expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"]),
         *_expected_active_python_module_wrapper_lines(["pytest"]),
+    ]
+
+
+def _default_builtin_rtk_selectors() -> list[str]:
+    return [
+        "aws",
+        "cargo",
+        "curl",
+        "diff",
+        "docker",
+        "dotnet",
+        "env",
+        "find",
+        "gh",
+        "git",
+        "glab",
+        "go",
+        "golangci-lint",
+        "gradlew",
+        "grep",
+        "gt",
+        "jest",
+        "kubectl",
+        "lint",
+        "ls",
+        "mypy",
+        "next",
+        "npm",
+        "npx",
+        "pip",
+        "playwright",
+        "pnpm",
+        "prettier",
+        "prisma",
+        "proxy",
+        "psql",
+        "pytest",
+        "rake",
+        "rspec",
+        "rubocop",
+        "ruff",
+        "run",
+        "tree",
+        "tsc",
+        "vitest",
+        "wc",
+        "wget",
     ]
 
 

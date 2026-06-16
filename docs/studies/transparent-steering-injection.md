@@ -46,10 +46,11 @@ environment variables are missing or the command shell cannot be resolved.
 Repos may define wrapper groups under `[tool.spice.wrappers.<group>]` and let
 agents select groups with `[tool.spice.agent] wrappers = [...]`. When the agent
 does not set `wrappers`, the built-in `common` group is selected. The built-in
-`common` group maps `rtk` to `run`, `proxy`, `grep`, `find`, and `git`; repos
-can override it by defining `[tool.spice.wrappers.common]`, including local
-direct-command wrappers such as pytest. An explicit empty list disables wrapper
-generation.
+`common` group maps `rtk` to a broad set of shell-function-safe command
+selectors, including tools such as `run`, `proxy`, `grep`, `find`, `git`, `gh`,
+`npm`, `pytest`, and `ruff`; repos can override it by defining
+`[tool.spice.wrappers.common]`, including local direct-command wrappers such as
+pytest. An explicit empty list disables wrapper generation.
 
 Example:
 
