@@ -473,10 +473,28 @@ def claim(handle: str, *, steal: bool = False) -> str:
         )
     if owner and owner != actor:
         annotate(uuid, f"claim stolen: {owner} -> {actor}")
+    _subscribe_claim_project(row, actor)
     handle_text = identity.render_handle(identity.resolve(handle))
     if notes:
         return "\n".join([*(f"task: {n}" for n in notes), handle_text])
     return handle_text
+
+
+def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
+    project = str(row.get("project") or "").strip()
+    if not project:
+        return
+    stem = project.split(config.PROJECT_DELIMITER, 1)[0]
+    if config.is_internal_project_stem(stem):
+        return
+
+    from spice.serve.teams import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CLAIM
+
+    store = ServeTeamStore()
+    team_id = store.current_team_for_agent(actor)
+    if team_id is None:
+        return
+    store.add_task_filter(team_id, project, source=TASK_FILTER_SOURCE_AUTO_CLAIM)
 
 
 def unclaim(handle: str) -> str:

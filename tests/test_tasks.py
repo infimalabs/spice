@@ -12,6 +12,12 @@ import pytest
 from spice.cli.parser import build_parser
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
+from spice.serve.teams import (
+    TASK_FILTER_SOURCE_AUTO_CLAIM,
+    TASK_FILTER_SOURCE_MANUAL,
+    ServeTeamStore,
+    TeamConfig,
+)
 from spice.tasks import alloc, config, gitsync, identity, lanes, ops, render, tw
 
 pytestmark = pytest.mark.skipif(
@@ -171,6 +177,96 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     assert completed_row["review_by"] == ACTOR_A
     assert completed_row["review_finding"] == "clean"
     assert completed_row["review_note"] == "review passed"
+
+
+def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
+    task_repo, monkeypatch
+):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A, PEER_ACTOR])
+    handle = ops.add(
+        "Manual claim out of lane",
+        project="task.unit",
+        priority="medium",
+        acceptance=["manual claim subscribes the project"],
+    )
+
+    claimed = ops.claim(handle)
+    after_claim = store.team_config(team.team_id)
+
+    assert claimed == handle
+    assert after_claim.task_filters == ("task.unit",)
+    assert [entry.to_payload() for entry in after_claim.task_filter_entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CLAIM}
+    ]
+
+    ops.done(handle, validation=["claim subscription routed review"])
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    assigned = ops.next_task()
+
+    assert identity.render_handle(assigned or {}) == handle
+    assert assigned["claim_by"] == PEER_ACTOR
+
+
+def test_task_next_auto_claim_does_not_rewrite_team_filters(task_repo):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(
+        members=[ACTOR_A], config=TeamConfig(task_filters=("task.unit",))
+    )
+    handle = ops.add(
+        "Auto claim in lane",
+        project="task.unit",
+        priority="medium",
+        acceptance=["auto claim leaves filter store unchanged"],
+    )
+    before = store.global_revision()
+
+    assigned = ops.next_task()
+    after = store.global_revision()
+    entries = store.team_config(team.team_id).task_filter_entries
+
+    assert identity.render_handle(assigned or {}) == handle
+    assert after == before
+    assert [entry.to_payload() for entry in entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_MANUAL}
+    ]
+
+
+def test_manual_claim_skips_private_project_subscription(task_repo):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A])
+    handle = ops.add(
+        "Private manual claim",
+        priority="medium",
+        acceptance=["private claims do not touch team filters"],
+    )
+    before = store.global_revision()
+
+    claimed = ops.claim(handle)
+
+    assert claimed == handle
+    assert store.global_revision() == before
+    assert store.team_config(team.team_id).task_filters == ()
+
+
+def test_manual_claim_skips_subscription_for_teamless_actor(task_repo):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    handle = ops.add(
+        "Teamless manual claim",
+        project="task.unit",
+        priority="medium",
+        acceptance=["teamless claims do not create subscriptions"],
+    )
+    before = store.global_revision()
+
+    claimed = ops.claim(handle)
+
+    assert claimed == handle
+    assert store.global_revision() == before
 
 
 def test_lifetime_filter_args_use_single_visibility_contract(task_repo):
