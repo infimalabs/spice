@@ -60,7 +60,7 @@ from spice.serve.worktrees import (
 DEFAULT_SERVE_HOST = "127.0.0.1"
 DEFAULT_SERVE_PORT = 8765
 STATIC_ASSET_ROUTE_PREFIX = "/static/"
-LIFETIME_LABELS = ("Renew", "Steer", "Drive")
+LIFETIME_LABELS = ("Steer", "Drive", "Drain")
 SERVE_UNTIL_WATCHER_JOIN_SECONDS = 1.0
 METRICS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 WORK_TREE_API_METRIC_ACTIONS = frozenset(
@@ -207,19 +207,21 @@ def work_tree_send_response_payload(
 ) -> tuple[dict[str, Any], HTTPStatus]:
     text = str(payload.get("text") or "").strip()
     lifetime = str(payload.get("lifetime") or "").strip()
-    drive_agent = lifetime == "Drive"
-    renew_intent = bool(payload.get("renewAgent"))
+    drive_agent = lifetime in {"Drive", "Drain"}
     fast_mode = bool(payload.get("fastMode"))
     if not text:
         return {
             "ok": False,
             "error": "Message text is required.",
         }, HTTPStatus.BAD_REQUEST
+    predecessor = payloads.resolve_thread_id_for_target(state, target) or ""
+    renew_intent = bool(
+        predecessor and state.team_store.agent_renewal_requested(predecessor)
+    )
     _apply_lifetime_to_team(state, target, payload)
     force_new = False
     if renew_intent:
         status = agent_status(target.repo_root)
-        predecessor = payloads.resolve_thread_id_for_target(state, target) or ""
         if not predecessor:
             return (
                 {
@@ -281,6 +283,11 @@ def work_tree_send_response_payload(
                 )
             except SpiceError:
                 pass
+    renewal_agent_id = predecessor if renew_intent else send_agent_id
+    if renewal_agent_id:
+        response_payload["renewalIntent"] = payloads.renewal_intent_for_actor(
+            state.team_store, renewal_agent_id
+        )
     return response_payload, HTTPStatus.OK
 
 
@@ -427,6 +434,16 @@ def lane_signature_for_target(
             team_facts.get("configRevision", 0),
             tuple(team_facts.get("taskFilters", [])),
             team_facts.get("lifetime", ""),
+            tuple(
+                (team_facts.get("renewalIntent") or {}).get(key, "")
+                for key in (
+                    "requested",
+                    "state",
+                    "ancestorThreadId",
+                    "successorAgentId",
+                    "revision",
+                )
+            ),
         ),
         _path_signature(state.team_store.path),
     )
@@ -706,7 +723,6 @@ class _ServeHandler(BaseHTTPRequestHandler):
             request_payload = self._read_payload()
             payload, status = agent_ensure_response_payload(
                 target,
-                force_new=bool(request_payload.get("renewAgent")),
                 fast_mode=bool(request_payload.get("fastMode")),
             )
             self._send_json(payload, status)

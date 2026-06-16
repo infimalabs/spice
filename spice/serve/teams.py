@@ -26,10 +26,13 @@ from typing import Any, Iterable, Iterator
 from spice.errors import SpiceError
 
 TEAM_DATABASE_FILENAME = "serve-teams.sqlite3"
-DEFAULT_LIFETIME = "Steer"
+DEFAULT_LIFETIME = "Drive"
 DEFAULT_SPEECH_MODE = "speak"
 DEFAULT_SELECTED_VIEW = "compose"
 TEAM_ID_HEX_CHARS = 12
+RENEWAL_STATE_REQUESTED = "requested"
+RENEWAL_STATE_PENDING = "pending"
+RENEWAL_STATE_STARTED = "started"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -135,9 +138,16 @@ class TeamConfig:
 class TeamMember:
     agent_id: str
     agent_facts: dict[str, str] = field(default_factory=dict)
+    renewal: TeamRenewalState | None = None
 
     def to_payload(self) -> dict[str, Any]:
-        return {"agentId": self.agent_id, "agentFacts": dict(self.agent_facts)}
+        return {
+            "agentId": self.agent_id,
+            "agentFacts": dict(self.agent_facts),
+            "renewalIntent": renewal_intent_payload(
+                self.renewal, agent_id=self.agent_id
+            ),
+        }
 
 
 @dataclass(frozen=True)
@@ -179,6 +189,25 @@ class TeamRenewalState:
     ancestor_thread_id: str
     successor_agent_id: str
     revision: int
+
+    @property
+    def requested(self) -> bool:
+        return self.state == RENEWAL_STATE_REQUESTED
+
+
+def renewal_intent_payload(
+    renewal: TeamRenewalState | None, *, agent_id: str = ""
+) -> dict[str, Any]:
+    resolved_agent_id = renewal.agent_id if renewal is not None else agent_id
+    return {
+        "agentId": resolved_agent_id,
+        "requested": bool(renewal and renewal.requested),
+        "state": renewal.state if renewal is not None else "",
+        "teamId": renewal.team_id if renewal is not None else "",
+        "ancestorThreadId": renewal.ancestor_thread_id if renewal is not None else "",
+        "successorAgentId": renewal.successor_agent_id if renewal is not None else "",
+        "revision": renewal.revision if renewal is not None else 0,
+    }
 
 
 @dataclass(frozen=True)
@@ -487,9 +516,63 @@ class ServeTeamStore:
 
     # ---- renewal -------------------------------------------------------
 
+    def set_agent_renewal_request(
+        self, agent_id: str, *, requested: bool
+    ) -> TeamRenewalState | None:
+        agent_id = _normalized_id(agent_id, "agent_id")
+        team_id = self.open_team_for_agent(agent_id)
+        with self.connect() as connection:
+            current = self._renewal_state_locked(connection, agent_id)
+            if requested:
+                if current is not None:
+                    return current
+                revision = self._record_event(
+                    connection,
+                    "renewalRequested",
+                    team_id,
+                    {"agentId": agent_id},
+                )
+                connection.execute(
+                    "INSERT OR REPLACE INTO renewals (agent_id, team_id, state, "
+                    "ancestor_thread_id, successor_agent_id, revision) "
+                    "VALUES (?, ?, ?, '', '', ?)",
+                    (agent_id, team_id, RENEWAL_STATE_REQUESTED, revision),
+                )
+                return TeamRenewalState(
+                    agent_id=agent_id,
+                    team_id=team_id,
+                    state=RENEWAL_STATE_REQUESTED,
+                    ancestor_thread_id="",
+                    successor_agent_id="",
+                    revision=revision,
+                )
+            if current is None or current.state != RENEWAL_STATE_REQUESTED:
+                return current
+            self._record_event(
+                connection,
+                "renewalRequestCleared",
+                current.team_id,
+                {"agentId": agent_id},
+            )
+            connection.execute(
+                "DELETE FROM renewals WHERE agent_id = ? AND state = ?",
+                (agent_id, RENEWAL_STATE_REQUESTED),
+            )
+            return None
+
+    def agent_renewal_requested(self, agent_id: str) -> bool:
+        renewal = self.renewal_state_for_agent(agent_id)
+        return bool(renewal and renewal.requested)
+
+    def renewal_state_for_agent(self, agent_id: str) -> TeamRenewalState | None:
+        agent_id = _normalized_id(agent_id, "agent_id")
+        with self.connect() as connection:
+            return self._renewal_state_locked(connection, agent_id)
+
     def record_pending_renewal(
         self, *, agent_id: str, ancestor_thread_id: str
     ) -> TeamRenewalState:
+        agent_id = _normalized_id(agent_id, "agent_id")
         team_id = self.open_team_for_agent(agent_id)
         with self.connect() as connection:
             revision = self._record_event(
@@ -501,13 +584,19 @@ class ServeTeamStore:
             connection.execute(
                 "INSERT OR REPLACE INTO renewals (agent_id, team_id, state, "
                 "ancestor_thread_id, successor_agent_id, revision) "
-                "VALUES (?, ?, 'pending', ?, '', ?)",
-                (agent_id, team_id, ancestor_thread_id, revision),
+                "VALUES (?, ?, ?, ?, '', ?)",
+                (
+                    agent_id,
+                    team_id,
+                    RENEWAL_STATE_PENDING,
+                    ancestor_thread_id,
+                    revision,
+                ),
             )
         return TeamRenewalState(
             agent_id=agent_id,
             team_id=team_id,
-            state="pending",
+            state=RENEWAL_STATE_PENDING,
             ancestor_thread_id=ancestor_thread_id,
             successor_agent_id="",
             revision=revision,
@@ -520,6 +609,10 @@ class ServeTeamStore:
         successor_agent_id: str,
         ancestor_thread_id: str = "",
     ) -> TeamRenewalState:
+        predecessor_agent_id = _normalized_id(
+            predecessor_agent_id, "predecessor_agent_id"
+        )
+        successor_agent_id = _normalized_id(successor_agent_id, "successor_agent_id")
         team_id = self.open_team_for_agent(predecessor_agent_id)
         with self.connect() as connection:
             revision = self._record_event(
@@ -538,10 +631,11 @@ class ServeTeamStore:
             connection.execute(
                 "INSERT OR REPLACE INTO renewals (agent_id, team_id, state, "
                 "ancestor_thread_id, successor_agent_id, revision) "
-                "VALUES (?, ?, 'started', ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     predecessor_agent_id,
                     team_id,
+                    RENEWAL_STATE_STARTED,
                     ancestor_thread_id,
                     successor_agent_id,
                     revision,
@@ -550,7 +644,7 @@ class ServeTeamStore:
         return TeamRenewalState(
             agent_id=predecessor_agent_id,
             team_id=team_id,
-            state="started",
+            state=RENEWAL_STATE_STARTED,
             ancestor_thread_id=ancestor_thread_id,
             successor_agent_id=successor_agent_id,
             revision=revision,
@@ -723,6 +817,19 @@ class ServeTeamStore:
             "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY joined_at",
             (team_id,),
         ).fetchall()
+        renewal_by_agent: dict[str, TeamRenewalState] = {}
+        if member_rows:
+            placeholders = ",".join("?" for _ in member_rows)
+            renewal_rows = connection.execute(
+                "SELECT agent_id, team_id, state, ancestor_thread_id, "
+                f"successor_agent_id, revision FROM renewals "
+                f"WHERE agent_id IN ({placeholders})",
+                tuple(str(member["agent_id"]) for member in member_rows),
+            ).fetchall()
+            renewal_by_agent = {
+                str(renewal["agent_id"]): _renewal_state_from_row(renewal)
+                for renewal in renewal_rows
+            }
         return TeamState(
             team_id=team_id,
             status=str(row["status"]),
@@ -730,9 +837,23 @@ class ServeTeamStore:
             config_revision=int(row["config_revision"]),
             config=_config_from_row(row),
             members=tuple(
-                TeamMember(agent_id=member["agent_id"]) for member in member_rows
+                TeamMember(
+                    agent_id=member["agent_id"],
+                    renewal=renewal_by_agent.get(str(member["agent_id"])),
+                )
+                for member in member_rows
             ),
         )
+
+    def _renewal_state_locked(
+        self, connection: sqlite3.Connection, agent_id: str
+    ) -> TeamRenewalState | None:
+        row = connection.execute(
+            "SELECT agent_id, team_id, state, ancestor_thread_id, "
+            "successor_agent_id, revision FROM renewals WHERE agent_id = ?",
+            (agent_id,),
+        ).fetchone()
+        return _renewal_state_from_row(row) if row is not None else None
 
     def _require_team(
         self, connection: sqlite3.Connection, team_id: str
@@ -1023,6 +1144,11 @@ class TeamCommandService:
             current = self.store.team_config(team_id)
             patch = payload.get("configPatch") or {}
             self.store.update_team_config(team_id, _patched_config(current, patch))
+        elif command == "setAgentRenewalIntent":
+            self.store.set_agent_renewal_request(
+                _required(payload, "agentId"),
+                requested=bool(payload.get("requested")),
+            )
         else:
             raise SpiceError(f"unknown team command {command!r}")
         snapshot = self.store.team_snapshot()
@@ -1044,6 +1170,17 @@ def _agent_alias_ids(agent_id: str, aliases: Iterable[str]) -> list[str]:
         if normalized not in ids:
             ids.append(normalized)
     return ids
+
+
+def _renewal_state_from_row(row: sqlite3.Row) -> TeamRenewalState:
+    return TeamRenewalState(
+        agent_id=str(row["agent_id"]),
+        team_id=str(row["team_id"]),
+        state=str(row["state"]),
+        ancestor_thread_id=str(row["ancestor_thread_id"]),
+        successor_agent_id=str(row["successor_agent_id"]),
+        revision=int(row["revision"]),
+    )
 
 
 def _config_from_payload(raw: Any) -> TeamConfig:

@@ -137,6 +137,41 @@ def test_team_command_service_reorders_team_agents(tmp_path):
     ]
 
 
+def test_team_command_service_toggles_agent_renewal_intent(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    service = TeamCommandService(store)
+    created = service.apply({"command": "createTeam", "members": ["agent-a"]})
+
+    enabled = service.apply(
+        {
+            "command": "setAgentRenewalIntent",
+            "agentId": "agent-a",
+            "requested": True,
+            "expectedRevision": created.revision,
+        }
+    )
+    enabled_member = enabled.snapshot.teams[0].to_payload()["members"][0]
+
+    assert store.agent_renewal_requested("agent-a") is True
+    assert enabled_member["renewalIntent"]["agentId"] == "agent-a"
+    assert enabled_member["renewalIntent"]["requested"] is True
+    assert enabled_member["renewalIntent"]["state"] == "requested"
+
+    disabled = service.apply(
+        {
+            "command": "setAgentRenewalIntent",
+            "agentId": "agent-a",
+            "requested": False,
+            "expectedRevision": enabled.revision,
+        }
+    )
+    disabled_member = disabled.snapshot.teams[0].to_payload()["members"][0]
+
+    assert store.renewal_state_for_agent("agent-a") is None
+    assert disabled_member["renewalIntent"]["requested"] is False
+    assert disabled_member["renewalIntent"]["state"] == ""
+
+
 def test_removing_final_agent_closes_team(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(members=["agent-a"])

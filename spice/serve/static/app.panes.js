@@ -100,7 +100,7 @@ function laneFilterPaneRenderModel(lane) {
   const removals = [...lane.selectedFilterRemovals].sort();
   const pending = [...lane.filterPickerPendingAssignments].sort();
   const availableFilters = laneAvailableTaskFilters(lane, pickerAssignedFilters);
-  const driving = laneEffectiveLifetime(lane) === "Drive";
+  const driving = agentLifetimeAutoManagesTasks(laneEffectiveLifetime(lane));
   const pickerActions = lane.filterPickerOpen
     ? laneFilterPickerActions(
         lane,

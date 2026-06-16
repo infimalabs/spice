@@ -781,17 +781,18 @@ def test_work_tree_send_drive_keeps_control_out_of_request_text(tmp_path, monkey
     assert empty_payload == {"ok": False, "error": "Message text is required."}
 
 
-def test_running_renew_sends_handoff_request_and_records_pending_renewal(
+def test_running_requested_renewal_sends_handoff_and_marks_pending(
     tmp_path, monkeypatch
 ):
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
     state.team_store.create_team(members=[THREAD_A])
+    state.team_store.set_agent_renewal_request(THREAD_A, requested=True)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
 
     payload, status = work_tree_send_response_payload(
-        state, target, {"text": "wrap this up", "renewAgent": True}
+        state, target, {"text": "wrap this up"}
     )
 
     item = collect_inbox_items(repo)[0]
@@ -804,18 +805,21 @@ def test_running_renew_sends_handoff_request_and_records_pending_renewal(
     assert status == HTTPStatus.OK
     assert payload["agentEnsure"] == {}
     assert RENEWAL_HANDOFF_REQUEST_SUFFIX in inbox_request_body(item.text)
+    assert payload["renewalIntent"]["requested"] is False
+    assert payload["renewalIntent"]["state"] == "pending"
     assert renewal["state"] == "pending"
     assert renewal["ancestor_thread_id"] == THREAD_A
     assert renewal["successor_agent_id"] == ""
 
 
-def test_stopped_renew_starts_successor_and_moves_team_membership(
+def test_stopped_requested_renewal_starts_successor_and_moves_team_membership(
     tmp_path, monkeypatch
 ):
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
     created = state.team_store.create_team(members=[THREAD_A])
+    state.team_store.set_agent_renewal_request(THREAD_A, requested=True)
     ensure_calls: list[dict[str, object]] = []
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
 
@@ -828,12 +832,14 @@ def test_stopped_renew_starts_successor_and_moves_team_membership(
     payload, status = work_tree_send_response_payload(
         state,
         target,
-        {"text": "continue from handoff", "renewAgent": True, "fastMode": True},
+        {"text": "continue from handoff", "fastMode": True},
     )
 
     body = inbox_request_body(collect_inbox_items(repo)[0].text)
     assert status == HTTPStatus.OK
     assert payload["agentEnsure"]["threadId"] == THREAD_B
+    assert payload["renewalIntent"]["requested"] is False
+    assert payload["renewalIntent"]["state"] == "started"
     assert renewal_rehydration_text(THREAD_A) in body
     assert ensure_calls == [
         {

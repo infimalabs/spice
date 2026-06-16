@@ -61,6 +61,20 @@ def test_team_diagnostics_include_events_routes_and_taskdrain_filters(tmp_path):
     assert f"renewal {AGENT_A} state=pending team={TEAM_ID}" in text
 
 
+def test_team_diagnostics_include_requested_renewal_intent(tmp_path):
+    store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
+    store.create_team(team_id=TEAM_ID, members=[AGENT_A])
+
+    renewal = store.set_agent_renewal_request(AGENT_A, requested=True)
+    payload = team_diagnostics_payload(store=store)
+    text = render_team_diagnostics(payload)
+
+    assert renewal is not None
+    assert payload["renewals"][0]["state"] == "requested"
+    assert payload["renewals"][0]["revision"] == renewal.revision
+    assert f"renewal {AGENT_A} state=requested team={TEAM_ID}" in text
+
+
 def test_empty_team_diagnostics_have_stable_sections(tmp_path):
     store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
 
@@ -80,11 +94,11 @@ def test_empty_team_diagnostics_have_stable_sections(tmp_path):
     assert payload["taskDrainFilters"] == [
         {
             "teamId": team["teamId"],
-            "lifetime": "Steer",
+            "lifetime": "Drive",
             "taskFilters": [],
             "filterTerms": [],
             "filterArgs": [],
-            "applies": False,
+            "applies": True,
         }
     ]
     assert payload["renewals"] == []
@@ -95,7 +109,7 @@ def test_empty_team_diagnostics_have_stable_sections(tmp_path):
     assert "members:\n  (none)" in text
     assert "effective routes:\n  (none)" in text
     assert "taskdrain team=" in text
-    assert " lifetime=Steer applies=no " in text
+    assert " lifetime=Drive applies=yes " in text
     assert "renewals:\n  (none)" in text
 
 

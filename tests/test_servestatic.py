@@ -346,6 +346,20 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
     )
 
 
+def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag():
+    app = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
+
+    assert 'const agentLifetimeLabels = ["Steer", "Drive", "Drain"];' in app
+    assert "function agentLifetimeAutoManagesTasks(lifetime) {" in app
+    assert 'lifetime === "Drive" || lifetime === "Drain"' in app
+    assert "data-lifetime-label>Drive</span>" in app_shell
+    assert "data-submit>Drive</button>" in app_shell
+    assert "renewAgent" not in app_controls
+    assert '"Renew"' not in app
+
+
 def test_static_sync_composer_placeholders_refreshes_existing_quote_textareas():
     app_shell = _shell_and_composer_text()
     sync_start = app_shell.index("function syncComposerPlaceholders(lane) {")

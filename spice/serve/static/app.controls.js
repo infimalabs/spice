@@ -87,7 +87,6 @@ function submitLaneForm(lane, event, targetId = "") {
   event.preventDefault();
   const host = laneGroupHost(lane);
   const lifetime = laneEffectiveLifetime(host);
-  const renewAgent = lifetime === "Renew";
   let submitted = false;
   const targetEntries = targetId
     ? [[targetId, host.shardTextareas.get(targetId)]]
@@ -112,7 +111,6 @@ function submitLaneForm(lane, event, targetId = "") {
       member,
       {
         text,
-        renewAgent,
         lifetime,
         fastMode: fastModeEnabled,
         threadId: member.targetThreadId || "",

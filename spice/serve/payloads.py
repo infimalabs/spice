@@ -23,7 +23,7 @@ from spice.serve.agentapi import (
     pending_inbox_count_after_agent_ensure,
 )
 from spice.serve.markdown import render_message_html
-from spice.serve.teams import ServeTeamStore
+from spice.serve.teams import ServeTeamStore, renewal_intent_payload
 from spice.serve.worktrees import WorktreeTarget
 from spice.tasks import config as task_config
 
@@ -107,7 +107,17 @@ def team_facts_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
         "configRevision": team.config_revision,
         "taskFilters": list(team.config.task_filters),
         "lifetime": team.config.lifetime,
+        "renewalIntent": renewal_intent_for_actor(store, actor),
     }
+
+
+def renewal_intent_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
+    if not actor:
+        return renewal_intent_payload(None)
+    return renewal_intent_payload(
+        store.renewal_state_for_agent(actor),
+        agent_id=actor,
+    )
 
 
 def target_activity_items(
@@ -198,6 +208,7 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
         binding_error = agent_binding_error(target.repo_root, status)
         binding_status = _binding_status(thread_id, binding_error)
         team_facts = team_facts_for_actor(state.team_store, thread_id)
+        renewal_intent = renewal_intent_for_actor(state.team_store, thread_id)
         items, error = target_activity_items(target, thread_id)
         status_line = _status_line_payload_from_status(
             status=status,
@@ -221,6 +232,7 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
                 "teamRevision": team_facts.get("teamRevision", 0),
                 "configRevision": team_facts.get("configRevision", 0),
                 "lifetime": team_facts.get("lifetime", ""),
+                "renewalIntent": renewal_intent,
                 "taskFilterInventory": inventory,
                 "laneInfo": _lane_info_payload(target, thread_id),
                 "bindingStatus": binding_status,
@@ -395,6 +407,7 @@ def messages_payload_for_worktree(
     )
     pending = pending_inbox_count_after_agent_ensure(pending, agent_ensure)
     team_facts = team_facts_for_actor(state.team_store, thread_id)
+    renewal_intent = renewal_intent_for_actor(state.team_store, thread_id)
     status = agent_status(target.repo_root)
     return {
         "messages": [item.to_payload() for item in items],
@@ -408,6 +421,7 @@ def messages_payload_for_worktree(
         "teamRevision": team_facts.get("teamRevision", 0),
         "configRevision": team_facts.get("configRevision", 0),
         "lifetime": team_facts.get("lifetime", ""),
+        "renewalIntent": renewal_intent,
         "taskFilterInventory": task_filter_inventory(),
         "laneMetrics": lane_metrics_payload(
             state, target, thread_id=thread_id, items=items, status=status
