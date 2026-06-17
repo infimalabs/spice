@@ -577,7 +577,7 @@ function renderSpiceMenuTargets() {
   } else {
     const choices = targets
       .slice()
-      .sort(compareTargetChoices);
+      .sort(compareSpiceMenuTargetChoices);
     const groups = spiceMenuTeamGroups(choices);
     list.replaceChildren(...groups.map(renderSpiceMenuTeamGroup));
     if (!groups.length) list.textContent = "no agents available";
@@ -606,9 +606,9 @@ function spiceMenuTeamGroups(choices) {
     grouped.get(teamId).targets.push(target);
   }
   const groups = [...grouped.values()];
-  for (const group of groups) group.targets.sort(compareTargetChoices);
+  for (const group of groups) group.targets.sort(compareSpiceMenuTargetChoices);
   groups.sort(compareSpiceMenuTeamGroups);
-  unassigned.sort(compareTargetChoices);
+  unassigned.sort(compareSpiceMenuTargetChoices);
   if (choices.length)
     groups.push({
       teamId: "",
@@ -620,12 +620,21 @@ function spiceMenuTeamGroups(choices) {
 }
 
 function compareSpiceMenuTeamGroups(left, right) {
-  const byChoice = compareTargetChoices(
-    left.targets[0] || {},
-    right.targets[0] || {},
+  const byName = spiceMenuTeamSortKey(left).localeCompare(
+    spiceMenuTeamSortKey(right),
   );
-  if (byChoice) return byChoice;
+  if (byName) return byName;
   return String(left.teamId || "").localeCompare(String(right.teamId || ""));
+}
+
+function spiceMenuTeamSortKey(group) {
+  return group.targets.map(targetChoiceName).join("\n");
+}
+
+function compareSpiceMenuTargetChoices(left, right) {
+  const byName = targetChoiceName(left).localeCompare(targetChoiceName(right));
+  if (byName) return byName;
+  return String(left.id || "").localeCompare(String(right.id || ""));
 }
 
 function renderSpiceMenuTeamGroup(group) {
