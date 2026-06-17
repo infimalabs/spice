@@ -200,7 +200,7 @@ The one idea above isn't arbitrary; four theses generate it.
    `spice/agent/driver.py`. Codex and Claude Code ship today; a new supported
    CLI is another driver value, not a broad mode split.
 2. **Agent launch defaults have two scopes.** Tracked `[tool.spice.agent]`
-   project defaults set model and thinking for every clone; current-worktree
+   project defaults set model and effort for every clone; current-worktree
    overrides live in `.spice/config/state.json` through
    `spice config agent --scope worktree`. Explicit launch flags still win.
 3. **The opinions are configuration with teeth.** Limits (LOC, CCN,

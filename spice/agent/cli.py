@@ -45,7 +45,7 @@ def configure_agent_parser(subparsers: Any) -> None:
     ensure.add_argument("--dry-run", action="store_true")
     ensure.add_argument("--force-new", action="store_true")
     ensure.add_argument("--model", default="")
-    ensure.add_argument("--thinking", default="")
+    ensure.add_argument("--effort", default="")
     ensure.add_argument("--personality")
     ensure.add_argument("--agent-bin", default="")
     ensure.add_argument("--fast-mode", action="store_true")
@@ -101,7 +101,7 @@ def handle_agent(args: argparse.Namespace) -> int:
             dry_run=bool(getattr(args, "dry_run", False)),
             force_new=bool(getattr(args, "force_new", False)),
             model=str(args.model),
-            reasoning_effort=str(args.thinking),
+            reasoning_effort=str(args.effort),
             personality=getattr(args, "personality", None),
             agent_bin=str(getattr(args, "agent_bin", "") or ""),
             fast_mode=bool(getattr(args, "fast_mode", False)),
@@ -120,7 +120,7 @@ def render_agent_status(status: Any) -> str:
         f"thread={status.thread_id or '-'}",
         (
             f"model={status.model or '-'} "
-            f"thinking={status.reasoning_effort or '-'} "
+            f"effort={status.reasoning_effort or '-'} "
             f"service_tier={status.service_tier or '-'}"
         ),
         f"started_at={status.started_at or '-'}",

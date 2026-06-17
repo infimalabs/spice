@@ -265,7 +265,7 @@ class CodexDriver(AgentDriver):
         return [*command, prompt]
 
 
-# Claude Code's `--effort` vocabulary. The configured spice thinking value is
+# Claude Code's `--effort` vocabulary. The configured spice effort value is
 # Codex-shaped (it ships `xhigh`); map the near-equivalents and drop anything
 # Claude would reject so a Codex-tuned config never crashes a Claude launch.
 CLAUDE_EFFORT_CHOICES = frozenset({"low", "medium", "high", "max"})

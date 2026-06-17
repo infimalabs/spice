@@ -36,9 +36,9 @@ from spice.agent.shellhook import apply_shell_steering_environment
 from spice.agent.watchdog import spawn_supervised_agent
 from spice.agent.wrap import agent_state_dir
 from spice.config import (
+    configured_agent_effort,
     configured_agent_model,
     configured_agent_personality,
-    configured_agent_thinking,
 )
 from spice.errors import SpiceError
 from spice.locking import lock_fd_exclusive, unlock_fd
@@ -200,7 +200,7 @@ def ensure_agent(
         model = model or configured_agent_model(resolved_root) or driver.default_model
         reasoning_effort = (
             reasoning_effort
-            or configured_agent_thinking(resolved_root)
+            or configured_agent_effort(resolved_root)
             or driver.default_reasoning_effort
         )
         command = driver.build_exec_command(

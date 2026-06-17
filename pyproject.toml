@@ -56,7 +56,7 @@ package_roots = ["spice"]
 
 [tool.spice.agent]
 model = "gpt-5.5"
-thinking = "xhigh"
+effort = "xhigh"
 
 [tool.spice.wrappers.common]
 rtk = ["run", "proxy", "grep", "find", "git"]

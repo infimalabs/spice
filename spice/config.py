@@ -31,10 +31,10 @@ AGENT_PERSONALITY_KEY = "personality"
 AGENT_PERSONALITY_CHOICES = ("none", "friendly", "pragmatic")
 DEFAULT_AGENT_PERSONALITY = "pragmatic"
 AGENT_MODEL_KEY = "model"
-AGENT_THINKING_KEY = "thinking"
+AGENT_EFFORT_KEY = "effort"
 AGENT_DRIVER_KEY = "driver"
 AGENT_DRIVER_CHOICES = ("codex", "claude")
-AGENT_LAUNCH_KEYS = (AGENT_MODEL_KEY, AGENT_THINKING_KEY, AGENT_DRIVER_KEY)
+AGENT_LAUNCH_KEYS = (AGENT_MODEL_KEY, AGENT_EFFORT_KEY, AGENT_DRIVER_KEY)
 
 JUDGE_KEY = "judge"
 JUDGE_BIN_KEY = "bin"
@@ -130,14 +130,14 @@ def configured_agent_model(repo_root: Path | None = None) -> str:
     )
 
 
-def configured_agent_thinking(repo_root: Path | None = None) -> str:
-    """Codex reasoning effort from the configured spice thinking setting."""
+def configured_agent_effort(repo_root: Path | None = None) -> str:
+    """Codex reasoning effort from the configured spice effort setting."""
     root = _root_or_current(repo_root)
     if root is None:
         return ""
     return (
-        _agent_worktree_value(root, AGENT_THINKING_KEY)
-        or _agent_project_value(root, AGENT_THINKING_KEY)
+        _agent_worktree_value(root, AGENT_EFFORT_KEY)
+        or _agent_project_value(root, AGENT_EFFORT_KEY)
         or ""
     )
 
@@ -180,7 +180,7 @@ def effective_agent_config(repo_root: Path) -> dict[str, str]:
         key: value
         for key, value in {
             AGENT_MODEL_KEY: configured_agent_model(repo_root),
-            AGENT_THINKING_KEY: configured_agent_thinking(repo_root),
+            AGENT_EFFORT_KEY: configured_agent_effort(repo_root),
             AGENT_DRIVER_KEY: configured_agent_driver(repo_root),
         }.items()
         if value

@@ -41,10 +41,10 @@ def configure_config_parser(subparsers: Any) -> None:
 
     agent = actions.add_parser(
         "agent",
-        help="Configure agent launch settings (driver, model, thinking).",
+        help="Configure agent launch settings (driver, model, effort).",
     )
     agent.add_argument("--model", help="Model override for agent launches.")
-    agent.add_argument("--thinking", help="Thinking effort for agent launches.")
+    agent.add_argument("--effort", help="Reasoning effort for agent launches.")
     agent.add_argument(
         "--driver",
         choices=config.AGENT_DRIVER_CHOICES,
@@ -108,8 +108,8 @@ def handle_config(args: argparse.Namespace) -> int:
         values: dict[str, str] = {}
         if args.model and args.model.strip():
             values[config.AGENT_MODEL_KEY] = args.model.strip()
-        if args.thinking and args.thinking.strip():
-            values[config.AGENT_THINKING_KEY] = args.thinking.strip()
+        if args.effort and args.effort.strip():
+            values[config.AGENT_EFFORT_KEY] = args.effort.strip()
         if getattr(args, "driver", None):
             values[config.AGENT_DRIVER_KEY] = str(args.driver)
         if not values:
@@ -155,5 +155,5 @@ def _agent_scope_line(scope: str, values: dict[str, str]) -> str:
         f"agent {scope} "
         f"driver={values.get(config.AGENT_DRIVER_KEY) or '-'} "
         f"model={values.get(config.AGENT_MODEL_KEY) or '-'} "
-        f"thinking={values.get(config.AGENT_THINKING_KEY) or '-'}"
+        f"effort={values.get(config.AGENT_EFFORT_KEY) or '-'}"
     )

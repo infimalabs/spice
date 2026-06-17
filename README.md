@@ -122,20 +122,20 @@ mounted-command boundaries, is in
 
 ### Agent defaults
 
-A project can set its default supervised-agent launch model and thinking in
+A project can set its default supervised-agent launch model and effort in
 tracked config, either by editing `pyproject.toml` or by running
-`spice config agent --scope project --model ... --thinking ...`:
+`spice config agent --scope project --model ... --effort ...`:
 
 ```toml
 [tool.spice.agent]
 model = "gpt-5.4"
-thinking = "low"
+effort = "low"
 ```
 
 An operator can override those defaults for just the current worktree:
 
 ```sh
-spice config agent --scope worktree --model gpt-5.4 --thinking low
+spice config agent --scope worktree --model gpt-5.4 --effort low
 ```
 
 Resolution order is explicit launch flags, then worktree config, then tracked

@@ -44,7 +44,7 @@ def agent_status_payload(target: WorktreeTarget) -> dict[str, Any]:
         "processGroupId": status.process_group_id or 0,
         "threadId": status.thread_id,
         "model": status.model,
-        "thinking": status.reasoning_effort,
+        "effort": status.reasoning_effort,
         "serviceTier": status.service_tier,
         "launchable": not status.running,
         "bindingStatus": "mismatch"
