@@ -95,6 +95,8 @@ const context = {
   renderMessagesIfChanged: () => {},
   syncComposerShards: () => {},
   syncLaneEffectiveControls: () => {},
+  laneLifetimeRuntimeState: () => ({ pendingLifetimeCommit: "" }),
+  restoreLaneLifetimeRuntimeState: () => {},
   relativeTime: () => "2m ago",
   setLaneStatus(lane, statusLine) {
     statusWrites.push({
