@@ -204,7 +204,10 @@ function ensureTeamMemberLane(targetId, team, hint = null) {
   if (member && member.renewalIntent) lane.renewalIntent = member.renewalIntent;
   if (Array.isArray(config.taskFilters))
     lane.taskFilters = uniqueStringList(config.taskFilters);
-  if (config.lifetime) applyServerLaneLifetime(lane, config.lifetime);
+  if (config.lifetime)
+    applyServerLaneLifetime(lane, config.lifetime, {
+      configRevision: config.revision,
+    });
   if (!hint && config.speechMode && speechModes.includes(config.speechMode))
     lane.speechMode = config.speechMode;
   syncLaneEffectiveControls(lane);

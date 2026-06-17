@@ -27,20 +27,57 @@ function setLaneSpeechMode(lane, mode) {
 function setLaneLifetime(lane, label) {
   const host = laneGroupHost(lane);
   const lifetime = agentLifetimeLabels.includes(label) ? label : defaultAgentLifetime;
+  host.serverLifetime = laneServerLifetime(host);
   host.lifetime = lifetime;
   host.pendingLifetimeCommit = lifetime;
+  host.pendingLifetimeConfigRevision = Math.max(
+    0,
+    Number(host.configRevision) || 0,
+  );
   syncLaneEffectiveControls(host);
   renderFilterPills();
   updateTaskDrainForLane(host);
 }
 
-function applyServerLaneLifetime(lane, lifetime) {
+function laneServerLifetime(lane) {
+  const host = laneGroupHost(lane);
+  return agentLifetimeLabels.includes(host.serverLifetime)
+    ? host.serverLifetime
+    : agentLifetimeLabels.includes(host.lifetime)
+      ? host.lifetime
+      : defaultAgentLifetime;
+}
+
+function laneLifetimeRevision(options = {}) {
+  return Math.max(0, Number(options.configRevision) || 0);
+}
+
+function serverLifetimeSupersedesPending(host, options = {}) {
+  if (options.force) return true;
+  if (options.supersedePending === false) return false;
+  const revision = laneLifetimeRevision(options);
+  return (
+    revision > 0 &&
+    revision > Math.max(0, Number(host.pendingLifetimeConfigRevision) || 0)
+  );
+}
+
+function clearLaneLifetimeCommitState(host) {
+  host.pendingLifetimeCommit = "";
+  host.pendingLifetimeConfigRevision = 0;
+}
+
+function applyServerLaneLifetime(lane, lifetime, options = {}) {
   if (!agentLifetimeLabels.includes(lifetime)) return false;
   const host = laneGroupHost(lane);
-  if (host.pendingLifetimeCommit && lifetime !== host.pendingLifetimeCommit)
-    return false;
-  if (host.pendingLifetimeCommit === lifetime) host.pendingLifetimeCommit = "";
+  if (host.pendingLifetimeCommit && lifetime !== host.pendingLifetimeCommit) {
+    if (!serverLifetimeSupersedesPending(host, options)) return false;
+    clearLaneLifetimeCommitState(host);
+  }
+  if (host.pendingLifetimeCommit === lifetime)
+    clearLaneLifetimeCommitState(host);
   const previous = host.lifetime;
+  host.serverLifetime = lifetime;
   host.lifetime = lifetime;
   syncLaneEffectiveControls(host);
   return previous !== lifetime;
@@ -48,7 +85,50 @@ function applyServerLaneLifetime(lane, lifetime) {
 
 function clearLaneLifetimeCommit(lane, lifetime) {
   const host = laneGroupHost(lane);
-  if (host.pendingLifetimeCommit === lifetime) host.pendingLifetimeCommit = "";
+  if (host.pendingLifetimeCommit === lifetime) clearLaneLifetimeCommitState(host);
+}
+
+function rollbackLaneLifetimeCommit(lane, lifetime, serverLifetime = "") {
+  const host = laneGroupHost(lane);
+  if (host.pendingLifetimeCommit !== lifetime) return false;
+  const authoritativeLifetime = agentLifetimeLabels.includes(serverLifetime)
+    ? serverLifetime
+    : laneServerLifetime(host);
+  clearLaneLifetimeCommitState(host);
+  return applyServerLaneLifetime(host, authoritativeLifetime, { force: true });
+}
+
+function laneLifetimeRuntimeState(lane) {
+  const host = laneGroupHost(lane);
+  return {
+    lifetime: host.lifetime,
+    serverLifetime: laneServerLifetime(host),
+    pendingLifetimeCommit: host.pendingLifetimeCommit || "",
+    pendingLifetimeConfigRevision: Math.max(
+      0,
+      Number(host.pendingLifetimeConfigRevision) || 0,
+    ),
+  };
+}
+
+function restoreLaneLifetimeRuntimeState(lane, state) {
+  if (!state) return;
+  const host = laneGroupHost(lane);
+  host.lifetime = agentLifetimeLabels.includes(state.lifetime)
+    ? state.lifetime
+    : defaultAgentLifetime;
+  host.serverLifetime = agentLifetimeLabels.includes(state.serverLifetime)
+    ? state.serverLifetime
+    : host.lifetime;
+  host.pendingLifetimeCommit = agentLifetimeLabels.includes(
+    state.pendingLifetimeCommit,
+  )
+    ? state.pendingLifetimeCommit
+    : "";
+  host.pendingLifetimeConfigRevision = Math.max(
+    0,
+    Number(state.pendingLifetimeConfigRevision) || 0,
+  );
 }
 
 function syncLaneEffectiveControls(lane) {

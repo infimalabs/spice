@@ -18,6 +18,9 @@ let laneDragState = null;
 let composerMoveDragState = null;
 
 function reconcileLaneGroups(groupRuns) {
+  const lifetimeStateByTargetId = new Map();
+  for (const lane of laneStates.values())
+    lifetimeStateByTargetId.set(lane.targetId, laneLifetimeRuntimeState(lane));
   for (const lane of laneStates.values()) {
     lane.groupTopology = null;
     lane.element.classList.remove("lane--shadowed");
@@ -34,6 +37,10 @@ function reconcileLaneGroups(groupRuns) {
       hostTargetId: host.targetId,
       memberTargetIds,
     };
+    restoreLaneLifetimeRuntimeState(
+      host,
+      pendingLaneLifetimeStateForMembers(members, lifetimeStateByTargetId),
+    );
     for (const shadow of shadows) {
       shadow.groupTopology = {
         role: "member",
@@ -48,6 +55,14 @@ function reconcileLaneGroups(groupRuns) {
     syncFusedLaneChrome(lane);
     renderMessagesIfChanged(lane);
   }
+}
+
+function pendingLaneLifetimeStateForMembers(members, lifetimeStateByTargetId) {
+  for (const member of members) {
+    const state = lifetimeStateByTargetId.get(member.targetId);
+    if (state && state.pendingLifetimeCommit) return state;
+  }
+  return null;
 }
 
 function laneGroupRole(lane) {

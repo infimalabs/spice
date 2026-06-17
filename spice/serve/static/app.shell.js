@@ -109,6 +109,7 @@ function createLaneState(targetId, hint = null, options = {}) {
     ...laneStreamState(target),
     speechMode: hint ? hint.speechMode : defaultSpeechMode,
     lifetime: target.lifetime || defaultAgentLifetime,
+    serverLifetime: target.lifetime || defaultAgentLifetime,
     selectedView: hint ? hint.selectedView : defaultLaneViewMode,
     taskFilters: uniqueStringList(target.taskFilters || []),
     laneFilterVersion: target.laneFilterVersion || "",
@@ -117,6 +118,7 @@ function createLaneState(targetId, hint = null, options = {}) {
     laneInfo: target.laneInfo || { summaryRows: [], members: [] },
     renewalIntent: target.renewalIntent || {},
     pendingLifetimeCommit: "",
+    pendingLifetimeConfigRevision: 0,
     privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),
     teamId: target.teamId || "",
     teamRevision: target.teamRevision || 0,
@@ -185,7 +187,10 @@ function syncEmptyTeamLane(lane, team = {}) {
   lane.branchName = "empty team";
   lane.targetThreadId = "";
   lane.activeThreadId = "";
-  if (config.lifetime) applyServerLaneLifetime(lane, config.lifetime);
+  if (config.lifetime)
+    applyServerLaneLifetime(lane, config.lifetime, {
+      configRevision: config.revision,
+    });
   if (config.speechMode && speechModes.includes(config.speechMode))
     lane.speechMode = config.speechMode;
   if (Array.isArray(config.taskFilters))

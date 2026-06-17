@@ -832,26 +832,49 @@ function updateTaskDrainForLane(lane, fields = {}) {
     .then((response) => {
       const result = response.result || {};
       for (const recipient of recipients)
-        applyTaskDrainRouteConfig(recipient, result);
+        applyTaskDrainRouteConfig(recipient, result, {
+          supersedePending: false,
+        });
+      settleLaneLifetimeCommit(host, requestedLifetime, result);
       if (result.ok === false) {
-        clearLaneLifetimeCommit(host, requestedLifetime);
         setLaneTransientStatus(host, result.error || "task drain update failed");
       }
     })
     .catch(() => {
-      clearLaneLifetimeCommit(host, requestedLifetime);
+      rollbackLaneLifetimeCommit(host, requestedLifetime);
       if (isLaneOpen(host))
         setLaneTransientStatus(host, "task drain update failed");
     });
 }
 
-function applyTaskDrainRouteConfig(lane, result) {
-  const config = result.ok === false ? result : result.route;
-  if (!config || !Array.isArray(config.taskFilters)) return;
-  lane.taskFilters = uniqueStringList(config.taskFilters);
-  lane.laneFilterVersion = String(config.laneFilterVersion || "");
+function taskDrainRouteConfig(result) {
+  return result.ok === false ? result : result.route;
+}
+
+function settleLaneLifetimeCommit(lane, requestedLifetime, result) {
+  const host = laneGroupHost(lane);
+  if (host.pendingLifetimeCommit !== requestedLifetime) return;
+  const config = taskDrainRouteConfig(result) || {};
+  if (result.ok !== false && config.lifetime === requestedLifetime) {
+    clearLaneLifetimeCommit(host, requestedLifetime);
+    return;
+  }
+  rollbackLaneLifetimeCommit(host, requestedLifetime, config.lifetime);
+}
+
+function applyTaskDrainRouteConfig(lane, result, options = {}) {
+  const config = taskDrainRouteConfig(result);
+  if (!config) return;
+  if (Array.isArray(config.taskFilters)) {
+    lane.taskFilters = uniqueStringList(config.taskFilters);
+    lane.laneFilterVersion = String(config.laneFilterVersion || "");
+  }
   if (config.teamId) lane.teamId = String(config.teamId);
-  if (config.lifetime) applyServerLaneLifetime(lane, config.lifetime);
+  if (config.lifetime)
+    applyServerLaneLifetime(lane, config.lifetime, {
+      configRevision: config.configRevision,
+      supersedePending: options.supersedePending,
+    });
   renderLaneViewShell(laneGroupHost(lane));
   renderFilterPills();
 }

@@ -39,7 +39,10 @@ function renderLaneChrome(lane, payload) {
   if (payload.laneMetrics) lane.laneMetrics = payload.laneMetrics;
   if (payload.laneInfo) lane.laneInfo = payload.laneInfo;
   if (payload.renewalIntent) lane.renewalIntent = payload.renewalIntent;
-  if (payload.lifetime) applyServerLaneLifetime(lane, payload.lifetime);
+  if (payload.lifetime)
+    applyServerLaneLifetime(lane, payload.lifetime, {
+      configRevision: payload.configRevision,
+    });
   const statusLine = applyRetainedLaneStatus(lane, payload.statusLine || {});
   syncLaneBackendPending(lane, statusLine.pendingInboxCount || 0);
   renderLaneViewShell(laneGroupHost(lane));
