@@ -44,7 +44,7 @@ function renderLaneChrome(lane, payload) {
       configRevision: payload.configRevision,
     });
   const statusLine = applyRetainedLaneStatus(lane, payload.statusLine || {});
-  syncLaneBackendPending(lane, statusLine.pendingInboxCount || 0);
+  syncLaneBackendPending(lane, statusLine);
   renderLaneViewShell(laneGroupHost(lane));
   renderFilterPills();
   syncFusedLaneChrome(laneGroupHost(lane));
@@ -119,11 +119,7 @@ function finishLanePendingSubmission(lane, options = {}) {
   const hasBackendCount = Number.isFinite(Number(options.pendingInboxCount));
   const inboxKey = String(options.inboxKey || "");
   lane.pendingSubmissionCount = Math.max(0, lane.pendingSubmissionCount - 1);
-  if (hasBackendCount)
-    lane.backendPendingInboxCount = Math.max(
-      0,
-      Number(options.pendingInboxCount),
-    );
+  if (hasBackendCount) applyLaneBackendPendingPayload(lane, options);
   const submittedPendingFloor = hasBackendCount
     ? lane.backendPendingInboxCount
     : lane.optimisticPendingInboxCount;
@@ -149,8 +145,8 @@ function finishLanePendingSubmission(lane, options = {}) {
   syncComposerPlaceholders(laneGroupHost(lane));
 }
 
-function syncLaneBackendPending(lane, count) {
-  lane.backendPendingInboxCount = Math.max(0, Number(count) || 0);
+function syncLaneBackendPending(lane, payload) {
+  applyLaneBackendPendingPayload(lane, payload);
   reconcileSubmittedMessagePredictions(lane);
   clearDrainedSubmittedMessagePredictions(lane);
   if (lane.pendingSubmissionCount > 0) {
@@ -165,6 +161,32 @@ function syncLaneBackendPending(lane, count) {
       laneSubmittedMessagePendingFloor(lane),
     );
   }
+}
+
+function applyLaneBackendPendingPayload(lane, payload) {
+  const identity = pendingIdentityFromPayload(payload);
+  lane.backendPendingInboxCount = identity.count;
+  if (identity.keys !== null) {
+    lane.backendPendingInboxKeys = new Set(identity.keys);
+    lane.backendPendingInboxRevision = identity.revision;
+    lane.backendPendingInboxKeysAuthoritative = true;
+  } else {
+    lane.backendPendingInboxKeysAuthoritative = false;
+  }
+}
+
+function pendingIdentityFromPayload(payload) {
+  const source =
+    payload && typeof payload === "object" ? payload : { pendingInboxCount: payload };
+  const count = Math.max(0, Number(source.pendingInboxCount) || 0);
+  const keys = Array.isArray(source.pendingInboxKeys)
+    ? source.pendingInboxKeys.map((key) => String(key)).filter(Boolean)
+    : null;
+  return {
+    count,
+    keys,
+    revision: String(source.pendingInboxRevision || ""),
+  };
 }
 
 function lanePendingDisplayCount(lane) {
@@ -191,6 +213,15 @@ function laneSubmittedMessagePendingFloor(lane) {
 function reconcileSubmittedMessagePredictions(lane) {
   if (!lane.optimisticSubmittedInboxKeys.size) {
     lane.optimisticPendingInboxFloor = 0;
+    return;
+  }
+  if (lane.backendPendingInboxKeysAuthoritative) {
+    for (const key of [...lane.optimisticSubmittedInboxKeys]) {
+      if (!lane.backendPendingInboxKeys.has(key))
+        lane.optimisticSubmittedInboxKeys.delete(key);
+    }
+    if (!lane.optimisticSubmittedInboxKeys.size)
+      lane.optimisticPendingInboxFloor = 0;
     return;
   }
   const ackedKeys = new Set(ackKeysForMessages(lane.knownMessages));

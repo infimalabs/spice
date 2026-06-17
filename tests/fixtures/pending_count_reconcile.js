@@ -71,6 +71,46 @@ assert(
   "accepted send refresh clears submitted inbox keys",
 );
 
+const sameCountDifferentKeys = lane({
+  backendPendingInboxCount: 1,
+  optimisticPendingInboxCount: 1,
+  optimisticSubmittedInboxKeys: new Set(["submitted-key"]),
+  optimisticPendingInboxFloor: 1,
+});
+context.syncLaneBackendPending(sameCountDifferentKeys, {
+  pendingInboxCount: 1,
+  pendingInboxKeys: ["other-key"],
+  pendingInboxRevision: "rev-other",
+});
+assert(
+  context.lanePendingDisplayCount(sameCountDifferentKeys) === 1,
+  "same-count backend key replacement remains visibly pending",
+);
+assert(
+  sameCountDifferentKeys.optimisticSubmittedInboxKeys.size === 0,
+  "authoritative backend keys clear stale submitted key with same count",
+);
+assert(
+  sameCountDifferentKeys.backendPendingInboxKeys.has("other-key"),
+  "authoritative backend keys are retained on the lane",
+);
+
+const submittedKeyStillPending = lane({
+  backendPendingInboxCount: 1,
+  optimisticPendingInboxCount: 1,
+  optimisticSubmittedInboxKeys: new Set(["submitted-key"]),
+  optimisticPendingInboxFloor: 1,
+});
+context.syncLaneBackendPending(submittedKeyStillPending, {
+  pendingInboxCount: 1,
+  pendingInboxKeys: ["submitted-key"],
+  pendingInboxRevision: "rev-submitted",
+});
+assert(
+  submittedKeyStillPending.optimisticSubmittedInboxKeys.has("submitted-key"),
+  "authoritative backend keys preserve submitted key that is still pending",
+);
+
 const stillQueued = lane();
 context.syncLaneBackendPending(stillQueued, 2);
 assert(

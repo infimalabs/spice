@@ -23,6 +23,7 @@ from spice.mail.inbox import (
     collect_deadlettered_inbox_items,
     collect_inbox_items,
     compose_inbox_text,
+    inbox_item_key,
     inbox_payload_rows,
     inbox_request_body,
     parse_inbox_payload,
@@ -195,6 +196,8 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert payload["requestText"] == "inspect this image"
     assert payload["noSay"] is True
     assert payload["pendingInboxCount"] == 1
+    assert payload["pendingInboxKeys"] == [inbox_item_key(items[0].name)]
+    assert payload["pendingInboxRevision"]
     assert payload["attachments"][0]["name"] == "paste.png"
     assert payload["attachments"][0]["url"].startswith(
         f"/api/work/trees/{target.id}/files/image?path="
@@ -234,6 +237,8 @@ def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
     assert payload["requestText"] == "inspect this failure"
     assert payload["pendingInboxCount"] == 0
     assert payload["pendingInboxLabel"] == "0"
+    assert payload["pendingInboxKeys"] == []
+    assert payload["pendingInboxRevision"]
     assert payload["agentEnsure"]["ok"] is False
     assert payload["agentEnsure"]["error"] == "Could not ensure agent: invalid config"
     assert payload["agentEnsure"]["deadletteredInboxKey"]
@@ -671,7 +676,10 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
     assert payload["pendingInboxCount"] == 0
     assert payload["statusLine"]["pendingInboxCount"] == 0
     assert payload["statusLine"]["pendingInboxLabel"] == "0"
+    assert payload["pendingInboxKeys"] == []
+    assert payload["statusLine"]["pendingInboxKeys"] == []
     assert payload["agentEnsure"]["pendingInboxCount"] == 0
+    assert payload["agentEnsure"]["pendingInboxKeys"] == []
     assert pending_inbox_count(repo) == 0
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
         "20260101T000000000001Z.txt"
@@ -714,9 +722,12 @@ def test_pending_inbox_deadletters_after_generic_ensure_failure(tmp_path, monkey
     )
     assert payload["agentEnsure"]["pendingInboxCount"] == 0
     assert payload["agentEnsure"]["pendingInboxLabel"] == "0"
+    assert payload["agentEnsure"]["pendingInboxKeys"] == []
     assert payload["pendingInboxCount"] == 0
     assert payload["statusLine"]["pendingInboxCount"] == 0
     assert payload["statusLine"]["pendingInboxLabel"] == "0"
+    assert payload["pendingInboxKeys"] == []
+    assert payload["statusLine"]["pendingInboxKeys"] == []
     assert pending_inbox_count(repo) == 0
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
         "20260101T000000000002Z.txt"

@@ -94,33 +94,55 @@ function targetPayloadShim(target) {
 function lanePayloadWithTargetPending(lane, target) {
   const targetPayload = targetPayloadShim(target);
   if (!lane.latestPayload) return targetPayload;
-  const pending = targetFreshPendingCount(target);
-  if (pending === null) return lane.latestPayload;
+  const pending = targetFreshPendingIdentity(target);
+  if (pending.count === null && pending.keys === null && !pending.revision)
+    return lane.latestPayload;
+  const pendingFields = pendingIdentityFields(pending);
   const statusLine = {
     ...(lane.latestPayload.statusLine || {}),
-    pendingInboxCount: pending,
-    pendingInboxLabel: String(pending),
+    ...pendingFields,
   };
   lane.latestPayload = {
     ...lane.latestPayload,
-    pendingInboxCount: pending,
-    pendingInboxLabel: String(pending),
+    ...pendingFields,
     statusLine,
   };
   return lane.latestPayload;
 }
 
-function targetFreshPendingCount(target) {
+function targetFreshPendingIdentity(target) {
   const statusLine = (target && target.statusLine) || {};
+  let count = null;
   for (const value of [
     statusLine.pendingInboxCount,
     target && target.pendingInboxCount,
     target && target.pendingCount,
   ]) {
-    const count = normalizedTargetChoiceCount(value);
-    if (count !== null) return count;
+    count = normalizedTargetChoiceCount(value);
+    if (count !== null) break;
   }
-  return null;
+  const sourceWithKeys = Array.isArray(statusLine.pendingInboxKeys)
+    ? statusLine
+    : target || {};
+  const keys = Array.isArray(sourceWithKeys.pendingInboxKeys)
+    ? sourceWithKeys.pendingInboxKeys.map((key) => String(key)).filter(Boolean)
+    : null;
+  return {
+    count,
+    keys,
+    revision: String(sourceWithKeys.pendingInboxRevision || ""),
+  };
+}
+
+function pendingIdentityFields(identity) {
+  const fields = {};
+  if (identity.count !== null) {
+    fields.pendingInboxCount = identity.count;
+    fields.pendingInboxLabel = String(identity.count);
+  }
+  if (identity.keys !== null) fields.pendingInboxKeys = identity.keys;
+  if (identity.revision) fields.pendingInboxRevision = identity.revision;
+  return fields;
 }
 
 // ---- team snapshot reconciliation ---------------------------------------------
