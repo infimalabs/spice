@@ -389,6 +389,8 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
     app = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
 
     assert 'const agentLifetimeLabels = ["Steer", "Drive", "Drain"];' in app
     assert 'Steer: "Manual filters only",' in app
@@ -403,6 +405,18 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
     assert "function agentLifetimeHelpText(lifetime) {" in app
     assert "data-lifetime-label>Drive</span>" in app_shell
     assert "data-submit>Drive</button>" in app_shell
+    assert 'pendingLifetimeCommit: "",' in app_shell
+    assert "host.pendingLifetimeCommit = lifetime;" in app_controls
+    assert (
+        "if (host.pendingLifetimeCommit && lifetime !== host.pendingLifetimeCommit)"
+        in app_controls
+    )
+    assert 'host.pendingLifetimeCommit = "";' in app_controls
+    assert "function clearLaneLifetimeCommit(lane, lifetime)" in app_controls
+    assert "applyServerLaneLifetime(lane, config.lifetime);" in app_shell
+    assert "applyServerLaneLifetime(lane, config.lifetime);" in app_lanes
+    assert "const requestedLifetime = payload.lifetime;" in app_stream
+    assert "clearLaneLifetimeCommit(host, requestedLifetime);" in app_stream
     assert "const lifetimeHelp = agentLifetimeHelpText(lifetime);" in app_controls
     assert "lane.lifetimeRangeEl.title = lifetimeHelp;" in app_controls
     assert '"Task subscription policy: " + lifetimeHelp' in app_controls

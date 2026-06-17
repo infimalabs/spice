@@ -824,6 +824,7 @@ function updateTaskDrainForLane(lane, fields = {}) {
     laneFilterVersion: commandLane.laneFilterVersion || "",
     ...fields,
   };
+  const requestedLifetime = payload.lifetime;
   liveBusRequest("lane.taskDrain", {
     targetId: commandLane.targetId,
     payload,
@@ -832,10 +833,13 @@ function updateTaskDrainForLane(lane, fields = {}) {
       const result = response.result || {};
       for (const recipient of recipients)
         applyTaskDrainRouteConfig(recipient, result);
-      if (result.ok === false)
+      if (result.ok === false) {
+        clearLaneLifetimeCommit(host, requestedLifetime);
         setLaneTransientStatus(host, result.error || "task drain update failed");
+      }
     })
     .catch(() => {
+      clearLaneLifetimeCommit(host, requestedLifetime);
       if (isLaneOpen(host))
         setLaneTransientStatus(host, "task drain update failed");
     });

@@ -116,6 +116,7 @@ function createLaneState(targetId, hint = null, options = {}) {
     laneMetrics: target.laneMetrics || {},
     laneInfo: target.laneInfo || { summaryRows: [], members: [] },
     renewalIntent: target.renewalIntent || {},
+    pendingLifetimeCommit: "",
     privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),
     teamId: target.teamId || "",
     teamRevision: target.teamRevision || 0,
@@ -184,8 +185,7 @@ function syncEmptyTeamLane(lane, team = {}) {
   lane.branchName = "empty team";
   lane.targetThreadId = "";
   lane.activeThreadId = "";
-  if (config.lifetime && agentLifetimeLabels.includes(config.lifetime))
-    lane.lifetime = config.lifetime;
+  if (config.lifetime) applyServerLaneLifetime(lane, config.lifetime);
   if (config.speechMode && speechModes.includes(config.speechMode))
     lane.speechMode = config.speechMode;
   if (Array.isArray(config.taskFilters))
