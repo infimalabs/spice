@@ -303,11 +303,11 @@ def _store_durable_inbox_attachment(
     artifact_dir = artifact_root / digest
     artifact_path = artifact_dir / filename
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    if not artifact_path.exists():
-        _write_bytes_fsynced(artifact_path, data)
+    if not _durable_attachment_matches(artifact_path, digest):
+        _write_bytes_atomic(artifact_path, data)
     metadata_path = artifact_dir / DURABLE_ATTACHMENT_METADATA
     if not metadata_path.exists():
-        _write_text_fsynced(
+        _write_text_atomic(
             metadata_path,
             json.dumps(
                 {
@@ -324,6 +324,13 @@ def _store_durable_inbox_attachment(
     fsync_directory(artifact_dir)
     fsync_directory(artifact_dir.parent)
     return artifact_path
+
+
+def _durable_attachment_matches(path: Path, digest: str) -> bool:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest() == digest
+    except OSError:
+        return False
 
 
 def _resolve_inbox_attachment_ref(ref: str, *, repo_root: Path) -> Path | None:
@@ -386,3 +393,25 @@ def _write_text_fsynced(path: Path, text: str) -> None:
         handle.write(text)
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def _write_bytes_atomic(path: Path, data: bytes) -> None:
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        _write_bytes_fsynced(tmp, data)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            tmp.unlink()
+        raise
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        _write_text_fsynced(tmp, text)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            tmp.unlink()
+        raise
