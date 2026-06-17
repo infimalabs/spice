@@ -59,12 +59,12 @@ It fits if you'd rather **operate a fleet than hand-write code**, you locate
 the craft in the **structure** rather than the keystrokes, you share its code
 posture — small bounded seams, ugly-fast cores allowed, no shims, fallbacks,
 or legacy — you trust **listening over writing**, and you run a supported
-agent driver (today: Codex).
+agent driver (today: Codex or Claude Code).
 
 It will fight you if your craft lives in the text, you want a tool that bends
-to your opinions instead of supplying its own, you're on a different agent, or
-you need something stable and supported today. That isn't a defect — it's the
-tool selecting its operator.
+to your opinions instead of supplying its own, you're on an unsupported agent
+driver, or you need something stable and supported today. That isn't a defect —
+it's the tool selecting its operator.
 
 ## Install
 

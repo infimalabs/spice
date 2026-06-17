@@ -196,9 +196,9 @@ The one idea above isn't arbitrary; four theses generate it.
    another target of its own constitution.
 1. **The driver seam.** Agent-CLI specifics (binary/argv, thread-id
    environment, rollout location and grammar, stdout section markers,
-   session-id parsing) live in one `AgentDriver` value in
-   `spice/agent/driver.py`. One built-in driver, no modes; a second driver is
-   a new module.
+   session-id parsing) live in concrete `AgentDriver` values in
+   `spice/agent/driver.py`. Codex and Claude Code ship today; a new supported
+   CLI is another driver value, not a broad mode split.
 2. **Agent launch defaults have two scopes.** Tracked `[tool.spice.agent]`
    project defaults set model and thinking for every clone; current-worktree
    overrides live in `.spice/config/state.json` through
