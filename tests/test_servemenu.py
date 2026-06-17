@@ -601,11 +601,6 @@ def test_static_empty_team_importer_renders_message_stream_choices():
     importer_rules = css[importer_start : css.index("}", importer_start)]
     importer_copy_start = css.index(".empty-team-importer .target-choice-copy {")
     importer_copy_rules = css[importer_copy_start : css.index("}", importer_copy_start)]
-    importer_signal_start = css.index(".empty-team-importer .target-choice-signal {")
-    importer_signal_rules = css[
-        importer_signal_start : css.index("}", importer_signal_start)
-    ]
     assert "direction: ltr;" in importer_rules
     assert "flex: 1 1 auto;" in importer_copy_rules
-    assert "margin-left: auto;" in importer_signal_rules
-    assert "order: 2;" in importer_signal_rules
+    assert ".empty-team-importer .target-choice-signal" not in css
