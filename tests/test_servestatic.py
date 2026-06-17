@@ -907,12 +907,15 @@ def test_static_css_adds_visible_nested_quote_depth():
     assert "--quote-deep-nest-indent: calc(" in css
     assert "--quote-nested-pad-inline: 6px;" in css
     assert "--quote-pad-block: 6px;" in css
+    assert "--quote-nested-bottom-gap: 6px;" in css
     assert ".message-body blockquote blockquote,\n.ack-quote blockquote {" in css
     assert (
         ".message-body blockquote blockquote blockquote,\n"
         ".ack-quote blockquote blockquote {" in css
     )
-    assert "margin: 6px 0 0 var(--quote-nest-indent);" in css
+    assert (
+        "margin: 6px 0 var(--quote-nested-bottom-gap) var(--quote-nest-indent);" in css
+    )
     assert "margin-left: var(--quote-deep-nest-indent);" in css
     assert (
         "border-left: var(--quote-rail-width) solid "
