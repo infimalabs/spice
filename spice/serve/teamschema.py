@@ -1,0 +1,107 @@
+"""SQLite schema and defaults for serve team storage."""
+
+TEAM_DATABASE_FILENAME = "serve-teams.sqlite3"
+DEFAULT_LIFETIME = "Drive"
+DEFAULT_SPEECH_MODE = "speak"
+DEFAULT_SELECTED_VIEW = "compose"
+TEAM_ID_HEX_CHARS = 12
+RENEWAL_STATE_REQUESTED = "requested"
+RENEWAL_STATE_PENDING = "pending"
+RENEWAL_STATE_STARTED = "started"
+TASK_FILTER_SOURCE_MANUAL = "manual"
+TASK_FILTER_SOURCE_AUTO_CREATE = "auto:create"
+TASK_FILTER_SOURCE_AUTO_CLAIM = "auto:claim"
+TASK_FILTER_SOURCES = frozenset(
+    {
+        TASK_FILTER_SOURCE_MANUAL,
+        TASK_FILTER_SOURCE_AUTO_CREATE,
+        TASK_FILTER_SOURCE_AUTO_CLAIM,
+    }
+)
+TEAM_SQLITE_BUSY_TIMEOUT_MS = 5000
+
+TEAM_SCHEMA = """
+CREATE TABLE IF NOT EXISTS events (
+    revision INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    kind TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS teams (
+    team_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at REAL NOT NULL,
+    revision INTEGER NOT NULL,
+    config_revision INTEGER NOT NULL DEFAULT 0,
+    lifetime TEXT NOT NULL,
+    speech_mode TEXT NOT NULL,
+    selected_view TEXT NOT NULL,
+    task_filters TEXT NOT NULL DEFAULT '[]',
+    shell_settings TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS memberships (
+    team_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    joined_at REAL NOT NULL,
+    PRIMARY KEY (team_id, agent_id)
+);
+CREATE TABLE IF NOT EXISTS team_task_filters (
+    team_id TEXT NOT NULL,
+    project TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (team_id, project, source)
+);
+CREATE TABLE IF NOT EXISTS team_agent_history (
+    team_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    first_seen_at REAL NOT NULL,
+    last_seen_at REAL NOT NULL,
+    PRIMARY KEY (team_id, agent_id)
+);
+CREATE TABLE IF NOT EXISTS renewals (
+    agent_id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    ancestor_thread_id TEXT NOT NULL,
+    successor_agent_id TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_metrics (
+    agent_id TEXT PRIMARY KEY,
+    acked INTEGER NOT NULL DEFAULT 0,
+    sends INTEGER NOT NULL DEFAULT 0,
+    tool_calls INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_metric_buckets (
+    agent_id TEXT NOT NULL,
+    bucket_start INTEGER NOT NULL,
+    messages INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (agent_id, bucket_start)
+);
+CREATE TABLE IF NOT EXISTS team_agent_metrics (
+    team_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    acked INTEGER NOT NULL DEFAULT 0,
+    sends INTEGER NOT NULL DEFAULT 0,
+    tool_calls INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (team_id, agent_id)
+);
+CREATE TABLE IF NOT EXISTS team_agent_metric_buckets (
+    team_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    bucket_start INTEGER NOT NULL,
+    messages INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (team_id, agent_id, bucket_start)
+);
+CREATE TABLE IF NOT EXISTS agent_metric_cursors (
+    agent_id TEXT PRIMARY KEY,
+    source_path TEXT NOT NULL,
+    offset INTEGER NOT NULL,
+    updated_at REAL NOT NULL
+);
+"""
