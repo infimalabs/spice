@@ -95,11 +95,19 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def handle_release(args: argparse.Namespace) -> int:
+    previous_cwd = Path.cwd()
     root = repo_root()
-    os.chdir(root)
-    ensure_release_worktree(root)
+    try:
+        os.chdir(root)
+        return _handle_release_from_root(args, root)
+    finally:
+        os.chdir(previous_cwd)
 
+
+def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
     mode = str(args.release_mode)
+    if mode != "notes":
+        ensure_release_worktree(root)
     if mode in {"release", "publish", "github"}:
         ensure_notes_file(getattr(args, "notes_file", None))
 

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import spice.release as release
 from spice.cli.mounts import mounted_commands
 from spice.release import (
     ReleaseRecord,
@@ -44,6 +45,37 @@ def test_repo_mounts_release_command(tmp_path):
         "python",
         "-m",
         "spice.release",
+    )
+
+
+def test_release_notes_mode_writes_output_without_release_sync(tmp_path, monkeypatch):
+    parser = build_release_parser()
+    notes_path = tmp_path / "notes.md"
+    args = parser.parse_args(["notes", "0.3.0", "--output", str(notes_path)])
+
+    def fail_release_sync(_root):
+        raise AssertionError("notes generation is read-only")
+
+    starting_cwd = Path.cwd()
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(release, "ensure_release_worktree", fail_release_sync)
+    monkeypatch.setattr(
+        release,
+        "release_commit_for_version",
+        lambda version: f"commit-for-{version}",
+    )
+    monkeypatch.setattr(
+        release,
+        "release_notes_for_version",
+        lambda version, commit: f"notes for {version} at {commit}\n",
+    )
+
+    result = release.handle_release(args)
+
+    assert result == 0
+    assert Path.cwd() == starting_cwd
+    assert notes_path.read_text(encoding="utf-8") == (
+        "notes for 0.3.0 at commit-for-0.3.0\n"
     )
 
 
