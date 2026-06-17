@@ -388,6 +388,8 @@ def test_static_spice_menu_replaces_picker_lane():
     assert "function spiceMenuTeamGroups(choices)" in app_lanes
     assert "function renderSpiceMenuTeamGroup(group)" in app_lanes
     assert "function spiceMenuTeamDetail(group)" in app_lanes
+    assert "function compareSpiceMenuTargetChoices(left, right)" in app_lanes
+    assert "function spiceMenuTeamSortKey(group)" in app_lanes
     assert "function wireSpiceMenuTargetDrag(button, target)" in app_lanes
     assert "function wireSpiceMenuTeamDropTarget(container, group)" in app_lanes
     assert "function moveTargetToMenuTeam(teamId, targetId)" in app_lanes
@@ -408,6 +410,25 @@ def test_static_spice_menu_replaces_picker_lane():
         in app_lanes
     )
     assert "function spiceMenuPrefersLaneElement(element)" in app_lanes
+    team_groups_start = app_lanes.index("function spiceMenuTeamGroups(choices)")
+    team_groups_end = app_lanes.index(
+        "function renderSpiceMenuTeamGroup(group)", team_groups_start
+    )
+    team_groups_block = app_lanes[team_groups_start:team_groups_end]
+    assert ".sort(compareSpiceMenuTargetChoices);" in team_groups_block
+    assert "group.targets.sort(compareSpiceMenuTargetChoices);" in team_groups_block
+    assert "unassigned.sort(compareSpiceMenuTargetChoices);" in team_groups_block
+    assert "compareTargetChoices" not in team_groups_block
+    compare_groups_start = app_lanes.index(
+        "function compareSpiceMenuTeamGroups(left, right)"
+    )
+    compare_groups_end = app_lanes.index(
+        "function renderSpiceMenuTeamGroup(group)", compare_groups_start
+    )
+    compare_groups_block = app_lanes[compare_groups_start:compare_groups_end]
+    assert "spiceMenuTeamSortKey(left)" in compare_groups_block
+    assert "spiceMenuTeamSortKey(right)" in compare_groups_block
+    assert "compareTargetChoices" not in compare_groups_block
     assert "const laneElement = /** @type {HTMLElement} */ (element);" in app_lanes
     assert 'laneStates.get(laneElement.dataset.targetId || "");' in app_lanes
     assert "return Boolean(lane && lane.emptyTeam);" in app_lanes
