@@ -58,6 +58,7 @@
 }
 .message-body,
 .ack-quote {
+  --quote-accent: var(--message-occupant-accent, var(--accent));
   --quote-deep-nest-indent: calc(
     var(--quote-nested-step) - var(--quote-rail-width) - var(--quote-nested-pad-inline)
   );
@@ -91,8 +92,8 @@
 }
 .message-body code { font: 12px/1.4 ui-monospace, monospace; }
 .message-body blockquote {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-  border-left: var(--quote-rail-width) solid var(--accent);
+  background: color-mix(in srgb, var(--quote-accent) 6%, transparent);
+  border-left: var(--quote-rail-width) solid var(--quote-accent);
   border-radius: var(--soft-radius) 0 0 var(--soft-radius);
   margin: 6px 0;
   padding: var(--quote-pad-block) var(--quote-pad-inline);
@@ -107,8 +108,8 @@
 }
 .message-body blockquote blockquote,
 .ack-quote blockquote {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border-left: var(--quote-rail-width) solid color-mix(in srgb, var(--accent) 72%, var(--fg));
+  background: color-mix(in srgb, var(--quote-accent) 8%, transparent);
+  border-left: var(--quote-rail-width) solid color-mix(in srgb, var(--quote-accent) 72%, var(--fg));
   border-radius: var(--soft-radius) 0 0 var(--soft-radius);
   padding: var(--quote-pad-block) var(--quote-nested-pad-inline);
 }
@@ -166,8 +167,8 @@
   margin: 3px 0 5px;
 }
 .ack-quote {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-  border-left: var(--quote-rail-width) solid var(--accent);
+  background: color-mix(in srgb, var(--quote-accent) 6%, transparent);
+  border-left: var(--quote-rail-width) solid var(--quote-accent);
   border-radius: var(--soft-radius) 0 0 var(--soft-radius);
   font-size: 13px;
   line-height: 1.34;
