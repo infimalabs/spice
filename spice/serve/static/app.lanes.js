@@ -62,7 +62,7 @@ function applyTargetsPayload(payload) {
     else
       renderLaneChrome(
         lane,
-        lane.latestPayload || targetPayloadShim(targetById.get(lane.targetId)),
+        lanePayloadWithTargetPending(lane, targetById.get(lane.targetId)),
       );
   }
   if (spiceMenuEl) renderSpiceMenu();
@@ -89,6 +89,38 @@ function targetPayloadShim(target) {
     privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),
     statusLine: target.statusLine || {},
   };
+}
+
+function lanePayloadWithTargetPending(lane, target) {
+  const targetPayload = targetPayloadShim(target);
+  if (!lane.latestPayload) return targetPayload;
+  const pending = targetFreshPendingCount(target);
+  if (pending === null) return lane.latestPayload;
+  const statusLine = {
+    ...(lane.latestPayload.statusLine || {}),
+    pendingInboxCount: pending,
+    pendingInboxLabel: String(pending),
+  };
+  lane.latestPayload = {
+    ...lane.latestPayload,
+    pendingInboxCount: pending,
+    pendingInboxLabel: String(pending),
+    statusLine,
+  };
+  return lane.latestPayload;
+}
+
+function targetFreshPendingCount(target) {
+  const statusLine = (target && target.statusLine) || {};
+  for (const value of [
+    statusLine.pendingInboxCount,
+    target && target.pendingInboxCount,
+    target && target.pendingCount,
+  ]) {
+    const count = normalizedTargetChoiceCount(value);
+    if (count !== null) return count;
+  }
+  return null;
 }
 
 // ---- team snapshot reconciliation ---------------------------------------------
