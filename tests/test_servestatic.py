@@ -329,7 +329,7 @@ def test_static_composer_menu_actions_include_team_moves_and_renewal():
     assert "agentIds: [laneTeamAgentId(member)]," in app_groups
 
 
-def test_static_quote_close_control_keeps_composer_menu_styling_compact():
+def test_static_quote_close_control_keeps_composer_menu_actions_polished():
     css = _serve_css_text()
     app_shell = _shell_and_composer_text()
     button_start = css.index(
@@ -339,9 +339,20 @@ def test_static_quote_close_control_keeps_composer_menu_styling_compact():
     button_rule = css[button_start:button_end]
     action_start = css.index(".composer-band-menu-action {")
     action_end = css.index(
-        ".composer-band-menu-action .spice-menu-action-detail", action_start
+        ".composer-band-menu-action .spice-menu-action-label", action_start
     )
     action_rule = css[action_start:action_end]
+    shared_detail_start = css.index(
+        ".composer-band-menu-action .spice-menu-action-label,\n"
+        ".composer-band-menu-action .spice-menu-action-detail {",
+        action_start,
+    )
+    shared_detail_rule = css[shared_detail_start : css.index("}", shared_detail_start)]
+    detail_start = css.index(
+        ".composer-band-menu-action .spice-menu-action-detail {\n  font-size",
+        action_start,
+    )
+    detail_rule = css[detail_start : css.index("}", detail_start)]
     shared_grid_start = css.index(".spice-menu-actions {")
     shared_grid_end = css.index(".spice-menu-target-list {", shared_grid_start)
     shared_grid_rule = css[shared_grid_start:shared_grid_end]
@@ -368,6 +379,7 @@ def test_static_quote_close_control_keeps_composer_menu_styling_compact():
     assert "grid-template-columns: repeat(auto-fit" in shared_grid_rule
     assert "display: grid;" in menu_grid_rule
     assert "grid-template-columns: repeat(auto-fit" in menu_grid_rule
+    assert "grid-auto-rows: minmax(64px, 1fr);" in menu_grid_rule
     assert (
         ".composer-band-close-button:hover,\n.composer-band-close-button:focus-visible {"
         in css
@@ -377,10 +389,14 @@ def test_static_quote_close_control_keeps_composer_menu_styling_compact():
         ".composer-band--menu-open textarea,\n.composer-band--menu-open .composer-attachments {"
         in css
     )
-    assert "font-size: 12px;" in action_rule
+    assert "align-items: center;" in action_rule
+    assert "container-type: inline-size;" in action_rule
+    assert "text-align: center;" in action_rule
+    assert "display: block;" in shared_detail_rule
+    assert "text-wrap: pretty;" in detail_rule
     assert (
         ".composer-band-menu-action .spice-menu-action-detail {\n  display: none;"
-        in css
+        not in css
     )
 
 
