@@ -338,20 +338,40 @@ button.primary:hover {
   position: absolute;
   z-index: 6;
 }
-.lane-team-menu-action {
-  align-items: stretch;
+.lane-team-menu .lane-team-menu-action {
+  align-items: center;
+  container-type: inline-size;
   flex-direction: column;
+  gap: 6px;
   justify-content: center;
   min-height: 0;
   overflow: hidden;
+  padding: 8px 10px;
+  text-align: center;
 }
-.lane-team-menu-action .spice-menu-action-label,
-.lane-team-menu-action .spice-menu-action-detail {
+.lane-team-menu .lane-team-menu-action .spice-menu-action-label,
+.lane-team-menu .lane-team-menu-action .spice-menu-action-detail {
+  display: block;
   flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
   overflow: visible;
   overflow-wrap: anywhere;
   text-overflow: clip;
   white-space: normal;
+}
+.lane-team-menu .lane-team-menu-action .spice-menu-action-label {
+  font-size: 13px;
+  font-size: clamp(12px, 7cqi, 16px);
+  font-weight: 700;
+  line-height: 1.14;
+  text-wrap: balance;
+}
+.lane-team-menu .lane-team-menu-action .spice-menu-action-detail {
+  font-size: 11px;
+  font-size: clamp(10px, 5.25cqi, 13px);
+  line-height: 1.2;
+  text-wrap: pretty;
 }
 .lane-team-menu-action:disabled {
   cursor: not-allowed;
