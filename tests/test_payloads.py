@@ -409,7 +409,7 @@ def test_ack_context_payload_round_trips_inbox_attachments(tmp_path):
 
     attachment = payload["acks"][0]["attachments"][0]
     assert payload["acks"][0]["text"] == "look here"
-    assert "RENEW:" not in payload["acks"][0]["html"]
+    assert payload["acks"][0]["html"] == "<p>look here</p>"
     assert attachment["name"] == "upload.png"
     assert attachment["contentType"] == "image/png"
     assert attachment["path"].startswith(".spice/inbox/")

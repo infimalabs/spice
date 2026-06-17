@@ -1032,7 +1032,7 @@ def test_running_requested_renewal_sends_handoff_and_marks_pending(
     assert status == HTTPStatus.OK
     assert payload["agentEnsure"] == {}
     assert payload["requestText"] == "wrap this up"
-    assert "RENEW:" not in payload["requestHtml"]
+    assert payload["requestHtml"] == "<p>wrap this up</p>"
     assert payload["attachments"][0]["name"] == "paste.png"
     assert RENEWAL_HANDOFF_REQUEST_SUFFIX in inbox_request_body(item.text)
     assert payload["renewalIntent"]["requested"] is False
