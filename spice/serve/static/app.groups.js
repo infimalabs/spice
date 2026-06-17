@@ -231,6 +231,7 @@ function syncLaneTeamMenuButton(lane) {
 function toggleLaneTeamMenu(lane, event = null) {
   if (event) event.stopPropagation();
   const host = laneGroupHost(lane);
+  if (host.emptyTeam && !host.emptyTeamCanClose) return;
   const open = host.teamMenuButtonEl.getAttribute("aria-expanded") === "true";
   closeLaneTeamMenusExcept(host);
   closeLaneTeamMenu(host);
@@ -254,6 +255,7 @@ function openLaneTeamMenu(host) {
 }
 
 function laneTeamMenuActions(host) {
+  if (host.emptyTeam) return [closeTeamMenuAction(host)];
   return [
     closeTeamMenuAction(host),
     splitIndividualsMenuAction(host),
@@ -264,7 +266,9 @@ function laneTeamMenuActions(host) {
 function closeTeamMenuAction(host) {
   return {
     label: "Close team",
-    detail: laneTeamMemberCountText(laneGroupMemberLanes(host).length),
+    detail: host.emptyTeam
+      ? "empty"
+      : laneTeamMemberCountText(laneGroupMemberLanes(host).length),
     onClick: () => closeLane(host),
   };
 }

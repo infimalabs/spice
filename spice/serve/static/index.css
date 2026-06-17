@@ -293,7 +293,7 @@ button.primary:hover {
   width: var(--lane-light-pip-size);
 }
 .lane--empty-team .lane-pip-stack,
-.lane--empty-team [data-lane-team-menu] {
+.lane--empty-team:not(.lane--empty-team-closable) [data-lane-team-menu] {
   pointer-events: none;
   visibility: hidden;
 }
