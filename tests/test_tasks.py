@@ -1045,14 +1045,16 @@ def test_task_review_help_requires_description_check(capsys):
     assert "verify the task description is current" in help_text
     assert "description=..." in help_text
     assert (
-        "Findings other than clean require at least one --then follow-up" in help_text
+        "Findings other than clean require durable follow-up tracking through "
+        "either --then or --followup" in help_text
     )
+    assert "adds the reviewed task as its dependency" in help_text
 
 
 def test_unclean_review_requires_followup_tracking(task_repo, monkeypatch):
     handle = _review_claim(task_repo, monkeypatch)
 
-    with pytest.raises(SpiceError, match="unclean task review requires --then"):
+    with pytest.raises(SpiceError, match="requires follow-up tracking"):
         ops.review(handle, finding="changes", note="needs work")
 
     row = identity.resolve(handle)
@@ -1081,6 +1083,31 @@ def test_unclean_review_spawns_dependent_followup(task_repo, monkeypatch):
 
     assert f"reviewed {handle} changes; completed {handle}" in output
     assert followup["description"] == "Add review coverage"
+    assert reviewed_uuid in followup.get("depends", [])
+    assert reviewed["status"] == "completed"
+    assert reviewed["review_finding"] == "changes"
+
+
+def test_unclean_review_links_existing_followup(task_repo, monkeypatch):
+    handle = _review_claim(task_repo, monkeypatch)
+    reviewed_uuid = identity.uuid_of(identity.resolve(handle))
+    existing = ops.add(
+        "Existing review follow-up",
+        project="task.unit",
+        acceptance=["Tracks the requested review change"],
+    )
+
+    output = ops.review(
+        handle,
+        finding="changes",
+        note="use existing task",
+        followup=[existing],
+    )
+    followup = identity.resolve(existing)
+    reviewed = tw.export([reviewed_uuid])[0]
+
+    assert f"reviewed {handle} changes; completed {handle}" in output
+    assert f"linked {existing}" in output
     assert reviewed_uuid in followup.get("depends", [])
     assert reviewed["status"] == "completed"
     assert reviewed["review_finding"] == "changes"

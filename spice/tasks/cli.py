@@ -112,20 +112,24 @@ def _configure_task_phase_parsers(actions: Any) -> None:
         epilog=(
             "--then expects a follow-up task title in the same key=value batch "
             "grammar as task add; it creates a task that depends on the "
-            "reviewed task. Findings other than clean require at least one "
-            "--then follow-up so requested changes stay tracked. Reviewers "
-            "must verify the task description is current before recording a "
-            "clean finding.\n\n"
+            "reviewed task. --followup accepts an existing task handle and "
+            "adds the reviewed task as its dependency. Findings other than "
+            "clean require durable follow-up tracking through either --then "
+            "or --followup. Reviewers must verify the task description is "
+            "current before recording a clean finding.\n\n"
             "Examples:\n"
             "  spice task review CLI-20260609T203539640394Z "
             '--finding clean --note "looks good"\n'
             "  spice task review CLI-20260609T203539640394Z "
             '--finding changes --then "title=Add coverage | project=task.cli '
-            '| description=Why it matters | acceptance=Focused tests cover it"'
+            '| description=Why it matters | acceptance=Focused tests cover it"\n'
+            "  spice task review CLI-20260609T203539640394Z "
+            "--finding changes --followup TASK-20260609T203527316867Z"
         ),
         recovery_examples=(
             'spice task review TASK-20260609T203539640394Z --finding clean --note "looks good"',
             'spice task review TASK-20260609T203539640394Z --finding changes --then "title=Add coverage | project=task.cli | acceptance=Focused tests cover it"',
+            "spice task review TASK-20260609T203539640394Z --finding changes --followup TASK-20260609T203527316867Z",
         ),
     )
     review.add_argument("handle")
@@ -141,6 +145,16 @@ def _configure_task_phase_parsers(actions: Any) -> None:
             "Create a dependent follow-up. FOLLOWUP must include title=... and "
             "may include project=..., description=..., acceptance=..., "
             "priority=..., flow=..., tags=..., after=..., due=...."
+        ),
+    )
+    review.add_argument(
+        "--followup",
+        action="append",
+        default=[],
+        metavar="HANDLE",
+        help=(
+            "Use an existing task as requested-change tracking by adding the "
+            "reviewed task as its dependency. Repeat for multiple tasks."
         ),
     )
     review.set_defaults(func=handle)
@@ -490,7 +504,11 @@ _DISPATCH = {
         notes=list(a.notes),
     ),
     "review": lambda a: ops.review(
-        a.handle, finding=a.finding, note=a.note, then=list(a.then)
+        a.handle,
+        finding=a.finding,
+        note=a.note,
+        then=list(a.then),
+        followup=list(a.followup),
     ),
     "oops": _oops,
     "note": _note,
