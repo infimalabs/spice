@@ -25,7 +25,12 @@ from spice.flexstate import (
     sticky_items_after_flex_breaches,
     sticky_paths_after_renames,
 )
-from spice.policy import FILE_BYTE_LIMIT, FILE_LOC_LIMIT
+from spice.policy import (
+    FILE_BYTE_LIMIT,
+    FILE_LOC_LIMIT,
+    FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
+    FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
+)
 from spice.studies.walk import is_excluded_path, staged_renames
 
 FILE_LOC_VERSION = 1
@@ -82,6 +87,17 @@ def _save_sticky(paths: set[Path], root: Path, git_path: str) -> None:
     )
 
 
+def is_generated_lockfile_path(path: Path) -> bool:
+    return (
+        path.suffix in FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES
+        or path.name in FILE_SHAPE_GENERATED_LOCKFILE_NAMES
+    )
+
+
+def _drop_generated_lockfile_paths(paths: set[Path]) -> set[Path]:
+    return {path for path in paths if not is_generated_lockfile_path(path)}
+
+
 def scan_staged_loc_violations(
     paths: list[Path],
     *,
@@ -99,12 +115,14 @@ def scan_staged_loc_violations(
         else flex_limit(byte_limit)
     )
     renames = staged_renames(root)
-    line_sticky = sticky_paths_after_renames(
+    loaded_line_sticky = sticky_paths_after_renames(
         _load_sticky(root, FILE_LOC_STICKY_STATE_GIT_PATH), renames
     )
-    byte_sticky = sticky_paths_after_renames(
+    loaded_byte_sticky = sticky_paths_after_renames(
         _load_sticky(root, FILE_BYTE_STICKY_STATE_GIT_PATH), renames
     )
+    line_sticky = _drop_generated_lockfile_paths(loaded_line_sticky)
+    byte_sticky = _drop_generated_lockfile_paths(loaded_byte_sticky)
     updated_line_sticky = _after_breaches(
         paths, line_sticky, root=root, flex=line_flex, measure=count_file_lines
     )
@@ -115,9 +133,9 @@ def scan_staged_loc_violations(
         flex=byte_flex,
         measure=count_file_bytes,
     )
-    if updated_line_sticky != line_sticky:
+    if updated_line_sticky != loaded_line_sticky:
         _save_sticky(updated_line_sticky, root, FILE_LOC_STICKY_STATE_GIT_PATH)
-    if updated_byte_sticky != byte_sticky:
+    if updated_byte_sticky != loaded_byte_sticky:
         _save_sticky(updated_byte_sticky, root, FILE_BYTE_STICKY_STATE_GIT_PATH)
     return scan_loc_violations(
         paths,
@@ -140,7 +158,7 @@ def _after_breaches(
     measure: Callable[[Path], int],
 ) -> set[Path]:
     return sticky_items_after_flex_breaches(
-        paths,
+        [path for path in paths if not is_generated_lockfile_path(path)],
         sticky,
         key_for_item=lambda path: path,
         is_breach=lambda path: (root / path).exists() and measure(root / path) > flex,
@@ -168,7 +186,9 @@ def scan_loc_violations(
     sticky_paths = sticky_paths or set()
     byte_sticky_paths = byte_sticky_paths or set()
     for rel_path in paths:
-        if is_excluded_path(rel_path, repo_root=root):
+        if is_generated_lockfile_path(rel_path) or is_excluded_path(
+            rel_path, repo_root=root
+        ):
             continue
         abs_path = root / rel_path
         if not abs_path.exists():
@@ -219,7 +239,9 @@ def _clear_sticky(
     retained = {
         rel_path
         for rel_path in sticky
-        if (root / rel_path).exists() and measure(root / rel_path) > limit
+        if not is_generated_lockfile_path(rel_path)
+        and (root / rel_path).exists()
+        and measure(root / rel_path) > limit
     }
     if retained:
         _save_sticky(retained, root, git_path)

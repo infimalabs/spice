@@ -305,6 +305,27 @@ def test_policy_exclude_filters_staged_and_tracked_walks(tmp_path):
     assert "pyproject.toml" in staged
 
 
+def test_file_shape_guard_excludes_generated_lockfiles_but_keeps_source_pressure(
+    tmp_path,
+):
+    repo = _git_init(tmp_path / "repo")
+    _write_repo_file(repo, "uv.lock", "package = []\n" * 1700)
+    _write_repo_file(repo, "tool.lock", "state = []\n" * 1700)
+    _write_repo_file(repo, "package-lock.json", '{"lockfileVersion": 3}\n' * 1700)
+    _git(repo, "add", ".")
+
+    precommit._run_file_loc_guard(
+        repo,
+        [Path("uv.lock"), Path("tool.lock"), Path("package-lock.json")],
+    )
+
+    _write_repo_file(repo, "large_source.py", "print('large')\n" * 1700)
+    _git(repo, "add", "large_source.py")
+
+    with pytest.raises(SpiceError, match="large_source.py"):
+        precommit._run_file_loc_guard(repo, [Path("large_source.py")])
+
+
 def test_policy_exclude_filters_renames_but_not_partially_staged_guard(tmp_path):
     repo = _git_init(tmp_path / "repo")
     _write_repo_file(

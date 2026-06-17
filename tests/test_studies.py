@@ -17,7 +17,7 @@ from spice.policy import (
     flex_limit,
 )
 from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
-from spice.studies.fileloc import scan_loc_violations
+from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies.magicnums import scan_text_magic_numbers
 
 MAGIC_HIGH_THRESHOLD = 100
@@ -63,6 +63,72 @@ def test_binary_assets_are_byte_gated_but_not_line_gated(tmp_path):
     assert findings[0].line_count == 0
     assert not findings[0].over_line_limit
     assert findings[0].over_byte_limit
+
+
+def test_generated_lockfiles_do_not_trip_file_shape_pressure(tmp_path):
+    lock_path = Path("uv.lock")
+    generic_lock_path = Path("tool.lock")
+    nested_lock_path = Path("client") / "package-lock.json"
+    source_path = Path("large_source.py")
+    (tmp_path / "client").mkdir()
+    (tmp_path / lock_path).write_text("package = []\n" * 20, encoding="utf-8")
+    (tmp_path / generic_lock_path).write_text("state = []\n" * 20, encoding="utf-8")
+    (tmp_path / nested_lock_path).write_text(
+        '{"lockfileVersion": 3}\n' * 20,
+        encoding="utf-8",
+    )
+    (tmp_path / source_path).write_text("print('large')\n" * 20, encoding="utf-8")
+
+    findings = scan_loc_violations(
+        [lock_path, generic_lock_path, nested_lock_path, source_path],
+        root=tmp_path,
+        limit=10,
+        flex_limit_value=10,
+        byte_limit=100,
+        byte_flex_limit_value=100,
+    )
+
+    assert [finding.path for finding in findings] == [source_path.as_posix()]
+
+
+def test_generated_lockfiles_are_pruned_from_file_shape_sticky_state(
+    tmp_path, monkeypatch
+):
+    lock_path = Path("uv.lock")
+    sticky_source_path = Path("sticky_source.py")
+    (tmp_path / lock_path).write_text("package = []\n" * 20, encoding="utf-8")
+    (tmp_path / sticky_source_path).write_text(
+        "print('large')\n" * 20,
+        encoding="utf-8",
+    )
+    saved: dict[str, set[Path]] = {}
+
+    monkeypatch.setattr(
+        "spice.studies.fileloc.staged_renames",
+        lambda _root: {},
+    )
+    monkeypatch.setattr(
+        "spice.studies.fileloc._load_sticky",
+        lambda _root, git_path: {lock_path, sticky_source_path},
+    )
+    monkeypatch.setattr(
+        "spice.studies.fileloc._save_sticky",
+        lambda paths, _root, git_path: saved.setdefault(git_path, set(paths)),
+    )
+
+    findings = scan_staged_loc_violations(
+        [lock_path],
+        root=tmp_path,
+        limit=10,
+        flex_limit_value=10,
+        byte_limit=100,
+        byte_flex_limit_value=100,
+    )
+
+    assert findings == []
+    assert len(saved) == 2
+    assert all(lock_path not in paths for paths in saved.values())
+    assert all(sticky_source_path in paths for paths in saved.values())
 
 
 def test_sticky_function_keys_follow_renames():
