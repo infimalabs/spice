@@ -9,6 +9,7 @@ from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.agent.renewal import strip_renewal_handoff_request_suffix
 from spice.config import configured_say_voice
+from spice.errors import SpiceError
 from spice.mail.inbox import (
     collect_archived_inbox_items,
     collect_inbox_items,
@@ -33,6 +34,36 @@ ACK_CONTEXT_ARCHIVE_LIMIT = 50
 LANE_METRIC_SPARKLINE_BUCKETS = 12
 LANE_METRIC_SPARKLINE_BUCKET_SECONDS = 60
 TASK_ACTOR_FIELDS = ("claim_by", "claim_thread", "review_author", "review_by")
+
+
+def agent_ensure_thread_id(agent_ensure: dict[str, Any] | None) -> str:
+    if not isinstance(agent_ensure, dict):
+        return ""
+    return canonical_thread_id(agent_ensure.get("threadId") or "")
+
+
+def record_started_renewal_from_ensure(
+    store: ServeTeamStore,
+    *,
+    predecessor_agent_id: str,
+    agent_ensure: dict[str, Any] | None,
+) -> str:
+    successor_agent_id = agent_ensure_thread_id(agent_ensure)
+    if not predecessor_agent_id or not successor_agent_id:
+        return successor_agent_id
+    if successor_agent_id == predecessor_agent_id:
+        return successor_agent_id
+    if not store.agent_renewal_active(predecessor_agent_id):
+        return successor_agent_id
+    try:
+        store.record_started_renewal(
+            predecessor_agent_id=predecessor_agent_id,
+            successor_agent_id=successor_agent_id,
+            ancestor_thread_id=predecessor_agent_id,
+        )
+    except SpiceError:
+        pass
+    return successor_agent_id
 
 
 def task_filter_inventory() -> dict[str, Any]:
@@ -202,14 +233,25 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
     inventory = task_filter_inventory()
     work_trees = []
     for target in targets:
+        thread_id = resolve_thread_id_for_target(state, target) or ""
         pending = pending_inbox_count(target.repo_root)
+        renew_intent = bool(
+            thread_id and state.team_store.agent_renewal_active(thread_id)
+        )
         agent_ensure = ensure_agent_for_pending_inbox(
             target,
             pending,
             attempt_cache=state.pending_agent_ensure_attempts,
+            force_new=renew_intent,
         )
+        ensured_thread_id = record_started_renewal_from_ensure(
+            state.team_store,
+            predecessor_agent_id=thread_id,
+            agent_ensure=agent_ensure,
+        )
+        if ensured_thread_id:
+            thread_id = ensured_thread_id
         pending = pending_inbox_count_after_agent_ensure(pending, agent_ensure)
-        thread_id = resolve_thread_id_for_target(state, target) or ""
         status = agent_status(target.repo_root)
         binding_error = agent_binding_error(target.repo_root, status)
         binding_status = _binding_status(thread_id, binding_error)
@@ -386,11 +428,25 @@ def messages_payload_for_worktree(
     expected_thread_id: str | None = None,
     fast_mode: bool = False,
 ) -> dict[str, Any]:
-    thread_id = (
-        canonical_thread_id(expected_thread_id or "")
-        or resolve_thread_id_for_target(state, target)
-        or ""
+    explicit_thread_id = canonical_thread_id(expected_thread_id or "")
+    thread_id = explicit_thread_id or resolve_thread_id_for_target(state, target) or ""
+    pending = pending_inbox_count(target.repo_root)
+    renew_intent = bool(thread_id and state.team_store.agent_renewal_active(thread_id))
+    agent_ensure = ensure_agent_for_pending_inbox(
+        target,
+        pending,
+        attempt_cache=state.pending_agent_ensure_attempts,
+        fast_mode=fast_mode,
+        force_new=renew_intent,
     )
+    ensured_thread_id = record_started_renewal_from_ensure(
+        state.team_store,
+        predecessor_agent_id=thread_id,
+        agent_ensure=agent_ensure,
+    )
+    if ensured_thread_id and not explicit_thread_id:
+        thread_id = ensured_thread_id
+    pending = pending_inbox_count_after_agent_ensure(pending, agent_ensure)
     if not thread_id:
         items: list[message_reader.AssistantMessage] = []
         error: str | None = "No agent thread is bound to this worktree yet."
@@ -404,14 +460,6 @@ def messages_payload_for_worktree(
             worktree_id=target.id,
             repo_root=target.repo_root,
         )
-    pending = pending_inbox_count(target.repo_root)
-    agent_ensure = ensure_agent_for_pending_inbox(
-        target,
-        pending,
-        attempt_cache=state.pending_agent_ensure_attempts,
-        fast_mode=fast_mode,
-    )
-    pending = pending_inbox_count_after_agent_ensure(pending, agent_ensure)
     team_facts = team_facts_for_actor(state.team_store, thread_id)
     renewal_intent = renewal_intent_for_actor(state.team_store, thread_id)
     status = agent_status(target.repo_root)

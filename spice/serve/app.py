@@ -262,26 +262,20 @@ def work_tree_send_response_payload(
         force_new=force_new,
     )
     agent_ensure = response_payload.get("agentEnsure")
-    ensured_thread_id = (
-        str(agent_ensure.get("threadId") or "").strip()
-        if isinstance(agent_ensure, dict)
-        else ""
-    )
+    if renew_intent and force_new:
+        ensured_thread_id = payloads.record_started_renewal_from_ensure(
+            state.team_store,
+            predecessor_agent_id=predecessor,
+            agent_ensure=agent_ensure if isinstance(agent_ensure, dict) else None,
+        )
+    else:
+        ensured_thread_id = payloads.agent_ensure_thread_id(
+            agent_ensure if isinstance(agent_ensure, dict) else None
+        )
     send_agent_id = (
         ensured_thread_id or payloads.resolve_thread_id_for_target(state, target) or ""
     )
     state.record_lane_send(target.id, agent_id=send_agent_id)
-    if renew_intent and force_new and isinstance(agent_ensure, dict):
-        successor = ensured_thread_id
-        if successor:
-            try:
-                state.team_store.record_started_renewal(
-                    predecessor_agent_id=predecessor,
-                    successor_agent_id=successor,
-                    ancestor_thread_id=predecessor,
-                )
-            except SpiceError:
-                pass
     renewal_agent_id = predecessor if renew_intent else send_agent_id
     if renewal_agent_id:
         response_payload["renewalIntent"] = payloads.renewal_intent_for_actor(
