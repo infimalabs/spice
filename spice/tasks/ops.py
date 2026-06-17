@@ -763,12 +763,14 @@ def review(
     finding: str = "clean",
     note: str | None = None,
     then: list[str] | None = None,
+    followup: list[str] | None = None,
 ) -> str:
     finding = (finding or "clean").strip()
-    if finding.casefold() != "clean" and not then:
+    if finding.casefold() != "clean" and not then and not followup:
         raise SpiceError(
-            "unclean task review requires --then follow-up tracking; "
-            'use --then "title=... | project=... | acceptance=..."'
+            "unclean task review requires follow-up tracking; "
+            'use --then "title=... | project=... | acceptance=..." '
+            "or --followup HANDLE"
         )
     tw.require_clean_worktree("task review")
     row = identity.resolve(handle)
@@ -793,6 +795,14 @@ def review(
     spawned: list[str] = []
     for spec in then or []:
         spawned.append(_spawn_followup(spec, after_uuid=uuid))
+    linked: list[str] = []
+    reviewed_handle = identity.render_handle(row)
+    for followup_handle in followup or []:
+        linked.append(
+            _link_existing_followup(
+                followup_handle, after_uuid=uuid, after_handle=reviewed_handle
+            )
+        )
     sync = gitsync.integrate_and_publish(
         identity.render_handle(row),
         meta=_publish_meta(row, actor, [note or ""]),
@@ -801,6 +811,7 @@ def review(
     result = _advance(identity.resolve(handle))
     lines = [f"reviewed {identity.render_handle(row)} {finding}; {result}"]
     lines += [f"spawned {h}" for h in spawned]
+    lines += [f"linked {h}" for h in linked]
     lines.append("next: run spice task next")
     return "\n".join(lines)
 
@@ -833,6 +844,22 @@ def _spawn_followup(spec: str, *, after_uuid: str) -> str:
         due=fields.get("due"),
         extra=[f"depends:{after_uuid}"],
     )
+
+
+def _link_existing_followup(handle: str, *, after_uuid: str, after_handle: str) -> str:
+    row = identity.resolve(handle)
+    uuid = identity.uuid_of(row)
+    if uuid == after_uuid:
+        raise SpiceError("a review follow-up cannot be the reviewed task itself")
+    try:
+        tw.run([uuid, "modify", f"depends:{after_uuid}"])
+    except SpiceError as exc:
+        raise SpiceError(
+            f"could not link existing review follow-up {identity.render_handle(row)} "
+            "(would it create a cycle?)"
+        ) from exc
+    annotate(uuid, f"review follow-up depends on {after_handle}")
+    return identity.render_handle(row)
 
 
 # ---- oops / note / depends / delete --------------------------------------
