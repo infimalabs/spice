@@ -58,7 +58,6 @@
 }
 .message-body,
 .ack-quote {
-  --quote-accent: var(--message-occupant-accent, var(--accent));
   --quote-deep-nest-indent: calc(
     var(--quote-nested-step) - var(--quote-rail-width) - var(--quote-nested-pad-inline)
   );
@@ -73,6 +72,7 @@
   --quote-rail-width: 3px;
 }
 .message-body {
+  --quote-accent: var(--message-occupant-accent, var(--accent));
   overflow-wrap: anywhere;
 }
 .message-body p { margin: 0 0 6px; }
@@ -167,6 +167,7 @@
   margin: 3px 0 5px;
 }
 .ack-quote {
+  --quote-accent: var(--accent);
   background: color-mix(in srgb, var(--quote-accent) 6%, transparent);
   border-left: var(--quote-rail-width) solid var(--quote-accent);
   border-radius: var(--soft-radius) 0 0 var(--soft-radius);

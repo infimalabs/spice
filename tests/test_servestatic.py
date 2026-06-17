@@ -1043,12 +1043,21 @@ def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
 
 def test_static_css_adds_visible_nested_quote_depth():
     css = _serve_css_text()
-    ack_selector = ".ack-quote {\n  background"
+    message_selector = (
+        ".message-body {\n"
+        "  --quote-accent: var(--message-occupant-accent, var(--accent));"
+    )
+    message_start = css.index(message_selector)
+    message_rule = css[message_start : css.index("}", message_start)]
+    ack_selector = ".ack-quote {\n  --quote-accent: var(--accent);"
     ack_start = css.index(ack_selector)
     ack_rule = css[ack_start : css.index("}", ack_start)]
 
     assert ".message-body,\n.ack-quote {" in css
-    assert "--quote-accent: var(--message-occupant-accent, var(--accent));" in css
+    assert (
+        "--quote-accent: var(--message-occupant-accent, var(--accent));" in message_rule
+    )
+    assert "--quote-accent: var(--accent);" in ack_rule
     assert "--quote-nested-step: 8px;" in css
     assert "--quote-nest-indent: calc(" in css
     assert "--quote-deep-nest-indent: calc(" in css
