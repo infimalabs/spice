@@ -1,0 +1,7 @@
+{
+  "name": "spice-harness-browser-validation",
+  "private": true,
+  "devDependencies": {
+    "playwright": "1.61.0"
+  }
+}
