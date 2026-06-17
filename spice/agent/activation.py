@@ -37,9 +37,10 @@ def activation_browser_validation_lines() -> list[str]:
     return [
         (
             "browser_validation_contract=for executable live browser checks, "
-            "start with the Playwright MCP server named playwright; if no live "
-            "browser path is available, report that browser coverage did not "
-            "run and restore Playwright MCP before continuing; do not "
+            "use the repo-local Node Playwright package; run npm install when "
+            "node_modules is absent, then invoke Playwright through npm exec "
+            "or Node require('playwright'); validation notes must distinguish "
+            "missing Node dependencies from browser coverage not run; do not "
             "substitute static tests or non-browser checks for required "
             "browser coverage"
         )
