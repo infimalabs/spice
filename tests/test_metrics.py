@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 from spice.serve.metrics import record_transcript_metrics_for_agent
 from spice.serve.teams import ServeTeamStore
@@ -57,8 +58,31 @@ def test_transcript_metric_ingestion_advances_cursor_without_double_count(tmp_pa
         store, agent_id="agent-a", transcript_path=rollout
     )
 
-    summary = store.lane_metric_summary("agent-a", bucket_count=12)
+    now = datetime(2026, 6, 10, 12, 0, 2, tzinfo=UTC).timestamp()
+    summary = store.lane_metric_summary("agent-a", bucket_count=12, now=now)
 
     assert summary.acked == 1
     assert summary.tool_calls == 1
     assert sum(summary.sparkline) == 3
+
+
+def test_lane_metric_sparkline_ages_old_buckets_out(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.record_agent_metric_delta(
+        "agent-a",
+        message_timestamps=[0, 60, 120],
+    )
+
+    initial = store.lane_metric_summary(
+        "agent-a", bucket_count=4, bucket_seconds=60, now=180
+    )
+    shifted = store.lane_metric_summary(
+        "agent-a", bucket_count=4, bucket_seconds=60, now=240
+    )
+    expired = store.lane_metric_summary(
+        "agent-a", bucket_count=4, bucket_seconds=60, now=360
+    )
+
+    assert initial.sparkline == (1, 1, 1, 0)
+    assert shifted.sparkline == (1, 1, 0, 0)
+    assert expired.sparkline == (0, 0, 0, 0)

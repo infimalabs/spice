@@ -126,10 +126,10 @@ def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
     )
 
     store.merge_teams(source.team_id, destination.team_id)
-    destination_after = store.lane_metric_summary("agent-b", bucket_count=12)
-    moved_after = store.lane_metric_summary("agent-a", bucket_count=12)
+    destination_after = store.lane_metric_summary("agent-b", bucket_count=12, now=180)
+    moved_after = store.lane_metric_summary("agent-a", bucket_count=12, now=180)
     store.merge_teams(source.team_id, destination.team_id)
-    repeated_after = store.lane_metric_summary("agent-b", bucket_count=12)
+    repeated_after = store.lane_metric_summary("agent-b", bucket_count=12, now=180)
 
     assert store.team_state(source.team_id).status == "closed"
     assert destination_after.agent_ids == ("agent-a", "agent-b")
