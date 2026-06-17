@@ -178,3 +178,44 @@ def test_env_policy_allow_marker_guidance_applies_to_repo_patterns(tmp_path):
 
     assert f"add `# {ENV_POLICY_ALLOW_MARKER}`" in board
     assert f"sample.py:1: {env_name}" in board
+
+
+def test_env_policy_previous_line_marker_waives_next_statement(tmp_path):
+    env_name = "SPICE_" + "TASK_BACKEND"
+    path = tmp_path / "sample.py"
+    path.write_text(
+        f'# env-policy: allow\nVALUE = "{env_name}"\n',
+        encoding="utf-8",
+    )
+
+    assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
+
+
+def test_env_policy_inline_marker_does_not_waive_next_statement(tmp_path):
+    waived_name = "SPICE_" + "TASK_BACKEND"
+    unwaived_name = "CODEX_" + "THREAD_ID"
+    path = tmp_path / "sample.py"
+    path.write_text(
+        f'WAIVED = "{waived_name}"  # env-policy: allow\n'
+        f'UNWAIVED = "{unwaived_name}"\n',
+        encoding="utf-8",
+    )
+
+    findings = scan_env_policy([Path("sample.py")], root=tmp_path)
+
+    assert [(finding.line, finding.name) for finding in findings] == [
+        (2, unwaived_name)
+    ]
+
+
+def test_env_policy_wrapped_statement_marker_waives_wrapped_literal(tmp_path):
+    path = tmp_path / "sample.py"
+    path.write_text(
+        "monkeypatch.setenv(\n"
+        '    "CODEX_THREAD_ID",\n'
+        '    "thread-ambient-value-that-makes-the-line-wrap-beyond-the-formatter-limit",\n'
+        ")  # env-policy: allow\n",
+        encoding="utf-8",
+    )
+
+    assert scan_env_policy([Path("sample.py")], root=tmp_path) == []

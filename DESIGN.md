@@ -137,7 +137,9 @@ authored-tree → study guards) and `dev commit-msg`. The opinions, exactly:
 - **Commit messages** — subject ≤ 100 chars; body auto-folded at 100;
   literal `\n` rejected; URLs and trailers exempt.
 - **Env policy** — literal env-var names in source require an
-  `env-policy: allow` waiver comment.
+  `env-policy: allow` waiver comment on the literal line, as a standalone
+  waiver comment directly above the statement, or anywhere inside the wrapped
+  statement that carries it.
 - **Fully-staged rule** — partially staged files fail the gate.
 - **No negative tests** — assert intended behavior, never absence or
   migration trails.
