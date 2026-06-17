@@ -197,6 +197,12 @@ def test_static_composer_attachment_thumbnails_fill_header():
     attachments_start = css.index(".composer-attachments {")
     attachments_end = css.index(".composer-attachments[hidden]", attachments_start)
     attachments_rule = css[attachments_start:attachments_end]
+    header_start = css.index(".composer-band-header {")
+    header_end = css.index(".composer-band-header--attachments", header_start)
+    header_rule = css[header_start:header_end]
+    attachment_header_start = css.index(".composer-band-header--attachments {")
+    attachment_header_end = css.index("}", attachment_header_start)
+    attachment_header_rule = css[attachment_header_start:attachment_header_end]
     list_start = css.index(".composer-attachment-list {")
     list_end = css.index(".composer-attachment-chip {", list_start)
     list_rule = css[list_start:list_end]
@@ -221,6 +227,9 @@ def test_static_composer_attachment_thumbnails_fill_header():
     assert 'body.className = "composer-band-body";' in app_shell
     assert 'const body = parent.querySelector(".composer-band-body");' in app_shell
     assert "composer-band-header--attachments" in app_shell
+    assert "padding: 0 5px 0 8px;" in header_rule
+    assert "gap: 6px;" in attachment_header_rule
+    assert "padding-left: 8px;" in attachment_header_rule
     assert (
         'wrap.style.setProperty("--composer-attachment-count", String(attachments.length));'
         in app_shell
