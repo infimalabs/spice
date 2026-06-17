@@ -145,7 +145,26 @@ def _render_text_run(kind: str, lines: list[str], worktree_id: str | None) -> st
             body = _render_inline(_HEADING_RE.sub("", lines[0]), worktree_id)
             return f"<h{level}>{body}</h{level}>"
     body = "<br>".join(_render_inline(line, worktree_id) for line in lines)
-    return f"<p>{body}</p>"
+    paragraph_class = ' class="message-image-stack"' if _is_image_stack(lines) else ""
+    return f"<p{paragraph_class}>{body}</p>"
+
+
+def _is_image_stack(lines: list[str]) -> bool:
+    return bool(lines) and all(_line_is_image_stack(line) for line in lines)
+
+
+def _line_is_image_stack(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    position = 0
+    matched = False
+    for match in _IMAGE_RE.finditer(stripped):
+        if stripped[position : match.start()].strip():
+            return False
+        matched = True
+        position = match.end()
+    return matched and not stripped[position:].strip()
 
 
 def _image_html(alt: str, src: str, worktree_id: str | None) -> str:

@@ -114,6 +114,7 @@ def test_markdown_reference_percent_encodes_delimiters():
 
 def test_render_html_inlines_worktree_image():
     html = render_message_html("![shot](shots/a.png)", worktree_id="wt")
+    assert '<p class="message-image-stack">' in html
     assert '<a class="message-image" ' in html
     assert 'href="/api/work/trees/wt/files/image?path=shots/a.png"' in html
     assert '<img src="/api/work/trees/wt/files/image?path=shots/a.png"' in html

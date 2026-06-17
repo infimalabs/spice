@@ -121,11 +121,38 @@ def test_static_css_centers_two_pip_lane_light_stack():
 def test_static_messages_use_compact_image_grid():
     css = _serve_css_text()
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    messages_start = css.rindex(".messages {")
+    messages_end = css.index(".messages article {", messages_start)
+    messages_rule = css[messages_start:messages_end]
+    article_start = css.index(".messages article {")
+    article_end = css.index(".messages article.image-only", article_start)
+    article_rule = css[article_start:article_end]
+    stack_start = css.index(".message-body p.message-image-stack {")
+    stack_end = css.index(
+        ".message-body p.message-image-stack .message-image", stack_start
+    )
+    stack_rule = css[stack_start:stack_end]
+    stack_image_start = css.index(
+        ".message-body p.message-image-stack .message-image img {"
+    )
+    stack_image_end = css.index("}", stack_image_start)
+    stack_image_rule = css[stack_image_start:stack_image_end]
 
     assert "grid-template-columns: repeat(" in css
-    assert "minmax(min(calc(50% - 4px), 156px), 1fr)" in css
+    assert "direction: rtl;" in messages_rule
+    assert "minmax(156px, 1fr)" in messages_rule
+    assert "overflow-x: auto;" in messages_rule
+    assert "direction: ltr;" in article_rule
     assert ".messages article.image-only" in css
     assert "grid-column: span 1" in css
+    assert "display: flex;" in stack_rule
+    assert "flex-direction: row-reverse;" in stack_rule
+    assert "flex-wrap: nowrap;" in stack_rule
+    assert "justify-content: flex-start;" in stack_rule
+    assert "overflow-x: auto;" in stack_rule
+    assert "max-height: 136px;" in stack_image_rule
+    assert "max-width: 156px;" in stack_image_rule
+    assert "object-fit: contain;" in stack_image_rule
     assert ".messages article.image-only .message-image img" in css
     assert "max-height: 136px" in css
     assert ".history-sentinel {\n  grid-column: 1 / -1;" in css
@@ -184,6 +211,9 @@ def test_static_composer_attachment_thumbnails_fill_header():
     chip_start = css.index(".composer-attachment-chip {")
     chip_end = css.index(".composer-attachment-chip img", chip_start)
     chip_rule = css[chip_start:chip_end]
+    chip_image_start = css.index(".composer-attachment-chip img {")
+    chip_image_end = css.index("}", chip_image_start)
+    chip_image_rule = css[chip_image_start:chip_image_end]
     name_start = css.index(".composer-attachment-name {")
     name_end = css.index("}", name_start)
     name_rule = css[name_start:name_end]
@@ -206,10 +236,12 @@ def test_static_composer_attachment_thumbnails_fill_header():
         "mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);"
         in title_shadow_rule
     )
+    assert "flex: 0 0 auto;" in attachments_rule
     assert "overflow-x: auto;" in attachments_rule
     assert "height: 100%;" in attachments_rule
     assert "justify-content: flex-end;" in attachments_rule
     assert "margin-left: auto;" in attachments_rule
+    assert "min-width: 26px;" in attachments_rule
     assert (
         "max-width: min(100%, calc(var(--composer-attachment-count, 1) * 28px - 2px));"
         in attachments_rule
@@ -217,7 +249,10 @@ def test_static_composer_attachment_thumbnails_fill_header():
     assert "flex-direction: row-reverse;" in list_rule
     assert "gap: 2px;" in list_rule
     assert "height: 26px;" in chip_rule
+    assert "flex: 0 0 26px;" in chip_rule
+    assert "min-width: 26px;" in chip_rule
     assert "width: 26px;" in chip_rule
+    assert "min-width: 100%;" in chip_image_rule
     assert "display: none;" in name_rule
 
 
@@ -1046,6 +1081,12 @@ def test_static_css_adds_visible_nested_quote_depth():
     ack_selector = ".ack-quote {\n  background"
     ack_start = css.index(ack_selector)
     ack_rule = css[ack_start : css.index("}", ack_start)]
+    ack_attachments_start = css.index(".ack-attachments {")
+    ack_attachments_end = css.index(".ack-attachment {", ack_attachments_start)
+    ack_attachments_rule = css[ack_attachments_start:ack_attachments_end]
+    ack_attachment_start = css.index(".ack-attachment {")
+    ack_attachment_end = css.index(".ack-attachment img", ack_attachment_start)
+    ack_attachment_rule = css[ack_attachment_start:ack_attachment_end]
 
     assert ".message-body,\n.ack-quote {" in css
     assert "--quote-accent: var(--message-occupant-accent, var(--accent));" in css
@@ -1072,6 +1113,12 @@ def test_static_css_adds_visible_nested_quote_depth():
     assert "--quote-rail-width: 3px;" in css
     assert "border-left: var(--quote-rail-width) solid var(--quote-accent);" in ack_rule
     assert "padding: var(--quote-pad-block) var(--quote-pad-inline);" in ack_rule
+    assert "flex-direction: row-reverse;" in ack_attachments_rule
+    assert "flex-wrap: nowrap;" in ack_attachments_rule
+    assert "justify-content: flex-start;" in ack_attachments_rule
+    assert "overflow-x: auto;" in ack_attachments_rule
+    assert "flex: 0 0 92px;" in ack_attachment_rule
+    assert "width: 92px;" in ack_attachment_rule
 
 
 def test_static_message_anchor_restore_does_not_drive_pane_collapse():
