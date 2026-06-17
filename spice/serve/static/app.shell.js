@@ -250,7 +250,7 @@ function syncEmptyTeamLane(lane, team = {}, options = {}) {
 function lockEmptyTeamPane(lane) {
   if (!lane || !lane.emptyTeam) return;
   lane.selectedView = defaultLaneViewMode;
-  setLanePaneCollapse(lane, 0);
+  setLanePaneCollapse(lane, lanePaneMaxHeight(lane));
 }
 
 function emptyTeamImportPanel(lane) {
@@ -711,7 +711,7 @@ function compensateLaneMessageScrollForPane(lane, appliedCollapsePx) {
 
 function setLanePaneCollapse(lane, collapsePx) {
   const maxHeight = lanePaneMaxHeight(lane);
-  const requestedCollapsePx = lane.emptyTeam ? 0 : collapsePx;
+  const requestedCollapsePx = lane.emptyTeam ? maxHeight : collapsePx;
   const next = Math.max(0, Math.min(maxHeight, requestedCollapsePx));
   lane.paneCollapsePx = next;
   const visibleHeight = Math.max(0, maxHeight - next);
