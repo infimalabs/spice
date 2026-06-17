@@ -68,6 +68,7 @@
   --quote-nested-step: 8px;
   --quote-pad-block: 6px;
   --quote-pad-inline: 8px;
+  --quote-nested-bottom-gap: 6px;
   --quote-rail-width: 3px;
 }
 .message-body {
@@ -98,7 +99,7 @@
 }
 .message-body blockquote blockquote,
 .ack-quote blockquote {
-  margin: 6px 0 0 var(--quote-nest-indent);
+  margin: 6px 0 var(--quote-nested-bottom-gap) var(--quote-nest-indent);
 }
 .message-body blockquote blockquote blockquote,
 .ack-quote blockquote blockquote {
