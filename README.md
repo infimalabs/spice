@@ -108,10 +108,12 @@ Wrapper groups live in tracked config:
 
 ```toml
 [tool.spice.agent]
-wrappers = ["common"]
+wrappers = ["common", "repo-tools"]
 
 [tool.spice.wrappers.common]
 rtk = ["run", "proxy", "grep", "find", "git"]
+
+[tool.spice.wrappers.repo-tools]
 codegen = { argv = ["uv", "run", "python", "-m", "tools.codegen"] }
 ```
 

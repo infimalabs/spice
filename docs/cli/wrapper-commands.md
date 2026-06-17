@@ -69,11 +69,14 @@ Wrapper entries may also be direct argv wrappers with an `argv = [...]` list;
 spice shell-quotes each argv word while building
 `SPICE_SHELL_HOOK_WRAPPERS`. Prefer stable repository-owned commands over
 hook-private environment variables. For example, a repository can opt into a
-local code-generation wrapper without changing the global default:
+local code-generation wrapper by selecting its own extension group alongside
+`common`, without implying that `codegen` belongs to the generic default:
 
 ```toml
-[tool.spice.wrappers.common]
-rtk = ["run", "proxy", "grep", "find", "git"]
+[tool.spice.agent]
+wrappers = ["common", "repo-tools"]
+
+[tool.spice.wrappers.repo-tools]
 codegen = { argv = ["uv", "run", "python", "-m", "tools.codegen"] }
 ```
 
