@@ -1036,6 +1036,7 @@ def test_static_css_adds_visible_nested_quote_depth():
     ack_rule = css[ack_start : css.index("}", ack_start)]
 
     assert ".message-body,\n.ack-quote {" in css
+    assert "--quote-accent: var(--message-occupant-accent, var(--accent));" in css
     assert "--quote-nested-step: 8px;" in css
     assert "--quote-nest-indent: calc(" in css
     assert "--quote-deep-nest-indent: calc(" in css
@@ -1053,11 +1054,11 @@ def test_static_css_adds_visible_nested_quote_depth():
     assert "margin-left: var(--quote-deep-nest-indent);" in css
     assert (
         "border-left: var(--quote-rail-width) solid "
-        "color-mix(in srgb, var(--accent) 72%, var(--fg));" in css
+        "color-mix(in srgb, var(--quote-accent) 72%, var(--fg));" in css
     )
     assert "padding: var(--quote-pad-block) var(--quote-nested-pad-inline);" in css
     assert "--quote-rail-width: 3px;" in css
-    assert "border-left: var(--quote-rail-width) solid var(--accent);" in ack_rule
+    assert "border-left: var(--quote-rail-width) solid var(--quote-accent);" in ack_rule
     assert "padding: var(--quote-pad-block) var(--quote-pad-inline);" in ack_rule
 
 
