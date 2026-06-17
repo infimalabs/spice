@@ -313,19 +313,19 @@ def render_agent_direct_wrapper_lines(
 ) -> list[str]:
     config_path = f"tool.spice.wrappers.{group_name}.{selector}"
     require_shell_function_name(selector, label=f"{config_path} command")
-    extra = sorted(set(entry) - {"command"})
+    extra = sorted(set(entry) - {"argv"})
     if extra:
         raise SpiceError(
             f"spice shell hook: {config_path} has unsupported keys: {', '.join(extra)}"
         )
     command_words = command_words_from_config(
-        entry.get("command"),
-        label=f"{config_path}.command",
+        entry.get("argv"),
+        label=f"{config_path}.argv",
     )
     if selector == command_words[0]:
         raise SpiceError(
             "spice shell hook: wrapper "
-            f"{selector!r} cannot intercept itself in {config_path}.command"
+            f"{selector!r} cannot intercept itself in {config_path}.argv"
         )
     record_agent_wrapper_selector(
         selector,

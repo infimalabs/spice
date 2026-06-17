@@ -60,7 +60,7 @@ wrappers = ["common"]
 
 [tool.spice.wrappers.common]
 rtk = ["run", "proxy", "grep", "find", "git"]
-pytest = { command = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
+pytest = { argv = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
 ```
 
 At spawn, spice renders command functions into `SPICE_SHELL_HOOK_WRAPPERS`; the
