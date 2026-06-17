@@ -267,6 +267,9 @@ def _add_one(
     actor = tw.current_actor()
     if claim:
         _require_single_active_slot(actor, action="task add --claim")
+        # Match a normal claim's baseline check before creating the task row.
+        # If this fails, task add --claim must not leave unclaimed work behind.
+        gitsync.prepare_for_claim()
     private_project = default_project(actor)
     if project is None:
         resolved_project = private_project
@@ -325,9 +328,6 @@ def _add_one(
     if claim:
         created = tw.export([f"incepted.is:{incepted}"])
         if created:
-            # Same baseline refresh as any claim, so created-and-claimed work
-            # starts from the current shared state.
-            gitsync.prepare_for_claim()
             do_claim(identity.uuid_of(created[0]), actor, guard_unclaimed=False)
     key = identity.key_for(resolved_project, title)
     return f"{key}-{incepted}"

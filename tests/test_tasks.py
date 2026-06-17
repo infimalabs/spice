@@ -124,6 +124,26 @@ def test_task_adopt_refuses_when_no_orphan_commit(remote_task_repo):
         ops.adopt(project="task.unit")
 
 
+def test_task_add_claim_refuses_dirty_tree_without_creating_task(remote_task_repo):
+    (remote_task_repo / "README.md").write_text("dirty\n", encoding="utf-8")
+
+    with pytest.raises(SpiceError, match="commit or clear the working tree first"):
+        ops.add("Dirty claim should not leak", project="task.unit", claim=True)
+
+    rows = tw.export(["status:pending"])
+    assert [
+        row for row in rows if row.get("description") == "Dirty claim should not leak"
+    ] == []
+
+
+def test_task_add_claim_creates_and_claims_clean_task(task_repo):
+    handle = ops.add("Clean claim lands", project="task.unit", claim=True)
+    row = identity.resolve(handle)
+
+    assert row["claim_by"] == ACTOR_A
+    assert bool(row["start"])
+
+
 def test_task_adopt_rejects_handle_with_new_task_fields(remote_task_repo):
     handle = ops.add(
         "Existing task", project="task.unit", priority="medium", acceptance=["x"]
