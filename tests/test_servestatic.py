@@ -329,6 +329,8 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert 'label: "Close team",' in app_groups
     assert 'label: "Split into individuals",' in app_groups
     assert 'label: "Restore previous team",' in app_groups
+    assert "if (host.emptyTeam) return [closeTeamMenuAction(host)];" in app_groups
+    assert 'detail: host.emptyTeam\n      ? "empty"' in app_groups
     close_team_index = app_groups.index('label: "Close team",')
     split_individuals_index = app_groups.index('label: "Split into individuals",')
     restore_previous_index = app_groups.index('label: "Restore previous team",')

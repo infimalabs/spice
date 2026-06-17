@@ -472,20 +472,25 @@ def test_static_empty_teams_render_importer_in_message_stream():
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
 
     assert 'const emptyTeamTargetPrefix = "empty-team:";' in app_lanes
-    assert "function ensureEmptyTeamLane(team)" in app_shell
+    assert "function ensureEmptyTeamLane(team, options = {})" in app_shell
     assert "const targetId = emptyTeamTargetId(team.teamId);" in app_lanes
-    assert "ensureEmptyTeamLane(team);" in app_lanes
+    assert "const canCloseEmptyTeam = teams.length > 1;" in app_lanes
+    assert "ensureEmptyTeamLane(team, { canClose: canCloseEmptyTeam });" in app_lanes
     assert "if (!targetById.has(lane.targetId) && !lane.emptyTeam)" in app_lanes
     assert "if (lane.emptyTeam) syncEmptyTeamLane(lane);" in app_lanes
     close_lane_start = app_lanes.index("function closeLane(lane) {")
     close_lane_end = app_lanes.index("function closeLaneCore(lane)", close_lane_start)
-    assert "if (lane.emptyTeam) return;" in app_lanes[close_lane_start:close_lane_end]
-    assert "function addEmptyTeamLane(team)" in app_shell
+    assert (
+        "if (host.emptyTeam && !host.emptyTeamCanClose) return;"
+        in app_lanes[close_lane_start:close_lane_end]
+    )
+    assert "if (!host.teamId) return;" in app_lanes[close_lane_start:close_lane_end]
+    assert "function addEmptyTeamLane(team, options = {})" in app_shell
     assert (
         'element.className = emptyTeam ? "lane lane--empty-team" : "lane";' in app_shell
     )
     empty_team_sync_start = app_shell.index(
-        "function syncEmptyTeamLane(lane, team = {}) {"
+        "function syncEmptyTeamLane(lane, team = {}, options = {}) {"
     )
     empty_team_sync_end = app_shell.index("function emptyTeamImportPanel(lane) {")
     empty_team_sync = app_shell[empty_team_sync_start:empty_team_sync_end]
@@ -499,6 +504,14 @@ def test_static_empty_teams_render_importer_in_message_stream():
     assert "lane.pipEl.hidden = true;" in empty_team_sync
     assert "lane.laneLightsEl.hidden = true;" in empty_team_sync
     assert "lane.laneLightsEl.replaceChildren();" in empty_team_sync
+    assert "lane.emptyTeamCanClose = nextCanClose;" in empty_team_sync
+    assert (
+        'lane.element.classList.toggle("lane--empty-team-closable", nextCanClose);'
+        in empty_team_sync
+    )
+    assert "if (lane.emptyTeamCanClose) {" in empty_team_sync
+    assert "lane.teamMenuButtonEl.disabled = false;" in empty_team_sync
+    assert 'lane.teamMenuButtonEl.removeAttribute("aria-hidden");' in empty_team_sync
     assert "lane.teamMenuButtonEl.disabled = true;" in empty_team_sync
     assert "lane.teamMenuButtonEl.tabIndex = -1;" in empty_team_sync
     assert (
@@ -550,8 +563,9 @@ def test_static_empty_teams_render_importer_in_message_stream():
     ) in app_stream
     assert "if (lane.emptyTeam) {\n    syncEmptyTeamLane(lane);" in app_groups
     assert (
-        ".lane--empty-team .lane-pip-stack,\n.lane--empty-team [data-lane-team-menu] {"
-        in css
+        ".lane--empty-team .lane-pip-stack,\n"
+        ".lane--empty-team:not(.lane--empty-team-closable) "
+        "[data-lane-team-menu] {" in css
     )
     assert "pointer-events: none;" in css
     assert "visibility: hidden;" in css

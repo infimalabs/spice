@@ -129,6 +129,7 @@ function applyTeamSnapshotPayload(payload, options = {}) {
   if (!changed) return;
   const openBefore = laneStateTargetIds();
   const teams = (payload.snapshot || {}).teams || [];
+  const canCloseEmptyTeam = teams.length > 1;
   const hints = laneHintsByTargetId();
   const openTargetIds = new Set();
   const groupRuns = [];
@@ -138,7 +139,7 @@ function applyTeamSnapshotPayload(payload, options = {}) {
       if (!team.teamId) continue;
       const targetId = emptyTeamTargetId(team.teamId);
       openTargetIds.add(targetId);
-      ensureEmptyTeamLane(team);
+      ensureEmptyTeamLane(team, { canClose: canCloseEmptyTeam });
       continue;
     }
     for (const targetId of memberTargetIds) {
@@ -276,9 +277,10 @@ async function openTargetTeam(targetId) {
 }
 
 function closeLane(lane) {
-  if (lane.emptyTeam) return;
   const host = laneGroupHost(lane);
-  if (laneHasUnsafeDraft(host)) {
+  if (host.emptyTeam && !host.emptyTeamCanClose) return;
+  if (!host.teamId) return;
+  if (!host.emptyTeam && laneHasUnsafeDraft(host)) {
     if (!window.confirm(unsafeDraftWarningText())) return;
   }
   for (const member of laneGroupMemberLanes(host))

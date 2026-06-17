@@ -13,10 +13,14 @@ function addLane(targetId, hint = null) {
   subscribeLaneToLiveBus(lane);
 }
 
-function addEmptyTeamLane(team) {
+function addEmptyTeamLane(team, options = {}) {
   const targetId = emptyTeamTargetId(team.teamId);
   if (laneStates.has(targetId)) return;
-  const lane = createLaneState(targetId, null, { emptyTeam: true, team });
+  const lane = createLaneState(targetId, null, {
+    emptyTeam: true,
+    team,
+    canClose: Boolean(options.canClose),
+  });
   laneStates.set(targetId, lane);
   lanesEl.append(lane.element);
   renderSpiceMenu();
@@ -124,6 +128,7 @@ function createLaneState(targetId, hint = null, options = {}) {
     privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),
     teamId: target.teamId || "",
     teamRevision: target.teamRevision || 0,
+    emptyTeamCanClose: emptyTeam && Boolean(options.canClose),
     teamSplitBackAvailable: false,
     teamSplitBackMemberCount: 0,
     configRevision: target.configRevision || 0,
@@ -161,7 +166,7 @@ function createLaneState(targetId, hint = null, options = {}) {
     ...laneElementRefs(element),
   };
   wireLaneShell(lane);
-  if (emptyTeam) syncEmptyTeamLane(lane, options.team || {});
+  if (emptyTeam) syncEmptyTeamLane(lane, options.team || {}, options);
   else {
     syncComposerShards(lane, [lane]);
     syncLaneEffectiveControls(lane);
@@ -170,17 +175,22 @@ function createLaneState(targetId, hint = null, options = {}) {
   return lane;
 }
 
-function ensureEmptyTeamLane(team) {
+function ensureEmptyTeamLane(team, options = {}) {
   if (!team.teamId) return;
   const targetId = emptyTeamTargetId(team.teamId);
-  if (!laneStates.has(targetId)) addEmptyTeamLane(team);
+  if (!laneStates.has(targetId)) addEmptyTeamLane(team, options);
   const lane = laneStates.get(targetId);
-  if (lane) syncEmptyTeamLane(lane, team);
+  if (lane) syncEmptyTeamLane(lane, team, options);
 }
 
-function syncEmptyTeamLane(lane, team = {}) {
+function syncEmptyTeamLane(lane, team = {}, options = {}) {
   if (!lane || !lane.emptyTeam) return;
   const config = team.config || {};
+  const nextCanClose = Object.prototype.hasOwnProperty.call(options, "canClose")
+    ? Boolean(options.canClose)
+    : Boolean(lane.emptyTeamCanClose);
+  lane.emptyTeamCanClose = nextCanClose;
+  lane.element.classList.toggle("lane--empty-team-closable", nextCanClose);
   lane.teamId = String(team.teamId || lane.teamId || "");
   lane.teamRevision = Math.max(0, Number(team.revision || lane.teamRevision || 0));
   lane.configRevision = Math.max(
@@ -214,11 +224,21 @@ function syncEmptyTeamLane(lane, team = {}) {
   lane.laneLightsEl.hidden = true;
   lane.laneLightsEl.replaceChildren();
   clearLaneLightGridLayout(lane.laneLightsEl);
-  lane.teamMenuButtonEl.disabled = true;
-  lane.teamMenuButtonEl.tabIndex = -1;
-  lane.teamMenuButtonEl.setAttribute("aria-hidden", "true");
-  lane.teamMenuButtonEl.setAttribute("aria-expanded", "false");
-  lane.teamMenuButtonEl.title = "";
+  if (lane.emptyTeamCanClose) {
+    lane.teamMenuButtonEl.disabled = false;
+    lane.teamMenuButtonEl.removeAttribute("aria-hidden");
+    lane.teamMenuButtonEl.removeAttribute("tabindex");
+    lane.teamMenuButtonEl.title = "Team actions";
+    lane.teamMenuButtonEl.setAttribute("aria-label", "Team actions");
+  } else {
+    lane.element.querySelector(".lane-team-menu")?.remove();
+    lane.element.classList.remove("lane--team-menu-open");
+    lane.teamMenuButtonEl.disabled = true;
+    lane.teamMenuButtonEl.tabIndex = -1;
+    lane.teamMenuButtonEl.setAttribute("aria-hidden", "true");
+    lane.teamMenuButtonEl.setAttribute("aria-expanded", "false");
+    lane.teamMenuButtonEl.title = "";
+  }
   lane.selectedView = defaultLaneViewMode;
   syncLaneEffectiveControls(lane);
   lockEmptyTeamPane(lane);
