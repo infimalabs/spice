@@ -112,7 +112,7 @@ wrappers = ["common"]
 
 [tool.spice.wrappers.common]
 rtk = ["run", "proxy", "grep", "find", "git"]
-pytest = { argv = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
+codegen = { argv = ["uv", "run", "python", "-m", "tools.codegen"] }
 ```
 
 Use wrappers for agent-owned execution where command output is also an
