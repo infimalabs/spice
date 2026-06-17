@@ -943,7 +943,18 @@ button.primary:hover {
   z-index: 90;
 }
 .target-choice-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.target-choice-copy span { color: var(--muted); font-size: 11px; }
+.target-choice-name {
+  color: color-mix(
+    in srgb,
+    var(--target-choice-name-accent, var(--fg)) 70%,
+    var(--fg)
+  );
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.target-choice-meta { color: var(--muted); font-size: 11px; }
 .target-choice-drag-affordance {
   color: var(--muted);
   flex: none;

@@ -922,8 +922,8 @@ function targetChoiceButton(target, actionLabel, onClick, role = "menuitem") {
   if (role) button.setAttribute("role", role);
   button.innerHTML =
     '<span class="target-choice-signal" aria-hidden="true"></span>' +
-    '<span class="target-choice-copy"><strong></strong><span></span></span>';
-  button.querySelector("strong").textContent = name;
+    '<span class="target-choice-copy"><span class="target-choice-name"></span><span class="target-choice-meta"></span></span>';
+  button.querySelector(".target-choice-name").textContent = name;
   updateTargetChoiceButtonPresentation(button, target, actionLabel);
   button.addEventListener("click", onClick);
   return button;
@@ -946,9 +946,25 @@ function updateTargetChoiceButtonPresentation(button, target, actionLabel) {
   const status = targetChoiceStatus(target);
   const metadata = targetChoiceMetadata(target);
   setTargetChoiceStatusClass(button, status);
+  syncTargetChoiceNameAccent(button, target);
   button.title = actionLabel + " " + targetChoiceName(target) + "; " + metadata;
-  const metadataEl = button.querySelector(".target-choice-copy span");
+  const metadataEl = button.querySelector(".target-choice-meta");
   if (metadataEl) metadataEl.textContent = metadata;
+}
+
+function syncTargetChoiceNameAccent(button, target) {
+  const accent = targetChoiceNameAccent(target);
+  if (accent) button.style.setProperty("--target-choice-name-accent", accent);
+  else button.style.removeProperty("--target-choice-name-accent");
+}
+
+function targetChoiceNameAccent(target) {
+  const lane = laneStates.get(target.id);
+  if (!lane) return "";
+  const host = laneGroupHost(lane);
+  const members = laneGroupMemberLanes(host);
+  if (!host.teamId && members.length <= 1) return "";
+  return messageOccupantAccent(laneMemberAccentIndex(host, lane));
 }
 
 function setTargetChoiceStatusClass(button, status) {

@@ -172,9 +172,14 @@
   position: relative;
 }
 .composer-band-title {
-  color: var(--muted);
+  color: color-mix(
+    in srgb,
+    var(--composer-header-accent, var(--muted)) 70%,
+    var(--fg)
+  );
   flex: 1 1 auto;
   font-size: 12px;
+  font-weight: 400;
   line-height: 1.2;
   min-width: 0;
   overflow: hidden;
