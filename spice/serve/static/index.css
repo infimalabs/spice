@@ -7,6 +7,10 @@
   --panel: #ffffff;
   --border: #d7ded2;
   --border-soft: color-mix(in srgb, var(--border) 72%, transparent);
+  --control-border-soft: color-mix(in srgb, var(--border) 52%, transparent);
+  --control-border-soft-hover: color-mix(in srgb, var(--border) 64%, transparent);
+  --control-surface-soft: color-mix(in srgb, var(--bg) 62%, var(--control));
+  --control-inset-soft: inset 0 0 0 1px var(--border-soft);
   --accent: #2d6a4f;
   --accent-strong: #1b4332;
   --ack-tint: color-mix(in srgb, var(--accent) 8%, var(--panel));
@@ -66,7 +70,7 @@ button {
   padding: 7px 9px;
   color: var(--fg);
   background: var(--control);
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border-soft);
   border-radius: 8px;
 }
 button { cursor: pointer; }
@@ -99,16 +103,23 @@ button.primary:hover {
   padding: 0;
   border-radius: 50%;
   color: var(--fg);
-  background: var(--control);
-  border: 1px solid var(--border);
+  background: var(--control-surface-soft);
+  border: 1px solid var(--control-border-soft);
+  box-shadow: var(--control-inset-soft);
   cursor: pointer;
+}
+.icon-button:hover,
+.icon-button:focus-visible {
+  border-color: var(--control-border-soft-hover);
+  box-shadow: var(--control-inset-soft);
+  color: var(--fg);
 }
 .spice-menu-button {
   align-items: center;
-  background: color-mix(in srgb, var(--control) 90%, var(--accent) 10%);
-  border-color: color-mix(in srgb, var(--border) 52%, transparent);
+  background: color-mix(in srgb, var(--control-surface-soft) 88%, var(--accent) 12%);
+  border-color: var(--control-border-soft);
   border-radius: var(--pill-radius);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: var(--control-inset-soft);
   color: color-mix(in srgb, var(--accent-strong) 76%, var(--fg));
   display: inline-flex;
   flex: 0 0 auto;
@@ -123,21 +134,21 @@ button.primary:hover {
 }
 .spice-menu-button:hover,
 .spice-menu-button:focus-visible {
-  background: color-mix(in srgb, var(--control) 82%, var(--accent) 18%);
-  border-color: color-mix(in srgb, var(--border) 64%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--control-surface-soft) 78%, var(--accent) 22%);
+  border-color: var(--control-border-soft-hover);
+  box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-button:active {
   background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);
   border-color: var(--border-soft);
-  box-shadow: inset 0 0 0 1px var(--border-soft);
+  box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-button[aria-expanded="true"] {
   background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);
   border-color: var(--border-soft);
-  box-shadow: inset 0 0 0 1px var(--border-soft);
+  box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-icon {
@@ -162,7 +173,8 @@ button.primary:hover {
 .filter-strip[aria-hidden="true"] { display: none; }
 .filter-pill {
   align-items: center;
-  border: 1px solid var(--border);
+  background: var(--control-surface-soft);
+  border: 1px solid var(--control-border-soft);
   border-radius: var(--pill-radius);
   display: inline-flex;
   font-size: 12px;
@@ -198,8 +210,9 @@ button.primary:hover {
 }
 .lane {
   background: var(--panel);
-  border: 1px solid var(--border-soft);
+  border: 1px solid var(--control-border-soft);
   border-radius: var(--soft-radius);
+  box-shadow: var(--control-inset-soft);
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
@@ -298,7 +311,9 @@ button.primary:hover {
   visibility: hidden;
 }
 .lane-team-menu-button[aria-expanded="true"] {
-  border-color: var(--accent);
+  background: color-mix(in srgb, var(--control-surface-soft) 82%, var(--accent) 18%);
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--accent-strong);
 }
 .lane-team-menu-icon {
@@ -311,7 +326,7 @@ button.primary:hover {
   width: 12px;
 }
 .lane-team-menu {
-  border-block: 1px solid var(--border-soft);
+  border-block: 1px solid var(--control-border-soft);
   padding: 6px 10px;
 }
 .lane-team-menu-action:disabled {
@@ -323,9 +338,10 @@ button.primary:hover {
 .lane-mode-rail {
   min-width: 0;
   padding: 4px;
-  border: 1px solid color-mix(in srgb, var(--border) 52%, transparent);
+  border: 1px solid var(--control-border-soft);
   border-radius: var(--pill-radius);
-  background: color-mix(in srgb, var(--bg) 62%, var(--control));
+  background: var(--control-surface-soft);
+  box-shadow: var(--control-inset-soft);
 }
 .lane-mode-button {
   align-items: center;
@@ -388,7 +404,7 @@ button.primary:hover {
       var(--lane-pane-control-pad) +
       var(--lane-pane-compose-edge-gap)
   );
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--control-border-soft);
   display: grid;
   height: var(
     --lane-pane-visible-height,
@@ -523,7 +539,7 @@ button.primary:hover {
 }
 .lane-filter-picker {
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border-soft);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -541,8 +557,9 @@ button.primary:hover {
 }
 .lane-filter-search {
   background: var(--control);
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border-soft);
   border-radius: 6px;
+  box-shadow: var(--control-inset-soft);
   color: var(--fg);
   font: inherit;
   padding: 4px 8px;
@@ -561,7 +578,10 @@ button.primary:hover {
   padding: 3px 7px;
   text-align: left;
 }
-.lane-filter-picker-action:hover { background: var(--control); }
+.lane-filter-picker-action:hover {
+  background: var(--control-surface-soft);
+  border-color: var(--control-border-soft-hover);
+}
 .lane-filter-picker-action--selected { border-color: var(--accent); color: var(--accent); }
 .lane-filter-picker-action-detail { color: var(--muted); font-size: 11px; }
 .lane-filter-picker-empty { color: var(--muted); font-size: 12px; padding: 4px; }
@@ -573,8 +593,8 @@ button.primary:hover {
   grid-template-columns: repeat(3, 1fr);
 }
 .lane-metric-cell {
-  background: color-mix(in srgb, var(--border) 12%, var(--control));
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: var(--control-surface-soft);
+  border: 1px solid var(--control-border-soft);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -622,8 +642,8 @@ button.primary:hover {
 }
 .lane-info-cell {
   align-items: baseline;
-  background: color-mix(in srgb, var(--border) 12%, var(--control));
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: var(--control-surface-soft);
+  border: 1px solid var(--control-border-soft);
   border-radius: 8px;
   color: color-mix(in srgb, var(--fg) 90%, var(--muted));
   cursor: pointer;
@@ -663,7 +683,7 @@ button.primary:hover {
 /* ---- status line ---- */
 .lane-statusline {
   align-items: baseline;
-  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--control-border-soft);
   color: var(--muted);
   display: flex;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -686,32 +706,32 @@ button.primary:hover {
 /* ---- spice context menu ---- */
 .spice-menu-button--fast {
   background: color-mix(in srgb, var(--control) 82%, var(--say-accent) 18%);
-  border-color: color-mix(in srgb, var(--border) 58%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--say-accent) 10%, transparent);
+  border-color: var(--control-border-soft);
+  box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-button--fast:hover,
 .spice-menu-button--fast:focus-visible {
   background: color-mix(in srgb, var(--control) 72%, var(--say-accent) 28%);
-  border-color: color-mix(in srgb, var(--border) 68%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--say-accent) 14%, transparent);
+  border-color: var(--control-border-soft-hover);
+  box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-button--fast:active {
   background: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);
   border-color: var(--border-soft);
-  box-shadow: inset 0 0 0 1px var(--border-soft);
+  box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-button--fast[aria-expanded="true"] {
   background: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);
   border-color: var(--border-soft);
-  box-shadow: inset 0 0 0 1px var(--border-soft);
+  box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-context-menu {
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border-soft);
   border-radius: 8px;
   box-shadow: 0 16px 34px color-mix(in srgb, #000 24%, transparent);
   display: flex;
@@ -791,9 +811,10 @@ button.primary:hover {
 }
 .spice-menu-action {
   align-items: center;
-  background: var(--control);
-  border: 1px solid var(--border);
+  background: var(--control-surface-soft);
+  border: 1px solid var(--control-border-soft);
   border-radius: 8px;
+  box-shadow: var(--control-inset-soft);
   color: var(--fg);
   cursor: pointer;
   display: flex;
@@ -828,9 +849,10 @@ button.primary:hover {
 }
 .target-choice {
   align-items: center;
-  background: var(--control);
-  border: 1px solid var(--border);
+  background: var(--control-surface-soft);
+  border: 1px solid var(--control-border-soft);
   border-radius: 8px;
+  box-shadow: var(--control-inset-soft);
   color: var(--fg);
   cursor: pointer;
   display: flex;
@@ -938,7 +960,7 @@ button.primary:hover {
     touch-action: pan-x pan-y;
   }
   .lane {
-    border-color: var(--border-soft);
+    border-color: var(--control-border-soft);
     border-radius: 7px;
     flex: 0 0 100%;
     min-width: 100%;
