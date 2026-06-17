@@ -2,21 +2,18 @@
 
 Shims are generated under `.spice/hooks/` and activated through the
 worktree-local `core.hooksPath`, so nothing spice writes collides with hooks
-the repo may already track. The shims bake in the absolute interpreter of the
-installation that ran `spice init`, but when the repo itself provides spice
-source they put the worktree first on PYTHONPATH before running `python -m
-spice`; ordinary target repos use the installed product.
+the repo may already track. The shims invoke the ambient `spice` command
+directly; runtime resolution belongs to that command, not to generated hook
+files.
 """
 
 from __future__ import annotations
 
 import stat
-import sys
-import shlex
 from pathlib import Path
 
 from spice.config import git_worktree_config_get, git_worktree_config_set
-from spice.paths import STATE_DIRNAME, git_common_dir, worktree_spice_source
+from spice.paths import STATE_DIRNAME, git_common_dir
 
 HOOKS_DIRNAME = "hooks"
 HOOK_ARGS = {
@@ -26,14 +23,10 @@ HOOK_ARGS = {
 }
 
 
-def hook_shim_content(repo_root: Path, args: str) -> str:
-    lines = ["#!/usr/bin/env sh", "", "set -eu", ""]
-    if worktree_spice_source(repo_root) is not None:
-        quoted_root = shlex.quote(str(repo_root.expanduser().resolve()))
-        lines.append(f"export PYTHONPATH={quoted_root}${{PYTHONPATH:+:$PYTHONPATH}}")
-        lines.append("")
-    lines.append(f"exec {shlex.quote(sys.executable)} -m spice {args}")
-    return "\n".join(lines) + "\n"
+def hook_shim_content(args: str) -> str:
+    return (
+        "\n".join(["#!/usr/bin/env sh", "", "set -eu", "", f"exec spice {args}"]) + "\n"
+    )
 
 
 def hooks_dir(repo_root: Path) -> Path:
@@ -47,7 +40,7 @@ def install_hooks_for_repo(repo_root: Path) -> list[str]:
     directory.mkdir(parents=True, exist_ok=True)
     for name, args in HOOK_ARGS.items():
         path = directory / name
-        content = hook_shim_content(repo_root, args)
+        content = hook_shim_content(args)
         if not path.exists() or path.read_text(encoding="utf-8") != content:
             path.write_text(content, encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)

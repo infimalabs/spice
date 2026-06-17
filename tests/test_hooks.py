@@ -429,7 +429,9 @@ def test_install_hooks_writes_reference_transaction_shim(tmp_path):
 
     path = hooks_dir(repo) / "reference-transaction"
     assert f"hook reference-transaction -> {path.relative_to(repo).as_posix()}" in rows
-    assert 'dev reference-transaction "$1"' in path.read_text(encoding="utf-8")
+    assert path.read_text(encoding="utf-8") == _expected_hook_content(
+        'dev reference-transaction "$1"'
+    )
     assert path.stat().st_mode & stat.S_IXUSR
     assert (
         _git(repo, "config", "--get", "core.hooksPath").stdout.strip() == ".spice/hooks"
@@ -442,18 +444,29 @@ def test_install_hooks_writes_pre_commit_git_hook_entrypoint_shim(tmp_path):
     install_hooks_for_repo(repo)
 
     content = (hooks_dir(repo) / "pre-commit").read_text(encoding="utf-8")
-    assert "dev pre-commit --consider-simply-committing-instead --hook" in content
+    assert content == _expected_hook_content(
+        "dev pre-commit --consider-simply-committing-instead --hook"
+    )
 
 
-def test_install_hooks_prefer_worktree_spice_source_for_spice_checkout(tmp_path):
+def test_install_hooks_writes_ambient_spice_shims_for_spice_checkout(tmp_path):
     repo = _git_init(tmp_path / "repo")
     _write_spice_product_shape(repo)
 
     install_hooks_for_repo(repo)
 
-    content = (hooks_dir(repo) / "reference-transaction").read_text(encoding="utf-8")
-    assert f"PYTHONPATH={repo.resolve()}" in content
-    assert "-m spice dev reference-transaction" in content
+    assert (hooks_dir(repo) / "reference-transaction").read_text(
+        encoding="utf-8"
+    ) == _expected_hook_content('dev reference-transaction "$1"')
+    assert (hooks_dir(repo) / "commit-msg").read_text(
+        encoding="utf-8"
+    ) == _expected_hook_content('dev commit-msg "$1"')
+
+
+def _expected_hook_content(args: str) -> str:
+    return (
+        "\n".join(["#!/usr/bin/env sh", "", "set -eu", "", f"exec spice {args}"]) + "\n"
+    )
 
 
 def test_reference_transaction_blocks_upstream_merged_current_branch_rewind(tmp_path):

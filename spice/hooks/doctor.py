@@ -337,7 +337,7 @@ def _hook_installation_errors(repo_root: Path) -> list[str]:
     directory = hooks_dir(repo_root)
     for name, args in HOOK_ARGS.items():
         path = directory / name
-        expected = hook_shim_content(repo_root, args)
+        expected = hook_shim_content(args)
         try:
             actual = path.read_text(encoding="utf-8")
         except OSError:
