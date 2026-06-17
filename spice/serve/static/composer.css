@@ -53,10 +53,6 @@
 .empty-team-importer .target-choice-copy {
   flex: 1 1 auto;
 }
-.empty-team-importer .target-choice-signal {
-  margin-left: auto;
-  order: 2;
-}
 .lane--composer-drop .composer-shards {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 42%, transparent);
 }
