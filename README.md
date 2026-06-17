@@ -82,9 +82,10 @@ spice dev doctor         # verify drivers, backends, and policy
 `.git/info/exclude`), materializes the worktree skill copy, and prepares state
 scaffolding. Repo-tracked policy lives in your `pyproject.toml` under
 `[tool.spice.*]` tables. The command surface is always `spice …`. Entrypoint
-resolution is worktree-true under the hood: generated shims and supervisor
-children load the spice source checkout first on `PYTHONPATH` when operating on
-that checkout; ordinary target repos use the installed product.
+resolution is worktree-true under the hood: generated git hooks invoke ambient
+`spice` directly, while supervisor children load the spice source checkout first
+on `PYTHONPATH` when operating on that checkout; ordinary target repos use the
+installed product.
 
 ### Agent command wrapper
 
