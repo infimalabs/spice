@@ -153,8 +153,8 @@
   padding: 0 5px 0 8px;
 }
 .composer-band-header--attachments {
-  gap: 4px;
-  padding-left: 3px;
+  gap: 6px;
+  padding-left: 8px;
 }
 .composer-band-header--primary {
   cursor: grab;
