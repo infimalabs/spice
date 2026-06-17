@@ -102,6 +102,14 @@ def renewal_handoff_request_text(text: str) -> str:
     )
 
 
+def strip_renewal_handoff_request_suffix(text: str) -> str:
+    """Remove the injected renewal suffix from operator-facing display text."""
+    body = str(text or "").rstrip()
+    if not body.endswith(RENEWAL_HANDOFF_REQUEST_SUFFIX):
+        return body.strip()
+    return body[: -len(RENEWAL_HANDOFF_REQUEST_SUFFIX)].rstrip()
+
+
 def renewal_steering_text(text: str, *, previous_thread_id: str) -> str:
     if not previous_thread_id:
         return text

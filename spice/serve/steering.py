@@ -7,6 +7,7 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Sequence
 
+from spice.agent.renewal import strip_renewal_handoff_request_suffix
 from spice.mail.attachments import InboxAttachment, prepare_inbox_attachments
 from spice.mail.inbox import (
     compose_inbox_text,
@@ -59,7 +60,7 @@ def submit_steering_message(
         key=key,
         path=path,
         text=composed,
-        request_text=inbox_request_body(composed),
+        request_text=strip_renewal_handoff_request_suffix(inbox_request_body(composed)),
         request_controls=inbox_request_controls(composed),
         no_say=no_say,
         attachments=collect_inbox_attachments(path),
