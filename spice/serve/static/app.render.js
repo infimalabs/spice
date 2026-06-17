@@ -177,7 +177,6 @@ function lanePendingDisplayCount(lane) {
 function clearDrainedSubmittedMessagePredictions(lane) {
   if (lane.backendPendingInboxCount > 0) return;
   if (Math.max(0, Number(lane.pendingSubmissionCount) || 0) > 0) return;
-  if (Math.max(0, Number(lane.sendAwaitingBackendCount) || 0) > 0) return;
   if (!lane.optimisticSubmittedInboxKeys.size) return;
   lane.optimisticSubmittedInboxKeys.clear();
   lane.optimisticPendingInboxFloor = 0;

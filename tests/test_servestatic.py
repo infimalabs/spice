@@ -592,7 +592,7 @@ def test_static_submitted_message_predictions_reconcile_against_server_echoes():
     assert "lane.optimisticSubmittedInboxKeys.add(inboxKey);" in app_render
     assert "laneSubmittedMessagePendingFloor(lane)" in app_render
     assert "clearDrainedSubmittedMessagePredictions(lane)" in app_render
-    assert "lane.sendAwaitingBackendCount" in app_render
+    assert "Number(lane.pendingSubmissionCount)" in app_render
     assert "function laneSubmittedMessagePendingFloor(lane)" in app_render
     assert "function reconcileSubmittedMessagePredictions(lane)" in app_render
     assert "const ackedKeys = new Set(ackKeysForMessages(lane.knownMessages));" in (

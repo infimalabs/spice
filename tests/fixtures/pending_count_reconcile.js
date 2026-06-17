@@ -49,15 +49,26 @@ assert(
   "drained backend clears submitted pending floor",
 );
 
-const sendInFlight = lane({ sendAwaitingBackendCount: 1 });
-context.syncLaneBackendPending(sendInFlight, 0);
+const submissionInFlight = lane({ pendingSubmissionCount: 1 });
+context.syncLaneBackendPending(submissionInFlight, 0);
 assert(
-  context.lanePendingDisplayCount(sendInFlight) === 2,
-  "in-flight send keeps optimistic pending count through stale backend zero",
+  context.lanePendingDisplayCount(submissionInFlight) === 2,
+  "pending submission keeps optimistic pending count through backend zero",
 );
 assert(
-  sendInFlight.optimisticSubmittedInboxKeys.size === 2,
-  "in-flight send keeps submitted inbox keys",
+  submissionInFlight.optimisticSubmittedInboxKeys.size === 2,
+  "pending submission keeps submitted inbox keys",
+);
+
+const acceptedSendRefresh = lane({ sendAwaitingBackendCount: 1 });
+context.syncLaneBackendPending(acceptedSendRefresh, 0);
+assert(
+  context.lanePendingDisplayCount(acceptedSendRefresh) === 0,
+  "accepted send refresh trusts drained backend count",
+);
+assert(
+  acceptedSendRefresh.optimisticSubmittedInboxKeys.size === 0,
+  "accepted send refresh clears submitted inbox keys",
 );
 
 const stillQueued = lane();
