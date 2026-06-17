@@ -53,7 +53,7 @@ list disables wrapper generation.
 
 The built-in `common` group maps `rtk` to a broad set of shell-function-safe
 command selectors that benefit from RTK routing, including common tools such as
-`git`, `grep`, `gh`, `npm`, `pytest`, `ruff`, `docker`, and `kubectl`. Repos
+`git`, `grep`, `gh`, `npm`, `ruff`, `docker`, and `kubectl`. Repos
 that need exact control can override the group:
 
 ```toml
@@ -67,16 +67,14 @@ duplicate selectors fail during wrapper generation.
 
 Wrapper entries may also be direct argv wrappers with an `argv = [...]` list;
 spice shell-quotes each argv word while building
-`SPICE_SHELL_HOOK_WRAPPERS`. An argv word in `$NAME` form is rendered as a
-quoted shell variable reference for hook-provided values such as
-`$SPICE_SHELL_HOOK_PYTHON`.
-For example, a repository can opt into a local pytest wrapper without changing
-the global default:
+`SPICE_SHELL_HOOK_WRAPPERS`. Prefer stable repository-owned commands over
+hook-private environment variables. For example, a repository can opt into a
+local code-generation wrapper without changing the global default:
 
 ```toml
 [tool.spice.wrappers.common]
 rtk = ["run", "proxy", "grep", "find", "git"]
-pytest = { argv = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
+codegen = { argv = ["uv", "run", "python", "-m", "tools.codegen"] }
 ```
 
 ## Mounted Commands
