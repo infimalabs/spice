@@ -65,9 +65,9 @@ Selectors are command names, not paths. Path selectors such as `/bin/sh` fail
 loudly until a redirector stage exists. A wrapper cannot intercept itself, and
 duplicate selectors fail during wrapper generation.
 
-Wrapper entries may also be direct command wrappers with a `command = [...]`
-argv list; spice shell-quotes each command word while building
-`SPICE_SHELL_HOOK_WRAPPERS`. A command word in `$NAME` form is rendered as a
+Wrapper entries may also be direct argv wrappers with an `argv = [...]` list;
+spice shell-quotes each argv word while building
+`SPICE_SHELL_HOOK_WRAPPERS`. An argv word in `$NAME` form is rendered as a
 quoted shell variable reference for hook-provided values such as
 `$SPICE_SHELL_HOOK_PYTHON`.
 For example, a repository can opt into a local pytest wrapper without changing
@@ -76,7 +76,7 @@ the global default:
 ```toml
 [tool.spice.wrappers.common]
 rtk = ["run", "proxy", "grep", "find", "git"]
-pytest = { command = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
+pytest = { argv = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
 ```
 
 ## Mounted Commands

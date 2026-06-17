@@ -366,7 +366,7 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
         groups={
             "common": {
                 "rtk": ["grep", "git"],
-                "pytest": {"command": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
+                "pytest": {"argv": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
             }
         },
     )
@@ -617,7 +617,7 @@ def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
         groups={
             "common": {
                 "rtk": ["run", "proxy", "grep", "find", "git"],
-                "pytest": {"command": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
+                "pytest": {"argv": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
             }
         },
     )
@@ -628,11 +628,11 @@ def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
     )
 
 
-def test_agent_wrapper_lines_accepts_direct_command_wrapper(tmp_path):
+def test_agent_wrapper_lines_accepts_direct_argv_wrapper(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
         order=["tests"],
-        groups={"tests": {"pytest": {"command": ["python", "-m", "pytest"]}}},
+        groups={"tests": {"pytest": {"argv": ["python", "-m", "pytest"]}}},
     )
 
     assert shellhook.render_agent_wrapper_lines(
@@ -665,7 +665,7 @@ def test_agent_wrapper_lines_fails_loudly_for_path_wrapper_commands(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
         order=["shells"],
-        groups={"shells": {"pytest": {"command": ["/bin/python", "-m", "pytest"]}}},
+        groups={"shells": {"pytest": {"argv": ["/bin/python", "-m", "pytest"]}}},
     )
 
     with pytest.raises(SpiceError, match="path wrapper command"):
@@ -1055,9 +1055,9 @@ def _write_agent_wrapper_config(
         lines.extend(["", f"[tool.spice.wrappers.{group_name}]"])
         for wrapper, value in entries.items():
             if isinstance(value, dict):
-                command = value["command"]
+                command = value["argv"]
                 lines.append(
-                    f"{_toml_key(wrapper)} = {{ command = ["
+                    f"{_toml_key(wrapper)} = {{ argv = ["
                     + ", ".join(f'"{word}"' for word in command)
                     + "] }"
                 )
