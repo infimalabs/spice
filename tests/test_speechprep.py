@@ -8,6 +8,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AUDIO_JS = PROJECT_ROOT / "spice" / "serve" / "static" / "app.audio.js"
+STREAM_JS = PROJECT_ROOT / "spice" / "serve" / "static" / "app.stream.js"
 
 
 def test_speech_text_preparation_strips_markdown_link_targets():
@@ -174,6 +175,10 @@ def test_external_pause_during_narration_preserves_speak_queue():
 
 def test_speech_burst_never_overlaps_audio():
     assert _burst_max_concurrent_audio() == 1
+
+
+def test_initial_payload_speech_keeps_fresh_ack_from_becoming_silent_baseline():
+    assert _initial_payload_speech_keys() == ["fresh-ack"]
 
 
 def _prepare_speech(text: str) -> str:
@@ -651,6 +656,38 @@ vm.runInContext(fs.readFileSync(path, "utf8"), context);
     if result.returncode != 0:
         raise AssertionError(
             "node speech queue backlog failed:\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    return json.loads(result.stdout)
+
+
+def _initial_payload_speech_keys() -> list[str]:
+    script = """
+const fs = require("fs");
+const vm = require("vm");
+const path = process.argv[1];
+const context = {};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(path, "utf8"), context);
+const lane = { speechPrimeStartedAt: Date.parse("2026-06-17T04:00:00.000Z") };
+const messages = [
+  { key: "stale-ack", timestamp: "2026-06-17T03:59:59.999Z" },
+  { key: "fresh-ack", timestamp: "2026-06-17T04:00:00.000Z" },
+  { key: "invalid-time", timestamp: "not-a-date" },
+];
+process.stdout.write(JSON.stringify(
+  context.initialPayloadSpeechMessages(lane, messages).map((item) => item.key),
+));
+"""
+    result = subprocess.run(
+        ["node", "-e", script, str(STREAM_JS)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            "node initial payload speech failed:\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
     return json.loads(result.stdout)

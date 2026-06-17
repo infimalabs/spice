@@ -1304,6 +1304,30 @@ def test_static_stream_queues_fresh_speech_for_all_post_prime_sources():
     assert "queueSpeechForMessages(lane, fresh);" in apply_body
 
 
+def test_static_stream_queues_fresh_initial_payload_before_silent_prime():
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    apply_start = app_stream.index("async function applyLaneBusPayload")
+    apply_body = app_stream[
+        apply_start : app_stream.index(
+            "\n}\n\nfunction initialPayloadSpeechMessages", apply_start
+        )
+    ]
+
+    assert (
+        "const initialSpeechMessages = wasSpeechPrimed\n"
+        "    ? []\n"
+        "    : initialPayloadSpeechMessages(lane, payload.messages || []);"
+    ) in apply_body
+    assert (
+        "if (!lane.speechPrimed) {\n"
+        "    queueSpeechForMessages(lane, initialSpeechMessages);\n"
+        "    primeSpeechBoundary(lane);\n"
+        "  }"
+    ) in apply_body
+    assert "function messageIsFreshForInitialSpeech" in app_stream
+    assert "timestamp >= boundary" in app_stream
+
+
 def test_static_manual_speech_playback_aborts_active_entry():
     app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
 

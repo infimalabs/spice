@@ -332,6 +332,7 @@ function laneStreamState(target) {
     missingAckContextKeys: new Set(),
     recentSentAckKeys: [],
     spokenMessageKeys: new Set(),
+    speechPrimeStartedAt: Date.now(),
     speechPrimed: false,
     speechAbortVersion: 0,
   };

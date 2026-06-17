@@ -248,6 +248,9 @@ async function refreshLane(lane) {
 async function applyLaneBusPayload(lane, payload, source) {
   const wasSpeechPrimed = lane.speechPrimed;
   const knownBefore = new Set(lane.knownMessageKeys);
+  const initialSpeechMessages = wasSpeechPrimed
+    ? []
+    : initialPayloadSpeechMessages(lane, payload.messages || []);
   lane.serverReachable = true;
   const threadChanged = syncLaneThreadId(lane, payload);
   if (threadChanged) {
@@ -258,20 +261,32 @@ async function applyLaneBusPayload(lane, payload, source) {
     lane.renderedStatusFingerprint = "";
   }
   mergePayloadMessages(lane, payload);
-  if (!lane.speechPrimed) primeSpeechBoundary(lane);
   lane.latestPayload = payload;
   renderLaneChrome(lane, payload);
   await hydrateAckContextsForMessages(lane, lane.knownMessages);
   renderMessagesIfChanged(lane);
   if (source === "watch" && (payload.messages || []).length)
     refreshServerTopology().catch(() => {});
-  if (wasSpeechPrimed) {
+  if (!lane.speechPrimed) {
+    queueSpeechForMessages(lane, initialSpeechMessages);
+    primeSpeechBoundary(lane);
+  } else if (wasSpeechPrimed) {
     const fresh = (payload.messages || []).filter(
       (item) => item.key && !knownBefore.has(item.key),
     );
     queueSpeechForMessages(lane, fresh);
   }
   if (threadChanged) subscribeLaneToLiveBus(lane);
+}
+
+function initialPayloadSpeechMessages(lane, messages) {
+  return messages.filter((item) => messageIsFreshForInitialSpeech(lane, item));
+}
+
+function messageIsFreshForInitialSpeech(lane, item) {
+  const boundary = Number(lane.speechPrimeStartedAt) || Date.now();
+  const timestamp = Date.parse(item.timestamp || "");
+  return Number.isFinite(timestamp) && timestamp >= boundary;
 }
 
 function syncLaneThreadId(lane, payload) {
