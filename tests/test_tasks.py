@@ -101,6 +101,23 @@ def test_task_adopt_mints_task_over_orphan_then_done_captures_it(remote_task_rep
     )
 
 
+def test_task_adopt_can_complete_orphan_in_one_shot(remote_task_repo):
+    orphan = _make_orphan_commit(remote_task_repo, subject="one shot orphan")
+
+    output = ops.adopt(
+        project="task.unit",
+        complete=True,
+        validation=["one-shot validation"],
+    )
+    handle = output.splitlines()[0].split()[-1]
+    review_row = identity.resolve(handle)
+
+    assert "adopted 1 orphan commit into" in output
+    assert f"advanced {handle} -> review" in output
+    assert review_row["validation"] == "one-shot validation"
+    assert review_row["done_head"] == orphan
+
+
 def test_task_adopt_claims_existing_handle_over_orphan(remote_task_repo):
     handle = ops.add(
         "Pre-filed task awaiting its commit",
@@ -151,6 +168,16 @@ def test_task_adopt_rejects_handle_with_new_task_fields(remote_task_repo):
     _make_orphan_commit(remote_task_repo)
     with pytest.raises(SpiceError, match="either an existing <handle> or new-task"):
         ops.adopt(handle, project="task.unit")
+
+
+def test_task_adopt_parser_accepts_done_with_validation():
+    args = build_parser().parse_args(
+        ["task", "adopt", "--done", "--validation", "tests passed"]
+    )
+
+    assert args.task_action == "adopt"
+    assert args.done is True
+    assert args.validation == ["tests passed"]
 
 
 def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatch):
