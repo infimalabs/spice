@@ -8,21 +8,21 @@ from spice.configcli import handle_config
 
 def test_project_agent_config_provides_launch_defaults(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.agent]\nmodel = "gpt-project"\nthinking = "low"\n',
+        '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
 
     assert config.configured_agent_model(tmp_path) == "gpt-project"
-    assert config.configured_agent_thinking(tmp_path) == "low"
+    assert config.configured_agent_effort(tmp_path) == "low"
     assert config.project_agent_config(tmp_path) == {
         "model": "gpt-project",
-        "thinking": "low",
+        "effort": "low",
     }
 
 
 def test_worktree_agent_config_overrides_project_defaults(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.agent]\nmodel = "gpt-project"\nthinking = "low"\n',
+        '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
     config.update_section(
@@ -30,27 +30,27 @@ def test_worktree_agent_config_overrides_project_defaults(tmp_path):
         config.AGENT_KEY,
         {
             config.AGENT_MODEL_KEY: "gpt-worktree",
-            config.AGENT_THINKING_KEY: "medium",
+            config.AGENT_EFFORT_KEY: "medium",
         },
     )
 
     assert config.configured_agent_model(tmp_path) == "gpt-worktree"
-    assert config.configured_agent_thinking(tmp_path) == "medium"
+    assert config.configured_agent_effort(tmp_path) == "medium"
     assert config.effective_agent_config(tmp_path) == {
         "model": "gpt-worktree",
-        "thinking": "medium",
+        "effort": "medium",
     }
 
 
 def test_config_overview_shows_project_worktree_and_effective_agent_config(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.agent]\nmodel = "gpt-project"\nthinking = "low"\n',
+        '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
     config.update_section(
         tmp_path,
         config.AGENT_KEY,
-        {config.AGENT_THINKING_KEY: "medium"},
+        {config.AGENT_EFFORT_KEY: "medium"},
     )
 
     assert config.config_overview(tmp_path) == {
@@ -58,17 +58,17 @@ def test_config_overview_shows_project_worktree_and_effective_agent_config(tmp_p
         "project": {
             "agent": {
                 "model": "gpt-project",
-                "thinking": "low",
+                "effort": "low",
             }
         },
         "worktree": {
             "schema": config.CONFIG_SCHEMA_VERSION,
-            "agent": {"thinking": "medium"},
+            "agent": {"effort": "medium"},
         },
         "effective": {
             "agent": {
                 "model": "gpt-project",
-                "thinking": "medium",
+                "effort": "medium",
             }
         },
     }
@@ -83,20 +83,20 @@ def test_config_agent_writes_project_scope(tmp_path, monkeypatch, capsys):
             scope="project",
             clear=False,
             model="gpt-project",
-            thinking="high",
+            effort="high",
         )
     )
 
     assert result == 0
     assert config.project_agent_config(tmp_path) == {
         "model": "gpt-project",
-        "thinking": "high",
+        "effort": "high",
     }
     assert (
         capsys.readouterr().out
-        == "agent project driver=- model=gpt-project thinking=high\n"
-        "agent worktree driver=- model=- thinking=-\n"
-        "agent effective driver=- model=gpt-project thinking=high\n"
+        == "agent project driver=- model=gpt-project effort=high\n"
+        "agent worktree driver=- model=- effort=-\n"
+        "agent effective driver=- model=gpt-project effort=high\n"
     )
 
 
@@ -109,19 +109,19 @@ def test_config_agent_writes_worktree_scope(tmp_path, monkeypatch, capsys):
             scope="worktree",
             clear=False,
             model="gpt-worktree",
-            thinking="low",
+            effort="low",
         )
     )
 
     assert result == 0
     assert config.worktree_agent_config(tmp_path) == {
         "model": "gpt-worktree",
-        "thinking": "low",
+        "effort": "low",
     }
     assert (
-        capsys.readouterr().out == "agent project driver=- model=- thinking=-\n"
-        "agent worktree driver=- model=gpt-worktree thinking=low\n"
-        "agent effective driver=- model=gpt-worktree thinking=low\n"
+        capsys.readouterr().out == "agent project driver=- model=- effort=-\n"
+        "agent worktree driver=- model=gpt-worktree effort=low\n"
+        "agent effective driver=- model=gpt-worktree effort=low\n"
     )
 
 
@@ -134,7 +134,7 @@ def test_config_agent_writes_driver_scope(tmp_path, monkeypatch, capsys):
             scope="worktree",
             clear=False,
             model=None,
-            thinking=None,
+            effort=None,
             driver="claude",
         )
     )
