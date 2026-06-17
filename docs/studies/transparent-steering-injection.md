@@ -48,18 +48,21 @@ agents select groups with `[tool.spice.agent] wrappers = [...]`. When the agent
 does not set `wrappers`, the built-in `common` group is selected. The built-in
 `common` group maps `rtk` to a broad set of shell-function-safe command
 selectors, including tools such as `run`, `proxy`, `grep`, `find`, `git`, `gh`,
-`npm`, and `ruff`; repos can override it by defining
-`[tool.spice.wrappers.common]`, including local direct-command wrappers such as
-repository code generators. An explicit empty list disables wrapper generation.
+`npm`, and `ruff`. Repos can override `common` for generic selector control, and
+repo-specific direct-command wrappers such as code generators belong in their
+own selected extension groups. An explicit empty list disables wrapper
+generation.
 
 Example:
 
 ```toml
 [tool.spice.agent]
-wrappers = ["common"]
+wrappers = ["common", "repo-tools"]
 
 [tool.spice.wrappers.common]
 rtk = ["run", "proxy", "grep", "find", "git"]
+
+[tool.spice.wrappers.repo-tools]
 codegen = { argv = ["uv", "run", "python", "-m", "tools.codegen"] }
 ```
 
