@@ -216,17 +216,17 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert "min-height: 50px;" in header_rules
     assert "padding: 7px 10px;" in header_rules
     assert (
-        "background: color-mix(in srgb, var(--control) 90%, var(--accent) 10%);"
+        "--control-border-soft: color-mix(in srgb, var(--border) 52%, transparent);"
+        in css
+    )
+    assert "--control-surface-soft:" in css
+    assert "--control-inset-soft: inset 0 0 0 1px var(--border-soft);" in css
+    assert (
+        "background: color-mix(in srgb, var(--control-surface-soft) 88%, var(--accent) 12%);"
         in button_rules
     )
-    assert (
-        "border-color: color-mix(in srgb, var(--border) 52%, transparent);"
-        in button_rules
-    )
-    assert (
-        "box-shadow: inset 0 0 0 1px "
-        "color-mix(in srgb, var(--accent) 8%, transparent);" in button_rules
-    )
+    assert "border-color: var(--control-border-soft);" in button_rules
+    assert "box-shadow: var(--control-inset-soft);" in button_rules
     assert (
         "color: color-mix(in srgb, var(--accent-strong) 76%, var(--fg));"
         in button_rules
@@ -239,17 +239,10 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert "font-size: 17px;" in label_rules
     assert ".spice-menu-button:hover,\n.spice-menu-button:focus-visible {" in css
     assert (
-        "background: color-mix(in srgb, var(--control) 82%, var(--accent) 18%);"
+        "background: color-mix(in srgb, var(--control-surface-soft) 78%, var(--accent) 22%);"
         in button_rules
     )
-    assert (
-        "border-color: color-mix(in srgb, var(--border) 64%, transparent);"
-        in button_rules
-    )
-    assert (
-        "box-shadow: inset 0 0 0 1px "
-        "color-mix(in srgb, var(--accent) 12%, transparent);" in button_rules
-    )
+    assert "border-color: var(--control-border-soft-hover);" in button_rules
     assert ".spice-menu-button:active {" in css
     assert (
         "background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);"
@@ -257,14 +250,14 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     )
     assert (
         "border-color: var(--border-soft);\n"
-        "  box-shadow: inset 0 0 0 1px var(--border-soft);" in button_rules
+        "  box-shadow: var(--control-inset-soft);" in button_rules
     )
     assert '.spice-menu-button[aria-expanded="true"] {' in button_rules
     assert (
         '.spice-menu-button[aria-expanded="true"] {\n'
         "  background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);\n"
         "  border-color: var(--border-soft);\n"
-        "  box-shadow: inset 0 0 0 1px var(--border-soft);" in button_rules
+        "  box-shadow: var(--control-inset-soft);" in button_rules
     )
     assert "var(--final-accent)" not in button_rules
     assert "color: currentColor;" in css
@@ -282,7 +275,7 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
         '.spice-menu-button--fast[aria-expanded="true"] {\n'
         "  background: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);\n"
         "  border-color: var(--border-soft);\n"
-        "  box-shadow: inset 0 0 0 1px var(--border-soft);" in css
+        "  box-shadow: var(--control-inset-soft);" in css
     )
     assert "height: 30px;" in button_rules
     assert "flex-wrap: nowrap;" in mobile_header_rules
@@ -290,6 +283,83 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert "padding: 8px;" in mobile_header_rules
     assert "flex: 1 1 auto;" in mobile_filter_rules
     assert "min-width: 0;" in mobile_filter_rules
+
+
+def test_static_soft_control_border_reaches_lane_controls():
+    css = _serve_css_text()
+
+    icon_rules = css[css.index(".icon-button {") : css.index(".icon-button:hover")]
+    lane_rules = css[css.index(".lane {") : css.index(".lane--shadowed")]
+    rail_rules = css[
+        css.index(".lane-mode-rail {\n  min-width") : css.index(".lane-mode-button {")
+    ]
+    team_button_rules = css[
+        css.index('.lane-team-menu-button[aria-expanded="true"] {') : css.index(
+            ".lane-team-menu-icon"
+        )
+    ]
+    slider_rules = css[css.index(".stack-slider {") : css.index(".submit-action {")]
+    submit_rules = css[
+        css.index(".primary.submit-action {") : css.index(
+            "button.primary.submit-action:hover"
+        )
+    ]
+    menu_action_rules = css[
+        css.index(".spice-menu-action {") : css.index(".spice-menu-action:hover")
+    ]
+    target_choice_rules = css[
+        css.index(".target-choice {") : css.index(".target-choice-signal")
+    ]
+    composer_button_rules = css[
+        css.index(
+            ".composer-band-menu-button,\n.composer-band-close-button {"
+        ) : css.index(".composer-band-menu-button:hover")
+    ]
+
+    assert (
+        "background: color-mix(in srgb, var(--control-surface-soft) 88%, var(--accent) 12%);"
+        in css
+    )
+    assert (
+        "background: color-mix(in srgb, var(--control-surface-soft) 78%, var(--accent) 22%);"
+        in css
+    )
+    assert (
+        "background: color-mix(in srgb, var(--control-surface-soft) 82%, var(--accent) 18%);"
+        in team_button_rules
+    )
+    assert (
+        "border-color: color-mix(in srgb, var(--accent) 54%, var(--border));"
+        in team_button_rules
+    )
+    assert "box-shadow: inset 0 0 0 1px color-mix" in team_button_rules
+    assert (
+        "border-color: color-mix(in srgb, var(--control-state-accent, var(--accent)) 72%, var(--border));"
+        in submit_rules
+    )
+    assert "box-shadow: inset 0 0 0 1px color-mix" in submit_rules
+
+    for rules in (
+        icon_rules,
+        lane_rules,
+        rail_rules,
+        slider_rules,
+        menu_action_rules,
+        target_choice_rules,
+        composer_button_rules,
+    ):
+        assert "border: 1px solid var(--control-border-soft);" in rules
+        assert "box-shadow: var(--control-inset-soft);" in rules
+
+    for rules in (
+        icon_rules,
+        rail_rules,
+        slider_rules,
+        menu_action_rules,
+        target_choice_rules,
+        composer_button_rules,
+    ):
+        assert "background: var(--control-surface-soft);" in rules
 
 
 def test_static_spice_menu_replaces_picker_lane():
