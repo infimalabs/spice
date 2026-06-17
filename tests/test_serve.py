@@ -608,9 +608,17 @@ def test_static_empty_teams_render_importer_in_message_stream():
     assert "lane.selectedView = defaultLaneViewMode;" in empty_team_sync
     assert "lockEmptyTeamPane(lane);" in empty_team_sync
     assert "function lockEmptyTeamPane(lane)" in app_shell
+    assert "setLanePaneCollapse(lane, lanePaneMaxHeight(lane));" in app_shell
     assert "if (host.emptyTeam) {\n    lockEmptyTeamPane(host);" in app_shell
     assert "if (lane.emptyTeam) return false;" in app_shell
-    assert "const requestedCollapsePx = lane.emptyTeam ? 0 : collapsePx;" in app_shell
+    assert (
+        "const requestedCollapsePx = lane.emptyTeam ? maxHeight : collapsePx;"
+        in app_shell
+    )
+    assert (
+        'lane.viewStackEl.classList.toggle("lane-view-stack--collapsed", visibleHeight < 1);'
+        in app_shell
+    )
     assert (
         'lane.modeRailEl.classList.toggle("lane-mode-rail--disabled", disabled);'
         in app_shell
