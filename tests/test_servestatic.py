@@ -173,6 +173,9 @@ def test_static_composer_attachment_thumbnails_fill_header():
     list_start = css.index(".composer-attachment-list {")
     list_end = css.index(".composer-attachment-chip {", list_start)
     list_rule = css[list_start:list_end]
+    title_start = css.index(".composer-band-title {")
+    title_end = css.index("}", title_start)
+    title_rule = css[title_start:title_end]
     title_shadow_start = css.index(
         ".composer-band-body--attachments .composer-band-title {"
     )
@@ -192,8 +195,17 @@ def test_static_composer_attachment_thumbnails_fill_header():
         'wrap.style.setProperty("--composer-attachment-count", String(attachments.length));'
         in app_shell
     )
-    assert "display: none;" not in title_shadow_rule
-    assert "mask-image: linear-gradient" in title_shadow_rule
+    assert "flex: 1 1 auto;" in title_rule
+    assert "overflow: hidden;" in title_rule
+    assert "text-overflow: ellipsis;" in title_rule
+    assert (
+        "-webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);"
+        in title_shadow_rule
+    )
+    assert (
+        "mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);"
+        in title_shadow_rule
+    )
     assert "overflow-x: auto;" in attachments_rule
     assert "height: 100%;" in attachments_rule
     assert "justify-content: flex-end;" in attachments_rule
