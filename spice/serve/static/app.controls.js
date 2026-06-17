@@ -27,9 +27,11 @@ function setLaneSpeechMode(lane, mode) {
 function setLaneLifetime(lane, label) {
   const host = laneGroupHost(lane);
   const lifetime = agentLifetimeLabels.includes(label) ? label : defaultAgentLifetime;
+  host.lifetimeRequestId = Math.max(0, Number(host.lifetimeRequestId) || 0) + 1;
   host.serverLifetime = laneServerLifetime(host);
   host.lifetime = lifetime;
   host.pendingLifetimeCommit = lifetime;
+  host.pendingLifetimeRequestId = host.lifetimeRequestId;
   host.pendingLifetimeConfigRevision = Math.max(
     0,
     Number(host.configRevision) || 0,
@@ -65,6 +67,7 @@ function serverLifetimeSupersedesPending(host, options = {}) {
 function clearLaneLifetimeCommitState(host) {
   host.pendingLifetimeCommit = "";
   host.pendingLifetimeConfigRevision = 0;
+  host.pendingLifetimeRequestId = 0;
 }
 
 function applyServerLaneLifetime(lane, lifetime, options = {}) {
@@ -83,14 +86,28 @@ function applyServerLaneLifetime(lane, lifetime, options = {}) {
   return previous !== lifetime;
 }
 
-function clearLaneLifetimeCommit(lane, lifetime) {
-  const host = laneGroupHost(lane);
-  if (host.pendingLifetimeCommit === lifetime) clearLaneLifetimeCommitState(host);
+function laneLifetimeCommitMatches(host, lifetime, options = {}) {
+  const requestId = Math.max(0, Number(options.requestId) || 0);
+  return (
+    host.pendingLifetimeCommit === lifetime &&
+    (!requestId || host.pendingLifetimeRequestId === requestId)
+  );
 }
 
-function rollbackLaneLifetimeCommit(lane, lifetime, serverLifetime = "") {
+function clearLaneLifetimeCommit(lane, lifetime, options = {}) {
   const host = laneGroupHost(lane);
-  if (host.pendingLifetimeCommit !== lifetime) return false;
+  if (laneLifetimeCommitMatches(host, lifetime, options))
+    clearLaneLifetimeCommitState(host);
+}
+
+function rollbackLaneLifetimeCommit(
+  lane,
+  lifetime,
+  serverLifetime = "",
+  options = {},
+) {
+  const host = laneGroupHost(lane);
+  if (!laneLifetimeCommitMatches(host, lifetime, options)) return false;
   const authoritativeLifetime = agentLifetimeLabels.includes(serverLifetime)
     ? serverLifetime
     : laneServerLifetime(host);
@@ -104,6 +121,11 @@ function laneLifetimeRuntimeState(lane) {
     lifetime: host.lifetime,
     serverLifetime: laneServerLifetime(host),
     pendingLifetimeCommit: host.pendingLifetimeCommit || "",
+    pendingLifetimeRequestId: Math.max(
+      0,
+      Number(host.pendingLifetimeRequestId) || 0,
+    ),
+    lifetimeRequestId: Math.max(0, Number(host.lifetimeRequestId) || 0),
     pendingLifetimeConfigRevision: Math.max(
       0,
       Number(host.pendingLifetimeConfigRevision) || 0,
@@ -125,6 +147,11 @@ function restoreLaneLifetimeRuntimeState(lane, state) {
   )
     ? state.pendingLifetimeCommit
     : "";
+  host.pendingLifetimeRequestId = Math.max(
+    0,
+    Number(state.pendingLifetimeRequestId) || 0,
+  );
+  host.lifetimeRequestId = Math.max(0, Number(state.lifetimeRequestId) || 0);
   host.pendingLifetimeConfigRevision = Math.max(
     0,
     Number(state.pendingLifetimeConfigRevision) || 0,
