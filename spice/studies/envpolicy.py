@@ -1,9 +1,9 @@
 """Environment-variable literal policy: every read is declared or waived.
 
 Harness-owned env names (`SPICE_*`, plus the driver's thread variable) may
-appear in source only on lines carrying the `env-policy: allow` waiver
-comment. The point is an auditable inventory: grep the waiver to see every
-place the environment shapes behavior.
+appear in source only in statements carrying, or immediately following a
+standalone, `env-policy: allow` waiver comment. The point is an auditable
+inventory: grep the waiver to see every place the environment shapes behavior.
 
 Library seam: target-repo tools may import the public finding dataclass,
 pattern/matcher helpers, scan helper, and `render_env_policy_board`;
@@ -52,8 +52,9 @@ def scan_env_policy(paths: list[Path], *, root: Path) -> list[EnvPolicyFinding]:
         if not abs_path.exists():
             continue
         text = abs_path.read_text(encoding="utf-8", errors="replace")
+        waived_lines = _waived_line_numbers(text)
         for line_number, line in enumerate(text.splitlines(), start=1):
-            if ENV_POLICY_ALLOW_MARKER in line:
+            if line_number in waived_lines:
                 continue
             for matcher in matchers:
                 for match in matcher.finditer(line):
@@ -65,6 +66,103 @@ def scan_env_policy(paths: list[Path], *, root: Path) -> list[EnvPolicyFinding]:
                         )
                     )
     return findings
+
+
+def _waived_line_numbers(text: str) -> set[int]:
+    lines = text.splitlines()
+    marker_lines = {
+        line_number
+        for line_number, line in enumerate(lines, start=1)
+        if ENV_POLICY_ALLOW_MARKER in line
+    }
+    standalone_marker_lines = {
+        line_number
+        for line_number, line in enumerate(lines, start=1)
+        if _standalone_waiver_line(line)
+    }
+    waived = set(marker_lines)
+    for start, end in _statement_spans(lines):
+        if start - 1 in standalone_marker_lines or any(
+            line_number in marker_lines for line_number in range(start, end + 1)
+        ):
+            waived.update(range(start, end + 1))
+    return waived
+
+
+def _standalone_waiver_line(line: str) -> bool:
+    stripped = line.strip()
+    return ENV_POLICY_ALLOW_MARKER in stripped and (
+        stripped.startswith("#") or stripped.startswith("//")
+    )
+
+
+def _statement_spans(lines: list[str]) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    depth = 0
+    for line_number, raw_line in enumerate(lines, start=1):
+        if start is None and not raw_line.strip():
+            continue
+        if start is None:
+            start = line_number
+        structural = _structural_line(raw_line)
+        depth = max(0, depth + _delimiter_delta(structural))
+        if depth == 0 and not structural.rstrip().endswith("\\"):
+            spans.append((start, line_number))
+            start = None
+    if start is not None:
+        spans.append((start, len(lines)))
+    return spans
+
+
+def _structural_line(line: str) -> str:
+    result: list[str] = []
+    in_single = False
+    in_double = False
+    escape = False
+    index = 0
+    while index < len(line):
+        char = line[index]
+        nxt = line[index + 1] if index + 1 < len(line) else ""
+        if in_single:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == "'":
+                in_single = False
+            index += 1
+            continue
+        if in_double:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_double = False
+            index += 1
+            continue
+        if char == "#":
+            break
+        if char == "/" and nxt == "/":
+            break
+        if char == "'":
+            in_single = True
+            index += 1
+            continue
+        if char == '"':
+            in_double = True
+            index += 1
+            continue
+        result.append(char)
+        index += 1
+    return "".join(result)
+
+
+def _delimiter_delta(line: str) -> int:
+    return sum(1 for char in line if char in "([{") - sum(
+        1 for char in line if char in ")]}"
+    )
 
 
 def env_name_patterns(repo_root: Path) -> list[str]:

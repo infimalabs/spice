@@ -251,7 +251,9 @@ The pre-commit gate is the executable form of the project's opinions — see
 - magic-number regressions are a ratchet against `HEAD`, not an amnesty;
 - env-literal inventory covers `SPICE_*` and `CODEX_THREAD_ID` by default;
   target repos can add tracked name regexes with
-  `[tool.spice.policy] env_name_patterns`;
+  `[tool.spice.policy] env_name_patterns`; the waiver may live on the literal
+  line, as a standalone waiver comment directly above the statement, or
+  anywhere inside the wrapped statement carrying that literal;
 - commit subjects fit in 100 columns; bodies are auto-folded.
 
 The gate applies to spice itself: this repository is its own first target.
