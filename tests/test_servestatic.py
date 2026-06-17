@@ -696,8 +696,33 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
     )
     assert "flex: 0 1 10rem;" not in chip_rule
     assert "justify-content: space-between;" not in chip_rule
+    assert "gap: 4px;" in chip_rule
+    assert "padding: 3px 10px 3px 12px;" in chip_rule
+    assert "background: var(--accent);" in chip_count_rule
+    assert "border-radius: var(--pill-radius);" in chip_count_rule
+    assert "color: var(--button-accent-fg);" in chip_count_rule
+    assert "font-size: 9px;" in chip_count_rule
+    assert "line-height: 13px;" in chip_count_rule
     assert "font-variant-numeric: tabular-nums;" not in chip_count_rule
-    assert "min-width: 20px;" in chip_count_rule
+    assert "min-width:" not in chip_count_rule
+    assert "\n  height:" not in chip_count_rule
+    assert "display: inline-grid;" not in chip_count_rule
+    assert (
+        ".lane-filter-chip--assign .lane-filter-chip-count,\n"
+        ".lane-filter-chip--empty .lane-filter-chip-count {\n"
+        "  background: var(--muted);\n"
+        "}" in css
+    )
+    assert (
+        ".lane-filter-chip--selected .lane-filter-chip-count {\n"
+        "  background: var(--warn);\n"
+        "}" in css
+    )
+    assert (
+        ".lane-filter-chip--private .lane-filter-chip-count {\n"
+        "  background: var(--final-accent);\n"
+        "}" in css
+    )
 
 
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
