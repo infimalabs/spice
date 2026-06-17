@@ -447,13 +447,14 @@ function positionSpiceMenu() {
   const paddingLeft = cssPixelValue(laneGridStyle.paddingLeft);
   const paddingTop = cssPixelValue(laneGridStyle.paddingTop);
   const paddingBottom = cssPixelValue(laneGridStyle.paddingBottom);
-  const visibleLane = visibleLaneElements()[0] || null;
-  const laneLeft = laneGrid.left + paddingLeft;
-  const laneWidth = visibleLane
-    ? visibleLane.getBoundingClientRect().width
+  const anchorLane = spiceMenuAnchorLane();
+  const anchorRect = anchorLane ? anchorLane.getBoundingClientRect() : null;
+  const laneLeft = anchorRect ? anchorRect.left : laneGrid.left + paddingLeft;
+  const laneWidth = anchorRect
+    ? anchorRect.width
     : spiceMenuMinimumLaneWidthPx();
-  const width = spiceMenuWidth(visibleLane, laneLeft, laneWidth, margin);
-  const left = spiceMenuLeft(visibleLane, laneLeft, width, margin);
+  const width = spiceMenuWidth(anchorLane, laneLeft, laneWidth, margin);
+  const left = spiceMenuLeft(anchorLane, laneLeft, width, margin);
   const top = laneGrid.top + paddingTop;
   const availableHeight = Math.max(1, window.innerHeight - top - margin);
   const laneGridHeight = Math.max(
@@ -464,13 +465,24 @@ function positionSpiceMenu() {
   spiceMenuEl.style.width = width + "px";
   spiceMenuEl.style.left = left + "px";
   spiceMenuEl.style.top = top + "px";
-  spiceMenuEl.style.height = visibleLane ? height + "px" : "";
+  spiceMenuEl.style.height = anchorLane ? height + "px" : "";
   spiceMenuEl.style.maxHeight = height + "px";
 }
 
-function spiceMenuWidth(visibleLane, laneLeft, laneWidth, margin) {
-  if (!visibleLane && spiceMenuUsesViewportWidth()) return window.innerWidth;
-  const availableWidth = visibleLane
+function spiceMenuAnchorLane() {
+  const visible = visibleLaneElements();
+  return visible.find(spiceMenuPrefersLaneElement) || visible[0] || null;
+}
+
+function spiceMenuPrefersLaneElement(element) {
+  const laneElement = /** @type {HTMLElement} */ (element);
+  const lane = laneStates.get(laneElement.dataset.targetId || "");
+  return Boolean(lane && lane.emptyTeam);
+}
+
+function spiceMenuWidth(anchorLane, laneLeft, laneWidth, margin) {
+  if (!anchorLane && spiceMenuUsesViewportWidth()) return window.innerWidth;
+  const availableWidth = anchorLane
     ? Math.max(1, window.innerWidth - laneLeft - margin)
     : Math.max(1, window.innerWidth - margin * 2);
   return Math.min(
@@ -479,8 +491,8 @@ function spiceMenuWidth(visibleLane, laneLeft, laneWidth, margin) {
   );
 }
 
-function spiceMenuLeft(visibleLane, laneLeft, width, margin) {
-  if (visibleLane) return laneLeft;
+function spiceMenuLeft(anchorLane, laneLeft, width, margin) {
+  if (anchorLane) return laneLeft;
   if (spiceMenuUsesViewportWidth()) return 0;
   const buttonRect = openLaneButton.getBoundingClientRect();
   return Math.max(
