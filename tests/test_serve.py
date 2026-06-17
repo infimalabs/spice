@@ -572,12 +572,9 @@ def test_static_spice_menu_drag_manages_team_membership():
     assert ".spice-menu-team--drop-ready .spice-menu-team-empty-drop {" in css
 
 
-def test_static_empty_teams_render_importer_in_message_stream():
-    css = _serve_css_text()
+def test_static_empty_teams_reconcile_and_close_from_team_snapshot():
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
-    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
-    app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
 
     assert 'const emptyTeamTargetPrefix = "empty-team:";' in app_lanes
     assert "function ensureEmptyTeamLane(team, options = {})" in app_shell
@@ -602,13 +599,6 @@ def test_static_empty_teams_render_importer_in_message_stream():
     )
     empty_team_sync_end = app_shell.index("function emptyTeamImportPanel(lane) {")
     empty_team_sync = app_shell[empty_team_sync_start:empty_team_sync_end]
-    assert "function emptyTeamImportPanel(lane)" in app_shell
-    assert "function emptyTeamImportChoice(lane, target)" in app_shell
-    assert "lane.shardsEl.replaceChildren();" in empty_team_sync
-    assert "renderMessagesIfChanged(lane);" in empty_team_sync
-    assert empty_team_sync.index(
-        "lane.shardsEl.replaceChildren();"
-    ) < empty_team_sync.index("renderMessagesIfChanged(lane);")
     assert "lane.pipEl.hidden = true;" in empty_team_sync
     assert "lane.laneLightsEl.hidden = true;" in empty_team_sync
     assert "lane.laneLightsEl.replaceChildren();" in empty_team_sync
@@ -617,6 +607,18 @@ def test_static_empty_teams_render_importer_in_message_stream():
         'lane.element.classList.toggle("lane--empty-team-closable", nextCanClose);'
         in empty_team_sync
     )
+
+
+def test_static_empty_team_controls_lock_collapsed_until_populated():
+    css = _serve_css_text()
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
+
+    empty_team_sync_start = app_shell.index(
+        "function syncEmptyTeamLane(lane, team = {}, options = {}) {"
+    )
+    empty_team_sync_end = app_shell.index("function emptyTeamImportPanel(lane) {")
+    empty_team_sync = app_shell[empty_team_sync_start:empty_team_sync_end]
     assert "if (lane.emptyTeamCanClose) {" in empty_team_sync
     assert "lane.teamMenuButtonEl.disabled = false;" in empty_team_sync
     assert 'lane.teamMenuButtonEl.removeAttribute("aria-hidden");' in empty_team_sync
@@ -649,6 +651,37 @@ def test_static_empty_teams_render_importer_in_message_stream():
     assert "lane.teamMenuButtonEl.disabled = false;" in app_groups
     assert 'lane.teamMenuButtonEl.removeAttribute("aria-hidden");' in app_groups
     assert 'lane.teamMenuButtonEl.removeAttribute("tabindex");' in app_groups
+    assert "if (lane.emptyTeam) {\n    syncEmptyTeamLane(lane);" in app_groups
+    assert (
+        ".lane--empty-team .lane-pip-stack,\n"
+        ".lane--empty-team:not(.lane--empty-team-closable) "
+        "[data-lane-team-menu] {" in css
+    )
+    assert "pointer-events: none;" in css
+    assert "visibility: hidden;" in css
+    assert ".lane--empty-team .lane-mode-rail--disabled" in css
+    assert "opacity: 0.72;" in css
+    assert ".lane--empty-team .composer-controls" in css
+    assert "display: none;" in css
+
+
+def test_static_empty_team_importer_renders_message_stream_choices():
+    css = _serve_css_text()
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+
+    empty_team_sync_start = app_shell.index(
+        "function syncEmptyTeamLane(lane, team = {}, options = {}) {"
+    )
+    empty_team_sync_end = app_shell.index("function emptyTeamImportPanel(lane) {")
+    empty_team_sync = app_shell[empty_team_sync_start:empty_team_sync_end]
+    assert "function emptyTeamImportPanel(lane)" in app_shell
+    assert "function emptyTeamImportChoice(lane, target)" in app_shell
+    assert "lane.shardsEl.replaceChildren();" in empty_team_sync
+    assert "renderMessagesIfChanged(lane);" in empty_team_sync
+    assert empty_team_sync.index(
+        "lane.shardsEl.replaceChildren();"
+    ) < empty_team_sync.index("renderMessagesIfChanged(lane);")
     assert 'const button = targetChoiceButton(\n    target,\n    "Import",' in app_shell
     assert '    "",\n  );' in app_shell
     assert "button.dataset.emptyTeamImportTargetId = target.id;" in app_shell
@@ -677,18 +710,6 @@ def test_static_empty_teams_render_importer_in_message_stream():
         "    lane.historySentinelEl,\n"
         "  );"
     ) in app_stream
-    assert "if (lane.emptyTeam) {\n    syncEmptyTeamLane(lane);" in app_groups
-    assert (
-        ".lane--empty-team .lane-pip-stack,\n"
-        ".lane--empty-team:not(.lane--empty-team-closable) "
-        "[data-lane-team-menu] {" in css
-    )
-    assert "pointer-events: none;" in css
-    assert "visibility: hidden;" in css
-    assert ".lane--empty-team .lane-mode-rail--disabled" in css
-    assert "opacity: 0.72;" in css
-    assert ".lane--empty-team .composer-controls" in css
-    assert "display: none;" in css
     assert ".empty-team-importer" in css
     assert "grid-column: 1 / -1;" in css
     assert ".empty-team-import-list" in css
