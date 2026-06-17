@@ -135,6 +135,8 @@ function createLaneState(targetId, hint = null, options = {}) {
     groupTopology: null,
     backendPendingInboxCount: 0,
     optimisticPendingInboxCount: 0,
+    optimisticSubmittedInboxKeys: new Set(),
+    optimisticPendingInboxFloor: 0,
     pendingSubmissionCount: 0,
     sendAwaitingBackendCount: 0,
     refreshInFlight: false,

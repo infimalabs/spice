@@ -765,6 +765,7 @@ function applyLaneSendResult(
   focusAfterComposerReset(options.focusAfterReset);
   finishLanePendingSubmission(lane, {
     accepted: true,
+    inboxKey: result.key,
     pendingInboxCount: result.pendingInboxCount,
   });
   rememberAckContext(
