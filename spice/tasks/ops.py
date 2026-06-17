@@ -147,7 +147,7 @@ def _require_manual_claim_allowed(row: dict[str, Any], actor: str) -> None:
     handle = identity.render_handle(row)
     raise SpiceError(
         f"cannot manually claim {handle}: this thread authored the review; "
-        "run `spice task next`; proceed only if next assigns it"
+        "leave it for another actor"
     )
 
 
@@ -1032,6 +1032,11 @@ def next_task() -> dict[str, Any] | None:
     actor = tw.current_actor()
     active_rows = tw.export(["status:pending", "+ACTIVE"])
     own_active = [r for r in active_rows if str(r.get("claim_by") or "") == actor]
+    for row in own_active:
+        if _is_same_author_review(row, actor):
+            unclaim(identity.render_handle(row))
+    active_rows = tw.export(["status:pending", "+ACTIVE"])
+    own_active = [r for r in active_rows if str(r.get("claim_by") or "") == actor]
     if own_active:
         return max(own_active, key=lambda r: str(r.get("claim_at") or ""))
 
@@ -1041,7 +1046,9 @@ def next_task() -> dict[str, Any] | None:
     candidates = [
         r
         for r in _candidate_rows(actor, lane_filter, overrides)
-        if not _is_oops(r) and not str(r.get("claim_by") or "")
+        if not _is_oops(r)
+        and not str(r.get("claim_by") or "")
+        and not _is_same_author_review(r, actor)
     ]
     if not candidates:
         return None
