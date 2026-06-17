@@ -169,9 +169,11 @@
   height: 100%;
   min-width: 0;
   overflow: hidden;
+  position: relative;
 }
 .composer-band-title {
   color: var(--muted);
+  flex: 1 1 auto;
   font-size: 12px;
   line-height: 1.2;
   min-width: 0;
@@ -180,7 +182,8 @@
   white-space: nowrap;
 }
 .composer-band-body--attachments .composer-band-title {
-  display: none;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
 }
 .composer-quote-time {
   color: var(--accent-strong);
@@ -280,20 +283,36 @@
 .composer-attachments {
   align-items: center;
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   height: 100%;
+  justify-content: flex-end;
+  margin-left: auto;
+  max-width: min(100%, calc(var(--composer-attachment-count, 1) * 28px - 2px));
   min-height: 0;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 1px 0;
+  position: relative;
   scrollbar-width: thin;
+  z-index: 1;
+}
+.composer-band-body--attachments .composer-attachments::before {
+  background: linear-gradient(90deg, transparent, var(--control));
+  bottom: 1px;
+  content: "";
+  left: -12px;
+  pointer-events: none;
+  position: absolute;
+  top: 1px;
+  width: 12px;
 }
 .composer-attachments[hidden] {
   display: none;
 }
 .composer-attachment-list {
   display: flex;
+  flex-direction: row-reverse;
   flex: 0 0 auto;
   gap: 2px;
   height: 100%;

@@ -173,6 +173,11 @@ def test_static_composer_attachment_thumbnails_fill_header():
     list_start = css.index(".composer-attachment-list {")
     list_end = css.index(".composer-attachment-chip {", list_start)
     list_rule = css[list_start:list_end]
+    title_shadow_start = css.index(
+        ".composer-band-body--attachments .composer-band-title {"
+    )
+    title_shadow_end = css.index("}", title_shadow_start)
+    title_shadow_rule = css[title_shadow_start:title_shadow_end]
     chip_start = css.index(".composer-attachment-chip {")
     chip_end = css.index(".composer-attachment-chip img", chip_start)
     chip_rule = css[chip_start:chip_end]
@@ -183,9 +188,21 @@ def test_static_composer_attachment_thumbnails_fill_header():
     assert 'body.className = "composer-band-body";' in app_shell
     assert 'const body = parent.querySelector(".composer-band-body");' in app_shell
     assert "composer-band-header--attachments" in app_shell
-    assert ".composer-band-body--attachments .composer-band-title" in css
+    assert (
+        'wrap.style.setProperty("--composer-attachment-count", String(attachments.length));'
+        in app_shell
+    )
+    assert "display: none;" not in title_shadow_rule
+    assert "mask-image: linear-gradient" in title_shadow_rule
     assert "overflow-x: auto;" in attachments_rule
     assert "height: 100%;" in attachments_rule
+    assert "justify-content: flex-end;" in attachments_rule
+    assert "margin-left: auto;" in attachments_rule
+    assert (
+        "max-width: min(100%, calc(var(--composer-attachment-count, 1) * 28px - 2px));"
+        in attachments_rule
+    )
+    assert "flex-direction: row-reverse;" in list_rule
     assert "gap: 2px;" in list_rule
     assert "height: 26px;" in chip_rule
     assert "width: 26px;" in chip_rule
