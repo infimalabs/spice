@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 import subprocess
@@ -12,6 +13,7 @@ import pytest
 from spice.cli.parser import build_parser
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
+from spice.mail import attachments as mail_attachments
 from spice.serve.teams import (
     TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE,
@@ -711,6 +713,68 @@ def test_task_add_reports_unresolved_attachment_ref(task_repo):
             priority="medium",
             acceptance=["missing attachment is reported"],
         )
+
+
+def test_task_add_replaces_partial_durable_attachment(task_repo):
+    live_rel = ".spice/inbox/20260102T000000000008Z.attachments/01-image.png"
+    live_path = task_repo / live_rel
+    data = b"complete-image"
+    live_path.parent.mkdir(parents=True, exist_ok=True)
+    live_path.write_bytes(data)
+    digest = hashlib.sha256(data).hexdigest()
+    artifact_path = (
+        config.backend_root() / "artifacts" / "attachments" / digest / live_path.name
+    )
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_bytes(b"partial")
+
+    handle = ops.add(
+        "Replace partial attachment artifact",
+        project="task.unit",
+        description=f"Screenshot reference: {live_rel}",
+        priority="medium",
+    )
+    row = identity.resolve(handle)
+    paths = _durable_artifact_paths(row["task_description"])
+
+    assert paths == [artifact_path]
+    assert artifact_path.read_bytes() == data
+
+
+def test_task_add_publishes_durable_attachment_with_atomic_replace(
+    task_repo, monkeypatch
+):
+    live_rel = ".spice/inbox/20260102T000000000009Z.attachments/01-image.png"
+    live_path = task_repo / live_rel
+    live_path.parent.mkdir(parents=True, exist_ok=True)
+    live_path.write_bytes(b"atomic-image")
+    written_paths: list[Path] = []
+    original_write = mail_attachments._write_bytes_fsynced
+
+    def record_write(path: Path, data: bytes) -> None:
+        written_paths.append(path)
+        original_write(path, data)
+
+    monkeypatch.setattr(mail_attachments, "_write_bytes_fsynced", record_write)
+
+    handle = ops.add(
+        "Atomically publish attachment artifact",
+        project="task.unit",
+        description=f"Screenshot reference: {live_rel}",
+        priority="medium",
+    )
+    row = identity.resolve(handle)
+    paths = _durable_artifact_paths(row["task_description"])
+
+    assert len(paths) == 1
+    assert paths[0].read_bytes() == b"atomic-image"
+    assert paths[0] not in written_paths
+    assert any(
+        path.parent == paths[0].parent
+        and path.name.startswith(f".{paths[0].name}.")
+        and path.name.endswith(".tmp")
+        for path in written_paths
+    )
 
 
 def test_task_note_reports_unresolved_attachment_ref(task_repo):
