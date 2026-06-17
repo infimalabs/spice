@@ -444,7 +444,7 @@ def messages_payload_for_worktree(
         predecessor_agent_id=thread_id,
         agent_ensure=agent_ensure,
     )
-    if ensured_thread_id and not explicit_thread_id:
+    if ensured_thread_id:
         thread_id = ensured_thread_id
     pending = pending_inbox_count_after_agent_ensure(pending, agent_ensure)
     if not thread_id:

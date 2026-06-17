@@ -169,7 +169,9 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
         fake_messages,
     )
 
-    result = payloads.messages_payload_for_worktree(state, target, limit=5)
+    result = payloads.messages_payload_for_worktree(
+        state, target, limit=5, expected_thread_id=THREAD_A
+    )
 
     assert result["targetThreadId"] == THREAD_B
     assert result["teamId"] == created.team_id
@@ -221,5 +223,4 @@ def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:
     )
     monkeypatch.setattr(app, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(agentapi, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(payloads, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(payloads, "agent_status", lambda *_args, **_kwargs: status)
