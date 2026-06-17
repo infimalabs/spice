@@ -1032,23 +1032,30 @@ def next_task() -> dict[str, Any] | None:
     actor = tw.current_actor()
     active_rows = tw.export(["status:pending", "+ACTIVE"])
     own_active = [r for r in active_rows if str(r.get("claim_by") or "") == actor]
-    for row in own_active:
-        if _is_same_author_review(row, actor):
-            unclaim(identity.render_handle(row))
-    active_rows = tw.export(["status:pending", "+ACTIVE"])
-    own_active = [r for r in active_rows if str(r.get("claim_by") or "") == actor]
     if own_active:
         return max(own_active, key=lambda r: str(r.get("claim_at") or ""))
 
     route = lanes.team_route_for_actor(actor)
     overrides = alloc.actor_overrides(actor, route)
     lane_filter = lanes.filter_args(route)
+    repair_candidates = [
+        r
+        for r in tw.export(
+            ["status:pending", "+ACTIVE", *_scope_filter(actor, lane_filter)],
+            overrides=overrides,
+        )
+        if not _is_oops(r) and not str(r.get("claim_by") or "")
+    ]
+    if repair_candidates:
+        for chosen in alloc.order(repair_candidates, actor, [], active_rows):
+            do_claim(identity.uuid_of(chosen), actor, guard_unclaimed=False)
+            fresh = identity.resolve(identity.render_handle(chosen))
+            if str(fresh.get("claim_by") or "") == actor:
+                return fresh
     candidates = [
         r
         for r in _candidate_rows(actor, lane_filter, overrides)
-        if not _is_oops(r)
-        and not str(r.get("claim_by") or "")
-        and not _is_same_author_review(r, actor)
+        if not _is_oops(r) and not str(r.get("claim_by") or "")
     ]
     if not candidates:
         return None
