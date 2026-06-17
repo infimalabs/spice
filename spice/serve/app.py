@@ -215,7 +215,7 @@ def work_tree_send_response_payload(
         }, HTTPStatus.BAD_REQUEST
     predecessor = payloads.resolve_thread_id_for_target(state, target) or ""
     renew_intent = bool(
-        predecessor and state.team_store.agent_renewal_requested(predecessor)
+        predecessor and state.team_store.agent_renewal_active(predecessor)
     )
     _apply_lifetime_to_team(state, target, payload)
     force_new = False

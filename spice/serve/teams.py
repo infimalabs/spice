@@ -743,6 +743,13 @@ class ServeTeamStore(TeamMetricStoreMixin):
         renewal = self.renewal_state_for_agent(agent_id)
         return bool(renewal and renewal.requested)
 
+    def agent_renewal_active(self, agent_id: str) -> bool:
+        renewal = self.renewal_state_for_agent(agent_id)
+        return bool(
+            renewal
+            and renewal.state in {RENEWAL_STATE_REQUESTED, RENEWAL_STATE_PENDING}
+        )
+
     def renewal_state_for_agent(self, agent_id: str) -> TeamRenewalState | None:
         agent_id = _normalized_id(agent_id, "agent_id")
         with self.connect() as connection:
