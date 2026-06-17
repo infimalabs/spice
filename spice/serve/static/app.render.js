@@ -152,6 +152,7 @@ function finishLanePendingSubmission(lane, options = {}) {
 function syncLaneBackendPending(lane, count) {
   lane.backendPendingInboxCount = Math.max(0, Number(count) || 0);
   reconcileSubmittedMessagePredictions(lane);
+  clearDrainedSubmittedMessagePredictions(lane);
   if (lane.pendingSubmissionCount > 0) {
     lane.optimisticPendingInboxCount = Math.max(
       lane.optimisticPendingInboxCount,
@@ -171,6 +172,15 @@ function lanePendingDisplayCount(lane) {
     lane.backendPendingInboxCount || 0,
     lane.optimisticPendingInboxCount || 0,
   );
+}
+
+function clearDrainedSubmittedMessagePredictions(lane) {
+  if (lane.backendPendingInboxCount > 0) return;
+  if (Math.max(0, Number(lane.pendingSubmissionCount) || 0) > 0) return;
+  if (Math.max(0, Number(lane.sendAwaitingBackendCount) || 0) > 0) return;
+  if (!lane.optimisticSubmittedInboxKeys.size) return;
+  lane.optimisticSubmittedInboxKeys.clear();
+  lane.optimisticPendingInboxFloor = 0;
 }
 
 function laneSubmittedMessagePendingFloor(lane) {
