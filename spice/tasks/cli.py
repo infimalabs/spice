@@ -280,6 +280,10 @@ def _configure_add_parser(actions: Any) -> None:
             "private task.\n"
             "  Do not pass agent.*; agent stems are reserved for automatic "
             "private task creation.\n\n"
+            "Shell quoting:\n"
+            "  Your shell expands backticks, $(), and $VARS before spice sees "
+            "arguments; use single quotes or stdin batch input for descriptions "
+            "that mention shell syntax.\n\n"
             "Examples:\n"
             '  spice task add "Clarify CLI help" --project task.cli '
             '--description "Longer merge body context"\n'

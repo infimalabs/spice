@@ -180,6 +180,16 @@ def test_task_adopt_parser_accepts_done_with_validation():
     assert args.validation == ["tests passed"]
 
 
+def test_task_add_help_warns_about_shell_quoting(capsys):
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["task", "add", "--help"])
+
+    help_text = capsys.readouterr().out
+    assert "Shell quoting:" in help_text
+    assert "before spice sees arguments" in help_text
+
+
 def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatch):
     handle = ops.add(
         "Exercise task phase flow",
