@@ -96,6 +96,15 @@ def _stamp(when: datetime) -> str:
     return when.isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
+def _pending_identity(count: int = 0) -> dict[str, object]:
+    return {
+        "pendingInboxCount": count,
+        "pendingInboxLabel": str(count),
+        "pendingInboxKeys": [],
+        "pendingInboxRevision": f"test-revision-{count}",
+    }
+
+
 def test_sparkline_buckets_messages_by_minute():
     latest = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
     one_bucket_ago = latest - timedelta(seconds=LANE_METRIC_SPARKLINE_BUCKET_SECONDS)
@@ -144,7 +153,9 @@ def test_status_line_pairs_activity_preview_with_activity_timestamp(
         "agent_status",
         lambda _repo: _Status(running=True, started_at="", process_status="running"),
     )
-    monkeypatch.setattr(payloads, "pending_inbox_count", lambda _repo: 0)
+    monkeypatch.setattr(
+        payloads, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
 
     line = payloads.status_line_payload(_State(), target, items=items, error=None)
 
@@ -212,7 +223,9 @@ def test_status_line_prefers_latest_claude_presence_over_visible_message(
         "agent_status",
         lambda _repo: _Status(running=True, started_at="", process_status="running"),
     )
-    monkeypatch.setattr(payloads, "pending_inbox_count", lambda _repo: 0)
+    monkeypatch.setattr(
+        payloads, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
 
     items = message_reader.read_assistant_messages(transcript, limit=5)
     line = payloads.status_line_payload(_State(), target, items=items, error=None)
@@ -238,7 +251,9 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
         return ([_message(latest, kind="presence:reasoning", preview="thinking")], None)
 
     monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
-    monkeypatch.setattr(payloads, "pending_inbox_count", lambda _repo: 0)
+    monkeypatch.setattr(
+        payloads, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
     monkeypatch.setattr(
         payloads,
         "ensure_agent_for_pending_inbox",
@@ -320,7 +335,9 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
     store.create_team(members=["agent-a"])
     store.set_agent_renewal_request("agent-a", requested=True)
     monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
-    monkeypatch.setattr(payloads, "pending_inbox_count", lambda _repo: 0)
+    monkeypatch.setattr(
+        payloads, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
     monkeypatch.setattr(
         payloads,
         "ensure_agent_for_pending_inbox",
@@ -473,13 +490,23 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         "agentProcessStatus",
         "error",
         "pendingInboxCount",
+        "pendingInboxLabel",
+        "pendingInboxKeys",
+        "pendingInboxRevision",
         "agentEnsure",
         "statusLine",
     }
     assert payload["messages"] == []
     assert payload["pendingInboxCount"] == 1
+    assert payload["pendingInboxLabel"] == "1"
+    assert payload["pendingInboxKeys"] == [inbox_item_key(pending_name)]
+    assert payload["pendingInboxRevision"]
     assert payload["statusLine"]["pendingInboxCount"] == 1
     assert payload["statusLine"]["pendingInboxLabel"] == "1"
+    assert payload["statusLine"]["pendingInboxKeys"] == [inbox_item_key(pending_name)]
+    assert (
+        payload["statusLine"]["pendingInboxRevision"] == payload["pendingInboxRevision"]
+    )
 
 
 def test_ack_context_payload_finds_archived_inbox_item_by_dropped_z_alias(tmp_path):

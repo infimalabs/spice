@@ -16,15 +16,14 @@ from spice.mail.inbox import (
     inbox_item_key_aliases,
     inbox_request_body,
     inbox_request_priority,
-    pending_inbox_count,
 )
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve import messages as message_reader
 from spice.serve.agentapi import (
     ensure_agent_for_pending_inbox,
-    pending_inbox_count_after_agent_ensure,
 )
 from spice.serve.markdown import render_message_html
+from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.teams import ServeTeamStore, renewal_intent_payload
 from spice.serve.worktrees import WorktreeTarget
 from spice.tasks import config as task_config
@@ -177,21 +176,24 @@ def status_line_payload(
     items: list[message_reader.AssistantMessage],
     error: str | None,
     pending_count: int | None = None,
+    pending_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     status = agent_status(target.repo_root)
     binding_error = agent_binding_error(target.repo_root, status)
-    pending = (
-        pending_count
-        if pending_count is not None
-        else pending_inbox_count(target.repo_root)
-    )
+    pending = pending_identity or pending_inbox_identity_payload(target.repo_root)
+    if pending_count is not None:
+        pending = {
+            **pending,
+            "pendingInboxCount": pending_count,
+            "pendingInboxLabel": str(pending_count),
+        }
     return _status_line_payload_from_status(
         status=status,
         thread_id=status.thread_id,
         binding_error=binding_error,
         items=items,
         error=error,
-        pending=pending,
+        pending_identity=pending,
     )
 
 
@@ -202,7 +204,7 @@ def _status_line_payload_from_status(
     binding_error: str,
     items: list[message_reader.AssistantMessage],
     error: str | None,
-    pending: int,
+    pending_identity: dict[str, Any],
 ) -> dict[str, Any]:
     thread_id = thread_id or ""
     visible = [item for item in items if not item.kind.startswith("presence:")]
@@ -220,8 +222,7 @@ def _status_line_payload_from_status(
         "latestMessagePreview": latest.preview if latest else "",
         "latestActivityPreview": (latest_activity.preview if latest_activity else ""),
         "preview": latest_status.preview if latest_status else "",
-        "pendingInboxCount": pending,
-        "pendingInboxLabel": str(pending),
+        **pending_identity,
         "agentProcessStatus": status.process_status,
         "agentVisualStatus": status.process_status,
         "error": binding_error or error or "",
@@ -234,7 +235,8 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
     work_trees = []
     for target in targets:
         thread_id = resolve_thread_id_for_target(state, target) or ""
-        pending = pending_inbox_count(target.repo_root)
+        pending_identity = pending_inbox_identity_payload(target.repo_root)
+        pending = int(pending_identity["pendingInboxCount"])
         renew_intent = bool(
             thread_id and state.team_store.agent_renewal_active(thread_id)
         )
@@ -251,7 +253,8 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
         )
         if ensured_thread_id:
             thread_id = ensured_thread_id
-        pending = pending_inbox_count_after_agent_ensure(pending, agent_ensure)
+        pending_identity = pending_inbox_identity_payload(target.repo_root)
+        pending = int(pending_identity["pendingInboxCount"])
         status = agent_status(target.repo_root)
         binding_error = agent_binding_error(target.repo_root, status)
         binding_status = _binding_status(thread_id, binding_error)
@@ -264,7 +267,7 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
             binding_error=binding_error,
             items=items,
             error=error,
-            pending=pending,
+            pending_identity=pending_identity,
         )
         work_trees.append(
             {
@@ -287,6 +290,7 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
                 "bindingError": binding_error,
                 "pendingCount": pending,
                 "pendingLabel": str(pending),
+                **pending_identity,
                 "privateTaskCount": 0,
                 "agentProcessStatus": status.process_status,
                 "agentVisualStatus": status_line["agentVisualStatus"],
@@ -430,7 +434,8 @@ def messages_payload_for_worktree(
 ) -> dict[str, Any]:
     explicit_thread_id = canonical_thread_id(expected_thread_id or "")
     thread_id = explicit_thread_id or resolve_thread_id_for_target(state, target) or ""
-    pending = pending_inbox_count(target.repo_root)
+    pending_identity = pending_inbox_identity_payload(target.repo_root)
+    pending = int(pending_identity["pendingInboxCount"])
     renew_intent = bool(thread_id and state.team_store.agent_renewal_active(thread_id))
     agent_ensure = ensure_agent_for_pending_inbox(
         target,
@@ -446,7 +451,8 @@ def messages_payload_for_worktree(
     )
     if ensured_thread_id:
         thread_id = ensured_thread_id
-    pending = pending_inbox_count_after_agent_ensure(pending, agent_ensure)
+    pending_identity = pending_inbox_identity_payload(target.repo_root)
+    pending = int(pending_identity["pendingInboxCount"])
     if not thread_id:
         items: list[message_reader.AssistantMessage] = []
         error: str | None = "No agent thread is bound to this worktree yet."
@@ -483,10 +489,15 @@ def messages_payload_for_worktree(
         "laneInfo": _lane_info_payload(target, thread_id),
         "agentProcessStatus": status.process_status,
         "error": error or "",
-        "pendingInboxCount": pending,
+        **pending_identity,
         "agentEnsure": agent_ensure or {},
         "statusLine": status_line_payload(
-            state, target, items=items, error=error, pending_count=pending
+            state,
+            target,
+            items=items,
+            error=error,
+            pending_count=pending,
+            pending_identity=pending_identity,
         ),
     }
 

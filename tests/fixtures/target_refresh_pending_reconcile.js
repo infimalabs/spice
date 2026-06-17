@@ -17,9 +17,13 @@ const lane = {
   latestPayload: {
     pendingInboxCount: 1,
     pendingInboxLabel: "1",
+    pendingInboxKeys: ["stale-key"],
+    pendingInboxRevision: "stale-rev",
     statusLine: {
       pendingInboxCount: 1,
       pendingInboxLabel: "1",
+      pendingInboxKeys: ["stale-key"],
+      pendingInboxRevision: "stale-rev",
       preview: "previous assistant response",
     },
   },
@@ -30,6 +34,8 @@ const drainedTarget = {
   statusLine: {
     pendingInboxCount: 0,
     pendingInboxLabel: "0",
+    pendingInboxKeys: [],
+    pendingInboxRevision: "drained-rev",
   },
 };
 
@@ -42,6 +48,14 @@ assert(
 assert(
   lane.latestPayload.pendingInboxCount === 0,
   "target refresh clears stale top-level pending count",
+);
+assert(
+  lane.latestPayload.statusLine.pendingInboxKeys.length === 0,
+  "target refresh clears stale latest-payload pending keys",
+);
+assert(
+  lane.latestPayload.pendingInboxRevision === "drained-rev",
+  "target refresh carries authoritative pending revision",
 );
 assert(
   lane.latestPayload.statusLine.preview === "previous assistant response",
@@ -64,12 +78,22 @@ const queuedLane = {
 };
 const queuedTarget = {
   pendingCount: 2,
-  statusLine: { pendingInboxCount: 2, pendingInboxLabel: "2" },
+  statusLine: {
+    pendingInboxCount: 2,
+    pendingInboxLabel: "2",
+    pendingInboxKeys: ["queued-a", "queued-b"],
+    pendingInboxRevision: "queued-rev",
+  },
 };
 context.lanePayloadWithTargetPending(queuedLane, queuedTarget);
 assert(
   queuedLane.latestPayload.statusLine.pendingInboxCount === 2,
   "target refresh still surfaces genuinely queued steering",
+);
+assert(
+  queuedLane.latestPayload.statusLine.pendingInboxKeys.join(",") ===
+    "queued-a,queued-b",
+  "target refresh surfaces authoritative pending keys",
 );
 
 const noFreshCountLane = {

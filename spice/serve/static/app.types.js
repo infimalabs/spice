@@ -22,6 +22,8 @@
  * @property {number=} teamRevision
  * @property {number=} configRevision
  * @property {string=} lifetime
+ * @property {string[]=} pendingInboxKeys
+ * @property {string=} pendingInboxRevision
  * @property {StatusLine=} statusLine
  *
  * @typedef {Object} TaskFilterInventory
@@ -61,6 +63,8 @@
  * @property {string=} agentVisualStatus
  * @property {string=} activityStatus
  * @property {number=} pendingInboxCount
+ * @property {string[]=} pendingInboxKeys
+ * @property {string=} pendingInboxRevision
  *
  * @typedef {Object} MessageAttachment
  * @property {string=} name

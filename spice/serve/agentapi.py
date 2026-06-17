@@ -22,10 +22,10 @@ from spice.mail.inbox import (
     inbox_item_is_automated_guidance,
     inbox_item_key,
     inbox_request_priority,
-    pending_inbox_count,
 )
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve.markdown import render_message_html
+from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.steering import SentSteeringMessage
 from spice.serve.worktrees import WorktreeTarget
 
@@ -105,6 +105,7 @@ def sent_steering_payload(
     target: WorktreeTarget | None,
     agent_ensure_override: dict[str, Any] | None = None,
     pending_count: int | None = None,
+    pending_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "ok": True,
@@ -123,7 +124,9 @@ def sent_steering_payload(
         ),
         "agentEnsure": agent_ensure_override or {},
     }
-    if pending_count is not None:
+    if pending_identity is not None:
+        payload.update(pending_identity)
+    elif pending_count is not None:
         payload["pendingInboxCount"] = pending_count
         payload["pendingInboxLabel"] = str(pending_count)
     return payload
@@ -139,7 +142,8 @@ def sent_steering_response_payload(
 ) -> dict[str, Any]:
     if target is None:
         return sent_steering_payload(sent, target=None)
-    pending = pending_inbox_count(target.repo_root)
+    pending_identity = pending_inbox_identity_payload(target.repo_root)
+    pending = int(pending_identity["pendingInboxCount"])
     agent_ensure = ensure_agent_for_pending_inbox(
         target,
         pending,
@@ -148,12 +152,14 @@ def sent_steering_response_payload(
         fast_mode=fast_mode,
         force_new=force_new,
     )
-    pending = pending_inbox_count_after_agent_ensure(pending, agent_ensure)
+    pending_identity = pending_inbox_identity_payload(target.repo_root)
+    pending = int(pending_identity["pendingInboxCount"])
     return sent_steering_payload(
         sent,
         target=target,
         agent_ensure_override=agent_ensure or {},
         pending_count=pending,
+        pending_identity=pending_identity,
     )
 
 
@@ -219,8 +225,7 @@ def deadletter_failed_agent_ensure_payload(
         payload["deadletterRequeueCommand"] = (
             f"spice agent requeue-deadletter {deadlettered}"
         )
-        payload["pendingInboxCount"] = pending_inbox_count(target.repo_root)
-        payload["pendingInboxLabel"] = str(payload["pendingInboxCount"])
+        payload.update(pending_inbox_identity_payload(target.repo_root))
     return payload
 
 

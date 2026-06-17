@@ -850,6 +850,8 @@ function applyLaneSendResult(
     accepted: true,
     inboxKey: result.key,
     pendingInboxCount: result.pendingInboxCount,
+    pendingInboxKeys: result.pendingInboxKeys,
+    pendingInboxRevision: result.pendingInboxRevision,
   });
   rememberAckContext(
     lane,
