@@ -1008,7 +1008,18 @@ def test_running_requested_renewal_sends_handoff_and_marks_pending(
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
 
     payload, status = work_tree_send_response_payload(
-        state, target, {"text": "wrap this up"}
+        state,
+        target,
+        {
+            "text": "wrap this up",
+            "attachments": [
+                {
+                    "name": "paste.png",
+                    "contentType": "image/png",
+                    "dataUrl": IMAGE_DATA_URL,
+                }
+            ],
+        },
     )
 
     item = collect_inbox_items(repo)[0]
@@ -1020,6 +1031,9 @@ def test_running_requested_renewal_sends_handoff_and_marks_pending(
         ).fetchone()
     assert status == HTTPStatus.OK
     assert payload["agentEnsure"] == {}
+    assert payload["requestText"] == "wrap this up"
+    assert "RENEW:" not in payload["requestHtml"]
+    assert payload["attachments"][0]["name"] == "paste.png"
     assert RENEWAL_HANDOFF_REQUEST_SUFFIX in inbox_request_body(item.text)
     assert payload["renewalIntent"]["requested"] is False
     assert payload["renewalIntent"]["state"] == "pending"

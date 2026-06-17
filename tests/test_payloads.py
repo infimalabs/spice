@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 
+from spice.agent.renewal import RENEWAL_HANDOFF_REQUEST_SUFFIX
 from spice.mail.acks import archive_ackd_inbox_items
 from spice.mail.attachments import prepare_inbox_attachments
 from spice.mail.inbox import compose_inbox_text, inbox_item_key, write_inbox_item
@@ -384,7 +385,11 @@ def test_sent_steering_payload_includes_image_attachments(tmp_path):
 
 def test_ack_context_payload_round_trips_inbox_attachments(tmp_path):
     name = "20260104T000000000004Z.txt"
-    composed = compose_inbox_text(body="look here", priority=None, stop=False)
+    composed = compose_inbox_text(
+        body=f"look here\n{RENEWAL_HANDOFF_REQUEST_SUFFIX}",
+        priority=None,
+        stop=False,
+    )
     attachments = prepare_inbox_attachments(
         [
             {
@@ -403,6 +408,8 @@ def test_ack_context_payload_round_trips_inbox_attachments(tmp_path):
     )
 
     attachment = payload["acks"][0]["attachments"][0]
+    assert payload["acks"][0]["text"] == "look here"
+    assert "RENEW:" not in payload["acks"][0]["html"]
     assert attachment["name"] == "upload.png"
     assert attachment["contentType"] == "image/png"
     assert attachment["path"].startswith(".spice/inbox/")

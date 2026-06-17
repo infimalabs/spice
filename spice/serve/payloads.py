@@ -7,6 +7,7 @@ from typing import Any
 
 from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import agent_binding_error, agent_status
+from spice.agent.renewal import strip_renewal_handoff_request_suffix
 from spice.config import configured_say_voice
 from spice.mail.inbox import (
     collect_archived_inbox_items,
@@ -465,7 +466,7 @@ def ack_context_payload_for_worktree(
             if key not in by_key and inbox_item_key_aliases(key) & item_aliases
         ]
         if matching_keys:
-            body = inbox_request_body(item.text)
+            body = strip_renewal_handoff_request_suffix(inbox_request_body(item.text))
             html = render_message_html(body, worktree_id=target.id)
             priority = inbox_request_priority(item.text) or ""
             attachments = inbox_attachment_payloads(
