@@ -58,7 +58,22 @@ def agent_wrapper_definitions_table(repo_root: Path) -> dict[str, Any]:
 
 def commands_table(repo_root: Path) -> dict[str, Any]:
     value = read_tool_table(repo_root).get("commands")
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    flattened: dict[str, Any] = {}
+    _flatten_commands_table(value, flattened)
+    return flattened
+
+
+def _flatten_commands_table(
+    source: dict[str, Any], destination: dict[str, Any], *, prefix: str = ""
+) -> None:
+    for key, value in source.items():
+        name = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            _flatten_commands_table(value, destination, prefix=name)
+            continue
+        destination[name] = value
 
 
 def string_list(raw: Any) -> list[str]:

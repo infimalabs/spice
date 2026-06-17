@@ -8,9 +8,10 @@ Spice has two command-extension surfaces with different owners:
   shell commands receive steering, context pressure, git-shadow routing, source
   checkout routing, and configured wrapper functions before the requested
   command executes.
-- `[tool.spice.commands]` mounted commands are repository-owned top-level
-  verbs. They let a project expose its own tools under `spice <verb>` without
-  making those tools built-ins for every repository.
+- `[tool.spice.commands]` mounted commands are repository-owned command paths.
+  They let a project expose its own tools under `spice <verb>` or
+  `spice <verb> <subcommand> ...` without making those tools built-ins for
+  every repository.
 
 ## Agent Command Wrapper
 
@@ -93,16 +94,19 @@ release = ["uv", "run", "python", "-m", "spice.release"]
 `notes` passed through verbatim. String mounts are shell-split once; list mounts
 pass their argv exactly.
 
-Mounted names are one-level verbs matching `^[a-z][a-z0-9-]*$`. Built-in spice
-verbs always win, and a mount that shadows a built-in fails loudly. Large tool
-families should mount one namespace owner, then dispatch inside that tool:
+Mounted names are dot-separated segment paths whose segments match
+`^[a-z][a-z0-9-]*$`. Top-level mounts that shadow built-in spice verbs fail
+loudly. Nested mounts under built-ins are allowed:
 
 ```toml
 [tool.spice.commands]
 toolbox = ["uv", "run", "toolbox"]
+report.inspect = ["project-tool", "report", "inspect"]
 ```
 
 `spice toolbox lint css --fix` then passes `lint css --fix` to `toolbox`.
+`spice report inspect --limit 40` then passes `--limit 40` to the mounted nested
+path backend.
 
 Mounted commands can import the public repo-tool seam documented in the README.
 They should not rely on private spice modules unless the seam is deliberately

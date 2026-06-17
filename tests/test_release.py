@@ -39,7 +39,7 @@ def test_repo_mounts_release_command(tmp_path):
         encoding="utf-8",
     )
 
-    assert mounted_commands(tmp_path)["release"] == (
+    assert mounted_commands(tmp_path)[("release",)] == (
         "uv",
         "run",
         "python",
