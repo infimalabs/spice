@@ -1047,7 +1047,10 @@ def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
 
     message = str(exc_info.value)
     assert "README.md" in message
+    assert "keep the merge state open" in message
+    assert "commit while MERGE_HEAD exists" in message
     assert "git status --short" in message
+    assert "git rev-parse --verify MERGE_HEAD" in message
     assert "git add -- README.md" in message
     assert 'spice task done TASK-20260101T000000000002Z --validation "..."' in message
     assert _git(repo, "rev-parse", "--verify", "MERGE_HEAD") == upstream_head

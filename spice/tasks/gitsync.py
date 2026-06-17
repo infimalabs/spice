@@ -490,8 +490,11 @@ def _merge_conflict_recovery(label: str, repo_root: Path) -> str:
     add_paths = " ".join(conflicts) if conflicts else "<files>"
     lines.extend(
         [
+            "keep the merge state open; do not run `git merge --abort`",
+            "commit while MERGE_HEAD exists so the baseline becomes a parent",
             "next commands:",
             "  git status --short",
+            "  git rev-parse --verify MERGE_HEAD",
             "  edit the conflicting files above",
             f"  git add -- {add_paths}",
             f'  git commit -m "Resolve baseline overlap for {label}"',
