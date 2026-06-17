@@ -26,9 +26,9 @@ function setLaneSpeechMode(lane, mode) {
 
 function setLaneLifetime(lane, label) {
   const host = laneGroupHost(lane);
-  host.lifetime = agentLifetimeLabels.includes(label)
-    ? label
-    : defaultAgentLifetime;
+  const lifetime = agentLifetimeLabels.includes(label) ? label : defaultAgentLifetime;
+  host.lifetime = lifetime;
+  host.pendingLifetimeCommit = lifetime;
   syncLaneEffectiveControls(host);
   renderFilterPills();
   updateTaskDrainForLane(host);
@@ -36,10 +36,19 @@ function setLaneLifetime(lane, label) {
 
 function applyServerLaneLifetime(lane, lifetime) {
   if (!agentLifetimeLabels.includes(lifetime)) return false;
-  const previous = lane.lifetime;
-  lane.lifetime = lifetime;
-  syncLaneEffectiveControls(lane);
+  const host = laneGroupHost(lane);
+  if (host.pendingLifetimeCommit && lifetime !== host.pendingLifetimeCommit)
+    return false;
+  if (host.pendingLifetimeCommit === lifetime) host.pendingLifetimeCommit = "";
+  const previous = host.lifetime;
+  host.lifetime = lifetime;
+  syncLaneEffectiveControls(host);
   return previous !== lifetime;
+}
+
+function clearLaneLifetimeCommit(lane, lifetime) {
+  const host = laneGroupHost(lane);
+  if (host.pendingLifetimeCommit === lifetime) host.pendingLifetimeCommit = "";
 }
 
 function syncLaneEffectiveControls(lane) {
