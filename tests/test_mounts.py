@@ -1,15 +1,17 @@
-"""Mounted commands: validation, built-in precedence, argv shapes."""
+"""Mounted commands: validation, precedence, dotted-path dispatch."""
 
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from spice.cli import entry as cli_entry
 from spice.cli.mounts import (
-    MOUNT_NAME_RE,
+    MOUNT_SEGMENT_RE,
     MOUNTED_COMMAND_ENV,
     MountedCommand,
     VISIBLE_PROG_ENV,
+    find_mounted_command,
     mounted_commands,
     run_mounted_command,
 )
@@ -33,38 +35,37 @@ def test_builtin_commands_match_the_live_parser():
 def test_string_mounts_shlex_split(tmp_path):
     repo = _repo_with_commands(tmp_path, 'probe = "python -m myproj.probe --fast"')
     assert mounted_commands(repo) == {
-        "probe": ("python", "-m", "myproj.probe", "--fast")
+        ("probe",): ("python", "-m", "myproj.probe", "--fast")
     }
 
 
 def test_list_mounts_pass_argv_verbatim(tmp_path):
     repo = _repo_with_commands(
-        tmp_path, 'release = ["uv", "run", "python", "-m", "spice.release"]'
+        tmp_path, 'release.notes = ["python", "-m", "spice.release", "notes"]'
     )
     assert mounted_commands(repo) == {
-        "release": ("uv", "run", "python", "-m", "spice.release")
+        ("release", "notes"): ("python", "-m", "spice.release", "notes")
     }
 
 
-def test_tool_family_mounts_use_one_namespace_owner(tmp_path):
-    assert MOUNT_NAME_RE.fullmatch("toolbox")
-    assert not MOUNT_NAME_RE.fullmatch("lint.css")
-    assert not MOUNT_NAME_RE.fullmatch("lint css")
-    repo = _repo_with_commands(tmp_path, 'toolbox = ["uv", "run", "toolbox"]')
-    assert mounted_commands(repo) == {"toolbox": ("uv", "run", "toolbox")}
+def test_dotted_mount_names_require_valid_segments(tmp_path):
+    assert MOUNT_SEGMENT_RE.fullmatch("lane-tools")
+    repo = _repo_with_commands(tmp_path, '"analyze.Bad_Name" = "./run.sh"')
+    with pytest.raises(SpiceError, match="dot-separated segments"):
+        mounted_commands(repo)
 
 
-def test_mount_shadowing_builtin_fails_loudly(tmp_path):
+def test_top_level_mount_shadowing_builtin_fails_loudly(tmp_path):
     repo = _repo_with_commands(tmp_path, 'task = "./scripts/task.sh"')
     with pytest.raises(SpiceError, match="shadows a built-in"):
         mounted_commands(repo)
 
 
-def test_mount_name_shape_is_enforced(tmp_path):
-    assert MOUNT_NAME_RE.fullmatch("lane-tools")
-    repo = _repo_with_commands(tmp_path, '"Bad_Name" = "./run.sh"')
-    with pytest.raises(SpiceError, match="must match"):
-        mounted_commands(repo)
+def test_builtin_nested_mounts_are_allowed(tmp_path):
+    repo = _repo_with_commands(tmp_path, 'report.inspect = ["project-tool", "inspect"]')
+    assert mounted_commands(repo) == {
+        ("report", "inspect"): ("project-tool", "inspect")
+    }
 
 
 def test_empty_mount_fails_loudly(tmp_path):
@@ -73,15 +74,34 @@ def test_empty_mount_fails_loudly(tmp_path):
         mounted_commands(repo)
 
 
+def test_find_mounted_command_uses_longest_matching_path(tmp_path, monkeypatch):
+    _repo_with_commands(
+        tmp_path,
+        'probe = ["tool", "probe"]\nreport.inspect = ["tool", "report", "inspect"]\n',
+    )
+    monkeypatch.setattr("spice.cli.mounts.repo_root_from_cwd", lambda: tmp_path)
+    resolved = find_mounted_command(["report", "inspect", "--limit", "20"])
+    assert resolved is not None
+    mount, remainder = resolved
+    assert mount.path == ("report", "inspect")
+    assert mount.argv == ("tool", "report", "inspect")
+    assert remainder == ["--limit", "20"]
+
+
 def test_run_mounted_command_exports_visible_spice_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ):
     captured: dict[str, object] = {}
+    (tmp_path / ".venv" / "bin").mkdir(parents=True)
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setenv("VIRTUAL_ENV", "/tmp/foreign-venv")
 
     def fake_run(argv, *, cwd, env, check):
         captured["argv"] = tuple(argv)
         captured["cwd"] = cwd
         captured["env"] = {
+            "VIRTUAL_ENV": env.get("VIRTUAL_ENV"),
+            "PATH": env.get("PATH"),
             MOUNTED_COMMAND_ENV: env.get(MOUNTED_COMMAND_ENV),
             VISIBLE_PROG_ENV: env.get(VISIBLE_PROG_ENV),
         }
@@ -90,20 +110,49 @@ def test_run_mounted_command_exports_visible_spice_identity(
 
     monkeypatch.setattr("spice.cli.mounts.subprocess.run", fake_run)
     mount = MountedCommand(
-        name="fmt",
-        argv=("uv", "run", "python", "-m", "gritctl", "fmt"),
+        path=("report", "inspect"),
+        argv=("project-tool", "report", "inspect"),
         repo_root=tmp_path,
     )
 
-    assert run_mounted_command(mount, ["--check"]) == 0
+    assert run_mounted_command(mount, ["--limit", "20"]) == 0
     assert captured == {
-        "argv": ("uv", "run", "python", "-m", "gritctl", "fmt", "--check"),
+        "argv": ("project-tool", "report", "inspect", "--limit", "20"),
         "cwd": tmp_path,
         "env": {
+            "VIRTUAL_ENV": str(tmp_path / ".venv"),
+            "PATH": str(tmp_path / ".venv" / "bin"),
             MOUNTED_COMMAND_ENV: "1",
-            VISIBLE_PROG_ENV: "spice fmt",
+            VISIBLE_PROG_ENV: "spice report inspect",
         },
         "check": False,
+    }
+
+
+def test_dispatch_prefers_dotted_mount_before_builtin_parse(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+):
+    _repo_with_commands(
+        tmp_path,
+        'report.inspect = ["project-tool", "report", "inspect"]\n',
+    )
+    monkeypatch.setattr("spice.cli.mounts.repo_root_from_cwd", lambda: tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_run_mounted_command(mount, args):
+        captured["path"] = mount.path
+        captured["argv"] = mount.argv
+        captured["args"] = list(args)
+        return 0
+
+    monkeypatch.setattr(
+        "spice.cli.mounts.run_mounted_command", fake_run_mounted_command
+    )
+    assert cli_entry._dispatch(["report", "inspect", "--limit", "20"]) == 0
+    assert captured == {
+        "path": ("report", "inspect"),
+        "argv": ("project-tool", "report", "inspect"),
+        "args": ["--limit", "20"],
     }
 
 

@@ -1,13 +1,4 @@
-"""Mounted commands: a repo's own tools, unified under the spice namespace.
-
-A project's custom tooling deserves one CLI without the harness owning it:
-a target repo
-declares `[tool.spice.commands]` in its tracked pyproject.toml and each
-entry runs as `spice <name> …` with the remaining arguments passed through
-verbatim — no argparse mangling between the operator and the tool. Entries
-are a command string (shlex-split) or an argv list, executed from the repo
-root. Built-in verbs always win; a mount that shadows one fails loudly.
-"""
+"""Mounted commands: repo-owned command paths unified under the spice namespace."""
 
 from __future__ import annotations
 
@@ -21,38 +12,51 @@ from typing import Any
 
 from spice.cli.parser import BUILTIN_COMMANDS
 from spice.errors import SpiceError
-from spice.paths import repo_root_from_cwd
+from spice.paths import repo_root_from_cwd, worktree_spice_environment
 from spice.repocfg import commands_table
 
-MOUNT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+MOUNT_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 MOUNTED_COMMAND_ENV = "SPICE_MOUNTED_COMMAND"  # env-policy: allow
 VISIBLE_PROG_ENV = "SPICE_VISIBLE_PROG"  # env-policy: allow
 
 
 @dataclass(frozen=True)
 class MountedCommand:
-    name: str
+    path: tuple[str, ...]
     argv: tuple[str, ...]
     repo_root: Path
 
+    @property
+    def name(self) -> str:
+        return ".".join(self.path)
 
-def mounted_commands(repo_root: Path) -> dict[str, tuple[str, ...]]:
+    @property
+    def visible_prog(self) -> str:
+        return "spice " + " ".join(self.path)
+
+
+def mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]:
     """The validated mount table; any malformed entry fails the whole read."""
-    mounts: dict[str, tuple[str, ...]] = {}
+    mounts: dict[tuple[str, ...], tuple[str, ...]] = {}
     for raw_name, raw_argv in commands_table(repo_root).items():
-        name = str(raw_name)
-        if name in BUILTIN_COMMANDS:
+        path = mount_command_path(str(raw_name))
+        if len(path) == 1 and path[0] in BUILTIN_COMMANDS:
             raise SpiceError(
-                f"[tool.spice.commands] entry {name!r} shadows a built-in "
+                f"[tool.spice.commands] entry {raw_name!r} shadows a built-in "
                 "spice command; pick another name"
             )
-        if not MOUNT_NAME_RE.fullmatch(name):
-            raise SpiceError(
-                f"[tool.spice.commands] entry {name!r} must match "
-                f"{MOUNT_NAME_RE.pattern}"
-            )
-        mounts[name] = _mount_argv(name, raw_argv)
+        mounts[path] = _mount_argv(str(raw_name), raw_argv)
     return mounts
+
+
+def mount_command_path(raw_name: str) -> tuple[str, ...]:
+    parts = tuple(raw_name.split("."))
+    if not parts or any(not MOUNT_SEGMENT_RE.fullmatch(part) for part in parts):
+        raise SpiceError(
+            f"[tool.spice.commands] entry {raw_name!r} must be dot-separated "
+            f"segments matching {MOUNT_SEGMENT_RE.pattern}"
+        )
+    return parts
 
 
 def _mount_argv(name: str, raw: Any) -> tuple[str, ...]:
@@ -70,27 +74,32 @@ def _mount_argv(name: str, raw: Any) -> tuple[str, ...]:
     return argv
 
 
-def find_mounted_command(name: str) -> MountedCommand | None:
-    """Resolve `name` to a mount, or None when built-ins/argparse should run.
-
-    Built-in names short-circuit before any configuration is read, so the
-    core command surface never pays for (or breaks on) a repo's mount table.
-    """
-    if name in BUILTIN_COMMANDS:
-        return None
+def find_mounted_command(argv: list[str]) -> tuple[MountedCommand, list[str]] | None:
+    """Resolve the longest mounted command path from argv, or None."""
     repo_root = repo_root_from_cwd()
     if repo_root is None:
         return None
-    argv = mounted_commands(repo_root).get(name)
-    if argv is None:
+    mounts = mounted_commands(repo_root)
+    if not mounts:
         return None
-    return MountedCommand(name=name, argv=argv, repo_root=repo_root)
+    best_path: tuple[str, ...] | None = None
+    for path in mounts:
+        if len(path) > len(argv):
+            continue
+        if tuple(argv[: len(path)]) != path:
+            continue
+        if best_path is None or len(path) > len(best_path):
+            best_path = path
+    if best_path is None:
+        return None
+    mount = MountedCommand(path=best_path, argv=mounts[best_path], repo_root=repo_root)
+    return mount, argv[len(best_path) :]
 
 
 def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
-    env = os.environ.copy()
+    env = worktree_spice_environment(mount.repo_root, base_env=os.environ)
     env[MOUNTED_COMMAND_ENV] = "1"
-    env[VISIBLE_PROG_ENV] = f"spice {mount.name}"
+    env[VISIBLE_PROG_ENV] = mount.visible_prog
     result = subprocess.run(
         [*mount.argv, *args], cwd=mount.repo_root, env=env, check=False
     )
@@ -98,8 +107,7 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
 
 
 def mounted_command_names() -> list[str]:
-    """Raw declared names for help text; validation happens at dispatch."""
     repo_root = repo_root_from_cwd()
     if repo_root is None:
         return []
-    return sorted(str(name) for name in commands_table(repo_root))
+    return sorted(".".join(path) for path in mounted_commands(repo_root))

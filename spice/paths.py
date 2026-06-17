@@ -104,14 +104,7 @@ def worktree_spice_environment(
     repo_root: Path | None, *, base_env: Mapping[str, str] | None = None
 ) -> dict[str, str]:
     env = dict(os.environ if base_env is None else base_env)
-    source = worktree_spice_source(repo_root)
-    if source is None:
-        return env
-    root = str(source.parent)
-    existing = env.get("PYTHONPATH", "")
-    parts = [part for part in existing.split(os.pathsep) if part and part != root]
-    env["PYTHONPATH"] = os.pathsep.join([root, *parts])
-    if "VIRTUAL_ENV" not in env and repo_root is not None:
+    if repo_root is not None:
         venv = Path(repo_root) / ".venv"
         if venv.is_dir():
             env["VIRTUAL_ENV"] = str(venv)
@@ -121,6 +114,13 @@ def worktree_spice_environment(
                 p for p in existing_path.split(os.pathsep) if p and p != venv_bin
             ]
             env["PATH"] = os.pathsep.join([venv_bin, *path_parts])
+    source = worktree_spice_source(repo_root)
+    if source is None:
+        return env
+    root = str(source.parent)
+    existing = env.get("PYTHONPATH", "")
+    parts = [part for part in existing.split(os.pathsep) if part and part != root]
+    env["PYTHONPATH"] = os.pathsep.join([root, *parts])
     return env
 
 

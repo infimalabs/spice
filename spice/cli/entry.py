@@ -47,9 +47,10 @@ def _dispatch(argv: list[str]) -> int:
     if argv and not argv[0].startswith("-"):
         from spice.cli.mounts import find_mounted_command, run_mounted_command
 
-        mount = find_mounted_command(argv[0])
-        if mount is not None:
-            return run_mounted_command(mount, argv[1:])
+        resolved = find_mounted_command(argv)
+        if resolved is not None:
+            mount, remainder = resolved
+            return run_mounted_command(mount, remainder)
 
     from spice.cli.parser import build_parser
 

@@ -28,7 +28,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Callable
 
-from spice.cli.mounts import mounted_commands
+from spice.cli.mounts import mount_command_path, mounted_commands
 from spice.errors import SpiceError
 from spice.paths import find_tool
 from spice.policy import REPO_TRUTH_DOC_LIMIT, REPO_TRUTH_DOCS
@@ -299,7 +299,7 @@ def _mounted_command_step(repo_root: Path, name: str) -> CommandStep:
     label = name.strip()
     if not label:
         raise SpiceError("[tool.spice.policy] mounted pre-commit command is empty")
-    argv = mounted_commands(repo_root).get(label)
+    argv = mounted_commands(repo_root).get(mount_command_path(label))
     if argv is None:
         raise SpiceError(
             f"[tool.spice.policy] pre-commit command {label!r} is not declared "

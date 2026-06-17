@@ -156,21 +156,21 @@ bench = ["python", "-m", "myproj.bench"]
 
 `spice release notes` or `spice bench --suite smoke` then runs the mounted
 command from the repo root with the remaining arguments passed through
-verbatim. Built-in verbs always win; a mount that shadows one fails loudly.
+verbatim. A mount may be a top-level verb or a dotted command path.
+Top-level mounts that shadow built-ins still fail loudly; nested mounts under
+built-ins are allowed.
 
-Mounted names are intentionally one-level verbs (`^[a-z][a-z0-9-]*$`), not
-nested command paths. A repo with a large tool family mounts one namespace
-owner and keeps family grouping inside that repo tool's own arguments:
+Mounted path segments are `^[a-z][a-z0-9-]*$`. A repo can mount one namespace
+owner, or mount specific nested paths directly:
 
 ```toml
 [tool.spice.commands]
 toolbox = ["uv", "run", "toolbox"]
+report.inspect = ["project-tool", "report", "inspect"]
 ```
 
 `spice toolbox lint css --fix` then dispatches `lint css --fix` to `toolbox`.
-Do not encode families as dotted, spaced, or ad-hoc hyphenated spice mount
-names such as `lint.css`, `lint css`, or one mount per subcommand; those
-groupings belong behind the mounted repo tool's explicit contract.
+`spice report inspect --limit 40` dispatches the mounted nested path directly.
 
 ### Library seam for repo tools
 
