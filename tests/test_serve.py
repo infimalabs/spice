@@ -505,6 +505,18 @@ def test_static_empty_teams_render_importer_in_message_stream():
         'lane.teamMenuButtonEl.setAttribute("aria-hidden", "true");' in empty_team_sync
     )
     assert 'lane.teamMenuButtonEl.title = "";' in empty_team_sync
+    assert "lane.selectedView = defaultLaneViewMode;" in empty_team_sync
+    assert "lockEmptyTeamPane(lane);" in empty_team_sync
+    assert "function lockEmptyTeamPane(lane)" in app_shell
+    assert "if (host.emptyTeam) {\n    lockEmptyTeamPane(host);" in app_shell
+    assert "if (lane.emptyTeam) return false;" in app_shell
+    assert "const requestedCollapsePx = lane.emptyTeam ? 0 : collapsePx;" in app_shell
+    assert (
+        'lane.modeRailEl.classList.toggle("lane-mode-rail--disabled", disabled);'
+        in app_shell
+    )
+    assert "button.disabled = disabled;" in app_shell
+    assert "button.tabIndex = disabled ? -1 : active ? 0 : -1;" in app_shell
     assert "lane.teamMenuButtonEl.disabled = false;" in app_groups
     assert 'lane.teamMenuButtonEl.removeAttribute("aria-hidden");' in app_groups
     assert 'lane.teamMenuButtonEl.removeAttribute("tabindex");' in app_groups
@@ -543,6 +555,8 @@ def test_static_empty_teams_render_importer_in_message_stream():
     )
     assert "pointer-events: none;" in css
     assert "visibility: hidden;" in css
+    assert ".lane--empty-team .lane-mode-rail--disabled" in css
+    assert "opacity: 0.72;" in css
     assert ".lane--empty-team .composer-controls" in css
     assert "display: none;" in css
     assert ".empty-team-importer" in css

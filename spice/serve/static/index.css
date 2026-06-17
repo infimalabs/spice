@@ -366,6 +366,13 @@ button.primary:hover {
   padding: 0 5px;
 }
 .lane-mode-badge--inactive { background: var(--muted); }
+.lane--empty-team .lane-mode-rail--disabled {
+  opacity: 0.72;
+  pointer-events: none;
+}
+.lane--empty-team .lane-mode-rail--disabled .lane-mode-button {
+  cursor: default;
+}
 
 /* ---- view stack: panels slide along --lane-view-position ----
    The composer's control rail (two sliders + the send button, 36px each)

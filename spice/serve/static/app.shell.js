@@ -219,8 +219,16 @@ function syncEmptyTeamLane(lane, team = {}) {
   lane.teamMenuButtonEl.setAttribute("aria-hidden", "true");
   lane.teamMenuButtonEl.setAttribute("aria-expanded", "false");
   lane.teamMenuButtonEl.title = "";
+  lane.selectedView = defaultLaneViewMode;
   syncLaneEffectiveControls(lane);
+  lockEmptyTeamPane(lane);
   renderMessagesIfChanged(lane);
+}
+
+function lockEmptyTeamPane(lane) {
+  if (!lane || !lane.emptyTeam) return;
+  lane.selectedView = defaultLaneViewMode;
+  setLanePaneCollapse(lane, 0);
 }
 
 function emptyTeamImportPanel(lane) {
@@ -444,10 +452,16 @@ function laneViewModeFromRailPoint(lane, clientX) {
 }
 
 function setLaneSelectedView(lane, view) {
+  const host = laneGroupHost(lane);
+  if (host.emptyTeam) {
+    lockEmptyTeamPane(host);
+    renderLaneViewShell(host);
+    return;
+  }
   lane.selectedView = laneViewMode(view);
   persistLaneHints();
   renderLaneViewShell(lane);
-  expandLanePane(laneGroupHost(lane));
+  expandLanePane(host);
 }
 
 function initializeLanePaneCollapse(lane) {
@@ -634,6 +648,7 @@ function lanePaneWheelDelta(lane, event) {
 }
 
 function lanePaneCanConsumeDelta(lane, delta) {
+  if (lane.emptyTeam) return false;
   if (delta > 0) return lane.paneCollapsePx < lanePaneMaxHeight(lane) - 1;
   if (delta < 0) return lane.paneCollapsePx > 1;
   return false;
@@ -674,7 +689,8 @@ function compensateLaneMessageScrollForPane(lane, appliedCollapsePx) {
 
 function setLanePaneCollapse(lane, collapsePx) {
   const maxHeight = lanePaneMaxHeight(lane);
-  const next = Math.max(0, Math.min(maxHeight, collapsePx));
+  const requestedCollapsePx = lane.emptyTeam ? 0 : collapsePx;
+  const next = Math.max(0, Math.min(maxHeight, requestedCollapsePx));
   lane.paneCollapsePx = next;
   const visibleHeight = Math.max(0, maxHeight - next);
   setStylePropertyIfChanged(
@@ -723,15 +739,20 @@ function clampScrollTop(element, value) {
 function renderLaneViewShell(lane) {
   const selectedView = laneViewMode(lane.selectedView);
   const position = laneViewModeIndex(selectedView);
+  const disabled = Boolean(lane.emptyTeam);
   lane.viewStackEl.style.setProperty("--lane-view-position", String(position));
+  lane.modeRailEl.classList.toggle("lane-mode-rail--disabled", disabled);
+  lane.modeRailEl.setAttribute("aria-disabled", disabled ? "true" : "false");
   for (const button of lane.element.querySelectorAll(
     "[data-lane-view-button]",
   )) {
     const view = button.dataset.laneViewButton;
     const active = view === selectedView;
     button.classList.toggle("lane-mode-button--active", active);
+    button.disabled = disabled;
+    button.setAttribute("aria-disabled", disabled ? "true" : "false");
     button.setAttribute("aria-selected", active ? "true" : "false");
-    button.tabIndex = active ? 0 : -1;
+    button.tabIndex = disabled ? -1 : active ? 0 : -1;
     syncLaneViewBadge(lane, view, button);
   }
   for (const panel of lane.element.querySelectorAll("[data-lane-view-panel]")) {
