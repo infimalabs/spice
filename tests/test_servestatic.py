@@ -591,6 +591,8 @@ def test_static_submitted_message_predictions_reconcile_against_server_echoes():
     assert "if (accepted && inboxKey && submittedPendingFloor > 0)" in app_render
     assert "lane.optimisticSubmittedInboxKeys.add(inboxKey);" in app_render
     assert "laneSubmittedMessagePendingFloor(lane)" in app_render
+    assert "clearDrainedSubmittedMessagePredictions(lane)" in app_render
+    assert "lane.sendAwaitingBackendCount" in app_render
     assert "function laneSubmittedMessagePendingFloor(lane)" in app_render
     assert "function reconcileSubmittedMessagePredictions(lane)" in app_render
     assert "const ackedKeys = new Set(ackKeysForMessages(lane.knownMessages));" in (
@@ -600,6 +602,17 @@ def test_static_submitted_message_predictions_reconcile_against_server_echoes():
         app_render
     )
     assert "inboxKey: result.key," in app_stream
+
+
+def test_static_pending_count_clears_stale_submitted_predictions_after_drain():
+    app_stream = STATIC_ROOT / "app.stream.js"
+    app_render = STATIC_ROOT / "app.render.js"
+    script = Path(__file__).with_name("fixtures") / "pending_count_reconcile.js"
+
+    subprocess.run(
+        ["node", str(script), str(app_stream), str(app_render)],
+        check=True,
+    )
 
 
 def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag():
