@@ -311,8 +311,15 @@ button.primary:hover {
   width: 12px;
 }
 .lane-team-menu {
-  border-block: 1px solid var(--border-soft);
-  padding: 6px 10px;
+  background: color-mix(in srgb, var(--panel) 94%, var(--control));
+  border-bottom: 1px solid var(--border-soft);
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
+  inset: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+  position: absolute;
+  z-index: 6;
 }
 .lane-team-menu-action:disabled {
   cursor: not-allowed;
@@ -395,6 +402,7 @@ button.primary:hover {
     var(--lane-pane-control-height)
   );
   overflow: hidden;
+  position: relative;
   transition: height 160ms ease;
 }
 .lane-view-stack--collapsed { pointer-events: none; }

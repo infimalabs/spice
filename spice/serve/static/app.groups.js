@@ -248,7 +248,7 @@ function openLaneTeamMenu(host) {
       renderLaneTeamMenuAction(host, action),
     ),
   );
-  host.element.insertBefore(menu, host.viewStackEl);
+  host.viewStackEl.append(menu);
   host.element.classList.add("lane--team-menu-open");
   host.teamMenuButtonEl.setAttribute("aria-expanded", "true");
   syncLaneTeamMenuDismissHandler();
