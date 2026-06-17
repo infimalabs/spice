@@ -52,7 +52,7 @@ function fakeLane(targetId, agentName, branchName, statusLine) {
         this.children = children;
       },
     },
-    closeButtonEl: {
+    teamMenuButtonEl: {
       innerHTML: "",
       title: "",
       setAttribute(name, value) {

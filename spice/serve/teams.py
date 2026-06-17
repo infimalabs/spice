@@ -104,6 +104,8 @@ class TeamState:
     config_revision: int
     config: TeamConfig
     members: tuple[TeamMember, ...]
+    split_back_available: bool = False
+    split_back_member_count: int = 0
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -112,6 +114,10 @@ class TeamState:
             "revision": self.revision,
             "config": self.config.to_payload(self.config_revision),
             "members": [member.to_payload() for member in self.members],
+            "splitBack": {
+                "available": self.split_back_available,
+                "memberCount": self.split_back_member_count,
+            },
         }
 
 
@@ -460,6 +466,54 @@ class ServeTeamStore(TeamMetricStoreMixin):
             )
             return self._team_state_locked(connection, created.team_id)
 
+    def split_team_back(self, source_team_id: str) -> TeamState:
+        with self.connect() as connection:
+            self._require_team(connection, source_team_id)
+            subgroup = self._latest_restorable_subgroup_locked(
+                connection, source_team_id
+            )
+            if subgroup is None:
+                raise SpiceError(
+                    f"team {source_team_id} has no preserved subgroup to split"
+                )
+            row, agent_ids = subgroup
+            child_team_id = str(row["child_team_id"])
+            self._require_team(connection, child_team_id)
+            connection.execute(
+                "UPDATE teams SET status = 'open' WHERE team_id = ?",
+                (child_team_id,),
+            )
+            self._move_team_metric_rows_for_agents_locked(
+                connection,
+                source_team_id,
+                child_team_id,
+                agent_ids,
+            )
+            for agent_id in agent_ids:
+                self._assign_locked(connection, child_team_id, agent_id)
+            revision = self._record_event(
+                connection,
+                "splitTeamBack",
+                source_team_id,
+                {"restoredTeamId": child_team_id, "agents": list(agent_ids)},
+            )
+            connection.execute(
+                "UPDATE teams SET revision = ? WHERE team_id = ?",
+                (revision, child_team_id),
+            )
+            connection.execute(
+                "UPDATE team_merge_subgroups SET restored_revision = ? "
+                "WHERE parent_team_id = ? AND child_team_id = ? "
+                "AND merged_revision = ?",
+                (
+                    revision,
+                    source_team_id,
+                    child_team_id,
+                    int(row["merged_revision"]),
+                ),
+            )
+            return self._team_state_locked(connection, child_team_id)
+
     def merge_teams(self, source_team_id: str, destination_team_id: str) -> int:
         if source_team_id == destination_team_id:
             raise SpiceError("merge requires two distinct teams")
@@ -470,21 +524,31 @@ class ServeTeamStore(TeamMetricStoreMixin):
                 "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY joined_at",
                 (source_team_id,),
             ).fetchall()
+            agent_ids = [str(row["agent_id"]) for row in rows]
             self._move_team_metric_rows_locked(
                 connection, source_team_id, destination_team_id
             )
-            for row in rows:
-                self._assign_locked(connection, destination_team_id, row["agent_id"])
+            for agent_id in agent_ids:
+                self._assign_locked(connection, destination_team_id, agent_id)
             connection.execute(
                 "UPDATE teams SET status = 'closed' WHERE team_id = ?",
                 (source_team_id,),
             )
-            return self._record_event(
+            revision = self._record_event(
                 connection,
                 "mergeTeams",
                 destination_team_id,
-                {"sourceTeamId": source_team_id},
+                {"sourceTeamId": source_team_id, "agents": agent_ids},
             )
+            if agent_ids:
+                self._record_merge_subgroup_locked(
+                    connection,
+                    parent_team_id=destination_team_id,
+                    child_team_id=source_team_id,
+                    merged_revision=revision,
+                    agent_ids=agent_ids,
+                )
+            return revision
 
     def reorder_team_agents(self, team_id: str, agent_ids: Iterable[str]) -> int:
         ordered_agent_ids = [_normalized_id(agent, "agent_id") for agent in agent_ids]
@@ -873,6 +937,12 @@ class ServeTeamStore(TeamMetricStoreMixin):
                 str(renewal["agent_id"]): _renewal_state_from_row(renewal)
                 for renewal in renewal_rows
             }
+        split_back_subgroup = self._latest_restorable_subgroup_locked(
+            connection, team_id
+        )
+        split_back_member_count = (
+            len(split_back_subgroup[1]) if split_back_subgroup is not None else 0
+        )
         return TeamState(
             team_id=team_id,
             status=str(row["status"]),
@@ -888,6 +958,8 @@ class ServeTeamStore(TeamMetricStoreMixin):
                 )
                 for member in member_rows
             ),
+            split_back_available=split_back_subgroup is not None,
+            split_back_member_count=split_back_member_count,
         )
 
     def _renewal_state_locked(
@@ -922,6 +994,63 @@ class ServeTeamStore(TeamMetricStoreMixin):
             (team_id, agent_id, now, now),
         )
 
+    def _record_merge_subgroup_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        parent_team_id: str,
+        child_team_id: str,
+        merged_revision: int,
+        agent_ids: Iterable[str],
+    ) -> None:
+        agent_list = list(dict.fromkeys(str(agent_id) for agent_id in agent_ids))
+        if not agent_list:
+            return
+        connection.execute(
+            "INSERT OR REPLACE INTO team_merge_subgroups "
+            "(parent_team_id, child_team_id, merged_revision, agent_ids, "
+            "created_at, restored_revision) VALUES (?, ?, ?, ?, ?, NULL)",
+            (
+                parent_team_id,
+                child_team_id,
+                int(merged_revision),
+                json.dumps(agent_list, separators=(",", ":")),
+                time.time(),
+            ),
+        )
+
+    def _latest_restorable_subgroup_locked(
+        self, connection: sqlite3.Connection, parent_team_id: str
+    ) -> tuple[sqlite3.Row, tuple[str, ...]] | None:
+        current_agent_ids = self._current_membership_agent_ids_locked(
+            connection, parent_team_id
+        )
+        if not current_agent_ids:
+            return None
+        rows = connection.execute(
+            "SELECT parent_team_id, child_team_id, merged_revision, agent_ids "
+            "FROM team_merge_subgroups "
+            "WHERE parent_team_id = ? AND restored_revision IS NULL "
+            "ORDER BY merged_revision DESC LIMIT 1",
+            (parent_team_id,),
+        ).fetchall()
+        if not rows:
+            return None
+        row = rows[0]
+        agent_ids = _team_subgroup_agent_ids(row["agent_ids"])
+        if agent_ids and set(agent_ids).issubset(current_agent_ids):
+            return row, agent_ids
+        return None
+
+    def _current_membership_agent_ids_locked(
+        self, connection: sqlite3.Connection, team_id: str
+    ) -> set[str]:
+        rows = connection.execute(
+            "SELECT agent_id FROM memberships WHERE team_id = ?",
+            (team_id,),
+        ).fetchall()
+        return {str(row["agent_id"]) for row in rows}
+
 
 def _config_from_row(
     row: sqlite3.Row, entries: Iterable[TeamTaskFilter] = ()
@@ -952,6 +1081,17 @@ def _task_filter_projects_from_json(raw: object) -> tuple[str, ...]:
     if not isinstance(values, list):
         return ()
     return _validated_task_filter_projects(str(item) for item in values)
+
+
+def _team_subgroup_agent_ids(raw: object) -> tuple[str, ...]:
+    try:
+        values = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return ()
+    if not isinstance(values, list):
+        return ()
+    agent_ids = [str(item) for item in values if str(item or "").strip()]
+    return tuple(dict.fromkeys(agent_ids))
 
 
 def _validated_task_filter_projects(projects: Iterable[str]) -> tuple[str, ...]:

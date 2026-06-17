@@ -237,7 +237,7 @@ button.primary:hover {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 38%, transparent);
 }
 
-/* ---- lane top row: pips, mode rail, close ---- */
+/* ---- lane top row: pips, mode rail, team menu ---- */
 .lane-top {
   align-items: center;
   cursor: grab;
@@ -293,9 +293,30 @@ button.primary:hover {
   width: var(--lane-light-pip-size);
 }
 .lane--empty-team .lane-pip-stack,
-.lane--empty-team [data-close-lane] {
+.lane--empty-team [data-lane-team-menu] {
   pointer-events: none;
   visibility: hidden;
+}
+.lane-team-menu-button[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+.lane-team-menu-icon {
+  background:
+    linear-gradient(currentColor, currentColor) 0 0 / 100% 1.5px no-repeat,
+    linear-gradient(currentColor, currentColor) 0 50% / 100% 1.5px no-repeat,
+    linear-gradient(currentColor, currentColor) 0 100% / 100% 1.5px no-repeat;
+  display: block;
+  height: 8px;
+  width: 12px;
+}
+.lane-team-menu {
+  border-block: 1px solid var(--border-soft);
+  padding: 6px 10px;
+}
+.lane-team-menu-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 
 .lane-mode-rail { display: flex; flex: 1; gap: 2px; }

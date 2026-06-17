@@ -165,6 +165,53 @@ class TeamMetricStoreMixin:
             (source_team_id,),
         )
 
+    def _move_team_metric_rows_for_agents_locked(
+        self,
+        connection: sqlite3.Connection,
+        source_team_id: str,
+        destination_team_id: str,
+        agent_ids: Iterable[str],
+    ) -> None:
+        agent_list = tuple(dict.fromkeys(str(agent_id) for agent_id in agent_ids))
+        if not agent_list:
+            return
+        placeholders = ",".join("?" for _agent_id in agent_list)
+        params = (destination_team_id, source_team_id, *agent_list)
+        connection.execute(
+            "INSERT INTO team_agent_metrics "
+            "(team_id, agent_id, acked, sends, tool_calls, updated_at) "
+            "SELECT ?, agent_id, acked, sends, tool_calls, updated_at "
+            "FROM team_agent_metrics "
+            f"WHERE team_id = ? AND agent_id IN ({placeholders}) "
+            "ON CONFLICT(team_id, agent_id) DO UPDATE SET "
+            "acked = team_agent_metrics.acked + excluded.acked, "
+            "sends = team_agent_metrics.sends + excluded.sends, "
+            "tool_calls = team_agent_metrics.tool_calls + excluded.tool_calls, "
+            "updated_at = max(team_agent_metrics.updated_at, excluded.updated_at)",
+            params,
+        )
+        connection.execute(
+            "INSERT INTO team_agent_metric_buckets "
+            "(team_id, agent_id, bucket_start, messages) "
+            "SELECT ?, agent_id, bucket_start, messages "
+            "FROM team_agent_metric_buckets "
+            f"WHERE team_id = ? AND agent_id IN ({placeholders}) "
+            "ON CONFLICT(team_id, agent_id, bucket_start) DO UPDATE SET "
+            "messages = team_agent_metric_buckets.messages + excluded.messages",
+            params,
+        )
+        delete_params = (source_team_id, *agent_list)
+        connection.execute(
+            "DELETE FROM team_agent_metrics "
+            f"WHERE team_id = ? AND agent_id IN ({placeholders})",
+            delete_params,
+        )
+        connection.execute(
+            "DELETE FROM team_agent_metric_buckets "
+            f"WHERE team_id = ? AND agent_id IN ({placeholders})",
+            delete_params,
+        )
+
     def _record_agent_metric_delta_locked(
         self,
         connection: sqlite3.Connection,
