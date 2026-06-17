@@ -444,67 +444,41 @@ function renderSpiceMenu() {
 function positionSpiceMenu() {
   if (!spiceMenuEl) return;
   const margin = 8;
-  const laneGrid = lanesEl.getBoundingClientRect();
-  const laneGridStyle = window.getComputedStyle(lanesEl);
-  const paddingLeft = cssPixelValue(laneGridStyle.paddingLeft);
-  const paddingTop = cssPixelValue(laneGridStyle.paddingTop);
-  const paddingBottom = cssPixelValue(laneGridStyle.paddingBottom);
-  const anchorLane = spiceMenuAnchorLane();
-  const anchorRect = anchorLane ? anchorLane.getBoundingClientRect() : null;
-  const laneLeft = anchorRect ? anchorRect.left : laneGrid.left + paddingLeft;
-  const laneWidth = anchorRect
-    ? anchorRect.width
-    : spiceMenuMinimumLaneWidthPx();
-  const width = spiceMenuWidth(anchorLane, laneLeft, laneWidth, margin);
-  const left = spiceMenuLeft(anchorLane, laneLeft, width, margin);
-  const top = laneGrid.top + paddingTop;
-  const availableHeight = Math.max(1, window.innerHeight - top - margin);
-  const laneGridHeight = Math.max(
-    1,
-    laneGrid.height - paddingTop - paddingBottom,
-  );
-  const height = Math.min(availableHeight, laneGridHeight);
+  const buttonRect = openLaneButton.getBoundingClientRect();
+  const viewportHeight =
+    window.innerHeight || document.documentElement.clientHeight;
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+  const top = Math.max(margin, buttonRect.bottom + margin);
+  const width = spiceMenuWidthForButton(buttonRect, viewportWidth, margin);
+  const left = spiceMenuLeftForButton(buttonRect, width, viewportWidth, margin);
+  const height = Math.max(220, viewportHeight - top - margin);
   spiceMenuEl.style.width = width + "px";
   spiceMenuEl.style.left = left + "px";
   spiceMenuEl.style.top = top + "px";
-  spiceMenuEl.style.height = anchorLane ? height + "px" : "";
+  spiceMenuEl.style.height = "";
   spiceMenuEl.style.maxHeight = height + "px";
 }
 
-function spiceMenuAnchorLane() {
-  const visible = visibleLaneElements();
-  return visible.find(spiceMenuPrefersLaneElement) || visible[0] || null;
-}
-
-function spiceMenuPrefersLaneElement(element) {
-  const laneElement = /** @type {HTMLElement} */ (element);
-  const lane = laneStates.get(laneElement.dataset.targetId || "");
-  return Boolean(lane && lane.emptyTeam);
-}
-
-function spiceMenuWidth(anchorLane, laneLeft, laneWidth, margin) {
-  if (!anchorLane && spiceMenuUsesViewportWidth()) return window.innerWidth;
-  const availableWidth = anchorLane
-    ? Math.max(1, window.innerWidth - laneLeft - margin)
-    : Math.max(1, window.innerWidth - margin * 2);
+function spiceMenuWidthForButton(buttonRect, viewportWidth, margin) {
+  if (spiceMenuUsesViewportWidth(viewportWidth)) return viewportWidth;
+  const availableWidth = Math.max(1, viewportWidth - margin * 2);
   return Math.min(
     availableWidth,
-    Math.max(spiceMenuMinimumLaneWidthPx(), laneWidth),
+    Math.max(spiceMenuMinimumLaneWidthPx(), buttonRect.width),
   );
 }
 
-function spiceMenuLeft(anchorLane, laneLeft, width, margin) {
-  if (anchorLane) return laneLeft;
-  if (spiceMenuUsesViewportWidth()) return 0;
-  const buttonRect = openLaneButton.getBoundingClientRect();
+function spiceMenuLeftForButton(buttonRect, width, viewportWidth, margin) {
+  if (spiceMenuUsesViewportWidth(viewportWidth)) return 0;
+  const rightAlignedLeft = buttonRect.right - width;
   return Math.max(
     margin,
-    Math.min(buttonRect.right - width, window.innerWidth - width - margin),
+    Math.min(rightAlignedLeft, viewportWidth - width - margin),
   );
 }
 
-function spiceMenuUsesViewportWidth() {
-  return window.matchMedia("(max-width: 720px)").matches;
+function spiceMenuUsesViewportWidth(viewportWidth) {
+  return viewportWidth < spiceMenuMinimumLaneWidthPx() + 20;
 }
 
 function spiceMenuMinimumLaneWidthPx() {
@@ -512,11 +486,6 @@ function spiceMenuMinimumLaneWidthPx() {
     Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) ||
     16;
   return 20 * fontSize;
-}
-
-function cssPixelValue(value) {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function renderSpiceMenuActions() {
