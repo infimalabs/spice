@@ -422,11 +422,22 @@ function stampMessageProducer(item, lane, threadId) {
 // ---- history paging -----------------------------------------------------------
 
 function syncLaneHistoryObserver(lane) {
+  for (const member of historySentinelMemberLanes(lane)) {
+    if (member === lane || !member.historyObserver) continue;
+    member.historyObserver.disconnect();
+    member.historyObserver = null;
+  }
   if (lane.historyObserver) lane.historyObserver.disconnect();
   lane.historyObserver = new IntersectionObserver(
     (entries) => {
-      if (entries.some((entry) => entry.isIntersecting))
-        maybeHydrateOlderMessages(lane);
+      const hydratedTargetIds = new Set();
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const member = historyLaneForSentinel(lane, entry.target);
+        if (hydratedTargetIds.has(member.targetId)) continue;
+        hydratedTargetIds.add(member.targetId);
+        maybeHydrateOlderMessages(member);
+      }
     },
     {
       root: lane.messagesEl,
@@ -434,7 +445,18 @@ function syncLaneHistoryObserver(lane) {
       threshold: 0,
     },
   );
-  lane.historyObserver.observe(lane.historySentinelEl);
+  for (const sentinel of lane.messagesEl.querySelectorAll(
+    "[data-history-sentinel]",
+  )) {
+    lane.historyObserver.observe(sentinel);
+  }
+}
+
+function historyLaneForSentinel(host, sentinel) {
+  const targetId = sentinel.dataset.historyTargetId || host.targetId;
+  const member = laneStates.get(targetId);
+  if (member && laneGroupHost(member) === host) return member;
+  return host;
 }
 
 function maybeHydrateOlderMessages(lane) {
@@ -580,11 +602,13 @@ function renderMessagesIfChanged(lane) {
   if (fingerprint === lane.renderedMessageFingerprint) return;
   const viewportAnchor = captureMessageViewportAnchor(lane);
   const existingNodes = existingMessageNodesByKey(lane);
-  const nodes = visibleItems
-    .map((item) => renderOrReuseMessageNode(lane, item, existingNodes))
-    .filter((node) => node !== null);
+  const nodes = messageStreamNodesWithHistorySentinels(
+    lane,
+    visibleItems,
+    existingNodes,
+  );
   suppressLanePaneScrollIntentForFrame(lane);
-  lane.messagesEl.replaceChildren(...nodes, lane.historySentinelEl);
+  lane.messagesEl.replaceChildren(...nodes);
   restoreMessageViewportAnchor(lane, viewportAnchor);
   syncLaneHistoryObserver(lane);
   lane.renderedMessageFingerprint = fingerprint;
@@ -603,6 +627,50 @@ function renderEmptyTeamMessages(lane) {
   restoreMessageViewportAnchor(lane, viewportAnchor);
   syncLaneHistoryObserver(lane);
   lane.renderedMessageFingerprint = fingerprint;
+}
+
+function messageStreamNodesWithHistorySentinels(lane, visibleItems, existingNodes) {
+  const sentinelMembersByMessageKey = historySentinelMembersByMessageKey(
+    lane,
+    visibleItems,
+  );
+  const nodes = [];
+  for (const item of visibleItems) {
+    const node = renderOrReuseMessageNode(lane, item, existingNodes);
+    if (!node) continue;
+    nodes.push(node);
+    for (const member of sentinelMembersByMessageKey.get(item.key) || []) {
+      nodes.push(historySentinelForLane(member));
+    }
+  }
+  if (!nodes.length) nodes.push(historySentinelForLane(lane));
+  return nodes;
+}
+
+function historySentinelMembersByMessageKey(lane, visibleItems) {
+  const oldestMessageKeyByTargetId = new Map();
+  for (const item of visibleItems) {
+    const targetId = laneMessageProducerTargetId(lane, item) || lane.targetId;
+    if (targetId) oldestMessageKeyByTargetId.set(targetId, item.key);
+  }
+  const membersByMessageKey = new Map();
+  for (const member of historySentinelMemberLanes(lane)) {
+    const messageKey = oldestMessageKeyByTargetId.get(member.targetId);
+    if (!messageKey) continue;
+    const members = membersByMessageKey.get(messageKey) || [];
+    members.push(member);
+    membersByMessageKey.set(messageKey, members);
+  }
+  return membersByMessageKey;
+}
+
+function historySentinelMemberLanes(lane) {
+  return laneIsFusedHost(lane) ? laneGroupMemberLanes(lane) : [lane];
+}
+
+function historySentinelForLane(lane) {
+  lane.historySentinelEl.dataset.historyTargetId = lane.targetId;
+  return lane.historySentinelEl;
 }
 
 function emptyTeamMessageFingerprint(lane) {

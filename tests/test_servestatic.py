@@ -1144,6 +1144,32 @@ def test_static_message_anchor_restore_does_not_drive_pane_collapse():
     assert "lane.messagesEl.scrollTop += delta" not in app_stream
 
 
+def test_static_team_stream_history_sentinels_track_each_member_lane():
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+
+    assert "lane.historySentinelEl.dataset.historyTargetId = targetId;" in app_shell
+    assert "const member = historyLaneForSentinel(lane, entry.target);" in app_stream
+    assert "maybeHydrateOlderMessages(member);" in app_stream
+    assert "if (member === lane || !member.historyObserver) continue;" in app_stream
+    assert "member.historyObserver.disconnect();" in app_stream
+    assert (
+        "for (const sentinel of lane.messagesEl.querySelectorAll(\n"
+        '    "[data-history-sentinel]",\n'
+        "  ))"
+    ) in app_stream
+    assert "function historySentinelMembersByMessageKey" in app_stream
+    assert "oldestMessageKeyByTargetId.set(targetId, item.key);" in app_stream
+    assert (
+        "return laneIsFusedHost(lane) ? laneGroupMemberLanes(lane) : [lane];"
+        in app_stream
+    )
+    assert "nodes.push(historySentinelForLane(member));" in app_stream
+    assert "lane.historySentinelEl.dataset.historyTargetId = lane.targetId;" in (
+        app_stream
+    )
+
+
 def test_static_image_only_messages_omit_copy_and_play_actions():
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
 

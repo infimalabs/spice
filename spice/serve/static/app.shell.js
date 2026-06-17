@@ -167,6 +167,7 @@ function createLaneState(targetId, hint = null, options = {}) {
     modeRailSuppressClick: false,
     ...laneElementRefs(element),
   };
+  lane.historySentinelEl.dataset.historyTargetId = targetId;
   wireLaneShell(lane);
   if (emptyTeam) syncEmptyTeamLane(lane, options.team || {}, options);
   else {
