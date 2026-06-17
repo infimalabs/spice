@@ -323,6 +323,7 @@ def test_team_command_service_toggles_agent_renewal_intent(tmp_path):
     enabled_member = enabled.snapshot.teams[0].to_payload()["members"][0]
 
     assert store.agent_renewal_requested("agent-a") is True
+    assert store.agent_renewal_active("agent-a") is True
     assert enabled_member["renewalIntent"]["agentId"] == "agent-a"
     assert enabled_member["renewalIntent"]["requested"] is True
     assert enabled_member["renewalIntent"]["state"] == "requested"
@@ -338,8 +339,27 @@ def test_team_command_service_toggles_agent_renewal_intent(tmp_path):
     disabled_member = disabled.snapshot.teams[0].to_payload()["members"][0]
 
     assert store.renewal_state_for_agent("agent-a") is None
+    assert store.agent_renewal_active("agent-a") is False
     assert disabled_member["renewalIntent"]["requested"] is False
     assert disabled_member["renewalIntent"]["state"] == ""
+
+
+def test_pending_renewal_remains_active_until_successor_starts(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.create_team(members=["agent-a"])
+
+    store.record_pending_renewal(agent_id="agent-a", ancestor_thread_id="agent-a")
+
+    assert store.agent_renewal_requested("agent-a") is False
+    assert store.agent_renewal_active("agent-a") is True
+
+    store.record_started_renewal(
+        predecessor_agent_id="agent-a",
+        successor_agent_id="agent-b",
+        ancestor_thread_id="agent-a",
+    )
+
+    assert store.agent_renewal_active("agent-a") is False
 
 
 def test_removing_final_agent_closes_team(tmp_path):
