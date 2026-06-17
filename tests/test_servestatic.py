@@ -343,12 +343,28 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     view_stack_end = css.index(".lane-view-stack--collapsed", view_stack_start)
     view_stack_rule = css[view_stack_start:view_stack_end]
     menu_start = css.index(".lane-team-menu {")
-    menu_end = css.index(".lane-team-menu-action:disabled", menu_start)
+    menu_end = css.index(".lane-team-menu-action {", menu_start)
     menu_rule = css[menu_start:menu_end]
+    action_start = css.index(".lane-team-menu-action {")
+    action_end = css.index(
+        ".lane-team-menu-action .spice-menu-action-label", action_start
+    )
+    action_rule = css[action_start:action_end]
+    text_start = css.index(".lane-team-menu-action .spice-menu-action-label")
+    text_end = css.index(".lane-team-menu-action:disabled", text_start)
+    text_rule = css[text_start:text_end]
     assert "position: relative;" in view_stack_rule
+    assert "align-content: stretch;" in menu_rule
     assert "position: absolute;" in menu_rule
     assert "inset: 0;" in menu_rule
+    assert "grid-auto-rows: minmax(72px, 1fr);" in menu_rule
     assert "z-index: 6;" in menu_rule
+    assert "flex-direction: column;" in action_rule
+    assert "justify-content: center;" in action_rule
+    assert "min-height: 0;" in action_rule
+    assert "overflow: hidden;" in action_rule
+    assert "overflow-wrap: anywhere;" in text_rule
+    assert "white-space: normal;" in text_rule
 
 
 def test_static_composer_header_drag_suppresses_browser_selection():
