@@ -362,19 +362,22 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     view_stack_end = css.index(".lane-view-stack--collapsed", view_stack_start)
     view_stack_rule = css[view_stack_start:view_stack_end]
     menu_start = css.index(".lane-team-menu {")
-    menu_end = css.index(".lane-team-menu-action {", menu_start)
+    menu_end = css.index(".lane-team-menu--empty-team-overlay {", menu_start)
     menu_rule = css[menu_start:menu_end]
     empty_team_overlay_start = css.index(".lane-team-menu--empty-team-overlay {")
     empty_team_overlay_end = css.index(
-        ".lane-team-menu-action {", empty_team_overlay_start
+        ".lane-team-menu .lane-team-menu-action {", empty_team_overlay_start
     )
     empty_team_overlay_rule = css[empty_team_overlay_start:empty_team_overlay_end]
-    action_start = css.index(".lane-team-menu-action {")
+    action_start = css.index(".lane-team-menu .lane-team-menu-action {")
     action_end = css.index(
-        ".lane-team-menu-action .spice-menu-action-label", action_start
+        ".lane-team-menu .lane-team-menu-action .spice-menu-action-label",
+        action_start,
     )
     action_rule = css[action_start:action_end]
-    text_start = css.index(".lane-team-menu-action .spice-menu-action-label")
+    text_start = css.index(
+        ".lane-team-menu .lane-team-menu-action .spice-menu-action-label"
+    )
     text_end = css.index(".lane-team-menu-action:disabled", text_start)
     text_rule = css[text_start:text_end]
     assert "position: relative;" in lane_rule
@@ -386,11 +389,22 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert "inset: var(--lane-team-menu-top, 0px) 0 auto;" in empty_team_overlay_rule
     assert "grid-auto-rows: minmax(72px, 1fr);" in menu_rule
     assert "z-index: 6;" in menu_rule
+    assert "align-items: center;" in action_rule
+    assert "container-type: inline-size;" in action_rule
     assert "flex-direction: column;" in action_rule
+    assert "gap: 6px;" in action_rule
     assert "justify-content: center;" in action_rule
     assert "min-height: 0;" in action_rule
     assert "overflow: hidden;" in action_rule
+    assert "padding: 8px 10px;" in action_rule
+    assert "text-align: center;" in action_rule
+    assert "display: block;" in text_rule
+    assert "max-width: 100%;" in text_rule
     assert "overflow-wrap: anywhere;" in text_rule
+    assert "font-size: clamp(12px, 7cqi, 16px);" in text_rule
+    assert "font-size: clamp(10px, 5.25cqi, 13px);" in text_rule
+    assert "text-wrap: balance;" in text_rule
+    assert "text-wrap: pretty;" in text_rule
     assert "white-space: normal;" in text_rule
 
 
