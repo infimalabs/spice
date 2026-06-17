@@ -7,10 +7,13 @@ audit coding agents across the repos they work on. Install it once, point it at
 a repository, and it provides a closed loop around the agents working there:
 
 - the agent's **transcript is the single source of truth**, and
-- the repo's **filesystem is the single channel of steering**;
+- the repo's **filesystem is the single channel of steering**.
 
 supervision, coordination, conscience, and hygiene are derived mechanically
-from those two surfaces.
+from those two surfaces. The **`spice agent run` wrapper** makes that loop live
+at execution time: every agent shell command carries pending steering, context
+pressure, git-shadow routing, source routing, and local command wrappers before
+the requested command runs.
 
 ## Why
 
@@ -81,10 +84,43 @@ scaffolding. Repo-tracked policy lives in your `pyproject.toml` under
 `[tool.spice.*]` tables. The command surface is always `spice …`. Entrypoint
 resolution is worktree-true under the hood: generated shims and supervisor
 children load the spice source checkout first on `PYTHONPATH` when operating on
-that checkout; ordinary target repos use the installed product. Agent shell
-startup hooks reexec zsh/bash commands through `spice agent run -- <cmd>` so
-steering, context warnings, git-shadow routing, and configured wrapper groups
-run before the requested command.
+that checkout; ordinary target repos use the installed product.
+
+### Agent command wrapper
+
+Agents run shell commands normally. In an agent-bound worktree, spice installs
+static zsh/bash startup hooks that transparently reexec the first command shell
+through:
+
+```sh
+spice agent run -- <shell> -c "<original command>"
+```
+
+That wrapper owns stderr before the command runs. It prints pending inbox
+steering and context-pressure warnings, connects to the supervisor side
+channel, routes git through the worktree shadow environment, routes `spice` and
+`python` to the correct source checkout or target virtualenv, and loads
+configured wrapper groups. Descendant shells keep the static hook environment
+without a second reexec, so steering is delivered at command boundaries without
+double-injecting nested shells.
+
+Wrapper groups live in tracked config:
+
+```toml
+[tool.spice.agent]
+wrappers = ["common"]
+
+[tool.spice.wrappers.common]
+rtk = ["run", "proxy", "grep", "find", "git"]
+pytest = { command = ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"] }
+```
+
+Use wrappers for agent-owned execution where command output is also an
+operator steering surface. The full contract, including `proxy` routing and
+mounted-command boundaries, is in
+[`docs/cli/wrapper-commands.md`](docs/cli/wrapper-commands.md).
+
+### Agent defaults
 
 A project can set its default supervised-agent launch model and thinking in
 tracked config, either by editing `pyproject.toml` or by running
@@ -104,6 +140,8 @@ spice config agent --scope worktree --model gpt-5.4 --thinking low
 
 Resolution order is explicit launch flags, then worktree config, then tracked
 project config, then the driver defaults.
+
+### Repo command mounts
 
 A repo can also mount its own tooling into the `spice` namespace:
 
@@ -130,9 +168,6 @@ toolbox = ["uv", "run", "toolbox"]
 Do not encode families as dotted, spaced, or ad-hoc hyphenated spice mount
 names such as `lint.css`, `lint css`, or one mount per subcommand; those
 groupings belong behind the mounted repo tool's explicit contract.
-
-The detailed wrapper and mounted-command contract lives in
-[`docs/cli/wrapper-commands.md`](docs/cli/wrapper-commands.md).
 
 ### Library seam for repo tools
 
