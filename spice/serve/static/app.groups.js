@@ -1,21 +1,18 @@
 // Lane groups: explicit topology over concrete target lanes, backed by server
-// teams. A gutter drop on a lane edge fuses (merges teams); the close control
-// on a fused host splits the group instead of closing. The visible host
+// teams. A gutter drop on a lane edge fuses (merges teams); the team menu
+// exposes close and split actions. The visible host
 // aggregates chrome and renders one merged, newest-first stream attributed per
 // agent; member targets remain the concrete send/refresh/drain addresses.
 
 const laneFuseGutterFraction = 0.2;
 const laneDragThresholdPx = 6;
-const laneBreakIconSvg =
-  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 12H3M3 12l3-3M3 12l3 3M14 12h7M21 12l-3-3M21 12l-3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const laneCloseIconSvg =
-  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 const laneLightPipSizePx = 9;
 const laneLightRowGapPx = 4;
 const laneLightColumnGapPx = 5;
 const laneLightColumnCapacity = 2;
 let laneDragState = null;
 let composerMoveDragState = null;
+let laneTeamMenuDismissHandler = null;
 
 function reconcileLaneGroups(groupRuns) {
   for (const lane of laneStates.values()) {
@@ -133,7 +130,7 @@ function syncFusedLaneChrome(lane) {
   const fused = members.length > 1;
   syncLaneLights(lane, fused ? members : []);
   syncFusedLaneStatusLine(lane);
-  syncLaneCloseButton(lane, fused);
+  syncLaneTeamMenuButton(lane);
   syncComposerShards(lane, fused ? members : [lane]);
   syncLaneEffectiveControls(lane);
 }
@@ -208,14 +205,145 @@ function fusedLaneStatusWord(status) {
   return status || "unknown";
 }
 
-function syncLaneCloseButton(lane, fused) {
-  lane.closeButtonEl.innerHTML = fused ? laneBreakIconSvg : laneCloseIconSvg;
-  lane.closeButtonEl.disabled = false;
-  lane.closeButtonEl.removeAttribute("aria-hidden");
-  lane.closeButtonEl.removeAttribute("tabindex");
-  const label = fused ? "Split lane group" : "Close lane";
-  lane.closeButtonEl.title = label;
-  lane.closeButtonEl.setAttribute("aria-label", label);
+function syncLaneTeamMenuButton(lane) {
+  lane.teamMenuButtonEl.disabled = false;
+  lane.teamMenuButtonEl.removeAttribute("aria-hidden");
+  lane.teamMenuButtonEl.removeAttribute("tabindex");
+  lane.teamMenuButtonEl.title = "Team actions";
+  lane.teamMenuButtonEl.setAttribute("aria-label", "Team actions");
+}
+
+function toggleLaneTeamMenu(lane, event = null) {
+  if (event) event.stopPropagation();
+  const host = laneGroupHost(lane);
+  const open = host.teamMenuButtonEl.getAttribute("aria-expanded") === "true";
+  closeLaneTeamMenusExcept(host);
+  closeLaneTeamMenu(host);
+  if (open) return;
+  openLaneTeamMenu(host);
+}
+
+function openLaneTeamMenu(host) {
+  const menu = document.createElement("div");
+  menu.className = "lane-team-menu spice-menu-actions";
+  menu.setAttribute("role", "menu");
+  menu.replaceChildren(
+    ...laneTeamMenuActions(host).map((action) =>
+      renderLaneTeamMenuAction(host, action),
+    ),
+  );
+  host.element.insertBefore(menu, host.viewStackEl);
+  host.element.classList.add("lane--team-menu-open");
+  host.teamMenuButtonEl.setAttribute("aria-expanded", "true");
+  syncLaneTeamMenuDismissHandler();
+}
+
+function laneTeamMenuActions(host) {
+  return [
+    closeTeamMenuAction(host),
+    splitIndividualsMenuAction(host),
+    restorePreviousTeamMenuAction(host),
+  ];
+}
+
+function closeTeamMenuAction(host) {
+  return {
+    label: "Close team",
+    detail: laneTeamMemberCountText(laneGroupMemberLanes(host).length),
+    onClick: () => closeLane(host),
+  };
+}
+
+function splitIndividualsMenuAction(host) {
+  const members = laneGroupMemberLanes(host);
+  return {
+    label: "Split into individuals",
+    detail: splitIndividualsMenuDetail(members.length),
+    disabled: members.length < 2,
+    onClick: () => splitLaneGroupIntoIndividuals(host),
+  };
+}
+
+function restorePreviousTeamMenuAction(host) {
+  return {
+    label: "Restore previous team",
+    detail: laneRestorePreviousTeamDetail(host),
+    disabled: !host.teamSplitBackAvailable,
+    onClick: () => restorePreviousTeam(host),
+  };
+}
+
+function splitIndividualsMenuDetail(count) {
+  if (count > 1) return "one team per agent";
+  return "already individual";
+}
+
+function laneTeamMemberCountText(count) {
+  if (count === 1) return "1 agent";
+  return count + " agents";
+}
+
+function laneRestorePreviousTeamDetail(host) {
+  const count = Math.max(0, Number(host.teamSplitBackMemberCount || 0));
+  if (!host.teamSplitBackAvailable || !count) return "no saved subgroup";
+  return laneTeamMemberCountText(count);
+}
+
+function renderLaneTeamMenuAction(host, action) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "lane-team-menu-action spice-menu-action";
+  button.setAttribute("role", "menuitem");
+  button.disabled = Boolean(action.disabled);
+  button.innerHTML =
+    '<span class="spice-menu-action-label"></span>' +
+    '<span class="spice-menu-action-detail"></span>';
+  button.querySelector(".spice-menu-action-label").textContent = action.label;
+  button.querySelector(".spice-menu-action-detail").textContent =
+    action.detail || "";
+  button.addEventListener("click", () => {
+    closeLaneTeamMenu(host);
+    action.onClick();
+  });
+  return button;
+}
+
+function closeLaneTeamMenu(host) {
+  host.element.querySelector(".lane-team-menu")?.remove();
+  host.element.classList.remove("lane--team-menu-open");
+  host.teamMenuButtonEl.setAttribute("aria-expanded", "false");
+  syncLaneTeamMenuDismissHandler();
+}
+
+function closeLaneTeamMenusExcept(exceptHost = null) {
+  for (const lane of laneStates.values()) {
+    if (exceptHost && laneGroupHost(lane) === exceptHost) continue;
+    closeLaneTeamMenu(laneGroupHost(lane));
+  }
+}
+
+function syncLaneTeamMenuDismissHandler() {
+  const hasOpenMenu = document.querySelector(".lane--team-menu-open");
+  if (hasOpenMenu && !laneTeamMenuDismissHandler) {
+    laneTeamMenuDismissHandler = dismissLaneTeamMenusOnPointerDown;
+    document.addEventListener("pointerdown", laneTeamMenuDismissHandler, true);
+  } else if (!hasOpenMenu && laneTeamMenuDismissHandler) {
+    document.removeEventListener("pointerdown", laneTeamMenuDismissHandler, true);
+    laneTeamMenuDismissHandler = null;
+  }
+}
+
+function dismissLaneTeamMenusOnPointerDown(event) {
+  const target = event.target;
+  if (!(target instanceof Node)) return;
+  for (const lane of laneStates.values()) {
+    const host = laneGroupHost(lane);
+    if (!host.element.classList.contains("lane--team-menu-open")) continue;
+    if (host.element.querySelector(".lane-team-menu")?.contains(target))
+      continue;
+    if (host.teamMenuButtonEl.contains(target)) continue;
+    closeLaneTeamMenu(host);
+  }
 }
 
 function syncLaneLights(lane, members) {
@@ -276,11 +404,11 @@ function clearLaneLightGridLayout(element) {
   element.style.removeProperty("--lane-light-height");
 }
 
-function breakLaneGroup(lane) {
+function splitLaneGroupIntoIndividuals(lane) {
   const host = laneGroupHost(lane);
   const members = laneGroupMemberLanes(host);
   splitLaneGroupOnServer(host, members).catch(() => {
-    setLaneTransientStatus(host, "split lane group failed");
+    setLaneTransientStatus(host, "split into individuals failed");
   });
 }
 
@@ -291,6 +419,24 @@ async function splitLaneGroupOnServer(host, members) {
   for (const member of members.slice(1)) {
     await splitComposerAgentFromTeamOnServer(host, member);
   }
+}
+
+function restorePreviousTeam(host) {
+  restorePreviousTeamOnServer(laneGroupHost(host)).catch(() => {
+    setLaneTransientStatus(laneGroupHost(host), "restore previous team failed");
+  });
+}
+
+async function restorePreviousTeamOnServer(host) {
+  if (!host.teamId) throw new Error("restore team requires host team id");
+  if (!host.teamSplitBackAvailable)
+    throw new Error("restore team requires a saved subgroup");
+  await updateLaneGroupConfigOnServer(host);
+  await requestTeamCommand(
+    teamCommandPayload("splitTeamBack", {
+      sourceTeamId: host.teamId,
+    }),
+  );
 }
 
 async function updateLaneGroupConfigOnServer(host) {

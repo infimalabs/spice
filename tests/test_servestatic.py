@@ -192,26 +192,8 @@ def test_static_composer_attachment_thumbnails_fill_header():
     assert "display: none;" in name_rule
 
 
-def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
-    css = _serve_css_text()
+def test_static_composer_menu_trigger_and_dismissal_are_wired():
     app_shell = _shell_and_composer_text()
-    app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
-    button_start = css.index(
-        ".composer-band-menu-button,\n.composer-band-close-button {"
-    )
-    button_end = css.index(".composer-band-menu-button:hover", button_start)
-    button_rule = css[button_start:button_end]
-    action_start = css.index(".composer-band-menu-action {")
-    action_end = css.index(
-        ".composer-band-menu-action .spice-menu-action-detail", action_start
-    )
-    action_rule = css[action_start:action_end]
-    shared_grid_start = css.index(".spice-menu-actions {")
-    shared_grid_end = css.index(".spice-menu-target-list {", shared_grid_start)
-    shared_grid_rule = css[shared_grid_start:shared_grid_end]
-    menu_grid_start = css.index(".composer-band-menu.spice-menu-actions {")
-    menu_grid_end = css.index(".composer-band-menu-action {", menu_grid_start)
-    menu_grid_rule = css[menu_grid_start:menu_grid_end]
 
     assert "trailingControl: composerBandMenuTrigger(" in app_shell
     assert (
@@ -245,6 +227,12 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
         in app_shell
     )
     assert "function syncComposerBandMenuState(band)" in app_shell
+
+
+def test_static_composer_menu_actions_include_team_moves_and_renewal():
+    app_shell = _shell_and_composer_text()
+    app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
+
     assert 'composerBandMenuAction(\n    "Leave all teams",' in app_shell
     assert 'composerBandMenuAction(\n    "Create new team",' in app_shell
     assert 'composerBandMenuAction(\n    "Renew this agent",' in app_shell
@@ -273,6 +261,30 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
     assert "agentId: laneTeamAgentId(member)," in app_shell
     assert "requested," in app_shell
     assert 'return "handoff pending";' in app_shell
+    assert 'teamCommandPayload("splitTeam", {' in app_groups
+    assert "agentIds: [laneTeamAgentId(member)]," in app_groups
+
+
+def test_static_quote_close_control_keeps_composer_menu_styling_compact():
+    css = _serve_css_text()
+    app_shell = _shell_and_composer_text()
+    button_start = css.index(
+        ".composer-band-menu-button,\n.composer-band-close-button {"
+    )
+    button_end = css.index(".composer-band-menu-button:hover", button_start)
+    button_rule = css[button_start:button_end]
+    action_start = css.index(".composer-band-menu-action {")
+    action_end = css.index(
+        ".composer-band-menu-action .spice-menu-action-detail", action_start
+    )
+    action_rule = css[action_start:action_end]
+    shared_grid_start = css.index(".spice-menu-actions {")
+    shared_grid_end = css.index(".spice-menu-target-list {", shared_grid_start)
+    shared_grid_rule = css[shared_grid_start:shared_grid_end]
+    menu_grid_start = css.index(".composer-band-menu.spice-menu-actions {")
+    menu_grid_end = css.index(".composer-band-menu-action {", menu_grid_start)
+    menu_grid_rule = css[menu_grid_start:menu_grid_end]
+
     assert "trailingControl: composerBandCloseButton(" in app_shell
     assert (
         "function composerBandCloseButton(closeTitle, closeLabel, onClose)" in app_shell
@@ -306,8 +318,23 @@ def test_static_composer_menu_stays_primary_while_quotes_keep_close_control():
         ".composer-band-menu-action .spice-menu-action-detail {\n  display: none;"
         in css
     )
-    assert 'teamCommandPayload("splitTeam", {' in app_groups
-    assert "agentIds: [laneTeamAgentId(member)]," in app_groups
+
+
+def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
+    app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+
+    assert 'data-lane-team-menu title="Team actions"' in app_shell
+    assert "function toggleLaneTeamMenu(lane, event = null)" in app_groups
+    assert 'label: "Close team",' in app_groups
+    assert 'label: "Split into individuals",' in app_groups
+    assert 'label: "Restore previous team",' in app_groups
+    close_team_index = app_groups.index('label: "Close team",')
+    split_individuals_index = app_groups.index('label: "Split into individuals",')
+    restore_previous_index = app_groups.index('label: "Restore previous team",')
+    assert close_team_index < split_individuals_index
+    assert split_individuals_index < restore_previous_index
+    assert 'teamCommandPayload("splitTeamBack", {' in app_groups
 
 
 def test_static_composer_header_drag_suppresses_browser_selection():

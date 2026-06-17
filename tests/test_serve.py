@@ -499,13 +499,15 @@ def test_static_empty_teams_render_importer_in_message_stream():
     assert "lane.pipEl.hidden = true;" in empty_team_sync
     assert "lane.laneLightsEl.hidden = true;" in empty_team_sync
     assert "lane.laneLightsEl.replaceChildren();" in empty_team_sync
-    assert "lane.closeButtonEl.disabled = true;" in empty_team_sync
-    assert "lane.closeButtonEl.tabIndex = -1;" in empty_team_sync
-    assert 'lane.closeButtonEl.setAttribute("aria-hidden", "true");' in empty_team_sync
-    assert 'lane.closeButtonEl.title = "";' in empty_team_sync
-    assert "lane.closeButtonEl.disabled = false;" in app_groups
-    assert 'lane.closeButtonEl.removeAttribute("aria-hidden");' in app_groups
-    assert 'lane.closeButtonEl.removeAttribute("tabindex");' in app_groups
+    assert "lane.teamMenuButtonEl.disabled = true;" in empty_team_sync
+    assert "lane.teamMenuButtonEl.tabIndex = -1;" in empty_team_sync
+    assert (
+        'lane.teamMenuButtonEl.setAttribute("aria-hidden", "true");' in empty_team_sync
+    )
+    assert 'lane.teamMenuButtonEl.title = "";' in empty_team_sync
+    assert "lane.teamMenuButtonEl.disabled = false;" in app_groups
+    assert 'lane.teamMenuButtonEl.removeAttribute("aria-hidden");' in app_groups
+    assert 'lane.teamMenuButtonEl.removeAttribute("tabindex");' in app_groups
     assert 'const button = targetChoiceButton(\n    target,\n    "Import",' in app_shell
     assert '    "",\n  );' in app_shell
     assert "button.dataset.emptyTeamImportTargetId = target.id;" in app_shell
@@ -536,7 +538,7 @@ def test_static_empty_teams_render_importer_in_message_stream():
     ) in app_stream
     assert "if (lane.emptyTeam) {\n    syncEmptyTeamLane(lane);" in app_groups
     assert (
-        ".lane--empty-team .lane-pip-stack,\n.lane--empty-team [data-close-lane] {"
+        ".lane--empty-team .lane-pip-stack,\n.lane--empty-team [data-lane-team-menu] {"
         in css
     )
     assert "pointer-events: none;" in css

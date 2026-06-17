@@ -31,7 +31,7 @@ const laneTemplate =
   "  </span>" +
   '  <div class="lane-mode-rail" data-lane-mode-rail role="tablist" aria-label="Lane views">' +
   "  </div>" +
-  '  <button class="icon-button" type="button" data-close-lane title="Close lane" aria-label="Close lane">×</button>' +
+  '  <button class="icon-button lane-team-menu-button" type="button" data-lane-team-menu title="Team actions" aria-label="Team actions" aria-haspopup="menu" aria-expanded="false"><span class="lane-team-menu-icon" aria-hidden="true"></span></button>' +
   "</div>" +
   '<div class="lane-view-stack" data-lane-view-stack>' +
   '  <section class="lane-view-panel" data-lane-view-panel="compose" role="tabpanel">' +
@@ -120,6 +120,8 @@ function createLaneState(targetId, hint = null, options = {}) {
     privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),
     teamId: target.teamId || "",
     teamRevision: target.teamRevision || 0,
+    teamSplitBackAvailable: false,
+    teamSplitBackMemberCount: 0,
     configRevision: target.configRevision || 0,
     groupTopology: null,
     backendPendingInboxCount: 0,
@@ -205,10 +207,11 @@ function syncEmptyTeamLane(lane, team = {}) {
   lane.laneLightsEl.hidden = true;
   lane.laneLightsEl.replaceChildren();
   clearLaneLightGridLayout(lane.laneLightsEl);
-  lane.closeButtonEl.disabled = true;
-  lane.closeButtonEl.tabIndex = -1;
-  lane.closeButtonEl.setAttribute("aria-hidden", "true");
-  lane.closeButtonEl.title = "";
+  lane.teamMenuButtonEl.disabled = true;
+  lane.teamMenuButtonEl.tabIndex = -1;
+  lane.teamMenuButtonEl.setAttribute("aria-hidden", "true");
+  lane.teamMenuButtonEl.setAttribute("aria-expanded", "false");
+  lane.teamMenuButtonEl.title = "";
   syncLaneEffectiveControls(lane);
   renderMessagesIfChanged(lane);
 }
@@ -308,7 +311,7 @@ function laneElementRefs(element) {
     lifetimeRangeEl: element.querySelector("[data-lifetime]"),
     lifetimeLabelEl: element.querySelector("[data-lifetime-label]"),
     submitEl: element.querySelector("[data-submit]"),
-    closeButtonEl: element.querySelector("[data-close-lane]"),
+    teamMenuButtonEl: element.querySelector("[data-lane-team-menu]"),
     modeRailEl: element.querySelector("[data-lane-mode-rail]"),
     filtersSummaryEl: element.querySelector("[data-filters-summary]"),
     filtersQueueEl: element.querySelector("[data-filters-queue]"),
@@ -328,7 +331,9 @@ function laneElementRefs(element) {
 
 function wireLaneShell(lane) {
   lane.formEl.addEventListener("submit", (event) => submitLaneForm(lane, event));
-  lane.closeButtonEl.addEventListener("click", () => closeLane(lane));
+  lane.teamMenuButtonEl.addEventListener("click", (event) =>
+    toggleLaneTeamMenu(lane, event),
+  );
   for (const button of lane.element.querySelectorAll(
     "[data-lane-view-button]",
   )) {

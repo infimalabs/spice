@@ -19,6 +19,9 @@ COMPOSER_MOVE_SOURCE_TOOL_CALL_TOTAL = 33
 TEAM_MERGE_ACKED_TOTAL = 14
 TEAM_MERGE_SEND_TOTAL = 25
 TEAM_MERGE_TOOL_CALL_TOTAL = 36
+RESTORED_SUBGROUP_ACKED_TOTAL = 18
+RESTORED_SUBGROUP_SEND_TOTAL = 30
+RESTORED_SUBGROUP_TOOL_CALL_TOTAL = 42
 
 
 def test_empty_team_snapshot_creates_initial_empty_team(tmp_path):
@@ -147,6 +150,76 @@ def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
         ).fetchone()[0]
     assert source_metric_rows == 0
     assert source_bucket_rows == 0
+
+
+def test_split_team_back_restores_latest_merged_source_team(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    source = store.create_team(members=["agent-a", "agent-b", "agent-c", "agent-d"])
+    destination = store.create_team(members=["agent-e"])
+
+    store.merge_teams(source.team_id, destination.team_id)
+    merged = store.team_state(destination.team_id)
+    restored = store.split_team_back(destination.team_id)
+
+    open_members = {
+        team.team_id: [member.agent_id for member in team.members]
+        for team in store.team_snapshot().teams
+    }
+    assert merged.split_back_available is True
+    assert merged.split_back_member_count == 4
+    assert restored.team_id == source.team_id
+    assert open_members == {
+        source.team_id: ["agent-a", "agent-b", "agent-c", "agent-d"],
+        destination.team_id: ["agent-e"],
+    }
+
+
+def test_split_team_back_moves_subgroup_metrics_back_to_restored_team(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    source = store.create_team(members=["agent-a", "agent-b"])
+    destination = store.create_team(members=["agent-c"])
+    store.record_agent_metric_delta("agent-a", acked=10, sends=20, tool_calls=30)
+    store.record_agent_metric_delta("agent-b", acked=1, sends=2, tool_calls=3)
+    store.record_agent_metric_delta("agent-c", acked=4, sends=5, tool_calls=6)
+
+    store.merge_teams(source.team_id, destination.team_id)
+    store.record_agent_metric_delta("agent-a", acked=7, sends=8, tool_calls=9)
+    store.split_team_back(destination.team_id)
+    restored_summary = store.lane_metric_summary("agent-a", bucket_count=12)
+    destination_summary = store.lane_metric_summary("agent-c", bucket_count=12)
+
+    assert restored_summary.agent_ids == ("agent-a", "agent-b")
+    assert restored_summary.acked == RESTORED_SUBGROUP_ACKED_TOTAL
+    assert restored_summary.sends == RESTORED_SUBGROUP_SEND_TOTAL
+    assert restored_summary.tool_calls == RESTORED_SUBGROUP_TOOL_CALL_TOTAL
+    assert destination_summary.agent_ids == ("agent-c",)
+    assert destination_summary.acked == 4
+    assert destination_summary.sends == 5
+    assert destination_summary.tool_calls == 6
+
+
+def test_split_team_back_unwinds_nested_team_merges_one_boundary_at_a_time(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    inner = store.create_team(members=["agent-a", "agent-b"])
+    middle = store.create_team(members=["agent-c", "agent-d"])
+    outer = store.create_team(members=["agent-e"])
+
+    store.merge_teams(inner.team_id, middle.team_id)
+    store.merge_teams(middle.team_id, outer.team_id)
+    restored_middle = store.split_team_back(outer.team_id)
+    restored_inner = store.split_team_back(middle.team_id)
+
+    open_members = {
+        team.team_id: [member.agent_id for member in team.members]
+        for team in store.team_snapshot().teams
+    }
+    assert restored_middle.team_id == middle.team_id
+    assert restored_inner.team_id == inner.team_id
+    assert open_members == {
+        inner.team_id: ["agent-a", "agent-b"],
+        middle.team_id: ["agent-c", "agent-d"],
+        outer.team_id: ["agent-e"],
+    }
 
 
 def test_assigning_agent_to_new_team_moves_single_open_membership(tmp_path):

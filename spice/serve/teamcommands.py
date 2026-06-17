@@ -58,6 +58,8 @@ class TeamCommandService:
             self.store.split_team(
                 _required(payload, "sourceTeamId"), agent_ids=agent_ids
             )
+        elif command == "splitTeamBack":
+            self.store.split_team_back(_required(payload, "sourceTeamId"))
         elif command == "mergeTeams":
             self.store.merge_teams(
                 _required(payload, "sourceTeamId"),

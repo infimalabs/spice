@@ -197,9 +197,15 @@ function ensureTeamMemberLane(targetId, team, hint = null) {
   const lane = laneStates.get(targetId);
   if (!lane) return;
   const config = team.config || {};
+  const splitBack = team.splitBack || {};
   const member = teamMemberForTargetId(team, targetId);
   lane.teamId = String(team.teamId || "");
   lane.teamRevision = Math.max(0, Number(team.revision || 0));
+  lane.teamSplitBackAvailable = Boolean(splitBack.available);
+  lane.teamSplitBackMemberCount = Math.max(
+    0,
+    Number(splitBack.memberCount || 0),
+  );
   lane.configRevision = Math.max(0, Number(config.revision || 0));
   if (member && member.renewalIntent) lane.renewalIntent = member.renewalIntent;
   if (Array.isArray(config.taskFilters))
@@ -269,21 +275,17 @@ async function openTargetTeam(targetId) {
 function closeLane(lane) {
   if (lane.emptyTeam) return;
   const host = laneGroupHost(lane);
-  const members = laneGroupMemberLanes(host);
-  if (members.length > 1) {
-    breakLaneGroup(host);
-    return;
-  }
-  if (laneHasUnsafeDraft(lane)) {
+  if (laneHasUnsafeDraft(host)) {
     if (!window.confirm(unsafeDraftWarningText())) return;
   }
-  sessionOpenTargetIds.delete(lane.targetId);
-  lane.serverCloseRequested = true;
+  for (const member of laneGroupMemberLanes(host))
+    sessionOpenTargetIds.delete(member.targetId);
+  host.serverCloseRequested = true;
   requestTeamCommand(
-    teamCommandPayload("closeTeam", { teamId: lane.teamId }),
+    teamCommandPayload("closeTeam", { teamId: host.teamId }),
   ).catch(() => {
-    lane.serverCloseRequested = false;
-    setLaneTransientStatus(lane, "close team failed");
+    host.serverCloseRequested = false;
+    setLaneTransientStatus(host, "close team failed");
   });
 }
 

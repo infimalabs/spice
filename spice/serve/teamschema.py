@@ -61,6 +61,15 @@ CREATE TABLE IF NOT EXISTS team_agent_history (
     last_seen_at REAL NOT NULL,
     PRIMARY KEY (team_id, agent_id)
 );
+CREATE TABLE IF NOT EXISTS team_merge_subgroups (
+    parent_team_id TEXT NOT NULL,
+    child_team_id TEXT NOT NULL,
+    merged_revision INTEGER NOT NULL,
+    agent_ids TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    restored_revision INTEGER,
+    PRIMARY KEY (parent_team_id, child_team_id, merged_revision)
+);
 CREATE TABLE IF NOT EXISTS renewals (
     agent_id TEXT PRIMARY KEY,
     team_id TEXT NOT NULL,
