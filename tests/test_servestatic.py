@@ -426,6 +426,29 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
     )
 
 
+def test_static_submitted_message_predictions_reconcile_against_server_echoes():
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+
+    assert "optimisticSubmittedInboxKeys: new Set()," in app_shell
+    assert "optimisticPendingInboxFloor: 0," in app_shell
+    assert 'const inboxKey = String(options.inboxKey || "");' in app_render
+    assert "const submittedPendingFloor = hasBackendCount" in app_render
+    assert "if (accepted && inboxKey && submittedPendingFloor > 0)" in app_render
+    assert "lane.optimisticSubmittedInboxKeys.add(inboxKey);" in app_render
+    assert "laneSubmittedMessagePendingFloor(lane)" in app_render
+    assert "function laneSubmittedMessagePendingFloor(lane)" in app_render
+    assert "function reconcileSubmittedMessagePredictions(lane)" in app_render
+    assert "const ackedKeys = new Set(ackKeysForMessages(lane.knownMessages));" in (
+        app_render
+    )
+    assert "if (ackedKeys.has(key)) lane.optimisticSubmittedInboxKeys.delete(key);" in (
+        app_render
+    )
+    assert "inboxKey: result.key," in app_stream
+
+
 def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag():
     app = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")

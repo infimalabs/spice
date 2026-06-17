@@ -117,19 +117,33 @@ function beginLanePendingSubmission(lane) {
 function finishLanePendingSubmission(lane, options = {}) {
   const accepted = Boolean(options.accepted);
   const hasBackendCount = Number.isFinite(Number(options.pendingInboxCount));
+  const inboxKey = String(options.inboxKey || "");
   lane.pendingSubmissionCount = Math.max(0, lane.pendingSubmissionCount - 1);
   if (hasBackendCount)
     lane.backendPendingInboxCount = Math.max(
       0,
       Number(options.pendingInboxCount),
     );
+  const submittedPendingFloor = hasBackendCount
+    ? lane.backendPendingInboxCount
+    : lane.optimisticPendingInboxCount;
+  if (accepted && inboxKey && submittedPendingFloor > 0) {
+    lane.optimisticSubmittedInboxKeys.add(inboxKey);
+    lane.optimisticPendingInboxFloor = Math.max(
+      lane.optimisticPendingInboxFloor,
+      submittedPendingFloor,
+    );
+  }
   if (accepted && !hasBackendCount) {
     lane.optimisticPendingInboxCount = Math.max(
       lane.backendPendingInboxCount,
       lane.optimisticPendingInboxCount,
     );
   } else if (!lane.pendingSubmissionCount) {
-    lane.optimisticPendingInboxCount = lane.backendPendingInboxCount;
+    lane.optimisticPendingInboxCount = Math.max(
+      lane.backendPendingInboxCount,
+      laneSubmittedMessagePendingFloor(lane),
+    );
   }
   renderLaneViewShell(laneGroupHost(lane));
   syncComposerPlaceholders(laneGroupHost(lane));
@@ -137,13 +151,18 @@ function finishLanePendingSubmission(lane, options = {}) {
 
 function syncLaneBackendPending(lane, count) {
   lane.backendPendingInboxCount = Math.max(0, Number(count) || 0);
+  reconcileSubmittedMessagePredictions(lane);
   if (lane.pendingSubmissionCount > 0) {
     lane.optimisticPendingInboxCount = Math.max(
       lane.optimisticPendingInboxCount,
       lane.backendPendingInboxCount,
+      laneSubmittedMessagePendingFloor(lane),
     );
   } else {
-    lane.optimisticPendingInboxCount = lane.backendPendingInboxCount;
+    lane.optimisticPendingInboxCount = Math.max(
+      lane.backendPendingInboxCount,
+      laneSubmittedMessagePendingFloor(lane),
+    );
   }
 }
 
@@ -152,6 +171,25 @@ function lanePendingDisplayCount(lane) {
     lane.backendPendingInboxCount || 0,
     lane.optimisticPendingInboxCount || 0,
   );
+}
+
+function laneSubmittedMessagePendingFloor(lane) {
+  return lane.optimisticSubmittedInboxKeys.size
+    ? Math.max(0, Number(lane.optimisticPendingInboxFloor) || 0)
+    : 0;
+}
+
+function reconcileSubmittedMessagePredictions(lane) {
+  if (!lane.optimisticSubmittedInboxKeys.size) {
+    lane.optimisticPendingInboxFloor = 0;
+    return;
+  }
+  const ackedKeys = new Set(ackKeysForMessages(lane.knownMessages));
+  for (const key of [...lane.optimisticSubmittedInboxKeys]) {
+    if (ackedKeys.has(key)) lane.optimisticSubmittedInboxKeys.delete(key);
+  }
+  if (!lane.optimisticSubmittedInboxKeys.size)
+    lane.optimisticPendingInboxFloor = 0;
 }
 
 // ---- status line ------------------------------------------------------------------
