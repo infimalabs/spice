@@ -98,7 +98,7 @@ spice agent run -- <shell> -c "<original command>"
 ```
 
 That wrapper owns stderr before the command runs. It prints pending inbox
-steering and context-pressure warnings, connects to the supervisor side
+steering and keep-working guidance, connects to the supervisor side
 channel, routes git through the worktree shadow environment, routes `spice` and
 `python` to the correct source checkout or target virtualenv, and loads
 configured wrapper groups. Descendant shells keep the static hook environment
@@ -206,7 +206,7 @@ or first add the helper to this seam with tests and a stability note.
 | Lifecycle | `spice agent ensure` / `supervise` | One worktree-bound agent per worktree, started under a neutral skill prompt, watched by a durable supervisor. |
 | Steering | filesystem inbox under `.spice/inbox/` | Durable operator messages; items retire only when the agent semantically ACKs their key in its transcript. |
 | Tasks | `spice task …` | Phase-native Taskwarrior board shared by all worktrees; `task next` is allocator-owned; git sync happens at task boundaries. |
-| Sessions | `spice session` | Transcript forensics: the no-arg briefing is the primary rehydration product, with context-pressure metering. |
+| Sessions | `spice session` | Transcript forensics: the no-arg briefing is the primary rehydration product, with keep-working guidance from context metering. |
 | Interface | `spice serve` | Localhost web UI: lanes over worktrees, live transcript streams, lifetime control (Renew / Steer / Drive), task-filter routing, fused lane groups backed by server-side teams; `spice serve teams` and `spice serve browser-artifact-path <file>` expose operator diagnostics for smoke runs. |
 | Conscience | `spice maxim …` | Builtin maxims judged against assistant prose by a local model; violations come back as inbox steering. |
 | Constitution | git pre-commit hook / `spice study …` | Namespace packages, path shape, LOC/byte/complexity flex+sticky gates, magic-number ratchet, env-literal inventory, commit-message policy. |

@@ -28,7 +28,11 @@ from spice.agent.gitshadow import (
 )
 from spice.errors import SpiceError
 from spice.mail.inbox import compose_inbox_text, write_inbox_item
-from spice.sessions.meter import ActiveContextSnapshot, ContextMeter
+from spice.sessions.meter import (
+    ActiveContextSnapshot,
+    ContextMeter,
+    context_meter_instruction,
+)
 
 DIRECT_AGENT_PID = 2222
 SUPERVISOR_PID = 3333
@@ -678,8 +682,8 @@ def test_context_meter_injector_repeats_warning_after_interval(tmp_path):
     injector.inject(force=False)
 
     output = stderr.getvalue()
-    assert output.count("Context Pressure") == 2
-    assert "level=yellow" in output
+    guidance = context_meter_instruction("yellow")
+    assert output.strip().splitlines() == [guidance, guidance]
 
 
 def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch):

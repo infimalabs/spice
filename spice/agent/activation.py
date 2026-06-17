@@ -52,7 +52,7 @@ def activation_command_surface_lines() -> list[str]:
         (
             "command_surface=run shell commands normally; spice shell startup "
             "hooks reexec the first zsh/bash command shell through spice agent "
-            "run so inbox steering and context warnings inject before the "
+            "run so inbox steering and keep-working guidance inject before the "
             "requested command; descendant shells use static hooks and "
             "precomputed wrappers without another reexec"
         ),

@@ -2,8 +2,8 @@
 
 The no-arg `spice session` output. It answers, mechanically, the questions a
 freshly compacted or freshly renewed agent must not guess at: what was asked,
-what was last delivered, what the context pressure is, what the working set
-was, and what steering is pending.
+what was last delivered, what to keep doing, what the working set was, and
+what steering is pending.
 """
 
 from __future__ import annotations
@@ -35,10 +35,8 @@ from spice.policy import (
 )
 from spice.sessions import records
 from spice.sessions.meter import (
-    active_context_percent,
     collect_context_meter,
     context_meter_instruction,
-    context_pressure_level,
 )
 from spice.sessions.records import (
     TurnRecord,
@@ -47,7 +45,6 @@ from spice.sessions.records import (
     collect_turns,
     is_scaffolding_text,
 )
-from spice.sessions.util import format_float, format_int
 from spice.studies import complexity, fileloc, magicnums
 from spice.studies.walk import is_excluded_path
 
@@ -139,23 +136,12 @@ def render_briefing(
         lines.append("Filters")
         lines.extend(filter_lines)
 
-    lines.append("Context")
+    lines.append("Guidance")
     snapshot = meter.latest_snapshot
     if snapshot is not None:
-        percent = active_context_percent(snapshot)
-        level = context_pressure_level(percent)
-        window = snapshot.model_context_window or 0
-        lines.append(
-            f"  level={level} active_context={format_int(snapshot.total_tokens)}/"
-            f"{format_int(window)} ({format_float(percent)}%)"
-        )
-        lines.append(f"  keep_working={context_meter_instruction(level)}")
+        lines.append(f"  keep_working={context_meter_instruction('available')}")
     else:
-        lines.append("  level=unknown")
-    lines.append(
-        f"  compactions={meter.compaction_count} "
-        f"snapshots_since_compaction={meter.snapshots_since_compaction}"
-    )
+        lines.append(f"  keep_working={context_meter_instruction('unknown')}")
 
     lines.append("Latest Ask")
     lines.append(f"  {clip(asks[-1][1]) if asks else '-'}")

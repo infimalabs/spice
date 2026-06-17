@@ -18,8 +18,8 @@ spice agent run -- <shell> -c "<original command>"
 ```
 
 That gives `spice agent run` ownership of stderr for steering injection,
-context warnings, git-shadow routing, source-checkout routing, and wrapper setup
-before the requested command. Descendant shells inherit
+keep-working guidance, git-shadow routing, source-checkout routing, and wrapper
+setup before the requested command. Descendant shells inherit
 `SPICE_SHELL_HOOK_REEXEC_STAGE=1`; they do not reexec and do not inject steering
 again. Stage-2 startup restores the user's original `ZDOTDIR`, `BASH_ENV`, and
 zsh history file, sources the real startup file when present, rearms the
