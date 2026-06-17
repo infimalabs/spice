@@ -189,18 +189,57 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
         lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
     )
     assigned = ops.next_task()
+    review_row = identity.resolve(handle)
+
+    assert assigned is None
+    assert str(review_row.get("claim_by") or "") == ""
+    assert not review_row.get("start")
+
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    assigned = ops.next_task()
 
     assert identity.render_handle(assigned or {}) == handle
-    assert assigned["claim_by"] == ACTOR_A
+    assert assigned["claim_by"] == PEER_ACTOR
 
     review_output = ops.review(handle, finding="clean", note="review passed")
     completed_row = tw.export([uuid])[0]
 
     assert f"reviewed {handle} clean; completed {handle}" in review_output
     assert completed_row["status"] == "completed"
-    assert completed_row["review_by"] == ACTOR_A
+    assert completed_row["review_by"] == PEER_ACTOR
     assert completed_row["review_finding"] == "clean"
     assert completed_row["review_note"] == "review passed"
+
+
+def test_task_next_releases_self_authored_review_claim_for_peer(task_repo, monkeypatch):
+    handle = ops.add(
+        "Repair accidental self-review assignment",
+        project="task.unit",
+        priority="medium",
+        acceptance=["self-authored review claims are released"],
+    )
+    ops.claim(handle)
+    ops.done(handle, validation=["implementation done"])
+    review_row = identity.resolve(handle)
+    uuid = identity.uuid_of(review_row)
+    ops.do_claim(uuid, ACTOR_A, guard_unclaimed=False)
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+
+    assigned = ops.next_task()
+    released = identity.resolve(handle)
+
+    assert assigned is None
+    assert str(released.get("claim_by") or "") == ""
+    assert not released.get("start")
+
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    assigned = ops.next_task()
+
+    assert identity.render_handle(assigned or {}) == handle
+    assert assigned["claim_by"] == PEER_ACTOR
 
 
 def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
@@ -1252,6 +1291,7 @@ def _review_claim(task_repo: Path, monkeypatch) -> str:
         "spice.tasks.lanes.team_route_for_actor",
         lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
     )
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
     assigned = ops.next_task()
     assert identity.render_handle(assigned or {}) == handle
     return handle
