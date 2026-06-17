@@ -4,6 +4,7 @@ const vm = require("vm");
 const groupsPath = process.argv[2];
 const source = fs.readFileSync(groupsPath, "utf8");
 const statusWrites = [];
+const composerWrites = [];
 
 function fakeStyle() {
   return {
@@ -81,6 +82,7 @@ const context = {
   host,
   member,
   statusWrites,
+  composerWrites,
   laneStates: new Map([
     [host.targetId, host],
     [member.targetId, member],
@@ -93,7 +95,12 @@ const context = {
   },
   isLaneOpen: () => true,
   renderMessagesIfChanged: () => {},
-  syncComposerShards: () => {},
+  syncComposerShards(lane, members) {
+    composerWrites.push({
+      targetId: lane.targetId,
+      memberTargetIds: members.map((candidate) => candidate.targetId),
+    });
+  },
   syncLaneEffectiveControls: () => {},
   laneLifetimeRuntimeState: () => ({ pendingLifetimeCommit: "" }),
   restoreLaneLifetimeRuntimeState: () => {},
@@ -118,6 +125,18 @@ vm.runInNewContext(
   if (fusedWrite.preview !== "member retained" ||
       fusedWrite.lastAssistantAt !== "2026-06-12T05:01:00Z")
     throw new Error("fused status did not use latest compact member status: " + JSON.stringify(fusedWrite));
+
+  reconcileLaneGroups([["member", "host"]]);
+  if (host.groupTopology.role !== "host")
+    throw new Error("reorder changed visible host role");
+  if (member.groupTopology.role !== "member")
+    throw new Error("reorder did not keep lead composer as shadow member");
+  if (host.groupTopology.memberTargetIds.join(",") !== "member,host")
+    throw new Error("reorder lost logical composer order: " + host.groupTopology.memberTargetIds.join(","));
+  const reorderedComposerWrite = composerWrites.at(-1);
+  if (reorderedComposerWrite.targetId !== "host" ||
+      reorderedComposerWrite.memberTargetIds.join(",") !== "member,host")
+    throw new Error("reorder did not render new composer order on stable host: " + JSON.stringify(reorderedComposerWrite));
 
   reconcileLaneGroups([]);
   const restoredWrite = statusWrites.at(-1);

@@ -504,6 +504,13 @@ def test_static_composer_drag_has_ghost_drop_zones_and_reorder_command():
     assert ".composer-shard--composer-drop-right::after" in css
     assert ".lane--composer-drop .composer-shards" in css
     assert "function composerReorderDropTarget(state, clientX, clientY)" in app_groups
+    assert "function currentLaneGroupHostByMemberTargetId()" in app_groups
+    assert "function stableLaneGroupHost(members, previousHostByMemberTargetId)" in (
+        app_groups
+    )
+    assert "const shadows = members.filter((member) => member !== host);" in (
+        app_groups
+    )
     assert 'state.dropTarget = { kind: "move", lane: targetLane };' in app_groups
     assert 'teamCommandPayload("reorderTeamAgents", {' in app_groups
     assert "orderedTargetIds" in app_groups

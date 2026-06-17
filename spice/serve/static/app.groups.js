@@ -16,6 +16,7 @@ let laneTeamMenuDismissHandler = null;
 
 function reconcileLaneGroups(groupRuns) {
   const lifetimeStateByTargetId = new Map();
+  const previousHostByMemberTargetId = currentLaneGroupHostByMemberTargetId();
   for (const lane of laneStates.values())
     lifetimeStateByTargetId.set(lane.targetId, laneLifetimeRuntimeState(lane));
   for (const lane of laneStates.values()) {
@@ -27,7 +28,8 @@ function reconcileLaneGroups(groupRuns) {
       .map((targetId) => laneStates.get(targetId))
       .filter((lane) => lane && isLaneOpen(lane));
     if (members.length < 2) continue;
-    const [host, ...shadows] = members;
+    const host = stableLaneGroupHost(members, previousHostByMemberTargetId);
+    const shadows = members.filter((member) => member !== host);
     const memberTargetIds = members.map((member) => member.targetId);
     host.groupTopology = {
       role: "host",
@@ -52,6 +54,31 @@ function reconcileLaneGroups(groupRuns) {
     syncFusedLaneChrome(lane);
     renderMessagesIfChanged(lane);
   }
+}
+
+function currentLaneGroupHostByMemberTargetId() {
+  const hosts = new Map();
+  const seenHosts = new Set();
+  for (const lane of laneStates.values()) {
+    const host = laneGroupHost(lane);
+    if (seenHosts.has(host.targetId)) continue;
+    seenHosts.add(host.targetId);
+    const memberTargetIds = laneGroupMemberTargetIds(host);
+    if (memberTargetIds.length < 2) continue;
+    for (const targetId of memberTargetIds) hosts.set(targetId, host.targetId);
+  }
+  return hosts;
+}
+
+function stableLaneGroupHost(members, previousHostByMemberTargetId) {
+  for (const member of members) {
+    const previousHostId = previousHostByMemberTargetId.get(member.targetId);
+    const previousHost = members.find(
+      (candidate) => candidate.targetId === previousHostId,
+    );
+    if (previousHost) return previousHost;
+  }
+  return members[0];
 }
 
 function pendingLaneLifetimeStateForMembers(members, lifetimeStateByTargetId) {
@@ -95,8 +122,10 @@ function laneGroupMemberLanes(lane) {
 }
 
 function syncLaneGroupDomOrder(host) {
-  let previous = host.element;
-  for (const member of laneGroupMemberLanes(host).slice(1)) {
+  const groupHost = laneGroupHost(host);
+  let previous = groupHost.element;
+  for (const member of laneGroupMemberLanes(groupHost)) {
+    if (member === groupHost) continue;
     const reference = previous.nextElementSibling;
     if (reference !== member.element)
       lanesEl.insertBefore(member.element, reference);
