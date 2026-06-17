@@ -216,11 +216,11 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert "min-height: 50px;" in header_rules
     assert "padding: 7px 10px;" in header_rules
     assert (
-        "--control-border-soft: color-mix(in srgb, var(--border) 52%, transparent);"
+        "--control-border-soft: color-mix(in srgb, var(--border) 36%, transparent);"
         in css
     )
     assert "--control-surface-soft:" in css
-    assert "--control-inset-soft: inset 0 0 0 1px var(--border-soft);" in css
+    assert "--control-inset-soft: none;" in css
     assert (
         "background: color-mix(in srgb, var(--control-surface-soft) 88%, var(--accent) 12%);"
         in button_rules
