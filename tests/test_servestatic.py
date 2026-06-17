@@ -321,11 +321,13 @@ def test_static_quote_close_control_keeps_composer_menu_styling_compact():
 
 
 def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
+    css = _serve_css_text()
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
 
     assert 'data-lane-team-menu title="Team actions"' in app_shell
     assert "function toggleLaneTeamMenu(lane, event = null)" in app_groups
+    assert "host.viewStackEl.append(menu);" in app_groups
     assert 'label: "Close team",' in app_groups
     assert 'label: "Split into individuals",' in app_groups
     assert 'label: "Restore previous team",' in app_groups
@@ -337,6 +339,16 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert close_team_index < split_individuals_index
     assert split_individuals_index < restore_previous_index
     assert 'teamCommandPayload("splitTeamBack", {' in app_groups
+    view_stack_start = css.index(".lane-view-stack {")
+    view_stack_end = css.index(".lane-view-stack--collapsed", view_stack_start)
+    view_stack_rule = css[view_stack_start:view_stack_end]
+    menu_start = css.index(".lane-team-menu {")
+    menu_end = css.index(".lane-team-menu-action:disabled", menu_start)
+    menu_rule = css[menu_start:menu_end]
+    assert "position: relative;" in view_stack_rule
+    assert "position: absolute;" in menu_rule
+    assert "inset: 0;" in menu_rule
+    assert "z-index: 6;" in menu_rule
 
 
 def test_static_composer_header_drag_suppresses_browser_selection():
