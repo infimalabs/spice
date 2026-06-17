@@ -220,6 +220,7 @@ button.primary:hover {
   min-width: 20em;
   overflow: hidden;
   overscroll-behavior-y: contain;
+  position: relative;
 }
 .lane--shadowed { display: none; }
 .lane--dragging {
@@ -337,6 +338,10 @@ button.primary:hover {
   padding: 8px 10px;
   position: absolute;
   z-index: 6;
+}
+.lane-team-menu--empty-team-overlay {
+  height: var(--lane-team-menu-height, 120px);
+  inset: var(--lane-team-menu-top, 0px) 0 auto;
 }
 .lane-team-menu-action {
   align-items: stretch;

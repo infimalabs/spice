@@ -248,10 +248,28 @@ function openLaneTeamMenu(host) {
       renderLaneTeamMenuAction(host, action),
     ),
   );
-  host.viewStackEl.append(menu);
+  if (host.emptyTeam) {
+    menu.classList.add("lane-team-menu--empty-team-overlay");
+    positionEmptyTeamMenuOverlay(host, menu);
+    host.element.append(menu);
+  } else {
+    host.viewStackEl.append(menu);
+  }
   host.element.classList.add("lane--team-menu-open");
   host.teamMenuButtonEl.setAttribute("aria-expanded", "true");
   syncLaneTeamMenuDismissHandler();
+}
+
+function positionEmptyTeamMenuOverlay(host, menu) {
+  syncLanePaneMetrics(host);
+  menu.style.setProperty(
+    "--lane-team-menu-top",
+    host.viewStackEl.offsetTop + "px",
+  );
+  menu.style.setProperty(
+    "--lane-team-menu-height",
+    lanePaneMaxHeight(host) + "px",
+  );
 }
 
 function laneTeamMenuActions(host) {

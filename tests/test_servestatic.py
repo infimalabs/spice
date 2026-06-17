@@ -328,6 +328,22 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert 'data-lane-team-menu title="Team actions"' in app_shell
     assert "function toggleLaneTeamMenu(lane, event = null)" in app_groups
     assert "host.viewStackEl.append(menu);" in app_groups
+    assert 'menu.classList.add("lane-team-menu--empty-team-overlay");' in app_groups
+    assert "host.element.append(menu);" in app_groups
+    assert "function positionEmptyTeamMenuOverlay(host, menu)" in app_groups
+    assert "syncLanePaneMetrics(host);" in app_groups
+    assert (
+        "menu.style.setProperty(\n"
+        '    "--lane-team-menu-top",\n'
+        '    host.viewStackEl.offsetTop + "px",\n'
+        "  );" in app_groups
+    )
+    assert (
+        "menu.style.setProperty(\n"
+        '    "--lane-team-menu-height",\n'
+        '    lanePaneMaxHeight(host) + "px",\n'
+        "  );" in app_groups
+    )
     assert 'label: "Close team",' in app_groups
     assert 'label: "Split into individuals",' in app_groups
     assert 'label: "Restore previous team",' in app_groups
@@ -339,12 +355,20 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert close_team_index < split_individuals_index
     assert split_individuals_index < restore_previous_index
     assert 'teamCommandPayload("splitTeamBack", {' in app_groups
+    lane_start = css.index(".lane {")
+    lane_end = css.index(".lane--shadowed", lane_start)
+    lane_rule = css[lane_start:lane_end]
     view_stack_start = css.index(".lane-view-stack {")
     view_stack_end = css.index(".lane-view-stack--collapsed", view_stack_start)
     view_stack_rule = css[view_stack_start:view_stack_end]
     menu_start = css.index(".lane-team-menu {")
     menu_end = css.index(".lane-team-menu-action {", menu_start)
     menu_rule = css[menu_start:menu_end]
+    empty_team_overlay_start = css.index(".lane-team-menu--empty-team-overlay {")
+    empty_team_overlay_end = css.index(
+        ".lane-team-menu-action {", empty_team_overlay_start
+    )
+    empty_team_overlay_rule = css[empty_team_overlay_start:empty_team_overlay_end]
     action_start = css.index(".lane-team-menu-action {")
     action_end = css.index(
         ".lane-team-menu-action .spice-menu-action-label", action_start
@@ -353,10 +377,13 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     text_start = css.index(".lane-team-menu-action .spice-menu-action-label")
     text_end = css.index(".lane-team-menu-action:disabled", text_start)
     text_rule = css[text_start:text_end]
+    assert "position: relative;" in lane_rule
     assert "position: relative;" in view_stack_rule
     assert "align-content: stretch;" in menu_rule
     assert "position: absolute;" in menu_rule
     assert "inset: 0;" in menu_rule
+    assert "height: var(--lane-team-menu-height, 120px);" in empty_team_overlay_rule
+    assert "inset: var(--lane-team-menu-top, 0px) 0 auto;" in empty_team_overlay_rule
     assert "grid-auto-rows: minmax(72px, 1fr);" in menu_rule
     assert "z-index: 6;" in menu_rule
     assert "flex-direction: column;" in action_rule
