@@ -424,12 +424,12 @@ button.primary:hover {
   display: inline-flex;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  gap: 8px;
+  gap: 4px;
   line-height: 1.1;
   max-width: 100%;
   min-height: 30px;
   overflow: hidden;
-  padding: 3px 3px 3px 12px;
+  padding: 3px 10px 3px 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -475,24 +475,23 @@ button.primary:hover {
   text-overflow: ellipsis;
 }
 .lane-filter-chip-count {
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
-  border-radius: 999px;
-  box-sizing: border-box;
-  display: inline-grid;
+  background: var(--accent);
+  border-radius: var(--pill-radius);
+  color: var(--button-accent-fg);
   flex: 0 0 auto;
-  height: 20px;
-  min-width: 20px;
+  font-size: 9px;
+  line-height: 13px;
   padding: 0 5px;
-  place-items: center;
 }
 .lane-filter-chip--assign .lane-filter-chip-count,
 .lane-filter-chip--empty .lane-filter-chip-count {
-  background: transparent;
-  border: 1px solid color-mix(in srgb, var(--muted) 24%, transparent);
+  background: var(--muted);
+}
+.lane-filter-chip--selected .lane-filter-chip-count {
+  background: var(--warn);
 }
 .lane-filter-chip--private .lane-filter-chip-count {
-  background: color-mix(in srgb, var(--final-accent) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--final-accent) 24%, transparent);
+  background: var(--final-accent);
 }
 .lane-filter-picker {
   background: var(--panel);
