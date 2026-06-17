@@ -41,6 +41,7 @@ from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
 from spice.serve.teams import ServeTeamStore, TeamCommandService
 from spice.serve.web import STATIC_ROOT, render_index_html, send_static_asset
 from spice.serve.worktrees import WorktreeTarget
+from spice.tasks import config as task_config
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -122,6 +123,54 @@ def test_serve_parser_accepts_until_path(tmp_path):
 
     assert args.command == "serve"
     assert args.until == stop_path
+
+
+def test_lane_watch_paths_include_task_backend_files(tmp_path):
+    backend = tmp_path / "task-backend"
+    data = backend / "data"
+    data.mkdir(parents=True)
+    taskrc = backend / "taskrc"
+    taskrc.write_text("data.location=data\n", encoding="utf-8")
+    pending = data / "pending.data"
+    pending.write_text("task one\n", encoding="utf-8")
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    task_config.set_backend(str(backend))
+    try:
+        paths = app.lane_watch_paths_for_target(state, target, THREAD_A, transcript)
+    finally:
+        task_config.set_backend(None)
+
+    assert backend in paths
+    assert data in paths
+    assert taskrc in paths
+    assert pending in paths
+
+
+def test_lane_signature_changes_when_task_backend_changes(tmp_path):
+    backend = tmp_path / "task-backend"
+    data = backend / "data"
+    data.mkdir(parents=True)
+    (backend / "taskrc").write_text("data.location=data\n", encoding="utf-8")
+    pending = data / "pending.data"
+    pending.write_text("task one\n", encoding="utf-8")
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    task_config.set_backend(str(backend))
+    try:
+        before = app.lane_signature_for_target(state, target, THREAD_A, transcript)
+        pending.write_text("task one\ntask two\n", encoding="utf-8")
+        after = app.lane_signature_for_target(state, target, THREAD_A, transcript)
+    finally:
+        task_config.set_backend(None)
+
+    assert after != before
 
 
 def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
