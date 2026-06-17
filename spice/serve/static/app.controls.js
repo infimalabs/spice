@@ -38,7 +38,7 @@ function setLaneLifetime(lane, label) {
   );
   syncLaneEffectiveControls(host);
   renderFilterPills();
-  updateTaskDrainForLane(host);
+  updateLaneLifetimeForLane(host);
 }
 
 function laneServerLifetime(lane) {
@@ -56,7 +56,18 @@ function laneLifetimeRevision(options = {}) {
 
 function serverLifetimeSupersedesPending(host, options = {}) {
   if (options.force) return true;
-  if (options.supersedePending === false) return false;
+  if (options.supersedePending !== true) return false;
+  const revision = laneLifetimeRevision(options);
+  return (
+    revision > 0 &&
+    revision > Math.max(0, Number(host.pendingLifetimeConfigRevision) || 0)
+  );
+}
+
+function serverLifetimeSettlesPending(host, lifetime, options = {}) {
+  if (host.pendingLifetimeCommit !== lifetime) return false;
+  const requestId = Math.max(0, Number(options.requestId) || 0);
+  if (requestId) return host.pendingLifetimeRequestId === requestId;
   const revision = laneLifetimeRevision(options);
   return (
     revision > 0 &&
@@ -70,15 +81,46 @@ function clearLaneLifetimeCommitState(host) {
   host.pendingLifetimeRequestId = 0;
 }
 
+function updateLaneLifetimeForLane(lane) {
+  const host = laneGroupHost(lane);
+  if (host.emptyTeam && host.teamId) {
+    updateEmptyTeamLifetimeForLane(host);
+    return;
+  }
+  updateTaskDrainForLane(host);
+}
+
+function updateEmptyTeamLifetimeForLane(host) {
+  const requestedLifetime = laneEffectiveLifetime(host);
+  const requestId = Math.max(0, Number(host.pendingLifetimeRequestId) || 0);
+  requestTeamCommand(
+    teamCommandPayload("updateTeamConfig", {
+      teamId: host.teamId,
+      configPatch: { lifetime: requestedLifetime },
+    }),
+  )
+    .then(() => {
+      if (!laneLifetimeCommitMatches(host, requestedLifetime, { requestId }))
+        return;
+      clearLaneLifetimeCommitState(host);
+      host.serverLifetime = requestedLifetime;
+      syncLaneEffectiveControls(host);
+    })
+    .catch(() => {
+      rollbackLaneLifetimeCommit(host, requestedLifetime, "", { requestId });
+      setLaneTransientStatus(host, "lifetime update failed");
+    });
+}
+
 function applyServerLaneLifetime(lane, lifetime, options = {}) {
   if (!agentLifetimeLabels.includes(lifetime)) return false;
   const host = laneGroupHost(lane);
   if (host.pendingLifetimeCommit && lifetime !== host.pendingLifetimeCommit) {
     if (!serverLifetimeSupersedesPending(host, options)) return false;
     clearLaneLifetimeCommitState(host);
-  }
-  if (host.pendingLifetimeCommit === lifetime)
+  } else if (serverLifetimeSettlesPending(host, lifetime, options)) {
     clearLaneLifetimeCommitState(host);
+  }
   const previous = host.lifetime;
   host.serverLifetime = lifetime;
   host.lifetime = lifetime;
