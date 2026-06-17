@@ -3,7 +3,7 @@
 The supervisor binds a socket in the tmp dir, publishes its path through a
 marker file under `.spice/agents/<driver>/side-channel/socket`, and answers
 each wrapper hello with the same payload the wrapper would synthesize itself
-(pending inbox readout + context-pressure warning). The agent hears the
+(pending inbox readout + keep-working guidance). The agent hears the
 operator through stderr without anyone touching its stdin.
 """
 

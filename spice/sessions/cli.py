@@ -25,12 +25,11 @@ from spice.sessions.briefing import (
     render_sweep,
 )
 from spice.sessions.meter import (
-    active_context_percent,
     collect_context_meter,
-    context_pressure_level,
+    context_meter_instruction,
 )
 from spice.sessions.resolve import resolve_files, resolve_thread_transcript
-from spice.sessions.util import format_float, format_int, normalize_timestamp
+from spice.sessions.util import format_int, normalize_timestamp
 
 DEFAULT_SWEEP_WINDOWS = 4
 DEFAULT_SUMMARY_RECENT = 8
@@ -393,12 +392,7 @@ def render_thread_summary(thread_id: str) -> str:
     )
     snapshot = meter.latest_snapshot
     if snapshot:
-        percent = active_context_percent(snapshot)
-        lines.append(
-            f"  context={format_int(snapshot.total_tokens)}/"
-            f"{format_int(snapshot.model_context_window or 0)} "
-            f"({format_float(percent)}%, {context_pressure_level(percent)})"
-        )
+        lines.append(f"  keep_working={context_meter_instruction('available')}")
     lines.append("Latest Activity")
     if latest_turn is None:
         lines.append("  none")
@@ -476,12 +470,7 @@ def _print_summary(files: list, *, recent: int) -> None:
     )
     snapshot = meter.latest_snapshot
     if snapshot:
-        percent = active_context_percent(snapshot)
-        print(
-            f"  context={format_int(snapshot.total_tokens)}/"
-            f"{format_int(snapshot.model_context_window or 0)} "
-            f"({format_float(percent)}%, {context_pressure_level(percent)})"
-        )
+        print(f"  keep_working={context_meter_instruction('available')}")
     asks = [
         (turn.start_ts, text)
         for turn in turns

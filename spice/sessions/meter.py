@@ -1,10 +1,10 @@
-"""The context meter: active-context pressure read from agent transcripts.
+"""The context meter: active-context state read from agent transcripts.
 
 A `token_count` payload in the transcript carries the latest turn's usage and
 the model context window. The meter folds those snapshots together with
-`compacted` events into pressure levels (green/yellow/orange/red) and a
-keep-working instruction — the harness warns the agent about pressure while
-explicitly forbidding finish-before-rollover behavior.
+`compacted` events. The harness uses the meter to decide when to repeat a
+simple keep-working instruction; user-facing output does not expose the
+underlying thresholds.
 """
 
 from __future__ import annotations
@@ -332,19 +332,7 @@ def _optional_int_payload_value(value: Any) -> int | None:
 
 
 def context_meter_instruction(level: str) -> str:
-    if level == "red":
-        return (
-            "KEEP WORKING the claimed task correctly; ignore compaction horizon; "
-            "no shortcuts or finish-before-rollover behavior."
-        )
-    if level == "orange":
-        return (
-            "Keep working the claimed task in order; ignore context pressure; "
-            "preserve normal validation standards."
-        )
-    if level == "yellow":
-        return (
-            "Keep working normally; context horizon is informational only; "
-            "do not change task strategy."
-        )
-    return "Keep working normally; claimed tasks remain primary."
+    return (
+        "Keep working; do not stop early. Continue the claimed task with "
+        "normal validation."
+    )

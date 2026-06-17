@@ -9,7 +9,7 @@ Shell startup hooks reexec zsh/bash commands through
 * connects to the supervisor side-channel socket (when one is live) and
   relays its payload to stderr;
 * injects pending inbox steering into stderr, re-displaying every 15s until ACK;
-* injects context-pressure warnings derived from the agent's own transcript,
+* injects keep-working guidance derived from the agent's own transcript,
   repeated every 15 minutes and persisted across wrapper processes.
 
 The agent's terminal is therefore a duplex steering surface: every command it
@@ -58,7 +58,6 @@ from spice.sessions.meter import (
     context_pressure_level,
     context_pressure_should_warn,
 )
-from spice.sessions.util import format_float, format_int
 
 PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
 PYTHON_ROUTE_FAILURE = (
@@ -533,7 +532,7 @@ def _signature_rows(signature: InboxSignature) -> list[tuple[str, tuple[int, int
 
 
 class AgentContextMeterInjector:
-    """Write context-pressure warnings to stderr, repeat-suppressed on disk."""
+    """Write keep-working guidance to stderr, repeat-suppressed on disk."""
 
     def __init__(
         self,
@@ -711,14 +710,5 @@ def render_agent_context_warning(
     level = context_pressure_level(percent)
     if not context_pressure_should_warn(level):
         return None
-    window = snapshot.model_context_window or 0
     signature = (level, snapshot.ts, snapshot.total_tokens)
-    lines = [
-        "Context Pressure",
-        (
-            f"  level={level} active_context={format_int(snapshot.total_tokens)}/"
-            f"{format_int(window)} ({format_float(percent)}%)"
-        ),
-        f"  keep_working={context_meter_instruction(level)}",
-    ]
-    return signature, "\n".join(lines) + "\n"
+    return signature, context_meter_instruction(level) + "\n"

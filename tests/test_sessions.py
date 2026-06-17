@@ -1,4 +1,4 @@
-"""Session forensics: context pressure thresholds and identity primitives."""
+"""Session forensics: context metering and identity primitives."""
 
 import json
 import os
@@ -23,6 +23,7 @@ from spice.sessions.meter import (
     ActiveContextSnapshot,
     active_context_percent,
     collect_context_meter,
+    context_meter_instruction,
     context_pressure_level,
     context_pressure_should_warn,
 )
@@ -267,6 +268,7 @@ def test_session_thread_resolves_claude_transcript_by_driver_owner(
     assert "latest_user=investigate claude" in summary
     assert "latest_assistant=claude done" in summary
     assert "latest_final=claude done" in summary
+    assert f"keep_working={context_meter_instruction('available')}" in summary
 
 
 def test_session_records_and_meter_parse_claude_transcript_owner(tmp_path, monkeypatch):

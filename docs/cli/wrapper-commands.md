@@ -5,7 +5,7 @@ Status: implemented contract.
 Spice has two command-extension surfaces with different owners:
 
 - `spice agent run -- <cmd>` is the agent shell wrapper. It is how agent-run
-  shell commands receive steering, context pressure, git-shadow routing, source
+  shell commands receive steering, keep-working guidance, git-shadow routing, source
   checkout routing, and configured wrapper functions before the requested
   command executes.
 - `[tool.spice.commands]` mounted commands are repository-owned command paths.
@@ -34,7 +34,7 @@ inspecting wrapper behavior.
 
 The wrapper does this before running the requested command:
 
-- prints pending operator steering and context-pressure notices on stderr;
+- prints pending operator steering and keep-working guidance on stderr;
 - preserves ACK semantics by leaving inbox retirement to transcript ACK lines;
 - routes git through the worktree shadow environment;
 - routes `spice` and `python` commands to the correct worktree source checkout
@@ -115,7 +115,7 @@ expanded with tests and documentation.
 ## Choosing A Surface
 
 Use `spice agent run -- <cmd>` for agent-owned execution where steering,
-context notices, worktree routing, and wrapper functions must apply.
+keep-working guidance, worktree routing, and wrapper functions must apply.
 
 Use a mounted command for repository-owned tools that operators or hooks should
 run as `spice <verb>` in that repository only. Release tooling is mounted in
