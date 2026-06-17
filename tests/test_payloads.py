@@ -283,7 +283,7 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
 
 
 def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
-    latest = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    latest = datetime.now(UTC)
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     store.record_agent_metric_delta(
         "agent-a",

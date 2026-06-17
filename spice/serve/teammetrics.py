@@ -100,6 +100,7 @@ class TeamMetricStoreMixin:
         *,
         bucket_count: int,
         bucket_seconds: int = METRIC_BUCKET_SECONDS,
+        now: float | None = None,
     ) -> LaneMetricSummary:
         if not str(agent_id or "").strip():
             return LaneMetricSummary(
@@ -112,6 +113,7 @@ class TeamMetricStoreMixin:
         agent_id = _normalized_id(agent_id, "agent_id")
         bucket_count = max(1, int(bucket_count))
         bucket_seconds = max(1, int(bucket_seconds))
+        summary_time = time.time() if now is None else max(0.0, float(now))
         with self.connect() as connection:
             row = connection.execute(
                 "SELECT team_id FROM memberships WHERE agent_id = ?", (agent_id,)
@@ -122,12 +124,14 @@ class TeamMetricStoreMixin:
                     str(row["team_id"]),
                     bucket_count=bucket_count,
                     bucket_seconds=bucket_seconds,
+                    now=summary_time,
                 )
             return self._agent_lane_metric_summary_locked(
                 connection,
                 (agent_id,),
                 bucket_count=bucket_count,
                 bucket_seconds=bucket_seconds,
+                now=summary_time,
             )
 
     def _move_team_metric_rows_locked(
@@ -283,6 +287,7 @@ class TeamMetricStoreMixin:
         *,
         bucket_count: int,
         bucket_seconds: int,
+        now: float,
     ) -> LaneMetricSummary:
         agent_rows = connection.execute(
             "SELECT agent_id FROM team_agent_metrics WHERE team_id = ? "
@@ -310,6 +315,7 @@ class TeamMetricStoreMixin:
             bucket_rows,
             bucket_count=bucket_count,
             bucket_seconds=bucket_seconds,
+            now=now,
         )
 
     def _agent_lane_metric_summary_locked(
@@ -319,6 +325,7 @@ class TeamMetricStoreMixin:
         *,
         bucket_count: int,
         bucket_seconds: int,
+        now: float,
     ) -> LaneMetricSummary:
         placeholders = ",".join("?" for _ in agent_ids)
         totals = connection.execute(
@@ -341,6 +348,7 @@ class TeamMetricStoreMixin:
             bucket_rows,
             bucket_count=bucket_count,
             bucket_seconds=bucket_seconds,
+            now=now,
         )
 
 
@@ -355,9 +363,12 @@ def _nonnegative_int(value: int) -> int:
     return max(0, int(value or 0))
 
 
-def _metric_bucket_start(timestamp: float) -> int:
+def _metric_bucket_start(
+    timestamp: float, bucket_seconds: int = METRIC_BUCKET_SECONDS
+) -> int:
     raw = max(0, int(float(timestamp)))
-    return raw - (raw % METRIC_BUCKET_SECONDS)
+    bucket_seconds = max(1, int(bucket_seconds))
+    return raw - (raw % bucket_seconds)
 
 
 def _metric_sparkline(
@@ -365,16 +376,19 @@ def _metric_sparkline(
     *,
     bucket_count: int,
     bucket_seconds: int,
+    now: float,
 ) -> tuple[int, ...]:
     values = [0] * bucket_count
     bucket_rows = [(bucket, count) for bucket, count in rows if count > 0]
     if not bucket_rows:
         return tuple(values)
-    latest = max(bucket for bucket, _count in bucket_rows)
+    latest = _metric_bucket_start(now, bucket_seconds)
     start = latest - ((bucket_count - 1) * bucket_seconds)
     for bucket, count in bucket_rows:
         index = (bucket - start) // bucket_seconds
-        values[max(0, min(index, bucket_count - 1))] += count
+        if index < 0:
+            continue
+        values[min(index, bucket_count - 1)] += count
     return tuple(values)
 
 
@@ -385,6 +399,7 @@ def _lane_metric_summary_from_rows(
     *,
     bucket_count: int,
     bucket_seconds: int,
+    now: float,
 ) -> LaneMetricSummary:
     return LaneMetricSummary(
         agent_ids=agent_ids,
@@ -398,5 +413,6 @@ def _lane_metric_summary_from_rows(
             ),
             bucket_count=bucket_count,
             bucket_seconds=bucket_seconds,
+            now=now,
         ),
     )
