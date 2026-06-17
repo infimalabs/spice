@@ -1,10 +1,18 @@
 """Mounted commands: validation, built-in precedence, argv shapes."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from spice.cli.mounts import MOUNT_NAME_RE, mounted_commands
+from spice.cli.mounts import (
+    MOUNT_NAME_RE,
+    MOUNTED_COMMAND_ENV,
+    MountedCommand,
+    VISIBLE_PROG_ENV,
+    mounted_commands,
+    run_mounted_command,
+)
 from spice.cli.parser import BUILTIN_COMMANDS, build_parser
 from spice.errors import SpiceError
 
@@ -63,6 +71,40 @@ def test_empty_mount_fails_loudly(tmp_path):
     repo = _repo_with_commands(tmp_path, 'noop = ""')
     with pytest.raises(SpiceError, match="empty"):
         mounted_commands(repo)
+
+
+def test_run_mounted_command_exports_visible_spice_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+):
+    captured: dict[str, object] = {}
+
+    def fake_run(argv, *, cwd, env, check):
+        captured["argv"] = tuple(argv)
+        captured["cwd"] = cwd
+        captured["env"] = {
+            MOUNTED_COMMAND_ENV: env.get(MOUNTED_COMMAND_ENV),
+            VISIBLE_PROG_ENV: env.get(VISIBLE_PROG_ENV),
+        }
+        captured["check"] = check
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("spice.cli.mounts.subprocess.run", fake_run)
+    mount = MountedCommand(
+        name="fmt",
+        argv=("uv", "run", "python", "-m", "gritctl", "fmt"),
+        repo_root=tmp_path,
+    )
+
+    assert run_mounted_command(mount, ["--check"]) == 0
+    assert captured == {
+        "argv": ("uv", "run", "python", "-m", "gritctl", "fmt", "--check"),
+        "cwd": tmp_path,
+        "env": {
+            MOUNTED_COMMAND_ENV: "1",
+            VISIBLE_PROG_ENV: "spice fmt",
+        },
+        "check": False,
+    }
 
 
 def test_wrapper_command_contract_is_linked_from_readme():

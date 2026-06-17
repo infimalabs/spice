@@ -11,6 +11,7 @@ root. Built-in verbs always win; a mount that shadows one fails loudly.
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import subprocess
@@ -24,6 +25,8 @@ from spice.paths import repo_root_from_cwd
 from spice.repocfg import commands_table
 
 MOUNT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+MOUNTED_COMMAND_ENV = "SPICE_MOUNTED_COMMAND"  # env-policy: allow
+VISIBLE_PROG_ENV = "SPICE_VISIBLE_PROG"  # env-policy: allow
 
 
 @dataclass(frozen=True)
@@ -85,7 +88,12 @@ def find_mounted_command(name: str) -> MountedCommand | None:
 
 
 def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
-    result = subprocess.run([*mount.argv, *args], cwd=mount.repo_root, check=False)
+    env = os.environ.copy()
+    env[MOUNTED_COMMAND_ENV] = "1"
+    env[VISIBLE_PROG_ENV] = f"spice {mount.name}"
+    result = subprocess.run(
+        [*mount.argv, *args], cwd=mount.repo_root, env=env, check=False
+    )
     return result.returncode
 
 
