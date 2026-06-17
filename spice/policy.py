@@ -16,6 +16,12 @@ from __future__ import annotations
 # to the base limit (sticky, rename-following) until it shrinks back under.
 FILE_LOC_LIMIT = 1000
 FILE_BYTE_LIMIT = 80_000
+FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES = (".lock",)
+FILE_SHAPE_GENERATED_LOCKFILE_NAMES = (
+    "bun.lockb",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+)
 
 # --- routine complexity ------------------------------------------------------
 COMPLEXITY_MAX_CCN = 20
