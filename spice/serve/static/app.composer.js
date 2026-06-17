@@ -318,6 +318,9 @@ function syncComposerAttachmentStrip(parent, lane, targetId, beforeNode) {
 
 function fillComposerAttachmentStrip(wrap, lane, targetId) {
   const attachments = composerAttachmentDraftsForTarget(lane, targetId);
+  if (attachments.length)
+    wrap.style.setProperty("--composer-attachment-count", String(attachments.length));
+  else wrap.style.removeProperty("--composer-attachment-count");
   wrap.hidden = attachments.length === 0;
   wrap
     .closest(".composer-band-body")
