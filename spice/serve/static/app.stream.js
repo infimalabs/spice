@@ -992,6 +992,7 @@ function applyTaskDrainRouteConfig(lane, result, options = {}) {
   if (config.lifetime && taskDrainLifetimeResponseIsCurrent(lane, options))
     applyServerLaneLifetime(lane, config.lifetime, {
       configRevision: config.configRevision,
+      requestId: options.lifetimeRequestId,
       supersedePending: options.supersedePending,
     });
   renderLaneViewShell(laneGroupHost(lane));

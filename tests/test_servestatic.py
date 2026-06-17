@@ -601,14 +601,22 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
     assert "host.pendingLifetimeCommit = lifetime;" in app_controls
     assert "host.pendingLifetimeRequestId = host.lifetimeRequestId;" in app_controls
     assert "host.serverLifetime = laneServerLifetime(host);" in app_controls
+    assert "function updateLaneLifetimeForLane(lane) {" in app_controls
+    assert "function updateEmptyTeamLifetimeForLane(host) {" in app_controls
+    assert "if (host.emptyTeam && host.teamId) {" in app_controls
+    assert "configPatch: { lifetime: requestedLifetime }," in app_controls
     assert "function serverLifetimeSupersedesPending(host, options = {})" in (
         app_controls
     )
-    assert "if (options.supersedePending === false) return false;" in app_controls
+    assert "if (options.supersedePending !== true) return false;" in app_controls
+    assert "function serverLifetimeSettlesPending(host, lifetime, options = {})" in (
+        app_controls
+    )
     assert (
         "if (host.pendingLifetimeCommit && lifetime !== host.pendingLifetimeCommit)"
         in app_controls
     )
+    assert "serverLifetimeSettlesPending(host, lifetime, options)" in app_controls
     assert 'host.pendingLifetimeCommit = "";' in app_controls
     assert "host.pendingLifetimeConfigRevision = 0;" in app_controls
     assert "host.pendingLifetimeRequestId = 0;" in app_controls
@@ -639,6 +647,7 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
     assert "if (!requestedLifetimeRequestId) return;" in app_stream
     assert "if (options.lifetimeRequestId === undefined) return true;" in app_stream
     assert "taskDrainLifetimeResponseIsCurrent(lane, options)" in app_stream
+    assert "requestId: options.lifetimeRequestId," in app_stream
     assert "if (pendingLifetimeRequestId)" in app_stream
     assert "requestId: pendingLifetimeRequestId," in app_stream
     assert "supersedePending: false," in app_stream
@@ -652,6 +661,20 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
     )
     assert "renewAgent" not in app_controls
     assert '"Renew"' not in app
+
+
+def test_lifetime_slider_pending_commit_ignores_stale_server_lifetimes():
+    app_controls = STATIC_ROOT / "app.controls.js"
+    script = Path(__file__).with_name("fixtures") / "lifetime_slider_pending.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(app_controls)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_static_sync_composer_placeholders_refreshes_existing_quote_textareas():
