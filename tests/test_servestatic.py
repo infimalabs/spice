@@ -693,6 +693,8 @@ def test_static_composer_headers_use_agent_accent_border():
     band_rule = css[band_start : css.index("}", band_start)]
     header_start = css.index(".composer-band-header {")
     header_rule = css[header_start : css.index("}", header_start)]
+    title_start = css.index(".composer-band-title {")
+    title_rule = css[title_start : css.index("}", title_start)]
     textarea_start = css.index(".composer-shard textarea {")
     textarea_rule = css[textarea_start : css.index("}", textarea_start)]
 
@@ -702,6 +704,8 @@ def test_static_composer_headers_use_agent_accent_border():
         "color-mix(in srgb, var(--composer-header-accent) 64%, var(--border-soft))"
         in header_rule
     )
+    assert "var(--composer-header-accent, var(--muted)) 70%" in title_rule
+    assert "font-weight: 400;" in title_rule
     assert "border-top" not in textarea_rule
     assert "function syncComposerBandAccent(band, lane, member)" in app_shell
     assert (
@@ -781,6 +785,39 @@ def test_static_message_accent_palette_names_all_six_team_slots():
     assert (
         "messageOccupantAccentPalette[index % messageOccupantAccentPalette.length]"
         not in app_render
+    )
+
+
+def test_static_agent_names_use_accent_colors_without_bold_weight():
+    css = _serve_css_text()
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+
+    message_name_start = css.rindex(".message-agent-name {")
+    message_name_rule = css[message_name_start : css.index("}", message_name_start)]
+    compaction_label_start = css.index(".compaction-label {")
+    compaction_label_rule = css[
+        compaction_label_start : css.index("}", compaction_label_start)
+    ]
+    target_name_start = css.index(".target-choice-name {")
+    target_name_rule = css[target_name_start : css.index("}", target_name_start)]
+
+    assert "var(--message-occupant-accent, var(--muted)) 70%" in message_name_rule
+    assert "font-weight: 400;" in message_name_rule
+    assert "var(--compaction-accent, var(--fg)) 70%" in compaction_label_rule
+    assert "font-weight: 400;" in compaction_label_rule
+    assert "var(--target-choice-name-accent, var(--fg)) 70%" in target_name_rule
+    assert "font-weight: 400;" in target_name_rule
+    assert (
+        '<span class="target-choice-copy"><span class="target-choice-name"></span>'
+        '<span class="target-choice-meta"></span></span>' in app_lanes
+    )
+    assert (
+        '<span class="target-choice-copy"><strong></strong><span></span></span>'
+        not in app_lanes
+    )
+    assert "function syncTargetChoiceNameAccent(button, target)" in app_lanes
+    assert (
+        'button.style.setProperty("--target-choice-name-accent", accent);' in app_lanes
     )
 
 
