@@ -437,7 +437,11 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
     assert "serverLifetime: target.lifetime || defaultAgentLifetime," in app_shell
     assert 'pendingLifetimeCommit: "",' in app_shell
     assert "pendingLifetimeConfigRevision: 0," in app_shell
+    assert "pendingLifetimeRequestId: 0," in app_shell
+    assert "lifetimeRequestId: 0," in app_shell
+    assert "host.lifetimeRequestId = Math.max" in app_controls
     assert "host.pendingLifetimeCommit = lifetime;" in app_controls
+    assert "host.pendingLifetimeRequestId = host.lifetimeRequestId;" in app_controls
     assert "host.serverLifetime = laneServerLifetime(host);" in app_controls
     assert "function serverLifetimeSupersedesPending(host, options = {})" in (
         app_controls
@@ -449,11 +453,16 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
     )
     assert 'host.pendingLifetimeCommit = "";' in app_controls
     assert "host.pendingLifetimeConfigRevision = 0;" in app_controls
-    assert "function clearLaneLifetimeCommit(lane, lifetime)" in app_controls
-    assert (
-        'function rollbackLaneLifetimeCommit(lane, lifetime, serverLifetime = "")'
-        in (app_controls)
+    assert "host.pendingLifetimeRequestId = 0;" in app_controls
+    assert "function laneLifetimeCommitMatches(host, lifetime, options = {})" in (
+        app_controls
     )
+    assert "function clearLaneLifetimeCommit(lane, lifetime, options = {})" in (
+        app_controls
+    )
+    assert "function rollbackLaneLifetimeCommit(" in app_controls
+    assert 'serverLifetime = "",' in app_controls
+    assert "options = {}," in app_controls
     assert "applyServerLaneLifetime(lane, config.lifetime, {" in app_shell
     assert "applyServerLaneLifetime(lane, config.lifetime, {" in app_lanes
     assert "configRevision: config.revision," in app_shell
@@ -465,8 +474,15 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
     assert "laneLifetimeRuntimeState(lane)" in app_groups
     assert "restoreLaneLifetimeRuntimeState(" in app_groups
     assert "const requestedLifetime = payload.lifetime;" in app_stream
-    assert "settleLaneLifetimeCommit(host, requestedLifetime, result);" in app_stream
-    assert "rollbackLaneLifetimeCommit(host, requestedLifetime);" in app_stream
+    assert "const lifetimeRequestId = Math.max" in app_stream
+    assert "const pendingLifetimeRequestId =" in app_stream
+    assert "lifetimeRequestId," in app_stream
+    assert "settleLaneLifetimeCommit(" in app_stream
+    assert "if (!requestedLifetimeRequestId) return;" in app_stream
+    assert "if (options.lifetimeRequestId === undefined) return true;" in app_stream
+    assert "taskDrainLifetimeResponseIsCurrent(lane, options)" in app_stream
+    assert "if (pendingLifetimeRequestId)" in app_stream
+    assert "requestId: pendingLifetimeRequestId," in app_stream
     assert "supersedePending: false," in app_stream
     assert "const lifetimeHelp = agentLifetimeHelpText(lifetime);" in app_controls
     assert "lane.lifetimeRangeEl.title = lifetimeHelp;" in app_controls

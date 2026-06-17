@@ -119,6 +119,8 @@ function createLaneState(targetId, hint = null, options = {}) {
     renewalIntent: target.renewalIntent || {},
     pendingLifetimeCommit: "",
     pendingLifetimeConfigRevision: 0,
+    pendingLifetimeRequestId: 0,
+    lifetimeRequestId: 0,
     privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),
     teamId: target.teamId || "",
     teamRevision: target.teamRevision || 0,

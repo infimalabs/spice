@@ -825,6 +825,11 @@ function updateTaskDrainForLane(lane, fields = {}) {
     ...fields,
   };
   const requestedLifetime = payload.lifetime;
+  const lifetimeRequestId = Math.max(0, Number(host.lifetimeRequestId) || 0);
+  const pendingLifetimeRequestId =
+    host.pendingLifetimeCommit === requestedLifetime
+      ? Math.max(0, Number(host.pendingLifetimeRequestId) || 0)
+      : 0;
   liveBusRequest("lane.taskDrain", {
     targetId: commandLane.targetId,
     payload,
@@ -834,14 +839,23 @@ function updateTaskDrainForLane(lane, fields = {}) {
       for (const recipient of recipients)
         applyTaskDrainRouteConfig(recipient, result, {
           supersedePending: false,
+          lifetimeRequestId,
         });
-      settleLaneLifetimeCommit(host, requestedLifetime, result);
+      settleLaneLifetimeCommit(
+        host,
+        requestedLifetime,
+        pendingLifetimeRequestId,
+        result,
+      );
       if (result.ok === false) {
         setLaneTransientStatus(host, result.error || "task drain update failed");
       }
     })
     .catch(() => {
-      rollbackLaneLifetimeCommit(host, requestedLifetime);
+      if (pendingLifetimeRequestId)
+        rollbackLaneLifetimeCommit(host, requestedLifetime, "", {
+          requestId: pendingLifetimeRequestId,
+        });
       if (isLaneOpen(host))
         setLaneTransientStatus(host, "task drain update failed");
     });
@@ -851,15 +865,36 @@ function taskDrainRouteConfig(result) {
   return result.ok === false ? result : result.route;
 }
 
-function settleLaneLifetimeCommit(lane, requestedLifetime, result) {
+function settleLaneLifetimeCommit(
+  lane,
+  requestedLifetime,
+  requestedLifetimeRequestId,
+  result,
+) {
+  if (!requestedLifetimeRequestId) return;
   const host = laneGroupHost(lane);
-  if (host.pendingLifetimeCommit !== requestedLifetime) return;
+  const requestOptions = { requestId: requestedLifetimeRequestId };
+  if (!laneLifetimeCommitMatches(host, requestedLifetime, requestOptions))
+    return;
   const config = taskDrainRouteConfig(result) || {};
   if (result.ok !== false && config.lifetime === requestedLifetime) {
-    clearLaneLifetimeCommit(host, requestedLifetime);
+    clearLaneLifetimeCommit(host, requestedLifetime, requestOptions);
     return;
   }
-  rollbackLaneLifetimeCommit(host, requestedLifetime, config.lifetime);
+  rollbackLaneLifetimeCommit(
+    host,
+    requestedLifetime,
+    config.lifetime,
+    requestOptions,
+  );
+}
+
+function taskDrainLifetimeResponseIsCurrent(lane, options = {}) {
+  if (options.lifetimeRequestId === undefined) return true;
+  const requestId = Math.max(0, Number(options.lifetimeRequestId) || 0);
+  const host = laneGroupHost(lane);
+  const latestRequestId = Math.max(0, Number(host.lifetimeRequestId) || 0);
+  return requestId >= latestRequestId;
 }
 
 function applyTaskDrainRouteConfig(lane, result, options = {}) {
@@ -870,7 +905,7 @@ function applyTaskDrainRouteConfig(lane, result, options = {}) {
     lane.laneFilterVersion = String(config.laneFilterVersion || "");
   }
   if (config.teamId) lane.teamId = String(config.teamId);
-  if (config.lifetime)
+  if (config.lifetime && taskDrainLifetimeResponseIsCurrent(lane, options))
     applyServerLaneLifetime(lane, config.lifetime, {
       configRevision: config.configRevision,
       supersedePending: options.supersedePending,
