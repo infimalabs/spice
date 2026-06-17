@@ -589,6 +589,8 @@ def adopt(
     project: str | None = None,
     description: str | None = None,
     priority: str = config.DEFAULT_PRIORITY,
+    complete: bool = False,
+    validation: list[str] | None = None,
 ) -> str:
     """Fold existing orphan commit(s) into a task and capture them normally.
 
@@ -599,6 +601,11 @@ def adopt(
     normal claim performs, so the orphan work is preserved rather than rejected
     and the agent can complete it through the usual `task done`/`review` flow.
     """
+    validation = list(validation or [])
+    if validation and not complete:
+        raise SpiceError("task adopt --validation requires --done")
+    if complete and not validation:
+        raise SpiceError("task adopt --done requires --validation")
     tw.require_clean_worktree("task adopt")
     ahead = gitsync.commits_ahead_of_baseline()
     if ahead == 0:
@@ -643,10 +650,10 @@ def adopt(
     # would discard the very orphan commits adopt exists to capture.
     do_claim(identity.uuid_of(row), actor, guard_unclaimed=False)
     noun = "commit" if ahead == 1 else "commits"
-    return (
-        f"adopted {ahead} orphan {noun} into {handle_text}\n"
-        f'next: spice task done {handle_text} --validation "..."'
-    )
+    adopted = f"adopted {ahead} orphan {noun} into {handle_text}"
+    if complete:
+        return f"{adopted}\n{done(handle_text, validation=validation)}"
+    return f'{adopted}\nnext: spice task done {handle_text} --validation "..."'
 
 
 # ---- done / advance -----------------------------------------------------

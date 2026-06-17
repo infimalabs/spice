@@ -247,6 +247,7 @@ def _configure_task_edit_parsers(actions: Any) -> None:
             "Examples:\n"
             "  spice task adopt\n"
             '  spice task adopt --project task.cli --title "Capture orphan fix"\n'
+            '  spice task adopt --done --validation "tests passed"\n'
             "  spice task adopt TASK-20260609T203539640394Z"
         ),
         recovery_examples=(
@@ -259,6 +260,12 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     adopt.add_argument("--project")
     adopt.add_argument("--description", action="append", default=[])
     adopt.add_argument("--priority", default=config.DEFAULT_PRIORITY)
+    adopt.add_argument(
+        "--done",
+        action="store_true",
+        help="Immediately complete the adopted implementation phase.",
+    )
+    adopt.add_argument("--validation", action="append", default=[])
     adopt.set_defaults(func=handle)
 
 
@@ -522,6 +529,8 @@ _DISPATCH = {
         project=a.project,
         description=_description(list(a.description)) or None,
         priority=a.priority,
+        complete=a.done,
+        validation=list(a.validation),
     ),
 }
 
