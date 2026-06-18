@@ -365,6 +365,11 @@ class ServeTeamStore(TeamMetricStoreMixin):
         alias_ids = _agent_alias_ids(agent_id, aliases)
         previous_team_ids: list[str] = []
         for alias_id in alias_ids:
+            if alias_id != agent_id:
+                self._rewrite_renewal_agent_locked(
+                    connection, alias_id, agent_id, team_id
+                )
+        for alias_id in alias_ids:
             previous_rows = connection.execute(
                 "SELECT DISTINCT team_id FROM memberships WHERE agent_id = ?",
                 (alias_id,),
@@ -389,6 +394,31 @@ class ServeTeamStore(TeamMetricStoreMixin):
                 for previous_team_id in previous_team_ids
                 if previous_team_id != team_id
             ],
+        )
+
+    def _rewrite_renewal_agent_locked(
+        self,
+        connection: sqlite3.Connection,
+        old_agent_id: str,
+        new_agent_id: str,
+        team_id: str,
+    ) -> None:
+        old_row = connection.execute(
+            "SELECT agent_id FROM renewals WHERE agent_id = ?", (old_agent_id,)
+        ).fetchone()
+        if old_row is None:
+            return
+        new_row = connection.execute(
+            "SELECT agent_id FROM renewals WHERE agent_id = ?", (new_agent_id,)
+        ).fetchone()
+        if new_row is not None:
+            connection.execute(
+                "DELETE FROM renewals WHERE agent_id = ?", (old_agent_id,)
+            )
+            return
+        connection.execute(
+            "UPDATE renewals SET agent_id = ?, team_id = ? WHERE agent_id = ?",
+            (new_agent_id, team_id, old_agent_id),
         )
 
     def _close_empty_teams_locked(
@@ -425,6 +455,9 @@ class ServeTeamStore(TeamMetricStoreMixin):
             for alias_id in alias_ids:
                 connection.execute(
                     "DELETE FROM memberships WHERE agent_id = ?", (alias_id,)
+                )
+                connection.execute(
+                    "DELETE FROM renewals WHERE agent_id = ?", (alias_id,)
                 )
             self._close_empty_teams_locked(connection, [team_id])
             revision = self._record_event(

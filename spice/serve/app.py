@@ -214,8 +214,13 @@ def work_tree_send_response_payload(
             "error": "Message text is required.",
         }, HTTPStatus.BAD_REQUEST
     predecessor = payloads.resolve_thread_id_for_target(state, target) or ""
+    predecessor_actor = payloads.team_actor_for_target(
+        state.team_store, target, predecessor
+    )
     renew_intent = bool(
-        predecessor and state.team_store.agent_renewal_active(predecessor)
+        predecessor
+        and predecessor_actor
+        and state.team_store.agent_renewal_active(predecessor_actor)
     )
     _apply_lifetime_to_team(state, target, payload)
     force_new = False
@@ -265,7 +270,7 @@ def work_tree_send_response_payload(
     if renew_intent and force_new:
         ensured_thread_id = payloads.record_started_renewal_from_ensure(
             state.team_store,
-            predecessor_agent_id=predecessor,
+            predecessor_agent_id=predecessor_actor,
             agent_ensure=agent_ensure if isinstance(agent_ensure, dict) else None,
         )
     else:
@@ -275,8 +280,10 @@ def work_tree_send_response_payload(
     send_agent_id = (
         ensured_thread_id or payloads.resolve_thread_id_for_target(state, target) or ""
     )
+    if send_agent_id:
+        payloads.team_actor_for_target(state.team_store, target, send_agent_id)
     state.record_lane_send(target.id, agent_id=send_agent_id)
-    renewal_agent_id = predecessor if renew_intent else send_agent_id
+    renewal_agent_id = predecessor_actor if renew_intent else send_agent_id
     if renewal_agent_id:
         response_payload["renewalIntent"] = payloads.renewal_intent_for_actor(
             state.team_store, renewal_agent_id
@@ -290,9 +297,8 @@ def _apply_lifetime_to_team(
     lifetime = str(payload.get("lifetime") or "").strip()
     if lifetime not in LIFETIME_LABELS:
         return
-    actor = payloads.resolve_thread_id_for_target(state, target) or ""
-    if not actor:
-        return
+    thread_id = payloads.resolve_thread_id_for_target(state, target) or ""
+    actor = payloads.team_actor_for_target(state.team_store, target, thread_id)
     team_id = state.team_store.current_team_for_agent(actor)
     if team_id is None:
         return
@@ -319,8 +325,9 @@ def work_tree_task_drain_response_payload(
 ) -> tuple[dict[str, Any], HTTPStatus]:
     _apply_lifetime_to_team(state, target, payload)
     task_filters = payload.get("taskFilters")
+    thread_id = payloads.resolve_thread_id_for_target(state, target) or ""
+    actor = payloads.team_actor_for_target(state.team_store, target, thread_id)
     if bool(payload.get("replaceTaskFilters")) and isinstance(task_filters, list):
-        actor = payloads.resolve_thread_id_for_target(state, target) or ""
         if not actor:
             return (
                 {"ok": False, "error": "task drain requires a bound agent"},
@@ -349,11 +356,10 @@ def work_tree_task_drain_response_payload(
             ),
             replace_task_filters=True,
         )
-    actor = payloads.resolve_thread_id_for_target(state, target) or ""
     facts = payloads.team_facts_for_actor(state.team_store, actor)
     route = {
         "actor": actor,
-        "targetIdentity": payloads.target_identity_payload(target, actor),
+        "targetIdentity": payloads.target_identity_payload(target, thread_id),
         "teamIdentity": payloads.team_identity_payload(facts),
         "memberAgents": [actor] if actor else [],
         "laneName": target.name,
@@ -424,7 +430,7 @@ def lane_signature_for_target(
     thread_id: str | None,
     transcript_path: Path | None,
 ) -> tuple[Any, ...]:
-    team_facts = payloads.team_facts_for_actor(state.team_store, thread_id or "")
+    team_facts = payloads.team_facts_for_target(state.team_store, target, thread_id)
     return (
         _path_signature(transcript_path),
         _inbox_signature(target.repo_root),

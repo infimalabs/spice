@@ -147,6 +147,38 @@ def team_facts_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
     }
 
 
+def team_actor_for_target(
+    store: ServeTeamStore, target: WorktreeTarget, thread_id: str | None
+) -> str:
+    """Return the single durable team actor for a target.
+
+    A target id is only a placeholder before the worktree has a thread. Once a
+    real thread exists, any placeholder membership is rewritten to that thread
+    before callers read team facts.
+    """
+    actor = canonical_thread_id(thread_id or "")
+    if not actor:
+        return target.id
+    if target.id and target.id != actor:
+        placeholder_team = store.current_team_for_agent(target.id)
+        if placeholder_team is not None:
+            store.assign_agent(placeholder_team, actor, aliases=[target.id])
+    return actor
+
+
+def team_facts_for_target(
+    store: ServeTeamStore, target: WorktreeTarget, thread_id: str | None
+) -> dict[str, Any]:
+    return team_facts_for_actor(store, team_actor_for_target(store, target, thread_id))
+
+
+def renewal_intent_for_target(
+    store: ServeTeamStore, target: WorktreeTarget, thread_id: str | None
+) -> dict[str, Any]:
+    actor = team_actor_for_target(store, target, thread_id)
+    return renewal_intent_for_actor(store, actor)
+
+
 def target_identity_payload(
     target: WorktreeTarget,
     thread_id: str,
@@ -339,8 +371,11 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
         thread_id = resolve_thread_id_for_target(state, target) or ""
         pending_identity = pending_inbox_identity_payload(target.repo_root)
         pending = int(pending_identity["pendingInboxCount"])
+        predecessor_actor = team_actor_for_target(state.team_store, target, thread_id)
         renew_intent = bool(
-            thread_id and state.team_store.agent_renewal_active(thread_id)
+            thread_id
+            and predecessor_actor
+            and state.team_store.agent_renewal_active(predecessor_actor)
         )
         agent_ensure = ensure_agent_for_pending_inbox(
             target,
@@ -350,7 +385,7 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
         )
         ensured_thread_id = record_started_renewal_from_ensure(
             state.team_store,
-            predecessor_agent_id=thread_id,
+            predecessor_agent_id=predecessor_actor,
             agent_ensure=agent_ensure,
         )
         if ensured_thread_id:
@@ -360,10 +395,10 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
         status = agent_status(target.repo_root)
         binding_error = agent_binding_error(target.repo_root, status)
         binding_status = _binding_status(thread_id, binding_error)
-        team_facts = team_facts_for_actor(state.team_store, thread_id)
+        team_facts = team_facts_for_target(state.team_store, target, thread_id)
         team_identity = team_identity_payload(team_facts)
         agent_name = _agent_name_for_target(target)
-        renewal_intent = renewal_intent_for_actor(state.team_store, thread_id)
+        renewal_intent = renewal_intent_for_target(state.team_store, target, thread_id)
         items, error = target_activity_items(target, thread_id)
         status_line = _status_line_payload_from_status(
             status=status,
@@ -541,7 +576,12 @@ def messages_payload_for_worktree(
     thread_id = explicit_thread_id or resolve_thread_id_for_target(state, target) or ""
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
-    renew_intent = bool(thread_id and state.team_store.agent_renewal_active(thread_id))
+    predecessor_actor = team_actor_for_target(state.team_store, target, thread_id)
+    renew_intent = bool(
+        thread_id
+        and predecessor_actor
+        and state.team_store.agent_renewal_active(predecessor_actor)
+    )
     agent_ensure = ensure_agent_for_pending_inbox(
         target,
         pending,
@@ -551,7 +591,7 @@ def messages_payload_for_worktree(
     )
     ensured_thread_id = record_started_renewal_from_ensure(
         state.team_store,
-        predecessor_agent_id=thread_id,
+        predecessor_agent_id=predecessor_actor,
         agent_ensure=agent_ensure,
     )
     if ensured_thread_id:
@@ -571,9 +611,9 @@ def messages_payload_for_worktree(
             worktree_id=target.id,
             repo_root=target.repo_root,
         )
-    team_facts = team_facts_for_actor(state.team_store, thread_id)
+    team_facts = team_facts_for_target(state.team_store, target, thread_id)
     team_identity = team_identity_payload(team_facts)
-    renewal_intent = renewal_intent_for_actor(state.team_store, thread_id)
+    renewal_intent = renewal_intent_for_target(state.team_store, target, thread_id)
     status = agent_status(target.repo_root)
     binding_error = agent_binding_error(target.repo_root, status)
     binding_status = _binding_status(thread_id, binding_error)
