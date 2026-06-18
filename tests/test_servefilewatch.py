@@ -5,6 +5,9 @@ import os
 from pathlib import Path
 import threading
 
+import pytest
+
+from spice.errors import SpiceError
 from spice.serve import app as serve_app
 from spice.serve import filewatch as serve_filewatch
 from spice.serve.app import run_serve
@@ -44,21 +47,25 @@ def test_file_watch_snapshot_detects_modified_file(tmp_path: Path) -> None:
     assert file_watch_path_changed(watched_path, baseline) is True
 
 
-def test_start_exit_file_watch_uses_watched_parent_events(
+def test_start_exit_file_watch_uses_exact_existing_path(
     monkeypatch, tmp_path: Path
 ) -> None:
     watched_path = tmp_path / "serve.stop"
+    watched_path.write_text("initial\n", encoding="utf-8")
     fake_server = FakeServer()
     stop_event = threading.Event()
     watch_roots: list[Path] = []
+    recursive_values: list[bool] = []
     filter_results: list[bool] = []
 
     def fake_watch(
         root, *, watch_filter, force_polling, debounce, stop_event, recursive
     ):
-        del force_polling, debounce, stop_event, recursive
+        del force_polling, debounce, stop_event
         watch_roots.append(root)
+        recursive_values.append(recursive)
         filter_results.append(watch_filter(object(), str(watched_path)))
+        filter_results.append(watch_filter(object(), str(tmp_path / "other.stop")))
         yield {
             (object(), str(tmp_path / "other.stop")),
             (object(), str(watched_path)),
@@ -74,13 +81,47 @@ def test_start_exit_file_watch_uses_watched_parent_events(
     assert isinstance(thread, threading.Thread)
     thread.join(timeout=1.0)
 
-    assert watch_roots == [tmp_path]
-    assert filter_results == [True]
+    assert watch_roots == [watched_path]
+    assert recursive_values == [False]
+    assert filter_results == [True, False]
     assert fake_server.shutdown_count == 1
+
+
+def test_start_exit_file_watch_rejects_missing_until_path(tmp_path: Path) -> None:
+    watched_path = tmp_path / "serve.stop"
+    fake_server = FakeServer()
+
+    with pytest.raises(SpiceError, match="--until path does not exist"):
+        start_exit_file_watch(
+            fake_server,
+            Namespace(until=watched_path),
+            stop_event=threading.Event(),
+        )
+
+
+def test_serve_fails_when_until_path_does_not_exist(
+    monkeypatch, tmp_path: Path
+) -> None:
+    watched_path = tmp_path / "serve.stop"
+    fake_server = FakeServer()
+    monkeypatch.setattr(serve_app, "_ServeHttpServer", lambda *_args: fake_server)
+
+    with pytest.raises(SpiceError, match="--until path does not exist"):
+        run_serve(
+            Namespace(
+                host="127.0.0.1",
+                port=0,
+                until=watched_path,
+                task_backend=None,
+            )
+        )
+
+    assert fake_server.closed is False
 
 
 def test_serve_exits_after_watched_file_changes(monkeypatch, tmp_path: Path) -> None:
     watched_path = tmp_path / "serve.stop"
+    watched_path.write_text("initial\n", encoding="utf-8")
     fake_server = FakeServer()
     watch_roots: list[Path] = []
 
@@ -105,7 +146,7 @@ def test_serve_exits_after_watched_file_changes(monkeypatch, tmp_path: Path) -> 
     )
 
     assert result == 0
-    assert watch_roots == [tmp_path]
+    assert watch_roots == [watched_path]
     assert fake_server.shutdown_count == 1
     assert fake_server.closed is True
 
