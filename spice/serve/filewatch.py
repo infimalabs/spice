@@ -8,6 +8,8 @@ from pathlib import Path
 import stat
 from threading import Event, Thread
 
+from spice.errors import SpiceError
+
 
 @dataclass(frozen=True)
 class FileWatchSnapshot:
@@ -34,6 +36,8 @@ def start_exit_file_watch(
     if watched_path is None:
         return None
     path = Path(watched_path).expanduser()
+    if not path.exists():
+        raise SpiceError(f"spice serve --until path does not exist: {path}")
     print(f"spice serve: watching {path} for exit")
     thread = Thread(
         target=_stop_when_file_changes,
@@ -61,11 +65,15 @@ def _stop_when_file_changes(
     root = _watch_root_for(path)
     for changes in watch(
         root,
-        watch_filter=_include_change,
+        watch_filter=lambda change, changed_path: _include_change(
+            change,
+            changed_path,
+            target=target,
+        ),
         force_polling=False,
         debounce=50,
         stop_event=stop_event,
-        recursive=True,
+        recursive=False,
     ):
         if _changes_include_path(changes, target):
             print(f"spice serve: watched file changed; exiting ({path})")
@@ -74,10 +82,7 @@ def _stop_when_file_changes(
 
 
 def _watch_root_for(path: Path) -> Path:
-    candidate = path if path.is_dir() else path.parent
-    while not candidate.exists() and candidate != candidate.parent:
-        candidate = candidate.parent
-    return candidate
+    return path
 
 
 def _normalized_watch_path(path: Path) -> Path:
@@ -91,8 +96,8 @@ def _changes_include_path(changes: Iterable[tuple[object, str]], target: Path) -
     )
 
 
-def _include_change(_change: object, _path: str) -> bool:
-    return True
+def _include_change(_change: object, path: str, *, target: Path) -> bool:
+    return _normalized_watch_path(Path(path)) == target
 
 
 def snapshot_file_watch_path(path: Path) -> FileWatchSnapshot:
