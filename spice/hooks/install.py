@@ -79,6 +79,7 @@ def exclude_rows() -> list[str]:
 def init_repo(repo_root: Path) -> list[str]:
     """`spice init`: hooks, skill copy, state scaffolding."""
     from spice.agent.lifecycle import (
+        WORKTREE_SKILL_GITIGNORE_RELATIVE_PATH,
         WORKTREE_SKILL_RELATIVE_PATH,
         materialize_worktree_skill,
     )
@@ -86,6 +87,11 @@ def init_repo(repo_root: Path) -> list[str]:
     rows = install_hooks_for_repo(repo_root)
     if materialize_worktree_skill(repo_root) is not None:
         rows.append(f"skill={WORKTREE_SKILL_RELATIVE_PATH.as_posix()}")
+        skill_ignore = repo_root / WORKTREE_SKILL_GITIGNORE_RELATIVE_PATH
+        if skill_ignore.is_file():
+            rows.append(
+                f"skill_ignore={WORKTREE_SKILL_GITIGNORE_RELATIVE_PATH.as_posix()}"
+            )
     # `.spice/` and the materialized skill copy are machine-local; exclude
     # them in the *common* git dir so the rule holds for every worktree (a
     # linked worktree's `.git` is a file).
