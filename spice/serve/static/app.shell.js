@@ -78,6 +78,8 @@ let composerBandMenuDismissHandler = null;
 function createLaneState(targetId, hint = null, options = {}) {
   const emptyTeam = Boolean(options.emptyTeam);
   const target = targetById.get(targetId) || {};
+  const targetIdentity = target.targetIdentity || {};
+  const teamIdentity = target.teamIdentity || { state: "none" };
   const element = document.createElement("section");
   element.className = emptyTeam ? "lane lane--empty-team" : "lane";
   element.dataset.targetId = targetId;
@@ -104,12 +106,12 @@ function createLaneState(targetId, hint = null, options = {}) {
     element,
     closed: false,
     laneId: "lane:" + targetId,
-    agentName: target.agentName || "",
+    agentName: emptyTeam ? "" : targetIdentityAgentName(targetIdentity),
     branchName: emptyTeam
       ? "empty team"
-      : target.branch || target.displayName || targetId,
-    targetThreadId: target.threadId || "",
-    activeThreadId: target.threadId || "",
+      : targetIdentityBranch(targetIdentity),
+    targetThreadId: emptyTeam ? "" : targetIdentityThreadId(targetIdentity),
+    activeThreadId: emptyTeam ? "" : targetIdentityThreadId(targetIdentity),
     ...laneStreamState(target),
     speechMode: hint ? hint.speechMode : defaultSpeechMode,
     lifetime: target.lifetime || defaultAgentLifetime,
@@ -126,12 +128,12 @@ function createLaneState(targetId, hint = null, options = {}) {
     pendingLifetimeRequestId: 0,
     lifetimeRequestId: 0,
     privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),
-    teamId: target.teamId || "",
-    teamRevision: target.teamRevision || 0,
+    teamId: emptyTeam ? "" : teamIdentityTeamId(teamIdentity),
+    teamRevision: emptyTeam ? 0 : teamIdentityRevision(teamIdentity),
     emptyTeamCanClose: emptyTeam && Boolean(options.canClose),
     teamSplitBackAvailable: false,
     teamSplitBackMemberCount: 0,
-    configRevision: target.configRevision || 0,
+    configRevision: emptyTeam ? 0 : teamIdentityConfigRevision(teamIdentity),
     groupTopology: null,
     backendPendingInboxCount: 0,
     backendPendingInboxKeys: new Set(),
@@ -299,7 +301,9 @@ async function importTargetIntoEmptyTeam(lane, targetId) {
   await requestTeamCommand(
     teamCommandPayload("moveAgentToTeam", {
       teamId: lane.teamId,
-      agentId: canonicalThreadActorId(target.threadId) || target.id,
+      agentId:
+        canonicalThreadActorId(targetIdentityThreadId(target.targetIdentity)) ||
+        target.id,
       agentAliases: emptyTeamImportAliases(target),
     }),
   );
@@ -307,7 +311,9 @@ async function importTargetIntoEmptyTeam(lane, targetId) {
 }
 
 function emptyTeamImportAliases(target) {
-  const actor = canonicalThreadActorId(target.threadId);
+  const actor = canonicalThreadActorId(
+    targetIdentityThreadId(target.targetIdentity),
+  );
   return actor && actor !== target.id ? [target.id] : [];
 }
 

@@ -9,8 +9,7 @@
  * @property {string} id
  * @property {string=} displayName
  * @property {string=} branch
- * @property {string=} agentName
- * @property {string=} threadId
+ * @property {TargetIdentity} targetIdentity
  * @property {string[]=} taskFilters
  * @property {TaskFilterEntry[]=} taskFilterEntries
  * @property {string=} laneFilterVersion
@@ -18,13 +17,33 @@
  * @property {Object.<string, number>=} laneMetrics
  * @property {LaneInfo=} laneInfo
  * @property {number=} privateTaskCount
- * @property {string=} teamId
- * @property {number=} teamRevision
- * @property {number=} configRevision
+ * @property {TeamIdentity} teamIdentity
  * @property {string=} lifetime
  * @property {string[]=} pendingInboxKeys
  * @property {string=} pendingInboxRevision
  * @property {StatusLine=} statusLine
+ *
+ * @typedef {Object} TargetIdentity
+ * @property {string} targetId
+ * @property {string} worktreeName
+ * @property {string} branch
+ * @property {AgentIdentity} agent
+ * @property {ThreadIdentity} thread
+ *
+ * @typedef {Object} AgentIdentity
+ * @property {"configured"|"unconfigured"} state
+ * @property {string=} name
+ *
+ * @typedef {Object} ThreadIdentity
+ * @property {"bound"|"unbound"|"mismatch"} state
+ * @property {string=} threadId
+ * @property {string=} error
+ *
+ * @typedef {Object} TeamIdentity
+ * @property {"member"|"none"} state
+ * @property {string=} teamId
+ * @property {number=} teamRevision
+ * @property {number=} configRevision
  *
  * @typedef {Object} TaskFilterInventory
  * @property {TaskFilterRecord[]=} filters

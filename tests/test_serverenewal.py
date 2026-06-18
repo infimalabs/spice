@@ -120,9 +120,12 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
     result = payloads.work_trees_payload(state)
 
     work_tree = result["workTrees"][0]
-    assert work_tree["threadId"] == THREAD_B
-    assert work_tree["teamId"] == created.team_id
-    assert work_tree["teamRevision"] > created.revision
+    assert work_tree["targetIdentity"]["thread"] == {
+        "state": "bound",
+        "threadId": THREAD_B,
+    }
+    assert work_tree["teamIdentity"]["teamId"] == created.team_id
+    assert work_tree["teamIdentity"]["teamRevision"] > created.revision
     assert ensure_calls == [
         {
             "target": target,
@@ -173,9 +176,12 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
         state, target, limit=5, expected_thread_id=THREAD_A
     )
 
-    assert result["targetThreadId"] == THREAD_B
-    assert result["teamId"] == created.team_id
-    assert result["teamRevision"] > created.revision
+    assert result["targetIdentity"]["thread"] == {
+        "state": "bound",
+        "threadId": THREAD_B,
+    }
+    assert result["teamIdentity"]["teamId"] == created.team_id
+    assert result["teamIdentity"]["teamRevision"] > created.revision
     assert result["agentEnsure"]["threadId"] == THREAD_B
     assert message_threads == [THREAD_B]
     assert ensure_calls == [

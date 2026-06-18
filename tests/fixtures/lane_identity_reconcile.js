@@ -48,16 +48,16 @@ const lane = {
 };
 
 context.renderLaneChrome(lane, {
-  // Current backend snapshots send present-but-unbound identity fields this way;
-  // the frontend must not retain old lane identity when the snapshot is present.
-  targetBranch: "main-2",
-  targetAgentName: "",
-  targetThreadId: "",
+  targetIdentity: {
+    targetId: "main-2",
+    worktreeName: "main-2",
+    branch: "main-2",
+    agent: { state: "unconfigured" },
+    thread: { state: "unbound" },
+  },
   taskFilters: [],
   laneFilterVersion: "",
-  teamId: "",
-  teamRevision: 0,
-  configRevision: 0,
+  teamIdentity: { state: "none" },
   statusLine: { agentProcessStatus: "idle" },
 });
 
@@ -71,3 +71,52 @@ assert(lane.configRevision === 0, "present config revision replaces stale revisi
 assert(lane.taskFilters.length === 0, "present task filters replace stale filters");
 assert(lane.laneFilterVersion === "", "present filter version replaces stale version");
 assert(lane.pipEl.dataset.agentStatus === "idle", "idle status renders on lane");
+
+function assertThrows(fn, expectedMessage) {
+  try {
+    fn();
+  } catch (error) {
+    assert(
+      String(error && error.message).includes(expectedMessage),
+      "unexpected error: " + error,
+    );
+    return;
+  }
+  throw new Error("expected error containing: " + expectedMessage);
+}
+
+assertThrows(
+  () =>
+    context.renderLaneChrome({ ...lane }, {
+      targetIdentity: {
+        targetId: "main-2",
+        worktreeName: "main-2",
+        branch: "main-2",
+        agent: { state: "unconfigured" },
+        thread: { state: "bound", threadId: "" },
+      },
+      statusLine: {},
+    }),
+  "thread id must be non-empty",
+);
+
+assertThrows(
+  () =>
+    context.renderLaneChrome({ ...lane }, {
+      targetIdentity: {
+        targetId: "main-2",
+        worktreeName: "main-2",
+        branch: "main-2",
+        agent: { state: "unconfigured" },
+        thread: { state: "unbound" },
+      },
+      teamIdentity: {
+        state: "member",
+        teamId: "",
+        teamRevision: 1,
+        configRevision: 1,
+      },
+      statusLine: {},
+    }),
+  "team id must be non-empty",
+);

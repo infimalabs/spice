@@ -291,7 +291,8 @@ function messageIsFreshForInitialSpeech(lane, item) {
 
 function syncLaneThreadId(lane, payload) {
   const previous = lane.targetThreadId || "";
-  const next = payload.targetThreadId || "";
+  if (!payloadHasField(payload, "targetIdentity")) return false;
+  const next = targetIdentityThreadId(payload.targetIdentity);
   if (!next) return false;
   lane.targetThreadId = next;
   lane.activeThreadId = next;
@@ -300,7 +301,9 @@ function syncLaneThreadId(lane, payload) {
 }
 
 function mergePayloadMessages(lane, payload) {
-  const threadId = payload.targetThreadId || lane.activeThreadId || "";
+  const threadId = payloadHasField(payload, "targetIdentity")
+    ? targetIdentityThreadId(payload.targetIdentity)
+    : lane.activeThreadId || "";
   for (const item of [...(payload.messages || [])].reverse()) {
     stampMessageProducer(item, lane, threadId);
     upsertKnownMessage(lane, item, "newest");
@@ -309,7 +312,9 @@ function mergePayloadMessages(lane, payload) {
 }
 
 function mergeOlderPayloadMessages(lane, payload) {
-  const threadId = payload.targetThreadId || lane.activeThreadId || "";
+  const threadId = payloadHasField(payload, "targetIdentity")
+    ? targetIdentityThreadId(payload.targetIdentity)
+    : lane.activeThreadId || "";
   let added = 0;
   for (const item of payload.messages || []) {
     stampMessageProducer(item, lane, threadId);
@@ -700,15 +705,14 @@ function emptyTeamTargetFingerprint(target) {
   const statusLine = target.statusLine || {};
   return [
     target.id || "",
-    target.branch || "",
-    target.displayName || "",
-    target.threadId || "",
+    targetIdentityBranch(target.targetIdentity),
+    targetIdentityThreadId(target.targetIdentity),
     target.lastAssistantAt || "",
     statusLine.lastAssistantAt || "",
     target.pendingCount || 0,
     target.pendingInboxCount || 0,
     target.agentProcessStatus || "",
-    target.bindingStatus || "",
+    targetIdentityThreadState(target.targetIdentity),
   ];
 }
 
@@ -990,10 +994,16 @@ function applyTaskDrainRouteConfig(lane, result, options = {}) {
     lane.taskFilters = uniqueStringList(config.taskFilters);
     lane.laneFilterVersion = String(config.laneFilterVersion || "");
   }
-  if (config.teamId) lane.teamId = String(config.teamId);
+  if (payloadHasField(config, "teamIdentity")) {
+    lane.teamId = teamIdentityTeamId(config.teamIdentity);
+    lane.teamRevision = teamIdentityRevision(config.teamIdentity);
+    lane.configRevision = teamIdentityConfigRevision(config.teamIdentity);
+  }
   if (config.lifetime && taskDrainLifetimeResponseIsCurrent(lane, options))
     applyServerLaneLifetime(lane, config.lifetime, {
-      configRevision: config.configRevision,
+      configRevision: payloadHasField(config, "teamIdentity")
+        ? teamIdentityConfigRevision(config.teamIdentity)
+        : lane.configRevision,
       requestId: options.lifetimeRequestId,
       supersedePending: options.supersedePending,
     });

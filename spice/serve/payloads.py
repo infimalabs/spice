@@ -147,6 +147,108 @@ def team_facts_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
     }
 
 
+def target_identity_payload(
+    target: WorktreeTarget,
+    thread_id: str,
+    *,
+    binding_status: str = "",
+    binding_error: str = "",
+    agent_name: str | None = None,
+) -> dict[str, Any]:
+    status = binding_status or ("bound" if thread_id else "unbound")
+    payload = {
+        "targetId": _required_identity_string(target.id, "target id"),
+        "worktreeName": _required_identity_string(target.name, "worktree name"),
+        "branch": _required_identity_string(
+            target.branch or target.name,
+            "target branch",
+        ),
+        "agent": _agent_identity_payload(
+            _agent_name_for_target(target) if agent_name is None else agent_name
+        ),
+        "thread": _thread_identity_payload(
+            thread_id,
+            binding_status=status,
+            binding_error=binding_error,
+        ),
+    }
+    return payload
+
+
+def team_identity_payload(team_facts: dict[str, Any]) -> dict[str, Any]:
+    team_id = str(team_facts.get("teamId") or "").strip()
+    if not team_id:
+        return {"state": "none"}
+    return {
+        "state": "member",
+        "teamId": _required_identity_string(team_id, "team id"),
+        "teamRevision": _nonnegative_payload_int(
+            team_facts.get("teamRevision"),
+            "team revision",
+        ),
+        "configRevision": _nonnegative_payload_int(
+            team_facts.get("configRevision"),
+            "config revision",
+        ),
+    }
+
+
+def _agent_identity_payload(agent_name: str) -> dict[str, str]:
+    name = str(agent_name or "").strip()
+    if not name:
+        return {"state": "unconfigured"}
+    return {
+        "state": "configured",
+        "name": _required_identity_string(name, "agent name"),
+    }
+
+
+def _thread_identity_payload(
+    thread_id: str,
+    *,
+    binding_status: str,
+    binding_error: str = "",
+) -> dict[str, str]:
+    state = str(binding_status or "").strip()
+    if state == "unbound":
+        return {"state": "unbound"}
+    if state == "mismatch":
+        payload = {"state": "mismatch"}
+        thread = str(thread_id or "").strip()
+        if thread:
+            payload["threadId"] = _required_identity_string(thread, "thread id")
+        error = str(binding_error or "").strip()
+        if error:
+            payload["error"] = error
+        return payload
+    if state != "bound":
+        raise SpiceError(f"invalid thread identity state: {state or '-'}")
+    payload = {
+        "state": state,
+        "threadId": _required_identity_string(thread_id, "thread id"),
+    }
+    error = str(binding_error or "").strip()
+    if error:
+        payload["error"] = error
+    return payload
+
+
+def _required_identity_string(value: Any, label: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise SpiceError(f"{label} must be non-empty in identity payload")
+    return text
+
+
+def _nonnegative_payload_int(value: Any, label: str) -> int:
+    if value is None or value == "":
+        raise SpiceError(f"{label} is required in identity payload")
+    number = int(value)
+    if number < 0:
+        raise SpiceError(f"{label} must be non-negative in identity payload")
+    return number
+
+
 def renewal_intent_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
     if not actor:
         return renewal_intent_payload(None)
@@ -259,6 +361,8 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
         binding_error = agent_binding_error(target.repo_root, status)
         binding_status = _binding_status(thread_id, binding_error)
         team_facts = team_facts_for_actor(state.team_store, thread_id)
+        team_identity = team_identity_payload(team_facts)
+        agent_name = _agent_name_for_target(target)
         renewal_intent = renewal_intent_for_actor(state.team_store, thread_id)
         items, error = target_activity_items(target, thread_id)
         status_line = _status_line_payload_from_status(
@@ -275,19 +379,20 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
                 "repoRoot": str(target.repo_root),
                 "displayName": target.display_name,
                 "branch": target.branch or target.name,
-                "agentName": _agent_name_for_target(target),
-                "threadId": thread_id,
+                "targetIdentity": target_identity_payload(
+                    target,
+                    thread_id,
+                    binding_status=binding_status,
+                    binding_error=binding_error,
+                    agent_name=agent_name,
+                ),
                 "taskFilters": team_facts.get("taskFilters", []),
                 "laneFilterVersion": "",
-                "teamId": team_facts.get("teamId", ""),
-                "teamRevision": team_facts.get("teamRevision", 0),
-                "configRevision": team_facts.get("configRevision", 0),
+                "teamIdentity": team_identity,
                 "lifetime": team_facts.get("lifetime", ""),
                 "renewalIntent": renewal_intent,
                 "taskFilterInventory": inventory,
                 "laneInfo": _lane_info_payload(target, thread_id),
-                "bindingStatus": binding_status,
-                "bindingError": binding_error,
                 "pendingCount": pending,
                 "pendingLabel": str(pending),
                 **pending_identity,
@@ -467,19 +572,24 @@ def messages_payload_for_worktree(
             repo_root=target.repo_root,
         )
     team_facts = team_facts_for_actor(state.team_store, thread_id)
+    team_identity = team_identity_payload(team_facts)
     renewal_intent = renewal_intent_for_actor(state.team_store, thread_id)
     status = agent_status(target.repo_root)
+    binding_error = agent_binding_error(target.repo_root, status)
+    binding_status = _binding_status(thread_id, binding_error)
     return {
         "messages": [item.to_payload() for item in items],
         "targetWorktreeName": target.name,
         "targetBranch": target.branch or target.name,
-        "targetAgentName": _agent_name_for_target(target),
-        "targetThreadId": thread_id,
+        "targetIdentity": target_identity_payload(
+            target,
+            thread_id,
+            binding_status=binding_status,
+            binding_error=binding_error,
+        ),
         "taskFilters": team_facts.get("taskFilters", []),
         "laneFilterVersion": "",
-        "teamId": team_facts.get("teamId", ""),
-        "teamRevision": team_facts.get("teamRevision", 0),
-        "configRevision": team_facts.get("configRevision", 0),
+        "teamIdentity": team_identity,
         "lifetime": team_facts.get("lifetime", ""),
         "renewalIntent": renewal_intent,
         "taskFilterInventory": task_filter_inventory(),

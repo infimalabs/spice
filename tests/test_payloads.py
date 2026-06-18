@@ -5,6 +5,9 @@ from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 
+import pytest
+
+from spice.errors import SpiceError
 from spice.agent.renewal import RENEWAL_HANDOFF_REQUEST_SUFFIX
 from spice.mail.acks import archive_ackd_inbox_items
 from spice.mail.attachments import prepare_inbox_attachments
@@ -90,6 +93,20 @@ class _InventoryState(_State):
 
     def worktree_targets(self) -> list[_Target]:
         return [self._target]
+
+
+def test_target_identity_payload_rejects_blank_bound_thread_id():
+    with pytest.raises(SpiceError, match="thread id must be non-empty"):
+        payloads.target_identity_payload(
+            _Target(id="wt"),
+            "",
+            binding_status="bound",
+        )
+
+
+def test_team_identity_payload_rejects_missing_member_revisions():
+    with pytest.raises(SpiceError, match="team revision is required"):
+        payloads.team_identity_payload({"teamId": "team-1"})
 
 
 def _stamp(when: datetime) -> str:
@@ -475,13 +492,10 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         "messages",
         "targetWorktreeName",
         "targetBranch",
-        "targetAgentName",
-        "targetThreadId",
+        "targetIdentity",
         "taskFilters",
         "laneFilterVersion",
-        "teamId",
-        "teamRevision",
-        "configRevision",
+        "teamIdentity",
         "lifetime",
         "renewalIntent",
         "taskFilterInventory",
@@ -497,6 +511,9 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         "statusLine",
     }
     assert payload["messages"] == []
+    assert payload["targetIdentity"]["thread"] == {"state": "unbound"}
+    assert payload["targetIdentity"]["agent"] == {"state": "unconfigured"}
+    assert payload["teamIdentity"] == {"state": "none"}
     assert payload["pendingInboxCount"] == 1
     assert payload["pendingInboxLabel"] == "1"
     assert payload["pendingInboxKeys"] == [inbox_item_key(pending_name)]

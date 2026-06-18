@@ -77,14 +77,10 @@ function applyTargetsPayload(payload) {
 function targetPayloadShim(target) {
   if (!target) return { statusLine: {} };
   return {
-    targetBranch: target.branch || target.displayName || "",
-    targetAgentName: target.agentName || "",
-    targetThreadId: target.threadId || "",
+    targetIdentity: target.targetIdentity,
     taskFilters: target.taskFilters || [],
     laneFilterVersion: target.laneFilterVersion || "",
-    teamId: target.teamId || "",
-    teamRevision: target.teamRevision || 0,
-    configRevision: target.configRevision || 0,
+    teamIdentity: target.teamIdentity,
     lifetime: target.lifetime || "",
     renewalIntent: target.renewalIntent || {},
     taskFilterInventory: target.taskFilterInventory || {},
@@ -260,7 +256,7 @@ function teamMemberTargetId(member, team = null, claimedTargetIds = []) {
     return laneTargetId;
   }
   for (const target of targets) {
-    if (canonicalThreadActorId(target.threadId) === actorId)
+    if (canonicalThreadActorId(targetIdentityThreadId(target.targetIdentity)) === actorId)
       return target.id;
   }
   const renewedTargetId = renewedTeamSlotTargetId(team, agentId, claimedTargetIds);
@@ -290,9 +286,12 @@ function renewedTeamSlotTargetId(team, agentId, claimedTargetIds = []) {
     if (lane.emptyTeam || claimed.has(lane.targetId)) continue;
     const target = targetById.get(lane.targetId);
     if (!target) continue;
-    if (String(lane.teamId || target.teamId || "") !== teamId) continue;
+    if (String(lane.teamId || teamIdentityTeamId(target.teamIdentity)) !== teamId)
+      continue;
     const laneActorId = canonicalThreadActorId(
-      lane.targetThreadId || target.threadId || lane.activeThreadId,
+      lane.targetThreadId ||
+        targetIdentityThreadId(target.targetIdentity) ||
+        lane.activeThreadId,
     );
     if (!laneActorId || actorIds.has(laneActorId)) continue;
     candidates.push(lane.targetId);
@@ -304,7 +303,11 @@ function renewedTeamSlotTargetId(team, agentId, claimedTargetIds = []) {
 
 function renameTeamMemberTargetThread(targetId, agentId) {
   const target = targetById.get(targetId);
-  if (target) target.threadId = agentId;
+  if (target)
+    target.targetIdentity = {
+      ...(target.targetIdentity || {}),
+      thread: { state: "bound", threadId: agentId },
+    };
   const lane = laneStates.get(targetId);
   if (!lane) return;
   lane.targetThreadId = agentId;
@@ -320,9 +323,12 @@ function preserveUnresolvedTeamLanes(team, openTargetIds) {
     if (lane.emptyTeam) continue;
     const target = targetById.get(lane.targetId);
     if (!target) continue;
-    if (String(lane.teamId || target.teamId || "") !== teamId) continue;
+    if (String(lane.teamId || teamIdentityTeamId(target.teamIdentity)) !== teamId)
+      continue;
     const laneActorId = canonicalThreadActorId(
-      lane.targetThreadId || target.threadId || lane.activeThreadId,
+      lane.targetThreadId ||
+        targetIdentityThreadId(target.targetIdentity) ||
+        lane.activeThreadId,
     );
     if (laneActorId && actorIds.has(laneActorId)) continue;
     openTargetIds.add(lane.targetId);
@@ -376,7 +382,11 @@ function laneTeamAgentId(lane) {
   const actor = canonicalThreadActorId(lane.targetThreadId);
   if (actor) return actor;
   const target = targetById.get(lane.targetId);
-  return canonicalThreadActorId(target ? target.threadId : "") || lane.targetId;
+  return (
+    canonicalThreadActorId(
+      target ? targetIdentityThreadId(target.targetIdentity) : "",
+    ) || lane.targetId
+  );
 }
 
 function laneTeamAgentAliases(lane) {
@@ -406,7 +416,10 @@ async function openTargetTeam(targetId, options = {}) {
       const hint = laneHintsByTargetId().get(targetId);
       await requestTeamCommand(
         teamCommandPayload("createTeam", {
-          members: [canonicalThreadActorId(target.threadId) || targetId],
+          members: [
+            canonicalThreadActorId(targetIdentityThreadId(target.targetIdentity)) ||
+              targetId,
+          ],
           config: {
             ...defaultTeamConfig(),
             speechMode: hint ? hint.speechMode : defaultSpeechMode,
@@ -577,7 +590,7 @@ function setTargetChoiceStatusClass(button, status) {
 }
 
 function targetChoiceName(target) {
-  return target.branch || target.displayName || target.id;
+  return targetIdentityBranch(target.targetIdentity);
 }
 
 function targetChoiceMetadata(target) {
@@ -585,7 +598,7 @@ function targetChoiceMetadata(target) {
   if (laneStates.has(target.id)) parts.push("open");
   const activity = relativeTime(targetChoiceLastAssistantAt(target));
   if (activity) parts.push(activity.trim());
-  else if (!target.threadId) parts.push("never");
+  else if (!targetIdentityThreadId(target.targetIdentity)) parts.push("never");
   parts.push(targetChoiceStatusLabel(target));
   const pending = targetChoicePendingCount(target);
   if (pending > 0) parts.push(pending + " pending");
@@ -620,7 +633,7 @@ function targetChoiceStatusLine(target) {
     laneStatusLine.activityStatus || statusLine.activityStatus || "";
   merged.bindingStatus =
     laneStatusLine.bindingStatus ||
-    target.bindingStatus ||
+    targetIdentityThreadState(target.targetIdentity) ||
     statusLine.bindingStatus ||
     "";
   return merged;
@@ -668,7 +681,8 @@ function targetChoiceStatus(target) {
   if (visualStatus && visualStatus !== "unknown") return visualStatus;
   const processStatus = targetChoiceKnownStatus(statusLine.agentProcessStatus);
   if (processStatus && processStatus !== "unknown") return processStatus;
-  return statusLine.bindingStatus === "bound" || target.threadId
+  return statusLine.bindingStatus === "bound" ||
+    targetIdentityThreadId(target.targetIdentity)
     ? "bound"
     : "unbound";
 }

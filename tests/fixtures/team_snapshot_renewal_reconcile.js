@@ -1,10 +1,14 @@
 const fs = require("fs");
 const vm = require("vm");
 
-const lanesPath = process.argv[2];
+const renderPath = process.argv[2];
+const lanesPath = process.argv[3];
 const context = { console };
 
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
+  filename: "app.render.js",
+});
 vm.runInContext(fs.readFileSync(lanesPath, "utf8"), context, {
   filename: "app.lanes.js",
 });
@@ -55,6 +59,25 @@ function renewalTeam(memberThreadId) {
   };
 }
 
+function targetIdentity(threadId) {
+  return {
+    targetId: "target-1",
+    worktreeName: "target-1",
+    branch: "target-1",
+    agent: { state: "unconfigured" },
+    thread: { state: "bound", threadId },
+  };
+}
+
+function teamIdentity() {
+  return {
+    state: "member",
+    teamId: "team-1",
+    teamRevision: 1,
+    configRevision: 1,
+  };
+}
+
 function applySnapshot(team) {
   context.applyTeamSnapshotPayload(
     {
@@ -69,8 +92,8 @@ function applySnapshot(team) {
 resetGlobals();
 const staleTarget = {
   id: "target-1",
-  threadId: "predecessor-thread",
-  teamId: "team-1",
+  targetIdentity: targetIdentity("predecessor-thread"),
+  teamIdentity: teamIdentity(),
 };
 const renamedLane = {
   targetId: "target-1",
@@ -91,7 +114,7 @@ assert(
   "renewed successor stays attached to the existing worktree lane",
 );
 assert(
-  staleTarget.threadId === "successor-thread",
+  staleTarget.targetIdentity.thread.threadId === "successor-thread",
   "stale target inventory thread id is renamed in place to the successor",
 );
 assert(
@@ -106,8 +129,8 @@ assert(
 resetGlobals();
 const pendingTarget = {
   id: "target-1",
-  threadId: "predecessor-thread",
-  teamId: "team-1",
+  targetIdentity: targetIdentity("predecessor-thread"),
+  teamIdentity: teamIdentity(),
 };
 const pendingLane = {
   targetId: "target-1",
@@ -132,7 +155,7 @@ assert(
   "early renewal snapshot renames the lane thread id in place",
 );
 assert(
-  pendingTarget.threadId === "successor-thread",
+  pendingTarget.targetIdentity.thread.threadId === "successor-thread",
   "early renewal snapshot renames stale target inventory in place",
 );
 assert(

@@ -206,7 +206,7 @@ function spiceMenuTeamGroups(choices) {
   const grouped = new Map();
   const unassigned = [];
   for (const target of choices) {
-    const teamId = target.teamId || "";
+    const teamId = teamIdentityTeamId(target.teamIdentity);
     if (!teamId) {
       unassigned.push(target);
       continue;
@@ -214,7 +214,9 @@ function spiceMenuTeamGroups(choices) {
     if (!grouped.has(teamId)) {
       grouped.set(teamId, {
         teamId,
-        totalCount: targets.filter((item) => item.teamId === teamId).length,
+        totalCount: targets.filter(
+          (item) => teamIdentityTeamId(item.teamIdentity) === teamId,
+        ).length,
         targets: [],
         unassigned: false,
       });
@@ -629,18 +631,29 @@ function spiceMenuCanDropTargetOnTeamId(teamId, targetId) {
   if (!targetId) return false;
   const target = targetById.get(targetId);
   if (!target) return false;
-  return (target.teamId || "") !== (teamId || "");
+  return teamIdentityTeamId(target.teamIdentity) !== (teamId || "");
 }
 
 function moveTargetToMenuTeamOptimisticUi(teamId, targetId) {
   const target = targetById.get(targetId);
   if (!target) return;
-  if ((target.teamId || "") === (teamId || "")) return;
+  if (teamIdentityTeamId(target.teamIdentity) === (teamId || "")) return;
+  const teamIdentity = optimisticMenuTeamIdentity(teamId);
   targets = targets.map((item) =>
-    item.id === targetId ? { ...item, teamId: teamId || "" } : item,
+    item.id === targetId ? { ...item, teamIdentity } : item,
   );
   targetById = new Map(targets.map((item) => [item.id, item]));
   if (spiceMenuEl) renderSpiceMenu();
+}
+
+function optimisticMenuTeamIdentity(teamId) {
+  const id = String(teamId || "");
+  if (!id) return { state: "none" };
+  for (const target of targets) {
+    if (teamIdentityTeamId(target.teamIdentity) === id)
+      return { ...target.teamIdentity };
+  }
+  throw new Error("optimistic menu team identity requires existing team");
 }
 
 async function moveTargetToMenuTeam(teamId, targetId, sourceTarget = null) {
@@ -655,7 +668,7 @@ async function moveTargetToMenuTeam(teamId, targetId, sourceTarget = null) {
       }),
     );
   } else {
-    const currentTeamId = target.teamId || "";
+    const currentTeamId = teamIdentityTeamId(target.teamIdentity);
     if (!currentTeamId) throw new Error("remove target requires current team");
     await requestTeamCommand(
       teamCommandPayload("removeAgentFromTeam", {
@@ -675,10 +688,10 @@ function spiceMenuDropTeamId(container) {
 }
 
 function targetTeamAgentId(target) {
-  return canonicalThreadActorId(target.threadId) || target.id;
+  return canonicalThreadActorId(targetIdentityThreadId(target.targetIdentity)) || target.id;
 }
 
 function targetTeamAgentAliases(target) {
-  const actor = canonicalThreadActorId(target.threadId);
+  const actor = canonicalThreadActorId(targetIdentityThreadId(target.targetIdentity));
   return actor && actor !== target.id ? [target.id] : [];
 }

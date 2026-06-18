@@ -648,14 +648,14 @@ def test_static_empty_team_importer_renders_message_stream_choices():
     assert "function emptyTeamMessageFingerprint(lane)" in app_stream
     assert "targets: targets.map(emptyTeamTargetFingerprint)," in app_stream
     assert "function emptyTeamTargetFingerprint(target)" in app_stream
-    assert 'target.displayName || "",' in app_stream
-    assert 'target.threadId || "",' in app_stream
+    assert "targetIdentityBranch(target.targetIdentity)," in app_stream
+    assert "targetIdentityThreadId(target.targetIdentity)," in app_stream
     assert 'target.lastAssistantAt || "",' in app_stream
     assert 'statusLine.lastAssistantAt || "",' in app_stream
     assert "target.pendingCount || 0," in app_stream
     assert "target.pendingInboxCount || 0," in app_stream
     assert 'target.agentProcessStatus || "",' in app_stream
-    assert 'target.bindingStatus || "",' in app_stream
+    assert "targetIdentityThreadState(target.targetIdentity)," in app_stream
     assert (
         "lane.messagesEl.replaceChildren(\n"
         "    emptyTeamImportPanel(lane),\n"
