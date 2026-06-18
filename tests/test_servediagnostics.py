@@ -80,6 +80,30 @@ def test_team_diagnostics_include_requested_renewal_intent(tmp_path):
     assert f"renewal {AGENT_A} state=requested team={TEAM_ID}" in text
 
 
+def test_team_diagnostics_prunes_zero_activity_closed_teams(tmp_path):
+    store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
+    unused = store.create_team(team_id="team-unused", members=[AGENT_A])
+    closed_revision = store.remove_agent(unused.team_id, AGENT_A)
+
+    payload = team_diagnostics_payload(store=store)
+    text = render_team_diagnostics(payload)
+    open_team = payload["teams"][0]
+
+    assert payload["globalRevision"] > closed_revision
+    assert payload["closedTeams"] == []
+    assert [team["teamId"] for team in payload["teamRecords"]] == [open_team["teamId"]]
+    assert [event["kind"] for event in payload["events"]] == [
+        "createTeam",
+        "pruneZeroActivityTeams",
+    ]
+    assert payload["events"][-1]["payload"] == {
+        "count": 1,
+        "teams": ["team-unused"],
+    }
+    assert "revision=" in text
+    assert "kind=pruneZeroActivityTeams" in text
+
+
 def test_empty_team_diagnostics_have_stable_sections(tmp_path):
     store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
 

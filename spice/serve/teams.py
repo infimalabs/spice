@@ -47,6 +47,18 @@ from spice.serve.teamschema import (
     TEAM_SQLITE_BUSY_TIMEOUT_MS as TEAM_SQLITE_BUSY_TIMEOUT_MS,
 )
 
+ZERO_ACTIVITY_EVENT_KINDS = frozenset(
+    {
+        "createTeam",
+        "closeTeam",
+        "closeEmptyTeam",
+        "assignAgent",
+        "removeAgent",
+        "reorderTeamAgents",
+    }
+)
+PRUNE_EVENT_TEAM_ID = "__system__"
+
 
 @dataclass(frozen=True)
 class TeamTaskFilter:
@@ -213,6 +225,108 @@ class ServeTeamStore(TeamMetricStoreMixin):
     def global_revision(self) -> int:
         with self.connect() as connection:
             return self._current_revision_locked(connection)
+
+    def prune_zero_activity_closed_teams(self) -> tuple[str, ...]:
+        with self.connect() as connection:
+            return self._prune_zero_activity_closed_teams_locked(connection)
+
+    def _prune_zero_activity_closed_teams_locked(
+        self, connection: sqlite3.Connection
+    ) -> tuple[str, ...]:
+        rows = connection.execute(
+            "SELECT * FROM teams WHERE status = 'closed' ORDER BY created_at"
+        ).fetchall()
+        team_ids = tuple(
+            str(row["team_id"])
+            for row in rows
+            if self._closed_team_has_zero_activity_locked(connection, row)
+        )
+        if not team_ids:
+            return ()
+        placeholders = ",".join("?" for _ in team_ids)
+        for table in (
+            "memberships",
+            "team_task_filters",
+            "team_agent_history",
+            "team_merge_subgroups",
+            "team_agent_metrics",
+            "team_agent_metric_buckets",
+            "renewals",
+        ):
+            if table == "team_merge_subgroups":
+                connection.execute(
+                    "DELETE FROM team_merge_subgroups "
+                    f"WHERE parent_team_id IN ({placeholders}) "
+                    f"OR child_team_id IN ({placeholders})",
+                    (*team_ids, *team_ids),
+                )
+                continue
+            connection.execute(
+                f"DELETE FROM {table} WHERE team_id IN ({placeholders})", team_ids
+            )
+        connection.execute(
+            f"DELETE FROM events WHERE team_id IN ({placeholders})", team_ids
+        )
+        connection.execute(
+            f"DELETE FROM teams WHERE team_id IN ({placeholders})", team_ids
+        )
+        self._record_event(
+            connection,
+            "pruneZeroActivityTeams",
+            PRUNE_EVENT_TEAM_ID,
+            {"teams": list(team_ids), "count": len(team_ids)},
+        )
+        return team_ids
+
+    def _closed_team_has_zero_activity_locked(
+        self, connection: sqlite3.Connection, row: sqlite3.Row
+    ) -> bool:
+        team_id = str(row["team_id"])
+        if int(row["config_revision"] or 0):
+            return False
+        if _task_filter_projects_from_json(row["task_filters"]):
+            return False
+        if _shell_settings_from_json(row["shell_settings"]):
+            return False
+        if self._team_has_rows_locked(
+            connection, "team_task_filters", "team_id = ?", (team_id,)
+        ):
+            return False
+        if self._team_has_rows_locked(
+            connection, "renewals", "team_id = ?", (team_id,)
+        ):
+            return False
+        if self._team_has_rows_locked(
+            connection, "team_agent_metrics", "team_id = ?", (team_id,)
+        ):
+            return False
+        if self._team_has_rows_locked(
+            connection, "team_agent_metric_buckets", "team_id = ?", (team_id,)
+        ):
+            return False
+        if self._team_has_rows_locked(
+            connection,
+            "team_merge_subgroups",
+            "parent_team_id = ? OR child_team_id = ?",
+            (team_id, team_id),
+        ):
+            return False
+        events = connection.execute(
+            "SELECT DISTINCT kind FROM events WHERE team_id = ?", (team_id,)
+        ).fetchall()
+        return {str(event["kind"]) for event in events} <= ZERO_ACTIVITY_EVENT_KINDS
+
+    def _team_has_rows_locked(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        where: str,
+        params: tuple[Any, ...],
+    ) -> bool:
+        row = connection.execute(
+            f"SELECT 1 FROM {table} WHERE {where} LIMIT 1", params
+        ).fetchone()
+        return row is not None
 
     def _migrate_task_filter_sources_locked(
         self, connection: sqlite3.Connection
@@ -932,6 +1046,7 @@ class ServeTeamStore(TeamMetricStoreMixin):
 
     def team_snapshot(self, *, since_revision: int | None = None) -> TeamSnapshot:
         with self.connect() as connection:
+            self._prune_zero_activity_closed_teams_locked(connection)
             self._ensure_open_team_locked(connection)
             revision_row = connection.execute(
                 "SELECT MAX(revision) AS r FROM events"
@@ -1121,6 +1236,14 @@ def _task_filter_projects_from_json(raw: object) -> tuple[str, ...]:
     if not isinstance(values, list):
         return ()
     return _validated_task_filter_projects(str(item) for item in values)
+
+
+def _shell_settings_from_json(raw: object) -> dict[str, Any]:
+    try:
+        values = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return values if isinstance(values, dict) else {}
 
 
 def _team_subgroup_agent_ids(raw: object) -> tuple[str, ...]:
