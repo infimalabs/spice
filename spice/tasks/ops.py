@@ -752,12 +752,9 @@ def done(
         modify.append(f"judgment:{judgment}")
     tw.run(modify)
     result = _advance(identity.resolve(handle))
-    next_line = "next: run spice task next"
+    next_line = _next_task_drain_line()
     if result.endswith(" -> review"):
-        next_line = (
-            "next: run spice task next "
-            "(reviewer assignment; self-review only if next assigns it)"
-        )
+        next_line = _next_task_drain_line(review_assignment=True)
     return f"{result}\n{next_line}"
 
 
@@ -819,8 +816,21 @@ def review(
     lines = [f"reviewed {identity.render_handle(row)} {finding}; {result}"]
     lines += [f"spawned {h}" for h in spawned]
     lines += [f"linked {h}" for h in linked]
-    lines.append("next: run spice task next")
+    lines.append(_next_task_drain_line())
     return "\n".join(lines)
+
+
+def _next_task_drain_line(*, review_assignment: bool = False) -> str:
+    tail = (
+        "keep working until no allocator-selected work remains or a real blocker exists"
+    )
+    if review_assignment:
+        return (
+            "next: YOU ARE NOT DONE. Run spice task next for reviewer assignment; "
+            "self-review only if next assigns it; "
+            f"{tail}"
+        )
+    return f"next: YOU ARE NOT DONE. Run spice task next; {tail}"
 
 
 def _spawn_followup(spec: str, *, after_uuid: str) -> str:
