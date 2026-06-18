@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 node_modules/
 *.egg-info/
+build/
 .ruff_cache/
 .pytest_cache/
 .playwright-mcp/
