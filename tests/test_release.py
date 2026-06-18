@@ -18,17 +18,33 @@ def test_release_parser_accepts_prepare_notes_publish_and_one_pass():
     prepare = parser.parse_args(["prepare", "minor"])
     notes = parser.parse_args(["notes", "0.3.0", "--output", "notes.md"])
     publish = parser.parse_args(["publish", "--notes-file", "curated.md"])
-    one_pass = parser.parse_args(["patch"])
+    one_pass = parser.parse_args(["minor"])
 
     assert prepare.release_mode == "prepare"
     assert prepare.bump == "minor"
+    assert release.BUMP_CHOICES == ("minor", "patch")
     assert notes.release_mode == "notes"
     assert notes.version == "0.3.0"
     assert notes.output == Path("notes.md")
     assert publish.release_mode == "publish"
     assert publish.notes_file == Path("curated.md")
     assert one_pass.release_mode == "release"
-    assert one_pass.bump == "patch"
+    assert one_pass.bump == "minor"
+
+
+def test_release_docs_do_not_use_patch_as_example():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    release_section = readme.split("## Release", 1)[1].split("## Status", 1)[0]
+    help_text = build_release_parser().format_help()
+
+    assert "{minor,patch,prepare,notes,publish,github}" in help_text
+    assert "spice release prepare patch" not in release_section
+    assert "spice release patch" not in release_section
+    assert "spice release prepare minor" in release_section
+    assert "spice release minor" in release_section
+    assert release_section.index("Use a minor release") < release_section.index(
+        "Use a patch release"
+    )
 
 
 def test_repo_mounts_release_command(tmp_path):

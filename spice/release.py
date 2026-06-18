@@ -17,7 +17,7 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 
-BUMP_CHOICES = ("patch", "minor")
+BUMP_CHOICES = ("minor", "patch")
 PYPI_POLL_ATTEMPTS = 20
 PYPI_POLL_SECONDS = 3
 PYPI_URL = "https://pypi.org/pypi/spice-harness/json"

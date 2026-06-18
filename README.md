@@ -306,11 +306,10 @@ Releases are cut from a clean `main` worktree with this repository's mounted
 without competing with a spice built-in.
 
 ```sh
-spice release prepare patch   # bump, validate, commit, stop before publish
+spice release prepare minor   # bump, validate, commit, stop before publish
 spice release notes > /tmp/spice-release-notes.md
 spice release publish --notes-file /tmp/spice-release-notes.md
-spice release patch           # one-pass bump, validate, commit, publish
-spice release minor           # same flow for a minor release
+spice release minor           # one-pass bump, validate, commit, publish
 ```
 
 For curated GitHub release notes, generate the draft after `prepare` and edit
@@ -319,17 +318,17 @@ first-parent commits in the exact previous-release-tag-to-release-commit range,
 grouped by landed task project metadata, rewritten into highlight-style bullets,
 and records that range in the package notes.
 
-Use a patch release when the shipped contract is unchanged: bug fixes,
-documentation clarifications, packaging fixes, or internal test/build/tooling
-changes that do not give operators a new capability and do not alter CLI,
-configuration, UI, task/session semantics, or the public library seam.
-
 Use a minor release when users can do something new or observe changed
 behavior: new commands or flags, new configuration, new `spice serve` or task
 workflow behavior, additions to the public library seam, changed output or
 artifacts, or any compatibility break while the project only has patch/minor
 release lanes. If a release contains both patch-level fixes and minor-level
 surface changes, choose minor.
+
+Use a patch release only when the shipped contract is unchanged: bug fixes,
+documentation clarifications, packaging fixes, or internal test/build/tooling
+changes that do not give operators a new capability and do not alter CLI,
+configuration, UI, task/session semantics, or the public library seam.
 
 ## Status
 
