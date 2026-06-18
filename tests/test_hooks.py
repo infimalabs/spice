@@ -607,6 +607,7 @@ def test_serve_web_typecheck_invokes_typescript_checkjs(tmp_path, monkeypatch):
     assert "--checkJs" in argv
     assert "--noEmit" in argv
     assert "spice/serve/static/app.types.js" in argv
+    assert "spice/serve/static/app.menu.js" in argv
     assert "spice/serve/static/app.js" in argv
     assert kwargs["cwd"] == tmp_path
 

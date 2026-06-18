@@ -45,6 +45,8 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert "Simultaneous Production, Integration, and Control Environment" not in html
     assert "<h1>spice</h1>" not in html
     assert ">+</button>" not in html
+    assert html.index("/static/app.lanes.js") < html.index("/static/app.menu.js")
+    assert html.index("/static/app.menu.js") < html.index("/static/app.shell.js")
     assert 'aria-label="Open teams"' in html
     assert 'id="open-lane" class="spice-menu-button"' in html
     assert 'aria-haspopup="menu" aria-expanded="false"' in html
@@ -162,13 +164,13 @@ def test_index_branding_defaults_to_project_name_and_allows_explicit_override(
 
 def test_static_branding_config_feeds_fast_mode_and_audio_titles():
     app_types = (STATIC_ROOT / "app.types.js").read_text(encoding="utf-8")
-    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_menu = (STATIC_ROOT / "app.menu.js").read_text(encoding="utf-8")
     app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
 
     assert "@typedef {Object} ServeBranding" in app_types
     assert "var spiceServeBranding;" in app_types
-    assert 'serveBrandMenuTitle() + " - fast mode on"' in app_lanes
-    assert ": serveBrandMenuTitle();" in app_lanes
+    assert 'serveBrandMenuTitle() + " - fast mode on"' in app_menu
+    assert ": serveBrandMenuTitle();" in app_menu
     assert "spiceServeBranding.name" in app_audio
     assert "artist: defaultDocumentTitle" in app_audio
 
@@ -305,12 +307,15 @@ def test_static_spice_menu_replaces_picker_lane():
     css = _serve_css_text()
     app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_menu = (STATIC_ROOT / "app.menu.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_static = app_lanes + app_menu
 
     assert "let spiceMenuEl = null;" in app_js
     assert 'let spiceMenuDragTargetId = "";' in app_js
+    assert "let spiceMenuRenderPending = false;" in app_js
     assert "let fastModeEnabled = false;" in app_js
-    assert "function openSpiceMenu()" in app_lanes
+    assert "function openSpiceMenu()" in app_menu
     assert "function laneStateTargetIds()" in app_lanes
     assert "function sameStringSets(left, right)" in app_lanes
     assert (
@@ -321,102 +326,104 @@ def test_static_spice_menu_replaces_picker_lane():
         'lane.element.scrollIntoView({ block: "nearest", inline: "nearest" });'
         in app_lanes
     )
-    assert "if (laneStates.size) closeSpiceMenu();" not in app_lanes
-    assert "function setFastModeEnabled(enabled)" in app_lanes
-    assert "function createEmptyTeamFromMenu()" in app_lanes
-    assert "function spiceMenuTeamGroups(choices)" in app_lanes
-    assert "function renderSpiceMenuTeamGroup(group)" in app_lanes
-    assert "function spiceMenuTeamDetail(group)" in app_lanes
-    assert "function compareSpiceMenuTargetChoices(left, right)" in app_lanes
-    assert "function spiceMenuTeamSortKey(group)" in app_lanes
-    assert "function wireSpiceMenuTargetDrag(button, target)" in app_lanes
-    assert "function wireSpiceMenuTeamDropTarget(container, group)" in app_lanes
-    assert "function moveTargetToMenuTeam(teamId, targetId)" in app_lanes
-    assert "const buttonRect = openLaneButton.getBoundingClientRect();" in app_lanes
-    assert "const top = Math.max(margin, buttonRect.bottom + margin);" in app_lanes
+    assert "if (laneStates.size) closeSpiceMenu();" not in app_static
+    assert "function setFastModeEnabled(enabled)" in app_menu
+    assert "function createEmptyTeamFromMenu()" in app_menu
+    assert "function spiceMenuTeamGroups(choices)" in app_menu
+    assert "function renderSpiceMenuTeamGroup(group)" in app_menu
+    assert "function spiceMenuTeamDetail(group)" in app_menu
+    assert "function compareSpiceMenuTargetChoices(left, right)" in app_menu
+    assert "function spiceMenuTeamSortKey(group)" in app_menu
+    assert "function wireSpiceMenuTargetDrag(button, target)" in app_menu
+    assert "function wireSpiceMenuTeamDropTarget(container, group)" in app_menu
+    assert (
+        "function moveTargetToMenuTeam(teamId, targetId, sourceTarget = null)"
+        in app_menu
+    )
+    assert "const buttonRect = openLaneButton.getBoundingClientRect();" in app_menu
+    assert "const top = Math.max(margin, buttonRect.bottom + margin);" in app_menu
     assert (
         "const width = spiceMenuWidthForButton(buttonRect, viewportWidth, margin);"
-        in app_lanes
+        in app_menu
     )
     assert (
         "const left = spiceMenuLeftForButton(buttonRect, width, viewportWidth, margin);"
-        in app_lanes
+        in app_menu
     )
-    assert "spiceMenuMinimumLaneWidthPx()" in app_lanes
+    assert "spiceMenuMinimumLaneWidthPx()" in app_menu
     assert (
         "function spiceMenuWidthForButton(buttonRect, viewportWidth, margin)"
-        in app_lanes
+        in app_menu
     )
-    assert "Math.max(spiceMenuMinimumLaneWidthPx(), buttonRect.width)" in app_lanes
+    assert "Math.max(spiceMenuMinimumLaneWidthPx(), buttonRect.width)" in app_menu
     assert (
         "function spiceMenuLeftForButton(buttonRect, width, viewportWidth, margin)"
-        in app_lanes
+        in app_menu
     )
-    assert "const rightAlignedLeft = buttonRect.right - width;" in app_lanes
-    assert "Math.min(rightAlignedLeft, viewportWidth - width - margin)" in app_lanes
-    team_groups_start = app_lanes.index("function spiceMenuTeamGroups(choices)")
-    team_groups_end = app_lanes.index(
+    assert "const rightAlignedLeft = buttonRect.right - width;" in app_menu
+    assert "Math.min(rightAlignedLeft, viewportWidth - width - margin)" in app_menu
+    team_groups_start = app_menu.index("function spiceMenuTeamGroups(choices)")
+    team_groups_end = app_menu.index(
         "function renderSpiceMenuTeamGroup(group)", team_groups_start
     )
-    team_groups_block = app_lanes[team_groups_start:team_groups_end]
+    team_groups_block = app_menu[team_groups_start:team_groups_end]
     assert ".sort(compareSpiceMenuTargetChoices);" in team_groups_block
     assert "group.targets.sort(compareSpiceMenuTargetChoices);" in team_groups_block
     assert "unassigned.sort(compareSpiceMenuTargetChoices);" in team_groups_block
     assert "compareTargetChoices" not in team_groups_block
-    compare_groups_start = app_lanes.index(
+    compare_groups_start = app_menu.index(
         "function compareSpiceMenuTeamGroups(left, right)"
     )
-    compare_groups_end = app_lanes.index(
+    compare_groups_end = app_menu.index(
         "function renderSpiceMenuTeamGroup(group)", compare_groups_start
     )
-    compare_groups_block = app_lanes[compare_groups_start:compare_groups_end]
+    compare_groups_block = app_menu[compare_groups_start:compare_groups_end]
     assert "spiceMenuTeamSortKey(left)" in compare_groups_block
     assert "spiceMenuTeamSortKey(right)" in compare_groups_block
     assert "compareTargetChoices" not in compare_groups_block
-    assert "function spiceMenuUsesViewportWidth(viewportWidth)" in app_lanes
-    assert "return viewportWidth < spiceMenuMinimumLaneWidthPx() + 20;" in app_lanes
+    assert "function spiceMenuUsesViewportWidth(viewportWidth)" in app_menu
+    assert "return viewportWidth < spiceMenuMinimumLaneWidthPx() + 20;" in app_menu
     assert (
         "if (spiceMenuUsesViewportWidth(viewportWidth)) return viewportWidth;"
-        in app_lanes
+        in app_menu
     )
-    assert "if (spiceMenuUsesViewportWidth(viewportWidth)) return 0;" in app_lanes
-    assert 'spiceMenuEl.style.height = "";' in app_lanes
-    assert 'spiceMenuEl.style.maxHeight = height + "px";' in app_lanes
-    assert 'className = "lane picker"' not in app_lanes
-    assert "openPickerLane" not in app_lanes
+    assert "if (spiceMenuUsesViewportWidth(viewportWidth)) return 0;" in app_menu
+    assert 'spiceMenuEl.style.height = "";' in app_menu
+    assert 'spiceMenuEl.style.maxHeight = height + "px";' in app_menu
+    assert 'className = "lane picker"' not in app_static
+    assert "openPickerLane" not in app_static
     assert "renderPickerChoices" not in app_shell
     assert ".spice-context-menu" in css
     assert ".picker" not in css
 
 
 def test_static_spice_menu_team_groups_and_actions():
+    app_menu = (STATIC_ROOT / "app.menu.js").read_text(encoding="utf-8")
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     css = _serve_css_text()
 
     assert (
         'teamCommandPayload("createTeam", {\n      config: defaultTeamConfig(),'
-        in app_lanes
+        in app_menu
     )
-    assert 'heading.textContent = "open team";' in app_lanes
-    assert '? "loading teams"\n      : "team list unavailable";' in app_lanes
-    assert 'list.textContent = "no agents available";' in app_lanes
+    assert 'heading.textContent = "open team";' in app_menu
+    assert '? "loading teams"\n      : "team list unavailable";' in app_menu
+    assert 'list.textContent = "no agents available";' in app_menu
     assert (
-        'label.textContent = group.unassigned\n    ? "agents without team"' in app_lanes
+        'label.textContent = group.unassigned\n    ? "agents without team"' in app_menu
     )
-    assert '    ? "drop here to remove from team"' in app_lanes
-    assert "function spiceMenuEmptyUnassignedDropHint()" in app_lanes
-    assert 'hint.className = "spice-menu-team-empty-drop";' in app_lanes
-    assert 'hint.textContent = "Drop agent here";' in app_lanes
-    assert "wireSpiceMenuTeamDropTarget(container, group);" in app_lanes
-    assert '"open any member; " + count + " agents open together"' in app_lanes
-    assert "const alreadyOpen = laneStates.has(target.id);" in app_lanes
-    assert 'if (alreadyOpen) actionLabel = "Show team";' in app_lanes
-    assert (
-        'else if (group && !group.unassigned) actionLabel = "Open team";' in app_lanes
-    )
-    assert 'button.classList.toggle("target-choice--open", alreadyOpen);' in app_lanes
+    assert '    ? "drop here to remove from team"' in app_menu
+    assert "function spiceMenuEmptyUnassignedDropHint()" in app_menu
+    assert 'hint.className = "spice-menu-team-empty-drop";' in app_menu
+    assert 'hint.textContent = "Drop agent here";' in app_menu
+    assert "wireSpiceMenuTeamDropTarget(container, group);" in app_menu
+    assert '"open any member; " + count + " agents open together"' in app_menu
+    assert "const alreadyOpen = laneStates.has(target.id);" in app_menu
+    assert 'if (alreadyOpen) actionLabel = "Show team";' in app_menu
+    assert 'else if (group && !group.unassigned) actionLabel = "Open team";' in app_menu
+    assert 'button.classList.toggle("target-choice--open", alreadyOpen);' in app_menu
     assert 'if (laneStates.has(target.id)) parts.push("open");' in app_lanes
-    assert 'setGlobalTransientStatus("open team failed");' in app_lanes
+    assert 'setGlobalTransientStatus("open team failed");' in app_menu
     assert (
         'function targetChoiceButton(target, actionLabel, onClick, role = "menuitem")'
         in app_lanes
@@ -451,52 +458,59 @@ def test_static_spice_menu_target_metadata_and_status_update_live():
 
 
 def test_static_spice_menu_drag_manages_team_membership():
-    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_menu = (STATIC_ROOT / "app.menu.js").read_text(encoding="utf-8")
     css = _serve_css_text()
 
-    assert "wireSpiceMenuTargetDrag(button, target);" in app_lanes
-    assert 'button.style.touchAction = "none";' in app_lanes
-    assert 'button.addEventListener("click", (event) => {' in app_lanes
-    assert "suppressNextClick = true;" in app_lanes
-    assert "button.setPointerCapture(event.pointerId);" in app_lanes
-    assert "spiceMenuTargetDragState = {" in app_lanes
-    assert "state.dragGhost = createSpiceMenuTargetDragGhost(button);" in app_lanes
-    assert "updateSpiceMenuTargetDragGhost(state, event);" in app_lanes
-    assert "function spiceMenuTargetDragMatches(state, event, targetId)" in app_lanes
-    assert "function clearSpiceMenuTargetDrag()" in app_lanes
-    assert "function createSpiceMenuTargetDragGhost(button)" in app_lanes
-    assert 'ghost.classList.add("target-choice-drag-ghost");' in app_lanes
-    assert "function updateSpiceMenuTargetDragGhost(state, event)" in app_lanes
-    assert "state.dragGhost?.remove();" in app_lanes
-    assert 'button.addEventListener("pointerdown", (event) => {' in app_lanes
-    assert 'button.addEventListener("pointermove", (event) => {' in app_lanes
-    assert 'button.addEventListener("pointerup", (event) => {' in app_lanes
-    assert 'button.addEventListener("pointercancel", (event) => {' in app_lanes
-    assert "Math.abs(dx) < 6 && Math.abs(dy) < 6" in app_lanes
-    assert (
-        "const el = document.elementFromPoint(event.clientX, event.clientY);"
-        in app_lanes
-    )
-    assert "container.dataset.spiceMenuTeamId = group.teamId;" in app_lanes
+    assert "wireSpiceMenuTargetDrag(button, target);" in app_menu
+    assert 'button.style.touchAction = "none";' in app_menu
+    assert 'button.addEventListener("click", (event) => {' in app_menu
+    assert "suppressNextClick = true;" in app_menu
+    assert "button.setPointerCapture(event.pointerId);" in app_menu
+    assert "const state = {" in app_menu
+    assert "spiceMenuTargetDragState = state;" in app_menu
+    assert "state.dragGhost = createSpiceMenuTargetDragGhost(state.button);" in app_menu
+    assert "updateSpiceMenuTargetDragGhost(state, event);" in app_menu
+    assert "function spiceMenuTargetDragMatches(state, event, targetId)" in app_menu
+    assert "function wireSpiceMenuTargetPointerDocumentEvents(target)" in app_menu
+    assert "function updateSpiceMenuTargetDragFromEvent(event, target" in app_menu
+    assert "function finishSpiceMenuTargetDragFromEvent(event, target)" in app_menu
+    assert "function suppressNextSpiceMenuDragClick()" in app_menu
+    assert "function moveTargetToMenuTeamOptimisticUi(teamId, targetId)" in app_menu
+    assert "function clearSpiceMenuTargetDrag()" in app_menu
+    assert "function createSpiceMenuTargetDragGhost(button)" in app_menu
+    assert 'ghost.classList.add("target-choice-drag-ghost");' in app_menu
+    assert "function updateSpiceMenuTargetDragGhost(state, event)" in app_menu
+    assert "state.dragGhost?.remove();" in app_menu
+    assert 'button.addEventListener("pointerdown", (event) => {' in app_menu
+    assert 'button.addEventListener("pointermove", (event) => {' in app_menu
+    assert 'button.addEventListener("pointerup", (event) => {' in app_menu
+    assert 'button.addEventListener("pointercancel", (event) => {' in app_menu
+    assert "Math.abs(dx) < 6 && Math.abs(dy) < 6" in app_menu
+    assert "const el = document.elementFromPoint(clientX, clientY);" in app_menu
+    assert "container.dataset.spiceMenuTeamId = group.teamId;" in app_menu
     assert (
         'container.dataset.spiceMenuUnassigned = group.unassigned ? "true" : "false";'
-        in app_lanes
+        in app_menu
     )
-    assert "function spiceMenuDropTeamId(container)" in app_lanes
-    assert 'container.classList.add("spice-menu-team--drop-ready");' in app_lanes
-    assert "moveTargetToMenuTeam(teamId, target.id).catch(() => {" in app_lanes
-    assert 'teamCommandPayload("moveAgentToTeam", {' in app_lanes
-    assert 'teamCommandPayload("removeAgentFromTeam", {' in app_lanes
-    assert "agentId: targetTeamAgentId(target)," in app_lanes
-    assert "agentAliases: targetTeamAgentAliases(target)," in app_lanes
-    assert "await refreshServerTopology();" in app_lanes
+    assert "function spiceMenuDropTeamId(container)" in app_menu
+    assert 'container.classList.add("spice-menu-team--drop-ready");' in app_menu
+    assert "moveTargetToMenuTeamOptimisticUi(menuDropTeamId, target.id);" in app_menu
+    assert (
+        "moveTargetToMenuTeam(menuDropTeamId, target.id, sourceTarget).catch(() => {"
+        in app_menu
+    )
+    assert 'teamCommandPayload("moveAgentToTeam", {' in app_menu
+    assert 'teamCommandPayload("removeAgentFromTeam", {' in app_menu
+    assert "agentId: targetTeamAgentId(target)," in app_menu
+    assert "agentAliases: targetTeamAgentAliases(target)," in app_menu
+    assert "await refreshServerTopology();" in app_menu
     assert (
         'setGlobalTransientStatus(teamId ? "team updated" : "agent removed from team");'
-        in app_lanes
+        in app_menu
     )
     assert (
-        'setGlobalTransientStatus(\n          teamId ? "move to team failed" : "remove from team failed",'
-        in app_lanes
+        'menuDropTeamId ? "move to team failed" : "remove from team failed",'
+        in app_menu
     )
     assert ".target-choice--draggable" in css
     assert ".target-choice--dragging {" in css
