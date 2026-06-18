@@ -14,6 +14,7 @@ SERVE_WEB_JS_PATHS = (
     "spice/serve/static/app.render.js",
     "spice/serve/static/app.stream.js",
     "spice/serve/static/app.lanes.js",
+    "spice/serve/static/app.menu.js",
     "spice/serve/static/app.shell.js",
     "spice/serve/static/app.composer.js",
     "spice/serve/static/app.controls.js",
