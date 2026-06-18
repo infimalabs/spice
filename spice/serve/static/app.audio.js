@@ -28,7 +28,12 @@ let playbackGeneration = 0;
 // and clears the entire queue.
 const intentionallyPaused = new WeakSet();
 const defaultDocumentTitle =
-  String(spiceServeBranding.name || "spice").trim() || "spice";
+  String(
+    (typeof spiceServeBranding === "object" &&
+      spiceServeBranding &&
+      spiceServeBranding.name) ||
+      "spice",
+  ).trim() || "spice";
 const speechQueueBacklogClearThreshold = 2;
 const hoursPerHalfDay = 12;
 const gitHashContextChars = 16;
