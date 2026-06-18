@@ -1,5 +1,4 @@
 .spice/
-.agents/skills/spice/SKILL.md
 __pycache__/
 *.pyc
 .venv/
