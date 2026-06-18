@@ -131,14 +131,14 @@ tracked config, either by editing `pyproject.toml` or by running
 
 ```toml
 [tool.spice.agent]
-model = "gpt-5.4"
-effort = "low"
+model = "gpt-5.5"
+effort = "xhigh"
 ```
 
 An operator can override those defaults for just the current worktree:
 
 ```sh
-spice config agent --scope worktree --model gpt-5.4 --effort low
+spice config agent --scope worktree --model gpt-5.5 --effort xhigh
 ```
 
 Resolution order is explicit launch flags, then worktree config, then tracked
