@@ -71,6 +71,38 @@ def test_task_done_and_review_outputs_keep_draining_guidance(task_repo, monkeypa
     )
 
 
+def test_task_claim_outputs_drive_to_completion_guidance(task_repo):
+    assert task_repo.is_dir()
+    handle = ops.add(
+        "Exercise task claim guidance",
+        project="task.guidance",
+        priority="medium",
+        acceptance=["claim guidance is explicit"],
+    )
+
+    claim_output = ops.claim(handle)
+
+    assert ops.claim_drive_line(handle) in claim_output
+
+
+def test_task_next_output_drives_allocated_task_to_completion(task_repo, monkeypatch):
+    assert task_repo.is_dir()
+    next_handle = ops.add(
+        "Exercise next allocation guidance",
+        project="task.guidance",
+        priority="medium",
+        acceptance=["next allocation guidance is explicit"],
+    )
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.guidance"], "lifetime": "Drive"},
+    )
+
+    next_output = render.render_next()
+
+    assert ops.claim_drive_line(next_handle) in next_output
+
+
 def _init_repo(path: Path) -> Path:
     path.mkdir()
     _run(path, "git", "init", "-b", "main")

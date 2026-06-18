@@ -478,9 +478,17 @@ def claim(handle: str, *, steal: bool = False) -> str:
         annotate(uuid, f"claim stolen: {owner} -> {actor}")
     _subscribe_claim_project(row, actor)
     handle_text = identity.render_handle(identity.resolve(handle))
+    claim_lines = [handle_text, claim_drive_line(handle_text)]
     if notes:
-        return "\n".join([*(f"task: {n}" for n in notes), handle_text])
-    return handle_text
+        return "\n".join([*(f"task: {n}" for n in notes), *claim_lines])
+    return "\n".join(claim_lines)
+
+
+def claim_drive_line(handle: str) -> str:
+    return (
+        f"drive: continue {handle}; drive the current phase to completion "
+        "with normal validation"
+    )
 
 
 def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
