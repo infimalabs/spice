@@ -804,8 +804,8 @@ function setFastModeEnabled(enabled) {
   fastModeEnabled = Boolean(enabled);
   openLaneButton.classList.toggle("spice-menu-button--fast", fastModeEnabled);
   openLaneButton.title = fastModeEnabled
-    ? "Open spice menu - fast mode on"
-    : "Open spice menu";
+    ? serveBrandMenuTitle() + " - fast mode on"
+    : serveBrandMenuTitle();
   renderSpiceMenu();
   configureLiveBusLanes();
   setGlobalTransientStatus(fastModeEnabled ? "fast mode on" : "fast mode off");

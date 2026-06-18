@@ -80,4 +80,10 @@
  * @property {string=} timestamp
  * @property {number=} ack_count
  * @property {MessageAttachment[]=} attachments
+ *
+ * @typedef {Object} ServeBranding
+ * @property {string=} name
  */
+
+/** @type {ServeBranding} */
+var spiceServeBranding;

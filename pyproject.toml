@@ -57,5 +57,8 @@ package_roots = ["spice"]
 [tool.spice.tasks]
 stems = ["session", "mail", "hooks", "studies", "cli", "lifecycle", "tests"]
 
+[tool.spice.serve]
+brand = "spice"
+
 [tool.spice.commands]
 release = ["uv", "run", "python", "-m", "spice.release"]

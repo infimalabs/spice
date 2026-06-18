@@ -585,7 +585,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
             self._send_text(serve_metrics_text(self.state), METRICS_CONTENT_TYPE)
             return
         if parsed.path == "/":
-            self._send_html(render_index_html())
+            self._send_html(render_index_html(self.state.anchor_root))
             return
         if parsed.path.startswith(STATIC_ASSET_ROUTE_PREFIX):
             send_static_asset(self, parsed.path.removeprefix(STATIC_ASSET_ROUTE_PREFIX))

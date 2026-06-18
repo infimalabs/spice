@@ -226,6 +226,9 @@ agents into a single Drive lane, split worktrees into parallel lanes, route by
 task filter, show live transcript attachments, and expose the control surfaces
 needed to steer or audit a running session.
 
+The serve header and browser title default to `[project].name` from
+`pyproject.toml`; set `[tool.spice.serve] brand = "Name"` to override them.
+
 | Compose and route | Parallel lanes |
 | --- | --- |
 | <img src="docs/screenshots/spice-compose-team-drive.png" alt="Composed Drive lane with three agents"> | <img src="docs/screenshots/spice-three-agent-drive-controls.png" alt="Three Drive lanes across active worktrees"> |
