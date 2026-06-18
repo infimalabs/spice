@@ -54,13 +54,6 @@ testpaths = ["tests"]
 [tool.spice.policy]
 package_roots = ["spice"]
 
-[tool.spice.agent]
-model = "gpt-5.5"
-effort = "xhigh"
-
-[tool.spice.wrappers.common]
-rtk = ["run", "proxy", "grep", "find", "git"]
-
 [tool.spice.tasks]
 stems = ["session", "mail", "hooks", "studies", "cli", "lifecycle", "tests"]
 
