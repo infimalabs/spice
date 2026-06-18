@@ -94,7 +94,7 @@ def _configure_task_read_parsers(actions: Any) -> None:
 def _configure_task_phase_parsers(actions: Any) -> None:
     done = actions.add_parser(
         "done",
-        help="Complete the current phase (advances or finishes).",
+        help="Complete the current phase (advances or completes).",
         recovery_examples=(
             'spice task done TASK-20260609T203539640394Z --validation "tests passed"',
         ),

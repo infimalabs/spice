@@ -20,7 +20,7 @@ inside the spice repo.
 2. `spice session`
 3. `spice task status`
 
-If a tool call is impossible, say only what prevented it and stop. Otherwise, let the command outputs establish context first, then respond to pending steering directly. ACK pending inbox keys inline in any assistant message as soon as they are understood; do not wait for final response. Use those outputs, side-channel steering, and the active task board as your source of truth. Do not infer a durable task from this skill invocation.
+If a tool call is impossible, say only what prevented it and end the turn. Otherwise, let the command outputs establish context first, then respond to pending steering directly. ACK pending inbox keys inline in any assistant message as soon as they are understood; do not wait for final response. Use those outputs, side-channel steering, and the active task board as your source of truth. Do not infer a durable task from this skill invocation.
 
 If continuity is clipped, deepen with `spice session sweep --count N`, `spice session timeline --limit N`, `spice session turns --turn-id ... --view full`, `spice session compactions`, or `spice session commits`.
 
@@ -31,7 +31,7 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
 - Run shell commands normally; the first zsh/bash command shell in an agent-bound worktree reexecs itself through `spice agent run` so spice owns stderr steering before the requested command. Descendant shells use the static hook stage and precomputed wrappers without another reexec. When you need an explicit recovery surface, use `spice agent run -- <command>`.
 - Use `spice agent run -- proxy <command>` only as a command-routing marker for configured shell-wrapper proxy behavior. It still goes through `agent run`; steering injection remains active.
 - Pull work with `spice task next`, not by eyeballing a board. `task next` returns the globally-best ready task across all open boards and claims it; the selected board is derived from the claimed task, not stored as a hidden default.
-- Completing a task phase advances it: use `spice task done <handle> --validation "..."` to move a task from implementation into its review phase, then run `spice task next` for reviewer assignment. Do not manually claim your own review; if `task next` assigns it anyway, treat that as an allocator assignment and verify the task description is current before `spice task review <handle> --finding clean --note "description current; ..."`. Read the printed `advanced ... -> <phase>` / `completed ...` line, then run `task next` again; a task is not finished while later phases remain.
+- Completing a task phase advances it: use `spice task done <handle> --validation "..."` to move a task from implementation into its review phase, then run `spice task next` for reviewer assignment. A phase boundary means YOU ARE NOT DONE: keep running `spice task next` and working allocator-selected tasks until it reports no work or a real blocker exists. Manual self-review claims stay out of the workflow; if `task next` assigns it anyway, treat that as an allocator assignment and verify the task description is current before `spice task review <handle> --finding clean --note "description current; ..."`. Read the printed `advanced ... -> <phase>` / `completed ...` line, then run `task next` again; a task remains active while later phases remain.
 - Use `spice task add --project <stem>` for public backlog items. Omitting `--project` creates private `agent.*` scratch work. Use `spice task note` for small observations attached to a task.
 - When the tooling itself fights you (weak default, surprising output, a command that did not work as emitted), record it with `spice task oops "..." --severity ... --kind ...`. It files the friction as a task on the deferred `oops` triage board (a human works that hatch); capture the speed bump rather than silently working around it.
 - Read side-channel steering before acting and acknowledge it through the normal agent workflow. Steering streams to each command's stderr (and shows a `pending=N` line even when repeat-suppressed); read it inline from command output and do not redirect stderr to a file (`2>...`), which hides it.
@@ -39,7 +39,9 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
 - Use `SAY:` in an assistant message only for genuine blockers, decisions worth operator attention, or important milestones. Do not shell out to `say` directly.
 - Treat a dirty worktree as pressure toward commit, split, or cleanup.
 - Do not spawn sub-agents.
-- Keep going while progress is real, but let the selected task, its board, and task notes shape the work instead of treating this skill as a standing user demand.
+- Keep going while progress is real. After you claim work, complete a phase, or
+  receive a review assignment, continue with the selected task, its board, and
+  task notes instead of treating this skill as a standing user demand.
 
 ## Prompt Boundary
 

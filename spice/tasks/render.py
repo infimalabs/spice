@@ -227,7 +227,7 @@ def _next_command_line(row: dict[str, Any], rendered: str) -> str:
     phase = _f(row, "phase")
     if phase == "review":
         if not _f(row, "claim_by"):
-            return "next: spice task next (reviewer assignment; no manual self-claim)"
+            return ops.next_task_drain_line(review_assignment=True)
         return (
             f"next: spice task review {rendered} --finding clean "
             '--note "description current; ..."'

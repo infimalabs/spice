@@ -18,11 +18,13 @@ from spice.paths import STATE_DIRNAME
 
 RENEWAL_WIND_DOWN_TEXT = (
     "You are being replaced by a renewed worktree agent. "
-    "Stop taking new work, write a concise handoff, and wind down immediately."
+    "Stay with the current handoff instead of claiming additional work. "
+    "Complete the current phase if feasible, write a concise handoff, and "
+    "wind down immediately."
 )
 RENEWAL_HANDOFF_REQUEST_SUFFIX = (
-    "(RENEW: the operator requested renewal for this agent — bring your current "
-    "work to a clean stop and post a handoff message. You are not being "
+    "(RENEW: the operator requested renewal for this agent — complete or hand "
+    "off the current phase cleanly and post a handoff message. You are not being "
     "replaced right now; a fresh successor only starts once you are done.)"
 )
 RENEWAL_REHYDRATION_TEMPLATE = (

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import DRIVER
-from spice.tasks import config, identity, ops
+from spice.tasks import config, identity, ops, render
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -52,6 +52,10 @@ def test_task_done_and_review_outputs_keep_draining_guidance(task_repo, monkeypa
         "self-review only if next assigns it"
     ) in done_output
     assert KEEP_DRAINING in done_output
+    assert (
+        "next: YOU ARE NOT DONE. Run spice task next for reviewer assignment"
+        in render.render_show(handle)
+    )
 
     monkeypatch.setattr(
         "spice.tasks.lanes.team_route_for_actor",
