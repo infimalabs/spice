@@ -174,11 +174,11 @@ def _require_single_active_slot(
         target_handle = identity.render_handle(target)
         raise SpiceError(
             f"{action} would create multiple active claims for {actor}; "
-            f"finish or unclaim {active_handle} before claiming {target_handle}"
+            f"complete or unclaim {active_handle} before claiming {target_handle}"
         )
     raise SpiceError(
         f"{action} would create multiple active claims for {actor}; "
-        f"finish or unclaim {active_handle} before claiming new work"
+        f"complete or unclaim {active_handle} before claiming new work"
     )
 
 
@@ -752,9 +752,9 @@ def done(
         modify.append(f"judgment:{judgment}")
     tw.run(modify)
     result = _advance(identity.resolve(handle))
-    next_line = _next_task_drain_line()
+    next_line = next_task_drain_line()
     if result.endswith(" -> review"):
-        next_line = _next_task_drain_line(review_assignment=True)
+        next_line = next_task_drain_line(review_assignment=True)
     return f"{result}\n{next_line}"
 
 
@@ -816,11 +816,11 @@ def review(
     lines = [f"reviewed {identity.render_handle(row)} {finding}; {result}"]
     lines += [f"spawned {h}" for h in spawned]
     lines += [f"linked {h}" for h in linked]
-    lines.append(_next_task_drain_line())
+    lines.append(next_task_drain_line())
     return "\n".join(lines)
 
 
-def _next_task_drain_line(*, review_assignment: bool = False) -> str:
+def next_task_drain_line(*, review_assignment: bool = False) -> str:
     tail = (
         "keep working until no allocator-selected work remains or a real blocker exists"
     )

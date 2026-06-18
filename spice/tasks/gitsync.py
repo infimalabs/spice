@@ -185,7 +185,7 @@ def prepare_for_claim(repo_root: Path | None = None) -> SyncResult:
     if ahead and ahead != "0":
         raise SpiceError(
             f"cannot start new work: the branch has {ahead} local commit(s) "
-            "not yet recorded by a completed task; finish or clear them first"
+            "not yet recorded by a completed task; capture or clear them first"
         )
     before = _read(root, "rev-parse", "HEAD")
     _run(root, "fetch", remote)

@@ -33,7 +33,7 @@ def test_task_subcommand_parse_error_prints_command_examples(capsys):
     error = capsys.readouterr().err
     assert exc_info.value.code == PARSE_ERROR
     assert "Try `spice task done --help` for the exact contract." in error
-    assert "Complete the current phase (advances or finishes)." in error
+    assert "Complete the current phase (advances or completes)." in error
     assert (
         'spice task done TASK-20260609T203539640394Z --validation "tests passed"'
         in error

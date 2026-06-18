@@ -59,6 +59,11 @@ def activation_command_surface_lines() -> list[str]:
         "session=spice session",
         "task_status=spice task status",
         "task_next=spice task next",
+        (
+            "task_drain_contract=YOU ARE NOT DONE after a task phase boundary; "
+            "run spice task next and keep working until no allocator-selected "
+            "work remains or a real blocker exists"
+        ),
         "task_show=spice task show <handle>",
         "tasks=spice task list",
         'task_done=spice task done <handle> --validation "..."',

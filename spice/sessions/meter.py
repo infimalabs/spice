@@ -332,7 +332,4 @@ def _optional_int_payload_value(value: Any) -> int | None:
 
 
 def context_meter_instruction(level: str) -> str:
-    return (
-        "Keep working; do not stop early. Continue the claimed task with "
-        "normal validation."
-    )
+    return "Keep working. Continue the claimed task with normal validation."
