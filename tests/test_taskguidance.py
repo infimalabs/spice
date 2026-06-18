@@ -19,6 +19,12 @@ ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 KEEP_DRAINING = (
     "keep working until no allocator-selected work remains or a real blocker exists"
 )
+STEER_EXPLICIT_DIRECTION = (
+    "run spice task next only when explicitly directed to continue allocator work"
+)
+STEER_MANUAL_CLAIM = (
+    "manual task claims are exceptional and usually require explicit operator direction"
+)
 
 
 @pytest.fixture
@@ -35,13 +41,20 @@ def task_repo(tmp_path, monkeypatch):
         config.set_backend(None)
 
 
-def test_task_done_and_review_outputs_keep_draining_guidance(task_repo, monkeypatch):
+@pytest.mark.parametrize("lifetime", ["Drive", "Drain"])
+def test_task_done_and_review_outputs_keep_draining_guidance(
+    task_repo, monkeypatch, lifetime
+):
     assert task_repo.is_dir()
     handle = ops.add(
         "Exercise task next guidance",
         project="task.guidance",
         priority="medium",
         acceptance=["post-boundary guidance is explicit"],
+    )
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.guidance"], "lifetime": lifetime},
     )
     ops.claim(handle)
 
@@ -57,10 +70,6 @@ def test_task_done_and_review_outputs_keep_draining_guidance(task_repo, monkeypa
         in render.render_show(handle)
     )
 
-    monkeypatch.setattr(
-        "spice.tasks.lanes.team_route_for_actor",
-        lambda _actor: {"filter": ["project:task.guidance"], "lifetime": "Drive"},
-    )
     assigned = ops.next_task()
     assert identity.render_handle(assigned or {}) == handle
 
@@ -69,6 +78,47 @@ def test_task_done_and_review_outputs_keep_draining_guidance(task_repo, monkeypa
     assert (
         f"next: YOU ARE NOT DONE. Run spice task next; {KEEP_DRAINING}" in review_output
     )
+
+
+def test_steer_task_done_and_review_outputs_make_continuation_explicit(
+    task_repo, monkeypatch
+):
+    assert task_repo.is_dir()
+    handle = ops.add(
+        "Exercise steer task guidance",
+        project="task.guidance",
+        priority="medium",
+        acceptance=["steer guidance is explicit-direction only"],
+    )
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.guidance"], "lifetime": "Steer"},
+    )
+    ops.claim(handle)
+
+    done_output = ops.done(handle, validation=["steer guidance checked"])
+
+    assert "YOU ARE NOT DONE" not in done_output
+    assert KEEP_DRAINING not in done_output
+    assert "next: review assignment pending" in done_output
+    assert STEER_EXPLICIT_DIRECTION in done_output
+    assert STEER_MANUAL_CLAIM in done_output
+    assert "self-review only if next assigns it" in done_output
+    shown = render.render_show(handle)
+    assert "YOU ARE NOT DONE" not in shown
+    assert STEER_EXPLICIT_DIRECTION in shown
+    assert STEER_MANUAL_CLAIM in shown
+
+    assigned = ops.next_task()
+    assert identity.render_handle(assigned or {}) == handle
+
+    review_output = ops.review(handle, finding="clean", note="description current")
+
+    assert "YOU ARE NOT DONE" not in review_output
+    assert KEEP_DRAINING not in review_output
+    assert "next: phase boundary reached" in review_output
+    assert STEER_EXPLICIT_DIRECTION in review_output
+    assert STEER_MANUAL_CLAIM in review_output
 
 
 def test_task_claim_outputs_drive_to_completion_guidance(task_repo):

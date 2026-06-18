@@ -828,7 +828,22 @@ def review(
     return "\n".join(lines)
 
 
-def next_task_drain_line(*, review_assignment: bool = False) -> str:
+def next_task_drain_line(
+    *, review_assignment: bool = False, actor: str | None = None
+) -> str:
+    contract = _task_continuation_contract(actor)
+    if not contract.drain_after_phase_boundary:
+        tail = (
+            "run spice task next only when explicitly directed to continue "
+            "allocator work; manual task claims are exceptional and usually "
+            "require explicit operator direction"
+        )
+        if review_assignment:
+            return (
+                f"next: review assignment pending; {tail}; "
+                "self-review only if next assigns it"
+            )
+        return f"next: phase boundary reached; {tail}"
     tail = (
         "keep working until no allocator-selected work remains or a real blocker exists"
     )
@@ -839,6 +854,14 @@ def next_task_drain_line(*, review_assignment: bool = False) -> str:
             f"{tail}"
         )
     return f"next: YOU ARE NOT DONE. Run spice task next; {tail}"
+
+
+def _task_continuation_contract(actor: str | None = None):
+    from spice.tasks import lanes
+
+    actor = actor or tw.current_actor()
+    route = lanes.team_route_for_actor(actor)
+    return lanes.task_continuation_contract(route)
 
 
 def _spawn_followup(spec: str, *, after_uuid: str) -> str:
