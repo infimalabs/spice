@@ -191,7 +191,7 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     head = _git(task_repo, "rev-parse", "HEAD")
     claimed_row = identity.resolve(handle)
 
-    assert claimed == handle
+    assert handle in claimed.splitlines()
     assert claimed_row["claim_by"] == ACTOR_A
     assert claimed_row["claim_head"] == head
 
@@ -270,7 +270,7 @@ def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
     claimed = ops.claim(handle)
     after_claim = store.team_config(team.team_id)
 
-    assert claimed == handle
+    assert handle in claimed.splitlines()
     assert after_claim.task_filters == ("task.unit",)
     assert [entry.to_payload() for entry in after_claim.task_filter_entries] == [
         {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CLAIM}
@@ -323,7 +323,7 @@ def test_manual_claim_skips_private_project_subscription(task_repo):
 
     claimed = ops.claim(handle)
 
-    assert claimed == handle
+    assert handle in claimed.splitlines()
     assert store.global_revision() == before
     assert store.team_config(team.team_id).task_filters == ()
 
@@ -341,7 +341,7 @@ def test_manual_claim_skips_subscription_for_teamless_actor(task_repo):
 
     claimed = ops.claim(handle)
 
-    assert claimed == handle
+    assert handle in claimed.splitlines()
     assert store.global_revision() == before
 
 
@@ -355,7 +355,7 @@ def test_manual_claim_skips_oops_subscription(task_repo):
 
     claimed = ops.claim(handle)
 
-    assert claimed == handle
+    assert handle in claimed.splitlines()
     assert store.global_revision() == before
     assert store.team_config(team.team_id).task_filters == ()
 

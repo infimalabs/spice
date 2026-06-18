@@ -623,10 +623,11 @@ def _handle_add(args: argparse.Namespace) -> int:
 def render_add_result(handle_text: str, *, claimed: bool) -> str:
     claim_state = "claimed" if claimed else "unclaimed"
     next_command = f"spice task show {handle_text}" if claimed else "spice task next"
-    return "\n".join(
-        [
-            f"created {handle_text}",
-            f"claim_state {claim_state}",
-            f"next: {next_command}",
-        ]
-    )
+    lines = [
+        f"created {handle_text}",
+        f"claim_state {claim_state}",
+        f"next: {next_command}",
+    ]
+    if claimed:
+        lines.append(ops.claim_drive_line(handle_text))
+    return "\n".join(lines)

@@ -307,11 +307,14 @@ def render_next() -> str:
     row = ops.next_task()
     if not row:
         return "no available tasks; run spice task status"
+    rendered = identity.render_handle(row)
     lines = [
         "next task:",
         render_row(row),
         "",
-        render_show(identity.render_handle(row)),
+        render_show(rendered),
+        "",
+        ops.claim_drive_line(rendered),
     ]
     return "\n".join(lines)
 
