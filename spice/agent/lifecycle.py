@@ -616,7 +616,18 @@ def agent_ensure_lock(repo_root: Path) -> Iterator[None]:
 
 
 def skill_invocation_prompt(repo_root: Path, skill_path: Path) -> str:
-    return driver_for(repo_root).skill_invocation_prompt(skill_path)
+    return driver_for(repo_root).skill_invocation_prompt(
+        prompt_skill_invocation_path(repo_root, skill_path)
+    )
+
+
+def prompt_skill_invocation_path(repo_root: Path, skill_path: Path) -> Path:
+    if not skill_path.is_absolute():
+        return skill_path
+    try:
+        return skill_path.resolve().relative_to(repo_root.resolve())
+    except ValueError:
+        return skill_path
 
 
 def available_skill_path(repo_root: Path, *, required: bool) -> Path | None:

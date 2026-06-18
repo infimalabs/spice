@@ -128,7 +128,6 @@ def test_playwright_mcp_args_write_light_scheme_config(tmp_path, monkeypatch):
 
 
 def test_ensure_agent_dry_run_covers_start_resume_and_renew(tmp_path, monkeypatch):
-    skill_path = (tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH).resolve()
     status_thread = [""]
     monkeypatch.setattr(
         lifecycle,
@@ -157,7 +156,8 @@ def test_ensure_agent_dry_run_covers_start_resume_and_renew(tmp_path, monkeypatc
     )
 
     assert started.action == "would-start"
-    assert started.prompt == f"[$spice]({skill_path})"
+    assert started.prompt == "[$spice](.agents/skills/spice/SKILL.md)"
+    assert str(tmp_path) not in started.prompt
     assert started.command[0] == "codex-test"
     assert 'model_reasoning_effort="high"' in _config_values(started.command)
     assert 'personality="friendly"' in _config_values(started.command)
@@ -166,6 +166,23 @@ def test_ensure_agent_dry_run_covers_start_resume_and_renew(tmp_path, monkeypatc
     assert resumed.command[-3:] == ["resume", "resume-thread", resumed.prompt]
     assert renewed.action == "would-renew"
     assert renewed.command[-1] == renewed.prompt
+
+
+def test_ensure_agent_dry_run_uses_relative_skill_prompt_for_claude(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        lifecycle,
+        "agent_status",
+        lambda *_args, **_kwargs: _status(),
+    )
+    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
+
+    result = lifecycle.ensure_agent(tmp_path, dry_run=True)
+
+    assert result.prompt.startswith("Read .agents/skills/spice/SKILL.md ")
+    assert str(tmp_path) not in result.prompt
+    assert result.command[-1] == result.prompt
 
 
 def test_start_agent_direct_path_writes_started_state_under_fakes(
