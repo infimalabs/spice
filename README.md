@@ -250,7 +250,8 @@ The pre-commit gate is the executable form of the project's opinions — see
 - files flex to 1500 lines but a breach holds them to 1000 until they shrink;
   routines flex the same way around CCN 20 / length 80;
 - magic-number regressions are a ratchet against `HEAD`, not an amnesty;
-- env-literal inventory covers `SPICE_*` and `CODEX_THREAD_ID` by default;
+- env-literal inventory covers `SPICE_*`, `CODEX_THREAD_ID`, and
+  `CLAUDE_CODE_SESSION_ID` by default;
   target repos can add tracked name regexes with
   `[tool.spice.policy] env_name_patterns`; the waiver may live on the literal
   line, as a standalone waiver comment directly above the statement, or

@@ -1,6 +1,6 @@
 """Environment-variable literal policy: every read is declared or waived.
 
-Harness-owned env names (`SPICE_*`, plus the driver's thread variable) may
+Harness-owned env names (`SPICE_*`, plus shipped driver thread variables) may
 appear in source only in statements carrying, or immediately following a
 standalone, `env-policy: allow` waiver comment. The point is an auditable
 inventory: grep the waiver to see every place the environment shapes behavior.

@@ -65,6 +65,7 @@ ENV_POLICY_ALLOW_MARKER = "env-policy: allow"
 ENV_POLICY_DEFAULT_NAME_PATTERNS = (  # env-policy: allow
     r"SPICE_[A-Z0-9_]+",
     r"CODEX_THREAD_ID",  # env-policy: allow
+    r"CLAUDE_CODE_SESSION_ID",  # env-policy: allow
 )
 ENV_POLICY_SELF_PATH_SUFFIX = "studies/envpolicy.py"
 
