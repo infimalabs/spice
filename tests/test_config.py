@@ -3,6 +3,7 @@
 import argparse
 
 from spice import config
+from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.configcli import handle_config
 
 
@@ -20,7 +21,8 @@ def test_project_agent_config_provides_launch_defaults(tmp_path):
     }
 
 
-def test_worktree_agent_config_overrides_project_defaults(tmp_path):
+def test_worktree_agent_config_overrides_project_defaults(tmp_path, monkeypatch):
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     (tmp_path / "pyproject.toml").write_text(
         '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
@@ -37,12 +39,16 @@ def test_worktree_agent_config_overrides_project_defaults(tmp_path):
     assert config.configured_agent_model(tmp_path) == "gpt-worktree"
     assert config.configured_agent_effort(tmp_path) == "medium"
     assert config.effective_agent_config(tmp_path) == {
+        "driver": "codex",
         "model": "gpt-worktree",
         "effort": "medium",
     }
 
 
-def test_config_overview_shows_project_worktree_and_effective_agent_config(tmp_path):
+def test_config_overview_shows_project_worktree_and_effective_agent_config(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     (tmp_path / "pyproject.toml").write_text(
         '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
@@ -67,6 +73,7 @@ def test_config_overview_shows_project_worktree_and_effective_agent_config(tmp_p
         },
         "effective": {
             "agent": {
+                "driver": "codex",
                 "model": "gpt-project",
                 "effort": "medium",
             }
@@ -74,7 +81,33 @@ def test_config_overview_shows_project_worktree_and_effective_agent_config(tmp_p
     }
 
 
+def test_config_agent_reveals_shipped_defaults_without_config(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    result = handle_config(
+        argparse.Namespace(
+            config_action="agent",
+            scope="worktree",
+            clear=False,
+            model=None,
+            effort=None,
+            driver=None,
+        )
+    )
+
+    assert result == 0
+    assert (
+        capsys.readouterr().out == "agent project driver=- model=- effort=-\n"
+        "agent worktree driver=- model=- effort=-\n"
+        "agent effective driver=codex model=gpt-5.5 effort=xhigh\n"
+    )
+
+
 def test_config_agent_writes_project_scope(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
 
     result = handle_config(
@@ -96,11 +129,12 @@ def test_config_agent_writes_project_scope(tmp_path, monkeypatch, capsys):
         capsys.readouterr().out
         == "agent project driver=- model=gpt-project effort=high\n"
         "agent worktree driver=- model=- effort=-\n"
-        "agent effective driver=- model=gpt-project effort=high\n"
+        "agent effective driver=codex model=gpt-project effort=high\n"
     )
 
 
 def test_config_agent_writes_worktree_scope(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
 
     result = handle_config(
@@ -121,11 +155,12 @@ def test_config_agent_writes_worktree_scope(tmp_path, monkeypatch, capsys):
     assert (
         capsys.readouterr().out == "agent project driver=- model=- effort=-\n"
         "agent worktree driver=- model=gpt-worktree effort=low\n"
-        "agent effective driver=- model=gpt-worktree effort=low\n"
+        "agent effective driver=codex model=gpt-worktree effort=low\n"
     )
 
 
 def test_config_agent_writes_driver_scope(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
 
     result = handle_config(
@@ -141,4 +176,8 @@ def test_config_agent_writes_driver_scope(tmp_path, monkeypatch, capsys):
 
     assert result == 0
     assert config.configured_agent_driver(tmp_path) == "claude"
-    assert "agent worktree driver=claude" in capsys.readouterr().out
+    assert (
+        capsys.readouterr().out == "agent project driver=- model=- effort=-\n"
+        "agent worktree driver=claude model=- effort=-\n"
+        "agent effective driver=claude model=claude-haiku-4-5 effort=xhigh\n"
+    )

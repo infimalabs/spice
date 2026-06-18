@@ -142,7 +142,9 @@ spice config agent --scope worktree --model gpt-5.5 --effort xhigh
 ```
 
 Resolution order is explicit launch flags, then worktree config, then tracked
-project config, then the driver defaults.
+project config, then the driver defaults. `spice config agent` keeps project
+and worktree rows explicit-only, while the effective row includes driver
+defaults so unconfigured repos still show what will launch.
 
 ### Repo command mounts
 

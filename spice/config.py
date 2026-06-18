@@ -176,14 +176,15 @@ def project_agent_config(repo_root: Path) -> dict[str, str]:
 
 
 def effective_agent_config(repo_root: Path) -> dict[str, str]:
+    from spice.agent.driver import driver_for
+
+    driver = driver_for(repo_root)
     return {
-        key: value
-        for key, value in {
-            AGENT_MODEL_KEY: configured_agent_model(repo_root),
-            AGENT_EFFORT_KEY: configured_agent_effort(repo_root),
-            AGENT_DRIVER_KEY: configured_agent_driver(repo_root),
-        }.items()
-        if value
+        AGENT_DRIVER_KEY: driver.name,
+        AGENT_MODEL_KEY: configured_agent_model(repo_root) or driver.default_model,
+        AGENT_EFFORT_KEY: (
+            configured_agent_effort(repo_root) or driver.default_reasoning_effort
+        ),
     }
 
 
