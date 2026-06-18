@@ -60,9 +60,14 @@ def activation_command_surface_lines() -> list[str]:
         "task_status=spice task status",
         "task_next=spice task next",
         (
-            "task_drain_contract=YOU ARE NOT DONE after a task phase boundary; "
-            "run spice task next and keep working until no allocator-selected "
-            "work remains or a real blocker exists"
+            "task_drain_contract=drive/drain lanes are not done after a task "
+            "phase boundary; run spice task next and keep working until no "
+            "allocator-selected work remains or a real blocker exists"
+        ),
+        (
+            "task_steer_contract=steer lanes treat allocator continuation as "
+            "explicit-direction work; manual task claims are exceptional and "
+            "usually require explicit operator direction"
         ),
         "task_show=spice task show <handle>",
         "tasks=spice task list",

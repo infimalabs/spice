@@ -7,6 +7,7 @@ and diagnostics; it does not persist a separate route registry.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 from typing import Any
 
@@ -18,6 +19,12 @@ TAG_TERM_RE = re.compile(r"^\+[A-Za-z0-9_][A-Za-z0-9_]*$")
 ROUTE_LIFETIMES = frozenset({"Steer", "Drive", "Drain"})
 RouteEntryValue = list[str] | str
 RouteEntry = dict[str, RouteEntryValue]
+
+
+@dataclass(frozen=True)
+class TaskContinuationContract:
+    lifetime: str
+    drain_after_phase_boundary: bool
 
 
 def _validate_rc(tokens: list[str]) -> list[str]:
@@ -146,3 +153,15 @@ def rc_overrides(route: dict[str, Any] | None) -> list[str]:
     if not route:
         return []
     return [str(token) for token in (route.get("rc") or []) if str(token)]
+
+
+def task_continuation_contract(
+    route: RouteEntry | None,
+) -> TaskContinuationContract:
+    lifetime = (
+        _lifetime(route.get("lifetime")) if route and route.get("lifetime") else ""
+    )
+    return TaskContinuationContract(
+        lifetime=lifetime,
+        drain_after_phase_boundary=lifetime != "Steer",
+    )
