@@ -50,6 +50,9 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert 'aria-haspopup="menu" aria-expanded="false"' in html
     assert 'class="spice-menu-icon" aria-hidden="true">🌶️</span>' in html
     assert '<span class="spice-menu-label">spice</span>' in html
+    assert 'const spiceServeBranding = {"name": "spice"};' in html
+    assert "const serveBrandName = String(spiceServeBranding.name" in app_js
+    assert "function serveBrandMenuTitle()" in app_js
     assert 'querySelector("#fast-mode-toggle")' not in app_js
     assert 'openLaneButton.addEventListener("click", (event) => {' in app_js
     assert "button.primary:hover {\n  background: var(--accent-strong);" in css
@@ -124,6 +127,50 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert "padding: 8px;" in mobile_header_rules
     assert "flex: 1 1 auto;" in mobile_filter_rules
     assert "min-width: 0;" in mobile_filter_rules
+
+
+def test_index_branding_defaults_to_project_name_and_allows_explicit_override(
+    tmp_path,
+):
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "mission-control"\n', encoding="utf-8")
+
+    project_html = render_index_html(tmp_path)
+
+    assert "<title>mission-control</title>" in project_html
+    assert 'title="Open mission-control menu"' in project_html
+    assert 'aria-label="Open mission-control menu"' in project_html
+    assert '<span class="spice-menu-label">mission-control</span>' in project_html
+    assert 'const spiceServeBranding = {"name": "mission-control"};' in project_html
+
+    pyproject.write_text(
+        (
+            '[project]\nname = "mission-control"\n\n'
+            '[tool.spice.serve]\nbrand = "Ops Console"\n'
+        ),
+        encoding="utf-8",
+    )
+
+    override_html = render_index_html(tmp_path)
+
+    assert "<title>Ops Console</title>" in override_html
+    assert 'title="Open Ops Console menu"' in override_html
+    assert 'aria-label="Open Ops Console menu"' in override_html
+    assert '<span class="spice-menu-label">Ops Console</span>' in override_html
+    assert 'const spiceServeBranding = {"name": "Ops Console"};' in override_html
+
+
+def test_static_branding_config_feeds_fast_mode_and_audio_titles():
+    app_types = (STATIC_ROOT / "app.types.js").read_text(encoding="utf-8")
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
+
+    assert "@typedef {Object} ServeBranding" in app_types
+    assert "var spiceServeBranding;" in app_types
+    assert 'serveBrandMenuTitle() + " - fast mode on"' in app_lanes
+    assert ": serveBrandMenuTitle();" in app_lanes
+    assert "spiceServeBranding.name" in app_audio
+    assert "artist: defaultDocumentTitle" in app_audio
 
 
 def test_static_soft_control_border_reaches_lane_controls():
@@ -412,8 +459,11 @@ def test_static_spice_menu_drag_manages_team_membership():
     assert 'button.addEventListener("click", (event) => {' in app_lanes
     assert "suppressNextClick = true;" in app_lanes
     assert "button.setPointerCapture(event.pointerId);" in app_lanes
-    assert "dragState.dragGhost = createSpiceMenuTargetDragGhost(button);" in app_lanes
-    assert "updateSpiceMenuTargetDragGhost(dragState, event);" in app_lanes
+    assert "spiceMenuTargetDragState = {" in app_lanes
+    assert "state.dragGhost = createSpiceMenuTargetDragGhost(button);" in app_lanes
+    assert "updateSpiceMenuTargetDragGhost(state, event);" in app_lanes
+    assert "function spiceMenuTargetDragMatches(state, event, targetId)" in app_lanes
+    assert "function clearSpiceMenuTargetDrag()" in app_lanes
     assert "function createSpiceMenuTargetDragGhost(button)" in app_lanes
     assert 'ghost.classList.add("target-choice-drag-ghost");' in app_lanes
     assert "function updateSpiceMenuTargetDragGhost(state, event)" in app_lanes

@@ -27,7 +27,8 @@ let playbackGeneration = 0;
 // a controlled settle; an unmarked 'pause' is an external stop (OS/media key)
 // and clears the entire queue.
 const intentionallyPaused = new WeakSet();
-const defaultDocumentTitle = "spice";
+const defaultDocumentTitle =
+  String(spiceServeBranding.name || "spice").trim() || "spice";
 const speechQueueBacklogClearThreshold = 2;
 const hoursPerHalfDay = 12;
 const gitHashContextChars = 16;
@@ -284,7 +285,7 @@ function syncSpeechSessionMetadata() {
     if (typeof MediaMetadata !== "undefined")
       session.metadata = new MediaMetadata({
         title,
-        artist: "spice",
+        artist: defaultDocumentTitle,
       });
   } catch {
     return;

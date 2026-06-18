@@ -37,6 +37,7 @@ const maximPriority = "maxim";
 const agentLifetimeLabels = ["Steer", "Drive", "Drain"];
 const defaultAgentLifetimeIndex = 1;
 const defaultAgentLifetime = agentLifetimeLabels[defaultAgentLifetimeIndex];
+const serveBrandName = String(spiceServeBranding.name || "spice").trim() || "spice";
 const agentLifetimeHelp = {
   Steer: "Manual filters only",
   Drive: "Auto-subscribe to projects this team creates or claims",
@@ -63,6 +64,10 @@ function agentLifetimeDissolvesTaskBoundary(lifetime) {
 
 function agentLifetimeHelpText(lifetime) {
   return agentLifetimeHelp[lifetime] || agentLifetimeHelp[defaultAgentLifetime];
+}
+
+function serveBrandMenuTitle() {
+  return "Open " + serveBrandName + " menu";
 }
 let targets = [];
 let targetById = new Map();
