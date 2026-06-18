@@ -383,12 +383,13 @@ function laneTeamAgentAliases(lane) {
 
 // ---- open / close ---------------------------------------------------------------
 
-async function openTargetTeam(targetId) {
+async function openTargetTeam(targetId, options = {}) {
+  const keepMenuOpen = Boolean(options.keepMenuOpen);
   if (laneStates.has(targetId)) {
     const lane = laneStates.get(targetId);
     if (lane)
       lane.element.scrollIntoView({ block: "nearest", inline: "nearest" });
-    closeSpiceMenu();
+    if (!keepMenuOpen) closeSpiceMenu();
     return;
   }
   const target = targetById.get(targetId);
@@ -409,7 +410,7 @@ async function openTargetTeam(targetId) {
         }),
       );
     }
-    closeSpiceMenu();
+    if (!keepMenuOpen) closeSpiceMenu();
   } catch (error) {
     sessionOpenTargetIds.delete(targetId);
     throw error;
@@ -555,6 +556,7 @@ function openSpiceMenu() {
 
 function closeSpiceMenu() {
   if (!spiceMenuEl) return;
+  clearSpiceMenuTargetDrag();
   if (spiceMenuPositionHandler) {
     window.removeEventListener("resize", spiceMenuPositionHandler);
     window.removeEventListener("scroll", spiceMenuPositionHandler, true);
@@ -575,6 +577,7 @@ function closeSpiceMenu() {
 
 function renderSpiceMenu() {
   if (!spiceMenuEl) return;
+  clearSpiceMenuTargetDrag();
   spiceMenuEl.replaceChildren(
     renderSpiceMenuActions(),
     renderSpiceMenuTargets(),
@@ -852,7 +855,6 @@ function wireSpiceMenuTargetDrag(button, target) {
   button.style.touchAction = "none";
   button.append(spiceMenuTargetDragAffordance());
 
-  let dragState = null;
   let suppressNextClick = false;
 
   button.addEventListener("click", (event) => {
@@ -865,7 +867,10 @@ function wireSpiceMenuTargetDrag(button, target) {
 
   button.addEventListener("pointerdown", (event) => {
     if (event.button !== undefined && event.button !== 0) return;
-    dragState = {
+    clearSpiceMenuTargetDrag();
+    spiceMenuTargetDragState = {
+      button,
+      targetId: target.id,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
@@ -874,41 +879,53 @@ function wireSpiceMenuTargetDrag(button, target) {
       dragging: false,
       dragGhost: null,
       overContainer: null,
+      overDesktop: false,
     };
     button.setPointerCapture(event.pointerId);
   });
 
   button.addEventListener("pointermove", (event) => {
-    if (!dragState || event.pointerId !== dragState.pointerId) return;
-    if (!dragState.dragging) {
-      const dx = event.clientX - dragState.startX;
-      const dy = event.clientY - dragState.startY;
+    const state = spiceMenuTargetDragState;
+    if (!spiceMenuTargetDragMatches(state, event, target.id)) return;
+    if (!state.dragging) {
+      const dx = event.clientX - state.startX;
+      const dy = event.clientY - state.startY;
       if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
-      dragState.dragging = true;
+      state.dragging = true;
       suppressNextClick = true;
       spiceMenuDragTargetId = target.id;
       button.classList.add("target-choice--dragging");
-      dragState.dragGhost = createSpiceMenuTargetDragGhost(button);
+      state.dragGhost = createSpiceMenuTargetDragGhost(button);
     }
-    updateSpiceMenuTargetDragGhost(dragState, event);
+    updateSpiceMenuTargetDragGhost(state, event);
     const el = document.elementFromPoint(event.clientX, event.clientY);
     const container = /** @type {HTMLElement | null} */ (el?.closest("[data-spice-menu-team-id]") || null);
-    if (container !== dragState.overContainer) {
-      dragState.overContainer?.classList.remove("spice-menu-team--drop-ready");
-      dragState.overContainer = null;
+    if (container !== state.overContainer) {
+      state.overContainer?.classList.remove("spice-menu-team--drop-ready");
+      state.overContainer = null;
       const teamId = container ? spiceMenuDropTeamId(container) : "";
       if (container && spiceMenuCanDropTargetOnTeamId(teamId, target.id)) {
         container.classList.add("spice-menu-team--drop-ready");
-        dragState.overContainer = container;
+        state.overContainer = container;
       }
     }
+    state.overDesktop = spiceMenuDesktopDropTargetFromPoint(
+      event.clientX,
+      event.clientY,
+    );
+    lanesEl.classList.toggle(
+      "swimlanes--menu-drop-ready",
+      state.overDesktop && !state.overContainer,
+    );
+    event.preventDefault();
   });
 
   button.addEventListener("pointerup", (event) => {
-    if (!dragState || event.pointerId !== dragState.pointerId) return;
-    if (dragState.dragging && dragState.overContainer) {
+    const state = spiceMenuTargetDragState;
+    if (!spiceMenuTargetDragMatches(state, event, target.id)) return;
+    if (state.dragging && state.overContainer) {
       const teamId = spiceMenuDropTeamId(
-        /** @type {HTMLElement} */ (dragState.overContainer),
+        /** @type {HTMLElement} */ (state.overContainer),
       );
       moveTargetToMenuTeam(teamId, target.id).catch(() => {
         setGlobalTransientStatus(
@@ -916,25 +933,50 @@ function wireSpiceMenuTargetDrag(button, target) {
         );
         refreshServerTopology().catch(() => {});
       });
+    } else if (state.dragging && state.overDesktop) {
+      openTargetTeam(target.id, { keepMenuOpen: true }).catch(() => {
+        setGlobalTransientStatus("open team failed");
+      });
     }
-    endMenuTargetDrag(button, dragState);
-    dragState = null;
+    endMenuTargetDrag(state);
+    spiceMenuTargetDragState = null;
+    event.preventDefault();
   });
 
   button.addEventListener("pointercancel", (event) => {
-    if (!dragState || event.pointerId !== dragState.pointerId) return;
-    endMenuTargetDrag(button, dragState);
-    dragState = null;
+    const state = spiceMenuTargetDragState;
+    if (!spiceMenuTargetDragMatches(state, event, target.id)) return;
+    endMenuTargetDrag(state);
+    spiceMenuTargetDragState = null;
   });
 }
 
-function endMenuTargetDrag(button, state) {
-  if (!state.dragging) return;
+function spiceMenuTargetDragMatches(state, event, targetId) {
+  return (
+    state &&
+    state.pointerId === event.pointerId &&
+    state.targetId === targetId
+  );
+}
+
+function endMenuTargetDrag(state) {
   spiceMenuDragTargetId = "";
-  button.classList.remove("target-choice--dragging");
+  state.button?.classList.remove("target-choice--dragging");
   state.dragGhost?.remove();
   state.dragGhost = null;
+  lanesEl.classList.remove("swimlanes--menu-drop-ready");
   clearSpiceMenuTeamDropHighlights();
+}
+
+function clearSpiceMenuTargetDrag() {
+  if (spiceMenuTargetDragState) {
+    endMenuTargetDrag(spiceMenuTargetDragState);
+    spiceMenuTargetDragState = null;
+  }
+  for (const ghost of document.querySelectorAll(".target-choice-drag-ghost"))
+    ghost.remove();
+  for (const choice of document.querySelectorAll(".target-choice--dragging"))
+    choice.classList.remove("target-choice--dragging");
 }
 
 function createSpiceMenuTargetDragGhost(button) {
@@ -953,6 +995,13 @@ function updateSpiceMenuTargetDragGhost(state, event) {
   const top = event.clientY - state.offsetY;
   state.dragGhost.style.transform =
     "translate(" + left + "px, " + top + "px)";
+}
+
+function spiceMenuDesktopDropTargetFromPoint(clientX, clientY) {
+  const element = document.elementFromPoint(clientX, clientY);
+  if (!(element instanceof Element)) return false;
+  if (spiceMenuEl?.contains(element)) return false;
+  return lanesEl.contains(element);
 }
 
 function spiceMenuTargetDragAffordance() {
