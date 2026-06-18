@@ -112,15 +112,19 @@ def test_manual_speech_playback_reads_all_display_paragraphs():
 
 
 def test_speech_session_updates_page_title_and_media_metadata():
-    assert _speech_session_title_states() == {
-        "activeTitle": "spice - Matilda",
-        "activeMediaTitle": "spice - Matilda",
-        "activeMediaArtist": "spice",
+    assert _speech_session_title_states("Ops Console") == {
+        "activeTitle": "Ops Console - Matilda",
+        "activeMediaTitle": "Ops Console - Matilda",
+        "activeMediaArtist": "Ops Console",
         "activePlaybackState": "playing",
-        "idleTitle": "spice",
-        "idleMediaTitle": "spice",
+        "idleTitle": "Ops Console",
+        "idleMediaTitle": "Ops Console",
         "idlePlaybackState": "none",
     }
+
+
+def test_speech_session_title_falls_back_without_branding_global():
+    assert _speech_session_title_states()["idleTitle"] == "spice"
 
 
 def test_narration_mode_holds_media_session_playing_for_speak_lanes():
@@ -223,8 +227,14 @@ process.stdout.write(
     return json.loads(result.stdout)
 
 
-def _speech_session_title_states() -> dict[str, str]:
-    script = """
+def _speech_session_title_states(brand: str | None = None) -> dict[str, str]:
+    branding = (
+        ""
+        if brand is None
+        else f"  spiceServeBranding: {json.dumps({'name': brand})},\n"
+    )
+    script = (
+        """
 const fs = require("fs");
 const vm = require("vm");
 const path = process.argv[1];
@@ -234,6 +244,9 @@ class FakeMediaMetadata {
   }
 }
 const context = {
+"""
+        + branding
+        + """
   document: {
     title: "spice - Simultaneous Production, Integration, and Control Environment",
     querySelectorAll: () => [],
@@ -265,6 +278,7 @@ process.stdout.write(JSON.stringify({
   idlePlaybackState: context.navigator.mediaSession.playbackState,
 }));
 """
+    )
     result = subprocess.run(
         ["node", "-e", script, str(AUDIO_JS)],
         capture_output=True,

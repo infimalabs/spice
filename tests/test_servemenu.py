@@ -172,6 +172,7 @@ def test_static_branding_config_feeds_fast_mode_and_audio_titles():
     assert 'serveBrandMenuTitle() + " - fast mode on"' in app_menu
     assert ": serveBrandMenuTitle();" in app_menu
     assert "spiceServeBranding.name" in app_audio
+    assert 'typeof spiceServeBranding === "object"' in app_audio
     assert "artist: defaultDocumentTitle" in app_audio
 
 
@@ -316,12 +317,15 @@ def test_static_spice_menu_replaces_picker_lane():
     assert "let spiceMenuRenderPending = false;" in app_js
     assert "let fastModeEnabled = false;" in app_js
     assert "function openSpiceMenu()" in app_menu
+    assert "function renderSpiceMenuIfAvailable()" in app_lanes
+    assert 'if (typeof renderSpiceMenu === "function") renderSpiceMenu();' in app_lanes
     assert "function laneStateTargetIds()" in app_lanes
     assert "function sameStringSets(left, right)" in app_lanes
     assert (
-        "if (!sameStringSets(openBefore, laneStateTargetIds())) renderSpiceMenu();"
-        in app_lanes
+        "if (!sameStringSets(openBefore, laneStateTargetIds()))\n"
+        "    renderSpiceMenuIfAvailable();" in app_lanes
     )
+    assert "renderSpiceMenuIfAvailable();" in app_shell
     assert (
         'lane.element.scrollIntoView({ block: "nearest", inline: "nearest" });'
         in app_lanes

@@ -16,6 +16,10 @@ const targetChoiceStatusValues = [
   "unknown",
 ];
 
+function renderSpiceMenuIfAvailable() {
+  if (typeof renderSpiceMenu === "function") renderSpiceMenu();
+}
+
 function emptyTeamTargetId(teamId) {
   return emptyTeamTargetPrefix + teamId;
 }
@@ -29,7 +33,7 @@ function refreshTargets() {
   if (targetsLoadPromise) return targetsLoadPromise;
   targetsLoading = true;
   if (!targetsLoaded) globalStatusEl.textContent = "loading teams";
-  if (spiceMenuEl) renderSpiceMenu();
+  if (spiceMenuEl) renderSpiceMenuIfAvailable();
   targetsLoadPromise = (async () => {
     try {
       const response = await liveBusRequest("targets.refresh");
@@ -39,7 +43,7 @@ function refreshTargets() {
     } finally {
       targetsLoading = false;
       targetsLoadPromise = null;
-      if (spiceMenuEl) renderSpiceMenu();
+      if (spiceMenuEl) renderSpiceMenuIfAvailable();
     }
   })();
   return targetsLoadPromise;
@@ -65,7 +69,7 @@ function applyTargetsPayload(payload) {
         lanePayloadWithTargetPending(lane, targetById.get(lane.targetId)),
       );
   }
-  if (spiceMenuEl) renderSpiceMenu();
+  if (spiceMenuEl) renderSpiceMenuIfAvailable();
 }
 
 // Targets carry statusLine and route facts in the same field names the lane
@@ -216,7 +220,8 @@ function applyTeamSnapshotPayload(payload, options = {}) {
   }
   reconcileLaneGroups(groupRuns);
   persistLaneHints();
-  if (!sameStringSets(openBefore, laneStateTargetIds())) renderSpiceMenu();
+  if (!sameStringSets(openBefore, laneStateTargetIds()))
+    renderSpiceMenuIfAvailable();
   renderFilterPills();
 }
 

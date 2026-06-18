@@ -8,7 +8,7 @@ function addLane(targetId, hint = null) {
   const lane = createLaneState(targetId, hint);
   laneStates.set(targetId, lane);
   lanesEl.append(lane.element);
-  renderSpiceMenu();
+  renderSpiceMenuIfAvailable();
   renderFilterPills();
   subscribeLaneToLiveBus(lane);
 }
@@ -23,7 +23,7 @@ function addEmptyTeamLane(team, options = {}) {
   });
   laneStates.set(targetId, lane);
   lanesEl.append(lane.element);
-  renderSpiceMenu();
+  renderSpiceMenuIfAvailable();
   renderFilterPills();
 }
 
