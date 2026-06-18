@@ -43,6 +43,7 @@ from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
 from spice.serve.teams import ServeTeamStore, TeamCommandService
 from spice.serve.web import STATIC_ROOT, render_index_html, send_static_asset
 from spice.serve.worktrees import WorktreeTarget
+from spice.tasks import config as task_config
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -125,8 +126,14 @@ def test_lane_watch_paths_use_exact_live_bus_sources(tmp_path):
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text("", encoding="utf-8")
     team_path = state.team_store.path
+    backend = tmp_path / "task-backend"
 
-    paths = app.lane_watch_paths_for_target(state, target, THREAD_A, transcript)
+    task_config.set_backend(str(backend))
+    try:
+        event_path = task_config.task_event_path()
+        paths = app.lane_watch_paths_for_target(state, target, THREAD_A, transcript)
+    finally:
+        task_config.set_backend(None)
 
     assert inbox_dir(repo).is_dir()
     assert paths == (
@@ -134,6 +141,7 @@ def test_lane_watch_paths_use_exact_live_bus_sources(tmp_path):
         team_path,
         team_path.with_name(f"{team_path.name}-wal"),
         team_path.with_name(f"{team_path.name}-shm"),
+        event_path,
         transcript,
     )
 

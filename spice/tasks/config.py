@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -37,6 +38,7 @@ BASE_APPROVED_STEMS = ("task", "serve", "agent", "oops")
 INTERNAL_STEMS = ("agent", "oops")
 APPROVED_PHASES = ("todo", "verify", "review", "oops")
 PHASE_SLOT_COUNT = 7  # phase_0 .. phase_6
+TASK_EVENT_FILENAME = "serve-task-events"
 DEFAULT_FLOW = ("todo", "review")
 PRIVATE_DEFAULT_FLOW = ("todo",)
 PER_STEM_FLOWS: dict[str, tuple[str, ...]] = {}
@@ -268,6 +270,10 @@ def taskrc_path() -> Path:
     return backend_root() / "taskrc"
 
 
+def task_event_path(root: Path | None = None) -> Path:
+    return (root or backend_root()) / TASK_EVENT_FILENAME
+
+
 def bootstrap_lock_path() -> Path:
     return backend_root() / ".bootstrap.lock"
 
@@ -285,9 +291,28 @@ def _bootstrap_lock():
 
 def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if path.read_text(encoding="utf-8") == text:
+            return
+    except OSError:
+        pass
     tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
+
+
+def ensure_task_event_file(root: Path | None = None) -> Path:
+    path = task_event_path(root)
+    if not path.exists():
+        _atomic_write_text(path, "0 bootstrap\n")
+    return path
+
+
+def mark_task_backend_changed(
+    reason: str = "task", *, root: Path | None = None
+) -> None:
+    token = f"{time.time_ns()} {os.getpid()} {reason.strip() or 'task'}\n"
+    _atomic_write_text(task_event_path(root), token)
 
 
 def uda_schema() -> dict[str, dict[str, str]]:
