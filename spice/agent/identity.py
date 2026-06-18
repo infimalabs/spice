@@ -33,8 +33,8 @@ def ambient_thread() -> tuple[str, AgentDriver] | None:
     must not be consulted here — a stale config value does not make the
     current shell an agent. The single signal that a command is being driven
     by an agent is a driver's live thread-id variable in os.environ — any
-    shipped driver's (a Claude agent sets `CLAUDE_CODE_SESSION_ID`, a Codex
-    agent `CODEX_THREAD_ID`).
+    shipped driver's (Claude and Codex each define a driver-owned thread-id
+    environment variable).
     """
     for driver in ALL_DRIVERS:
         raw = os.environ.get(driver.thread_id_env)

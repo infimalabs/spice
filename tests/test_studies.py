@@ -200,13 +200,20 @@ def test_c_grammar_comments_pass():
 
 
 def test_env_policy_defaults_still_apply(tmp_path):
-    env_name = "SPICE_" + "TASK_BACKEND"
+    names = [
+        "SPICE_" + "TASK_BACKEND",
+        "CODEX_" + "THREAD_ID",
+        "CLAUDE_" + "CODE_SESSION_ID",
+    ]
     path = tmp_path / "sample.py"
-    path.write_text(f'import os\nVALUE = os.environ["{env_name}"]\n', encoding="utf-8")
+    path.write_text(
+        "\n".join(f'VALUE = os.environ["{name}"]' for name in names),
+        encoding="utf-8",
+    )
 
     findings = scan_env_policy([Path("sample.py")], root=tmp_path)
 
-    assert [(finding.line, finding.name) for finding in findings] == [(2, env_name)]
+    assert [finding.name for finding in findings] == names
 
 
 def test_env_policy_repo_patterns_merge_with_defaults(tmp_path):
@@ -217,6 +224,7 @@ def test_env_policy_repo_patterns_merge_with_defaults(tmp_path):
     )
     names = [
         "SPICE_" + "TASK_BACKEND",
+        "CLAUDE_" + "CODE_SESSION_ID",
         "MYPROJ_" + "AUTH_TOKEN",
         "ENGINE_" + "THISISABATCHMODE",
         "DEPLOY_TARGET",
