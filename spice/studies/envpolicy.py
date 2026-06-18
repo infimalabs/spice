@@ -8,11 +8,6 @@ inventory: grep the waiver to see every place the environment shapes behavior.
 Library seam: target-repo tools may import the public finding dataclass,
 pattern/matcher helpers, scan helper, and `render_env_policy_board`;
 underscored names remain private.
-
-Backend boundary: lizard remains the complexity backend because it reports
-routine metrics. Env policy needs quoted literal positions, including
-module-level constants and shell scripts, so a small literal scanner preserves
-the audited surface without pretending routine metrics are token inventory.
 """
 
 from __future__ import annotations
@@ -32,9 +27,6 @@ from spice.repocfg import policy_table, string_list
 from spice.studies.walk import is_excluded_path
 
 SCANNED_SUFFIXES = ENV_SUFFIXES
-# This stays separate from the lizard-backed complexity scan. The watched env
-# surface includes shell files and top-level literals, while lizard's public
-# output is function/routine metrics rather than string-literal locations.
 # This module necessarily names the patterns it polices; it is self-waived.
 SELF_PATH_SUFFIX = ENV_POLICY_SELF_PATH_SUFFIX
 

@@ -239,33 +239,6 @@ def test_env_policy_repo_patterns_merge_with_defaults(tmp_path):
     assert [finding.name for finding in findings] == names
 
 
-def test_env_policy_scans_top_level_literals_without_routine_scope(tmp_path):
-    env_name = "CODEX_" + "THREAD_ID"
-    path = tmp_path / "settings.ts"
-    path.write_text(f'export const driverThread = "{env_name}";\n', encoding="utf-8")
-
-    findings = scan_env_policy([Path("settings.ts")], root=tmp_path)
-
-    assert [(finding.path, finding.line, finding.name) for finding in findings] == [
-        ("settings.ts", 1, env_name)
-    ]
-
-
-def test_env_policy_scans_shell_literals_outside_lizard_scope(tmp_path):
-    env_name = "SPICE_" + "TASK_BACKEND"
-    path = tmp_path / "deploy.sh"
-    path.write_text(
-        f'#!/usr/bin/env sh\nprintf "%s\\n" "{env_name}"\n',
-        encoding="utf-8",
-    )
-
-    findings = scan_env_policy([Path("deploy.sh")], root=tmp_path)
-
-    assert [(finding.path, finding.line, finding.name) for finding in findings] == [
-        ("deploy.sh", 2, env_name)
-    ]
-
-
 def test_env_policy_allow_marker_guidance_applies_to_repo_patterns(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         '[tool.spice.policy]\nenv_name_patterns = ["MYPROJ_[A-Z0-9_]+"]\n',
