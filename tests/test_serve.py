@@ -23,6 +23,7 @@ from spice.mail.inbox import (
     collect_deadlettered_inbox_items,
     collect_inbox_items,
     compose_inbox_text,
+    inbox_dir,
     inbox_item_key,
     inbox_payload_rows,
     inbox_request_body,
@@ -42,7 +43,6 @@ from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
 from spice.serve.teams import ServeTeamStore, TeamCommandService
 from spice.serve.web import STATIC_ROOT, render_index_html, send_static_asset
 from spice.serve.worktrees import WorktreeTarget
-from spice.tasks import config as task_config
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -118,52 +118,24 @@ def test_serve_parser_accepts_until_path(tmp_path):
     assert args.until == stop_path
 
 
-def test_lane_watch_paths_include_task_backend_files(tmp_path):
-    backend = tmp_path / "task-backend"
-    data = backend / "data"
-    data.mkdir(parents=True)
-    taskrc = backend / "taskrc"
-    taskrc.write_text("data.location=data\n", encoding="utf-8")
-    pending = data / "pending.data"
-    pending.write_text("task one\n", encoding="utf-8")
+def test_lane_watch_paths_use_exact_live_bus_sources(tmp_path):
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text("", encoding="utf-8")
-    task_config.set_backend(str(backend))
-    try:
-        paths = app.lane_watch_paths_for_target(state, target, THREAD_A, transcript)
-    finally:
-        task_config.set_backend(None)
+    team_path = state.team_store.path
 
-    assert backend in paths
-    assert data in paths
-    assert taskrc in paths
-    assert pending in paths
+    paths = app.lane_watch_paths_for_target(state, target, THREAD_A, transcript)
 
-
-def test_lane_signature_changes_when_task_backend_changes(tmp_path):
-    backend = tmp_path / "task-backend"
-    data = backend / "data"
-    data.mkdir(parents=True)
-    (backend / "taskrc").write_text("data.location=data\n", encoding="utf-8")
-    pending = data / "pending.data"
-    pending.write_text("task one\n", encoding="utf-8")
-    repo = _repo(tmp_path)
-    target = _target(repo)
-    state = _serve_state(tmp_path, target)
-    transcript = tmp_path / "rollout.jsonl"
-    transcript.write_text("", encoding="utf-8")
-    task_config.set_backend(str(backend))
-    try:
-        before = app.lane_signature_for_target(state, target, THREAD_A, transcript)
-        pending.write_text("task one\ntask two\n", encoding="utf-8")
-        after = app.lane_signature_for_target(state, target, THREAD_A, transcript)
-    finally:
-        task_config.set_backend(None)
-
-    assert after != before
+    assert inbox_dir(repo).is_dir()
+    assert paths == (
+        inbox_dir(repo),
+        team_path,
+        team_path.with_name(f"{team_path.name}-wal"),
+        team_path.with_name(f"{team_path.name}-shm"),
+        transcript,
+    )
 
 
 def test_work_tree_send_writes_inbox_and_returns_attachment_payload(

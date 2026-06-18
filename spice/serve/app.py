@@ -406,9 +406,9 @@ def lane_watch_paths_for_target(
 ) -> tuple[Path, ...]:
     del thread_id
     target_inbox = inbox_dir(target.repo_root)
+    target_inbox.mkdir(parents=True, exist_ok=True)
     team_path = state.team_store.path
-    paths = [target_inbox, target_inbox.parent, team_path, team_path.parent]
-    paths.extend(_task_backend_watch_paths())
+    paths = [target_inbox, *_team_store_watch_paths(team_path)]
     if transcript_path is not None:
         paths.append(transcript_path)
     return tuple(paths)
@@ -442,7 +442,14 @@ def lane_signature_for_target(
             ),
         ),
         _path_signature(state.team_store.path),
-        _task_backend_signature(),
+    )
+
+
+def _team_store_watch_paths(path: Path) -> tuple[Path, ...]:
+    return (
+        path,
+        path.with_name(f"{path.name}-wal"),
+        path.with_name(f"{path.name}-shm"),
     )
 
 
@@ -454,25 +461,6 @@ def _path_signature(path: Path | None) -> tuple[str, int, int]:
     except OSError:
         return (str(path), 0, 0)
     return (str(path), stat.st_mtime_ns, stat.st_size)
-
-
-def _task_backend_watch_paths() -> tuple[Path, ...]:
-    try:
-        root = task_config.backend_root()
-        data = task_config.data_dir()
-        taskrc = task_config.taskrc_path()
-    except SpiceError:
-        return ()
-    paths: list[Path] = [root, data, taskrc]
-    try:
-        paths.extend(sorted(data.iterdir(), key=lambda path: str(path)))
-    except OSError:
-        pass
-    return tuple(paths)
-
-
-def _task_backend_signature() -> tuple[tuple[str, int, int], ...]:
-    return tuple(_path_signature(path) for path in _task_backend_watch_paths())
 
 
 def _inbox_signature(repo_root: Path) -> tuple[tuple[str, int, int], ...]:
