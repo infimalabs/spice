@@ -15,6 +15,8 @@ import pytest
 from spice.agent import driver as agent_driver
 from spice.agent import lifecycle, sidechannel, wrap
 from spice.agent.driver import (
+    CLAUDE_DRIVER,
+    CODEX_DRIVER,
     DRIVER,
     PLAYWRIGHT_MCP_ARGS,
     PLAYWRIGHT_MCP_COMMAND,
@@ -39,6 +41,13 @@ SUPERVISOR_PID = 3333
 SUPERVISED_AGENT_PID = 4444
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
+
+
+def test_shipped_agent_defaults_are_current_high_effort():
+    assert CODEX_DRIVER.default_model == "gpt-5.5"
+    assert CODEX_DRIVER.default_reasoning_effort == "xhigh"
+    assert CODEX_DRIVER.default_service_tier == "fast"
+    assert CLAUDE_DRIVER.default_reasoning_effort == "xhigh"
 
 
 def test_codex_driver_command_pins_fast_service_tier_and_playwright_mcp(
@@ -84,6 +93,20 @@ def test_codex_driver_command_pins_fast_service_tier_and_playwright_mcp(
     assert 'service_tier="fast"' in configs
     assert command[command.index("--enable") + 1] == "fast_mode"
     assert command[-3:] == ["resume", "thread-1", prompt]
+
+
+def test_ensure_agent_uses_shipped_codex_defaults_without_config(tmp_path, monkeypatch):
+    monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.setattr(
+        lifecycle,
+        "agent_status",
+        lambda *_args, **_kwargs: _status(),
+    )
+
+    result = lifecycle.ensure_agent(tmp_path, dry_run=True)
+
+    assert result.command[result.command.index("--model") + 1] == "gpt-5.5"
+    assert 'model_reasoning_effort="xhigh"' in _config_values(result.command)
 
 
 def test_playwright_mcp_args_write_light_scheme_config(tmp_path, monkeypatch):
