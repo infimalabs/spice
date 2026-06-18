@@ -20,24 +20,11 @@ const messageOccupantAccentPalette = [
 let globalTransientStatusTimer = null;
 
 function renderLaneChrome(lane, payload) {
-  if (payloadHasField(payload, "targetBranch"))
-    lane.branchName = String(payload.targetBranch || "");
-  if (payloadHasField(payload, "targetAgentName"))
-    lane.agentName = String(payload.targetAgentName || "");
-  if (payloadHasField(payload, "targetThreadId")) {
-    const threadId = String(payload.targetThreadId || "");
-    lane.targetThreadId = threadId;
-    lane.activeThreadId = threadId;
-  }
+  applyLaneTargetIdentity(lane, payload);
   lane.taskFilters = uniqueStringList(payload.taskFilters || lane.taskFilters);
   if (payloadHasField(payload, "laneFilterVersion"))
     lane.laneFilterVersion = String(payload.laneFilterVersion || "");
-  if (payloadHasField(payload, "teamId"))
-    lane.teamId = String(payload.teamId || "");
-  if (payloadHasField(payload, "teamRevision"))
-    lane.teamRevision = Math.max(0, Number(payload.teamRevision) || 0);
-  if (payloadHasField(payload, "configRevision"))
-    lane.configRevision = Math.max(0, Number(payload.configRevision) || 0);
+  applyLaneTeamIdentity(lane, payload);
   if (payload.taskFilterInventory)
     lane.taskFilterInventory = payload.taskFilterInventory;
   if (payload.privateTaskCount !== undefined)
@@ -47,7 +34,9 @@ function renderLaneChrome(lane, payload) {
   if (payload.renewalIntent) lane.renewalIntent = payload.renewalIntent;
   if (payload.lifetime)
     applyServerLaneLifetime(lane, payload.lifetime, {
-      configRevision: payload.configRevision,
+      configRevision: payloadHasField(payload, "teamIdentity")
+        ? teamIdentityConfigRevision(payload.teamIdentity)
+        : lane.configRevision,
     });
   const statusLine = applyRetainedLaneStatus(lane, payload.statusLine || {});
   syncLaneBackendPending(lane, statusLine);
@@ -59,6 +48,113 @@ function renderLaneChrome(lane, payload) {
 
 function payloadHasField(payload, name) {
   return Object.prototype.hasOwnProperty.call(payload || {}, name);
+}
+
+function applyLaneTargetIdentity(lane, payload) {
+  if (!payloadHasField(payload, "targetIdentity")) return;
+  const identity = payload.targetIdentity || {};
+  lane.branchName = targetIdentityBranch(identity);
+  lane.agentName = targetIdentityAgentName(identity);
+  const threadId = targetIdentityThreadId(identity);
+  lane.targetThreadId = threadId;
+  lane.activeThreadId = threadId;
+}
+
+function applyLaneTeamIdentity(lane, payload) {
+  if (!payloadHasField(payload, "teamIdentity")) return;
+  const identity = payload.teamIdentity || {};
+  const state = identityPayloadState(identity, "team identity");
+  if (state === "none") {
+    lane.teamId = "";
+    lane.teamRevision = 0;
+    lane.configRevision = 0;
+    return;
+  }
+  if (state !== "member")
+    throw new Error("invalid team identity state: " + (state || "-"));
+  lane.teamId = requiredIdentityText(identity.teamId, "team id");
+  lane.teamRevision = nonnegativeIdentityNumber(
+    identity.teamRevision,
+    "team revision",
+  );
+  lane.configRevision = nonnegativeIdentityNumber(
+    identity.configRevision,
+    "config revision",
+  );
+}
+
+function targetIdentityBranch(identity) {
+  return requiredIdentityText((identity || {}).branch, "target branch");
+}
+
+function targetIdentityAgentName(identity) {
+  const agent = (identity || {}).agent || {};
+  const state = identityPayloadState(agent, "agent identity");
+  if (state === "unconfigured") return "";
+  if (state !== "configured")
+    throw new Error("invalid agent identity state: " + (state || "-"));
+  return requiredIdentityText(agent.name, "agent name");
+}
+
+function targetIdentityThreadId(identity) {
+  const thread = (identity || {}).thread || {};
+  const state = targetIdentityThreadState(identity);
+  if (state === "unbound") return "";
+  if (state === "mismatch") {
+    return thread.threadId === undefined
+      ? ""
+      : requiredIdentityText(thread.threadId, "thread id");
+  }
+  if (state !== "bound")
+    throw new Error("invalid thread identity state: " + (state || "-"));
+  return requiredIdentityText(thread.threadId, "thread id");
+}
+
+function targetIdentityThreadState(identity) {
+  return identityPayloadState(((identity || {}).thread || {}), "thread identity");
+}
+
+function teamIdentityTeamId(identity) {
+  const state = identityPayloadState(identity, "team identity");
+  if (state === "none") return "";
+  if (state !== "member")
+    throw new Error("invalid team identity state: " + (state || "-"));
+  return requiredIdentityText(identity.teamId, "team id");
+}
+
+function teamIdentityRevision(identity) {
+  return teamIdentityNumber(identity, "teamRevision", "team revision");
+}
+
+function teamIdentityConfigRevision(identity) {
+  return teamIdentityNumber(identity, "configRevision", "config revision");
+}
+
+function teamIdentityNumber(identity, field, label) {
+  const state = identityPayloadState(identity, "team identity");
+  if (state === "none") return 0;
+  if (state !== "member")
+    throw new Error("invalid team identity state: " + (state || "-"));
+  return nonnegativeIdentityNumber(identity[field], label);
+}
+
+function identityPayloadState(identity, label) {
+  const state = String((identity || {}).state || "").trim();
+  if (!state) throw new Error(label + " state is required");
+  return state;
+}
+
+function requiredIdentityText(value, label) {
+  const text = String(value || "").trim();
+  if (!text) throw new Error(label + " must be non-empty");
+  return text;
+}
+
+function nonnegativeIdentityNumber(value, label) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0)
+    throw new Error(label + " must be non-negative");
+  return Math.floor(number);
 }
 
 function statusLineWithRetainedSummary(lane, statusLine) {

@@ -556,7 +556,7 @@ def test_task_drain_replaces_filters_and_creates_route_team(tmp_path, monkeypatc
     team_id = state.team_store.current_team_for_agent(THREAD_A)
     assert status == HTTPStatus.OK
     assert payload["route"]["actor"] == THREAD_A
-    assert payload["route"]["teamId"] == team_id
+    assert payload["route"]["teamIdentity"]["teamId"] == team_id
     assert payload["route"]["taskFilters"] == ["serve.ui", "task.review"]
     assert payload["route"]["lifetime"] == "Drive"
     assert payload["route"]["memberAgents"] == [THREAD_A]

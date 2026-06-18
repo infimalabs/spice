@@ -353,9 +353,8 @@ def work_tree_task_drain_response_payload(
     facts = payloads.team_facts_for_actor(state.team_store, actor)
     route = {
         "actor": actor,
-        "teamId": facts.get("teamId", ""),
-        "teamRevision": facts.get("teamRevision", 0),
-        "configRevision": facts.get("configRevision", 0),
+        "targetIdentity": payloads.target_identity_payload(target, actor),
+        "teamIdentity": payloads.team_identity_payload(facts),
         "memberAgents": [actor] if actor else [],
         "laneName": target.name,
         "taskFilters": facts.get("taskFilters", []),
