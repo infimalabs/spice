@@ -408,7 +408,11 @@ def lane_watch_paths_for_target(
     target_inbox = inbox_dir(target.repo_root)
     target_inbox.mkdir(parents=True, exist_ok=True)
     team_path = state.team_store.path
-    paths = [target_inbox, *_team_store_watch_paths(team_path)]
+    paths = [
+        target_inbox,
+        *_team_store_watch_paths(team_path),
+        task_config.ensure_task_event_file(),
+    ]
     if transcript_path is not None:
         paths.append(transcript_path)
     return tuple(paths)
@@ -442,6 +446,7 @@ def lane_signature_for_target(
             ),
         ),
         _path_signature(state.team_store.path),
+        _path_signature(task_config.ensure_task_event_file()),
     )
 
 

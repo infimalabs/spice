@@ -17,6 +17,8 @@ from spice.agent.identity import ambient_thread_id
 from spice.errors import SpiceError
 from spice.tasks import config
 
+_MUTATING_COMMANDS = frozenset({"add", "annotate", "delete", "done", "modify"})
+
 
 def require_task_binary() -> None:
     if not shutil.which("task"):
@@ -46,6 +48,10 @@ def run(
     if check and result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise SpiceError(f"task command failed: {' '.join(args)}\n{detail}")
+    if result.returncode == 0:
+        reason = _mutation_reason(args)
+        if reason:
+            config.mark_task_backend_changed(reason, root=selected_taskrc.parent)
     return result
 
 
@@ -60,6 +66,13 @@ def export(
     if not isinstance(data, list):
         raise SpiceError("Taskwarrior export did not return a JSON array")
     return [row for row in data if isinstance(row, dict)]
+
+
+def _mutation_reason(args: list[str]) -> str:
+    for arg in args:
+        if arg in _MUTATING_COMMANDS:
+            return arg
+    return ""
 
 
 def now_iso() -> str:
