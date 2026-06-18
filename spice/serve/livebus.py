@@ -337,13 +337,10 @@ def _existing_watch_paths(paths: tuple[Path, ...]) -> tuple[Path, ...]:
     result: list[Path] = []
     seen: set[Path] = set()
     for path in paths:
-        current = path
-        while not current.exists() and current.parent != current:
-            current = current.parent
-        if not current.exists() or current in seen:
+        if not path.exists() or path in seen:
             continue
-        seen.add(current)
-        result.append(current)
+        seen.add(path)
+        result.append(path)
     return tuple(result)
 
 

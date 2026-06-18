@@ -42,6 +42,14 @@ class _Connection:
             self.sent.append(payload)
 
 
+def test_existing_watch_paths_returns_existing_input_paths(tmp_path):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    missing = parent / "missing.txt"
+
+    assert livebus._existing_watch_paths((parent, missing)) == (parent,)
+
+
 def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_count(
     tmp_path, monkeypatch
 ):
@@ -246,7 +254,7 @@ def _callbacks(
         }
 
     def watch_paths(_target, _thread_id, transcript_path):
-        paths = [inbox_dir(target.repo_root), inbox_dir(target.repo_root).parent]
+        paths = [inbox_dir(target.repo_root)]
         if transcript_path is not None:
             paths.append(transcript_path)
         return tuple(paths)
