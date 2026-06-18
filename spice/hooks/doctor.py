@@ -283,8 +283,8 @@ def _skill_check(repo_root: Path) -> DoctorCheck:
         return _ok("skill", f"{location} current", "spice agent activation")
     return _ok(
         "skill",
-        f"{location} differs from packaged (repo-owned, or refreshed on "
-        "next activation)",
+        f"{location} differs from packaged (tracked copy, or refreshed on "
+        "next activation when generated)",
         "spice agent activation",
     )
 
