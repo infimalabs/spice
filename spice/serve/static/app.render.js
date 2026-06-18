@@ -20,17 +20,23 @@ const messageOccupantAccentPalette = [
 let globalTransientStatusTimer = null;
 
 function renderLaneChrome(lane, payload) {
-  if (payload.targetBranch) lane.branchName = payload.targetBranch;
-  if (payload.targetAgentName) lane.agentName = payload.targetAgentName;
-  if (payload.targetThreadId) lane.targetThreadId = payload.targetThreadId;
+  if (payloadHasField(payload, "targetBranch"))
+    lane.branchName = String(payload.targetBranch || "");
+  if (payloadHasField(payload, "targetAgentName"))
+    lane.agentName = String(payload.targetAgentName || "");
+  if (payloadHasField(payload, "targetThreadId")) {
+    const threadId = String(payload.targetThreadId || "");
+    lane.targetThreadId = threadId;
+    lane.activeThreadId = threadId;
+  }
   lane.taskFilters = uniqueStringList(payload.taskFilters || lane.taskFilters);
-  lane.laneFilterVersion = String(
-    payload.laneFilterVersion || lane.laneFilterVersion || "",
-  );
-  if (payload.teamId) lane.teamId = String(payload.teamId);
-  if (payload.teamRevision)
+  if (payloadHasField(payload, "laneFilterVersion"))
+    lane.laneFilterVersion = String(payload.laneFilterVersion || "");
+  if (payloadHasField(payload, "teamId"))
+    lane.teamId = String(payload.teamId || "");
+  if (payloadHasField(payload, "teamRevision"))
     lane.teamRevision = Math.max(0, Number(payload.teamRevision) || 0);
-  if (payload.configRevision)
+  if (payloadHasField(payload, "configRevision"))
     lane.configRevision = Math.max(0, Number(payload.configRevision) || 0);
   if (payload.taskFilterInventory)
     lane.taskFilterInventory = payload.taskFilterInventory;
@@ -49,6 +55,10 @@ function renderLaneChrome(lane, payload) {
   renderFilterPills();
   syncFusedLaneChrome(laneGroupHost(lane));
   syncComposerPlaceholders(laneGroupHost(lane));
+}
+
+function payloadHasField(payload, name) {
+  return Object.prototype.hasOwnProperty.call(payload || {}, name);
 }
 
 function statusLineWithRetainedSummary(lane, statusLine) {
