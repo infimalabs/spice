@@ -18,3 +18,13 @@ def test_target_refresh_clears_stale_open_lane_pending_count():
         ["node", str(script), str(app_lanes)],
         check=True,
     )
+
+
+def test_team_snapshot_renewal_reuses_existing_lane_without_empty_placeholder():
+    app_lanes = STATIC_ROOT / "app.lanes.js"
+    script = Path(__file__).with_name("fixtures") / "team_snapshot_renewal_reconcile.js"
+
+    subprocess.run(
+        ["node", str(script), str(app_lanes)],
+        check=True,
+    )

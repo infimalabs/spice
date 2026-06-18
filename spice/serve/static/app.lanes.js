@@ -188,8 +188,13 @@ function applyTeamSnapshotPayload(payload, options = {}) {
   const openTargetIds = new Set();
   const groupRuns = [];
   for (const team of teams) {
+    const members = team.members || [];
     const memberTargetIds = teamMemberTargetIds(team);
     if (!memberTargetIds.length) {
+      if (members.length) {
+        preserveUnresolvedTeamLanes(team, openTargetIds);
+        continue;
+      }
       if (!team.teamId) continue;
       const targetId = emptyTeamTargetId(team.teamId);
       openTargetIds.add(targetId);
@@ -200,6 +205,8 @@ function applyTeamSnapshotPayload(payload, options = {}) {
       openTargetIds.add(targetId);
       ensureTeamMemberLane(targetId, team, hints.get(targetId));
     }
+    if (memberTargetIds.length < members.length)
+      preserveUnresolvedTeamLanes(team, openTargetIds);
     if (memberTargetIds.length > 1) groupRuns.push(memberTargetIds);
   }
   for (const lane of [...laneStates.values()]) {
@@ -228,7 +235,7 @@ function sameStringSets(left, right) {
 function teamMemberTargetIds(team) {
   const targetIds = [];
   for (const member of team.members || []) {
-    const targetId = teamMemberTargetId(member);
+    const targetId = teamMemberTargetId(member, team, targetIds);
     if (targetId && targetById.has(targetId) && !targetIds.includes(targetId))
       targetIds.push(targetId);
   }
@@ -237,14 +244,93 @@ function teamMemberTargetIds(team) {
 
 // A team member is an actor (canonical thread id) or, before any thread is
 // bound, the worktree target id itself.
-function teamMemberTargetId(member) {
+function teamMemberTargetId(member, team = null, claimedTargetIds = []) {
   const agentId = String((member || {}).agentId || "");
+  const actorId = canonicalThreadActorId(agentId);
+  if (!actorId) return "";
   if (targetById.has(agentId)) return agentId;
+  const laneTargetId = teamMemberLaneTargetId(actorId);
+  if (laneTargetId) {
+    renameTeamMemberTargetThread(laneTargetId, agentId);
+    return laneTargetId;
+  }
   for (const target of targets) {
-    if (canonicalThreadActorId(target.threadId) === agentId && agentId)
+    if (canonicalThreadActorId(target.threadId) === actorId)
       return target.id;
   }
+  const renewedTargetId = renewedTeamSlotTargetId(team, agentId, claimedTargetIds);
+  if (renewedTargetId) return renewedTargetId;
   return "";
+}
+
+function teamMemberLaneTargetId(actorId) {
+  for (const lane of laneStates.values()) {
+    if (!targetById.has(lane.targetId)) continue;
+    if (
+      canonicalThreadActorId(lane.targetThreadId) === actorId ||
+      canonicalThreadActorId(lane.activeThreadId) === actorId
+    )
+      return lane.targetId;
+  }
+  return "";
+}
+
+function renewedTeamSlotTargetId(team, agentId, claimedTargetIds = []) {
+  const teamId = String((team || {}).teamId || "");
+  if (!teamId) return "";
+  const actorIds = teamMemberActorIds(team);
+  const claimed = new Set(claimedTargetIds);
+  const candidates = [];
+  for (const lane of laneStates.values()) {
+    if (lane.emptyTeam || claimed.has(lane.targetId)) continue;
+    const target = targetById.get(lane.targetId);
+    if (!target) continue;
+    if (String(lane.teamId || target.teamId || "") !== teamId) continue;
+    const laneActorId = canonicalThreadActorId(
+      lane.targetThreadId || target.threadId || lane.activeThreadId,
+    );
+    if (!laneActorId || actorIds.has(laneActorId)) continue;
+    candidates.push(lane.targetId);
+  }
+  if (candidates.length !== 1) return "";
+  renameTeamMemberTargetThread(candidates[0], agentId);
+  return candidates[0];
+}
+
+function renameTeamMemberTargetThread(targetId, agentId) {
+  const target = targetById.get(targetId);
+  if (target) target.threadId = agentId;
+  const lane = laneStates.get(targetId);
+  if (!lane) return;
+  lane.targetThreadId = agentId;
+  lane.activeThreadId = agentId;
+  if (typeof ensureLaneOccupant === "function") ensureLaneOccupant(lane, agentId);
+}
+
+function preserveUnresolvedTeamLanes(team, openTargetIds) {
+  const teamId = String((team || {}).teamId || "");
+  if (!teamId) return;
+  const actorIds = teamMemberActorIds(team);
+  for (const lane of laneStates.values()) {
+    if (lane.emptyTeam) continue;
+    const target = targetById.get(lane.targetId);
+    if (!target) continue;
+    if (String(lane.teamId || target.teamId || "") !== teamId) continue;
+    const laneActorId = canonicalThreadActorId(
+      lane.targetThreadId || target.threadId || lane.activeThreadId,
+    );
+    if (laneActorId && actorIds.has(laneActorId)) continue;
+    openTargetIds.add(lane.targetId);
+  }
+}
+
+function teamMemberActorIds(team) {
+  const actorIds = new Set();
+  for (const member of (team || {}).members || []) {
+    const actorId = canonicalThreadActorId((member || {}).agentId);
+    if (actorId) actorIds.add(actorId);
+  }
+  return actorIds;
 }
 
 function ensureTeamMemberLane(targetId, team, hint = null) {
