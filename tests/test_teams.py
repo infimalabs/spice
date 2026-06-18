@@ -224,7 +224,7 @@ def test_split_team_back_unwinds_nested_team_merges_one_boundary_at_a_time(tmp_p
 
 def test_assigning_agent_to_new_team_moves_single_open_membership(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    source = store.create_team(members=["agent-a"])
+    store.create_team(members=["agent-a"])
     destination = store.create_team(members=["agent-b"])
 
     store.assign_agent(destination.team_id, "agent-a")
@@ -233,14 +233,21 @@ def test_assigning_agent_to_new_team_moves_single_open_membership(tmp_path):
         team.team_id: {member.agent_id for member in team.members}
         for team in store.team_snapshot().teams
     }
+    with store.connect() as connection:
+        team_rows = connection.execute(
+            "SELECT team_id, status FROM teams ORDER BY created_at"
+        ).fetchall()
+
     assert open_members == {destination.team_id: {"agent-a", "agent-b"}}
     assert store.current_team_for_agent("agent-a") == destination.team_id
-    assert store.team_state(source.team_id).status == "closed"
+    assert [(row["team_id"], row["status"]) for row in team_rows] == [
+        (destination.team_id, "open")
+    ]
 
 
 def test_assigning_agent_with_target_alias_retires_stale_membership(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    source = store.create_team(members=["target-a"])
+    store.create_team(members=["target-a"])
     destination = store.create_team(members=["agent-b"])
 
     store.assign_agent(destination.team_id, "thread-a", aliases=["target-a"])
@@ -249,15 +256,22 @@ def test_assigning_agent_with_target_alias_retires_stale_membership(tmp_path):
         team.team_id: {member.agent_id for member in team.members}
         for team in store.team_snapshot().teams
     }
+    with store.connect() as connection:
+        team_rows = connection.execute(
+            "SELECT team_id, status FROM teams ORDER BY created_at"
+        ).fetchall()
+
     assert open_members == {destination.team_id: {"thread-a", "agent-b"}}
     assert store.current_team_for_agent("thread-a") == destination.team_id
-    assert store.team_state(source.team_id).status == "closed"
+    assert [(row["team_id"], row["status"]) for row in team_rows] == [
+        (destination.team_id, "open")
+    ]
 
 
 def test_team_command_service_imports_agent_into_empty_team(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     service = TeamCommandService(store)
-    source = store.create_team(members=["target-a"])
+    store.create_team(members=["target-a"])
     empty = store.create_team()
 
     result = service.apply(
@@ -273,9 +287,16 @@ def test_team_command_service_imports_agent_into_empty_team(tmp_path):
         team.team_id: {member.agent_id for member in team.members}
         for team in result.snapshot.teams
     }
+    with store.connect() as connection:
+        team_rows = connection.execute(
+            "SELECT team_id, status FROM teams ORDER BY created_at"
+        ).fetchall()
+
     assert open_members == {empty.team_id: {"thread-a"}}
     assert store.current_team_for_agent("thread-a") == empty.team_id
-    assert store.team_state(source.team_id).status == "closed"
+    assert [(row["team_id"], row["status"]) for row in team_rows] == [
+        (empty.team_id, "open")
+    ]
 
 
 def test_team_command_service_reorders_team_agents(tmp_path):
@@ -368,14 +389,27 @@ def test_removing_final_agent_closes_team(tmp_path):
 
     revision = store.remove_agent(team.team_id, "agent-a")
     snapshot = store.team_snapshot()
+    with store.connect() as connection:
+        team_rows = connection.execute(
+            "SELECT team_id, status FROM teams ORDER BY created_at"
+        ).fetchall()
+        event_rows = connection.execute(
+            "SELECT kind FROM events ORDER BY revision"
+        ).fetchall()
 
-    assert store.team_state(team.team_id).status == "closed"
-    assert snapshot.global_revision == revision
+    assert snapshot.global_revision > revision
     assert len(snapshot.teams) == 1
     replacement = snapshot.teams[0]
     assert replacement.team_id != team.team_id
     assert replacement.status == "open"
     assert replacement.members == ()
+    assert [(row["team_id"], row["status"]) for row in team_rows] == [
+        (replacement.team_id, "open")
+    ]
+    assert [row["kind"] for row in event_rows] == [
+        "createTeam",
+        "pruneZeroActivityTeams",
+    ]
 
 
 def test_team_command_service_close_final_team_returns_replacement_empty_team(
@@ -387,8 +421,14 @@ def test_team_command_service_close_final_team_returns_replacement_empty_team(
     team = created.snapshot.teams[0]
 
     result = service.apply({"command": "closeTeam", "teamId": team.team_id})
+    with store.connect() as connection:
+        team_rows = connection.execute(
+            "SELECT team_id, status FROM teams ORDER BY created_at"
+        ).fetchall()
+        event_rows = connection.execute(
+            "SELECT kind FROM events ORDER BY revision"
+        ).fetchall()
 
-    assert store.team_state(team.team_id).status == "closed"
     assert result.revision == result.snapshot.global_revision
     assert result.revision > created.revision
     assert len(result.snapshot.teams) == 1
@@ -396,6 +436,38 @@ def test_team_command_service_close_final_team_returns_replacement_empty_team(
     assert replacement.team_id != team.team_id
     assert replacement.status == "open"
     assert replacement.members == ()
+    assert [(row["team_id"], row["status"]) for row in team_rows] == [
+        (replacement.team_id, "open")
+    ]
+    assert [row["kind"] for row in event_rows] == [
+        "createTeam",
+        "pruneZeroActivityTeams",
+    ]
+
+
+def test_zero_activity_prune_preserves_metric_and_config_teams(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    metric_team = store.create_team(team_id="team-metric", members=["agent-a"])
+    store.record_agent_metric_delta("agent-a", sends=1)
+    store.remove_agent(metric_team.team_id, "agent-a")
+    config_team = store.create_team(
+        team_id="team-config",
+        members=["agent-b"],
+        config=TeamConfig(task_filters=("serve.ui",)),
+    )
+    store.remove_agent(config_team.team_id, "agent-b")
+
+    snapshot = store.team_snapshot()
+    with store.connect() as connection:
+        team_rows = connection.execute(
+            "SELECT team_id, status FROM teams ORDER BY team_id"
+        ).fetchall()
+
+    assert {row["team_id"]: row["status"] for row in team_rows} == {
+        "team-config": "closed",
+        "team-metric": "closed",
+        snapshot.teams[0].team_id: "open",
+    }
 
 
 def test_team_command_service_keeps_revisioned_config_history(tmp_path):
