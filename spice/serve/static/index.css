@@ -891,11 +891,15 @@ button.primary:hover {
   color: var(--muted);
   flex: none;
   font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
 }
 .spice-menu-action-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .target-choice {
   align-items: center;
