@@ -85,19 +85,8 @@ def test_claude_command_starts_headless_stream_json_with_effort(tmp_path):
     assert command[1:5] == ["--print", "--output-format", "stream-json", "--verbose"]
     assert command[command.index("--model") + 1] == "haiku"
     assert command[command.index("--permission-mode") + 1] == "bypassPermissions"
-    # Codex-shaped `xhigh` maps onto Claude's `max` rather than crashing launch.
-    assert command[command.index("--effort") + 1] == "max"
+    assert command[command.index("--effort") + 1] == "xhigh"
     assert command[-1] == "follow the skill"
-
-
-def test_claude_command_maps_default_xhigh_effort_to_max(tmp_path):
-    command = CLAUDE_DRIVER.build_exec_command(
-        repo_root=tmp_path,
-        prompt="follow the skill",
-        model="haiku",
-    )
-
-    assert command[command.index("--effort") + 1] == "max"
 
 
 def test_claude_command_registers_playwright_mcp_server(tmp_path):

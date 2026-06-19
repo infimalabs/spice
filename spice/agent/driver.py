@@ -266,10 +266,8 @@ class CodexDriver(AgentDriver):
 
 
 # Claude Code's `--effort` vocabulary. The configured spice effort value is
-# Codex-shaped (it ships `xhigh`); map the near-equivalents and drop anything
-# Claude would reject so a Codex-tuned config never crashes a Claude launch.
-CLAUDE_EFFORT_CHOICES = frozenset({"low", "medium", "high", "max"})
-CLAUDE_EFFORT_ALIASES = {"minimal": "low", "xlow": "low", "xhigh": "max"}
+# Codex-shaped; Claude uses the same set, except for `max`, which we ignore.
+CLAUDE_EFFORT_CHOICES = frozenset({"low", "medium", "high", "xhigh"})
 # Claude's usage never records the context window; a session runs either the
 # standard tier (the driver's `default_context_window`) or the 1M beta. The
 # meter fits occupancy to the smallest tier that holds it.
@@ -285,9 +283,7 @@ OUT_OF_CREDITS_PATTERNS = (
 
 def claude_effort(value: str) -> str:
     effort = (value or "").strip().lower()
-    if effort in CLAUDE_EFFORT_CHOICES:
-        return effort
-    return CLAUDE_EFFORT_ALIASES.get(effort, "")
+    return effort if effort in CLAUDE_EFFORT_CHOICES else ""
 
 
 def dashed_uuid(value: str) -> str:
@@ -681,7 +677,7 @@ CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
     default_bin="claude",
     bin_env="SPICE_AGENT_BIN",  # env-policy: allow
     thread_id_env="CLAUDE_CODE_SESSION_ID",  # env-policy: allow
-    default_model="claude-haiku-4-5",
+    default_model="claude-opus-4-8",
     default_reasoning_effort="xhigh",
     default_service_tier="",
     stdout_assistant_marker="",
