@@ -529,7 +529,7 @@ def test_task_drain_replaces_filters_and_creates_route_team(tmp_path, monkeypatc
         target,
         {
             "replaceTaskFilters": True,
-            "taskFilters": ["serve.ui", "", "task.review"],
+            "taskFilters": ["serve", "", "task.review"],
             "lifetime": "Drive",
         },
     )
@@ -538,7 +538,7 @@ def test_task_drain_replaces_filters_and_creates_route_team(tmp_path, monkeypatc
     assert status == HTTPStatus.OK
     assert payload["route"]["actor"] == THREAD_A
     assert payload["route"]["teamIdentity"]["teamId"] == team_id
-    assert payload["route"]["taskFilters"] == ["serve.ui", "task.review"]
+    assert payload["route"]["taskFilters"] == ["serve", "task.review"]
     assert payload["route"]["lifetime"] == "Drive"
     assert payload["route"]["memberAgents"] == [THREAD_A]
 

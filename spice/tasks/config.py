@@ -418,9 +418,8 @@ def validate_assignable_project(project: str) -> str:
     if stem not in assignable_stems():
         raise SpiceError(
             f"project stem {stem!r} is internal and cannot be lane-filter assigned "
-            f"(assignable examples: {_project_examples_summary()})"
+            f"(assignable: {', '.join(assignable_stems())})"
         )
-    _validate_assignable_project_depth(project, segments)
     return project
 
 
@@ -439,11 +438,11 @@ def validate_manual_creation_project(project: str) -> str:
             f"omit --project for private work or use an assignable project such as "
             f"{_project_example()}"
         )
-    _validate_assignable_project_depth(project, segments)
+    _validate_public_task_project_depth(project, segments)
     return project
 
 
-def _validate_assignable_project_depth(project: str, segments: list[str]) -> None:
+def _validate_public_task_project_depth(project: str, segments: list[str]) -> None:
     min_depth, max_depth = project_depth_bounds()
     depth = len(segments)
     if depth < min_depth:
@@ -478,10 +477,6 @@ def _project_example(
         suffixes.append(f"level{len(suffixes) + 1}")
     segments = [stem, *suffixes]
     return PROJECT_DELIMITER.join(segments)
-
-
-def _project_examples_summary() -> str:
-    return ", ".join(_project_example(stem) for stem in assignable_stems())
 
 
 def is_internal_project_stem(stem: str) -> bool:

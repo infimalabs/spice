@@ -18,6 +18,7 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
     assert "It still goes through `agent run`" in text
     assert "run `spice task add --project <stem.child>` immediately" in text
     assert "immediate task capture, not allocator selection" in text
+    assert "`spice task status` and `spice task doctor` report" in text
 
 
 def test_available_skill_path_materializes_into_the_worktree(tmp_path):

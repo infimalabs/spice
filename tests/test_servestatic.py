@@ -466,6 +466,7 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert 'detail: host.teamImportOverlayOpen ? "close panel" : "choose agent",' in (
         app_groups
     )
+    assert "cover messages" not in app_groups
     assert 'label: "Split into individuals",' in app_groups
     assert 'label: "Restore previous team",' in app_groups
     assert "if (host.emptyTeam) return [closeTeamMenuAction(host)];" in app_groups
@@ -519,7 +520,7 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert "position: relative;" in lane_rule
     assert "position: relative;" in view_stack_rule
     assert "position: relative;" in messages_rule
-    assert "align-content: stretch;" in menu_rule
+    assert "align-content: start;" in menu_rule
     assert "position: absolute;" in menu_rule
     assert "inset: 0;" in menu_rule
     assert "height: var(--lane-team-menu-height, 120px);" in empty_team_overlay_rule
@@ -532,25 +533,25 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert "left: 0;" in team_import_overlay_rule
     assert "right: 0;" in team_import_overlay_rule
     assert "z-index: 7;" in team_import_overlay_rule
-    assert "grid-auto-rows: minmax(72px, 1fr);" in menu_rule
+    assert "grid-auto-rows: minmax(38px, auto);" in menu_rule
     assert "z-index: 6;" in menu_rule
     assert "align-items: center;" in action_rule
-    assert "container-type: inline-size;" in action_rule
-    assert "flex-direction: column;" in action_rule
-    assert "gap: 6px;" in action_rule
-    assert "justify-content: center;" in action_rule
-    assert "min-height: 0;" in action_rule
+    assert "container-type: inline-size;" not in action_rule
+    assert "flex-direction: row;" in action_rule
+    assert "gap: 8px;" in action_rule
+    assert "justify-content: space-between;" in action_rule
+    assert "min-height: 38px;" in action_rule
     assert "overflow: hidden;" in action_rule
-    assert "padding: 8px 10px;" in action_rule
-    assert "text-align: center;" in action_rule
-    assert "display: block;" in text_rule
-    assert "max-width: 100%;" in text_rule
-    assert "overflow-wrap: anywhere;" in text_rule
-    assert "font-size: clamp(12px, 7cqi, 16px);" in text_rule
-    assert "font-size: clamp(10px, 5.25cqi, 13px);" in text_rule
-    assert "text-wrap: balance;" in text_rule
-    assert "text-wrap: pretty;" in text_rule
-    assert "white-space: normal;" in text_rule
+    assert "padding: 7px 9px;" in action_rule
+    assert "text-align: left;" in action_rule
+    assert "overflow: hidden;" in text_rule
+    assert "overflow-wrap: normal;" in text_rule
+    assert "text-overflow: ellipsis;" in text_rule
+    assert "white-space: nowrap;" in text_rule
+    assert "flex: 1 1 auto;" in text_rule
+    assert "font-size: 13px;" in text_rule
+    assert "flex: 0 1 46%;" in text_rule
+    assert "line-height: 1.15;" in text_rule
 
 
 def test_static_composer_header_drag_suppresses_browser_selection():

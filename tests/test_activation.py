@@ -27,6 +27,7 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "immediate task capture is not allocator selection" in text
     assert "ack_inline=ACK pending inbox keys" in text
     assert "task_add_public=spice task add ... --project <stem.child>" in text
+    assert "task_project_depth=public task project depth bounds" in text
 
 
 def test_activation_command_surface_explains_pending_count_recovery():
