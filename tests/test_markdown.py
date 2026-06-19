@@ -1,7 +1,10 @@
 """Safe transcript markdown rendering."""
 
+import re
+import subprocess
 from urllib.parse import urlparse
 
+from spice.paths import shared_attachment_root
 from spice.serve.app import (
     ServeState,
     _resolve_work_tree_link_path,
@@ -118,3 +121,74 @@ def test_work_tree_proxy_route_resolves_lane_worktree_file(tmp_path):
     assert selected is not None
     assert selected.id == "lane-id"
     assert resolved == target
+
+
+def test_work_tree_proxy_route_resolves_rendered_shared_attachment_link(tmp_path):
+    anchor = tmp_path / "anchor"
+    worktree = _git_repo(tmp_path / "lane")
+    anchor.mkdir()
+    shared = shared_attachment_root(worktree) / "digest" / "01-image.png"
+    shared.parent.mkdir(parents=True, exist_ok=True)
+    shared.write_bytes(b"image")
+    state = ServeState(anchor_root=anchor)
+    state.cached_targets = [
+        WorktreeTarget(
+            id="lane-id",
+            repo_root=worktree,
+            name="lane",
+            branch="main",
+        )
+    ]
+
+    html = render_message_html(
+        f"Attachment [paste.png]({shared.as_posix()}).", worktree_id="lane-id"
+    )
+    href = _first_href(html)
+    parsed = urlparse(href)
+    selected, route_target = _work_tree_proxy_target_from_request(state, parsed)
+    resolved = _resolve_work_tree_link_path(state, route_target or "", selected)
+
+    assert selected is not None
+    assert selected.id == "lane-id"
+    assert resolved == shared
+
+
+def test_work_tree_proxy_route_rejects_absolute_file_outside_allowed_roots(tmp_path):
+    anchor = tmp_path / "anchor"
+    worktree = _git_repo(tmp_path / "lane")
+    outside = tmp_path / "outside.png"
+    anchor.mkdir()
+    outside.write_bytes(b"outside")
+    state = ServeState(anchor_root=anchor)
+    state.cached_targets = [
+        WorktreeTarget(
+            id="lane-id",
+            repo_root=worktree,
+            name="lane",
+            branch="main",
+        )
+    ]
+
+    html = render_message_html(
+        f"Attachment [outside.png]({outside.as_posix()}).", worktree_id="lane-id"
+    )
+    href = _first_href(html)
+    parsed = urlparse(href)
+    selected, route_target = _work_tree_proxy_target_from_request(state, parsed)
+    resolved = _resolve_work_tree_link_path(state, route_target or "", selected)
+
+    assert selected is not None
+    assert selected.id == "lane-id"
+    assert resolved is None
+
+
+def _first_href(html: str) -> str:
+    match = re.search(r'href="([^"]+)"', html)
+    assert match is not None
+    return match.group(1)
+
+
+def _git_repo(path):
+    path.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
+    return path
