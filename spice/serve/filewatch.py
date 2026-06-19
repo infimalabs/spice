@@ -36,8 +36,7 @@ def start_exit_file_watch(
     if watched_path is None:
         return None
     path = Path(watched_path).expanduser()
-    if not path.exists():
-        raise SpiceError(f"spice serve --until path does not exist: {path}")
+    _initialize_watch_path(path)
     print(f"spice serve: watching {path} for exit")
     thread = Thread(
         target=_stop_when_file_changes,
@@ -47,6 +46,17 @@ def start_exit_file_watch(
     )
     thread.start()
     return thread
+
+
+def _initialize_watch_path(path: Path) -> None:
+    if path.exists():
+        return
+    try:
+        path.touch()
+    except OSError as exc:
+        raise SpiceError(
+            f"spice serve --until path could not be initialized: {path}: {exc}"
+        ) from exc
 
 
 def _import_watch():
