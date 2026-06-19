@@ -154,6 +154,13 @@ def test_speech_queue_preserves_couple_pending_entries_across_agents():
     ) == ["active", "bravo", "alpha"]
 
 
+def test_natural_clip_end_pause_preserves_final_tail():
+    assert _natural_clip_end_pause_requests() == [
+        "First final paragraph.",
+        "Last final paragraph.",
+    ]
+
+
 def test_speech_queue_clears_global_pending_backlog_when_behind():
     assert _speech_queue_requests_for_entries(
         [
@@ -670,6 +677,107 @@ vm.runInContext(fs.readFileSync(path, "utf8"), context);
     if result.returncode != 0:
         raise AssertionError(
             "node speech queue backlog failed:\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    return json.loads(result.stdout)
+
+
+def _natural_clip_end_pause_requests() -> list[str]:
+    script = """
+const fs = require("fs");
+const vm = require("vm");
+const path = process.argv[1];
+const requests = [];
+const audioInstances = [];
+const failTimer = setTimeout(() => {
+  console.error("final tail was not requested");
+  process.exit(1);
+}, 1000);
+let tailRequestedResolve;
+const tailRequested = new Promise((resolve) => {
+  tailRequestedResolve = resolve;
+});
+
+class FakeAudio {
+  constructor() {
+    this.listeners = {};
+    this.index = audioInstances.length;
+    this.ended = false;
+    audioInstances.push(this);
+  }
+  addEventListener(name, callback) {
+    this.listeners[name] = callback;
+  }
+  removeEventListener(name) {
+    delete this.listeners[name];
+  }
+  play() {
+    if (this.index === 0) {
+      queueMicrotask(() => {
+        this.ended = true;
+        this.listeners.pause();
+      });
+    } else {
+      queueMicrotask(() => this.listeners.ended());
+    }
+    return Promise.resolve();
+  }
+  pause() {
+    if (this.listeners.pause) this.listeners.pause();
+  }
+}
+
+const context = {
+  Blob: class {},
+  Audio: FakeAudio,
+  URL: {
+    createObjectURL: () => "blob:audio",
+    revokeObjectURL: () => {},
+  },
+  document: { querySelectorAll: () => [] },
+  fetch: async (url, options) => {
+    const text = JSON.parse(options.body).text;
+    requests.push(text);
+    if (text === "Last final paragraph.") tailRequestedResolve();
+    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+  },
+  isPresenceMessage: () => false,
+  laneEffectiveSpeechMode: () => "speak",
+  laneGroupHost: (lane) => lane,
+  queueMicrotask,
+  targetApi: (targetId, suffix) => targetId + suffix,
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(path, "utf8"), context);
+
+(async () => {
+  const lane = {
+    targetId: "lane-a",
+    speechAbortVersion: 0,
+    spokenMessageKeys: new Set(),
+  };
+  context.enqueueSpeech(lane, "final-key", [
+    "First final paragraph.",
+    "Last final paragraph.",
+  ]);
+  await tailRequested;
+  clearTimeout(failTimer);
+  process.stdout.write(JSON.stringify(requests));
+})().catch((error) => {
+  clearTimeout(failTimer);
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});
+"""
+    result = subprocess.run(
+        ["node", "-e", script, str(AUDIO_JS)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            "node natural pause final tail failed:\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
     return json.loads(result.stdout)
