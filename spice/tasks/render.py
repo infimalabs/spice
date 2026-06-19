@@ -274,8 +274,7 @@ def render_status() -> str:
         f"oops {len(ops.oops_rows())}",
     ]
     route = lanes.team_route_for_actor(actor)
-    lane_filter = lanes.filter_args(route)
-    effective_filter = ops.effective_filter_args(actor, lane_filter)
+    effective_filter = ops.effective_route_filter_args(actor, route)
     if effective_filter:
         lane_filter_label = " ".join(effective_filter)
     else:
