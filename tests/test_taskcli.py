@@ -110,6 +110,43 @@ def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
     assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
 
 
+def test_task_review_then_marks_spawned_followup_as_cli_creation_surface(
+    task_repo, capsys
+):
+    assert task_repo.is_dir()
+    handle = ops.add(
+        "Review target for CLI follow-up",
+        project="task.unit",
+        priority="medium",
+        flow=["review"],
+        acceptance=["review starts directly for CLI coverage"],
+        claim=True,
+    )
+    args = build_parser().parse_args(
+        [
+            "task",
+            "review",
+            handle,
+            "--finding",
+            "changes",
+            "--note",
+            "description current; needs follow-up",
+            "--then",
+            "title=CLI spawned follow-up | project=task.unit | "
+            "acceptance=Spawned review follow-up can render as a task card",
+        ]
+    )
+    args.backend = str(config.backend_root())
+
+    assert args.func(args) == 0
+    out = capsys.readouterr().out
+    spawned = re.search(r"spawned (\S+)", out).group(1)
+    row = identity.resolve(spawned)
+
+    assert row["description"] == "CLI spawned follow-up"
+    assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
+
+
 def test_task_add_takes_exactly_one_title_form(task_repo):
     args = build_parser().parse_args(
         ["task", "add", "Positional title", "--title", "Flag title"]
@@ -139,6 +176,7 @@ def test_task_oops_description_records_triage_context(task_repo, capsys):
     assert row["description"] == "wrapper hiccup"
     assert row["task_description"] == "Longer triage context for the board."
     assert row["project"] == config.OOPS_PROJECT
+    assert str(row.get(config.TASK_CREATION_SURFACE_UDA) or "") == ""
 
 
 def test_task_oops_accepts_priority_style_severity_shorthand(task_repo, capsys):

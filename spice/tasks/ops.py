@@ -879,6 +879,7 @@ def review(
     note: str | None = None,
     then: list[str] | None = None,
     followup: list[str] | None = None,
+    creation_surface: str | None = None,
 ) -> str:
     finding = (finding or "clean").strip()
     if finding.casefold() != "clean" and not then and not followup:
@@ -909,7 +910,9 @@ def review(
     annotate(uuid, f"review: finding={finding}; by={actor}")
     spawned: list[str] = []
     for spec in then or []:
-        spawned.append(_spawn_followup(spec, after_uuid=uuid))
+        spawned.append(
+            _spawn_followup(spec, after_uuid=uuid, creation_surface=creation_surface)
+        )
     linked: list[str] = []
     reviewed_handle = identity.render_handle(row)
     for followup_handle in followup or []:
@@ -972,7 +975,9 @@ def _task_continuation_contract(actor: str | None = None):
     return lanes.task_continuation_contract(route)
 
 
-def _spawn_followup(spec: str, *, after_uuid: str) -> str:
+def _spawn_followup(
+    spec: str, *, after_uuid: str, creation_surface: str | None = None
+) -> str:
     fields: dict[str, str] = {}
     for part in spec.split("|"):
         if "=" in part:
@@ -999,6 +1004,7 @@ def _spawn_followup(spec: str, *, after_uuid: str) -> str:
         claim=False,
         due=fields.get("due"),
         extra=[f"depends:{after_uuid}"],
+        creation_surface=creation_surface,
     )
 
 

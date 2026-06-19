@@ -516,6 +516,7 @@ _DISPATCH = {
         note=a.note,
         then=list(a.then),
         followup=list(a.followup),
+        creation_surface=config.TASK_CREATION_SURFACE_CLI,
     ),
     "oops": _oops,
     "note": _note,
