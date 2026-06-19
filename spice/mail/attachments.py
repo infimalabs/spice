@@ -25,7 +25,6 @@ INBOX_ATTACHMENT_MAX_ITEMS = 8
 INBOX_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024
 INBOX_ATTACHMENT_NAME_MAX_CHARS = 96
 DURABLE_ATTACHMENT_METADATA = "metadata.json"
-SHARED_ATTACHMENT_DISPLAY_ROOT = Path(".spice") / "attachments"
 
 _DATA_URL_PREFIX_RE = re.compile(
     r"^data:(?P<content_type>[^;,]+)(?:;[^,]*)?;base64,(?P<data>.*)$",
@@ -262,25 +261,23 @@ def _resolve_manifest_attachment_path(raw_path: str, *, repo_root: Path) -> Path
 
 
 def shared_attachment_display_path(path: Path, *, repo_root: Path) -> Path | None:
+    root = shared_attachment_root(repo_root).resolve()
     try:
-        rel_path = path.resolve().relative_to(shared_attachment_root(repo_root))
+        resolved = path.resolve()
+        resolved.relative_to(root)
     except (OSError, ValueError):
         return None
-    return SHARED_ATTACHMENT_DISPLAY_ROOT / rel_path
+    return resolved
 
 
 def resolve_shared_attachment_ref(ref: str, *, repo_root: Path) -> Path | None:
     path = Path(ref.replace("\\", "/"))
     root = shared_attachment_root(repo_root).resolve()
-    if path.is_absolute():
-        candidates = [path.resolve()]
-    elif path.parts[:2] == SHARED_ATTACHMENT_DISPLAY_ROOT.parts:
-        candidates = [(root / Path(*path.parts[2:])).resolve()]
-    else:
-        candidates = []
-    for candidate in candidates:
-        if candidate.is_relative_to(root) and candidate.is_file():
-            return candidate
+    if not path.is_absolute():
+        return None
+    candidate = path.resolve()
+    if candidate.is_relative_to(root) and candidate.is_file():
+        return candidate
     return None
 
 

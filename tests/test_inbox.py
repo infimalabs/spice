@@ -198,8 +198,8 @@ def test_inbox_attachment_readout_rows_render_clickable_reference(tmp_path):
     html = render_message_html(attachment_row, worktree_id="wt")
     archived_path = item.attachments[0].path
 
-    assert "[paste.png](.spice/attachments/" in attachment_row
-    assert archived_path.as_posix() not in attachment_row
+    assert f"[paste.png]({archived_path.as_posix()})" in attachment_row
+    assert shared_attachment_root(tmp_path) in archived_path.parents
     assert 'href="/work/tree/wt/' in html
     assert ">paste.png</a>" in html
 

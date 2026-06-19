@@ -135,8 +135,8 @@ def test_merge_message_omits_task_description_body():
                 "Operator steering 20260612T043642083543Z: the labels "
                 "input_image and view_image look clickable but do not navigate.\n\n"
                 "Screenshot references: "
-                ".spice/attachments/sha-a/01-image.png and "
-                ".spice/attachments/sha-b/02-image.png.\n\n"
+                "/tmp/spice/attachments/sha-a/01-image.png and "
+                "/tmp/spice/attachments/sha-b/02-image.png.\n\n"
                 "Keep the rendered image context stable for reviewers."
             ),
             "actor": ACTOR_A,

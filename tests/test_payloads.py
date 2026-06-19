@@ -13,6 +13,7 @@ from spice.agent.renewal import RENEWAL_HANDOFF_REQUEST_SUFFIX
 from spice.mail.acks import archive_ackd_inbox_items
 from spice.mail.attachments import prepare_inbox_attachments
 from spice.mail.inbox import compose_inbox_text, inbox_item_key, write_inbox_item
+from spice.paths import shared_attachment_root
 from spice.serve.agentapi import sent_steering_payload
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
@@ -587,7 +588,9 @@ def test_sent_steering_payload_includes_image_attachments(tmp_path):
 
     assert payload["attachments"][0]["name"] == "paste.png"
     assert payload["attachments"][0]["contentType"] == "image/png"
-    assert payload["attachments"][0]["path"].startswith(".spice/attachments/")
+    attachment_path = Path(payload["attachments"][0]["path"])
+    assert attachment_path.is_absolute()
+    assert shared_attachment_root(tmp_path) in attachment_path.parents
     assert payload["attachments"][0]["url"].startswith(
         "/api/work/trees/wt/files/image?path="
     )
@@ -623,7 +626,9 @@ def test_ack_context_payload_round_trips_inbox_attachments(tmp_path):
     assert payload["acks"][0]["html"] == "<p>look here</p>"
     assert attachment["name"] == "upload.png"
     assert attachment["contentType"] == "image/png"
-    assert attachment["path"].startswith(".spice/attachments/")
+    attachment_path = Path(attachment["path"])
+    assert attachment_path.is_absolute()
+    assert shared_attachment_root(tmp_path) in attachment_path.parents
     assert attachment["url"].startswith("/api/work/trees/wt/files/image?path=")
 
 
