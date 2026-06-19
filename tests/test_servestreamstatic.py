@@ -427,10 +427,28 @@ def test_static_stream_uses_message_payload_and_standard_badges():
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     css = _serve_css_text()
+    index_css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    messages_css = (STATIC_ROOT / "messages.css").read_text(encoding="utf-8")
     merge_start = app_stream.index("function mergePayloadMessages")
     merge_end = app_stream.index("function upsertKnownMessage", merge_start)
     badge_start = app_render.index("function renderBadges")
     badge_end = app_render.index("function renderCompactionDivider", badge_start)
+    badges_css_start = messages_css.index(".badges {")
+    badges_css_rule = messages_css[
+        badges_css_start : messages_css.index("}", badges_css_start)
+    ]
+    badge_css_start = messages_css.index(".badge {")
+    badge_css_rule = messages_css[
+        badge_css_start : messages_css.index("}", badge_css_start)
+    ]
+    filter_count_start = index_css.index(".filter-pill-count {")
+    filter_count_rule = index_css[
+        filter_count_start : index_css.index("}", filter_count_start)
+    ]
+    chip_count_start = index_css.index(".lane-filter-chip-count {")
+    chip_count_rule = index_css[
+        chip_count_start : index_css.index("}", chip_count_start)
+    ]
     final_css_start = css.index(".messages article.final {")
     final_css_end = css.index(".messages article.final.acked {", final_css_start)
 
@@ -486,6 +504,20 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         "}\n"
         "\n"
     )
+    assert (
+        "--message-badge-accent: var(--message-occupant-accent, var(--accent));"
+        in badges_css_rule
+    )
+    assert (
+        "border: 1px solid color-mix(in srgb, var(--message-badge-accent) 58%, var(--border));"
+        in badge_css_rule
+    )
+    assert (
+        "color: color-mix(in srgb, var(--message-badge-accent) 82%, var(--fg));"
+        in badge_css_rule
+    )
+    assert "background: var(--accent);" in filter_count_rule
+    assert "background: var(--accent);" in chip_count_rule
     assert css[final_css_start:final_css_end] == (
         ".messages article.final {\n"
         "  background: var(--final-tint);\n"
