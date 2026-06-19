@@ -670,9 +670,26 @@ function compareTargetChoices(left, right) {
   const byStatus =
     targetChoiceStatusOrder(left) - targetChoiceStatusOrder(right);
   if (byStatus) return byStatus;
+  const byRecency = compareTargetChoiceRecency(left, right);
+  if (byRecency) return byRecency;
   const byName = targetChoiceName(left).localeCompare(targetChoiceName(right));
   if (byName) return byName;
   return String(left.id || "").localeCompare(String(right.id || ""));
+}
+
+function compareTargetChoiceRecency(left, right) {
+  if (targetChoiceIsRunning(left) || targetChoiceIsRunning(right)) return 0;
+  const leftAt = targetChoiceLastAssistantAt(left);
+  const rightAt = targetChoiceLastAssistantAt(right);
+  if (leftAt && rightAt && leftAt !== rightAt) return leftAt > rightAt ? -1 : 1;
+  if (leftAt && !rightAt) return -1;
+  if (!leftAt && rightAt) return 1;
+  return 0;
+}
+
+function targetChoiceIsRunning(target) {
+  const status = targetChoiceStatus(target);
+  return status === "running" || status === "running-stale";
 }
 
 function targetChoiceStatusOrder(target) {
