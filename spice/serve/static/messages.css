@@ -103,7 +103,7 @@
   padding: var(--quote-pad-block) var(--quote-pad-inline);
 }
 .message-body .task-directive-quote {
-  --quote-accent: var(--warn);
+  --quote-accent: var(--team-teal-accent);
   background: color-mix(in srgb, var(--quote-accent) 7%, transparent);
   display: grid;
   gap: 5px;
