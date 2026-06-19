@@ -716,6 +716,7 @@ def test_static_empty_team_importer_renders_message_stream_choices():
     assert "targets: targets.map(emptyTeamTargetFingerprint)," in app_stream
     assert "function emptyTeamTargetFingerprint(target)" in app_stream
     assert "targetIdentityBranch(target.targetIdentity)," in app_stream
+    assert "targetIdentityAgentName(target.targetIdentity)," in app_stream
     assert "targetIdentityThreadId(target.targetIdentity)," in app_stream
     assert 'target.lastAssistantAt || "",' in app_stream
     assert 'statusLine.lastAssistantAt || "",' in app_stream

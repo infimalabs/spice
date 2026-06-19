@@ -590,7 +590,7 @@ function setTargetChoiceStatusClass(button, status) {
 }
 
 function targetChoiceName(target) {
-  return targetIdentityBranch(target.targetIdentity);
+  return targetIdentityDisplayLabel(target.targetIdentity);
 }
 
 function targetChoiceMetadata(target) {
