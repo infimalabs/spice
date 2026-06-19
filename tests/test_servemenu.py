@@ -268,55 +268,68 @@ def test_static_lane_mode_rail_uses_text_labels_without_glyph_icons():
     assert ".lane-mode-word { display: none; }" not in css
 
 
-def test_static_composer_band_menu_uses_compact_local_action_sizing():
+def test_static_composer_band_menu_matches_large_team_action_sizing():
     css = _serve_css_text()
-    base_grid_start = css.index(".composer-band-menu.spice-menu-actions {")
-    compact_grid_start = css.index(
-        ".composer-band--menu-open .composer-band-menu.spice-menu-actions {"
-    )
-    compact_grid_rule = css[compact_grid_start : css.index("}", compact_grid_start)]
-    compact_menu_start = css.index(".composer-band--menu-open .composer-band-menu {")
-    compact_menu_rule = css[compact_menu_start : css.index("}", compact_menu_start)]
-    compact_action_start = css.index(
-        ".composer-band--menu-open .composer-band-menu-action {"
-    )
-    compact_action_rule = css[
-        compact_action_start : css.index("}", compact_action_start)
+    composer_grid_start = css.index(".composer-band-menu.spice-menu-actions {")
+    composer_grid_rule = css[composer_grid_start : css.index("}", composer_grid_start)]
+    composer_action_start = css.index(".composer-band-menu-action {")
+    composer_action_rule = css[
+        composer_action_start : css.index("}", composer_action_start)
     ]
-    compact_text_start = css.index(
-        ".composer-band--menu-open .composer-band-menu-action .spice-menu-action-label,\n"
-        ".composer-band--menu-open .composer-band-menu-action .spice-menu-action-detail {"
+    composer_text_start = css.index(
+        ".composer-band-menu-action .spice-menu-action-label,\n"
+        ".composer-band-menu-action .spice-menu-action-detail {"
     )
-    compact_text_rule = css[compact_text_start : css.index("}", compact_text_start)]
-    compact_label_start = css.index(
-        ".composer-band--menu-open .composer-band-menu-action .spice-menu-action-label {"
+    composer_text_rule = css[composer_text_start : css.index("}", composer_text_start)]
+    composer_label_start = css.index(
+        ".composer-band-menu-action .spice-menu-action-label {"
     )
-    compact_label_rule = css[compact_label_start : css.index("}", compact_label_start)]
-    compact_detail_start = css.index(
-        ".composer-band--menu-open .composer-band-menu-action .spice-menu-action-detail {",
-        compact_label_start,
-    )
-    compact_detail_rule = css[
-        compact_detail_start : css.index("}", compact_detail_start)
+    composer_label_rule = css[
+        composer_label_start : css.index("}", composer_label_start)
     ]
+    composer_detail_start = css.index(
+        ".composer-band-menu-action .spice-menu-action-detail {",
+        composer_label_start,
+    )
+    composer_detail_rule = css[
+        composer_detail_start : css.index("}", composer_detail_start)
+    ]
+    team_grid_start = css.index(".lane-team-menu {")
+    team_grid_rule = css[team_grid_start : css.index("}", team_grid_start)]
+    team_action_start = css.index(".lane-team-menu .lane-team-menu-action {")
+    team_action_rule = css[team_action_start : css.index("}", team_action_start)]
 
-    assert base_grid_start < compact_grid_start
-    assert "padding: 6px;" in compact_menu_rule
-    assert "gap: 4px;" in compact_grid_rule
-    assert "grid-auto-rows: minmax(34px, auto);" in compact_grid_rule
-    assert "flex-direction: row;" in compact_action_rule
-    assert "justify-content: space-between;" in compact_action_rule
-    assert "min-height: 34px;" in compact_action_rule
-    assert "padding: 5px 7px;" in compact_action_rule
-    assert "text-align: left;" in compact_action_rule
-    assert "overflow: hidden;" in compact_text_rule
-    assert "overflow-wrap: normal;" in compact_text_rule
-    assert "text-overflow: ellipsis;" in compact_text_rule
-    assert "white-space: nowrap;" in compact_text_rule
-    assert "font-size: 12px;" in compact_label_rule
-    assert "font-weight: 600;" in compact_label_rule
-    assert "flex: 0 1 46%;" in compact_detail_rule
-    assert "font-size: 10px;" in compact_detail_rule
+    for expected in (
+        "gap: 6px;",
+        "grid-auto-rows: minmax(72px, 1fr);",
+        "grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));",
+    ):
+        assert expected in composer_grid_rule
+        assert expected in team_grid_rule
+
+    for expected in (
+        "flex-direction: column;",
+        "gap: 6px;",
+        "justify-content: center;",
+        "min-height: 0;",
+        "padding: 8px 10px;",
+        "text-align: center;",
+    ):
+        assert expected in composer_action_rule
+        assert expected in team_action_rule
+
+    assert "overflow-wrap: anywhere;" in composer_text_rule
+    assert "white-space: normal;" in composer_text_rule
+    assert "font-size: clamp(12px, 7cqi, 16px);" in composer_label_rule
+    assert "font-weight: 700;" in composer_label_rule
+    assert "font-size: clamp(10px, 5.25cqi, 13px);" in composer_detail_rule
+    assert "margin-left: 0;" in composer_detail_rule
+    assert "text-align: center;" in composer_detail_rule
+    assert "width: 100%;" in composer_detail_rule
+    assert (
+        ".composer-band--menu-open .composer-band-menu.spice-menu-actions {" not in css
+    )
+    assert ".composer-band--menu-open .composer-band-menu-action {" not in css
 
 
 def test_static_spice_menu_replaces_picker_lane():

@@ -443,7 +443,11 @@ def test_static_quote_close_control_keeps_composer_menu_actions_polished():
     assert "grid-template-columns: repeat(auto-fit" in shared_grid_rule
     assert "display: grid;" in menu_grid_rule
     assert "grid-template-columns: repeat(auto-fit" in menu_grid_rule
-    assert "grid-auto-rows: minmax(64px, 1fr);" in menu_grid_rule
+    assert "grid-auto-rows: minmax(72px, 1fr);" in menu_grid_rule
+    assert (
+        "grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));"
+        in menu_grid_rule
+    )
     assert (
         ".composer-band-close-button:hover,\n.composer-band-close-button:focus-visible {"
         in css
@@ -457,6 +461,8 @@ def test_static_quote_close_control_keeps_composer_menu_actions_polished():
     assert "container-type: inline-size;" in action_rule
     assert "text-align: center;" in action_rule
     assert "display: block;" in shared_detail_rule
+    assert "text-align: center;" in detail_rule
+    assert "width: 100%;" in detail_rule
     assert "text-wrap: pretty;" in detail_rule
     assert (
         ".composer-band-menu-action .spice-menu-action-detail {\n  display: none;"
