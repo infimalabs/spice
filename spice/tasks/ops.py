@@ -6,6 +6,7 @@ Taskwarrior.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -18,6 +19,19 @@ from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
 from spice.tasks import config, gitsync, identity, tw
 
 TASK_TITLE_LIMIT = COMMIT_MESSAGE_WRAP_LIMIT
+
+
+@dataclass(frozen=True)
+class TaskAddBatchRequest:
+    title: str
+    project: str
+    acceptance: tuple[str, ...]
+    description: str | None = None
+    priority: str = config.DEFAULT_PRIORITY
+    flow: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
+    after: tuple[str, ...] = ()
+    due: str | None = None
 
 
 def annotate(target: str, text: str) -> None:
@@ -368,11 +382,14 @@ def add(
     )
 
 
-def _parse_batch_line(raw: str, index: int) -> tuple[dict[str, str], list[str]]:
+def _parse_add_batch_request(
+    raw: str, index: int
+) -> tuple[TaskAddBatchRequest | None, list[str]]:
     """Parse one `key=value | ...` line and collect its validation errors.
 
     Dependencies are resolved here (in the validate pass) so a bad `after`
-    rejects the whole batch instead of creating earlier lines first."""
+    rejects the whole batch instead of creating earlier lines first.
+    """
     fields: dict[str, str] = {}
     errors: list[str] = []
     for part in raw.split("|"):
@@ -399,48 +416,73 @@ def _parse_batch_line(raw: str, index: int) -> tuple[dict[str, str], list[str]]:
             config.map_priority(fields["priority"])
         except SpiceError as exc:
             errors.append(f"line {index}: {exc}")
-    if fields.get("flow") and fields.get("project"):
+    flow = _batch_csv(fields.get("flow", ""))
+    after = _batch_csv(fields.get("after", ""))
+    if flow and fields.get("project"):
         try:
-            config.resolve_flow(
-                [p for p in fields["flow"].split(",") if p], fields["project"]
-            )
+            config.resolve_flow(list(flow), fields["project"])
         except SpiceError as exc:
             errors.append(f"line {index}: {exc}")
-    for dep in [d.strip() for d in fields.get("after", "").split(",") if d.strip()]:
+    for dep in after:
         try:
             identity.resolve(dep)
         except SpiceError:
             errors.append(f"line {index}: unknown after handle {dep!r}")
-    return fields, errors
+    if errors:
+        return None, errors
+    return (
+        TaskAddBatchRequest(
+            title=fields["title"],
+            description=fields.get("description") or None,
+            project=fields["project"],
+            priority=fields.get("priority", config.DEFAULT_PRIORITY),
+            flow=flow,
+            tags=_batch_csv(fields.get("tags", "")),
+            after=after,
+            acceptance=(fields["acceptance"],),
+            due=fields.get("due") or None,
+        ),
+        [],
+    )
 
 
-def add_batch(lines: list[str]) -> list[str]:
-    parsed: list[dict[str, str]] = []
+def _batch_csv(raw: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def parse_add_batch(lines: Sequence[str]) -> list[TaskAddBatchRequest]:
+    parsed: list[TaskAddBatchRequest] = []
     errors: list[str] = []
     for index, raw in enumerate(lines, start=1):
         if not raw.strip():
             continue
-        fields, line_errors = _parse_batch_line(raw, index)
+        request, line_errors = _parse_add_batch_request(raw, index)
         errors.extend(line_errors)
-        parsed.append(fields)
+        if request is not None:
+            parsed.append(request)
     if errors:
         raise SpiceError("batch add rejected:\n" + "\n".join(errors))
+    return parsed
+
+
+def add_batch(lines: list[str]) -> list[str]:
+    parsed = parse_add_batch(lines)
     existing = {str(r.get("incepted") or "") for r in tw.export()}
     handles: list[str] = []
-    for fields in parsed:
+    for request in parsed:
         handles.append(
             _add_one(
-                title=fields["title"],
-                description=fields.get("description"),
-                project=fields.get("project"),
-                priority=fields.get("priority", config.DEFAULT_PRIORITY),
-                flow=[p for p in fields.get("flow", "").split(",") if p] or None,
-                tags=[t for t in fields.get("tags", "").split(",") if t],
-                after=[a for a in fields.get("after", "").split(",") if a],
-                acceptance=[fields["acceptance"]],
+                title=request.title,
+                description=request.description,
+                project=request.project,
+                priority=request.priority,
+                flow=list(request.flow) or None,
+                tags=list(request.tags),
+                after=list(request.after),
+                acceptance=list(request.acceptance),
                 wait=None,
                 claim=False,
-                due=fields.get("due"),
+                due=request.due,
                 existing=existing,
             )
         )
