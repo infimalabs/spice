@@ -253,6 +253,21 @@ def test_static_soft_control_border_reaches_lane_controls():
         assert "background: var(--control-surface-soft);" in rules
 
 
+def test_static_lane_mode_rail_uses_text_labels_without_glyph_icons():
+    css = _serve_css_text()
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+
+    assert "laneViewGlyphs" not in app_shell
+    assert "lane-mode-glyph" not in app_shell
+    assert "lane-mode-glyph" not in css
+    assert (
+        "'<span class=\"lane-mode-word\"></span>' +\n"
+        "      '<span class=\"lane-mode-badge\" data-lane-view-badge hidden></span>'"
+        in app_shell
+    )
+    assert ".lane-mode-word { display: none; }" not in css
+
+
 def test_static_composer_band_menu_uses_compact_local_action_sizing():
     css = _serve_css_text()
     base_grid_start = css.index(".composer-band-menu.spice-menu-actions {")

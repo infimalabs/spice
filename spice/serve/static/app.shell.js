@@ -72,7 +72,6 @@ const laneTemplate =
   '  <div class="history-sentinel" data-history-sentinel aria-hidden="true"></div>' +
   "</div>";
 
-const laneViewGlyphs = { compose: "✎", filters: "❒", metrics: "▦", info: "ⓘ" };
 let composerBandMenuDismissHandler = null;
 
 function createLaneState(targetId, hint = null, options = {}) {
@@ -93,10 +92,8 @@ function createLaneState(targetId, hint = null, options = {}) {
     button.setAttribute("role", "tab");
     button.title = view;
     button.innerHTML =
-      '<span class="lane-mode-glyph" aria-hidden="true"></span>' +
       '<span class="lane-mode-word"></span>' +
       '<span class="lane-mode-badge" data-lane-view-badge hidden></span>';
-    button.querySelector(".lane-mode-glyph").textContent = laneViewGlyphs[view];
     button.querySelector(".lane-mode-word").textContent = view;
     rail.append(button);
   }

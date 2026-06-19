@@ -1046,11 +1046,10 @@ button.primary:hover {
   .lane-mode-rail { gap: 1px; padding: 3px; }
   .lane-mode-button {
     flex-basis: 25%;
-    font-size: 13px;
+    font-size: 11px;
     min-height: 30px;
-    padding: 3px 5px;
+    padding: 3px 4px;
   }
-  .lane-mode-word { display: none; }
   .lane-view-stack {
     --lane-pane-control-item-height: 34px;
     --lane-pane-control-gap: 5px;
