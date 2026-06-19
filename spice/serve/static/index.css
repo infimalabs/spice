@@ -667,6 +667,7 @@ button.primary:hover {
   flex-direction: column;
   padding: 7px 8px;
 }
+.lane-metrics-lit-island { display: contents; }
 .lane-metric-cell--wide { grid-column: span 3; }
 .lane-metric-value {
   color: var(--accent-strong);
