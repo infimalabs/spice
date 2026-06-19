@@ -43,8 +43,8 @@ from spice.agent.gitshadow import (
 )
 from spice.agent.identity import ambient_thread_id
 from spice.agent.paths import agent_state_dir
-from spice.mail.inbox import inbox_dir, inbox_item_key
 from spice.paths import (
+    STATE_DIRNAME,
     worktree_spice_environment,
     worktree_spice_python_command,
     worktree_spice_source,
@@ -134,7 +134,12 @@ def emit_initial_side_channel_payload(
         return
     from spice.agent.sidechannel import render_side_channel_payload
 
-    payload = render_side_channel_payload(repo_root)
+    try:
+        payload = render_side_channel_payload(repo_root)
+    except Exception as exc:  # pragma: no cover - conflicted worktree recovery
+        stderr.write(f"spice side-channel unavailable: {exc}\n")
+        stderr.flush()
+        return
     if payload:
         stderr.write(payload)
         stderr.flush()
@@ -441,14 +446,19 @@ class AgentInboxInjector:
             self._emit_pending_summary(len(pending_keys))
             return
         display_filter = set[str]() if new_pending_keys else suppressed_keys
-        from spice.mail.readout import print_inbox_readout
+        try:
+            from spice.mail.readout import print_inbox_readout
 
-        displayed_keys = print_inbox_readout(
-            self.repo_root,
-            quiet=True,
-            displayed_keys=display_filter,
-            file=self.stderr,
-        )
+            displayed_keys = print_inbox_readout(
+                self.repo_root,
+                quiet=True,
+                displayed_keys=display_filter,
+                file=self.stderr,
+            )
+        except Exception as exc:  # pragma: no cover - conflicted worktree recovery
+            self.stderr.write(f"Inbox Steering\n  unavailable={exc}\n")
+            self.stderr.flush()
+            displayed_keys = []
         self.stderr.flush()
         displayed_signature = inbox_pending_signature(self.repo_root)
         displayed_pending_keys = {
@@ -525,7 +535,7 @@ class AgentSideChannelNoticeInjector:
 def inbox_pending_signature(repo_root: Path | None) -> InboxSignature:
     if repo_root is None:
         return ()
-    directory = inbox_dir(repo_root)
+    directory = Path(repo_root) / STATE_DIRNAME / "inbox"
     rows: list[tuple[str, int, int]] = []
     try:
         with os.scandir(directory) as entries:
@@ -544,8 +554,13 @@ def inbox_pending_signature(repo_root: Path | None) -> InboxSignature:
 
 def _signature_rows(signature: InboxSignature) -> list[tuple[str, tuple[int, int]]]:
     return [
-        (inbox_item_key(name), (mtime_ns, size)) for name, mtime_ns, size in signature
+        (_inbox_item_key(name), (mtime_ns, size)) for name, mtime_ns, size in signature
     ]
+
+
+def _inbox_item_key(name: str) -> str:
+    path = Path(name)
+    return path.stem or path.name
 
 
 class AgentContextMeterInjector:
