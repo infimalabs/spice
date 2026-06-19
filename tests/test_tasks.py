@@ -744,7 +744,7 @@ def test_task_add_preserves_shared_attachment_refs(task_repo):
     shared = shared_attachment_root(task_repo) / "digest" / "01-image.png"
     shared.parent.mkdir(parents=True, exist_ok=True)
     shared.write_bytes(b"shared-image")
-    shared_ref = ".spice/attachments/digest/01-image.png"
+    shared_ref = shared.as_posix()
 
     handle = ops.add(
         "Preserve shared attachment references",
@@ -770,7 +770,7 @@ def test_task_note_preserves_shared_attachment_refs(task_repo):
     shared = shared_attachment_root(task_repo) / "digest" / "02-image.png"
     shared.parent.mkdir(parents=True, exist_ok=True)
     shared.write_bytes(b"note-image")
-    shared_ref = ".spice/attachments/digest/02-image.png"
+    shared_ref = shared.as_posix()
 
     ops.note(
         handle,

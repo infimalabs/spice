@@ -214,7 +214,9 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert inbox_request_body(items[0].text) == "inspect this image"
     assert items[0].attachments[0].path.read_bytes() == b"image-bytes"
     assert shared_attachment_root(repo) in items[0].attachments[0].path.parents
-    assert payload["attachments"][0]["path"].startswith(".spice/attachments/")
+    attachment_path = Path(payload["attachments"][0]["path"])
+    assert attachment_path.is_absolute()
+    assert shared_attachment_root(repo) in attachment_path.parents
 
     handler = _ImageHandler(state)
     app._ServeHandler._send_worktree_image(
@@ -391,7 +393,7 @@ def test_worktree_image_resolves_shared_attachment_reference(tmp_path):
     app._ServeHandler._send_worktree_image(
         handler,
         target,
-        {"path": [f".spice/attachments/{digest}/01-image.png"]},
+        {"path": [shared.as_posix()]},
     )
 
     assert handler.status == HTTPStatus.OK
@@ -430,7 +432,11 @@ def test_worktree_image_rejects_missing_shared_attachment_reference(tmp_path):
     app._ServeHandler._send_worktree_image(
         handler,
         target,
-        {"path": [".spice/attachments/missing/01-image.png"]},
+        {
+            "path": [
+                (shared_attachment_root(repo) / "missing" / "01-image.png").as_posix()
+            ]
+        },
     )
 
     assert handler.status == HTTPStatus.NOT_FOUND
