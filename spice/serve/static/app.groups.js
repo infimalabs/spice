@@ -263,6 +263,10 @@ function toggleLaneTeamMenu(lane, event = null) {
   if (host.emptyTeam && !host.emptyTeamCanClose) return;
   const open = host.teamMenuButtonEl.getAttribute("aria-expanded") === "true";
   closeLaneTeamMenusExcept(host);
+  if (host.teamImportOverlayOpen) {
+    closeTeamImportOverlay(host);
+    return;
+  }
   closeLaneTeamMenu(host);
   if (open) return;
   openLaneTeamMenu(host);
@@ -324,7 +328,7 @@ function closeTeamMenuAction(host) {
 function importAgentMenuAction(host) {
   return {
     label: "Import agent",
-    detail: host.teamImportOverlayOpen ? "hide panel" : "choose agent",
+    detail: host.teamImportOverlayOpen ? "close panel" : "choose agent",
     onClick: () => toggleTeamImportOverlay(host),
   };
 }
@@ -385,15 +389,22 @@ function renderLaneTeamMenuAction(host, action) {
 
 function closeLaneTeamMenu(host) {
   host.element.querySelector(".lane-team-menu")?.remove();
-  host.element.classList.remove("lane--team-menu-open");
-  host.teamMenuButtonEl.setAttribute("aria-expanded", "false");
+  if (!host.teamImportOverlayOpen) {
+    host.element.classList.remove("lane--team-menu-open");
+    host.teamMenuButtonEl.setAttribute("aria-expanded", "false");
+  }
   syncLaneTeamMenuDismissHandler();
 }
 
 function closeLaneTeamMenusExcept(exceptHost = null) {
+  const closedHosts = new Set();
   for (const lane of laneStates.values()) {
-    if (exceptHost && laneGroupHost(lane) === exceptHost) continue;
-    closeLaneTeamMenu(laneGroupHost(lane));
+    const host = laneGroupHost(lane);
+    if (closedHosts.has(host)) continue;
+    closedHosts.add(host);
+    if (exceptHost && host === exceptHost) continue;
+    closeLaneTeamMenu(host);
+    closeTeamImportOverlay(host);
   }
 }
 
@@ -416,8 +427,10 @@ function dismissLaneTeamMenusOnPointerDown(event) {
     if (!host.element.classList.contains("lane--team-menu-open")) continue;
     if (host.element.querySelector(".lane-team-menu")?.contains(target))
       continue;
+    if (host.teamImportOverlayEl?.contains(target)) continue;
     if (host.teamMenuButtonEl.contains(target)) continue;
     closeLaneTeamMenu(host);
+    closeTeamImportOverlay(host);
   }
 }
 

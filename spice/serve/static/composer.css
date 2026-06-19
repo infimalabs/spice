@@ -54,14 +54,16 @@
   flex: 1 1 auto;
 }
 .team-import-overlay {
-  bottom: 11px;
-  left: 11px;
-  max-height: calc(100% - 22px);
+  align-self: stretch;
+  bottom: 0;
+  justify-self: stretch;
+  left: 0;
+  max-height: none;
   overflow: hidden;
   position: absolute;
-  right: 11px;
-  top: 11px;
-  z-index: 5;
+  right: 0;
+  top: var(--team-import-overlay-top, 0px);
+  z-index: 7;
 }
 .lane--composer-drop .composer-shards {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 42%, transparent);
