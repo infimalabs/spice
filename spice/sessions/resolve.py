@@ -21,8 +21,8 @@ def looks_like_thread_id(value: str) -> bool:
 def resolve_files(raw_files: list[str]) -> list[Path]:
     """Resolve inputs (paths or thread ids) to transcript files.
 
-    With no inputs, the ambient agent's own transcript is the subject — the
-    no-arg `spice session` is an agent looking at itself.
+    With no inputs, the ambient agent's own transcript is the subject —
+    `spice session briefing` is an agent looking at itself.
     """
     if raw_files:
         files = [resolve_file_input(value) for value in raw_files]

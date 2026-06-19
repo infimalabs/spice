@@ -177,7 +177,7 @@ def renewal_intent_payload(
 def team_database_path() -> Path:
     from spice.tasks import config as task_config
 
-    return task_config.backend_root() / TEAM_DATABASE_FILENAME
+    return task_config.data_dir() / TEAM_DATABASE_FILENAME
 
 
 class ServeTeamStore(TeamMetricStoreMixin):

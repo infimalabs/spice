@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
         hints=("Choose one top-level command before passing command-specific flags.",),
         examples=(
             "spice task status",
-            "spice session",
+            "spice session briefing",
             "spice serve --host 127.0.0.1 --port 8765",
         ),
     )

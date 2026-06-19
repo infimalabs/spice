@@ -1,9 +1,9 @@
 """The briefing: rehydrate an agent (or its successor) from the transcript.
 
-The no-arg `spice session` output. It answers, mechanically, the questions a
-freshly compacted or freshly renewed agent must not guess at: what was asked,
-what was last delivered, what to keep doing, what the working set was, and
-what steering is pending.
+The `spice session briefing` output. It answers, mechanically, the questions
+a freshly compacted or freshly renewed agent must not guess at: what was
+asked, what was last delivered, what to keep doing, what the working set was,
+and what steering is pending.
 """
 
 from __future__ import annotations

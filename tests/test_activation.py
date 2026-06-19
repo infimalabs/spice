@@ -15,6 +15,7 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "command_surface=run shell commands normally" in text
     assert "reexec the first zsh/bash command shell through spice agent run" in text
     assert "descendant shells use static hooks and precomputed wrappers" in text
+    assert "session=spice session briefing" in text
     assert (
         "task_drain_contract=drive/drain lanes are not done after a task phase boundary"
         in text
@@ -29,7 +30,7 @@ def test_activation_command_surface_explains_pending_count_recovery():
     text = "\n".join(activation_command_surface_lines())
 
     assert "pending_inbox_recovery=" in text
-    assert "spice session only shows pending=N without bodies" in text
+    assert "spice session briefing only shows pending=N without bodies" in text
     assert "run the next command through spice agent run --" in text
 
 

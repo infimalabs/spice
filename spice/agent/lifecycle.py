@@ -772,11 +772,7 @@ def agent_state_is_authoritative(state: dict[str, Any]) -> bool:
 
 def next_agent_log_path(repo_root: Path) -> Path:
     stamp = utc_now().replace(":", "").replace("-", "")
-    return agent_log_dir(repo_root) / f"{stamp}.log"
-
-
-def agent_log_dir(repo_root: Path) -> Path:
-    return agent_state_dir(repo_root) / "logs"
+    return agent_state_dir(repo_root) / f"{stamp}.log"
 
 
 def settle_agent_log_path(repo_root: Path, log_path: Path, thread_id: str) -> Path:

@@ -17,7 +17,7 @@ runtime resolution and steering injection; agents should not switch entrypoints
 inside the spice repo.
 
 1. `spice agent activation`
-2. `spice session`
+2. `spice session briefing`
 3. `spice task status`
 
 If a tool call is impossible, say only what prevented it and end the turn. Otherwise, let the command outputs establish context first, then respond to pending steering directly. ACK pending inbox keys inline in any assistant message as soon as they are understood; do not wait for final response. Use those outputs, side-channel steering, and the active task board as your source of truth. Do not infer a durable task from this skill invocation.
@@ -45,4 +45,4 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
 
 ## Prompt Boundary
 
-The wrapper must never pass operator prose as the initial prompt. If you need the current ask, recover it from `spice session`, `spice task status`, and side-channel messages.
+The wrapper must never pass operator prose as the initial prompt. If you need the current ask, recover it from `spice session briefing`, `spice task status`, and side-channel messages.
