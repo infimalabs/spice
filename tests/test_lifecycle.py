@@ -521,6 +521,36 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     assert thread.joined_timeouts == [1.0]
 
 
+def test_require_supervisor_started_accepts_thread_settled_log_path(
+    tmp_path, monkeypatch
+):
+    thread_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    log_path = lifecycle.next_agent_log_path(tmp_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("starting\n", encoding="utf-8")
+    final_log_path = lifecycle.settle_agent_log_path(tmp_path, log_path, thread_id)
+    lifecycle.write_agent_state(
+        tmp_path,
+        {
+            "pid": SUPERVISED_AGENT_PID,
+            "thread_id": thread_id,
+            "log_path": str(final_log_path),
+            "mode": "start",
+            "started_at": "2026-01-02T03:04:05Z",
+            "prompt_skill_path": str(tmp_path / lifecycle.WORKTREE_SKILL_RELATIVE_PATH),
+        },
+    )
+    monkeypatch.setattr(lifecycle, "SUPERVISOR_STARTUP_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(
+        lifecycle,
+        "process_id_is_running",
+        lambda pid: pid == SUPERVISED_AGENT_PID,
+    )
+    process = _FakeProcess(pid=SUPERVISOR_PID, returncode=None)
+
+    lifecycle.require_supervisor_started(process, repo_root=tmp_path, log_path=log_path)
+
+
 def test_require_started_process_distinguishes_credit_failure(tmp_path, monkeypatch):
     log_path = tmp_path / "agent.log"
     log_path.write_text("Error: Claude AI usage limit reached\n", encoding="utf-8")
