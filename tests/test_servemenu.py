@@ -643,17 +643,31 @@ def test_static_empty_team_importer_renders_message_stream_choices():
     empty_team_sync_end = app_shell.index("function emptyTeamImportPanel(lane) {")
     empty_team_sync = app_shell[empty_team_sync_start:empty_team_sync_end]
     assert "function emptyTeamImportPanel(lane)" in app_shell
+    assert "function teamImportPanel(lane, options = {})" in app_shell
     assert "function emptyTeamImportChoice(lane, target)" in app_shell
+    assert "function teamImportChoice(lane, target, options = {})" in app_shell
     assert "lane.shardsEl.replaceChildren();" in empty_team_sync
     assert "renderMessagesIfChanged(lane);" in empty_team_sync
     assert empty_team_sync.index(
         "lane.shardsEl.replaceChildren();"
     ) < empty_team_sync.index("renderMessagesIfChanged(lane);")
+    assert "return teamImportPanel(lane);" in app_shell
+    assert "const overlay = Boolean(options.overlay);" in app_shell
+    assert 'panel.classList.add("team-import-overlay");' in app_shell
+    assert "function teamImportTargets(lane)" in app_shell
+    assert "const memberTargetIds = new Set(laneGroupMemberTargetIds(host));" in (
+        app_shell
+    )
     assert 'const button = targetChoiceButton(\n    target,\n    "Import",' in app_shell
     assert '    "",\n  );' in app_shell
     assert "button.dataset.emptyTeamImportTargetId = target.id;" in app_shell
+    assert "button.dataset.teamImportTargetId = target.id;" in app_shell
     assert 'teamCommandPayload("moveAgentToTeam", {' in app_shell
-    assert "agentAliases: emptyTeamImportAliases(target)," in app_shell
+    assert "agentAliases: teamImportAliases(target)," in app_shell
+    assert "function toggleTeamImportOverlay(lane)" in app_shell
+    assert "function syncTeamImportOverlay(lane)" in app_shell
+    assert "host.messagesEl.append(overlay);" in app_shell
+    assert "syncTeamImportOverlay(lane);" in app_stream
     assert "if (lane.emptyTeam) return;" in app_stream
     assert (
         "if (isLaneOpen(lane) && !lane.emptyTeam) subscribeLaneToLiveBus(lane);"
@@ -678,6 +692,7 @@ def test_static_empty_team_importer_renders_message_stream_choices():
         "  );"
     ) in app_stream
     assert ".empty-team-importer" in css
+    assert ".team-import-overlay" in css
     assert "grid-column: 1 / -1;" in css
     assert ".empty-team-import-list" in css
     importer_start = css.index(".empty-team-importer {")

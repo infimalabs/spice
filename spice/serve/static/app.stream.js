@@ -631,6 +631,7 @@ function renderMessagesIfChanged(lane) {
   lane.messagesEl.replaceChildren(...nodes);
   restoreMessageViewportAnchor(lane, viewportAnchor);
   syncLaneHistoryObserver(lane);
+  syncTeamImportOverlay(lane);
   lane.renderedMessageFingerprint = fingerprint;
 }
 
