@@ -65,12 +65,16 @@ def test_static_filter_header_pills_render_models_and_styles():
     assert '"not currently drained"' in app_lanes
     assert "if (fingerprint === renderedFilterPillsFingerprint) return;" in app_lanes
     assert "renderedFilterPillsFingerprint = fingerprint;" in app_lanes
+    assert "font-family: ui-monospace, SFMono-Regular, Menlo, monospace;" in (
+        filter_pill_rule
+    )
     assert "gap: 4px;" in filter_pill_rule
     assert filter_count_rule == (
         ".filter-pill-count {\n"
         "  background: var(--accent);\n"
         "  border-radius: var(--pill-radius);\n"
         "  color: var(--button-accent-fg);\n"
+        "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;\n"
         "  font-size: 9px;\n"
         "  padding: 0 5px;\n"
     )
@@ -150,6 +154,7 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
         "  border-radius: var(--pill-radius);\n"
         "  color: var(--button-accent-fg);\n"
         "  flex: 0 0 auto;\n"
+        "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;\n"
         "  font-size: 9px;\n"
         "  line-height: 13px;\n"
         "  padding: 0 5px;\n"
@@ -579,6 +584,9 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     )
     assert "align-items: center;" in badge_css_rule
     assert "display: inline-flex;" in badge_css_rule
+    assert "font-family: ui-monospace, SFMono-Regular, Menlo, monospace;" in (
+        badge_css_rule
+    )
     assert "gap: 5px;" in badge_css_rule
     assert "padding: 2px 5px 2px 8px;" in badge_css_rule
     assert "line-height: 1.15;" in badge_label_rule
@@ -587,6 +595,7 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
         "  background: var(--message-badge-accent);\n"
         "  border-radius: var(--pill-radius);\n"
         "  color: var(--button-accent-fg);\n"
+        "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;\n"
         "  font-size: 9px;\n"
         "  line-height: 13px;\n"
         "  padding: 0 5px;\n"

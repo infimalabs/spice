@@ -259,6 +259,8 @@ def test_static_soft_control_border_reaches_lane_controls():
 def test_static_lane_mode_rail_uses_text_labels_without_glyph_icons():
     css = _serve_css_text()
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    badge_start = css.index(".lane-mode-badge {")
+    badge_rule = css[badge_start : css.index("}", badge_start)]
 
     assert "laneViewGlyphs" not in app_shell
     assert "lane-mode-glyph" not in app_shell
@@ -269,6 +271,7 @@ def test_static_lane_mode_rail_uses_text_labels_without_glyph_icons():
         in app_shell
     )
     assert ".lane-mode-word { display: none; }" not in css
+    assert "font-family: ui-monospace, SFMono-Regular, Menlo, monospace;" in badge_rule
 
 
 def test_static_composer_band_menu_matches_large_team_action_sizing():
