@@ -366,6 +366,48 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     assert "<dt>handle</dt><dd>UI-20260610T120001000001Z</dd>" in item["display_html"]
 
 
+def test_cli_review_followup_row_renders_standalone_task_card(monkeypatch):
+    actor = "a" * 32
+    row = {
+        "id": 43,
+        "uuid": "review-followup-43",
+        "incepted": "20260610T120003000001Z",
+        "description": "CLI review follow-up",
+        "project": "serve.ui",
+        "acceptance": "Review follow-up appears as a card",
+        "origin_thread": actor,
+        "creation_surface": "cli",
+        "depends": ["reviewed-task-uuid"],
+        "status": "pending",
+    }
+    seen: dict[str, object] = {}
+
+    def fake_export(filters: list[str] | None = None) -> list[dict[str, object]]:
+        seen["filters"] = filters
+        return [row]
+
+    monkeypatch.setattr(payloads.tw, "export", fake_export)
+
+    cards = payloads._task_card_messages_for_thread(actor, after=None, before=None)
+
+    assert seen["filters"] == [
+        "status.any:",
+        "creation_surface.is:cli",
+        f"origin_thread.is:{actor}",
+    ]
+    assert len(cards) == 1
+    card = cards[0]
+    assert card.kind == "task_card"
+    assert card.source_kind == "cli_task_created"
+    assert card.display_text == "Task capture: CLI review follow-up (serve.ui)"
+    assert '<blockquote class="task-directive-quote">' in card.display_html
+    assert "<dt>title</dt><dd>CLI review follow-up</dd>" in card.display_html
+    assert (
+        "<dt>acceptance</dt><dd>Review follow-up appears as a card</dd>"
+        in card.display_html
+    )
+
+
 def test_task_card_cursor_merges_newer_backend_and_transcript_items(monkeypatch):
     actor = "a" * 32
     rows = [
