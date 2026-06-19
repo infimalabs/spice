@@ -25,7 +25,7 @@ def test_unstarted_target_id_membership_is_visible_in_target_payload(
     target = _target(repo)
     state = _serve_state(tmp_path, target)
     created = state.team_store.create_team(
-        config=TeamConfig(lifetime="Drain", task_filters=("serve",)),
+        config=TeamConfig(lifetime="Drain", task_filters=("serve.ui",)),
         members=[target.id],
     )
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
@@ -36,7 +36,7 @@ def test_unstarted_target_id_membership_is_visible_in_target_payload(
     assert work_tree["targetIdentity"]["thread"] == {"state": "unbound"}
     assert work_tree["teamIdentity"]["teamId"] == created.team_id
     assert work_tree["lifetime"] == "Drain"
-    assert work_tree["taskFilters"] == ["serve"]
+    assert work_tree["taskFilters"] == ["serve.ui"]
     assert [
         member.agent_id
         for member in state.team_store.team_state(created.team_id).members
@@ -50,7 +50,7 @@ def test_unstarted_target_id_membership_is_visible_in_lane_payload(
     target = _target(repo)
     state = _serve_state(tmp_path, target)
     created = state.team_store.create_team(
-        config=TeamConfig(lifetime="Drain", task_filters=("serve",)),
+        config=TeamConfig(lifetime="Drain", task_filters=("serve.ui",)),
         members=[target.id],
     )
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
@@ -61,7 +61,7 @@ def test_unstarted_target_id_membership_is_visible_in_lane_payload(
     assert result["targetIdentity"]["thread"] == {"state": "unbound"}
     assert result["teamIdentity"]["teamId"] == created.team_id
     assert result["lifetime"] == "Drain"
-    assert result["taskFilters"] == ["serve"]
+    assert result["taskFilters"] == ["serve.ui"]
     assert signature[2][0] == created.team_id
 
 
@@ -117,7 +117,7 @@ def test_task_drain_uses_unstarted_target_actor_without_binding_thread(
         target,
         {
             "replaceTaskFilters": True,
-            "taskFilters": ["serve", ""],
+            "taskFilters": ["serve.ui", ""],
             "lifetime": "Drive",
         },
     )
@@ -127,7 +127,7 @@ def test_task_drain_uses_unstarted_target_actor_without_binding_thread(
     assert result["route"]["actor"] == target.id
     assert result["route"]["targetIdentity"]["thread"] == {"state": "unbound"}
     assert result["route"]["teamIdentity"]["teamId"] == team_id
-    assert result["route"]["taskFilters"] == ["serve"]
+    assert result["route"]["taskFilters"] == ["serve.ui"]
     assert [
         member.agent_id for member in state.team_store.team_state(team_id).members
     ] == [target.id]

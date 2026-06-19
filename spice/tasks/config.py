@@ -28,6 +28,8 @@ PROJECT_SEGMENT_PATTERN = "[0-9a-z_]+"
 PROJECT_SEGMENT_RULE_LABEL = "lowercase letters, digits, and underscores"
 PROJECT_DELIMITER = "."
 SEGMENT_RE = re.compile(rf"^{PROJECT_SEGMENT_PATTERN}$")
+DEFAULT_PROJECT_MIN_DEPTH = 2
+DEFAULT_PROJECT_MAX_DEPTH = 3
 
 # Durable vocabulary. `task` and `serve` ship with the harness; `agent` is
 # reserved for automatic private task creation and `oops` for deferred
@@ -101,16 +103,11 @@ def assignable_stems() -> tuple[str, ...]:
 
 
 def _configured_extra_stems() -> tuple[str, ...]:
-    from spice.paths import repo_root_from_cwd
-    from spice.repocfg import string_list, tasks_table
+    from spice.repocfg import string_list
 
-    root = repo_root_from_cwd()
-    if root is None:
-        return ()
+    table = _tasks_config_table()
     return tuple(
-        stem
-        for stem in string_list(tasks_table(root).get("stems"))
-        if SEGMENT_RE.match(stem)
+        stem for stem in string_list(table.get("stems")) if SEGMENT_RE.match(stem)
     )
 
 
@@ -121,13 +118,9 @@ def per_stem_flows() -> dict[str, tuple[str, ...]]:
 
 
 def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
-    from spice.paths import repo_root_from_cwd
-    from spice.repocfg import string_list, tasks_table
+    from spice.repocfg import string_list
 
-    root = repo_root_from_cwd()
-    if root is None:
-        return {}
-    raw_flows = tasks_table(root).get("flows")
+    raw_flows = _tasks_config_table().get("flows")
     if not isinstance(raw_flows, dict):
         return {}
     approved = approved_stems()
@@ -145,6 +138,41 @@ def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
             )
         flows[stem] = tuple(_validate_flow_phases(string_list(raw_flow)))
     return flows
+
+
+def _tasks_config_table() -> dict[str, object]:
+    from spice.paths import repo_root_from_cwd
+    from spice.repocfg import tasks_table
+
+    root = repo_root_from_cwd()
+    if root is None:
+        return {}
+    return tasks_table(root)
+
+
+def project_depth_bounds() -> tuple[int, int]:
+    table = _tasks_config_table()
+    min_depth = _configured_project_depth(
+        table, "project_min_depth", DEFAULT_PROJECT_MIN_DEPTH
+    )
+    max_depth = _configured_project_depth(
+        table, "project_max_depth", DEFAULT_PROJECT_MAX_DEPTH
+    )
+    if max_depth < min_depth:
+        raise SpiceError(
+            "[tool.spice.tasks].project_max_depth must be greater than or equal to "
+            "project_min_depth"
+        )
+    return min_depth, max_depth
+
+
+def _configured_project_depth(table: dict[str, object], key: str, default: int) -> int:
+    raw = table.get(key)
+    if raw is None:
+        return default
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        raise SpiceError(f"[tool.spice.tasks].{key} must be a positive integer")
+    return raw
 
 
 def map_priority(raw: str) -> str:
@@ -368,7 +396,7 @@ def validate_project(project: str) -> str:
     project = (project or "").strip()
     if not project:
         raise SpiceError("project must be non-empty")
-    segments = project.split(".")
+    segments = project.split(PROJECT_DELIMITER)
     for seg in segments:
         if not SEGMENT_RE.match(seg):
             raise SpiceError(
@@ -385,30 +413,75 @@ def validate_project(project: str) -> str:
 
 def validate_assignable_project(project: str) -> str:
     project = validate_project(project)
-    stem = project.split(PROJECT_DELIMITER, 1)[0]
+    segments = project.split(PROJECT_DELIMITER)
+    stem = segments[0]
     if stem not in assignable_stems():
         raise SpiceError(
             f"project stem {stem!r} is internal and cannot be lane-filter assigned "
-            f"(assignable: {', '.join(assignable_stems())})"
+            f"(assignable examples: {_project_examples_summary()})"
         )
+    _validate_assignable_project_depth(project, segments)
     return project
 
 
 def validate_manual_creation_project(project: str) -> str:
     project = validate_project(project)
-    stem = project.split(PROJECT_DELIMITER, 1)[0]
+    segments = project.split(PROJECT_DELIMITER)
+    stem = segments[0]
     if stem in INTERNAL_STEMS:
         if stem != "agent":
             raise SpiceError(
                 f"project stem {stem!r} is reserved for system task creation; "
-                f"use an assignable stem ({', '.join(assignable_stems())})"
+                f"use an assignable project such as {_project_example()}"
             )
         raise SpiceError(
             f"project stem {stem!r} is reserved for automatic private task creation; "
-            f"omit --project for private work or use an assignable stem "
-            f"({', '.join(assignable_stems())})"
+            f"omit --project for private work or use an assignable project such as "
+            f"{_project_example()}"
         )
+    _validate_assignable_project_depth(project, segments)
     return project
+
+
+def _validate_assignable_project_depth(project: str, segments: list[str]) -> None:
+    min_depth, max_depth = project_depth_bounds()
+    depth = len(segments)
+    if depth < min_depth:
+        raise SpiceError(
+            f"project {project!r} has depth {depth}; public task projects require "
+            f"at least {min_depth} dotted segments, such as "
+            f"{_project_example(segments[0], min_depth, max_depth)}"
+        )
+    if depth > max_depth:
+        raise SpiceError(
+            f"project {project!r} has depth {depth}; public task projects allow "
+            f"at most {max_depth} dotted segments, such as "
+            f"{_project_example(segments[0], min_depth, max_depth)}"
+        )
+
+
+def _project_example(
+    stem: str | None = None,
+    min_depth: int | None = None,
+    max_depth: int | None = None,
+) -> str:
+    if stem is None:
+        stem = assignable_stems()[0]
+    if min_depth is None or max_depth is None:
+        min_depth, max_depth = project_depth_bounds()
+    target_depth = max(min_depth, 2)
+    if target_depth > max_depth:
+        target_depth = max_depth
+    suffix_count = max(0, target_depth - 1)
+    suffixes = list(("example", "unit", "work", "item")[:suffix_count])
+    while len(suffixes) < suffix_count:
+        suffixes.append(f"level{len(suffixes) + 1}")
+    segments = [stem, *suffixes]
+    return PROJECT_DELIMITER.join(segments)
+
+
+def _project_examples_summary() -> str:
+    return ", ".join(_project_example(stem) for stem in assignable_stems())
 
 
 def is_internal_project_stem(stem: str) -> bool:
@@ -419,15 +492,20 @@ def task_project_validation_catalog() -> dict[str, object]:
     """Return the lane-filter assignable task project vocabulary for serve."""
     stems = assignable_stems()
     flows = per_stem_flows()
+    min_depth, max_depth = project_depth_bounds()
     return {
         "approvedStems": list(stems),
         "approvedPhases": list(APPROVED_PHASES),
         "defaultFlow": list(DEFAULT_FLOW),
         "perStemFlows": {stem: list(flow) for stem, flow in sorted(flows.items())},
         "projectDelimiter": PROJECT_DELIMITER,
+        "projectMinDepth": min_depth,
+        "projectMaxDepth": max_depth,
         "segmentPattern": PROJECT_SEGMENT_PATTERN,
         "segmentRuleLabel": PROJECT_SEGMENT_RULE_LABEL,
-        "projectExamples": [f"{stem}.example" for stem in stems],
+        "projectExamples": [
+            _project_example(stem, min_depth, max_depth) for stem in stems
+        ],
     }
 
 
