@@ -288,6 +288,16 @@ def work_tree_send_response_payload(
         response_payload["renewalIntent"] = payloads.renewal_intent_for_actor(
             state.team_store, renewal_agent_id
         )
+    route_thread_id = send_agent_id or predecessor
+    route_actor = payloads.team_actor_for_target(
+        state.team_store, target, route_thread_id
+    )
+    response_payload["route"] = _work_tree_route_payload(
+        state,
+        target,
+        thread_id=route_thread_id,
+        actor=route_actor,
+    )
     return response_payload, HTTPStatus.OK
 
 
@@ -356,8 +366,19 @@ def work_tree_task_drain_response_payload(
             ),
             replace_task_filters=True,
         )
+    route = _work_tree_route_payload(state, target, thread_id=thread_id, actor=actor)
+    return {"ok": True, "route": route}, HTTPStatus.OK
+
+
+def _work_tree_route_payload(
+    state: ServeState,
+    target: WorktreeTarget,
+    *,
+    thread_id: str,
+    actor: str,
+) -> dict[str, Any]:
     facts = payloads.team_facts_for_actor(state.team_store, actor)
-    route = {
+    return {
         "actor": actor,
         "targetIdentity": payloads.target_identity_payload(target, thread_id),
         "teamIdentity": payloads.team_identity_payload(facts),
@@ -371,7 +392,6 @@ def work_tree_task_drain_response_payload(
         "laneFilterVersion": "",
         "lifetime": facts.get("lifetime", ""),
     }
-    return {"ok": True, "route": route}, HTTPStatus.OK
 
 
 def team_snapshot_response_payload(

@@ -843,6 +843,7 @@ function applyLaneSendResult(
   sourceLane = lane,
   options = {},
 ) {
+  const previousThreadId = lane.targetThreadId || "";
   applyTaskDrainRouteConfig(lane, result);
   if (!result.ok) {
     finishLanePendingSubmission(lane, { accepted: false });
@@ -870,7 +871,7 @@ function applyLaneSendResult(
   if (ensure.ok === false)
     setLaneTransientStatus(sourceLane, agentEnsureFailureStatus(ensure));
   if (ensure.threadId) {
-    const changed = ensure.threadId !== lane.targetThreadId;
+    const changed = ensure.threadId !== previousThreadId;
     lane.targetThreadId = ensure.threadId;
     lane.activeThreadId = ensure.threadId;
     ensureLaneOccupant(lane, ensure.threadId);
@@ -991,6 +992,9 @@ function taskDrainLifetimeResponseIsCurrent(lane, options = {}) {
 function applyTaskDrainRouteConfig(lane, result, options = {}) {
   const config = taskDrainRouteConfig(result);
   if (!config) return;
+  applyRouteConfigToTargetInventory(lane, config);
+  if (payloadHasField(config, "targetIdentity"))
+    applyLaneTargetIdentity(lane, config);
   if (Array.isArray(config.taskFilters)) {
     lane.taskFilters = uniqueStringList(config.taskFilters);
     lane.laneFilterVersion = String(config.laneFilterVersion || "");
@@ -1010,4 +1014,19 @@ function applyTaskDrainRouteConfig(lane, result, options = {}) {
     });
   renderLaneViewShell(laneGroupHost(lane));
   renderFilterPills();
+}
+
+function applyRouteConfigToTargetInventory(lane, config) {
+  const target = targetById.get(lane.targetId);
+  if (!target) return;
+  if (payloadHasField(config, "targetIdentity"))
+    target.targetIdentity = config.targetIdentity;
+  if (payloadHasField(config, "teamIdentity"))
+    target.teamIdentity = config.teamIdentity;
+  if (Array.isArray(config.taskFilters))
+    target.taskFilters = uniqueStringList(config.taskFilters);
+  if (payloadHasField(config, "laneFilterVersion"))
+    target.laneFilterVersion = String(config.laneFilterVersion || "");
+  if (payloadHasField(config, "lifetime"))
+    target.lifetime = String(config.lifetime || "");
 }
