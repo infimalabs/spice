@@ -94,7 +94,7 @@ def test_inbox_readout_ack_guidance_leaves_response_wording_open(tmp_path):
     readout = "\n".join(rows)
 
     assert (
-        "ACK by assistant message: "
+        "ACK by assistant message (plain text, no markdown emphasis): "
         "ACK <key> [<key> ...]: <what changed or was captured>"
     ) in readout
     assert "ACK example: include the key and a concise response" in readout

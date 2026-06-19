@@ -369,7 +369,7 @@ def test_briefing_pending_inbox_ack_guidance_uses_open_response_copy(
 
     assert "Inbox\n  pending=1" in briefing
     assert (
-        "ACK by assistant message: "
+        "ACK by assistant message (plain text, no markdown emphasis): "
         "ACK <key> [<key> ...]: <what changed or was captured>"
     ) in briefing
     assert "understood" not in briefing
