@@ -572,9 +572,13 @@ def test_static_composer_drag_has_ghost_drop_zones_and_reorder_command():
     app_shell = _shell_and_composer_text()
 
     assert ".composer-shard--drag-ghost" in css
+    assert ".composer-shard--dragging > *" in css
+    assert ".composer-band--dragging > *" in css
     assert ".composer-shard--composer-drop-left::before" in css
     assert ".composer-shard--composer-drop-right::after" in css
     assert ".lane--composer-drop .composer-shards" in css
+    assert ".lane--dragging > *" in css
+    assert ".lane-drag-ghost" in css
     assert "function composerReorderDropTarget(state, clientX, clientY)" in app_groups
     assert "function currentLaneGroupHostByMemberTargetId()" in app_groups
     assert "function stableLaneGroupHost(members, previousHostByMemberTargetId)" in (
@@ -587,6 +591,9 @@ def test_static_composer_drag_has_ghost_drop_zones_and_reorder_command():
     assert 'teamCommandPayload("reorderTeamAgents", {' in app_groups
     assert "orderedTargetIds" in app_groups
     assert 'state.sourceShard?.classList.add("composer-shard--dragging");' in app_groups
+    assert "function ensureLaneDragGhost(state)" in app_groups
+    assert "function updateLaneDragGhost(state, clientX, clientY)" in app_groups
+    assert "state.dragGhost?.remove();" in app_groups
     assert "wireComposerMoveDrag(lane, header, member.targetId);" in app_shell
 
 

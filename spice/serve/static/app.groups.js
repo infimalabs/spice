@@ -1011,6 +1011,9 @@ function wireLaneDrag(lane) {
       dragging: false,
       dropTarget: null,
       dropSide: null,
+      dragGhost: null,
+      ghostOffsetX: event.clientX - lane.element.getBoundingClientRect().left,
+      ghostOffsetY: event.clientY - lane.element.getBoundingClientRect().top,
     };
     handle.setPointerCapture(event.pointerId);
   });
@@ -1024,6 +1027,8 @@ function wireLaneDrag(lane) {
       return;
     state.dragging = true;
     state.lane.element.classList.add("lane--dragging");
+    ensureLaneDragGhost(state);
+    updateLaneDragGhost(state, event.clientX, event.clientY);
     updateLaneDragTarget(state, event.clientX);
   });
   handle.addEventListener("pointerup", (event) => {
@@ -1095,8 +1100,32 @@ function finishLaneDrag(state, clientX) {
   });
 }
 
+function ensureLaneDragGhost(state) {
+  if (state.dragGhost) return;
+  const source = state.lane.element;
+  const rect = source.getBoundingClientRect();
+  const ghost = source.cloneNode(true);
+  ghost.classList.remove("lane--dragging");
+  ghost.classList.add("lane-drag-ghost");
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.style.width = Math.max(1, Math.round(rect.width)) + "px";
+  ghost.style.height = Math.max(1, Math.round(rect.height)) + "px";
+  for (const element of ghost.querySelectorAll("textarea, button, a"))
+    element.setAttribute("tabindex", "-1");
+  document.body.append(ghost);
+  state.dragGhost = ghost;
+}
+
+function updateLaneDragGhost(state, clientX, clientY) {
+  if (!state.dragGhost) return;
+  const left = Math.round(clientX - state.ghostOffsetX);
+  const top = Math.round(clientY - state.ghostOffsetY);
+  state.dragGhost.style.transform = "translate(" + left + "px, " + top + "px)";
+}
+
 function clearLaneDrag(state) {
   if (!state) return;
+  state.dragGhost?.remove();
   state.lane.element.classList.remove("lane--dragging");
   clearLaneFuseHighlights();
   laneDragState = null;
