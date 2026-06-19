@@ -1,5 +1,7 @@
 // Global spice menu and target-team drag/drop controls.
 
+const spiceMenuNewTeamDropId = "__new_team_drop__";
+
 // ---- spice context menu -----------------------------------------------------------
 
 function toggleSpiceMenu() {
@@ -150,11 +152,6 @@ function renderSpiceMenuActions() {
       pressed: fastModeEnabled,
       onClick: () => setFastModeEnabled(!fastModeEnabled),
     }),
-    renderSpiceMenuAction({
-      label: "New team",
-      detail: "no agents",
-      onClick: () => createEmptyTeamFromMenu(),
-    }),
   );
   section.append(heading, actions);
   return section;
@@ -227,14 +224,26 @@ function spiceMenuTeamGroups(choices) {
   for (const group of groups) group.targets.sort(compareSpiceMenuTargetChoices);
   groups.sort(compareSpiceMenuTeamGroups);
   unassigned.sort(compareSpiceMenuTargetChoices);
-  if (choices.length)
+  if (choices.length) {
+    groups.push(spiceMenuNewTeamDropGroup());
     groups.push({
       teamId: "",
       totalCount: unassigned.length,
       targets: unassigned,
       unassigned: true,
     });
+  }
   return groups;
+}
+
+function spiceMenuNewTeamDropGroup() {
+  return {
+    teamId: spiceMenuNewTeamDropId,
+    totalCount: 0,
+    targets: [],
+    newTeam: true,
+    unassigned: false,
+  };
 }
 
 function compareSpiceMenuTeamGroups(left, right) {
@@ -257,7 +266,9 @@ function renderSpiceMenuTeamGroup(group) {
   const container = document.createElement("section");
   container.className = group.unassigned
     ? "spice-menu-team spice-menu-team--unassigned"
-    : "spice-menu-team";
+    : group.newTeam
+      ? "spice-menu-team spice-menu-team--new-team-drop"
+      : "spice-menu-team";
   wireSpiceMenuTeamDropTarget(container, group);
   const header = document.createElement("div");
   header.className = "spice-menu-team-header";
@@ -265,23 +276,35 @@ function renderSpiceMenuTeamGroup(group) {
   label.className = "spice-menu-team-label";
   label.textContent = group.unassigned
     ? "agents without team"
-    : spiceMenuTeamTitle(group);
+    : group.newTeam
+      ? "new team"
+      : spiceMenuTeamTitle(group);
   const detail = document.createElement("span");
   detail.className = "spice-menu-team-detail";
   detail.textContent = group.unassigned
     ? "drop here to remove from team"
-    : spiceMenuTeamDetail(group);
+    : group.newTeam
+      ? "drop agent to create"
+      : spiceMenuTeamDetail(group);
   const choices = document.createElement("div");
   choices.className = "spice-menu-team-targets";
   const targetChoices = group.targets.map((target) =>
     renderTargetChoice(target, group),
   );
+  if (group.newTeam) targetChoices.push(spiceMenuNewTeamDropHint());
   if (group.unassigned && !targetChoices.length)
     targetChoices.push(spiceMenuEmptyUnassignedDropHint());
   choices.replaceChildren(...targetChoices);
   header.append(label, detail);
   container.append(header, choices);
   return container;
+}
+
+function spiceMenuNewTeamDropHint() {
+  const hint = document.createElement("div");
+  hint.className = "spice-menu-team-new-drop";
+  hint.textContent = "Drop agent here";
+  return hint;
 }
 
 function spiceMenuEmptyUnassignedDropHint() {
@@ -313,21 +336,6 @@ function setFastModeEnabled(enabled) {
   renderSpiceMenu();
   configureLiveBusLanes();
   setGlobalTransientStatus(fastModeEnabled ? "fast mode on" : "fast mode off");
-}
-
-function createEmptyTeamFromMenu() {
-  requestTeamCommand(
-    teamCommandPayload("createTeam", {
-      config: defaultTeamConfig(),
-    }),
-  )
-    .then(() => {
-      setGlobalTransientStatus("new team created");
-      closeSpiceMenu();
-    })
-    .catch(() => {
-      setGlobalTransientStatus("create team failed");
-    });
 }
 
 function defaultTeamConfig() {
@@ -504,7 +512,11 @@ function finishSpiceMenuTargetDragFromEvent(event, target) {
     moveTargetToMenuTeamOptimisticUi(menuDropTeamId, target.id);
     moveTargetToMenuTeam(menuDropTeamId, target.id, sourceTarget).catch(() => {
       setGlobalTransientStatus(
-        menuDropTeamId ? "move to team failed" : "remove from team failed",
+        menuDropTeamId === spiceMenuNewTeamDropId
+          ? "create team failed"
+          : menuDropTeamId
+            ? "move to team failed"
+            : "remove from team failed",
       );
       refreshServerTopology().catch(() => {});
     });
@@ -617,6 +629,7 @@ function spiceMenuTargetDragAffordance() {
 function wireSpiceMenuTeamDropTarget(container, group) {
   container.dataset.spiceMenuTeamId = group.teamId;
   container.dataset.spiceMenuUnassigned = group.unassigned ? "true" : "false";
+  container.dataset.spiceMenuNewTeam = group.newTeam ? "true" : "false";
 }
 
 function clearSpiceMenuTeamDropHighlights() {
@@ -629,6 +642,7 @@ function spiceMenuCanDropTargetOnTeamId(teamId, targetId) {
   if (!targetId) return false;
   const target = targetById.get(targetId);
   if (!target) return false;
+  if (teamId === spiceMenuNewTeamDropId) return true;
   return teamIdentityTeamId(target.teamIdentity) !== (teamId || "");
 }
 
@@ -636,12 +650,24 @@ function moveTargetToMenuTeamOptimisticUi(teamId, targetId) {
   const target = targetById.get(targetId);
   if (!target) return;
   if (teamIdentityTeamId(target.teamIdentity) === (teamId || "")) return;
-  const teamIdentity = optimisticMenuTeamIdentity(teamId);
+  const teamIdentity =
+    teamId === spiceMenuNewTeamDropId
+      ? optimisticNewMenuTeamIdentity(targetId)
+      : optimisticMenuTeamIdentity(teamId);
   targets = targets.map((item) =>
     item.id === targetId ? { ...item, teamIdentity } : item,
   );
   targetById = new Map(targets.map((item) => [item.id, item]));
   if (spiceMenuEl) renderSpiceMenu();
+}
+
+function optimisticNewMenuTeamIdentity(targetId) {
+  return {
+    state: "member",
+    teamId: "new-team:" + targetId,
+    teamRevision: 0,
+    configRevision: 0,
+  };
 }
 
 function optimisticMenuTeamIdentity(teamId) {
@@ -657,7 +683,14 @@ function optimisticMenuTeamIdentity(teamId) {
 async function moveTargetToMenuTeam(teamId, targetId, sourceTarget = null) {
   const target = sourceTarget || targetById.get(targetId);
   if (!target) throw new Error("move target requires target");
-  if (teamId) {
+  if (teamId === spiceMenuNewTeamDropId) {
+    await requestTeamCommand(
+      teamCommandPayload("createTeam", {
+        members: [targetTeamAgentId(target)],
+        config: defaultTeamConfig(),
+      }),
+    );
+  } else if (teamId) {
     await requestTeamCommand(
       teamCommandPayload("moveAgentToTeam", {
         teamId,
@@ -677,10 +710,18 @@ async function moveTargetToMenuTeam(teamId, targetId, sourceTarget = null) {
     );
   }
   await refreshServerTopology();
-  setGlobalTransientStatus(teamId ? "team updated" : "agent removed from team");
+  setGlobalTransientStatus(
+    teamId === spiceMenuNewTeamDropId
+      ? "new team created"
+      : teamId
+        ? "team updated"
+        : "agent removed from team",
+  );
 }
 
 function spiceMenuDropTeamId(container) {
+  if (container.dataset.spiceMenuNewTeam === "true")
+    return spiceMenuNewTeamDropId;
   if (container.dataset.spiceMenuUnassigned === "true") return "";
   return container.dataset.spiceMenuTeamId || "";
 }

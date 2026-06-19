@@ -347,16 +347,18 @@ def test_static_spice_menu_replaces_picker_lane():
     )
     assert "if (laneStates.size) closeSpiceMenu();" not in app_static
     assert "function setFastModeEnabled(enabled)" in app_menu
-    assert "function createEmptyTeamFromMenu()" in app_menu
+    assert "function createEmptyTeamFromMenu()" not in app_menu
+    assert "const spiceMenuNewTeamDropId" in app_menu
     assert "function spiceMenuTeamGroups(choices)" in app_menu
+    assert "function spiceMenuNewTeamDropGroup()" in app_menu
     assert "function renderSpiceMenuTeamGroup(group)" in app_menu
     assert "function spiceMenuTeamDetail(group)" in app_menu
     assert "function compareSpiceMenuTargetChoices(left, right)" in app_menu
     assert "function spiceMenuTeamSortKey(group)" in app_menu
     assert "function wireSpiceMenuTargetDrag(button, target)" in app_menu
     assert "function wireSpiceMenuTeamDropTarget(container, group)" in app_menu
-    assert 'label: "New team",' in app_menu
-    assert 'setGlobalTransientStatus("new team created");' in app_menu
+    assert 'label: "New team",' not in app_menu
+    assert '"new team created"' in app_menu
     assert "New empty team" not in app_menu
     assert "empty team created" not in app_menu
     assert (
@@ -425,18 +427,21 @@ def test_static_spice_menu_team_groups_and_actions():
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     css = _serve_css_text()
 
-    assert (
-        'teamCommandPayload("createTeam", {\n      config: defaultTeamConfig(),'
-        in app_menu
-    )
+    assert 'teamCommandPayload("createTeam", {' in app_menu
+    assert "members: [targetTeamAgentId(target)]," in app_menu
     assert 'heading.textContent = "open team";' in app_menu
     assert '? "loading teams"\n      : "team list unavailable";' in app_menu
     assert 'list.textContent = "no agents available";' in app_menu
     assert (
         'label.textContent = group.unassigned\n    ? "agents without team"' in app_menu
     )
+    assert 'group.newTeam\n      ? "new team"' in app_menu
     assert '    ? "drop here to remove from team"' in app_menu
+    assert '"drop agent to create"' in app_menu
+    assert "spiceMenuNewTeamDropGroup()" in app_menu
+    assert "function spiceMenuNewTeamDropHint()" in app_menu
     assert "function spiceMenuEmptyUnassignedDropHint()" in app_menu
+    assert 'hint.className = "spice-menu-team-new-drop";' in app_menu
     assert 'hint.className = "spice-menu-team-empty-drop";' in app_menu
     assert 'hint.textContent = "Drop agent here";' in app_menu
     assert "wireSpiceMenuTeamDropTarget(container, group);" in app_menu
@@ -454,9 +459,11 @@ def test_static_spice_menu_team_groups_and_actions():
     assert 'if (role) button.setAttribute("role", role);' in app_lanes
     assert ".spice-menu-team {" in css
     assert ".spice-menu-team--unassigned {" in css
+    assert ".spice-menu-team--new-team-drop {" in css
     assert ".spice-menu-team--drop-ready {" in css
     assert ".spice-menu-team-header {" in css
     assert ".spice-menu-team-targets {" in css
+    assert ".spice-menu-team-new-drop {" in css
     assert ".target-choice--open {" in css
     assert '.spice-menu-action[aria-checked="true"]' in css
     generic_action_start = css.index(".spice-menu-action {")
@@ -552,32 +559,46 @@ def test_static_spice_menu_drag_manages_team_membership():
         'container.dataset.spiceMenuUnassigned = group.unassigned ? "true" : "false";'
         in app_menu
     )
+    assert 'container.dataset.spiceMenuNewTeam = group.newTeam ? "true" : "false";' in (
+        app_menu
+    )
     assert "function spiceMenuDropTeamId(container)" in app_menu
+    assert (
+        'if (container.dataset.spiceMenuNewTeam === "true")\n'
+        "    return spiceMenuNewTeamDropId;" in app_menu
+    )
     assert 'container.classList.add("spice-menu-team--drop-ready");' in app_menu
     assert "moveTargetToMenuTeamOptimisticUi(menuDropTeamId, target.id);" in app_menu
     assert (
         "moveTargetToMenuTeam(menuDropTeamId, target.id, sourceTarget).catch(() => {"
         in app_menu
     )
+    assert "function optimisticNewMenuTeamIdentity(targetId)" in app_menu
     assert 'teamCommandPayload("moveAgentToTeam", {' in app_menu
+    assert 'teamCommandPayload("createTeam", {' in app_menu
     assert 'teamCommandPayload("removeAgentFromTeam", {' in app_menu
+    assert "members: [targetTeamAgentId(target)]," in app_menu
     assert "agentId: targetTeamAgentId(target)," in app_menu
     assert "agentAliases: targetTeamAgentAliases(target)," in app_menu
     assert "await refreshServerTopology();" in app_menu
+    assert '"new team created"' in app_menu
+    assert '"create team failed"' in app_menu
     assert (
         'setGlobalTransientStatus(teamId ? "team updated" : "agent removed from team");'
-        in app_menu
+        not in app_menu
     )
     assert (
         'menuDropTeamId ? "move to team failed" : "remove from team failed",'
-        in app_menu
+        not in app_menu
     )
     assert ".target-choice--draggable" in css
     assert ".target-choice--dragging {" in css
     assert ".target-choice-drag-ghost {" in css
     assert ".target-choice-drag-affordance {" in css
     assert ".spice-menu-team-empty-drop {" in css
+    assert ".spice-menu-team-new-drop {" in css
     assert ".spice-menu-team--drop-ready .spice-menu-team-empty-drop {" in css
+    assert ".spice-menu-team--drop-ready .spice-menu-team-new-drop {" in css
 
 
 def test_static_empty_teams_reconcile_and_close_from_team_snapshot():
