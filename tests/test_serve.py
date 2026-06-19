@@ -110,10 +110,11 @@ def test_serve_parser_exposes_until_path_help(capsys):
     assert exc.value.code == 0
     help_text = capsys.readouterr().out
     flat_help = " ".join(help_text.split())
+    expected_until_help = (
+        "Watch PATH and stop the server after it is touched or changed."
+    )
     assert "--until PATH" in help_text
-    assert "touched or changed" in flat_help
-    assert "created" not in flat_help
-    assert "deleted" not in flat_help
+    assert expected_until_help in flat_help
 
 
 def test_serve_parser_accepts_until_path(tmp_path):
