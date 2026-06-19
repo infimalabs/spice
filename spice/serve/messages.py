@@ -756,6 +756,8 @@ def _task_directive_from_line(line: str) -> dict[str, Any] | None:
         return None
     payload = stripped[token_end:].lstrip(_TASK_DIRECTIVE_SEPARATOR_CHARS)
     fields = _task_directive_fields(payload)
+    if not _task_directive_has_primary_fields(fields):
+        return None
     return {"payload": payload, "fields": fields}
 
 
@@ -770,6 +772,11 @@ def _task_directive_fields(payload: str) -> list[tuple[str, str]]:
         if key and value:
             fields.append((key, value))
     return fields
+
+
+def _task_directive_has_primary_fields(fields: list[tuple[str, str]]) -> bool:
+    keys = {key for key, _value in fields}
+    return all(key in keys for key in _TASK_DIRECTIVE_PRIMARY_FIELDS)
 
 
 def _task_directive_summary(directive: dict[str, Any]) -> str:
