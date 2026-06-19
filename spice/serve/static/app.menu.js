@@ -220,9 +220,9 @@ function spiceMenuTeamGroups(choices) {
     }
     grouped.get(teamId).targets.push(target);
   }
-  const groups = [...grouped.values()];
+  let groups = [...grouped.values()];
   for (const group of groups) group.targets.sort(compareSpiceMenuTargetChoices);
-  groups.sort(compareSpiceMenuTeamGroups);
+  groups = placedSpiceMenuTeamGroups(groups);
   unassigned.sort(compareSpiceMenuTargetChoices);
   if (choices.length) {
     groups.push(spiceMenuNewTeamDropGroup());
@@ -234,6 +234,42 @@ function spiceMenuTeamGroups(choices) {
     });
   }
   return groups;
+}
+
+function placedSpiceMenuTeamGroups(groups) {
+  const regular = [];
+  const placed = [];
+  for (const group of groups) {
+    const placementIndex = spiceMenuNewTeamPlacementIndex(group);
+    if (placementIndex === -1) regular.push(group);
+    else placed.push({ group, placementIndex });
+  }
+  regular.sort(compareSpiceMenuTeamGroups);
+  placed.sort(comparePlacedSpiceMenuTeamGroups);
+  return [...regular, ...placed.map((item) => item.group)];
+}
+
+function comparePlacedSpiceMenuTeamGroups(left, right) {
+  if (left.placementIndex !== right.placementIndex)
+    return left.placementIndex - right.placementIndex;
+  return compareSpiceMenuTeamGroups(left.group, right.group);
+}
+
+function spiceMenuNewTeamPlacementIndex(group) {
+  const teamId = String(group.teamId || "");
+  for (let index = 0; index < spiceMenuNewTeamPlacementHints.length; index++) {
+    const hint = spiceMenuNewTeamPlacementHints[index];
+    if (hint.teamId && teamId === hint.teamId) return index;
+    if (!hint.teamId && teamId === hint.optimisticTeamId) return index;
+    if (
+      !hint.teamId &&
+      group.targets.some((target) => target.id === hint.targetId)
+    ) {
+      if (teamId && teamId !== hint.optimisticTeamId) hint.teamId = teamId;
+      return index;
+    }
+  }
+  return -1;
 }
 
 function spiceMenuNewTeamDropGroup() {
@@ -650,6 +686,8 @@ function moveTargetToMenuTeamOptimisticUi(teamId, targetId) {
   const target = targetById.get(targetId);
   if (!target) return;
   if (teamIdentityTeamId(target.teamIdentity) === (teamId || "")) return;
+  if (teamId === spiceMenuNewTeamDropId)
+    rememberSpiceMenuNewTeamPlacement(targetId);
   const teamIdentity =
     teamId === spiceMenuNewTeamDropId
       ? optimisticNewMenuTeamIdentity(targetId)
@@ -661,13 +699,30 @@ function moveTargetToMenuTeamOptimisticUi(teamId, targetId) {
   if (spiceMenuEl) renderSpiceMenu();
 }
 
+function rememberSpiceMenuNewTeamPlacement(targetId) {
+  const id = String(targetId || "");
+  if (!id) return;
+  spiceMenuNewTeamPlacementHints = spiceMenuNewTeamPlacementHints.filter(
+    (hint) => hint.targetId !== id,
+  );
+  spiceMenuNewTeamPlacementHints.push({
+    targetId: id,
+    optimisticTeamId: optimisticNewMenuTeamId(id),
+    teamId: "",
+  });
+}
+
 function optimisticNewMenuTeamIdentity(targetId) {
   return {
     state: "member",
-    teamId: "new-team:" + targetId,
+    teamId: optimisticNewMenuTeamId(targetId),
     teamRevision: 0,
     configRevision: 0,
   };
+}
+
+function optimisticNewMenuTeamId(targetId) {
+  return "new-team:" + targetId;
 }
 
 function optimisticMenuTeamIdentity(teamId) {

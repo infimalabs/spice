@@ -83,6 +83,7 @@ let spiceMenuKeyHandler = null;
 let spiceMenuDragTargetId = "";
 let spiceMenuTargetDragState = null;
 let spiceMenuRenderPending = false;
+let spiceMenuNewTeamPlacementHints = [];
 let fastModeEnabled = false;
 let teamSnapshotRevision = 0;
 let sessionOpenTargetIds = new Set();
