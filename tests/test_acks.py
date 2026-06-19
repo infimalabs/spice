@@ -1,6 +1,7 @@
 """ACK grammar: the tuned header parser is a core product surface."""
 
 import json
+import subprocess
 from types import SimpleNamespace
 
 from spice.agent.driver import DRIVER
@@ -14,7 +15,7 @@ from spice.mail.acks import (
     extract_task_batch_lines_from_text,
     split_ack_message,
 )
-from spice.mail.ackstate import ack_state_records
+from spice.mail.ackstate import ack_state_database_path, ack_state_records
 from spice.mail.inbox import (
     collect_acked_inbox_items,
     compose_inbox_text,
@@ -33,6 +34,12 @@ KEY_A = "20260513T184251491561Z"
 KEY_B = "20260513T184252000000Z"
 KEY_C = "20260513T184253000000Z"
 KEY_D = "20260513T184254000000Z"
+
+
+def _init_repo(path):
+    # The ACK-state db is centralized under the shared git common dir, so
+    # archiving needs repo_root to be a real worktree.
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
 
 
 def test_backticked_key_with_colon_body():
@@ -127,7 +134,20 @@ def test_standalone_task_directive_is_stripped_from_display_text():
     assert segments == []
 
 
+def test_ack_state_database_is_centralized_under_git_common_dir(tmp_path):
+    _init_repo(tmp_path)
+    from spice.paths import git_common_dir
+
+    path = ack_state_database_path(tmp_path)
+    common = git_common_dir(tmp_path)
+
+    # Sibling of the task backend db under the shared common dir, not .spice.
+    assert path == common / "spice" / "task" / "data" / "acks.sqlite3"
+    assert ".spice" not in path.parts
+
+
 def test_archive_ackd_inbox_items_records_durable_ack_state(tmp_path):
+    _init_repo(tmp_path)
     name = f"{KEY_A}.txt"
     text = compose_inbox_text(body="durable ack state", priority=None, stop=False)
     write_inbox_item(
@@ -147,6 +167,7 @@ def test_archive_ackd_inbox_items_records_durable_ack_state(tmp_path):
 
 
 def test_ack_state_supplies_archive_context_without_archive_files(tmp_path):
+    _init_repo(tmp_path)
     name = f"{KEY_B}.txt"
     text = compose_inbox_text(
         body="ack state outlives archive", priority=None, stop=False

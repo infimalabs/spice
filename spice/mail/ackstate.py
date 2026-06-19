@@ -3,6 +3,11 @@
 ACKing an inbox item records the consumed text here and removes the pending
 file. The old filesystem archive is intentionally not the source of truth; this
 SQLite store is the ACK history that agent rehydration and UI surfaces read.
+
+The store lives with the other spice SQLite databases under the shared git
+common dir (`git_common_dir/<SHARED_DIR>/data`, the same `data_dir()` that
+holds the task backend and `spiceteams.sqlite3`), not in a per-worktree
+`.spice/`. That keeps one ACK history per repository across every worktree.
 """
 
 from __future__ import annotations
@@ -14,9 +19,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from spice.paths import STATE_DIRNAME
+from spice.paths import git_common_dir
+from spice.tasks.config import SHARED_DIR
 
 ACK_STATE_DATABASE_FILENAME = "acks.sqlite3"
+# Mirrors task_config.data_dir() == backend_root() / "data"; the ack store is a
+# sibling of the task backend db under the shared git common dir.
+ACK_STATE_DATA_SUBDIR = "data"
 ACK_STATE_SQLITE_BUSY_TIMEOUT_MS = 5000
 
 ACK_STATE_SCHEMA = """
@@ -50,7 +59,8 @@ class AckStateWrite:
 
 
 def ack_state_database_path(repo_root: str | Path) -> Path:
-    return Path(repo_root) / STATE_DIRNAME / ACK_STATE_DATABASE_FILENAME
+    common = git_common_dir(Path(repo_root))
+    return common / SHARED_DIR / ACK_STATE_DATA_SUBDIR / ACK_STATE_DATABASE_FILENAME
 
 
 def record_acked_inbox_items(

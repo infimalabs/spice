@@ -139,6 +139,7 @@ def test_key_aliases_accept_dropped_z():
 
 
 def test_ack_retires_pending_item_via_dropped_z_alias(tmp_path):
+    _init_repo(tmp_path)
     name = "20260102T000000000002Z.txt"
     composed = compose_inbox_text(body="please ack me", priority=None, stop=False)
     write_inbox_item(tmp_path, name, composed)
