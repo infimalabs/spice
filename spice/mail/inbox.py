@@ -313,6 +313,20 @@ def inbox_item_readout_rows(item: InboxItem) -> list[str]:
     return rows
 
 
+def inbox_item_summary_row(item: InboxItem) -> str:
+    """One compact line for an item whose full body was already shown.
+
+    Used when a fresh readout is triggered (e.g. a new key arrived) while this
+    item is still inside its repeat-suppression window: the key stays visible
+    and ACKable without re-dumping its full body into the agent's context.
+    """
+    return (
+        f"key={inbox_item_key(item.name)}: "
+        f"age={relative_time_for_path(item.source_path)} "
+        "(shown earlier; ACK to clear)"
+    )
+
+
 def inbox_attachment_readout_path(item: InboxItem, attachment: InboxAttachment) -> Path:
     repo_root = _repo_root_for_inbox_path(item.source_path)
     if repo_root is not None:

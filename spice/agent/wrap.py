@@ -445,7 +445,11 @@ class AgentInboxInjector:
         ):
             self._emit_pending_summary(len(pending_keys))
             return
-        display_filter = set[str]() if new_pending_keys else suppressed_keys
+        # Always pass the recently-shown keys as the suppression filter, even
+        # when a new key forced this readout: the new key renders full (real
+        # time preserved) while keys still inside their window collapse to one
+        # compact line each instead of re-dumping every body on every new key.
+        display_filter = suppressed_keys
         try:
             from spice.mail.readout import print_inbox_readout
 
