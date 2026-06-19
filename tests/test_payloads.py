@@ -114,6 +114,19 @@ def _stamp(when: datetime) -> str:
     return when.isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
+def _write_response_item(
+    path: Path, timestamp: str, payload: dict[str, object]
+) -> None:
+    path.write_text(
+        json.dumps(
+            {"timestamp": timestamp, "type": "response_item", "payload": payload},
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _pending_identity(count: int = 0) -> dict[str, object]:
     return {
         "pendingInboxCount": count,
@@ -185,6 +198,163 @@ def test_status_line_pairs_activity_preview_with_activity_timestamp(
     assert line["preview"] == "thinking"
     assert line["latestActivityPreview"] == "thinking"
     assert line["latestMessagePreview"] == ""
+
+
+def test_inline_task_directive_renders_quote_like_block_in_message(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": (
+                        "Queued the follow-up.\n"
+                        "TASK title=Inline follow-up | project=task.unit | "
+                        "acceptance=Tracked from UI\n"
+                        "Continuing."
+                    ),
+                }
+            ],
+        },
+    )
+
+    items = message_reader.read_assistant_messages(transcript, limit=5)
+
+    assert len(items) == 1
+    item = items[0]
+    assert item.kind == "assistant"
+    assert item.display_text == (
+        "Queued the follow-up.\nTask capture: Inline follow-up (task.unit)\nContinuing."
+    )
+    assert "TASK title" not in item.display_text
+    assert "TASK title" not in item.display_html
+    assert '<blockquote class="task-directive-quote">' in item.display_html
+    assert '<div class="task-directive-kicker">Task capture</div>' in item.display_html
+    assert "<dt>title</dt><dd>Inline follow-up</dd>" in item.display_html
+    assert "<dt>project</dt><dd>task.unit</dd>" in item.display_html
+    assert "<dt>acceptance</dt><dd>Tracked from UI</dd>" in item.display_html
+
+
+def test_inline_task_directive_renders_inside_ack_segment_at_written_position(
+    tmp_path,
+):
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": (
+                        "ACK 20260610T115900000000Z: captured.\n"
+                        "TASK: title=ACK follow-up | project=serve.ui | "
+                        "acceptance=Inline block appears\n"
+                        "Continuing."
+                    ),
+                }
+            ],
+        },
+    )
+
+    item = message_reader.read_assistant_messages(transcript, limit=5)[0]
+    segment_html = item.ack_segments[0]["html"]
+
+    assert item.ack_count == 1
+    assert item.ack_utterances == ["captured.\nContinuing."]
+    assert item.display_text == (
+        "Captured.\nTask capture: ACK follow-up (serve.ui)\nContinuing."
+    )
+    assert "TASK:" not in segment_html
+    assert segment_html.index("<p>Captured.</p>") < segment_html.index(
+        '<blockquote class="task-directive-quote">'
+    )
+    assert segment_html.index('<blockquote class="task-directive-quote">') < (
+        segment_html.index("<p>Continuing.</p>")
+    )
+    assert "<dt>title</dt><dd>ACK follow-up</dd>" in segment_html
+    assert "<dt>project</dt><dd>serve.ui</dd>" in segment_html
+
+
+def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monkeypatch):
+    latest = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "function_call_output",
+            "call_id": "call-inline-task",
+            "output": (
+                "Chunk ID: 123\n"
+                "Output:\n"
+                "Supervisor Feedback\n"
+                "  ack_archived=20260610T120000000000Z\n"
+                "Supervisor Feedback\n"
+                "  inline_task_created=FILTERS-20260610T120000000001Z "
+                "UI-20260610T120000000002Z\n"
+                "next task:\n"
+            ),
+        },
+    )
+    monkeypatch.setattr(
+        payloads,
+        "agent_status",
+        lambda _repo: _Status(running=True, started_at="", process_status="running"),
+    )
+    monkeypatch.setattr(
+        payloads, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
+
+    items = message_reader.read_assistant_messages(transcript, limit=5)
+    line = payloads.status_line_payload(
+        _State(), _Target(id="wt", repo_root=tmp_path), items=items, error=None
+    )
+
+    assert len(items) == 1
+    item = items[0]
+    assert item.kind == "presence:function_call_output"
+    assert item.preview == (
+        "Tasks captured: FILTERS-20260610T120000000001Z, UI-20260610T120000000002Z"
+    )
+    assert line["preview"] == item.preview
+    assert line["latestActivityPreview"] == item.preview
+    assert line["latestMessagePreview"] == ""
+
+
+def test_inline_task_supervisor_error_updates_presence_preview(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 12, 1, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "function_call_output",
+            "call_id": "call-inline-task-error",
+            "output": (
+                "Output:\n"
+                "Supervisor Feedback\n"
+                "  inline_task_error=batch add rejected: line 2 project depth\n"
+            ),
+        },
+    )
+
+    items = message_reader.read_assistant_messages(transcript, limit=5)
+
+    assert len(items) == 1
+    item = items[0]
+    assert item.kind == "presence:function_call_output"
+    assert item.preview == (
+        "Task capture failed: batch add rejected: line 2 project depth"
+    )
 
 
 def test_status_line_prefers_latest_claude_presence_over_visible_message(

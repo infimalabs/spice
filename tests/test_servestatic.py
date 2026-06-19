@@ -191,6 +191,29 @@ def test_static_messages_use_compact_image_grid():
     assert 'if (item.image_only) article.classList.add("image-only");' in app_render
 
 
+def test_static_inline_task_directives_use_quote_like_accented_blocks():
+    css = _serve_css_text()
+
+    quote_rule = _between(css, ".message-body .task-directive-quote {", "}")
+    property_rule = _between(css, ".task-directive-property {", "}")
+    detail_rule = _between(css, ".task-directive-property dd {", "}")
+
+    assert "--quote-accent: var(--warn);" in quote_rule
+    assert "background: color-mix(in srgb, var(--quote-accent) 7%, transparent);" in (
+        quote_rule
+    )
+    assert "display: grid;" in quote_rule
+    assert ".task-directive-kicker {" in css
+    assert ".task-directive-properties {" in css
+    assert "grid-template-columns: minmax(64px, max-content) minmax(0, 1fr);" in (
+        property_rule
+    )
+    assert "font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;" in (
+        detail_rule
+    )
+    assert "overflow-wrap: anywhere;" in detail_rule
+
+
 def test_static_draft_composers_use_14px_font():
     css = _serve_css_text()
     selector = ".composer-shard textarea {"

@@ -95,7 +95,9 @@ class AckSegment:
     content: str
 
 
-def split_ack_message(text: str) -> tuple[str, list[AckSegment]]:
+def split_ack_message(
+    text: str, *, drop_task_directives: bool = True
+) -> tuple[str, list[AckSegment]]:
     """Split `text` into its leading prose and its ordered ACK segments.
 
     The first element is the cleaned preamble — everything before the first ACK
@@ -106,8 +108,12 @@ def split_ack_message(text: str) -> tuple[str, list[AckSegment]]:
     """
     bounds = _ack_marker_bounds(text)
     if not bounds:
-        return _clean_segment_content(text, drop_task_directives=True), []
-    preamble = _clean_segment_content(text[: bounds[0][0]], drop_task_directives=True)
+        return _clean_segment_content(
+            text, drop_task_directives=drop_task_directives
+        ), []
+    preamble = _clean_segment_content(
+        text[: bounds[0][0]], drop_task_directives=drop_task_directives
+    )
     segments: list[AckSegment] = []
     for index, (_ack_pos, header_end, keys) in enumerate(bounds):
         body_end = bounds[index + 1][0] if index + 1 < len(bounds) else len(text)
@@ -115,7 +121,8 @@ def split_ack_message(text: str) -> tuple[str, list[AckSegment]]:
             AckSegment(
                 keys=keys,
                 content=_clean_segment_content(
-                    text[header_end:body_end], drop_task_directives=True
+                    text[header_end:body_end],
+                    drop_task_directives=drop_task_directives,
                 ),
             )
         )
