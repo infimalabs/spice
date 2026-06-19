@@ -2,7 +2,7 @@
 
 An ACK in the harness idiom looks like:
 
-    ACK 20260513T184251491561Z: <what was understood>
+    ACK 20260513T184251491561Z: <what changed or was captured>
 
 The detector treats text as an ACK iff it carries:
 

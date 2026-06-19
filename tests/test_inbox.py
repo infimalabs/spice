@@ -1,5 +1,8 @@
 """Inbox steering: durable publish, payload round-trip, ACK retirement."""
 
+import os
+import time
+
 from spice.mail.acks import archive_ackd_inbox_items
 from spice.mail.attachments import (
     find_archived_inbox_attachment_references,
@@ -15,6 +18,7 @@ from spice.mail.inbox import (
     collect_inbox_items,
     compose_inbox_text,
     deadletter_inbox_item,
+    inbox_ack_format_hint_row,
     inbox_dir,
     inbox_deadletter_context_rows,
     inbox_item_key,
@@ -75,6 +79,42 @@ def test_compose_parse_and_readout_keep_controls_out_of_body(tmp_path):
     assert parsed.body == "keep draining"
     assert parsed.controls == (INBOX_CONTROL_DRAIN_QUEUE,)
     assert any("control=drive-drain-queue: DRAIN QUEUE ASAP" in row for row in rows)
+
+
+def test_inbox_readout_ack_guidance_leaves_response_wording_open(tmp_path):
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000003Z.txt",
+        compose_inbox_text(body="please capture this", priority=None, stop=False),
+    )
+
+    rows = inbox_payload_rows(collect_inbox_items(str(tmp_path)))
+    readout = "\n".join(rows)
+
+    assert (
+        "ACK by assistant message: "
+        "ACK <key> [<key> ...]: <what changed or was captured>"
+    ) in readout
+    assert "ACK example: include the key and a concise response" in readout
+    assert "understood" not in readout
+    assert "put this literal text" not in readout
+
+
+def test_aged_inbox_ack_hint_avoids_literal_response_script(tmp_path):
+    written = write_inbox_item(
+        tmp_path,
+        "20260101T000000000004Z.txt",
+        compose_inbox_text(body="please capture this too", priority=None, stop=False),
+    )
+    old = time.time() - 2 * 60
+    os.utime(written, (old, old))
+    items = collect_inbox_items(str(tmp_path))
+
+    row = inbox_ack_format_hint_row(items)
+
+    assert "include an ACK header in your next assistant message" in row
+    assert "put this literal text" not in row
+    assert "understood" not in row
 
 
 def test_parse_preserves_non_note_parenthetical_suffix():
