@@ -93,3 +93,46 @@ def test_static_spice_menu_target_drag_cleans_ghosts_and_keeps_desktop_drops_ope
     assert "border-style: dashed;" in target_drag_rule
     assert ".target-choice--dragging > *" in css
     assert ".swimlanes--menu-drop-ready" in css
+
+
+def test_static_lane_team_drag_uses_menu_style_pointer_tracking():
+    app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
+    app_menu = (STATIC_ROOT / "app.menu.js").read_text(encoding="utf-8")
+
+    pointer_start = app_groups.index(
+        'handle.addEventListener("pointerdown", (event) => {',
+        app_groups.index("function wireLaneDrag"),
+    )
+    pointer_body = app_groups[
+        pointer_start : app_groups.index(
+            'handle.addEventListener("pointermove", (event) => {', pointer_start
+        )
+    ]
+
+    assert "function wireSpiceMenuTargetPointerDocumentEvents(target)" in app_menu
+    assert "function wireLaneDragPointerDocumentEvents()" in app_groups
+    assert 'document.addEventListener("pointermove", onMove);' in app_groups
+    assert 'document.addEventListener("pointerup", onUp);' in app_groups
+    assert 'document.addEventListener("pointercancel", onCancel);' in app_groups
+    assert 'document.removeEventListener("pointermove", onMove);' in app_groups
+    assert 'document.removeEventListener("pointerup", onUp);' in app_groups
+    assert 'document.removeEventListener("pointercancel", onCancel);' in app_groups
+    assert "event.preventDefault();" in pointer_body
+    assert "clearLaneDrag(laneDragState);" in pointer_body
+    assert "startY: event.clientY," in pointer_body
+    assert "pointerCleanup: null," in pointer_body
+    assert "pointerCaptureFailed: false," in pointer_body
+    assert "laneDragState.pointerCleanup = wireLaneDragPointerDocumentEvents();" in (
+        pointer_body
+    )
+    assert "handle.setPointerCapture(event.pointerId);" in pointer_body
+    assert "function updateLaneDragFromEvent(event)" in app_groups
+    assert (
+        "Math.abs(dx) < laneDragThresholdPx && Math.abs(dy) < laneDragThresholdPx"
+        in app_groups
+    )
+    assert "function visibleLaneElementFromPoint(clientX, clientY)" in app_groups
+    assert "document.elementFromPoint(clientX, clientY);" in app_groups
+    assert "function suppressNextLaneDragClick()" in app_groups
+    assert "if (dragging) suppressNextLaneDragClick();" in app_groups
+    assert "state.handle.releasePointerCapture(state.pointerId);" in app_groups

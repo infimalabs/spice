@@ -1004,40 +1004,89 @@ function wireLaneDrag(lane) {
   handle.addEventListener("pointerdown", (event) => {
     if (event.target.closest("button")) return;
     if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
+    clearLaneDrag(laneDragState);
     laneDragState = {
       lane,
+      handle,
       pointerId: event.pointerId,
       startX: event.clientX,
+      startY: event.clientY,
       dragging: false,
       dropTarget: null,
       dropSide: null,
+      pointerCleanup: null,
+      pointerCaptureFailed: false,
     };
-    handle.setPointerCapture(event.pointerId);
+    laneDragState.pointerCleanup = wireLaneDragPointerDocumentEvents();
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch (error) {
+      laneDragState.pointerCaptureFailed = true;
+    }
   });
   handle.addEventListener("pointermove", (event) => {
-    if (!laneDragMatches(event)) return;
-    const state = laneDragState;
-    if (
-      !state.dragging &&
-      Math.abs(event.clientX - state.startX) < laneDragThresholdPx
-    )
-      return;
-    state.dragging = true;
-    state.lane.element.classList.add("lane--dragging");
-    updateLaneDragTarget(state, event.clientX);
+    updateLaneDragFromEvent(event);
   });
   handle.addEventListener("pointerup", (event) => {
-    if (!laneDragMatches(event)) return;
-    finishLaneDrag(laneDragState, event.clientX);
+    finishLaneDragFromEvent(event);
   });
   handle.addEventListener("pointercancel", (event) => {
-    if (!laneDragMatches(event)) return;
-    clearLaneDrag(laneDragState);
+    cancelLaneDragFromEvent(event);
   });
 }
 
 function laneDragMatches(event) {
   return laneDragState && laneDragState.pointerId === event.pointerId;
+}
+
+function wireLaneDragPointerDocumentEvents() {
+  const onMove = (event) => {
+    updateLaneDragFromEvent(event);
+  };
+  const onUp = (event) => {
+    finishLaneDragFromEvent(event);
+  };
+  const onCancel = (event) => {
+    cancelLaneDragFromEvent(event);
+  };
+  document.addEventListener("pointermove", onMove);
+  document.addEventListener("pointerup", onUp);
+  document.addEventListener("pointercancel", onCancel);
+  return () => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    document.removeEventListener("pointercancel", onCancel);
+  };
+}
+
+function updateLaneDragFromEvent(event) {
+  if (!laneDragMatches(event)) return;
+  const state = laneDragState;
+  if (!state.dragging) {
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+    if (Math.abs(dx) < laneDragThresholdPx && Math.abs(dy) < laneDragThresholdPx)
+      return;
+    state.dragging = true;
+    state.lane.element.classList.add("lane--dragging");
+  }
+  updateLaneDragTarget(state, event.clientX, event.clientY);
+  event.preventDefault();
+}
+
+function finishLaneDragFromEvent(event) {
+  if (!laneDragMatches(event)) return;
+  finishLaneDrag(laneDragState, event.clientX, event.clientY);
+  event.preventDefault();
+}
+
+function cancelLaneDragFromEvent(event) {
+  if (!laneDragMatches(event)) return;
+  const suppressClick = Boolean(laneDragState.dragging);
+  clearLaneDrag(laneDragState);
+  if (suppressClick) suppressNextLaneDragClick();
+  event.preventDefault();
 }
 
 function visibleLaneElements() {
@@ -1046,15 +1095,12 @@ function visibleLaneElements() {
   );
 }
 
-function updateLaneDragTarget(state, clientX) {
+function updateLaneDragTarget(state, clientX, clientY) {
   clearLaneFuseHighlights();
   state.dropTarget = null;
   state.dropSide = null;
-  const under = visibleLaneElements().find((element) => {
-    if (element === state.lane.element) return false;
-    const rect = element.getBoundingClientRect();
-    return clientX >= rect.left && clientX <= rect.right;
-  });
+  const under = visibleLaneElementFromPoint(clientX, clientY);
+  if (under === state.lane.element) return;
   if (!under) return;
   const underLane = /** @type {HTMLElement} */ (under);
   const rect = underLane.getBoundingClientRect();
@@ -1077,10 +1123,20 @@ function updateLaneDragTarget(state, clientX) {
   underLane.classList.add("lane--swap-target");
 }
 
-function finishLaneDrag(state, clientX) {
-  updateLaneDragTarget(state, clientX);
+function visibleLaneElementFromPoint(clientX, clientY) {
+  const element = document.elementFromPoint(clientX, clientY);
+  const laneElement = element?.closest(".lane[data-target-id]");
+  if (!(laneElement instanceof HTMLElement)) return null;
+  if (laneElement.classList.contains("lane--shadowed")) return null;
+  return laneElement;
+}
+
+function finishLaneDrag(state, clientX, clientY) {
+  if (!state) return;
+  updateLaneDragTarget(state, clientX, clientY);
   const { lane, dropTarget, dropSide, dragging } = state;
   clearLaneDrag(state);
+  if (dragging) suppressNextLaneDragClick();
   if (!dragging || !dropTarget) return;
   if (dropSide === "swap") {
     const dragged = laneGroupMemberLanes(laneGroupHost(lane)).map(
@@ -1097,9 +1153,30 @@ function finishLaneDrag(state, clientX) {
 
 function clearLaneDrag(state) {
   if (!state) return;
+  state.pointerCleanup?.();
+  state.pointerCleanup = null;
+  if (state.handle && state.pointerId !== undefined) {
+    try {
+      if (state.handle.hasPointerCapture?.(state.pointerId))
+        state.handle.releasePointerCapture(state.pointerId);
+    } catch (error) {
+      state.pointerCaptureFailed = true;
+    }
+  }
   state.lane.element.classList.remove("lane--dragging");
   clearLaneFuseHighlights();
   laneDragState = null;
+}
+
+function suppressNextLaneDragClick() {
+  const onClick = (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  document.addEventListener("click", onClick, true);
+  window.setTimeout(() => {
+    document.removeEventListener("click", onClick, true);
+  }, 0);
 }
 
 function clearLaneFuseHighlights() {
