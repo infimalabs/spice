@@ -1,10 +1,10 @@
 """The supervisor side-channel: a Unix socket the agent wrapper greets.
 
 The supervisor binds a socket in the tmp dir, publishes its path through a
-marker file under the worktree git dir's `spice/agents/<driver>/` coordination
-state, and answers each wrapper hello with the same payload the wrapper would
-synthesize itself (pending inbox readout + keep-working guidance). The agent
-hears the operator through stderr without anyone touching its stdin.
+marker file under this worktree git dir's `spice/agents/<driver>/` state, and
+answers each wrapper hello with the same payload the wrapper would synthesize
+itself (pending inbox readout + keep-working guidance). The agent hears the
+operator through stderr without anyone touching its stdin.
 """
 
 from __future__ import annotations

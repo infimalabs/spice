@@ -3,9 +3,10 @@
 One agent inhabits one worktree. `ensure` starts a fresh agent, resumes the
 recorded thread, or — under renewal — forces a new successor; the launch is
 serialized by an ensure-lock and recorded in durable state under
-git-backed agent state. Worktree-scoped coordination lives under that
-worktree's git dir; once the real thread id is known, thread-owned state and
-logs live under the common git dir at `spice/agents/<driver>/<thread-id>/`.
+git-backed agent state. Runtime state always lives under this worktree's git
+dir at `spice/agents/<driver>/`; once the real thread id is known, thread-owned
+state and logs live under `spice/agents/<driver>/<thread-id>/` in that same
+worktree git dir.
 The agent runs under a detached supervisor process (`spice agent supervise`)
 that owns the side-channel socket and the stdout watchdog, publishes the agent
 state, and survives the parent that launched it.

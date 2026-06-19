@@ -221,7 +221,9 @@ def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(
     linked_git_dir = repo / ".git" / "worktrees" / linked.name / "spice" / "agents"
     linked_worktree_dir = (linked_git_dir / DRIVER.state_dirname).resolve()
     thread_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    linked_thread_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     primary_thread_dir = common_agent_root / thread_id
+    linked_thread_dir = linked_worktree_dir / linked_thread_id
 
     assert lifecycle.agent_state_path(repo).parent == primary_worktree_dir
     assert sidechannelnotify.side_channel_marker_path(repo).parent == (
@@ -230,6 +232,8 @@ def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(
     assert sidechannelnotify.side_channel_marker_path(linked).parent == (
         linked_worktree_dir / "side-channel"
     )
+    with lifecycle.agent_ensure_lock(repo):
+        assert (primary_worktree_dir / "ensure.lock").exists()
 
     log_path = primary_worktree_dir / "logs" / "startup.log"
     log_path.parent.mkdir(parents=True)
@@ -256,13 +260,37 @@ def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(
     assert wrap.context_meter_cache_path(repo) == (
         primary_thread_dir / "context-meter.json"
     )
+    assert wrap.context_warning_state_path(repo) == (
+        primary_thread_dir / "context-warning.json"
+    )
     assert renewal.renewal_request_path(repo) == primary_thread_dir / "renew.json"
     assert repo / ".spice" not in primary_thread_dir.parents
     assert linked / ".spice" not in linked_worktree_dir.parents
 
     monkeypatch.setattr(lifecycle, "utc_now", lambda: "2026-01-02T03:04:05Z")
     linked_log = lifecycle.next_agent_log_path(linked)
-    assert linked_log == (linked_worktree_dir / "logs" / "20260102T030405Z.log")
+    assert linked_log == linked_worktree_dir / "logs" / "20260102T030405Z.log"
+    linked_log.parent.mkdir(parents=True)
+    linked_log.write_text("linked\n", encoding="utf-8")
+    final_linked_log = lifecycle.settle_agent_log_path(
+        linked, linked_log, linked_thread_id
+    )
+    lifecycle.write_agent_state(
+        linked,
+        {
+            "mode": "start",
+            "started_at": "2026-01-02T03:04:05Z",
+            "prompt_skill_path": str(linked / lifecycle.WORKTREE_SKILL_RELATIVE_PATH),
+            "thread_id": linked_thread_id,
+            "log_path": str(final_linked_log),
+        },
+    )
+    assert final_linked_log == linked_thread_dir / "logs" / "20260102T030405Z.log"
+    assert lifecycle.agent_state_path(linked) == linked_thread_dir / "state.json"
+    assert (linked_worktree_dir / "thread-id").read_text(encoding="utf-8") == (
+        f"{linked_thread_id}\n"
+    )
+    assert not (common_agent_root / linked_thread_id).exists()
 
 
 def test_start_agent_direct_path_writes_started_state_under_fakes(

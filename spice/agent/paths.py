@@ -6,7 +6,7 @@ from pathlib import Path
 
 from spice.agent.driver import driver_for
 from spice.agent.identity import canonical_thread_id
-from spice.paths import atomic_write_text, git_common_dir, git_dir
+from spice.paths import atomic_write_text, git_dir
 
 AGENT_STATE_GIT_ROOT = Path("spice") / "agents"
 THREAD_ID_FILENAME = "thread-id"
@@ -21,7 +21,7 @@ def agent_worktree_state_dir(repo_root: Path) -> Path:
 def agent_thread_state_dir(repo_root: Path, thread_id: str) -> Path:
     canonical = canonical_thread_id(thread_id)
     return (
-        git_common_dir(repo_root)
+        git_dir(repo_root)
         / AGENT_STATE_GIT_ROOT
         / driver_for(repo_root).state_dirname
         / canonical
