@@ -145,6 +145,8 @@ function createLaneState(targetId, hint = null, options = {}) {
     liveBusSubscribed: false,
     serverReachable: true,
     serverCloseRequested: false,
+    teamImportOverlayOpen: false,
+    teamImportOverlayEl: null,
     filterPickerOpen: false,
     filterPickerQuery: "",
     filterPickerPendingAssignments: new Set(),
@@ -257,61 +259,130 @@ function lockEmptyTeamPane(lane) {
 }
 
 function emptyTeamImportPanel(lane) {
+  return teamImportPanel(lane);
+}
+
+function teamImportPanel(lane, options = {}) {
+  const overlay = Boolean(options.overlay);
   const panel = document.createElement("div");
   panel.className = "empty-team-importer";
+  if (overlay) panel.classList.add("team-import-overlay");
   panel.dataset.emptyTeamImporter = "";
+  panel.dataset.teamImporter = "";
   const heading = document.createElement("div");
   heading.className = "empty-team-importer-heading";
   heading.textContent = "import agent";
   const list = document.createElement("div");
   list.className = "empty-team-import-list";
-  const choices = targets.slice().sort(compareTargetChoices);
-  if (choices.length) list.replaceChildren(...choices.map((target) =>
-    emptyTeamImportChoice(lane, target),
-  ));
+  const choices = teamImportTargets(lane);
+  if (choices.length)
+    list.replaceChildren(
+      ...choices.map((target) => teamImportChoice(lane, target, { overlay })),
+    );
   else list.textContent = "no available agents";
   panel.append(heading, list);
   return panel;
 }
 
 function emptyTeamImportChoice(lane, target) {
+  return teamImportChoice(lane, target);
+}
+
+function teamImportChoice(lane, target, options = {}) {
   const button = targetChoiceButton(
     target,
     "Import",
     (event) => {
       event.preventDefault();
-      importTargetIntoEmptyTeam(lane, target.id).catch(() => {
-        setLaneTransientStatus(lane, "import agent failed");
-      });
+      importTargetIntoTeam(lane, target.id)
+        .then(() => {
+          if (options.overlay) closeTeamImportOverlay(lane);
+        })
+        .catch(() => {
+          setLaneTransientStatus(lane, "import agent failed");
+        });
     },
     "",
   );
   button.dataset.emptyTeamImportTargetId = target.id;
+  button.dataset.teamImportTargetId = target.id;
   return button;
 }
 
 async function importTargetIntoEmptyTeam(lane, targetId) {
+  return importTargetIntoTeam(lane, targetId);
+}
+
+async function importTargetIntoTeam(lane, targetId) {
+  const host = laneGroupHost(lane);
   const target = targetById.get(targetId);
-  if (!lane || !lane.emptyTeam || !lane.teamId || !target)
-    throw new Error("import requires empty team and target");
+  if (!host || !host.teamId || !target)
+    throw new Error("import requires team and target");
   setLaneTransientStatus(lane, "importing agent");
   await requestTeamCommand(
     teamCommandPayload("moveAgentToTeam", {
-      teamId: lane.teamId,
+      teamId: host.teamId,
       agentId:
         canonicalThreadActorId(targetIdentityThreadId(target.targetIdentity)) ||
         target.id,
-      agentAliases: emptyTeamImportAliases(target),
+      agentAliases: teamImportAliases(target),
     }),
   );
   await refreshTeamSnapshot({ force: true });
 }
 
 function emptyTeamImportAliases(target) {
+  return teamImportAliases(target);
+}
+
+function teamImportAliases(target) {
   const actor = canonicalThreadActorId(
     targetIdentityThreadId(target.targetIdentity),
   );
   return actor && actor !== target.id ? [target.id] : [];
+}
+
+function teamImportTargets(lane) {
+  const host = laneGroupHost(lane);
+  const memberTargetIds = new Set(laneGroupMemberTargetIds(host));
+  return targets
+    .filter((target) => !memberTargetIds.has(target.id))
+    .sort(compareTargetChoices);
+}
+
+function toggleTeamImportOverlay(lane) {
+  const host = laneGroupHost(lane);
+  if (!host || host.emptyTeam) return;
+  if (host.teamImportOverlayOpen) closeTeamImportOverlay(host);
+  else openTeamImportOverlay(host);
+}
+
+function openTeamImportOverlay(lane) {
+  const host = laneGroupHost(lane);
+  if (!host || host.emptyTeam) return;
+  host.teamImportOverlayOpen = true;
+  syncTeamImportOverlay(host);
+}
+
+function closeTeamImportOverlay(lane) {
+  const host = laneGroupHost(lane);
+  if (!host) return;
+  host.teamImportOverlayOpen = false;
+  syncTeamImportOverlay(host);
+}
+
+function syncTeamImportOverlay(lane) {
+  const host = laneGroupHost(lane);
+  if (!host || host.emptyTeam || !host.messagesEl) return;
+  if (!host.teamImportOverlayOpen) {
+    host.teamImportOverlayEl?.remove();
+    host.teamImportOverlayEl = null;
+    return;
+  }
+  const overlay = teamImportPanel(host, { overlay: true });
+  host.teamImportOverlayEl?.remove();
+  host.teamImportOverlayEl = overlay;
+  host.messagesEl.append(overlay);
 }
 
 // The lane's transcript-stream state: known messages, cursors, render

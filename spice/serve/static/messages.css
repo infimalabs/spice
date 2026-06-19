@@ -13,6 +13,7 @@
   overflow-x: auto;
   overflow-y: auto;
   padding: 11px;
+  position: relative;
 }
 .messages article {
   background: var(--panel);

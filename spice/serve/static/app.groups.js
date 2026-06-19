@@ -305,6 +305,7 @@ function laneTeamMenuActions(host) {
   if (host.emptyTeam) return [closeTeamMenuAction(host)];
   return [
     closeTeamMenuAction(host),
+    importAgentMenuAction(host),
     splitIndividualsMenuAction(host),
     restorePreviousTeamMenuAction(host),
   ];
@@ -317,6 +318,14 @@ function closeTeamMenuAction(host) {
       ? "empty"
       : laneTeamMemberCountText(laneGroupMemberLanes(host).length),
     onClick: () => closeLane(host),
+  };
+}
+
+function importAgentMenuAction(host) {
+  return {
+    label: "Import agent",
+    detail: host.teamImportOverlayOpen ? "hide panel" : "cover messages",
+    onClick: () => toggleTeamImportOverlay(host),
   };
 }
 

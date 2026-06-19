@@ -53,6 +53,16 @@
 .empty-team-importer .target-choice-copy {
   flex: 1 1 auto;
 }
+.team-import-overlay {
+  bottom: 11px;
+  left: 11px;
+  max-height: calc(100% - 22px);
+  overflow: hidden;
+  position: absolute;
+  right: 11px;
+  top: 11px;
+  z-index: 5;
+}
 .lane--composer-drop .composer-shards {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 42%, transparent);
 }

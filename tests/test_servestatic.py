@@ -413,6 +413,7 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     css = _serve_css_text()
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    messages_css = (STATIC_ROOT / "messages.css").read_text(encoding="utf-8")
 
     assert 'data-lane-team-menu title="Team actions"' in app_shell
     assert "function toggleLaneTeamMenu(lane, event = null)" in app_groups
@@ -434,14 +435,21 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
         "  );" in app_groups
     )
     assert 'label: "Close team",' in app_groups
+    assert 'label: "Import agent",' in app_groups
+    assert 'detail: host.teamImportOverlayOpen ? "hide panel" : "cover messages",' in (
+        app_groups
+    )
     assert 'label: "Split into individuals",' in app_groups
     assert 'label: "Restore previous team",' in app_groups
     assert "if (host.emptyTeam) return [closeTeamMenuAction(host)];" in app_groups
     assert 'detail: host.emptyTeam\n      ? "empty"' in app_groups
+    assert "onClick: () => toggleTeamImportOverlay(host)," in app_groups
     close_team_index = app_groups.index('label: "Close team",')
+    import_agent_index = app_groups.index('label: "Import agent",')
     split_individuals_index = app_groups.index('label: "Split into individuals",')
     restore_previous_index = app_groups.index('label: "Restore previous team",')
-    assert close_team_index < split_individuals_index
+    assert close_team_index < import_agent_index
+    assert import_agent_index < split_individuals_index
     assert split_individuals_index < restore_previous_index
     assert 'teamCommandPayload("splitTeamBack", {' in app_groups
     lane_start = css.index(".lane {")
@@ -450,6 +458,9 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     view_stack_start = css.index(".lane-view-stack {")
     view_stack_end = css.index(".lane-view-stack--collapsed", view_stack_start)
     view_stack_rule = css[view_stack_start:view_stack_end]
+    messages_start = messages_css.index(".messages {")
+    messages_end = messages_css.index(".messages article", messages_start)
+    messages_rule = messages_css[messages_start:messages_end]
     menu_start = css.index(".lane-team-menu {")
     menu_end = css.index(".lane-team-menu--empty-team-overlay {", menu_start)
     menu_rule = css[menu_start:menu_end]
@@ -469,13 +480,22 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     )
     text_end = css.index(".lane-team-menu-action:disabled", text_start)
     text_rule = css[text_start:text_end]
+    team_import_overlay_start = css.index(".team-import-overlay {")
+    team_import_overlay_rule = css[
+        team_import_overlay_start : css.index("}", team_import_overlay_start)
+    ]
     assert "position: relative;" in lane_rule
     assert "position: relative;" in view_stack_rule
+    assert "position: relative;" in messages_rule
     assert "align-content: stretch;" in menu_rule
     assert "position: absolute;" in menu_rule
     assert "inset: 0;" in menu_rule
     assert "height: var(--lane-team-menu-height, 120px);" in empty_team_overlay_rule
     assert "inset: var(--lane-team-menu-top, 0px) 0 auto;" in empty_team_overlay_rule
+    assert "position: absolute;" in team_import_overlay_rule
+    assert "top: 11px;" in team_import_overlay_rule
+    assert "bottom: 11px;" in team_import_overlay_rule
+    assert "z-index: 5;" in team_import_overlay_rule
     assert "grid-auto-rows: minmax(72px, 1fr);" in menu_rule
     assert "z-index: 6;" in menu_rule
     assert "align-items: center;" in action_rule
