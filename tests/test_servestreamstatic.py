@@ -446,42 +446,10 @@ def test_static_message_speech_routes_to_producer_lane():
     assert "await playSpeech(entry.targetLane, text);" in app_audio
 
 
-def test_static_stream_uses_message_payload_and_standard_badges():
+def test_static_stream_uses_message_payload_merge_shape():
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
-    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
-    css = _serve_css_text()
-    index_css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
-    messages_css = (STATIC_ROOT / "messages.css").read_text(encoding="utf-8")
     merge_start = app_stream.index("function mergePayloadMessages")
     merge_end = app_stream.index("function upsertKnownMessage", merge_start)
-    badge_start = app_render.index("function renderBadges")
-    badge_end = app_render.index("function renderCompactionDivider", badge_start)
-    badges_css_start = messages_css.index(".badges {")
-    badges_css_rule = messages_css[
-        badges_css_start : messages_css.index("}", badges_css_start)
-    ]
-    badge_css_start = messages_css.index(".badge {")
-    badge_css_rule = messages_css[
-        badge_css_start : messages_css.index("}", badge_css_start)
-    ]
-    final_badge_start = messages_css.index(".badge.final-badge {")
-    final_badge_rule = messages_css[
-        final_badge_start : messages_css.index("}", final_badge_start)
-    ]
-    maxim_badge_start = messages_css.index(".badge.maxim-badge {")
-    maxim_badge_rule = messages_css[
-        maxim_badge_start : messages_css.index("}", maxim_badge_start)
-    ]
-    filter_count_start = index_css.index(".filter-pill-count {")
-    filter_count_rule = index_css[
-        filter_count_start : index_css.index("}", filter_count_start)
-    ]
-    chip_count_start = index_css.index(".lane-filter-chip-count {")
-    chip_count_rule = index_css[
-        chip_count_start : index_css.index("}", chip_count_start)
-    ]
-    final_css_start = css.index(".messages article.final {")
-    final_css_end = css.index(".messages article.final.acked {", final_css_start)
 
     assert app_stream[merge_start:merge_end] == (
         "function mergePayloadMessages(lane, payload) {\n"
@@ -510,6 +478,13 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         "}\n"
         "\n"
     )
+
+
+def test_static_stream_renders_message_badge_dom():
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    badge_start = app_render.index("function renderBadges")
+    badge_end = app_render.index("function renderCompactionDivider", badge_start)
+
     assert app_render[badge_start:badge_end] == (
         "function renderBadges(ackCount, kind, maximAckCount, taskCardCount) {\n"
         "  const visibleAckCount = Math.max(0, ackCount - maximAckCount);\n"
@@ -523,25 +498,77 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         "    return null;\n"
         '  const badges = document.createElement("div");\n'
         '  badges.className = "badges";\n'
-        "  const add = (label, className) => {\n"
+        "  const add = (label, className, count) => {\n"
         '    const badge = document.createElement("span");\n'
         '    badge.className = className ? "badge " + className : "badge";\n'
-        "    badge.textContent = label;\n"
+        '    const text = document.createElement("span");\n'
+        '    text.className = "badge-label";\n'
+        "    text.textContent = label;\n"
+        "    badge.append(text);\n"
+        '    if (count !== undefined && count !== null && count !== "") {\n'
+        '      const countEl = document.createElement("span");\n'
+        '      countEl.className = "badge-count";\n'
+        "      countEl.textContent = String(count);\n"
+        "      badge.append(countEl);\n"
+        "    }\n"
         "    badges.append(badge);\n"
         "  };\n"
         '  if (maximAckCount) add("MAXIM", "maxim-badge");\n'
         '  if (kind === "final") add("FINAL", "final-badge");\n'
-        "  if (visibleTaskCount)\n"
-        '    add(visibleTaskCount + "\\u00a0TASK" + (visibleTaskCount === 1 ? "" : "S"));\n'
-        "  if (visibleAckCount)\n"
-        '    add(visibleAckCount + "\\u00a0ACK" + (visibleAckCount === 1 ? "" : "s"));\n'
+        '  if (visibleTaskCount) add("TASK", "task-badge", visibleTaskCount);\n'
+        '  if (visibleAckCount) add("ACK", "", visibleAckCount);\n'
         "  return badges;\n"
         "}\n"
         "\n"
     )
+    assert "    item.task_card_count || 0,\n  );" in app_render
+
+
+def test_static_message_badge_css_uses_compact_semantic_counts():
+    css = _serve_css_text()
+    index_css = (STATIC_ROOT / "index.css").read_text(encoding="utf-8")
+    messages_css = (STATIC_ROOT / "messages.css").read_text(encoding="utf-8")
+    badges_css_start = messages_css.index(".badges {")
+    badges_css_rule = messages_css[
+        badges_css_start : messages_css.index("}", badges_css_start)
+    ]
+    badge_css_start = messages_css.index(".badge {")
+    badge_css_rule = messages_css[
+        badge_css_start : messages_css.index("}", badge_css_start)
+    ]
+    badge_label_start = messages_css.index(".badge-label {")
+    badge_label_rule = messages_css[
+        badge_label_start : messages_css.index("}", badge_label_start)
+    ]
+    badge_count_start = messages_css.index(".badge-count {")
+    badge_count_rule = messages_css[
+        badge_count_start : messages_css.index("}", badge_count_start)
+    ]
+    final_badge_start = messages_css.index(".badge.final-badge {")
+    final_badge_rule = messages_css[
+        final_badge_start : messages_css.index("}", final_badge_start)
+    ]
+    task_badge_start = messages_css.index(".badge.task-badge {")
+    task_badge_rule = messages_css[
+        task_badge_start : messages_css.index("}", task_badge_start)
+    ]
+    maxim_badge_start = messages_css.index(".badge.maxim-badge {")
+    maxim_badge_rule = messages_css[
+        maxim_badge_start : messages_css.index("}", maxim_badge_start)
+    ]
+    filter_count_start = index_css.index(".filter-pill-count {")
+    filter_count_rule = index_css[
+        filter_count_start : index_css.index("}", filter_count_start)
+    ]
+    chip_count_start = index_css.index(".lane-filter-chip-count {")
+    chip_count_rule = index_css[
+        chip_count_start : index_css.index("}", chip_count_start)
+    ]
+    final_css_start = css.index(".messages article.final {")
+    final_css_end = css.index(".messages article.final.acked {", final_css_start)
+
     assert "--message-occupant-accent" not in badges_css_rule
     assert "--message-badge-accent: var(--accent-strong);" in badge_css_rule
-    assert "    item.task_card_count || 0,\n  );" in app_render
     assert (
         "border: 1px solid color-mix(in srgb, var(--message-badge-accent) 58%, var(--border));"
         in badge_css_rule
@@ -550,7 +577,18 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         "color: color-mix(in srgb, var(--message-badge-accent) 82%, var(--fg));"
         in badge_css_rule
     )
+    assert "align-items: center;" in badge_css_rule
+    assert "display: inline-flex;" in badge_css_rule
+    assert "gap: 5px;" in badge_css_rule
+    assert "padding: 2px 5px 2px 8px;" in badge_css_rule
+    assert "line-height: 1.15;" in badge_label_rule
+    assert "background: var(--message-badge-accent);" in badge_count_rule
+    assert "color: var(--button-accent-fg);" in badge_count_rule
+    assert "display: inline-grid;" in badge_count_rule
+    assert "min-width: 16px;" in badge_count_rule
+    assert "place-items: center;" in badge_count_rule
     assert "--message-badge-accent: var(--final-accent);" in final_badge_rule
+    assert "--message-badge-accent: var(--team-plum-accent);" in task_badge_rule
     assert "--message-badge-accent: var(--maxim-accent);" in maxim_badge_rule
     assert "font-weight: 700;" in maxim_badge_rule
     assert "background: var(--accent);" in filter_count_rule
