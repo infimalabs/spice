@@ -628,6 +628,33 @@ def _supervisor_feedback_notice_pairs(output: str) -> list[tuple[str, str]]:
     return pairs
 
 
+def task_card_message(
+    key: str,
+    index: int,
+    timestamp: str,
+    fields: list[tuple[str, str]],
+    *,
+    source_kind: str,
+) -> AssistantMessage:
+    directive = {"fields": fields}
+    display_text = _task_directive_summary(directive)
+    display_html = _task_directive_html(directive)
+    return AssistantMessage(
+        key=key,
+        index=index,
+        timestamp=timestamp,
+        text=display_text,
+        display_text=display_text,
+        display_html=display_html,
+        ack_count=0,
+        ack_keys=[],
+        ack_utterances=[],
+        kind="task_card",
+        preview=_preview_from_text(display_text),
+        source_kind=source_kind,
+    )
+
+
 def _key_offset(key: str) -> int | None:
     raw = key.rsplit("#", 1)[-1]
     try:

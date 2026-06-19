@@ -116,6 +116,19 @@ def test_add_batch_creates_from_parsed_requests(task_repo):
     assert row["acceptance"] == "Batch creation still works"
 
 
+def test_add_batch_can_mark_cli_creation_surface(task_repo):
+    handles = ops.add_batch(
+        [
+            "title=CLI marked batch | project=task.unit | "
+            "acceptance=Batch task card source is durable"
+        ],
+        creation_surface=config.TASK_CREATION_SURFACE_CLI,
+    )
+    row = identity.resolve(handles[0])
+
+    assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
+
+
 def test_add_batch_results_update_drive_task_filter_with_visible_route(task_repo):
     store = ServeTeamStore()
     team = store.create_team(members=[ACTOR], config=TeamConfig(lifetime="Drive"))

@@ -44,6 +44,8 @@ TASK_EVENT_FILENAME = "events"
 DEFAULT_FLOW = ("todo", "review")
 PRIVATE_DEFAULT_FLOW = ("todo",)
 PER_STEM_FLOWS: dict[str, tuple[str, ...]] = {}
+TASK_CREATION_SURFACE_UDA = "creation_surface"
+TASK_CREATION_SURFACE_CLI = "cli"
 
 SENTINEL_ACTOR = "00000000-0000-0000-0000-000000000000"
 OOPS_WAIT = "2099-01-01T00:00:00"
@@ -229,6 +231,7 @@ _EVIDENCE = [
     "judgment",
     "delete_reason",
     "pace",
+    TASK_CREATION_SURFACE_UDA,
     "origin_thread",
     "origin_worktree",
     "origin_branch",

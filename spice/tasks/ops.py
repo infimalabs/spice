@@ -250,6 +250,10 @@ def _task_acceptance(acceptance: Sequence[str]) -> list[str]:
     return [_task_text(item) for item in acceptance]
 
 
+def _task_creation_surface(value: str | None) -> str:
+    return _task_text((value or "").strip())
+
+
 def default_project(actor: str) -> str:
     hexid = "".join(c for c in actor.lower() if c.isalnum())
     return f"agent.{hexid}.task"
@@ -276,6 +280,7 @@ def _add_one(
     system_project: bool = False,
     return_result: bool = False,
     actor_override: str | None = None,
+    creation_surface: str | None = None,
 ) -> str | TaskAddResult:
     title = _task_title(title)
     body = _task_description(description)
@@ -322,6 +327,9 @@ def _add_one(
         args.append(f"acceptance:{' | '.join(_task_acceptance(acceptance))}")
     if body:
         args.append(f"task_description:{body}")
+    surface = _task_creation_surface(creation_surface)
+    if surface:
+        args.append(f"{config.TASK_CREATION_SURFACE_UDA}:{surface}")
     args += [
         f"origin_thread:{actor}",
         f"origin_worktree:{config.repo_root()}",
@@ -371,6 +379,7 @@ def add(
     scheduled: str | None = None,
     until: str | None = None,
     due: str | None = None,
+    creation_surface: str | None = None,
 ) -> str:
     return _add_one(
         title=title,
@@ -387,6 +396,7 @@ def add(
         scheduled=scheduled,
         until=until,
         due=due,
+        creation_surface=creation_surface,
     )
 
 
@@ -492,7 +502,10 @@ def parse_add_batch(lines: Sequence[str]) -> list[TaskAddBatchRequest]:
 
 
 def add_batch_results(
-    lines: list[str], *, actor_override: str | None = None
+    lines: list[str],
+    *,
+    actor_override: str | None = None,
+    creation_surface: str | None = None,
 ) -> list[TaskAddResult]:
     parsed = parse_add_batch(lines)
     existing = {str(r.get("incepted") or "") for r in tw.export()}
@@ -513,6 +526,7 @@ def add_batch_results(
             existing=existing,
             return_result=True,
             actor_override=actor_override,
+            creation_surface=creation_surface,
         )
         if not isinstance(
             result, TaskAddResult
@@ -522,8 +536,11 @@ def add_batch_results(
     return results
 
 
-def add_batch(lines: list[str]) -> list[str]:
-    return [result.handle for result in add_batch_results(lines)]
+def add_batch(lines: list[str], *, creation_surface: str | None = None) -> list[str]:
+    return [
+        result.handle
+        for result in add_batch_results(lines, creation_surface=creation_surface)
+    ]
 
 
 # ---- claim --------------------------------------------------------------

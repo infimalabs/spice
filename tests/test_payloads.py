@@ -285,6 +285,133 @@ def test_inline_task_directive_renders_inside_ack_segment_at_written_position(
     assert "<dt>project</dt><dd>serve.ui</dd>" in segment_html
 
 
+def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch):
+    actor = "a" * 32
+    row = {
+        "id": 42,
+        "uuid": "task-uuid-42",
+        "incepted": "20260610T120001000001Z",
+        "description": "CLI follow-up",
+        "project": "serve.ui",
+        "acceptance": "Task card comes from the backend",
+        "origin_thread": actor,
+        "creation_surface": "cli",
+        "status": "pending",
+    }
+    seen: dict[str, object] = {}
+
+    def fake_export(filters: list[str] | None = None) -> list[dict[str, object]]:
+        if filters and "creation_surface.is:cli" in filters:
+            seen["filters"] = filters
+            return [row]
+        return []
+
+    monkeypatch.setattr(payloads.tw, "export", fake_export)
+    monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(
+        payloads, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
+    monkeypatch.setattr(
+        payloads,
+        "ensure_agent_for_pending_inbox",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        payloads, "resolve_thread_id_for_target", lambda _state, _target: actor
+    )
+    monkeypatch.setattr(
+        payloads,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id=actor,
+        ),
+    )
+    monkeypatch.setattr(payloads, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(
+        payloads.message_reader,
+        "assistant_messages_for_thread_id",
+        lambda *_args, **_kwargs: ([], None),
+    )
+
+    payload = payloads.messages_payload_for_worktree(
+        _State(),
+        _Target(id="wt", repo_root=tmp_path),
+        limit=5,
+    )
+
+    assert seen["filters"] == [
+        "status.any:",
+        "creation_surface.is:cli",
+        f"origin_thread.is:{actor}",
+    ]
+    item = payload["messages"][0]
+    assert item["kind"] == "task_card"
+    assert item["source_kind"] == "cli_task_created"
+    assert item["timestamp"] == "2026-06-10T12:00:01.000001Z"
+    assert item["display_text"] == "Task capture: CLI follow-up (serve.ui)"
+    assert item["preview"] == "Task capture: CLI follow-up (serve.ui)"
+    assert '<blockquote class="task-directive-quote">' in item["display_html"]
+    assert (
+        '<div class="task-directive-kicker">Task capture</div>' in item["display_html"]
+    )
+    assert "<dt>title</dt><dd>CLI follow-up</dd>" in item["display_html"]
+    assert "<dt>project</dt><dd>serve.ui</dd>" in item["display_html"]
+    assert (
+        "<dt>acceptance</dt><dd>Task card comes from the backend</dd>"
+        in item["display_html"]
+    )
+    assert "<dt>handle</dt><dd>UI-20260610T120001000001Z</dd>" in item["display_html"]
+
+
+def test_task_card_cursor_merges_newer_backend_and_transcript_items(monkeypatch):
+    actor = "a" * 32
+    rows = [
+        {
+            "id": 1,
+            "uuid": "older-task",
+            "incepted": "20260610T120001000001Z",
+            "description": "Older CLI follow-up",
+            "project": "serve.ui",
+            "origin_thread": actor,
+            "creation_surface": "cli",
+        },
+        {
+            "id": 2,
+            "uuid": "newer-task",
+            "incepted": "20260610T120002000001Z",
+            "description": "Later CLI follow-up",
+            "project": "serve.ui",
+            "origin_thread": actor,
+            "creation_surface": "cli",
+        },
+    ]
+    boundary_key = "2026-06-10T12:00:01.000001Z#task-card:older-task"
+
+    monkeypatch.setattr(payloads.tw, "export", lambda _filters: rows)
+
+    merged = payloads._merge_task_card_messages(
+        actor,
+        [_message("2026-06-10T12:00:03.000000Z")],
+        limit=5,
+        after=boundary_key,
+    )
+
+    assert [item.display_text for item in merged] == [
+        "hello",
+        "Task capture: Later CLI follow-up (serve.ui)",
+    ]
+    boundary = message_reader.parse_timestamp("2026-06-10T12:00:01.000001Z")
+    assert boundary is not None
+    assert all(
+        (timestamp := message_reader.parse_timestamp(item.timestamp)) is not None
+        and timestamp > boundary
+        for item in merged
+    )
+
+
 def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monkeypatch):
     latest = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
     transcript = tmp_path / "rollout.jsonl"

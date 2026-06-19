@@ -107,6 +107,7 @@ def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
     row = identity.resolve(created)
 
     assert row["description"] == "Alias title lands"
+    assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
 
 
 def test_task_add_takes_exactly_one_title_form(task_repo):

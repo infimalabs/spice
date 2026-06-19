@@ -27,12 +27,15 @@ from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.teams import ServeTeamStore, renewal_intent_payload
 from spice.serve.worktrees import WorktreeTarget
 from spice.tasks import config as task_config
+from spice.tasks import identity as task_identity
+from spice.tasks import tw
 
 ACK_CONTEXT_ARCHIVE_LIMIT = 50
 
 LANE_METRIC_SPARKLINE_BUCKETS = 12
 LANE_METRIC_SPARKLINE_BUCKET_SECONDS = 60
 TASK_ACTOR_FIELDS = ("claim_by", "claim_thread", "review_author", "review_by")
+TASK_CARD_SOURCE_KIND = "cli_task_created"
 
 
 def agent_ensure_thread_id(agent_ensure: dict[str, Any] | None) -> str:
@@ -295,12 +298,206 @@ def target_activity_items(
 ) -> tuple[list[message_reader.AssistantMessage], str | None]:
     if not thread_id:
         return [], None
-    return message_reader.assistant_messages_for_thread_id(
+    items, error = message_reader.assistant_messages_for_thread_id(
         thread_id,
         limit=1,
         worktree_id=target.id,
         repo_root=target.repo_root,
     )
+    return _merge_task_card_messages(thread_id, items, limit=1), error
+
+
+def _merge_task_card_messages(
+    thread_id: str,
+    items: list[message_reader.AssistantMessage],
+    *,
+    limit: int,
+    after: str | None = None,
+    before: str | None = None,
+) -> list[message_reader.AssistantMessage]:
+    cards = _task_card_messages_for_thread(thread_id, after=after, before=before)
+    if not cards:
+        return items
+    bounded = max(1, min(limit, message_reader.MAX_MESSAGE_LIMIT))
+    merged = {item.key: item for item in (*items, *cards)}
+    values = _filter_non_offset_boundary(
+        list(merged.values()),
+        after=after,
+        before=before,
+    )
+    presence = [item for item in values if item.kind.startswith("presence:")]
+    latest_presence = _newest_message(presence)
+    visible = [item for item in values if not item.kind.startswith("presence:")]
+    kept = _newest_messages(visible, limit=bounded)
+    if latest_presence is not None:
+        kept.append(latest_presence)
+    return _newest_messages(kept, limit=len(kept))
+
+
+def _task_card_messages_for_thread(
+    thread_id: str,
+    *,
+    after: str | None,
+    before: str | None,
+) -> list[message_reader.AssistantMessage]:
+    actor = tw.canonical_actor(thread_id)
+    if not actor:
+        return []
+    try:
+        rows = tw.export(
+            [
+                "status.any:",
+                f"{task_config.TASK_CREATION_SURFACE_UDA}.is:"
+                f"{task_config.TASK_CREATION_SURFACE_CLI}",
+                f"origin_thread.is:{actor}",
+            ]
+        )
+    except SpiceError:
+        return []
+    cards = [
+        card for row in rows if (card := _task_card_message_from_row(row)) is not None
+    ]
+    return [
+        card
+        for card in cards
+        if _message_inside_time_boundary(card, after=after, before=before)
+    ]
+
+
+def _task_card_message_from_row(
+    row: dict[str, Any],
+) -> message_reader.AssistantMessage | None:
+    timestamp = _task_row_timestamp(row)
+    if not timestamp:
+        return None
+    handle = task_identity.render_handle(row)
+    fields: list[tuple[str, str]] = []
+    title = str(row.get("description") or "").strip()
+    project = str(row.get("project") or "").strip()
+    acceptance = str(row.get("acceptance") or "").strip()
+    if title:
+        fields.append(("title", title))
+    if project:
+        fields.append(("project", project))
+    if acceptance:
+        fields.append(("acceptance", acceptance))
+    if handle:
+        fields.append(("handle", handle))
+    if not fields:
+        return None
+    return message_reader.task_card_message(
+        key=f"{timestamp}#task-card:{str(row.get('uuid') or handle)}",
+        index=_task_card_index(row),
+        timestamp=timestamp,
+        fields=fields,
+        source_kind=TASK_CARD_SOURCE_KIND,
+    )
+
+
+def _task_card_index(row: dict[str, Any]) -> int:
+    raw_id = row.get("id")
+    try:
+        task_id = int(raw_id)
+    except (TypeError, ValueError):
+        task_id = 0
+    return 9_000_000_000_000_000_000 + max(0, task_id)
+
+
+def _task_row_timestamp(row: dict[str, Any]) -> str:
+    parsed = _parse_task_timestamp(str(row.get("incepted") or "")) or (
+        _parse_task_timestamp(str(row.get("entry") or ""))
+    )
+    if parsed is None:
+        return ""
+    return parsed.isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _parse_task_timestamp(raw: str) -> datetime | None:
+    value = raw.strip()
+    if not value:
+        return None
+    parsed = message_reader.parse_timestamp(value)
+    if parsed is not None:
+        return parsed
+    for fmt in ("%Y%m%dT%H%M%S%fZ", "%Y%m%dT%H%M%SZ"):
+        try:
+            return datetime.strptime(value, fmt).replace(tzinfo=UTC)
+        except ValueError:
+            continue
+    return None
+
+
+def _filter_non_offset_boundary(
+    items: list[message_reader.AssistantMessage],
+    *,
+    after: str | None,
+    before: str | None,
+) -> list[message_reader.AssistantMessage]:
+    after_boundary = None if _key_has_transcript_offset(after) else after
+    before_boundary = None if _key_has_transcript_offset(before) else before
+    if not after_boundary and not before_boundary:
+        return items
+    return [
+        item
+        for item in items
+        if _message_inside_time_boundary(
+            item, after=after_boundary, before=before_boundary
+        )
+    ]
+
+
+def _message_inside_time_boundary(
+    item: message_reader.AssistantMessage,
+    *,
+    after: str | None,
+    before: str | None,
+) -> bool:
+    timestamp = message_reader.parse_timestamp(item.timestamp)
+    if timestamp is None:
+        return True
+    after_timestamp = _timestamp_from_message_key(after)
+    if after_timestamp is not None and timestamp <= after_timestamp:
+        return False
+    before_timestamp = _timestamp_from_message_key(before)
+    if before_timestamp is not None and timestamp >= before_timestamp:
+        return False
+    return True
+
+
+def _timestamp_from_message_key(key: str | None) -> datetime | None:
+    if not key:
+        return None
+    timestamp, _sep, _suffix = key.partition("#")
+    return message_reader.parse_timestamp(timestamp)
+
+
+def _key_has_transcript_offset(key: str | None) -> bool:
+    if not key or "#" not in key:
+        return False
+    raw = key.rsplit("#", 1)[-1]
+    try:
+        return int(raw) >= 0
+    except ValueError:
+        return False
+
+
+def _newest_message(
+    items: list[message_reader.AssistantMessage],
+) -> message_reader.AssistantMessage | None:
+    newest = _newest_messages(items, limit=1)
+    return newest[0] if newest else None
+
+
+def _newest_messages(
+    items: list[message_reader.AssistantMessage], *, limit: int
+) -> list[message_reader.AssistantMessage]:
+    return sorted(items, key=_message_sort_key, reverse=True)[:limit]
+
+
+def _message_sort_key(item: message_reader.AssistantMessage) -> tuple[float, int, str]:
+    timestamp = message_reader.parse_timestamp(item.timestamp)
+    epoch = timestamp.timestamp() if timestamp is not None else 0.0
+    return (epoch, item.index, item.key)
 
 
 def status_line_payload(
@@ -610,6 +807,13 @@ def messages_payload_for_worktree(
             cursor=state.rollout_cursor(thread_id) if not before else None,
             worktree_id=target.id,
             repo_root=target.repo_root,
+        )
+        items = _merge_task_card_messages(
+            thread_id,
+            items,
+            limit=limit,
+            after=after,
+            before=before,
         )
     team_facts = team_facts_for_target(state.team_store, target, thread_id)
     team_identity = team_identity_payload(team_facts)

@@ -605,13 +605,14 @@ def _handle_add(args: argparse.Namespace) -> int:
             scheduled=args.scheduled,
             until=args.until,
             due=args.due,
+            creation_surface=config.TASK_CREATION_SURFACE_CLI,
         )
         print(render_add_result(handle_text, claimed=args.claim))
         return 0
     lines = sys.stdin.read().splitlines()
     if not any(line.strip() for line in lines):
         raise SpiceError("task add requires a title argument or batch lines on stdin")
-    handles = ops.add_batch(lines)
+    handles = ops.add_batch(lines, creation_surface=config.TASK_CREATION_SURFACE_CLI)
     for handle_text in handles:
         print(f"created {handle_text}")
     if handles:
