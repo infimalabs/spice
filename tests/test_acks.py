@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from spice.agent.driver import DRIVER
 from spice.mail.acks import (
     ack_content_by_key,
+    archive_ackd_inbox_items,
     collect_ack_segments,
     collect_unique_ack_keys,
     extract_ack_keys_from_text,
@@ -13,7 +14,13 @@ from spice.mail.acks import (
     extract_task_batch_lines_from_text,
     split_ack_message,
 )
-from spice.mail.inbox import compose_inbox_text, inbox_dir, parse_inbox_payload
+from spice.mail.ackstate import ack_state_records
+from spice.mail.inbox import (
+    collect_acked_inbox_items,
+    compose_inbox_text,
+    inbox_dir,
+    parse_inbox_payload,
+)
 from spice.mail.inbox import write_inbox_item
 from spice.mail.watch import (
     AckWatchOutcome,
@@ -118,6 +125,46 @@ def test_standalone_task_directive_is_stripped_from_display_text():
     ]
     assert preamble == "Done."
     assert segments == []
+
+
+def test_archive_ackd_inbox_items_records_durable_ack_state(tmp_path):
+    name = f"{KEY_A}.txt"
+    text = compose_inbox_text(body="durable ack state", priority=None, stop=False)
+    write_inbox_item(
+        tmp_path,
+        name,
+        text,
+    )
+
+    assert archive_ackd_inbox_items(tmp_path, [KEY_A]) == [KEY_A]
+
+    archived = collect_acked_inbox_items(tmp_path)
+    records = ack_state_records(tmp_path)
+    assert [(item.name, item.text) for item in archived] == [(name, text)]
+    assert [(record.key, record.inbox_name, record.text) for record in records] == [
+        (KEY_A, name, text)
+    ]
+
+
+def test_ack_state_supplies_archive_context_without_archive_files(tmp_path):
+    name = f"{KEY_B}.txt"
+    text = compose_inbox_text(
+        body="ack state outlives archive", priority=None, stop=False
+    )
+    write_inbox_item(
+        tmp_path,
+        name,
+        text,
+    )
+
+    archive_ackd_inbox_items(tmp_path, [KEY_B])
+
+    archived = collect_acked_inbox_items(tmp_path)
+    records = ack_state_records(tmp_path)
+    assert [(item.name, item.text) for item in archived] == [(name, text)]
+    assert [(record.key, record.inbox_name, record.text) for record in records] == [
+        (KEY_B, name, text)
+    ]
 
 
 def test_content_by_key_latest_ack_wins():

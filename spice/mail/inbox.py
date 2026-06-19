@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import quote
 
+from spice.mail.ackstate import ack_state_database_path, ack_state_records
 from spice.mail.attachments import (
     InboxAttachment,
     InboxAttachmentInput,
@@ -120,40 +121,23 @@ def collect_inbox_items(repo_root: str | Path | None) -> list[InboxItem]:
     return items
 
 
-def collect_archived_inbox_items(
+def collect_acked_inbox_items(
     repo_root: str | Path | None, *, limit: int = INBOX_ARCHIVE_DEFAULT_LIMIT
 ) -> list[InboxItem]:
     if not repo_root:
         return []
     prune_stale_inbox_artifacts(repo_root)
-    archive_dir = inbox_dir(repo_root) / INBOX_ARCHIVE_DIRNAME
-    if not archive_dir.is_dir():
-        return []
-    paths = sorted(
-        (
-            path
-            for path in _file_paths(archive_dir)
-            if path.suffix == ".txt" and inbox_path_is_fresh(path)
-        ),
-        key=lambda path: (_path_mtime(path), path.name),
-        reverse=True,
-    )[: max(0, limit)]
-    items: list[InboxItem] = []
-    for path in paths:
-        try:
-            text = path.read_text(errors="replace")
-        except FileNotFoundError:
-            continue
-        items.append(
-            InboxItem(
-                source_path=path,
-                archive_path=path,
-                name=path.name,
-                text=text,
-                attachments=collect_inbox_attachments(path),
-            )
+    state_path = ack_state_database_path(repo_root)
+    return [
+        InboxItem(
+            source_path=state_path,
+            archive_path=state_path,
+            name=record.inbox_name,
+            text=record.text,
+            attachments=(),
         )
-    return items
+        for record in ack_state_records(repo_root)[: max(0, limit)]
+    ]
 
 
 def collect_deadlettered_inbox_items(
@@ -315,12 +299,10 @@ def inbox_attachment_readout_path(item: InboxItem, attachment: InboxAttachment) 
     return inbox_attachment_dir(item.archive_path) / attachment.path.name
 
 
-def inbox_archive_context_rows(items: Sequence[InboxItem]) -> list[str]:
+def inbox_ack_state_context_rows(items: Sequence[InboxItem]) -> list[str]:
     if not items:
         return []
-    rows = [
-        "source=inbox_archive; status=already_consumed_operator_steering; window=24h"
-    ]
+    rows = ["source=ack_state; status=already_consumed_operator_steering; store=sqlite"]
     for item in items:
         payload = parse_inbox_payload(item.text)
         text = one_line_preview(payload.body, limit=INBOX_ARCHIVE_PREVIEW_LIMIT)
@@ -329,7 +311,7 @@ def inbox_archive_context_rows(items: Sequence[InboxItem]) -> list[str]:
             f" attachments={len(item.attachments)}" if item.attachments else ""
         )
         rows.append(
-            f"archived_inbox key={inbox_item_key(item.name)} "
+            f"acked_inbox key={inbox_item_key(item.name)} "
             f"age={relative_time_for_path(item.source_path)}{priority}"
             f"{attachments} text={text or '-'}"
         )
@@ -410,6 +392,14 @@ def consume_inbox_items(items: Sequence[dict[str, Any]]) -> None:
         with contextlib.suppress(FileNotFoundError):
             source.unlink()
         archive_inbox_attachments(source, archive)
+
+
+def discard_inbox_items(items: Sequence[dict[str, Any]]) -> None:
+    for item in items:
+        source = Path(str(item.get("source_path") or ""))
+        with contextlib.suppress(FileNotFoundError):
+            source.unlink()
+        remove_inbox_attachment_dir(inbox_attachment_dir(source))
 
 
 def deadletter_inbox_item(
