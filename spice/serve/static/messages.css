@@ -312,13 +312,29 @@
 }
 .badge {
   --message-badge-accent: var(--accent-strong);
+  align-items: center;
   border: 1px solid color-mix(in srgb, var(--message-badge-accent) 58%, var(--border));
   border-radius: var(--pill-radius);
   color: color-mix(in srgb, var(--message-badge-accent) 82%, var(--fg));
+  display: inline-flex;
   font-size: 12px;
-  padding: 2px 8px;
+  gap: 5px;
+  padding: 2px 5px 2px 8px;
   text-transform: uppercase;
   white-space: nowrap;
+}
+.badge-label { line-height: 1.15; }
+.badge-count {
+  background: var(--message-badge-accent);
+  border-radius: var(--pill-radius);
+  color: var(--button-accent-fg);
+  display: inline-grid;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 16px;
+  padding: 2px 5px;
+  place-items: center;
 }
 .message-footer .icon-button {
   border-color: color-mix(in srgb, var(--message-action-accent) 24%, var(--control-border-soft));
@@ -339,6 +355,7 @@
   color: var(--fg);
 }
 .badge.final-badge { --message-badge-accent: var(--final-accent); }
+.badge.task-badge { --message-badge-accent: var(--team-plum-accent); }
 .badge.maxim-badge {
   --message-badge-accent: var(--maxim-accent);
   font-weight: 700;

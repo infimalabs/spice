@@ -672,18 +672,25 @@ function renderBadges(ackCount, kind, maximAckCount, taskCardCount) {
     return null;
   const badges = document.createElement("div");
   badges.className = "badges";
-  const add = (label, className) => {
+  const add = (label, className, count) => {
     const badge = document.createElement("span");
     badge.className = className ? "badge " + className : "badge";
-    badge.textContent = label;
+    const text = document.createElement("span");
+    text.className = "badge-label";
+    text.textContent = label;
+    badge.append(text);
+    if (count !== undefined && count !== null && count !== "") {
+      const countEl = document.createElement("span");
+      countEl.className = "badge-count";
+      countEl.textContent = String(count);
+      badge.append(countEl);
+    }
     badges.append(badge);
   };
   if (maximAckCount) add("MAXIM", "maxim-badge");
   if (kind === "final") add("FINAL", "final-badge");
-  if (visibleTaskCount)
-    add(visibleTaskCount + "\u00a0TASK" + (visibleTaskCount === 1 ? "" : "S"));
-  if (visibleAckCount)
-    add(visibleAckCount + "\u00a0ACK" + (visibleAckCount === 1 ? "" : "s"));
+  if (visibleTaskCount) add("TASK", "task-badge", visibleTaskCount);
+  if (visibleAckCount) add("ACK", "", visibleAckCount);
   return badges;
 }
 
