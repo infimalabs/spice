@@ -28,12 +28,12 @@ KEY_D = "20260513T184254000000Z"
 
 
 def test_backticked_key_with_colon_body():
-    text = f"ACK `{KEY_A}`: understood, proceeding with the refactor."
+    text = f"ACK `{KEY_A}`: captured, proceeding with the refactor."
     assert list(extract_ack_keys_from_text(text)) == [KEY_A]
 
 
 def test_plain_key_with_space_body():
-    text = f"ACK {KEY_A} understood."
+    text = f"ACK {KEY_A} captured."
     assert list(extract_ack_keys_from_text(text)) == [KEY_A]
 
 

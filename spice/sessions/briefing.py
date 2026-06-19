@@ -815,7 +815,10 @@ def _inbox_lines() -> list[str]:
             f"age={relative_time_for_path(item.source_path)}"
         )
     if items:
-        lines.append("  ACK by assistant message: ACK <key> [<key> ...]: <response>")
+        lines.append(
+            "  ACK by assistant message: "
+            "ACK <key> [<key> ...]: <what changed or was captured>"
+        )
     if deadletters:
         lines.append(f"  deadlettered={len(deadletters)}")
         lines.extend(f"  {line}" for line in inbox_deadletter_context_rows(deadletters))

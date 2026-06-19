@@ -85,7 +85,7 @@ def activation_command_surface_lines() -> list[str]:
         ),
         (
             "ack_inline=ACK pending inbox keys in any assistant message as "
-            "soon as understood; do not wait for final response"
+            "soon as they are read and acted on; do not wait for final response"
         ),
         (
             "pending_inbox_recovery=if spice session briefing only shows "
