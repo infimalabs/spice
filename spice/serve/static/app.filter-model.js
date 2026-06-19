@@ -44,7 +44,3 @@ function taskFilterOpenCount(inventory, filter) {
   const row = (inventory.filters || []).find((item) => item.name === filter);
   return row ? Math.max(0, Number(row.openTaskCount) || 0) : 0;
 }
-
-function taskCountBadgeCount(count) {
-  return String(Math.max(0, Number(count) || 0));
-}

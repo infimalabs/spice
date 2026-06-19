@@ -53,14 +53,6 @@ assert(
   "missing filters should count as zero",
 );
 assert(
-  context.taskCountBadgeCount(2) === "2",
-  "badge count should render the numeric task count",
-);
-assert(
-  context.taskCountBadgeCount("invalid") === "0",
-  "badge count should normalize invalid counts to zero",
-);
-assert(
   names(context.availableTaskFilterNames(inventory, ["task.review"])) ===
     "serve.ui,task.config",
   "exact assignments should not cover sibling filters",
