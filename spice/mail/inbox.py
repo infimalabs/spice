@@ -27,6 +27,7 @@ from spice.mail.attachments import (
     collect_inbox_attachments,
     inbox_attachment_dir,
     remove_inbox_attachment_dir,
+    shared_attachment_display_path,
     write_inbox_attachments,
 )
 from spice.paths import STATE_DIRNAME, fsync_directory
@@ -95,8 +96,9 @@ def inbox_dir(repo_root: Path | str) -> Path:
 def collect_inbox_items(repo_root: str | Path | None) -> list[InboxItem]:
     if not repo_root:
         return []
+    root = Path(repo_root)
     prune_stale_inbox_artifacts(repo_root)
-    directory = inbox_dir(repo_root)
+    directory = inbox_dir(root)
     if not directory.is_dir():
         return []
     archive_dir = directory / INBOX_ARCHIVE_DIRNAME
@@ -114,7 +116,7 @@ def collect_inbox_items(repo_root: str | Path | None) -> list[InboxItem]:
                 archive_path=archive_dir / path.name,
                 name=path.name,
                 text=text,
-                attachments=collect_inbox_attachments(path),
+                attachments=collect_inbox_attachments(path, repo_root=root),
             )
         )
     return items
@@ -125,8 +127,9 @@ def collect_archived_inbox_items(
 ) -> list[InboxItem]:
     if not repo_root:
         return []
+    root = Path(repo_root)
     prune_stale_inbox_artifacts(repo_root)
-    archive_dir = inbox_dir(repo_root) / INBOX_ARCHIVE_DIRNAME
+    archive_dir = inbox_dir(root) / INBOX_ARCHIVE_DIRNAME
     if not archive_dir.is_dir():
         return []
     paths = sorted(
@@ -150,7 +153,7 @@ def collect_archived_inbox_items(
                 archive_path=path,
                 name=path.name,
                 text=text,
-                attachments=collect_inbox_attachments(path),
+                attachments=collect_inbox_attachments(path, repo_root=root),
             )
         )
     return items
@@ -164,11 +167,14 @@ def collect_deadlettered_inbox_items(
     prune_stale_inbox_artifacts(repo_root)
     return _collect_consumed_inbox_items(
         inbox_dir(repo_root) / INBOX_DEADLETTER_DIRNAME,
+        repo_root=Path(repo_root),
         limit=limit,
     )
 
 
-def _collect_consumed_inbox_items(directory: Path, *, limit: int) -> list[InboxItem]:
+def _collect_consumed_inbox_items(
+    directory: Path, *, repo_root: Path, limit: int
+) -> list[InboxItem]:
     if not directory.is_dir():
         return []
     paths = sorted(
@@ -192,7 +198,7 @@ def _collect_consumed_inbox_items(directory: Path, *, limit: int) -> list[InboxI
                 archive_path=path,
                 name=path.name,
                 text=text,
-                attachments=collect_inbox_attachments(path),
+                attachments=collect_inbox_attachments(path, repo_root=repo_root),
             )
         )
     return items
@@ -312,7 +318,21 @@ def inbox_item_readout_rows(item: InboxItem) -> list[str]:
 
 
 def inbox_attachment_readout_path(item: InboxItem, attachment: InboxAttachment) -> Path:
+    repo_root = _repo_root_for_inbox_path(item.source_path)
+    if repo_root is not None:
+        display_path = shared_attachment_display_path(
+            attachment.path, repo_root=repo_root
+        )
+        if display_path is not None:
+            return display_path
     return inbox_attachment_dir(item.archive_path) / attachment.path.name
+
+
+def _repo_root_for_inbox_path(path: Path) -> Path | None:
+    for parent in path.parents:
+        if parent.name == STATE_DIRNAME:
+            return parent.parent
+    return None
 
 
 def inbox_archive_context_rows(items: Sequence[InboxItem]) -> list[str]:
@@ -500,7 +520,7 @@ def write_inbox_item(
         os.fsync(handle.fileno())
     try:
         target_path = _atomic_publish_inbox_item(tmp_path, directory / target_name)
-        write_inbox_attachments(target_path, attachments)
+        write_inbox_attachments(target_path, attachments, repo_root=repo_root)
         notify_inbox_changed(repo_root)
     finally:
         with contextlib.suppress(FileNotFoundError):
@@ -541,7 +561,7 @@ def resend_inbox_item(
     )
     original_path = inbox_dir(repo_root) / f"{original_key}.txt"
     original_attachments: list[InboxAttachmentInput] = []
-    for attachment in collect_inbox_attachments(original_path):
+    for attachment in collect_inbox_attachments(original_path, repo_root=repo_root):
         try:
             data = attachment.path.read_bytes()
         except OSError:

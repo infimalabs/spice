@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -13,7 +11,7 @@ import pytest
 from spice.cli.parser import build_parser
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
-from spice.mail import attachments as mail_attachments
+from spice.paths import shared_attachment_root
 from spice.serve.teams import (
     TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE,
@@ -29,7 +27,6 @@ pytestmark = pytest.mark.skipif(
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 PEER_ACTOR = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-GIT_TIMEOUT_RETURN_CODE = 124
 
 
 @pytest.fixture
@@ -691,172 +688,46 @@ def test_task_add_stores_description_and_caps_title(task_repo):
     assert f"description {body}" in shown
 
 
-def test_task_add_copies_inbox_attachment_refs_to_durable_store(task_repo):
-    live_abs = (
-        task_repo
-        / ".spice"
-        / "inbox"
-        / "20260102T000000000004Z.attachments"
-        / "01-image.png"
-    )
-    archived_abs = (
-        task_repo
-        / ".spice"
-        / "inbox"
-        / "archive"
-        / "20260102T000000000004Z.attachments"
-        / "01-image.png"
-    )
-    live_rel = ".spice/inbox/20260102T000000000004Z.attachments/02-image.png"
-    archived_rel = (
-        ".spice/inbox/archive/20260102T000000000004Z.attachments/03-image.png"
-    )
-    for path, data in (
-        (live_abs, b"absolute-live"),
-        (task_repo / live_rel, b"relative-live"),
-        (task_repo / archived_rel, b"archived"),
-    ):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+def test_task_add_preserves_shared_attachment_refs(task_repo):
+    shared = shared_attachment_root(task_repo) / "digest" / "01-image.png"
+    shared.parent.mkdir(parents=True, exist_ok=True)
+    shared.write_bytes(b"shared-image")
+    shared_ref = ".spice/attachments/digest/01-image.png"
 
     handle = ops.add(
-        "Preserve attachment references",
+        "Preserve shared attachment references",
         project="task.unit",
-        description=(
-            f"Screenshot/reference attachment: {live_abs}. "
-            f"Relative reference: {live_rel}; already archived: "
-            f"{archived_rel}."
-        ),
+        description=f"Screenshot/reference attachment: {shared_ref}.",
         priority="medium",
-        acceptance=[f"Resolve {live_rel} without broad searches."],
+        acceptance=[f"Open {shared_ref}."],
     )
     row = identity.resolve(handle)
-    paths = _durable_artifact_paths(row["task_description"], row["acceptance"])
 
-    assert len(paths) == 4
-    assert len(set(paths)) == 3
-    assert all(path.is_file() for path in paths)
-    assert all(
-        config.backend_root() / "artifacts" / "attachments" in path.parents
-        for path in paths
-    )
-    assert archived_abs not in paths
-    assert str(live_abs) not in row["task_description"]
-    assert ".spice/inbox/" not in row["task_description"]
-    assert ".spice/inbox/" not in row["acceptance"]
+    assert row["task_description"] == f"Screenshot/reference attachment: {shared_ref}."
+    assert row["acceptance"] == f"Open {shared_ref}."
+    assert shared.is_file()
 
 
-def test_task_note_copies_inbox_attachment_refs_to_durable_store(task_repo):
+def test_task_note_preserves_shared_attachment_refs(task_repo):
     handle = ops.add(
         "Track attachment note",
         project="task.unit",
         priority="medium",
         acceptance=["notes are normalized"],
     )
-    live_rel = ".spice/inbox/20260102T000000000005Z.attachments/01-image.png"
-    live_path = task_repo / live_rel
-    live_path.parent.mkdir(parents=True, exist_ok=True)
-    live_path.write_bytes(b"note-image")
+    shared = shared_attachment_root(task_repo) / "digest" / "02-image.png"
+    shared.parent.mkdir(parents=True, exist_ok=True)
+    shared.write_bytes(b"note-image")
+    shared_ref = ".spice/attachments/digest/02-image.png"
 
     ops.note(
         handle,
-        f"Screenshot reference: {live_rel}",
+        f"Screenshot reference: {shared_ref}",
     )
     shown = render.render_show(handle)
-    paths = _durable_artifact_paths(shown)
 
-    assert len(paths) == 1
-    assert paths[0].is_file()
-    assert paths[0].read_bytes() == b"note-image"
-    assert ".spice/inbox/20260102T000000000005Z.attachments" not in shown
-
-
-def test_task_add_reports_unresolved_attachment_ref(task_repo):
-    missing = ".spice/inbox/20260102T000000000006Z.attachments/01-image.png"
-
-    with pytest.raises(SpiceError, match=re.escape(missing)):
-        ops.add(
-            "Track missing attachment",
-            project="task.unit",
-            description=f"Screenshot reference: {missing}",
-            priority="medium",
-            acceptance=["missing attachment is reported"],
-        )
-
-
-def test_task_add_replaces_partial_durable_attachment(task_repo):
-    live_rel = ".spice/inbox/20260102T000000000008Z.attachments/01-image.png"
-    live_path = task_repo / live_rel
-    data = b"complete-image"
-    live_path.parent.mkdir(parents=True, exist_ok=True)
-    live_path.write_bytes(data)
-    digest = hashlib.sha256(data).hexdigest()
-    artifact_path = (
-        config.backend_root() / "artifacts" / "attachments" / digest / live_path.name
-    )
-    artifact_path.parent.mkdir(parents=True, exist_ok=True)
-    artifact_path.write_bytes(b"partial")
-
-    handle = ops.add(
-        "Replace partial attachment artifact",
-        project="task.unit",
-        description=f"Screenshot reference: {live_rel}",
-        priority="medium",
-    )
-    row = identity.resolve(handle)
-    paths = _durable_artifact_paths(row["task_description"])
-
-    assert paths == [artifact_path]
-    assert artifact_path.read_bytes() == data
-
-
-def test_task_add_publishes_durable_attachment_with_atomic_replace(
-    task_repo, monkeypatch
-):
-    live_rel = ".spice/inbox/20260102T000000000009Z.attachments/01-image.png"
-    live_path = task_repo / live_rel
-    live_path.parent.mkdir(parents=True, exist_ok=True)
-    live_path.write_bytes(b"atomic-image")
-    written_paths: list[Path] = []
-    original_write = mail_attachments._write_bytes_fsynced
-
-    def record_write(path: Path, data: bytes) -> None:
-        written_paths.append(path)
-        original_write(path, data)
-
-    monkeypatch.setattr(mail_attachments, "_write_bytes_fsynced", record_write)
-
-    handle = ops.add(
-        "Atomically publish attachment artifact",
-        project="task.unit",
-        description=f"Screenshot reference: {live_rel}",
-        priority="medium",
-    )
-    row = identity.resolve(handle)
-    paths = _durable_artifact_paths(row["task_description"])
-
-    assert len(paths) == 1
-    assert paths[0].read_bytes() == b"atomic-image"
-    assert paths[0] not in written_paths
-    assert any(
-        path.parent == paths[0].parent
-        and path.name.startswith(f".{paths[0].name}.")
-        and path.name.endswith(".tmp")
-        for path in written_paths
-    )
-
-
-def test_task_note_reports_unresolved_attachment_ref(task_repo):
-    handle = ops.add(
-        "Track missing attachment note",
-        project="task.unit",
-        priority="medium",
-        acceptance=["missing note attachment is reported"],
-    )
-    missing = ".spice/inbox/20260102T000000000007Z.attachments/01-image.png"
-
-    with pytest.raises(SpiceError, match=re.escape(missing)):
-        ops.note(handle, f"Screenshot reference: {missing}")
+    assert f"Screenshot reference: {shared_ref}" in shown
+    assert shared.is_file()
 
 
 def test_repo_configured_per_stem_default_flow_feeds_task_add(task_repo):
@@ -932,176 +803,6 @@ def test_allocator_spreads_from_peer_cell_then_sticks_to_last_cell():
         "same-crowded",
         "outside-band",
     ]
-
-
-def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path):
-    remote = tmp_path / "remote.git"
-    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
-    repo = _init_repo(tmp_path / "agent")
-    _run(repo, "git", "remote", "add", "origin", str(remote))
-    _run(repo, "git", "push", "-u", "origin", "main")
-
-    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
-    _run(repo, "git", "add", "agent.txt")
-    _run(repo, "git", "commit", "-m", "agent work")
-    agent_head = _git(repo, "rev-parse", "HEAD")
-
-    peer = tmp_path / "peer"
-    _run(tmp_path, "git", "clone", str(remote), str(peer))
-    _configure_git_identity(peer)
-    (peer / "baseline.txt").write_text("baseline work\n", encoding="utf-8")
-    _run(peer, "git", "add", "baseline.txt")
-    _run(peer, "git", "commit", "-m", "baseline work")
-    _run(peer, "git", "push", "origin", "main")
-    upstream_head = _git(peer, "rev-parse", "HEAD")
-
-    result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000001Z",
-        repo_root=repo,
-        meta={
-            "title": "Publish task work",
-            "description": "Longer merge body for reviewers.",
-            "actor": ACTOR_A,
-            "phase": "todo",
-            "project": "task.unit",
-        },
-    )
-    captured = _uda_map(result.uda_args)
-    merge_head = captured["done_merge_head"]
-
-    assert captured["done_head"] == agent_head
-    assert captured["done_ref"] == merge_head
-    assert captured["done_upstream"] == "origin/main"
-    assert captured["done_upstream_head"] == upstream_head
-    assert _git(repo, "rev-parse", "HEAD") == merge_head
-    assert _merge_parents(repo, merge_head) == [upstream_head, agent_head]
-    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
-    assert _git(repo, "status", "--porcelain") == ""
-    message = _git(repo, "log", "-1", "--format=%B", merge_head)
-    assert message == (
-        "Publish task work\n\n"
-        "Task: TASK-20260101T000000000001Z\n"
-        "Task-Phase: todo\n"
-        "Task-Project: task.unit\n"
-        f"Task-Session: {ACTOR_A}"
-    )
-
-
-def test_integrate_and_publish_retries_non_fast_forward_publish_race(
-    tmp_path, monkeypatch
-):
-    remote = tmp_path / "remote.git"
-    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
-    repo = _init_repo(tmp_path / "agent")
-    _run(repo, "git", "remote", "add", "origin", str(remote))
-    _run(repo, "git", "push", "-u", "origin", "main")
-
-    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
-    _run(repo, "git", "add", "agent.txt")
-    _run(repo, "git", "commit", "-m", "agent work")
-    agent_head = _git(repo, "rev-parse", "HEAD")
-
-    peer = tmp_path / "peer"
-    _run(tmp_path, "git", "clone", str(remote), str(peer))
-    _configure_git_identity(peer)
-    real_run = gitsync._run
-    push_attempts = 0
-
-    def racing_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-        nonlocal push_attempts
-        if args and args[0] == "push" and repo_root == repo:
-            push_attempts += 1
-            if push_attempts == 1:
-                (peer / "baseline.txt").write_text(
-                    "baseline raced ahead\n", encoding="utf-8"
-                )
-                _run(peer, "git", "add", "baseline.txt")
-                _run(peer, "git", "commit", "-m", "baseline raced ahead")
-                _run(peer, "git", "push", "origin", "main")
-        return real_run(repo_root, *args)
-
-    monkeypatch.setattr(gitsync, "_run", racing_run)
-
-    result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000004Z",
-        repo_root=repo,
-        meta={
-            "title": "Publish raced task work",
-            "actor": ACTOR_A,
-            "phase": "todo",
-            "project": "task.unit",
-        },
-    )
-    captured = _uda_map(result.uda_args)
-    merge_head = captured["done_merge_head"]
-    raced_upstream = _git(peer, "rev-parse", "HEAD")
-    first_retry_parent, second_retry_parent = _merge_parents(repo, merge_head)
-
-    assert push_attempts == 2
-    assert captured["done_head"] == agent_head
-    assert captured["done_upstream_head"] == raced_upstream
-    assert first_retry_parent == raced_upstream
-    assert _merge_parents(repo, second_retry_parent)[1] == agent_head
-    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
-    assert _git(repo, "status", "--porcelain") == ""
-
-
-def test_merge_message_omits_task_description_body():
-    message = gitsync._compose_message(
-        "TASK-20260101T000000000003Z",
-        {
-            "title": "Fix image labels",
-            "description": (
-                "Operator steering 20260612T043642083543Z: the labels "
-                "input_image and view_image look clickable but do not navigate.\n\n"
-                "Archived screenshot references: "
-                ".spice/inbox/archive/20260612T043642083543Z.attachments/"
-                "01-image.png and "
-                ".spice/inbox/archive/20260612T043642083543Z.attachments/"
-                "02-image.png.\n\n"
-                "Keep the rendered image context stable for reviewers."
-            ),
-            "actor": ACTOR_A,
-            "phase": "todo",
-            "project": "serve.ui",
-        },
-    )
-
-    assert message == (
-        "Fix image labels\n\n"
-        "Task: TASK-20260101T000000000003Z\n"
-        "Task-Phase: todo\n"
-        "Task-Project: serve.ui\n"
-        f"Task-Session: {ACTOR_A}"
-    )
-
-
-def test_merge_message_uses_fallback_subject_and_trailers_only():
-    message = gitsync._compose_message(
-        "TASK-20260101T000000000004Z",
-        {
-            "title": "",
-            "description": (
-                "Operator steering 20260612T054500966259Z: final task merge "
-                "commit bodies currently include the task description, which "
-                "can read well but carries too many transient details such as "
-                "'operator steering ...' wording and links/paths to .spice "
-                "inbox artifacts that will not exist for readers later. Adjust "
-                "task completion/merge commit body generation."
-            ),
-            "actor": ACTOR_A,
-            "phase": "todo",
-            "project": "task",
-        },
-    )
-
-    assert message == (
-        "Integrate TASK-20260101T000000000004Z\n\n"
-        "Task: TASK-20260101T000000000004Z\n"
-        "Task-Phase: todo\n"
-        "Task-Project: task\n"
-        f"Task-Session: {ACTOR_A}"
-    )
 
 
 def test_task_review_help_requires_description_check(capsys):
@@ -1182,72 +883,6 @@ def test_unclean_review_links_existing_followup(task_repo, monkeypatch):
     assert reviewed["review_finding"] == "changes"
 
 
-def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
-    remote = tmp_path / "remote.git"
-    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
-    repo = _init_repo(tmp_path / "agent")
-    _run(repo, "git", "remote", "add", "origin", str(remote))
-    _run(repo, "git", "push", "-u", "origin", "main")
-
-    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
-    _run(repo, "git", "add", "README.md")
-    _run(repo, "git", "commit", "-m", "agent work")
-
-    peer = tmp_path / "peer"
-    _run(tmp_path, "git", "clone", str(remote), str(peer))
-    _configure_git_identity(peer)
-    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
-    _run(peer, "git", "add", "README.md")
-    _run(peer, "git", "commit", "-m", "baseline work")
-    _run(peer, "git", "push", "origin", "main")
-    upstream_head = _git(peer, "rev-parse", "HEAD")
-
-    with pytest.raises(gitsync.MergeConflict) as exc_info:
-        gitsync.integrate_and_publish("TASK-20260101T000000000002Z", repo_root=repo)
-
-    message = str(exc_info.value)
-    assert "README.md" in message
-    assert "keep the merge state open" in message
-    assert "commit while MERGE_HEAD exists" in message
-    assert "git status --short" in message
-    assert "git rev-parse --verify MERGE_HEAD" in message
-    assert "git add -- README.md" in message
-    assert 'spice task done TASK-20260101T000000000002Z --validation "..."' in message
-    assert _git(repo, "rev-parse", "--verify", "MERGE_HEAD") == upstream_head
-    assert _git(repo, "status", "--porcelain") == "UU README.md"
-
-    (repo / "README.md").write_text("resolved work\n", encoding="utf-8")
-    _run(repo, "git", "add", "README.md")
-    _run(
-        repo,
-        "git",
-        "commit",
-        "-m",
-        "Resolve baseline overlap for TASK-20260101T000000000002Z",
-    )
-
-    result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000002Z", repo_root=repo
-    )
-    captured = _uda_map(result.uda_args)
-    merge_head = captured["done_merge_head"]
-
-    assert captured["done_upstream_head"] == upstream_head
-    assert _merge_parents(repo, merge_head)[0] == upstream_head
-    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
-    assert _git(repo, "status", "--porcelain") == ""
-
-
-def _durable_artifact_paths(*texts: str) -> list[Path]:
-    paths: list[Path] = []
-    for text in texts:
-        for token in re.split(r"\s+", str(text)):
-            candidate = token.strip(".,;:")
-            if "/artifacts/attachments/" in candidate:
-                paths.append(Path(candidate))
-    return paths
-
-
 def _row(
     description: str,
     *,
@@ -1282,11 +917,6 @@ def _configure_git_identity(repo: Path) -> None:
     _run(repo, "git", "config", "user.name", "Spice Tests")
 
 
-def _merge_parents(repo: Path, commit: str) -> list[str]:
-    line = _git(repo, "rev-list", "--parents", "-n", "1", commit)
-    return line.split()[1:]
-
-
 def _review_claim(task_repo: Path, monkeypatch) -> str:
     assert task_repo.is_dir()
     handle = ops.add(
@@ -1307,172 +937,9 @@ def _review_claim(task_repo: Path, monkeypatch) -> str:
     return handle
 
 
-def _uda_map(args: list[str]) -> dict[str, str]:
-    return dict(arg.split(":", 1) for arg in args)
-
-
 def _git(repo: Path, *args: str) -> str:
     return _run(repo, "git", *args).stdout.strip()
 
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
-
-
-def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
-    args = build_parser().parse_args(
-        ["task", "add", "--title", "Alias title lands", "--project", "task.unit"]
-    )
-
-    assert args.func(args) == 0
-    created = capsys.readouterr().out.split()[1]
-    row = identity.resolve(created)
-
-    assert row["description"] == "Alias title lands"
-
-
-def test_task_add_takes_exactly_one_title_form(task_repo):
-    args = build_parser().parse_args(
-        ["task", "add", "Positional title", "--title", "Flag title"]
-    )
-
-    with pytest.raises(SpiceError, match="positional title or --title"):
-        args.func(args)
-
-
-def test_gitsync_network_commands_are_noninteractive_and_bounded(tmp_path, monkeypatch):
-    seen: dict[str, object] = {}
-
-    def fake_run(command: list[str], **kwargs):
-        seen["command"] = command
-        seen["env"] = kwargs["env"]
-        seen["timeout"] = kwargs.get("timeout")
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-
-    monkeypatch.setattr(gitsync.subprocess, "run", fake_run)
-
-    gitsync._run(tmp_path, "fetch", "origin")
-
-    env = seen["env"]
-    assert isinstance(env, dict)
-    assert env["GIT_TERMINAL_PROMPT"] == "0"
-    assert env["GIT_SSH_COMMAND"] == gitsync.TASK_GIT_SSH_COMMAND
-    assert seen["timeout"] == gitsync.GIT_NETWORK_TIMEOUT_SECONDS
-
-
-def test_gitsync_network_timeout_returns_failed_process(tmp_path, monkeypatch):
-    def fake_run(command: list[str], **kwargs):
-        raise subprocess.TimeoutExpired(
-            command, kwargs["timeout"], output="partial", stderr="stalled"
-        )
-
-    monkeypatch.setattr(gitsync.subprocess, "run", fake_run)
-
-    completed = gitsync._run(tmp_path, "fetch", "origin")
-
-    assert completed.returncode == GIT_TIMEOUT_RETURN_CODE
-    assert completed.stdout == "partial"
-    assert "git fetch timed out after 30s" in completed.stderr
-
-
-def test_task_oops_description_records_triage_context(task_repo, capsys):
-    args = build_parser().parse_args(
-        [
-            "task",
-            "oops",
-            "wrapper",
-            "hiccup",
-            "--description",
-            "Longer triage context for the board.",
-        ]
-    )
-
-    assert args.func(args) == 0
-    out = capsys.readouterr().out
-    created = re.search(r"OOPS-\S+", out).group(0)
-    row = identity.resolve(created)
-
-    assert row["description"] == "wrapper hiccup"
-    assert row["task_description"] == "Longer triage context for the board."
-    assert row["project"] == config.OOPS_PROJECT
-
-
-def test_task_oops_accepts_priority_style_severity_shorthand(task_repo, capsys):
-    args = build_parser().parse_args(
-        ["task", "oops", "wrapper", "hiccup", "--severity", "H"]
-    )
-
-    assert args.func(args) == 0
-    out = capsys.readouterr().out
-    created = re.search(r"OOPS-\S+", out).group(0)
-    row = identity.resolve(created)
-
-    assert "[high]" in out
-    assert row["priority"] == "H"
-    assert "high" in row["tags"]
-    assert row["project"] == config.OOPS_PROJECT
-
-
-def test_task_add_rejects_oops_system_project(task_repo):
-    assert task_repo.is_dir()
-
-    with pytest.raises(SpiceError, match="reserved for system task creation"):
-        ops.add(
-            "Manual oops project",
-            project=config.OOPS_PROJECT,
-            priority="medium",
-            acceptance=["oops is system-created only"],
-        )
-
-
-def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
-    remote = tmp_path / "remote.git"
-    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
-    repo = _init_repo(tmp_path / "agent")
-    _run(repo, "git", "remote", "add", "origin", str(remote))
-    _run(repo, "git", "push", "-u", "origin", "main")
-
-    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
-    _run(repo, "git", "add", "README.md")
-    _run(repo, "git", "commit", "-m", "agent work")
-
-    peer = tmp_path / "peer"
-    _run(tmp_path, "git", "clone", str(remote), str(peer))
-    _configure_git_identity(peer)
-    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
-    _run(peer, "git", "add", "README.md")
-    _run(peer, "git", "commit", "-m", "baseline work")
-    _run(peer, "git", "push", "origin", "main")
-    upstream_head = _git(peer, "rev-parse", "HEAD")
-
-    with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-20260101T000000000003Z", repo_root=repo)
-
-    conflicted = (repo / "README.md").read_text(encoding="utf-8")
-    assert "<<<<<<<" in conflicted
-    _run(repo, "git", "add", "README.md")
-    _run(repo, "git", "commit", "-m", "Resolve baseline overlap, badly")
-
-    with pytest.raises(SpiceError, match="conflict markers") as exc_info:
-        gitsync.integrate_and_publish("TASK-20260101T000000000003Z", repo_root=repo)
-
-    message = str(exc_info.value)
-    assert "README.md" in message
-    assert "git add -- README.md" in message
-    assert "git commit --amend --no-edit" in message
-    assert (
-        _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == upstream_head
-    )
-
-    (repo / "README.md").write_text("resolved work\n", encoding="utf-8")
-    _run(repo, "git", "add", "README.md")
-    _run(repo, "git", "commit", "--amend", "--no-edit")
-
-    result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000003Z", repo_root=repo
-    )
-    captured = _uda_map(result.uda_args)
-    merge_head = captured["done_merge_head"]
-
-    assert _merge_parents(repo, merge_head)[0] == upstream_head
-    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head

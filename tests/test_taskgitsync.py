@@ -1,0 +1,357 @@
+"""Task git publication and merge-message behavior."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from spice.errors import SpiceError
+from spice.tasks import gitsync
+
+ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+GIT_TIMEOUT_RETURN_CODE = 124
+
+
+def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
+    agent_head = _git(repo, "rev-parse", "HEAD")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "baseline.txt").write_text("baseline work\n", encoding="utf-8")
+    _run(peer, "git", "add", "baseline.txt")
+    _run(peer, "git", "commit", "-m", "baseline work")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000001Z",
+        repo_root=repo,
+        meta={
+            "title": "Publish task work",
+            "description": "Longer merge body for reviewers.",
+            "actor": ACTOR_A,
+            "phase": "todo",
+            "project": "task.unit",
+        },
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert captured["done_head"] == agent_head
+    assert captured["done_ref"] == merge_head
+    assert captured["done_upstream"] == "origin/main"
+    assert captured["done_upstream_head"] == upstream_head
+    assert _git(repo, "rev-parse", "HEAD") == merge_head
+    assert _merge_parents(repo, merge_head) == [upstream_head, agent_head]
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert _git(repo, "status", "--porcelain") == ""
+    message = _git(repo, "log", "-1", "--format=%B", merge_head)
+    assert message == (
+        "Publish task work\n\n"
+        "Task: TASK-20260101T000000000001Z\n"
+        "Task-Phase: todo\n"
+        "Task-Project: task.unit\n"
+        f"Task-Session: {ACTOR_A}"
+    )
+
+
+def test_integrate_and_publish_retries_non_fast_forward_publish_race(
+    tmp_path, monkeypatch
+):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
+    agent_head = _git(repo, "rev-parse", "HEAD")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    real_run = gitsync._run
+    push_attempts = 0
+
+    def racing_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        nonlocal push_attempts
+        if args and args[0] == "push" and repo_root == repo:
+            push_attempts += 1
+            if push_attempts == 1:
+                (peer / "baseline.txt").write_text(
+                    "baseline raced ahead\n", encoding="utf-8"
+                )
+                _run(peer, "git", "add", "baseline.txt")
+                _run(peer, "git", "commit", "-m", "baseline raced ahead")
+                _run(peer, "git", "push", "origin", "main")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", racing_run)
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000004Z",
+        repo_root=repo,
+        meta={
+            "title": "Publish raced task work",
+            "actor": ACTOR_A,
+            "phase": "todo",
+            "project": "task.unit",
+        },
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+    raced_upstream = _git(peer, "rev-parse", "HEAD")
+    first_retry_parent, second_retry_parent = _merge_parents(repo, merge_head)
+
+    assert push_attempts == 2
+    assert captured["done_head"] == agent_head
+    assert captured["done_upstream_head"] == raced_upstream
+    assert first_retry_parent == raced_upstream
+    assert _merge_parents(repo, second_retry_parent)[1] == agent_head
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_merge_message_omits_task_description_body():
+    message = gitsync._compose_message(
+        "TASK-20260101T000000000003Z",
+        {
+            "title": "Fix image labels",
+            "description": (
+                "Operator steering 20260612T043642083543Z: the labels "
+                "input_image and view_image look clickable but do not navigate.\n\n"
+                "Screenshot references: "
+                ".spice/attachments/sha-a/01-image.png and "
+                ".spice/attachments/sha-b/02-image.png.\n\n"
+                "Keep the rendered image context stable for reviewers."
+            ),
+            "actor": ACTOR_A,
+            "phase": "todo",
+            "project": "serve.ui",
+        },
+    )
+
+    assert message == (
+        "Fix image labels\n\n"
+        "Task: TASK-20260101T000000000003Z\n"
+        "Task-Phase: todo\n"
+        "Task-Project: serve.ui\n"
+        f"Task-Session: {ACTOR_A}"
+    )
+
+
+def test_merge_message_uses_fallback_subject_and_trailers_only():
+    message = gitsync._compose_message(
+        "TASK-20260101T000000000004Z",
+        {
+            "title": "",
+            "description": (
+                "Operator steering 20260612T054500966259Z: final task merge "
+                "commit bodies currently include the task description, which "
+                "can read well but carries too many transient details such as "
+                "'operator steering ...' wording and links/paths to .spice "
+                "inbox artifacts that will not exist for readers later. Adjust "
+                "task completion/merge commit body generation."
+            ),
+            "actor": ACTOR_A,
+            "phase": "todo",
+            "project": "task",
+        },
+    )
+
+    assert message == (
+        "Integrate TASK-20260101T000000000004Z\n\n"
+        "Task: TASK-20260101T000000000004Z\n"
+        "Task-Phase: todo\n"
+        "Task-Project: task\n"
+        f"Task-Session: {ACTOR_A}"
+    )
+
+
+def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
+    _run(peer, "git", "add", "README.md")
+    _run(peer, "git", "commit", "-m", "baseline work")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    with pytest.raises(gitsync.MergeConflict) as exc_info:
+        gitsync.integrate_and_publish("TASK-20260101T000000000002Z", repo_root=repo)
+
+    message = str(exc_info.value)
+    assert "README.md" in message
+    assert "keep the merge state open" in message
+    assert "commit while MERGE_HEAD exists" in message
+    assert "git status --short" in message
+    assert "git rev-parse --verify MERGE_HEAD" in message
+    assert "git add -- README.md" in message
+    assert 'spice task done TASK-20260101T000000000002Z --validation "..."' in message
+    assert _git(repo, "rev-parse", "--verify", "MERGE_HEAD") == upstream_head
+    assert _git(repo, "status", "--porcelain") == "UU README.md"
+
+    (repo / "README.md").write_text("resolved work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(
+        repo,
+        "git",
+        "commit",
+        "-m",
+        "Resolve baseline overlap for TASK-20260101T000000000002Z",
+    )
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000002Z", repo_root=repo
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert captured["done_upstream_head"] == upstream_head
+    assert _merge_parents(repo, merge_head)[0] == upstream_head
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_gitsync_network_commands_are_noninteractive_and_bounded(tmp_path, monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs):
+        seen["command"] = command
+        seen["env"] = kwargs["env"]
+        seen["timeout"] = kwargs.get("timeout")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gitsync.subprocess, "run", fake_run)
+
+    gitsync._run(tmp_path, "fetch", "origin")
+
+    env = seen["env"]
+    assert isinstance(env, dict)
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_SSH_COMMAND"] == gitsync.TASK_GIT_SSH_COMMAND
+    assert seen["timeout"] == gitsync.GIT_NETWORK_TIMEOUT_SECONDS
+
+
+def test_gitsync_network_timeout_returns_failed_process(tmp_path, monkeypatch):
+    def fake_run(command: list[str], **kwargs):
+        raise subprocess.TimeoutExpired(
+            command, kwargs["timeout"], output="partial", stderr="stalled"
+        )
+
+    monkeypatch.setattr(gitsync.subprocess, "run", fake_run)
+
+    completed = gitsync._run(tmp_path, "fetch", "origin")
+
+    assert completed.returncode == GIT_TIMEOUT_RETURN_CODE
+    assert completed.stdout == "partial"
+    assert "git fetch timed out after 30s" in completed.stderr
+
+
+def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
+    _run(peer, "git", "add", "README.md")
+    _run(peer, "git", "commit", "-m", "baseline work")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    with pytest.raises(gitsync.MergeConflict):
+        gitsync.integrate_and_publish("TASK-20260101T000000000003Z", repo_root=repo)
+
+    conflicted = (repo / "README.md").read_text(encoding="utf-8")
+    assert "<<<<<<<" in conflicted
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "Resolve baseline overlap, badly")
+
+    with pytest.raises(SpiceError, match="conflict markers") as exc_info:
+        gitsync.integrate_and_publish("TASK-20260101T000000000003Z", repo_root=repo)
+
+    message = str(exc_info.value)
+    assert "README.md" in message
+    assert "git add -- README.md" in message
+    assert "git commit --amend --no-edit" in message
+    assert (
+        _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == upstream_head
+    )
+
+    (repo / "README.md").write_text("resolved work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "--amend", "--no-edit")
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000003Z", repo_root=repo
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert _merge_parents(repo, merge_head)[0] == upstream_head
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+
+
+def _init_repo(path: Path) -> Path:
+    path.mkdir()
+    _run(path, "git", "init", "-b", "main")
+    _configure_git_identity(path)
+    (path / "README.md").write_text("initial\n", encoding="utf-8")
+    _run(path, "git", "add", "README.md")
+    _run(path, "git", "commit", "-m", "initial")
+    return path
+
+
+def _configure_git_identity(repo: Path) -> None:
+    _run(repo, "git", "config", "user.email", "spice@example.test")
+    _run(repo, "git", "config", "user.name", "Spice Tests")
+
+
+def _merge_parents(repo: Path, commit: str) -> list[str]:
+    return _git(repo, "show", "-s", "--format=%P", commit).split()
+
+
+def _uda_map(args: list[str]) -> dict[str, str]:
+    return dict(item.split(":", 1) for item in args)
+
+
+def _git(repo: Path, *args: str) -> str:
+    return _run(repo, "git", *args).stdout.strip()
+
+
+def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

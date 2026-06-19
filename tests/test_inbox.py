@@ -1,15 +1,16 @@
 """Inbox steering: durable publish, payload round-trip, ACK retirement."""
 
 import os
+import subprocess
 import time
 
 from spice.mail.acks import archive_ackd_inbox_items
 from spice.mail.attachments import (
-    find_archived_inbox_attachment_references,
     inbox_attachment_dir,
     prepare_inbox_attachments,
 )
 from spice.mail.inbox import (
+    collect_archived_inbox_items,
     collect_deadlettered_inbox_items,
     INBOX_CONTROL_DRAIN_QUEUE,
     INBOX_CONTINUE_NOTE,
@@ -30,6 +31,7 @@ from spice.mail.inbox import (
     requeue_deadlettered_inbox_item,
     write_inbox_item,
 )
+from spice.paths import shared_attachment_root
 from spice.serve.markdown import render_message_html
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
@@ -127,6 +129,10 @@ def test_parse_preserves_non_note_parenthetical_suffix():
     assert parsed.is_stop is False
 
 
+def _init_repo(path):
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
+
+
 def test_key_aliases_accept_dropped_z():
     aliases = inbox_item_key_aliases("20260101T000000000001Z.txt")
     assert aliases == {"20260101T000000000001Z", "20260101T000000000001"}
@@ -142,6 +148,7 @@ def test_ack_retires_pending_item_via_dropped_z_alias(tmp_path):
 
 
 def test_ack_archives_pending_item_attachments(tmp_path):
+    _init_repo(tmp_path)
     name = "20260102T000000000003Z.txt"
     composed = compose_inbox_text(body="please inspect this", priority=None, stop=False)
     attachments = prepare_inbox_attachments(
@@ -159,8 +166,10 @@ def test_ack_archives_pending_item_attachments(tmp_path):
     items = collect_inbox_items(str(tmp_path))
     assert items[0].attachments[0].name == "paste.png"
     assert items[0].attachments[0].path.read_bytes() == b"image-bytes"
+    assert shared_attachment_root(tmp_path) in items[0].attachments[0].path.parents
 
     archived = archive_ackd_inbox_items(tmp_path, ["20260102T000000000003"])
+    archived_items = collect_archived_inbox_items(tmp_path)
 
     archive_text = inbox_dir(tmp_path) / "archive" / name
     archive_attachment_dir = inbox_attachment_dir(archive_text)
@@ -168,9 +177,15 @@ def test_ack_archives_pending_item_attachments(tmp_path):
     assert archive_text.is_file()
     assert archive_attachment_dir.is_dir()
     assert not pending_attachment_dir.exists()
+    assert archived_items[0].attachments[0].path.read_bytes() == b"image-bytes"
+    assert (
+        shared_attachment_root(tmp_path)
+        in archived_items[0].attachments[0].path.parents
+    )
 
 
 def test_inbox_attachment_readout_rows_render_clickable_reference(tmp_path):
+    _init_repo(tmp_path)
     name = "20260102T000000000004Z.txt"
     composed = compose_inbox_text(body="please inspect this", priority=None, stop=False)
     attachments = prepare_inbox_attachments(
@@ -188,32 +203,14 @@ def test_inbox_attachment_readout_rows_render_clickable_reference(tmp_path):
     rows = inbox_payload_rows([item])
     attachment_row = next(row for row in rows if "attachment 1:" in row)
     html = render_message_html(attachment_row, worktree_id="wt")
-    archived_path = (
-        inbox_attachment_dir(item.archive_path) / item.attachments[0].path.name
-    )
+    archived_path = item.attachments[0].path
 
-    assert f"[paste.png]({archived_path.as_posix()})" in attachment_row
-    assert item.attachments[0].path.as_posix() not in attachment_row
+    assert "[paste.png](.spice/attachments/" in attachment_row
+    assert archived_path.as_posix() not in attachment_row
     assert 'href="/work/tree/wt/' in html
     assert ">paste.png</a>" in html
     archive_ackd_inbox_items(tmp_path, [inbox_item_key(name)])
     assert archived_path.is_file()
-
-
-def test_find_archived_inbox_attachment_references_strips_sentence_punctuation():
-    refs = find_archived_inbox_attachment_references(
-        "Open .spice/inbox/archive/20260102T000000000004Z.attachments/"
-        "01-image.png. Also "
-        "/tmp/repo/.spice/inbox/archive/20260102T000000000004Z.attachments/"
-        "02-image.png; ignore live "
-        ".spice/inbox/20260102T000000000004Z.attachments/03-image.png."
-    )
-
-    assert refs == (
-        ".spice/inbox/archive/20260102T000000000004Z.attachments/01-image.png",
-        "/tmp/repo/.spice/inbox/archive/"
-        "20260102T000000000004Z.attachments/02-image.png",
-    )
 
 
 def test_reading_does_not_clear_pending(tmp_path):
@@ -272,6 +269,7 @@ def test_pending_operator_count_zero_for_only_automated_guidance(tmp_path):
 
 
 def test_deadletter_excludes_item_from_pending_and_can_requeue(tmp_path):
+    _init_repo(tmp_path)
     name = "20260103T000000000014Z.txt"
     composed = compose_inbox_text(body="operator steering", priority=None, stop=False)
     attachments = prepare_inbox_attachments(
@@ -294,6 +292,9 @@ def test_deadletter_excludes_item_from_pending_and_can_requeue(tmp_path):
     deadletters = collect_deadlettered_inbox_items(tmp_path)
     assert [item.name for item in deadletters] == [name]
     assert deadletters[0].attachments[0].name == "paste.png"
+    assert (
+        shared_attachment_root(tmp_path) in deadletters[0].attachments[0].path.parents
+    )
     rows = inbox_deadletter_context_rows(deadletters)
     assert "requeue=spice agent requeue-deadletter <key>" in rows[0]
     assert "deadlettered_inbox key=20260103T000000000014Z" in rows[1]

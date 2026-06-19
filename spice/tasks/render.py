@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import shlex
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.mail.attachments import find_archived_inbox_attachment_references
 from spice.tasks import config, identity, lanes, ops, tw
 
 
@@ -177,37 +175,6 @@ def _rehydrate_lines(row: dict[str, Any]) -> list[str]:
     return ["rehydrate:", *lines]
 
 
-def _attachment_texts(row: dict[str, Any]) -> list[str]:
-    texts = [
-        _f(row, "description"),
-        _f(row, "task_description"),
-        _f(row, "acceptance"),
-        _f(row, "validation"),
-    ]
-    for ann in row.get("annotations") or []:
-        texts.append(str(ann.get("description") or ""))
-    return texts
-
-
-def _origin_attachment_lines(row: dict[str, Any]) -> list[str]:
-    origin_worktree = _f(row, "origin_worktree")
-    if not origin_worktree or origin_worktree == "-":
-        return []
-    origin_root = Path(origin_worktree)
-    seen: set[str] = set()
-    resolved: list[str] = []
-    for text in _attachment_texts(row):
-        for ref in find_archived_inbox_attachment_references(text):
-            if ref in seen or Path(ref).is_absolute():
-                continue
-            seen.add(ref)
-            ref_path = Path(ref.replace("\\", "/"))
-            resolved.append(f"  {ref} -> {(origin_root / ref_path).as_posix()}")
-    if not resolved:
-        return []
-    return ["origin_attachments:", *resolved]
-
-
 def _review_commit_lines(row: dict[str, Any]) -> list[str]:
     review_ref = _f(row, "done_ref")
     if not review_ref:
@@ -254,7 +221,6 @@ def render_show(handle: str) -> str:
     lines = _base_show_lines(row, rendered, flow)
     lines.extend(_review_commit_lines(row))
     lines.extend(_rehydrate_lines(row))
-    lines.extend(_origin_attachment_lines(row))
     deps = _deps_lines(row)
     if deps:
         lines.append("depends:")

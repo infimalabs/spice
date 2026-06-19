@@ -9,12 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, Sequence
 
 from spice.agent.identity import ambient_thread_id
 from spice.errors import SpiceError
-from spice.mail.attachments import durable_inbox_attachment_references
 from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
 from spice.tasks import config, gitsync, identity, tw
 
@@ -231,16 +229,8 @@ def _task_title(title: str, *, context: str = "") -> str:
     return value
 
 
-def _task_artifact_root() -> Path:
-    return config.backend_root() / "artifacts" / "attachments"
-
-
 def _task_text(text: str) -> str:
-    return durable_inbox_attachment_references(
-        text,
-        repo_root=config.repo_root(),
-        artifact_root=_task_artifact_root(),
-    )
+    return text
 
 
 def _task_description(description: str | None) -> str:

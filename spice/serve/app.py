@@ -21,9 +21,8 @@ from spice.agent.driver import ALL_DRIVERS, SPICE_AGENT_DRIVER_ENV
 from spice.agent.lifecycle import agent_status
 from spice.agent.renewal import renewal_handoff_request_text, renewal_steering_text
 from spice.errors import SpiceError
-from spice.mail.attachments import INBOX_ATTACHMENT_DIR_SUFFIX
+from spice.mail.attachments import resolve_shared_attachment_ref
 from spice.mail.inbox import (
-    INBOX_ARCHIVE_DIRNAME,
     collect_inbox_items,
     inbox_dir,
     pending_inbox_count,
@@ -1060,6 +1059,9 @@ def _query_str(query: dict[str, list[str]], key: str) -> str | None:
 
 def _resolve_worktree_image_path(repo_root: Path, raw: str) -> Path | None:
     root = repo_root.resolve()
+    shared = resolve_shared_attachment_ref(raw, repo_root=root)
+    if shared is not None:
+        return shared
     candidate = Path(raw)
     resolved = (candidate if candidate.is_absolute() else root / candidate).resolve()
     for path in _worktree_image_path_candidates(root, resolved):
@@ -1069,30 +1071,9 @@ def _resolve_worktree_image_path(repo_root: Path, raw: str) -> Path | None:
 
 
 def _worktree_image_path_candidates(root: Path, resolved: Path) -> tuple[Path, ...]:
-    inbox_candidates = _inbox_attachment_path_candidates(root, resolved)
-    if inbox_candidates:
-        return inbox_candidates
+    shared_candidate = resolve_shared_attachment_ref(str(resolved), repo_root=root)
+    if shared_candidate is not None:
+        return (shared_candidate,)
     if resolved.is_relative_to(root):
         return (resolved,)
     return ()
-
-
-def _inbox_attachment_path_candidates(root: Path, resolved: Path) -> tuple[Path, ...]:
-    inbox_root = inbox_dir(root).resolve()
-    try:
-        relative = resolved.relative_to(inbox_root)
-    except ValueError:
-        return ()
-    parts = relative.parts
-    if len(parts) < 2:
-        return ()
-    attachment_parts = parts[1:] if parts[0] == INBOX_ARCHIVE_DIRNAME else parts
-    if not attachment_parts[0].endswith(INBOX_ATTACHMENT_DIR_SUFFIX):
-        return ()
-    archive = (inbox_root / INBOX_ARCHIVE_DIRNAME / Path(*attachment_parts)).resolve()
-    live = (inbox_root / Path(*attachment_parts)).resolve()
-    candidates: list[Path] = []
-    for path in (archive, live):
-        if path.is_relative_to(root) and path not in candidates:
-            candidates.append(path)
-    return tuple(candidates)
