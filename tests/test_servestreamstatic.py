@@ -24,21 +24,15 @@ def _shell_and_composer_text() -> str:
     )
 
 
-def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
+def test_static_filter_header_pills_render_models_and_styles():
     css = _serve_css_text()
     app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
-    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
-    app_panes = (STATIC_ROOT / "app.panes.js").read_text(encoding="utf-8")
 
     filter_pill_start = css.index(".filter-pill {")
     filter_pill_rule = css[filter_pill_start : css.index("}", filter_pill_start)]
     filter_count_start = css.index(".filter-pill-count {")
     filter_count_rule = css[filter_count_start : css.index("}", filter_count_start)]
-    chip_start = css.index(".lane-filter-chip {")
-    chip_rule = css[chip_start : css.index("}", chip_start)]
-    chip_count_start = css.index(".lane-filter-chip-count {")
-    chip_count_rule = css[chip_count_start : css.index("}", chip_count_start)]
 
     assert 'let renderedFilterPillsFingerprint = "";' in app_js
     assert 'const taskFilterHeaderExtraStems = ["agent", "oops"];' in app_lanes
@@ -62,6 +56,33 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
     assert '"not currently drained"' in app_lanes
     assert "if (fingerprint === renderedFilterPillsFingerprint) return;" in app_lanes
     assert "renderedFilterPillsFingerprint = fingerprint;" in app_lanes
+    assert "gap: 4px;" in filter_pill_rule
+    assert "background: var(--accent);" in filter_count_rule
+    assert "border-radius: var(--pill-radius);" in filter_count_rule
+    assert "color: var(--button-accent-fg);" in filter_count_rule
+    assert "min-width:" not in filter_count_rule
+    assert (
+        ".filter-pill--undrainable .filter-pill-count { background: var(--muted); }"
+        in css
+    )
+    assert ".filter-pill--implicit {" in css
+    assert ".filter-pill--system { color: var(--warn); }" in css
+    assert (
+        "box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--good) 42%, transparent);"
+        in (css)
+    )
+
+
+def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
+    css = _serve_css_text()
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_panes = (STATIC_ROOT / "app.panes.js").read_text(encoding="utf-8")
+
+    chip_start = css.index(".lane-filter-chip {")
+    chip_rule = css[chip_start : css.index("}", chip_start)]
+    chip_count_start = css.index(".lane-filter-chip-count {")
+    chip_count_rule = css[chip_count_start : css.index("}", chip_count_start)]
+
     assert 'renderedFilterPaneFingerprint: "",' in app_shell
     assert "agentLifetimeDissolvesTaskBoundary(lifetime) ||" in app_shell
     assert "function laneFilterPaneRenderModel(lane)" in app_panes
@@ -95,21 +116,6 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
         in app_panes
     )
     assert "tasks · stem" in app_panes
-    assert "gap: 4px;" in filter_pill_rule
-    assert "background: var(--accent);" in filter_count_rule
-    assert "border-radius: var(--pill-radius);" in filter_count_rule
-    assert "color: var(--button-accent-fg);" in filter_count_rule
-    assert "min-width:" not in filter_count_rule
-    assert (
-        ".filter-pill--undrainable .filter-pill-count { background: var(--muted); }"
-        in css
-    )
-    assert ".filter-pill--implicit {" in css
-    assert ".filter-pill--system { color: var(--warn); }" in css
-    assert (
-        "box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--good) 42%, transparent);"
-        in (css)
-    )
     assert "flex: 0 1 10rem;" not in chip_rule
     assert "justify-content: space-between;" not in chip_rule
     assert "gap: 4px;" in chip_rule
@@ -138,6 +144,34 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
         ".lane-filter-chip--private .lane-filter-chip-count {\n"
         "  background: var(--final-accent);\n"
         "}" in css
+    )
+
+
+def test_static_filter_pane_uses_pure_filter_model_helpers():
+    app_filter_model = (STATIC_ROOT / "app.filter-model.js").read_text(encoding="utf-8")
+    app_panes = (STATIC_ROOT / "app.panes.js").read_text(encoding="utf-8")
+
+    assert "function taskFilterEffectiveAssignedNames(" in app_filter_model
+    assert "function availableTaskFilterNames(" in app_filter_model
+    assert "function availableTaskFilterOpenTaskCount(" in app_filter_model
+    assert "function taskFilterOpenCount(" in app_filter_model
+    assert "return taskFilterEffectiveAssignedNames(inventory, assignedFilters);" in (
+        app_panes
+    )
+    assert "return availableTaskFilterNames(laneFilterInventory(lane)" in app_panes
+    assert "return taskFilterOpenCount(laneFilterInventory(lane), filter);" in (
+        app_panes
+    )
+
+
+def test_static_filter_model_helpers_are_pure_and_covered():
+    script = Path(__file__).with_name("fixtures") / "filter_model.js"
+
+    subprocess.run(
+        ["node", str(script), str(STATIC_ROOT / "app.filter-model.js")],
+        check=True,
+        capture_output=True,
+        text=True,
     )
 
 

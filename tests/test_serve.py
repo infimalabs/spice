@@ -889,6 +889,12 @@ def test_index_links_and_serves_packaged_favicon():
     assert html.index("/static/messages.css") < html.index("/static/status-colors.css")
     assert html.index("/static/app.shell.js") < html.index("/static/app.composer.js")
     assert html.index("/static/app.composer.js") < html.index("/static/app.controls.js")
+    assert html.index("/static/app.controls.js") < html.index(
+        "/static/app.filter-model.js"
+    )
+    assert html.index("/static/app.filter-model.js") < html.index(
+        "/static/app.panes.js"
+    )
     assert favicon.is_file()
     assert handler.status == HTTPStatus.OK
     assert handler.headers["Content-Length"] == str(favicon.stat().st_size)
