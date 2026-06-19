@@ -20,7 +20,7 @@ inside the spice repo.
 2. `spice session briefing`
 3. `spice task status`
 
-If a tool call is impossible, say only what prevented it and end the turn. Otherwise, let the command outputs establish context first, then respond to pending steering directly. ACK pending inbox keys inline in any assistant message as soon as they are read and acted on; do not wait for final response. Use those outputs, side-channel steering, and the active task board as your source of truth. Do not infer a durable task from this skill invocation.
+If a tool call is impossible, say only what prevented it and end the turn. Otherwise, let the command outputs establish context first, then respond to pending steering directly. A spice session is a real-time interactive loop: when pending steering keys appear, lead your next working assistant message with a plain-text ACK header for those keys, e.g. `ACK <key> [<key> ...]: <what changed or was captured>`. ACKed keys clear from pending once that assistant message is processed. Do not bury ACKs mid-message or save them for the final response. Use those outputs, side-channel steering, and the active task board as your source of truth. Do not infer a durable task from this skill invocation.
 
 If continuity is clipped, deepen with `spice session sweep --count N`, `spice session timeline --limit N`, `spice session turns --turn-id ... --view full`, `spice session compactions`, or `spice session commits`.
 

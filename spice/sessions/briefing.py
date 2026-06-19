@@ -17,10 +17,11 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.mail.inbox import (
+    INBOX_RESPONSE_ROW,
     collect_deadlettered_inbox_items,
     collect_inbox_items,
-    inbox_deadletter_context_rows,
     format_relative_seconds,
+    inbox_deadletter_context_rows,
     inbox_item_key,
     relative_time_for_path,
 )
@@ -815,10 +816,7 @@ def _inbox_lines() -> list[str]:
             f"age={relative_time_for_path(item.source_path)}"
         )
     if items:
-        lines.append(
-            "  ACK by assistant message (plain text, no markdown emphasis): "
-            "ACK <key> [<key> ...]: <what changed or was captured>"
-        )
+        lines.append(f"  {INBOX_RESPONSE_ROW}")
     if deadletters:
         lines.append(f"  deadlettered={len(deadletters)}")
         lines.extend(f"  {line}" for line in inbox_deadletter_context_rows(deadletters))

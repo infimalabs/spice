@@ -20,6 +20,12 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
     assert "`TASK title=... | project=<stem.child> | acceptance=...`" in text
     assert "immediate task capture, not allocator selection" in text
     assert "`spice task status` and `spice task doctor` report" in text
+    assert "A spice session is a real-time interactive loop" in text
+    assert (
+        "lead your next working assistant message with a plain-text ACK header" in text
+    )
+    assert "ACKed keys clear from pending" in text
+    assert "Do not bury ACKs mid-message or save them for the final response" in text
 
 
 def test_available_skill_path_materializes_into_the_worktree(tmp_path):
