@@ -221,6 +221,18 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     unclaim.add_argument("handle")
     unclaim.set_defaults(func=handle)
 
+    edit = actions.add_parser(
+        "edit",
+        help="Change a task's priority and/or project in place.",
+        recovery_examples=(
+            "spice task edit TASK-20260609T203539640394Z --priority high",
+        ),
+    )
+    edit.add_argument("handle")
+    edit.add_argument("--priority", help="high/medium/low/none or H/M/L.")
+    edit.add_argument("--project", help="Reassign to an assignable dotted project.")
+    edit.set_defaults(func=handle)
+
     delete = actions.add_parser(
         "delete",
         help="Delete a task with a reason.",
@@ -524,6 +536,7 @@ _DISPATCH = {
     "depends": lambda a: ops.depends(a.handle, list(a.after)),
     "claim": lambda a: ops.claim(a.handle, steal=a.steal),
     "unclaim": lambda a: ops.unclaim(a.handle),
+    "edit": lambda a: ops.edit(a.handle, priority=a.priority, project=a.project),
     "delete": lambda a: ops.delete(a.handle, a.reason),
     "adopt": lambda a: ops.adopt(
         a.handle,

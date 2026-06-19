@@ -71,6 +71,29 @@ def _make_orphan_commit(
     return _git(repo, "rev-parse", "HEAD")
 
 
+def test_task_edit_changes_priority_in_place(task_repo):
+    handle = ops.add("Bump me", project="task.unit", priority="low")
+    assert identity.resolve(handle)["priority"] == "L"
+
+    ops.edit(handle, priority="high")
+
+    assert identity.resolve(handle)["priority"] == "H"
+
+
+def test_task_edit_reassigns_project_in_place(task_repo):
+    handle = ops.add("Move me", project="task.unit", priority="medium")
+
+    ops.edit(handle, project="task.moved")
+
+    assert identity.resolve(handle)["project"] == "task.moved"
+
+
+def test_task_edit_requires_at_least_one_field(task_repo):
+    handle = ops.add("Leave me", project="task.unit", priority="medium")
+    with pytest.raises(SpiceError):
+        ops.edit(handle)
+
+
 def test_task_adopt_mints_task_over_orphan_then_done_captures_it(remote_task_repo):
     orphan = _make_orphan_commit(remote_task_repo, subject="orphan fix worth keeping")
     assert gitsync.commits_ahead_of_baseline(remote_task_repo) == 1

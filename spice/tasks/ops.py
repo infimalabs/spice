@@ -682,6 +682,40 @@ def unclaim(handle: str) -> str:
     return identity.render_handle(row)
 
 
+def edit(
+    handle: str,
+    *,
+    priority: str | None = None,
+    project: str | None = None,
+) -> str:
+    """Change an existing task's priority and/or project in place.
+
+    Avoids the delete-and-recreate detour for a simple priority bump or a
+    project move: resolve the task and apply whichever fields were supplied in
+    one modify. At least one of `priority`/`project` is required.
+    """
+    if priority is None and project is None:
+        raise SpiceError("task edit needs --priority and/or --project")
+    row = identity.resolve(handle)
+    uuid = identity.uuid_of(row)
+    mods: list[str] = []
+    if priority is not None:
+        mods.append(f"priority:{config.map_priority(priority)}")
+    resolved_project: str | None = None
+    if project is not None:
+        resolved_project = config.validate_manual_creation_project(project)
+        mods.append(f"project:{resolved_project}")
+    tw.run([uuid, "modify", *mods])
+    lines = [f"edited {identity.render_handle(row)}: {' '.join(mods)}"]
+    if resolved_project is not None:
+        lines.append(
+            _subscribe_created_project(
+                resolved_project, tw.canonical_actor(tw.current_actor())
+            )
+        )
+    return "\n".join(lines)
+
+
 # ---- adopt --------------------------------------------------------------
 
 
