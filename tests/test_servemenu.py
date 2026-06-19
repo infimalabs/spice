@@ -485,6 +485,24 @@ def test_static_spice_menu_target_metadata_and_status_update_live():
     assert "const pending = targetChoicePendingCount(target);" in app_lanes
     assert "liveAgentVisualStatus(statusLine)" in app_lanes
     assert "agentStatusLabel(status)" in app_lanes
+    assert "function compareTargetChoices(left, right)" in app_lanes
+    assert (
+        "const byStatus =\n"
+        "    targetChoiceStatusOrder(left) - targetChoiceStatusOrder(right);"
+        in app_lanes
+    )
+    assert "if (byStatus) return byStatus;" in app_lanes
+    assert (
+        "const byName = targetChoiceName(left).localeCompare(targetChoiceName(right));"
+        in app_lanes
+    )
+    assert "if (byName) return byName;" in app_lanes
+    assert (
+        'return String(left.id || "").localeCompare(String(right.id || ""));'
+        in app_lanes
+    )
+    assert "function targetChoiceStatusOrder(target)" in app_lanes
+    assert "const index = targetChoiceStatusValues.indexOf(status);" in app_lanes
     assert "updateLiveTargetChoiceMetadata();" in app_render
     assert ".target-choice--running-stale .target-choice-signal" in css
 
