@@ -84,6 +84,10 @@ def activation_command_surface_lines() -> list[str]:
             "--project creates private agent scratch work"
         ),
         (
+            "task_project_depth=public task project depth bounds are reported by "
+            "spice task status and spice task doctor"
+        ),
+        (
             "ack_inline=ACK pending inbox keys in any assistant message as "
             "soon as they are read and acted on; do not wait for final response"
         ),

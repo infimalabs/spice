@@ -94,6 +94,7 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
         "const actions = [...existing, ...stems].sort(compareLaneFilterPickerActions);"
         in app_panes
     )
+    assert "tasks · stem" in app_panes
     assert "gap: 4px;" in filter_pill_rule
     assert "background: var(--accent);" in filter_count_rule
     assert "border-radius: var(--pill-radius);" in filter_count_rule

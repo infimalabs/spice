@@ -646,3 +646,34 @@ def test_team_command_service_replaces_membership_without_rewriting_sources(tmp_
         {"project": "task.extra", "source": TASK_FILTER_SOURCE_MANUAL},
         {"project": "task.review", "source": TASK_FILTER_SOURCE_AUTO_CLAIM},
     ]
+
+
+def test_team_config_replace_preserves_existing_filter_sources(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(members=["agent-a"])
+    store.add_task_filter(
+        team.team_id, "serve.ui", source=TASK_FILTER_SOURCE_AUTO_CREATE
+    )
+    store.add_task_filter(
+        team.team_id, "task.review", source=TASK_FILTER_SOURCE_AUTO_CLAIM
+    )
+    current = store.team_config(team.team_id)
+
+    store.update_team_config(
+        team.team_id,
+        TeamConfig(
+            lifetime=current.lifetime,
+            speech_mode=current.speech_mode,
+            task_filters=("serve.ui", "task.extra"),
+            selected_view=current.selected_view,
+            shell_settings=current.shell_settings,
+        ),
+        replace_task_filters=True,
+    )
+    replaced = store.team_config(team.team_id)
+
+    assert replaced.task_filters == ("serve.ui", "task.extra")
+    assert [entry.to_payload() for entry in replaced.task_filter_entries] == [
+        {"project": "serve.ui", "source": TASK_FILTER_SOURCE_AUTO_CREATE},
+        {"project": "task.extra", "source": TASK_FILTER_SOURCE_MANUAL},
+    ]

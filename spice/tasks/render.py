@@ -272,6 +272,11 @@ def _visible_count(actor: str, filters: list[str]) -> int:
     return len(ops.visible_rows(actor, filters))
 
 
+def _public_task_project_depth_label() -> str:
+    min_depth, max_depth = config.project_depth_bounds()
+    return f"public task project depth {min_depth}..{max_depth} dotted segments"
+
+
 def _is_stale_claim(row: dict[str, Any], now: str) -> bool:
     until = str(row.get("claim_until") or "")
     return bool(until and until < now)
@@ -310,6 +315,7 @@ def render_status() -> str:
     else:
         lane_filter_label = f"project:{ops.default_project(actor)}"
     lines.insert(2, f"filter {lane_filter_label}")
+    lines.insert(3, _public_task_project_depth_label())
     return "\n".join(lines)
 
 
@@ -383,6 +389,7 @@ def render_doctor() -> str:
         f"stale claims {len(ops.stale_rows())}",
         f"reports {' '.join(config.REPORTS)}",
         f"analytics {' '.join(config.ANALYTICS_COMMANDS)}",
+        _public_task_project_depth_label(),
         f"assignable stems {' '.join(config.assignable_stems())}",
         f"internal stems {' '.join(config.INTERNAL_STEMS)}",
         f"approved phases {' '.join(config.APPROVED_PHASES)}",
