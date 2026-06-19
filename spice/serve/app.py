@@ -27,7 +27,7 @@ from spice.mail.inbox import (
     inbox_dir,
     pending_inbox_count,
 )
-from spice.paths import repo_root_from_cwd
+from spice.paths import repo_root_from_cwd, shared_attachment_root
 from spice.serve import payloads
 from spice.serve.agentapi import (
     agent_ensure_response_payload,
@@ -1016,6 +1016,12 @@ def _work_tree_link_roots(
         resolved = candidate.resolve()
         if resolved not in roots:
             roots.append(resolved)
+        try:
+            shared = shared_attachment_root(resolved).resolve()
+        except SpiceError:
+            continue
+        if shared not in roots:
+            roots.append(shared)
     return roots
 
 
