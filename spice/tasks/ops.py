@@ -1113,27 +1113,54 @@ def stale_rows() -> list[dict[str, Any]]:
     return out
 
 
-def _scope_filter(actor: str, lane_filter: list[str] | None) -> list[str]:
+def _scope_filter(
+    actor: str, lane_filter: list[str] | None, *, include_origin: bool = False
+) -> list[str]:
     private = f"project:{default_project(actor)}"
+    origin = f"origin_thread.is:{actor}" if include_origin else ""
     if not lane_filter:
+        if origin:
+            return ["(", private, "or", origin, ")"]
         return [private]
     if private in lane_filter:
-        return lane_filter
+        if not origin or origin in lane_filter:
+            return lane_filter
+        return ["(", origin, "or", *lane_filter, ")"]
+    if origin:
+        return ["(", private, "or", origin, "or", *lane_filter, ")"]
     return ["(", private, "or", *lane_filter, ")"]
+
+
+def _route_includes_origin(route: dict[str, Any] | None) -> bool:
+    if route is None:
+        return True
+    return str(route.get("lifetime") or "") in ("Drive", "Drain")
 
 
 def effective_filter_args(actor: str, lane_filter: list[str] | None) -> list[str]:
     return _scope_filter(actor, lane_filter)
 
 
-def _team_route_filter(actor: str) -> list[str] | None:
+def effective_route_filter_args(actor: str, route: dict[str, Any] | None) -> list[str]:
     from spice.tasks import lanes
 
-    return lanes.filter_args(lanes.team_route_for_actor(actor))
+    return _scope_filter(
+        actor,
+        lanes.filter_args(route),
+        include_origin=_route_includes_origin(route),
+    )
 
 
 def visible_rows(actor: str, filters: list[str]) -> list[dict[str, Any]]:
-    return tw.export([*filters, *_scope_filter(actor, _team_route_filter(actor))])
+    from spice.tasks import lanes
+
+    route = lanes.team_route_for_actor(actor)
+    return tw.export(
+        [
+            *filters,
+            *effective_route_filter_args(actor, route),
+        ]
+    )
 
 
 def visible_ready_rows(actor: str) -> list[dict[str, Any]]:
@@ -1152,11 +1179,18 @@ def visible_pending_rows(actor: str) -> list[dict[str, Any]]:
 
 
 def _candidate_rows(
-    actor: str, lane_filter: list[str] | None, overrides: list[str]
+    actor: str,
+    lane_filter: list[str] | None,
+    overrides: list[str],
+    *,
+    include_origin: bool = False,
 ) -> list[dict[str, Any]]:
     base_filter = ["status:pending", "+READY", "-ACTIVE"]
     return tw.export(
-        [*base_filter, *_scope_filter(actor, lane_filter)],
+        [
+            *base_filter,
+            *_scope_filter(actor, lane_filter, include_origin=include_origin),
+        ],
         overrides=overrides,
     )
 
@@ -1173,10 +1207,15 @@ def next_task() -> dict[str, Any] | None:
     route = lanes.team_route_for_actor(actor)
     overrides = alloc.actor_overrides(actor, route)
     lane_filter = lanes.filter_args(route)
+    include_origin = _route_includes_origin(route)
     repair_candidates = [
         r
         for r in tw.export(
-            ["status:pending", "+ACTIVE", *_scope_filter(actor, lane_filter)],
+            [
+                "status:pending",
+                "+ACTIVE",
+                *_scope_filter(actor, lane_filter, include_origin=include_origin),
+            ],
             overrides=overrides,
         )
         if not _is_oops(r) and not str(r.get("claim_by") or "")
@@ -1189,7 +1228,9 @@ def next_task() -> dict[str, Any] | None:
                 return fresh
     candidates = [
         r
-        for r in _candidate_rows(actor, lane_filter, overrides)
+        for r in _candidate_rows(
+            actor, lane_filter, overrides, include_origin=include_origin
+        )
         if not _is_oops(r) and not str(r.get("claim_by") or "")
     ]
     if not candidates:

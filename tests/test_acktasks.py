@@ -59,6 +59,7 @@ def quiet_supervisor(monkeypatch):
 def test_supervised_ack_creates_inline_task_and_archives_inbox(
     task_repo, quiet_supervisor
 ):
+    store = ServeTeamStore()
     write_inbox_item(
         task_repo,
         f"{INBOX_KEY}.txt",
@@ -94,6 +95,10 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
         f"ack_archived={INBOX_KEY}",
         f"inline_task_created={handle}(route_filter=skipped:task.unit:no_team)",
     ]
+    assigned = ops.next_task()
+
+    assert identity.render_handle(assigned or {}) == handle
+    assert store.current_team_for_agent(ACTOR) is None
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
 

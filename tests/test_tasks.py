@@ -527,7 +527,7 @@ def test_drain_task_creation_uses_effective_visibility_not_stored_filter(task_re
     assert store.team_config(team.team_id).task_filters == ()
 
 
-def test_teamless_task_creation_skips_drive_subscription(task_repo):
+def test_teamless_task_creation_routes_creator_without_team_subscription(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
     before = store.global_revision()
@@ -541,6 +541,33 @@ def test_teamless_task_creation_skips_drive_subscription(task_repo):
 
     assert identity.resolve(handle)["project"] == "task.unit"
     assert store.global_revision() == before
+    assigned = ops.next_task()
+
+    assert identity.render_handle(assigned or {}) == handle
+    assert store.current_team_for_agent(ACTOR_A) is None
+    assert store.open_task_filter_projects() == ()
+
+
+def test_teamless_creator_scope_does_not_route_peer_public_tasks(
+    task_repo, monkeypatch
+):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    handle = ops.add(
+        "Peer teamless public task",
+        project="task.unit",
+        priority="medium",
+        acceptance=["origin scope is not global public visibility"],
+    )
+
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    assigned = ops.next_task()
+
+    assert identity.resolve(handle)["origin_thread"] == PEER_ACTOR
+    assert assigned is None
+    assert store.current_team_for_agent(ACTOR_A) is None
+    assert store.current_team_for_agent(PEER_ACTOR) is None
 
 
 def test_drive_oops_creation_skips_subscription(task_repo):
@@ -645,12 +672,37 @@ def test_lifetime_filter_args_use_single_visibility_contract(task_repo):
     ]
     assert lanes.filter_args({"filter": [], "lifetime": "Steer"}) == []
     assert ops.effective_filter_args(ACTOR_A, []) == [private]
+    assert ops.effective_route_filter_args(ACTOR_A, None) == [
+        "(",
+        private,
+        "or",
+        f"origin_thread.is:{ACTOR_A}",
+        ")",
+    ]
+    assert ops.effective_route_filter_args(
+        ACTOR_A, {"filter": [], "lifetime": "Steer"}
+    ) == [private]
     assert ops.effective_filter_args(
         ACTOR_A,
         lanes.filter_args({"filter": stored, "lifetime": "Drain"}),
     ) == [
         "(",
         private,
+        "or",
+        "(",
+        "project:serve",
+        "or",
+        "project:task",
+        ")",
+        ")",
+    ]
+    assert ops.effective_route_filter_args(
+        ACTOR_A, {"filter": stored, "lifetime": "Drain"}
+    ) == [
+        "(",
+        private,
+        "or",
+        f"origin_thread.is:{ACTOR_A}",
         "or",
         "(",
         "project:serve",
