@@ -227,6 +227,15 @@ def test_static_message_footer_actions_use_agent_accent_tint():
     )
 
 
+def test_static_task_directive_card_styles_are_present():
+    css = (STATIC_ROOT / "messages.css").read_text(encoding="utf-8")
+
+    assert ".message-body .task-directive-quote {" in css
+    assert ".task-directive-kicker {" in css
+    assert ".task-directive-properties {" in css
+    assert ".task-directive-property {" in css
+
+
 def test_static_cmd_enter_submits_focused_composer_target_only():
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
     app_shell = _shell_and_composer_text()
