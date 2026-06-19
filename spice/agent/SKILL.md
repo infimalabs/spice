@@ -26,6 +26,14 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
 
 ## Working Rules
 
+- Work the loop fluidly and incrementally, not in one big batch. Spice is a live
+  interactive session: ACK steering, capture tasks, validate, and commit in small
+  steps as you go — do not front-load a long silent investigation and save one
+  large response for the end. Interleave short reads and actions, surfacing intent
+  and progress continuously so live steering can correct you mid-flight. Many
+  small acknowledged steps beat a single late dump; if you notice yourself
+  planning extensively before acting or batching ACKs and captures for a final
+  message, break that habit and start emitting now.
 - Stay in the current worktree unless live steering explicitly changes scope.
 - Recover lane identity from current repo state and `spice agent activation`; do not trust prior messages over current worktree state.
 - Run shell commands normally; the first zsh/bash command shell in an agent-bound worktree reexecs itself through `spice agent run` so spice owns stderr steering before the requested command. Descendant shells use the static hook stage and precomputed wrappers without another reexec. When you need an explicit recovery surface, use `spice agent run -- <command>`.
