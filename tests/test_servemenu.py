@@ -355,6 +355,10 @@ def test_static_spice_menu_replaces_picker_lane():
     assert "function spiceMenuTeamSortKey(group)" in app_menu
     assert "function wireSpiceMenuTargetDrag(button, target)" in app_menu
     assert "function wireSpiceMenuTeamDropTarget(container, group)" in app_menu
+    assert 'label: "New team",' in app_menu
+    assert 'setGlobalTransientStatus("new team created");' in app_menu
+    assert "New empty team" not in app_menu
+    assert "empty team created" not in app_menu
     assert (
         "function moveTargetToMenuTeam(teamId, targetId, sourceTarget = null)"
         in app_menu

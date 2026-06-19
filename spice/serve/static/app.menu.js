@@ -151,7 +151,7 @@ function renderSpiceMenuActions() {
       onClick: () => setFastModeEnabled(!fastModeEnabled),
     }),
     renderSpiceMenuAction({
-      label: "New empty team",
+      label: "New team",
       detail: "no agents",
       onClick: () => createEmptyTeamFromMenu(),
     }),
@@ -324,7 +324,7 @@ function createEmptyTeamFromMenu() {
     }),
   )
     .then(() => {
-      setGlobalTransientStatus("empty team created");
+      setGlobalTransientStatus("new team created");
       closeSpiceMenu();
     })
     .catch(() => {
