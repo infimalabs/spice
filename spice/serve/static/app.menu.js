@@ -250,9 +250,7 @@ function spiceMenuTeamSortKey(group) {
 }
 
 function compareSpiceMenuTargetChoices(left, right) {
-  const byName = targetChoiceName(left).localeCompare(targetChoiceName(right));
-  if (byName) return byName;
-  return String(left.id || "").localeCompare(String(right.id || ""));
+  return compareTargetChoices(left, right);
 }
 
 function renderSpiceMenuTeamGroup(group) {

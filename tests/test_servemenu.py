@@ -393,7 +393,7 @@ def test_static_spice_menu_replaces_picker_lane():
     assert ".sort(compareSpiceMenuTargetChoices);" in team_groups_block
     assert "group.targets.sort(compareSpiceMenuTargetChoices);" in team_groups_block
     assert "unassigned.sort(compareSpiceMenuTargetChoices);" in team_groups_block
-    assert "compareTargetChoices" not in team_groups_block
+    assert "return compareTargetChoices(left, right);" in team_groups_block
     compare_groups_start = app_menu.index(
         "function compareSpiceMenuTeamGroups(left, right)"
     )
@@ -403,7 +403,7 @@ def test_static_spice_menu_replaces_picker_lane():
     compare_groups_block = app_menu[compare_groups_start:compare_groups_end]
     assert "spiceMenuTeamSortKey(left)" in compare_groups_block
     assert "spiceMenuTeamSortKey(right)" in compare_groups_block
-    assert "compareTargetChoices" not in compare_groups_block
+    assert "return compareTargetChoices(left, right);" in compare_groups_block
     assert "function spiceMenuUsesViewportWidth(viewportWidth)" in app_menu
     assert "return viewportWidth < spiceMenuMinimumLaneWidthPx() + 20;" in app_menu
     assert (
@@ -492,6 +492,16 @@ def test_static_spice_menu_target_metadata_and_status_update_live():
         in app_lanes
     )
     assert "if (byStatus) return byStatus;" in app_lanes
+    assert "const byRecency = compareTargetChoiceRecency(left, right);" in app_lanes
+    assert "if (byRecency) return byRecency;" in app_lanes
+    assert "function compareTargetChoiceRecency(left, right)" in app_lanes
+    assert (
+        "if (targetChoiceIsRunning(left) || targetChoiceIsRunning(right)) return 0;"
+        in app_lanes
+    )
+    assert "return leftAt > rightAt ? -1 : 1;" in app_lanes
+    assert "function targetChoiceIsRunning(target)" in app_lanes
+    assert 'return status === "running" || status === "running-stale";' in app_lanes
     assert (
         "const byName = targetChoiceName(left).localeCompare(targetChoiceName(right));"
         in app_lanes
