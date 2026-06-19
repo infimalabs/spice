@@ -605,7 +605,7 @@ def test_team_store_connect_enables_wal_and_busy_timeout(tmp_path):
     assert int(busy_timeout) == TEAM_SQLITE_BUSY_TIMEOUT_MS
 
 
-def test_team_command_service_replaces_manual_task_filters(tmp_path):
+def test_team_command_service_replaces_membership_without_rewriting_sources(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     service = TeamCommandService(store)
     created = service.apply(
@@ -636,12 +636,13 @@ def test_team_command_service_replaces_manual_task_filters(tmp_path):
         {
             "command": "updateTeamConfig",
             "teamId": team.team_id,
-            "configPatch": {"taskFilters": ["task.review"]},
+            "configPatch": {"taskFilters": ["task.review", "task.extra"]},
         }
     )
     replaced = store.team_config(team.team_id)
 
-    assert replaced.task_filters == ("task.review",)
+    assert replaced.task_filters == ("task.extra", "task.review")
     assert [entry.to_payload() for entry in replaced.task_filter_entries] == [
-        {"project": "task.review", "source": TASK_FILTER_SOURCE_MANUAL}
+        {"project": "task.extra", "source": TASK_FILTER_SOURCE_MANUAL},
+        {"project": "task.review", "source": TASK_FILTER_SOURCE_AUTO_CLAIM},
     ]

@@ -388,11 +388,27 @@ class ServeTeamStore(TeamMetricStoreMixin):
     def _replace_task_filters_locked(
         self, connection: sqlite3.Connection, team_id: str, projects: Iterable[str]
     ) -> tuple[str, ...]:
-        connection.execute(
-            "DELETE FROM team_task_filters WHERE team_id = ?", (team_id,)
-        )
+        validated = _validated_task_filter_projects(projects)
+        if validated:
+            placeholders = ",".join("?" for _ in validated)
+            connection.execute(
+                "DELETE FROM team_task_filters "
+                f"WHERE team_id = ? AND project NOT IN ({placeholders})",
+                (team_id, *validated),
+            )
+        else:
+            connection.execute(
+                "DELETE FROM team_task_filters WHERE team_id = ?", (team_id,)
+            )
         now = time.time()
-        for project in _validated_task_filter_projects(projects):
+        for project in validated:
+            existing = connection.execute(
+                "SELECT 1 FROM team_task_filters "
+                "WHERE team_id = ? AND project = ? LIMIT 1",
+                (team_id, project),
+            ).fetchone()
+            if existing:
+                continue
             connection.execute(
                 "INSERT INTO team_task_filters "
                 "(team_id, project, source, created_at, updated_at) "
