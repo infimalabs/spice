@@ -873,6 +873,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
 ):
     repo = tmp_path / "repo"
     repo.mkdir()
+    _init_repo(repo)
     pending_name = "20260104T000000000006Z.txt"
     archived_name = "20260104T000000000007Z.txt"
     write_inbox_item(
@@ -945,6 +946,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
 
 
 def test_ack_context_payload_finds_acked_inbox_item_by_dropped_z_alias(tmp_path):
+    _init_repo(tmp_path)
     name = "20260104T000000000005Z.txt"
     bare_key = "20260104T000000000005"
     composed = compose_inbox_text(body="operator original", priority=None, stop=False)
@@ -965,6 +967,7 @@ def test_ack_context_payload_finds_acked_inbox_item_by_dropped_z_alias(tmp_path)
 def test_ack_context_payload_does_not_quote_assistant_ack_when_inbox_missing(
     monkeypatch, tmp_path
 ):
+    _init_repo(tmp_path)
     key = "20260104T000000000005Z"
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text(
