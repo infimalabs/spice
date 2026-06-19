@@ -100,6 +100,23 @@
   padding: 7px 9px;
 }
 .message-body code { font: 12px/1.4 ui-monospace, monospace; }
+.message-body table {
+  border-collapse: collapse;
+  display: block;
+  margin: 6px 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.message-body th,
+.message-body td {
+  border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+  padding: 4px 8px;
+  text-align: left;
+}
+.message-body th {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-weight: 600;
+}
 .message-body blockquote {
   background: color-mix(in srgb, var(--quote-accent) 6%, transparent);
   border-left: var(--quote-rail-width) solid var(--quote-accent);
