@@ -202,11 +202,18 @@ def run_maxim_show_cli(args: argparse.Namespace) -> int:
 
 def _render_maxim_listing() -> str:
     rows = [
-        (f"{name} ({'/'.join(sorted(bag.words))})", bag.message)
+        (
+            f"{name} ({'/'.join(_render_trigger_key(key) for key in sorted(bag.words))})",
+            bag.message,
+        )
         for name, bag in resolved_maxim_bags().items()
     ]
     width = max(len(name) for name, _ in rows)
     return "\n".join(f"{name.ljust(width)}  {text}" for name, text in rows)
+
+
+def _render_trigger_key(key: str) -> str:
+    return f'"{key}"' if " " in key else key
 
 
 def _load_template(prompt_file: Path | None) -> str:

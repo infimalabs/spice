@@ -7,8 +7,11 @@ from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from spice.agent import maximcli, maxims, watchdog
 from spice.agent.maxims import MaximVerdict
+from spice.errors import SpiceError
 from spice.mail.inbox import collect_inbox_items
 from spice.serve.teams import ServeTeamStore
 
@@ -125,6 +128,58 @@ words = ["detour"]
     assert hit.message == bag.message
 
 
+def test_builtin_phrase_trigger_matches_whole_phrase_across_punctuation():
+    hits = maxims.triggered_maxims(
+        [
+            "This FALLS, back to a quiet path.",
+            "A fallsback identifier should not match.",
+        ]
+    )
+    misses = maxims.triggered_maxims(["This falls backwards instead."])
+
+    assert [hit.name for hit in hits] == ["fallbacks"]
+    assert misses == []
+    assert maxims.configured_maxim("falls   back") == maxims.builtin_maxim("fallback")
+
+
+def test_repo_config_declares_phrase_trigger_key(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    _write_pyproject(
+        repo,
+        """
+[tool.spice.maxims.routes]
+words = ["quiet route", "soft landing"]
+message = "DO NOT take the quiet route."
+""",
+    )
+
+    bag = maxims.resolved_maxim_bags(repo)["routes"]
+    hits = maxims.triggered_maxims(
+        ["This quiet-route had a soft\nLANDING."], repo_root=repo
+    )
+    misses = maxims.triggered_maxims(["This quietroute fallsback."], repo_root=repo)
+
+    assert bag.words == frozenset({"quiet route", "soft landing"})
+    assert [hit.name for hit in hits] == ["routes"]
+    assert misses == []
+    assert maxims.configured_maxim("Quiet   Route", repo_root=repo) == bag.message
+
+
+def test_repo_config_rejects_non_alphabetic_phrase_trigger_key(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    _write_pyproject(
+        repo,
+        """
+[tool.spice.maxims.routes]
+words = ["falls-back"]
+message = "DO NOT take the quiet route."
+""",
+    )
+
+    with pytest.raises(SpiceError, match="alphabetic phrases"):
+        maxims.resolved_maxim_bags(repo)
+
+
 def test_builtin_fallback_maxim_allows_explicit_defaults_and_resolver_order():
     message = maxims.builtin_maxim("fallback")
 
@@ -177,6 +232,24 @@ message = "{message}"
     assert shown == f"{message}\n"
     assert code == maximcli.CONDITION_UNMET_EXIT_CODE
     assert seen == [message]
+
+
+def test_maxim_show_quotes_phrase_trigger_keys(tmp_path, monkeypatch, capsys):
+    repo = _init_repo(tmp_path / "repo")
+    _write_pyproject(
+        repo,
+        """
+[tool.spice.maxims.routes]
+words = ["quiet route", "detour"]
+message = "DO NOT take the quiet route."
+""",
+    )
+    monkeypatch.chdir(repo)
+
+    maximcli.run_maxim_show_cli(Namespace(name=None))
+    shown = capsys.readouterr().out
+
+    assert 'routes (detour/"quiet route")' in shown
 
 
 def _write_pyproject(repo: Path, text: str) -> None:
