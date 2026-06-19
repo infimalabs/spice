@@ -27,7 +27,10 @@ from spice.agent.maxims import (
     evaluate_maxim_any_violation,
     triggered_maxims,
 )
-from spice.mail.acks import archive_ackd_inbox_items_from_assistant_message
+from spice.mail.acks import (
+    archive_ackd_inbox_items_from_assistant_message,
+    extract_task_batch_lines_from_ack_text,
+)
 from spice.mail.inbox import write_inbox_item
 from spice.procs import popen_new_process_group_kwargs
 from spice.sessions.util import first_text
@@ -134,6 +137,11 @@ def process_supervised_assistant_message(
 ) -> None:
     archive_ackd_inbox_items_from_assistant_message(repo_root, message_text)
     try:
+        create_inline_ack_tasks(repo_root, message_text, log_handle)
+    except Exception as exc:  # pragma: no cover - supervisor-visible task failure
+        log_handle.write(f"spice inline task supervisor error: {exc}\n")
+        log_handle.flush()
+    try:
         record_supervised_lane_metrics(repo_root)
     except Exception as exc:  # pragma: no cover - supervisor-visible metric failure
         log_handle.write(f"spice metrics supervisor error: {exc}\n")
@@ -145,6 +153,24 @@ def process_supervised_assistant_message(
     except Exception as exc:  # pragma: no cover - defensive supervisor logging
         log_handle.write(f"spice maxim supervisor error: {exc}\n")
         log_handle.flush()
+
+
+def create_inline_ack_tasks(
+    repo_root: Path, message_text: str, log_handle: TextIO
+) -> list[str]:
+    batch_lines = extract_task_batch_lines_from_ack_text(message_text)
+    if not batch_lines:
+        return []
+    empty = [index for index, line in enumerate(batch_lines, start=1) if not line]
+    if empty:
+        raise RuntimeError(f"inline TASK directive missing payload at line {empty[0]}")
+    from spice.tasks import ops
+
+    handles = ops.add_batch(batch_lines)
+    if handles:
+        log_handle.write("spice inline task created: " + " ".join(handles) + "\n")
+        log_handle.flush()
+    return handles
 
 
 def record_supervised_lane_metrics(repo_root: Path) -> None:
