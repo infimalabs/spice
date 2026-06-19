@@ -679,7 +679,14 @@ def test_static_empty_team_importer_renders_message_stream_choices():
     assert "agentAliases: teamImportAliases(target)," in app_shell
     assert "function toggleTeamImportOverlay(lane)" in app_shell
     assert "function syncTeamImportOverlay(lane)" in app_shell
-    assert "host.messagesEl.append(overlay);" in app_shell
+    assert "function positionTeamImportOverlay(host, overlay)" in app_shell
+    assert "positionTeamImportOverlay(host, overlay);" in app_shell
+    assert "host.element.append(overlay);" in app_shell
+    assert (
+        '    "--team-import-overlay-top",\n    host.messagesEl.offsetTop + "px",'
+        in (app_shell)
+    )
+    assert 'host.teamMenuButtonEl.setAttribute("aria-expanded", "true");' in (app_shell)
     assert "syncTeamImportOverlay(lane);" in app_stream
     assert "if (lane.emptyTeam) return;" in app_stream
     assert (

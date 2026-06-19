@@ -360,6 +360,7 @@ function toggleTeamImportOverlay(lane) {
 function openTeamImportOverlay(lane) {
   const host = laneGroupHost(lane);
   if (!host || host.emptyTeam) return;
+  closeLaneTeamMenusExcept(host);
   host.teamImportOverlayOpen = true;
   syncTeamImportOverlay(host);
 }
@@ -377,12 +378,29 @@ function syncTeamImportOverlay(lane) {
   if (!host.teamImportOverlayOpen) {
     host.teamImportOverlayEl?.remove();
     host.teamImportOverlayEl = null;
+    if (!host.element.querySelector(".lane-team-menu")) {
+      host.element.classList.remove("lane--team-menu-open");
+      host.teamMenuButtonEl.setAttribute("aria-expanded", "false");
+    }
+    syncLaneTeamMenuDismissHandler();
     return;
   }
   const overlay = teamImportPanel(host, { overlay: true });
+  positionTeamImportOverlay(host, overlay);
   host.teamImportOverlayEl?.remove();
   host.teamImportOverlayEl = overlay;
-  host.messagesEl.append(overlay);
+  host.element.append(overlay);
+  host.element.classList.add("lane--team-menu-open");
+  host.teamMenuButtonEl.setAttribute("aria-expanded", "true");
+  syncLaneTeamMenuDismissHandler();
+}
+
+function positionTeamImportOverlay(host, overlay) {
+  syncLanePaneMetrics(host);
+  overlay.style.setProperty(
+    "--team-import-overlay-top",
+    host.messagesEl.offsetTop + "px",
+  );
 }
 
 // The lane's transcript-stream state: known messages, cursors, render

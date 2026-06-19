@@ -463,7 +463,7 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     )
     assert 'label: "Close team",' in app_groups
     assert 'label: "Import agent",' in app_groups
-    assert 'detail: host.teamImportOverlayOpen ? "hide panel" : "cover messages",' in (
+    assert 'detail: host.teamImportOverlayOpen ? "close panel" : "choose agent",' in (
         app_groups
     )
     assert 'label: "Split into individuals",' in app_groups
@@ -471,6 +471,11 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert "if (host.emptyTeam) return [closeTeamMenuAction(host)];" in app_groups
     assert 'detail: host.emptyTeam\n      ? "empty"' in app_groups
     assert "onClick: () => toggleTeamImportOverlay(host)," in app_groups
+    assert "if (host.teamImportOverlayOpen) {\n    closeTeamImportOverlay(host);" in (
+        app_groups
+    )
+    assert "if (host.teamImportOverlayEl?.contains(target)) continue;" in app_groups
+    assert "closeTeamImportOverlay(host);" in app_groups
     close_team_index = app_groups.index('label: "Close team",')
     import_agent_index = app_groups.index('label: "Import agent",')
     split_individuals_index = app_groups.index('label: "Split into individuals",')
@@ -520,9 +525,13 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert "height: var(--lane-team-menu-height, 120px);" in empty_team_overlay_rule
     assert "inset: var(--lane-team-menu-top, 0px) 0 auto;" in empty_team_overlay_rule
     assert "position: absolute;" in team_import_overlay_rule
-    assert "top: 11px;" in team_import_overlay_rule
-    assert "bottom: 11px;" in team_import_overlay_rule
-    assert "z-index: 5;" in team_import_overlay_rule
+    assert "align-self: stretch;" in team_import_overlay_rule
+    assert "justify-self: stretch;" in team_import_overlay_rule
+    assert "top: var(--team-import-overlay-top, 0px);" in team_import_overlay_rule
+    assert "bottom: 0;" in team_import_overlay_rule
+    assert "left: 0;" in team_import_overlay_rule
+    assert "right: 0;" in team_import_overlay_rule
+    assert "z-index: 7;" in team_import_overlay_rule
     assert "grid-auto-rows: minmax(72px, 1fr);" in menu_rule
     assert "z-index: 6;" in menu_rule
     assert "align-items: center;" in action_rule
