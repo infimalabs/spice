@@ -200,8 +200,8 @@ def test_static_inline_task_directives_use_quote_like_accented_blocks():
     detail_rule = _between(css, ".task-directive-property dd {", "}")
     palette = _between(app_render, "const messageOccupantAccentPalette = [", "];")
 
-    assert '"var(--team-teal-accent)",' in palette.splitlines()[5]
-    assert "--quote-accent: var(--team-teal-accent);" in quote_rule
+    assert '"var(--team-plum-accent)",' in palette.splitlines()[6]
+    assert "--quote-accent: var(--team-plum-accent);" in quote_rule
     assert "background: color-mix(in srgb, var(--quote-accent) 7%, transparent);" in (
         quote_rule
     )
