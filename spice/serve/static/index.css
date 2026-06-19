@@ -224,9 +224,26 @@ button.primary:hover {
 }
 .lane--shadowed { display: none; }
 .lane--dragging {
-  box-shadow: 0 16px 34px color-mix(in srgb, #000 22%, transparent);
-  opacity: 0.94;
-  transform: translateY(-3px);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  border-style: dashed;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+  cursor: grabbing;
+}
+.lane--dragging > * {
+  visibility: hidden;
+}
+.lane-drag-ghost {
+  box-shadow: 0 18px 42px color-mix(in srgb, #000 32%, transparent);
+  cursor: grabbing;
+  left: 0;
+  max-height: calc(100vh - 20px);
+  opacity: 0.98;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  transform-origin: top left;
+  z-index: 80;
 }
 .lane--composer-drop {
   outline: 2px solid color-mix(in srgb, var(--accent) 82%, transparent);

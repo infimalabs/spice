@@ -1017,6 +1017,9 @@ function wireLaneDrag(lane) {
       dropSide: null,
       pointerCleanup: null,
       pointerCaptureFailed: false,
+      dragGhost: null,
+      ghostOffsetX: event.clientX - lane.element.getBoundingClientRect().left,
+      ghostOffsetY: event.clientY - lane.element.getBoundingClientRect().top,
     };
     laneDragState.pointerCleanup = wireLaneDragPointerDocumentEvents();
     try {
@@ -1070,7 +1073,9 @@ function updateLaneDragFromEvent(event) {
       return;
     state.dragging = true;
     state.lane.element.classList.add("lane--dragging");
+    ensureLaneDragGhost(state);
   }
+  updateLaneDragGhost(state, event.clientX, event.clientY);
   updateLaneDragTarget(state, event.clientX, event.clientY);
   event.preventDefault();
 }
@@ -1151,6 +1156,29 @@ function finishLaneDrag(state, clientX, clientY) {
   });
 }
 
+function ensureLaneDragGhost(state) {
+  if (state.dragGhost) return;
+  const source = state.lane.element;
+  const rect = source.getBoundingClientRect();
+  const ghost = source.cloneNode(true);
+  ghost.classList.remove("lane--dragging");
+  ghost.classList.add("lane-drag-ghost");
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.style.width = Math.max(1, Math.round(rect.width)) + "px";
+  ghost.style.height = Math.max(1, Math.round(rect.height)) + "px";
+  for (const element of ghost.querySelectorAll("textarea, button, a"))
+    element.setAttribute("tabindex", "-1");
+  document.body.append(ghost);
+  state.dragGhost = ghost;
+}
+
+function updateLaneDragGhost(state, clientX, clientY) {
+  if (!state.dragGhost) return;
+  const left = Math.round(clientX - state.ghostOffsetX);
+  const top = Math.round(clientY - state.ghostOffsetY);
+  state.dragGhost.style.transform = "translate(" + left + "px, " + top + "px)";
+}
+
 function clearLaneDrag(state) {
   if (!state) return;
   state.pointerCleanup?.();
@@ -1163,6 +1191,7 @@ function clearLaneDrag(state) {
       state.pointerCaptureFailed = true;
     }
   }
+  state.dragGhost?.remove();
   state.lane.element.classList.remove("lane--dragging");
   clearLaneFuseHighlights();
   laneDragState = null;

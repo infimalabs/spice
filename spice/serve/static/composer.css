@@ -98,7 +98,14 @@
 .composer-shard--composer-drop-left::before { left: -5px; }
 .composer-shard--composer-drop-right::after { right: -5px; }
 .composer-shard--dragging {
-  opacity: 0.46;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+  outline: 1px dashed color-mix(in srgb, var(--accent) 58%, var(--border));
+  outline-offset: -1px;
+}
+.composer-shard--dragging > * {
+  visibility: hidden;
 }
 .composer-shard--drag-ghost {
   box-shadow: 0 18px 42px color-mix(in srgb, #000 32%, transparent);
@@ -140,8 +147,13 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
 }
 .composer-band--dragging {
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  border-style: dashed;
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 34%, transparent);
-  opacity: 0.62;
+}
+.composer-band--dragging > * {
+  visibility: hidden;
 }
 .composer-band--drag-ghost {
   box-shadow: 0 18px 42px color-mix(in srgb, #000 32%, transparent);
