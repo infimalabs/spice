@@ -365,13 +365,19 @@ function spiceMenuTeamDetail(group) {
 
 function setFastModeEnabled(enabled) {
   fastModeEnabled = Boolean(enabled);
+  persistFastModeEnabled(fastModeEnabled);
+  syncFastModeButtonState();
+  renderSpiceMenu();
+  configureLiveBusLanes();
+  setGlobalTransientStatus(fastModeEnabled ? "fast mode on" : "fast mode off");
+}
+
+function syncFastModeButtonState() {
+  if (typeof openLaneButton === "undefined" || !openLaneButton) return;
   openLaneButton.classList.toggle("spice-menu-button--fast", fastModeEnabled);
   openLaneButton.title = fastModeEnabled
     ? serveBrandMenuTitle() + " - fast mode on"
     : serveBrandMenuTitle();
-  renderSpiceMenu();
-  configureLiveBusLanes();
-  setGlobalTransientStatus(fastModeEnabled ? "fast mode on" : "fast mode off");
 }
 
 function defaultTeamConfig() {

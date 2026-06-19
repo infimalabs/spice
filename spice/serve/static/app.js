@@ -31,6 +31,7 @@ const liveBusReconnectBaseMs = 500;
 const liveBusReconnectMaxMs = 10 * 1000;
 const relativeTimeTickMs = 1000;
 const laneStorageKey = "spice.serve.laneConfigs";
+const fastModeStorageKey = "spice.serve.fastMode";
 const speechModes = ["quiet", "speak", "narrate"];
 const defaultSpeechMode = "speak";
 const maximPriority = "maxim";
@@ -84,7 +85,7 @@ let spiceMenuDragTargetId = "";
 let spiceMenuTargetDragState = null;
 let spiceMenuRenderPending = false;
 let spiceMenuNewTeamPlacementHints = [];
-let fastModeEnabled = false;
+let fastModeEnabled = storedFastModeEnabled();
 let teamSnapshotRevision = 0;
 let sessionOpenTargetIds = new Set();
 
@@ -119,6 +120,17 @@ function browserStorage() {
   }
 }
 
+function storedFastModeEnabled() {
+  const storage = browserStorage();
+  return storage ? storage.getItem(fastModeStorageKey) === "true" : false;
+}
+
+function persistFastModeEnabled(enabled) {
+  const storage = browserStorage();
+  if (!storage) return;
+  storage.setItem(fastModeStorageKey, enabled ? "true" : "false");
+}
+
 async function init() {
   await connectLiveBus();
   await refreshServerTopology();
@@ -141,5 +153,7 @@ openLaneButton.addEventListener("click", (event) => {
   event.preventDefault();
   toggleSpiceMenu();
 });
+
+if (typeof syncFastModeButtonState === "function") syncFastModeButtonState();
 
 init().catch((error) => setGlobalTransientStatus(String(error)));
