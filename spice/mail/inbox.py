@@ -48,8 +48,8 @@ INBOX_ACK_REMINDER_SECONDS = 15
 INBOX_ACK_ESCALATED_SECONDS = 60
 INBOX_ACK_OVERDUE_SECONDS = 5 * 60
 INBOX_TASK_HINT_ROW = (
-    "Task offload: decide now whether this steering needs a task; if "
-    "scope/tracking changed, add one before resuming work."
+    "Task offload: capture in the moment; if the operator asks for a task "
+    "or scope/tracking changed, add one before resuming work."
 )
 INBOX_PEEK_PERSISTENCE_ROW = (
     "Persistence: redisplays after 15s until ACKed; bare reads never clear."

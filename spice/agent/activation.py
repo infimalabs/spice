@@ -69,6 +69,13 @@ def activation_command_surface_lines() -> list[str]:
             "explicit-direction work; manual task claims are exceptional and "
             "usually require explicit operator direction"
         ),
+        (
+            "task_capture_contract=operator requests to create or capture tasks "
+            "are captured immediately with spice task add before continuing "
+            "other work; immediate task capture is not allocator selection, so "
+            "do not claim or switch tasks unless spice task next assigns it or "
+            "live steering explicitly says to"
+        ),
         "task_show=spice task show <handle>",
         "tasks=spice task list",
         'task_done=spice task done <handle> --validation "..."',

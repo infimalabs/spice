@@ -806,7 +806,8 @@ def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
     # command never looks empty while steering waits.
     assert output.count("operator steering") == 2
     assert output.count("recently shown") == 1
-    assert "Task offload: decide now whether this steering needs a task" in output
+    assert "Task offload: capture in the moment" in output
+    assert "operator asks for a task" in output
 
 
 def test_inbox_injector_suppresses_task_offload_for_maxim_guidance(tmp_path):
@@ -832,7 +833,7 @@ def test_inbox_injector_suppresses_task_offload_for_maxim_guidance(tmp_path):
     output = stderr.getvalue()
     assert "priority=maxim" in output
     assert "No separate task is needed for the maxim itself." in output
-    assert "Task offload: decide now whether this steering needs a task" not in output
+    assert "Task offload: capture in the moment" not in output
 
 
 def test_context_meter_injector_repeats_warning_after_interval(tmp_path):

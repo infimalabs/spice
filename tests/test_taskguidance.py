@@ -25,6 +25,11 @@ STEER_EXPLICIT_DIRECTION = (
 STEER_MANUAL_CLAIM = (
     "manual task claims are exceptional and usually require explicit operator direction"
 )
+TASK_CAPTURE_IMMEDIATE = (
+    "capture operator task-creation requests immediately with spice task add before "
+    "continuing other work"
+)
+TASK_CAPTURE_NOT_ALLOCATOR = "immediate task capture is not allocator selection"
 
 
 @pytest.fixture
@@ -102,11 +107,15 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert KEEP_DRAINING not in done_output
     assert "next: review assignment pending" in done_output
     assert STEER_EXPLICIT_DIRECTION in done_output
+    assert TASK_CAPTURE_IMMEDIATE in done_output
+    assert TASK_CAPTURE_NOT_ALLOCATOR in done_output
     assert STEER_MANUAL_CLAIM in done_output
     assert "self-review only if next assigns it" in done_output
     shown = render.render_show(handle)
     assert "YOU ARE NOT DONE" not in shown
     assert STEER_EXPLICIT_DIRECTION in shown
+    assert TASK_CAPTURE_IMMEDIATE in shown
+    assert TASK_CAPTURE_NOT_ALLOCATOR in shown
     assert STEER_MANUAL_CLAIM in shown
 
     assigned = ops.next_task()
@@ -118,6 +127,8 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert KEEP_DRAINING not in review_output
     assert "next: phase boundary reached" in review_output
     assert STEER_EXPLICIT_DIRECTION in review_output
+    assert TASK_CAPTURE_IMMEDIATE in review_output
+    assert TASK_CAPTURE_NOT_ALLOCATOR in review_output
     assert STEER_MANUAL_CLAIM in review_output
 
 

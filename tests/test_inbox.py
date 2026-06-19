@@ -190,7 +190,8 @@ def test_inbox_payload_rows_prompt_immediate_task_offload(tmp_path):
     rows = inbox_payload_rows(collect_inbox_items(str(tmp_path)))
 
     assert INBOX_TASK_HINT_ROW in rows
-    assert "decide now" in INBOX_TASK_HINT_ROW
+    assert "capture in the moment" in INBOX_TASK_HINT_ROW
+    assert "operator asks for a task" in INBOX_TASK_HINT_ROW
     assert "scope/tracking changed" in INBOX_TASK_HINT_ROW
     assert "before resuming work" in INBOX_TASK_HINT_ROW
 
