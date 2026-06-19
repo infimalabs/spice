@@ -336,27 +336,32 @@
   --message-badge-accent: var(--accent-strong);
   align-items: center;
   background: var(--message-badge-accent);
-  border: 1px solid color-mix(in srgb, var(--message-badge-accent) 62%, var(--message-badge-surface));
+  border: 1px solid color-mix(in srgb, var(--message-badge-accent) 42%, var(--message-badge-surface));
   border-radius: var(--pill-radius);
   color: var(--button-accent-fg);
   display: inline-flex;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  gap: 5px;
-  padding: 2px 5px 2px 8px;
+  gap: 4px;
+  padding: 2px 6px;
   text-transform: uppercase;
   white-space: nowrap;
 }
-.badge-label { line-height: 1.15; }
+.badge-label { line-height: 16px; }
 .badge-count {
+  align-items: center;
   background: var(--message-badge-surface);
-  border: 1px solid color-mix(in srgb, var(--message-badge-accent) 36%, var(--message-badge-surface));
+  border: 0;
   border-radius: var(--pill-radius);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--message-badge-accent) 24%, transparent);
   color: var(--message-badge-accent);
+  display: inline-flex;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 9px;
-  font-weight: 700;
+  height: 16px;
+  justify-content: center;
   line-height: 12px;
+  min-width: 16px;
   padding: 0 5px;
 }
 .message-footer .icon-button {
@@ -381,7 +386,6 @@
 .badge.task-badge { --message-badge-accent: var(--team-plum-accent); }
 .badge.maxim-badge {
   --message-badge-accent: var(--maxim-accent);
-  font-weight: 700;
 }
 .compaction-divider {
   align-items: center;
