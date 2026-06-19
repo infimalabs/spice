@@ -354,6 +354,27 @@ def test_briefing_reports_deadlettered_inbox_items(tmp_path, monkeypatch):
     assert "deadlettered_inbox key=20260101T000000000001Z" in briefing
 
 
+def test_briefing_pending_inbox_ack_guidance_uses_open_response_copy(
+    tmp_path, monkeypatch
+):
+    repo = _init_git_repo(tmp_path / "repo")
+    write_inbox_item(
+        repo,
+        "20260101T000000000002Z.txt",
+        compose_inbox_text(body="operator steering", priority=None, stop=False),
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing([], max_lines=200, max_bytes=20000)
+
+    assert "Inbox\n  pending=1" in briefing
+    assert (
+        "ACK by assistant message: "
+        "ACK <key> [<key> ...]: <what changed or was captured>"
+    ) in briefing
+    assert "understood" not in briefing
+
+
 def test_agent_requeue_deadletter_command_restores_pending_item(
     tmp_path, monkeypatch, capsys
 ):
