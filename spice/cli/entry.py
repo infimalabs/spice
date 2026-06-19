@@ -44,6 +44,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dispatch(argv: list[str]) -> int:
+    if argv[:2] == ["agent", "run"]:
+        from spice.agent.wrap import run_agent_command
+
+        return run_agent_command(repo_root_from_cwd(), argv[2:])
+
     if argv and not argv[0].startswith("-"):
         from spice.cli.mounts import find_mounted_command, run_mounted_command
 
