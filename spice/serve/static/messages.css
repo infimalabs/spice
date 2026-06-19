@@ -306,11 +306,15 @@
   white-space: nowrap;
 }
 .message-agent-name:disabled { cursor: default; }
-.badges { display: inline-flex; gap: 4px; }
+.badges {
+  --message-badge-accent: var(--message-occupant-accent, var(--accent));
+  display: inline-flex;
+  gap: 4px;
+}
 .badge {
-  border: 1px solid var(--accent);
+  border: 1px solid color-mix(in srgb, var(--message-badge-accent) 58%, var(--border));
   border-radius: var(--pill-radius);
-  color: var(--accent-strong);
+  color: color-mix(in srgb, var(--message-badge-accent) 82%, var(--fg));
   font-size: 12px;
   padding: 2px 8px;
   text-transform: uppercase;
