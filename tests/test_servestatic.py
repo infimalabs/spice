@@ -17,6 +17,11 @@ def _serve_css_text() -> str:
     )
 
 
+def _between(text: str, start: str, end: str) -> str:
+    start_index = text.index(start)
+    return text[start_index : text.index(end, start_index)]
+
+
 def _shell_and_composer_text() -> str:
     return "\n".join(
         (STATIC_ROOT / filename).read_text(encoding="utf-8")
@@ -437,10 +442,8 @@ def test_static_quote_close_control_keeps_composer_menu_actions_polished():
 
 
 def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
-    css = _serve_css_text()
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
-    messages_css = (STATIC_ROOT / "messages.css").read_text(encoding="utf-8")
 
     assert 'data-lane-team-menu title="Team actions"' in app_shell
     assert "function toggleLaneTeamMenu(lane, event = null)" in app_groups
@@ -485,40 +488,40 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert import_agent_index < split_individuals_index
     assert split_individuals_index < restore_previous_index
     assert 'teamCommandPayload("splitTeamBack", {' in app_groups
-    lane_start = css.index(".lane {")
-    lane_end = css.index(".lane--shadowed", lane_start)
-    lane_rule = css[lane_start:lane_end]
-    view_stack_start = css.index(".lane-view-stack {")
-    view_stack_end = css.index(".lane-view-stack--collapsed", view_stack_start)
-    view_stack_rule = css[view_stack_start:view_stack_end]
-    messages_start = messages_css.index(".messages {")
-    messages_end = messages_css.index(".messages article", messages_start)
-    messages_rule = messages_css[messages_start:messages_end]
-    menu_start = css.index(".lane-team-menu {")
-    menu_end = css.index(".lane-team-menu--empty-team-overlay {", menu_start)
-    menu_rule = css[menu_start:menu_end]
-    menu_override_start = css.index(".lane-team-menu.spice-menu-actions {")
-    menu_override_rule = css[menu_override_start : css.index("}", menu_override_start)]
-    empty_team_overlay_start = css.index(".lane-team-menu--empty-team-overlay {")
-    empty_team_overlay_end = css.index(
-        ".lane-team-menu .lane-team-menu-action {", empty_team_overlay_start
+
+
+def test_static_lane_team_menu_keeps_large_tiles_and_centered_detail():
+    css = _serve_css_text()
+    messages_css = (STATIC_ROOT / "messages.css").read_text(encoding="utf-8")
+
+    lane_rule = _between(css, ".lane {", ".lane--shadowed")
+    view_stack_rule = _between(css, ".lane-view-stack {", ".lane-view-stack--collapsed")
+    messages_rule = _between(messages_css, ".messages {", ".messages article")
+    menu_rule = _between(
+        css, ".lane-team-menu {", ".lane-team-menu--empty-team-overlay {"
     )
-    empty_team_overlay_rule = css[empty_team_overlay_start:empty_team_overlay_end]
-    action_start = css.index(".lane-team-menu .lane-team-menu-action {")
-    action_end = css.index(
+    menu_override_rule = _between(
+        css,
+        ".lane-team-menu.spice-menu-actions {",
+        "}",
+    )
+    empty_team_overlay_rule = _between(
+        css,
+        ".lane-team-menu--empty-team-overlay {",
+        ".lane-team-menu .lane-team-menu-action {",
+    )
+    action_rule = _between(
+        css,
+        ".lane-team-menu .lane-team-menu-action {",
         ".lane-team-menu .lane-team-menu-action .spice-menu-action-label",
-        action_start,
     )
-    action_rule = css[action_start:action_end]
-    text_start = css.index(
-        ".lane-team-menu .lane-team-menu-action .spice-menu-action-label"
+    text_rule = _between(
+        css,
+        ".lane-team-menu .lane-team-menu-action .spice-menu-action-label",
+        ".lane-team-menu-action:disabled",
     )
-    text_end = css.index(".lane-team-menu-action:disabled", text_start)
-    text_rule = css[text_start:text_end]
-    team_import_overlay_start = css.index(".team-import-overlay {")
-    team_import_overlay_rule = css[
-        team_import_overlay_start : css.index("}", team_import_overlay_start)
-    ]
+    team_import_overlay_rule = _between(css, ".team-import-overlay {", "}")
+
     assert "position: relative;" in lane_rule
     assert "position: relative;" in view_stack_rule
     assert "position: relative;" in messages_rule
@@ -552,9 +555,12 @@ def test_static_lane_team_menu_exposes_close_split_and_restore_actions():
     assert "overflow-wrap: anywhere;" in text_rule
     assert "font-size: clamp(12px, 7cqi, 16px);" in text_rule
     assert "font-size: clamp(10px, 5.25cqi, 13px);" in text_rule
+    assert "margin-left: 0;" in text_rule
+    assert "text-align: center;" in text_rule
     assert "text-wrap: balance;" in text_rule
     assert "text-wrap: pretty;" in text_rule
     assert "white-space: normal;" in text_rule
+    assert "width: 100%;" in text_rule
 
 
 def test_static_composer_header_drag_suppresses_browser_selection():
