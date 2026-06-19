@@ -835,8 +835,11 @@ def next_task_drain_line(
     if not contract.drain_after_phase_boundary:
         tail = (
             "run spice task next only when explicitly directed to continue "
-            "allocator work; manual task claims are exceptional and usually "
-            "require explicit operator direction"
+            "allocator work; capture operator task-creation requests "
+            "immediately with spice task add before continuing other work; "
+            "immediate task capture is not allocator selection; manual task "
+            "claims are exceptional and usually require explicit operator "
+            "direction"
         )
         if review_assignment:
             return (
