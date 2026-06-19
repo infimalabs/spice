@@ -184,6 +184,37 @@ def test_static_message_footer_controls_stay_right_aligned_on_mobile():
     )
 
 
+def test_static_message_footer_actions_use_agent_accent_tint():
+    css = (STATIC_ROOT / "messages.css").read_text(encoding="utf-8")
+    footer_start = css.index(".message-footer {\n  --message-action-accent")
+    footer_rule = css[footer_start : css.index("}", footer_start)]
+    action_start = css.index(".message-footer .icon-button {")
+    action_rule = css[action_start : css.index("}", action_start)]
+    hover_start = css.index(".message-footer .icon-button:hover,")
+    hover_rule = css[hover_start : css.index("}", hover_start)]
+
+    assert (
+        "--message-action-accent: var(--message-occupant-accent, var(--muted));"
+        in footer_rule
+    )
+    assert (
+        "border-color: color-mix(in srgb, var(--message-action-accent) 38%, var(--border));"
+        in action_rule
+    )
+    assert (
+        "color: color-mix(in srgb, var(--message-action-accent) 72%, var(--muted));"
+        in action_rule
+    )
+    assert (
+        "border-color: color-mix(in srgb, var(--message-action-accent) 62%, var(--border));"
+        in hover_rule
+    )
+    assert (
+        "color: color-mix(in srgb, var(--message-action-accent) 86%, var(--fg));"
+        in hover_rule
+    )
+
+
 def test_static_cmd_enter_submits_focused_composer_target_only():
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
     app_shell = _shell_and_composer_text()

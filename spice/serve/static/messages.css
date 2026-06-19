@@ -271,6 +271,7 @@
   white-space: nowrap;
 }
 .message-footer {
+  --message-action-accent: var(--message-occupant-accent, var(--muted));
   align-items: center;
   color: var(--muted);
   display: flex;
@@ -316,12 +317,17 @@
   white-space: nowrap;
 }
 .message-footer .icon-button {
-  border-color: color-mix(in srgb, var(--border) 82%, transparent);
-  color: var(--muted);
+  border-color: color-mix(in srgb, var(--message-action-accent) 38%, var(--border));
+  color: color-mix(in srgb, var(--message-action-accent) 72%, var(--muted));
   flex-basis: 32px;
   font-size: 16px;
   height: 32px;
   width: 32px;
+}
+.message-footer .icon-button:hover,
+.message-footer .icon-button:focus-visible {
+  border-color: color-mix(in srgb, var(--message-action-accent) 62%, var(--border));
+  color: color-mix(in srgb, var(--message-action-accent) 86%, var(--fg));
 }
 .badge.final-badge { border-color: var(--final-accent); color: var(--final-accent); }
 .badge.maxim-badge {
