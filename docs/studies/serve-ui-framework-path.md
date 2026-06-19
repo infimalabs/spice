@@ -105,6 +105,14 @@ clean state seams.
 - Add a reusable Playwright harness for serve UI interaction checks.
 - Optional after those land: prototype one Lit island in a non-core panel.
 
+## Pilot Result
+
+The first Lit island prototype is recorded in
+`docs/studies/serve-ui-lit-island-prototype.md`. It keeps the metrics pane
+vanilla by default, adds an opt-in Lit custom element behind `?litMetrics=1`,
+and rejects broader adoption until spice has a local bundle/package-serving
+policy and a second eventful-panel pilot.
+
 ## Sources
 
 - Svelte describes itself as a compiler-based UI framework that outputs browser

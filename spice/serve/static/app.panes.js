@@ -576,44 +576,122 @@ function mutateLaneTaskFilters(lane, updateFilters) {
 
 // ---- metrics pane -------------------------------------------------------------------------
 
+let laneMetricsLitIslandPromise = null;
+let laneMetricsLitIslandRenderer = null;
+const laneMetricsLitIslandModulePath = "/static/app.metrics-lit.js";
+
 function renderLaneMetricsPane(lane) {
   if (!lane.metricsGridEl) return;
-  const metrics = lane.laneMetrics || {};
-  lane.metricsSummaryEl.textContent = lane.serverReachable ? "live" : "offline";
-  lane.metricsGridEl.replaceChildren(
-    laneMetricCell("drained", String(metrics.drained || 0)),
-    laneMetricCell("acked", String(metrics.acked || 0)),
-    laneMetricCell("sends", String(metrics.sends || 0)),
-    laneMetricCell("tool calls", String(metrics.toolCalls || 0)),
-    laneMetricCell("uptime", laneMetricDuration(metrics.uptimeSeconds || 0)),
-    laneMetricSparklineCell(metrics),
+  const model = laneMetricsRenderModel(lane);
+  lane.metricsSummaryEl.textContent = model.status;
+  if (laneMetricsLitIslandEnabled()) {
+    if (laneMetricsLitIslandRenderer) {
+      laneMetricsLitIslandRenderer(lane.metricsGridEl, model);
+      return;
+    }
+    renderLaneMetricsVanilla(lane.metricsGridEl, model);
+    loadLaneMetricsLitIsland().then(
+      (renderer) => {
+        if (!lane.metricsGridEl) return;
+        renderer(lane.metricsGridEl, laneMetricsRenderModel(lane));
+      },
+      (error) => reportLaneMetricsLitIslandError(error),
+    );
+    return;
+  }
+  renderLaneMetricsVanilla(lane.metricsGridEl, model);
+}
+
+function renderLaneMetricsVanilla(grid, model) {
+  const cells = model.cells.map((cell) => laneMetricCell(cell.label, cell.value));
+  grid.replaceChildren(
+    ...cells,
+    laneMetricSparklineCell(model),
   );
+}
+
+function laneMetricsRenderModel(lane) {
+  const metrics = lane.laneMetrics || {};
+  const sparkline = Array.isArray(metrics.sparkline)
+    ? metrics.sparkline.map((value) => Number(value) || 0)
+    : [];
+  return {
+    status: lane.serverReachable ? "live" : "offline",
+    cells: [
+      { label: "drained", value: String(metrics.drained || 0) },
+      { label: "acked", value: String(metrics.acked || 0) },
+      { label: "sends", value: String(metrics.sends || 0) },
+      { label: "tool calls", value: String(metrics.toolCalls || 0) },
+      { label: "uptime", value: laneMetricDuration(metrics.uptimeSeconds || 0) },
+    ],
+    sparkline,
+    activityTotal: sparkline.reduce((sum, value) => sum + value, 0),
+  };
+}
+
+function laneMetricsLitIslandEnabled() {
+  if (typeof window === "undefined") return false;
+  if (/** @type {any} */ (window).__spiceForceLitMetricsIsland === true)
+    return true;
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    if (params.get("litMetrics") === "1") return true;
+  } catch (error) {
+    // Fall through to storage; malformed synthetic locations should not break metrics.
+  }
+  const storage = browserStorage();
+  return storage ? storage.getItem("spice.serve.litMetrics") === "1" : false;
+}
+
+function loadLaneMetricsLitIsland() {
+  if (laneMetricsLitIslandPromise) return laneMetricsLitIslandPromise;
+  const loader =
+    /** @type {any} */ (window).__spiceLitMetricsModuleLoader ||
+    (() => import(laneMetricsLitIslandModulePath));
+  laneMetricsLitIslandPromise = Promise.resolve()
+    .then(() => loader())
+    .then((module) => {
+      const renderer = module && module.renderLaneMetricsLitIsland;
+      if (typeof renderer !== "function")
+        throw new Error("Lit metrics island did not export a renderer");
+      laneMetricsLitIslandRenderer = renderer;
+      return renderer;
+    });
+  return laneMetricsLitIslandPromise;
+}
+
+function reportLaneMetricsLitIslandError(error) {
+  const status = /** @type {any} */ (window).setGlobalTransientStatus;
+  if (typeof status === "function")
+    status("Lit metrics island failed: " + String(error));
+  throw error;
 }
 
 function laneMetricCell(label, value) {
   const cell = document.createElement("span");
   cell.className = "lane-metric-cell";
-  cell.innerHTML =
-    '<span class="lane-metric-value"></span><span class="lane-metric-label"></span>';
-  cell.querySelector(".lane-metric-value").textContent = value;
-  cell.querySelector(".lane-metric-label").textContent = label;
+  const valueEl = document.createElement("span");
+  valueEl.className = "lane-metric-value";
+  valueEl.textContent = value;
+  const labelEl = document.createElement("span");
+  labelEl.className = "lane-metric-label";
+  labelEl.textContent = label;
+  cell.append(valueEl, labelEl);
   return cell;
 }
 
-function laneMetricSparklineCell(metrics) {
-  const sparkline = Array.isArray(metrics.sparkline) ? metrics.sparkline : [];
-  const total = sparkline.reduce((sum, value) => sum + (Number(value) || 0), 0);
-  const cell = laneMetricCell("activity", total + " messages");
+function laneMetricSparklineCell(model) {
+  const cell = laneMetricCell("activity", model.activityTotal + " messages");
   cell.classList.add("lane-metric-cell--wide");
   const wrap = document.createElement("div");
   wrap.className = "lane-metric-sparkline";
-  const max = Math.max(1, ...sparkline.map((value) => Number(value) || 0));
-  for (const value of sparkline) {
+  const max = Math.max(1, ...model.sparkline);
+  for (const value of model.sparkline) {
     const bar = document.createElement("span");
     bar.className = "lane-metric-sparkline-bar";
     bar.style.setProperty(
       "--lane-metric-sparkline-level",
-      String(Math.max(1, Math.ceil(((Number(value) || 0) / max) * 8))),
+      String(Math.max(1, Math.ceil((value / max) * 8))),
     );
     wrap.append(bar);
   }
