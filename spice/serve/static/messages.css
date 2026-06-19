@@ -321,7 +321,7 @@
   white-space: nowrap;
 }
 .message-footer .icon-button {
-  border-color: color-mix(in srgb, var(--message-action-accent) 38%, var(--border));
+  border-color: color-mix(in srgb, var(--message-action-accent) 24%, var(--control-border-soft));
   color: var(--muted);
   flex-basis: 32px;
   font-size: 16px;
@@ -330,12 +330,12 @@
 }
 .message-footer .icon-button:hover,
 .message-footer .icon-button:focus-visible {
-  border-color: color-mix(in srgb, var(--message-action-accent) 62%, var(--border));
+  border-color: color-mix(in srgb, var(--message-action-accent) 42%, var(--control-border-soft-hover));
   color: var(--fg);
 }
 .message-footer .speech-button--playing,
 .message-footer .icon-button.icon-button--active {
-  border-color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 48%, var(--control-border-soft-hover));
   color: var(--fg);
 }
 .badge.final-badge { border-color: var(--final-accent); color: var(--final-accent); }
