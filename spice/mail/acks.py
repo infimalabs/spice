@@ -390,14 +390,7 @@ def _task_batch_line_from_directive(line: str) -> str | None:
         _TASK_DIRECTIVE_SEPARATOR_CHARS
     ):
         return None
-    if len(stripped) == token_end:
-        return ""
-    cursor = token_end
-    while cursor < len(stripped) and stripped[cursor] in (
-        _TASK_DIRECTIVE_SEPARATOR_CHARS
-    ):
-        cursor += 1
-    return stripped[cursor:].strip()
+    return stripped
 
 
 def iter_assistant_ack_keys(

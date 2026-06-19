@@ -26,8 +26,9 @@ STEER_MANUAL_CLAIM = (
     "manual task claims are exceptional and usually require explicit operator direction"
 )
 TASK_CAPTURE_IMMEDIATE = (
-    "capture operator task-creation requests immediately with spice task add before "
-    "continuing other work"
+    "capture operator task-creation requests immediately with TASK title=... | "
+    "project=<stem.child> | acceptance=... in an ACK or standalone assistant "
+    "message using the same task-add batch format"
 )
 TASK_CAPTURE_NOT_ALLOCATOR = "immediate task capture is not allocator selection"
 

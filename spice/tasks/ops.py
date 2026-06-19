@@ -19,6 +19,8 @@ from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
 from spice.tasks import config, gitsync, identity, tw
 
 TASK_TITLE_LIMIT = COMMIT_MESSAGE_WRAP_LIMIT
+TASK_BATCH_DIRECTIVE_TOKEN = "TASK"
+TASK_BATCH_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
 
 
 @dataclass(frozen=True)
@@ -390,6 +392,7 @@ def _parse_add_batch_request(
     Dependencies are resolved here (in the validate pass) so a bad `after`
     rejects the whole batch instead of creating earlier lines first.
     """
+    raw = _strip_task_batch_directive(raw)
     fields: dict[str, str] = {}
     errors: list[str] = []
     for part in raw.split("|"):
@@ -448,6 +451,23 @@ def _parse_add_batch_request(
 
 def _batch_csv(raw: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _strip_task_batch_directive(raw: str) -> str:
+    stripped = raw.strip()
+    token_end = len(TASK_BATCH_DIRECTIVE_TOKEN)
+    if not stripped.startswith(TASK_BATCH_DIRECTIVE_TOKEN):
+        return raw
+    if len(stripped) > token_end and stripped[token_end] not in (
+        TASK_BATCH_DIRECTIVE_SEPARATOR_CHARS
+    ):
+        return raw
+    cursor = token_end
+    while cursor < len(stripped) and stripped[cursor] in (
+        TASK_BATCH_DIRECTIVE_SEPARATOR_CHARS
+    ):
+        cursor += 1
+    return stripped[cursor:].strip()
 
 
 def parse_add_batch(lines: Sequence[str]) -> list[TaskAddBatchRequest]:
@@ -878,10 +898,12 @@ def next_task_drain_line(
         tail = (
             "run spice task next only when explicitly directed to continue "
             "allocator work; capture operator task-creation requests "
-            "immediately with spice task add before continuing other work; "
-            "immediate task capture is not allocator selection; manual task "
-            "claims are exceptional and usually require explicit operator "
-            "direction"
+            "immediately with TASK title=... | project=<stem.child> | "
+            "acceptance=... in an ACK or standalone assistant message using "
+            "the same task-add batch format, or spice task add before "
+            "continuing other work; immediate task capture is not allocator "
+            "selection; manual task claims are exceptional and usually "
+            "require explicit operator direction"
         )
         if review_assignment:
             return (

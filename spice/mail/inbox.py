@@ -43,7 +43,7 @@ _PREVIEW_ELLIPSIS_CHARS = 3
 SECONDS_PER_MINUTE = 60
 INBOX_MAX_ITEM_AGE_SECONDS = 24 * 60 * 60
 INBOX_DIRECT_STEERING_ROW = "Direct operator steering: read before planning."
-INBOX_STEERING_ROW = "Inbox steering: read before planning; archive only after ACK."
+INBOX_STEERING_ROW = "Inbox steering: read before planning; retire only after ACK."
 INBOX_RESPONSE_ROW = (
     "ACK by assistant message: ACK <key> [<key> ...]: <what changed or was captured>"
 )
@@ -51,8 +51,10 @@ INBOX_ACK_REMINDER_SECONDS = 15
 INBOX_ACK_ESCALATED_SECONDS = 60
 INBOX_ACK_OVERDUE_SECONDS = 5 * 60
 INBOX_TASK_HINT_ROW = (
-    "Task offload: capture in the moment; if the operator asks for a task "
-    "or scope/tracking changed, add one before resuming work."
+    "Task offload: capture in the moment with "
+    "`TASK title=... | project=<stem.child> | acceptance=...` in an ACK or "
+    "standalone assistant message using the same task-add batch format, or use "
+    "spice task add; then resume allocator flow."
 )
 INBOX_PEEK_PERSISTENCE_ROW = (
     "Persistence: redisplays after 15s until ACKed; bare reads never clear."

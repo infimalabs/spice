@@ -108,8 +108,8 @@ def test_task_directives_are_extracted_from_any_message_line():
     preamble, segments = split_ack_message(text)
 
     assert extract_task_batch_lines_from_text(text) == [
-        "title=Standalone | project=task.unit | acceptance=Outside ACK",
-        "title=Captured | project=task.unit | acceptance=Inside ACK",
+        "TASK title=Standalone | project=task.unit | acceptance=Outside ACK",
+        "TASK: title=Captured | project=task.unit | acceptance=Inside ACK",
     ]
     assert preamble == ""
     assert segments[0].content == "captured."
@@ -121,7 +121,7 @@ def test_standalone_task_directive_is_stripped_from_display_text():
     preamble, segments = split_ack_message(text)
 
     assert extract_task_batch_lines_from_text(text) == [
-        "title=Standalone | project=task.unit | acceptance=Tracked"
+        "TASK title=Standalone | project=task.unit | acceptance=Tracked"
     ]
     assert preamble == "Done."
     assert segments == []
