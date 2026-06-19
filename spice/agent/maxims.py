@@ -52,9 +52,9 @@ class MaximBag:
 
 
 # Built-in maxims keyed by a stable bag name. Bags declare every supported
-# spelling explicitly; the hot path only tokenizes prose and intersects
-# observed words with the registered key set. Each message is fed verbatim into
-# a verdict, e.g. ``spice maxim agree "$(spice maxim show fallback)" "<text>"``.
+# spelling explicitly; the hot path tokenizes prose and matches whole trigger
+# keys. Each message is fed verbatim into a verdict, e.g. ``spice maxim agree
+# "$(spice maxim show fallback)" "<text>"``.
 BUILTIN_MAXIM_BAGS: dict[str, MaximBag] = {
     "polling": MaximBag(
         name="polling",
@@ -82,7 +82,9 @@ BUILTIN_MAXIM_BAGS: dict[str, MaximBag] = {
     ),
     "fallbacks": MaximBag(
         name="fallbacks",
-        words=frozenset({"fallback", "fallbacks", "option", "optional", "options"}),
+        words=frozenset(
+            {"fallback", "fallbacks", "falls back", "option", "optional", "options"}
+        ),
         message=(
             "DO NOT hide uncertainty behind quiet defensive secondary paths; "
             "intentional defaults and explicit resolver order are fine when the "
@@ -149,18 +151,17 @@ BUILTIN_MAXIMS: dict[frozenset[str], str] = {
 def _flatten_bag_keys(bags: Mapping[str, MaximBag]) -> dict[str, str]:
     lookup: dict[str, str] = {}
     for name, bag in bags.items():
-        for word in bag.words:
-            owner = lookup.setdefault(word, name)
+        for key in bag.words:
+            owner = lookup.setdefault(key, name)
             if owner != name:
                 raise SpiceError(
-                    f"maxim trigger word {word!r} appears in both "
-                    f"{owner!r} and {name!r}"
+                    f"maxim trigger key {key!r} appears in both {owner!r} and {name!r}"
                 )
     return lookup
 
 
 _WORD_REGEX = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]+(?![A-Za-z0-9_])")
-_MAXIM_WORD_RE = re.compile(r"^[a-z]+$")
+_MAXIM_KEY_RE = re.compile(r"^[a-z]+(?: [a-z]+)*$")
 
 
 def resolved_maxim_bags(repo_root: Path | None = None) -> dict[str, MaximBag]:
@@ -199,16 +200,26 @@ def _configured_words(
         return base.words
     words = []
     for word in string_list(raw_config.get("words")):
-        normalized = word.casefold()
-        if not _MAXIM_WORD_RE.fullmatch(normalized):
+        normalized = _normalize_trigger_key(word)
+        if not _MAXIM_KEY_RE.fullmatch(normalized):
             raise SpiceError(
-                f"[tool.spice.maxims.{name}] words must be alphabetic; got {word!r}"
+                f"[tool.spice.maxims.{name}] words must be alphabetic phrases; "
+                f"got {word!r}"
             )
         if normalized not in words:
             words.append(normalized)
     if not words:
         raise SpiceError(f"[tool.spice.maxims.{name}] words must be non-empty")
     return frozenset(words)
+
+
+def _normalize_trigger_key(raw: Any) -> str:
+    return " ".join(str(raw or "").casefold().split())
+
+
+def _normalize_trigger_selector(raw: str) -> str:
+    normalized = _normalize_trigger_key(raw)
+    return normalized if _MAXIM_KEY_RE.fullmatch(normalized) else raw.strip().casefold()
 
 
 def _configured_message(
@@ -426,7 +437,7 @@ def configured_maxim(name: str, *, repo_root: Path | None = None) -> str:
     bag = bags.get(selector)
     if bag is not None:
         return bag.message
-    bag_name = key_to_name.get(selector)
+    bag_name = key_to_name.get(_normalize_trigger_selector(name))
     if bag_name is None:
         known = ", ".join(maxim_names(repo_root))
         raise SpiceError(f"unknown maxim {name!r}; configured maxims are: {known}")
@@ -448,18 +459,36 @@ def triggered_maxims(
 ) -> list[MaximBag]:
     """Return matched maxim bags, in declared order.
 
-    The scan tokenizes the prose once, then intersects the observed whole
-    words with the explicitly registered key set. Variation support belongs
-    in the maxim's frozenset bag, not in match-time word mutation.
+    The scan tokenizes prose into alphabetic words, then matches explicitly
+    registered single-word or phrase keys. Variation support belongs in the
+    maxim's frozenset bag, not in match-time word mutation.
     """
     bags, key_to_name, bag_order = _resolved_lookup(repo_root)
-    words = {
-        match.group(0).casefold()
-        for statement in statements
-        for match in _WORD_REGEX.finditer(statement)
-    }
-    seen = {key_to_name[key] for key in words & set(key_to_name)}
+    seen: set[str] = set()
+    trigger_parts = {key: tuple(key.split()) for key in key_to_name}
+    for statement in statements:
+        words = [match.group(0).casefold() for match in _WORD_REGEX.finditer(statement)]
+        if not words:
+            continue
+        word_set = set(words)
+        for key, parts in trigger_parts.items():
+            if len(parts) == 1:
+                if parts[0] in word_set:
+                    seen.add(key_to_name[key])
+                continue
+            if _contains_word_phrase(words, parts):
+                seen.add(key_to_name[key])
     return [bags[name] for name in sorted(seen, key=bag_order.__getitem__)]
+
+
+def _contains_word_phrase(words: Sequence[str], phrase: tuple[str, ...]) -> bool:
+    size = len(phrase)
+    if size > len(words):
+        return False
+    return any(
+        tuple(words[index : index + size]) == phrase
+        for index in range(len(words) - size + 1)
+    )
 
 
 def resolve_maxim(maxim: str, *, repo_root: Path | None = None) -> str:
@@ -474,7 +503,7 @@ def resolve_maxim(maxim: str, *, repo_root: Path | None = None) -> str:
     bag = bags.get(selector)
     if bag is not None:
         return bag.message
-    bag_name = key_to_name.get(selector)
+    bag_name = key_to_name.get(_normalize_trigger_selector(maxim))
     if bag_name is not None:
         return bags[bag_name].message
     if len(maxim.split()) <= 1:
