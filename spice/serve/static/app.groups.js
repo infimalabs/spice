@@ -324,7 +324,7 @@ function closeTeamMenuAction(host) {
 function importAgentMenuAction(host) {
   return {
     label: "Import agent",
-    detail: host.teamImportOverlayOpen ? "hide panel" : "cover messages",
+    detail: host.teamImportOverlayOpen ? "hide panel" : "choose agent",
     onClick: () => toggleTeamImportOverlay(host),
   };
 }
