@@ -462,12 +462,13 @@ class AgentInboxInjector:
         # Every pending item is inside its repeat-suppression window, so the full
         # readout is withheld — but emit a one-line count so a quick command never
         # *looks* empty while steering waits. The full readout returns on the next
-        # repeat or via `spice session`.
+        # repeat or via `spice session briefing`.
         if count <= 0:
             return
         self.stderr.write(
             f"Inbox Steering\n  pending={count} "
-            "(recently shown; full readout on repeat or run `spice session`)\n"
+            "(recently shown; full readout on repeat or run "
+            "`spice session briefing`)\n"
         )
         self.stderr.flush()
 

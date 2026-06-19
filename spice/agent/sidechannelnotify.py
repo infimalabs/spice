@@ -9,19 +9,25 @@ import socket
 from pathlib import Path
 
 from spice.agent.paths import agent_worktree_state_dir
+from spice.errors import SpiceError
 
 SIDE_CHANNEL_NOTIFY_EVENT = "notify"
 SIDE_CHANNEL_INBOX_EVENT = "inbox"
 
 
 def side_channel_marker_path(repo_root: Path) -> Path:
-    return agent_worktree_state_dir(repo_root) / "side-channel" / "socket"
+    return agent_worktree_state_dir(repo_root) / "stderr.sock"
 
 
 def active_agent_side_channel_socket_path(repo_root: Path | None) -> Path | None:
     if repo_root is None:
         return None
-    marker_path = side_channel_marker_path(repo_root)
+    try:
+        marker_path = side_channel_marker_path(repo_root)
+    except SpiceError as exc:
+        if str(exc) != "not inside a git worktree":
+            raise
+        return None
     try:
         raw_socket_path = marker_path.read_text(encoding="utf-8").strip()
     except OSError:

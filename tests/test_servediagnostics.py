@@ -191,7 +191,7 @@ def test_serve_teams_cli_json_uses_task_backend(tmp_path, capsys):
         task_config.set_backend(None)
 
     assert result == EXIT_OK
-    assert data["storePath"] == str(backend / TEAM_DATABASE_FILENAME)
+    assert data["storePath"] == str(backend / "data" / TEAM_DATABASE_FILENAME)
     assert data["globalRevision"] == 1
     assert len(data["teams"]) == 1
     assert data["teams"][0]["members"] == []

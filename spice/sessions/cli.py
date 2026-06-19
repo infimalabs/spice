@@ -43,11 +43,9 @@ DEFAULT_PHASE_EXAMPLES = 2
 DEFAULT_PHASE_TEXT_CHARS = 180
 DEFAULT_MESSAGES_LIMIT = 80
 DEFAULT_MESSAGE_TEXT_CHARS = 180
-DEFAULT_USER_LOG_LIMIT = 50
 DEFAULT_COMMITS_LIMIT = 25
 DEFAULT_COMMANDS_LIMIT = 80
 DEFAULT_COMMAND_TEXT_CHARS = 220
-USER_LOG_PREVIEW_CHARS = 400
 COMMIT_LINE_PREVIEW_CHARS = 160
 COMMIT_USER_PREVIEW_CHARS = 120
 
@@ -177,16 +175,6 @@ def _configure_turn_parsers(actions: Any) -> None:
 
 
 def _configure_log_parsers(actions: Any) -> None:
-    user_log = actions.add_parser(
-        "user-log",
-        help="Operator messages in order (forensic, not authoritative).",
-        recovery_examples=("spice session user-log --limit 20",),
-    )
-    _add_files_argument(user_log)
-    user_log.add_argument("--include-scaffolding", action="store_true")
-    user_log.add_argument("--limit", type=int, default=DEFAULT_USER_LOG_LIMIT)
-    user_log.set_defaults(func=handle_session)
-
     messages = actions.add_parser(
         "messages",
         help="Print individual user/assistant messages with phase and flavor filters.",
@@ -342,13 +330,6 @@ def handle_session(args: argparse.Namespace) -> int:
         return 0
     if action == "phases":
         _print_phases(args, files)
-        return 0
-    if action == "user-log":
-        _print_user_log(
-            files,
-            include_scaffolding=bool(args.include_scaffolding),
-            limit=max(1, args.limit),
-        )
         return 0
     if action == "messages":
         _print_messages(args, files)
@@ -723,21 +704,6 @@ def _print_phases(args: argparse.Namespace, files: list[Path]) -> None:
                 f"final={clip(example['final'], max(1, args.max_text))}"
             )
         print()
-
-
-def _print_user_log(files: list, *, include_scaffolding: bool, limit: int) -> None:
-    turns = records.collect_turns(files)
-    rows = [
-        (turn.start_ts, text)
-        for turn in turns
-        for text in turn.user_messages
-        if include_scaffolding or not records.is_scaffolding_text(text)
-    ][-limit:]
-    if not rows:
-        print("no user messages")
-        return
-    for ts, text in rows:
-        print(f"{ts} {clip(text, USER_LOG_PREVIEW_CHARS)}")
 
 
 def _print_messages(args: argparse.Namespace, files: list[Path]) -> None:

@@ -226,17 +226,17 @@ def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(
     linked_thread_dir = linked_worktree_dir / linked_thread_id
 
     assert lifecycle.agent_state_path(repo).parent == primary_worktree_dir
-    assert sidechannelnotify.side_channel_marker_path(repo).parent == (
-        primary_worktree_dir / "side-channel"
+    assert sidechannelnotify.side_channel_marker_path(repo) == (
+        primary_worktree_dir / "stderr.sock"
     )
-    assert sidechannelnotify.side_channel_marker_path(linked).parent == (
-        linked_worktree_dir / "side-channel"
+    assert sidechannelnotify.side_channel_marker_path(linked) == (
+        linked_worktree_dir / "stderr.sock"
     )
     with lifecycle.agent_ensure_lock(repo):
         assert (primary_worktree_dir / "ensure.lock").exists()
 
-    log_path = primary_worktree_dir / "logs" / "startup.log"
-    log_path.parent.mkdir(parents=True)
+    log_path = primary_worktree_dir / "startup.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text("starting\n", encoding="utf-8")
     final_log = lifecycle.settle_agent_log_path(repo, log_path, thread_id)
     lifecycle.write_agent_state(
@@ -269,8 +269,8 @@ def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(
 
     monkeypatch.setattr(lifecycle, "utc_now", lambda: "2026-01-02T03:04:05Z")
     linked_log = lifecycle.next_agent_log_path(linked)
-    assert linked_log == linked_worktree_dir / "logs" / "20260102T030405Z.log"
-    linked_log.parent.mkdir(parents=True)
+    assert linked_log == linked_worktree_dir / "20260102T030405Z.log"
+    linked_log.parent.mkdir(parents=True, exist_ok=True)
     linked_log.write_text("linked\n", encoding="utf-8")
     final_linked_log = lifecycle.settle_agent_log_path(
         linked, linked_log, linked_thread_id
@@ -406,7 +406,7 @@ def test_start_agent_supervised_path_uses_supervisor_and_reaper(tmp_path, monkey
 
 
 def test_spawn_agent_supervisor_omits_prompt_skill_path_arg(tmp_path, monkeypatch):
-    log_path = tmp_path / "logs" / "supervised.log"
+    log_path = tmp_path / "supervised.log"
     spawned: list[dict[str, object]] = []
 
     class FakePopen(_FakeProcess):

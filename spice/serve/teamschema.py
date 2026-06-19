@@ -1,6 +1,6 @@
 """SQLite schema and defaults for serve team storage."""
 
-TEAM_DATABASE_FILENAME = "serve-teams.sqlite3"
+TEAM_DATABASE_FILENAME = "spiceteams.sqlite3"
 DEFAULT_LIFETIME = "Drive"
 DEFAULT_SPEECH_MODE = "speak"
 DEFAULT_SELECTED_VIEW = "compose"

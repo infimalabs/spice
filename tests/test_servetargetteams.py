@@ -207,6 +207,7 @@ def _patch_payload_dependencies(
 
     monkeypatch.setattr(payloads, "agent_status", lambda _repo: status)
     monkeypatch.setattr(app, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(agentapi, "agent_status", lambda _repo: status)
     monkeypatch.setattr(payloads, "agent_binding_error", lambda *_args: "")
     monkeypatch.setattr(payloads, "configured_say_voice", lambda _repo: "")
     monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})

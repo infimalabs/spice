@@ -56,7 +56,7 @@ def activation_command_surface_lines() -> list[str]:
             "requested command; descendant shells use static hooks and "
             "precomputed wrappers without another reexec"
         ),
-        "session=spice session",
+        "session=spice session briefing",
         "task_status=spice task status",
         "task_next=spice task next",
         (
@@ -81,9 +81,9 @@ def activation_command_surface_lines() -> list[str]:
             "soon as understood; do not wait for final response"
         ),
         (
-            "pending_inbox_recovery=if spice session only shows pending=N "
-            "without bodies, run the next command through spice agent run -- "
-            "to print the pending steering readout"
+            "pending_inbox_recovery=if spice session briefing only shows "
+            "pending=N without bodies, run the next command through spice "
+            "agent run -- to print the pending steering readout"
         ),
         "inbox_steering=automatic shell/side-channel injection; no public mail command",
         "side_channel=operator steering arrives through the supervisor socket",

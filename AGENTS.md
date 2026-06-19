@@ -10,10 +10,10 @@ rules apply to the agents working here.
   steering and keep-working guidance on stderr before the requested command.
 - `spice` is the canonical control plane. Start every session with:
   1. `spice agent activation`
-  2. `spice session`
+  2. `spice session briefing`
   3. `spice task status`
-- The no-arg `spice session` briefing is the primary rehydration product after
-  a renewal or compaction. Trust machine-readable artifacts over chat memory.
+- `spice session briefing` is the primary rehydration product after a renewal
+  or compaction. Trust machine-readable artifacts over chat memory.
 
 ## Steering and ACKs
 
