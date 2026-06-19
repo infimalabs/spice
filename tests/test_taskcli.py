@@ -346,6 +346,74 @@ def test_task_show_resolves_relative_archived_attachments_to_origin(monkeypatch)
     assert output.count(f"{first_ref} ->") == 1
 
 
+def test_task_show_prints_merge_aware_diff_command_for_task_merge(monkeypatch):
+    row = _row(
+        "Review merge",
+        project="task.render",
+        incepted="20260612T065825463453Z",
+        status="pending",
+        phase="review",
+    )
+    row.update(
+        {
+            "task_description": "",
+            "phase_i": "1",
+            "urgency": "9.2",
+            "claim_by": "actor-a",
+            "done_ref": "merge-head",
+            "done_merge_head": "merge-head",
+            "done_head": "agent-head",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+
+    output = render.render_show("TASK-test")
+
+    assert "review_commit merge-head (task merge; agent_head agent-head)" in output
+    assert (
+        "review_diff_command git show -m --first-parent --stat --patch merge-head"
+        in output
+    )
+    assert (
+        "review_diff_note task merge commits need merge-aware diff; "
+        "plain git show can omit the agent patch"
+    ) in output
+
+
+def test_task_show_omits_merge_aware_diff_command_for_task_head(monkeypatch):
+    row = _row(
+        "Review direct head",
+        project="task.render",
+        incepted="20260612T065825463453Z",
+        status="pending",
+        phase="review",
+    )
+    row.update(
+        {
+            "task_description": "",
+            "phase_i": "1",
+            "urgency": "9.2",
+            "claim_by": "actor-a",
+            "done_ref": "agent-head",
+            "done_merge_head": "agent-head",
+            "done_head": "agent-head",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+
+    output = render.render_show("TASK-test")
+
+    assert "review_commit agent-head (task head)" in output
+    assert "review_diff_command" not in output
+    assert "plain git show" not in output
+
+
 def _row(
     description: str,
     *,
