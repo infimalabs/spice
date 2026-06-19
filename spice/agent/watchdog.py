@@ -31,6 +31,7 @@ from spice.mail.acks import (
     archive_ackd_inbox_items_from_assistant_message,
     extract_task_batch_lines_from_text,
 )
+from spice.agent.sidechannelnotify import publish_side_channel_notice
 from spice.mail.inbox import write_inbox_item
 from spice.procs import popen_new_process_group_kwargs
 from spice.sessions.util import first_text
@@ -135,12 +136,31 @@ def process_supervised_assistant_message(
     log_handle: TextIO,
     reminder_gate: MaximReminderGate,
 ) -> None:
-    archive_ackd_inbox_items_from_assistant_message(repo_root, message_text)
+    acked_keys = archive_ackd_inbox_items_from_assistant_message(
+        repo_root, message_text
+    )
+    if acked_keys:
+        publish_supervisor_feedback(
+            repo_root,
+            "ack_archived=" + " ".join(acked_keys),
+            log_handle,
+        )
     try:
-        create_inline_tasks(repo_root, message_text, log_handle)
+        handles = create_inline_tasks(repo_root, message_text, log_handle)
+        if handles:
+            publish_supervisor_feedback(
+                repo_root,
+                "inline_task_created=" + " ".join(handles),
+                log_handle,
+            )
     except Exception as exc:  # pragma: no cover - supervisor-visible task failure
         log_handle.write(f"spice inline task supervisor error: {exc}\n")
         log_handle.flush()
+        publish_supervisor_feedback(
+            repo_root,
+            f"inline_task_error={exc}",
+            log_handle,
+        )
     try:
         record_supervised_lane_metrics(repo_root)
     except Exception as exc:  # pragma: no cover - supervisor-visible metric failure
@@ -152,6 +172,16 @@ def process_supervised_assistant_message(
         )
     except Exception as exc:  # pragma: no cover - defensive supervisor logging
         log_handle.write(f"spice maxim supervisor error: {exc}\n")
+        log_handle.flush()
+
+
+def publish_supervisor_feedback(
+    repo_root: Path, message: str, log_handle: TextIO
+) -> None:
+    try:
+        publish_side_channel_notice(repo_root, message)
+    except Exception as exc:  # pragma: no cover - best-effort stderr feedback
+        log_handle.write(f"spice side-channel feedback error: {exc}\n")
         log_handle.flush()
 
 
