@@ -243,6 +243,37 @@ def test_inline_task_directive_renders_quote_like_block_in_message(tmp_path):
     assert "<dt>acceptance</dt><dd>Tracked from UI</dd>" in item.display_html
 
 
+def test_malformed_task_like_progress_update_remains_plain_message(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    text = (
+        "TASK badges now use the plum task accent with the count after the label. "
+        "I am validating the focused tests next."
+    )
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+    items = message_reader.read_assistant_messages(transcript, limit=5)
+
+    assert len(items) == 1
+    item = items[0]
+    assert item.task_card_count == 0
+    assert item.to_payload()["task_card_count"] == 0
+    assert item.display_text == text
+    assert text in item.display_html
+    assert "Task capture" not in item.display_text
+    assert "Task capture" not in item.display_html
+    assert "pending capture" not in item.display_html
+    assert 'class="task-directive-quote"' not in item.display_html
+
+
 def test_inline_task_directive_renders_inside_ack_segment_at_written_position(
     tmp_path,
 ):
