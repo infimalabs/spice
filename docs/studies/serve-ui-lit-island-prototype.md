@@ -21,14 +21,15 @@ cell creation, sparkline rendering, and duration formatting. The prototype adds:
 
 - 67 lines in `app.metrics-lit.js` for the Lit custom element and renderer
   adapter.
-- 74 changed lines in `app.panes.js` to split a shared render model, keep the
-  normal vanilla renderer as the non-Lit baseline, and gate the Lit loader.
+- 98 inserted and 20 removed lines in `app.panes.js` to split a shared render
+  model, keep the normal vanilla renderer as the non-Lit baseline, and gate the
+  Lit loader.
 - 1 CSS line for `.lane-metrics-lit-island { display: contents; }` so the
   custom element does not disturb the existing grid.
-- 251 lines of focused test coverage, mostly a small fake DOM fixture that keeps
+- 257 lines of focused test coverage, mostly a small fake DOM fixture that keeps
   the opt-in loader behavior executable without a browser.
 
-The component itself is readable, but the adapter and fallback scaffolding are
+The component itself is readable, but the adapter and opt-in scaffolding are
 larger than the original pane. That overhead is acceptable for a prototype and
 too heavy to justify default adoption for a panel this simple.
 
