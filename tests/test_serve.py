@@ -20,6 +20,7 @@ from spice.agent.renewal import (
     renewal_rehydration_text,
 )
 from spice.cli.parser import build_parser
+from spice.mail.acks import archive_ackd_inbox_items
 from spice.mail.inbox import (
     INBOX_CONTROL_DRAIN_QUEUE,
     INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD,
@@ -207,17 +208,29 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert payload["pendingInboxCount"] == 1
     assert payload["pendingInboxKeys"] == [inbox_item_key(items[0].name)]
     assert payload["pendingInboxRevision"]
-    assert payload["attachments"][0]["name"] == "paste.png"
-    assert payload["attachments"][0]["url"].startswith(
+    live_attachment = payload["attachments"][0]
+    assert live_attachment["name"] == "paste.png"
+    assert live_attachment["url"].startswith(
         f"/api/work/trees/{target.id}/files/image?path="
     )
+    refresh_payload = payloads.ack_context_payload_for_worktree(
+        state, target, keys=[payload["key"]]
+    )
+    assert refresh_payload["acks"][0]["found"] is True
+    assert refresh_payload["acks"][0]["attachments"][0] == live_attachment
+    assert archive_ackd_inbox_items(repo, [payload["key"]]) == [payload["key"]]
+    archived_refresh_payload = payloads.ack_context_payload_for_worktree(
+        state, target, keys=[payload["key"]]
+    )
+    assert archived_refresh_payload["acks"][0]["found"] is True
+    assert archived_refresh_payload["acks"][0]["attachments"][0] == live_attachment
     assert state.lane_send_count(target.id) == 1
     assert state.team_store.lane_metric_summary(THREAD_A, bucket_count=12).sends == 1
-    assert pending_inbox_count(repo) == 1
+    assert pending_inbox_count(repo) == 0
     assert inbox_request_body(items[0].text) == "inspect this image"
     assert items[0].attachments[0].path.read_bytes() == b"image-bytes"
     assert shared_attachment_root(repo) in items[0].attachments[0].path.parents
-    attachment_path = Path(payload["attachments"][0]["path"])
+    attachment_path = Path(live_attachment["path"])
     assert attachment_path.is_absolute()
     assert shared_attachment_root(repo) in attachment_path.parents
 
@@ -225,7 +238,7 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     app._ServeHandler._send_worktree_image(
         handler,
         target,
-        {"path": [payload["attachments"][0]["path"]]},
+        {"path": [live_attachment["path"]]},
     )
 
     assert handler.status == HTTPStatus.OK

@@ -170,10 +170,13 @@ def test_ack_records_pending_item_with_attachments_in_sqlite_state(tmp_path):
 
     archived = archive_ackd_inbox_items(tmp_path, ["20260102T000000000003"])
     archived_items = collect_acked_inbox_items(tmp_path)
+    archived_attachment = archived_items[0].attachments[0]
     assert archived == [inbox_item_key(name)]
-    assert [(item.name, item.text, item.attachments) for item in archived_items] == [
-        (name, composed, ())
-    ]
+    assert [(item.name, item.text) for item in archived_items] == [(name, composed)]
+    assert archived_attachment.name == "paste.png"
+    assert archived_attachment.content_type == "image/png"
+    assert archived_attachment.path == attachment_path
+    assert archived_attachment.size == len(b"image-bytes")
     assert attachment_path.is_file()
 
 

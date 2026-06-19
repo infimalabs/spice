@@ -138,7 +138,7 @@ def collect_acked_inbox_items(
             archive_path=state_path,
             name=record.inbox_name,
             text=record.text,
-            attachments=(),
+            attachments=_ack_state_record_attachments(record),
         )
         for record in ack_state_records(repo_root)[: max(0, limit)]
     ]
@@ -337,6 +337,30 @@ def inbox_ack_state_context_rows(items: Sequence[InboxItem]) -> list[str]:
             f"{attachments} text={text or '-'}"
         )
     return rows
+
+
+def _ack_state_record_attachments(record: Any) -> tuple[InboxAttachment, ...]:
+    attachments: list[InboxAttachment] = []
+    for item in record.attachments:
+        path = Path(str(item.get("path") or ""))
+        if not path.is_file():
+            continue
+        try:
+            size = int(item.get("size") or path.stat().st_size)
+        except (OSError, TypeError, ValueError):
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+        attachments.append(
+            InboxAttachment(
+                path=path,
+                name=str(item.get("name") or path.name),
+                content_type=str(item.get("content_type") or "image/*"),
+                size=size,
+            )
+        )
+    return tuple(attachments)
 
 
 def inbox_deadletter_context_rows(items: Sequence[InboxItem]) -> list[str]:
