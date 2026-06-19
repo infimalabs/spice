@@ -87,6 +87,7 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert rows[0]["description"] == "Inline follow-up"
     assert rows[0]["project"] == "task.unit"
     assert rows[0]["acceptance"] == "Inline task exists"
+    assert rows[0]["origin_thread"] == ACTOR
     handle = identity.render_handle(rows[0])
     assert handle in log.getvalue()
     assert "route_filter=skipped:task.unit:no_team" in log.getvalue()
