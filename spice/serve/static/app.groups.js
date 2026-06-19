@@ -160,8 +160,7 @@ function laneGroupMergedMessages(host) {
 function laneMemberTargetLabel(member) {
   const agent = member.agentName || "";
   const branch = member.branchName || member.targetId || "this branch";
-  if (!agent || agent === branch) return branch;
-  return agent + " on " + branch;
+  return agentBranchLabel(agent, branch);
 }
 
 function syncFusedLaneChrome(lane) {

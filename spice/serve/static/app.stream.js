@@ -707,6 +707,7 @@ function emptyTeamTargetFingerprint(target) {
   return [
     target.id || "",
     targetIdentityBranch(target.targetIdentity),
+    targetIdentityAgentName(target.targetIdentity),
     targetIdentityThreadId(target.targetIdentity),
     target.lastAssistantAt || "",
     statusLine.lastAssistantAt || "",

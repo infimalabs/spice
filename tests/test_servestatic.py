@@ -675,6 +675,17 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
     )
 
 
+def test_static_target_choice_labels_show_agent_name_on_branch():
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+
+    assert "function agentBranchLabel(agentName, branchName)" in app_render
+    assert 'return agent + " on " + branch;' in app_render
+    assert "return agentBranchLabel(agent, branch);" in app_groups
+    assert "return targetIdentityDisplayLabel(target.targetIdentity);" in app_lanes
+
+
 def test_static_submitted_message_predictions_reconcile_against_server_echoes():
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")

@@ -96,6 +96,20 @@ function targetIdentityAgentName(identity) {
   return requiredIdentityText(agent.name, "agent name");
 }
 
+function agentBranchLabel(agentName, branchName) {
+  const agent = agentName || "";
+  const branch = branchName || "this branch";
+  if (!agent || agent === branch) return branch;
+  return agent + " on " + branch;
+}
+
+function targetIdentityDisplayLabel(identity) {
+  return agentBranchLabel(
+    targetIdentityAgentName(identity),
+    targetIdentityBranch(identity),
+  );
+}
+
 function targetIdentityThreadId(identity) {
   const thread = (identity || {}).thread || {};
   const state = targetIdentityThreadState(identity);
