@@ -29,6 +29,34 @@ def test_markdown_splits_paragraphs_and_lists_without_blank_lines():
     assert "<p>Done.</p>" in html
 
 
+def test_markdown_renders_pipe_table_with_inline_cells():
+    html = render_message_html(
+        "Here is the data:\n"
+        "| Commit | Change |\n"
+        "| --- | --- |\n"
+        "| `abc123` | bumped **priority** |\n"
+        "| def456 | moved project |"
+    )
+
+    assert "<p>Here is the data:</p>" in html
+    assert "<table><thead><tr><th>Commit</th><th>Change</th></tr></thead>" in html
+    assert "<tbody>" in html
+    assert (
+        "<td><code>abc123</code></td><td>bumped <strong>priority</strong></td>" in html
+    )
+    assert "<td>def456</td><td>moved project</td>" in html
+    # The delimiter row must not leak through as a body row.
+    assert "---" not in html
+
+
+def test_markdown_table_requires_matching_delimiter_row():
+    # A pipe line followed by a non-delimiter line stays a paragraph, not a table.
+    html = render_message_html("a | b\nplain text")
+
+    assert "<table>" not in html
+    assert "a | b" in html
+
+
 def test_markdown_renders_mixed_headings_ordered_lists_and_quotes():
     html = render_message_html(
         "## Plan\n"
