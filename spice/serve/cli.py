@@ -36,10 +36,7 @@ def configure_serve_parser(subparsers: Any) -> None:
         "--until",
         type=Path,
         metavar="PATH",
-        help=(
-            "Watch PATH and stop the server after it is created, deleted, "
-            "touched, or changed."
-        ),
+        help="Watch PATH and stop the server after it is touched or changed.",
     )
     parser.add_argument(
         "--task-backend",

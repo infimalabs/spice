@@ -109,9 +109,11 @@ def test_serve_parser_exposes_until_path_help(capsys):
 
     assert exc.value.code == 0
     help_text = capsys.readouterr().out
+    flat_help = " ".join(help_text.split())
     assert "--until PATH" in help_text
-    assert "created," in help_text
-    assert "deleted, touched, or changed" in help_text
+    assert "touched or changed" in flat_help
+    assert "created" not in flat_help
+    assert "deleted" not in flat_help
 
 
 def test_serve_parser_accepts_until_path(tmp_path):
