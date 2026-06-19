@@ -46,7 +46,8 @@ INBOX_MAX_ITEM_AGE_SECONDS = 24 * 60 * 60
 INBOX_DIRECT_STEERING_ROW = "Direct operator steering: read before planning."
 INBOX_STEERING_ROW = "Inbox steering: read before planning; retire only after ACK."
 INBOX_RESPONSE_ROW = (
-    "ACK by assistant message: ACK <key> [<key> ...]: <what changed or was captured>"
+    "ACK by assistant message (plain text, no markdown emphasis): "
+    "ACK <key> [<key> ...]: <what changed or was captured>"
 )
 INBOX_ACK_REMINDER_SECONDS = 15
 INBOX_ACK_ESCALATED_SECONDS = 60

@@ -816,7 +816,7 @@ def _inbox_lines() -> list[str]:
         )
     if items:
         lines.append(
-            "  ACK by assistant message: "
+            "  ACK by assistant message (plain text, no markdown emphasis): "
             "ACK <key> [<key> ...]: <what changed or was captured>"
         )
     if deadletters:
