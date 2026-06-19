@@ -36,6 +36,33 @@ def test_static_initial_bootstrap_waits_for_server_topology():
     ) in app
 
 
+def test_static_send_route_applies_fresh_start_identity_before_refresh():
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    send_start = app_stream.index("function applyLaneSendResult(")
+    send_body = app_stream[
+        send_start : app_stream.index(
+            "\n}\n\nfunction agentEnsureFailureStatus", send_start
+        )
+    ]
+    route_start = app_stream.index("function applyTaskDrainRouteConfig(")
+    route_body = app_stream[
+        route_start : app_stream.index(
+            "\n}\n\nfunction applyRouteConfigToTargetInventory",
+            route_start,
+        )
+    ]
+    inventory_start = app_stream.index("function applyRouteConfigToTargetInventory(")
+    inventory_body = app_stream[inventory_start:]
+
+    assert 'const previousThreadId = lane.targetThreadId || "";' in send_body
+    assert "const changed = ensure.threadId !== previousThreadId;" in send_body
+    assert "applyRouteConfigToTargetInventory(lane, config);" in route_body
+    assert 'payloadHasField(config, "targetIdentity")' in route_body
+    assert "applyLaneTargetIdentity(lane, config);" in route_body
+    assert "target.targetIdentity = config.targetIdentity;" in inventory_body
+    assert "target.teamIdentity = config.teamIdentity;" in inventory_body
+
+
 def test_static_lane_status_preview_requires_relative_time():
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     start = app_render.index("function setLaneStatus(lane, statusLine) {")
