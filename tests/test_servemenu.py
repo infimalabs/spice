@@ -80,6 +80,7 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
         "color: color-mix(in srgb, var(--accent-strong) 76%, var(--fg));"
         in button_rules
     )
+    assert "font-weight: 400;" in button_rules
     assert "gap: 4px;" in button_rules
     assert "height: 30px;" in button_rules
     assert "padding: 0 8px 0 6px;" in button_rules
@@ -272,6 +273,10 @@ def test_static_lane_mode_rail_uses_text_labels_without_glyph_icons():
     )
     assert ".lane-mode-word { display: none; }" not in css
     assert "font-family: ui-monospace, SFMono-Regular, Menlo, monospace;" in badge_rule
+    assert (
+        "box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--button-accent-fg) 24%, transparent);"
+        in badge_rule
+    )
 
 
 def test_static_composer_band_menu_matches_large_team_action_sizing():
@@ -304,6 +309,11 @@ def test_static_composer_band_menu_matches_large_team_action_sizing():
     team_grid_rule = css[team_grid_start : css.index("}", team_grid_start)]
     team_action_start = css.index(".lane-team-menu .lane-team-menu-action {")
     team_action_rule = css[team_action_start : css.index("}", team_action_start)]
+    team_label_start = css.index(
+        ".lane-team-menu .lane-team-menu-action .spice-menu-action-label {",
+        team_action_start,
+    )
+    team_label_rule = css[team_label_start : css.index("}", team_label_start)]
 
     for expected in (
         "gap: 6px;",
@@ -327,7 +337,9 @@ def test_static_composer_band_menu_matches_large_team_action_sizing():
     assert "overflow-wrap: anywhere;" in composer_text_rule
     assert "white-space: normal;" in composer_text_rule
     assert "font-size: clamp(12px, 7cqi, 16px);" in composer_label_rule
-    assert "font-weight: 700;" in composer_label_rule
+    assert "font-weight: 400;" in composer_label_rule
+    assert "font-size: clamp(12px, 7cqi, 16px);" in team_label_rule
+    assert "font-weight: 400;" in team_label_rule
     assert "font-size: clamp(10px, 5.25cqi, 13px);" in composer_detail_rule
     assert "margin-left: 0;" in composer_detail_rule
     assert "text-align: center;" in composer_detail_rule

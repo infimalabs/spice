@@ -308,7 +308,7 @@
 .composer-band-menu-action .spice-menu-action-label {
   font-size: 13px;
   font-size: clamp(12px, 7cqi, 16px);
-  font-weight: 700;
+  font-weight: 400;
   line-height: 1.14;
   text-wrap: balance;
 }
