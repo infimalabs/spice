@@ -151,7 +151,7 @@
 }
 .message-body p.message-image-stack {
   display: flex;
-  flex-direction: row-reverse;
+  flex-direction: row;
   flex-wrap: nowrap;
   gap: 6px;
   justify-content: flex-start;
@@ -204,7 +204,7 @@
 }
 .ack-attachments {
   display: flex;
-  flex-direction: row-reverse;
+  flex-direction: row;
   flex-wrap: nowrap;
   gap: 6px;
   justify-content: flex-start;

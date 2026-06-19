@@ -178,7 +178,7 @@ def test_static_messages_use_compact_image_grid():
     assert ".messages article.image-only" in css
     assert "grid-column: span 1" in css
     assert "display: flex;" in stack_rule
-    assert "flex-direction: row-reverse;" in stack_rule
+    assert "flex-direction: row;" in stack_rule
     assert "flex-wrap: nowrap;" in stack_rule
     assert "justify-content: flex-start;" in stack_rule
     assert "overflow-x: auto;" in stack_rule
