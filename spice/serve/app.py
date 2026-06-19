@@ -10,7 +10,9 @@ import os
 import subprocess
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BufferedReader
 from pathlib import Path
+from socket import SocketIO
 from threading import Event, Lock
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -64,6 +66,8 @@ STATIC_ASSET_ROUTE_PREFIX = "/static/"
 LIFETIME_LABELS = ("Steer", "Drive", "Drain")
 SERVE_UNTIL_WATCHER_JOIN_SECONDS = 1.0
 METRICS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
+MAX_HTTP_REQUEST_LINE_BYTES = 65536
+HTTP_REQUEST_LINE_READ_LIMIT = MAX_HTTP_REQUEST_LINE_BYTES + 1
 WORK_TREE_API_METRIC_ACTIONS = frozenset(
     {
         "",
@@ -574,6 +578,13 @@ def _is_client_disconnect(exc: BaseException) -> bool:
     return isinstance(exc, OSError) and exc.errno in _CLIENT_DISCONNECT_ERRNOS
 
 
+def _request_reader_timed_out(reader: object) -> bool:
+    if not isinstance(reader, BufferedReader):
+        return False
+    raw = reader.raw
+    return isinstance(raw, SocketIO) and raw._timeout_occurred
+
+
 class _ServeHandler(BaseHTTPRequestHandler):
     server_version = "spice-serve"
     protocol_version = "HTTP/1.1"
@@ -585,6 +596,43 @@ class _ServeHandler(BaseHTTPRequestHandler):
             if _is_client_disconnect(exc):
                 return
             raise
+
+    def handle_one_request(self) -> None:
+        try:
+            try:
+                self.raw_requestline = self.rfile.readline(HTTP_REQUEST_LINE_READ_LIMIT)
+            except TimeoutError:
+                raise
+            except OSError:
+                if _request_reader_timed_out(self.rfile):
+                    self.close_connection = True
+                    return
+                raise
+            if len(self.raw_requestline) > MAX_HTTP_REQUEST_LINE_BYTES:
+                self.requestline = ""
+                self.request_version = ""
+                self.command = ""
+                self.send_error(HTTPStatus.REQUEST_URI_TOO_LONG)
+                return
+            if not self.raw_requestline:
+                self.close_connection = True
+                return
+            if not self.parse_request():
+                return
+            method_name = "do_" + self.command
+            if not hasattr(self, method_name):
+                self.send_error(
+                    HTTPStatus.NOT_IMPLEMENTED,
+                    "Unsupported method (%r)" % self.command,
+                )
+                return
+            method = getattr(self, method_name)
+            method()
+            self.wfile.flush()
+        except TimeoutError as exc:
+            self.log_error("Request timed out: %r", exc)
+            self.close_connection = True
+            return
 
     @property
     def state(self) -> ServeState:

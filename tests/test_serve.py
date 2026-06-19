@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import subprocess
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -118,6 +119,28 @@ def test_serve_parser_accepts_until_path(tmp_path):
 
     assert args.command == "serve"
     assert args.until == stop_path
+
+
+def test_serve_handler_closes_socket_reader_after_request_line_timeout():
+    server_socket, client_socket = socket.socketpair()
+    server_socket.settimeout(0.001)
+    reader = server_socket.makefile("rb")
+    handler = object.__new__(app._ServeHandler)
+
+    try:
+        handler.rfile = reader
+        handler.close_connection = False
+
+        app._ServeHandler.handle_one_request(handler)
+        assert handler.close_connection is True
+
+        handler.close_connection = False
+        app._ServeHandler.handle_one_request(handler)
+        assert handler.close_connection is True
+    finally:
+        reader.close()
+        server_socket.close()
+        client_socket.close()
 
 
 def test_lane_watch_paths_use_exact_live_bus_sources(tmp_path):
