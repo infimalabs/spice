@@ -12,7 +12,7 @@ import pytest
 from spice.agent import sidechannelnotify, watchdog
 from spice.agent.driver import DRIVER
 from spice.mail.inbox import (
-    collect_archived_inbox_items,
+    collect_acked_inbox_items,
     collect_inbox_items,
     compose_inbox_text,
     write_inbox_item,
@@ -74,7 +74,7 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
 
     rows = tw.export(["status:pending"])
     assert collect_inbox_items(task_repo) == []
-    assert [item.name for item in collect_archived_inbox_items(task_repo)] == [
+    assert [item.name for item in collect_acked_inbox_items(task_repo)] == [
         f"{INBOX_KEY}.txt"
     ]
     assert len(rows) == 1

@@ -15,6 +15,7 @@ from spice.mail.inbox import (
     INBOX_CONTINUE_NOTE,
     INBOX_GRACEFUL_NOTE,
     INBOX_TASK_HINT_ROW,
+    collect_acked_inbox_items,
     collect_inbox_items,
     compose_inbox_text,
     deadletter_inbox_item,
@@ -141,7 +142,7 @@ def test_ack_retires_pending_item_via_dropped_z_alias(tmp_path):
     assert pending_inbox_count(str(tmp_path)) == 0
 
 
-def test_ack_archives_pending_item_attachments(tmp_path):
+def test_ack_records_pending_item_with_attachments_in_sqlite_state(tmp_path):
     name = "20260102T000000000003Z.txt"
     composed = compose_inbox_text(body="please inspect this", priority=None, stop=False)
     attachments = prepare_inbox_attachments(
@@ -153,8 +154,7 @@ def test_ack_archives_pending_item_attachments(tmp_path):
             }
         ]
     )
-    written = write_inbox_item(tmp_path, name, composed, attachments=attachments)
-    pending_attachment_dir = inbox_attachment_dir(written)
+    write_inbox_item(tmp_path, name, composed, attachments=attachments)
 
     items = collect_inbox_items(str(tmp_path))
     assert items[0].attachments[0].name == "paste.png"
@@ -162,12 +162,11 @@ def test_ack_archives_pending_item_attachments(tmp_path):
 
     archived = archive_ackd_inbox_items(tmp_path, ["20260102T000000000003"])
 
-    archive_text = inbox_dir(tmp_path) / "archive" / name
-    archive_attachment_dir = inbox_attachment_dir(archive_text)
+    archived_items = collect_acked_inbox_items(tmp_path)
     assert archived == [inbox_item_key(name)]
-    assert archive_text.is_file()
-    assert archive_attachment_dir.is_dir()
-    assert not pending_attachment_dir.exists()
+    assert [(item.name, item.text, item.attachments) for item in archived_items] == [
+        (name, composed, ())
+    ]
 
 
 def test_inbox_attachment_readout_rows_render_clickable_reference(tmp_path):
@@ -196,8 +195,6 @@ def test_inbox_attachment_readout_rows_render_clickable_reference(tmp_path):
     assert item.attachments[0].path.as_posix() not in attachment_row
     assert 'href="/work/tree/wt/' in html
     assert ">paste.png</a>" in html
-    archive_ackd_inbox_items(tmp_path, [inbox_item_key(name)])
-    assert archived_path.is_file()
 
 
 def test_find_archived_inbox_attachment_references_strips_sentence_punctuation():
