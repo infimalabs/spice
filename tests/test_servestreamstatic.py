@@ -549,6 +549,12 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     badge_count_rule = messages_css[
         badge_count_start : messages_css.index("}", badge_count_start)
     ]
+    article_start = messages_css.index(".messages article {")
+    article_rule = messages_css[article_start : messages_css.index("}", article_start)]
+    acked_article_start = messages_css.index(".messages article.acked {")
+    acked_article_rule = messages_css[
+        acked_article_start : messages_css.index("}", acked_article_start)
+    ]
     final_badge_start = messages_css.index(".badge.final-badge {")
     final_badge_rule = messages_css[
         final_badge_start : messages_css.index("}", final_badge_start)
@@ -573,15 +579,15 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     final_css_end = css.index(".messages article.final.acked {", final_css_start)
 
     assert "--message-occupant-accent" not in badges_css_rule
+    assert "--message-badge-surface: var(--panel);" in article_rule
+    assert "--message-badge-surface: var(--ack-tint);" in acked_article_rule
     assert "--message-badge-accent: var(--accent-strong);" in badge_css_rule
+    assert "background: var(--message-badge-accent);" in badge_css_rule
     assert (
-        "border: 1px solid color-mix(in srgb, var(--message-badge-accent) 58%, var(--border));"
+        "border: 1px solid color-mix(in srgb, var(--message-badge-accent) 62%, var(--message-badge-surface));"
         in badge_css_rule
     )
-    assert (
-        "color: color-mix(in srgb, var(--message-badge-accent) 82%, var(--fg));"
-        in badge_css_rule
-    )
+    assert "color: var(--button-accent-fg);" in badge_css_rule
     assert "align-items: center;" in badge_css_rule
     assert "display: inline-flex;" in badge_css_rule
     assert "font-family: ui-monospace, SFMono-Regular, Menlo, monospace;" in (
@@ -592,12 +598,14 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     assert "line-height: 1.15;" in badge_label_rule
     assert badge_count_rule == (
         ".badge-count {\n"
-        "  background: var(--message-badge-accent);\n"
+        "  background: var(--message-badge-surface);\n"
+        "  border: 1px solid color-mix(in srgb, var(--message-badge-accent) 36%, var(--message-badge-surface));\n"
         "  border-radius: var(--pill-radius);\n"
-        "  color: var(--button-accent-fg);\n"
+        "  color: var(--message-badge-accent);\n"
         "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;\n"
         "  font-size: 9px;\n"
-        "  line-height: 13px;\n"
+        "  font-weight: 700;\n"
+        "  line-height: 12px;\n"
         "  padding: 0 5px;\n"
     )
     assert "--message-badge-accent: var(--final-accent);" in final_badge_rule
@@ -608,6 +616,7 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     assert "background: var(--accent);" in chip_count_rule
     assert css[final_css_start:final_css_end] == (
         ".messages article.final {\n"
+        "  --message-badge-surface: var(--final-tint);\n"
         "  background: var(--final-tint);\n"
         "  border-color: var(--final-accent);\n"
         "  box-shadow: inset 0 3px 0 var(--final-accent);\n"
