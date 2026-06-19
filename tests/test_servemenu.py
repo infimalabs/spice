@@ -346,7 +346,16 @@ def test_static_spice_menu_replaces_picker_lane():
     assert "let spiceMenuEl = null;" in app_js
     assert 'let spiceMenuDragTargetId = "";' in app_js
     assert "let spiceMenuRenderPending = false;" in app_js
-    assert "let fastModeEnabled = false;" in app_js
+    assert 'const fastModeStorageKey = "spice.serve.fastMode";' in app_js
+    assert "let fastModeEnabled = storedFastModeEnabled();" in app_js
+    assert "function storedFastModeEnabled()" in app_js
+    assert 'storage.getItem(fastModeStorageKey) === "true"' in app_js
+    assert "function persistFastModeEnabled(enabled)" in app_js
+    assert 'storage.setItem(fastModeStorageKey, enabled ? "true" : "false");' in app_js
+    assert (
+        'if (typeof syncFastModeButtonState === "function") syncFastModeButtonState();'
+        in app_js
+    )
     assert "function openSpiceMenu()" in app_menu
     assert "function renderSpiceMenuIfAvailable()" in app_lanes
     assert 'if (typeof renderSpiceMenu === "function") renderSpiceMenu();' in app_lanes
@@ -363,6 +372,12 @@ def test_static_spice_menu_replaces_picker_lane():
     )
     assert "if (laneStates.size) closeSpiceMenu();" not in app_static
     assert "function setFastModeEnabled(enabled)" in app_menu
+    assert "persistFastModeEnabled(fastModeEnabled);" in app_menu
+    assert "function syncFastModeButtonState()" in app_menu
+    assert (
+        'if (typeof openLaneButton === "undefined" || !openLaneButton) return;'
+        in app_menu
+    )
     assert "function createEmptyTeamFromMenu()" not in app_menu
     assert "const spiceMenuNewTeamDropId" in app_menu
     assert "function spiceMenuTeamGroups(choices)" in app_menu
