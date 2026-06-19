@@ -393,7 +393,10 @@ button.primary:hover {
   font-size: 11px;
   font-size: clamp(10px, 5.25cqi, 13px);
   line-height: 1.2;
+  margin-left: 0;
+  text-align: center;
   text-wrap: pretty;
+  width: 100%;
 }
 .lane-team-menu-action:disabled {
   cursor: not-allowed;
