@@ -322,7 +322,7 @@
 }
 .message-footer .icon-button {
   border-color: color-mix(in srgb, var(--message-action-accent) 38%, var(--border));
-  color: color-mix(in srgb, var(--message-action-accent) 72%, var(--muted));
+  color: var(--muted);
   flex-basis: 32px;
   font-size: 16px;
   height: 32px;
@@ -331,7 +331,12 @@
 .message-footer .icon-button:hover,
 .message-footer .icon-button:focus-visible {
   border-color: color-mix(in srgb, var(--message-action-accent) 62%, var(--border));
-  color: color-mix(in srgb, var(--message-action-accent) 86%, var(--fg));
+  color: var(--fg);
+}
+.message-footer .speech-button--playing,
+.message-footer .icon-button.icon-button--active {
+  border-color: var(--good);
+  color: var(--fg);
 }
 .badge.final-badge { border-color: var(--final-accent); color: var(--final-accent); }
 .badge.maxim-badge {
@@ -340,7 +345,6 @@
   color: var(--button-accent-fg);
   font-weight: 700;
 }
-.speech-button--playing { border-color: var(--good); color: var(--good); }
 .compaction-divider {
   align-items: center;
   color: var(--muted);
