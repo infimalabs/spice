@@ -10,6 +10,7 @@ scanned backwards in chunks so a season-long transcript stays cheap to page.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from dataclasses import dataclass, field
@@ -56,6 +57,15 @@ _PRESENCE_PAYLOAD_TYPES = frozenset(
         "web_search_call",
     }
 )
+_SUPERVISOR_FEEDBACK_OUTPUT_TYPES = frozenset(
+    {"function_call_output", "custom_tool_call_output"}
+)
+_SUPERVISOR_FEEDBACK_HEADING = "Supervisor Feedback"
+_INLINE_TASK_CREATED_NOTICE = "inline_task_created"
+_INLINE_TASK_ERROR_NOTICE = "inline_task_error"
+_TASK_DIRECTIVE_TOKEN = "TASK"
+_TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
+_TASK_DIRECTIVE_PRIMARY_FIELDS = ("title", "project", "acceptance")
 
 
 @dataclass(frozen=True)
@@ -541,6 +551,83 @@ def _build_message(
     return None
 
 
+def _payload_output_text(payload: dict[str, Any]) -> str:
+    output = payload.get("output")
+    if isinstance(output, str):
+        return output
+    if isinstance(output, list):
+        parts: list[str] = []
+        for item in output:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "\n".join(parts)
+    return ""
+
+
+def _inline_task_feedback_items(output: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for key, value in _supervisor_feedback_notice_pairs(output):
+        if key == _INLINE_TASK_CREATED_NOTICE:
+            handles = [handle for handle in value.split() if handle]
+            if handles:
+                items.append(
+                    {
+                        "kind": "task_created",
+                        "label": "Task captured"
+                        if len(handles) == 1
+                        else "Tasks captured",
+                        "detail": ", ".join(handles),
+                        "handles": handles,
+                    }
+                )
+        elif key == _INLINE_TASK_ERROR_NOTICE:
+            items.append(
+                {
+                    "kind": "task_error",
+                    "label": "Task capture failed",
+                    "detail": value.strip() or "unknown error",
+                }
+            )
+    return items
+
+
+def _supervisor_feedback_preview(payload: dict[str, Any]) -> str:
+    if payload.get("type") not in _SUPERVISOR_FEEDBACK_OUTPUT_TYPES:
+        return ""
+    items = _inline_task_feedback_items(_payload_output_text(payload))
+    return _preview_from_text(
+        "\n".join(f"{item['label']}: {item['detail']}" for item in items)
+    )
+
+
+def _supervisor_feedback_notice_pairs(output: str) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    lines = output.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() != _SUPERVISOR_FEEDBACK_HEADING:
+            index += 1
+            continue
+        index += 1
+        while index < len(lines):
+            line = lines[index]
+            stripped = line.strip()
+            if stripped == _SUPERVISOR_FEEDBACK_HEADING:
+                break
+            if not stripped:
+                index += 1
+                break
+            if line == stripped:
+                break
+            if "=" in stripped:
+                key, value = stripped.split("=", 1)
+                pairs.append((key.strip(), value.strip()))
+            index += 1
+    return pairs
+
+
 def _key_offset(key: str) -> int | None:
     raw = key.rsplit("#", 1)[-1]
     try:
@@ -581,6 +668,122 @@ def _capitalize_first(text: str) -> str:
     return f"{first.title()}{text[1:]}"
 
 
+def _render_message_html_with_task_directives(
+    text: str, *, worktree_id: str | None = None
+) -> str:
+    if not text or not text.strip():
+        return ""
+    rendered: list[str] = []
+    pending: list[str] = []
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        directive = _task_directive_from_line(line)
+        if directive is None:
+            pending.append(line)
+            continue
+        if pending:
+            rendered.append(
+                render_message_html("\n".join(pending), worktree_id=worktree_id)
+            )
+            pending = []
+        rendered.append(_task_directive_html(directive))
+    if pending:
+        rendered.append(
+            render_message_html("\n".join(pending), worktree_id=worktree_id)
+        )
+    return "".join(rendered)
+
+
+def _display_text_with_task_directives(text: str) -> str:
+    lines: list[str] = []
+    for line in text.splitlines():
+        directive = _task_directive_from_line(line)
+        if directive is None:
+            lines.append(line)
+        else:
+            lines.append(_task_directive_summary(directive))
+    return "\n".join(lines).strip()
+
+
+def _strip_task_directive_lines(text: str) -> str:
+    lines = [
+        line for line in text.splitlines() if _task_directive_from_line(line) is None
+    ]
+    return "\n".join(lines).strip()
+
+
+def _task_directive_from_line(line: str) -> dict[str, Any] | None:
+    stripped = line.strip()
+    token_end = len(_TASK_DIRECTIVE_TOKEN)
+    if not stripped.startswith(_TASK_DIRECTIVE_TOKEN):
+        return None
+    if len(stripped) > token_end and stripped[token_end] not in (
+        _TASK_DIRECTIVE_SEPARATOR_CHARS
+    ):
+        return None
+    payload = stripped[token_end:].lstrip(_TASK_DIRECTIVE_SEPARATOR_CHARS)
+    fields = _task_directive_fields(payload)
+    return {"payload": payload, "fields": fields}
+
+
+def _task_directive_fields(payload: str) -> list[tuple[str, str]]:
+    fields: list[tuple[str, str]] = []
+    for part in payload.split("|"):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = " ".join(key.strip().split())
+        value = " ".join(value.strip().split())
+        if key and value:
+            fields.append((key, value))
+    return fields
+
+
+def _task_directive_summary(directive: dict[str, Any]) -> str:
+    fields = dict(directive.get("fields") or [])
+    title = fields.get("title") or fields.get("description") or "inline task"
+    project = fields.get("project") or ""
+    suffix = f" ({project})" if project else ""
+    return f"Task capture: {title}{suffix}"
+
+
+def _task_directive_html(directive: dict[str, Any]) -> str:
+    fields = _ordered_task_directive_fields(directive.get("fields") or [])
+    rows = "".join(
+        '<div class="task-directive-property">'
+        f"<dt>{html.escape(label)}</dt>"
+        f"<dd>{html.escape(value)}</dd>"
+        "</div>"
+        for label, value in fields
+    )
+    if not rows:
+        rows = (
+            '<div class="task-directive-property">'
+            "<dt>status</dt><dd>pending capture</dd>"
+            "</div>"
+        )
+    return (
+        '<blockquote class="task-directive-quote">'
+        '<div class="task-directive-kicker">Task capture</div>'
+        f'<dl class="task-directive-properties">{rows}</dl>'
+        "</blockquote>"
+    )
+
+
+def _ordered_task_directive_fields(
+    fields: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    remaining = list(fields)
+    ordered: list[tuple[str, str]] = []
+    for wanted in _TASK_DIRECTIVE_PRIMARY_FIELDS:
+        for index, (key, value) in enumerate(remaining):
+            if key == wanted:
+                ordered.append((key, value))
+                remaining.pop(index)
+                break
+    ordered.extend(remaining)
+    return ordered
+
+
 def _assistant_message(
     key: str,
     offset: int,
@@ -591,46 +794,57 @@ def _assistant_message(
     source_kind: str = "assistant_text",
     worktree_id: str | None = None,
 ) -> AssistantMessage:
-    preamble, segments = split_ack_message(text)
+    preamble, segments = split_ack_message(text, drop_task_directives=False)
     preamble = strip_app_directive_lines(preamble)
     ack_segments: list[dict[str, Any]] = []
     ack_keys: list[str] = []
     seen_keys: set[str] = set()
     ack_utterances: list[str] = []
-    display_parts: list[str] = [preamble] if preamble else []
+    display_sources: list[str] = [preamble] if preamble else []
+    display_parts: list[str] = (
+        [_display_text_with_task_directives(preamble)] if preamble else []
+    )
     for segment in segments:
         # The ACK header is hidden in the UI, so capitalize the response's
         # first letter for display while keeping the spoken text verbatim.
         body = _capitalize_first(strip_app_directive_lines(segment.content))
+        display_body = _display_text_with_task_directives(body)
         ack_segments.append(
             {
                 "keys": list(segment.keys),
-                "html": render_message_html(body, worktree_id=worktree_id),
+                "html": _render_message_html_with_task_directives(
+                    body, worktree_id=worktree_id
+                ),
             }
         )
         for ack_key in segment.keys:
             if ack_key not in seen_keys:
                 seen_keys.add(ack_key)
                 ack_keys.append(ack_key)
-        spoken = strip_app_directive_lines(segment.content).strip()
+        spoken = _strip_task_directive_lines(strip_app_directive_lines(segment.content))
         if spoken:
             ack_utterances.append(spoken)
         if body:
-            display_parts.append(body)
+            display_sources.append(body)
+        if display_body:
+            display_parts.append(display_body)
     display_text = "\n".join(display_parts)
     image_only = _image_only_markdown(display_text)
     preamble_html = (
-        render_message_html(preamble, worktree_id=worktree_id)
+        _render_message_html_with_task_directives(preamble, worktree_id=worktree_id)
         if preamble and segments
         else ""
     )
+    display_source = "\n".join(display_sources)
     return AssistantMessage(
         key=key,
         index=offset,
         timestamp=timestamp,
         text=text,
         display_text=display_text,
-        display_html=render_message_html(display_text, worktree_id=worktree_id),
+        display_html=_render_message_html_with_task_directives(
+            display_source, worktree_id=worktree_id
+        ),
         ack_count=len(ack_keys),
         ack_keys=ack_keys,
         ack_utterances=ack_utterances,
@@ -702,6 +916,9 @@ def _preview_from_text(text: str) -> str:
 
 
 def _preview_for_presence(payload: dict[str, Any], payload_type: str) -> str:
+    supervisor_feedback = _supervisor_feedback_preview(payload)
+    if supervisor_feedback:
+        return supervisor_feedback
     if payload_type == "reasoning":
         return _preview_from_text(_reasoning_summary_text(payload)) or "thinking"
     if payload_type in {"function_call", "custom_tool_call"}:
