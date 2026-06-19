@@ -667,10 +667,18 @@ function normalizedTargetChoiceCount(value) {
 }
 
 function compareTargetChoices(left, right) {
-  const leftTime = Date.parse(targetChoiceLastAssistantAt(left)) || 0;
-  const rightTime = Date.parse(targetChoiceLastAssistantAt(right)) || 0;
-  if (leftTime !== rightTime) return rightTime - leftTime;
-  return String(left.branch || "").localeCompare(String(right.branch || ""));
+  const byStatus =
+    targetChoiceStatusOrder(left) - targetChoiceStatusOrder(right);
+  if (byStatus) return byStatus;
+  const byName = targetChoiceName(left).localeCompare(targetChoiceName(right));
+  if (byName) return byName;
+  return String(left.id || "").localeCompare(String(right.id || ""));
+}
+
+function targetChoiceStatusOrder(target) {
+  const status = targetChoiceStatus(target);
+  const index = targetChoiceStatusValues.indexOf(status);
+  return index === -1 ? targetChoiceStatusValues.length : index;
 }
 
 function targetChoiceStatus(target) {
