@@ -455,6 +455,15 @@ def test_static_spice_menu_team_groups_and_actions():
     assert ".spice-menu-team-targets {" in css
     assert ".target-choice--open {" in css
     assert '.spice-menu-action[aria-checked="true"]' in css
+    generic_action_start = css.index(".spice-menu-action {")
+    action_label_start = css.index(".spice-menu-action-label {", generic_action_start)
+    action_label_rule = css[action_label_start : css.index("}", action_label_start)]
+    action_detail_start = css.index(".spice-menu-action-detail {", generic_action_start)
+    action_detail_rule = css[action_detail_start : css.index("}", action_detail_start)]
+    assert "white-space: nowrap;" in action_label_rule
+    assert "white-space: nowrap;" in action_detail_rule
+    assert "margin-left: auto;" in action_detail_rule
+    assert "text-align: right;" in action_detail_rule
 
 
 def test_static_spice_menu_target_metadata_and_status_update_live():
