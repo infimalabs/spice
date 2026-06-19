@@ -385,15 +385,6 @@ class ClaudeDriver(AgentDriver):
         command.append(prompt)
         return command
 
-    def skill_invocation_prompt(self, skill_path: Path) -> str:
-        # Claude has no `[$skill]` auto-loader; instruct it to read and obey the
-        # file. The ask still stays out of the prompt — the file points the
-        # agent at activation, the session briefing, the board, and the inbox.
-        return (
-            f"Read {skill_path} and follow it as the operating instructions for "
-            "this session."
-        )
-
     def normalize_transcript_line(self, raw: dict[str, Any]) -> dict[str, Any] | None:
         rtype = raw.get("type")
         timestamp = raw.get("timestamp")
