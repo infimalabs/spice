@@ -582,11 +582,15 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     assert "gap: 5px;" in badge_css_rule
     assert "padding: 2px 5px 2px 8px;" in badge_css_rule
     assert "line-height: 1.15;" in badge_label_rule
-    assert "background: var(--message-badge-accent);" in badge_count_rule
-    assert "color: var(--button-accent-fg);" in badge_count_rule
-    assert "display: inline-grid;" in badge_count_rule
-    assert "min-width: 16px;" in badge_count_rule
-    assert "place-items: center;" in badge_count_rule
+    assert badge_count_rule == (
+        ".badge-count {\n"
+        "  background: var(--message-badge-accent);\n"
+        "  border-radius: var(--pill-radius);\n"
+        "  color: var(--button-accent-fg);\n"
+        "  font-size: 9px;\n"
+        "  line-height: 13px;\n"
+        "  padding: 0 5px;\n"
+    )
     assert "--message-badge-accent: var(--final-accent);" in final_badge_rule
     assert "--message-badge-accent: var(--team-plum-accent);" in task_badge_rule
     assert "--message-badge-accent: var(--maxim-accent);" in maxim_badge_rule
