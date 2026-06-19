@@ -485,7 +485,7 @@ def requeue_deadlettered_inbox_item(
         )
         with contextlib.suppress(FileNotFoundError):
             item.source_path.unlink()
-        remove_inbox_attachment_dir(item.source_path)
+        remove_inbox_attachment_dir(inbox_attachment_dir(item.source_path))
         return written
     return None
 

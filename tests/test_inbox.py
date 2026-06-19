@@ -19,6 +19,7 @@ from spice.mail.inbox import (
     compose_inbox_text,
     deadletter_inbox_item,
     inbox_ack_format_hint_row,
+    inbox_attachment_dir,
     inbox_dir,
     inbox_deadletter_context_rows,
     inbox_item_key,
@@ -290,10 +291,13 @@ def test_deadletter_excludes_item_from_pending_and_can_requeue(tmp_path):
     rows = inbox_deadletter_context_rows(deadletters)
     assert "requeue=spice agent requeue-deadletter <key>" in rows[0]
     assert "deadlettered_inbox key=20260103T000000000014Z" in rows[1]
+    deadletter_attachment_dir = inbox_attachment_dir(deadletters[0].source_path)
+    assert deadletter_attachment_dir.is_dir()
 
     requeued = requeue_deadlettered_inbox_item(tmp_path, "20260103T000000000014Z")
 
     assert requeued is not None
+    assert not deadletter_attachment_dir.exists()
     assert pending_inbox_count(tmp_path) == 1
     assert pending_operator_inbox_count(tmp_path) == 1
     assert collect_deadlettered_inbox_items(tmp_path) == []
