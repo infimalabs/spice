@@ -789,9 +789,12 @@ function renderFilterPills() {
     pill.title = model.title;
     pill.innerHTML =
       '<span class="filter-pill-label"></span>' +
+      '<span class="task-count-badge-label">TASK</span>' +
       '<span class="filter-pill-count"></span>';
     pill.querySelector(".filter-pill-label").textContent = model.label;
-    pill.querySelector(".filter-pill-count").textContent = String(model.openTaskCount);
+    pill.querySelector(".filter-pill-count").textContent = taskCountBadgeCount(
+      model.openTaskCount,
+    );
     nodes.push(pill);
   }
   filterStripEl.replaceChildren(...nodes);
