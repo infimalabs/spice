@@ -551,21 +551,22 @@ def test_require_supervisor_started_accepts_thread_settled_log_path(
     lifecycle.require_supervisor_started(process, repo_root=tmp_path, log_path=log_path)
 
 
-def test_require_started_process_distinguishes_credit_failure(tmp_path, monkeypatch):
+def test_require_started_process_distinguishes_codex_credit_failure(
+    tmp_path, monkeypatch
+):
     log_path = tmp_path / "agent.log"
-    log_path.write_text("Error: Claude AI usage limit reached\n", encoding="utf-8")
+    log_path.write_text(
+        "ERROR: You've hit your usage limit. Visit "
+        "https://chatgpt.com/codex/settings/usage to purchase more credits "
+        "or try again at 4:36 PM.\n",
+        encoding="utf-8",
+    )
     process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=1)
 
-    class FakeDriver:
-        def process_failure_kind(self, *, exit_code: int, output: str) -> str:
-            assert exit_code == 1
-            assert "usage limit reached" in output
-            return lifecycle.AGENT_FAILURE_OUT_OF_CREDITS
-
     monkeypatch.setattr(lifecycle, "STARTUP_GRACE_SECONDS", 0)
-    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: FakeDriver())
+    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CODEX_DRIVER)
 
-    with pytest.raises(lifecycle.AgentOutOfCreditsError, match="usage limit reached"):
+    with pytest.raises(lifecycle.AgentOutOfCreditsError, match="hit your usage limit"):
         lifecycle.require_started_process(process, log_path, repo_root=tmp_path)
 
 
