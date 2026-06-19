@@ -29,7 +29,7 @@ from spice.agent.maxims import (
 )
 from spice.mail.acks import (
     archive_ackd_inbox_items_from_assistant_message,
-    extract_task_batch_lines_from_ack_text,
+    extract_task_batch_lines_from_text,
 )
 from spice.mail.inbox import write_inbox_item
 from spice.procs import popen_new_process_group_kwargs
@@ -158,7 +158,7 @@ def process_supervised_assistant_message(
 def create_inline_ack_tasks(
     repo_root: Path, message_text: str, log_handle: TextIO
 ) -> list[str]:
-    batch_lines = extract_task_batch_lines_from_ack_text(message_text)
+    batch_lines = extract_task_batch_lines_from_text(message_text)
     if not batch_lines:
         return []
     empty = [index for index, line in enumerate(batch_lines, start=1) if not line]
