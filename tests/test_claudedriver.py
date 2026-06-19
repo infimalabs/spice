@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -144,11 +145,15 @@ def test_claude_driver_classifies_out_of_credits_output():
     )
 
 
-def test_claude_skill_prompt_instructs_reading_the_file(tmp_path):
-    skill = tmp_path / "SKILL.md"
-    prompt = CLAUDE_DRIVER.skill_invocation_prompt(skill)
-    assert str(skill) in prompt
-    assert prompt.lower().startswith("read ")
+def test_claude_skill_prompt_matches_codex_link_form():
+    skill = Path(".agents") / "skills" / "spice" / "SKILL.md"
+
+    assert CLAUDE_DRIVER.skill_invocation_prompt(skill) == (
+        CODEX_DRIVER.skill_invocation_prompt(skill)
+    )
+    assert CLAUDE_DRIVER.skill_invocation_prompt(skill) == (
+        "[$spice](.agents/skills/spice/SKILL.md)"
+    )
 
 
 def test_claude_transcript_resolves_by_session_glob(tmp_path, monkeypatch):

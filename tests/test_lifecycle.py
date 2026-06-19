@@ -180,7 +180,7 @@ def test_ensure_agent_dry_run_uses_relative_skill_prompt_for_claude(
 
     result = lifecycle.ensure_agent(tmp_path, dry_run=True)
 
-    assert result.prompt.startswith("Read .agents/skills/spice/SKILL.md ")
+    assert result.prompt == "[$spice](.agents/skills/spice/SKILL.md)"
     assert str(tmp_path) not in result.prompt
     assert result.command[-1] == result.prompt
 
