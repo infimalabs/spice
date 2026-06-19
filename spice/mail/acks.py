@@ -105,8 +105,8 @@ def split_ack_message(text: str) -> tuple[str, list[AckSegment]]:
     """
     bounds = _ack_marker_bounds(text)
     if not bounds:
-        return _clean_segment_content(text), []
-    preamble = _clean_segment_content(text[: bounds[0][0]])
+        return _clean_segment_content(text, drop_task_directives=True), []
+    preamble = _clean_segment_content(text[: bounds[0][0]], drop_task_directives=True)
     segments: list[AckSegment] = []
     for index, (_ack_pos, header_end, keys) in enumerate(bounds):
         body_end = bounds[index + 1][0] if index + 1 < len(bounds) else len(text)
@@ -126,14 +126,9 @@ def extract_ack_segments_from_text(text: str) -> list[AckSegment]:
     return split_ack_message(text)[1]
 
 
-def extract_task_batch_lines_from_ack_text(text: str) -> list[str]:
-    """Return inline TASK batch payloads carried inside ACK segments."""
-    bounds = _ack_marker_bounds(text)
-    lines: list[str] = []
-    for index, (_ack_pos, header_end, _keys) in enumerate(bounds):
-        body_end = bounds[index + 1][0] if index + 1 < len(bounds) else len(text)
-        lines.extend(_task_batch_lines(text[header_end:body_end]))
-    return lines
+def extract_task_batch_lines_from_text(text: str) -> list[str]:
+    """Return inline TASK batch payloads carried by an assistant message."""
+    return _task_batch_lines(text)
 
 
 def ack_content_by_key(segments: Iterable[AckSegment]) -> dict[str, str]:

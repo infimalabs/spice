@@ -10,7 +10,7 @@ from spice.mail.acks import (
     collect_unique_ack_keys,
     extract_ack_keys_from_text,
     extract_ack_segments_from_text,
-    extract_task_batch_lines_from_ack_text,
+    extract_task_batch_lines_from_text,
     split_ack_message,
 )
 from spice.mail.inbox import compose_inbox_text, inbox_dir, parse_inbox_payload
@@ -91,20 +91,33 @@ def test_segment_content_drops_inline_task_directive_lines():
     assert segments[0].content == "captured.\ncontinuing."
 
 
-def test_inline_task_directives_are_extracted_only_from_ack_segments():
+def test_task_directives_are_extracted_from_any_message_line():
     text = (
-        "TASK title=Ignored | project=task.unit | acceptance=Outside ACK\n"
+        "TASK title=Standalone | project=task.unit | acceptance=Outside ACK\n"
         f"ACK {KEY_A}: captured.\n"
         "TASK: title=Captured | project=task.unit | acceptance=Inside ACK\n"
         f"ACK {KEY_B}: second."
     )
     preamble, segments = split_ack_message(text)
 
-    assert extract_task_batch_lines_from_ack_text(text) == [
-        "title=Captured | project=task.unit | acceptance=Inside ACK"
+    assert extract_task_batch_lines_from_text(text) == [
+        "title=Standalone | project=task.unit | acceptance=Outside ACK",
+        "title=Captured | project=task.unit | acceptance=Inside ACK",
     ]
-    assert preamble == "TASK title=Ignored | project=task.unit | acceptance=Outside ACK"
+    assert preamble == ""
     assert segments[0].content == "captured."
+
+
+def test_standalone_task_directive_is_stripped_from_display_text():
+    text = "TASK title=Standalone | project=task.unit | acceptance=Tracked\nDone."
+
+    preamble, segments = split_ack_message(text)
+
+    assert extract_task_batch_lines_from_text(text) == [
+        "title=Standalone | project=task.unit | acceptance=Tracked"
+    ]
+    assert preamble == "Done."
+    assert segments == []
 
 
 def test_content_by_key_latest_ack_wins():

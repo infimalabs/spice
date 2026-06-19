@@ -84,20 +84,36 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert identity.render_handle(rows[0]) in log.getvalue()
 
 
-def test_supervised_ack_rejects_invalid_inline_task_batch_without_partial_creation(
-    task_repo, quiet_supervisor
-):
-    write_inbox_item(
-        task_repo,
-        f"{INBOX_KEY}.txt",
-        compose_inbox_text(body="capture this", priority=None, stop=False),
-    )
+def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supervisor):
     log = io.StringIO()
 
     watchdog.process_supervised_assistant_message(
         task_repo,
         (
-            f"ACK {INBOX_KEY}: captured.\n"
+            "Queued the follow-up.\n"
+            "TASK title=Standalone follow-up | project=task.unit | "
+            "acceptance=Standalone task exists"
+        ),
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    rows = tw.export(["status:pending"])
+    assert len(rows) == 1
+    assert rows[0]["description"] == "Standalone follow-up"
+    assert rows[0]["project"] == "task.unit"
+    assert rows[0]["acceptance"] == "Standalone task exists"
+    assert identity.render_handle(rows[0]) in log.getvalue()
+
+
+def test_supervised_standalone_task_batch_rejects_without_partial_creation(
+    task_repo, quiet_supervisor
+):
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        (
             "TASK title=Would otherwise create | project=task.unit | acceptance=ok\n"
             "TASK title=Invalid project depth | project=task | acceptance=bad"
         ),
@@ -105,7 +121,6 @@ def test_supervised_ack_rejects_invalid_inline_task_batch_without_partial_creati
         watchdog.MaximReminderGate(),
     )
 
-    assert collect_inbox_items(task_repo) == []
     assert tw.export(["status:pending"]) == []
     assert "spice inline task supervisor error: batch add rejected" in log.getvalue()
 
