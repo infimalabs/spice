@@ -42,7 +42,7 @@ const lane = {
   teamId: "team-open",
   teamRevision: 2,
   configRevision: 2,
-  taskFilters: ["serve"],
+  taskFilters: ["serve.ui"],
   laneFilterVersion: "stale",
   pipEl: { dataset: {}, title: "" },
 };

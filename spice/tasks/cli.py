@@ -311,7 +311,7 @@ def _configure_add_parser(actions: Any) -> None:
     route.add_argument(
         "--project",
         help=(
-            "Assignable project stem such as task.cli or serve.web. "
+            "Assignable dotted project such as task.cli or serve.web. "
             "Omit --project for private work; agent.* is reserved."
         ),
     )
@@ -402,7 +402,7 @@ def _project_filter(raw: str) -> str:
     if value.startswith("project:"):
         value = value[len("project:") :]
     if not value:
-        raise argparse.ArgumentTypeError("--project requires a project stem")
+        raise argparse.ArgumentTypeError("--project requires a project")
     return value
 
 

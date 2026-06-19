@@ -80,7 +80,7 @@ def activation_command_surface_lines() -> list[str]:
         "tasks=spice task list",
         'task_done=spice task done <handle> --validation "..."',
         (
-            "task_add_public=spice task add ... --project <stem>; omitting "
+            "task_add_public=spice task add ... --project <stem.child>; omitting "
             "--project creates private agent scratch work"
         ),
         (
