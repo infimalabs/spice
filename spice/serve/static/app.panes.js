@@ -151,11 +151,9 @@ function laneFilterChip(lane, filter) {
   chip.title = "Select lane filter for removal: " + filter;
   chip.innerHTML =
     '<span class="lane-filter-chip-label"></span>' +
-    '<span class="task-count-badge-label">TASK</span>' +
     '<span class="lane-filter-chip-count"></span>';
   chip.querySelector(".lane-filter-chip-label").textContent = filter;
-  chip.querySelector(".lane-filter-chip-count").textContent =
-    taskCountBadgeCount(count);
+  chip.querySelector(".lane-filter-chip-count").textContent = String(count);
   chip.addEventListener("click", () => {
     if (selected) lane.selectedFilterRemovals.delete(filter);
     else lane.selectedFilterRemovals.add(filter);
@@ -183,11 +181,9 @@ function laneFilterPrivateChip(queue) {
   chip.title = queue.label + " private queue";
   chip.innerHTML =
     '<span class="lane-filter-chip-label"></span>' +
-    '<span class="task-count-badge-label">TASK</span>' +
     '<span class="lane-filter-chip-count"></span>';
   chip.querySelector(".lane-filter-chip-label").textContent = queue.label;
-  chip.querySelector(".lane-filter-chip-count").textContent =
-    taskCountBadgeCount(queue.count);
+  chip.querySelector(".lane-filter-chip-count").textContent = String(queue.count);
   return chip;
 }
 
@@ -323,13 +319,10 @@ function laneFilterAssignChip(lane, filters) {
   button.append(label);
   if (removing || catalogReady) {
     const count = removing ? removals.length : availableOpenTaskCount;
-    const taskLabel = document.createElement("span");
-    taskLabel.className = "task-count-badge-label";
-    taskLabel.textContent = "TASK";
     const countEl = document.createElement("span");
     countEl.className = "lane-filter-chip-count";
-    countEl.textContent = taskCountBadgeCount(count);
-    button.append(taskLabel, countEl);
+    countEl.textContent = String(count);
+    button.append(countEl);
   }
   button.title = removing
     ? "Remove selected lane filters"

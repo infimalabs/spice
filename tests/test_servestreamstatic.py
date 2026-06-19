@@ -28,7 +28,6 @@ def test_static_filter_header_pills_render_models_and_styles():
     css = _serve_css_text()
     app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
-    app_filter_model = (STATIC_ROOT / "app.filter-model.js").read_text(encoding="utf-8")
 
     filter_pill_start = css.index(".filter-pill {")
     filter_pill_rule = css[filter_pill_start : css.index("}", filter_pill_start)]
@@ -40,9 +39,15 @@ def test_static_filter_header_pills_render_models_and_styles():
     assert "function filterPillModels()" in app_lanes
     assert "return taskFilterStemPills.map(taskFilterStemPillModel);" in app_lanes
     assert "function taskFilterStemPillModel(stem)" in app_lanes
-    assert "function taskCountBadgeCount(count)" in app_filter_model
-    assert '<span class="task-count-badge-label">TASK</span>' in app_lanes
-    assert "taskCountBadgeCount(\n      model.openTaskCount,\n    )" in app_lanes
+    assert (
+        "pill.innerHTML =\n"
+        "      '<span class=\"filter-pill-label\"></span>' +\n"
+        "      '<span class=\"filter-pill-count\"></span>';" in app_lanes
+    )
+    assert (
+        'pill.querySelector(".filter-pill-count").textContent = '
+        "String(model.openTaskCount);" in app_lanes
+    )
     assert 'classes.push("filter-pill--system");' in app_lanes
     assert "function taskFilterStemScopeLabel(stemName)" in app_lanes
     assert 'return stemName === "oops" ? "oops" : stemName + ".*";' in app_lanes
@@ -61,14 +66,14 @@ def test_static_filter_header_pills_render_models_and_styles():
     assert "if (fingerprint === renderedFilterPillsFingerprint) return;" in app_lanes
     assert "renderedFilterPillsFingerprint = fingerprint;" in app_lanes
     assert "gap: 4px;" in filter_pill_rule
-    assert "background: var(--accent);" in filter_count_rule
-    assert "border-radius: var(--pill-radius);" in filter_count_rule
-    assert "color: var(--button-accent-fg);" in filter_count_rule
-    assert "display: inline-grid;" in filter_count_rule
-    assert "line-height: 13px;" in filter_count_rule
-    assert "min-width: 13px;" in filter_count_rule
-    assert "place-items: center;" in filter_count_rule
-    assert ".task-count-badge-label {" in css
+    assert filter_count_rule == (
+        ".filter-pill-count {\n"
+        "  background: var(--accent);\n"
+        "  border-radius: var(--pill-radius);\n"
+        "  color: var(--button-accent-fg);\n"
+        "  font-size: 9px;\n"
+        "  padding: 0 5px;\n"
+    )
     assert (
         ".filter-pill--undrainable .filter-pill-count { background: var(--muted); }"
         in css
@@ -124,19 +129,31 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
         in app_panes
     )
     assert "tasks · stem" in app_panes
+    assert (
+        "chip.innerHTML =\n"
+        "    '<span class=\"lane-filter-chip-label\"></span>' +\n"
+        "    '<span class=\"lane-filter-chip-count\"></span>';" in app_panes
+    )
+    assert (
+        'chip.querySelector(".lane-filter-chip-count").textContent = String(count);'
+        in app_panes
+    )
+    assert "countEl.textContent = String(count);" in app_panes
+    assert "button.append(countEl);" in app_panes
     assert "flex: 0 1 10rem;" not in chip_rule
     assert "justify-content: space-between;" not in chip_rule
     assert "gap: 4px;" in chip_rule
     assert "padding: 3px 10px 3px 12px;" in chip_rule
-    assert "background: var(--accent);" in chip_count_rule
-    assert "border-radius: var(--pill-radius);" in chip_count_rule
-    assert "color: var(--button-accent-fg);" in chip_count_rule
-    assert "display: inline-grid;" in chip_count_rule
-    assert "font-size: 9px;" in chip_count_rule
-    assert "line-height: 13px;" in chip_count_rule
-    assert "min-width: 13px;" in chip_count_rule
-    assert "place-items: center;" in chip_count_rule
-    assert ".task-count-badge-label {" in css
+    assert chip_count_rule == (
+        ".lane-filter-chip-count {\n"
+        "  background: var(--accent);\n"
+        "  border-radius: var(--pill-radius);\n"
+        "  color: var(--button-accent-fg);\n"
+        "  flex: 0 0 auto;\n"
+        "  font-size: 9px;\n"
+        "  line-height: 13px;\n"
+        "  padding: 0 5px;\n"
+    )
     assert (
         ".lane-filter-chip--assign .lane-filter-chip-count,\n"
         ".lane-filter-chip--empty .lane-filter-chip-count {\n"
@@ -163,7 +180,6 @@ def test_static_filter_pane_uses_pure_filter_model_helpers():
     assert "function availableTaskFilterNames(" in app_filter_model
     assert "function availableTaskFilterOpenTaskCount(" in app_filter_model
     assert "function taskFilterOpenCount(" in app_filter_model
-    assert "function taskCountBadgeCount(count)" in app_filter_model
     assert "return taskFilterEffectiveAssignedNames(inventory, assignedFilters);" in (
         app_panes
     )
@@ -171,9 +187,6 @@ def test_static_filter_pane_uses_pure_filter_model_helpers():
     assert "return taskFilterOpenCount(laneFilterInventory(lane), filter);" in (
         app_panes
     )
-    assert '<span class="task-count-badge-label">TASK</span>' in app_panes
-    assert "taskCountBadgeCount(count)" in app_panes
-    assert "taskCountBadgeCount(queue.count)" in app_panes
 
 
 def test_static_filter_model_helpers_are_pure_and_covered():
