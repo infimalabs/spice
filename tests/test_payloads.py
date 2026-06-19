@@ -264,14 +264,16 @@ def test_malformed_task_like_progress_update_remains_plain_message(tmp_path):
 
     assert len(items) == 1
     item = items[0]
+    payload = item.to_payload()
+    expected_html = f"<p>{text}</p>"
     assert item.task_card_count == 0
-    assert item.to_payload()["task_card_count"] == 0
+    assert payload["task_card_count"] == item.task_card_count
     assert item.display_text == text
-    assert text in item.display_html
-    assert "Task capture" not in item.display_text
-    assert "Task capture" not in item.display_html
-    assert "pending capture" not in item.display_html
-    assert 'class="task-directive-quote"' not in item.display_html
+    assert item.display_html == expected_html
+    assert payload["display_text"] == text
+    assert payload["display_html"] == expected_html
+    assert payload["preview"] == text
+    assert payload["text"] == text
 
 
 def test_inline_task_directive_renders_inside_ack_segment_at_written_position(
