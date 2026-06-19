@@ -56,6 +56,7 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
   <script src="/static/app.shell.js"></script>
   <script src="/static/app.composer.js"></script>
   <script src="/static/app.controls.js"></script>
+  <script src="/static/app.filter-model.js"></script>
   <script src="/static/app.panes.js"></script>
   <script src="/static/app.groups.js"></script>
   <script src="/static/app.audio.js"></script>

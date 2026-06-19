@@ -17,51 +17,22 @@ function laneFilterInventory(lane) {
 }
 
 function laneEffectiveAssignedFilterNames(inventory, assignedFilters) {
-  const covered = new Set();
-  const stems = new Map(
-    ((inventory || {}).primaryStems || []).map((stem) => [stem.name, stem]),
-  );
-  for (const assignedFilter of assignedFilters || []) {
-    if (!assignedFilter) continue;
-    covered.add(assignedFilter);
-    const stem = stems.get(assignedFilter);
-    if (!stem) continue;
-    for (const stemFilter of stem.filters || []) {
-      if (stemFilter) covered.add(stemFilter);
-    }
-  }
-  return covered;
+  return taskFilterEffectiveAssignedNames(inventory, assignedFilters);
 }
 
 function laneFilterAvailableOpenTaskCount(lane, assignedFilters) {
-  const inventory = laneFilterInventory(lane);
-  if (!inventory) return 0;
-  const covered = laneEffectiveAssignedFilterNames(inventory, assignedFilters);
-  return (inventory.filters || []).reduce((total, filter) => {
-    if (!filter.name || covered.has(filter.name)) return total;
-    return total + Math.max(0, Number(filter.openTaskCount) || 0);
-  }, 0);
+  return availableTaskFilterOpenTaskCount(
+    laneFilterInventory(lane),
+    assignedFilters,
+  );
 }
 
 function laneAvailableTaskFilters(lane, assignedFilters) {
-  const inventory = laneFilterInventory(lane);
-  if (!inventory) return [];
-  const covered = laneEffectiveAssignedFilterNames(inventory, assignedFilters);
-  return (inventory.filters || [])
-    .map((filter) => filter.name)
-    .filter((filter) => filter && !covered.has(filter))
-    .sort();
+  return availableTaskFilterNames(laneFilterInventory(lane), assignedFilters);
 }
 
 function laneTaskFilterOpenCount(lane, filter) {
-  const inventory = laneFilterInventory(lane);
-  if (!inventory) return 0;
-  const stem = (inventory.primaryStems || []).find(
-    (item) => item.name === filter,
-  );
-  if (stem) return Math.max(0, Number(stem.openTaskCount) || 0);
-  const row = (inventory.filters || []).find((item) => item.name === filter);
-  return row ? Math.max(0, Number(row.openTaskCount) || 0) : 0;
+  return taskFilterOpenCount(laneFilterInventory(lane), filter);
 }
 
 function renderLaneFiltersPane(lane) {
