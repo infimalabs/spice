@@ -140,7 +140,7 @@ def test_unstarted_send_rewrites_placeholder_membership_to_ensured_thread(
     target = _target(repo)
     state = _serve_state(tmp_path, target)
     created = state.team_store.create_team(
-        config=TeamConfig(lifetime="Drain", task_filters=("serve",)),
+        config=TeamConfig(lifetime="Drain", task_filters=("serve.ui",)),
         members=[target.id],
     )
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
@@ -165,7 +165,7 @@ def test_unstarted_send_rewrites_placeholder_membership_to_ensured_thread(
         "threadId": THREAD_A,
     }
     assert result["route"]["teamIdentity"]["teamId"] == created.team_id
-    assert result["route"]["taskFilters"] == ["serve"]
+    assert result["route"]["taskFilters"] == ["serve.ui"]
     assert result["route"]["lifetime"] == "Drain"
     assert [member.agent_id for member in members] == [THREAD_A]
 
