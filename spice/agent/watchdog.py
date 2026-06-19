@@ -146,11 +146,11 @@ def process_supervised_assistant_message(
             log_handle,
         )
     try:
-        handles = create_inline_tasks(repo_root, message_text, log_handle)
-        if handles:
+        results = create_inline_tasks(repo_root, message_text, log_handle)
+        if results:
             publish_supervisor_feedback(
                 repo_root,
-                "inline_task_created=" + " ".join(handles),
+                "inline_task_created=" + _inline_task_result_text(results),
                 log_handle,
             )
     except Exception as exc:  # pragma: no cover - supervisor-visible task failure
@@ -187,7 +187,7 @@ def publish_supervisor_feedback(
 
 def create_inline_tasks(
     repo_root: Path, message_text: str, log_handle: TextIO
-) -> list[str]:
+) -> list[object]:
     batch_lines = extract_task_batch_lines_from_text(message_text)
     if not batch_lines:
         return []
@@ -196,11 +196,17 @@ def create_inline_tasks(
         raise RuntimeError(f"inline TASK directive missing payload at line {empty[0]}")
     from spice.tasks import ops
 
-    handles = ops.add_batch(batch_lines)
-    if handles:
-        log_handle.write("spice inline task created: " + " ".join(handles) + "\n")
+    results = ops.add_batch_results(batch_lines)
+    if results:
+        log_handle.write(
+            "spice inline task created: " + _inline_task_result_text(results) + "\n"
+        )
         log_handle.flush()
-    return handles
+    return results
+
+
+def _inline_task_result_text(results: list[object]) -> str:
+    return " ".join(f"{result.handle}({result.route_feedback})" for result in results)
 
 
 def record_supervised_lane_metrics(repo_root: Path) -> None:

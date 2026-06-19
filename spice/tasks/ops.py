@@ -34,6 +34,13 @@ class TaskAddBatchRequest:
     due: str | None = None
 
 
+@dataclass(frozen=True)
+class TaskAddResult:
+    handle: str
+    project: str
+    route_feedback: str
+
+
 def annotate(target: str, text: str) -> None:
     """Annotate via `-- ` so attribute-like text (e.g. "depends: X") stays
     literal."""
@@ -267,7 +274,8 @@ def _add_one(
     extra: list[str] | None = None,
     existing: set[str] | None = None,
     system_project: bool = False,
-) -> str:
+    return_result: bool = False,
+) -> str | TaskAddResult:
     title = _task_title(title)
     body = _task_description(description)
     actor = tw.current_actor()
@@ -330,13 +338,20 @@ def _add_one(
     args.extend(extra or [])
     args.append(title)
     tw.run(args)
-    _subscribe_created_project(resolved_project, actor)
+    route_feedback = _subscribe_created_project(resolved_project, actor)
     if claim:
         created = tw.export([f"incepted.is:{incepted}"])
         if created:
             do_claim(identity.uuid_of(created[0]), actor, guard_unclaimed=False)
     key = identity.key_for(resolved_project, title)
-    return f"{key}-{incepted}"
+    result = TaskAddResult(
+        handle=f"{key}-{incepted}",
+        project=resolved_project,
+        route_feedback=route_feedback,
+    )
+    if return_result:
+        return result
+    return result.handle
 
 
 def add(
@@ -475,28 +490,36 @@ def parse_add_batch(lines: Sequence[str]) -> list[TaskAddBatchRequest]:
     return parsed
 
 
-def add_batch(lines: list[str]) -> list[str]:
+def add_batch_results(lines: list[str]) -> list[TaskAddResult]:
     parsed = parse_add_batch(lines)
     existing = {str(r.get("incepted") or "") for r in tw.export()}
-    handles: list[str] = []
+    results: list[TaskAddResult] = []
     for request in parsed:
-        handles.append(
-            _add_one(
-                title=request.title,
-                description=request.description,
-                project=request.project,
-                priority=request.priority,
-                flow=list(request.flow) or None,
-                tags=list(request.tags),
-                after=list(request.after),
-                acceptance=list(request.acceptance),
-                wait=None,
-                claim=False,
-                due=request.due,
-                existing=existing,
-            )
+        result = _add_one(
+            title=request.title,
+            description=request.description,
+            project=request.project,
+            priority=request.priority,
+            flow=list(request.flow) or None,
+            tags=list(request.tags),
+            after=list(request.after),
+            acceptance=list(request.acceptance),
+            wait=None,
+            claim=False,
+            due=request.due,
+            existing=existing,
+            return_result=True,
         )
-    return handles
+        if not isinstance(
+            result, TaskAddResult
+        ):  # defensive; return_result controls this
+            raise SpiceError("batch add did not return task creation details")
+        results.append(result)
+    return results
+
+
+def add_batch(lines: list[str]) -> list[str]:
+    return [result.handle for result in add_batch_results(lines)]
 
 
 # ---- claim --------------------------------------------------------------
@@ -559,21 +582,28 @@ def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
     store.add_task_filter(team_id, project, source=TASK_FILTER_SOURCE_AUTO_CLAIM)
 
 
-def _subscribe_created_project(project: str, actor: str) -> None:
+def _subscribe_created_project(project: str, actor: str) -> str:
     project = str(project or "").strip()
     if not project or _project_is_subscription_excluded(project):
-        return
+        return f"route_filter=skipped:{project or '-'}:excluded"
 
     from spice.serve.teams import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CREATE
 
     store = ServeTeamStore()
     team_id = store.current_team_for_agent(actor)
     if team_id is None:
-        return
+        return f"route_filter=skipped:{project}:no_team"
     team_config = store.team_config(team_id)
     if team_config.lifetime != "Drive":
-        return
+        return f"route_filter=skipped:{project}:lifetime:{team_config.lifetime}"
+    before = {
+        (entry.project, entry.source) for entry in team_config.task_filter_entries
+    }
     store.add_task_filter(team_id, project, source=TASK_FILTER_SOURCE_AUTO_CREATE)
+    outcome = (
+        "present" if (project, TASK_FILTER_SOURCE_AUTO_CREATE) in before else "added"
+    )
+    return f"route_filter={outcome}:{project}:{TASK_FILTER_SOURCE_AUTO_CREATE}"
 
 
 def _project_is_subscription_excluded(project: str) -> bool:

@@ -17,7 +17,12 @@ from spice.mail.inbox import (
     compose_inbox_text,
     write_inbox_item,
 )
-from spice.tasks import config, identity, tw
+from spice.serve.teams import (
+    TASK_FILTER_SOURCE_AUTO_CREATE,
+    ServeTeamStore,
+    TeamConfig,
+)
+from spice.tasks import config, identity, ops, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -83,15 +88,18 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert rows[0]["acceptance"] == "Inline task exists"
     handle = identity.render_handle(rows[0])
     assert handle in log.getvalue()
+    assert "route_filter=skipped:task.unit:no_team" in log.getvalue()
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert feedback == [
         f"ack_archived={INBOX_KEY}",
-        f"inline_task_created={handle}",
+        f"inline_task_created={handle}(route_filter=skipped:task.unit:no_team)",
     ]
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
 
 def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supervisor):
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR], config=TeamConfig(lifetime="Drive"))
     log = io.StringIO()
 
     watchdog.process_supervised_assistant_message(
@@ -112,8 +120,18 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
     assert rows[0]["acceptance"] == "Standalone task exists"
     handle = identity.render_handle(rows[0])
     assert handle in log.getvalue()
+    assert "route_filter=added:task.unit:auto:create" in log.getvalue()
+    team_config = store.team_config(team.team_id)
+    assert team_config.task_filters == ("task.unit",)
+    assert [entry.to_payload() for entry in team_config.task_filter_entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE}
+    ]
+    assigned = ops.next_task()
+    assert identity.render_handle(assigned or {}) == handle
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
-    assert feedback == [f"inline_task_created={handle}"]
+    assert feedback == [
+        f"inline_task_created={handle}(route_filter=added:task.unit:auto:create)"
+    ]
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
 

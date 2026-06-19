@@ -10,6 +10,11 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
+from spice.serve.teams import (
+    TASK_FILTER_SOURCE_AUTO_CREATE,
+    ServeTeamStore,
+    TeamConfig,
+)
 from spice.tasks import config, identity, ops, tw
 
 pytestmark = pytest.mark.skipif(
@@ -109,6 +114,29 @@ def test_add_batch_creates_from_parsed_requests(task_repo):
     assert row["project"] == "task.unit"
     assert row["priority"] == "L"
     assert row["acceptance"] == "Batch creation still works"
+
+
+def test_add_batch_results_update_drive_task_filter_with_visible_route(task_repo):
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR], config=TeamConfig(lifetime="Drive"))
+
+    results = ops.add_batch_results(
+        [
+            "TASK title=Visible batch | project=task.batch | "
+            "acceptance=Batch creation updates routing"
+        ]
+    )
+    row = identity.resolve(results[0].handle)
+    team_config = store.team_config(team.team_id)
+
+    assert row["description"] == "Visible batch"
+    assert row["project"] == "task.batch"
+    assert results[0].project == "task.batch"
+    assert results[0].route_feedback == "route_filter=added:task.batch:auto:create"
+    assert team_config.task_filters == ("task.batch",)
+    assert [entry.to_payload() for entry in team_config.task_filter_entries] == [
+        {"project": "task.batch", "source": TASK_FILTER_SOURCE_AUTO_CREATE}
+    ]
 
 
 def _init_repo(path: Path) -> Path:
