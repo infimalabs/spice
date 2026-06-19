@@ -842,6 +842,39 @@ def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
     assert "same task-add batch format" in output
 
 
+def test_inbox_injector_compacts_already_shown_item_when_new_key_arrives(tmp_path):
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000001Z.txt",
+        compose_inbox_text(body="first steering", priority=None, stop=False),
+    )
+    now = [0.0]
+    stderr = io.StringIO()
+    injector = wrap.AgentInboxInjector(
+        tmp_path,
+        stderr=stderr,
+        repeat_interval_seconds=15.0,
+        time_factory=lambda: now[0],
+    )
+
+    injector.inject(force=False)
+    # A new key arrives while the first is still inside its suppression window.
+    now[0] = 5.0
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000002Z.txt",
+        compose_inbox_text(body="second steering", priority=None, stop=False),
+    )
+    injector.inject(force=False)
+
+    output = stderr.getvalue()
+    # The new key renders full (real-time delivery preserved); the already-shown
+    # key collapses to one compact summary line instead of re-dumping its body.
+    assert output.count("first steering") == 1
+    assert output.count("second steering") == 1
+    assert "shown earlier; ACK to clear" in output
+
+
 def test_inbox_injector_suppresses_task_offload_for_maxim_guidance(tmp_path):
     write_inbox_item(
         tmp_path,
