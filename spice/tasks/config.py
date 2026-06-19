@@ -358,8 +358,11 @@ def uda_schema() -> dict[str, dict[str, str]]:
 
 
 def write_taskrc() -> None:
+    from spice.paths import shared_attachment_root
+
     with _bootstrap_lock():
         data_dir().mkdir(parents=True, exist_ok=True)
+        shared_attachment_root(repo_root()).mkdir(parents=True, exist_ok=True)
         lines = [
             f"data.location={data_dir()}",
             "confirmation=no",

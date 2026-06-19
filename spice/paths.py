@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 STATE_DIRNAME = ".spice"
+SHARED_ATTACHMENT_DIR = Path("spice") / "attachments"
 WORKTREE_SPICE_REQUIRED_PATHS = (
     Path("spice") / "__main__.py",
     Path("spice") / "cli" / "entry.py",
@@ -79,6 +80,10 @@ def git_dir(root: Path) -> Path:
         raise SpiceError("not inside a git worktree")
     raw = Path(result.stdout.strip())
     return (raw if raw.is_absolute() else root / raw).resolve()
+
+
+def shared_attachment_root(repo_root: Path) -> Path:
+    return git_common_dir(repo_root) / SHARED_ATTACHMENT_DIR
 
 
 def state_dir(repo_root: Path) -> Path:

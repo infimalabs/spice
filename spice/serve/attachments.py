@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import quote
 
-from spice.mail.attachments import InboxAttachment
+from spice.mail.attachments import InboxAttachment, shared_attachment_display_path
 
 
 def inbox_attachment_payloads(
@@ -44,6 +44,9 @@ def _attachment_payload(
 def _relative_attachment_path(path: Path, repo_root: Path | None) -> str:
     if repo_root is None:
         return str(path)
+    shared_path = shared_attachment_display_path(path, repo_root=repo_root)
+    if shared_path is not None:
+        return shared_path.as_posix()
     try:
         return path.relative_to(repo_root).as_posix()
     except ValueError:

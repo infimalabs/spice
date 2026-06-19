@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import socket
 import subprocess
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
     write_inbox_item,
 )
+from spice.paths import shared_attachment_root
 from spice.serve import agentapi, app, payloads
 from spice.serve.app import (
     ServeState,
@@ -211,6 +213,19 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert pending_inbox_count(repo) == 1
     assert inbox_request_body(items[0].text) == "inspect this image"
     assert items[0].attachments[0].path.read_bytes() == b"image-bytes"
+    assert shared_attachment_root(repo) in items[0].attachments[0].path.parents
+    assert payload["attachments"][0]["path"].startswith(".spice/attachments/")
+
+    handler = _ImageHandler(state)
+    app._ServeHandler._send_worktree_image(
+        handler,
+        target,
+        {"path": [payload["attachments"][0]["path"]]},
+    )
+
+    assert handler.status == HTTPStatus.OK
+    assert handler.headers["Content-Type"] == "image/png"
+    assert handler.body.getvalue() == b"image-bytes"
 
 
 def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
@@ -362,70 +377,63 @@ def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
     assert handler.body.getvalue() == b"image-bytes"
 
 
-def test_worktree_image_resolves_archived_attachment_from_live_reference(tmp_path):
+def test_worktree_image_resolves_shared_attachment_reference(tmp_path):
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
-    _live, archived = _inbox_attachment_paths(repo)
-    archived.parent.mkdir(parents=True)
-    archived.write_bytes(b"archived-image")
+    data = b"shared-image"
+    digest = hashlib.sha256(data).hexdigest()
+    shared = shared_attachment_root(repo) / digest / "01-image.png"
+    shared.parent.mkdir(parents=True)
+    shared.write_bytes(data)
     handler = _ImageHandler(state)
 
     app._ServeHandler._send_worktree_image(
         handler,
         target,
-        {"path": [".spice/inbox/20260102T000000000001Z.attachments/01-image.png"]},
+        {"path": [f".spice/attachments/{digest}/01-image.png"]},
     )
 
     assert handler.status == HTTPStatus.OK
     assert handler.headers["Content-Type"] == "image/png"
-    assert handler.body.getvalue() == b"archived-image"
+    assert handler.body.getvalue() == data
 
 
-def test_worktree_image_resolves_live_attachment_from_archive_reference(tmp_path):
+def test_worktree_image_resolves_absolute_shared_attachment_reference(tmp_path):
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
-    live, _archived = _inbox_attachment_paths(repo)
-    live.parent.mkdir(parents=True)
-    live.write_bytes(b"live-image")
+    data = b"absolute-shared-image"
+    digest = hashlib.sha256(data).hexdigest()
+    shared = shared_attachment_root(repo) / digest / "01-image.png"
+    shared.parent.mkdir(parents=True)
+    shared.write_bytes(data)
     handler = _ImageHandler(state)
 
     app._ServeHandler._send_worktree_image(
         handler,
         target,
-        {
-            "path": [
-                ".spice/inbox/archive/20260102T000000000001Z.attachments/01-image.png"
-            ]
-        },
+        {"path": [shared.as_posix()]},
     )
 
     assert handler.status == HTTPStatus.OK
     assert handler.headers["Content-Type"] == "image/png"
-    assert handler.body.getvalue() == b"live-image"
+    assert handler.body.getvalue() == data
 
 
-def test_worktree_image_prefers_archived_attachment_when_both_exist(tmp_path):
+def test_worktree_image_rejects_missing_shared_attachment_reference(tmp_path):
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
-    live, archived = _inbox_attachment_paths(repo)
-    live.parent.mkdir(parents=True)
-    archived.parent.mkdir(parents=True)
-    live.write_bytes(b"live-image")
-    archived.write_bytes(b"archived-image")
     handler = _ImageHandler(state)
 
     app._ServeHandler._send_worktree_image(
         handler,
         target,
-        {"path": [".spice/inbox/20260102T000000000001Z.attachments/01-image.png"]},
+        {"path": [".spice/attachments/missing/01-image.png"]},
     )
 
-    assert handler.status == HTTPStatus.OK
-    assert handler.headers["Content-Type"] == "image/png"
-    assert handler.body.getvalue() == b"archived-image"
+    assert handler.status == HTTPStatus.NOT_FOUND
 
 
 def test_work_tree_send_drive_keeps_control_out_of_request_text(tmp_path, monkeypatch):
@@ -942,13 +950,6 @@ def _serve_state(tmp_path: Path, target: WorktreeTarget) -> ServeState:
     state.team_store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     state.team_commands = TeamCommandService(state.team_store)
     return state
-
-
-def _inbox_attachment_paths(repo: Path) -> tuple[Path, Path]:
-    relative = Path("20260102T000000000001Z.attachments") / "01-image.png"
-    live = repo / ".spice" / "inbox" / relative
-    archived = repo / ".spice" / "inbox" / "archive" / relative
-    return live, archived
 
 
 def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:

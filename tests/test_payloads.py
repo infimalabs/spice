@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -120,6 +121,10 @@ def _pending_identity(count: int = 0) -> dict[str, object]:
         "pendingInboxKeys": [],
         "pendingInboxRevision": f"test-revision-{count}",
     }
+
+
+def _init_repo(path: Path) -> None:
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
 
 
 def test_sparkline_buckets_messages_by_minute():
@@ -393,6 +398,7 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
 
 
 def test_sent_steering_payload_includes_image_attachments(tmp_path):
+    _init_repo(tmp_path)
     sent = submit_steering_message(
         text="inspect this",
         priority=None,
@@ -411,13 +417,14 @@ def test_sent_steering_payload_includes_image_attachments(tmp_path):
 
     assert payload["attachments"][0]["name"] == "paste.png"
     assert payload["attachments"][0]["contentType"] == "image/png"
-    assert payload["attachments"][0]["path"].startswith(".spice/inbox/")
+    assert payload["attachments"][0]["path"].startswith(".spice/attachments/")
     assert payload["attachments"][0]["url"].startswith(
         "/api/work/trees/wt/files/image?path="
     )
 
 
 def test_ack_context_payload_round_trips_inbox_attachments(tmp_path):
+    _init_repo(tmp_path)
     name = "20260104T000000000004Z.txt"
     composed = compose_inbox_text(
         body=f"look here\n{RENEWAL_HANDOFF_REQUEST_SUFFIX}",
@@ -446,7 +453,7 @@ def test_ack_context_payload_round_trips_inbox_attachments(tmp_path):
     assert payload["acks"][0]["html"] == "<p>look here</p>"
     assert attachment["name"] == "upload.png"
     assert attachment["contentType"] == "image/png"
-    assert attachment["path"].startswith(".spice/inbox/")
+    assert attachment["path"].startswith(".spice/attachments/")
     assert attachment["url"].startswith("/api/work/trees/wt/files/image?path=")
 
 

@@ -63,7 +63,7 @@ def submit_steering_message(
         request_text=strip_renewal_handoff_request_suffix(inbox_request_body(composed)),
         request_controls=inbox_request_controls(composed),
         no_say=no_say,
-        attachments=collect_inbox_attachments(path),
+        attachments=collect_inbox_attachments(path, repo_root=target_repo_root),
     )
 
 
