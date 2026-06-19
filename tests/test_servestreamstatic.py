@@ -296,7 +296,7 @@ def test_static_css_adds_visible_nested_quote_depth():
     assert "--quote-rail-width: 3px;" in css
     assert "border-left: var(--quote-rail-width) solid var(--quote-accent);" in ack_rule
     assert "padding: var(--quote-pad-block) var(--quote-pad-inline);" in ack_rule
-    assert "flex-direction: row-reverse;" in ack_attachments_rule
+    assert "flex-direction: row;" in ack_attachments_rule
     assert "flex-wrap: nowrap;" in ack_attachments_rule
     assert "justify-content: flex-start;" in ack_attachments_rule
     assert "overflow-x: auto;" in ack_attachments_rule
