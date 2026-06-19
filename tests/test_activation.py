@@ -23,10 +23,12 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "task_steer_contract=steer lanes treat allocator continuation" in text
     assert "manual task claims are exceptional" in text
     assert "task_capture_contract=operator requests to create or capture tasks" in text
-    assert "are captured immediately with spice task add before continuing" in text
+    assert "TASK title=... | project=<stem.child> | acceptance=..." in text
+    assert "same key=value batch format as task add" in text
     assert "immediate task capture is not allocator selection" in text
     assert "ack_inline=ACK pending inbox keys" in text
-    assert "task_add_public=spice task add ... --project <stem.child>" in text
+    assert "task_add_public=TASK title=... | project=<stem.child>" in text
+    assert "same task-add batch format" in text
     assert "task_project_depth=public task project depth bounds" in text
 
 

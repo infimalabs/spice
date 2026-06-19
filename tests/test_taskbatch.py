@@ -57,6 +57,29 @@ def test_parse_add_batch_returns_typed_requests_without_creating_tasks(task_repo
     assert tw.export(["status:pending"]) == []
 
 
+def test_parse_add_batch_accepts_task_directive_prefix(task_repo):
+    requests = ops.parse_add_batch(
+        [
+            "TASK: title=Prefixed batch | project=task.unit | "
+            "acceptance=Same batch parser"
+        ]
+    )
+
+    assert requests == [
+        ops.TaskAddBatchRequest(
+            title="Prefixed batch",
+            description=None,
+            project="task.unit",
+            priority=config.DEFAULT_PRIORITY,
+            flow=(),
+            tags=(),
+            acceptance=("Same batch parser",),
+            due=None,
+        )
+    ]
+    assert tw.export(["status:pending"]) == []
+
+
 def test_add_batch_validates_all_lines_before_creating_tasks(task_repo):
     with pytest.raises(SpiceError, match="batch add rejected"):
         ops.add_batch(
