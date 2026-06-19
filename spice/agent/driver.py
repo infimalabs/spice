@@ -431,27 +431,29 @@ def _claude_response_item(timestamp: Any, payload: dict[str, Any]) -> dict[str, 
     return {"type": "response_item", "timestamp": timestamp, "payload": payload}
 
 
-def _claude_first_block(message: dict[str, Any]) -> dict[str, Any] | None:
+def _claude_content_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
     content = message.get("content")
     if not isinstance(content, list):
-        return None
-    for block in content:
-        if isinstance(block, dict):
-            return block
-    return None
+        return []
+    return [block for block in content if isinstance(block, dict)]
+
+
+def _claude_text_content(message: dict[str, Any]) -> str:
+    texts = [
+        text
+        for block in _claude_content_blocks(message)
+        if block.get("type") == "text"
+        for text in [block.get("text")]
+        if isinstance(text, str) and text.strip()
+    ]
+    return "\n\n".join(texts).strip()
 
 
 def _claude_assistant_event(
     timestamp: Any, message: dict[str, Any]
 ) -> dict[str, Any] | None:
-    block = _claude_first_block(message)
-    if block is None:
-        return None
-    block_type = block.get("type")
-    if block_type == "text":
-        text = block.get("text")
-        if not isinstance(text, str) or not text.strip():
-            return None
+    text = _claude_text_content(message)
+    if text:
         payload: dict[str, Any] = {
             "type": "message",
             "role": "assistant",
@@ -460,22 +462,28 @@ def _claude_assistant_event(
         if message.get("stop_reason") == "end_turn":
             payload["phase"] = "final_answer"
         return _claude_response_item(timestamp, payload)
-    if block_type == "thinking":
-        summary = block.get("thinking")
+    thinking_block: dict[str, Any] | None = None
+    for block in _claude_content_blocks(message):
+        block_type = block.get("type")
+        if block_type == "thinking":
+            thinking_block = thinking_block or block
+            continue
+        if block_type == "tool_use":
+            return _claude_response_item(timestamp, _claude_tool_call_payload(block))
+        if block_type == "image":
+            item = _claude_image_item(block)
+            if item is not None:
+                return _claude_response_item(
+                    timestamp,
+                    {"type": "message", "role": "assistant", "content": [item]},
+                )
+    if thinking_block is not None:
+        summary = thinking_block.get("thinking")
         text = summary if isinstance(summary, str) else ""
         return _claude_response_item(
             timestamp,
             {"type": "reasoning", "summary": [{"type": "summary_text", "text": text}]},
         )
-    if block_type == "tool_use":
-        return _claude_response_item(timestamp, _claude_tool_call_payload(block))
-    if block_type == "image":
-        item = _claude_image_item(block)
-        if item is not None:
-            return _claude_response_item(
-                timestamp,
-                {"type": "message", "role": "assistant", "content": [item]},
-            )
     return None
 
 

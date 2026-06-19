@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -10,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent import sidechannelnotify, watchdog
-from spice.agent.driver import DRIVER
+from spice.agent.driver import CLAUDE_DRIVER, DRIVER
 from spice.mail.inbox import (
     collect_acked_inbox_items,
     collect_inbox_items,
@@ -101,6 +102,64 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert identity.render_handle(assigned or {}) == handle
     assert store.current_team_for_agent(ACTOR) is None
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
+
+
+def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(
+    task_repo, quiet_supervisor
+):
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(body="capture this", priority=None, stop=False),
+    )
+    log = io.StringIO()
+    gate = watchdog.MaximReminderGate()
+    scanner = watchdog.JsonStdoutScanner(
+        lambda text: watchdog.process_supervised_assistant_message(
+            task_repo, text, log, gate
+        ),
+        CLAUDE_DRIVER.normalize_transcript_line,
+        on_compaction=gate.note_compaction,
+    )
+
+    scanner.process_line(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "thinking", "thinking": "checking steering"},
+                        {
+                            "type": "text",
+                            "text": (
+                                f"ACK {INBOX_KEY}: captured.\n"
+                                "TASK title=Claude follow-up | project=task.unit | "
+                                "acceptance=Text after thinking still processes"
+                            ),
+                        },
+                    ],
+                },
+            }
+        )
+    )
+    scanner.close()
+
+    rows = tw.export(["status:pending"])
+    assert collect_inbox_items(task_repo) == []
+    assert [item.name for item in collect_acked_inbox_items(task_repo)] == [
+        f"{INBOX_KEY}.txt"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["description"] == "Claude follow-up"
+    assert rows[0]["project"] == "task.unit"
+    assert rows[0]["acceptance"] == "Text after thinking still processes"
+    handle = identity.render_handle(rows[0])
+    feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
+    assert feedback == [
+        f"ack_archived={INBOX_KEY}",
+        f"inline_task_created={handle}(route_filter=skipped:task.unit:no_team)",
+    ]
 
 
 def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supervisor):

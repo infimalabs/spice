@@ -177,6 +177,28 @@ def test_claude_normalizes_assistant_text_into_final_message():
     assert payload["content"][0]["text"] == "READY"
 
 
+def test_claude_normalizes_assistant_text_after_thinking_block():
+    raw = {
+        "type": "assistant",
+        "timestamp": "2026-06-14T00:30:00.000Z",
+        "message": {
+            "role": "assistant",
+            "stop_reason": "end_turn",
+            "content": [
+                {"type": "thinking", "thinking": "working"},
+                {"type": "text", "text": "ACK 20260614T003000000000Z: done."},
+            ],
+        },
+    }
+
+    payload = CLAUDE_DRIVER.normalize_transcript_line(raw)["payload"]
+
+    assert payload["type"] == "message"
+    assert payload["role"] == "assistant"
+    assert payload["phase"] == "final_answer"
+    assert payload["content"][0]["text"] == "ACK 20260614T003000000000Z: done."
+
+
 def test_claude_normalizes_tool_use_into_function_call():
     raw = {
         "type": "assistant",
@@ -184,7 +206,8 @@ def test_claude_normalizes_tool_use_into_function_call():
             "role": "assistant",
             "stop_reason": "tool_use",
             "content": [
-                {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}
+                {"type": "thinking", "thinking": "choosing command"},
+                {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
             ],
         },
     }
