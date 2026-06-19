@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
@@ -198,6 +199,7 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
     return repo
 
 

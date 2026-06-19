@@ -65,6 +65,22 @@ def git_common_dir(root: Path) -> Path:
     return (raw if raw.is_absolute() else root / raw).resolve()
 
 
+def git_dir(root: Path) -> Path:
+    """The git dir for this specific worktree."""
+    from spice.errors import SpiceError
+
+    result = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--git-dir"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise SpiceError("not inside a git worktree")
+    raw = Path(result.stdout.strip())
+    return (raw if raw.is_absolute() else root / raw).resolve()
+
+
 def state_dir(repo_root: Path) -> Path:
     return repo_root / STATE_DIRNAME
 

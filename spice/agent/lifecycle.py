@@ -3,10 +3,12 @@
 One agent inhabits one worktree. `ensure` starts a fresh agent, resumes the
 recorded thread, or — under renewal — forces a new successor; the launch is
 serialized by an ensure-lock and recorded in durable state under
-`.spice/agents/<driver>/state.json`. The agent runs under a detached
-supervisor process (`spice agent supervise`) that owns the side-channel
-socket and the stdout watchdog, publishes the agent state, and survives the
-parent that launched it.
+git-backed agent state. Worktree-scoped coordination lives under that
+worktree's git dir; once the real thread id is known, thread-owned state and
+logs live under the common git dir at `spice/agents/<driver>/<thread-id>/`.
+The agent runs under a detached supervisor process (`spice agent supervise`)
+that owns the side-channel socket and the stdout watchdog, publishes the agent
+state, and survives the parent that launched it.
 
 The prompt boundary: the initial prompt is only a neutral skill invocation.
 Operator prose never rides the start prompt — the agent recovers intent from
@@ -32,9 +34,14 @@ from typing import Any, Iterator, Sequence, cast
 from spice.agent.driver import driver_for
 from spice.agent.gitshadow import agent_git_shadow_environment
 from spice.agent.identity import ambient_thread, ambient_thread_id, canonical_thread_id
+from spice.agent.paths import (
+    agent_state_dir,
+    agent_thread_state_dir,
+    agent_worktree_state_dir,
+    write_agent_thread_pointer,
+)
 from spice.agent.shellhook import apply_shell_steering_environment
 from spice.agent.watchdog import spawn_supervised_agent
-from spice.agent.wrap import agent_state_dir
 from spice.config import (
     configured_agent_effort,
     configured_agent_model,
@@ -288,6 +295,7 @@ def start_agent(
     started_thread_id = started_agent_thread_id(
         log_path, repo_root=repo_root, fallback_thread_id=resume_thread_id
     )
+    log_path = settle_agent_log_path(repo_root, log_path, started_thread_id)
     write_agent_state(
         repo_root,
         build_agent_state(
@@ -443,6 +451,7 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
             repo_root=repo_root,
             fallback_thread_id=str(args.resume_thread_id or ""),
         )
+        log_path = settle_agent_log_path(repo_root, log_path, started_thread_id)
         state = build_agent_state(
             process=process,
             action=str(args.action),
@@ -604,7 +613,7 @@ def parse_agent_session_id(text: str, repo_root: Path) -> str:
 
 @contextmanager
 def agent_ensure_lock(repo_root: Path) -> Iterator[None]:
-    lock_path = agent_state_dir(repo_root) / AGENT_LOCK_FILE
+    lock_path = agent_worktree_state_dir(repo_root) / AGENT_LOCK_FILE
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle = lock_path.open("a+")
     try:
@@ -741,11 +750,17 @@ def read_agent_state(repo_root: Path) -> dict[str, Any]:
 
 
 def write_agent_state(repo_root: Path, state: dict[str, Any]) -> None:
-    path = agent_state_path(repo_root)
+    thread_id = canonical_thread_id(state.get("thread_id"))
+    if thread_id:
+        path = agent_thread_state_dir(repo_root, thread_id) / AGENT_STATE_FILE
+    else:
+        path = agent_state_path(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    if thread_id:
+        write_agent_thread_pointer(repo_root, thread_id)
 
 
 def agent_state_is_authoritative(state: dict[str, Any]) -> bool:
@@ -756,7 +771,26 @@ def agent_state_is_authoritative(state: dict[str, Any]) -> bool:
 
 def next_agent_log_path(repo_root: Path) -> Path:
     stamp = utc_now().replace(":", "").replace("-", "")
-    return agent_state_dir(repo_root) / "logs" / f"{stamp}.log"
+    return agent_log_dir(repo_root) / f"{stamp}.log"
+
+
+def agent_log_dir(repo_root: Path) -> Path:
+    return agent_state_dir(repo_root) / "logs"
+
+
+def settle_agent_log_path(repo_root: Path, log_path: Path, thread_id: str) -> Path:
+    canonical = canonical_thread_id(thread_id)
+    if not canonical:
+        return log_path
+    target = agent_thread_state_dir(repo_root, canonical) / "logs" / log_path.name
+    if log_path == target:
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        log_path.replace(target)
+    except FileNotFoundError:
+        return target
+    return target
 
 
 def state_int(value: Any) -> int | None:

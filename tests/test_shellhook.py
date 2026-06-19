@@ -277,6 +277,7 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
     zsh = shutil.which("zsh")
     if zsh is None:
         pytest.skip("zsh is not installed")
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
     trace = tmp_path / "trace.log"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

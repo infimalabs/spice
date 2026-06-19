@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from spice.agent import driver as agent_driver
-from spice.agent import lifecycle, sidechannel, wrap
+from spice.agent import lifecycle, renewal, sidechannel, sidechannelnotify, wrap
 from spice.agent.driver import (
     CLAUDE_DRIVER,
     CODEX_DRIVER,
@@ -41,6 +41,12 @@ SUPERVISOR_PID = 3333
 SUPERVISED_AGENT_PID = 4444
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
+
+
+@pytest.fixture(autouse=True)
+def _git_worktree_tmp_path(request, tmp_path):
+    if "tmp_path" in request.fixturenames:
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
 
 
 def test_shipped_agent_defaults_are_current_high_effort():
@@ -185,6 +191,80 @@ def test_ensure_agent_dry_run_uses_relative_skill_prompt_for_claude(
     assert result.command[-1] == result.prompt
 
 
+def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    linked = tmp_path / "linked"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "spice@example.test"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "config", "user.name", "Spice Tests"], cwd=repo, check=True)
+    (repo / "README.md").write_text("initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "--detach", str(linked), "HEAD"],
+        cwd=repo,
+        check=True,
+    )
+    common_agent_root = (
+        repo / ".git" / "spice" / "agents" / DRIVER.state_dirname
+    ).resolve()
+    primary_worktree_dir = (
+        repo / ".git" / "spice" / "agents" / DRIVER.state_dirname
+    ).resolve()
+    linked_git_dir = repo / ".git" / "worktrees" / linked.name / "spice" / "agents"
+    linked_worktree_dir = (linked_git_dir / DRIVER.state_dirname).resolve()
+    thread_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    primary_thread_dir = common_agent_root / thread_id
+
+    assert lifecycle.agent_state_path(repo).parent == primary_worktree_dir
+    assert sidechannelnotify.side_channel_marker_path(repo).parent == (
+        primary_worktree_dir / "side-channel"
+    )
+    assert sidechannelnotify.side_channel_marker_path(linked).parent == (
+        linked_worktree_dir / "side-channel"
+    )
+
+    log_path = primary_worktree_dir / "logs" / "startup.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text("starting\n", encoding="utf-8")
+    final_log = lifecycle.settle_agent_log_path(repo, log_path, thread_id)
+    lifecycle.write_agent_state(
+        repo,
+        {
+            "mode": "start",
+            "started_at": "2026-01-02T03:04:05Z",
+            "prompt_skill_path": str(repo / lifecycle.WORKTREE_SKILL_RELATIVE_PATH),
+            "thread_id": thread_id,
+            "log_path": str(final_log),
+        },
+    )
+
+    assert not log_path.exists()
+    assert final_log == primary_thread_dir / "logs" / "startup.log"
+    assert final_log.read_text(encoding="utf-8") == "starting\n"
+    assert lifecycle.agent_state_path(repo) == primary_thread_dir / "state.json"
+    assert (primary_worktree_dir / "thread-id").read_text(encoding="utf-8") == (
+        f"{thread_id}\n"
+    )
+    assert wrap.context_meter_cache_path(repo) == (
+        primary_thread_dir / "context-meter.json"
+    )
+    assert renewal.renewal_request_path(repo) == primary_thread_dir / "renew.json"
+    assert repo / ".spice" not in primary_thread_dir.parents
+    assert linked / ".spice" not in linked_worktree_dir.parents
+
+    monkeypatch.setattr(lifecycle, "utc_now", lambda: "2026-01-02T03:04:05Z")
+    linked_log = lifecycle.next_agent_log_path(linked)
+    assert linked_log == (linked_worktree_dir / "logs" / "20260102T030405Z.log")
+
+
 def test_start_agent_direct_path_writes_started_state_under_fakes(
     tmp_path, monkeypatch
 ):
@@ -192,6 +272,7 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
     process = _FakeProcess(pid=DIRECT_AGENT_PID, returncode=None)
     spawned: list[tuple[list[str], object, object]] = []
     reaped: list[int] = []
+    thread_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     monkeypatch.setattr(lifecycle, "next_agent_log_path", lambda _repo: log_path)
     monkeypatch.setattr(
         lifecycle,
@@ -208,7 +289,7 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
     monkeypatch.setattr(
         lifecycle,
         "started_agent_thread_id",
-        lambda _log_path, *, repo_root, fallback_thread_id: "started-thread",
+        lambda _log_path, *, repo_root, fallback_thread_id: thread_id,
     )
     monkeypatch.setattr(
         lifecycle, "reap_process_when_done", lambda proc: reaped.append(proc.pid)
@@ -227,14 +308,25 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
         supervise_stdout=False,
     )
     state = lifecycle.read_agent_state(tmp_path)
+    final_log_path = (
+        tmp_path
+        / ".git"
+        / "spice"
+        / "agents"
+        / DRIVER.state_dirname
+        / thread_id
+        / "logs"
+        / log_path.name
+    ).resolve()
 
-    assert returned == log_path
+    assert returned == final_log_path
     assert spawned == [(["codex", "exec", "prompt"], tmp_path, log_path)]
     assert state["pid"] == DIRECT_AGENT_PID
     assert state["mode"] == "start"
     assert state["model"] == "gpt-test"
     assert state["reasoning_effort"] == "medium"
-    assert state["thread_id"] == "started-thread"
+    assert state["thread_id"] == thread_id
+    assert state["log_path"] == str(final_log_path)
     assert reaped == [DIRECT_AGENT_PID]
 
 
@@ -330,6 +422,7 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     thread = _FakeThread()
     side_events: list[tuple[str, object]] = []
     spawned: list[dict[str, object]] = []
+    thread_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     monkeypatch.setattr(lifecycle, "agent_environment", lambda repo_root: {"ENV": "1"})
     monkeypatch.setattr(
         lifecycle,
@@ -349,7 +442,7 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     monkeypatch.setattr(
         lifecycle,
         "started_agent_thread_id",
-        lambda _log_path, *, repo_root, fallback_thread_id: "supervised-thread",
+        lambda _log_path, *, repo_root, fallback_thread_id: thread_id,
     )
     monkeypatch.setattr(
         sidechannel,
@@ -370,6 +463,16 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
 
     exit_code = lifecycle.run_agent_supervisor(args)
     state = lifecycle.read_agent_state(tmp_path)
+    final_log_path = (
+        tmp_path
+        / ".git"
+        / "spice"
+        / "agents"
+        / DRIVER.state_dirname
+        / thread_id
+        / "logs"
+        / log_path.name
+    ).resolve()
 
     assert exit_code == 5
     assert side_events == [("enter", tmp_path), ("exit", tmp_path)]
@@ -383,7 +486,8 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     ]
     assert state["pid"] == SUPERVISED_AGENT_PID
     assert state["supervisor_pid"] == os.getpid()
-    assert state["thread_id"] == "supervised-thread"
+    assert state["thread_id"] == thread_id
+    assert state["log_path"] == str(final_log_path)
     assert state["prompt_skill_path"] == str(skill_path)
     assert state["fast_mode"] is True
     assert thread.joined_timeouts == [1.0]
