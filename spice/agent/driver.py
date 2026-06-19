@@ -274,13 +274,12 @@ CLAUDE_EFFORT_ALIASES = {"minimal": "low", "xlow": "low", "xhigh": "max"}
 # standard tier (the driver's `default_context_window`) or the 1M beta. The
 # meter fits occupancy to the smallest tier that holds it.
 CLAUDE_FALLBACK_CONTEXT_WINDOW = 1_000_000
-CLAUDE_OUT_OF_CREDITS_PATTERNS = (
+OUT_OF_CREDITS_PATTERNS = (
+    re.compile(r"\busage limit\b", re.IGNORECASE),
     re.compile(r"\b(?:out of|insufficient)\s+credits?\b", re.IGNORECASE),
     re.compile(
         r"\bcredit balance\b.*\b(?:low|exhausted|insufficient)\b", re.IGNORECASE
     ),
-    re.compile(r"\busage limit (?:reached|exceeded)\b", re.IGNORECASE),
-    re.compile(r"\bClaude AI usage limit reached\b", re.IGNORECASE),
 )
 
 
@@ -669,6 +668,7 @@ CODEX_DRIVER: AgentDriver = CodexDriver(
     ),
     stdout_compaction_marker="context compacted",
     session_id_pattern=re.compile(r"^session id:\s*(\S+)\s*$", re.MULTILINE),
+    out_of_credits_patterns=OUT_OF_CREDITS_PATTERNS,
 )
 
 # Claude's `stream-json` stdout is one JSON event per line, so the watchdog
@@ -689,7 +689,7 @@ CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
     stdout_compaction_marker="",
     session_id_pattern=re.compile(r'"session_id"\s*:\s*"([0-9a-fA-F-]{36})"'),
     default_context_window=200000,
-    out_of_credits_patterns=CLAUDE_OUT_OF_CREDITS_PATTERNS,
+    out_of_credits_patterns=OUT_OF_CREDITS_PATTERNS,
     stdout_format="json",
 )
 
