@@ -173,6 +173,7 @@ def archive_ackd_inbox_items(
                 key=inbox_item_key(item.name),
                 inbox_name=item.name,
                 text=item.text,
+                attachments=_ack_state_attachments(item),
             )
             for item in to_archive
         ],
@@ -187,6 +188,18 @@ def archive_ackd_inbox_items_from_assistant_message(
 ) -> list[str]:
     """Archive inbox items ACK'd by one supervisor-observed assistant message."""
     return archive_ackd_inbox_items(repo_root, extract_ack_keys_from_text(message_text))
+
+
+def _ack_state_attachments(item: Any) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "path": str(attachment.path),
+            "name": attachment.name,
+            "content_type": attachment.content_type,
+            "size": attachment.size,
+        }
+        for attachment in item.attachments
+    )
 
 
 def _ack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...]]]:

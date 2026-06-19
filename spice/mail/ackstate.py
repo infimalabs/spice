@@ -7,11 +7,12 @@ SQLite store is the ACK history that agent rehydration and UI surfaces read.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from spice.paths import STATE_DIRNAME
 
@@ -23,6 +24,7 @@ CREATE TABLE IF NOT EXISTS acked_inbox_items (
   key TEXT PRIMARY KEY,
   inbox_name TEXT NOT NULL,
   text TEXT NOT NULL,
+  attachments_json TEXT NOT NULL DEFAULT '[]',
   archived_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS acked_inbox_items_archived_at_idx
@@ -35,6 +37,7 @@ class AckStateRecord:
     key: str
     inbox_name: str
     text: str
+    attachments: tuple[dict[str, Any], ...]
     archived_at: float
 
 
@@ -43,6 +46,7 @@ class AckStateWrite:
     key: str
     inbox_name: str
     text: str
+    attachments: tuple[dict[str, Any], ...] = ()
 
 
 def ack_state_database_path(repo_root: str | Path) -> Path:
@@ -57,6 +61,7 @@ def record_acked_inbox_items(
             item.key,
             item.inbox_name,
             item.text,
+            json.dumps(list(item.attachments), sort_keys=True),
             float(time.time() if now is None else now),
         )
         for item in items
@@ -70,11 +75,12 @@ def record_acked_inbox_items(
         connection.executemany(
             """
             INSERT INTO acked_inbox_items
-              (key, inbox_name, text, archived_at)
-            VALUES (?, ?, ?, ?)
+              (key, inbox_name, text, attachments_json, archived_at)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(key) DO UPDATE SET
               inbox_name=excluded.inbox_name,
               text=excluded.text,
+              attachments_json=excluded.attachments_json,
               archived_at=excluded.archived_at
             """,
             rows,
@@ -90,14 +96,48 @@ def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
         _ensure_schema(connection)
         rows = connection.execute(
             """
-            SELECT key, inbox_name, text, archived_at
+            SELECT key, inbox_name, text, attachments_json, archived_at
             FROM acked_inbox_items
             ORDER BY archived_at DESC, key DESC
             """
         ).fetchall()
-    return [AckStateRecord(*row) for row in rows]
+    return [
+        AckStateRecord(
+            key=row[0],
+            inbox_name=row[1],
+            text=row[2],
+            attachments=_decode_attachments_json(row[3]),
+            archived_at=row[4],
+        )
+        for row in rows
+    ]
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     connection.execute(f"PRAGMA busy_timeout = {ACK_STATE_SQLITE_BUSY_TIMEOUT_MS}")
     connection.executescript(ACK_STATE_SCHEMA)
+    _ensure_attachments_column(connection)
+
+
+def _ensure_attachments_column(connection: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(acked_inbox_items)")
+    }
+    if "attachments_json" in columns:
+        return
+    connection.execute(
+        "ALTER TABLE acked_inbox_items "
+        "ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'"
+    )
+
+
+def _decode_attachments_json(raw: str) -> tuple[dict[str, Any], ...]:
+    try:
+        parsed = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(parsed, list):
+        return ()
+    attachments = [item for item in parsed if isinstance(item, dict)]
+    return tuple(attachments)
