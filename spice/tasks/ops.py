@@ -275,10 +275,11 @@ def _add_one(
     existing: set[str] | None = None,
     system_project: bool = False,
     return_result: bool = False,
+    actor_override: str | None = None,
 ) -> str | TaskAddResult:
     title = _task_title(title)
     body = _task_description(description)
-    actor = tw.current_actor()
+    actor = tw.canonical_actor(actor_override or tw.current_actor())
     if claim:
         _require_single_active_slot(actor, action="task add --claim")
         # Match a normal claim's baseline check before creating the task row.
@@ -490,7 +491,9 @@ def parse_add_batch(lines: Sequence[str]) -> list[TaskAddBatchRequest]:
     return parsed
 
 
-def add_batch_results(lines: list[str]) -> list[TaskAddResult]:
+def add_batch_results(
+    lines: list[str], *, actor_override: str | None = None
+) -> list[TaskAddResult]:
     parsed = parse_add_batch(lines)
     existing = {str(r.get("incepted") or "") for r in tw.export()}
     results: list[TaskAddResult] = []
@@ -509,6 +512,7 @@ def add_batch_results(lines: list[str]) -> list[TaskAddResult]:
             due=request.due,
             existing=existing,
             return_result=True,
+            actor_override=actor_override,
         )
         if not isinstance(
             result, TaskAddResult

@@ -22,6 +22,7 @@ from threading import Thread
 from typing import Callable, Protocol, TextIO, cast
 
 from spice.agent.driver import AgentDriver, driver_for
+from spice.agent.identity import ambient_thread_id
 from spice.agent.maxims import (
     MaximBag,
     evaluate_maxim_any_violation,
@@ -194,15 +195,22 @@ def create_inline_tasks(
     empty = [index for index, line in enumerate(batch_lines, start=1) if not line]
     if empty:
         raise RuntimeError(f"inline TASK directive missing payload at line {empty[0]}")
+    actor = _supervised_inline_task_actor(repo_root)
     from spice.tasks import ops
 
-    results = ops.add_batch_results(batch_lines)
+    results = ops.add_batch_results(batch_lines, actor_override=actor)
     if results:
         log_handle.write(
             "spice inline task created: " + _inline_task_result_text(results) + "\n"
         )
         log_handle.flush()
     return results
+
+
+def _supervised_inline_task_actor(repo_root: Path) -> str:
+    from spice.agent.lifecycle import agent_status
+
+    return agent_status(repo_root).thread_id or ambient_thread_id() or ""
 
 
 def _inline_task_result_text(results: list[object]) -> str:
