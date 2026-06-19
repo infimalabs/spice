@@ -196,7 +196,7 @@ def test_static_message_footer_controls_stay_right_aligned_on_mobile():
     )
 
 
-def test_static_message_footer_actions_use_agent_accent_tint():
+def test_static_message_footer_actions_use_border_only_agent_accent():
     css = (STATIC_ROOT / "messages.css").read_text(encoding="utf-8")
     footer_start = css.index(".message-footer {\n  --message-action-accent")
     footer_rule = css[footer_start : css.index("}", footer_start)]
@@ -204,6 +204,8 @@ def test_static_message_footer_actions_use_agent_accent_tint():
     action_rule = css[action_start : css.index("}", action_start)]
     hover_start = css.index(".message-footer .icon-button:hover,")
     hover_rule = css[hover_start : css.index("}", hover_start)]
+    active_start = css.index(".message-footer .speech-button--playing,")
+    active_rule = css[active_start : css.index("}", active_start)]
 
     assert (
         "--message-action-accent: var(--message-occupant-accent, var(--muted));"
@@ -213,18 +215,14 @@ def test_static_message_footer_actions_use_agent_accent_tint():
         "border-color: color-mix(in srgb, var(--message-action-accent) 38%, var(--border));"
         in action_rule
     )
-    assert (
-        "color: color-mix(in srgb, var(--message-action-accent) 72%, var(--muted));"
-        in action_rule
-    )
+    assert "color: var(--muted);" in action_rule
     assert (
         "border-color: color-mix(in srgb, var(--message-action-accent) 62%, var(--border));"
         in hover_rule
     )
-    assert (
-        "color: color-mix(in srgb, var(--message-action-accent) 86%, var(--fg));"
-        in hover_rule
-    )
+    assert "color: var(--fg);" in hover_rule
+    assert "border-color: var(--good);" in active_rule
+    assert "color: var(--fg);" in active_rule
 
 
 def test_static_task_directive_card_styles_are_present():
