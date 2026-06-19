@@ -277,11 +277,11 @@
   padding: 8px 10px;
 }
 .composer-band-menu.spice-menu-actions {
-  align-content: start;
+  align-content: stretch;
   display: grid;
   gap: 6px;
-  grid-auto-rows: minmax(64px, 1fr);
-  grid-template-columns: repeat(auto-fit, minmax(min(136px, 100%), 1fr));
+  grid-auto-rows: minmax(72px, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
 }
 .composer-band-menu-action {
   align-items: center;
@@ -316,37 +316,10 @@
   font-size: 11px;
   font-size: clamp(10px, 5.25cqi, 13px);
   line-height: 1.2;
+  margin-left: 0;
+  text-align: center;
   text-wrap: pretty;
-}
-.composer-band--menu-open .composer-band-menu {
-  padding: 6px;
-}
-.composer-band--menu-open .composer-band-menu.spice-menu-actions {
-  gap: 4px;
-  grid-auto-rows: minmax(34px, auto);
-}
-.composer-band--menu-open .composer-band-menu-action {
-  flex-direction: row;
-  justify-content: space-between;
-  min-height: 34px;
-  padding: 5px 7px;
-  text-align: left;
-}
-.composer-band--menu-open .composer-band-menu-action .spice-menu-action-label,
-.composer-band--menu-open .composer-band-menu-action .spice-menu-action-detail {
-  overflow: hidden;
-  overflow-wrap: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.composer-band--menu-open .composer-band-menu-action .spice-menu-action-label {
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.15;
-}
-.composer-band--menu-open .composer-band-menu-action .spice-menu-action-detail {
-  flex: 0 1 46%;
-  font-size: 10px;
+  width: 100%;
 }
 .composer-band-menu-action:disabled {
   cursor: not-allowed;
