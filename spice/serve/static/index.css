@@ -344,11 +344,11 @@ button.primary:hover {
   width: 12px;
 }
 .lane-team-menu {
-  align-content: start;
+  align-content: stretch;
   background: color-mix(in srgb, var(--panel) 94%, var(--control));
   border-bottom: 1px solid var(--control-border-soft);
   gap: 6px;
-  grid-auto-rows: minmax(38px, auto);
+  grid-auto-rows: minmax(72px, 1fr);
   grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
   inset: 0;
   overflow-y: auto;
@@ -362,32 +362,38 @@ button.primary:hover {
 }
 .lane-team-menu .lane-team-menu-action {
   align-items: center;
-  flex-direction: row;
-  gap: 8px;
-  justify-content: space-between;
-  min-height: 38px;
+  container-type: inline-size;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  min-height: 0;
   overflow: hidden;
-  padding: 7px 9px;
-  text-align: left;
+  padding: 8px 10px;
+  text-align: center;
 }
 .lane-team-menu .lane-team-menu-action .spice-menu-action-label,
 .lane-team-menu .lane-team-menu-action .spice-menu-action-detail {
+  display: block;
+  flex: 0 1 auto;
+  max-width: 100%;
   min-width: 0;
-  overflow: hidden;
-  overflow-wrap: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 .lane-team-menu .lane-team-menu-action .spice-menu-action-label {
-  flex: 1 1 auto;
   font-size: 13px;
+  font-size: clamp(12px, 7cqi, 16px);
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1.14;
+  text-wrap: balance;
 }
 .lane-team-menu .lane-team-menu-action .spice-menu-action-detail {
-  flex: 0 1 46%;
   font-size: 11px;
-  line-height: 1.15;
+  font-size: clamp(10px, 5.25cqi, 13px);
+  line-height: 1.2;
+  text-wrap: pretty;
 }
 .lane-team-menu-action:disabled {
   cursor: not-allowed;
@@ -819,6 +825,9 @@ button.primary:hover {
   display: grid;
   gap: 6px;
   grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
+}
+.lane-team-menu.spice-menu-actions {
+  align-content: stretch;
 }
 .spice-menu-target-list {
   display: flex;
