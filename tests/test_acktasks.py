@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from spice.agent import sidechannel, watchdog
+from spice.agent import sidechannelnotify, watchdog
 from spice.agent.driver import DRIVER
 from spice.mail.inbox import (
     collect_archived_inbox_items,
@@ -83,10 +83,12 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert rows[0]["acceptance"] == "Inline task exists"
     handle = identity.render_handle(rows[0])
     assert handle in log.getvalue()
-    feedback = sidechannel.render_side_channel_payload(task_repo)
-    assert f"ack_archived={INBOX_KEY}" in feedback
-    assert f"inline_task_created={handle}" in feedback
-    assert sidechannel.render_side_channel_payload(task_repo) == ""
+    feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
+    assert feedback == [
+        f"ack_archived={INBOX_KEY}",
+        f"inline_task_created={handle}",
+    ]
+    assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
 
 def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supervisor):
@@ -110,9 +112,9 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
     assert rows[0]["acceptance"] == "Standalone task exists"
     handle = identity.render_handle(rows[0])
     assert handle in log.getvalue()
-    feedback = sidechannel.render_side_channel_payload(task_repo)
-    assert f"inline_task_created={handle}" in feedback
-    assert sidechannel.render_side_channel_payload(task_repo) == ""
+    feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
+    assert feedback == [f"inline_task_created={handle}"]
+    assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
 
 def test_supervised_standalone_task_batch_rejects_without_partial_creation(
@@ -132,9 +134,10 @@ def test_supervised_standalone_task_batch_rejects_without_partial_creation(
 
     assert tw.export(["status:pending"]) == []
     assert "spice inline task supervisor error: batch add rejected" in log.getvalue()
-    feedback = sidechannel.render_side_channel_payload(task_repo)
-    assert "inline_task_error=batch add rejected" in feedback
-    assert sidechannel.render_side_channel_payload(task_repo) == ""
+    feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
+    assert len(feedback) == 1
+    assert "inline_task_error=batch add rejected" in feedback[0]
+    assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
 
 def _init_repo(path: Path) -> Path:

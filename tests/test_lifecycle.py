@@ -918,17 +918,45 @@ def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch)
     assert not thread.is_alive()
 
 
-def test_side_channel_notice_payload_consumes_once(tmp_path):
+def test_side_channel_notice_queue_consumes_once(tmp_path):
     sidechannelnotify.publish_side_channel_notice(
         tmp_path, "inline_task_created=ACKS-20260101T000000000001Z"
     )
 
-    first = sidechannel.render_side_channel_payload(tmp_path)
-    second = sidechannel.render_side_channel_payload(tmp_path)
+    first = sidechannelnotify.consume_side_channel_notices(tmp_path)
+    second = sidechannelnotify.consume_side_channel_notices(tmp_path)
 
-    assert "Supervisor Feedback" in first
-    assert "inline_task_created=ACKS-20260101T000000000001Z" in first
-    assert second == ""
+    assert first == ["inline_task_created=ACKS-20260101T000000000001Z"]
+    assert second == []
+
+
+def test_side_channel_watch_streams_queued_notice_after_initial_payload(
+    tmp_path, monkeypatch
+):
+    stderr = io.StringIO()
+    monkeypatch.chdir(tmp_path)
+    sidechannelnotify.publish_side_channel_notice(
+        tmp_path, "inline_task_created=ACKS-20260101T000000000002Z"
+    )
+
+    with sidechannel.AgentSideChannelServer(tmp_path):
+        thread = Thread(
+            target=wrap.watch_agent_side_channel,
+            kwargs={
+                "repo_root": tmp_path,
+                "parent_pid": os.getpid(),
+                "stderr": stderr,
+                "initial_payload_already_rendered": True,
+            },
+        )
+        thread.start()
+        output = _eventually(lambda: stderr.getvalue(), contains="000000000002Z")
+
+    thread.join(timeout=1.0)
+    assert "Supervisor Feedback" in output
+    assert "inline_task_created=ACKS-20260101T000000000002Z" in output
+    assert output.count("000000000002Z") == 1
+    assert not thread.is_alive()
 
 
 def test_side_channel_watch_streams_later_notice_to_stderr(tmp_path, monkeypatch):
