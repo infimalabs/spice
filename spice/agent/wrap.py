@@ -34,6 +34,7 @@ from typing import Any, TextIO
 from spice.agent.driver import driver_for
 from spice.agent.sidechannelnotify import (
     active_agent_side_channel_socket_path,
+    consume_side_channel_notices,
     side_channel_marker_path as side_channel_marker_path,
 )
 from spice.agent.gitshadow import (
@@ -500,6 +501,25 @@ class AgentInboxInjector:
             if key not in pending_keys:
                 self.displayed_at_by_key.pop(key, None)
                 self.displayed_signature_by_key.pop(key, None)
+
+
+class AgentSideChannelNoticeInjector:
+    """Write one-shot supervisor feedback to the same stderr side-channel."""
+
+    def __init__(self, repo_root: Path | None, *, stderr: TextIO) -> None:
+        self.repo_root = repo_root
+        self.stderr = stderr
+
+    def inject(self, *, force: bool) -> None:
+        del force
+        notices = consume_side_channel_notices(self.repo_root)
+        if not notices:
+            return
+        self.stderr.write("Supervisor Feedback\n")
+        for notice in notices:
+            for line in notice.splitlines():
+                self.stderr.write(f"  {line}\n")
+        self.stderr.flush()
 
 
 def inbox_pending_signature(repo_root: Path | None) -> InboxSignature:

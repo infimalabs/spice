@@ -25,6 +25,7 @@ from spice.agent.wrap import (
     AGENT_RUN_INBOX_REPEAT_SECONDS,
     AgentContextMeterInjector,
     AgentInboxInjector,
+    AgentSideChannelNoticeInjector,
     agent_context_meter,
     side_channel_marker_path,
 )
@@ -160,9 +161,14 @@ class AgentSideChannelServer:
             repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
             meter_factory=agent_context_meter,
         )
+        notice_injector = AgentSideChannelNoticeInjector(
+            self.repo_root,
+            stderr=writer,
+        )
 
         def emit() -> None:
             with self._payload_lock:
+                notice_injector.inject(force=False)
                 inbox_injector.inject(force=False)
                 context_injector.inject(force=False)
 
@@ -271,6 +277,7 @@ def _hello_path(value: object) -> Path | None:
 
 def render_side_channel_payload(repo_root: Path) -> str:
     stderr = io.StringIO()
+    AgentSideChannelNoticeInjector(repo_root, stderr=stderr).inject(force=True)
     AgentInboxInjector(
         repo_root,
         stderr=stderr,

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from spice.agent import watchdog
+from spice.agent import sidechannel, watchdog
 from spice.agent.driver import DRIVER
 from spice.mail.inbox import (
     collect_archived_inbox_items,
@@ -81,7 +81,12 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert rows[0]["description"] == "Inline follow-up"
     assert rows[0]["project"] == "task.unit"
     assert rows[0]["acceptance"] == "Inline task exists"
-    assert identity.render_handle(rows[0]) in log.getvalue()
+    handle = identity.render_handle(rows[0])
+    assert handle in log.getvalue()
+    feedback = sidechannel.render_side_channel_payload(task_repo)
+    assert f"ack_archived={INBOX_KEY}" in feedback
+    assert f"inline_task_created={handle}" in feedback
+    assert sidechannel.render_side_channel_payload(task_repo) == ""
 
 
 def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supervisor):
@@ -103,7 +108,11 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
     assert rows[0]["description"] == "Standalone follow-up"
     assert rows[0]["project"] == "task.unit"
     assert rows[0]["acceptance"] == "Standalone task exists"
-    assert identity.render_handle(rows[0]) in log.getvalue()
+    handle = identity.render_handle(rows[0])
+    assert handle in log.getvalue()
+    feedback = sidechannel.render_side_channel_payload(task_repo)
+    assert f"inline_task_created={handle}" in feedback
+    assert sidechannel.render_side_channel_payload(task_repo) == ""
 
 
 def test_supervised_standalone_task_batch_rejects_without_partial_creation(
@@ -123,6 +132,9 @@ def test_supervised_standalone_task_batch_rejects_without_partial_creation(
 
     assert tw.export(["status:pending"]) == []
     assert "spice inline task supervisor error: batch add rejected" in log.getvalue()
+    feedback = sidechannel.render_side_channel_payload(task_repo)
+    assert "inline_task_error=batch add rejected" in feedback
+    assert sidechannel.render_side_channel_payload(task_repo) == ""
 
 
 def _init_repo(path: Path) -> Path:
