@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass
 from http import HTTPStatus
 from io import BytesIO
@@ -898,6 +899,7 @@ def test_index_links_and_serves_packaged_favicon():
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
     return repo
 
 

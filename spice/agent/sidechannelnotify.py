@@ -8,22 +8,14 @@ import os
 import socket
 from pathlib import Path
 
-from spice.agent.driver import driver_for
-from spice.paths import STATE_DIRNAME
+from spice.agent.paths import agent_worktree_state_dir
 
 SIDE_CHANNEL_NOTIFY_EVENT = "notify"
 SIDE_CHANNEL_INBOX_EVENT = "inbox"
 
 
 def side_channel_marker_path(repo_root: Path) -> Path:
-    return (
-        repo_root
-        / STATE_DIRNAME
-        / "agents"
-        / driver_for(repo_root).state_dirname
-        / "side-channel"
-        / "socket"
-    )
+    return agent_worktree_state_dir(repo_root) / "side-channel" / "socket"
 
 
 def active_agent_side_channel_socket_path(repo_root: Path | None) -> Path | None:

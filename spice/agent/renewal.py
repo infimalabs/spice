@@ -13,8 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from spice.agent.driver import driver_for
-from spice.paths import STATE_DIRNAME
+from spice.agent.paths import agent_state_dir
 
 RENEWAL_WIND_DOWN_TEXT = (
     "You are being replaced by a renewed worktree agent. "
@@ -37,13 +36,7 @@ RENEWAL_REHYDRATION_TEMPLATE = (
 
 
 def renewal_request_path(repo_root: Path) -> Path:
-    return (
-        repo_root
-        / STATE_DIRNAME
-        / "agents"
-        / driver_for(repo_root).state_dirname
-        / "renew.json"
-    )
+    return agent_state_dir(repo_root) / "renew.json"
 
 
 def write_agent_renewal_request(
@@ -128,8 +121,13 @@ def renewal_wind_down_rows(
     request = read_agent_renewal_request(repo_root)
     if request is None or renewal_target_thread_id(request) != thread_id:
         return []
+    request_path = renewal_request_path(repo_root)
+    try:
+        request_display = request_path.relative_to(repo_root).as_posix()
+    except ValueError:
+        request_display = str(request_path)
     return [
-        f"renewal_request={renewal_request_path(repo_root).relative_to(repo_root).as_posix()}",
+        f"renewal_request={request_display}",
         f"target_thread_id={thread_id}",
         RENEWAL_WIND_DOWN_TEXT,
     ]

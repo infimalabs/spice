@@ -41,9 +41,9 @@ from spice.agent.gitshadow import (
     scrub_agent_git_shadow_environment,
 )
 from spice.agent.identity import ambient_thread_id
+from spice.agent.paths import agent_state_dir
 from spice.mail.inbox import inbox_dir, inbox_item_key
 from spice.paths import (
-    STATE_DIRNAME,
     worktree_spice_environment,
     worktree_spice_python_command,
     worktree_spice_source,
@@ -82,10 +82,6 @@ ContextWarningKey = tuple[str]
 ProcessFactory = Callable[..., Any]
 TimeFactory = Callable[[], float]
 ContextMeterFactory = Callable[[Path | None], ContextMeter | None]
-
-
-def agent_state_dir(repo_root: Path) -> Path:
-    return repo_root / STATE_DIRNAME / "agents" / driver_for(repo_root).state_dirname
 
 
 def context_meter_cache_path(repo_root: Path) -> Path:
