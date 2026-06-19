@@ -464,6 +464,14 @@ def test_static_stream_uses_message_payload_and_standard_badges():
     badge_css_rule = messages_css[
         badge_css_start : messages_css.index("}", badge_css_start)
     ]
+    final_badge_start = messages_css.index(".badge.final-badge {")
+    final_badge_rule = messages_css[
+        final_badge_start : messages_css.index("}", final_badge_start)
+    ]
+    maxim_badge_start = messages_css.index(".badge.maxim-badge {")
+    maxim_badge_rule = messages_css[
+        maxim_badge_start : messages_css.index("}", maxim_badge_start)
+    ]
     filter_count_start = index_css.index(".filter-pill-count {")
     filter_count_rule = index_css[
         filter_count_start : index_css.index("}", filter_count_start)
@@ -531,11 +539,9 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         "}\n"
         "\n"
     )
+    assert "--message-occupant-accent" not in badges_css_rule
+    assert "--message-badge-accent: var(--accent-strong);" in badge_css_rule
     assert "    item.task_card_count || 0,\n  );" in app_render
-    assert (
-        "--message-badge-accent: var(--message-occupant-accent, var(--accent));"
-        in badges_css_rule
-    )
     assert (
         "border: 1px solid color-mix(in srgb, var(--message-badge-accent) 58%, var(--border));"
         in badge_css_rule
@@ -544,6 +550,9 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         "color: color-mix(in srgb, var(--message-badge-accent) 82%, var(--fg));"
         in badge_css_rule
     )
+    assert "--message-badge-accent: var(--final-accent);" in final_badge_rule
+    assert "--message-badge-accent: var(--maxim-accent);" in maxim_badge_rule
+    assert "font-weight: 700;" in maxim_badge_rule
     assert "background: var(--accent);" in filter_count_rule
     assert "background: var(--accent);" in chip_count_rule
     assert css[final_css_start:final_css_end] == (

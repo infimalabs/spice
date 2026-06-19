@@ -307,11 +307,11 @@
 }
 .message-agent-name:disabled { cursor: default; }
 .badges {
-  --message-badge-accent: var(--message-occupant-accent, var(--accent));
   display: inline-flex;
   gap: 4px;
 }
 .badge {
+  --message-badge-accent: var(--accent-strong);
   border: 1px solid color-mix(in srgb, var(--message-badge-accent) 58%, var(--border));
   border-radius: var(--pill-radius);
   color: color-mix(in srgb, var(--message-badge-accent) 82%, var(--fg));
@@ -338,11 +338,9 @@
   border-color: color-mix(in srgb, var(--good) 48%, var(--control-border-soft-hover));
   color: var(--fg);
 }
-.badge.final-badge { border-color: var(--final-accent); color: var(--final-accent); }
+.badge.final-badge { --message-badge-accent: var(--final-accent); }
 .badge.maxim-badge {
-  background: var(--maxim-accent);
-  border-color: var(--maxim-accent);
-  color: var(--button-accent-fg);
+  --message-badge-accent: var(--maxim-accent);
   font-weight: 700;
 }
 .compaction-divider {
