@@ -103,6 +103,12 @@ def claim_meta(actor: str) -> list[str]:
     thread = ambient_thread_id()
     if not thread:
         thread = tw.canonical_actor(config.SENTINEL_ACTOR)
+    # Per-turn granularity here is Codex-only by design. Codex sets
+    # CODEX_TURN_ID/CODEX_SESSION_TURN_ID in the agent env, so a claim can stamp
+    # the exact turn. Claude Code exposes no per-turn env (only
+    # CLAUDE_CODE_SESSION_ID); its per-turn id lives in the transcript as
+    # `promptId`, which the claim path cannot see. For Claude this intentionally
+    # resolves to the thread id, so claim_context_turn equals claim_thread.
     turn = (
         os.environ.get("CODEX_TURN_ID")
         or os.environ.get("CODEX_SESSION_TURN_ID")
