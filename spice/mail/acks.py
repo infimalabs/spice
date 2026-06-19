@@ -45,6 +45,7 @@ from spice.mail.inbox import (
 from spice.sessions.util import first_text, normalize_timestamp
 
 ACK_TOKEN = "ACK"
+TASK_DIRECTIVE_TOKEN = "TASK"
 
 # Transcript lines start with `{"timestamp":"<iso>",...` — the timestamp can
 # be sliced out without JSON parsing for cheap window pre-filtering.
@@ -61,6 +62,7 @@ _ACK_HEADER_WRAPPER_CHARS = " \t\r\n`\"'[],()*_"
 _ACK_KEY_CLOSER_CHARS = "`\"'])*_"
 _ACK_BODY_SPACE_CHARS = " \t\r\n"
 _ACK_HEADER_SEPARATOR_CHARS = ":—–.-,;!?"
+_TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
 # Key grammar: 8 date digits, a "T", then 6+ alphanumerics.
 _KEY_DATE_DIGITS = 8
 _KEY_TIME_SEPARATOR_INDEX = 8
@@ -110,7 +112,10 @@ def split_ack_message(text: str) -> tuple[str, list[AckSegment]]:
         body_end = bounds[index + 1][0] if index + 1 < len(bounds) else len(text)
         segments.append(
             AckSegment(
-                keys=keys, content=_clean_segment_content(text[header_end:body_end])
+                keys=keys,
+                content=_clean_segment_content(
+                    text[header_end:body_end], drop_task_directives=True
+                ),
             )
         )
     return preamble, segments
@@ -119,6 +124,16 @@ def split_ack_message(text: str) -> tuple[str, list[AckSegment]]:
 def extract_ack_segments_from_text(text: str) -> list[AckSegment]:
     """Return just the ACK segments of `text` (see :func:`split_ack_message`)."""
     return split_ack_message(text)[1]
+
+
+def extract_task_batch_lines_from_ack_text(text: str) -> list[str]:
+    """Return inline TASK batch payloads carried inside ACK segments."""
+    bounds = _ack_marker_bounds(text)
+    lines: list[str] = []
+    for index, (_ack_pos, header_end, _keys) in enumerate(bounds):
+        body_end = bounds[index + 1][0] if index + 1 < len(bounds) else len(text)
+        lines.extend(_task_batch_lines(text[header_end:body_end]))
+    return lines
 
 
 def ack_content_by_key(segments: Iterable[AckSegment]) -> dict[str, str]:
@@ -323,8 +338,13 @@ def _ack_key_end(text: str, start: int, limit: int) -> int | None:
     return suffix_end
 
 
-def _clean_segment_content(body: str) -> str:
-    lines = [line for line in body.splitlines() if not _is_app_directive_line(line)]
+def _clean_segment_content(body: str, *, drop_task_directives: bool = False) -> str:
+    lines = [
+        line
+        for line in body.splitlines()
+        if not _is_app_directive_line(line)
+        and (not drop_task_directives or not _is_task_directive_line(line))
+    ]
     return "\n".join(lines).strip()
 
 
@@ -339,6 +359,38 @@ def _is_app_directive_line(line: str) -> bool:
         return False
     name = stripped[2:open_brace]
     return all(char.islower() or char.isdigit() or char == "-" for char in name)
+
+
+def _task_batch_lines(text: str) -> list[str]:
+    lines: list[str] = []
+    for line in text.splitlines():
+        payload = _task_batch_line_from_directive(line)
+        if payload is not None:
+            lines.append(payload)
+    return lines
+
+
+def _is_task_directive_line(line: str) -> bool:
+    return _task_batch_line_from_directive(line) is not None
+
+
+def _task_batch_line_from_directive(line: str) -> str | None:
+    stripped = line.strip()
+    token_end = len(TASK_DIRECTIVE_TOKEN)
+    if not stripped.startswith(TASK_DIRECTIVE_TOKEN):
+        return None
+    if len(stripped) > token_end and stripped[token_end] not in (
+        _TASK_DIRECTIVE_SEPARATOR_CHARS
+    ):
+        return None
+    if len(stripped) == token_end:
+        return ""
+    cursor = token_end
+    while cursor < len(stripped) and stripped[cursor] in (
+        _TASK_DIRECTIVE_SEPARATOR_CHARS
+    ):
+        cursor += 1
+    return stripped[cursor:].strip()
 
 
 def iter_assistant_ack_keys(

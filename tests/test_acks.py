@@ -10,6 +10,7 @@ from spice.mail.acks import (
     collect_unique_ack_keys,
     extract_ack_keys_from_text,
     extract_ack_segments_from_text,
+    extract_task_batch_lines_from_ack_text,
     split_ack_message,
 )
 from spice.mail.inbox import compose_inbox_text, inbox_dir, parse_inbox_payload
@@ -76,6 +77,34 @@ def test_segment_content_drops_app_directive_lines():
     text = f'ACK {KEY_A}: shipped.\n::git-commit{{"sha":"abc"}}\ntrailing prose.'
     segments = extract_ack_segments_from_text(text)
     assert segments[0].content == "shipped.\ntrailing prose."
+
+
+def test_segment_content_drops_inline_task_directive_lines():
+    text = (
+        f"ACK {KEY_A}: captured.\n"
+        "TASK title=Follow up | project=task.unit | acceptance=Tracked\n"
+        "continuing."
+    )
+    segments = extract_ack_segments_from_text(text)
+
+    assert list(extract_ack_keys_from_text(text)) == [KEY_A]
+    assert segments[0].content == "captured.\ncontinuing."
+
+
+def test_inline_task_directives_are_extracted_only_from_ack_segments():
+    text = (
+        "TASK title=Ignored | project=task.unit | acceptance=Outside ACK\n"
+        f"ACK {KEY_A}: captured.\n"
+        "TASK: title=Captured | project=task.unit | acceptance=Inside ACK\n"
+        f"ACK {KEY_B}: second."
+    )
+    preamble, segments = split_ack_message(text)
+
+    assert extract_task_batch_lines_from_ack_text(text) == [
+        "title=Captured | project=task.unit | acceptance=Inside ACK"
+    ]
+    assert preamble == "TASK title=Ignored | project=task.unit | acceptance=Outside ACK"
+    assert segments[0].content == "captured."
 
 
 def test_content_by_key_latest_ack_wins():
