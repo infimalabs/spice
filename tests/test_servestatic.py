@@ -193,12 +193,16 @@ def test_static_messages_use_compact_image_grid():
 
 def test_static_inline_task_directives_use_quote_like_accented_blocks():
     css = _serve_css_text()
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
 
     quote_rule = _between(css, ".message-body .task-directive-quote {", "}")
     property_rule = _between(css, ".task-directive-property {", "}")
     detail_rule = _between(css, ".task-directive-property dd {", "}")
+    palette = _between(app_render, "const messageOccupantAccentPalette = [", "];")
 
-    assert "--quote-accent: var(--warn);" in quote_rule
+    assert '"var(--team-teal-accent)",' in palette.splitlines()[5]
+    assert "--quote-accent: var(--team-teal-accent);" in quote_rule
+    assert "--quote-accent: var(--warn);" not in quote_rule
     assert "background: color-mix(in srgb, var(--quote-accent) 7%, transparent);" in (
         quote_rule
     )
