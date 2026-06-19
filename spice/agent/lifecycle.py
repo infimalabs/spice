@@ -405,7 +405,7 @@ def require_supervisor_started(
     deadline = time.monotonic() + SUPERVISOR_STARTUP_TIMEOUT_SECONDS
     while True:
         state = read_agent_state(repo_root)
-        if state_path_value(state.get("log_path")) == log_path:
+        if agent_state_matches_startup_log(repo_root, state, log_path):
             pid = state_int(state.get("pid"))
             if process_id_is_running(pid):
                 return
@@ -429,6 +429,25 @@ def require_supervisor_started(
                 detail=detail,
             )
         time.sleep(STARTUP_SESSION_ID_POLL_SECONDS)
+
+
+def agent_state_matches_startup_log(
+    repo_root: Path, state: dict[str, Any], log_path: Path
+) -> bool:
+    state_log_path = state_path_value(state.get("log_path"))
+    if state_log_path is None:
+        return False
+    expected = log_path.expanduser().resolve()
+    actual = state_log_path.expanduser().resolve()
+    if actual == expected:
+        return True
+    thread_id = canonical_thread_id(state.get("thread_id"))
+    if not thread_id:
+        return False
+    settled = (
+        agent_thread_state_dir(repo_root, thread_id) / "logs" / expected.name
+    ).resolve()
+    return actual == settled
 
 
 def run_agent_supervisor(args: argparse.Namespace) -> int:
