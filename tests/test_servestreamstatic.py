@@ -584,7 +584,7 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     assert "--message-badge-accent: var(--accent-strong);" in badge_css_rule
     assert "background: var(--message-badge-accent);" in badge_css_rule
     assert (
-        "border: 1px solid color-mix(in srgb, var(--message-badge-accent) 62%, var(--message-badge-surface));"
+        "border: 1px solid color-mix(in srgb, var(--message-badge-accent) 42%, var(--message-badge-surface));"
         in badge_css_rule
     )
     assert "color: var(--button-accent-fg);" in badge_css_rule
@@ -593,25 +593,31 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     assert "font-family: ui-monospace, SFMono-Regular, Menlo, monospace;" in (
         badge_css_rule
     )
-    assert "gap: 5px;" in badge_css_rule
-    assert "padding: 2px 5px 2px 8px;" in badge_css_rule
-    assert "line-height: 1.15;" in badge_label_rule
+    assert "gap: 4px;" in badge_css_rule
+    assert "padding: 2px 6px;" in badge_css_rule
+    assert "line-height: 16px;" in badge_label_rule
     assert badge_count_rule == (
         ".badge-count {\n"
+        "  align-items: center;\n"
         "  background: var(--message-badge-surface);\n"
-        "  border: 1px solid color-mix(in srgb, var(--message-badge-accent) 36%, var(--message-badge-surface));\n"
+        "  border: 0;\n"
         "  border-radius: var(--pill-radius);\n"
+        "  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--message-badge-accent) 24%, transparent);\n"
         "  color: var(--message-badge-accent);\n"
+        "  display: inline-flex;\n"
         "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;\n"
         "  font-size: 9px;\n"
-        "  font-weight: 700;\n"
+        "  height: 16px;\n"
+        "  justify-content: center;\n"
         "  line-height: 12px;\n"
+        "  min-width: 16px;\n"
         "  padding: 0 5px;\n"
     )
     assert "--message-badge-accent: var(--final-accent);" in final_badge_rule
     assert "--message-badge-accent: var(--team-plum-accent);" in task_badge_rule
-    assert "--message-badge-accent: var(--maxim-accent);" in maxim_badge_rule
-    assert "font-weight: 700;" in maxim_badge_rule
+    assert maxim_badge_rule == (
+        ".badge.maxim-badge {\n  --message-badge-accent: var(--maxim-accent);\n"
+    )
     assert "background: var(--accent);" in filter_count_rule
     assert "background: var(--accent);" in chip_count_rule
     assert css[final_css_start:final_css_end] == (
