@@ -111,8 +111,6 @@ def task_filter_inventory() -> dict[str, Any]:
             "defaultFlow": catalog["defaultFlow"],
             "perStemFlows": catalog["perStemFlows"],
             "filterDelimiter": catalog["projectDelimiter"],
-            "filterMinDepth": catalog["projectMinDepth"],
-            "filterMaxDepth": catalog["projectMaxDepth"],
             "segmentPattern": catalog["segmentPattern"],
             "segmentRuleLabel": catalog["segmentRuleLabel"],
             "filterExamples": catalog["projectExamples"],
