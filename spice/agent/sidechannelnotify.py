@@ -3,30 +3,25 @@
 from __future__ import annotations
 
 import contextlib
-from datetime import UTC, datetime
 import json
 import os
 import socket
-import uuid
 from pathlib import Path
+from threading import Lock
 
 from spice.agent.paths import agent_worktree_state_dir
 from spice.errors import SpiceError
-from spice.paths import atomic_write_text
 
 SIDE_CHANNEL_NOTIFY_EVENT = "notify"
 SIDE_CHANNEL_INBOX_EVENT = "inbox"
 SIDE_CHANNEL_NOTICE_EVENT = "notice"
-SIDE_CHANNEL_NOTICE_DIRNAME = "stderr-notices"
-SIDE_CHANNEL_NOTICE_SUFFIX = ".txt"
+
+_NOTICE_LOCK = Lock()
+_NOTICES_BY_REPO_ROOT: dict[str, list[str]] = {}
 
 
 def side_channel_marker_path(repo_root: Path) -> Path:
     return agent_worktree_state_dir(repo_root) / "stderr.sock"
-
-
-def side_channel_notice_dir(repo_root: Path) -> Path:
-    return agent_worktree_state_dir(repo_root) / SIDE_CHANNEL_NOTICE_DIRNAME
 
 
 def active_agent_side_channel_socket_path(repo_root: Path | None) -> Path | None:
@@ -85,59 +80,34 @@ def side_channel_notify_hello(
     }
 
 
-def publish_side_channel_notice(repo_root: Path | None, text: str) -> Path | None:
-    """Queue transient stderr feedback for the next side-channel payload."""
+def publish_side_channel_notice(repo_root: Path | None, text: str) -> str | None:
+    """Queue in-process stderr feedback for the current supervisor side-channel."""
     clean = _clean_notice_text(text)
-    if repo_root is None or not clean:
+    key = _notice_queue_key(repo_root)
+    if key is None or not clean:
         return None
-    try:
-        directory = side_channel_notice_dir(repo_root)
-    except SpiceError:
-        return None
-    name = (
-        datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-        + f".{os.getpid()}.{uuid.uuid4().hex}{SIDE_CHANNEL_NOTICE_SUFFIX}"
-    )
-    path = atomic_write_text(directory / name, clean + "\n")
+    with _NOTICE_LOCK:
+        _NOTICES_BY_REPO_ROOT.setdefault(key, []).append(clean)
     notify_agent_side_channel(repo_root, event=SIDE_CHANNEL_NOTICE_EVENT)
-    return path
+    return clean
 
 
 def consume_side_channel_notices(repo_root: Path | None) -> list[str]:
-    """Read and remove queued transient stderr feedback in publish order."""
+    """Read and remove queued in-process stderr feedback in publish order."""
+    key = _notice_queue_key(repo_root)
+    if key is None:
+        return []
+    with _NOTICE_LOCK:
+        return _NOTICES_BY_REPO_ROOT.pop(key, [])
+
+
+def _notice_queue_key(repo_root: Path | None) -> str | None:
     if repo_root is None:
-        return []
+        return None
     try:
-        directory = side_channel_notice_dir(repo_root)
-    except SpiceError:
-        return []
-    try:
-        entries = sorted(
-            path
-            for path in directory.iterdir()
-            if path.is_file() and path.name.endswith(SIDE_CHANNEL_NOTICE_SUFFIX)
-        )
+        return str(repo_root.expanduser().resolve())
     except OSError:
-        return []
-    notices: list[str] = []
-    for path in entries:
-        claimed = path.with_name(f".{path.name}.{os.getpid()}.claim")
-        try:
-            path.rename(claimed)
-        except OSError:
-            continue
-        try:
-            text = claimed.read_text(encoding="utf-8")
-        except OSError:
-            with contextlib.suppress(FileNotFoundError):
-                claimed.unlink()
-            continue
-        with contextlib.suppress(FileNotFoundError):
-            claimed.unlink()
-        clean = _clean_notice_text(text)
-        if clean:
-            notices.append(clean)
-    return notices
+        return str(repo_root.expanduser())
 
 
 def _clean_notice_text(text: str) -> str:

@@ -166,16 +166,23 @@ class AgentSideChannelServer:
             stderr=writer,
         )
 
-        def emit() -> None:
+        def emit(*, include_regular_payload: bool) -> None:
             with self._payload_lock:
                 notice_injector.inject(force=False)
+                if not include_regular_payload:
+                    return
                 inbox_injector.inject(force=False)
                 context_injector.inject(force=False)
 
         try:
             if not initial_payload_already_rendered:
                 try:
-                    emit()
+                    emit(include_regular_payload=True)
+                except OSError:
+                    return
+            else:
+                try:
+                    emit(include_regular_payload=False)
                 except OSError:
                     return
             while not self._stopping.is_set():
@@ -188,7 +195,7 @@ class AgentSideChannelServer:
                 if wake_reader in readable:
                     _drain_wakeup(wake_reader)
                     try:
-                        emit()
+                        emit(include_regular_payload=True)
                     except OSError:
                         return
         finally:
@@ -277,7 +284,6 @@ def _hello_path(value: object) -> Path | None:
 
 def render_side_channel_payload(repo_root: Path) -> str:
     stderr = io.StringIO()
-    AgentSideChannelNoticeInjector(repo_root, stderr=stderr).inject(force=True)
     AgentInboxInjector(
         repo_root,
         stderr=stderr,
