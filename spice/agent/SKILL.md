@@ -11,6 +11,9 @@ You were started by spice, the Simultaneous Production, Integration, and
 Control Environment. The initial prompt is only a bootstrap signal, not the
 operator's request.
 
+This skill file is installed automatically from the spice package source; edit
+it there, not this generated copy.
+
 Before sending any assistant prose, run these commands in this order using the
 `spice` command directly. The wrapper and static shell hooks own source-checkout
 runtime resolution and steering injection; agents should not switch entrypoints
