@@ -137,7 +137,7 @@ def process_supervised_assistant_message(
 ) -> None:
     archive_ackd_inbox_items_from_assistant_message(repo_root, message_text)
     try:
-        create_inline_ack_tasks(repo_root, message_text, log_handle)
+        create_inline_tasks(repo_root, message_text, log_handle)
     except Exception as exc:  # pragma: no cover - supervisor-visible task failure
         log_handle.write(f"spice inline task supervisor error: {exc}\n")
         log_handle.flush()
@@ -155,7 +155,7 @@ def process_supervised_assistant_message(
         log_handle.flush()
 
 
-def create_inline_ack_tasks(
+def create_inline_tasks(
     repo_root: Path, message_text: str, log_handle: TextIO
 ) -> list[str]:
     batch_lines = extract_task_batch_lines_from_text(message_text)
