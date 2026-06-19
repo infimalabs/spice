@@ -470,8 +470,9 @@ function playAudioBuffer(buffer) {
       // Without an active narration session, an external pause is a stop. With
       // narration selected, mobile lock/background pauses are treated as
       // recoverable interruptions so the shared speech queue keeps draining.
-      // Pauses we initiated are controlled settles and never cascade.
-      const external = !intentionallyPaused.has(audio);
+      // Pauses we initiated, and pause events some browsers emit at natural
+      // clip end, are controlled settles and never cascade.
+      const external = !audio.ended && !intentionallyPaused.has(audio);
       finish();
       if (external && !narrationMediaSessionActive()) stopAllSpeech();
     };
