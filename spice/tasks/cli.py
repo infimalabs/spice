@@ -234,16 +234,17 @@ def _configure_task_edit_parsers(actions: Any) -> None:
 
     adopt = actions.add_parser(
         "adopt",
-        help="Fold an existing orphan commit into a (new or given) task.",
+        help="Capture an orphan commit (committed with no task claimed) into a task.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "A commit made outside a claimed task's window (after task done, or "
-            "before a claim) is an orphan: task next refuses new work while it "
-            "sits ahead of the baseline. adopt claims a task over the orphan "
-            "WITHOUT the baseline fast-forward a normal claim performs, so the "
-            "work is captured through the usual task done/review flow instead of "
-            "a reset+redo. With no handle it mints a task (title defaults to the "
-            "orphan commit subject); with a handle it claims that task.\n\n"
+            "An orphan commit is one you made while no task was claimed — before "
+            "your first claim, or after the previous task completed. task next "
+            "won't start new work while an orphan sits uncaptured on your branch.\n\n"
+            "adopt wraps a task around the orphan instead of making you reset and "
+            "redo it: it claims a task — newly minted, or the handle you pass — "
+            "over the commit you already made, so you finish it through the normal "
+            "done/review flow. With no handle, the new task's title defaults to "
+            "the orphan commit's subject.\n\n"
             "Examples:\n"
             "  spice task adopt\n"
             '  spice task adopt --project task.cli --title "Capture orphan fix"\n'

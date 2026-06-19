@@ -703,14 +703,15 @@ def adopt(
     complete: bool = False,
     validation: list[str] | None = None,
 ) -> str:
-    """Fold existing orphan commit(s) into a task and capture them normally.
+    """Fold orphan commit(s) into a task and capture them through the normal flow.
 
-    A commit made outside a claimed task's window (after `task done`, or before
-    any claim) is an orphan: `task next` refuses to start new work while it
-    sits ahead of the baseline. `adopt` claims a task — newly minted, or the
-    given handle — over those commits *without* the baseline fast-forward a
-    normal claim performs, so the orphan work is preserved rather than rejected
-    and the agent can complete it through the usual `task done`/`review` flow.
+    An orphan commit is one made while no task was claimed — before any claim,
+    or after the previous `task done`. `task next` refuses to start new work
+    while an orphan sits ahead of the baseline. `adopt` claims a task — newly
+    minted, or the given handle — over those commits *without* the baseline
+    fast-forward a normal claim performs, so the work is preserved rather than
+    rejected and the agent finishes it through the usual `task done`/`review`
+    flow.
     """
     validation = list(validation or [])
     if validation and not complete:
