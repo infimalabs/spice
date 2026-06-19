@@ -5,10 +5,12 @@ from __future__ import annotations
 import subprocess
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 
 from spice.agent import maximcli, maxims, watchdog
 from spice.agent.maxims import MaximVerdict
 from spice.mail.inbox import collect_inbox_items
+from spice.serve.teams import ServeTeamStore
 
 
 def test_repo_config_declares_new_maxim_bag_for_scan_and_watchdog(
@@ -38,6 +40,9 @@ message = "DO NOT take shortcuts; keep the direct route."
         )
 
     monkeypatch.setattr(watchdog, "evaluate_maxim_any_violation", judge_violation)
+    monkeypatch.setattr(
+        watchdog, "record_supervised_lane_sends", lambda _repo, *, sends=1: None
+    )
 
     paths = watchdog.publish_maxim_hits_as_inbox(repo, "Taking shortcuts here.")
     item = collect_inbox_items(repo)[0]
@@ -45,6 +50,59 @@ message = "DO NOT take shortcuts; keep the direct route."
     assert len(paths) == 1
     assert paths[0].is_file()
     assert item.text == "[MAXIM] DO NOT take shortcuts; keep the direct route.\n"
+
+
+def test_watchdog_maxim_publish_records_supervised_send(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    _write_pyproject(
+        repo,
+        """
+[tool.spice.maxims.shortcuts]
+words = ["shortcut", "shortcuts"]
+message = "DO NOT take shortcuts; keep the direct route."
+""",
+    )
+    recorded: list[tuple[Path, int]] = []
+
+    def judge_violation(maxim: str, statement: str) -> MaximVerdict:
+        return MaximVerdict(
+            maxim=maxim,
+            statement=statement,
+            prompt="",
+            answer="NO",
+            attempts=("NO",),
+        )
+
+    monkeypatch.setattr(watchdog, "evaluate_maxim_any_violation", judge_violation)
+    monkeypatch.setattr(
+        watchdog,
+        "record_supervised_lane_sends",
+        lambda path, *, sends=1: recorded.append((path, sends)),
+    )
+
+    paths = watchdog.publish_maxim_hits_as_inbox(repo, "Taking shortcuts here.")
+
+    assert len(paths) == 1
+    assert recorded == [(repo, 1)]
+
+
+def test_record_supervised_lane_sends_updates_current_agent_metrics(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.create_team(members=["thread-a"])
+
+    monkeypatch.setattr(
+        "spice.agent.lifecycle.agent_status",
+        lambda _repo: SimpleNamespace(thread_id="thread-a"),
+    )
+    monkeypatch.setattr("spice.serve.teams.ServeTeamStore", lambda: store)
+
+    watchdog.record_supervised_lane_sends(repo)
+
+    summary = store.lane_metric_summary("thread-a", bucket_count=12)
+    assert summary.sends == 1
 
 
 def test_repo_config_overrides_builtin_trigger_words(tmp_path):
