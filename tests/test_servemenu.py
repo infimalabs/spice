@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import subprocess
+
 from spice.serve.web import STATIC_ROOT, render_index_html
 
 SERVE_CSS_FILES = ("index.css", "composer.css", "messages.css", "status-colors.css")
@@ -612,6 +615,14 @@ def test_static_spice_menu_drag_manages_team_membership():
     assert ".spice-menu-team-new-drop {" in css
     assert ".spice-menu-team--drop-ready .spice-menu-team-empty-drop {" in css
     assert ".spice-menu-team--drop-ready .spice-menu-team-new-drop {" in css
+
+
+def test_spice_menu_new_team_drop_keeps_created_team_near_drop_zone():
+    script = Path(__file__).with_name("fixtures") / "spice_menu_new_team_order.js"
+    subprocess.run(
+        ["node", str(script), str(STATIC_ROOT / "app.menu.js")],
+        check=True,
+    )
 
 
 def test_static_empty_teams_reconcile_and_close_from_team_snapshot():
