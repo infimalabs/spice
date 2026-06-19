@@ -93,8 +93,10 @@ def activation_command_surface_lines() -> list[str]:
             "spice task status and spice task doctor"
         ),
         (
-            "ack_inline=ACK pending inbox keys in any assistant message as "
-            "soon as they are read and acted on; do not wait for final response"
+            "ack_inline=spice is a real-time interactive loop; lead each "
+            "working assistant message with ACK <key> [<key> ...] for "
+            "currently-pending keys; acknowledged keys clear from pending; "
+            "do not bury ACKs mid-message or defer them to final response"
         ),
         (
             "pending_inbox_recovery=if spice session briefing only shows "

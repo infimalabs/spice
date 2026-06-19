@@ -46,8 +46,11 @@ INBOX_MAX_ITEM_AGE_SECONDS = 24 * 60 * 60
 INBOX_DIRECT_STEERING_ROW = "Direct operator steering: read before planning."
 INBOX_STEERING_ROW = "Inbox steering: read before planning; retire only after ACK."
 INBOX_RESPONSE_ROW = (
-    "ACK by assistant message (plain text, no markdown emphasis): "
-    "ACK <key> [<key> ...]: <what changed or was captured>"
+    "Real-time ACK loop: put a plain-text ACK header near the start of each "
+    "working assistant message: "
+    "ACK <key> [<key> ...]: <what changed or was captured>; acknowledged "
+    "keys clear once processed. Do not bury ACKs mid-message or save them for "
+    "final response."
 )
 INBOX_ACK_REMINDER_SECONDS = 15
 INBOX_ACK_ESCALATED_SECONDS = 60
@@ -59,7 +62,9 @@ INBOX_TASK_HINT_ROW = (
     "spice task add; then resume allocator flow."
 )
 INBOX_PEEK_PERSISTENCE_ROW = (
-    "Persistence: redisplays after 15s until ACKed; bare reads never clear."
+    "Persistence: acknowledged keys clear once processed; unACKed keys "
+    "redisplay after 15s; bare reads never clear. Do not bury ACKs mid-message "
+    "or save them for final response."
 )
 
 # Trailing note that tells the receiver whether this message is routine
@@ -251,21 +256,26 @@ def inbox_ack_format_hint_row(items: Sequence[InboxItem]) -> str:
         return (
             "ACK required now: "
             f"pending for {format_relative_seconds(age_seconds)}; include an ACK "
-            f"header near the start of the next assistant message, e.g. `{example}`."
+            "header near the start of the next working assistant message, "
+            f"e.g. `{example}`."
         )
     if age_seconds >= INBOX_ACK_ESCALATED_SECONDS:
         return (
             "ACK reminder: "
             f"pending for {format_relative_seconds(age_seconds)}; include an ACK "
-            f"header in your next assistant message, e.g. `{example}`."
+            "header near the start of your next working assistant message, "
+            f"e.g. `{example}`."
         )
     if age_seconds >= INBOX_ACK_REMINDER_SECONDS:
         return (
             "ACK hint: "
             "this will keep redisplaying until an assistant message includes "
-            f"an ACK header like `{example}`."
+            f"an ACK header near the start, like `{example}`."
         )
-    return f"ACK example: include the key and a concise response, e.g. `{example}`."
+    return (
+        "ACK example: lead the next working assistant message with a concise "
+        f"ACK response, e.g. `{example}`."
+    )
 
 
 def _inbox_item_age_seconds(item: InboxItem) -> float:

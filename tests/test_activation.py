@@ -26,7 +26,10 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "TASK title=... | project=<stem.child> | acceptance=..." in text
     assert "same key=value batch format as task add" in text
     assert "immediate task capture is not allocator selection" in text
-    assert "ack_inline=ACK pending inbox keys" in text
+    assert "ack_inline=spice is a real-time interactive loop" in text
+    assert "lead each working assistant message with ACK <key>" in text
+    assert "acknowledged keys clear from pending" in text
+    assert "do not bury ACKs mid-message or defer them to final response" in text
     assert "task_add_public=TASK title=... | project=<stem.child>" in text
     assert "same task-add batch format" in text
     assert "task_project_depth=public task project depth bounds" in text
