@@ -533,7 +533,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     )
 
 
-def test_ack_context_payload_finds_archived_inbox_item_by_dropped_z_alias(tmp_path):
+def test_ack_context_payload_finds_acked_inbox_item_by_dropped_z_alias(tmp_path):
     name = "20260104T000000000005Z.txt"
     bare_key = "20260104T000000000005"
     composed = compose_inbox_text(body="operator original", priority=None, stop=False)

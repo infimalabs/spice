@@ -6,16 +6,15 @@ import time
 
 from spice.mail.acks import archive_ackd_inbox_items
 from spice.mail.attachments import (
-    inbox_attachment_dir,
     prepare_inbox_attachments,
 )
 from spice.mail.inbox import (
-    collect_archived_inbox_items,
     collect_deadlettered_inbox_items,
     INBOX_CONTROL_DRAIN_QUEUE,
     INBOX_CONTINUE_NOTE,
     INBOX_GRACEFUL_NOTE,
     INBOX_TASK_HINT_ROW,
+    collect_acked_inbox_items,
     collect_inbox_items,
     compose_inbox_text,
     deadletter_inbox_item,
@@ -147,7 +146,7 @@ def test_ack_retires_pending_item_via_dropped_z_alias(tmp_path):
     assert pending_inbox_count(str(tmp_path)) == 0
 
 
-def test_ack_archives_pending_item_attachments(tmp_path):
+def test_ack_records_pending_item_with_attachments_in_sqlite_state(tmp_path):
     _init_repo(tmp_path)
     name = "20260102T000000000003Z.txt"
     composed = compose_inbox_text(body="please inspect this", priority=None, stop=False)
@@ -160,28 +159,21 @@ def test_ack_archives_pending_item_attachments(tmp_path):
             }
         ]
     )
-    written = write_inbox_item(tmp_path, name, composed, attachments=attachments)
-    pending_attachment_dir = inbox_attachment_dir(written)
+    write_inbox_item(tmp_path, name, composed, attachments=attachments)
 
     items = collect_inbox_items(str(tmp_path))
+    attachment_path = items[0].attachments[0].path
     assert items[0].attachments[0].name == "paste.png"
-    assert items[0].attachments[0].path.read_bytes() == b"image-bytes"
-    assert shared_attachment_root(tmp_path) in items[0].attachments[0].path.parents
+    assert attachment_path.read_bytes() == b"image-bytes"
+    assert shared_attachment_root(tmp_path) in attachment_path.parents
 
     archived = archive_ackd_inbox_items(tmp_path, ["20260102T000000000003"])
-    archived_items = collect_archived_inbox_items(tmp_path)
-
-    archive_text = inbox_dir(tmp_path) / "archive" / name
-    archive_attachment_dir = inbox_attachment_dir(archive_text)
+    archived_items = collect_acked_inbox_items(tmp_path)
     assert archived == [inbox_item_key(name)]
-    assert archive_text.is_file()
-    assert archive_attachment_dir.is_dir()
-    assert not pending_attachment_dir.exists()
-    assert archived_items[0].attachments[0].path.read_bytes() == b"image-bytes"
-    assert (
-        shared_attachment_root(tmp_path)
-        in archived_items[0].attachments[0].path.parents
-    )
+    assert [(item.name, item.text, item.attachments) for item in archived_items] == [
+        (name, composed, ())
+    ]
+    assert attachment_path.is_file()
 
 
 def test_inbox_attachment_readout_rows_render_clickable_reference(tmp_path):
@@ -209,8 +201,6 @@ def test_inbox_attachment_readout_rows_render_clickable_reference(tmp_path):
     assert archived_path.as_posix() not in attachment_row
     assert 'href="/work/tree/wt/' in html
     assert ">paste.png</a>" in html
-    archive_ackd_inbox_items(tmp_path, [inbox_item_key(name)])
-    assert archived_path.is_file()
 
 
 def test_reading_does_not_clear_pending(tmp_path):
@@ -228,9 +218,11 @@ def test_inbox_payload_rows_prompt_immediate_task_offload(tmp_path):
 
     assert INBOX_TASK_HINT_ROW in rows
     assert "capture in the moment" in INBOX_TASK_HINT_ROW
-    assert "operator asks for a task" in INBOX_TASK_HINT_ROW
-    assert "scope/tracking changed" in INBOX_TASK_HINT_ROW
-    assert "before resuming work" in INBOX_TASK_HINT_ROW
+    assert "TASK title=... | project=<stem.child> | acceptance=..." in (
+        INBOX_TASK_HINT_ROW
+    )
+    assert "same task-add batch format" in INBOX_TASK_HINT_ROW
+    assert "resume allocator flow" in INBOX_TASK_HINT_ROW
 
 
 def test_pending_operator_count_excludes_automated_guidance(tmp_path):

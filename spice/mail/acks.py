@@ -34,9 +34,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
+from spice.mail.ackstate import AckStateWrite, record_acked_inbox_items
 from spice.mail.inbox import (
     collect_inbox_items,
-    consume_inbox_items,
+    discard_inbox_items,
     inbox_item_key,
     inbox_item_key_aliases,
     inbox_payload_items,
@@ -158,7 +159,18 @@ def archive_ackd_inbox_items(
     ]
     if not to_archive:
         return []
-    consume_inbox_items(inbox_payload_items(to_archive))
+    record_acked_inbox_items(
+        repo_root,
+        [
+            AckStateWrite(
+                key=inbox_item_key(item.name),
+                inbox_name=item.name,
+                text=item.text,
+            )
+            for item in to_archive
+        ],
+    )
+    discard_inbox_items(inbox_payload_items(to_archive))
     notify_inbox_changed(repo_root)
     return [inbox_item_key(item.name) for item in to_archive]
 
@@ -378,14 +390,7 @@ def _task_batch_line_from_directive(line: str) -> str | None:
         _TASK_DIRECTIVE_SEPARATOR_CHARS
     ):
         return None
-    if len(stripped) == token_end:
-        return ""
-    cursor = token_end
-    while cursor < len(stripped) and stripped[cursor] in (
-        _TASK_DIRECTIVE_SEPARATOR_CHARS
-    ):
-        cursor += 1
-    return stripped[cursor:].strip()
+    return stripped
 
 
 def iter_assistant_ack_keys(

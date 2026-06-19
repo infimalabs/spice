@@ -20,6 +20,11 @@ rules apply to the agents working here.
 - Operator steering arrives as inbox items. Reading does not retire them;
   retire an item by ACKing its key in an assistant message:
   `ACK <key> [<key> ...]: <what you understood and did>`.
+- When steering asks for task capture, add an inline batch line using the same
+  key=value format as task-add batch input in the ACK or a standalone assistant
+  message:
+  `TASK title=... | project=<stem.child> | acceptance=...`. Capture first, then
+  return to `spice task next`; task creation is not allocator selection.
 - Keep-working guidance means continue through the allocator. A phase boundary
   keeps the lane active: after `task done` or `task review`, run
   `spice task next` and keep working until the allocator reports no work or a

@@ -11,7 +11,7 @@ from spice.agent.renewal import strip_renewal_handoff_request_suffix
 from spice.config import configured_say_voice
 from spice.errors import SpiceError
 from spice.mail.inbox import (
-    collect_archived_inbox_items,
+    collect_acked_inbox_items,
     collect_inbox_items,
     inbox_item_key_aliases,
     inbox_request_body,
@@ -664,7 +664,7 @@ def ack_context_payload_for_worktree(
     wanted = [key for key in keys if key]
     by_key: dict[str, dict[str, Any]] = {}
     pending = collect_inbox_items(str(target.repo_root))
-    archived = collect_archived_inbox_items(
+    archived = collect_acked_inbox_items(
         str(target.repo_root), limit=ACK_CONTEXT_ARCHIVE_LIMIT
     )
     for item in (*pending, *archived):

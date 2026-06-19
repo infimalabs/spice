@@ -16,7 +16,8 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
     assert "agents should not switch entrypoints" in text
     assert "only as a command-routing marker" in text
     assert "It still goes through `agent run`" in text
-    assert "run `spice task add --project <stem.child>` immediately" in text
+    assert "same key=value batch format as task-add batch input" in text
+    assert "`TASK title=... | project=<stem.child> | acceptance=...`" in text
     assert "immediate task capture, not allocator selection" in text
     assert "`spice task status` and `spice task doctor` report" in text
 
