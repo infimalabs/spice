@@ -511,11 +511,13 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         "\n"
     )
     assert app_render[badge_start:badge_end] == (
-        "function renderBadges(ackCount, kind, maximAckCount) {\n"
+        "function renderBadges(ackCount, kind, maximAckCount, taskCardCount) {\n"
         "  const visibleAckCount = Math.max(0, ackCount - maximAckCount);\n"
+        "  const visibleTaskCount = Math.max(0, Number(taskCardCount) || 0);\n"
         "  if (\n"
         "    !maximAckCount &&\n"
         "    !visibleAckCount &&\n"
+        "    !visibleTaskCount &&\n"
         '    kind !== "final"\n'
         "  )\n"
         "    return null;\n"
@@ -529,6 +531,8 @@ def test_static_stream_uses_message_payload_and_standard_badges():
         "  };\n"
         '  if (maximAckCount) add("MAXIM", "maxim-badge");\n'
         '  if (kind === "final") add("FINAL", "final-badge");\n'
+        "  if (visibleTaskCount)\n"
+        '    add(visibleTaskCount + "\\u00a0TASK" + (visibleTaskCount === 1 ? "" : "S"));\n'
         "  if (visibleAckCount)\n"
         '    add(visibleAckCount + "\\u00a0ACK" + (visibleAckCount === 1 ? "" : "s"));\n'
         "  return badges;\n"
@@ -537,6 +541,7 @@ def test_static_stream_uses_message_payload_and_standard_badges():
     )
     assert "--message-occupant-accent" not in badges_css_rule
     assert "--message-badge-accent: var(--accent-strong);" in badge_css_rule
+    assert "    item.task_card_count || 0,\n  );" in app_render
     assert (
         "border: 1px solid color-mix(in srgb, var(--message-badge-accent) 58%, var(--border));"
         in badge_css_rule

@@ -83,6 +83,7 @@ class AssistantMessage:
     preview: str = ""
     image_only: bool = False
     source_kind: str = ""
+    task_card_count: int = 0
     ack_segments: list[dict[str, Any]] = field(default_factory=list)
     preamble_html: str = ""
     plan_items: list[dict[str, str]] = field(default_factory=list)
@@ -104,6 +105,7 @@ class AssistantMessage:
             "preamble_html": self.preamble_html,
             "preview": self.preview,
             "image_only": self.image_only,
+            "task_card_count": self.task_card_count,
             "ack_count": self.ack_count,
             "ack_keys": self.ack_keys,
             "ack_utterances": self.ack_utterances,
@@ -652,6 +654,7 @@ def task_card_message(
         kind="task_card",
         preview=_preview_from_text(display_text),
         source_kind=source_kind,
+        task_card_count=1,
     )
 
 
@@ -736,6 +739,10 @@ def _strip_task_directive_lines(text: str) -> str:
         line for line in text.splitlines() if _task_directive_from_line(line) is None
     ]
     return "\n".join(lines).strip()
+
+
+def _task_directive_count(text: str) -> int:
+    return sum(1 for line in text.splitlines() if _task_directive_from_line(line))
 
 
 def _task_directive_from_line(line: str) -> dict[str, Any] | None:
@@ -831,10 +838,12 @@ def _assistant_message(
     display_parts: list[str] = (
         [_display_text_with_task_directives(preamble)] if preamble else []
     )
+    task_card_count = _task_directive_count(preamble)
     for segment in segments:
         # The ACK header is hidden in the UI, so capitalize the response's
         # first letter for display while keeping the spoken text verbatim.
         body = _capitalize_first(strip_app_directive_lines(segment.content))
+        task_card_count += _task_directive_count(body)
         display_body = _display_text_with_task_directives(body)
         ack_segments.append(
             {
@@ -879,6 +888,7 @@ def _assistant_message(
         preview="image" if image_only else _preview_from_text(display_text),
         image_only=image_only,
         source_kind=source_kind,
+        task_card_count=task_card_count,
         ack_segments=ack_segments,
         preamble_html=preamble_html,
     )

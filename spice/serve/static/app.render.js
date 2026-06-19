@@ -534,6 +534,7 @@ function renderMessageFooter(lane, item, maximAckCount) {
     item.ack_count || 0,
     item.kind,
     maximAckCount,
+    item.task_card_count || 0,
   );
   if (badges) left.append(renderDotSeparator(), badges);
   footer.append(left);
@@ -659,11 +660,13 @@ function itemMaximAckCount(lane, item) {
   return count;
 }
 
-function renderBadges(ackCount, kind, maximAckCount) {
+function renderBadges(ackCount, kind, maximAckCount, taskCardCount) {
   const visibleAckCount = Math.max(0, ackCount - maximAckCount);
+  const visibleTaskCount = Math.max(0, Number(taskCardCount) || 0);
   if (
     !maximAckCount &&
     !visibleAckCount &&
+    !visibleTaskCount &&
     kind !== "final"
   )
     return null;
@@ -677,6 +680,8 @@ function renderBadges(ackCount, kind, maximAckCount) {
   };
   if (maximAckCount) add("MAXIM", "maxim-badge");
   if (kind === "final") add("FINAL", "final-badge");
+  if (visibleTaskCount)
+    add(visibleTaskCount + "\u00a0TASK" + (visibleTaskCount === 1 ? "" : "S"));
   if (visibleAckCount)
     add(visibleAckCount + "\u00a0ACK" + (visibleAckCount === 1 ? "" : "s"));
   return badges;

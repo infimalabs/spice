@@ -229,6 +229,8 @@ def test_inline_task_directive_renders_quote_like_block_in_message(tmp_path):
     assert len(items) == 1
     item = items[0]
     assert item.kind == "assistant"
+    assert item.task_card_count == 1
+    assert item.to_payload()["task_card_count"] == 1
     assert item.display_text == (
         "Queued the follow-up.\nTask capture: Inline follow-up (task.unit)\nContinuing."
     )
@@ -270,6 +272,7 @@ def test_inline_task_directive_renders_inside_ack_segment_at_written_position(
     segment_html = item.ack_segments[0]["html"]
 
     assert item.ack_count == 1
+    assert item.task_card_count == 1
     assert item.ack_utterances == ["captured.\nContinuing."]
     assert item.display_text == (
         "Captured.\nTask capture: ACK follow-up (serve.ui)\nContinuing."
@@ -283,6 +286,36 @@ def test_inline_task_directive_renders_inside_ack_segment_at_written_position(
     )
     assert "<dt>title</dt><dd>ACK follow-up</dd>" in segment_html
     assert "<dt>project</dt><dd>serve.ui</dd>" in segment_html
+
+
+def test_inline_task_directive_counts_multiple_task_cards(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": (
+                        "TASK title=First follow-up | project=serve.ui | "
+                        "acceptance=First card\n"
+                        "TASK title=Second follow-up | project=task.unit | "
+                        "acceptance=Second card"
+                    ),
+                }
+            ],
+        },
+    )
+
+    item = message_reader.read_assistant_messages(transcript, limit=5)[0]
+
+    assert item.task_card_count == 2
+    assert item.to_payload()["task_card_count"] == 2
+    assert item.display_html.count('class="task-directive-quote"') == 2
 
 
 def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch):
@@ -350,6 +383,7 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     item = payload["messages"][0]
     assert item["kind"] == "task_card"
     assert item["source_kind"] == "cli_task_created"
+    assert item["task_card_count"] == 1
     assert item["timestamp"] == "2026-06-10T12:00:01.000001Z"
     assert item["display_text"] == "Task capture: CLI follow-up (serve.ui)"
     assert item["preview"] == "Task capture: CLI follow-up (serve.ui)"
