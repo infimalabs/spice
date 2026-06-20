@@ -826,7 +826,7 @@ def test_zshrc_hook_sources_real_interactive_zshrc_and_loads_wrappers(tmp_path):
         timeout=3,
     )
 
-    assert completed.returncode == 0
+    assert completed.returncode == 0, _completed_process_detail(completed, trace)
     lines = _trace_lines(trace, expected_prefix="rtk:")
     assert lines.count("real:.zshenv") == 1
     assert lines.count("real:.zshrc") == 1
@@ -834,6 +834,56 @@ def test_zshrc_hook_sources_real_interactive_zshrc_and_loads_wrappers(tmp_path):
     assert "rtk:grep needle /dev/null" in lines
     assert not any(line.startswith("fake:") for line in lines)
     assert not (hook_dir / ".zsh_history").exists()
+
+
+def test_zshrc_hook_interactive_shell_loads_bare_pre_commit_wrapper(tmp_path):
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["repo-tools"],
+        groups={"repo-tools": {"pre-commit": {"argv": ["spice", "dev", "pre-commit"]}}},
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    trace = tmp_path / "trace.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    spice = bin_dir / "spice"
+    spice.write_text(
+        f'#!/bin/sh\nprintf \'spice:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+        encoding="utf-8",
+    )
+    spice.chmod(0o755)
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    env = {
+        "HOME": str(home),
+        "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
+        shellhook.ZDOTDIR_ENV: str(hook_dir),
+        SHELL_TRACE_ENV: str(trace),
+        shellhook.SHELL_HOOK_WRAPPERS_ENV: "\n".join(
+            shellhook.render_agent_wrapper_lines(tmp_path)
+        ),
+        **shellhook.shell_steering_runtime_environment(
+            base_env={"HOME": str(home)},
+            repo_root=tmp_path,
+        ),
+    }
+
+    completed = subprocess.run(
+        [zsh, "-i"],
+        input="pre-commit --all-files\nexit\n",
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+        timeout=3,
+    )
+
+    assert completed.returncode == 0, _completed_process_detail(completed, trace)
+    lines = _trace_lines(trace, expected_prefix="spice:")
+    assert "spice:dev pre-commit --all-files" in lines
 
 
 def test_zsh_login_hook_reexec_does_not_loop_when_active_zdotdir_is_hook(tmp_path):
@@ -1207,6 +1257,18 @@ def _trace_lines(trace: Path, *, expected_prefix: str) -> list[str]:
             trace.read_text(encoding="utf-8").splitlines() if trace.exists() else []
         ),
         contains=expected_prefix,
+    )
+
+
+def _completed_process_detail(
+    completed: subprocess.CompletedProcess, trace: Path
+) -> str:
+    trace_text = trace.read_text(encoding="utf-8") if trace.exists() else "<missing>"
+    return (
+        f"returncode={completed.returncode}\n"
+        f"stdout={completed.stdout!r}\n"
+        f"stderr={completed.stderr!r}\n"
+        f"trace={trace_text!r}"
     )
 
 
