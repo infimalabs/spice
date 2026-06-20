@@ -78,82 +78,95 @@ def _target_paths(args: argparse.Namespace, root: Path) -> list[Path]:
 
 def handle_study(args: argparse.Namespace) -> int:
     root = require_repo_root()
-    action = args.study_action
-    if action == "shape":
-        errors = [
-            error
-            for error in (
-                shape.namespace_policy_error(root),
-                shape.path_shape_error(root),
-            )
-            if error
-        ]
-        if errors:
-            print("\n".join(errors))
-            return 1
-        print("shape: ok")
-        return 0
+    handler = _STUDY_ACTIONS.get(args.study_action)
+    if handler is None:
+        raise SpiceError(f"unknown study action {args.study_action!r}")
+    return handler(args, root)
+
+
+def _study_shape(args: argparse.Namespace, root: Path) -> int:
+    errors = [
+        error
+        for error in (
+            shape.namespace_policy_error(root),
+            shape.path_shape_error(root),
+        )
+        if error
+    ]
+    if errors:
+        print("\n".join(errors))
+        return 1
+    print("shape: ok")
+    return 0
+
+
+def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
     paths = _target_paths(args, root)
-    if action == "file-loc":
-        findings = (
-            fileloc.scan_staged_loc_violations(
-                paths,
-                root=root,
-                limit=args.limit,
-                flex_limit_value=args.flex_limit,
-                byte_limit=args.byte_limit,
-                byte_flex_limit_value=args.byte_flex_limit,
-            )
-            if args.staged
-            else fileloc.scan_loc_violations(
-                paths,
-                root=root,
-                limit=args.limit,
-                flex_limit_value=args.flex_limit,
-                byte_limit=args.byte_limit,
-                byte_flex_limit_value=args.byte_flex_limit,
-            )
+    scan = (
+        fileloc.scan_staged_loc_violations
+        if args.staged
+        else fileloc.scan_loc_violations
+    )
+    findings = scan(
+        paths,
+        root=root,
+        limit=args.limit,
+        flex_limit_value=args.flex_limit,
+        byte_limit=args.byte_limit,
+        byte_flex_limit_value=args.byte_flex_limit,
+    )
+    print(
+        fileloc.render_loc_board(
+            findings,
+            limit=args.limit,
+            flex_limit_value=args.flex_limit,
+            byte_limit=args.byte_limit,
+            byte_flex_limit_value=args.byte_flex_limit,
         )
-        print(
-            fileloc.render_loc_board(
-                findings,
-                limit=args.limit,
-                flex_limit_value=args.flex_limit,
-                byte_limit=args.byte_limit,
-                byte_flex_limit_value=args.byte_flex_limit,
-            )
-        )
-        return 1 if findings else 0
-    if action == "complexity":
-        complexity_findings = complexity.scan_staged_complexity_violations(
-            paths,
-            root=root,
+    )
+    return 1 if findings else 0
+
+
+def _study_complexity(args: argparse.Namespace, root: Path) -> int:
+    findings = complexity.scan_staged_complexity_violations(
+        _target_paths(args, root),
+        root=root,
+        max_ccn=args.max_ccn,
+        max_length=args.max_length,
+        ccn_flex_limit_value=args.ccn_flex_limit,
+        length_flex_limit_value=args.length_flex_limit,
+    )
+    print(
+        complexity.render_complexity_board(
+            findings,
             max_ccn=args.max_ccn,
             max_length=args.max_length,
-            ccn_flex_limit_value=args.ccn_flex_limit,
-            length_flex_limit_value=args.length_flex_limit,
         )
-        print(
-            complexity.render_complexity_board(
-                complexity_findings,
-                max_ccn=args.max_ccn,
-                max_length=args.max_length,
-            )
-        )
-        return 1 if complexity_findings else 0
-    if action == "magic-numbers":
-        magic_findings = magicnums.detect_magic_regressions(
-            paths,
-            root=root,
-            baseline_ref=args.baseline_ref,
-            examine_threshold=args.threshold,
-        )
-        print(
-            magicnums.render_magic_board(magic_findings, baseline_ref=args.baseline_ref)
-        )
-        return 1 if magic_findings else 0
-    if action == "env-policy":
-        env_findings = envpolicy.scan_env_policy(paths, root=root)
-        print(envpolicy.render_env_policy_board(env_findings))
-        return 1 if env_findings else 0
-    raise SpiceError(f"unknown study action {action!r}")
+    )
+    return 1 if findings else 0
+
+
+def _study_magic_numbers(args: argparse.Namespace, root: Path) -> int:
+    findings = magicnums.detect_magic_regressions(
+        _target_paths(args, root),
+        root=root,
+        baseline_ref=args.baseline_ref,
+        examine_threshold=args.threshold,
+    )
+    print(magicnums.render_magic_board(findings, baseline_ref=args.baseline_ref))
+    return 1 if findings else 0
+
+
+def _study_env_policy(args: argparse.Namespace, root: Path) -> int:
+    findings = envpolicy.scan_env_policy(_target_paths(args, root), root=root)
+    print(envpolicy.render_env_policy_board(findings))
+    return 1 if findings else 0
+
+
+_STUDY_ACTIONS = {
+    "shape": _study_shape,
+    "file-loc": _study_file_loc,
+    "complexity": _study_complexity,
+    "magic-numbers": _study_magic_numbers,
+    "env-policy": _study_env_policy,
+}
