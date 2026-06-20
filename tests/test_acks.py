@@ -142,7 +142,7 @@ def test_ack_state_database_is_centralized_under_git_common_dir(tmp_path):
     common = git_common_dir(tmp_path)
 
     # Sibling of the task backend db under the shared common dir, not .spice.
-    assert path == common / "spice" / "task" / "data" / "spiceacks.sqlite3"
+    assert path == common / "spice" / "data" / "spiceacks.sqlite3"
     assert ".spice" not in path.parts
 
 
