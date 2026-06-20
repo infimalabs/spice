@@ -223,15 +223,10 @@ def _configure_wake_parser(actions: Any) -> None:
         help="Make a waiting task current.",
         recovery_examples=(
             "spice task wake TASK-20260609T203539640394Z",
-            "spice task wake TASK-20260609T203539640394Z --claim",
+            "spice task wake TASK-20260609T203539640394Z TASK-20260609T203540123456Z",
         ),
     )
-    wake.add_argument("handle")
-    wake.add_argument(
-        "--claim",
-        action="store_true",
-        help="Claim the task after clearing its wait.",
-    )
+    wake.add_argument("handles", nargs="+", metavar="handle")
     wake.set_defaults(func=handle)
 
 
@@ -574,7 +569,7 @@ _DISPATCH = {
     "oops": _oops,
     "note": _note,
     "depends": lambda a: ops.depends(a.handle, list(a.after)),
-    "wake": lambda a: ops.wake(a.handle, claim_after=a.claim),
+    "wake": lambda a: ops.wake(list(a.handles)),
     "claim": lambda a: ops.claim(a.handle, steal=a.steal),
     "unclaim": lambda a: ops.unclaim(a.handle),
     "edit": lambda a: ops.edit(a.handle, priority=a.priority, project=a.project),

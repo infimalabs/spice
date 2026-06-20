@@ -94,63 +94,59 @@ def test_task_edit_requires_at_least_one_field(task_repo):
         ops.edit(handle)
 
 
-def test_task_wake_clears_wait_and_makes_task_current(task_repo):
-    handle = ops.add(
-        "Wake delayed task",
+def test_task_wake_clears_multiple_waits_and_makes_tasks_current(task_repo):
+    first = ops.add(
+        "Wake delayed task one",
         project="task.unit",
         priority="medium",
         wait=config.OOPS_WAIT,
     )
-    delayed = identity.resolve(handle)
+    second = ops.add(
+        "Wake delayed task two",
+        project="task.unit",
+        priority="medium",
+        wait=config.OOPS_WAIT,
+    )
+    delayed = [identity.resolve(first), identity.resolve(second)]
 
-    assert delayed.get("wait")
-    assert handle not in {identity.render_handle(row) for row in ops.ready_rows()}
+    assert all(row.get("wait") for row in delayed)
+    ready_before = {identity.render_handle(row) for row in ops.ready_rows()}
+    assert first not in ready_before
+    assert second not in ready_before
 
-    output = ops.wake(handle)
-    row = identity.resolve(handle)
+    output = ops.wake([first, second])
+    first_row = identity.resolve(first)
+    second_row = identity.resolve(second)
+    ready_after = {identity.render_handle(row) for row in ops.ready_rows()}
 
-    assert f"woke {handle}: wait:" in output
+    assert f"woke {first}: wait:" in output
+    assert f"woke {second}: wait:" in output
     assert "next: spice task next" in output
-    assert not str(row.get("wait") or "")
-    assert handle in {identity.render_handle(row) for row in ops.ready_rows()}
-    assert not str(row.get("claim_by") or "")
-    assert not row.get("start")
+    assert not str(first_row.get("wait") or "")
+    assert not str(second_row.get("wait") or "")
+    assert first in ready_after
+    assert second in ready_after
+    assert not str(first_row.get("claim_by") or "")
+    assert not str(second_row.get("claim_by") or "")
+    assert not first_row.get("start")
+    assert not second_row.get("start")
 
 
-def test_task_wake_can_claim_after_clearing_wait(task_repo):
-    handle = ops.add(
-        "Wake and claim delayed task",
+def test_task_wake_rejects_batch_without_partial_clear(task_repo):
+    delayed = ops.add(
+        "Wake batch delayed task",
         project="task.unit",
         priority="medium",
         wait=config.OOPS_WAIT,
     )
+    claimed = ops.add("Wake batch claimed task", project="task.unit", claim=True)
 
-    output = ops.wake(handle, claim_after=True)
-    row = identity.resolve(handle)
+    with pytest.raises(SpiceError, match="active or claimed"):
+        ops.wake([delayed, claimed])
 
-    assert f"woke {handle}: wait:" in output
-    assert ops.claim_drive_line(handle) in output
-    assert row["status"] == "pending"
-    assert not str(row.get("wait") or "")
-    assert row["claim_by"] == ACTOR_A
-    assert row["start"]
-
-
-def test_task_wake_claim_refuses_dirty_tree_without_clearing_wait(remote_task_repo):
-    handle = ops.add(
-        "Wake claim waits for clean tree",
-        project="task.unit",
-        priority="medium",
-        wait=config.OOPS_WAIT,
-    )
-    (remote_task_repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
-
-    with pytest.raises(SpiceError, match="commit or clear the working tree first"):
-        ops.wake(handle, claim_after=True)
-
-    row = identity.resolve(handle)
+    row = identity.resolve(delayed)
     assert row.get("wait")
-    assert handle not in {identity.render_handle(row) for row in ops.ready_rows()}
+    assert delayed not in {identity.render_handle(row) for row in ops.ready_rows()}
     assert not str(row.get("claim_by") or "")
     assert not row.get("start")
 
@@ -160,7 +156,7 @@ def test_task_wake_refuses_deferred_oops_triage(task_repo):
     handle = created.split()[1]
 
     with pytest.raises(SpiceError, match="oops triage"):
-        ops.wake(handle)
+        ops.wake([handle])
 
 
 def test_task_adopt_mints_task_over_orphan_then_done_captures_it(remote_task_repo):
