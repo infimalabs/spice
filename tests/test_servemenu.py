@@ -142,10 +142,11 @@ def test_header_spice_menu_fast_mode_flame_pulses_behind_pepper():
     assert "position: absolute;" in icon_flame_rules
     assert "opacity: 0;" in icon_flame_rules
     assert "pointer-events: none;" in icon_flame_rules
-    assert "font-size:" not in icon_flame_rules
+    assert "font-size: 0.8em;" in icon_flame_rules
     assert "inset: 50% auto auto 50%;" in icon_flame_rules
     assert "z-index: 0;" in icon_flame_rules
-    assert "drop-shadow" in icon_flame_rules
+    assert "filter:" not in icon_flame_rules
+    assert "drop-shadow" not in icon_flame_rules
     assert "transform: translate(-50%, -50%);" in icon_flame_rules
     assert "scale(" not in icon_flame_rules
     assert "rotate(" not in icon_flame_rules
