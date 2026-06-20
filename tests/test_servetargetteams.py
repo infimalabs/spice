@@ -16,6 +16,7 @@ from spice.serve.teams import ServeTeamStore, TeamCommandService, TeamConfig
 from spice.serve.worktrees import WorktreeTarget
 
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ACTOR_A = f"thread:{THREAD_A}"
 
 
 def test_unstarted_target_id_membership_is_visible_in_target_payload(
@@ -26,7 +27,7 @@ def test_unstarted_target_id_membership_is_visible_in_target_payload(
     state = _serve_state(tmp_path, target)
     created = state.team_store.create_team(
         config=TeamConfig(lifetime="Drain", task_filters=("serve.ui",)),
-        members=[target.id],
+        members=[f"target:{target.id}"],
     )
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
 
@@ -40,7 +41,7 @@ def test_unstarted_target_id_membership_is_visible_in_target_payload(
     assert [
         member.agent_id
         for member in state.team_store.team_state(created.team_id).members
-    ] == [target.id]
+    ] == [f"target:{target.id}"]
 
 
 def test_unstarted_target_id_membership_is_visible_in_lane_payload(
@@ -51,7 +52,7 @@ def test_unstarted_target_id_membership_is_visible_in_lane_payload(
     state = _serve_state(tmp_path, target)
     created = state.team_store.create_team(
         config=TeamConfig(lifetime="Drain", task_filters=("serve.ui",)),
-        members=[target.id],
+        members=[f"target:{target.id}"],
     )
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
 
@@ -71,8 +72,8 @@ def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
-    created = state.team_store.create_team(members=[target.id])
-    state.team_store.set_agent_renewal_request(target.id, requested=True)
+    created = state.team_store.create_team(members=[f"target:{target.id}"])
+    state.team_store.set_agent_renewal_request(f"target:{target.id}", requested=True)
     ensure_calls: list[dict[str, object]] = []
     _patch_payload_dependencies(
         monkeypatch, thread_id=THREAD_A, running=False, ensure_calls=ensure_calls
@@ -88,12 +89,12 @@ def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
         "threadId": THREAD_A,
     }
     assert work_tree["teamIdentity"]["teamId"] == created.team_id
-    assert work_tree["renewalIntent"]["agentId"] == THREAD_A
+    assert work_tree["renewalIntent"]["agentId"] == ACTOR_A
     assert work_tree["renewalIntent"]["requested"] is True
-    assert [member.agent_id for member in members] == [THREAD_A]
-    assert [member.agent_id for member in snapshot_members] == [THREAD_A]
+    assert [member.agent_id for member in members] == [ACTOR_A]
+    assert [member.agent_id for member in snapshot_members] == [ACTOR_A]
     renewal = snapshot_members[0].renewal
-    assert renewal.agent_id == THREAD_A
+    assert renewal.agent_id == ACTOR_A
     assert ensure_calls == [
         {
             "target": target,
@@ -122,15 +123,16 @@ def test_task_drain_uses_unstarted_target_actor_without_binding_thread(
         },
     )
 
-    team_id = state.team_store.current_team_for_agent(target.id)
+    target_actor = f"target:{target.id}"
+    team_id = state.team_store.current_team_for_agent(target_actor)
     assert status == HTTPStatus.OK
-    assert result["route"]["actor"] == target.id
+    assert result["route"]["actor"] == target_actor
     assert result["route"]["targetIdentity"]["thread"] == {"state": "unbound"}
     assert result["route"]["teamIdentity"]["teamId"] == team_id
     assert result["route"]["taskFilters"] == ["serve.ui"]
     assert [
         member.agent_id for member in state.team_store.team_state(team_id).members
-    ] == [target.id]
+    ] == [target_actor]
 
 
 def test_unstarted_send_rewrites_placeholder_membership_to_ensured_thread(
@@ -141,7 +143,7 @@ def test_unstarted_send_rewrites_placeholder_membership_to_ensured_thread(
     state = _serve_state(tmp_path, target)
     created = state.team_store.create_team(
         config=TeamConfig(lifetime="Drain", task_filters=("serve.ui",)),
-        members=[target.id],
+        members=[f"target:{target.id}"],
     )
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
 
@@ -159,7 +161,7 @@ def test_unstarted_send_rewrites_placeholder_membership_to_ensured_thread(
     members = state.team_store.team_state(created.team_id).members
     assert status == HTTPStatus.OK
     assert result["agentEnsure"]["threadId"] == THREAD_A
-    assert result["route"]["actor"] == THREAD_A
+    assert result["route"]["actor"] == ACTOR_A
     assert result["route"]["targetIdentity"]["thread"] == {
         "state": "bound",
         "threadId": THREAD_A,
@@ -167,7 +169,7 @@ def test_unstarted_send_rewrites_placeholder_membership_to_ensured_thread(
     assert result["route"]["teamIdentity"]["teamId"] == created.team_id
     assert result["route"]["taskFilters"] == ["serve.ui"]
     assert result["route"]["lifetime"] == "Drain"
-    assert [member.agent_id for member in members] == [THREAD_A]
+    assert [member.agent_id for member in members] == [ACTOR_A]
 
 
 def _repo(tmp_path: Path) -> Path:

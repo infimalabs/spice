@@ -290,6 +290,8 @@ def test_serve_agent_identity_normalizes_legacy_bare_actor_and_renewal(
         "ancestorThreadId": "thread-a",
         "successorThreadId": "",
     }
+    assert store.current_team_for_agent("thread-a") is None
+    assert store.current_team_for_agent("thread:thread-a") is not None
     assert (
         payloads.serve_agent_identity_payload(target, actor_id="wt")["actorId"]
         == "target:wt"
@@ -1029,8 +1031,9 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
 def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
     latest = datetime.now(UTC)
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.create_team(members=["thread:agent-a"])
     store.record_agent_metric_delta(
-        "agent-a",
+        "thread:agent-a",
         acked=2,
         sends=3,
         tool_calls=2,
@@ -1060,8 +1063,8 @@ def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
 
 def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    store.create_team(members=["agent-a"])
-    store.set_agent_renewal_request("agent-a", requested=True)
+    store.create_team(members=["thread:agent-a"])
+    store.set_agent_renewal_request("thread:agent-a", requested=True)
     monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
         payloads, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
@@ -1098,7 +1101,7 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
         limit=5,
     )
 
-    assert payload["renewalIntent"]["agentId"] == "agent-a"
+    assert payload["renewalIntent"]["agentId"] == "thread:agent-a"
     assert payload["renewalIntent"]["requested"] is True
     assert payload["renewalIntent"]["state"] == "requested"
 

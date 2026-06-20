@@ -396,6 +396,26 @@ def test_static_composer_menu_actions_include_team_moves_and_renewal():
     assert "agentIds: [laneTeamAgentId(member)]," in app_groups
 
 
+def test_static_team_routing_uses_explicit_actor_ids():
+    app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_menu = (STATIC_ROOT / "app.menu.js").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+
+    assert 'return id ? "target:" + id : "";' in app_js
+    assert 'return actor ? "thread:" + actor : "";' in app_js
+    assert "function targetTeamAgentId(target)" in app_js
+    assert "function laneTeamAgentId(lane)" in app_lanes
+    assert "return targetActor || targetTeamActorId(lane.targetId);" in app_lanes
+    assert "const threadId = teamActorThreadId(actorId);" in app_lanes
+    assert "members: [targetTeamAgentId(target)]," in app_lanes
+    assert "members: [targetTeamAgentId(target)]," in app_menu
+    assert "agentId: targetTeamAgentId(target)," in app_menu
+    assert "agentId: targetTeamAgentId(target)," in app_shell
+    assert "agentAliases: targetTeamAgentAliases(target)," in app_menu
+    assert "return targetTeamAgentAliases(target);" in app_shell
+
+
 def test_static_quote_close_control_keeps_composer_menu_actions_polished():
     css = _serve_css_text()
     app_shell = _shell_and_composer_text()

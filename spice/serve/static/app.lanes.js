@@ -243,23 +243,26 @@ function teamMemberTargetIds(team) {
   return targetIds;
 }
 
-// A team member is an actor (canonical thread id) or, before any thread is
-// bound, the worktree target id itself.
+// A team member is an explicit actor: target:<target-id> before a thread binds,
+// then thread:<canonical-thread-id> once an agent exists.
 function teamMemberTargetId(member, team = null, claimedTargetIds = []) {
   const agentId = String((member || {}).agentId || "");
-  const actorId = canonicalThreadActorId(agentId);
+  const actorId = normalizeTeamActorId(agentId);
   if (!actorId) return "";
-  if (targetById.has(agentId)) return agentId;
+  if (teamActorKind(actorId) === "target") {
+    const targetId = teamActorValue(actorId);
+    return targetById.has(targetId) ? targetId : "";
+  }
   const laneTargetId = teamMemberLaneTargetId(actorId);
   if (laneTargetId) {
-    renameTeamMemberTargetThread(laneTargetId, agentId);
+    renameTeamMemberTargetThread(laneTargetId, actorId);
     return laneTargetId;
   }
   for (const target of targets) {
-    if (canonicalThreadActorId(targetIdentityThreadId(target.targetIdentity)) === actorId)
+    if (teamActorMatchesThread(actorId, targetIdentityThreadId(target.targetIdentity)))
       return target.id;
   }
-  const renewedTargetId = renewedTeamSlotTargetId(team, agentId, claimedTargetIds);
+  const renewedTargetId = renewedTeamSlotTargetId(team, actorId, claimedTargetIds);
   if (renewedTargetId) return renewedTargetId;
   return "";
 }
@@ -268,15 +271,15 @@ function teamMemberLaneTargetId(actorId) {
   for (const lane of laneStates.values()) {
     if (!targetById.has(lane.targetId)) continue;
     if (
-      canonicalThreadActorId(lane.targetThreadId) === actorId ||
-      canonicalThreadActorId(lane.activeThreadId) === actorId
+      teamActorMatchesThread(actorId, lane.targetThreadId) ||
+      teamActorMatchesThread(actorId, lane.activeThreadId)
     )
       return lane.targetId;
   }
   return "";
 }
 
-function renewedTeamSlotTargetId(team, agentId, claimedTargetIds = []) {
+function renewedTeamSlotTargetId(team, actorId, claimedTargetIds = []) {
   const teamId = String((team || {}).teamId || "");
   if (!teamId) return "";
   const actorIds = teamMemberActorIds(team);
@@ -288,31 +291,29 @@ function renewedTeamSlotTargetId(team, agentId, claimedTargetIds = []) {
     if (!target) continue;
     if (String(lane.teamId || teamIdentityTeamId(target.teamIdentity)) !== teamId)
       continue;
-    const laneActorId = canonicalThreadActorId(
-      lane.targetThreadId ||
-        targetIdentityThreadId(target.targetIdentity) ||
-        lane.activeThreadId,
-    );
+    const laneActorId = laneTeamAgentId(lane);
     if (!laneActorId || actorIds.has(laneActorId)) continue;
     candidates.push(lane.targetId);
   }
   if (candidates.length !== 1) return "";
-  renameTeamMemberTargetThread(candidates[0], agentId);
+  renameTeamMemberTargetThread(candidates[0], actorId);
   return candidates[0];
 }
 
-function renameTeamMemberTargetThread(targetId, agentId) {
+function renameTeamMemberTargetThread(targetId, actorId) {
+  const threadId = teamActorThreadId(actorId);
+  if (!threadId) return;
   const target = targetById.get(targetId);
   if (target)
     target.targetIdentity = {
       ...(target.targetIdentity || {}),
-      thread: { state: "bound", threadId: agentId },
+      thread: { state: "bound", threadId },
     };
   const lane = laneStates.get(targetId);
   if (!lane) return;
-  lane.targetThreadId = agentId;
-  lane.activeThreadId = agentId;
-  if (typeof ensureLaneOccupant === "function") ensureLaneOccupant(lane, agentId);
+  lane.targetThreadId = threadId;
+  lane.activeThreadId = threadId;
+  if (typeof ensureLaneOccupant === "function") ensureLaneOccupant(lane, threadId);
 }
 
 function preserveUnresolvedTeamLanes(team, openTargetIds) {
@@ -325,11 +326,7 @@ function preserveUnresolvedTeamLanes(team, openTargetIds) {
     if (!target) continue;
     if (String(lane.teamId || teamIdentityTeamId(target.teamIdentity)) !== teamId)
       continue;
-    const laneActorId = canonicalThreadActorId(
-      lane.targetThreadId ||
-        targetIdentityThreadId(target.targetIdentity) ||
-        lane.activeThreadId,
-    );
+    const laneActorId = laneTeamAgentId(lane);
     if (laneActorId && actorIds.has(laneActorId)) continue;
     openTargetIds.add(lane.targetId);
   }
@@ -338,7 +335,7 @@ function preserveUnresolvedTeamLanes(team, openTargetIds) {
 function teamMemberActorIds(team) {
   const actorIds = new Set();
   for (const member of (team || {}).members || []) {
-    const actorId = canonicalThreadActorId((member || {}).agentId);
+    const actorId = normalizeTeamActorId((member || {}).agentId);
     if (actorId) actorIds.add(actorId);
   }
   return actorIds;
@@ -379,21 +376,23 @@ function teamMemberForTargetId(team, targetId) {
 }
 
 function laneTeamAgentId(lane) {
-  const actor = canonicalThreadActorId(lane.targetThreadId);
+  const actor = threadTeamActorId(lane.targetThreadId);
   if (actor) return actor;
   const target = targetById.get(lane.targetId);
-  return (
-    canonicalThreadActorId(
-      target ? targetIdentityThreadId(target.targetIdentity) : "",
-    ) || lane.targetId
-  );
+  const targetActor = target
+    ? threadTeamActorId(targetIdentityThreadId(target.targetIdentity))
+    : "";
+  return targetActor || targetTeamActorId(lane.targetId);
 }
 
 function laneTeamAgentAliases(lane) {
-  const aliases = [];
-  if (lane.targetId && lane.targetId !== laneTeamAgentId(lane))
-    aliases.push(lane.targetId);
-  return aliases;
+  const actor = laneTeamAgentId(lane);
+  const aliases = [
+    targetTeamActorId(lane.targetId),
+    String(lane.targetId || "").trim(),
+    teamActorThreadId(actor),
+  ].filter((alias) => alias && alias !== actor);
+  return uniqueStringList(aliases);
 }
 
 // ---- open / close ---------------------------------------------------------------
@@ -416,10 +415,7 @@ async function openTargetTeam(targetId, options = {}) {
       const hint = laneHintsByTargetId().get(targetId);
       await requestTeamCommand(
         teamCommandPayload("createTeam", {
-          members: [
-            canonicalThreadActorId(targetIdentityThreadId(target.targetIdentity)) ||
-              targetId,
-          ],
+          members: [targetTeamAgentId(target)],
           config: {
             ...defaultTeamConfig(),
             speechMode: hint ? hint.speechMode : defaultSpeechMode,
