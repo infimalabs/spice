@@ -22,6 +22,11 @@ def _between(text: str, start: str, end: str) -> str:
     return text[start_index : text.index(end, start_index)]
 
 
+def _assert_contains_all(text: str, snippets: tuple[str, ...]) -> None:
+    for snippet in snippets:
+        assert snippet in text
+
+
 def _shell_and_composer_text() -> str:
     return "\n".join(
         (STATIC_ROOT / filename).read_text(encoding="utf-8")
@@ -758,95 +763,123 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
     app = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
+
+    _assert_contains_all(
+        app,
+        (
+            'const agentLifetimeLabels = ["Steer", "Drive", "Drain"];',
+            'Steer: "Manual filters only",',
+            'Drive: "Auto-subscribe to projects this team creates or claims",',
+            'Drain: "Boundary dissolved: see all assignable work",',
+            "function agentLifetimeAutoManagesTasks(lifetime) {",
+            'return lifetime === "Drive";',
+            "function agentLifetimeUsesStoredTaskFilters(lifetime) {",
+            'return lifetime === "Steer" || lifetime === "Drive";',
+            "function agentLifetimeDissolvesTaskBoundary(lifetime) {",
+            'return lifetime === "Drain";',
+            "function agentLifetimeHelpText(lifetime) {",
+        ),
+    )
+    _assert_contains_all(
+        app_shell,
+        (
+            "data-lifetime-label>Drive</span>",
+            "data-submit>Drive</button>",
+            "const lifetime = target.lifetime || defaultAgentLifetime;",
+            "serverLifetime: lifetime,",
+            'pendingLifetimeCommit: "",',
+            "pendingLifetimeConfigRevision: 0,",
+            "pendingLifetimeRequestId: 0,",
+            "lifetimeRequestId: 0,",
+            "applyServerLaneLifetime(lane, config.lifetime, {",
+            "configRevision: config.revision,",
+        ),
+    )
+    assert "renewAgent" not in app_controls
+    assert '"Renew"' not in app
+
+
+def test_static_lifetime_slider_tracks_pending_state_in_controls():
+    app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
+
+    _assert_contains_all(
+        app_controls,
+        (
+            "host.lifetimeRequestId = Math.max",
+            "host.pendingLifetimeCommit = lifetime;",
+            "host.pendingLifetimeRequestId = host.lifetimeRequestId;",
+            "host.serverLifetime = laneServerLifetime(host);",
+            "function updateLaneLifetimeForLane(lane) {",
+            "function updateEmptyTeamLifetimeForLane(host) {",
+            "if (host.emptyTeam && host.teamId) {",
+            "configPatch: { lifetime: requestedLifetime },",
+            "function serverLifetimeSupersedesPending(host, options = {})",
+            "if (options.supersedePending !== true) return false;",
+            "function serverLifetimeSettlesPending(host, lifetime, options = {})",
+            "if (host.pendingLifetimeCommit && lifetime !== host.pendingLifetimeCommit)",
+            "serverLifetimeSettlesPending(host, lifetime, options)",
+            'host.pendingLifetimeCommit = "";',
+            "host.pendingLifetimeConfigRevision = 0;",
+            "host.pendingLifetimeRequestId = 0;",
+            "function laneLifetimeCommitMatches(host, lifetime, options = {})",
+            "function clearLaneLifetimeCommit(lane, lifetime, options = {})",
+            "function rollbackLaneLifetimeCommit(",
+            'serverLifetime = "",',
+            "options = {},",
+            "const lifetimeHelp = agentLifetimeHelpText(lifetime);",
+            "lane.lifetimeRangeEl.title = lifetimeHelp;",
+            '"Task subscription policy: " + lifetimeHelp',
+            "lane.lifetimeLabelEl.title = lifetimeHelp;",
+            'lane.submitEl.title = "Send with " + lifetime + ": " + lifetimeHelp;',
+        ),
+    )
+
+
+def test_static_lifetime_slider_syncs_server_state_sources():
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
 
-    assert 'const agentLifetimeLabels = ["Steer", "Drive", "Drain"];' in app
-    assert 'Steer: "Manual filters only",' in app
-    assert 'Drive: "Auto-subscribe to projects this team creates or claims",' in app
-    assert 'Drain: "Boundary dissolved: see all assignable work",' in app
-    assert "function agentLifetimeAutoManagesTasks(lifetime) {" in app
-    assert 'return lifetime === "Drive";' in app
-    assert "function agentLifetimeUsesStoredTaskFilters(lifetime) {" in app
-    assert 'return lifetime === "Steer" || lifetime === "Drive";' in app
-    assert "function agentLifetimeDissolvesTaskBoundary(lifetime) {" in app
-    assert 'return lifetime === "Drain";' in app
-    assert "function agentLifetimeHelpText(lifetime) {" in app
-    assert "data-lifetime-label>Drive</span>" in app_shell
-    assert "data-submit>Drive</button>" in app_shell
-    assert "const lifetime = target.lifetime || defaultAgentLifetime;" in app_shell
-    assert "serverLifetime: lifetime," in app_shell
-    assert 'pendingLifetimeCommit: "",' in app_shell
-    assert "pendingLifetimeConfigRevision: 0," in app_shell
-    assert "pendingLifetimeRequestId: 0," in app_shell
-    assert "lifetimeRequestId: 0," in app_shell
-    assert "host.lifetimeRequestId = Math.max" in app_controls
-    assert "host.pendingLifetimeCommit = lifetime;" in app_controls
-    assert "host.pendingLifetimeRequestId = host.lifetimeRequestId;" in app_controls
-    assert "host.serverLifetime = laneServerLifetime(host);" in app_controls
-    assert "function updateLaneLifetimeForLane(lane) {" in app_controls
-    assert "function updateEmptyTeamLifetimeForLane(host) {" in app_controls
-    assert "if (host.emptyTeam && host.teamId) {" in app_controls
-    assert "configPatch: { lifetime: requestedLifetime }," in app_controls
-    assert "function serverLifetimeSupersedesPending(host, options = {})" in (
-        app_controls
+    _assert_contains_all(
+        app_stream,
+        (
+            "const requestedLifetime = payload.lifetime;",
+            "const lifetimeRequestId = Math.max",
+            "const pendingLifetimeRequestId =",
+            "lifetimeRequestId,",
+            "settleLaneLifetimeCommit(",
+            "if (!requestedLifetimeRequestId) return;",
+            "if (options.lifetimeRequestId === undefined) return true;",
+            "taskDrainLifetimeResponseIsCurrent(lane, options)",
+            "requestId: options.lifetimeRequestId,",
+            "if (pendingLifetimeRequestId)",
+            "requestId: pendingLifetimeRequestId,",
+            "supersedePending: false,",
+        ),
     )
-    assert "if (options.supersedePending !== true) return false;" in app_controls
-    assert "function serverLifetimeSettlesPending(host, lifetime, options = {})" in (
-        app_controls
+    _assert_contains_all(
+        app_lanes,
+        (
+            "applyServerLaneLifetime(lane, config.lifetime, {",
+            "configRevision: config.revision,",
+        ),
     )
-    assert (
-        "if (host.pendingLifetimeCommit && lifetime !== host.pendingLifetimeCommit)"
-        in app_controls
+    _assert_contains_all(
+        app_render,
+        (
+            'payloadHasField(payload, "teamIdentity")',
+            "teamIdentityConfigRevision(payload.teamIdentity)",
+        ),
     )
-    assert "serverLifetimeSettlesPending(host, lifetime, options)" in app_controls
-    assert 'host.pendingLifetimeCommit = "";' in app_controls
-    assert "host.pendingLifetimeConfigRevision = 0;" in app_controls
-    assert "host.pendingLifetimeRequestId = 0;" in app_controls
-    assert "function laneLifetimeCommitMatches(host, lifetime, options = {})" in (
-        app_controls
+    _assert_contains_all(
+        app_groups,
+        (
+            "pendingLaneLifetimeStateForMembers(members, lifetimeStateByTargetId)",
+            "laneLifetimeRuntimeState(lane)",
+            "restoreLaneLifetimeRuntimeState(",
+        ),
     )
-    assert "function clearLaneLifetimeCommit(lane, lifetime, options = {})" in (
-        app_controls
-    )
-    assert "function rollbackLaneLifetimeCommit(" in app_controls
-    assert 'serverLifetime = "",' in app_controls
-    assert "options = {}," in app_controls
-    assert "applyServerLaneLifetime(lane, config.lifetime, {" in app_shell
-    assert "applyServerLaneLifetime(lane, config.lifetime, {" in app_lanes
-    assert "configRevision: config.revision," in app_shell
-    assert "configRevision: config.revision," in app_lanes
-    assert 'payloadHasField(payload, "teamIdentity")' in app_render
-    assert "teamIdentityConfigRevision(payload.teamIdentity)" in app_render
-    assert "pendingLaneLifetimeStateForMembers(members, lifetimeStateByTargetId)" in (
-        app_groups
-    )
-    assert "laneLifetimeRuntimeState(lane)" in app_groups
-    assert "restoreLaneLifetimeRuntimeState(" in app_groups
-    assert "const requestedLifetime = payload.lifetime;" in app_stream
-    assert "const lifetimeRequestId = Math.max" in app_stream
-    assert "const pendingLifetimeRequestId =" in app_stream
-    assert "lifetimeRequestId," in app_stream
-    assert "settleLaneLifetimeCommit(" in app_stream
-    assert "if (!requestedLifetimeRequestId) return;" in app_stream
-    assert "if (options.lifetimeRequestId === undefined) return true;" in app_stream
-    assert "taskDrainLifetimeResponseIsCurrent(lane, options)" in app_stream
-    assert "requestId: options.lifetimeRequestId," in app_stream
-    assert "if (pendingLifetimeRequestId)" in app_stream
-    assert "requestId: pendingLifetimeRequestId," in app_stream
-    assert "supersedePending: false," in app_stream
-    assert "const lifetimeHelp = agentLifetimeHelpText(lifetime);" in app_controls
-    assert "lane.lifetimeRangeEl.title = lifetimeHelp;" in app_controls
-    assert '"Task subscription policy: " + lifetimeHelp' in app_controls
-    assert "lane.lifetimeLabelEl.title = lifetimeHelp;" in app_controls
-    assert (
-        'lane.submitEl.title = "Send with " + lifetime + ": " + lifetimeHelp;'
-        in app_controls
-    )
-    assert "renewAgent" not in app_controls
-    assert '"Renew"' not in app
 
 
 def test_lifetime_slider_pending_commit_ignores_stale_server_lifetimes():
@@ -855,6 +888,20 @@ def test_lifetime_slider_pending_commit_ignores_stale_server_lifetimes():
 
     result = subprocess.run(
         ["node", str(script), str(app_controls)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_lane_pane_slider_moves_panels_with_rail_direction():
+    app_shell = STATIC_ROOT / "app.shell.js"
+    script = Path(__file__).with_name("fixtures") / "lane_pane_direction.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(app_shell)],
         capture_output=True,
         text=True,
         check=False,
@@ -1009,12 +1056,68 @@ def test_static_composer_headers_use_agent_accent_border():
 
 
 def test_static_composer_driver_icons_use_local_driver_assets():
-    css = _serve_css_text()
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
     app_composer = (STATIC_ROOT / "app.composer.js").read_text(encoding="utf-8")
     openai_icon = STATIC_ROOT / "icons" / "openai.svg"
     claude_icon = STATIC_ROOT / "icons" / "claude.svg"
+    assert openai_icon.is_file()
+    assert claude_icon.is_file()
+    assert 'fill="currentColor"' in openai_icon.read_text(encoding="utf-8")
+    assert 'fill="currentColor"' in claude_icon.read_text(encoding="utf-8")
+
+    _assert_contains_all(
+        app_render,
+        (
+            "function targetIdentityDriverName(identity)",
+            "function targetIdentityDriverModel(identity)",
+            "function targetIdentityDriverEffort(identity)",
+            "function applyLaneServeAgentIdentity(lane, payload)",
+            "function serveAgentDesiredDriverName(identity)",
+            "function serveAgentActualDriverName(identity)",
+            "function identityDisplayPair(actual, desired)",
+            "lane.driverName = identityDisplayPair(actualDriver, desiredDriver);",
+            "lane.driverIconName = actualDriver || transcriptOwner || desiredDriver;",
+        ),
+    )
+    _assert_contains_all(
+        app_shell,
+        (
+            "const serveAgentIdentity = target.serveAgentIdentity || {};",
+            "serveAgentActualDriverName(serveAgentIdentity)",
+            "serveAgentDesiredDriverName(serveAgentIdentity)",
+            "driverIconName:",
+        ),
+    )
+    _assert_contains_all(
+        app_composer,
+        (
+            "syncComposerDriverIcon(primary, member);",
+            'claude: "/static/icons/claude.svg",',
+            'codex: "/static/icons/openai.svg",',
+            'openai: "/static/icons/openai.svg",',
+            "icon.dataset.composerDriverIcon = driver;",
+            "const tooltip = composerDriverTooltip(member, driver);",
+            "icon.title = tooltip;",
+            'icon.setAttribute("aria-label", tooltip);',
+            'icon.setAttribute("role", "img");',
+            '"Codex driver"',
+            '"driver: " + driverName',
+            '"model: " + model',
+            '"effort: " + effort',
+            '"thread: " + (threadId || "unbound")',
+            '"session: " + session',
+        ),
+    )
+    assert '"source: worktree launch config"' not in app_composer
+    assert (
+        'icon.style.setProperty("--composer-driver-icon-url", '
+        "'url(\"' + src + '\")');" in app_composer
+    )
+
+
+def test_static_composer_driver_icons_style_local_driver_assets():
+    css = _serve_css_text()
     icon_start = css.index(".composer-driver-icon {")
     icon_rule = css[icon_start : css.index("}", icon_start)]
     icon_before_start = css.index(".composer-driver-icon::before {")
@@ -1032,66 +1135,28 @@ def test_static_composer_driver_icons_use_local_driver_assets():
     textarea_start = css.index(".composer-band--primary textarea {")
     textarea_rule = css[textarea_start : css.index("}", textarea_start)]
 
-    assert openai_icon.is_file()
-    assert claude_icon.is_file()
-    assert 'fill="currentColor"' in openai_icon.read_text(encoding="utf-8")
-    assert 'fill="currentColor"' in claude_icon.read_text(encoding="utf-8")
-    assert "function targetIdentityDriverName(identity)" in app_render
-    assert "function targetIdentityDriverModel(identity)" in app_render
-    assert "function targetIdentityDriverEffort(identity)" in app_render
-    assert "function applyLaneServeAgentIdentity(lane, payload)" in app_render
-    assert "function serveAgentDesiredDriverName(identity)" in app_render
-    assert "function serveAgentActualDriverName(identity)" in app_render
-    assert "function identityDisplayPair(actual, desired)" in app_render
-    assert "lane.driverName = identityDisplayPair(actualDriver, desiredDriver);" in (
-        app_render
+    _assert_contains_all(
+        icon_rule,
+        (
+            "bottom: 8px;",
+            "cursor: help;",
+            "height: 18px;",
+            "pointer-events: auto;",
+            "position: absolute;",
+            "right: 8px;",
+            "width: 18px;",
+        ),
     )
-    assert (
-        "lane.driverIconName = actualDriver || transcriptOwner || desiredDriver;"
-        in (app_render)
+    _assert_contains_all(
+        icon_before_rule,
+        (
+            'content: "";',
+            "inset: 2px;",
+            "-webkit-mask: var(--composer-driver-icon-url) center / contain no-repeat;",
+            "mask: var(--composer-driver-icon-url) center / contain no-repeat;",
+            "position: absolute;",
+        ),
     )
-    assert "const serveAgentIdentity = target.serveAgentIdentity || {};" in app_shell
-    assert "serveAgentActualDriverName(serveAgentIdentity)" in app_shell
-    assert "serveAgentDesiredDriverName(serveAgentIdentity)" in app_shell
-    assert "driverIconName:" in app_shell
-    assert "syncComposerDriverIcon(primary, member);" in app_composer
-    assert 'claude: "/static/icons/claude.svg",' in app_composer
-    assert 'codex: "/static/icons/openai.svg",' in app_composer
-    assert 'openai: "/static/icons/openai.svg",' in app_composer
-    assert "icon.dataset.composerDriverIcon = driver;" in app_composer
-    assert "const tooltip = composerDriverTooltip(member, driver);" in app_composer
-    assert "icon.title = tooltip;" in app_composer
-    assert 'icon.setAttribute("aria-label", tooltip);' in app_composer
-    assert 'icon.setAttribute("role", "img");' in app_composer
-    assert '"Codex driver"' in app_composer
-    assert '"driver: " + driverName' in app_composer
-    assert '"model: " + model' in app_composer
-    assert '"effort: " + effort' in app_composer
-    assert '"thread: " + (threadId || "unbound")' in app_composer
-    assert '"session: " + session' in app_composer
-    assert '"source: worktree launch config"' not in app_composer
-    assert (
-        'icon.style.setProperty("--composer-driver-icon-url", '
-        "'url(\"' + src + '\")');" in app_composer
-    )
-    for expected in (
-        "bottom: 8px;",
-        "cursor: help;",
-        "height: 18px;",
-        "pointer-events: auto;",
-        "position: absolute;",
-        "right: 8px;",
-        "width: 18px;",
-    ):
-        assert expected in icon_rule
-    for expected in (
-        'content: "";',
-        "inset: 2px;",
-        "-webkit-mask: var(--composer-driver-icon-url) center / contain no-repeat;",
-        "mask: var(--composer-driver-icon-url) center / contain no-repeat;",
-        "position: absolute;",
-    ):
-        assert expected in icon_before_rule
     assert (
         "--composer-driver-icon-color: color-mix(in srgb, #d97706 88%, var(--fg));"
         in (claude_rule)
