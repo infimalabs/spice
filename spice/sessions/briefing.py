@@ -294,6 +294,13 @@ def _git_posture_lines() -> list[str]:
     ]
     if dirty_count:
         lines.extend(_dirty_pressure_lines(dirty_pressure))
+    from spice.hooks.install import drifted_hooks
+
+    drifted = drifted_hooks(repo_root)
+    if drifted:
+        lines.append(
+            f"  hooks=stale:{','.join(drifted)} (run spice agent activation to refresh)"
+        )
     return lines
 
 

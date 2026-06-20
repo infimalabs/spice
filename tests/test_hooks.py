@@ -11,7 +11,12 @@ import pytest
 
 from spice.errors import SpiceError
 from spice.hooks import precommit
-from spice.hooks.install import hooks_dir, init_repo, install_hooks_for_repo
+from spice.hooks.install import (
+    drifted_hooks,
+    hooks_dir,
+    init_repo,
+    install_hooks_for_repo,
+)
 from spice.hooks.precommit import _run_repo_truth_doc_guard, repo_truth_docs
 from spice.policy import REPO_TRUTH_DOC_LIMIT, REPO_TRUTH_DOCS
 from spice.studies.localpaths import (
@@ -445,6 +450,28 @@ def test_install_hooks_writes_pre_commit_hook_backend_shim(tmp_path):
 
     content = (hooks_dir(repo) / "pre-commit").read_text(encoding="utf-8")
     assert content == _expected_hook_content("dev pre-commit")
+
+
+def test_drifted_hooks_clean_after_install(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    install_hooks_for_repo(repo)
+    assert drifted_hooks(repo) == []
+
+
+def test_drifted_hooks_flags_stale_shim(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    install_hooks_for_repo(repo)
+    # A shim left behind after a HOOK_ARGS change (e.g. a removed flag).
+    (hooks_dir(repo) / "pre-commit").write_text(
+        "#!/usr/bin/env sh\n\nset -eu\n\nexec spice dev pre-commit --gone\n",
+        encoding="utf-8",
+    )
+    assert drifted_hooks(repo) == ["pre-commit"]
+
+
+def test_drifted_hooks_empty_without_installed_hooks(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    assert drifted_hooks(repo) == []
 
 
 def test_init_repo_reports_generated_worktree_skill_ignore(tmp_path):
