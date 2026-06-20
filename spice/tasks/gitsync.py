@@ -261,11 +261,7 @@ def integrate_and_publish(
         return SyncResult(uda_args=_capture(agent_head, agent_head, "", ""))
     remote, baseline = resolved
 
-    _run(root, "fetch", remote)
-    upstream_head = _read(root, "rev-parse", baseline)
-    if not upstream_head:
-        raise SpiceError(f"baseline {baseline} not found on remote {remote}")
-
+    upstream_head = _fetch_upstream_head(root, remote, baseline)
     if agent_head == upstream_head:
         # Nothing to integrate; the baseline already holds this state.
         return SyncResult(
@@ -273,43 +269,18 @@ def integrate_and_publish(
         )
 
     message = _compose_message(label, meta)
-
-    if _is_ancestor(root, upstream_head, "HEAD"):
-        # The baseline contributes no new tree content, but first-parent
-        # history still needs the baseline as mainline for generated merges.
-        if _is_merge_with_first_parent(root, "HEAD", upstream_head):
-            merge_head = agent_head
-        else:
-            merge_head = _synthesize_and_fast_forward(
-                root, agent_head, upstream_head, agent_head, message
-            )
-    else:
-        # The baseline advanced. Merge into the index without committing, then
-        # synthesize the generated task merge with the baseline as mainline. A
-        # real conflict stays in the worktree for the agent to resolve;
-        # retrying wraps that resolution in the same generated merge shape.
-        merge = _run(root, "merge", "--no-ff", "--no-commit", "-m", message, baseline)
-        if merge.returncode != 0:
-            raise MergeConflict(_merge_conflict_recovery(label, root))
-        merged_tree = _read(root, "write-tree")
-        if not merged_tree:
-            raise SpiceError("could not write merged tree")
-        abort = _run(root, "merge", "--abort")
-        if abort.returncode != 0:
-            raise SpiceError(_fail("clear merge state", abort))
-        merge_head = _synthesize_and_fast_forward(
-            root, merged_tree, upstream_head, agent_head, message
-        )
-
-    flagged = _conflict_marker_paths(root, upstream_head, merge_head)
-    if flagged:
-        raise SpiceError(_conflict_marker_refusal(label, flagged))
-    branch = baseline.split("/", 1)[1]
-    merge_head, upstream_head = _publish_task_merge(
+    merge_head = _integrate_task_work(
+        root,
+        baseline=baseline,
+        label=label,
+        agent_head=agent_head,
+        upstream_head=upstream_head,
+        message=message,
+    )
+    merge_head, upstream_head = _publish_integrated_task(
         root,
         remote=remote,
         baseline=baseline,
-        branch=branch,
         label=label,
         merge_head=merge_head,
         upstream_head=upstream_head,
@@ -317,6 +288,102 @@ def integrate_and_publish(
     )
     return SyncResult(
         uda_args=_capture(agent_head, merge_head, baseline, upstream_head)
+    )
+
+
+def _fetch_upstream_head(repo_root: Path, remote: str, baseline: str) -> str:
+    _run(repo_root, "fetch", remote)
+    upstream_head = _read(repo_root, "rev-parse", baseline)
+    if not upstream_head:
+        raise SpiceError(f"baseline {baseline} not found on remote {remote}")
+    return upstream_head
+
+
+def _integrate_task_work(
+    repo_root: Path,
+    *,
+    baseline: str,
+    label: str,
+    agent_head: str,
+    upstream_head: str,
+    message: str,
+) -> str:
+    if _is_ancestor(repo_root, upstream_head, "HEAD"):
+        return _integrate_already_contains_baseline(
+            repo_root, agent_head, upstream_head, message
+        )
+    return _integrate_advanced_baseline(
+        repo_root,
+        baseline=baseline,
+        label=label,
+        agent_head=agent_head,
+        upstream_head=upstream_head,
+        message=message,
+    )
+
+
+def _integrate_already_contains_baseline(
+    repo_root: Path, agent_head: str, upstream_head: str, message: str
+) -> str:
+    # The baseline contributes no new tree content, but first-parent history
+    # still needs the baseline as mainline for generated merges.
+    if _is_merge_with_first_parent(repo_root, "HEAD", upstream_head):
+        return agent_head
+    return _synthesize_and_fast_forward(
+        repo_root, agent_head, upstream_head, agent_head, message
+    )
+
+
+def _integrate_advanced_baseline(
+    repo_root: Path,
+    *,
+    baseline: str,
+    label: str,
+    agent_head: str,
+    upstream_head: str,
+    message: str,
+) -> str:
+    # Merge into the index without committing, then synthesize the generated
+    # task merge with the baseline as mainline. A real conflict stays in the
+    # worktree for the agent to resolve; retrying wraps that resolution in the
+    # same generated merge shape.
+    merge = _run(repo_root, "merge", "--no-ff", "--no-commit", "-m", message, baseline)
+    if merge.returncode != 0:
+        raise MergeConflict(_merge_conflict_recovery(label, repo_root))
+    merged_tree = _read(repo_root, "write-tree")
+    if not merged_tree:
+        raise SpiceError("could not write merged tree")
+    abort = _run(repo_root, "merge", "--abort")
+    if abort.returncode != 0:
+        raise SpiceError(_fail("clear merge state", abort))
+    return _synthesize_and_fast_forward(
+        repo_root, merged_tree, upstream_head, agent_head, message
+    )
+
+
+def _publish_integrated_task(
+    repo_root: Path,
+    *,
+    remote: str,
+    baseline: str,
+    label: str,
+    merge_head: str,
+    upstream_head: str,
+    message: str,
+) -> tuple[str, str]:
+    flagged = _conflict_marker_paths(repo_root, upstream_head, merge_head)
+    if flagged:
+        raise SpiceError(_conflict_marker_refusal(label, flagged))
+    branch = baseline.split("/", 1)[1]
+    return _publish_task_merge(
+        repo_root,
+        remote=remote,
+        baseline=baseline,
+        branch=branch,
+        label=label,
+        merge_head=merge_head,
+        upstream_head=upstream_head,
+        message=message,
     )
 
 
