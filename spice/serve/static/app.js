@@ -164,11 +164,9 @@ function targetTeamAgentId(target) {
 
 function targetTeamAgentAliases(target) {
   const actor = targetTeamAgentId(target);
-  const aliases = [
-    targetTeamActorId(target.id),
-    String(target.id || "").trim(),
-    teamActorThreadId(actor),
-  ].filter((alias) => alias && alias !== actor);
+  const aliases = [targetTeamActorId(target.id)].filter(
+    (alias) => alias && alias !== actor,
+  );
   return uniqueStringList(aliases);
 }
 

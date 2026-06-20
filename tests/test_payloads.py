@@ -299,17 +299,15 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
     assert stored.transcript_owner == "claude"
 
 
-def test_serve_agent_identity_normalizes_legacy_bare_actor_and_renewal(
-    tmp_path, monkeypatch
-):
+def test_serve_agent_identity_reports_explicit_actor_renewal(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_repo(repo)
     store = ServeTeamStore(tmp_path / "teams.sqlite")
-    store.create_team(members=["thread-a", "thread-b"])
-    _record_identity(store, "thread-a", thread_id="thread-a")
+    store.create_team(members=["thread:thread-a", "thread:thread-b"])
+    _record_identity(store, "thread:thread-a", thread_id="thread-a")
     renewal = store.record_pending_renewal(
-        agent_id="thread-a", ancestor_thread_id="thread-a"
+        agent_id="thread:thread-a", ancestor_thread_id="thread-a"
     )
     target = _Target(id="wt", repo_root=repo, name="repo", branch="main")
     monkeypatch.setattr(
@@ -325,7 +323,7 @@ def test_serve_agent_identity_normalizes_legacy_bare_actor_and_renewal(
 
     identity = payloads.serve_agent_identity_payload(
         target,
-        actor_id="thread-a",
+        actor_id="thread:thread-a",
         store=store,
     )
 
@@ -337,10 +335,9 @@ def test_serve_agent_identity_normalizes_legacy_bare_actor_and_renewal(
         "successorThreadId": "",
         "revision": renewal.revision,
     }
-    assert store.current_team_for_agent("thread-a") is None
     assert store.current_team_for_agent("thread:thread-a") is not None
     assert (
-        payloads.serve_agent_identity_payload(target, actor_id="wt")["actorId"]
+        payloads.serve_agent_identity_payload(target, actor_id="target:wt")["actorId"]
         == "target:wt"
     )
 

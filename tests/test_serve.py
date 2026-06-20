@@ -677,15 +677,16 @@ def test_team_command_payloads_report_revisions_and_stale_valid_command_applies(
     assert unchanged["changed"] is False
 
 
-def test_team_command_payload_normalizes_legacy_bare_actor_ids(tmp_path):
+def test_team_command_payload_preserves_explicit_actor_ids(tmp_path):
     target = _target(_repo(tmp_path))
     state = _serve_state(tmp_path, target)
+    target_actor = f"target:{target.id}"
 
     created, create_status = team_command_response_payload(
         state,
         {
             "command": "createTeam",
-            "members": [target.id, THREAD_A],
+            "members": [target_actor, ACTOR_A],
         },
     )
     team_id = created["snapshot"]["teams"][0]["teamId"]
@@ -694,7 +695,7 @@ def test_team_command_payload_normalizes_legacy_bare_actor_ids(tmp_path):
         {
             "command": "reorderTeamAgents",
             "teamId": team_id,
-            "agentIds": [THREAD_A, target.id],
+            "agentIds": [ACTOR_A, target_actor],
         },
     )
 
@@ -703,9 +704,7 @@ def test_team_command_payload_normalizes_legacy_bare_actor_ids(tmp_path):
     ]
     assert create_status == HTTPStatus.OK
     assert reorder_status == HTTPStatus.OK
-    assert members == [ACTOR_A, f"target:{target.id}"]
-    assert state.team_store.current_team_for_agent(THREAD_A) is None
-    assert state.team_store.current_team_for_agent(target.id) is None
+    assert members == [ACTOR_A, target_actor]
 
 
 def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(

@@ -388,11 +388,9 @@ function laneTeamAgentId(lane) {
 
 function laneTeamAgentAliases(lane) {
   const actor = laneTeamAgentId(lane);
-  const aliases = [
-    targetTeamActorId(lane.targetId),
-    String(lane.targetId || "").trim(),
-    teamActorThreadId(actor),
-  ].filter((alias) => alias && alias !== actor);
+  const aliases = [targetTeamActorId(lane.targetId)].filter(
+    (alias) => alias && alias !== actor,
+  );
   return uniqueStringList(aliases);
 }
 

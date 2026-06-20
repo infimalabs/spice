@@ -33,8 +33,6 @@ from spice.serve.teamids import normalized_id as _normalized_id
 from spice.serve.teamidentity import (
     TeamIdentityStoreMixin,
     agent_identity_from_row,
-    agent_identity_lookup_ids,
-    identity_for_member,
     select_agent_identity_rows,
     thread_id_from_actor,
 )
@@ -112,7 +110,6 @@ class ServeTeamStore(
             connection.executescript(TEAM_SCHEMA)
             self._migrate_renewal_identity_columns_locked(connection)
             self._migrate_task_filter_sources_locked(connection)
-            self._migrate_agent_identity_backfill_locked(connection)
             yield connection
             connection.commit()
         finally:
@@ -343,9 +340,6 @@ class ServeTeamStore(
         previous_team_ids: list[str] = []
         for alias_id in alias_ids:
             if alias_id != agent_id:
-                self._rewrite_agent_identity_alias_locked(
-                    connection, alias_id, agent_id
-                )
                 self._rewrite_renewal_agent_locked(
                     connection, alias_id, agent_id, team_id
                 )
@@ -997,15 +991,8 @@ class ServeTeamStore(
         renewal_by_agent: dict[str, TeamRenewalState] = {}
         if member_rows:
             member_ids = tuple(str(member["agent_id"]) for member in member_rows)
-            identity_lookup_ids = tuple(
-                dict.fromkeys(
-                    lookup_id
-                    for member_id in member_ids
-                    for lookup_id in agent_identity_lookup_ids(member_id)
-                )
-            )
             placeholders = ",".join("?" for _ in member_rows)
-            identity_rows = select_agent_identity_rows(connection, identity_lookup_ids)
+            identity_rows = select_agent_identity_rows(connection, member_ids)
             identity_by_actor = {
                 str(identity["actor_id"]): agent_identity_from_row(identity)
                 for identity in identity_rows
@@ -1040,7 +1027,7 @@ class ServeTeamStore(
                     agent_id=member["agent_id"],
                     agent_facts=(
                         identity.to_payload()
-                        if (identity := identity_for_member(identity_by_actor, member))
+                        if (identity := identity_by_actor.get(str(member["agent_id"])))
                         else {}
                     ),
                     renewal=renewal_by_agent.get(str(member["agent_id"])),

@@ -10,40 +10,6 @@ from spice.serve.teammodels import TeamAgentIdentity
 
 
 class TeamIdentityStoreMixin:
-    def _migrate_agent_identity_backfill_locked(
-        self, connection: sqlite3.Connection
-    ) -> None:
-        agent_ids = {
-            str(row["agent_id"])
-            for row in connection.execute("SELECT agent_id FROM memberships")
-        }
-        agent_ids.update(
-            str(row["agent_id"])
-            for row in connection.execute("SELECT agent_id FROM renewals")
-        )
-        if not agent_ids:
-            return
-        now = time.time()
-        for agent_id in sorted(agent_ids):
-            if self._agent_identity_row_locked(connection, agent_id) is not None:
-                continue
-            renewal = self._renewal_state_locked(connection, agent_id)
-            self._record_agent_identity_locked(
-                connection,
-                actor_id=agent_id,
-                target_id=target_id_from_actor(agent_id),
-                thread_id=thread_id_from_actor(agent_id),
-                renewal_state=renewal.state if renewal is not None else "",
-                renewal_ancestor_thread_id=(
-                    renewal.ancestor_thread_id if renewal is not None else ""
-                ),
-                renewal_successor_thread_id=(
-                    renewal.successor_thread_id if renewal is not None else ""
-                ),
-                renewal_revision=renewal.revision if renewal is not None else 0,
-                updated_at=now,
-            )
-
     def _agent_identity_row_locked(
         self, connection: sqlite3.Connection, actor_id: str
     ) -> sqlite3.Row | None:
@@ -228,45 +194,6 @@ class TeamIdentityStoreMixin:
             row = self._agent_identity_row_locked(connection, actor_id)
             return agent_identity_from_row(row) if row is not None else None
 
-    def _rewrite_agent_identity_alias_locked(
-        self,
-        connection: sqlite3.Connection,
-        old_actor_id: str,
-        new_actor_id: str,
-    ) -> None:
-        old_row = self._agent_identity_row_locked(connection, old_actor_id)
-        if old_row is None:
-            return
-        new_row = self._agent_identity_row_locked(connection, new_actor_id)
-        if new_row is not None:
-            connection.execute(
-                "DELETE FROM agent_identities WHERE actor_id = ?", (old_actor_id,)
-            )
-            return
-        identity = agent_identity_from_row(old_row)
-        self._record_agent_identity_locked(
-            connection,
-            actor_id=new_actor_id,
-            target_id=identity.target_id or target_id_from_actor(old_actor_id),
-            thread_id=thread_id_from_actor(new_actor_id) or identity.thread_id,
-            actual_driver=identity.actual_driver,
-            actual_model=identity.actual_model,
-            actual_effort=identity.actual_effort,
-            actual_service_tier=identity.actual_service_tier,
-            desired_driver=identity.desired_driver,
-            desired_model=identity.desired_model,
-            desired_effort=identity.desired_effort,
-            transcript_owner=identity.transcript_owner,
-            renewal_state=identity.renewal_state,
-            renewal_ancestor_thread_id=identity.renewal_ancestor_thread_id,
-            renewal_successor_thread_id=identity.renewal_successor_thread_id,
-            renewal_revision=identity.renewal_revision,
-            updated_at=identity.updated_at,
-        )
-        connection.execute(
-            "DELETE FROM agent_identities WHERE actor_id = ?", (old_actor_id,)
-        )
-
 
 def target_id_from_actor(actor_id: str) -> str:
     actor = str(actor_id or "").strip()
@@ -278,23 +205,6 @@ def thread_id_from_actor(actor_id: str) -> str:
     if actor.startswith("thread:"):
         return actor[7:]
     return "" if actor.startswith("target:") else actor
-
-
-def agent_identity_lookup_ids(agent_id: str) -> tuple[str, ...]:
-    agent = str(agent_id or "").strip()
-    if not agent or agent.startswith("thread:") or agent.startswith("target:"):
-        return (agent,) if agent else ()
-    return (f"thread:{agent}", f"target:{agent}", agent)
-
-
-def identity_for_member(
-    identity_by_actor: dict[str, TeamAgentIdentity], member: sqlite3.Row
-) -> TeamAgentIdentity | None:
-    for actor_id in agent_identity_lookup_ids(str(member["agent_id"])):
-        identity = identity_by_actor.get(actor_id)
-        if identity is not None:
-            return identity
-    return None
 
 
 def agent_identity_from_row(row: sqlite3.Row) -> TeamAgentIdentity:
