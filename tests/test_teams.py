@@ -7,7 +7,6 @@ from spice.serve.teams import (
     TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE,
     TASK_FILTER_SOURCE_MANUAL,
-    RENEWAL_STATE_PENDING,
     TEAM_SQLITE_BUSY_TIMEOUT_MS,
     ServeTeamStore,
     TeamCommandService,
@@ -281,7 +280,7 @@ def test_assigning_agent_with_target_alias_retires_stale_membership(tmp_path):
     store.assign_agent(
         destination.team_id,
         "thread:thread-a",
-        aliases=["target:target-a", "target-a"],
+        aliases=["target:target-a"],
     )
 
     open_members = {
@@ -302,32 +301,36 @@ def test_assigning_agent_with_target_alias_retires_stale_membership(tmp_path):
 
 def test_assigning_agent_with_same_team_alias_preserves_roster_slot(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    team = store.create_team(members=["agent-a", "agent-b", "agent-c"])
+    team = store.create_team(
+        members=["thread:agent-a", "thread:agent-b", "thread:agent-c"]
+    )
 
-    store.assign_agent(team.team_id, "agent-b-renewed", aliases=["agent-b"])
+    store.assign_agent(
+        team.team_id, "thread:agent-b-renewed", aliases=["thread:agent-b"]
+    )
 
     state = store.team_state(team.team_id)
     assert [member.agent_id for member in state.members] == [
-        "agent-a",
-        "agent-b-renewed",
-        "agent-c",
+        "thread:agent-a",
+        "thread:agent-b-renewed",
+        "thread:agent-c",
     ]
-    assert store.current_team_for_agent("agent-b") is None
-    assert store.current_team_for_agent("agent-b-renewed") == team.team_id
+    assert store.current_team_for_agent("thread:agent-b") is None
+    assert store.current_team_for_agent("thread:agent-b-renewed") == team.team_id
 
 
 def test_team_command_service_imports_agent_into_empty_team(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     service = TeamCommandService(store)
-    store.create_team(members=["target-a"])
+    store.create_team(members=["target:target-a"])
     empty = store.create_team()
 
     result = service.apply(
         {
             "command": "moveAgentToTeam",
             "teamId": empty.team_id,
-            "agentId": "thread-a",
-            "agentAliases": ["target-a"],
+            "agentId": "thread:thread-a",
+            "agentAliases": ["target:target-a"],
         }
     )
 
@@ -340,8 +343,8 @@ def test_team_command_service_imports_agent_into_empty_team(tmp_path):
             "SELECT team_id, status FROM teams ORDER BY created_at"
         ).fetchall()
 
-    assert open_members == {empty.team_id: {"thread-a"}}
-    assert store.current_team_for_agent("thread-a") == empty.team_id
+    assert open_members == {empty.team_id: {"thread:thread-a"}}
+    assert store.current_team_for_agent("thread:thread-a") == empty.team_id
     assert [(row["team_id"], row["status"]) for row in team_rows] == [
         (empty.team_id, "open")
     ]
@@ -423,51 +426,57 @@ def test_team_command_service_toggles_agent_renewal_intent(tmp_path):
 
 def test_pending_renewal_remains_active_until_successor_starts(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    store.create_team(members=["agent-a"])
-    _record_identity(store, "agent-a")
+    store.create_team(members=["thread:agent-a"])
+    _record_identity(store, "thread:agent-a", thread_id="agent-a")
 
-    store.record_pending_renewal(agent_id="agent-a", ancestor_thread_id="agent-a")
+    store.record_pending_renewal(
+        agent_id="thread:agent-a", ancestor_thread_id="agent-a"
+    )
 
-    assert store.agent_renewal_requested("agent-a") is False
-    assert store.agent_renewal_active("agent-a") is True
+    assert store.agent_renewal_requested("thread:agent-a") is False
+    assert store.agent_renewal_active("thread:agent-a") is True
 
     store.record_started_renewal(
-        predecessor_agent_id="agent-a",
-        successor_agent_id="agent-b",
+        predecessor_agent_id="thread:agent-a",
+        successor_agent_id="thread:agent-b",
         ancestor_thread_id="agent-a",
     )
 
-    assert store.agent_renewal_active("agent-a") is False
+    assert store.agent_renewal_active("thread:agent-a") is False
 
 
 def test_started_renewal_preserves_predecessor_roster_slot(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    team = store.create_team(members=["agent-a", "agent-b", "agent-c"])
-    _record_identity(store, "agent-b", target_id="wt-b")
-    store.record_pending_renewal(agent_id="agent-b", ancestor_thread_id="agent-b")
+    team = store.create_team(
+        members=["thread:agent-a", "thread:agent-b", "thread:agent-c"]
+    )
+    _record_identity(store, "thread:agent-b", target_id="wt-b", thread_id="agent-b")
+    store.record_pending_renewal(
+        agent_id="thread:agent-b", ancestor_thread_id="agent-b"
+    )
 
     store.record_started_renewal(
-        predecessor_agent_id="agent-b",
-        successor_agent_id="agent-b-renewed",
+        predecessor_agent_id="thread:agent-b",
+        successor_agent_id="thread:agent-b-renewed",
         ancestor_thread_id="agent-b",
     )
 
     state = store.team_state(team.team_id)
     assert [member.agent_id for member in state.members] == [
-        "agent-a",
-        "agent-b-renewed",
-        "agent-c",
+        "thread:agent-a",
+        "thread:agent-b-renewed",
+        "thread:agent-c",
     ]
-    assert store.current_team_for_agent("agent-b") is None
-    assert store.current_team_for_agent("agent-b-renewed") == team.team_id
-    renewal = store.renewal_state_for_agent("agent-b")
+    assert store.current_team_for_agent("thread:agent-b") is None
+    assert store.current_team_for_agent("thread:agent-b-renewed") == team.team_id
+    renewal = store.renewal_state_for_agent("thread:agent-b")
     assert renewal is not None
-    assert renewal.successor_agent_id == "agent-b-renewed"
+    assert renewal.successor_agent_id == "thread:agent-b-renewed"
     assert renewal.successor_thread_id == "agent-b-renewed"
     assert renewal.team_slot == 1
-    assert renewal.predecessor_identity["actorId"] == "agent-b"
+    assert renewal.predecessor_identity["actorId"] == "thread:agent-b"
     assert renewal.predecessor_identity["actualModel"] == "actual-model"
-    assert renewal.successor_identity["actorId"] == "agent-b-renewed"
+    assert renewal.successor_identity["actorId"] == "thread:agent-b-renewed"
     assert renewal.successor_identity["targetId"] == "wt-b"
     assert renewal.successor_identity["threadId"] == "agent-b-renewed"
 
@@ -726,34 +735,9 @@ def test_team_store_connect_enables_wal_and_busy_timeout(tmp_path):
     assert int(busy_timeout) == TEAM_SQLITE_BUSY_TIMEOUT_MS
 
 
-def test_team_store_backfills_agent_identity_from_existing_membership_and_renewal(
-    tmp_path,
-):
+def test_team_state_reads_explicit_identity_for_member(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    team = store.create_team(members=["agent-a"])
-    _record_identity(store, "agent-a")
-    renewal = store.record_pending_renewal(
-        agent_id="agent-a", ancestor_thread_id="agent-a"
-    )
-    with store.connect() as connection:
-        connection.execute("DELETE FROM agent_identities")
-
-    identity = store.agent_identity_for_actor("agent-a")
-    member = store.team_state(team.team_id).members[0]
-
-    assert identity is not None
-    assert identity.actor_id == "agent-a"
-    assert identity.thread_id == "agent-a"
-    assert identity.renewal_state == RENEWAL_STATE_PENDING
-    assert identity.renewal_ancestor_thread_id == "agent-a"
-    assert identity.renewal_revision == renewal.revision
-    assert member.agent_facts["actorId"] == "agent-a"
-    assert member.agent_facts["renewalState"] == RENEWAL_STATE_PENDING
-
-
-def test_team_state_reads_explicit_identity_for_bare_membership(tmp_path):
-    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    team = store.create_team(members=["agent-a"])
+    team = store.create_team(members=["thread:agent-a"])
 
     store.record_agent_identity(
         actor_id="thread:agent-a",
@@ -768,7 +752,7 @@ def test_team_state_reads_explicit_identity_for_bare_membership(tmp_path):
     )
     member = store.team_state(team.team_id).members[0]
 
-    assert member.agent_id == "agent-a"
+    assert member.agent_id == "thread:agent-a"
     assert member.agent_facts["actorId"] == "thread:agent-a"
     assert member.agent_facts["targetId"] == "wt-a"
     assert member.agent_facts["threadId"] == "agent-a"

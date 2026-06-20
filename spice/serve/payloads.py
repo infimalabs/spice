@@ -27,9 +27,6 @@ from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.teams import ServeTeamStore, renewal_intent_payload
 from spice.serve.teamids import (
-    TARGET_ACTOR_PREFIX,
-    THREAD_ACTOR_PREFIX,
-    actor_value,
     normalize_actor_id,
     target_actor_id,
     thread_actor_id,
@@ -144,7 +141,6 @@ def resolve_thread_id_for_target(state: Any, target: WorktreeTarget) -> str | No
 def team_facts_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
     if not actor:
         return {}
-    _promote_team_actor(store, actor, _legacy_actor_names(actor))
     team_id = store.current_team_for_agent(actor)
     if team_id is None:
         return {}
@@ -172,7 +168,7 @@ def team_actor_for_target(
     before callers read team facts.
     """
     actor = target_bound_actor(target, thread_id)
-    _promote_team_actor(store, actor, _target_actor_legacy_names(target, actor))
+    _promote_team_actor(store, actor, _target_actor_previous_names(target, actor))
     return actor
 
 
@@ -449,10 +445,6 @@ def _normalize_command_agent_field(
         return
     normalized_agent = normalize_actor_id(raw_agent, target_ids=target_ids)
     payload["agentId"] = normalized_agent
-    aliases = [str(item) for item in payload.get("agentAliases") or [] if item]
-    if raw_agent != normalized_agent and raw_agent not in aliases:
-        aliases.append(raw_agent)
-    payload["agentAliases"] = aliases
 
 
 def _promote_team_actor(
@@ -472,19 +464,13 @@ def _promote_team_actor(
         return
 
 
-def _target_actor_legacy_names(target: WorktreeTarget, actor: str) -> list[str]:
-    names = _legacy_actor_names(actor)
+def _target_actor_previous_names(target: WorktreeTarget, actor: str) -> list[str]:
+    names: list[str] = []
     target_actor = target_actor_id(target.id)
-    for name in (target_actor, target.id):
+    for name in (target_actor,):
         if name and name != actor and name not in names:
             names.append(name)
     return names
-
-
-def _legacy_actor_names(actor: str) -> list[str]:
-    if actor.startswith((TARGET_ACTOR_PREFIX, THREAD_ACTOR_PREFIX)):
-        return [actor_value(actor)]
-    return []
 
 
 def _actual_launch_identity(status: Any) -> dict[str, str]:
@@ -537,7 +523,6 @@ def _serve_renewal_identity(
     }
     if store is None:
         return empty
-    _promote_team_actor(store, actor_id, _legacy_actor_names(actor_id))
     renewal = store.renewal_state_for_agent(actor_id)
     team_index = _serve_team_index(store, actor_id)
     if renewal is None:
@@ -581,7 +566,6 @@ def _nonnegative_payload_int(value: Any, label: str) -> int:
 def renewal_intent_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
     if not actor:
         return renewal_intent_payload(None)
-    _promote_team_actor(store, actor, _legacy_actor_names(actor))
     return renewal_intent_payload(
         store.renewal_state_for_agent(actor),
         agent_id=actor,
