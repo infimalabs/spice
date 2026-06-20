@@ -1,4 +1,4 @@
-"""Target, thread, team, and serve-agent identity payloads."""
+"""Agent, team, and target identity payload builders."""
 
 from __future__ import annotations
 
@@ -253,7 +253,7 @@ def target_identity_payload(
         ),
         "driver": _driver_identity_payload(target),
         "agent": _agent_identity_payload(
-            agent_name_for_target(target) if agent_name is None else agent_name
+            _agent_name_for_target(target) if agent_name is None else agent_name
         ),
         "thread": _thread_identity_payload(
             thread_id,
@@ -505,7 +505,7 @@ def renewal_intent_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any
     )
 
 
-def agent_name_for_target(target: WorktreeTarget) -> str:
+def _agent_name_for_target(target: WorktreeTarget) -> str:
     """The agent's voice name; empty when no voice is configured."""
     voice = configured_say_voice(target.repo_root)
     if not voice:
@@ -513,7 +513,7 @@ def agent_name_for_target(target: WorktreeTarget) -> str:
     return voice.split("(", 1)[0].strip()
 
 
-def binding_status(thread_id: str, binding_error: str) -> str:
+def _binding_status(thread_id: str, binding_error: str) -> str:
     if binding_error:
         return "mismatch"
     return "bound" if thread_id else "unbound"

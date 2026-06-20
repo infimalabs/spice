@@ -26,7 +26,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
 )
 from spice.paths import repo_root_from_cwd, shared_attachment_root
-from spice.serve import identitypayloads, payloads
+from spice.serve import identitypayload, messagepayload, worktreepayload
 from spice.serve.agentapi import (
     agent_ensure_response_payload,
     agent_status_payload,
@@ -213,7 +213,7 @@ def team_command_response_payload(
 ) -> tuple[dict[str, Any], HTTPStatus]:
     try:
         result = state.team_commands.apply(
-            identitypayloads.normalize_team_command_payload(
+            identitypayload.normalize_team_command_payload(
                 payload, targets=state.worktree_targets()
             )
         )
@@ -255,7 +255,7 @@ def lane_signature_for_target(
     thread_id: str | None,
     transcript: TranscriptResolution | None,
 ) -> tuple[Any, ...]:
-    team_facts = identitypayloads.team_facts_for_target(
+    team_facts = identitypayload.team_facts_for_target(
         state.team_store, target, thread_id
     )
     return (
@@ -318,7 +318,7 @@ def serve_metrics_text(state: ServeState) -> str:
     rollout_present = 0
     pending = 0
     for target in state.worktree_targets():
-        thread_id = identitypayloads.resolve_thread_id_for_target(state, target) or ""
+        thread_id = identitypayload.resolve_thread_id_for_target(state, target) or ""
         if thread_id:
             bound = 1
             transcript = resolve_thread_transcript(thread_id, target.repo_root)
@@ -465,7 +465,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/work/trees":
             self.state.invalidate_targets()
-            self._send_json(payloads.work_trees_payload(self.state))
+            self._send_json(worktreepayload.work_trees_payload(self.state))
             return
         if parsed.path == "/api/teams":
             self._send_json(
@@ -504,7 +504,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         query = parse_qs(query_string)
         if action == "messages":
             self._send_json(
-                payloads.messages_payload_for_worktree(
+                messagepayload.messages_payload_for_worktree(
                     self.state,
                     target,
                     limit=_query_int(query, "limit", DEFAULT_MESSAGE_LIMIT),
@@ -516,7 +516,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
             return
         if action == "acks":
             self._send_json(
-                payloads.ack_context_payload_for_worktree(
+                messagepayload.ack_context_payload_for_worktree(
                     self.state, target, keys=query.get("key", [])
                 )
             )
@@ -540,7 +540,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         if offset < 0 or item < 0:
             self.send_error(HTTPStatus.BAD_REQUEST, "offset and item are required")
             return
-        thread_id = identitypayloads.resolve_thread_id_for_target(self.state, target)
+        thread_id = identitypayload.resolve_thread_id_for_target(self.state, target)
         transcript = (
             resolve_thread_transcript(thread_id, target.repo_root)
             if thread_id
@@ -660,10 +660,13 @@ class _ServeHandler(BaseHTTPRequestHandler):
                     state, selector
                 ),
                 work_trees_payload=lambda: (
-                    state.invalidate_targets() or payloads.work_trees_payload(state)
+                    state.invalidate_targets()
+                    or worktreepayload.work_trees_payload(state)
                 ),
                 messages_payload=lambda target, **kwargs: (
-                    payloads.messages_payload_for_worktree(state, target, **kwargs)
+                    messagepayload.messages_payload_for_worktree(
+                        state, target, **kwargs
+                    )
                 ),
                 send_payload=lambda target, payload: work_tree_send_response_payload(
                     state, target, payload
@@ -677,7 +680,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 team_command_payload=lambda payload: team_command_response_payload(
                     state, payload
                 ),
-                thread_id=lambda target: identitypayloads.resolve_thread_id_for_target(
+                thread_id=lambda target: identitypayload.resolve_thread_id_for_target(
                     state, target
                 ),
                 transcript_resolution=resolve_thread_transcript,
