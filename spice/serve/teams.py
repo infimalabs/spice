@@ -18,17 +18,39 @@ import sqlite3
 import time
 import uuid as uuidlib
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from spice.errors import SpiceError
+from spice.serve.teamfilters import (
+    TeamFilterStoreMixin,
+    config_from_row,
+    shell_settings_from_json,
+    task_filter_projects_from_json,
+)
 from spice.serve.teamids import agent_alias_ids as _agent_alias_ids
 from spice.serve.teamids import normalized_id as _normalized_id
+from spice.serve.teamidentity import (
+    TeamIdentityStoreMixin,
+    agent_identity_from_row,
+    agent_identity_lookup_ids,
+    identity_for_member,
+    select_agent_identity_rows,
+)
 from spice.serve.teammetrics import (
     METRIC_BUCKET_SECONDS as METRIC_BUCKET_SECONDS,
     LaneMetricSummary as LaneMetricSummary,
     TeamMetricStoreMixin,
+)
+from spice.serve.teammodels import (
+    TeamAgentIdentity as TeamAgentIdentity,
+    TeamConfig as TeamConfig,
+    TeamMember,
+    TeamRenewalState,
+    TeamSnapshot,
+    TeamState,
+    TeamTaskFilter as TeamTaskFilter,
+    renewal_intent_payload as renewal_intent_payload,
 )
 from spice.serve.teamschema import (
     DEFAULT_LIFETIME as DEFAULT_LIFETIME,
@@ -60,127 +82,15 @@ ZERO_ACTIVITY_EVENT_KINDS = frozenset(
 PRUNE_EVENT_TEAM_ID = "__system__"
 
 
-@dataclass(frozen=True)
-class TeamTaskFilter:
-    project: str
-    source: str = TASK_FILTER_SOURCE_MANUAL
-
-    def to_payload(self) -> dict[str, str]:
-        return {"project": self.project, "source": self.source}
-
-
-@dataclass(frozen=True)
-class TeamConfig:
-    lifetime: str = DEFAULT_LIFETIME
-    speech_mode: str = DEFAULT_SPEECH_MODE
-    task_filters: tuple[str, ...] = ()
-    task_filter_entries: tuple[TeamTaskFilter, ...] = ()
-    selected_view: str = DEFAULT_SELECTED_VIEW
-    shell_settings: dict[str, Any] = field(default_factory=dict)
-
-    def to_payload(self, revision: int) -> dict[str, Any]:
-        return {
-            "lifetime": self.lifetime,
-            "speechMode": self.speech_mode,
-            "taskFilters": list(self.task_filters),
-            "taskFilterEntries": [
-                entry.to_payload() for entry in self.task_filter_entries
-            ],
-            "selectedView": self.selected_view,
-            "shellSettings": dict(self.shell_settings),
-            "revision": revision,
-        }
-
-
-@dataclass(frozen=True)
-class TeamMember:
-    agent_id: str
-    agent_facts: dict[str, str] = field(default_factory=dict)
-    renewal: TeamRenewalState | None = None
-
-    def to_payload(self) -> dict[str, Any]:
-        return {
-            "agentId": self.agent_id,
-            "agentFacts": dict(self.agent_facts),
-            "renewalIntent": renewal_intent_payload(
-                self.renewal, agent_id=self.agent_id
-            ),
-        }
-
-
-@dataclass(frozen=True)
-class TeamState:
-    team_id: str
-    status: str
-    revision: int
-    config_revision: int
-    config: TeamConfig
-    members: tuple[TeamMember, ...]
-    split_back_available: bool = False
-    split_back_member_count: int = 0
-
-    def to_payload(self) -> dict[str, Any]:
-        return {
-            "teamId": self.team_id,
-            "status": self.status,
-            "revision": self.revision,
-            "config": self.config.to_payload(self.config_revision),
-            "members": [member.to_payload() for member in self.members],
-            "splitBack": {
-                "available": self.split_back_available,
-                "memberCount": self.split_back_member_count,
-            },
-        }
-
-
-@dataclass(frozen=True)
-class TeamSnapshot:
-    global_revision: int
-    teams: tuple[TeamState, ...]
-
-    def to_payload(self) -> dict[str, Any]:
-        return {
-            "globalRevision": self.global_revision,
-            "teams": [team.to_payload() for team in self.teams],
-        }
-
-
-@dataclass(frozen=True)
-class TeamRenewalState:
-    agent_id: str
-    team_id: str
-    state: str
-    ancestor_thread_id: str
-    successor_agent_id: str
-    revision: int
-
-    @property
-    def requested(self) -> bool:
-        return self.state == RENEWAL_STATE_REQUESTED
-
-
-def renewal_intent_payload(
-    renewal: TeamRenewalState | None, *, agent_id: str = ""
-) -> dict[str, Any]:
-    resolved_agent_id = renewal.agent_id if renewal is not None else agent_id
-    return {
-        "agentId": resolved_agent_id,
-        "requested": bool(renewal and renewal.requested),
-        "state": renewal.state if renewal is not None else "",
-        "teamId": renewal.team_id if renewal is not None else "",
-        "ancestorThreadId": renewal.ancestor_thread_id if renewal is not None else "",
-        "successorAgentId": renewal.successor_agent_id if renewal is not None else "",
-        "revision": renewal.revision if renewal is not None else 0,
-    }
-
-
 def team_database_path() -> Path:
     from spice.tasks import config as task_config
 
     return task_config.data_dir() / TEAM_DATABASE_FILENAME
 
 
-class ServeTeamStore(TeamMetricStoreMixin):
+class ServeTeamStore(
+    TeamIdentityStoreMixin, TeamFilterStoreMixin, TeamMetricStoreMixin
+):
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or team_database_path()
 
@@ -194,6 +104,7 @@ class ServeTeamStore(TeamMetricStoreMixin):
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(TEAM_SCHEMA)
             self._migrate_task_filter_sources_locked(connection)
+            self._migrate_agent_identity_backfill_locked(connection)
             yield connection
             connection.commit()
         finally:
@@ -284,9 +195,9 @@ class ServeTeamStore(TeamMetricStoreMixin):
         team_id = str(row["team_id"])
         if int(row["config_revision"] or 0):
             return False
-        if _task_filter_projects_from_json(row["task_filters"]):
+        if task_filter_projects_from_json(row["task_filters"]):
             return False
-        if _shell_settings_from_json(row["shell_settings"]):
+        if shell_settings_from_json(row["shell_settings"]):
             return False
         if self._team_has_rows_locked(
             connection, "team_task_filters", "team_id = ?", (team_id,)
@@ -327,95 +238,6 @@ class ServeTeamStore(TeamMetricStoreMixin):
             f"SELECT 1 FROM {table} WHERE {where} LIMIT 1", params
         ).fetchone()
         return row is not None
-
-    def _migrate_task_filter_sources_locked(
-        self, connection: sqlite3.Connection
-    ) -> None:
-        rows = connection.execute(
-            "SELECT team_id, task_filters FROM teams ORDER BY created_at"
-        ).fetchall()
-        now = time.time()
-        for row in rows:
-            team_id = str(row["team_id"])
-            existing = connection.execute(
-                "SELECT COUNT(*) AS count FROM team_task_filters WHERE team_id = ?",
-                (team_id,),
-            ).fetchone()
-            if existing and int(existing["count"] or 0) > 0:
-                continue
-            for project in _task_filter_projects_from_json(row["task_filters"]):
-                connection.execute(
-                    "INSERT OR IGNORE INTO team_task_filters "
-                    "(team_id, project, source, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (team_id, project, TASK_FILTER_SOURCE_MANUAL, now, now),
-                )
-            self._sync_task_filter_projection_locked(connection, team_id)
-
-    def _task_filter_entries_locked(
-        self, connection: sqlite3.Connection, team_id: str
-    ) -> tuple[TeamTaskFilter, ...]:
-        rows = connection.execute(
-            "SELECT project, source FROM team_task_filters "
-            "WHERE team_id = ? ORDER BY project, source",
-            (team_id,),
-        ).fetchall()
-        return tuple(
-            TeamTaskFilter(project=str(row["project"]), source=str(row["source"]))
-            for row in rows
-        )
-
-    def _task_filter_projects_locked(
-        self, connection: sqlite3.Connection, team_id: str
-    ) -> tuple[str, ...]:
-        rows = connection.execute(
-            "SELECT DISTINCT project FROM team_task_filters "
-            "WHERE team_id = ? ORDER BY project",
-            (team_id,),
-        ).fetchall()
-        return tuple(str(row["project"]) for row in rows)
-
-    def _sync_task_filter_projection_locked(
-        self, connection: sqlite3.Connection, team_id: str
-    ) -> tuple[str, ...]:
-        projects = self._task_filter_projects_locked(connection, team_id)
-        connection.execute(
-            "UPDATE teams SET task_filters = ? WHERE team_id = ?",
-            (json.dumps(list(projects)), team_id),
-        )
-        return projects
-
-    def _replace_task_filters_locked(
-        self, connection: sqlite3.Connection, team_id: str, projects: Iterable[str]
-    ) -> tuple[str, ...]:
-        validated = _validated_task_filter_projects(projects)
-        if validated:
-            placeholders = ",".join("?" for _ in validated)
-            connection.execute(
-                "DELETE FROM team_task_filters "
-                f"WHERE team_id = ? AND project NOT IN ({placeholders})",
-                (team_id, *validated),
-            )
-        else:
-            connection.execute(
-                "DELETE FROM team_task_filters WHERE team_id = ?", (team_id,)
-            )
-        now = time.time()
-        for project in validated:
-            existing = connection.execute(
-                "SELECT 1 FROM team_task_filters "
-                "WHERE team_id = ? AND project = ? LIMIT 1",
-                (team_id, project),
-            ).fetchone()
-            if existing:
-                continue
-            connection.execute(
-                "INSERT INTO team_task_filters "
-                "(team_id, project, source, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (team_id, project, TASK_FILTER_SOURCE_MANUAL, now, now),
-            )
-        return self._sync_task_filter_projection_locked(connection, team_id)
 
     # ---- commands ------------------------------------------------------
 
@@ -496,6 +318,9 @@ class ServeTeamStore(TeamMetricStoreMixin):
         previous_team_ids: list[str] = []
         for alias_id in alias_ids:
             if alias_id != agent_id:
+                self._rewrite_agent_identity_alias_locked(
+                    connection, alias_id, agent_id
+                )
                 self._rewrite_renewal_agent_locked(
                     connection, alias_id, agent_id, team_id
                 )
@@ -753,122 +578,6 @@ class ServeTeamStore(TeamMetricStoreMixin):
                 {"agentIds": ordered_agent_ids},
             )
 
-    def update_team_config(
-        self,
-        team_id: str,
-        config: TeamConfig,
-        *,
-        replace_task_filters: bool = False,
-    ) -> int:
-        with self.connect() as connection:
-            self._require_team(connection, team_id)
-            connection.execute(
-                "UPDATE teams SET lifetime = ?, speech_mode = ?, selected_view = ?, "
-                "shell_settings = ?, "
-                "config_revision = config_revision + 1 WHERE team_id = ?",
-                (
-                    config.lifetime,
-                    config.speech_mode,
-                    config.selected_view,
-                    json.dumps(config.shell_settings),
-                    team_id,
-                ),
-            )
-            if replace_task_filters:
-                self._replace_task_filters_locked(
-                    connection, team_id, config.task_filters
-                )
-            task_filters = self._task_filter_projects_locked(connection, team_id)
-            return self._record_event(
-                connection,
-                "updateTeamConfig",
-                team_id,
-                {"lifetime": config.lifetime, "taskFilters": list(task_filters)},
-            )
-
-    def add_task_filter(
-        self,
-        team_id: str,
-        project: str,
-        *,
-        source: str = TASK_FILTER_SOURCE_MANUAL,
-    ) -> int:
-        project = _validated_task_filter_project(project)
-        source = _validated_task_filter_source(source)
-        with self.connect() as connection:
-            self._require_team(connection, team_id)
-            now = time.time()
-            cursor = connection.execute(
-                "INSERT OR IGNORE INTO team_task_filters "
-                "(team_id, project, source, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (team_id, project, source, now, now),
-            )
-            if cursor.rowcount == 0:
-                return self._current_revision_locked(connection)
-            self._sync_task_filter_projection_locked(connection, team_id)
-            connection.execute(
-                "UPDATE teams SET config_revision = config_revision + 1 "
-                "WHERE team_id = ?",
-                (team_id,),
-            )
-            return self._record_event(
-                connection,
-                "addTaskFilter",
-                team_id,
-                {
-                    "project": project,
-                    "source": source,
-                    "taskFilters": list(
-                        self._task_filter_projects_locked(connection, team_id)
-                    ),
-                },
-            )
-
-    def remove_task_filter(
-        self,
-        team_id: str,
-        project: str,
-        *,
-        source: str | None = None,
-    ) -> int:
-        project = _validated_task_filter_project(project)
-        if source is not None:
-            source = _validated_task_filter_source(source)
-        with self.connect() as connection:
-            self._require_team(connection, team_id)
-            if source is None:
-                cursor = connection.execute(
-                    "DELETE FROM team_task_filters WHERE team_id = ? AND project = ?",
-                    (team_id, project),
-                )
-            else:
-                cursor = connection.execute(
-                    "DELETE FROM team_task_filters "
-                    "WHERE team_id = ? AND project = ? AND source = ?",
-                    (team_id, project, source),
-                )
-            if cursor.rowcount == 0:
-                return self._current_revision_locked(connection)
-            self._sync_task_filter_projection_locked(connection, team_id)
-            connection.execute(
-                "UPDATE teams SET config_revision = config_revision + 1 "
-                "WHERE team_id = ?",
-                (team_id,),
-            )
-            return self._record_event(
-                connection,
-                "removeTaskFilter",
-                team_id,
-                {
-                    "project": project,
-                    "source": source or "",
-                    "taskFilters": list(
-                        self._task_filter_projects_locked(connection, team_id)
-                    ),
-                },
-            )
-
     # ---- renewal -------------------------------------------------------
 
     def set_agent_renewal_request(
@@ -893,6 +602,12 @@ class ServeTeamStore(TeamMetricStoreMixin):
                     "VALUES (?, ?, ?, '', '', ?)",
                     (agent_id, team_id, RENEWAL_STATE_REQUESTED, revision),
                 )
+                self._update_agent_identity_renewal_locked(
+                    connection,
+                    actor_id=agent_id,
+                    state=RENEWAL_STATE_REQUESTED,
+                    revision=revision,
+                )
                 return TeamRenewalState(
                     agent_id=agent_id,
                     team_id=team_id,
@@ -913,6 +628,7 @@ class ServeTeamStore(TeamMetricStoreMixin):
                 "DELETE FROM renewals WHERE agent_id = ? AND state = ?",
                 (agent_id, RENEWAL_STATE_REQUESTED),
             )
+            self._update_agent_identity_renewal_locked(connection, actor_id=agent_id)
             return None
 
     def agent_renewal_requested(self, agent_id: str) -> bool:
@@ -954,6 +670,13 @@ class ServeTeamStore(TeamMetricStoreMixin):
                     ancestor_thread_id,
                     revision,
                 ),
+            )
+            self._update_agent_identity_renewal_locked(
+                connection,
+                actor_id=agent_id,
+                state=RENEWAL_STATE_PENDING,
+                ancestor_thread_id=ancestor_thread_id,
+                revision=revision,
             )
         return TeamRenewalState(
             agent_id=agent_id,
@@ -1018,6 +741,14 @@ class ServeTeamStore(TeamMetricStoreMixin):
                     revision,
                 ),
             )
+            self._update_agent_identity_renewal_locked(
+                connection,
+                actor_id=predecessor_agent_id,
+                state=RENEWAL_STATE_STARTED,
+                ancestor_thread_id=ancestor_thread_id,
+                successor_thread_id=successor_agent_id,
+                revision=revision,
+            )
         return TeamRenewalState(
             agent_id=predecessor_agent_id,
             team_id=team_id,
@@ -1041,48 +772,6 @@ class ServeTeamStore(TeamMetricStoreMixin):
         if team_id is None:
             raise SpiceError(f"agent {agent_id} is not assigned to any team")
         return team_id
-
-    def team_config(self, team_id: str) -> TeamConfig:
-        with self.connect() as connection:
-            row = self._require_team(connection, team_id)
-            entries = self._task_filter_entries_locked(connection, team_id)
-            return _config_from_row(row, entries)
-
-    def open_team_ids_with_task_filter(
-        self, project: str, *, source: str | None = None
-    ) -> tuple[str, ...]:
-        project = _validated_task_filter_project(project)
-        if source is not None:
-            source = _validated_task_filter_source(source)
-        source_clause = "" if source is None else " AND team_task_filters.source = ?"
-        params: tuple[str, ...] = (project,) if source is None else (project, source)
-        with self.connect() as connection:
-            rows = connection.execute(
-                "SELECT DISTINCT teams.team_id FROM teams "
-                "JOIN team_task_filters ON team_task_filters.team_id = teams.team_id "
-                "WHERE teams.status = 'open' AND team_task_filters.project = ?"
-                f"{source_clause} "
-                "ORDER BY teams.created_at",
-                params,
-            ).fetchall()
-        return tuple(str(row["team_id"]) for row in rows)
-
-    def open_task_filter_projects(
-        self, *, source: str | None = None
-    ) -> tuple[str, ...]:
-        if source is not None:
-            source = _validated_task_filter_source(source)
-        source_clause = "" if source is None else " AND team_task_filters.source = ?"
-        params: tuple[str, ...] = () if source is None else (source,)
-        with self.connect() as connection:
-            rows = connection.execute(
-                "SELECT DISTINCT team_task_filters.project FROM team_task_filters "
-                "JOIN teams ON teams.team_id = team_task_filters.team_id "
-                f"WHERE teams.status = 'open'{source_clause} "
-                "ORDER BY team_task_filters.project",
-                params,
-            ).fetchall()
-        return tuple(str(row["project"]) for row in rows)
 
     def team_state(self, team_id: str) -> TeamState:
         with self.connect() as connection:
@@ -1123,14 +812,28 @@ class ServeTeamStore(TeamMetricStoreMixin):
             "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY joined_at",
             (team_id,),
         ).fetchall()
+        identity_by_actor: dict[str, TeamAgentIdentity] = {}
         renewal_by_agent: dict[str, TeamRenewalState] = {}
         if member_rows:
+            member_ids = tuple(str(member["agent_id"]) for member in member_rows)
+            identity_lookup_ids = tuple(
+                dict.fromkeys(
+                    lookup_id
+                    for member_id in member_ids
+                    for lookup_id in agent_identity_lookup_ids(member_id)
+                )
+            )
             placeholders = ",".join("?" for _ in member_rows)
+            identity_rows = select_agent_identity_rows(connection, identity_lookup_ids)
+            identity_by_actor = {
+                str(identity["actor_id"]): agent_identity_from_row(identity)
+                for identity in identity_rows
+            }
             renewal_rows = connection.execute(
                 "SELECT agent_id, team_id, state, ancestor_thread_id, "
                 f"successor_agent_id, revision FROM renewals "
                 f"WHERE agent_id IN ({placeholders})",
-                tuple(str(member["agent_id"]) for member in member_rows),
+                member_ids,
             ).fetchall()
             renewal_by_agent = {
                 str(renewal["agent_id"]): _renewal_state_from_row(renewal)
@@ -1147,12 +850,17 @@ class ServeTeamStore(TeamMetricStoreMixin):
             status=str(row["status"]),
             revision=int(row["revision"]),
             config_revision=int(row["config_revision"]),
-            config=_config_from_row(
+            config=config_from_row(
                 row, self._task_filter_entries_locked(connection, team_id)
             ),
             members=tuple(
                 TeamMember(
                     agent_id=member["agent_id"],
+                    agent_facts=(
+                        identity.to_payload()
+                        if (identity := identity_for_member(identity_by_actor, member))
+                        else {}
+                    ),
                     renewal=renewal_by_agent.get(str(member["agent_id"])),
                 )
                 for member in member_rows
@@ -1251,45 +959,6 @@ class ServeTeamStore(TeamMetricStoreMixin):
         return {str(row["agent_id"]) for row in rows}
 
 
-def _config_from_row(
-    row: sqlite3.Row, entries: Iterable[TeamTaskFilter] = ()
-) -> TeamConfig:
-    task_filter_entries = tuple(entries)
-    task_filters = tuple(dict.fromkeys(entry.project for entry in task_filter_entries))
-    if not task_filters:
-        task_filters = _task_filter_projects_from_json(row["task_filters"])
-    try:
-        shell_settings = json.loads(row["shell_settings"])
-    except (json.JSONDecodeError, TypeError):
-        shell_settings = {}
-    return TeamConfig(
-        lifetime=str(row["lifetime"]),
-        speech_mode=str(row["speech_mode"]),
-        task_filters=task_filters,
-        task_filter_entries=task_filter_entries,
-        selected_view=str(row["selected_view"]),
-        shell_settings=shell_settings if isinstance(shell_settings, dict) else {},
-    )
-
-
-def _task_filter_projects_from_json(raw: object) -> tuple[str, ...]:
-    try:
-        values = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return ()
-    if not isinstance(values, list):
-        return ()
-    return _validated_task_filter_projects(str(item) for item in values)
-
-
-def _shell_settings_from_json(raw: object) -> dict[str, Any]:
-    try:
-        values = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return {}
-    return values if isinstance(values, dict) else {}
-
-
 def _team_subgroup_agent_ids(raw: object) -> tuple[str, ...]:
     try:
         values = json.loads(raw)
@@ -1299,32 +968,6 @@ def _team_subgroup_agent_ids(raw: object) -> tuple[str, ...]:
         return ()
     agent_ids = [str(item) for item in values if str(item or "").strip()]
     return tuple(dict.fromkeys(agent_ids))
-
-
-def _validated_task_filter_projects(projects: Iterable[str]) -> tuple[str, ...]:
-    seen: dict[str, None] = {}
-    for project in projects:
-        value = str(project or "").strip()
-        if not value:
-            continue
-        seen.setdefault(_validated_task_filter_project(value), None)
-    return tuple(sorted(seen))
-
-
-def _validated_task_filter_project(project: str) -> str:
-    from spice.tasks import config as task_config
-
-    return task_config.validate_assignable_project(str(project or "").strip())
-
-
-def _validated_task_filter_source(source: str) -> str:
-    value = str(source or "").strip()
-    if value not in TASK_FILTER_SOURCES:
-        raise SpiceError(
-            "task filter source must be one of "
-            + ", ".join(sorted(TASK_FILTER_SOURCES))
-        )
-    return value
 
 
 def _renewal_state_from_row(row: sqlite3.Row) -> TeamRenewalState:

@@ -78,6 +78,24 @@ CREATE TABLE IF NOT EXISTS renewals (
     successor_agent_id TEXT NOT NULL DEFAULT '',
     revision INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_identities (
+    actor_id TEXT PRIMARY KEY,
+    target_id TEXT NOT NULL DEFAULT '',
+    thread_id TEXT NOT NULL DEFAULT '',
+    actual_driver TEXT NOT NULL DEFAULT '',
+    actual_model TEXT NOT NULL DEFAULT '',
+    actual_effort TEXT NOT NULL DEFAULT '',
+    actual_service_tier TEXT NOT NULL DEFAULT '',
+    desired_driver TEXT NOT NULL DEFAULT '',
+    desired_model TEXT NOT NULL DEFAULT '',
+    desired_effort TEXT NOT NULL DEFAULT '',
+    transcript_owner TEXT NOT NULL DEFAULT '',
+    renewal_state TEXT NOT NULL DEFAULT '',
+    renewal_ancestor_thread_id TEXT NOT NULL DEFAULT '',
+    renewal_successor_thread_id TEXT NOT NULL DEFAULT '',
+    renewal_revision INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS agent_metrics (
     agent_id TEXT PRIMARY KEY,
     acked INTEGER NOT NULL DEFAULT 0,

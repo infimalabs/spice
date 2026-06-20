@@ -7,6 +7,7 @@ from spice.serve.teams import (
     TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE,
     TASK_FILTER_SOURCE_MANUAL,
+    RENEWAL_STATE_PENDING,
     TEAM_SQLITE_BUSY_TIMEOUT_MS,
     ServeTeamStore,
     TeamCommandService,
@@ -22,6 +23,7 @@ TEAM_MERGE_TOOL_CALL_TOTAL = 36
 RESTORED_SUBGROUP_ACKED_TOTAL = 18
 RESTORED_SUBGROUP_SEND_TOTAL = 30
 RESTORED_SUBGROUP_TOOL_CALL_TOTAL = 42
+IDENTITY_RENEWAL_REVISION = 42
 
 
 def test_empty_team_snapshot_creates_initial_empty_team(tmp_path):
@@ -643,6 +645,104 @@ def test_team_store_connect_enables_wal_and_busy_timeout(tmp_path):
 
     assert str(journal_mode).lower() == "wal"
     assert int(busy_timeout) == TEAM_SQLITE_BUSY_TIMEOUT_MS
+
+
+def test_team_store_backfills_agent_identity_from_existing_membership_and_renewal(
+    tmp_path,
+):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(members=["agent-a"])
+    renewal = store.record_pending_renewal(
+        agent_id="agent-a", ancestor_thread_id="agent-a"
+    )
+    with store.connect() as connection:
+        connection.execute("DELETE FROM agent_identities")
+
+    identity = store.agent_identity_for_actor("agent-a")
+    member = store.team_state(team.team_id).members[0]
+
+    assert identity is not None
+    assert identity.actor_id == "agent-a"
+    assert identity.thread_id == "agent-a"
+    assert identity.renewal_state == RENEWAL_STATE_PENDING
+    assert identity.renewal_ancestor_thread_id == "agent-a"
+    assert identity.renewal_revision == renewal.revision
+    assert member.agent_facts["actorId"] == "agent-a"
+    assert member.agent_facts["renewalState"] == RENEWAL_STATE_PENDING
+
+
+def test_team_state_reads_explicit_identity_for_bare_membership(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(members=["agent-a"])
+
+    store.record_agent_identity(
+        actor_id="thread:agent-a",
+        target_id="wt-a",
+        thread_id="agent-a",
+        actual_driver="codex",
+        actual_model="gpt-5",
+        actual_effort="high",
+        desired_driver="codex",
+        desired_model="gpt-5",
+        desired_effort="high",
+    )
+    member = store.team_state(team.team_id).members[0]
+
+    assert member.agent_id == "agent-a"
+    assert member.agent_facts["actorId"] == "thread:agent-a"
+    assert member.agent_facts["targetId"] == "wt-a"
+    assert member.agent_facts["threadId"] == "agent-a"
+
+
+def test_team_store_records_repeated_agent_identity_updates(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(members=["thread:agent-a"])
+
+    first = store.record_agent_identity(
+        actor_id="thread:agent-a",
+        target_id="wt-a",
+        thread_id="agent-a",
+        actual_driver="codex",
+        actual_model="gpt-5",
+        actual_effort="high",
+        actual_service_tier="default",
+        desired_driver="codex",
+        desired_model="gpt-5",
+        desired_effort="high",
+        transcript_owner="codex",
+    )
+    updated = store.record_agent_identity(
+        actor_id="thread:agent-a",
+        target_id="wt-a",
+        thread_id="agent-a",
+        actual_driver="claude",
+        actual_model="claude-sonnet-4-5",
+        actual_effort="medium",
+        actual_service_tier="fast",
+        desired_driver="codex",
+        desired_model="gpt-5.5",
+        desired_effort="xhigh",
+        transcript_owner="claude",
+        renewal_state="pending",
+        renewal_ancestor_thread_id="agent-a",
+        renewal_successor_thread_id="",
+        renewal_revision=IDENTITY_RENEWAL_REVISION,
+    )
+    stored = store.agent_identity_for_actor("thread:agent-a")
+    member = store.team_state(team.team_id).members[0]
+
+    assert stored is not None
+    assert stored == updated
+    assert updated.updated_at >= first.updated_at
+    assert stored.actual_driver == "claude"
+    assert stored.actual_model == "claude-sonnet-4-5"
+    assert stored.actual_service_tier == "fast"
+    assert stored.desired_model == "gpt-5.5"
+    assert stored.renewal_revision == IDENTITY_RENEWAL_REVISION
+    assert stored.updated_at == updated.updated_at
+    assert member.agent_facts["actorId"] == "thread:agent-a"
+    assert member.agent_facts["actualDriver"] == "claude"
+    assert member.agent_facts["desiredEffort"] == "xhigh"
 
 
 def test_team_command_service_replaces_membership_without_rewriting_sources(tmp_path):

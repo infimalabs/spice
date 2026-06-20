@@ -189,10 +189,10 @@ def serve_agent_identity_payload(
     """Resolve the driver-neutral serve identity for one worktree target."""
     status = agent_status(target.repo_root)
     desired = effective_agent_config(target.repo_root)
-    bound_thread = canonical_thread_id(thread_id or status.thread_id)
+    bound_thread = canonical_thread_id(thread_id or getattr(status, "thread_id", ""))
     actor = _serve_actor_id(target, bound_thread, actor_id=actor_id)
     actual_launch = _actual_launch_identity(status)
-    return {
+    identity = {
         "actorId": actor,
         "target": {
             "id": _required_identity_string(target.id, "target id"),
@@ -238,6 +238,26 @@ def serve_agent_identity_payload(
         },
         "renewal": _serve_renewal_identity(store, actor),
     }
+    if store is not None:
+        renewal = identity["renewal"]
+        store.record_agent_identity(
+            actor_id=actor,
+            target_id=identity["target"]["id"],
+            thread_id=bound_thread,
+            actual_driver=identity["driver"]["actual"],
+            actual_model=actual_launch["model"],
+            actual_effort=actual_launch["effort"],
+            actual_service_tier=actual_launch["serviceTier"],
+            desired_driver=identity["driver"]["desired"],
+            desired_model=identity["launch"]["desired"]["model"],
+            desired_effort=identity["launch"]["desired"]["effort"],
+            transcript_owner=identity["driver"]["transcriptOwner"],
+            renewal_state=str(renewal.get("state") or ""),
+            renewal_ancestor_thread_id=str(renewal.get("ancestorThreadId") or ""),
+            renewal_successor_thread_id=str(renewal.get("successorThreadId") or ""),
+            renewal_revision=int(renewal.get("revision") or 0),
+        )
+    return identity
 
 
 def renewal_intent_for_target(
@@ -390,17 +410,16 @@ def _serve_actor_id(
 
 
 def _actual_launch_identity(status: Any) -> dict[str, str]:
-    has_actual = bool(
-        status.thread_id
-        or status.model
-        or status.reasoning_effort
-        or status.service_tier
-        or status.started_at
-    )
+    thread_id = getattr(status, "thread_id", "")
+    model = getattr(status, "model", "")
+    effort = getattr(status, "reasoning_effort", "")
+    service_tier = getattr(status, "service_tier", "")
+    started_at = getattr(status, "started_at", "")
+    has_actual = bool(thread_id or model or effort or service_tier or started_at)
     return {
-        "model": str(status.model or ""),
-        "effort": str(status.reasoning_effort or ""),
-        "serviceTier": str(status.service_tier or ""),
+        "model": str(model or ""),
+        "effort": str(effort or ""),
+        "serviceTier": str(service_tier or ""),
         "source": "agent state" if has_actual else "",
     }
 
@@ -431,6 +450,7 @@ def _serve_renewal_identity(
         "teamIndex": None,
         "ancestorThreadId": "",
         "successorThreadId": "",
+        "revision": 0,
     }
     if store is None:
         return empty
@@ -444,6 +464,7 @@ def _serve_renewal_identity(
         "teamIndex": team_index,
         "ancestorThreadId": renewal.ancestor_thread_id,
         "successorThreadId": renewal.successor_agent_id,
+        "revision": renewal.revision,
     }
 
 
@@ -802,6 +823,14 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
         status = agent_status(target.repo_root)
         binding_error = agent_binding_error(target.repo_root, status)
         binding_status = _binding_status(thread_id, binding_error)
+        serve_identity = serve_agent_identity_payload(
+            target,
+            thread_id,
+            binding_status=binding_status,
+            binding_error=binding_error,
+            transcript_owner=_transcript_owner_for_thread(thread_id, target.repo_root),
+            store=state.team_store,
+        )
         team_facts = team_facts_for_target(state.team_store, target, thread_id)
         team_identity = team_identity_payload(team_facts)
         agent_name = _agent_name_for_target(target)
@@ -828,6 +857,7 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
                     binding_error=binding_error,
                     agent_name=agent_name,
                 ),
+                "serveAgentIdentity": serve_identity,
                 "taskFilters": team_facts.get("taskFilters", []),
                 "laneFilterVersion": "",
                 "teamIdentity": team_identity,
@@ -865,6 +895,15 @@ def _binding_status(thread_id: str, binding_error: str) -> str:
     if binding_error:
         return "mismatch"
     return "bound" if thread_id else "unbound"
+
+
+def _transcript_owner_for_thread(thread_id: str, repo_root: Any) -> str:
+    if not thread_id:
+        return ""
+    path = message_reader.transcript_path_for_thread(thread_id, repo_root)
+    if path is None or not path.is_file():
+        return ""
+    return message_reader.driver_for_transcript(path).name
 
 
 def _lane_info_payload(target: WorktreeTarget, thread_id: str) -> dict[str, Any]:
@@ -1035,6 +1074,14 @@ def messages_payload_for_worktree(
     status = agent_status(target.repo_root)
     binding_error = agent_binding_error(target.repo_root, status)
     binding_status = _binding_status(thread_id, binding_error)
+    serve_identity = serve_agent_identity_payload(
+        target,
+        thread_id,
+        binding_status=binding_status,
+        binding_error=binding_error,
+        transcript_owner=_transcript_owner_for_thread(thread_id, target.repo_root),
+        store=state.team_store,
+    )
     return {
         "messages": [item.to_payload() for item in items],
         "targetWorktreeName": target.name,
@@ -1045,6 +1092,7 @@ def messages_payload_for_worktree(
             binding_status=binding_status,
             binding_error=binding_error,
         ),
+        "serveAgentIdentity": serve_identity,
         "taskFilters": team_facts.get("taskFilters", []),
         "laneFilterVersion": "",
         "teamIdentity": team_identity,
