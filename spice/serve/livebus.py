@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import select
 from dataclasses import dataclass, field
+from importlib import import_module
 from pathlib import Path
 from threading import Event, Lock, Thread
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from spice.serve.messages import TranscriptResolution
 from spice.serve.websocket import (
@@ -384,7 +385,8 @@ def _wait_for_change_kqueue(paths: tuple[Path, ...], stop: Event) -> bool:
 
 
 def _wait_for_change_watchfiles(paths: tuple[Path, ...], stop: Event) -> bool:
-    from watchfiles import watch
+    module = import_module("watchfiles")
+    watch = cast(Callable[..., Any], getattr(module, "watch"))
 
     for _changes in watch(
         *paths,

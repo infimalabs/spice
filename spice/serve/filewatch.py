@@ -4,9 +4,11 @@ import argparse
 from collections.abc import Iterable
 from dataclasses import dataclass
 from http.server import ThreadingHTTPServer
+from importlib import import_module
 from pathlib import Path
 import stat
 from threading import Event, Thread
+from typing import Any, Callable, cast
 
 from spice.errors import SpiceError
 
@@ -59,10 +61,9 @@ def _initialize_watch_path(path: Path) -> None:
         ) from exc
 
 
-def _import_watch():
-    from watchfiles import watch
-
-    return watch
+def _import_watch() -> Callable[..., Any]:
+    module = import_module("watchfiles")
+    return cast(Callable[..., Any], getattr(module, "watch"))
 
 
 def _stop_when_file_changes(

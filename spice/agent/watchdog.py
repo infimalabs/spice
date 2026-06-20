@@ -33,6 +33,7 @@ from spice.mail.acks import (
     extract_task_batch_lines_from_text,
 )
 from spice.agent.sidechannelnotify import publish_side_channel_notice
+from spice.tasks.create import TaskAddResult
 from spice.mail.inbox import write_inbox_item
 from spice.procs import popen_new_process_group_kwargs
 from spice.sessions.util import first_text
@@ -198,7 +199,7 @@ INLINE_TASK_BACKLOG_NOTE = (
 
 def create_inline_tasks(
     repo_root: Path, message_text: str, log_handle: TextIO
-) -> list[object]:
+) -> list[TaskAddResult]:
     batch_lines = extract_task_batch_lines_from_text(message_text)
     if not batch_lines:
         return []
@@ -223,7 +224,7 @@ def _supervised_inline_task_actor(repo_root: Path) -> str:
     return agent_status(repo_root).thread_id or ambient_thread_id() or ""
 
 
-def _inline_task_result_text(results: list[object]) -> str:
+def _inline_task_result_text(results: list[TaskAddResult]) -> str:
     return " ".join(f"{result.handle}({result.route_feedback})" for result in results)
 
 

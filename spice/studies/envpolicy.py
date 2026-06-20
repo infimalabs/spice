@@ -167,7 +167,7 @@ def _delimiter_delta(line: str) -> int:
 
 def env_name_patterns(repo_root: Path) -> list[str]:
     declared = string_list(policy_table(repo_root).get("env_name_patterns"))
-    patterns = list(ENV_POLICY_DEFAULT_NAME_PATTERNS)
+    patterns: list[str] = list(ENV_POLICY_DEFAULT_NAME_PATTERNS)
     patterns.extend(pattern for pattern in declared if pattern not in patterns)
     return patterns
 

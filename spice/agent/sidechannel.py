@@ -18,6 +18,7 @@ import socket
 import tempfile
 from pathlib import Path
 from threading import Event, Lock, Thread
+from typing import TextIO, cast
 
 from spice.agent.sidechannelnotify import SIDE_CHANNEL_NOTIFY_EVENT
 from spice.agent.wrap import (
@@ -146,7 +147,7 @@ class AgentSideChannelServer:
         except OSError:
             return
         self._register_stream_wakeup(wake_writer)
-        writer = _SocketTextWriter(connection)
+        writer = cast(TextIO, _SocketTextWriter(connection))
         # Per-connection injectors: each command's stream tracks its own
         # repeat-suppression, so a quick command is never suppressed by a prior
         # command's display while a long command still throttles its own repeats.
@@ -298,7 +299,7 @@ def render_side_channel_payload(repo_root: Path) -> str:
     return stderr.getvalue()
 
 
-class _SocketTextWriter:
+class _SocketTextWriter(io.TextIOBase):
     def __init__(self, connection: socket.socket) -> None:
         self.connection = connection
 

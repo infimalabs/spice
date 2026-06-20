@@ -293,7 +293,7 @@ def watch_agent_side_channel(
             ).encode("utf-8")
             + b"\n"
         )
-        read_targets: list[object] = [side_socket]
+        read_targets: list[socket.socket | _ParentExitWatcher] = [side_socket]
         if parent_exit is not None:
             read_targets.append(parent_exit)
         while True:
@@ -373,6 +373,7 @@ def _parent_exit_watcher(parent_pid: int) -> _ParentExitWatcher | None:
         except OSError:
             return None
     if hasattr(select, "kqueue") and hasattr(select, "KQ_FILTER_PROC"):
+        kqueue: select.kqueue | None = None
         try:
             kqueue = select.kqueue()
             event = select.kevent(
@@ -384,7 +385,7 @@ def _parent_exit_watcher(parent_pid: int) -> _ParentExitWatcher | None:
             kqueue.control([event], 0, 0)
             return _ParentExitWatcher(kqueue)
         except OSError:
-            with contextlib.suppress(UnboundLocalError):
+            if kqueue is not None:
                 kqueue.close()
             return None
     return None
