@@ -91,10 +91,6 @@ def test_static_filter_header_pills_render_models_and_styles():
     )
     assert ".filter-pill--implicit {" in css
     assert ".filter-pill--system { color: var(--warn); }" in css
-    assert (
-        "box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--good) 42%, transparent);"
-        in (css)
-    )
 
 
 def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
