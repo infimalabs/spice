@@ -641,6 +641,18 @@ def test_agent_wrapper_lines_accepts_direct_argv_wrapper(tmp_path):
     ) == _expected_python_module_wrapper_lines(["pytest"])
 
 
+def test_spice_checkout_maps_bare_pre_commit_to_dev_gate():
+    repo = Path(__file__).resolve().parents[1]
+    lines = shellhook.render_agent_wrapper_lines(repo)
+
+    wrapper_start = lines.index("pre-commit() {")
+    assert lines[wrapper_start : wrapper_start + 3] == [
+        "pre-commit() {",
+        '  spice dev pre-commit "$@"',
+        "}",
+    ]
+
+
 def test_agent_wrapper_lines_honors_empty_agent_wrapper_list(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,

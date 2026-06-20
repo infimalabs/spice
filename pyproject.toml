@@ -51,6 +51,12 @@ line-length = 88
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.spice.agent]
+wrappers = ["common", "spice-dev"]
+
+[tool.spice.wrappers.spice-dev]
+pre-commit = { argv = ["spice", "dev", "pre-commit"] }
+
 [tool.spice.policy]
 package_roots = ["spice"]
 
