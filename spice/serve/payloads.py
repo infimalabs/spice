@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from spice.agent.driver import ALL_DRIVERS
 from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.agent.renewal import strip_renewal_handoff_request_suffix
@@ -175,6 +176,70 @@ def team_facts_for_target(
     return team_facts_for_actor(store, team_actor_for_target(store, target, thread_id))
 
 
+def serve_agent_identity_payload(
+    target: WorktreeTarget,
+    thread_id: str | None = None,
+    *,
+    actor_id: str = "",
+    binding_status: str = "",
+    binding_error: str = "",
+    transcript_owner: str = "",
+    store: ServeTeamStore | None = None,
+) -> dict[str, Any]:
+    """Resolve the driver-neutral serve identity for one worktree target."""
+    status = agent_status(target.repo_root)
+    desired = effective_agent_config(target.repo_root)
+    bound_thread = canonical_thread_id(thread_id or status.thread_id)
+    actor = _serve_actor_id(target, bound_thread, actor_id=actor_id)
+    actual_launch = _actual_launch_identity(status)
+    return {
+        "actorId": actor,
+        "target": {
+            "id": _required_identity_string(target.id, "target id"),
+            "worktreeName": _required_identity_string(
+                target.name,
+                "worktree name",
+            ),
+            "repoRoot": _required_identity_string(
+                str(target.repo_root),
+                "target repo root",
+            ),
+            "branch": _required_identity_string(
+                target.branch or target.name,
+                "target branch",
+            ),
+        },
+        "thread": _serve_thread_identity(
+            bound_thread,
+            binding_status=binding_status,
+            binding_error=binding_error,
+        ),
+        "driver": {
+            "desired": _required_identity_string(
+                desired.get("driver"),
+                "desired driver",
+            ),
+            "actual": _actual_driver_identity(status, actual_launch),
+            "transcriptOwner": str(transcript_owner or "").strip(),
+        },
+        "launch": {
+            "desired": {
+                "model": _required_identity_string(
+                    desired.get("model"),
+                    "desired model",
+                ),
+                "effort": _required_identity_string(
+                    desired.get("effort"),
+                    "desired effort",
+                ),
+                "source": "effective agent config",
+            },
+            "actual": actual_launch,
+        },
+        "renewal": _serve_renewal_identity(store, actor),
+    }
+
+
 def renewal_intent_for_target(
     store: ServeTeamStore, target: WorktreeTarget, thread_id: str | None
 ) -> dict[str, Any]:
@@ -285,6 +350,118 @@ def _thread_identity_payload(
     if error:
         payload["error"] = error
     return payload
+
+
+def _serve_thread_identity(
+    thread_id: str,
+    *,
+    binding_status: str,
+    binding_error: str,
+) -> dict[str, str]:
+    status = binding_status or ("bound" if thread_id else "unbound")
+    return _thread_identity_payload(
+        thread_id,
+        binding_status=status,
+        binding_error=binding_error,
+    )
+
+
+def _serve_actor_id(
+    target: WorktreeTarget,
+    thread_id: str,
+    *,
+    actor_id: str,
+) -> str:
+    actor = str(actor_id or "").strip()
+    if actor.startswith("target:"):
+        return "target:" + _required_identity_string(actor[7:], "target actor id")
+    if actor.startswith("thread:"):
+        thread = canonical_thread_id(actor[7:])
+        return "thread:" + _required_identity_string(thread, "thread actor id")
+    if actor:
+        return (
+            f"target:{target.id}"
+            if actor == target.id
+            else f"thread:{canonical_thread_id(actor)}"
+        )
+    if thread_id:
+        return f"thread:{thread_id}"
+    return f"target:{target.id}"
+
+
+def _actual_launch_identity(status: Any) -> dict[str, str]:
+    has_actual = bool(
+        status.thread_id
+        or status.model
+        or status.reasoning_effort
+        or status.service_tier
+        or status.started_at
+    )
+    return {
+        "model": str(status.model or ""),
+        "effort": str(status.reasoning_effort or ""),
+        "serviceTier": str(status.service_tier or ""),
+        "source": "agent state" if has_actual else "",
+    }
+
+
+def _actual_driver_identity(status: Any, actual_launch: dict[str, str]) -> str:
+    if not actual_launch.get("source"):
+        return ""
+    state_path = getattr(status, "state_path", None)
+    if state_path is None:
+        return ""
+    parts = list(state_path.parts)
+    for index, part in enumerate(parts[:-1]):
+        if part != "agents":
+            continue
+        dirname = parts[index + 1]
+        for driver in ALL_DRIVERS:
+            if driver.state_dirname == dirname:
+                return driver.name
+    return ""
+
+
+def _serve_renewal_identity(
+    store: ServeTeamStore | None,
+    actor_id: str,
+) -> dict[str, Any]:
+    empty = {
+        "state": "none",
+        "teamIndex": None,
+        "ancestorThreadId": "",
+        "successorThreadId": "",
+    }
+    if store is None:
+        return empty
+    store_actor = _store_actor_id(actor_id)
+    renewal = store.renewal_state_for_agent(store_actor)
+    team_index = _serve_team_index(store, store_actor)
+    if renewal is None:
+        return {**empty, "teamIndex": team_index}
+    return {
+        "state": renewal.state,
+        "teamIndex": team_index,
+        "ancestorThreadId": renewal.ancestor_thread_id,
+        "successorThreadId": renewal.successor_agent_id,
+    }
+
+
+def _store_actor_id(actor_id: str) -> str:
+    if actor_id.startswith("target:") or actor_id.startswith("thread:"):
+        return actor_id.split(":", 1)[1]
+    return actor_id
+
+
+def _serve_team_index(store: ServeTeamStore, actor_id: str) -> int | None:
+    team_id = store.current_team_for_agent(actor_id)
+    if team_id is None:
+        return None
+    team = store.team_state(team_id)
+    for index, member in enumerate(team.members):
+        if member.agent_id == actor_id:
+            return index
+    return None
 
 
 def _required_identity_string(value: Any, label: str) -> str:

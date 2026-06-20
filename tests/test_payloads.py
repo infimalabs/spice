@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -142,6 +143,141 @@ def test_target_identity_payload_reports_configured_driver(tmp_path, monkeypatch
     assert rows["effort"] == "medium"
 
 
+def test_serve_agent_identity_reports_unbound_target_identity(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    target = _Target(id="wt", repo_root=repo, name="repo", branch="main")
+    monkeypatch.setattr(
+        payloads,
+        "effective_agent_config",
+        lambda _repo: {"driver": "codex", "model": "gpt-5.5", "effort": "xhigh"},
+    )
+    monkeypatch.setattr(
+        payloads,
+        "agent_status",
+        lambda _repo: _identity_status(repo),
+    )
+
+    identity = payloads.serve_agent_identity_payload(target)
+
+    assert identity["actorId"] == "target:wt"
+    assert identity["target"] == {
+        "id": "wt",
+        "worktreeName": "repo",
+        "repoRoot": str(repo),
+        "branch": "main",
+    }
+    assert identity["thread"] == {"state": "unbound"}
+    assert identity["driver"] == {
+        "desired": "codex",
+        "actual": "",
+        "transcriptOwner": "",
+    }
+    assert identity["launch"]["desired"] == {
+        "model": "gpt-5.5",
+        "effort": "xhigh",
+        "source": "effective agent config",
+    }
+    assert identity["launch"]["actual"] == {
+        "model": "",
+        "effort": "",
+        "serviceTier": "",
+        "source": "",
+    }
+    assert identity["renewal"] == {
+        "state": "none",
+        "teamIndex": None,
+        "ancestorThreadId": "",
+        "successorThreadId": "",
+    }
+
+
+def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    target = _Target(id="wt", repo_root=repo, name="repo", branch="main")
+    monkeypatch.setattr(
+        payloads,
+        "effective_agent_config",
+        lambda _repo: {"driver": "codex", "model": "desired-model", "effort": "high"},
+    )
+    monkeypatch.setattr(
+        payloads,
+        "agent_status",
+        lambda _repo: _identity_status(
+            repo,
+            driver="claude",
+            thread_id="thread-a",
+            model="actual-model",
+            effort="low",
+            service_tier="fast",
+            started_at="2026-06-20T04:00:00Z",
+        ),
+    )
+
+    identity = payloads.serve_agent_identity_payload(
+        target,
+        transcript_owner="claude",
+    )
+
+    assert identity["actorId"] == "thread:thread-a"
+    assert identity["thread"] == {"state": "bound", "threadId": "thread-a"}
+    assert identity["driver"] == {
+        "desired": "codex",
+        "actual": "claude",
+        "transcriptOwner": "claude",
+    }
+    assert identity["launch"]["desired"]["model"] == "desired-model"
+    assert identity["launch"]["actual"] == {
+        "model": "actual-model",
+        "effort": "low",
+        "serviceTier": "fast",
+        "source": "agent state",
+    }
+
+
+def test_serve_agent_identity_normalizes_legacy_bare_actor_and_renewal(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    store = ServeTeamStore(tmp_path / "teams.sqlite")
+    store.create_team(members=["thread-a", "thread-b"])
+    store.record_pending_renewal(agent_id="thread-a", ancestor_thread_id="thread-a")
+    target = _Target(id="wt", repo_root=repo, name="repo", branch="main")
+    monkeypatch.setattr(
+        payloads,
+        "effective_agent_config",
+        lambda _repo: {"driver": "codex", "model": "gpt-5.5", "effort": "xhigh"},
+    )
+    monkeypatch.setattr(
+        payloads,
+        "agent_status",
+        lambda _repo: _identity_status(repo, thread_id="thread-a"),
+    )
+
+    identity = payloads.serve_agent_identity_payload(
+        target,
+        actor_id="thread-a",
+        store=store,
+    )
+
+    assert identity["actorId"] == "thread:thread-a"
+    assert identity["renewal"] == {
+        "state": "pending",
+        "teamIndex": 0,
+        "ancestorThreadId": "thread-a",
+        "successorThreadId": "",
+    }
+    assert (
+        payloads.serve_agent_identity_payload(target, actor_id="wt")["actorId"]
+        == "target:wt"
+    )
+
+
 def test_team_identity_payload_rejects_missing_member_revisions():
     with pytest.raises(SpiceError, match="team revision is required"):
         payloads.team_identity_payload({"teamId": "team-1"})
@@ -175,6 +311,26 @@ def _pending_identity(count: int = 0) -> dict[str, object]:
 
 def _init_repo(path: Path) -> None:
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
+
+
+def _identity_status(
+    repo: Path,
+    *,
+    driver: str = "codex",
+    thread_id: str = "",
+    model: str = "",
+    effort: str = "",
+    service_tier: str = "",
+    started_at: str = "",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        thread_id=thread_id,
+        model=model,
+        reasoning_effort=effort,
+        service_tier=service_tier,
+        started_at=started_at,
+        state_path=repo / ".git" / "spice" / "agents" / driver / "state.json",
+    )
 
 
 def test_sparkline_buckets_messages_by_minute():
