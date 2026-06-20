@@ -399,6 +399,30 @@ def test_pending_renewal_remains_active_until_successor_starts(tmp_path):
     assert store.agent_renewal_active("agent-a") is False
 
 
+def test_started_renewal_preserves_predecessor_roster_slot(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(members=["agent-a", "agent-b", "agent-c"])
+    store.record_pending_renewal(agent_id="agent-b", ancestor_thread_id="agent-b")
+
+    store.record_started_renewal(
+        predecessor_agent_id="agent-b",
+        successor_agent_id="agent-b-renewed",
+        ancestor_thread_id="agent-b",
+    )
+
+    state = store.team_state(team.team_id)
+    assert [member.agent_id for member in state.members] == [
+        "agent-a",
+        "agent-b-renewed",
+        "agent-c",
+    ]
+    assert store.current_team_for_agent("agent-b") is None
+    assert store.current_team_for_agent("agent-b-renewed") == team.team_id
+    renewal = store.renewal_state_for_agent("agent-b")
+    assert renewal is not None
+    assert renewal.successor_agent_id == "agent-b-renewed"
+
+
 def test_removing_final_agent_closes_team(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(members=["agent-a"])
