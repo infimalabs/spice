@@ -499,22 +499,35 @@ class ServeTeamStore(TeamMetricStoreMixin):
                 self._rewrite_renewal_agent_locked(
                     connection, alias_id, agent_id, team_id
                 )
+        # A renewal successor (or a placeholder promoted to its real thread)
+        # arrives carrying its predecessor's id as an alias that already holds a
+        # slot in this same team. The roster is ordered by joined_at, so reusing
+        # the predecessor's joined_at keeps the successor in the ancestor's slot
+        # instead of appending it to the end; a genuinely new agent has no such
+        # slot and falls back to now.
+        inherited_joined_at: float | None = None
         for alias_id in alias_ids:
             previous_rows = connection.execute(
-                "SELECT DISTINCT team_id FROM memberships WHERE agent_id = ?",
+                "SELECT team_id, joined_at FROM memberships WHERE agent_id = ?",
                 (alias_id,),
             ).fetchall()
-            previous_team_ids.extend(
-                row["team_id"]
-                for row in previous_rows
-                if row["team_id"] not in previous_team_ids
-            )
+            for row in previous_rows:
+                if row["team_id"] not in previous_team_ids:
+                    previous_team_ids.append(row["team_id"])
+                if row["team_id"] == team_id and row["joined_at"] is not None:
+                    joined_at = float(row["joined_at"])
+                    if inherited_joined_at is None or joined_at < inherited_joined_at:
+                        inherited_joined_at = joined_at
             connection.execute(
                 "DELETE FROM memberships WHERE agent_id = ?", (alias_id,)
             )
         connection.execute(
             "INSERT INTO memberships (team_id, agent_id, joined_at) VALUES (?, ?, ?)",
-            (team_id, agent_id, time.time()),
+            (
+                team_id,
+                agent_id,
+                time.time() if inherited_joined_at is None else inherited_joined_at,
+            ),
         )
         self._note_team_agent_history_locked(connection, team_id, agent_id)
         self._close_empty_teams_locked(
