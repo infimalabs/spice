@@ -5,6 +5,8 @@ _spice_shell_hook_name=".zshrc"
 _spice_shell_hook_dir="${ZDOTDIR:?spice shell hook: missing ZDOTDIR}"
 _spice_shell_hook_self="${_spice_shell_hook_dir}/${_spice_shell_hook_name}"
 
+set -o pipefail
+
 if [ -n "${SPICE_SHELL_HOOK_ORIGINAL_ZDOTDIR-}" ]; then
   export ZDOTDIR="$SPICE_SHELL_HOOK_ORIGINAL_ZDOTDIR"
 else
