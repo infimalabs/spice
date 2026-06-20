@@ -54,6 +54,8 @@ from spice.tasks import config as task_config
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 THREAD_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+ACTOR_A = f"thread:{THREAD_A}"
+ACTOR_B = f"thread:{THREAD_B}"
 
 
 @dataclass(frozen=True)
@@ -231,7 +233,7 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert archived_refresh_payload["acks"][0]["found"] is True
     assert archived_refresh_payload["acks"][0]["attachments"][0] == live_attachment
     assert state.lane_send_count(target.id) == 1
-    assert state.team_store.lane_metric_summary(THREAD_A, bucket_count=12).sends == 1
+    assert state.team_store.lane_metric_summary(ACTOR_A, bucket_count=12).sends == 1
     assert pending_inbox_count(repo) == 0
     assert inbox_request_body(items[0].text) == "inspect this image"
     assert items[0].attachments[0].path.read_bytes() == b"image-bytes"
@@ -502,8 +504,8 @@ def test_running_requested_renewal_sends_handoff_and_marks_pending(
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
-    state.team_store.create_team(members=[THREAD_A])
-    state.team_store.set_agent_renewal_request(THREAD_A, requested=True)
+    state.team_store.create_team(members=[ACTOR_A])
+    state.team_store.set_agent_renewal_request(ACTOR_A, requested=True)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
 
     payload, status = work_tree_send_response_payload(
@@ -526,7 +528,7 @@ def test_running_requested_renewal_sends_handoff_and_marks_pending(
         renewal = connection.execute(
             "SELECT state, ancestor_thread_id, successor_agent_id "
             "FROM renewals WHERE agent_id = ?",
-            (THREAD_A,),
+            (ACTOR_A,),
         ).fetchone()
     assert status == HTTPStatus.OK
     assert payload["agentEnsure"] == {}
@@ -547,8 +549,8 @@ def test_stopped_requested_renewal_starts_successor_and_moves_team_membership(
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
-    created = state.team_store.create_team(members=[THREAD_A])
-    state.team_store.set_agent_renewal_request(THREAD_A, requested=True)
+    created = state.team_store.create_team(members=[ACTOR_A])
+    state.team_store.set_agent_renewal_request(ACTOR_A, requested=True)
     ensure_calls: list[dict[str, object]] = []
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
 
@@ -577,8 +579,8 @@ def test_stopped_requested_renewal_starts_successor_and_moves_team_membership(
             "force_new": True,
         }
     ]
-    assert state.team_store.current_team_for_agent(THREAD_A) is None
-    assert state.team_store.current_team_for_agent(THREAD_B) == created.team_id
+    assert state.team_store.current_team_for_agent(ACTOR_A) is None
+    assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
 
 
 def test_task_drain_replaces_filters_and_creates_route_team(tmp_path, monkeypatch):
@@ -597,13 +599,13 @@ def test_task_drain_replaces_filters_and_creates_route_team(tmp_path, monkeypatc
         },
     )
 
-    team_id = state.team_store.current_team_for_agent(THREAD_A)
+    team_id = state.team_store.current_team_for_agent(ACTOR_A)
     assert status == HTTPStatus.OK
-    assert payload["route"]["actor"] == THREAD_A
+    assert payload["route"]["actor"] == ACTOR_A
     assert payload["route"]["teamIdentity"]["teamId"] == team_id
     assert payload["route"]["taskFilters"] == ["serve", "task.review"]
     assert payload["route"]["lifetime"] == "Drive"
-    assert payload["route"]["memberAgents"] == [THREAD_A]
+    assert payload["route"]["memberAgents"] == [ACTOR_A]
 
 
 def test_team_command_payloads_report_revisions_and_stale_valid_command_applies(
@@ -614,7 +616,7 @@ def test_team_command_payloads_report_revisions_and_stale_valid_command_applies(
         state,
         {
             "command": "createTeam",
-            "members": [THREAD_A],
+            "members": [ACTOR_A],
             "config": {"lifetime": "Steer"},
         },
     )
@@ -651,6 +653,37 @@ def test_team_command_payloads_report_revisions_and_stale_valid_command_applies(
     assert fresh_snapshot["revision"] == stale["revision"]
     unchanged = team_snapshot_response_payload(state, since_revision=stale["revision"])
     assert unchanged["changed"] is False
+
+
+def test_team_command_payload_normalizes_legacy_bare_actor_ids(tmp_path):
+    target = _target(_repo(tmp_path))
+    state = _serve_state(tmp_path, target)
+
+    created, create_status = team_command_response_payload(
+        state,
+        {
+            "command": "createTeam",
+            "members": [target.id, THREAD_A],
+        },
+    )
+    team_id = created["snapshot"]["teams"][0]["teamId"]
+    reorder, reorder_status = team_command_response_payload(
+        state,
+        {
+            "command": "reorderTeamAgents",
+            "teamId": team_id,
+            "agentIds": [THREAD_A, target.id],
+        },
+    )
+
+    members = [
+        member["agentId"] for member in reorder["snapshot"]["teams"][0]["members"]
+    ]
+    assert create_status == HTTPStatus.OK
+    assert reorder_status == HTTPStatus.OK
+    assert members == [ACTOR_A, f"target:{target.id}"]
+    assert state.team_store.current_team_for_agent(THREAD_A) is None
+    assert state.team_store.current_team_for_agent(target.id) is None
 
 
 def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(

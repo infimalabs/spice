@@ -231,16 +231,19 @@ def record_supervised_lane_metrics(repo_root: Path) -> None:
     from spice.agent.lifecycle import agent_status
     from spice.serve.messages import resolve_thread_transcript
     from spice.serve.metrics import record_transcript_metrics_for_agent
+    from spice.serve.teamids import thread_actor_id
     from spice.serve.teams import ServeTeamStore
 
-    agent_id = agent_status(repo_root).thread_id
-    if not agent_id:
+    thread_id = agent_status(repo_root).thread_id
+    if not thread_id:
         raise RuntimeError(f"could not resolve supervised agent id for {repo_root}")
-    transcript = resolve_thread_transcript(agent_id, repo_root)
+    transcript = resolve_thread_transcript(thread_id, repo_root)
     if transcript is None:
-        raise RuntimeError(f"could not resolve transcript for {agent_id}")
+        raise RuntimeError(f"could not resolve transcript for {thread_id}")
     record_transcript_metrics_for_agent(
-        ServeTeamStore(), agent_id=agent_id, transcript_path=transcript.path
+        ServeTeamStore(),
+        agent_id=thread_actor_id(thread_id),
+        transcript_path=transcript.path,
     )
 
 
@@ -248,12 +251,13 @@ def record_supervised_lane_sends(repo_root: Path, *, sends: int = 1) -> None:
     if sends <= 0:
         return
     from spice.agent.lifecycle import agent_status
+    from spice.serve.teamids import thread_actor_id
     from spice.serve.teams import ServeTeamStore
 
-    agent_id = agent_status(repo_root).thread_id
-    if not agent_id:
+    thread_id = agent_status(repo_root).thread_id
+    if not thread_id:
         raise RuntimeError(f"could not resolve supervised agent id for {repo_root}")
-    ServeTeamStore().record_agent_metric_delta(agent_id, sends=sends)
+    ServeTeamStore().record_agent_metric_delta(thread_actor_id(thread_id), sends=sends)
 
 
 class StdoutScanner(Protocol):

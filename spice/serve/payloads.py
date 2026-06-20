@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Iterable
 
 from spice.agent.driver import ALL_DRIVERS
 from spice.agent.identity import canonical_thread_id
@@ -26,6 +26,15 @@ from spice.serve.agentapi import (
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.teams import ServeTeamStore, renewal_intent_payload
+from spice.serve.teamids import (
+    TARGET_ACTOR_PREFIX,
+    THREAD_ACTOR_PREFIX,
+    actor_value,
+    normalize_actor_id,
+    target_actor_id,
+    thread_actor_id,
+    thread_id_for_actor,
+)
 from spice.serve.worktrees import WorktreeTarget
 from spice.tasks import config as task_config
 from spice.tasks import identity as task_identity
@@ -51,22 +60,23 @@ def record_started_renewal_from_ensure(
     predecessor_agent_id: str,
     agent_ensure: dict[str, Any] | None,
 ) -> str:
-    successor_agent_id = agent_ensure_thread_id(agent_ensure)
-    if not predecessor_agent_id or not successor_agent_id:
-        return successor_agent_id
+    successor_thread_id = agent_ensure_thread_id(agent_ensure)
+    if not predecessor_agent_id or not successor_thread_id:
+        return successor_thread_id
+    successor_agent_id = thread_actor_id(successor_thread_id)
     if successor_agent_id == predecessor_agent_id:
-        return successor_agent_id
+        return successor_thread_id
     if not store.agent_renewal_active(predecessor_agent_id):
-        return successor_agent_id
+        return successor_thread_id
     try:
         store.record_started_renewal(
             predecessor_agent_id=predecessor_agent_id,
             successor_agent_id=successor_agent_id,
-            ancestor_thread_id=predecessor_agent_id,
+            ancestor_thread_id=thread_id_for_actor(predecessor_agent_id),
         )
     except SpiceError:
         pass
-    return successor_agent_id
+    return successor_thread_id
 
 
 def task_filter_inventory() -> dict[str, Any]:
@@ -134,6 +144,7 @@ def resolve_thread_id_for_target(state: Any, target: WorktreeTarget) -> str | No
 def team_facts_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
     if not actor:
         return {}
+    _promote_team_actor(store, actor, _legacy_actor_names(actor))
     team_id = store.current_team_for_agent(actor)
     if team_id is None:
         return {}
@@ -160,13 +171,8 @@ def team_actor_for_target(
     real thread exists, any placeholder membership is rewritten to that thread
     before callers read team facts.
     """
-    actor = canonical_thread_id(thread_id or "")
-    if not actor:
-        return target.id
-    if target.id and target.id != actor:
-        placeholder_team = store.current_team_for_agent(target.id)
-        if placeholder_team is not None:
-            store.assign_agent(placeholder_team, actor, aliases=[target.id])
+    actor = target_bound_actor(target, thread_id)
+    _promote_team_actor(store, actor, _target_actor_legacy_names(target, actor))
     return actor
 
 
@@ -174,6 +180,39 @@ def team_facts_for_target(
     store: ServeTeamStore, target: WorktreeTarget, thread_id: str | None
 ) -> dict[str, Any]:
     return team_facts_for_actor(store, team_actor_for_target(store, target, thread_id))
+
+
+def target_bound_actor(target: WorktreeTarget, thread_id: str | None) -> str:
+    thread = canonical_thread_id(thread_id or "")
+    return thread_actor_id(thread) if thread else target_actor_id(target.id)
+
+
+def normalize_team_command_payload(
+    payload: dict[str, Any], targets: Iterable[WorktreeTarget]
+) -> dict[str, Any]:
+    target_ids = {str(target.id) for target in targets}
+    normalized = dict(payload)
+    command = str(normalized.get("command") or "")
+    if command == "createTeam":
+        normalized["members"] = [
+            _normalize_command_actor(item, target_ids)
+            for item in normalized.get("members") or []
+            if str(item or "").strip()
+        ]
+    elif command in {"moveAgentToTeam", "moveComposerToTeam", "removeAgentFromTeam"}:
+        _normalize_command_agent_field(normalized, target_ids)
+    elif command == "setAgentRenewalIntent":
+        if normalized.get("agentId"):
+            normalized["agentId"] = _normalize_command_actor(
+                normalized["agentId"], target_ids
+            )
+    elif command in {"splitTeam", "reorderTeamAgents"}:
+        normalized["agentIds"] = [
+            _normalize_command_actor(item, target_ids)
+            for item in normalized.get("agentIds") or []
+            if str(item or "").strip()
+        ]
+    return normalized
 
 
 def serve_agent_identity_payload(
@@ -393,20 +432,59 @@ def _serve_actor_id(
     actor_id: str,
 ) -> str:
     actor = str(actor_id or "").strip()
-    if actor.startswith("target:"):
-        return "target:" + _required_identity_string(actor[7:], "target actor id")
-    if actor.startswith("thread:"):
-        thread = canonical_thread_id(actor[7:])
-        return "thread:" + _required_identity_string(thread, "thread actor id")
     if actor:
-        return (
-            f"target:{target.id}"
-            if actor == target.id
-            else f"thread:{canonical_thread_id(actor)}"
-        )
-    if thread_id:
-        return f"thread:{thread_id}"
-    return f"target:{target.id}"
+        return normalize_actor_id(actor, target_ids=(target.id,))
+    return target_bound_actor(target, thread_id)
+
+
+def _normalize_command_actor(actor_id: Any, target_ids: set[str]) -> str:
+    return normalize_actor_id(str(actor_id or ""), target_ids=target_ids)
+
+
+def _normalize_command_agent_field(
+    payload: dict[str, Any], target_ids: set[str]
+) -> None:
+    raw_agent = str(payload.get("agentId") or "").strip()
+    if not raw_agent:
+        return
+    normalized_agent = normalize_actor_id(raw_agent, target_ids=target_ids)
+    payload["agentId"] = normalized_agent
+    aliases = [str(item) for item in payload.get("agentAliases") or [] if item]
+    if raw_agent != normalized_agent and raw_agent not in aliases:
+        aliases.append(raw_agent)
+    payload["agentAliases"] = aliases
+
+
+def _promote_team_actor(
+    store: ServeTeamStore,
+    actor: str,
+    previous_names: Iterable[str],
+) -> None:
+    names = [name for name in dict.fromkeys((actor, *previous_names)) if name]
+    if not names:
+        return
+    target_team_id = store.current_team_for_agent(actor)
+    for name in names[1:]:
+        team_id = store.current_team_for_agent(name)
+        if team_id is None:
+            continue
+        store.assign_agent(target_team_id or team_id, actor, aliases=names[1:])
+        return
+
+
+def _target_actor_legacy_names(target: WorktreeTarget, actor: str) -> list[str]:
+    names = _legacy_actor_names(actor)
+    target_actor = target_actor_id(target.id)
+    for name in (target_actor, target.id):
+        if name and name != actor and name not in names:
+            names.append(name)
+    return names
+
+
+def _legacy_actor_names(actor: str) -> list[str]:
+    if actor.startswith((TARGET_ACTOR_PREFIX, THREAD_ACTOR_PREFIX)):
+        return [actor_value(actor)]
+    return []
 
 
 def _actual_launch_identity(status: Any) -> dict[str, str]:
@@ -459,9 +537,9 @@ def _serve_renewal_identity(
     }
     if store is None:
         return empty
-    store_actor = _store_actor_id(actor_id)
-    renewal = store.renewal_state_for_agent(store_actor)
-    team_index = _serve_team_index(store, store_actor)
+    _promote_team_actor(store, actor_id, _legacy_actor_names(actor_id))
+    renewal = store.renewal_state_for_agent(actor_id)
+    team_index = _serve_team_index(store, actor_id)
     if renewal is None:
         return {**empty, "teamIndex": team_index}
     return {
@@ -471,12 +549,6 @@ def _serve_renewal_identity(
         "successorThreadId": renewal.successor_agent_id,
         "revision": renewal.revision,
     }
-
-
-def _store_actor_id(actor_id: str) -> str:
-    if actor_id.startswith("target:") or actor_id.startswith("thread:"):
-        return actor_id.split(":", 1)[1]
-    return actor_id
 
 
 def _serve_team_index(store: ServeTeamStore, actor_id: str) -> int | None:
@@ -509,6 +581,7 @@ def _nonnegative_payload_int(value: Any, label: str) -> int:
 def renewal_intent_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
     if not actor:
         return renewal_intent_payload(None)
+    _promote_team_actor(store, actor, _legacy_actor_names(actor))
     return renewal_intent_payload(
         store.renewal_state_for_agent(actor),
         agent_id=actor,
@@ -937,8 +1010,9 @@ def lane_metrics_payload(
     status: Any,
 ) -> dict[str, Any]:
     """Lane counters from durable per-agent metrics plus live process uptime."""
+    actor = team_actor_for_target(state.team_store, target, thread_id)
     summary = state.team_store.lane_metric_summary(
-        thread_id,
+        actor,
         bucket_count=LANE_METRIC_SPARKLINE_BUCKETS,
         bucket_seconds=LANE_METRIC_SPARKLINE_BUCKET_SECONDS,
     )
