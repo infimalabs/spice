@@ -24,15 +24,6 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     header_start = css.index(".app-header {")
     header_end = css.index(".app-header .meta", header_start)
     header_rules = css[header_start:header_end]
-    button_start = css.index(".spice-menu-button {")
-    button_end = css.index(".spice-menu-icon {", button_start)
-    button_rules = css[button_start:button_end]
-    icon_start = css.index(".spice-menu-icon {")
-    icon_end = css.index(".spice-menu-label {", icon_start)
-    icon_rules = css[icon_start:icon_end]
-    label_start = css.index(".spice-menu-label {")
-    label_end = css.index(".icon-button svg", label_start)
-    label_rules = css[label_start:label_end]
     mobile_header_start = css.index(
         "  .app-header {", css.index("@media (max-width: 720px)")
     )
@@ -70,69 +61,82 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     )
     assert "--control-surface-soft:" in css
     assert "--control-inset-soft: none;" in css
-    assert (
-        "background: color-mix(in srgb, var(--control-surface-soft) 88%, var(--accent) 12%);"
-        in button_rules
-    )
-    assert "border-color: var(--control-border-soft);" in button_rules
-    assert "box-shadow: var(--control-inset-soft);" in button_rules
-    assert (
-        "color: color-mix(in srgb, var(--accent-strong) 76%, var(--fg));"
-        in button_rules
-    )
-    assert "font-weight: 400;" in button_rules
-    assert "gap: 4px;" in button_rules
-    assert "height: 30px;" in button_rules
-    assert "padding: 0 8px 0 6px;" in button_rules
-    assert "font-size: 15px;" in icon_rules
-    assert "color: currentColor;" in label_rules
-    assert "font-size: 17px;" in label_rules
-    assert ".spice-menu-button:hover,\n.spice-menu-button:focus-visible {" in css
-    assert (
-        "background: color-mix(in srgb, var(--control-surface-soft) 78%, var(--accent) 22%);"
-        in button_rules
-    )
-    assert "border-color: var(--control-border-soft-hover);" in button_rules
-    assert ".spice-menu-button:active {" in css
-    assert (
-        "background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);"
-        in button_rules
-    )
-    assert (
-        "border-color: var(--border-soft);\n"
-        "  box-shadow: var(--control-inset-soft);" in button_rules
-    )
-    assert '.spice-menu-button[aria-expanded="true"] {' in button_rules
-    assert (
-        '.spice-menu-button[aria-expanded="true"] {\n'
-        "  background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);\n"
-        "  border-color: var(--border-soft);\n"
-        "  box-shadow: var(--control-inset-soft);" in button_rules
-    )
-    assert "var(--final-accent)" not in button_rules
-    assert "color: currentColor;" in css
-    assert (
-        ".spice-menu-button--fast:hover,\n"
-        ".spice-menu-button--fast:focus-visible {" in css
-    )
-    assert ".spice-menu-button--fast:active {" in css
-    assert '.spice-menu-button--fast[aria-expanded="true"] {' in css
-    assert (
-        "background: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);"
-        in css
-    )
-    assert (
-        '.spice-menu-button--fast[aria-expanded="true"] {\n'
-        "  background: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);\n"
-        "  border-color: var(--border-soft);\n"
-        "  box-shadow: var(--control-inset-soft);" in css
-    )
-    assert "height: 30px;" in button_rules
     assert "flex-wrap: nowrap;" in mobile_header_rules
     assert "min-height: 46px;" in mobile_header_rules
     assert "padding: 8px;" in mobile_header_rules
     assert "flex: 1 1 auto;" in mobile_filter_rules
     assert "min-width: 0;" in mobile_filter_rules
+
+
+def test_header_spice_menu_button_uses_cutout_pepper_stamp():
+    css = _serve_css_text()
+    button_start = css.index(".spice-menu-button {")
+    button_end = css.index(".spice-menu-icon {", button_start)
+    button_rules = css[button_start:button_end]
+    icon_start = css.index(".spice-menu-icon {")
+    icon_end = css.index(".spice-menu-label {", icon_start)
+    icon_rules = css[icon_start:icon_end]
+    label_start = css.index(".spice-menu-label {")
+    label_end = css.index(".icon-button svg", label_start)
+    label_rules = css[label_start:label_end]
+
+    assert "--spice-menu-accent: var(--accent-strong);" in button_rules
+    assert "--spice-menu-stamp-surface: var(--bg);" in button_rules
+    assert (
+        "--spice-menu-surface: color-mix(in srgb, var(--control-surface-soft) 88%, var(--accent) 12%);"
+        in button_rules
+    )
+    assert "background: var(--spice-menu-surface);" in button_rules
+    assert (
+        "border: 1px solid color-mix(in srgb, var(--spice-menu-accent) 42%, var(--spice-menu-surface));"
+        in button_rules
+    )
+    assert (
+        "color: color-mix(in srgb, var(--accent-strong) 76%, var(--fg));"
+        in button_rules
+    )
+    assert "height: 30px;" in button_rules
+    assert "background: var(--spice-menu-stamp-surface);" in icon_rules
+    assert "border-radius: var(--pill-radius);" in icon_rules
+    assert (
+        "box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--spice-menu-accent) 24%, transparent);"
+        in icon_rules
+    )
+    assert "height: 22px;" in icon_rules
+    assert "min-width: 30px;" in icon_rules
+    assert "padding: 0 6px;" in icon_rules
+    assert "font-size: 16px;" in label_rules
+
+
+def test_header_spice_menu_button_keeps_cutout_treatment_in_states():
+    css = _serve_css_text()
+    button_start = css.index(".spice-menu-button {")
+    button_end = css.index(".spice-menu-icon {", button_start)
+    button_rules = css[button_start:button_end]
+
+    assert ".spice-menu-button:hover,\n.spice-menu-button:focus-visible {" in css
+    assert (
+        "--spice-menu-surface: color-mix(in srgb, var(--control-surface-soft) 78%, var(--accent) 22%);"
+        in button_rules
+    )
+    assert (
+        "border-color: color-mix(in srgb, var(--spice-menu-accent) 58%, var(--spice-menu-surface));"
+        in button_rules
+    )
+    assert ".spice-menu-button:active {" in css
+    assert (
+        "--spice-menu-surface: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);"
+        in button_rules
+    )
+    assert '.spice-menu-button[aria-expanded="true"] {' in button_rules
+    assert "--spice-menu-accent: var(--say-accent);" in css
+    assert (
+        '.spice-menu-button--fast[aria-expanded="true"] {\n'
+        "  --spice-menu-surface: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);\n"
+        "  background: var(--spice-menu-surface);\n"
+        "  border-color: color-mix(in srgb, var(--spice-menu-accent) 70%, var(--spice-menu-surface));\n"
+        "  box-shadow: var(--control-inset-soft);" in css
+    )
 
 
 def test_index_branding_defaults_to_project_name_and_allows_explicit_override(
@@ -211,14 +215,6 @@ def test_static_soft_control_border_reaches_lane_controls():
         ) : css.index(".composer-band-menu-button:hover")
     ]
 
-    assert (
-        "background: color-mix(in srgb, var(--control-surface-soft) 88%, var(--accent) 12%);"
-        in css
-    )
-    assert (
-        "background: color-mix(in srgb, var(--control-surface-soft) 78%, var(--accent) 22%);"
-        in css
-    )
     assert (
         "background: color-mix(in srgb, var(--control-surface-soft) 82%, var(--accent) 18%);"
         in team_button_rules

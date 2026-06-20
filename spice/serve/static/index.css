@@ -115,9 +115,12 @@ button.primary:hover {
   color: var(--fg);
 }
 .spice-menu-button {
+  --spice-menu-accent: var(--accent-strong);
+  --spice-menu-stamp-surface: var(--bg);
+  --spice-menu-surface: color-mix(in srgb, var(--control-surface-soft) 88%, var(--accent) 12%);
   align-items: center;
-  background: color-mix(in srgb, var(--control-surface-soft) 88%, var(--accent) 12%);
-  border-color: var(--control-border-soft);
+  background: var(--spice-menu-surface);
+  border: 1px solid color-mix(in srgb, var(--spice-menu-accent) 42%, var(--spice-menu-surface));
   border-radius: var(--pill-radius);
   box-shadow: var(--control-inset-soft);
   color: color-mix(in srgb, var(--accent-strong) 76%, var(--fg));
@@ -134,31 +137,43 @@ button.primary:hover {
 }
 .spice-menu-button:hover,
 .spice-menu-button:focus-visible {
-  background: color-mix(in srgb, var(--control-surface-soft) 78%, var(--accent) 22%);
-  border-color: var(--control-border-soft-hover);
+  --spice-menu-surface: color-mix(in srgb, var(--control-surface-soft) 78%, var(--accent) 22%);
+  background: var(--spice-menu-surface);
+  border-color: color-mix(in srgb, var(--spice-menu-accent) 58%, var(--spice-menu-surface));
   box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-button:active {
-  background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);
-  border-color: var(--border-soft);
+  --spice-menu-surface: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);
+  background: var(--spice-menu-surface);
+  border-color: color-mix(in srgb, var(--spice-menu-accent) 70%, var(--spice-menu-surface));
   box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-button[aria-expanded="true"] {
-  background: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);
-  border-color: var(--border-soft);
+  --spice-menu-surface: color-mix(in srgb, var(--control) 76%, var(--accent) 24%);
+  background: var(--spice-menu-surface);
+  border-color: color-mix(in srgb, var(--spice-menu-accent) 70%, var(--spice-menu-surface));
   box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-icon {
+  align-items: center;
+  background: var(--spice-menu-stamp-surface);
+  border-radius: var(--pill-radius);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--spice-menu-accent) 24%, transparent);
+  display: inline-grid;
   font-size: 15px;
+  height: 22px;
+  justify-content: center;
   line-height: 1;
+  min-width: 30px;
+  padding: 0 6px;
 }
 .spice-menu-label {
   color: currentColor;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 17px;
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
@@ -783,27 +798,32 @@ button.primary:hover {
 
 /* ---- spice context menu ---- */
 .spice-menu-button--fast {
-  background: color-mix(in srgb, var(--control) 82%, var(--say-accent) 18%);
-  border-color: var(--control-border-soft);
+  --spice-menu-accent: var(--say-accent);
+  --spice-menu-surface: color-mix(in srgb, var(--control) 82%, var(--say-accent) 18%);
+  background: var(--spice-menu-surface);
+  border: 1px solid color-mix(in srgb, var(--spice-menu-accent) 42%, var(--spice-menu-surface));
   box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-button--fast:hover,
 .spice-menu-button--fast:focus-visible {
-  background: color-mix(in srgb, var(--control) 72%, var(--say-accent) 28%);
-  border-color: var(--control-border-soft-hover);
+  --spice-menu-surface: color-mix(in srgb, var(--control) 72%, var(--say-accent) 28%);
+  background: var(--spice-menu-surface);
+  border-color: color-mix(in srgb, var(--spice-menu-accent) 58%, var(--spice-menu-surface));
   box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-button--fast:active {
-  background: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);
-  border-color: var(--border-soft);
+  --spice-menu-surface: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);
+  background: var(--spice-menu-surface);
+  border-color: color-mix(in srgb, var(--spice-menu-accent) 70%, var(--spice-menu-surface));
   box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
 .spice-menu-button--fast[aria-expanded="true"] {
-  background: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);
-  border-color: var(--border-soft);
+  --spice-menu-surface: color-mix(in srgb, var(--control) 64%, var(--say-accent) 36%);
+  background: var(--spice-menu-surface);
+  border-color: color-mix(in srgb, var(--spice-menu-accent) 70%, var(--spice-menu-surface));
   box-shadow: var(--control-inset-soft);
   color: var(--fg);
 }
