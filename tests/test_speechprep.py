@@ -161,7 +161,7 @@ def test_natural_clip_end_pause_preserves_final_tail():
     ]
 
 
-def test_speech_queue_clears_global_pending_backlog_when_behind():
+def test_speech_queue_preserves_first_pending_when_coalescing_backlog():
     assert _speech_queue_requests_for_entries(
         [
             {"lane": "a", "key": "active-key", "text": "active"},
@@ -169,7 +169,7 @@ def test_speech_queue_clears_global_pending_backlog_when_behind():
             {"lane": "a", "key": "alpha-key", "text": "alpha"},
             {"lane": "b", "key": "current-key", "text": "current"},
         ]
-    ) == ["active", "current"]
+    ) == ["active", "bravo", "current"]
 
 
 def test_stop_clears_pending_queue_across_lanes():
@@ -189,11 +189,7 @@ def test_speech_burst_never_overlaps_audio():
 
 
 def test_initial_payload_speech_keeps_startup_ack_from_becoming_silent_baseline():
-    assert _initial_payload_speech_keys() == [
-        "recent-refresh-ack",
-        "startup-race-ack",
-        "fresh-ack",
-    ]
+    assert _initial_payload_speech_keys() == ["startup-race-ack", "fresh-ack"]
 
 
 def test_automatic_speech_tracks_latest_played_timestamp_per_agent():
@@ -809,8 +805,7 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(path, "utf8"), context);
 const lane = { speechPrimeStartedAt: Date.parse("2026-06-17T04:00:00.000Z") };
 const messages = [
-  { key: "stale-history", timestamp: "2026-06-17T03:58:59.999Z" },
-  { key: "recent-refresh-ack", timestamp: "2026-06-17T03:59:11.000Z" },
+  { key: "stale-history", timestamp: "2026-06-17T03:59:54.999Z" },
   { key: "startup-race-ack", timestamp: "2026-06-17T03:59:55.000Z" },
   { key: "fresh-ack", timestamp: "2026-06-17T04:00:00.000Z" },
   { key: "invalid-time", timestamp: "not-a-date" },

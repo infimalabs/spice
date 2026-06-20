@@ -304,8 +304,7 @@ function speakUtcDateTime(year, month, day, hour, minute, second) {
 }
 
 function enqueueSpeech(lane, messageKey, texts, targetLane = lane) {
-  if (speechQueue.length >= speechQueueBacklogClearThreshold)
-    speechQueue.length = 0;
+  preserveFirstPendingSpeechWhenBacklogged();
   speechQueue.push({
     lane,
     targetLane,
@@ -315,6 +314,13 @@ function enqueueSpeech(lane, messageKey, texts, targetLane = lane) {
     epoch: speechEpoch,
   });
   drainSpeechQueue();
+}
+
+function preserveFirstPendingSpeechWhenBacklogged() {
+  if (speechQueue.length < speechQueueBacklogClearThreshold) return;
+  const firstPending = speechQueue[0];
+  speechQueue.length = 0;
+  if (firstPending) speechQueue.push(firstPending);
 }
 
 function toggleMessageSpeech(lane, item, targetLane = lane) {
