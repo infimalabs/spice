@@ -41,16 +41,17 @@ def task_filter_inventory() -> dict[str, Any]:
         rows = []
     counts: dict[str, int] = {}
     waiting_count = 0
+    oops_count = 0
     for row in rows:
         project = str(row.get("project") or "")
         raw_tags = row.get("tags") or []
         tags = {raw_tags} if isinstance(raw_tags, str) else set(raw_tags)
         is_oops = project == task_config.OOPS_PROJECT or "oops" in tags
-        if is_oops and not row.get("start"):
+        if is_oops:
+            oops_count += 1
             continue
         if str(row.get("status") or "pending") == "waiting":
-            if not is_oops:
-                waiting_count += 1
+            waiting_count += 1
             continue
         if project:
             counts[project] = counts.get(project, 0) + 1
@@ -75,6 +76,13 @@ def task_filter_inventory() -> dict[str, Any]:
             "openTaskCount": waiting_count,
             "filters": [],
             "waitingTaskCount": waiting_count,
+        }
+    if oops_count:
+        stems["oops"] = {
+            "name": "oops",
+            "openTaskCount": oops_count,
+            "filters": [],
+            "oopsTaskCount": oops_count,
         }
     return {
         "filters": filters,

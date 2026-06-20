@@ -820,6 +820,11 @@ function taskFilterStemPillTitle(label, openTaskCount, drainability) {
       openTaskCount +
       " waiting/deferred tasks; wake with `spice task wake <handle>`"
     );
+  if (label === "oops")
+    return (
+      openTaskCount +
+      " oops/deferred triage tasks; inspect with `spice task oops`"
+    );
   return (
     openTaskCount +
     " open across " +

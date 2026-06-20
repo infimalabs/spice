@@ -27,5 +27,7 @@ def test_global_filter_pills_show_waiting_tasks_with_distinct_system_style():
     )
     assert 'label === "waiting"' in app_lanes
     assert "spice task wake <handle>" in app_lanes
+    assert 'label === "oops"' in app_lanes
+    assert "spice task oops" in app_lanes
     assert "border-style: dotted;" in waiting_rule
     assert "color: var(--say-accent);" in waiting_rule
