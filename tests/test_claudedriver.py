@@ -89,6 +89,21 @@ def test_claude_command_starts_headless_stream_json_with_effort(tmp_path):
     assert command[-1] == "follow the skill"
 
 
+def test_claude_command_appends_skill_to_system_prompt(tmp_path):
+    skill_link = "[$spice](.agents/skills/spice/SKILL.md)"
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path,
+        prompt=skill_link,
+        model="haiku",
+    )
+    # The skill rides Claude's system prompt every launch, carrying the same
+    # relpath link as the trailing prompt — not just the bootstrap turn.
+    assert command[command.index("--append-system-prompt") + 1] == skill_link
+    # It is a flag value, not the trailing prompt the agent acts on.
+    assert command[-1] == skill_link
+    assert command.index("--append-system-prompt") < len(command) - 1
+
+
 def test_claude_command_registers_playwright_mcp_server(tmp_path):
     command = CLAUDE_DRIVER.build_exec_command(
         repo_root=tmp_path,
