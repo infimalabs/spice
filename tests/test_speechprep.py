@@ -188,8 +188,16 @@ def test_speech_burst_never_overlaps_audio():
     assert _burst_max_concurrent_audio() == 1
 
 
-def test_initial_payload_speech_keeps_fresh_ack_from_becoming_silent_baseline():
-    assert _initial_payload_speech_keys() == ["fresh-ack"]
+def test_initial_payload_speech_keeps_startup_ack_from_becoming_silent_baseline():
+    assert _initial_payload_speech_keys() == ["startup-race-ack", "fresh-ack"]
+
+
+def test_automatic_speech_tracks_latest_played_timestamp_per_agent():
+    assert _automatic_speech_cursor_requests() == [
+        "latest",
+        "other agent older",
+        "newer",
+    ]
 
 
 def _prepare_speech(text: str) -> str:
@@ -793,7 +801,8 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(path, "utf8"), context);
 const lane = { speechPrimeStartedAt: Date.parse("2026-06-17T04:00:00.000Z") };
 const messages = [
-  { key: "stale-ack", timestamp: "2026-06-17T03:59:59.999Z" },
+  { key: "stale-history", timestamp: "2026-06-17T03:59:54.999Z" },
+  { key: "startup-race-ack", timestamp: "2026-06-17T03:59:55.000Z" },
   { key: "fresh-ack", timestamp: "2026-06-17T04:00:00.000Z" },
   { key: "invalid-time", timestamp: "not-a-date" },
 ];
@@ -813,6 +822,108 @@ process.stdout.write(JSON.stringify(
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
     return json.loads(result.stdout)
+
+
+def _automatic_speech_cursor_requests() -> list[str]:
+    script = """
+const fs = require("fs");
+const vm = require("vm");
+const path = process.argv[1];
+const requests = [];
+
+class FakeAudio {
+  constructor() {
+    this.listeners = {};
+    this.ended = false;
+  }
+  addEventListener(name, callback) {
+    this.listeners[name] = callback;
+  }
+  removeEventListener(name) {
+    delete this.listeners[name];
+  }
+  play() {
+    queueMicrotask(() => {
+      this.ended = true;
+      if (this.listeners.ended) this.listeners.ended();
+    });
+    return Promise.resolve();
+  }
+  pause() {
+    if (this.listeners.pause) this.listeners.pause();
+  }
+}
+
+const context = {
+  Blob: class {},
+  Audio: FakeAudio,
+  URL: {
+    createObjectURL: () => "blob:audio",
+    revokeObjectURL: () => {},
+  },
+  document: { querySelectorAll: () => [] },
+  fetch: async (url, options) => {
+    requests.push(JSON.parse(options.body).text);
+    return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+  },
+  isPresenceMessage: () => false,
+  laneEffectiveSpeechMode: () => "speak",
+  laneGroupHost: (lane) => lane,
+  queueMicrotask,
+  setTimeout,
+  targetApi: (targetId, suffix) => targetId + suffix,
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(path, "utf8"), context);
+
+(async () => {
+  const lane = {
+    targetId: "lane-a",
+    targetThreadId: "agent-a",
+    speechAbortVersion: 0,
+    spokenMessageKeys: new Set(),
+    latestSpokenMessageAtByAgent: new Map(),
+  };
+  context.queueSpeechForMessages(lane, [
+    {
+      key: "latest",
+      timestamp: "2026-06-17T04:00:10.000Z",
+      threadId: "agent-a",
+      ack_utterances: ["latest"],
+    },
+  ]);
+  context.queueSpeechForMessages(lane, [
+    {
+      key: "older",
+      timestamp: "2026-06-17T04:00:09.000Z",
+      threadId: "agent-a",
+      ack_utterances: ["older"],
+    },
+  ]);
+  context.queueSpeechForMessages(lane, [
+    {
+      key: "other-agent",
+      timestamp: "2026-06-17T04:00:09.000Z",
+      threadId: "agent-b",
+      ack_utterances: ["other agent older"],
+    },
+  ]);
+  context.queueSpeechForMessages(lane, [
+    {
+      key: "newer",
+      timestamp: "2026-06-17T04:00:11.000Z",
+      threadId: "agent-a",
+      ack_utterances: ["newer"],
+    },
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  process.stdout.write(JSON.stringify(requests));
+})().catch((error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});
+"""
+    return _run_audio_script(script, "node automatic speech cursor failed")
 
 
 def _stop_clears_pending_across_lanes() -> list[str]:

@@ -427,6 +427,7 @@ function laneStreamState(target) {
     missingAckContextKeys: new Set(),
     recentSentAckKeys: [],
     spokenMessageKeys: new Set(),
+    latestSpokenMessageAtByAgent: new Map(),
     speechPrimeStartedAt: Date.now(),
     speechPrimed: false,
     speechAbortVersion: 0,

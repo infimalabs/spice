@@ -43,12 +43,57 @@ function queueSpeechForMessages(lane, messages) {
   const host = laneGroupHost(lane);
   if (laneEffectiveSpeechMode(host) === "quiet") return;
   for (const item of [...messages].reverse()) {
+    if (!item.key) continue;
     if (isPresenceMessage(item)) continue;
     if (lane.spokenMessageKeys.has(item.key)) continue;
-    lane.spokenMessageKeys.add(item.key);
+    const timestamp = automaticSpeechMessageTimestamp(item);
+    if (messageIsBehindAutomaticSpeechCursor(host, item, timestamp)) continue;
     const texts = automaticSpeechUtterances(host, item);
-    if (texts.length) enqueueSpeech(lane, item.key, texts);
+    if (!texts.length) continue;
+    lane.spokenMessageKeys.add(item.key);
+    recordAutomaticSpeechCursor(host, item, timestamp);
+    enqueueSpeech(lane, item.key, texts);
   }
+}
+
+function automaticSpeechMessageTimestamp(item) {
+  const timestamp = Date.parse(item.timestamp || "");
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function messageIsBehindAutomaticSpeechCursor(lane, item, timestamp) {
+  if (timestamp === null) return false;
+  const agentKey = automaticSpeechAgentKey(lane, item);
+  if (!agentKey) return false;
+  const cursors = automaticSpeechCursorMap(lane);
+  const latest = cursors.get(agentKey);
+  return Number.isFinite(latest) && timestamp < latest;
+}
+
+function recordAutomaticSpeechCursor(lane, item, timestamp) {
+  if (timestamp === null) return;
+  const agentKey = automaticSpeechAgentKey(lane, item);
+  if (!agentKey) return;
+  const cursors = automaticSpeechCursorMap(lane);
+  const latest = cursors.get(agentKey);
+  if (!Number.isFinite(latest) || timestamp > latest) cursors.set(agentKey, timestamp);
+}
+
+function automaticSpeechCursorMap(lane) {
+  if (!lane.latestSpokenMessageAtByAgent)
+    lane.latestSpokenMessageAtByAgent = new Map();
+  return lane.latestSpokenMessageAtByAgent;
+}
+
+function automaticSpeechAgentKey(lane, item) {
+  return (
+    item.threadId ||
+    item.producerTargetId ||
+    lane.targetThreadId ||
+    lane.activeThreadId ||
+    lane.targetId ||
+    ""
+  );
 }
 
 function primeSpeechBoundary(lane) {
