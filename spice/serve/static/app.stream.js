@@ -12,6 +12,8 @@ let liveBusReconnectTimer = null;
 let liveBusReconnectAttempt = 0;
 let liveBusLastInboundAt = 0;
 let liveBusHasConnected = false;
+// Covers the short lane creation/subscription race without replaying old history.
+const initialSpeechStartupGraceMs = 5 * 1000;
 
 function liveBusUrl() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -284,7 +286,9 @@ function initialPayloadSpeechMessages(lane, messages) {
 }
 
 function messageIsFreshForInitialSpeech(lane, item) {
-  const boundary = Number(lane.speechPrimeStartedAt) || Date.now();
+  const boundary =
+    (Number(lane.speechPrimeStartedAt) || Date.now()) -
+    initialSpeechStartupGraceMs;
   const timestamp = Date.parse(item.timestamp || "");
   return Number.isFinite(timestamp) && timestamp >= boundary;
 }

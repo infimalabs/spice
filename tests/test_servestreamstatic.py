@@ -682,6 +682,7 @@ def test_static_stream_queues_fresh_initial_payload_before_silent_prime():
         "  }"
     ) in apply_body
     assert "function messageIsFreshForInitialSpeech" in app_stream
+    assert "const initialSpeechStartupGraceMs = 5 * 1000;" in app_stream
     assert "timestamp >= boundary" in app_stream
 
 
