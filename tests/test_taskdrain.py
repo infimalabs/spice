@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import DRIVER
+from spice.serve.teamids import thread_actor_id
 from spice.serve.teams import ServeTeamStore, TeamConfig
 from spice.tasks import config, identity, ops
 
@@ -18,6 +19,8 @@ pytestmark = pytest.mark.skipif(
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 PEER_ACTOR = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+ACTOR_A_MEMBER = thread_actor_id(ACTOR_A)
+PEER_ACTOR_MEMBER = thread_actor_id(PEER_ACTOR)
 
 
 @pytest.fixture
@@ -41,7 +44,8 @@ def test_drain_phase_boundary_sees_configured_assignable_stem(task_repo, monkeyp
     _run(task_repo, "git", "add", "pyproject.toml")
     _run(task_repo, "git", "commit", "-m", "configure paintball stem")
     ServeTeamStore().create_team(
-        members=[ACTOR_A, PEER_ACTOR], config=TeamConfig(lifetime="Drain")
+        members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER],
+        config=TeamConfig(lifetime="Drain"),
     )
     handle = ops.add(
         "Drain sees configured stem",

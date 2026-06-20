@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import DRIVER
+from spice.serve.teamids import thread_actor_id
 from spice.serve.teams import TASK_FILTER_SOURCE_AUTO_CREATE, ServeTeamStore, TeamConfig
 from spice.tasks import config, identity, ops
 
@@ -18,6 +19,8 @@ pytestmark = pytest.mark.skipif(
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 PEER_ACTOR = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+ACTOR_A_MEMBER = thread_actor_id(ACTOR_A)
+PEER_ACTOR_MEMBER = thread_actor_id(PEER_ACTOR)
 
 
 @pytest.fixture
@@ -38,7 +41,8 @@ def test_drive_replace_path_preserves_auto_create_filter_for_gc(task_repo, monke
     assert task_repo.is_dir()
     store = ServeTeamStore()
     team = store.create_team(
-        members=[ACTOR_A, PEER_ACTOR], config=TeamConfig(lifetime="Drive")
+        members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER],
+        config=TeamConfig(lifetime="Drive"),
     )
     handle = ops.add(
         "Drive replace preserves provenance",

@@ -10,6 +10,7 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
+from spice.serve.teamids import thread_actor_id
 from spice.serve.teams import (
     TASK_FILTER_SOURCE_AUTO_CREATE,
     ServeTeamStore,
@@ -22,6 +23,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ACTOR_MEMBER = thread_actor_id(ACTOR)
 
 
 @pytest.fixture
@@ -131,7 +133,10 @@ def test_add_batch_can_mark_cli_creation_surface(task_repo):
 
 def test_add_batch_results_update_drive_task_filter_with_visible_route(task_repo):
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR], config=TeamConfig(lifetime="Drive"))
+    team = store.create_team(
+        members=[ACTOR_MEMBER],
+        config=TeamConfig(lifetime="Drive"),
+    )
 
     results = ops.add_batch_results(
         [

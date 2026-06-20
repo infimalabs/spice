@@ -19,6 +19,7 @@ from spice.serve.teams import (
     ServeTeamStore,
     TeamConfig,
 )
+from spice.serve.teamids import thread_actor_id
 from spice.tasks import alloc, config, gitsync, identity, lanes, ops, render, tw
 
 pytestmark = pytest.mark.skipif(
@@ -27,6 +28,8 @@ pytestmark = pytest.mark.skipif(
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 PEER_ACTOR = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+ACTOR_A_MEMBER = thread_actor_id(ACTOR_A)
+PEER_ACTOR_MEMBER = thread_actor_id(PEER_ACTOR)
 
 
 @pytest.fixture
@@ -159,7 +162,9 @@ def test_drive_wake_auto_subscribes_woken_project(task_repo):
         acceptance=["drive wake subscribes delayed work"],
     )
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drive"))
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drive")
+    )
     before = store.global_revision()
 
     output = ops.wake([handle])
@@ -176,7 +181,9 @@ def test_drive_wake_auto_subscribes_woken_project(task_repo):
 
 def test_drain_wake_auto_subscribes_woken_project(task_repo):
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drain"))
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drain")
+    )
     handle = ops.add(
         "Drain wakes delayed task",
         project="task.unit",
@@ -200,7 +207,9 @@ def test_drain_wake_auto_subscribes_woken_project(task_repo):
 
 def test_steer_wake_keeps_preparation_only_boundary(task_repo):
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Steer"))
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Steer")
+    )
     handle = ops.add(
         "Steer wakes delayed task",
         project="task.unit",
@@ -401,7 +410,7 @@ def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
     assert task_repo.is_dir()
     store = ServeTeamStore()
     team = store.create_team(
-        members=[ACTOR_A, PEER_ACTOR], config=TeamConfig(lifetime="Steer")
+        members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER], config=TeamConfig(lifetime="Steer")
     )
     handle = ops.add(
         "Manual claim out of lane",
@@ -431,7 +440,7 @@ def test_task_next_auto_claim_does_not_rewrite_team_filters(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
     team = store.create_team(
-        members=[ACTOR_A],
+        members=[ACTOR_A_MEMBER],
         config=TeamConfig(lifetime="Steer", task_filters=("task.unit",)),
     )
     handle = ops.add(
@@ -456,7 +465,7 @@ def test_task_next_auto_claim_does_not_rewrite_team_filters(task_repo):
 def test_manual_claim_skips_private_project_subscription(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A])
+    team = store.create_team(members=[ACTOR_A_MEMBER])
     handle = ops.add(
         "Private manual claim",
         priority="medium",
@@ -491,7 +500,9 @@ def test_manual_claim_skips_subscription_for_teamless_actor(task_repo):
 def test_manual_claim_skips_oops_subscription(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Steer"))
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Steer")
+    )
     created = ops.oops("Manual oops claim target", description="triage only")
     handle = created.split()[1]
     before = store.global_revision()
@@ -506,7 +517,7 @@ def test_manual_claim_skips_oops_subscription(task_repo):
 def test_final_review_completion_gcs_auto_claim_filter(task_repo, monkeypatch):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A, PEER_ACTOR])
+    team = store.create_team(members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER])
     handle = ops.add(
         "Review keeps project subscribed",
         project="task.unit",
@@ -539,7 +550,7 @@ def test_empty_project_gc_removes_auto_sources_but_preserves_manual(
     assert task_repo.is_dir()
     store = ServeTeamStore()
     team = store.create_team(
-        members=[ACTOR_A, PEER_ACTOR],
+        members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER],
         config=TeamConfig(task_filters=("task.unit",)),
     )
     handle = ops.add(
@@ -576,7 +587,7 @@ def test_delete_gcs_empty_auto_create_filter_after_project_subtree_empties(
 ):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A])
+    team = store.create_team(members=[ACTOR_A_MEMBER])
     store.add_task_filter(
         team.team_id, "task.unit", source=TASK_FILTER_SOURCE_AUTO_CREATE
     )
@@ -611,7 +622,9 @@ def test_delete_gcs_empty_auto_create_filter_after_project_subtree_empties(
 def test_drive_task_creation_subscribes_project_idempotently(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drive"))
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drive")
+    )
 
     first = ops.add(
         "Drive creates first task",
@@ -640,7 +653,9 @@ def test_drive_task_creation_subscribes_project_idempotently(task_repo):
 def test_steer_task_creation_keeps_manual_subscription_boundary(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Steer"))
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Steer")
+    )
     before = store.global_revision()
 
     handle = ops.add(
@@ -658,7 +673,9 @@ def test_steer_task_creation_keeps_manual_subscription_boundary(task_repo):
 def test_drain_task_creation_uses_effective_visibility_not_stored_filter(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drain"))
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drain")
+    )
     before = store.global_revision()
 
     handle = ops.add(
@@ -716,10 +733,69 @@ def test_teamless_creator_scope_does_not_route_peer_public_tasks(
     assert store.current_team_for_agent(PEER_ACTOR) is None
 
 
+def test_explicit_thread_membership_routes_peer_review_through_status_and_next(
+    task_repo, monkeypatch
+):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    store.create_team(
+        members=[ACTOR_A_MEMBER],
+        config=TeamConfig(lifetime="Drive", task_filters=("serve.ui",)),
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    handle = ops.add(
+        "Peer serve review",
+        project="serve.ui",
+        priority="medium",
+        acceptance=["explicit thread membership routes serve reviews"],
+    )
+    ops.claim(handle)
+    ops.done(handle, validation=["implementation complete"])
+
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    status = render.render_status()
+    assigned = ops.next_task()
+
+    assert f"project:{ops.default_project(ACTOR_A)}" in status
+    assert f"origin_thread.is:{ACTOR_A}" in status
+    assert "project:serve.ui" in status
+    assert identity.render_handle(assigned or {}) == handle
+    assert assigned["phase"] == "review"
+    assert assigned["review_author"] == PEER_ACTOR
+    assert assigned["claim_by"] == ACTOR_A
+
+
+def test_explicit_thread_route_keeps_private_fallback_without_membership(task_repo):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    store.create_team(
+        members=[PEER_ACTOR_MEMBER],
+        config=TeamConfig(lifetime="Drive", task_filters=("serve.ui",)),
+    )
+    private = f"project:{ops.default_project(ACTOR_A)}"
+
+    route = lanes.team_route_for_actor(ACTOR_A)
+    status = render.render_status()
+    filter_line = next(
+        line for line in status.splitlines() if line.startswith("filter ")
+    )
+
+    assert ops.effective_route_filter_args(ACTOR_A, route) == [
+        "(",
+        private,
+        "or",
+        f"origin_thread.is:{ACTOR_A}",
+        ")",
+    ]
+    assert filter_line == f"filter ( {private} or origin_thread.is:{ACTOR_A} )"
+
+
 def test_drive_oops_creation_skips_subscription(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drive"))
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drive")
+    )
     before = store.global_revision()
 
     created = ops.oops("Drive oops creation", description="triage only")
@@ -735,7 +811,7 @@ def test_drive_create_allocate_review_and_gc_capstone(task_repo, monkeypatch):
     assert task_repo.is_dir()
     store = ServeTeamStore()
     team = store.create_team(
-        members=[ACTOR_A, PEER_ACTOR], config=TeamConfig(lifetime="Drive")
+        members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER], config=TeamConfig(lifetime="Drive")
     )
     handle = ops.add(
         "Drive capstone task",
@@ -774,8 +850,8 @@ def test_drive_create_allocate_review_and_gc_capstone(task_repo, monkeypatch):
 def test_drain_visibility_and_empty_steer_private_fail_closed(task_repo, monkeypatch):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drain"))
-    store.create_team(members=[PEER_ACTOR], config=TeamConfig(lifetime="Steer"))
+    store.create_team(members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drain"))
+    store.create_team(members=[PEER_ACTOR_MEMBER], config=TeamConfig(lifetime="Steer"))
     public = ops.add(
         "Drain-visible public task",
         project="serve.ui",
