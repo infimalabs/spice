@@ -1356,6 +1356,32 @@ def _candidate_rows(
     )
 
 
+def _unclaimed_actionable(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r for r in rows if not _is_oops(r) and not str(r.get("claim_by") or "")]
+
+
+def _claim_first(
+    candidates: list[dict[str, Any]],
+    actor: str,
+    claimed_rows: list[dict[str, Any]],
+    active_rows: list[dict[str, Any]],
+    *,
+    guard_unclaimed: bool,
+) -> dict[str, Any] | None:
+    from spice.tasks import alloc
+
+    for chosen in alloc.order(candidates, actor, claimed_rows, active_rows):
+        if not do_claim(
+            identity.uuid_of(chosen), actor, guard_unclaimed=guard_unclaimed
+        ):
+            # lost the race to a concurrent agent; fall through to the next one
+            continue
+        fresh = identity.resolve(identity.render_handle(chosen))
+        if str(fresh.get("claim_by") or "") == actor:
+            return fresh
+    return None
+
+
 def next_task() -> dict[str, Any] | None:
     from spice.tasks import alloc, lanes
 
@@ -1369,9 +1395,8 @@ def next_task() -> dict[str, Any] | None:
     overrides = alloc.actor_overrides(actor, route)
     lane_filter = lanes.filter_args(route)
     include_origin = _route_includes_origin(route)
-    repair_candidates = [
-        r
-        for r in tw.export(
+    repair_candidates = _unclaimed_actionable(
+        tw.export(
             [
                 "status:pending",
                 "+ACTIVE",
@@ -1379,21 +1404,16 @@ def next_task() -> dict[str, Any] | None:
             ],
             overrides=overrides,
         )
-        if not _is_oops(r) and not str(r.get("claim_by") or "")
-    ]
+    )
     if repair_candidates:
-        for chosen in alloc.order(repair_candidates, actor, [], active_rows):
-            do_claim(identity.uuid_of(chosen), actor, guard_unclaimed=False)
-            fresh = identity.resolve(identity.render_handle(chosen))
-            if str(fresh.get("claim_by") or "") == actor:
-                return fresh
-    candidates = [
-        r
-        for r in _candidate_rows(
-            actor, lane_filter, overrides, include_origin=include_origin
+        repaired = _claim_first(
+            repair_candidates, actor, [], active_rows, guard_unclaimed=False
         )
-        if not _is_oops(r) and not str(r.get("claim_by") or "")
-    ]
+        if repaired is not None:
+            return repaired
+    candidates = _unclaimed_actionable(
+        _candidate_rows(actor, lane_filter, overrides, include_origin=include_origin)
+    )
     if not candidates:
         return None
     # We intend to claim: bring the tree to the current baseline once before
@@ -1401,11 +1421,6 @@ def next_task() -> dict[str, Any] | None:
     for note_text in gitsync.prepare_for_claim().notes:
         print(f"task: {note_text}")
     claimed_rows = tw.export([f"claim_by.is:{actor}"])
-    for chosen in alloc.order(candidates, actor, claimed_rows, active_rows):
-        if not do_claim(identity.uuid_of(chosen), actor, guard_unclaimed=True):
-            continue
-        fresh = identity.resolve(identity.render_handle(chosen))
-        if str(fresh.get("claim_by") or "") == actor:
-            return fresh
-        # lost the race to a concurrent agent; fall through to the next one
-    return None
+    return _claim_first(
+        candidates, actor, claimed_rows, active_rows, guard_unclaimed=True
+    )
