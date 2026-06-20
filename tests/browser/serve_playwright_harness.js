@@ -274,13 +274,14 @@ async function serveBrowserContextOptions(options = {}) {
 
 async function withServePage(options, callback) {
   const server = await startServe(options);
-  const browser = await chromium.launch(options.launchOptions || {});
-  const context = await browser.newContext(
-    await serveBrowserContextOptions(options),
-  );
-  const page = await context.newPage();
-  const browserErrors = collectBrowserErrors(page, options);
+  let browser = null;
   try {
+    browser = await chromium.launch(options.launchOptions || {});
+    const context = await browser.newContext(
+      await serveBrowserContextOptions(options),
+    );
+    const page = await context.newPage();
+    const browserErrors = collectBrowserErrors(page, options);
     const targetPath = options.path || "/";
     const url = new URL(targetPath, server.url).toString();
     await page.goto(url, {
@@ -298,7 +299,7 @@ async function withServePage(options, callback) {
     assertNoBrowserErrors(browserErrors);
     return result;
   } finally {
-    await browser.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
     await server.stop();
   }
 }

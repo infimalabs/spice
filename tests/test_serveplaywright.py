@@ -37,6 +37,24 @@ def test_serve_playwright_harness_loads_shared_agent_context() -> None:
     assert "browser.newContext(options.contextOptions || {})" not in harness
 
 
+def test_serve_playwright_harness_cleans_up_when_context_creation_fails() -> None:
+    harness = (ROOT / "browser" / "serve_playwright_harness.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "let browser = null;" in harness
+    assert "browser = await chromium.launch" in harness
+    assert "await serveBrowserContextOptions(options)" in harness
+    assert "if (browser) await browser.close().catch(() => {});" in harness
+    assert "await server.stop();" in harness
+    assert harness.index("let browser = null;") < harness.index(
+        "await serveBrowserContextOptions(options)"
+    )
+    assert harness.index("await serveBrowserContextOptions(options)") < harness.index(
+        "finally"
+    )
+
+
 def test_serve_playwright_harness_rejects_per_smoke_color_scheme() -> None:
     harness = (ROOT / "browser" / "serve_playwright_harness.js").read_text(
         encoding="utf-8"
