@@ -96,13 +96,14 @@ def test_header_spice_menu_button_uses_cutout_pepper_stamp():
         in button_rules
     )
     assert "height: 30px;" in button_rules
+    assert "padding: 0 8px 0 2px;" in button_rules
     assert "background: var(--spice-menu-stamp-surface);" in icon_rules
     assert "border-radius: var(--pill-radius);" in icon_rules
     assert (
-        "box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--spice-menu-accent) 24%, transparent);"
+        "box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--spice-menu-accent) 12%, transparent);"
         in icon_rules
     )
-    assert "height: 22px;" in icon_rules
+    assert "height: 25px;" in icon_rules
     assert "min-width: 30px;" in icon_rules
     assert "padding: 0 6px;" in icon_rules
     assert "font-size: 16px;" in label_rules
