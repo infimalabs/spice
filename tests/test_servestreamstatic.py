@@ -552,10 +552,6 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     badge_css_rule = messages_css[
         badge_css_start : messages_css.index("}", badge_css_start)
     ]
-    badge_label_start = messages_css.index(".badge-label {")
-    badge_label_rule = messages_css[
-        badge_label_start : messages_css.index("}", badge_label_start)
-    ]
     badge_count_start = messages_css.index(".badge-count {")
     badge_count_rule = messages_css[
         badge_count_start : messages_css.index("}", badge_count_start)
@@ -606,22 +602,16 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     )
     assert "gap: 4px;" in badge_css_rule
     assert "padding: 2px 6px;" in badge_css_rule
-    assert "line-height: 16px;" in badge_label_rule
+    assert ".badge-label {" not in messages_css
     assert badge_count_rule == (
         ".badge-count {\n"
-        "  align-items: center;\n"
         "  background: var(--message-badge-surface);\n"
         "  border: 0;\n"
         "  border-radius: var(--pill-radius);\n"
         "  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--message-badge-accent) 24%, transparent);\n"
         "  color: var(--message-badge-accent);\n"
-        "  display: inline-flex;\n"
         "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;\n"
         "  font-size: 9px;\n"
-        "  height: 16px;\n"
-        "  justify-content: center;\n"
-        "  line-height: 12px;\n"
-        "  min-width: 16px;\n"
         "  padding: 0 5px;\n"
     )
     assert "--message-badge-accent: var(--final-accent);" in final_badge_rule
