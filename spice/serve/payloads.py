@@ -274,25 +274,37 @@ def serve_agent_identity_payload(
         "renewal": _serve_renewal_identity(store, actor),
     }
     if store is not None:
-        renewal = identity["renewal"]
-        store.record_agent_identity(
-            actor_id=actor,
-            target_id=identity["target"]["id"],
-            thread_id=bound_thread,
-            actual_driver=identity["driver"]["actual"],
-            actual_model=actual_launch["model"],
-            actual_effort=actual_launch["effort"],
-            actual_service_tier=actual_launch["serviceTier"],
-            desired_driver=identity["driver"]["desired"],
-            desired_model=identity["launch"]["desired"]["model"],
-            desired_effort=identity["launch"]["desired"]["effort"],
-            transcript_owner=identity["driver"]["transcriptOwner"],
-            renewal_state=str(renewal.get("state") or ""),
-            renewal_ancestor_thread_id=str(renewal.get("ancestorThreadId") or ""),
-            renewal_successor_thread_id=str(renewal.get("successorThreadId") or ""),
-            renewal_revision=int(renewal.get("revision") or 0),
+        _record_serve_agent_identity(
+            store, identity, actor, bound_thread, actual_launch
         )
     return identity
+
+
+def _record_serve_agent_identity(
+    store: ServeTeamStore,
+    identity: dict[str, Any],
+    actor: str,
+    bound_thread: str,
+    actual_launch: dict[str, str],
+) -> None:
+    renewal = identity["renewal"]
+    store.record_agent_identity(
+        actor_id=actor,
+        target_id=identity["target"]["id"],
+        thread_id=bound_thread,
+        actual_driver=identity["driver"]["actual"],
+        actual_model=actual_launch["model"],
+        actual_effort=actual_launch["effort"],
+        actual_service_tier=actual_launch["serviceTier"],
+        desired_driver=identity["driver"]["desired"],
+        desired_model=identity["launch"]["desired"]["model"],
+        desired_effort=identity["launch"]["desired"]["effort"],
+        transcript_owner=identity["driver"]["transcriptOwner"],
+        renewal_state=str(renewal.get("state") or ""),
+        renewal_ancestor_thread_id=str(renewal.get("ancestorThreadId") or ""),
+        renewal_successor_thread_id=str(renewal.get("successorThreadId") or ""),
+        renewal_revision=int(renewal.get("revision") or 0),
+    )
 
 
 def renewal_intent_for_target(
@@ -864,105 +876,150 @@ def _status_line_payload_from_status(
 def work_trees_payload(state: Any) -> dict[str, Any]:
     targets = state.worktree_targets()
     inventory = task_filter_inventory()
-    work_trees = []
-    for target in targets:
-        thread_id = resolve_thread_id_for_target(state, target) or ""
-        pending_identity = pending_inbox_identity_payload(target.repo_root)
-        pending = int(pending_identity["pendingInboxCount"])
-        predecessor_actor = team_actor_for_target(state.team_store, target, thread_id)
-        renew_intent = bool(
-            thread_id
-            and predecessor_actor
-            and state.team_store.agent_renewal_active(predecessor_actor)
-        )
-        if renew_intent:
-            serve_agent_identity_payload(
-                target,
-                thread_id,
-                actor_id=predecessor_actor,
-                store=state.team_store,
-            )
-        agent_ensure = ensure_agent_for_pending_inbox(
-            target,
-            pending,
-            attempt_cache=state.pending_agent_ensure_attempts,
-            force_new=renew_intent,
-        )
-        ensured_thread_id = record_started_renewal_from_ensure(
-            state.team_store,
-            predecessor_agent_id=predecessor_actor,
-            agent_ensure=agent_ensure,
-        )
-        if ensured_thread_id:
-            thread_id = ensured_thread_id
-        pending_identity = pending_inbox_identity_payload(target.repo_root)
-        pending = int(pending_identity["pendingInboxCount"])
-        status = agent_status(target.repo_root)
-        binding_error = agent_binding_error(target.repo_root, status)
-        binding_status = _binding_status(thread_id, binding_error)
-        team_facts = team_facts_for_target(state.team_store, target, thread_id)
-        team_identity = team_identity_payload(team_facts)
-        agent_name = _agent_name_for_target(target)
-        renewal_intent = (
-            renewal_intent_for_actor(state.team_store, predecessor_actor)
-            if renew_intent and predecessor_actor
-            else renewal_intent_for_target(state.team_store, target, thread_id)
-        )
-        items, error, transcript = target_activity_items(target, thread_id)
-        transcript_owner = transcript.owner_driver.name if transcript else ""
-        serve_identity = serve_agent_identity_payload(
+    return {
+        "workTrees": [
+            _work_tree_payload(state, target, inventory) for target in targets
+        ],
+        "defaultTargetId": targets[0].id if targets else "",
+        "taskFilterInventory": inventory,
+    }
+
+
+def _work_tree_payload(
+    state: Any,
+    target: WorktreeTarget,
+    inventory: dict[str, Any],
+) -> dict[str, Any]:
+    thread_id = resolve_thread_id_for_target(state, target) or ""
+    thread_id, predecessor_actor, renew_intent, agent_ensure = _ensure_work_tree_agent(
+        state, target, thread_id
+    )
+    pending_identity = pending_inbox_identity_payload(target.repo_root)
+    pending = int(pending_identity["pendingInboxCount"])
+    status = agent_status(target.repo_root)
+    binding_error = agent_binding_error(target.repo_root, status)
+    binding_status = _binding_status(thread_id, binding_error)
+    team_facts = team_facts_for_target(state.team_store, target, thread_id)
+    team_identity = team_identity_payload(team_facts)
+    agent_name = _agent_name_for_target(target)
+    renewal_intent = _work_tree_renewal_intent(
+        state, target, thread_id, predecessor_actor, renew_intent
+    )
+    serve_identity, status_line = _work_tree_status_payloads(
+        state,
+        target,
+        thread_id=thread_id,
+        binding_status=binding_status,
+        binding_error=binding_error,
+        status=status,
+        pending_identity=pending_identity,
+    )
+    return {
+        "id": target.id,
+        "repoRoot": str(target.repo_root),
+        "displayName": target.display_name,
+        "branch": target.branch or target.name,
+        "targetIdentity": target_identity_payload(
             target,
             thread_id,
             binding_status=binding_status,
             binding_error=binding_error,
-            transcript_owner=transcript_owner,
+            agent_name=agent_name,
+        ),
+        "serveAgentIdentity": serve_identity,
+        "taskFilters": team_facts.get("taskFilters", []),
+        "laneFilterVersion": "",
+        "teamIdentity": team_identity,
+        "lifetime": team_facts.get("lifetime", ""),
+        "renewalIntent": renewal_intent,
+        "taskFilterInventory": inventory,
+        "laneInfo": _lane_info_payload(target, serve_identity),
+        "pendingCount": pending,
+        "pendingLabel": str(pending),
+        **pending_identity,
+        "privateTaskCount": 0,
+        "agentProcessStatus": status.process_status,
+        "agentVisualStatus": status_line["agentVisualStatus"],
+        "agentEnsure": agent_ensure or {},
+        "lastAssistantAt": status_line["lastAssistantAt"],
+        "statusLine": status_line,
+    }
+
+
+def _ensure_work_tree_agent(
+    state: Any, target: WorktreeTarget, thread_id: str, *, fast_mode: bool | None = None
+) -> tuple[str, str, bool, dict[str, Any] | None]:
+    pending_identity = pending_inbox_identity_payload(target.repo_root)
+    pending = int(pending_identity["pendingInboxCount"])
+    predecessor_actor = team_actor_for_target(state.team_store, target, thread_id)
+    renew_intent = bool(
+        thread_id
+        and predecessor_actor
+        and state.team_store.agent_renewal_active(predecessor_actor)
+    )
+    if renew_intent:
+        serve_agent_identity_payload(
+            target,
+            thread_id,
+            actor_id=predecessor_actor,
             store=state.team_store,
         )
-        status_line = _status_line_payload_from_status(
-            status=status,
-            thread_id=thread_id,
-            binding_error=binding_error,
-            items=items,
-            error=error,
-            pending_identity=pending_identity,
-        )
-        work_trees.append(
-            {
-                "id": target.id,
-                "repoRoot": str(target.repo_root),
-                "displayName": target.display_name,
-                "branch": target.branch or target.name,
-                "targetIdentity": target_identity_payload(
-                    target,
-                    thread_id,
-                    binding_status=binding_status,
-                    binding_error=binding_error,
-                    agent_name=agent_name,
-                ),
-                "serveAgentIdentity": serve_identity,
-                "taskFilters": team_facts.get("taskFilters", []),
-                "laneFilterVersion": "",
-                "teamIdentity": team_identity,
-                "lifetime": team_facts.get("lifetime", ""),
-                "renewalIntent": renewal_intent,
-                "taskFilterInventory": inventory,
-                "laneInfo": _lane_info_payload(target, serve_identity),
-                "pendingCount": pending,
-                "pendingLabel": str(pending),
-                **pending_identity,
-                "privateTaskCount": 0,
-                "agentProcessStatus": status.process_status,
-                "agentVisualStatus": status_line["agentVisualStatus"],
-                "agentEnsure": agent_ensure or {},
-                "lastAssistantAt": status_line["lastAssistantAt"],
-                "statusLine": status_line,
-            }
-        )
-    return {
-        "workTrees": work_trees,
-        "defaultTargetId": targets[0].id if targets else "",
-        "taskFilterInventory": inventory,
+    ensure_kwargs: dict[str, Any] = {
+        "attempt_cache": state.pending_agent_ensure_attempts,
+        "force_new": renew_intent,
     }
+    if fast_mode is not None:
+        ensure_kwargs["fast_mode"] = fast_mode
+    agent_ensure = ensure_agent_for_pending_inbox(target, pending, **ensure_kwargs)
+    ensured_thread_id = record_started_renewal_from_ensure(
+        state.team_store,
+        predecessor_agent_id=predecessor_actor,
+        agent_ensure=agent_ensure,
+    )
+    return ensured_thread_id or thread_id, predecessor_actor, renew_intent, agent_ensure
+
+
+def _work_tree_status_payloads(
+    state: Any,
+    target: WorktreeTarget,
+    *,
+    thread_id: str,
+    binding_status: str,
+    binding_error: str,
+    status: Any,
+    pending_identity: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    items, error, transcript = target_activity_items(target, thread_id)
+    transcript_owner = transcript.owner_driver.name if transcript else ""
+    serve_identity = serve_agent_identity_payload(
+        target,
+        thread_id,
+        binding_status=binding_status,
+        binding_error=binding_error,
+        transcript_owner=transcript_owner,
+        store=state.team_store,
+    )
+    status_line = _status_line_payload_from_status(
+        status=status,
+        thread_id=thread_id,
+        binding_error=binding_error,
+        items=items,
+        error=error,
+        pending_identity=pending_identity,
+    )
+    return serve_identity, status_line
+
+
+def _work_tree_renewal_intent(
+    state: Any,
+    target: WorktreeTarget,
+    thread_id: str,
+    predecessor_actor: str,
+    renew_intent: bool,
+) -> dict[str, Any]:
+    if renew_intent and predecessor_actor:
+        return renewal_intent_for_actor(state.team_store, predecessor_actor)
+    return renewal_intent_for_target(state.team_store, target, thread_id)
 
 
 def _agent_name_for_target(target: WorktreeTarget) -> str:
@@ -1131,67 +1188,86 @@ def messages_payload_for_worktree(
 ) -> dict[str, Any]:
     explicit_thread_id = canonical_thread_id(expected_thread_id or "")
     thread_id = explicit_thread_id or resolve_thread_id_for_target(state, target) or ""
+    thread_id, predecessor_actor, renew_intent, agent_ensure = _ensure_work_tree_agent(
+        state, target, thread_id, fast_mode=fast_mode
+    )
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
-    predecessor_actor = team_actor_for_target(state.team_store, target, thread_id)
-    renew_intent = bool(
-        thread_id
-        and predecessor_actor
-        and state.team_store.agent_renewal_active(predecessor_actor)
-    )
-    if renew_intent:
-        serve_agent_identity_payload(
-            target,
-            thread_id,
-            actor_id=predecessor_actor,
-            store=state.team_store,
-        )
-    agent_ensure = ensure_agent_for_pending_inbox(
+    items, error, transcript = _message_items_for_worktree(
+        state,
         target,
-        pending,
-        attempt_cache=state.pending_agent_ensure_attempts,
-        fast_mode=fast_mode,
-        force_new=renew_intent,
+        thread_id,
+        limit=limit,
+        after=after,
+        before=before,
     )
-    ensured_thread_id = record_started_renewal_from_ensure(
-        state.team_store,
-        predecessor_agent_id=predecessor_actor,
+    return _messages_worktree_payload(
+        state,
+        target,
+        thread_id=thread_id,
+        predecessor_actor=predecessor_actor,
+        renew_intent=renew_intent,
         agent_ensure=agent_ensure,
+        pending=pending,
+        pending_identity=pending_identity,
+        items=items,
+        error=error,
+        transcript=transcript,
     )
-    if ensured_thread_id:
-        thread_id = ensured_thread_id
-    pending_identity = pending_inbox_identity_payload(target.repo_root)
-    pending = int(pending_identity["pendingInboxCount"])
+
+
+def _message_items_for_worktree(
+    state: Any,
+    target: WorktreeTarget,
+    thread_id: str,
+    *,
+    limit: int,
+    after: str | None,
+    before: str | None,
+) -> tuple[
+    list[message_reader.AssistantMessage],
+    str | None,
+    message_reader.TranscriptResolution | None,
+]:
     if not thread_id:
-        items: list[message_reader.AssistantMessage] = []
-        error: str | None = "No agent thread is bound to this worktree yet."
-        transcript: message_reader.TranscriptResolution | None = None
-    else:
-        read = message_reader.assistant_messages_for_thread_id(
-            thread_id,
-            limit=limit,
-            after=after,
-            before=before,
-            cursor=state.rollout_cursor(thread_id) if not before else None,
-            worktree_id=target.id,
-            repo_root=target.repo_root,
-        )
-        items = read.items
-        error = read.error
-        transcript = read.transcript
-        items = _merge_task_card_messages(
-            thread_id,
-            items,
-            limit=limit,
-            after=after,
-            before=before,
-        )
+        return [], "No agent thread is bound to this worktree yet.", None
+    read = message_reader.assistant_messages_for_thread_id(
+        thread_id,
+        limit=limit,
+        after=after,
+        before=before,
+        cursor=state.rollout_cursor(thread_id) if not before else None,
+        worktree_id=target.id,
+        repo_root=target.repo_root,
+    )
+    items = _merge_task_card_messages(
+        thread_id,
+        read.items,
+        limit=limit,
+        after=after,
+        before=before,
+    )
+    return items, read.error, read.transcript
+
+
+def _messages_worktree_payload(
+    state: Any,
+    target: WorktreeTarget,
+    *,
+    thread_id: str,
+    predecessor_actor: str,
+    renew_intent: bool,
+    agent_ensure: dict[str, Any] | None,
+    pending: int,
+    pending_identity: dict[str, Any],
+    items: list[message_reader.AssistantMessage],
+    error: str | None,
+    transcript: message_reader.TranscriptResolution | None,
+) -> dict[str, Any]:
     team_facts = team_facts_for_target(state.team_store, target, thread_id)
     team_identity = team_identity_payload(team_facts)
-    renewal_intent = (
-        renewal_intent_for_actor(state.team_store, predecessor_actor)
-        if renew_intent and predecessor_actor
-        else renewal_intent_for_target(state.team_store, target, thread_id)
+    renewal_intent = _work_tree_renewal_intent(
+        state, target, thread_id, predecessor_actor, renew_intent
     )
     status = agent_status(target.repo_root)
     binding_error = agent_binding_error(target.repo_root, status)
