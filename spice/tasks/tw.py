@@ -38,6 +38,7 @@ def run(
         "task",
         f"rc:{selected_taskrc}",
         "rc.confirmation=no",
+        "rc.bulk=0",
         "rc.verbose=nothing",
         *(overrides or []),
         *args,
