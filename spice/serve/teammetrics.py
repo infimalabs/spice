@@ -5,8 +5,9 @@ from __future__ import annotations
 import sqlite3
 import time
 from collections import Counter
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Protocol
 
 from spice.errors import SpiceError
 
@@ -22,9 +23,58 @@ class LaneMetricSummary:
     sparkline: tuple[int, ...]
 
 
+class _TeamMetricStore(Protocol):
+    def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
+
+    def _record_agent_metric_delta_locked(
+        self,
+        connection: sqlite3.Connection,
+        agent_id: str,
+        *,
+        acked: int,
+        sends: int,
+        tool_calls: int,
+        buckets: Counter[int],
+        now: float,
+    ) -> None: ...
+
+    def _record_team_agent_metric_delta_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_id: str,
+        agent_id: str,
+        *,
+        acked: int,
+        sends: int,
+        tool_calls: int,
+        buckets: Counter[int],
+        now: float,
+    ) -> None: ...
+
+    def _team_lane_metric_summary_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_id: str,
+        *,
+        bucket_count: int,
+        bucket_seconds: int,
+        now: float,
+    ) -> LaneMetricSummary: ...
+
+    def _agent_lane_metric_summary_locked(
+        self,
+        connection: sqlite3.Connection,
+        agent_ids: tuple[str, ...],
+        *,
+        bucket_count: int,
+        bucket_seconds: int,
+        now: float,
+    ) -> LaneMetricSummary: ...
+
+
 class TeamMetricStoreMixin:
     def record_agent_metric_delta(
-        self,
+        self: _TeamMetricStore,
         agent_id: str,
         *,
         acked: int = 0,
@@ -67,7 +117,9 @@ class TeamMetricStoreMixin:
                     now=now,
                 )
 
-    def agent_metric_cursor(self, agent_id: str, source_path: str) -> int:
+    def agent_metric_cursor(
+        self: _TeamMetricStore, agent_id: str, source_path: str
+    ) -> int:
         agent_id = _normalized_id(agent_id, "agent_id")
         with self.connect() as connection:
             row = connection.execute(
@@ -80,7 +132,7 @@ class TeamMetricStoreMixin:
         return max(0, int(row["offset"] or 0))
 
     def record_agent_metric_cursor(
-        self, agent_id: str, *, source_path: str, offset: int
+        self: _TeamMetricStore, agent_id: str, *, source_path: str, offset: int
     ) -> None:
         agent_id = _normalized_id(agent_id, "agent_id")
         with self.connect() as connection:
@@ -95,7 +147,7 @@ class TeamMetricStoreMixin:
             )
 
     def lane_metric_summary(
-        self,
+        self: _TeamMetricStore,
         agent_id: str,
         *,
         bucket_count: int,

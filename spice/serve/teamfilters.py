@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from contextlib import AbstractContextManager
 from typing import Any, Iterable
+from typing import Protocol
 
 from spice.errors import SpiceError
 from spice.serve.teammodels import TeamConfig, TeamTaskFilter
@@ -13,6 +15,40 @@ from spice.serve.teamschema import (
     TASK_FILTER_SOURCE_MANUAL,
     TASK_FILTER_SOURCES,
 )
+
+
+class _TeamFilterStore(Protocol):
+    def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
+
+    def _require_team(
+        self, connection: sqlite3.Connection, team_id: str
+    ) -> sqlite3.Row: ...
+
+    def _record_event(
+        self,
+        connection: sqlite3.Connection,
+        kind: str,
+        team_id: str,
+        payload: dict[str, Any],
+    ) -> int: ...
+
+    def _current_revision_locked(self, connection: sqlite3.Connection) -> int: ...
+
+    def _replace_task_filters_locked(
+        self, connection: sqlite3.Connection, team_id: str, projects: Iterable[str]
+    ) -> tuple[str, ...]: ...
+
+    def _task_filter_entries_locked(
+        self, connection: sqlite3.Connection, team_id: str
+    ) -> tuple[TeamTaskFilter, ...]: ...
+
+    def _task_filter_projects_locked(
+        self, connection: sqlite3.Connection, team_id: str
+    ) -> tuple[str, ...]: ...
+
+    def _sync_task_filter_projection_locked(
+        self, connection: sqlite3.Connection, team_id: str
+    ) -> tuple[str, ...]: ...
 
 
 class TeamFilterStoreMixin:
@@ -106,7 +142,7 @@ class TeamFilterStoreMixin:
         return self._sync_task_filter_projection_locked(connection, team_id)
 
     def update_team_config(
-        self,
+        self: _TeamFilterStore,
         team_id: str,
         config: TeamConfig,
         *,
@@ -139,7 +175,7 @@ class TeamFilterStoreMixin:
             )
 
     def add_task_filter(
-        self,
+        self: _TeamFilterStore,
         team_id: str,
         project: str,
         *,
@@ -178,7 +214,7 @@ class TeamFilterStoreMixin:
             )
 
     def remove_task_filter(
-        self,
+        self: _TeamFilterStore,
         team_id: str,
         project: str,
         *,
@@ -221,14 +257,14 @@ class TeamFilterStoreMixin:
                 },
             )
 
-    def team_config(self, team_id: str) -> TeamConfig:
+    def team_config(self: _TeamFilterStore, team_id: str) -> TeamConfig:
         with self.connect() as connection:
             row = self._require_team(connection, team_id)
             entries = self._task_filter_entries_locked(connection, team_id)
             return config_from_row(row, entries)
 
     def open_team_ids_with_task_filter(
-        self, project: str, *, source: str | None = None
+        self: _TeamFilterStore, project: str, *, source: str | None = None
     ) -> tuple[str, ...]:
         project = validated_task_filter_project(project)
         if source is not None:
@@ -247,7 +283,7 @@ class TeamFilterStoreMixin:
         return tuple(str(row["team_id"]) for row in rows)
 
     def open_task_filter_projects(
-        self, *, source: str | None = None
+        self: _TeamFilterStore, *, source: str | None = None
     ) -> tuple[str, ...]:
         if source is not None:
             source = validated_task_filter_source(source)
@@ -271,23 +307,20 @@ def config_from_row(
     task_filters = tuple(dict.fromkeys(entry.project for entry in task_filter_entries))
     if not task_filters:
         task_filters = task_filter_projects_from_json(row["task_filters"])
-    try:
-        shell_settings = json.loads(row["shell_settings"])
-    except (json.JSONDecodeError, TypeError):
-        shell_settings = {}
+    shell_settings = shell_settings_from_json(row["shell_settings"])
     return TeamConfig(
         lifetime=str(row["lifetime"]),
         speech_mode=str(row["speech_mode"]),
         task_filters=task_filters,
         task_filter_entries=task_filter_entries,
         selected_view=str(row["selected_view"]),
-        shell_settings=shell_settings if isinstance(shell_settings, dict) else {},
+        shell_settings=shell_settings,
     )
 
 
 def task_filter_projects_from_json(raw: object) -> tuple[str, ...]:
     try:
-        values = json.loads(raw)
+        values = json.loads(_json_source(raw))
     except (json.JSONDecodeError, TypeError):
         return ()
     if not isinstance(values, list):
@@ -297,10 +330,14 @@ def task_filter_projects_from_json(raw: object) -> tuple[str, ...]:
 
 def shell_settings_from_json(raw: object) -> dict[str, Any]:
     try:
-        values = json.loads(raw)
+        values = json.loads(_json_source(raw))
     except (json.JSONDecodeError, TypeError):
         return {}
     return values if isinstance(values, dict) else {}
+
+
+def _json_source(raw: object) -> str | bytes | bytearray:
+    return raw if isinstance(raw, str | bytes | bytearray) else ""
 
 
 def validated_task_filter_projects(projects: Iterable[str]) -> tuple[str, ...]:

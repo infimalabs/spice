@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Iterable, Mapping
+from contextlib import AbstractContextManager
+from typing import Any, Protocol
 
 from spice.errors import SpiceError
 from spice.serve.teamids import normalized_id as _normalized_id
@@ -24,6 +25,106 @@ RENEWAL_IDENTITY_COLUMNS = (
     ("predecessor_identity", "TEXT NOT NULL DEFAULT '{}'"),
     ("successor_identity", "TEXT NOT NULL DEFAULT '{}'"),
 )
+
+
+class _TeamRenewalStore(Protocol):
+    def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
+
+    def _team_member_ids_locked(
+        self, connection: sqlite3.Connection, team_id: str
+    ) -> tuple[str, ...]: ...
+
+    def _agent_identity_row_locked(
+        self, connection: sqlite3.Connection, actor_id: str
+    ) -> sqlite3.Row | None: ...
+
+    def open_team_for_agent(self, agent_id: str) -> str: ...
+
+    def _record_event(
+        self,
+        connection: sqlite3.Connection,
+        kind: str,
+        team_id: str,
+        payload: dict[str, Any],
+    ) -> int: ...
+
+    def _update_agent_identity_renewal_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        actor_id: str,
+        state: str = "",
+        ancestor_thread_id: str = "",
+        successor_thread_id: str = "",
+        revision: int = 0,
+    ) -> None: ...
+
+    def _assign_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_id: str,
+        agent_id: str,
+        aliases: Iterable[str] = (),
+    ) -> None: ...
+
+    def _team_slot_for_agent_locked(
+        self, connection: sqlite3.Connection, team_id: str, agent_id: str
+    ) -> int | None: ...
+
+    def _renewal_predecessor_identity_locked(
+        self, connection: sqlite3.Connection, actor_id: str
+    ) -> dict[str, Any]: ...
+
+    def _renewal_successor_identity(
+        self,
+        predecessor_identity: Mapping[str, Any],
+        *,
+        successor_agent_id: str = "",
+        successor_thread_id: str = "",
+    ) -> dict[str, Any]: ...
+
+    def renewal_state_for_agent(self, agent_id: str) -> TeamRenewalState | None: ...
+
+    def _renewal_state_locked(
+        self, connection: sqlite3.Connection, agent_id: str
+    ) -> TeamRenewalState | None: ...
+
+    def _replace_team_slot_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        team_id: str,
+        predecessor_agent_id: str,
+        successor_agent_id: str,
+        team_slot: int | None,
+    ) -> None: ...
+
+    def _started_renewal_facts_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        team_id: str,
+        predecessor_agent_id: str,
+        successor_agent_id: str,
+    ) -> tuple[int | None, dict[str, Any], str, dict[str, Any]]: ...
+
+    def _persist_started_renewal_locked(
+        self, connection: sqlite3.Connection, renewal: TeamRenewalState
+    ) -> None: ...
+
+    def _started_renewal_record(
+        self,
+        *,
+        predecessor_agent_id: str,
+        team_id: str,
+        ancestor_thread_id: str,
+        successor_agent_id: str,
+        successor_thread_id: str,
+        team_slot: int | None,
+        predecessor_identity: dict[str, Any],
+        successor_identity: dict[str, Any],
+        revision: int,
+    ) -> TeamRenewalState: ...
 
 
 class TeamRenewalStoreMixin:
@@ -70,7 +171,10 @@ class TeamRenewalStoreMixin:
         )
 
     def _team_slot_for_agent_locked(
-        self, connection: sqlite3.Connection, team_id: str, agent_id: str
+        self: _TeamRenewalStore,
+        connection: sqlite3.Connection,
+        team_id: str,
+        agent_id: str,
     ) -> int | None:
         member_ids = self._team_member_ids_locked(connection, team_id)
         try:
@@ -79,7 +183,7 @@ class TeamRenewalStoreMixin:
             return None
 
     def _renewal_predecessor_identity_locked(
-        self, connection: sqlite3.Connection, actor_id: str
+        self: _TeamRenewalStore, connection: sqlite3.Connection, actor_id: str
     ) -> dict[str, Any]:
         row = self._agent_identity_row_locked(connection, actor_id)
         if row is None:
@@ -117,7 +221,7 @@ class TeamRenewalStoreMixin:
         }
 
     def _replace_team_slot_locked(
-        self,
+        self: _TeamRenewalStore,
         connection: sqlite3.Connection,
         *,
         team_id: str,
@@ -143,7 +247,7 @@ class TeamRenewalStoreMixin:
             )
 
     def set_agent_renewal_request(
-        self, agent_id: str, *, requested: bool
+        self: _TeamRenewalStore, agent_id: str, *, requested: bool
     ) -> TeamRenewalState | None:
         agent_id = _normalized_id(agent_id, "agent_id")
         team_id = self.open_team_for_agent(agent_id)
@@ -215,24 +319,26 @@ class TeamRenewalStoreMixin:
             self._update_agent_identity_renewal_locked(connection, actor_id=agent_id)
             return None
 
-    def agent_renewal_requested(self, agent_id: str) -> bool:
+    def agent_renewal_requested(self: _TeamRenewalStore, agent_id: str) -> bool:
         renewal = self.renewal_state_for_agent(agent_id)
         return bool(renewal and renewal.requested)
 
-    def agent_renewal_active(self, agent_id: str) -> bool:
+    def agent_renewal_active(self: _TeamRenewalStore, agent_id: str) -> bool:
         renewal = self.renewal_state_for_agent(agent_id)
         return bool(
             renewal
             and renewal.state in {RENEWAL_STATE_REQUESTED, RENEWAL_STATE_PENDING}
         )
 
-    def renewal_state_for_agent(self, agent_id: str) -> TeamRenewalState | None:
+    def renewal_state_for_agent(
+        self: _TeamRenewalStore, agent_id: str
+    ) -> TeamRenewalState | None:
         agent_id = _normalized_id(agent_id, "agent_id")
         with self.connect() as connection:
             return self._renewal_state_locked(connection, agent_id)
 
     def record_pending_renewal(
-        self, *, agent_id: str, ancestor_thread_id: str
+        self: _TeamRenewalStore, *, agent_id: str, ancestor_thread_id: str
     ) -> TeamRenewalState:
         agent_id = _normalized_id(agent_id, "agent_id")
         team_id = self.open_team_for_agent(agent_id)
@@ -289,7 +395,7 @@ class TeamRenewalStoreMixin:
         )
 
     def record_started_renewal(
-        self,
+        self: _TeamRenewalStore,
         *,
         predecessor_agent_id: str,
         successor_agent_id: str,
@@ -349,7 +455,7 @@ class TeamRenewalStoreMixin:
         return renewal
 
     def _started_renewal_facts_locked(
-        self,
+        self: _TeamRenewalStore,
         connection: sqlite3.Connection,
         *,
         team_id: str,
@@ -385,7 +491,9 @@ class TeamRenewalStoreMixin:
         )
 
     def _persist_started_renewal_locked(
-        self, connection: sqlite3.Connection, renewal: TeamRenewalState
+        self: _TeamRenewalStore,
+        connection: sqlite3.Connection,
+        renewal: TeamRenewalState,
     ) -> None:
         connection.execute(
             "INSERT OR REPLACE INTO renewals (agent_id, team_id, state, "

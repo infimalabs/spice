@@ -169,10 +169,13 @@ def _task_card_message_from_row(
 
 def _task_card_index(row: dict[str, Any]) -> int:
     raw_id = row.get("id")
-    try:
-        task_id = int(raw_id)
-    except (TypeError, ValueError):
+    if raw_id is None:
         task_id = 0
+    else:
+        try:
+            task_id = int(raw_id)
+        except (TypeError, ValueError):
+            task_id = 0
     return 9_000_000_000_000_000_000 + max(0, task_id)
 
 
