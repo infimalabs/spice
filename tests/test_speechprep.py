@@ -189,7 +189,11 @@ def test_speech_burst_never_overlaps_audio():
 
 
 def test_initial_payload_speech_keeps_startup_ack_from_becoming_silent_baseline():
-    assert _initial_payload_speech_keys() == ["startup-race-ack", "fresh-ack"]
+    assert _initial_payload_speech_keys() == [
+        "recent-refresh-ack",
+        "startup-race-ack",
+        "fresh-ack",
+    ]
 
 
 def test_automatic_speech_tracks_latest_played_timestamp_per_agent():
@@ -805,7 +809,8 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(path, "utf8"), context);
 const lane = { speechPrimeStartedAt: Date.parse("2026-06-17T04:00:00.000Z") };
 const messages = [
-  { key: "stale-history", timestamp: "2026-06-17T03:59:54.999Z" },
+  { key: "stale-history", timestamp: "2026-06-17T03:58:59.999Z" },
+  { key: "recent-refresh-ack", timestamp: "2026-06-17T03:59:11.000Z" },
   { key: "startup-race-ack", timestamp: "2026-06-17T03:59:55.000Z" },
   { key: "fresh-ack", timestamp: "2026-06-17T04:00:00.000Z" },
   { key: "invalid-time", timestamp: "not-a-date" },
