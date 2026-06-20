@@ -97,14 +97,30 @@ def test_task_add_after_repeats_for_multiple_dependencies():
     assert args.title == "Follow-up title"
 
 
-def test_task_wake_parser_accepts_claim_flag():
+def test_task_wake_parser_accepts_multiple_handles():
     args = build_parser().parse_args(
-        ["task", "wake", "TASK-20260101T000000000001Z", "--claim"]
+        [
+            "task",
+            "wake",
+            "TASK-20260101T000000000001Z",
+            "TASK-20260101T000000000002Z",
+        ]
     )
 
     assert args.task_action == "wake"
-    assert args.handle == "TASK-20260101T000000000001Z"
-    assert args.claim is True
+    assert args.handles == [
+        "TASK-20260101T000000000001Z",
+        "TASK-20260101T000000000002Z",
+    ]
+
+
+def test_task_wake_parser_rejects_claim_flag():
+    with pytest.raises(SystemExit) as exc_info:
+        build_parser().parse_args(
+            ["task", "wake", "TASK-20260101T000000000001Z", "--claim"]
+        )
+
+    assert exc_info.value.code == 2
 
 
 def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
