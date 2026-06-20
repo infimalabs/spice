@@ -122,11 +122,28 @@ def _hatch_roots(repo_root: Path, tool: dict[str, object]) -> list[str] | None:
         targets = build.get("targets")
         wheel = targets.get("wheel") if isinstance(targets, dict) else None
         packages = wheel.get("packages") if isinstance(wheel, dict) else None
-    if packages is None:
+    if packages is not None:
+        if not isinstance(packages, list):
+            raise SpiceError("[tool.hatch.build...].packages must be a list")
+        return _dedupe(str(entry).strip().strip("/") for entry in packages)
+    include = build.get("include")
+    if include is None:
         return None
-    if not isinstance(packages, list):
-        raise SpiceError("[tool.hatch.build...].packages must be a list")
-    return _dedupe(str(entry).strip().strip("/") for entry in packages)
+    return _hatch_include_roots(repo_root, include)
+
+
+def _hatch_include_roots(repo_root: Path, include: object) -> list[str]:
+    if not isinstance(include, list):
+        raise SpiceError("[tool.hatch.build].include must be a list")
+    roots: list[str] = []
+    for entry in include:
+        if not isinstance(entry, str):
+            raise SpiceError("[tool.hatch.build].include entries must be strings")
+        rel = entry.strip().strip("/")
+        path = repo_root / rel
+        if path.is_dir() and next(path.rglob("*.py"), None) is not None:
+            roots.append(rel)
+    return _dedupe(roots)
 
 
 def _flit_roots(repo_root: Path, tool: dict[str, object]) -> list[str] | None:
