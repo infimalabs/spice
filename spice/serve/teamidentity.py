@@ -38,7 +38,7 @@ class TeamIdentityStoreMixin:
                     renewal.ancestor_thread_id if renewal is not None else ""
                 ),
                 renewal_successor_thread_id=(
-                    renewal.successor_agent_id if renewal is not None else ""
+                    renewal.successor_thread_id if renewal is not None else ""
                 ),
                 renewal_revision=renewal.revision if renewal is not None else 0,
                 updated_at=now,

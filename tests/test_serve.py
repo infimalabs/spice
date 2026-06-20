@@ -505,8 +505,14 @@ def test_running_requested_renewal_sends_handoff_and_marks_pending(
     target = _target(repo)
     state = _serve_state(tmp_path, target)
     state.team_store.create_team(members=[ACTOR_A])
+    _record_identity(state, target, ACTOR_A, THREAD_A)
     state.team_store.set_agent_renewal_request(ACTOR_A, requested=True)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
+    monkeypatch.setattr(
+        payloads,
+        "effective_agent_config",
+        lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
+    )
 
     payload, status = work_tree_send_response_payload(
         state,
@@ -538,6 +544,12 @@ def test_running_requested_renewal_sends_handoff_and_marks_pending(
     assert RENEWAL_HANDOFF_REQUEST_SUFFIX in inbox_request_body(item.text)
     assert payload["renewalIntent"]["requested"] is False
     assert payload["renewalIntent"]["state"] == "pending"
+    assert payload["renewalIntent"]["successorThreadId"] == ""
+    assert payload["renewalIntent"]["teamSlot"] == 0
+    assert payload["renewalIntent"]["predecessorIdentity"]["actualModel"] == (
+        "gpt-test"
+    )
+    assert payload["renewalIntent"]["successorIdentity"]["desiredModel"] == ("gpt-next")
     assert renewal["state"] == "pending"
     assert renewal["ancestor_thread_id"] == THREAD_A
     assert renewal["successor_agent_id"] == ""
@@ -550,9 +562,15 @@ def test_stopped_requested_renewal_starts_successor_and_moves_team_membership(
     target = _target(repo)
     state = _serve_state(tmp_path, target)
     created = state.team_store.create_team(members=[ACTOR_A])
+    _record_identity(state, target, ACTOR_A, THREAD_A)
     state.team_store.set_agent_renewal_request(ACTOR_A, requested=True)
     ensure_calls: list[dict[str, object]] = []
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    monkeypatch.setattr(
+        payloads,
+        "effective_agent_config",
+        lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
+    )
 
     def fake_ensure(ensured_target, **kwargs):
         ensure_calls.append({"target": ensured_target, **kwargs})
@@ -571,6 +589,10 @@ def test_stopped_requested_renewal_starts_successor_and_moves_team_membership(
     assert payload["agentEnsure"]["threadId"] == THREAD_B
     assert payload["renewalIntent"]["requested"] is False
     assert payload["renewalIntent"]["state"] == "started"
+    assert payload["renewalIntent"]["successorThreadId"] == THREAD_B
+    assert payload["renewalIntent"]["teamSlot"] == 0
+    assert payload["renewalIntent"]["successorIdentity"]["actorId"] == ACTOR_B
+    assert payload["renewalIntent"]["successorIdentity"]["threadId"] == THREAD_B
     assert renewal_rehydration_text(THREAD_A) in body
     assert ensure_calls == [
         {
@@ -1025,6 +1047,30 @@ def _serve_state(tmp_path: Path, target: WorktreeTarget) -> ServeState:
     state.team_store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     state.team_commands = TeamCommandService(state.team_store)
     return state
+
+
+def _record_identity(
+    state: ServeState,
+    target: WorktreeTarget,
+    actor_id: str,
+    thread_id: str,
+    *,
+    desired_model: str = "gpt-next",
+    desired_effort: str = "high",
+) -> None:
+    state.team_store.record_agent_identity(
+        actor_id=actor_id,
+        target_id=target.id,
+        thread_id=thread_id,
+        actual_driver="codex",
+        actual_model="gpt-test",
+        actual_effort="low",
+        actual_service_tier="fast",
+        desired_driver="codex",
+        desired_model=desired_model,
+        desired_effort=desired_effort,
+        transcript_owner="codex",
+    )
 
 
 def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:

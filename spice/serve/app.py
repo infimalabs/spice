@@ -230,6 +230,12 @@ def work_tree_send_response_payload(
     force_new = False
     if renew_intent:
         status = agent_status(target.repo_root)
+        payloads.serve_agent_identity_payload(
+            target,
+            predecessor,
+            actor_id=predecessor_actor,
+            store=state.team_store,
+        )
         if not predecessor:
             return (
                 {
