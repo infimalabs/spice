@@ -145,12 +145,20 @@ def test_header_spice_menu_fast_mode_flame_pulses_behind_pepper():
     assert "inset: 50% auto auto 50%;" in icon_flame_rules
     assert "z-index: 0;" in icon_flame_rules
     assert "drop-shadow" in icon_flame_rules
-    assert "animation: spice-menu-flame-pulse 1.15s ease-in-out infinite;" in fast_rules
-    assert "opacity: 0.9;" in fast_rules
-    assert "opacity: 0.5;" in keyframes
-    assert "opacity: 0.96;" in keyframes
+    assert "transform: translate(-50%, -50%);" in icon_flame_rules
+    assert "scale(" not in icon_flame_rules
+    assert "rotate(" not in icon_flame_rules
+    assert "animation: spice-menu-flame-pulse 2.8s ease-in-out infinite;" in fast_rules
+    assert "opacity: 0.82;" in fast_rules
+    assert "opacity: 0.48;" in keyframes
+    assert "opacity: 0.92;" in keyframes
+    assert "transform:" not in keyframes
+    assert "scale(" not in keyframes
+    assert "rotate(" not in keyframes
     assert "animation: none;" in reduced_rules
-    assert "opacity: 0.84;" in reduced_rules
+    assert "opacity: 0.82;" in reduced_rules
+    assert "scale(" not in reduced_rules
+    assert "rotate(" not in reduced_rules
 
 
 def test_header_spice_menu_button_keeps_cutout_treatment_in_states():
