@@ -167,18 +167,18 @@ function composerPrimaryBandHeader(lane, member) {
 }
 
 function composerPrimaryMenuActions(lane, member, label) {
+  const leave = composerBandMenuAction(
+    "Leave all teams",
+    "Remove " + label + " from all teams",
+  );
+  leave.onClick = () => removeComposerAgentFromTeam(lane, member.targetId);
+
   const create = composerBandMenuAction(
     "Create new team",
     "Move only " + label + " to a new team",
   );
   create.disabled = laneGroupMemberLanes(laneGroupHost(lane)).length < 2;
   create.onClick = () => splitComposerAgentFromTeam(lane, member.targetId);
-
-  const leave = composerBandMenuAction(
-    "Leave all teams",
-    "Remove " + label + " from all teams",
-  );
-  leave.onClick = () => removeComposerAgentFromTeam(lane, member.targetId);
 
   const renew = composerBandMenuAction(
     "Renew this agent",
@@ -190,7 +190,7 @@ function composerPrimaryMenuActions(lane, member, label) {
   renew.onClick = (requested) =>
     toggleComposerAgentRenewalIntent(lane, member, requested);
 
-  return [create, leave, renew];
+  return [leave, create, renew];
 }
 
 function composerBandMenuAction(label, detail) {
