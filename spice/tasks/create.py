@@ -254,7 +254,14 @@ def _parse_add_batch_request(
     Dependencies are resolved here (in the validate pass) so a bad `after`
     rejects the whole batch instead of creating earlier lines first.
     """
-    raw = _strip_task_batch_directive(raw)
+    fields, errors = _parse_batch_fields(_strip_task_batch_directive(raw), index)
+    errors.extend(_batch_field_errors(fields, index))
+    if errors:
+        return None, errors
+    return _batch_request_from_fields(fields), []
+
+
+def _parse_batch_fields(raw: str, index: int) -> tuple[dict[str, str], list[str]]:
     fields: dict[str, str] = {}
     errors: list[str] = []
     for part in raw.split("|"):
@@ -263,6 +270,11 @@ def _parse_add_batch_request(
             continue
         key, value = part.split("=", 1)
         fields[key.strip()] = value.strip()
+    return fields, errors
+
+
+def _batch_field_errors(fields: dict[str, str], index: int) -> list[str]:
+    errors: list[str] = []
     for req in ("title", "project", "acceptance"):
         if not fields.get(req):
             errors.append(f"line {index}: missing required field {req!r}")
@@ -282,32 +294,30 @@ def _parse_add_batch_request(
         except SpiceError as exc:
             errors.append(f"line {index}: {exc}")
     flow = _batch_csv(fields.get("flow", ""))
-    after = _batch_csv(fields.get("after", ""))
     if flow and fields.get("project"):
         try:
             config.resolve_flow(list(flow), fields["project"])
         except SpiceError as exc:
             errors.append(f"line {index}: {exc}")
-    for dep in after:
+    for dep in _batch_csv(fields.get("after", "")):
         try:
             identity.resolve(dep)
         except SpiceError:
             errors.append(f"line {index}: unknown after handle {dep!r}")
-    if errors:
-        return None, errors
-    return (
-        TaskAddBatchRequest(
-            title=fields["title"],
-            description=fields.get("description") or None,
-            project=fields["project"],
-            priority=fields.get("priority", config.DEFAULT_PRIORITY),
-            flow=flow,
-            tags=_batch_csv(fields.get("tags", "")),
-            after=after,
-            acceptance=(fields["acceptance"],),
-            due=fields.get("due") or None,
-        ),
-        [],
+    return errors
+
+
+def _batch_request_from_fields(fields: dict[str, str]) -> TaskAddBatchRequest:
+    return TaskAddBatchRequest(
+        title=fields["title"],
+        description=fields.get("description") or None,
+        project=fields["project"],
+        priority=fields.get("priority", config.DEFAULT_PRIORITY),
+        flow=_batch_csv(fields.get("flow", "")),
+        tags=_batch_csv(fields.get("tags", "")),
+        after=_batch_csv(fields.get("after", "")),
+        acceptance=(fields["acceptance"],),
+        due=fields.get("due") or None,
     )
 
 
