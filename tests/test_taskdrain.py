@@ -11,7 +11,7 @@ import pytest
 from spice.agent.driver import DRIVER
 from spice.serve.teamids import thread_actor_id
 from spice.serve.teams import ServeTeamStore, TeamConfig
-from spice.tasks import config, identity, ops
+from spice.tasks import alloc, config, create, identity, ops
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -47,21 +47,21 @@ def test_drain_phase_boundary_sees_configured_assignable_stem(task_repo, monkeyp
         members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER],
         config=TeamConfig(lifetime="Drain"),
     )
-    handle = ops.add(
+    handle = create.add(
         "Drain sees configured stem",
         project="paintball.docs",
         priority="medium",
         acceptance=["drain sees repo-defined assignable stems"],
     )
 
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
 
     assert identity.render_handle(assigned or {}) == handle
     assert assigned["project"] == "paintball.docs"
 
     ops.done(handle, validation=["implementation complete"])
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
-    review = ops.next_task()
+    review = alloc.next_task()
 
     assert identity.render_handle(review or {}) == handle
     assert review["phase"] == "review"

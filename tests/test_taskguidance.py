@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import DRIVER
-from spice.tasks import config, identity, ops, render
+from spice.tasks import alloc, config, create, identity, ops, render
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -52,7 +52,7 @@ def test_task_done_and_review_outputs_keep_draining_guidance(
     task_repo, monkeypatch, lifetime
 ):
     assert task_repo.is_dir()
-    handle = ops.add(
+    handle = create.add(
         "Exercise task next guidance",
         project="task.guidance",
         priority="medium",
@@ -76,7 +76,7 @@ def test_task_done_and_review_outputs_keep_draining_guidance(
         in render.render_show(handle)
     )
 
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
     assert identity.render_handle(assigned or {}) == handle
 
     review_output = ops.review(handle, finding="clean", note="description current")
@@ -90,7 +90,7 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     task_repo, monkeypatch
 ):
     assert task_repo.is_dir()
-    handle = ops.add(
+    handle = create.add(
         "Exercise steer task guidance",
         project="task.guidance",
         priority="medium",
@@ -119,7 +119,7 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert TASK_CAPTURE_NOT_ALLOCATOR in shown
     assert STEER_MANUAL_CLAIM in shown
 
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
     assert identity.render_handle(assigned or {}) == handle
 
     review_output = ops.review(handle, finding="clean", note="description current")
@@ -135,7 +135,7 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
 
 def test_task_claim_outputs_drive_to_completion_guidance(task_repo):
     assert task_repo.is_dir()
-    handle = ops.add(
+    handle = create.add(
         "Exercise task claim guidance",
         project="task.guidance",
         priority="medium",
@@ -149,7 +149,7 @@ def test_task_claim_outputs_drive_to_completion_guidance(task_repo):
 
 def test_task_next_output_drives_allocated_task_to_completion(task_repo, monkeypatch):
     assert task_repo.is_dir()
-    next_handle = ops.add(
+    next_handle = create.add(
         "Exercise next allocation guidance",
         project="task.guidance",
         priority="medium",

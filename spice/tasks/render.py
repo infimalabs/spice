@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.tasks import config, identity, lanes, ops, tw
+from spice.tasks import alloc, config, identity, lanes, ops, tw
 
 
 SHOW_ANNOTATIONS_LIMIT = 6
@@ -235,7 +235,7 @@ def render_show(handle: str) -> str:
 
 
 def _visible_count(actor: str, filters: list[str]) -> int:
-    return len(ops.visible_rows(actor, filters))
+    return len(alloc.visible_rows(actor, filters))
 
 
 def _public_task_project_depth_label() -> str:
@@ -251,15 +251,15 @@ def _is_stale_claim(row: dict[str, Any], now: str) -> bool:
 def render_status() -> str:
     actor = tw.current_actor()
     now = tw.now_iso()
-    active_rows = ops.visible_active_rows(actor)
+    active_rows = alloc.visible_active_rows(actor)
     active = [r for r in active_rows if str(r.get("claim_by") or "") == actor]
     active_count = sum(1 for r in active_rows if not _is_stale_claim(r, now))
-    ready_rows = ops.visible_ready_rows(actor)
+    ready_rows = alloc.visible_ready_rows(actor)
     review_rows = [r for r in ready_rows if _f(r, "phase") == "review"]
     non_review_ready_rows = [r for r in ready_rows if _f(r, "phase") != "review"]
     blocked_count = _visible_count(actor, ["status:pending", "+BLOCKED"])
     waiting_count = sum(
-        1 for r in ops.visible_rows(actor, ["status:waiting"]) if not ops._is_oops(r)
+        1 for r in alloc.visible_rows(actor, ["status:waiting"]) if not alloc.is_oops(r)
     )
     stale_count = sum(1 for r in active_rows if _is_stale_claim(r, now))
     lines = [
@@ -271,21 +271,21 @@ def render_status() -> str:
         f"blocked {blocked_count}",
         f"waiting {waiting_count}",
         f"stale {stale_count}",
-        f"oops {len(ops.oops_rows())}",
+        f"oops {len(alloc.oops_rows())}",
     ]
     route = lanes.team_route_for_actor(actor)
-    effective_filter = ops.effective_route_filter_args(actor, route)
+    effective_filter = alloc.effective_route_filter_args(actor, route)
     if effective_filter:
         lane_filter_label = " ".join(effective_filter)
     else:
-        lane_filter_label = f"project:{ops.default_project(actor)}"
+        lane_filter_label = f"project:{config.private_project(actor)}"
     lines.insert(2, f"filter {lane_filter_label}")
     lines.insert(3, _public_task_project_depth_label())
     return "\n".join(lines)
 
 
 def render_next() -> str:
-    row = ops.next_task()
+    row = alloc.next_task()
     if not row:
         return "no available tasks; run spice task status"
     rendered = identity.render_handle(row)
@@ -351,7 +351,7 @@ def render_doctor() -> str:
         f"backend {config.backend_root()}",
         f"taskrc {config.taskrc_path()}",
         f"rows {len(rows)} pending {len(pending)}",
-        f"stale claims {len(ops.stale_rows())}",
+        f"stale claims {len(alloc.stale_rows())}",
         f"reports {' '.join(config.REPORTS)}",
         f"analytics {' '.join(config.ANALYTICS_COMMANDS)}",
         _public_task_project_depth_label(),

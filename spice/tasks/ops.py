@@ -1,4 +1,4 @@
-"""Task mutations and the allocator: add, claim, done, review, oops, next.
+"""Task mutations: add, claim, done, review, oops, notes, dependencies.
 
 Every operation is a thin, guard-railed compile from agent intent to native
 Taskwarrior.
@@ -6,39 +6,13 @@ Taskwarrior.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, Sequence
 
 from spice.agent.identity import ambient_thread_id
 from spice.errors import SpiceError
-from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
-from spice.tasks import config, gitsync, identity, tw
-
-TASK_TITLE_LIMIT = COMMIT_MESSAGE_WRAP_LIMIT
-TASK_BATCH_DIRECTIVE_TOKEN = "TASK"
-TASK_BATCH_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
-
-
-@dataclass(frozen=True)
-class TaskAddBatchRequest:
-    title: str
-    project: str
-    acceptance: tuple[str, ...]
-    description: str | None = None
-    priority: str = config.DEFAULT_PRIORITY
-    flow: tuple[str, ...] = ()
-    tags: tuple[str, ...] = ()
-    after: tuple[str, ...] = ()
-    due: str | None = None
-
-
-@dataclass(frozen=True)
-class TaskAddResult:
-    handle: str
-    project: str
-    route_feedback: str
+from spice.tasks import alloc, config, gitsync, identity, tw
 
 
 def annotate(target: str, text: str) -> None:
@@ -46,6 +20,10 @@ def annotate(target: str, text: str) -> None:
     literal."""
     text = _task_text(text)
     tw.run([target, "annotate", "--", text])
+
+
+def _task_text(text: str) -> str:
+    return text
 
 
 # ---- flow / phase slots -------------------------------------------------
@@ -230,369 +208,6 @@ def do_claim(uuid: str, actor: str, *, guard_unclaimed: bool = True) -> bool:
     return True
 
 
-# ---- creation -----------------------------------------------------------
-
-
-def _task_title(title: str, *, context: str = "") -> str:
-    value = title.strip()
-    if len(value) > TASK_TITLE_LIMIT:
-        raise SpiceError(
-            f"{context}task title is {len(value)} chars; keep task titles at "
-            f"{TASK_TITLE_LIMIT} chars or less and move detail into "
-            "--description"
-        )
-    return value
-
-
-def _task_text(text: str) -> str:
-    return text
-
-
-def _task_description(description: str | None) -> str:
-    return _task_text((description or "").strip())
-
-
-def _task_acceptance(acceptance: Sequence[str]) -> list[str]:
-    return [_task_text(item) for item in acceptance]
-
-
-def _task_creation_surface(value: str | None) -> str:
-    return _task_text((value or "").strip())
-
-
-def default_project(actor: str) -> str:
-    hexid = "".join(c for c in actor.lower() if c.isalnum())
-    return f"agent.{hexid}.task"
-
-
-def _resolve_add_project(actor: str, project: str | None, system_project: bool) -> str:
-    if project is None:
-        return default_project(actor)
-    if system_project:
-        return config.validate_project(project)
-    return config.validate_manual_creation_project(project)
-
-
-def _build_add_args(
-    *,
-    title: str,
-    body: str | None,
-    actor: str,
-    incepted: str,
-    resolved_project: str,
-    phases: list[str],
-    priority: str,
-    tags: list[str],
-    after: list[str],
-    acceptance: list[str],
-    wait: str | None,
-    every: str | None,
-    scheduled: str | None,
-    until: str | None,
-    due: str | None,
-    extra: list[str] | None,
-    creation_surface: str | None,
-) -> list[str]:
-    mapped_priority = config.map_priority(priority)
-    args = [
-        "add",
-        f"incepted:{incepted}",
-        f"project:{resolved_project}",
-        *flow_args(phases),
-    ]
-    if mapped_priority:
-        args.append(f"priority:{mapped_priority}")
-    if due:
-        args.append(f"due:{due}")
-    elif mapped_priority and mapped_priority in config.SLA_DUE_SECONDS:
-        args.append(f"due:{tw.future_iso(config.SLA_DUE_SECONDS[mapped_priority])}")
-    if wait:
-        args.append(f"wait:{wait}")
-    if every:
-        config.parse_duration(every)  # validate the pacing duration up front
-        args.append(f"pace:{every}")
-    if scheduled:
-        args.append(f"scheduled:{scheduled}")
-    if until:
-        args.append(f"until:{until}")
-    if acceptance:
-        args.append(f"acceptance:{' | '.join(_task_acceptance(acceptance))}")
-    if body:
-        args.append(f"task_description:{body}")
-    surface = _task_creation_surface(creation_surface)
-    if surface:
-        args.append(f"{config.TASK_CREATION_SURFACE_UDA}:{surface}")
-    args += [
-        f"origin_thread:{actor}",
-        f"origin_worktree:{config.repo_root()}",
-        f"origin_branch:{tw.current_branch()}",
-    ]
-    for tag in tags:
-        norm = "".join(c if c.isalnum() else "_" for c in tag.strip().lower()).strip(
-            "_"
-        )
-        if norm:
-            args.append(f"+{norm}")
-    for handle in after:
-        dep = identity.resolve(handle)
-        args.append(f"depends:{identity.uuid_of(dep)}")
-    args.extend(extra or [])
-    args.append(title)
-    return args
-
-
-def _add_one(
-    *,
-    title: str,
-    description: str | None = None,
-    project: str | None,
-    priority: str,
-    flow: list[str] | None,
-    tags: list[str],
-    after: list[str],
-    acceptance: list[str],
-    wait: str | None,
-    claim: bool,
-    every: str | None = None,
-    scheduled: str | None = None,
-    until: str | None = None,
-    due: str | None = None,
-    extra: list[str] | None = None,
-    existing: set[str] | None = None,
-    system_project: bool = False,
-    return_result: bool = False,
-    actor_override: str | None = None,
-    creation_surface: str | None = None,
-) -> str | TaskAddResult:
-    title = _task_title(title)
-    body = _task_description(description)
-    actor = tw.canonical_actor(actor_override or tw.current_actor())
-    if claim:
-        _require_single_active_slot(actor, action="task add --claim")
-        # Match a normal claim's baseline check before creating the task row.
-        # If this fails, task add --claim must not leave unclaimed work behind.
-        gitsync.prepare_for_claim()
-    resolved_project = _resolve_add_project(actor, project, system_project)
-    phases = config.resolve_flow(flow, resolved_project)
-    incepted = identity.mint_incepted(existing)
-    if existing is not None:
-        existing.add(incepted)
-    args = _build_add_args(
-        title=title,
-        body=body,
-        actor=actor,
-        incepted=incepted,
-        resolved_project=resolved_project,
-        phases=phases,
-        priority=priority,
-        tags=tags,
-        after=after,
-        acceptance=acceptance,
-        wait=wait,
-        every=every,
-        scheduled=scheduled,
-        until=until,
-        due=due,
-        extra=extra,
-        creation_surface=creation_surface,
-    )
-    tw.run(args)
-    route_feedback = _subscribe_created_project(resolved_project, actor)
-    if claim:
-        created = tw.export([f"incepted.is:{incepted}"])
-        if created:
-            do_claim(identity.uuid_of(created[0]), actor, guard_unclaimed=False)
-    key = identity.key_for(resolved_project, title)
-    result = TaskAddResult(
-        handle=f"{key}-{incepted}",
-        project=resolved_project,
-        route_feedback=route_feedback,
-    )
-    if return_result:
-        return result
-    return result.handle
-
-
-def add(
-    title: str,
-    *,
-    description: str | None = None,
-    project: str | None = None,
-    priority: str = config.DEFAULT_PRIORITY,
-    flow: list[str] | None = None,
-    tags: list[str] | None = None,
-    after: list[str] | None = None,
-    acceptance: list[str] | None = None,
-    wait: str | None = None,
-    claim: bool = False,
-    every: str | None = None,
-    scheduled: str | None = None,
-    until: str | None = None,
-    due: str | None = None,
-    creation_surface: str | None = None,
-) -> str:
-    return _add_one(
-        title=title,
-        description=description,
-        project=project,
-        priority=priority,
-        flow=flow,
-        tags=tags or [],
-        after=after or [],
-        acceptance=acceptance or [],
-        wait=wait,
-        claim=claim,
-        every=every,
-        scheduled=scheduled,
-        until=until,
-        due=due,
-        creation_surface=creation_surface,
-    )
-
-
-def _parse_add_batch_request(
-    raw: str, index: int
-) -> tuple[TaskAddBatchRequest | None, list[str]]:
-    """Parse one `key=value | ...` line and collect its validation errors.
-
-    Dependencies are resolved here (in the validate pass) so a bad `after`
-    rejects the whole batch instead of creating earlier lines first.
-    """
-    raw = _strip_task_batch_directive(raw)
-    fields: dict[str, str] = {}
-    errors: list[str] = []
-    for part in raw.split("|"):
-        if "=" not in part:
-            errors.append(f"line {index}: field without '=': {part.strip()!r}")
-            continue
-        key, value = part.split("=", 1)
-        fields[key.strip()] = value.strip()
-    for req in ("title", "project", "acceptance"):
-        if not fields.get(req):
-            errors.append(f"line {index}: missing required field {req!r}")
-    if fields.get("title"):
-        try:
-            _task_title(fields["title"], context=f"line {index}: ")
-        except SpiceError as exc:
-            errors.append(str(exc))
-    if fields.get("project"):
-        try:
-            config.validate_manual_creation_project(fields["project"])
-        except SpiceError as exc:
-            errors.append(f"line {index}: {exc}")
-    if "priority" in fields:
-        try:
-            config.map_priority(fields["priority"])
-        except SpiceError as exc:
-            errors.append(f"line {index}: {exc}")
-    flow = _batch_csv(fields.get("flow", ""))
-    after = _batch_csv(fields.get("after", ""))
-    if flow and fields.get("project"):
-        try:
-            config.resolve_flow(list(flow), fields["project"])
-        except SpiceError as exc:
-            errors.append(f"line {index}: {exc}")
-    for dep in after:
-        try:
-            identity.resolve(dep)
-        except SpiceError:
-            errors.append(f"line {index}: unknown after handle {dep!r}")
-    if errors:
-        return None, errors
-    return (
-        TaskAddBatchRequest(
-            title=fields["title"],
-            description=fields.get("description") or None,
-            project=fields["project"],
-            priority=fields.get("priority", config.DEFAULT_PRIORITY),
-            flow=flow,
-            tags=_batch_csv(fields.get("tags", "")),
-            after=after,
-            acceptance=(fields["acceptance"],),
-            due=fields.get("due") or None,
-        ),
-        [],
-    )
-
-
-def _batch_csv(raw: str) -> tuple[str, ...]:
-    return tuple(part.strip() for part in raw.split(",") if part.strip())
-
-
-def _strip_task_batch_directive(raw: str) -> str:
-    stripped = raw.strip()
-    token_end = len(TASK_BATCH_DIRECTIVE_TOKEN)
-    if not stripped.startswith(TASK_BATCH_DIRECTIVE_TOKEN):
-        return raw
-    if len(stripped) > token_end and stripped[token_end] not in (
-        TASK_BATCH_DIRECTIVE_SEPARATOR_CHARS
-    ):
-        return raw
-    cursor = token_end
-    while cursor < len(stripped) and stripped[cursor] in (
-        TASK_BATCH_DIRECTIVE_SEPARATOR_CHARS
-    ):
-        cursor += 1
-    return stripped[cursor:].strip()
-
-
-def parse_add_batch(lines: Sequence[str]) -> list[TaskAddBatchRequest]:
-    parsed: list[TaskAddBatchRequest] = []
-    errors: list[str] = []
-    for index, raw in enumerate(lines, start=1):
-        if not raw.strip():
-            continue
-        request, line_errors = _parse_add_batch_request(raw, index)
-        errors.extend(line_errors)
-        if request is not None:
-            parsed.append(request)
-    if errors:
-        raise SpiceError("batch add rejected:\n" + "\n".join(errors))
-    return parsed
-
-
-def add_batch_results(
-    lines: list[str],
-    *,
-    actor_override: str | None = None,
-    creation_surface: str | None = None,
-) -> list[TaskAddResult]:
-    parsed = parse_add_batch(lines)
-    existing = {str(r.get("incepted") or "") for r in tw.export()}
-    results: list[TaskAddResult] = []
-    for request in parsed:
-        result = _add_one(
-            title=request.title,
-            description=request.description,
-            project=request.project,
-            priority=request.priority,
-            flow=list(request.flow) or None,
-            tags=list(request.tags),
-            after=list(request.after),
-            acceptance=list(request.acceptance),
-            wait=None,
-            claim=False,
-            due=request.due,
-            existing=existing,
-            return_result=True,
-            actor_override=actor_override,
-            creation_surface=creation_surface,
-        )
-        if not isinstance(
-            result, TaskAddResult
-        ):  # defensive; return_result controls this
-            raise SpiceError("batch add did not return task creation details")
-        results.append(result)
-    return results
-
-
-def add_batch(lines: list[str], *, creation_surface: str | None = None) -> list[str]:
-    return [
-        result.handle
-        for result in add_batch_results(lines, creation_surface=creation_surface)
-    ]
-
-
 # ---- claim --------------------------------------------------------------
 
 
@@ -759,7 +374,7 @@ def wake(handles: Sequence[str]) -> str:
     for row in rows:
         _require_pending(row, "wake")
         rendered = identity.render_handle(row)
-        if _is_oops(row):
+        if alloc.is_oops(row):
             raise SpiceError(f"cannot wake deferred oops triage task: {rendered}")
         if row.get("start") or str(row.get("claim_by") or ""):
             raise SpiceError(f"cannot wake active or claimed task: {rendered}")
@@ -820,10 +435,12 @@ def edit(
 
 def _adopt_default_title() -> str:
     """A task title derived from the most recent orphan commit subject."""
+    from spice.tasks import create
+
     subject = tw._git("log", "-1", "--format=%s").strip()
     if not subject:
         return "Adopt orphan commit"
-    return subject[:TASK_TITLE_LIMIT].strip()
+    return subject[: create.TASK_TITLE_LIMIT].strip()
 
 
 def adopt(
@@ -875,7 +492,9 @@ def adopt(
                 f"task already claimed by {owner}; unclaim it before adopting"
             )
     else:
-        created = _add_one(
+        from spice.tasks import create
+
+        created = create.add_one(
             title=(title or "").strip() or _adopt_default_title(),
             description=description,
             project=project,
@@ -1125,7 +744,9 @@ def _spawn_followup(
             "description=Why the follow-up matters | "
             'acceptance=Focused tests cover it")'
         )
-    return _add_one(
+    from spice.tasks import create
+
+    return create.add_one(
         title=fields["title"],
         description=fields.get("description"),
         project=fields.get("project"),
@@ -1175,7 +796,9 @@ def oops(
 ) -> str:
     severity = config.map_severity(severity)
     oops_tags = ["oops", severity, *([kind] if kind else []), *(tags or [])]
-    handle = _add_one(
+    from spice.tasks import create
+
+    handle = create.add_one(
         title=text,
         description=description or None,
         project=config.OOPS_PROJECT,
@@ -1236,191 +859,3 @@ def delete(handle: str, reason: str) -> str:
     tw.run([uuid, "delete"])
     _gc_empty_project_task_filters(project)
     return identity.render_handle(row)
-
-
-# ---- allocator (next) -----------------------------------------------------
-
-
-def _is_oops(row: dict[str, Any]) -> bool:
-    return "oops" in (row.get("tags") or [])
-
-
-def ready_rows() -> list[dict[str, Any]]:
-    """Available work: READY, not already claimed (claimed rows are +ACTIVE),
-    and not oops."""
-    rows = tw.export(["status:pending", "+READY", "-ACTIVE"])
-    return [r for r in rows if not _is_oops(r) and not str(r.get("claim_by") or "")]
-
-
-def oops_rows() -> list[dict[str, Any]]:
-    """Deferred oops items carry a far-future wait, so they are `waiting`."""
-    return [
-        r
-        for r in tw.export(["+oops"])
-        if str(r.get("status")) in ("pending", "waiting")
-    ]
-
-
-def stale_rows() -> list[dict[str, Any]]:
-    """Active claims whose deadline has elapsed (claim_until < now). ISO-8601
-    timestamps share a format here, so a lexicographic compare is
-    chronological."""
-    now = tw.now_iso()
-    out: list[dict[str, Any]] = []
-    for r in tw.export(["+ACTIVE"]):
-        until = str(r.get("claim_until") or "")
-        if until and until < now:
-            out.append(r)
-    return out
-
-
-def _scope_filter(
-    actor: str, lane_filter: list[str] | None, *, include_origin: bool = False
-) -> list[str]:
-    private = f"project:{default_project(actor)}"
-    origin = f"origin_thread.is:{actor}" if include_origin else ""
-    if not lane_filter:
-        if origin:
-            return ["(", private, "or", origin, ")"]
-        return [private]
-    if private in lane_filter:
-        if not origin or origin in lane_filter:
-            return lane_filter
-        return ["(", origin, "or", *lane_filter, ")"]
-    if origin:
-        return ["(", private, "or", origin, "or", *lane_filter, ")"]
-    return ["(", private, "or", *lane_filter, ")"]
-
-
-def _route_includes_origin(route: dict[str, Any] | None) -> bool:
-    if route is None:
-        return True
-    return str(route.get("lifetime") or "") in ("Drive", "Drain")
-
-
-def effective_filter_args(actor: str, lane_filter: list[str] | None) -> list[str]:
-    return _scope_filter(actor, lane_filter)
-
-
-def effective_route_filter_args(actor: str, route: dict[str, Any] | None) -> list[str]:
-    from spice.tasks import lanes
-
-    return _scope_filter(
-        actor,
-        lanes.filter_args(route),
-        include_origin=_route_includes_origin(route),
-    )
-
-
-def visible_rows(actor: str, filters: list[str]) -> list[dict[str, Any]]:
-    from spice.tasks import lanes
-
-    route = lanes.team_route_for_actor(actor)
-    return tw.export(
-        [
-            *filters,
-            *effective_route_filter_args(actor, route),
-        ]
-    )
-
-
-def visible_ready_rows(actor: str) -> list[dict[str, Any]]:
-    rows = visible_rows(actor, ["status:pending", "+READY", "-ACTIVE"])
-    return [r for r in rows if not _is_oops(r) and not str(r.get("claim_by") or "")]
-
-
-def visible_active_rows(actor: str) -> list[dict[str, Any]]:
-    rows = visible_rows(actor, ["status:pending", "+ACTIVE"])
-    return [r for r in rows if not _is_oops(r) and str(r.get("claim_by") or "")]
-
-
-def visible_pending_rows(actor: str) -> list[dict[str, Any]]:
-    rows = visible_rows(actor, ["status:pending"])
-    return [r for r in rows if not _is_oops(r)]
-
-
-def _candidate_rows(
-    actor: str,
-    lane_filter: list[str] | None,
-    overrides: list[str],
-    *,
-    include_origin: bool = False,
-) -> list[dict[str, Any]]:
-    base_filter = ["status:pending", "+READY", "-ACTIVE"]
-    return tw.export(
-        [
-            *base_filter,
-            *_scope_filter(actor, lane_filter, include_origin=include_origin),
-        ],
-        overrides=overrides,
-    )
-
-
-def _unclaimed_actionable(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [r for r in rows if not _is_oops(r) and not str(r.get("claim_by") or "")]
-
-
-def _claim_first(
-    candidates: list[dict[str, Any]],
-    actor: str,
-    claimed_rows: list[dict[str, Any]],
-    active_rows: list[dict[str, Any]],
-    *,
-    guard_unclaimed: bool,
-) -> dict[str, Any] | None:
-    from spice.tasks import alloc
-
-    for chosen in alloc.order(candidates, actor, claimed_rows, active_rows):
-        if not do_claim(
-            identity.uuid_of(chosen), actor, guard_unclaimed=guard_unclaimed
-        ):
-            # lost the race to a concurrent agent; fall through to the next one
-            continue
-        fresh = identity.resolve(identity.render_handle(chosen))
-        if str(fresh.get("claim_by") or "") == actor:
-            return fresh
-    return None
-
-
-def next_task() -> dict[str, Any] | None:
-    from spice.tasks import alloc, lanes
-
-    actor = tw.current_actor()
-    active_rows = tw.export(["status:pending", "+ACTIVE"])
-    own_active = [r for r in active_rows if str(r.get("claim_by") or "") == actor]
-    if own_active:
-        return max(own_active, key=lambda r: str(r.get("claim_at") or ""))
-
-    route = lanes.team_route_for_actor(actor)
-    overrides = alloc.actor_overrides(actor, route)
-    lane_filter = lanes.filter_args(route)
-    include_origin = _route_includes_origin(route)
-    repair_candidates = _unclaimed_actionable(
-        tw.export(
-            [
-                "status:pending",
-                "+ACTIVE",
-                *_scope_filter(actor, lane_filter, include_origin=include_origin),
-            ],
-            overrides=overrides,
-        )
-    )
-    if repair_candidates:
-        repaired = _claim_first(
-            repair_candidates, actor, [], active_rows, guard_unclaimed=False
-        )
-        if repaired is not None:
-            return repaired
-    candidates = _unclaimed_actionable(
-        _candidate_rows(actor, lane_filter, overrides, include_origin=include_origin)
-    )
-    if not candidates:
-        return None
-    # We intend to claim: bring the tree to the current baseline once before
-    # the claim records HEAD, so new work starts from the latest shared state.
-    for note_text in gitsync.prepare_for_claim().notes:
-        print(f"task: {note_text}")
-    claimed_rows = tw.export([f"claim_by.is:{actor}"])
-    return _claim_first(
-        candidates, actor, claimed_rows, active_rows, guard_unclaimed=True
-    )

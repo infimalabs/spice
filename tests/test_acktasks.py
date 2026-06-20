@@ -24,7 +24,7 @@ from spice.serve.teams import (
     ServeTeamStore,
     TeamConfig,
 )
-from spice.tasks import config, identity, ops, tw
+from spice.tasks import alloc, config, identity, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -100,7 +100,7 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
         f"inline_task_created={handle}(route_filter=skipped:task.unit:no_team)",
         watchdog.INLINE_TASK_BACKLOG_NOTE,
     ]
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
 
     assert identity.render_handle(assigned or {}) == handle
     assert store.current_team_for_agent(ACTOR) is None
@@ -197,7 +197,7 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
     assert [entry.to_payload() for entry in team_config.task_filter_entries] == [
         {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE}
     ]
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
     assert identity.render_handle(assigned or {}) == handle
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert feedback == [
