@@ -107,11 +107,12 @@ def _config_from_payload(raw: Any) -> Any:
 
 
 def _patched_config(current: Any, patch: dict[str, Any]) -> Any:
-    from spice.serve.teams import TeamConfig, _validated_task_filter_projects
+    from spice.serve.teamfilters import validated_task_filter_projects
+    from spice.serve.teams import TeamConfig
 
     task_filters = current.task_filters
     if isinstance(patch.get("taskFilters"), list):
-        task_filters = _validated_task_filter_projects(
+        task_filters = validated_task_filter_projects(
             str(item) for item in patch["taskFilters"]
         )
     shell_settings = current.shell_settings

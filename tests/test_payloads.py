@@ -208,6 +208,7 @@ def test_serve_agent_identity_reports_unbound_target_identity(tmp_path, monkeypa
         "teamIndex": None,
         "ancestorThreadId": "",
         "successorThreadId": "",
+        "revision": 0,
     }
 
 
@@ -235,10 +236,14 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
         ),
     )
 
+    store = ServeTeamStore(tmp_path / "teams.sqlite")
+
     identity = payloads.serve_agent_identity_payload(
         target,
         transcript_owner="claude",
+        store=store,
     )
+    stored = store.agent_identity_for_actor("thread:thread-a")
 
     assert identity["actorId"] == "thread:thread-a"
     assert identity["thread"] == {"state": "bound", "threadId": "thread-a"}
@@ -254,6 +259,18 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
         "serviceTier": "fast",
         "source": "agent state",
     }
+    assert stored is not None
+    assert stored.actor_id == "thread:thread-a"
+    assert stored.target_id == "wt"
+    assert stored.thread_id == "thread-a"
+    assert stored.actual_driver == "claude"
+    assert stored.actual_model == "actual-model"
+    assert stored.actual_effort == "low"
+    assert stored.actual_service_tier == "fast"
+    assert stored.desired_driver == "codex"
+    assert stored.desired_model == "desired-model"
+    assert stored.desired_effort == "high"
+    assert stored.transcript_owner == "claude"
 
 
 def test_serve_agent_identity_normalizes_legacy_bare_actor_and_renewal(
@@ -264,7 +281,9 @@ def test_serve_agent_identity_normalizes_legacy_bare_actor_and_renewal(
     _init_repo(repo)
     store = ServeTeamStore(tmp_path / "teams.sqlite")
     store.create_team(members=["thread-a", "thread-b"])
-    store.record_pending_renewal(agent_id="thread-a", ancestor_thread_id="thread-a")
+    renewal = store.record_pending_renewal(
+        agent_id="thread-a", ancestor_thread_id="thread-a"
+    )
     target = _Target(id="wt", repo_root=repo, name="repo", branch="main")
     monkeypatch.setattr(
         payloads,
@@ -289,6 +308,7 @@ def test_serve_agent_identity_normalizes_legacy_bare_actor_and_renewal(
         "teamIndex": 0,
         "ancestorThreadId": "thread-a",
         "successorThreadId": "",
+        "revision": renewal.revision,
     }
     assert store.current_team_for_agent("thread-a") is None
     assert store.current_team_for_agent("thread:thread-a") is not None
@@ -966,6 +986,7 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
 
     work_tree = payload["workTrees"][0]
     assert work_tree["lastAssistantAt"] == latest
+    assert work_tree["serveAgentIdentity"]["actorId"] == "thread:agent-a"
     assert work_tree["statusLine"]["lastAssistantAt"] == latest
     assert work_tree["statusLine"]["preview"] == "thinking"
     assert calls == [
@@ -1235,6 +1256,8 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     assert payload["messages"] == []
     assert payload["targetIdentity"]["thread"] == {"state": "unbound"}
     assert payload["targetIdentity"]["agent"] == {"state": "unconfigured"}
+    assert payload["serveAgentIdentity"]["actorId"] == "target:wt"
+    assert payload["serveAgentIdentity"]["renewal"]["revision"] == 0
     assert payload["teamIdentity"] == {"state": "none"}
     assert payload["pendingInboxCount"] == 1
     assert payload["pendingInboxLabel"] == "1"
