@@ -265,48 +265,34 @@ def default_project(actor: str) -> str:
     return f"agent.{hexid}.task"
 
 
-def _add_one(
+def _resolve_add_project(actor: str, project: str | None, system_project: bool) -> str:
+    if project is None:
+        return default_project(actor)
+    if system_project:
+        return config.validate_project(project)
+    return config.validate_manual_creation_project(project)
+
+
+def _build_add_args(
     *,
     title: str,
-    description: str | None = None,
-    project: str | None,
+    body: str | None,
+    actor: str,
+    incepted: str,
+    resolved_project: str,
+    phases: list[str],
     priority: str,
-    flow: list[str] | None,
     tags: list[str],
     after: list[str],
     acceptance: list[str],
     wait: str | None,
-    claim: bool,
-    every: str | None = None,
-    scheduled: str | None = None,
-    until: str | None = None,
-    due: str | None = None,
-    extra: list[str] | None = None,
-    existing: set[str] | None = None,
-    system_project: bool = False,
-    return_result: bool = False,
-    actor_override: str | None = None,
-    creation_surface: str | None = None,
-) -> str | TaskAddResult:
-    title = _task_title(title)
-    body = _task_description(description)
-    actor = tw.canonical_actor(actor_override or tw.current_actor())
-    if claim:
-        _require_single_active_slot(actor, action="task add --claim")
-        # Match a normal claim's baseline check before creating the task row.
-        # If this fails, task add --claim must not leave unclaimed work behind.
-        gitsync.prepare_for_claim()
-    private_project = default_project(actor)
-    if project is None:
-        resolved_project = private_project
-    elif system_project:
-        resolved_project = config.validate_project(project)
-    else:
-        resolved_project = config.validate_manual_creation_project(project)
-    phases = config.resolve_flow(flow, resolved_project)
-    incepted = identity.mint_incepted(existing)
-    if existing is not None:
-        existing.add(incepted)
+    every: str | None,
+    scheduled: str | None,
+    until: str | None,
+    due: str | None,
+    extra: list[str] | None,
+    creation_surface: str | None,
+) -> list[str]:
     mapped_priority = config.map_priority(priority)
     args = [
         "add",
@@ -352,6 +338,64 @@ def _add_one(
         args.append(f"depends:{identity.uuid_of(dep)}")
     args.extend(extra or [])
     args.append(title)
+    return args
+
+
+def _add_one(
+    *,
+    title: str,
+    description: str | None = None,
+    project: str | None,
+    priority: str,
+    flow: list[str] | None,
+    tags: list[str],
+    after: list[str],
+    acceptance: list[str],
+    wait: str | None,
+    claim: bool,
+    every: str | None = None,
+    scheduled: str | None = None,
+    until: str | None = None,
+    due: str | None = None,
+    extra: list[str] | None = None,
+    existing: set[str] | None = None,
+    system_project: bool = False,
+    return_result: bool = False,
+    actor_override: str | None = None,
+    creation_surface: str | None = None,
+) -> str | TaskAddResult:
+    title = _task_title(title)
+    body = _task_description(description)
+    actor = tw.canonical_actor(actor_override or tw.current_actor())
+    if claim:
+        _require_single_active_slot(actor, action="task add --claim")
+        # Match a normal claim's baseline check before creating the task row.
+        # If this fails, task add --claim must not leave unclaimed work behind.
+        gitsync.prepare_for_claim()
+    resolved_project = _resolve_add_project(actor, project, system_project)
+    phases = config.resolve_flow(flow, resolved_project)
+    incepted = identity.mint_incepted(existing)
+    if existing is not None:
+        existing.add(incepted)
+    args = _build_add_args(
+        title=title,
+        body=body,
+        actor=actor,
+        incepted=incepted,
+        resolved_project=resolved_project,
+        phases=phases,
+        priority=priority,
+        tags=tags,
+        after=after,
+        acceptance=acceptance,
+        wait=wait,
+        every=every,
+        scheduled=scheduled,
+        until=until,
+        due=due,
+        extra=extra,
+        creation_surface=creation_surface,
+    )
     tw.run(args)
     route_feedback = _subscribe_created_project(resolved_project, actor)
     if claim:
