@@ -842,7 +842,7 @@ def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
     assert "same task-add batch format" in output
 
 
-def test_inbox_injector_compacts_already_shown_item_when_new_key_arrives(tmp_path):
+def test_inbox_injector_repeats_already_shown_item_after_new_key(tmp_path):
     write_inbox_item(
         tmp_path,
         "20260101T000000000001Z.txt",
@@ -866,13 +866,19 @@ def test_inbox_injector_compacts_already_shown_item_when_new_key_arrives(tmp_pat
         compose_inbox_text(body="second steering", priority=None, stop=False),
     )
     injector.inject(force=False)
+    # The first key has now aged past the 15s repeat cadence, even though a new
+    # key arrived in the meantime; it must render full again instead of staying
+    # compact forever.
+    now[0] = 16.0
+    injector.inject(force=False)
 
     output = stderr.getvalue()
     # The new key renders full (real-time delivery preserved); the already-shown
-    # key collapses to one compact summary line instead of re-dumping its body.
-    assert output.count("first steering") == 1
+    # key first collapses to one compact summary line, then renders full again
+    # after the repeat interval.
+    assert output.count("first steering") == 2
     assert output.count("second steering") == 1
-    assert "shown earlier; ACK to clear" in output
+    assert output.count("shown earlier; ACK to clear") == 2
 
 
 def test_inbox_injector_suppresses_task_offload_for_maxim_guidance(tmp_path):
