@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.flexstate import (
     sticky_function_keys_after_renames,
@@ -19,6 +20,7 @@ from spice.policy import (
     FLEX_NUMERATOR,
     flex_limit,
 )
+from spice.studies import cli as studies_cli
 from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies.magicnums import scan_text_magic_numbers
@@ -99,6 +101,16 @@ def test_generated_lockfiles_do_not_trip_file_shape_pressure(tmp_path):
     )
 
     assert [finding.path for finding in findings] == [source_path.as_posix()]
+
+
+def test_study_explicit_directory_reports_file_path_requirement(tmp_path, monkeypatch):
+    directory = tmp_path / "spice" / "serve"
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    args = build_parser().parse_args(["study", "file-loc", "spice/serve"])
+
+    with pytest.raises(SpiceError, match="file paths.*spice/serve"):
+        args.func(args)
 
 
 def test_generated_lockfiles_are_pruned_from_file_shape_sticky_state(
