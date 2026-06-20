@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, cast
 
 from spice.agent.driver import driver_for_transcript
 from spice.agent.identity import canonical_thread_id
@@ -48,6 +48,14 @@ DEFAULT_COMMANDS_LIMIT = 80
 DEFAULT_COMMAND_TEXT_CHARS = 220
 COMMIT_LINE_PREVIEW_CHARS = 160
 COMMIT_USER_PREVIEW_CHARS = 120
+
+
+class SessionFilterKwargs(TypedDict):
+    start: str | None
+    end: str | None
+    contains: str | None
+    turn_ids: list[str]
+    tools: list[str]
 
 
 def configure_session_parser(subparsers: Any) -> None:
@@ -418,13 +426,15 @@ def _latest_text(values: list[str]) -> str:
     return next((text for text in reversed(values) if text.strip()), "")
 
 
-def _filter_kwargs(args: argparse.Namespace) -> dict[str, object]:
+def _filter_kwargs(args: argparse.Namespace) -> SessionFilterKwargs:
     return {
-        "start": _normalize_bound(getattr(args, "start", None)),
-        "end": _normalize_bound(getattr(args, "end", None)),
-        "contains": getattr(args, "contains", None),
-        "turn_ids": _clean_list(getattr(args, "turn_ids", None)),
-        "tools": _clean_list(getattr(args, "tools", None)),
+        "start": _normalize_bound(cast(str | None, getattr(args, "start", None))),
+        "end": _normalize_bound(cast(str | None, getattr(args, "end", None))),
+        "contains": cast(str | None, getattr(args, "contains", None)),
+        "turn_ids": _clean_list(
+            cast(list[str] | None, getattr(args, "turn_ids", None))
+        ),
+        "tools": _clean_list(cast(list[str] | None, getattr(args, "tools", None))),
     }
 
 
