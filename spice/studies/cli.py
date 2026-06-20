@@ -69,11 +69,18 @@ def _target_paths(args: argparse.Namespace, root: Path) -> list[Path]:
     if args.staged:
         return staged_paths(root)
     if args.paths:
-        return [
-            path if not path.is_absolute() else path.relative_to(root)
-            for path in args.paths
-        ]
+        return [_explicit_target_path(path, root) for path in args.paths]
     return tracked_paths(root)
+
+
+def _explicit_target_path(path: Path, root: Path) -> Path:
+    rel_path = path if not path.is_absolute() else path.relative_to(root)
+    if (root / rel_path).is_dir():
+        raise SpiceError(
+            "explicit study paths must be file paths; "
+            f"got directory: {rel_path.as_posix()}"
+        )
+    return rel_path
 
 
 def handle_study(args: argparse.Namespace) -> int:

@@ -191,7 +191,7 @@ def scan_loc_violations(
         ):
             continue
         abs_path = root / rel_path
-        if not abs_path.exists():
+        if not abs_path.exists() or not abs_path.is_file():
             continue
         active_line_limit = limit if rel_path in sticky_paths else line_flex
         active_byte_limit = byte_limit if rel_path in byte_sticky_paths else byte_flex
