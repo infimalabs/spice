@@ -820,6 +820,14 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
         renewal_intent = renewal_intent_for_target(state.team_store, target, thread_id)
         items, error, transcript = target_activity_items(target, thread_id)
         transcript_owner = transcript.owner_driver.name if transcript else ""
+        serve_identity = serve_agent_identity_payload(
+            target,
+            thread_id,
+            binding_status=binding_status,
+            binding_error=binding_error,
+            transcript_owner=transcript_owner,
+            store=state.team_store,
+        )
         status_line = _status_line_payload_from_status(
             status=status,
             thread_id=thread_id,
@@ -841,21 +849,14 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
                     binding_error=binding_error,
                     agent_name=agent_name,
                 ),
-                "serveAgentIdentity": serve_agent_identity_payload(
-                    target,
-                    thread_id,
-                    binding_status=binding_status,
-                    binding_error=binding_error,
-                    transcript_owner=transcript_owner,
-                    store=state.team_store,
-                ),
+                "serveAgentIdentity": serve_identity,
                 "taskFilters": team_facts.get("taskFilters", []),
                 "laneFilterVersion": "",
                 "teamIdentity": team_identity,
                 "lifetime": team_facts.get("lifetime", ""),
                 "renewalIntent": renewal_intent,
                 "taskFilterInventory": inventory,
-                "laneInfo": _lane_info_payload(target, thread_id),
+                "laneInfo": _lane_info_payload(target, serve_identity),
                 "pendingCount": pending,
                 "pendingLabel": str(pending),
                 **pending_identity,
@@ -888,21 +889,54 @@ def _binding_status(thread_id: str, binding_error: str) -> str:
     return "bound" if thread_id else "unbound"
 
 
-def _lane_info_payload(target: WorktreeTarget, thread_id: str) -> dict[str, Any]:
+def _lane_info_payload(
+    target: WorktreeTarget, serve_identity: dict[str, Any]
+) -> dict[str, Any]:
     agent_name = _agent_name_for_target(target)
-    driver = _driver_identity_payload(target)
+    thread_id = str((serve_identity.get("thread") or {}).get("threadId") or "")
+    driver = serve_identity.get("driver") or {}
+    desired_driver = str(driver.get("desired") or "")
+    actual_driver = str(driver.get("actual") or "")
+    session_owner = str(driver.get("transcriptOwner") or "")
+    launch = serve_identity.get("launch") or {}
+    desired_launch = launch.get("desired") or {}
+    actual_launch = launch.get("actual") or {}
     rows = [
         {"key": "agent", "value": agent_name or "-", "span": False},
-        {"key": "driver", "value": driver["name"], "span": False},
-        {"key": "model", "value": driver["model"], "span": False},
-        {"key": "effort", "value": driver["effort"], "span": False},
+        *_identity_value_rows("driver", actual_driver, desired_driver),
+        *_identity_value_rows(
+            "model",
+            str(actual_launch.get("model") or ""),
+            str(desired_launch.get("model") or ""),
+        ),
+        *_identity_value_rows(
+            "effort",
+            str(actual_launch.get("effort") or ""),
+            str(desired_launch.get("effort") or ""),
+        ),
         {"key": "target", "value": target.id, "span": False},
         {"key": "worktree", "value": target.name or "-", "span": False},
         {"key": "path", "value": str(target.repo_root), "span": True},
         {"key": "branch", "value": target.branch or "-", "span": False},
         {"key": "thread", "value": thread_id or "-", "span": True},
+        {"key": "session", "value": session_owner or "-", "span": False},
     ]
     return {"summaryRows": rows, "members": []}
+
+
+def _identity_value_rows(
+    key: str,
+    actual: str,
+    desired: str,
+) -> list[dict[str, Any]]:
+    actual = str(actual or "").strip()
+    desired = str(desired or "").strip()
+    if actual and desired and actual != desired:
+        return [
+            {"key": f"{key} actual", "value": actual, "span": False},
+            {"key": f"{key} desired", "value": desired, "span": False},
+        ]
+    return [{"key": key, "value": desired or actual or "-", "span": False}]
 
 
 def lane_metrics_payload(
@@ -1061,6 +1095,14 @@ def messages_payload_for_worktree(
     binding_error = agent_binding_error(target.repo_root, status)
     binding_status = _binding_status(thread_id, binding_error)
     transcript_owner = transcript.owner_driver.name if transcript else ""
+    serve_identity = serve_agent_identity_payload(
+        target,
+        thread_id,
+        binding_status=binding_status,
+        binding_error=binding_error,
+        transcript_owner=transcript_owner,
+        store=state.team_store,
+    )
     return {
         "messages": [item.to_payload() for item in items],
         "targetWorktreeName": target.name,
@@ -1071,14 +1113,7 @@ def messages_payload_for_worktree(
             binding_status=binding_status,
             binding_error=binding_error,
         ),
-        "serveAgentIdentity": serve_agent_identity_payload(
-            target,
-            thread_id,
-            binding_status=binding_status,
-            binding_error=binding_error,
-            transcript_owner=transcript_owner,
-            store=state.team_store,
-        ),
+        "serveAgentIdentity": serve_identity,
         "taskFilters": team_facts.get("taskFilters", []),
         "laneFilterVersion": "",
         "teamIdentity": team_identity,
@@ -1088,7 +1123,7 @@ def messages_payload_for_worktree(
         "laneMetrics": lane_metrics_payload(
             state, target, thread_id=thread_id, items=items, status=status
         ),
-        "laneInfo": _lane_info_payload(target, thread_id),
+        "laneInfo": _lane_info_payload(target, serve_identity),
         "agentProcessStatus": status.process_status,
         "error": error or "",
         **pending_identity,

@@ -74,16 +74,73 @@ const laneTemplate =
 
 let composerBandMenuDismissHandler = null;
 
-function createLaneState(targetId, hint = null, options = {}) {
-  const emptyTeam = Boolean(options.emptyTeam);
-  const target = targetById.get(targetId) || {};
-  const targetIdentity = target.targetIdentity || {};
-  const teamIdentity = target.teamIdentity || { state: "none" };
+function laneDriverIdentityFields(emptyTeam, targetIdentity, serveAgentIdentity) {
+  if (emptyTeam)
+    return {
+      driverName: "",
+      driverModel: "",
+      driverEffort: "",
+      driverDesiredName: "",
+      driverDesiredModel: "",
+      driverDesiredEffort: "",
+      driverActualName: "",
+      driverActualModel: "",
+      driverActualEffort: "",
+      driverTranscriptOwner: "",
+      driverIconName: "",
+      serveAgentIdentity: {},
+    };
+  const desiredName =
+    serveAgentDesiredDriverName(serveAgentIdentity) ||
+    targetIdentityDriverName(targetIdentity);
+  const desiredModel =
+    serveAgentDesiredLaunchValue(serveAgentIdentity, "model") ||
+    targetIdentityDriverModel(targetIdentity);
+  const desiredEffort =
+    serveAgentDesiredLaunchValue(serveAgentIdentity, "effort") ||
+    targetIdentityDriverEffort(targetIdentity);
+  const actualName = serveAgentActualDriverName(serveAgentIdentity);
+  const actualModel = serveAgentActualLaunchValue(serveAgentIdentity, "model");
+  const actualEffort = serveAgentActualLaunchValue(serveAgentIdentity, "effort");
+  const transcriptOwner = serveAgentTranscriptOwner(serveAgentIdentity);
+  return {
+    driverName: identityDisplayPair(actualName, desiredName),
+    driverModel: identityDisplayPair(actualModel, desiredModel),
+    driverEffort: identityDisplayPair(actualEffort, desiredEffort),
+    driverDesiredName: desiredName,
+    driverDesiredModel: desiredModel,
+    driverDesiredEffort: desiredEffort,
+    driverActualName: actualName,
+    driverActualModel: actualModel,
+    driverActualEffort: actualEffort,
+    driverTranscriptOwner: transcriptOwner,
+    driverIconName: actualName || transcriptOwner || desiredName,
+    serveAgentIdentity,
+  };
+}
+
+function laneTargetIdentityFields(emptyTeam, targetIdentity, serveAgentIdentity) {
+  return {
+    agentName: emptyTeam ? "" : targetIdentityAgentName(targetIdentity),
+    ...laneDriverIdentityFields(emptyTeam, targetIdentity, serveAgentIdentity),
+    branchName: emptyTeam
+      ? "empty team"
+      : targetIdentityBranch(targetIdentity),
+    targetThreadId: emptyTeam ? "" : targetIdentityThreadId(targetIdentity),
+    activeThreadId: emptyTeam ? "" : targetIdentityThreadId(targetIdentity),
+  };
+}
+
+function createLaneShellElement(targetId, emptyTeam) {
   const element = document.createElement("section");
   element.className = emptyTeam ? "lane lane--empty-team" : "lane";
   element.dataset.targetId = targetId;
   element.innerHTML = laneTemplate;
-  const rail = element.querySelector("[data-lane-mode-rail]");
+  populateLaneModeRail(element.querySelector("[data-lane-mode-rail]"));
+  return element;
+}
+
+function populateLaneModeRail(rail) {
   for (const view of laneViewModes) {
     const button = document.createElement("button");
     button.type = "button";
@@ -97,25 +154,14 @@ function createLaneState(targetId, hint = null, options = {}) {
     button.querySelector(".lane-mode-word").textContent = view;
     rail.append(button);
   }
-  const lane = {
-    targetId,
-    emptyTeam,
-    element,
-    closed: false,
-    laneId: "lane:" + targetId,
-    agentName: emptyTeam ? "" : targetIdentityAgentName(targetIdentity),
-    driverName: emptyTeam ? "" : targetIdentityDriverName(targetIdentity),
-    driverModel: emptyTeam ? "" : targetIdentityDriverModel(targetIdentity),
-    driverEffort: emptyTeam ? "" : targetIdentityDriverEffort(targetIdentity),
-    branchName: emptyTeam
-      ? "empty team"
-      : targetIdentityBranch(targetIdentity),
-    targetThreadId: emptyTeam ? "" : targetIdentityThreadId(targetIdentity),
-    activeThreadId: emptyTeam ? "" : targetIdentityThreadId(targetIdentity),
-    ...laneStreamState(target),
+}
+
+function laneControlState(target, hint) {
+  const lifetime = target.lifetime || defaultAgentLifetime;
+  return {
     speechMode: hint ? hint.speechMode : defaultSpeechMode,
-    lifetime: target.lifetime || defaultAgentLifetime,
-    serverLifetime: target.lifetime || defaultAgentLifetime,
+    lifetime,
+    serverLifetime: lifetime,
     selectedView: hint ? hint.selectedView : defaultLaneViewMode,
     taskFilters: uniqueStringList(target.taskFilters || []),
     laneFilterVersion: target.laneFilterVersion || "",
@@ -123,11 +169,12 @@ function createLaneState(targetId, hint = null, options = {}) {
     laneMetrics: target.laneMetrics || {},
     laneInfo: target.laneInfo || { summaryRows: [], members: [] },
     renewalIntent: target.renewalIntent || {},
-    pendingLifetimeCommit: "",
-    pendingLifetimeConfigRevision: 0,
-    pendingLifetimeRequestId: 0,
-    lifetimeRequestId: 0,
     privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),
+  };
+}
+
+function laneTeamState(emptyTeam, teamIdentity, options) {
+  return {
     teamId: emptyTeam ? "" : teamIdentityTeamId(teamIdentity),
     teamRevision: emptyTeam ? 0 : teamIdentityRevision(teamIdentity),
     emptyTeamCanClose: emptyTeam && Boolean(options.canClose),
@@ -135,6 +182,11 @@ function createLaneState(targetId, hint = null, options = {}) {
     teamSplitBackMemberCount: 0,
     configRevision: emptyTeam ? 0 : teamIdentityConfigRevision(teamIdentity),
     groupTopology: null,
+  };
+}
+
+function laneBackendState() {
+  return {
     backendPendingInboxCount: 0,
     backendPendingInboxKeys: new Set(),
     backendPendingInboxRevision: "",
@@ -148,6 +200,11 @@ function createLaneState(targetId, hint = null, options = {}) {
     liveBusSubscribed: false,
     serverReachable: true,
     serverCloseRequested: false,
+  };
+}
+
+function laneOverlayState() {
+  return {
     teamImportOverlayOpen: false,
     teamImportOverlayEl: null,
     filterPickerOpen: false,
@@ -158,10 +215,20 @@ function createLaneState(targetId, hint = null, options = {}) {
     filterPickerOverlayDismissHandler: null,
     selectedFilterRemovals: new Set(),
     renderedFilterPaneFingerprint: "",
+  };
+}
+
+function laneDraftState() {
+  return {
     shardTextareas: new Map(),
     shardAttachments: new Map(),
     quoteDrafts: new Map(),
     nextQuoteDraftId: 0,
+  };
+}
+
+function lanePaneState() {
+  return {
     paneCollapsePx: 0,
     paneMaxHeight: 0,
     paneMetricsFrame: 0,
@@ -172,6 +239,38 @@ function createLaneState(targetId, hint = null, options = {}) {
     previousMessageScrollTop: 0,
     modeRailDrag: null,
     modeRailSuppressClick: false,
+  };
+}
+
+function createLaneState(targetId, hint = null, options = {}) {
+  const emptyTeam = Boolean(options.emptyTeam);
+  const target = targetById.get(targetId) || {};
+  const targetIdentity = target.targetIdentity || {};
+  const serveAgentIdentity = target.serveAgentIdentity || {};
+  const teamIdentity = target.teamIdentity || { state: "none" };
+  const element = createLaneShellElement(targetId, emptyTeam);
+  const lane = {
+    targetId,
+    emptyTeam,
+    element,
+    closed: false,
+    laneId: "lane:" + targetId,
+    ...laneTargetIdentityFields(
+      emptyTeam,
+      targetIdentity,
+      serveAgentIdentity,
+    ),
+    ...laneStreamState(target),
+    ...laneControlState(target, hint),
+    pendingLifetimeCommit: "",
+    pendingLifetimeConfigRevision: 0,
+    pendingLifetimeRequestId: 0,
+    lifetimeRequestId: 0,
+    ...laneTeamState(emptyTeam, teamIdentity, options),
+    ...laneBackendState(),
+    ...laneOverlayState(),
+    ...laneDraftState(),
+    ...lanePaneState(),
     ...laneElementRefs(element),
   };
   lane.historySentinelEl.dataset.historyTargetId = targetId;
@@ -211,6 +310,15 @@ function syncEmptyTeamLane(lane, team = {}, options = {}) {
   lane.driverName = "";
   lane.driverModel = "";
   lane.driverEffort = "";
+  lane.driverDesiredName = "";
+  lane.driverDesiredModel = "";
+  lane.driverDesiredEffort = "";
+  lane.driverActualName = "";
+  lane.driverActualModel = "";
+  lane.driverActualEffort = "";
+  lane.driverTranscriptOwner = "";
+  lane.driverIconName = "";
+  lane.serveAgentIdentity = {};
   lane.branchName = "empty team";
   lane.targetThreadId = "";
   lane.activeThreadId = "";

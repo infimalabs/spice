@@ -385,6 +385,11 @@ def _work_tree_route_payload(
     return {
         "actor": actor,
         "targetIdentity": payloads.target_identity_payload(target, thread_id),
+        "serveAgentIdentity": payloads.serve_agent_identity_payload(
+            target,
+            thread_id,
+            store=state.team_store,
+        ),
         "teamIdentity": payloads.team_identity_payload(facts),
         "memberAgents": [actor] if actor else [],
         "laneName": target.name,

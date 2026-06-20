@@ -64,7 +64,10 @@ def test_static_send_route_applies_fresh_start_identity_before_refresh():
     assert "applyRouteConfigToTargetInventory(lane, config);" in route_body
     assert 'payloadHasField(config, "targetIdentity")' in route_body
     assert "applyLaneTargetIdentity(lane, config);" in route_body
+    assert 'payloadHasField(config, "serveAgentIdentity")' in route_body
+    assert "applyLaneServeAgentIdentity(lane, config);" in route_body
     assert "target.targetIdentity = config.targetIdentity;" in inventory_body
+    assert "target.serveAgentIdentity = config.serveAgentIdentity;" in inventory_body
     assert "target.teamIdentity = config.teamIdentity;" in inventory_body
 
 
@@ -753,7 +756,8 @@ def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag()
     assert "function agentLifetimeHelpText(lifetime) {" in app
     assert "data-lifetime-label>Drive</span>" in app_shell
     assert "data-submit>Drive</button>" in app_shell
-    assert "serverLifetime: target.lifetime || defaultAgentLifetime," in app_shell
+    assert "const lifetime = target.lifetime || defaultAgentLifetime;" in app_shell
+    assert "serverLifetime: lifetime," in app_shell
     assert 'pendingLifetimeCommit: "",' in app_shell
     assert "pendingLifetimeConfigRevision: 0," in app_shell
     assert "pendingLifetimeRequestId: 0," in app_shell
@@ -1015,20 +1019,21 @@ def test_static_composer_driver_icons_use_local_driver_assets():
     assert "function targetIdentityDriverName(identity)" in app_render
     assert "function targetIdentityDriverModel(identity)" in app_render
     assert "function targetIdentityDriverEffort(identity)" in app_render
-    assert "lane.driverName = targetIdentityDriverName(identity);" in app_render
-    assert "lane.driverModel = targetIdentityDriverModel(identity);" in app_render
-    assert "lane.driverEffort = targetIdentityDriverEffort(identity);" in app_render
-    assert 'driverName: emptyTeam ? "" : targetIdentityDriverName(targetIdentity),' in (
-        app_shell
+    assert "function applyLaneServeAgentIdentity(lane, payload)" in app_render
+    assert "function serveAgentDesiredDriverName(identity)" in app_render
+    assert "function serveAgentActualDriverName(identity)" in app_render
+    assert "function identityDisplayPair(actual, desired)" in app_render
+    assert "lane.driverName = identityDisplayPair(actualDriver, desiredDriver);" in (
+        app_render
     )
     assert (
-        'driverModel: emptyTeam ? "" : targetIdentityDriverModel(targetIdentity),'
-        in (app_shell)
+        "lane.driverIconName = actualDriver || transcriptOwner || desiredDriver;"
+        in (app_render)
     )
-    assert (
-        'driverEffort: emptyTeam ? "" : targetIdentityDriverEffort(targetIdentity),'
-        in app_shell
-    )
+    assert "const serveAgentIdentity = target.serveAgentIdentity || {};" in app_shell
+    assert "serveAgentActualDriverName(serveAgentIdentity)" in app_shell
+    assert "serveAgentDesiredDriverName(serveAgentIdentity)" in app_shell
+    assert "driverIconName:" in app_shell
     assert "syncComposerDriverIcon(primary, member);" in app_composer
     assert 'claude: "/static/icons/claude.svg",' in app_composer
     assert 'codex: "/static/icons/openai.svg",' in app_composer
@@ -1039,10 +1044,12 @@ def test_static_composer_driver_icons_use_local_driver_assets():
     assert 'icon.setAttribute("aria-label", tooltip);' in app_composer
     assert 'icon.setAttribute("role", "img");' in app_composer
     assert '"Codex driver"' in app_composer
+    assert '"driver: " + driverName' in app_composer
     assert '"model: " + model' in app_composer
     assert '"effort: " + effort' in app_composer
     assert '"thread: " + (threadId || "unbound")' in app_composer
-    assert '"source: worktree launch config"' in app_composer
+    assert '"session: " + session' in app_composer
+    assert '"source: worktree launch config"' not in app_composer
     assert (
         'icon.style.setProperty("--composer-driver-icon-url", '
         "'url(\"' + src + '\")');" in app_composer

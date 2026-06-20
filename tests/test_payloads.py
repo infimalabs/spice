@@ -150,11 +150,15 @@ def test_target_identity_payload_reports_configured_driver(tmp_path, monkeypatch
         "model": "claude-sonnet-4-5",
         "effort": "medium",
     }
+    target = _Target(id="wt", repo_root=repo)
+    serve_identity = payloads.serve_agent_identity_payload(
+        target,
+        "",
+        binding_status="unbound",
+    )
     rows = {
         row["key"]: row["value"]
-        for row in payloads._lane_info_payload(_Target(id="wt", repo_root=repo), "")[
-            "summaryRows"
-        ]
+        for row in payloads._lane_info_payload(target, serve_identity)["summaryRows"]
     }
     assert rows["driver"] == "claude"
     assert rows["model"] == "claude-sonnet-4-5"
@@ -342,6 +346,8 @@ def _identity_status(
     started_at: str = "",
 ) -> SimpleNamespace:
     return SimpleNamespace(
+        running=bool(thread_id),
+        process_status="running" if thread_id else "idle",
         thread_id=thread_id,
         model=model,
         reasoning_effort=effort,
@@ -985,6 +991,11 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
         path=tmp_path / "claude.jsonl",
         owner_driver=CLAUDE_DRIVER,
     )
+    monkeypatch.setattr(
+        payloads,
+        "effective_agent_config",
+        lambda _repo: {"driver": "codex", "model": "desired-model", "effort": "high"},
+    )
     monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
         payloads, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
@@ -1002,12 +1013,12 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
     monkeypatch.setattr(
         payloads,
         "agent_status",
-        lambda _repo: _Status(
-            running=True,
-            started_at="",
-            process_status="running",
+        lambda _repo: _identity_status(
+            tmp_path,
+            driver="claude",
             thread_id=thread_id,
             model="actual-model",
+            effort="low",
         ),
     )
     monkeypatch.setattr(payloads, "agent_binding_error", lambda _repo, _status: "")
@@ -1024,6 +1035,20 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
     )
 
     assert payload["serveAgentIdentity"]["driver"]["transcriptOwner"] == "claude"
+    assert payload["serveAgentIdentity"]["driver"]["actual"] == "claude"
+    assert payload["serveAgentIdentity"]["driver"]["desired"] == "codex"
+    assert payload["laneInfo"]["summaryRows"][:7] == [
+        {"key": "agent", "value": "-", "span": False},
+        {"key": "driver actual", "value": "claude", "span": False},
+        {"key": "driver desired", "value": "codex", "span": False},
+        {"key": "model actual", "value": "actual-model", "span": False},
+        {"key": "model desired", "value": "desired-model", "span": False},
+        {"key": "effort actual", "value": "low", "span": False},
+        {"key": "effort desired", "value": "high", "span": False},
+    ]
+    assert {"key": "session", "value": "claude", "span": False} in payload["laneInfo"][
+        "summaryRows"
+    ]
 
 
 def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):

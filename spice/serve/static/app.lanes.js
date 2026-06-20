@@ -78,6 +78,7 @@ function targetPayloadShim(target) {
   if (!target) return { statusLine: {} };
   return {
     targetIdentity: target.targetIdentity,
+    serveAgentIdentity: target.serveAgentIdentity,
     taskFilters: target.taskFilters || [],
     laneFilterVersion: target.laneFilterVersion || "",
     teamIdentity: target.teamIdentity,

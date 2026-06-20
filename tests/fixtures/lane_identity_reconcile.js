@@ -56,6 +56,17 @@ context.renderLaneChrome(lane, {
     agent: { state: "unconfigured" },
     thread: { state: "unbound" },
   },
+  serveAgentIdentity: {
+    actorId: "target:main-2",
+    driver: { desired: "codex", actual: "", transcriptOwner: "" },
+    launch: {
+      desired: { model: "gpt-5.5", effort: "xhigh" },
+      actual: { model: "", effort: "", serviceTier: "", source: "" },
+    },
+    renewal: { state: "none" },
+    target: {},
+    thread: { state: "unbound" },
+  },
   taskFilters: [],
   laneFilterVersion: "",
   teamIdentity: { state: "none" },
@@ -72,6 +83,45 @@ assert(lane.configRevision === 0, "present config revision replaces stale revisi
 assert(lane.taskFilters.length === 0, "present task filters replace stale filters");
 assert(lane.laneFilterVersion === "", "present filter version replaces stale version");
 assert(lane.pipEl.dataset.agentStatus === "idle", "idle status renders on lane");
+assert(lane.driverName === "codex", "unbound driver stays compact");
+assert(lane.driverModel === "gpt-5.5", "unbound model stays compact");
+assert(lane.driverEffort === "xhigh", "unbound effort stays compact");
+assert(lane.driverIconName === "codex", "unbound driver icon uses desired driver");
+
+context.renderLaneChrome(lane, {
+  targetIdentity: {
+    targetId: "main-2",
+    worktreeName: "main-2",
+    branch: "main-2",
+    driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
+    agent: { state: "unconfigured" },
+    thread: { state: "bound", threadId: "thread-b" },
+  },
+  serveAgentIdentity: {
+    actorId: "thread:thread-b",
+    driver: {
+      desired: "codex",
+      actual: "claude",
+      transcriptOwner: "claude",
+    },
+    launch: {
+      desired: { model: "gpt-5.5", effort: "xhigh" },
+      actual: { model: "claude-opus", effort: "low", serviceTier: "", source: "agent state" },
+    },
+    renewal: { state: "requested" },
+    target: {},
+    thread: { state: "bound", threadId: "thread-b" },
+  },
+  teamIdentity: { state: "none" },
+  statusLine: { agentProcessStatus: "running" },
+});
+
+assert(lane.driverName === "claude -> codex", "driver mismatch renders actual to desired");
+assert(lane.driverModel === "claude-opus -> gpt-5.5", "model mismatch renders actual to desired");
+assert(lane.driverEffort === "low -> xhigh", "effort mismatch renders actual to desired");
+assert(lane.driverIconName === "claude", "driver icon uses actual driver");
+assert(lane.driverTranscriptOwner === "claude", "transcript owner is retained");
+assert(lane.targetThreadId === "thread-b", "serve identity thread updates target thread");
 
 function assertThrows(fn, expectedMessage) {
   try {

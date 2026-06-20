@@ -21,6 +21,7 @@ let globalTransientStatusTimer = null;
 
 function renderLaneChrome(lane, payload) {
   applyLaneTargetIdentity(lane, payload);
+  applyLaneServeAgentIdentity(lane, payload);
   lane.taskFilters = uniqueStringList(payload.taskFilters || lane.taskFilters);
   if (payloadHasField(payload, "laneFilterVersion"))
     lane.laneFilterVersion = String(payload.laneFilterVersion || "");
@@ -58,7 +59,42 @@ function applyLaneTargetIdentity(lane, payload) {
   lane.driverName = targetIdentityDriverName(identity);
   lane.driverModel = targetIdentityDriverModel(identity);
   lane.driverEffort = targetIdentityDriverEffort(identity);
+  lane.driverDesiredName = lane.driverName;
+  lane.driverDesiredModel = lane.driverModel;
+  lane.driverDesiredEffort = lane.driverEffort;
+  lane.driverActualName = "";
+  lane.driverActualModel = "";
+  lane.driverActualEffort = "";
+  lane.driverTranscriptOwner = "";
+  lane.driverIconName = lane.driverName;
   const threadId = targetIdentityThreadId(identity);
+  lane.targetThreadId = threadId;
+  lane.activeThreadId = threadId;
+}
+
+function applyLaneServeAgentIdentity(lane, payload) {
+  if (!payloadHasField(payload, "serveAgentIdentity")) return;
+  const identity = payload.serveAgentIdentity || {};
+  lane.serveAgentIdentity = identity;
+  const desiredDriver = serveAgentDesiredDriverName(identity);
+  const actualDriver = serveAgentActualDriverName(identity);
+  const transcriptOwner = serveAgentTranscriptOwner(identity);
+  const desiredModel = serveAgentDesiredLaunchValue(identity, "model");
+  const actualModel = serveAgentActualLaunchValue(identity, "model");
+  const desiredEffort = serveAgentDesiredLaunchValue(identity, "effort");
+  const actualEffort = serveAgentActualLaunchValue(identity, "effort");
+  lane.driverDesiredName = desiredDriver;
+  lane.driverActualName = actualDriver;
+  lane.driverTranscriptOwner = transcriptOwner;
+  lane.driverName = identityDisplayPair(actualDriver, desiredDriver);
+  lane.driverIconName = actualDriver || transcriptOwner || desiredDriver;
+  lane.driverDesiredModel = desiredModel;
+  lane.driverActualModel = actualModel;
+  lane.driverModel = identityDisplayPair(actualModel, desiredModel);
+  lane.driverDesiredEffort = desiredEffort;
+  lane.driverActualEffort = actualEffort;
+  lane.driverEffort = identityDisplayPair(actualEffort, desiredEffort);
+  const threadId = serveAgentThreadId(identity);
   lane.targetThreadId = threadId;
   lane.activeThreadId = threadId;
 }
@@ -113,6 +149,60 @@ function targetIdentityDriverEffort(identity) {
 
 function targetIdentityDriver(identity) {
   return (identity || {}).driver || {};
+}
+
+function serveAgentDriver(identity) {
+  return (identity || {}).driver || {};
+}
+
+function serveAgentDesiredDriverName(identity) {
+  const driver = serveAgentDriver(identity);
+  if (!driver.desired) return "";
+  return requiredIdentityText(driver.desired, "desired driver");
+}
+
+function serveAgentActualDriverName(identity) {
+  return String(serveAgentDriver(identity).actual || "").trim();
+}
+
+function serveAgentTranscriptOwner(identity) {
+  return String(serveAgentDriver(identity).transcriptOwner || "").trim();
+}
+
+function serveAgentLaunch(identity, kind) {
+  return (((identity || {}).launch || {})[kind] || {});
+}
+
+function serveAgentDesiredLaunchValue(identity, field) {
+  const launch = serveAgentLaunch(identity, "desired");
+  if (!launch[field]) return "";
+  return requiredIdentityText(launch[field], "desired " + field);
+}
+
+function serveAgentActualLaunchValue(identity, field) {
+  return String(serveAgentLaunch(identity, "actual")[field] || "").trim();
+}
+
+function serveAgentThreadId(identity) {
+  const thread = (identity || {}).thread || {};
+  const state = identityPayloadState(thread, "serve thread identity");
+  if (state === "unbound") return "";
+  if (state === "mismatch") {
+    return thread.threadId === undefined
+      ? ""
+      : requiredIdentityText(thread.threadId, "thread id");
+  }
+  if (state !== "bound")
+    throw new Error("invalid serve thread identity state: " + (state || "-"));
+  return requiredIdentityText(thread.threadId, "thread id");
+}
+
+function identityDisplayPair(actual, desired) {
+  const actualText = String(actual || "").trim();
+  const desiredText = String(desired || "").trim();
+  if (actualText && desiredText && actualText !== desiredText)
+    return actualText + " -> " + desiredText;
+  return desiredText || actualText;
 }
 
 function agentBranchLabel(agentName, branchName) {
