@@ -9,9 +9,11 @@ Python-package-specific; the rest of the constitution still applies.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from fnmatch import fnmatch
 from pathlib import Path
 
+from spice.errors import SpiceError
 from spice.policy import BOUNDARY_UNDERSCORE_PATTERN
 from spice.repocfg import policy_table, read_pyproject, string_list
 
@@ -36,24 +38,161 @@ def configured_package_roots(repo_root: Path) -> list[Path]:
 
 
 def _derived_package_roots(repo_root: Path) -> list[str]:
-    """Top-level package roots inferred from `[tool.setuptools]` packaging.
+    """Package roots inferred from the project's own packaging metadata.
 
-    Supports an explicit `packages` list (keep the top-level segments) and the
-    `packages.find` auto-discovery form (top-level dirs under `where` matching
-    `include`/`exclude` that actually contain Python — so build artifacts like
-    `*.egg-info` are not mistaken for packages).
+    Each backend is tried in a fixed precedence; the first one whose table is
+    present wins. A backend whose table is absent is skipped; a backend that is
+    present but malformed fails loudly (``SpiceError``) rather than silently
+    falling through. When no packaging backend declares anything, fall back to
+    a ``src/`` layout, then to the ``[project].name`` package directory.
     """
-    tool = read_pyproject(repo_root).get("tool")
-    setuptools = tool.get("setuptools") if isinstance(tool, dict) else None
-    packages = setuptools.get("packages") if isinstance(setuptools, dict) else None
+    data = read_pyproject(repo_root)
+    tool = data.get("tool")
+    tool = tool if isinstance(tool, dict) else {}
+    for resolver in (
+        _setuptools_roots,
+        _poetry_roots,
+        _hatch_roots,
+        _flit_roots,
+        _pdm_roots,
+    ):
+        roots = resolver(repo_root, tool)
+        if roots is not None:
+            return roots
+    return _layout_fallback_roots(repo_root, data)
+
+
+def _setuptools_roots(repo_root: Path, tool: dict[str, object]) -> list[str] | None:
+    setuptools = tool.get("setuptools")
+    if not isinstance(setuptools, dict):
+        return None
+    packages = setuptools.get("packages")
+    if packages is None:
+        return None
     if isinstance(packages, list):
         return _explicit_package_roots(packages)
-    # Only auto-discover when the project explicitly opts into it; a bare
-    # [project] table with no setuptools packaging config derives nothing.
-    find = packages.get("find") if isinstance(packages, dict) else None
-    if not isinstance(find, dict):
-        return []
-    return _find_package_roots(repo_root, find)
+    if isinstance(packages, dict) and isinstance(packages.get("find"), dict):
+        return _find_package_roots(repo_root, packages["find"])
+    raise SpiceError(
+        "[tool.setuptools].packages must be a list or a {find = {...}} table"
+    )
+
+
+def _poetry_roots(repo_root: Path, tool: dict[str, object]) -> list[str] | None:
+    poetry = tool.get("poetry")
+    if not isinstance(poetry, dict):
+        return None
+    packages = poetry.get("packages")
+    if packages is not None:
+        return _poetry_package_roots(packages)
+    name = poetry.get("name")
+    if isinstance(name, str) and name.strip():
+        return _name_dir_roots(repo_root, name)
+    return []
+
+
+def _poetry_package_roots(packages: object) -> list[str]:
+    if not isinstance(packages, list):
+        raise SpiceError("[tool.poetry].packages must be a list")
+    roots: list[str] = []
+    for entry in packages:
+        if isinstance(entry, str):
+            rel = entry
+        elif isinstance(entry, dict) and isinstance(entry.get("include"), str):
+            base = entry.get("from")
+            base = base if isinstance(base, str) else ""
+            rel = f"{base}/{entry['include']}".strip("/") if base else entry["include"]
+        else:
+            raise SpiceError(
+                "[tool.poetry].packages entries must be a string or a table with 'include'"
+            )
+        rel = rel.strip("/")
+        if rel and rel not in roots:
+            roots.append(rel)
+    return roots
+
+
+def _hatch_roots(repo_root: Path, tool: dict[str, object]) -> list[str] | None:
+    hatch = tool.get("hatch")
+    build = hatch.get("build") if isinstance(hatch, dict) else None
+    if not isinstance(build, dict):
+        return None
+    packages = build.get("packages")
+    if packages is None:
+        targets = build.get("targets")
+        wheel = targets.get("wheel") if isinstance(targets, dict) else None
+        packages = wheel.get("packages") if isinstance(wheel, dict) else None
+    if packages is None:
+        return None
+    if not isinstance(packages, list):
+        raise SpiceError("[tool.hatch.build...].packages must be a list")
+    return _dedupe(str(entry).strip().strip("/") for entry in packages)
+
+
+def _flit_roots(repo_root: Path, tool: dict[str, object]) -> list[str] | None:
+    flit = tool.get("flit")
+    if not isinstance(flit, dict):
+        return None
+    module = flit.get("module")
+    name = module.get("name") if isinstance(module, dict) else None
+    if name is None:
+        metadata = flit.get("metadata")
+        name = metadata.get("module") if isinstance(metadata, dict) else None
+    if name is None:
+        return None
+    if not isinstance(name, str) or not name.strip():
+        raise SpiceError("[tool.flit.module].name must be a non-empty string")
+    return _name_dir_roots(repo_root, name)
+
+
+def _pdm_roots(repo_root: Path, tool: dict[str, object]) -> list[str] | None:
+    pdm = tool.get("pdm")
+    build = pdm.get("build") if isinstance(pdm, dict) else None
+    if not isinstance(build, dict):
+        return None
+    includes = build.get("includes")
+    if includes is None:
+        return None
+    if not isinstance(includes, list):
+        raise SpiceError("[tool.pdm.build].includes must be a list")
+    candidates = (str(entry or "").strip().rstrip("/") for entry in includes)
+    return _dedupe(
+        entry
+        for entry in candidates
+        if entry and "*" not in entry and not entry.endswith(".py")
+    )
+
+
+def _layout_fallback_roots(repo_root: Path, data: dict[str, object]) -> list[str]:
+    src = repo_root / "src"
+    if src.is_dir():
+        roots = [
+            f"src/{child.name}"
+            for child in sorted(src.iterdir())
+            if child.is_dir()
+            and not child.name.startswith(".")
+            and next(child.rglob("*.py"), None) is not None
+        ]
+        if roots:
+            return roots
+    project = data.get("project")
+    name = project.get("name") if isinstance(project, dict) else None
+    if isinstance(name, str) and name.strip():
+        return _name_dir_roots(repo_root, name)
+    return []
+
+
+def _name_dir_roots(repo_root: Path, name: str) -> list[str]:
+    normalized = name.strip().replace("-", "_")
+    for candidate in (normalized, f"src/{normalized}"):
+        path = repo_root / candidate
+        if path.is_dir() and next(path.rglob("*.py"), None) is not None:
+            return [candidate]
+    return []
+
+
+def _dedupe(names: Iterable[str]) -> list[str]:
+    return list(dict.fromkeys(name for name in names if name))
 
 
 def _explicit_package_roots(packages: list[object]) -> list[str]:
