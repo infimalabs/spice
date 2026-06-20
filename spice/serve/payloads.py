@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Iterable
 
@@ -1176,16 +1177,30 @@ def _message_sparkline(items: list[message_reader.AssistantMessage]) -> list[int
     return values
 
 
-def messages_payload_for_worktree(
+@dataclass(frozen=True)
+class _ResolvedMessagesThread:
+    thread_id: str
+    predecessor_actor: str
+    renew_intent: bool
+    agent_ensure: dict[str, Any] | None
+    pending_identity: dict[str, Any]
+    pending: int
+
+
+@dataclass(frozen=True)
+class _ThreadMessages:
+    items: list[message_reader.AssistantMessage]
+    error: str | None
+    transcript: message_reader.TranscriptResolution | None
+
+
+def _resolve_messages_thread(
     state: Any,
     target: WorktreeTarget,
     *,
-    limit: int,
-    after: str | None = None,
-    before: str | None = None,
-    expected_thread_id: str | None = None,
-    fast_mode: bool = False,
-) -> dict[str, Any]:
+    expected_thread_id: str | None,
+    fast_mode: bool,
+) -> _ResolvedMessagesThread:
     explicit_thread_id = canonical_thread_id(expected_thread_id or "")
     thread_id = explicit_thread_id or resolve_thread_id_for_target(state, target) or ""
     thread_id, predecessor_actor, renew_intent, agent_ensure = _ensure_work_tree_agent(
@@ -1193,30 +1208,17 @@ def messages_payload_for_worktree(
     )
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
-    items, error, transcript = _message_items_for_worktree(
-        state,
-        target,
-        thread_id,
-        limit=limit,
-        after=after,
-        before=before,
-    )
-    return _messages_worktree_payload(
-        state,
-        target,
+    return _ResolvedMessagesThread(
         thread_id=thread_id,
         predecessor_actor=predecessor_actor,
         renew_intent=renew_intent,
         agent_ensure=agent_ensure,
-        pending=pending,
         pending_identity=pending_identity,
-        items=items,
-        error=error,
-        transcript=transcript,
+        pending=pending,
     )
 
 
-def _message_items_for_worktree(
+def _read_thread_messages(
     state: Any,
     target: WorktreeTarget,
     thread_id: str,
@@ -1224,13 +1226,13 @@ def _message_items_for_worktree(
     limit: int,
     after: str | None,
     before: str | None,
-) -> tuple[
-    list[message_reader.AssistantMessage],
-    str | None,
-    message_reader.TranscriptResolution | None,
-]:
+) -> _ThreadMessages:
     if not thread_id:
-        return [], "No agent thread is bound to this worktree yet.", None
+        return _ThreadMessages(
+            items=[],
+            error="No agent thread is bound to this worktree yet.",
+            transcript=None,
+        )
     read = message_reader.assistant_messages_for_thread_id(
         thread_id,
         limit=limit,
@@ -1247,7 +1249,43 @@ def _message_items_for_worktree(
         after=after,
         before=before,
     )
-    return items, read.error, read.transcript
+    return _ThreadMessages(items=items, error=read.error, transcript=read.transcript)
+
+
+def messages_payload_for_worktree(
+    state: Any,
+    target: WorktreeTarget,
+    *,
+    limit: int,
+    after: str | None = None,
+    before: str | None = None,
+    expected_thread_id: str | None = None,
+    fast_mode: bool = False,
+) -> dict[str, Any]:
+    resolved = _resolve_messages_thread(
+        state, target, expected_thread_id=expected_thread_id, fast_mode=fast_mode
+    )
+    messages = _read_thread_messages(
+        state,
+        target,
+        resolved.thread_id,
+        limit=limit,
+        after=after,
+        before=before,
+    )
+    return _messages_worktree_payload(
+        state,
+        target,
+        thread_id=resolved.thread_id,
+        predecessor_actor=resolved.predecessor_actor,
+        renew_intent=resolved.renew_intent,
+        agent_ensure=resolved.agent_ensure,
+        pending=resolved.pending,
+        pending_identity=resolved.pending_identity,
+        items=messages.items,
+        error=messages.error,
+        transcript=messages.transcript,
+    )
 
 
 def _messages_worktree_payload(
