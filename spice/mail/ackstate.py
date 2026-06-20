@@ -28,7 +28,7 @@ ACK_STATE_DATABASE_FILENAME = "spiceacks.sqlite3"
 ACK_STATE_DATA_SUBDIR = "data"
 ACK_STATE_SQLITE_BUSY_TIMEOUT_MS = 5000
 
-ACK_STATE_SCHEMA = """
+ACK_STATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS acked_inbox_items (
   key TEXT PRIMARY KEY,
   inbox_name TEXT NOT NULL,
@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS acked_inbox_items (
   attachments_json TEXT NOT NULL DEFAULT '[]',
   archived_at REAL NOT NULL
 );
+"""
+ACK_STATE_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS acked_inbox_items_archived_at_idx
   ON acked_inbox_items(archived_at);
 """
@@ -125,21 +127,39 @@ def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     connection.execute(f"PRAGMA busy_timeout = {ACK_STATE_SQLITE_BUSY_TIMEOUT_MS}")
-    connection.executescript(ACK_STATE_SCHEMA)
-    _ensure_attachments_column(connection)
+    connection.execute(ACK_STATE_TABLE_SQL)
+    _ensure_column(
+        connection,
+        "inbox_name",
+        "ALTER TABLE acked_inbox_items ADD COLUMN inbox_name TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(
+        connection,
+        "text",
+        "ALTER TABLE acked_inbox_items ADD COLUMN text TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(
+        connection,
+        "attachments_json",
+        "ALTER TABLE acked_inbox_items "
+        "ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'",
+    )
+    _ensure_column(
+        connection,
+        "archived_at",
+        "ALTER TABLE acked_inbox_items ADD COLUMN archived_at REAL NOT NULL DEFAULT 0",
+    )
+    connection.execute(ACK_STATE_INDEX_SQL)
 
 
-def _ensure_attachments_column(connection: sqlite3.Connection) -> None:
+def _ensure_column(connection: sqlite3.Connection, column: str, statement: str) -> None:
     columns = {
         str(row[1])
         for row in connection.execute("PRAGMA table_info(acked_inbox_items)")
     }
-    if "attachments_json" in columns:
+    if column in columns:
         return
-    connection.execute(
-        "ALTER TABLE acked_inbox_items "
-        "ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'"
-    )
+    connection.execute(statement)
 
 
 def _decode_attachments_json(raw: str) -> tuple[dict[str, Any], ...]:

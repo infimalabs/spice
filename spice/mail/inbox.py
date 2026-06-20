@@ -2,9 +2,10 @@
 
 Items live under `.spice/inbox/*.txt`, one file per message, named by a
 UTC-microsecond timestamp key. Publish is atomic (tmp + fsync + hardlink +
-directory fsync); collisions increment a suffix. Reads never clear items;
-items move to `inbox/archive/` only when an assistant message ACKs their key.
-Items older than 24 hours expire in place.
+directory fsync); collisions increment a suffix. Reads never clear items. ACK
+is the only normal retirement path: ACKed items are recorded in
+`spiceacks.sqlite3` with their text and durable attachment references, then
+removed from pending input. Items older than 24 hours expire in place.
 """
 
 from __future__ import annotations
@@ -134,6 +135,7 @@ def collect_inbox_items(repo_root: str | Path | None) -> list[InboxItem]:
 def collect_acked_inbox_items(
     repo_root: str | Path | None, *, limit: int = INBOX_ARCHIVE_DEFAULT_LIMIT
 ) -> list[InboxItem]:
+    """Return consumed operator steering from ACK state, not archive files."""
     if not repo_root:
         return []
     prune_stale_inbox_artifacts(repo_root)

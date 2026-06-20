@@ -151,7 +151,12 @@ def ack_content_by_key(segments: Iterable[AckSegment]) -> dict[str, str]:
 def archive_ackd_inbox_items(
     repo_root: Path | None, ack_keys: Iterable[str]
 ) -> list[str]:
-    """Archive pending inbox items whose key appears in assistant ACK text."""
+    """Retire pending inbox items whose key appears in assistant ACK text.
+
+    The consumed steering text and durable attachment references are recorded
+    in `spiceacks.sqlite3`; the pending inbox file is only the input transport
+    and is discarded after the database write succeeds.
+    """
     if repo_root is None:
         return []
     acked_aliases: set[str] = set()
@@ -161,10 +166,10 @@ def archive_ackd_inbox_items(
     if not acked_aliases:
         return []
     pending = collect_inbox_items(str(repo_root))
-    to_archive = [
+    to_retire = [
         item for item in pending if inbox_item_key_aliases(item.name) & acked_aliases
     ]
-    if not to_archive:
+    if not to_retire:
         return []
     record_acked_inbox_items(
         repo_root,
@@ -175,12 +180,12 @@ def archive_ackd_inbox_items(
                 text=item.text,
                 attachments=_ack_state_attachments(item),
             )
-            for item in to_archive
+            for item in to_retire
         ],
     )
-    discard_inbox_items(inbox_payload_items(to_archive))
+    discard_inbox_items(inbox_payload_items(to_retire))
     notify_inbox_changed(repo_root)
-    return [inbox_item_key(item.name) for item in to_archive]
+    return [inbox_item_key(item.name) for item in to_retire]
 
 
 def archive_ackd_inbox_items_from_assistant_message(

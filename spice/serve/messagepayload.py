@@ -462,17 +462,18 @@ def ack_context_payload_for_worktree(
 ) -> dict[str, Any]:
     """Resolve sent-steering context for ACK keys the UI wants to quote.
 
-    Pending and recently archived inbox items are the source of truth. The
-    assistant's ACK reply is not operator context and must not be quoted back as
-    if the operator wrote it.
+    Pending inbox items are live input. Once consumed, `spiceacks.sqlite3` is
+    the source of truth for the operator's steering text and durable attachment
+    references. The assistant's ACK reply is not operator context and must not
+    be quoted back as if the operator wrote it.
     """
     wanted = [key for key in keys if key]
     by_key: dict[str, dict[str, Any]] = {}
-    pending = collect_inbox_items(str(target.repo_root))
-    archived = collect_acked_inbox_items(
+    acked = collect_acked_inbox_items(
         str(target.repo_root), limit=ACK_CONTEXT_ARCHIVE_LIMIT
     )
-    for item in (*pending, *archived):
+    pending = collect_inbox_items(str(target.repo_root))
+    for item in (*acked, *pending):
         item_aliases = inbox_item_key_aliases(item.name)
         matching_keys = [
             key
