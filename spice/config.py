@@ -103,6 +103,8 @@ def configured_say_words_per_minute(repo_root: Path | None = None) -> int | None
     if root is None:
         return None
     raw = _section(root, SAY_KEY).get(SAY_WORDS_PER_MINUTE_KEY)
+    if raw is None:
+        return None
     try:
         value = int(raw)
     except (TypeError, ValueError):
@@ -238,7 +240,7 @@ def _rewrite_project_agent_table(
     seen: set[str] = set()
     for line in lines[start + 1 : end]:
         key = _toml_assignment_key(line)
-        if key in values:
+        if key is not None and key in values:
             seen.add(key)
             if not clear:
                 rewritten.append(_toml_assignment(key, values[key]))

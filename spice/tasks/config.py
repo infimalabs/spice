@@ -97,7 +97,7 @@ def private_project(actor: str) -> str:
 
 def approved_stems() -> tuple[str, ...]:
     extras = _configured_extra_stems()
-    merged = list(BASE_APPROVED_STEMS)
+    merged: list[str] = list(BASE_APPROVED_STEMS)
     for stem in extras:
         if stem not in merged:
             merged.append(stem)
@@ -480,7 +480,7 @@ def _project_example(
     if target_depth > max_depth:
         target_depth = max_depth
     suffix_count = max(0, target_depth - 1)
-    suffixes = list(("example", "unit", "work", "item")[:suffix_count])
+    suffixes: list[str] = list(("example", "unit", "work", "item")[:suffix_count])
     while len(suffixes) < suffix_count:
         suffixes.append(f"level{len(suffixes) + 1}")
     segments = [stem, *suffixes]

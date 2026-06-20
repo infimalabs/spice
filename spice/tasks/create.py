@@ -137,7 +137,7 @@ def _build_add_args(
     return args
 
 
-def add_one(
+def _add_result(
     *,
     title: str,
     description: str | None = None,
@@ -156,10 +156,9 @@ def add_one(
     extra: list[str] | None = None,
     existing: set[str] | None = None,
     system_project: bool = False,
-    return_result: bool = False,
     actor_override: str | None = None,
     creation_surface: str | None = None,
-) -> str | TaskAddResult:
+) -> TaskAddResult:
     title = _task_title(title)
     body = _task_description(description)
     actor = tw.canonical_actor(actor_override or tw.current_actor())
@@ -204,9 +203,52 @@ def add_one(
         project=resolved_project,
         route_feedback=route_feedback,
     )
-    if return_result:
-        return result
-    return result.handle
+    return result
+
+
+def add_one(
+    *,
+    title: str,
+    description: str | None = None,
+    project: str | None,
+    priority: str,
+    flow: list[str] | None,
+    tags: list[str],
+    after: list[str],
+    acceptance: list[str],
+    wait: str | None,
+    claim: bool,
+    every: str | None = None,
+    scheduled: str | None = None,
+    until: str | None = None,
+    due: str | None = None,
+    extra: list[str] | None = None,
+    existing: set[str] | None = None,
+    system_project: bool = False,
+    actor_override: str | None = None,
+    creation_surface: str | None = None,
+) -> str:
+    return _add_result(
+        title=title,
+        description=description,
+        project=project,
+        priority=priority,
+        flow=flow,
+        tags=tags,
+        after=after,
+        acceptance=acceptance,
+        wait=wait,
+        claim=claim,
+        every=every,
+        scheduled=scheduled,
+        until=until,
+        due=due,
+        extra=extra,
+        existing=existing,
+        system_project=system_project,
+        actor_override=actor_override,
+        creation_surface=creation_surface,
+    ).handle
 
 
 def add(
@@ -367,7 +409,7 @@ def add_batch_results(
     existing = {str(r.get("incepted") or "") for r in tw.export()}
     results: list[TaskAddResult] = []
     for request in parsed:
-        result = add_one(
+        result = _add_result(
             title=request.title,
             description=request.description,
             project=request.project,
@@ -380,14 +422,9 @@ def add_batch_results(
             claim=False,
             due=request.due,
             existing=existing,
-            return_result=True,
             actor_override=actor_override,
             creation_surface=creation_surface,
         )
-        if not isinstance(
-            result, TaskAddResult
-        ):  # defensive; return_result controls this
-            raise SpiceError("batch add did not return task creation details")
         results.append(result)
     return results
 

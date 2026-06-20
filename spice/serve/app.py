@@ -386,7 +386,7 @@ def _request_reader_timed_out(reader: object) -> bool:
     if not isinstance(reader, BufferedReader):
         return False
     raw = reader.raw
-    return isinstance(raw, SocketIO) and raw._timeout_occurred
+    return isinstance(raw, SocketIO) and bool(getattr(raw, "_timeout_occurred", False))
 
 
 class _ServeHandler(BaseHTTPRequestHandler):

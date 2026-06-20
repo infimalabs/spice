@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, NoReturn, TypeVar, overload
+
+_NamespaceT = TypeVar("_NamespaceT")
 
 
 @dataclass(frozen=True)
@@ -15,13 +17,31 @@ class RecoveryMetadata:
 
 
 class RecoveringArgumentParser(argparse.ArgumentParser):
+    @overload
     def parse_args(
-        self, args: list[str] | None = None, namespace: argparse.Namespace | None = None
-    ) -> argparse.Namespace:
+        self,
+        args: Iterable[str] | None = None,
+        namespace: None = None,
+    ) -> argparse.Namespace: ...
+
+    @overload
+    def parse_args(
+        self,
+        args: Iterable[str] | None = None,
+        *,
+        namespace: _NamespaceT,
+    ) -> _NamespaceT: ...
+
+    def parse_args(
+        self,
+        args: Iterable[str] | None = None,
+        namespace: Any = None,
+    ) -> Any:
         parsed, extras = self.parse_known_args(args, namespace)
         if extras:
             parser = getattr(parsed, "_spice_error_parser", self)
             parser.error("unrecognized arguments: " + " ".join(extras))
+        assert parsed is not None
         return parsed
 
     def add_subparsers(self, **kwargs: Any) -> argparse._SubParsersAction:
@@ -29,7 +49,7 @@ class RecoveringArgumentParser(argparse.ArgumentParser):
         kwargs.setdefault("action", RecoveringSubParsersAction)
         return super().add_subparsers(**kwargs)
 
-    def error(self, message: str) -> None:
+    def error(self, message: str) -> NoReturn:
         self.print_usage(sys.stderr)
         self.exit(2, f"{self.prog}: error: {message}\n{render_recovery(self)}\n")
 

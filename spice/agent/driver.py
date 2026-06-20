@@ -28,7 +28,7 @@ import uuid
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 from spice.paths import atomic_write_json, state_dir
 
@@ -74,7 +74,19 @@ class AgentDriver:
         """True iff `path` sits in this driver's transcript layout."""
         return False
 
-    def build_exec_command(self, **kwargs: object) -> list[str]:
+    def build_exec_command(
+        self,
+        *,
+        repo_root: Path,
+        prompt: str,
+        thread_id: str = "",
+        model: str = "",
+        reasoning_effort: str = "",
+        personality: str = "",
+        service_tier: str = "",
+        binary: str = "",
+        fast_mode: bool = False,
+    ) -> list[str]:
         raise NotImplementedError
 
     def skill_invocation_prompt(self, skill_path: Path) -> str:
@@ -139,6 +151,14 @@ class AgentDriver:
 PLAYWRIGHT_MCP_SERVER_NAME = "playwright"
 PLAYWRIGHT_MCP_COMMAND = "npx"
 PLAYWRIGHT_MCP_ARGS = ("--yes", "@playwright/mcp@latest", "--headless")
+
+
+@overload
+def _as_int(value: Any, default: None) -> int | None: ...
+
+
+@overload
+def _as_int(value: Any, default: int = 0) -> int: ...
 
 
 def _as_int(value: Any, default: int | None = 0) -> int | None:
@@ -618,7 +638,7 @@ def claude_mcp_config_json(repo_root: Path) -> str:
 
 
 def playwright_mcp_args(repo_root: Path) -> list[str]:
-    args = list(PLAYWRIGHT_MCP_ARGS)
+    args: list[str] = list(PLAYWRIGHT_MCP_ARGS)
     config_path = write_playwright_mcp_config(repo_root)
     args.extend(["--config", str(config_path)])
     return args
