@@ -14,6 +14,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
 from spice.errors import SpiceError
 from spice.mail.inbox import (
@@ -72,6 +73,25 @@ class DirtyComplexityRegression:
     value: int
     active_threshold: int
     baseline_value: int | None
+
+
+class DirtyWorktreePressure(TypedDict, total=False):
+    available: bool
+    dirtyPathCount: int
+    scannedPathCount: int
+    fileCountWithPressure: int
+    totalFindings: int
+    fileLocFindingCount: int
+    complexityRegressionCount: int
+    magicRegressionCount: int
+    severity: str
+    summary: list[str]
+    summaryOverflow: int
+    errors: list[str]
+    oldestDirtyAgeSeconds: int
+    oldestDirtyPath: str
+    newestDirtyAgeSeconds: int
+    newestDirtyPath: str
 
 
 def clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
@@ -315,7 +335,7 @@ def _git_posture_lines() -> list[str]:
     return lines
 
 
-def _empty_dirty_worktree_pressure() -> dict[str, object]:
+def _empty_dirty_worktree_pressure() -> DirtyWorktreePressure:
     return {
         "available": True,
         "dirtyPathCount": 0,
@@ -332,7 +352,7 @@ def _empty_dirty_worktree_pressure() -> dict[str, object]:
     }
 
 
-def _build_dirty_worktree_pressure(*, repo_root: Path) -> dict[str, object]:
+def _build_dirty_worktree_pressure(*, repo_root: Path) -> DirtyWorktreePressure:
     dirty = _dirty_paths(repo_root)
     if not dirty:
         return _empty_dirty_worktree_pressure()
@@ -658,7 +678,7 @@ def _dirty_pressure_severity(
     return "none"
 
 
-def _dirty_path_ages(paths: list[Path], *, repo_root: Path) -> dict[str, object]:
+def _dirty_path_ages(paths: list[Path], *, repo_root: Path) -> DirtyWorktreePressure:
     now = time.time()
     rows: list[tuple[float, str]] = []
     for path in paths:
@@ -679,7 +699,7 @@ def _dirty_path_ages(paths: list[Path], *, repo_root: Path) -> dict[str, object]
     }
 
 
-def _dirty_pressure_lines(pressure: dict[str, object]) -> list[str]:
+def _dirty_pressure_lines(pressure: DirtyWorktreePressure) -> list[str]:
     if not pressure.get("available"):
         return ["  pressure=unavailable"]
     dirty_paths = int(pressure.get("dirtyPathCount") or 0)
@@ -697,12 +717,12 @@ def _dirty_pressure_lines(pressure: dict[str, object]) -> list[str]:
     age_line = _dirty_pressure_age_line(pressure)
     if age_line:
         lines.append(f"  {age_line}")
-    lines.extend(
-        f"  pressure_error={error}" for error in pressure.get("errors", []) if error
-    )
+    errors = pressure.get("errors") or []
+    lines.extend(f"  pressure_error={error}" for error in errors if error)
+    summary_rows = pressure.get("summary") or []
     lines.extend(
         f"  pressure_file={summary}"
-        for summary in pressure.get("summary", [])[:3]
+        for summary in summary_rows[:3]
         if isinstance(summary, str)
     )
     overflow = int(pressure.get("summaryOverflow") or 0)
@@ -713,7 +733,7 @@ def _dirty_pressure_lines(pressure: dict[str, object]) -> list[str]:
     return lines
 
 
-def _dirty_pressure_age_line(pressure: dict[str, object]) -> str | None:
+def _dirty_pressure_age_line(pressure: DirtyWorktreePressure) -> str | None:
     oldest = pressure.get("oldestDirtyAgeSeconds")
     newest = pressure.get("newestDirtyAgeSeconds")
     if oldest is None or newest is None:
@@ -727,11 +747,8 @@ def _dirty_pressure_age_line(pressure: dict[str, object]) -> str | None:
     )
 
 
-def _format_dirty_age(raw_seconds: object) -> str:
-    try:
-        seconds = float(raw_seconds)
-    except (TypeError, ValueError):
-        return "unknown"
+def _format_dirty_age(raw_seconds: int | float) -> str:
+    seconds = float(raw_seconds)
     return format_relative_seconds(seconds).removesuffix(" ago")
 
 
