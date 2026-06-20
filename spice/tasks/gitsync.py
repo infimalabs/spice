@@ -21,6 +21,7 @@ so the captured review record holds without a remote.
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -478,6 +479,8 @@ def _publish_race_recovery(
 
 def _merge_conflict_recovery(label: str, repo_root: Path) -> str:
     conflicts = _conflict_paths(repo_root)
+    if not _read(repo_root, "rev-parse", "--verify", "MERGE_HEAD"):
+        return _merge_conflict_marker_recovery(label, repo_root, conflicts)
     lines = [
         "your changes overlap with the current baseline; git is paused in a "
         "merge state",
@@ -487,7 +490,7 @@ def _merge_conflict_recovery(label: str, repo_root: Path) -> str:
         lines.extend(f"  {path}" for path in conflicts)
     else:
         lines.append("conflicting files: run `git status --short`")
-    add_paths = " ".join(conflicts) if conflicts else "<files>"
+    add_paths = _shell_join(conflicts) if conflicts else "<files>"
     lines.extend(
         [
             "keep the merge state open; do not run `git merge --abort`",
@@ -504,9 +507,61 @@ def _merge_conflict_recovery(label: str, repo_root: Path) -> str:
     return "\n".join(lines)
 
 
+def _merge_conflict_marker_recovery(
+    label: str, repo_root: Path, conflicts: list[str]
+) -> str:
+    marker_paths = _working_tree_conflict_marker_paths(repo_root)
+    paths = conflicts or marker_paths
+    _, baseline = branch_upstream_target(repo_root) or ("", "<baseline>")
+    lines = [
+        "your changes overlap with the current baseline; git left conflict "
+        "markers without an open MERGE_HEAD",
+    ]
+    if paths:
+        lines.append("conflict-marker files:")
+        lines.extend(f"  {path}" for path in paths)
+    else:
+        lines.append("conflict-marker files: run `git status --short`")
+    add_paths = _shell_join(paths) if paths else "<files>"
+    lines.extend(
+        [
+            "do not use plain `git commit`; no MERGE_HEAD exists to supply the "
+            "baseline parent",
+            "next commands:",
+            "  git status --short",
+            "  git rev-parse --verify MERGE_HEAD  # expected to fail here",
+            "  edit the files above and remove every marker line",
+            f"  git add -- {add_paths}",
+            "  merge_commit=$(git commit-tree $(git write-tree) "
+            f'-p HEAD -p {baseline} -m "Resolve baseline overlap for {label}")',
+            '  git update-ref refs/heads/$(git branch --show-current) "$merge_commit"',
+            f'  spice task done {label} --validation "..."',
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _conflict_paths(repo_root: Path) -> list[str]:
     output = _read(repo_root, "diff", "--name-only", "--diff-filter=U")
     return [line for line in output.splitlines() if line]
+
+
+def _working_tree_conflict_marker_paths(repo_root: Path) -> list[str]:
+    changed: set[str] = set(_conflict_paths(repo_root))
+    for args in (("diff", "--name-only"), ("diff", "--cached", "--name-only")):
+        changed.update(line for line in _read(repo_root, *args).splitlines() if line)
+    if not changed:
+        return []
+
+    def marked(pattern: str) -> set[str]:
+        listing = _read(repo_root, "grep", "-l", "-E", pattern, "--", *sorted(changed))
+        return {line for line in listing.splitlines() if line}
+
+    return sorted(marked(r"^<{7}( |$)") & marked(r"^>{7}( |$)"))
+
+
+def _shell_join(values: list[str]) -> str:
+    return shlex.join(values)
 
 
 def _synthesize_merge(
