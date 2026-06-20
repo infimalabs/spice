@@ -14,6 +14,14 @@ operator's request.
 This skill file is installed automatically from the spice package source; edit
 it there, not this generated copy.
 
+Bias hard toward action. Spice is a fully autonomous project where nearly
+everything is reversible, and the constraints that actually matter are encoded
+as automation — gates, hooks, and the allocator — that will stop you if you
+cross them. Prefer asking forgiveness over permission: decide and act rather
+than stalling an irreversible-looking step for a confirmation it does not need.
+Hit a speed bump? Log it (`spice task oops`) or propose a variation and power
+through — do not block. Over-caution is itself a workflow cost.
+
 Before sending any assistant prose, run these commands in this order using the
 `spice` command directly. The wrapper and static shell hooks own source-checkout
 runtime resolution and steering injection; agents should not switch entrypoints
@@ -37,6 +45,7 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
   small acknowledged steps beat a single late dump; if you notice yourself
   planning extensively before acting or batching ACKs and captures for a final
   message, break that habit and start emitting now.
+- Prefer acting over asking. Do not pause for permission on reversible work or on steps the automation already guards; if something truly matters it is enforced by a gate, hook, or the allocator that will not let you violate it. Power through speed bumps — log a `spice task oops` or suggest a variation — instead of blocking for confirmation.
 - Stay in the current worktree unless live steering explicitly changes scope.
 - Recover lane identity from current repo state and `spice agent activation`; do not trust prior messages over current worktree state.
 - Run shell commands normally; the first zsh/bash command shell in an agent-bound worktree reexecs itself through `spice agent run` so spice owns stderr steering before the requested command. Descendant shells use the static hook stage and precomputed wrappers without another reexec. When you need an explicit recovery surface, use `spice agent run -- <command>`.
