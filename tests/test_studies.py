@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+import pytest
+
+from spice.errors import SpiceError
 from spice.flexstate import (
     sticky_function_keys_after_renames,
     sticky_items_after_flex_breaches,
@@ -337,10 +340,85 @@ def test_package_roots_derived_from_explicit_packages_list_keeps_top_level(tmp_p
     assert configured_package_roots(tmp_path) == [tmp_path / "app"]
 
 
-def test_package_roots_empty_when_not_declared_or_derivable(tmp_path):
+def test_package_roots_derived_from_poetry_packages(tmp_path):
+    _make_package(tmp_path / "src", "pkg")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry]\nname = "pkg"\n'
+        '[[tool.poetry.packages]]\ninclude = "pkg"\nfrom = "src"\n',
+        encoding="utf-8",
+    )
+
+    assert configured_package_roots(tmp_path) == [tmp_path / "src" / "pkg"]
+
+
+def test_package_roots_derived_from_poetry_name(tmp_path):
+    _make_package(tmp_path, "widget")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry]\nname = "widget"\n', encoding="utf-8"
+    )
+
+    assert configured_package_roots(tmp_path) == [tmp_path / "widget"]
+
+
+def test_package_roots_derived_from_hatch_wheel_packages(tmp_path):
+    _make_package(tmp_path / "src", "gadget")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.hatch.build.targets.wheel]\npackages = ["src/gadget"]\n',
+        encoding="utf-8",
+    )
+
+    assert configured_package_roots(tmp_path) == [tmp_path / "src" / "gadget"]
+
+
+def test_package_roots_derived_from_flit_module(tmp_path):
+    _make_package(tmp_path, "thing")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.flit.module]\nname = "thing"\n', encoding="utf-8"
+    )
+
+    assert configured_package_roots(tmp_path) == [tmp_path / "thing"]
+
+
+def test_package_roots_derived_from_pdm_includes(tmp_path):
+    _make_package(tmp_path, "core")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pdm.build]\nincludes = ["core"]\n', encoding="utf-8"
+    )
+
+    assert configured_package_roots(tmp_path) == [tmp_path / "core"]
+
+
+def test_package_roots_derived_from_src_layout(tmp_path):
+    _make_package(tmp_path / "src", "lib")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "anything"\n', encoding="utf-8"
+    )
+
+    assert configured_package_roots(tmp_path) == [tmp_path / "src" / "lib"]
+
+
+def test_package_roots_derived_from_project_name(tmp_path):
     _make_package(tmp_path, "app")
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "app"\n', encoding="utf-8"
     )
 
+    assert configured_package_roots(tmp_path) == [tmp_path / "app"]
+
+
+def test_package_roots_empty_when_truly_underivable(tmp_path):
+    _make_package(tmp_path, "app")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "different"\n', encoding="utf-8"
+    )
+
     assert configured_package_roots(tmp_path) == []
+
+
+def test_package_roots_malformed_poetry_packages_fails_loudly(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry]\nname = "x"\npackages = "notalist"\n', encoding="utf-8"
+    )
+
+    with pytest.raises(SpiceError):
+        configured_package_roots(tmp_path)
