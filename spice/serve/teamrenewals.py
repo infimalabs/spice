@@ -32,7 +32,7 @@ class _TeamRenewalStore(Protocol):
 
     def _team_member_ids_locked(
         self, connection: sqlite3.Connection, team_id: str
-    ) -> tuple[str, ...]: ...
+    ) -> list[str]: ...
 
     def _agent_identity_row_locked(
         self, connection: sqlite3.Connection, actor_id: str

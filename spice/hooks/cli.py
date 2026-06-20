@@ -46,6 +46,12 @@ def configure_dev_parser(subparsers: Any) -> None:
         recovery_examples=("spice dev serve-web-typecheck",),
     ).set_defaults(func=handle_dev)
 
+    actions.add_parser(
+        "python-typecheck",
+        help="Typecheck the project's Python package roots with pyright.",
+        recovery_examples=("spice dev python-typecheck",),
+    ).set_defaults(func=handle_dev)
+
     commit_msg = actions.add_parser(
         "commit-msg",
         help="Validate (and auto-fold) a commit message file.",
@@ -101,6 +107,11 @@ def handle_dev(args: argparse.Namespace) -> int:
         from spice.serve.typecheck import run_serve_web_typecheck
 
         run_serve_web_typecheck(repo_root)
+        return 0
+    if command == "python-typecheck":
+        from spice.studies.typecheck import run_python_typecheck
+
+        run_python_typecheck(repo_root)
         return 0
     if command == "commit-msg":
         from spice.hooks.commitmsg import handle_commit_msg
