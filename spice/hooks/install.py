@@ -17,7 +17,7 @@ from spice.paths import STATE_DIRNAME, git_common_dir
 
 HOOKS_DIRNAME = "hooks"
 HOOK_ARGS = {
-    "pre-commit": "dev pre-commit --consider-simply-committing-instead --hook",
+    "pre-commit": "dev pre-commit",
     "commit-msg": 'dev commit-msg "$1"',
     "reference-transaction": 'dev reference-transaction "$1"',
 }
