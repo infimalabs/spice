@@ -9,10 +9,11 @@ Python-package-specific; the rest of the constitution still applies.
 from __future__ import annotations
 
 import re
+from fnmatch import fnmatch
 from pathlib import Path
 
 from spice.policy import BOUNDARY_UNDERSCORE_PATTERN
-from spice.repocfg import policy_table, string_list
+from spice.repocfg import policy_table, read_pyproject, string_list
 
 BOUNDARY_UNDERSCORE_RE = re.compile(BOUNDARY_UNDERSCORE_PATTERN)
 # Generic continuation shards: a split must name the seam, not number it.
@@ -25,8 +26,60 @@ ALLOWED_NON_SHAPE_FILES = frozenset({"__main__.py", "py.typed"})
 
 
 def configured_package_roots(repo_root: Path) -> list[Path]:
+    # Explicit `[tool.spice.policy] package_roots` wins; otherwise derive the
+    # roots from the project's own Python packaging config so a standard project
+    # needs no spice-local declaration. Neither present -> no roots (skip).
     names = string_list(policy_table(repo_root).get("package_roots"))
+    if not names:
+        names = _derived_package_roots(repo_root)
     return [repo_root / name for name in names if (repo_root / name).is_dir()]
+
+
+def _derived_package_roots(repo_root: Path) -> list[str]:
+    """Top-level package roots inferred from `[tool.setuptools]` packaging.
+
+    Supports an explicit `packages` list (keep the top-level segments) and the
+    `packages.find` auto-discovery form (top-level dirs under `where` matching
+    `include`/`exclude` that actually contain Python — so build artifacts like
+    `*.egg-info` are not mistaken for packages).
+    """
+    tool = read_pyproject(repo_root).get("tool")
+    setuptools = tool.get("setuptools") if isinstance(tool, dict) else None
+    packages = setuptools.get("packages") if isinstance(setuptools, dict) else None
+    if isinstance(packages, list):
+        roots: list[str] = []
+        for entry in packages:
+            top = str(entry or "").split(".", 1)[0].strip()
+            if top and top not in roots:
+                roots.append(top)
+        return roots
+    # Only auto-discover when the project explicitly opts into it; a bare
+    # [project] table with no setuptools packaging config derives nothing.
+    find = packages.get("find") if isinstance(packages, dict) else None
+    if not isinstance(find, dict):
+        return []
+    where_dirs = string_list(find.get("where")) or ["."]
+    includes = string_list(find.get("include")) or ["*"]
+    excludes = string_list(find.get("exclude"))
+    roots = []
+    for base in where_dirs:
+        base_dir = repo_root / base
+        if not base_dir.is_dir():
+            continue
+        for child in sorted(base_dir.iterdir()):
+            name = child.name
+            if not child.is_dir() or name.startswith("."):
+                continue
+            if not any(fnmatch(name, pattern) for pattern in includes):
+                continue
+            if any(fnmatch(name, pattern) for pattern in excludes):
+                continue
+            if next(child.rglob("*.py"), None) is None:
+                continue
+            rel = child.relative_to(repo_root).as_posix()
+            if rel not in roots:
+                roots.append(rel)
+    return roots
 
 
 def namespace_policy_error(repo_root: Path) -> str:

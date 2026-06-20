@@ -19,6 +19,7 @@ from spice.policy import (
 from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies.magicnums import scan_text_magic_numbers
+from spice.studies.shape import configured_package_roots
 
 MAGIC_HIGH_THRESHOLD = 100
 MAGIC_HIGH_LITERAL = "125"
@@ -293,3 +294,53 @@ def test_env_policy_wrapped_statement_marker_waives_wrapped_literal(tmp_path):
     )
 
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
+
+
+def _make_package(root: Path, name: str) -> None:
+    pkg = root / name
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "mod.py").write_text("x = 1\n", encoding="utf-8")
+
+
+def test_package_roots_explicit_policy_overrides_derivation(tmp_path):
+    _make_package(tmp_path, "chosen")
+    _make_package(tmp_path, "ignored")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\npackage_roots = ["chosen"]\n'
+        '[tool.setuptools.packages.find]\ninclude = ["ignored*"]\n',
+        encoding="utf-8",
+    )
+
+    assert configured_package_roots(tmp_path) == [tmp_path / "chosen"]
+
+
+def test_package_roots_derived_from_setuptools_find_excludes_non_python(tmp_path):
+    _make_package(tmp_path, "app")
+    # A build artifact matching the include glob but carrying no Python.
+    (tmp_path / "app.egg-info").mkdir()
+    (tmp_path / "app.egg-info" / "PKG-INFO").write_text("meta\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.setuptools.packages.find]\nwhere = ["."]\ninclude = ["app*"]\n',
+        encoding="utf-8",
+    )
+
+    assert configured_package_roots(tmp_path) == [tmp_path / "app"]
+
+
+def test_package_roots_derived_from_explicit_packages_list_keeps_top_level(tmp_path):
+    _make_package(tmp_path, "app")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.setuptools]\npackages = ["app", "app.sub", "app.sub.deep"]\n',
+        encoding="utf-8",
+    )
+
+    assert configured_package_roots(tmp_path) == [tmp_path / "app"]
+
+
+def test_package_roots_empty_when_not_declared_or_derivable(tmp_path):
+    _make_package(tmp_path, "app")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "app"\n', encoding="utf-8"
+    )
+
+    assert configured_package_roots(tmp_path) == []

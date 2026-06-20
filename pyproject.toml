@@ -57,9 +57,6 @@ wrappers = ["common", "spice-dev"]
 [tool.spice.wrappers.spice-dev]
 pre-commit = { argv = ["spice", "dev", "pre-commit"] }
 
-[tool.spice.policy]
-package_roots = ["spice"]
-
 [tool.spice.tasks]
 stems = ["session", "mail", "hooks", "studies", "cli", "lifecycle", "tests"]
 
