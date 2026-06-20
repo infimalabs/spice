@@ -116,6 +116,7 @@
 .message-body th {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   font-weight: 600;
+  white-space: nowrap;
 }
 .message-body blockquote {
   background: color-mix(in srgb, var(--quote-accent) 6%, transparent);
