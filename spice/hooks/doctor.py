@@ -122,10 +122,10 @@ def _ensure_state_excluded(repo_root: Path) -> list[str]:
 
 
 def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
-    from spice.serve.typecheck import serve_web_js_targets
+    from spice.serve.typecheck import serve_web_typecheck_targets
 
     checks: list[DoctorCheck] = []
-    serve_web_present = bool(serve_web_js_targets(repo_root))
+    serve_web_present = bool(serve_web_typecheck_targets(repo_root))
     npm_note = (
         "serve web TypeScript checkJs backend"
         if serve_web_present
