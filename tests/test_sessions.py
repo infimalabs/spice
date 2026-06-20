@@ -29,6 +29,7 @@ from spice.sessions.meter import (
 )
 from spice.sessions import records
 from spice.sessions.util import first_text, normalize_timestamp
+from spice.errors import SpiceError
 from spice.tasks.identity import (
     INCEPTED_RE,
     canonicalize_zulu_free_handle,
@@ -768,3 +769,50 @@ def _init_git_repo(path) -> None:
 
 def _run(cwd, *args: str) -> None:
     subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
+
+
+def test_collect_turns_derives_claude_turns_from_prompt_id(tmp_path, monkeypatch):
+    from spice.agent.driver import CLAUDE_DRIVER
+
+    monkeypatch.setattr(records, "driver_for_transcript", lambda _path: CLAUDE_DRIVER)
+    lines = [
+        {
+            "type": "user",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "promptId": "p1",
+            "message": {"content": "first prompt"},
+        },
+        {
+            "type": "assistant",
+            "timestamp": "2026-01-01T00:00:01Z",
+            "message": {"content": [{"type": "text", "text": "reply one"}]},
+        },
+        {
+            "type": "user",
+            "timestamp": "2026-01-01T00:00:02Z",
+            "promptId": "p2",
+            "message": {"content": "second prompt"},
+        },
+        {
+            "type": "assistant",
+            "timestamp": "2026-01-01T00:00:03Z",
+            "message": {"content": [{"type": "text", "text": "reply two"}]},
+        },
+    ]
+    path = tmp_path / "claude.jsonl"
+    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n")
+
+    turns = records.collect_turns([path])
+
+    assert [turn.turn_id for turn in turns] == ["p1", "p2"]
+    assert records.filter_turns(turns, turn_ids=["p2"]) == [turns[1]]
+
+
+def test_filter_turns_fails_loudly_when_turns_have_no_ids():
+    idless = [
+        records.TurnRecord(source_file="s.jsonl", start_ts="2026-01-01T00:00:00Z")
+    ]
+    with pytest.raises(SpiceError):
+        records.filter_turns(idless, turn_ids=["whatever"])
+    # No turn-id filter requested: id-less turns pass through untouched.
+    assert records.filter_turns(idless) == idless

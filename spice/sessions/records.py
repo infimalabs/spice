@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from spice.agent.driver import driver_for_transcript
+from spice.errors import SpiceError
 from spice.sessions.util import first_text, int_or_zero, normalize_timestamp
 
 COMMIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
@@ -127,7 +128,19 @@ def _collect_turns_for_file(path: Path) -> list[TurnRecord]:
             continue
         if record_type != "response_item":
             continue
-        if current is None:
+        # Codex marks turn boundaries with task_started events; Claude has none,
+        # so a real user prompt (carrying Claude's per-turn `prompt_id`) opens
+        # the turn instead. Events without a prompt_id append to the current one.
+        prompt_id = payload.get("prompt_id")
+        if (
+            prompt_id
+            and payload.get("type") == "message"
+            and payload.get("role") == "user"
+            and (current is None or current.turn_id != prompt_id)
+        ):
+            current = TurnRecord(source_file=str(path), start_ts=ts, turn_id=prompt_id)
+            turns.append(current)
+        elif current is None:
             current = TurnRecord(source_file=str(path), start_ts=ts)
             turns.append(current)
         _apply_response_item(current, ts, payload)
@@ -345,6 +358,18 @@ def filter_turns(
     kept: list[TurnRecord] = []
     needle = (contains or "").lower()
     turn_filter = {turn_id for turn_id in turn_ids or [] if turn_id}
+    # Fail loudly instead of silently returning nothing when a turn-id filter is
+    # asked of turns that carry no ids. Codex stamps turn ids from task events;
+    # Claude transcripts have no per-turn id, so every turn id is empty and any
+    # --turn-id would match nothing — which reads as "no such turn" rather than
+    # "unsupported here".
+    if turn_filter and turns and not any(turn.turn_id for turn in turns):
+        raise SpiceError(
+            "turn-id filtering is unavailable for this transcript: its turns "
+            "carry no per-turn id (e.g. Claude sessions, whose transcripts have "
+            "no Codex-style turn events). Filter by --start/--end/--contains, or "
+            "drop --turn-id."
+        )
     tool_filter = {tool for tool in tools or [] if tool}
     for turn in turns:
         turn_end = turn.end_ts or turn.last_activity_ts or turn.start_ts

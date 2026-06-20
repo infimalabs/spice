@@ -387,7 +387,7 @@ class ClaudeDriver(AgentDriver):
         if rtype == "assistant" and isinstance(message, dict):
             return _claude_assistant_event(timestamp, message)
         if rtype == "user" and isinstance(message, dict):
-            return _claude_user_event(timestamp, message)
+            return _claude_user_event(timestamp, message, raw.get("promptId"))
         if _claude_is_compaction(raw):
             return {"type": "compacted", "timestamp": timestamp, "payload": {}}
         return None
@@ -553,20 +553,22 @@ def _claude_plan_steps(arguments: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def _claude_user_event(
-    timestamp: Any, message: dict[str, Any]
+    timestamp: Any, message: dict[str, Any], prompt_id: Any = None
 ) -> dict[str, Any] | None:
     content = message.get("content")
     if isinstance(content, str):
         if not content.strip():
             return None
-        return _claude_response_item(
-            timestamp,
-            {
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "text", "text": content}],
-            },
-        )
+        payload: dict[str, Any] = {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "text", "text": content}],
+        }
+        # A real user prompt carries Claude's per-turn id; tool-result `user`
+        # lines below do not, so turn boundaries land on actual prompts.
+        if isinstance(prompt_id, str) and prompt_id:
+            payload["prompt_id"] = prompt_id
+        return _claude_response_item(timestamp, payload)
     if isinstance(content, list):
         block = next((item for item in content if isinstance(item, dict)), None)
         if block is not None and block.get("type") == "tool_result":
