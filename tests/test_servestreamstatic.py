@@ -35,7 +35,9 @@ def test_static_filter_header_pills_render_models_and_styles():
     filter_count_rule = css[filter_count_start : css.index("}", filter_count_start)]
 
     assert 'let renderedFilterPillsFingerprint = "";' in app_js
-    assert 'const taskFilterHeaderExtraStems = ["agent", "oops"];' in app_lanes
+    assert 'const taskFilterHeaderExtraStems = ["agent", "waiting", "oops"];' in (
+        app_lanes
+    )
     assert "function filterPillModels()" in app_lanes
     assert "return taskFilterStemPills.map(taskFilterStemPillModel);" in app_lanes
     assert "function taskFilterStemPillModel(stem)" in app_lanes
@@ -50,9 +52,13 @@ def test_static_filter_header_pills_render_models_and_styles():
     )
     assert 'classes.push("filter-pill--system");' in app_lanes
     assert "function taskFilterStemScopeLabel(stemName)" in app_lanes
+    assert 'if (stemName === "waiting") return "waiting/deferred tasks";' in app_lanes
     assert 'return stemName === "oops" ? "oops" : stemName + ".*";' in app_lanes
     assert "function taskFilterStemIsSystem(stemName)" in app_lanes
-    assert 'return stemName === "agent" || stemName === "oops";' in app_lanes
+    assert (
+        'return stemName === "agent" || stemName === "oops" || stemName === "waiting";'
+        in app_lanes
+    )
     assert "boundaryDissolved: Boolean(model.drainability.boundaryDissolved)" in (
         app_lanes
     )

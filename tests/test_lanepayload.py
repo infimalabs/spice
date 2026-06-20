@@ -428,24 +428,45 @@ def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
 
 
 def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
-    monkeypatch.setattr(
-        tw,
-        "export",
-        lambda _args: [
+    seen: dict[str, list[str]] = {}
+
+    def fake_export(args: list[str]) -> list[dict[str, object]]:
+        seen["args"] = args
+        return [
             {"project": "serve.ui"},
             {"project": "serve.ui"},
             {"project": "task.review"},
             {"project": "agent.abc123.task"},
             {"project": "oops"},
             {"project": "oops", "start": "2026-06-16T23:00:00Z"},
-        ],
+            {"project": "serve.ui", "status": "waiting", "wait": "2099-01-01"},
+            {
+                "project": "oops",
+                "status": "waiting",
+                "tags": ["oops"],
+                "wait": "2099-01-01",
+            },
+            {
+                "project": "serve.ui",
+                "status": "waiting",
+                "tags": "oops",
+                "wait": "2099-01-01",
+            },
+        ]
+
+    monkeypatch.setattr(
+        tw,
+        "export",
+        fake_export,
     )
     inventory = task_filter_inventory()
     filters = {item["name"]: item["openTaskCount"] for item in inventory["filters"]}
     stems = {item["name"]: item["openTaskCount"] for item in inventory["primaryStems"]}
+    assert seen["args"] == ["(", "status:pending", "or", "status:waiting", ")"]
     assert inventory["openTaskCount"] == 3
     assert filters["serve.ui"] == 2
     assert filters["task.review"] == 1
+    assert "waiting" not in filters
     assert "agent.abc123.task" not in filters
     assert "oops" not in filters
     assert "serve.example" in inventory["catalog"]["filterExamples"]
@@ -453,3 +474,4 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
     assert stems["task"] == 1
     assert stems["agent"] == 1
     assert stems["oops"] == 1
+    assert stems["waiting"] == 1

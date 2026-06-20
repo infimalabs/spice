@@ -730,7 +730,7 @@ function targetChoiceStatusLabel(target) {
 
 // ---- global filter pills -----------------------------------------------------------
 
-const taskFilterHeaderExtraStems = ["agent", "oops"];
+const taskFilterHeaderExtraStems = ["agent", "waiting", "oops"];
 
 function taskFilterStemPillsFromInventory(inventory) {
   const catalog = (inventory || {}).catalog || {};
@@ -803,29 +803,41 @@ function taskFilterStemPillModel(stem) {
   const classes = [];
   if (stem.name === "agent") classes.push("filter-pill--private");
   if (stem.name === "oops") classes.push("filter-pill--system");
+  if (stem.name === "waiting") classes.push("filter-pill--waiting");
   return {
     kind: "stem",
     label,
     openTaskCount,
     classes,
     drainability,
-    title:
-      openTaskCount +
-      " open across " +
-      taskFilterStemScopeLabel(label) +
-      "; " +
-      (drainability.drainable
-        ? "drained by " + drainability.count
-        : "not currently drained"),
+    title: taskFilterStemPillTitle(label, openTaskCount, drainability),
   };
 }
 
+function taskFilterStemPillTitle(label, openTaskCount, drainability) {
+  if (label === "waiting")
+    return (
+      openTaskCount +
+      " waiting/deferred tasks; wake with `spice task wake <handle>`"
+    );
+  return (
+    openTaskCount +
+    " open across " +
+    taskFilterStemScopeLabel(label) +
+    "; " +
+    (drainability.drainable
+      ? "drained by " + drainability.count
+      : "not currently drained")
+  );
+}
+
 function taskFilterStemScopeLabel(stemName) {
+  if (stemName === "waiting") return "waiting/deferred tasks";
   return stemName === "oops" ? "oops" : stemName + ".*";
 }
 
 function taskFilterStemIsSystem(stemName) {
-  return stemName === "agent" || stemName === "oops";
+  return stemName === "agent" || stemName === "oops" || stemName === "waiting";
 }
 
 function taskFilterStemDrainability(stem) {
