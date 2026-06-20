@@ -136,6 +136,20 @@ def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
     assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
 
 
+def test_task_add_deferred_flag_creates_waiting_task(task_repo, capsys):
+    args = build_parser().parse_args(
+        ["task", "add", "Deferred CLI task", "--project", "task.unit", "--deferred"]
+    )
+
+    assert args.func(args) == 0
+    created = capsys.readouterr().out.split()[1]
+    row = identity.resolve(created)
+
+    assert row["description"] == "Deferred CLI task"
+    assert str(row.get("wait") or "").startswith("2099")
+    assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
+
+
 def test_task_review_then_marks_spawned_followup_as_cli_creation_surface(
     task_repo, capsys
 ):
