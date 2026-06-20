@@ -81,6 +81,18 @@ wrappers = ["common", "repo-tools"]
 codegen = { argv = ["uv", "run", "python", "-m", "tools.codegen"] }
 ```
 
+The spice checkout itself uses the same local-extension pattern to catch the
+common agent habit of running bare `pre-commit`, while leaving the generic
+`common` group unchanged:
+
+```toml
+[tool.spice.agent]
+wrappers = ["common", "spice-dev"]
+
+[tool.spice.wrappers.spice-dev]
+pre-commit = { argv = ["spice", "dev", "pre-commit"] }
+```
+
 ## Mounted Commands
 
 Repositories declare mounted commands in tracked `pyproject.toml`:
