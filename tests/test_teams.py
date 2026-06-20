@@ -268,6 +268,22 @@ def test_assigning_agent_with_target_alias_retires_stale_membership(tmp_path):
     ]
 
 
+def test_assigning_agent_with_same_team_alias_preserves_roster_slot(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(members=["agent-a", "agent-b", "agent-c"])
+
+    store.assign_agent(team.team_id, "agent-b-renewed", aliases=["agent-b"])
+
+    state = store.team_state(team.team_id)
+    assert [member.agent_id for member in state.members] == [
+        "agent-a",
+        "agent-b-renewed",
+        "agent-c",
+    ]
+    assert store.current_team_for_agent("agent-b") is None
+    assert store.current_team_for_agent("agent-b-renewed") == team.team_id
+
+
 def test_team_command_service_imports_agent_into_empty_team(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     service = TeamCommandService(store)
