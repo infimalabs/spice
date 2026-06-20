@@ -36,10 +36,13 @@ from spice.policy import (
 )
 from spice.sessions import records
 from spice.sessions.meter import (
+    ContextMeter,
     collect_context_meter,
     context_meter_instruction,
 )
 from spice.sessions.records import (
+    CommitRecord,
+    CompactionRecord,
     TurnRecord,
     collect_commit_records,
     collect_compactions,
@@ -118,76 +121,18 @@ def render_briefing(
     asks = operator_asks(turns)
     finals = [(turn.start_ts, text) for turn in turns for text in turn.final_answers]
     lines: list[str] = []
-
-    lines.append("Briefing")
-    window_start = turns[0].start_ts if turns else "-"
-    window_end = (
-        (turns[-1].end_ts or turns[-1].last_activity_ts or turns[-1].start_ts)
-        if turns
-        else "-"
-    )
-    lines.append(
-        f"  files={', '.join(Path(f).name for f in files)} turns={len(turns)} "
-        f"window={window_start} -> {window_end}"
-    )
+    lines.extend(_briefing_header_lines(files, turns))
     filter_lines = _active_filter_lines(
         start=start, end=end, contains=contains, turn_ids=turn_ids, tools=tools
     )
     if filter_lines:
         lines.append("Filters")
         lines.extend(filter_lines)
-
-    lines.append("Guidance")
-    snapshot = meter.latest_snapshot
-    if snapshot is not None:
-        lines.append(f"  keep_working={context_meter_instruction('available')}")
-    else:
-        lines.append(f"  keep_working={context_meter_instruction('unknown')}")
-
-    lines.append("Latest Ask")
-    lines.append(f"  {clip(asks[-1][1]) if asks else '-'}")
-
-    if len(asks) > 1:
-        lines.append("Recent Asks")
-        for ts, text in asks[-DEFAULT_RECENT_ASKS:-1]:
-            lines.append(f"  {ts} {clip(text)}")
-
-    lines.append("Latest Final")
-    lines.append(f"  {clip(finals[-1][1]) if finals else '-'}")
-    if len(finals) > 1:
-        lines.append("Recent Finals")
-        for ts, text in finals[-DEFAULT_RECENT_FINALS - 1 : -1]:
-            lines.append(f"  {ts} {clip(text)}")
-
-    if compactions:
-        latest = compactions[-1]
-        lines.append("Recovery")
-        lines.append(f"  latest_compaction={latest.ts}")
-        lines.append(f"  assistant_before={clip(latest.last_assistant_before_text)}")
-        lines.append(f"  user_after={clip(latest.first_user_after_text)}")
-
-    lines.append("Activity")
-    lines.append(
-        "  commands={c} patches={p} errors={e} web_searches={w}".format(
-            c=sum(turn.command_count for turn in turns),
-            p=sum(turn.patch_count for turn in turns),
-            e=sum(turn.error_count for turn in turns),
-            w=sum(turn.web_search_count for turn in turns),
-        )
-    )
-    working_set = active_file_order(turns)
-    if working_set:
-        lines.append("Working Set")
-        for path, count in working_set[:WORKING_SET_LIMIT]:
-            lines.append(f"  {path} touches={count}")
-
-    if commits:
-        lines.append("Recent Commits")
-        for record in commits[-RECENT_COMMITS_LIMIT:]:
-            lines.append(
-                f"  {record.start_ts} {record.sha} {clip(record.line, COMMIT_PREVIEW_CHARS)}"
-            )
-
+    lines.extend(_guidance_lines(meter))
+    lines.extend(_asks_lines(asks))
+    lines.extend(_finals_lines(finals))
+    lines.extend(_recovery_lines(compactions))
+    lines.extend(_activity_lines(turns, commits))
     lines.extend(_git_posture_lines())
     lines.extend(_inbox_lines())
     return apply_output_budget(
@@ -196,6 +141,79 @@ def render_briefing(
         max_bytes=max_bytes,
         explain=explain_pruning,
     )
+
+
+def _briefing_header_lines(files: list[Path], turns: list[TurnRecord]) -> list[str]:
+    window_start = turns[0].start_ts if turns else "-"
+    window_end = (
+        (turns[-1].end_ts or turns[-1].last_activity_ts or turns[-1].start_ts)
+        if turns
+        else "-"
+    )
+    return [
+        "Briefing",
+        f"  files={', '.join(Path(f).name for f in files)} turns={len(turns)} "
+        f"window={window_start} -> {window_end}",
+    ]
+
+
+def _guidance_lines(meter: ContextMeter) -> list[str]:
+    state = "available" if meter.latest_snapshot is not None else "unknown"
+    return ["Guidance", f"  keep_working={context_meter_instruction(state)}"]
+
+
+def _asks_lines(asks: list[tuple[str, str]]) -> list[str]:
+    lines = ["Latest Ask", f"  {clip(asks[-1][1]) if asks else '-'}"]
+    if len(asks) > 1:
+        lines.append("Recent Asks")
+        for ts, text in asks[-DEFAULT_RECENT_ASKS:-1]:
+            lines.append(f"  {ts} {clip(text)}")
+    return lines
+
+
+def _finals_lines(finals: list[tuple[str, str]]) -> list[str]:
+    lines = ["Latest Final", f"  {clip(finals[-1][1]) if finals else '-'}"]
+    if len(finals) > 1:
+        lines.append("Recent Finals")
+        for ts, text in finals[-DEFAULT_RECENT_FINALS - 1 : -1]:
+            lines.append(f"  {ts} {clip(text)}")
+    return lines
+
+
+def _recovery_lines(compactions: list[CompactionRecord]) -> list[str]:
+    if not compactions:
+        return []
+    latest = compactions[-1]
+    return [
+        "Recovery",
+        f"  latest_compaction={latest.ts}",
+        f"  assistant_before={clip(latest.last_assistant_before_text)}",
+        f"  user_after={clip(latest.first_user_after_text)}",
+    ]
+
+
+def _activity_lines(turns: list[TurnRecord], commits: list[CommitRecord]) -> list[str]:
+    lines = [
+        "Activity",
+        "  commands={c} patches={p} errors={e} web_searches={w}".format(
+            c=sum(turn.command_count for turn in turns),
+            p=sum(turn.patch_count for turn in turns),
+            e=sum(turn.error_count for turn in turns),
+            w=sum(turn.web_search_count for turn in turns),
+        ),
+    ]
+    working_set = active_file_order(turns)
+    if working_set:
+        lines.append("Working Set")
+        for path, count in working_set[:WORKING_SET_LIMIT]:
+            lines.append(f"  {path} touches={count}")
+    if commits:
+        lines.append("Recent Commits")
+        for record in commits[-RECENT_COMMITS_LIMIT:]:
+            lines.append(
+                f"  {record.start_ts} {record.sha} {clip(record.line, COMMIT_PREVIEW_CHARS)}"
+            )
+    return lines
 
 
 def active_file_order(turns: list[TurnRecord]) -> list[tuple[str, int]]:
