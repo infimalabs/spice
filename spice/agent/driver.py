@@ -620,24 +620,21 @@ def claude_mcp_config_json(repo_root: Path) -> str:
 def playwright_mcp_args(repo_root: Path) -> list[str]:
     args = list(PLAYWRIGHT_MCP_ARGS)
     config_path = write_playwright_mcp_config(repo_root)
-    if config_path is not None:
-        args.extend(["--config", str(config_path)])
+    args.extend(["--config", str(config_path)])
     return args
 
 
-def write_playwright_mcp_config(repo_root: Path) -> Path | None:
+def write_playwright_mcp_config(repo_root: Path) -> Path:
     color_scheme = operator_color_scheme()
-    if color_scheme is None:
-        return None
     return atomic_write_json(
         state_dir(repo_root) / "agent" / "playwright-mcp.json",
         {"browser": {"contextOptions": {"colorScheme": color_scheme}}},
     )
 
 
-def operator_color_scheme() -> str | None:
+def operator_color_scheme() -> str:
     if sys.platform != "darwin":
-        return None
+        return "light"
     try:
         result = subprocess.run(
             ["defaults", "read", "-g", "AppleInterfaceStyle"],
@@ -646,7 +643,7 @@ def operator_color_scheme() -> str | None:
             text=True,
         )
     except OSError:
-        return None
+        return "light"
     return "dark" if result.stdout.strip().lower() == "dark" else "light"
 
 

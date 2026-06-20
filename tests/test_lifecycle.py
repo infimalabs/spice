@@ -21,6 +21,7 @@ from spice.agent.driver import (
     PLAYWRIGHT_MCP_ARGS,
     PLAYWRIGHT_MCP_COMMAND,
     PLAYWRIGHT_MCP_SERVER_NAME,
+    operator_color_scheme,
     playwright_mcp_args,
     write_playwright_mcp_config,
 )
@@ -131,6 +132,23 @@ def test_playwright_mcp_args_write_light_scheme_config(tmp_path, monkeypatch):
         "--config",
         str(config_path),
     ]
+
+
+def test_operator_color_scheme_defaults_to_explicit_light_off_macos(monkeypatch):
+    monkeypatch.setattr(agent_driver.sys, "platform", "linux")
+
+    assert operator_color_scheme() == "light"
+
+
+def test_operator_color_scheme_defaults_to_explicit_light_when_unreadable(monkeypatch):
+    monkeypatch.setattr(agent_driver.sys, "platform", "darwin")
+
+    def raise_os_error(*_args, **_kwargs):
+        raise OSError("defaults unavailable")
+
+    monkeypatch.setattr(agent_driver.subprocess, "run", raise_os_error)
+
+    assert operator_color_scheme() == "light"
 
 
 def test_ensure_agent_dry_run_covers_start_resume_and_renew(tmp_path, monkeypatch):
