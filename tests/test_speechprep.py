@@ -200,6 +200,10 @@ def test_automatic_speech_tracks_latest_played_timestamp_per_agent():
     ]
 
 
+def test_automatic_speech_cursor_survives_page_reload_storage():
+    assert _automatic_speech_persisted_cursor_requests() == ["latest", "newer"]
+
+
 def _prepare_speech(text: str) -> str:
     return _node_call("prepareSpeechText", text)
 
@@ -882,7 +886,6 @@ vm.runInContext(fs.readFileSync(path, "utf8"), context);
     targetThreadId: "agent-a",
     speechAbortVersion: 0,
     spokenMessageKeys: new Set(),
-    latestSpokenMessageAtByAgent: new Map(),
   };
   context.queueSpeechForMessages(lane, [
     {
@@ -924,6 +927,111 @@ vm.runInContext(fs.readFileSync(path, "utf8"), context);
 });
 """
     return _run_audio_script(script, "node automatic speech cursor failed")
+
+
+def _automatic_speech_persisted_cursor_requests() -> list[str]:
+    script = """
+const fs = require("fs");
+const vm = require("vm");
+const path = process.argv[1];
+const source = fs.readFileSync(path, "utf8");
+const requests = [];
+const storage = {
+  values: new Map(),
+  getItem(key) {
+    return this.values.has(key) ? this.values.get(key) : null;
+  },
+  setItem(key, value) {
+    this.values.set(key, String(value));
+  },
+};
+
+class FakeAudio {
+  constructor() {
+    this.listeners = {};
+    this.ended = false;
+  }
+  addEventListener(name, callback) {
+    this.listeners[name] = callback;
+  }
+  removeEventListener(name) {
+    delete this.listeners[name];
+  }
+  play() {
+    queueMicrotask(() => {
+      this.ended = true;
+      if (this.listeners.ended) this.listeners.ended();
+    });
+    return Promise.resolve();
+  }
+  pause() {
+    if (this.listeners.pause) this.listeners.pause();
+  }
+}
+
+async function runPage(messages) {
+  const context = {
+    Blob: class {},
+    Audio: FakeAudio,
+    URL: {
+      createObjectURL: () => "blob:audio",
+      revokeObjectURL: () => {},
+    },
+    document: { querySelectorAll: () => [] },
+    fetch: async (url, options) => {
+      requests.push(JSON.parse(options.body).text);
+      return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    },
+    browserStorage: () => storage,
+    isPresenceMessage: () => false,
+    laneEffectiveSpeechMode: () => "speak",
+    laneGroupHost: (lane) => lane,
+    queueMicrotask,
+    setTimeout,
+    targetApi: (targetId, suffix) => targetId + suffix,
+  };
+  vm.createContext(context);
+  vm.runInContext(source, context);
+  const lane = {
+    targetId: "lane-a",
+    targetThreadId: "agent-a",
+    speechAbortVersion: 0,
+    spokenMessageKeys: new Set(),
+  };
+  context.queueSpeechForMessages(lane, messages);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+}
+
+(async () => {
+  await runPage([
+    {
+      key: "latest",
+      timestamp: "2026-06-17T04:00:10.000Z",
+      threadId: "agent-a",
+      ack_utterances: ["latest"],
+    },
+  ]);
+  await runPage([
+    {
+      key: "newer",
+      timestamp: "2026-06-17T04:00:11.000Z",
+      threadId: "agent-a",
+      ack_utterances: ["newer"],
+    },
+    {
+      key: "older",
+      timestamp: "2026-06-17T04:00:09.000Z",
+      threadId: "agent-a",
+      ack_utterances: ["older"],
+    },
+  ]);
+  process.stdout.write(JSON.stringify(requests));
+})().catch((error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});
+"""
+    return _run_audio_script(script, "node persisted automatic speech cursor failed")
 
 
 def _stop_clears_pending_across_lanes() -> list[str]:
