@@ -63,7 +63,7 @@ def test_unstarted_target_id_membership_is_visible_in_lane_payload(
     assert result["teamIdentity"]["teamId"] == created.team_id
     assert result["lifetime"] == "Drain"
     assert result["taskFilters"] == ["serve.ui"]
-    assert signature[2][0] == created.team_id
+    assert signature[3][0] == created.team_id
 
 
 def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
@@ -231,5 +231,9 @@ def _patch_payload_dependencies(
     monkeypatch.setattr(
         payloads.message_reader,
         "assistant_messages_for_thread_id",
-        lambda *_args, **_kwargs: ([], None),
+        lambda *_args, **_kwargs: payloads.message_reader.AssistantMessageRead(
+            items=[],
+            error=None,
+            transcript=None,
+        ),
     )

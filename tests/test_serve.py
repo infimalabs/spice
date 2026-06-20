@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from spice.agent.driver import CODEX_DRIVER
 from spice.agent.renewal import (
     RENEWAL_HANDOFF_REQUEST_SUFFIX,
     renewal_rehydration_text,
@@ -163,7 +164,12 @@ def test_lane_watch_paths_use_exact_live_bus_sources(tmp_path):
     task_config.set_backend(str(backend))
     try:
         event_path = task_config.task_event_path()
-        paths = app.lane_watch_paths_for_target(state, target, THREAD_A, transcript)
+        paths = app.lane_watch_paths_for_target(
+            state,
+            target,
+            THREAD_A,
+            _transcript_resolution(THREAD_A, transcript),
+        )
     finally:
         task_config.set_backend(None)
 
@@ -306,7 +312,9 @@ def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkey
         payloads, "resolve_thread_id_for_target", lambda *_args: THREAD_A
     )
     monkeypatch.setattr(
-        app, "transcript_path_for_thread", lambda _thread, _repo_root: rollout
+        app,
+        "resolve_thread_transcript",
+        lambda _thread, _repo_root: _transcript_resolution(THREAD_A, rollout),
     )
     state.record_http_request("GET", "/")
     state.record_http_request("GET", f"/api/work/trees/{target.id}/acks")
@@ -382,7 +390,9 @@ def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(payloads, "resolve_thread_id_for_target", lambda *_: THREAD_A)
     monkeypatch.setattr(
-        app, "transcript_path_for_thread", lambda _thread_id, _repo_root: rollout
+        app,
+        "resolve_thread_transcript",
+        lambda _thread_id, _repo_root: _transcript_resolution(THREAD_A, rollout),
     )
     handler = _ImageHandler(state)
 
@@ -891,7 +901,9 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
             HTTPStatus.OK,
         ),
         thread_id=lambda _target: "thread",
-        transcript_path=lambda _thread_id: Path("rollout.jsonl"),
+        transcript_resolution=lambda _thread_id: _transcript_resolution(
+            "thread", Path("rollout.jsonl")
+        ),
         lane_watch_paths=lambda *_args: (),
         lane_signature=lambda *_args: (),
     )
@@ -997,6 +1009,14 @@ def _repo(tmp_path: Path) -> Path:
 
 def _target(repo: Path) -> WorktreeTarget:
     return WorktreeTarget(id="target-1", repo_root=repo, name=repo.name, branch="main")
+
+
+def _transcript_resolution(thread_id: str, path: Path) -> app.TranscriptResolution:
+    return app.TranscriptResolution(
+        thread_id=thread_id,
+        path=path,
+        owner_driver=CODEX_DRIVER,
+    )
 
 
 def _serve_state(tmp_path: Path, target: WorktreeTarget) -> ServeState:

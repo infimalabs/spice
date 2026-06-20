@@ -46,7 +46,8 @@ from spice.serve.livebus import LiveBusCallbacks, serve_live_bus
 from spice.serve.messages import (
     DEFAULT_MESSAGE_LIMIT,
     RolloutCursor,
-    transcript_path_for_thread,
+    TranscriptResolution,
+    resolve_thread_transcript,
 )
 from spice.serve.steering import steering_submit_error_status, submit_steering_message
 from spice.serve.teams import ServeTeamStore, TeamCommandService, TeamConfig
@@ -438,7 +439,7 @@ def lane_watch_paths_for_target(
     state: ServeState,
     target: WorktreeTarget,
     thread_id: str | None,
-    transcript_path: Path | None,
+    transcript: TranscriptResolution | None,
 ) -> tuple[Path, ...]:
     del thread_id
     target_inbox = inbox_dir(target.repo_root)
@@ -449,8 +450,8 @@ def lane_watch_paths_for_target(
         *_team_store_watch_paths(team_path),
         task_config.ensure_task_event_file(),
     ]
-    if transcript_path is not None:
-        paths.append(transcript_path)
+    if transcript is not None:
+        paths.append(transcript.path)
     return tuple(paths)
 
 
@@ -458,11 +459,12 @@ def lane_signature_for_target(
     state: ServeState,
     target: WorktreeTarget,
     thread_id: str | None,
-    transcript_path: Path | None,
+    transcript: TranscriptResolution | None,
 ) -> tuple[Any, ...]:
     team_facts = payloads.team_facts_for_target(state.team_store, target, thread_id)
     return (
-        _path_signature(transcript_path),
+        _path_signature(transcript.path if transcript else None),
+        transcript.owner_driver.name if transcript else "",
         _inbox_signature(target.repo_root),
         (
             team_facts.get("teamId", ""),
@@ -523,8 +525,8 @@ def serve_metrics_text(state: ServeState) -> str:
         thread_id = payloads.resolve_thread_id_for_target(state, target) or ""
         if thread_id:
             bound = 1
-            transcript_path = transcript_path_for_thread(thread_id, target.repo_root)
-            if transcript_path is not None and transcript_path.is_file():
+            transcript = resolve_thread_transcript(thread_id, target.repo_root)
+            if transcript is not None and transcript.path.is_file():
                 rollout_present = 1
         pending += pending_inbox_count(target.repo_root)
     lines = [
@@ -743,15 +745,20 @@ class _ServeHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.BAD_REQUEST, "offset and item are required")
             return
         thread_id = payloads.resolve_thread_id_for_target(self.state, target)
-        path = (
-            transcript_path_for_thread(thread_id, target.repo_root)
+        transcript = (
+            resolve_thread_transcript(thread_id, target.repo_root)
             if thread_id
             else None
         )
-        if path is None:
+        if transcript is None:
             self.send_error(HTTPStatus.NOT_FOUND, "target thread is not bound")
             return
-        result = rollout_image_from_offset(path, offset=offset, item_index=item)
+        result = rollout_image_from_offset(
+            transcript.path,
+            offset=offset,
+            item_index=item,
+            driver=transcript.owner_driver,
+        )
         if result is None:
             self.send_error(HTTPStatus.NOT_FOUND, "message image not found")
             return
@@ -877,7 +884,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 thread_id=lambda target: payloads.resolve_thread_id_for_target(
                     state, target
                 ),
-                transcript_path=transcript_path_for_thread,
+                transcript_resolution=resolve_thread_transcript,
                 lane_watch_paths=lambda target, thread_id, transcript_path: (
                     lane_watch_paths_for_target(
                         state, target, thread_id, transcript_path

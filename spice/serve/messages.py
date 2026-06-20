@@ -25,6 +25,7 @@ from spice.agent.driver import (
     driver_for,
     driver_for_transcript,
 )
+from spice.agent.identity import canonical_thread_id
 from spice.mail.acks import split_ack_message
 from spice.mail.watch import (
     extract_assistant_text,
@@ -122,21 +123,36 @@ class RolloutCursor:
     lock: RLock = field(default_factory=RLock, repr=False)
 
 
-def transcript_path_for_thread(
-    thread_id: str, repo_root: Path | None = None
-) -> Path | None:
-    """Locate a thread's transcript, preferring the worktree's driver.
+@dataclass(frozen=True)
+class TranscriptResolution:
+    thread_id: str
+    path: Path
+    owner_driver: AgentDriver
 
-    A thread id resolves under exactly one driver (a Codex rollout or a Claude
-    session), so when the worktree's configured driver does not find it the
-    other shipped drivers are tried — the lookup never depends on a
-    process-global driver.
-    """
+
+@dataclass(frozen=True)
+class AssistantMessageRead:
+    items: list[AssistantMessage]
+    error: str | None
+    transcript: TranscriptResolution | None
+
+
+def resolve_thread_transcript(
+    thread_id: str, repo_root: Path | None = None
+) -> TranscriptResolution | None:
+    """Locate a thread's transcript and the driver that owns it."""
+    canonical = canonical_thread_id(thread_id)
+    if not canonical:
+        return None
     preferred = driver_for(repo_root)
     ordered = [preferred, *(d for d in ALL_DRIVERS if d is not preferred)]
     for driver in ordered:
         try:
-            return driver.thread_transcript_path(thread_id)
+            return TranscriptResolution(
+                thread_id=canonical,
+                path=driver.thread_transcript_path(canonical),
+                owner_driver=driver,
+            )
         except (RuntimeError, SystemExit):
             continue
     return None
@@ -151,20 +167,26 @@ def assistant_messages_for_thread_id(
     cursor: RolloutCursor | None = None,
     worktree_id: str | None = None,
     repo_root: Path | None = None,
-) -> tuple[list[AssistantMessage], str | None]:
-    path = transcript_path_for_thread(thread_id, repo_root)
-    if path is None or not path.is_file():
-        return [], f"Could not resolve transcript for {thread_id}"
-    return (
-        read_assistant_messages(
-            path,
+) -> AssistantMessageRead:
+    transcript = resolve_thread_transcript(thread_id, repo_root)
+    if transcript is None or not transcript.path.is_file():
+        return AssistantMessageRead(
+            items=[],
+            error=f"Could not resolve transcript for {thread_id}",
+            transcript=transcript,
+        )
+    return AssistantMessageRead(
+        items=read_assistant_messages(
+            transcript.path,
             limit=limit,
             after=after,
             before=before,
             cursor=cursor,
             worktree_id=worktree_id,
+            driver=transcript.owner_driver,
         ),
-        None,
+        error=None,
+        transcript=transcript,
     )
 
 
@@ -176,8 +198,10 @@ def read_assistant_messages(
     before: str | None = None,
     cursor: RolloutCursor | None = None,
     worktree_id: str | None = None,
+    driver: AgentDriver | None = None,
 ) -> list[AssistantMessage]:
     bounded = max(1, min(limit, MAX_MESSAGE_LIMIT))
+    owner_driver = driver or driver_for_transcript(transcript_path)
     if cursor is not None:
         with cursor.lock:
             return _read_locked(
@@ -187,6 +211,7 @@ def read_assistant_messages(
                 before=before,
                 cursor=cursor,
                 worktree_id=worktree_id,
+                driver=owner_driver,
             )
     return _read_locked(
         transcript_path,
@@ -195,6 +220,7 @@ def read_assistant_messages(
         before=before,
         cursor=None,
         worktree_id=worktree_id,
+        driver=owner_driver,
     )
 
 
@@ -232,6 +258,7 @@ def _read_locked(
     before: str | None,
     cursor: RolloutCursor | None,
     worktree_id: str | None,
+    driver: AgentDriver,
 ) -> list[AssistantMessage]:
     if before is not None:
         end_offset = _key_offset(before)
@@ -243,6 +270,7 @@ def _read_locked(
             end_offset=end_offset,
             cursor=None,
             worktree_id=worktree_id,
+            driver=driver,
         )
     if cursor is not None and after and after == cursor.last_key:
         return _read_from_offset(
@@ -251,6 +279,7 @@ def _read_locked(
             limit=limit,
             cursor=cursor,
             worktree_id=worktree_id,
+            driver=driver,
         )
     if after is not None:
         after_offset = _key_offset(after)
@@ -261,6 +290,7 @@ def _read_locked(
                 limit=limit,
                 cursor=cursor,
                 worktree_id=worktree_id,
+                driver=driver,
             )
     return _read_window(
         transcript_path,
@@ -268,6 +298,7 @@ def _read_locked(
         end_offset=None,
         cursor=cursor,
         worktree_id=worktree_id,
+        driver=driver,
     )
 
 
@@ -288,9 +319,9 @@ def _read_from_offset(
     limit: int,
     cursor: RolloutCursor | None,
     worktree_id: str | None,
+    driver: AgentDriver,
 ) -> list[AssistantMessage]:
     messages: list[AssistantMessage] = []
-    driver = driver_for_transcript(transcript_path)
     try:
         file_size = transcript_path.stat().st_size
         if file_size < start_offset:
@@ -324,6 +355,7 @@ def _read_window(
     end_offset: int | None,
     cursor: RolloutCursor | None,
     worktree_id: str | None,
+    driver: AgentDriver,
 ) -> list[AssistantMessage]:
     """Newest-first window ending at `end_offset` (or EOF), tail-scanned."""
     try:
@@ -339,6 +371,7 @@ def _read_window(
                 end=scan_end,
                 limit=limit,
                 worktree_id=worktree_id,
+                driver=driver,
             )
             if len(newest) >= limit or start == 0:
                 break
@@ -349,7 +382,7 @@ def _read_window(
         kept.sort(key=lambda message: message.index)
         kept = _collapse_view_image_pairs(kept)
         if end_offset is not None and _line_has_tool_output_image(
-            transcript_path, end_offset
+            transcript_path, end_offset, driver=driver
         ):
             kept = _drop_trailing_view_image_call(kept)
         if cursor is not None and end_offset is None:
@@ -367,10 +400,10 @@ def _scan_span(
     end: int,
     limit: int,
     worktree_id: str | None,
+    driver: AgentDriver,
 ) -> tuple[list[AssistantMessage], AssistantMessage | None]:
     visible: list[AssistantMessage] = []
     latest_presence: AssistantMessage | None = None
-    driver = driver_for_transcript(transcript_path)
     with transcript_path.open(encoding="utf-8", errors="replace") as handle:
         handle.seek(start)
         if start:
@@ -423,7 +456,9 @@ def _drop_trailing_view_image_call(
     return messages
 
 
-def _line_has_tool_output_image(transcript_path: Path, offset: int) -> bool:
+def _line_has_tool_output_image(
+    transcript_path: Path, offset: int, *, driver: AgentDriver
+) -> bool:
     """The paging boundary line pairs with a trailing `view_image` call."""
     try:
         with transcript_path.open(encoding="utf-8", errors="replace") as handle:
@@ -434,7 +469,7 @@ def _line_has_tool_output_image(transcript_path: Path, offset: int) -> bool:
     loaded = _load_json_line(line)
     if loaded is None:
         return False
-    event = driver_for_transcript(transcript_path).normalize_transcript_line(loaded)
+    event = driver.normalize_transcript_line(loaded)
     if event is None or event.get("type") != "response_item":
         return False
     payload = event.get("payload")

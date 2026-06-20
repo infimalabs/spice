@@ -228,7 +228,7 @@ def serve_agent_identity_payload(
     """Resolve the driver-neutral serve identity for one worktree target."""
     status = agent_status(target.repo_root)
     desired = effective_agent_config(target.repo_root)
-    bound_thread = canonical_thread_id(thread_id or status.thread_id)
+    bound_thread = canonical_thread_id(thread_id or getattr(status, "thread_id", ""))
     actor = _serve_actor_id(target, bound_thread, actor_id=actor_id)
     actual_launch = _actual_launch_identity(status)
     return {
@@ -468,17 +468,21 @@ def _legacy_actor_names(actor: str) -> list[str]:
 
 
 def _actual_launch_identity(status: Any) -> dict[str, str]:
+    model = str(getattr(status, "model", "") or "")
+    effort = str(getattr(status, "reasoning_effort", "") or "")
+    service_tier = str(getattr(status, "service_tier", "") or "")
+    started_at = str(getattr(status, "started_at", "") or "")
     has_actual = bool(
-        status.thread_id
-        or status.model
-        or status.reasoning_effort
-        or status.service_tier
-        or status.started_at
+        getattr(status, "thread_id", "")
+        or model
+        or effort
+        or service_tier
+        or started_at
     )
     return {
-        "model": str(status.model or ""),
-        "effort": str(status.reasoning_effort or ""),
-        "serviceTier": str(status.service_tier or ""),
+        "model": model,
+        "effort": effort,
+        "serviceTier": service_tier,
         "source": "agent state" if has_actual else "",
     }
 
@@ -564,16 +568,24 @@ def renewal_intent_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any
 
 def target_activity_items(
     target: WorktreeTarget, thread_id: str
-) -> tuple[list[message_reader.AssistantMessage], str | None]:
+) -> tuple[
+    list[message_reader.AssistantMessage],
+    str | None,
+    message_reader.TranscriptResolution | None,
+]:
     if not thread_id:
-        return [], None
-    items, error = message_reader.assistant_messages_for_thread_id(
+        return [], None, None
+    read = message_reader.assistant_messages_for_thread_id(
         thread_id,
         limit=1,
         worktree_id=target.id,
         repo_root=target.repo_root,
     )
-    return _merge_task_card_messages(thread_id, items, limit=1), error
+    return (
+        _merge_task_card_messages(thread_id, read.items, limit=1),
+        read.error,
+        read.transcript,
+    )
 
 
 def _merge_task_card_messages(
@@ -879,7 +891,8 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
         team_identity = team_identity_payload(team_facts)
         agent_name = _agent_name_for_target(target)
         renewal_intent = renewal_intent_for_target(state.team_store, target, thread_id)
-        items, error = target_activity_items(target, thread_id)
+        items, error, transcript = target_activity_items(target, thread_id)
+        transcript_owner = transcript.owner_driver.name if transcript else ""
         status_line = _status_line_payload_from_status(
             status=status,
             thread_id=thread_id,
@@ -900,6 +913,14 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
                     binding_status=binding_status,
                     binding_error=binding_error,
                     agent_name=agent_name,
+                ),
+                "serveAgentIdentity": serve_agent_identity_payload(
+                    target,
+                    thread_id,
+                    binding_status=binding_status,
+                    binding_error=binding_error,
+                    transcript_owner=transcript_owner,
+                    store=state.team_store,
                 ),
                 "taskFilters": team_facts.get("taskFilters", []),
                 "laneFilterVersion": "",
@@ -1086,8 +1107,9 @@ def messages_payload_for_worktree(
     if not thread_id:
         items: list[message_reader.AssistantMessage] = []
         error: str | None = "No agent thread is bound to this worktree yet."
+        transcript: message_reader.TranscriptResolution | None = None
     else:
-        items, error = message_reader.assistant_messages_for_thread_id(
+        read = message_reader.assistant_messages_for_thread_id(
             thread_id,
             limit=limit,
             after=after,
@@ -1096,6 +1118,9 @@ def messages_payload_for_worktree(
             worktree_id=target.id,
             repo_root=target.repo_root,
         )
+        items = read.items
+        error = read.error
+        transcript = read.transcript
         items = _merge_task_card_messages(
             thread_id,
             items,
@@ -1109,6 +1134,7 @@ def messages_payload_for_worktree(
     status = agent_status(target.repo_root)
     binding_error = agent_binding_error(target.repo_root, status)
     binding_status = _binding_status(thread_id, binding_error)
+    transcript_owner = transcript.owner_driver.name if transcript else ""
     return {
         "messages": [item.to_payload() for item in items],
         "targetWorktreeName": target.name,
@@ -1118,6 +1144,14 @@ def messages_payload_for_worktree(
             thread_id,
             binding_status=binding_status,
             binding_error=binding_error,
+        ),
+        "serveAgentIdentity": serve_agent_identity_payload(
+            target,
+            thread_id,
+            binding_status=binding_status,
+            binding_error=binding_error,
+            transcript_owner=transcript_owner,
+            store=state.team_store,
         ),
         "taskFilters": team_facts.get("taskFilters", []),
         "laneFilterVersion": "",
