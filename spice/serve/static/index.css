@@ -194,7 +194,7 @@ button.primary:hover {
   z-index: 0;
 }
 .spice-menu-button--fast .spice-menu-icon::before {
-  animation: spice-menu-flame-pulse 2.8s ease-in-out infinite;
+  animation: spice-menu-flame-pulse 3.2s ease-in-out infinite;
   opacity: 0.82;
 }
 @keyframes spice-menu-flame-pulse {

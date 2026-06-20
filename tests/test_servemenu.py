@@ -149,7 +149,7 @@ def test_header_spice_menu_fast_mode_flame_pulses_behind_pepper():
     assert "transform: translate(-50%, -50%);" in icon_flame_rules
     assert "scale(" not in icon_flame_rules
     assert "rotate(" not in icon_flame_rules
-    assert "animation: spice-menu-flame-pulse 2.8s ease-in-out infinite;" in fast_rules
+    assert "animation: spice-menu-flame-pulse 3.2s ease-in-out infinite;" in fast_rules
     assert "opacity: 0.82;" in fast_rules
     assert "opacity: 0.48;" in keyframes
     assert "opacity: 0.92;" in keyframes
