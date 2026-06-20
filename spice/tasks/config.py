@@ -2,9 +2,9 @@
 
 A *backend* is one shared Taskwarrior database. Its root holds the generated
 ``taskrc`` and the single ``data/`` directory every agent in the backend
-shares. The directory lives in the git common dir (named ``task``, or
-``task-<name>`` for a named backend) so every worktree of a repository sees
-one board; there are no per-worktree replicas and no sync server.
+shares. The default root is the git common dir's ``spice/`` state namespace.
+Every worktree of a repository sees one board; there are no per-worktree
+replicas and no sync server.
 """
 
 from __future__ import annotations
@@ -20,10 +20,9 @@ from spice.errors import SpiceError
 from spice.locking import lock_fd_exclusive, unlock_fd
 
 TASK_BACKEND_ENV = "SPICE_TASK_BACKEND"  # env-policy: allow
-# All spice git-dir state lives under the `spice/` namespace (sticky study
-# state shares it), so a repo can host other tooling without collisions.
-SHARED_DIR = "spice/task"
-BACKEND_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# All spice git-dir state lives under the `spice/` namespace, so a repo can host
+# other tooling without collisions.
+SHARED_DIR = "spice"
 PROJECT_SEGMENT_PATTERN = "[0-9a-z_]+"
 PROJECT_SEGMENT_RULE_LABEL = "lowercase letters, digits, and underscores"
 PROJECT_DELIMITER = "."
@@ -287,9 +286,7 @@ def backend_root() -> Path:
         expanded = Path(selector).expanduser()
         if expanded.is_absolute():
             return expanded.resolve()
-        if not BACKEND_NAME_RE.match(selector):
-            raise SpiceError(f"invalid backend name: {selector!r}")
-        return git_common_dir(repo_root()) / f"{SHARED_DIR}-{selector}"
+        raise SpiceError(f"{TASK_BACKEND_ENV} requires an absolute path")
     return git_common_dir(repo_root()) / SHARED_DIR
 
 
