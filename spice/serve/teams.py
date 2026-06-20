@@ -748,13 +748,17 @@ class ServeTeamStore(
 
 def _team_subgroup_agent_ids(raw: object) -> tuple[str, ...]:
     try:
-        values = json.loads(raw)
+        values = json.loads(_json_source(raw))
     except (json.JSONDecodeError, TypeError):
         return ()
     if not isinstance(values, list):
         return ()
     agent_ids = [str(item) for item in values if str(item or "").strip()]
     return tuple(dict.fromkeys(agent_ids))
+
+
+def _json_source(raw: object) -> str | bytes | bytearray:
+    return raw if isinstance(raw, str | bytes | bytearray) else ""
 
 
 from spice.serve.teamcommands import (  # noqa: E402

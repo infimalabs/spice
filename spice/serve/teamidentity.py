@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from typing import Protocol
 
 from spice.serve.teamids import normalized_id as _normalized_id
 from spice.serve.teammodels import TeamAgentIdentity
@@ -28,6 +30,20 @@ class AgentIdentityRecordRequest:
     renewal_successor_thread_id: str = ""
     renewal_revision: int = 0
     updated_at: float | None = None
+
+
+class _TeamIdentityStore(Protocol):
+    def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
+
+    def _agent_identity_row_locked(
+        self, connection: sqlite3.Connection, actor_id: str
+    ) -> sqlite3.Row | None: ...
+
+    def _record_agent_identity_locked(
+        self,
+        connection: sqlite3.Connection,
+        request: AgentIdentityRecordRequest,
+    ) -> TeamAgentIdentity: ...
 
 
 def _identity_from_record_request(
@@ -181,7 +197,7 @@ class TeamIdentityStoreMixin:
         )
 
     def record_agent_identity(
-        self,
+        self: _TeamIdentityStore,
         *,
         actor_id: str,
         target_id: str = "",
@@ -221,7 +237,9 @@ class TeamIdentityStoreMixin:
                 ),
             )
 
-    def agent_identity_for_actor(self, actor_id: str) -> TeamAgentIdentity | None:
+    def agent_identity_for_actor(
+        self: _TeamIdentityStore, actor_id: str
+    ) -> TeamAgentIdentity | None:
         actor_id = _normalized_id(actor_id, "actor_id")
         with self.connect() as connection:
             row = self._agent_identity_row_locked(connection, actor_id)
