@@ -16,7 +16,6 @@ import pytest
 
 from spice.agent.driver import (
     CLAUDE_DRIVER,
-    CLAUDE_FALLBACK_CONTEXT_WINDOW,
     CODEX_DRIVER,
     PLAYWRIGHT_MCP_COMMAND,
     PLAYWRIGHT_MCP_SERVER_NAME,
@@ -372,7 +371,7 @@ def test_claude_context_fields_sum_prompt_and_fit_window():
     assert fields["model_context_window"] == CLAUDE_DRIVER.default_context_window
 
 
-def test_claude_context_window_grows_to_million_when_overflowing():
+def test_claude_context_window_stays_at_standard_tier_when_overflowing():
     cache_read, output = 355000, 2000
     raw = {
         "type": "assistant",
@@ -388,4 +387,6 @@ def test_claude_context_window_grows_to_million_when_overflowing():
     }
     fields = CLAUDE_DRIVER.context_snapshot_fields(raw)
     assert fields["total_tokens"] == cache_read + output
-    assert fields["model_context_window"] == CLAUDE_FALLBACK_CONTEXT_WINDOW
+    # Overflow no longer promotes to the 1M tier; it stays pinned at 200K so
+    # pressure reads past 100% and drives compaction.
+    assert fields["model_context_window"] == CLAUDE_DRIVER.default_context_window

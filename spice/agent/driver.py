@@ -268,10 +268,6 @@ class CodexDriver(AgentDriver):
 # Claude Code's `--effort` vocabulary. The configured spice effort value is
 # Codex-shaped; Claude uses the same set, except for `max`, which we ignore.
 CLAUDE_EFFORT_CHOICES = frozenset({"low", "medium", "high", "xhigh"})
-# Claude's usage never records the context window; a session runs either the
-# standard tier (the driver's `default_context_window`) or the 1M beta. The
-# meter fits occupancy to the smallest tier that holds it.
-CLAUDE_FALLBACK_CONTEXT_WINDOW = 1_000_000
 OUT_OF_CREDITS_PATTERNS = (
     re.compile(r"\busage limit\b", re.IGNORECASE),
     re.compile(r"\b(?:out of|insufficient)\s+credits?\b", re.IGNORECASE),
@@ -414,17 +410,12 @@ class ClaudeDriver(AgentDriver):
             "output_tokens": output_tokens,
             "reasoning_output_tokens": 0,
             "total_tokens": total,
-            "model_context_window": self._fitted_context_window(total),
+            # Always meter against the standard tier so context pressure builds
+            # and the agent compacts near 200K — matching other agents and not
+            # drifting up to a larger (1M) API context.
+            "model_context_window": self.default_context_window or None,
             "cumulative_total_tokens": total,
         }
-
-    def _fitted_context_window(self, total: int) -> int | None:
-        # Pick the smallest standard tier that holds the observed occupancy so
-        # pressure never reads past 100%.
-        for window in (self.default_context_window, CLAUDE_FALLBACK_CONTEXT_WINDOW):
-            if window and total <= window:
-                return window
-        return self.default_context_window or None
 
 
 def _claude_response_item(timestamp: Any, payload: dict[str, Any]) -> dict[str, Any]:
