@@ -13,7 +13,7 @@ import pytest
 from spice.cli.parser import build_parser
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
-from spice.tasks import cli as task_cli, config, identity, ops, render
+from spice.tasks import cli as task_cli, config, create, identity, render
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -140,7 +140,7 @@ def test_task_review_then_marks_spawned_followup_as_cli_creation_surface(
     task_repo, capsys
 ):
     assert task_repo.is_dir()
-    handle = ops.add(
+    handle = create.add(
         "Review target for CLI follow-up",
         project="task.unit",
         priority="medium",
@@ -225,7 +225,7 @@ def test_task_add_rejects_oops_system_project(task_repo):
     assert task_repo.is_dir()
 
     with pytest.raises(SpiceError, match="reserved for system task creation"):
-        ops.add(
+        create.add(
             "Manual oops project",
             project=config.OOPS_PROJECT,
             priority="medium",
@@ -264,7 +264,7 @@ def test_task_list_limit_filters_project_stem_and_sorts_newest(monkeypatch):
         return rows
 
     monkeypatch.setattr("spice.tasks.tw.current_actor", lambda: "actor-a")
-    monkeypatch.setattr(task_cli.ops, "visible_rows", fake_visible_rows)
+    monkeypatch.setattr(task_cli.alloc, "visible_rows", fake_visible_rows)
 
     output = task_cli._list(
         argparse.Namespace(all=False, status=None, project="serve", limit=2)
@@ -294,7 +294,7 @@ def test_task_list_status_filter_uses_visible_rows(monkeypatch):
         ]
 
     monkeypatch.setattr("spice.tasks.tw.current_actor", lambda: "actor-a")
-    monkeypatch.setattr(task_cli.ops, "visible_rows", fake_visible_rows)
+    monkeypatch.setattr(task_cli.alloc, "visible_rows", fake_visible_rows)
 
     output = task_cli._list(
         argparse.Namespace(all=False, status="waiting", project=None, limit=None)

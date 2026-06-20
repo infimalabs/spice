@@ -568,7 +568,10 @@ def test_serve_web_typecheck_skips_repo_without_sources(tmp_path, monkeypatch):
 def test_serve_web_typecheck_invokes_typescript_checkjs(tmp_path, monkeypatch):
     from spice.serve import typecheck
 
-    for relative in typecheck.SERVE_WEB_JS_PATHS:
+    for relative in (
+        *typecheck.SERVE_WEB_JS_PATHS,
+        *typecheck.SERVE_WEB_MODULE_JS_PATHS,
+    ):
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("// serve static source\n", encoding="utf-8")
@@ -584,6 +587,7 @@ def test_serve_web_typecheck_invokes_typescript_checkjs(tmp_path, monkeypatch):
 
     typecheck.run_serve_web_typecheck(tmp_path)
 
+    assert len(calls) == 2
     argv, kwargs = calls[0]
     assert argv[:6] == [
         "/usr/bin/npm",
@@ -598,7 +602,15 @@ def test_serve_web_typecheck_invokes_typescript_checkjs(tmp_path, monkeypatch):
     assert "spice/serve/static/app.types.js" in argv
     assert "spice/serve/static/app.menu.js" in argv
     assert "spice/serve/static/app.js" in argv
+    assert "spice/serve/static/app.metrics-lit.js" not in argv
     assert kwargs["cwd"] == tmp_path
+    module_argv, module_kwargs = calls[1]
+    assert "--module" in module_argv
+    assert "ESNext" in module_argv
+    assert "--moduleResolution" in module_argv
+    assert "bundler" in module_argv
+    assert "spice/serve/static/app.metrics-lit.js" in module_argv
+    assert module_kwargs["cwd"] == tmp_path
 
 
 def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):

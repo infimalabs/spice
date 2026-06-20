@@ -20,7 +20,7 @@ from spice.serve.teams import (
     TeamConfig,
 )
 from spice.serve.teamids import thread_actor_id
-from spice.tasks import alloc, config, gitsync, identity, lanes, ops, render, tw
+from spice.tasks import alloc, config, create, gitsync, identity, lanes, ops, render, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -75,7 +75,7 @@ def _make_orphan_commit(
 
 
 def test_task_edit_changes_priority_in_place(task_repo):
-    handle = ops.add("Bump me", project="task.unit", priority="low")
+    handle = create.add("Bump me", project="task.unit", priority="low")
     assert identity.resolve(handle)["priority"] == "L"
 
     ops.edit(handle, priority="high")
@@ -84,7 +84,7 @@ def test_task_edit_changes_priority_in_place(task_repo):
 
 
 def test_task_edit_reassigns_project_in_place(task_repo):
-    handle = ops.add("Move me", project="task.unit", priority="medium")
+    handle = create.add("Move me", project="task.unit", priority="medium")
 
     ops.edit(handle, project="task.moved")
 
@@ -92,14 +92,14 @@ def test_task_edit_reassigns_project_in_place(task_repo):
 
 
 def test_task_edit_requires_at_least_one_field(task_repo):
-    handle = ops.add("Leave me", project="task.unit", priority="medium")
+    handle = create.add("Leave me", project="task.unit", priority="medium")
     with pytest.raises(SpiceError):
         ops.edit(handle)
 
 
 def test_task_wake_clears_multiple_waits_and_makes_tasks_current(task_repo):
     handles = [
-        ops.add(
+        create.add(
             f"Wake delayed task {index}",
             project="task.unit",
             priority="medium",
@@ -110,12 +110,12 @@ def test_task_wake_clears_multiple_waits_and_makes_tasks_current(task_repo):
     delayed = [identity.resolve(handle) for handle in handles]
 
     assert all(row.get("wait") for row in delayed)
-    ready_before = {identity.render_handle(row) for row in ops.ready_rows()}
+    ready_before = {identity.render_handle(row) for row in alloc.ready_rows()}
     assert not set(handles) & ready_before
 
     output = ops.wake(handles)
     rows = [identity.resolve(handle) for handle in handles]
-    ready_after = {identity.render_handle(row) for row in ops.ready_rows()}
+    ready_after = {identity.render_handle(row) for row in alloc.ready_rows()}
 
     for handle in handles:
         assert f"woke {handle}: wait:" in output
@@ -127,20 +127,20 @@ def test_task_wake_clears_multiple_waits_and_makes_tasks_current(task_repo):
 
 
 def test_task_wake_rejects_batch_without_partial_clear(task_repo):
-    delayed = ops.add(
+    delayed = create.add(
         "Wake batch delayed task",
         project="task.unit",
         priority="medium",
         wait=config.OOPS_WAIT,
     )
-    claimed = ops.add("Wake batch claimed task", project="task.unit", claim=True)
+    claimed = create.add("Wake batch claimed task", project="task.unit", claim=True)
 
     with pytest.raises(SpiceError, match="active or claimed"):
         ops.wake([delayed, claimed])
 
     row = identity.resolve(delayed)
     assert row.get("wait")
-    assert delayed not in {identity.render_handle(row) for row in ops.ready_rows()}
+    assert delayed not in {identity.render_handle(row) for row in alloc.ready_rows()}
     assert not str(row.get("claim_by") or "")
     assert not row.get("start")
 
@@ -154,7 +154,7 @@ def test_task_wake_refuses_deferred_oops_triage(task_repo):
 
 
 def test_drive_wake_auto_subscribes_woken_project(task_repo):
-    handle = ops.add(
+    handle = create.add(
         "Drive wakes delayed task",
         project="task.unit",
         priority="medium",
@@ -184,7 +184,7 @@ def test_drain_wake_auto_subscribes_woken_project(task_repo):
     team = store.create_team(
         members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drain")
     )
-    handle = ops.add(
+    handle = create.add(
         "Drain wakes delayed task",
         project="task.unit",
         priority="medium",
@@ -210,7 +210,7 @@ def test_steer_wake_keeps_preparation_only_boundary(task_repo):
     team = store.create_team(
         members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Steer")
     )
-    handle = ops.add(
+    handle = create.add(
         "Steer wakes delayed task",
         project="task.unit",
         priority="medium",
@@ -271,7 +271,7 @@ def test_task_adopt_can_complete_orphan_in_one_shot(remote_task_repo):
 
 
 def test_task_adopt_claims_existing_handle_over_orphan(remote_task_repo):
-    handle = ops.add(
+    handle = create.add(
         "Pre-filed task awaiting its commit",
         project="task.unit",
         priority="medium",
@@ -297,7 +297,7 @@ def test_task_add_claim_refuses_dirty_tree_without_creating_task(remote_task_rep
     (remote_task_repo / "README.md").write_text("dirty\n", encoding="utf-8")
 
     with pytest.raises(SpiceError, match="commit or clear the working tree first"):
-        ops.add("Dirty claim should not leak", project="task.unit", claim=True)
+        create.add("Dirty claim should not leak", project="task.unit", claim=True)
 
     rows = tw.export(["status:pending"])
     assert [
@@ -306,7 +306,7 @@ def test_task_add_claim_refuses_dirty_tree_without_creating_task(remote_task_rep
 
 
 def test_task_add_claim_creates_and_claims_clean_task(task_repo):
-    handle = ops.add("Clean claim lands", project="task.unit", claim=True)
+    handle = create.add("Clean claim lands", project="task.unit", claim=True)
     row = identity.resolve(handle)
 
     assert row["claim_by"] == ACTOR_A
@@ -314,7 +314,7 @@ def test_task_add_claim_creates_and_claims_clean_task(task_repo):
 
 
 def test_task_adopt_rejects_handle_with_new_task_fields(remote_task_repo):
-    handle = ops.add(
+    handle = create.add(
         "Existing task", project="task.unit", priority="medium", acceptance=["x"]
     )
     _make_orphan_commit(remote_task_repo)
@@ -333,7 +333,7 @@ def test_task_adopt_parser_accepts_done_with_validation():
 
 
 def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatch):
-    handle = ops.add(
+    handle = create.add(
         "Exercise task phase flow",
         project="task.unit",
         priority="medium",
@@ -367,7 +367,7 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
         "spice.tasks.lanes.team_route_for_actor",
         lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
     )
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
 
     assert identity.render_handle(assigned or {}) == handle
     assert assigned["claim_by"] == ACTOR_A
@@ -383,7 +383,7 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
 
 
 def test_task_next_repairs_active_claim_missing_owner(task_repo, monkeypatch):
-    handle = ops.add(
+    handle = create.add(
         "Repair partial active claim",
         project="task.unit",
         priority="medium",
@@ -397,7 +397,7 @@ def test_task_next_repairs_active_claim_missing_owner(task_repo, monkeypatch):
         lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
     )
 
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
 
     assert identity.render_handle(assigned or {}) == handle
     assert assigned["claim_by"] == ACTOR_A
@@ -412,7 +412,7 @@ def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
     team = store.create_team(
         members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER], config=TeamConfig(lifetime="Steer")
     )
-    handle = ops.add(
+    handle = create.add(
         "Manual claim out of lane",
         project="task.unit",
         priority="medium",
@@ -430,7 +430,7 @@ def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
 
     ops.done(handle, validation=["claim subscription routed review"])
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
 
     assert identity.render_handle(assigned or {}) == handle
     assert assigned["claim_by"] == PEER_ACTOR
@@ -443,7 +443,7 @@ def test_task_next_auto_claim_does_not_rewrite_team_filters(task_repo):
         members=[ACTOR_A_MEMBER],
         config=TeamConfig(lifetime="Steer", task_filters=("task.unit",)),
     )
-    handle = ops.add(
+    handle = create.add(
         "Auto claim in lane",
         project="task.unit",
         priority="medium",
@@ -451,7 +451,7 @@ def test_task_next_auto_claim_does_not_rewrite_team_filters(task_repo):
     )
     before = store.global_revision()
 
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
     after = store.global_revision()
     entries = store.team_config(team.team_id).task_filter_entries
 
@@ -466,7 +466,7 @@ def test_manual_claim_skips_private_project_subscription(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
     team = store.create_team(members=[ACTOR_A_MEMBER])
-    handle = ops.add(
+    handle = create.add(
         "Private manual claim",
         priority="medium",
         acceptance=["private claims do not touch team filters"],
@@ -483,7 +483,7 @@ def test_manual_claim_skips_private_project_subscription(task_repo):
 def test_manual_claim_skips_subscription_for_teamless_actor(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
-    handle = ops.add(
+    handle = create.add(
         "Teamless manual claim",
         project="task.unit",
         priority="medium",
@@ -518,7 +518,7 @@ def test_final_review_completion_gcs_auto_claim_filter(task_repo, monkeypatch):
     assert task_repo.is_dir()
     store = ServeTeamStore()
     team = store.create_team(members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER])
-    handle = ops.add(
+    handle = create.add(
         "Review keeps project subscribed",
         project="task.unit",
         priority="medium",
@@ -553,7 +553,7 @@ def test_empty_project_gc_removes_auto_sources_but_preserves_manual(
         members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER],
         config=TeamConfig(task_filters=("task.unit",)),
     )
-    handle = ops.add(
+    handle = create.add(
         "Manual filter survives auto gc",
         project="task.unit",
         priority="medium",
@@ -591,13 +591,13 @@ def test_delete_gcs_empty_auto_create_filter_after_project_subtree_empties(
     store.add_task_filter(
         team.team_id, "task.unit", source=TASK_FILTER_SOURCE_AUTO_CREATE
     )
-    parent = ops.add(
+    parent = create.add(
         "Parent task",
         project="task.unit",
         priority="medium",
         acceptance=["parent deletion keeps filter while child pending"],
     )
-    child = ops.add(
+    child = create.add(
         "Child task",
         project="task.unit.child",
         priority="medium",
@@ -626,7 +626,7 @@ def test_drive_task_creation_subscribes_project_idempotently(task_repo):
         members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drive")
     )
 
-    first = ops.add(
+    first = create.add(
         "Drive creates first task",
         project="task.unit",
         priority="medium",
@@ -634,7 +634,7 @@ def test_drive_task_creation_subscribes_project_idempotently(task_repo):
     )
     after_first = store.global_revision()
     after_first_config = store.team_config(team.team_id)
-    second = ops.add(
+    second = create.add(
         "Drive creates second task",
         project="task.unit",
         priority="medium",
@@ -658,7 +658,7 @@ def test_steer_task_creation_keeps_manual_subscription_boundary(task_repo):
     )
     before = store.global_revision()
 
-    handle = ops.add(
+    handle = create.add(
         "Steer creates task",
         project="task.unit",
         priority="medium",
@@ -678,7 +678,7 @@ def test_drain_task_creation_uses_effective_visibility_not_stored_filter(task_re
     )
     before = store.global_revision()
 
-    handle = ops.add(
+    handle = create.add(
         "Drain creates task",
         project="task.unit",
         priority="medium",
@@ -695,7 +695,7 @@ def test_teamless_task_creation_routes_creator_without_team_subscription(task_re
     store = ServeTeamStore()
     before = store.global_revision()
 
-    handle = ops.add(
+    handle = create.add(
         "Teamless creates task",
         project="task.unit",
         priority="medium",
@@ -704,7 +704,7 @@ def test_teamless_task_creation_routes_creator_without_team_subscription(task_re
 
     assert identity.resolve(handle)["project"] == "task.unit"
     assert store.global_revision() == before
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
 
     assert identity.render_handle(assigned or {}) == handle
     assert store.current_team_for_agent(ACTOR_A) is None
@@ -717,7 +717,7 @@ def test_teamless_creator_scope_does_not_route_peer_public_tasks(
     assert task_repo.is_dir()
     store = ServeTeamStore()
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
-    handle = ops.add(
+    handle = create.add(
         "Peer teamless public task",
         project="task.unit",
         priority="medium",
@@ -725,7 +725,7 @@ def test_teamless_creator_scope_does_not_route_peer_public_tasks(
     )
 
     monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
 
     assert identity.resolve(handle)["origin_thread"] == PEER_ACTOR
     assert assigned is None
@@ -743,7 +743,7 @@ def test_explicit_thread_membership_routes_peer_review_through_status_and_next(
         config=TeamConfig(lifetime="Drive", task_filters=("serve.ui",)),
     )
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
-    handle = ops.add(
+    handle = create.add(
         "Peer serve review",
         project="serve.ui",
         priority="medium",
@@ -754,9 +754,9 @@ def test_explicit_thread_membership_routes_peer_review_through_status_and_next(
 
     monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
     status = render.render_status()
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
 
-    assert f"project:{ops.default_project(ACTOR_A)}" in status
+    assert f"project:{config.private_project(ACTOR_A)}" in status
     assert f"origin_thread.is:{ACTOR_A}" in status
     assert "project:serve.ui" in status
     assert identity.render_handle(assigned or {}) == handle
@@ -772,7 +772,7 @@ def test_explicit_thread_route_keeps_private_fallback_without_membership(task_re
         members=[PEER_ACTOR_MEMBER],
         config=TeamConfig(lifetime="Drive", task_filters=("serve.ui",)),
     )
-    private = f"project:{ops.default_project(ACTOR_A)}"
+    private = f"project:{config.private_project(ACTOR_A)}"
 
     route = lanes.team_route_for_actor(ACTOR_A)
     status = render.render_status()
@@ -780,7 +780,7 @@ def test_explicit_thread_route_keeps_private_fallback_without_membership(task_re
         line for line in status.splitlines() if line.startswith("filter ")
     )
 
-    assert ops.effective_route_filter_args(ACTOR_A, route) == [
+    assert alloc.effective_route_filter_args(ACTOR_A, route) == [
         "(",
         private,
         "or",
@@ -813,7 +813,7 @@ def test_drive_create_allocate_review_and_gc_capstone(task_repo, monkeypatch):
     team = store.create_team(
         members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER], config=TeamConfig(lifetime="Drive")
     )
-    handle = ops.add(
+    handle = create.add(
         "Drive capstone task",
         project="task.unit",
         priority="medium",
@@ -826,7 +826,7 @@ def test_drive_create_allocate_review_and_gc_capstone(task_repo, monkeypatch):
         {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE}
     ]
 
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
 
     assert identity.render_handle(assigned or {}) == handle
 
@@ -836,7 +836,7 @@ def test_drive_create_allocate_review_and_gc_capstone(task_repo, monkeypatch):
     assert review_pending.task_filters == ("task.unit",)
 
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
-    review = ops.next_task()
+    review = alloc.next_task()
 
     assert identity.render_handle(review or {}) == handle
 
@@ -852,36 +852,36 @@ def test_drain_visibility_and_empty_steer_private_fail_closed(task_repo, monkeyp
     store = ServeTeamStore()
     store.create_team(members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drain"))
     store.create_team(members=[PEER_ACTOR_MEMBER], config=TeamConfig(lifetime="Steer"))
-    public = ops.add(
+    public = create.add(
         "Drain-visible public task",
         project="serve.ui",
         priority="medium",
         acceptance=["drain sees assignable public work"],
     )
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
-    private = ops.add(
+    private = create.add(
         "Peer private task",
         priority="medium",
         acceptance=["empty steer sees own private work"],
     )
 
     monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
-    drain_assigned = ops.next_task()
+    drain_assigned = alloc.next_task()
 
     assert identity.render_handle(drain_assigned or {}) == public
     assert drain_assigned["project"] == "serve.ui"
 
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
-    steer_assigned = ops.next_task()
+    steer_assigned = alloc.next_task()
 
     assert identity.render_handle(steer_assigned or {}) == private
-    assert steer_assigned["project"] == ops.default_project(PEER_ACTOR)
+    assert steer_assigned["project"] == config.private_project(PEER_ACTOR)
 
 
 def test_lifetime_filter_args_use_single_visibility_contract(task_repo):
     assert task_repo.is_dir()
     stored = ["project:task.unit"]
-    private = f"project:{ops.default_project(ACTOR_A)}"
+    private = f"project:{config.private_project(ACTOR_A)}"
 
     assert lanes.filter_args({"filter": stored, "lifetime": "Steer"}) == stored
     assert lanes.filter_args({"filter": stored, "lifetime": "Drive"}) == stored
@@ -893,18 +893,18 @@ def test_lifetime_filter_args_use_single_visibility_contract(task_repo):
         ")",
     ]
     assert lanes.filter_args({"filter": [], "lifetime": "Steer"}) == []
-    assert ops.effective_filter_args(ACTOR_A, []) == [private]
-    assert ops.effective_route_filter_args(ACTOR_A, None) == [
+    assert alloc.effective_filter_args(ACTOR_A, []) == [private]
+    assert alloc.effective_route_filter_args(ACTOR_A, None) == [
         "(",
         private,
         "or",
         f"origin_thread.is:{ACTOR_A}",
         ")",
     ]
-    assert ops.effective_route_filter_args(
+    assert alloc.effective_route_filter_args(
         ACTOR_A, {"filter": [], "lifetime": "Steer"}
     ) == [private]
-    assert ops.effective_filter_args(
+    assert alloc.effective_filter_args(
         ACTOR_A,
         lanes.filter_args({"filter": stored, "lifetime": "Drain"}),
     ) == [
@@ -918,7 +918,7 @@ def test_lifetime_filter_args_use_single_visibility_contract(task_repo):
         ")",
         ")",
     ]
-    assert ops.effective_route_filter_args(
+    assert alloc.effective_route_filter_args(
         ACTOR_A, {"filter": stored, "lifetime": "Drain"}
     ) == [
         "(",
@@ -936,9 +936,9 @@ def test_lifetime_filter_args_use_single_visibility_contract(task_repo):
 
 
 def test_task_add_stores_description_and_caps_title(task_repo):
-    overlong = "A" * (ops.TASK_TITLE_LIMIT + 1)
+    overlong = "A" * (create.TASK_TITLE_LIMIT + 1)
     with pytest.raises(SpiceError, match="move detail into --description"):
-        ops.add(
+        create.add(
             overlong,
             project="task.unit",
             priority="medium",
@@ -946,7 +946,7 @@ def test_task_add_stores_description_and_caps_title(task_repo):
         )
 
     body = "Longer context reviewers should keep current."
-    handle = ops.add(
+    handle = create.add(
         "Short subject",
         project="task.unit",
         description=body,
@@ -968,7 +968,7 @@ def test_task_add_preserves_shared_attachment_refs(task_repo):
     shared.write_bytes(b"shared-image")
     shared_ref = shared.as_posix()
 
-    handle = ops.add(
+    handle = create.add(
         "Preserve shared attachment references",
         project="task.unit",
         description=f"Screenshot/reference attachment: {shared_ref}.",
@@ -983,7 +983,7 @@ def test_task_add_preserves_shared_attachment_refs(task_repo):
 
 
 def test_task_note_preserves_shared_attachment_refs(task_repo):
-    handle = ops.add(
+    handle = create.add(
         "Track attachment note",
         project="task.unit",
         priority="medium",
@@ -1014,7 +1014,7 @@ def test_repo_configured_per_stem_default_flow_feeds_task_add(task_repo):
         encoding="utf-8",
     )
 
-    handle = ops.add(
+    handle = create.add(
         "Exercise configured flow",
         project="qa.pipeline",
         priority="medium",
@@ -1135,7 +1135,7 @@ def test_unclean_review_spawns_dependent_followup(task_repo, monkeypatch):
 def test_unclean_review_links_existing_followup(task_repo, monkeypatch):
     handle = _review_claim(task_repo, monkeypatch)
     reviewed_uuid = identity.uuid_of(identity.resolve(handle))
-    existing = ops.add(
+    existing = create.add(
         "Existing review follow-up",
         project="task.unit",
         acceptance=["Tracks the requested review change"],
@@ -1193,7 +1193,7 @@ def _configure_git_identity(repo: Path) -> None:
 
 def _review_claim(task_repo: Path, monkeypatch) -> str:
     assert task_repo.is_dir()
-    handle = ops.add(
+    handle = create.add(
         "Review follow-up invariant",
         project="task.unit",
         priority="medium",
@@ -1206,7 +1206,7 @@ def _review_claim(task_repo: Path, monkeypatch) -> str:
         lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
     )
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
     assert identity.render_handle(assigned or {}) == handle
     return handle
 

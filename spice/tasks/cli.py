@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.tasks import config, identity, ops, render
+from spice.tasks import alloc, config, create, identity, ops, render
 
 _TASK_LIST_STATUSES = ("pending", "waiting", "completed", "deleted")
 _TASK_LIST_NEWEST_FIELDS = ("end", "modified", "entry", "incepted", "claim_at")
@@ -461,8 +461,8 @@ def _list(args: argparse.Namespace) -> str:
     if args.all:
         rows = tw.export(filters)
     else:
-        rows = ops.visible_rows(tw.current_actor(), filters or ["status:pending"])
-        rows = [r for r in rows if not ops._is_oops(r)]
+        rows = alloc.visible_rows(tw.current_actor(), filters or ["status:pending"])
+        rows = [r for r in rows if not alloc.is_oops(r)]
     rows = _apply_list_project_filter(rows, getattr(args, "project", None))
     rows = _apply_list_limit(rows, getattr(args, "limit", None))
     return render.render_list(rows)
@@ -531,7 +531,7 @@ def _note(args: argparse.Namespace) -> str:
 def _oops(args: argparse.Namespace) -> str:
     text = " ".join(args.text).strip()
     if not text:
-        return render.render_list(ops.oops_rows())
+        return render.render_list(alloc.oops_rows())
     return ops.oops(
         text,
         description=args.description,
@@ -549,7 +549,7 @@ _DISPATCH = {
     "status": lambda a: render.render_status(),
     "next": lambda a: render.render_next(),
     "doctor": lambda a: render.render_doctor(),
-    "stale": lambda a: render.render_list(ops.stale_rows()),
+    "stale": lambda a: render.render_list(alloc.stale_rows()),
     "list": _list,
     "show": lambda a: render.render_show(a.handle),
     "done": lambda a: ops.done(
@@ -641,7 +641,7 @@ def _handle_add(args: argparse.Namespace) -> int:
     if title:
         for notice in notices:
             print(notice)
-        handle_text = ops.add(
+        handle_text = create.add(
             title,
             project=None if getattr(args, "private", False) else args.project,
             description=_description(list(args.description)),
@@ -663,7 +663,7 @@ def _handle_add(args: argparse.Namespace) -> int:
     lines = sys.stdin.read().splitlines()
     if not any(line.strip() for line in lines):
         raise SpiceError("task add requires a title argument or batch lines on stdin")
-    handles = ops.add_batch(lines, creation_surface=config.TASK_CREATION_SURFACE_CLI)
+    handles = create.add_batch(lines, creation_surface=config.TASK_CREATION_SURFACE_CLI)
     for handle_text in handles:
         print(f"created {handle_text}")
     if handles:

@@ -11,7 +11,7 @@ import pytest
 from spice.agent.driver import DRIVER
 from spice.serve.teamids import thread_actor_id
 from spice.serve.teams import TASK_FILTER_SOURCE_AUTO_CREATE, ServeTeamStore, TeamConfig
-from spice.tasks import config, identity, ops
+from spice.tasks import alloc, config, create, identity, ops
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -44,7 +44,7 @@ def test_drive_replace_path_preserves_auto_create_filter_for_gc(task_repo, monke
         members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER],
         config=TeamConfig(lifetime="Drive"),
     )
-    handle = ops.add(
+    handle = create.add(
         "Drive replace preserves provenance",
         project="task.unit",
         priority="medium",
@@ -62,11 +62,11 @@ def test_drive_replace_path_preserves_auto_create_filter_for_gc(task_repo, monke
         {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE}
     ]
 
-    assigned = ops.next_task()
+    assigned = alloc.next_task()
     assert identity.render_handle(assigned or {}) == handle
     ops.done(handle, validation=["implementation complete"])
     monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
-    review = ops.next_task()
+    review = alloc.next_task()
     assert identity.render_handle(review or {}) == handle
     ops.review(handle, finding="clean", note="review complete")
     after_review = store.team_config(team.team_id)
