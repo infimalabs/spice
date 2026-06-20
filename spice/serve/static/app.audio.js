@@ -35,9 +35,12 @@ const defaultDocumentTitle =
       "spice",
   ).trim() || "spice";
 const speechQueueBacklogClearThreshold = 2;
+const automaticSpeechCursorStorageKey = "spice.serve.automaticSpeechCursors";
+const automaticSpeechCursorStorageLimit = 500;
 const hoursPerHalfDay = 12;
 const gitHashContextChars = 16;
 let speechMediaSessionHandlersInstalled = false;
+let automaticSpeechCursors = null;
 
 function queueSpeechForMessages(lane, messages) {
   const host = laneGroupHost(lane);
@@ -65,7 +68,7 @@ function messageIsBehindAutomaticSpeechCursor(lane, item, timestamp) {
   if (timestamp === null) return false;
   const agentKey = automaticSpeechAgentKey(lane, item);
   if (!agentKey) return false;
-  const cursors = automaticSpeechCursorMap(lane);
+  const cursors = automaticSpeechCursorMap();
   const latest = cursors.get(agentKey);
   return Number.isFinite(latest) && timestamp < latest;
 }
@@ -74,15 +77,56 @@ function recordAutomaticSpeechCursor(lane, item, timestamp) {
   if (timestamp === null) return;
   const agentKey = automaticSpeechAgentKey(lane, item);
   if (!agentKey) return;
-  const cursors = automaticSpeechCursorMap(lane);
+  const cursors = automaticSpeechCursorMap();
   const latest = cursors.get(agentKey);
-  if (!Number.isFinite(latest) || timestamp > latest) cursors.set(agentKey, timestamp);
+  if (!Number.isFinite(latest) || timestamp > latest) {
+    cursors.set(agentKey, timestamp);
+    persistAutomaticSpeechCursors(cursors);
+  }
 }
 
-function automaticSpeechCursorMap(lane) {
-  if (!lane.latestSpokenMessageAtByAgent)
-    lane.latestSpokenMessageAtByAgent = new Map();
-  return lane.latestSpokenMessageAtByAgent;
+function automaticSpeechCursorMap() {
+  if (!automaticSpeechCursors)
+    automaticSpeechCursors = loadAutomaticSpeechCursors();
+  return automaticSpeechCursors;
+}
+
+function loadAutomaticSpeechCursors() {
+  const cursors = new Map();
+  const storage = speechBrowserStorage();
+  if (!storage) return cursors;
+  let parsed = [];
+  try {
+    parsed = JSON.parse(storage.getItem(automaticSpeechCursorStorageKey) || "[]");
+  } catch (error) {
+    parsed = [];
+  }
+  if (!Array.isArray(parsed)) return cursors;
+  for (const row of parsed) {
+    if (!Array.isArray(row) || row.length < 2) continue;
+    const agentKey = String(row[0] || "");
+    const timestamp = Number(row[1]);
+    if (agentKey && Number.isFinite(timestamp)) cursors.set(agentKey, timestamp);
+  }
+  return cursors;
+}
+
+function persistAutomaticSpeechCursors(cursors) {
+  const storage = speechBrowserStorage();
+  if (!storage) return;
+  const rows = [...cursors.entries()]
+    .filter((row) => row[0] && Number.isFinite(row[1]))
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, automaticSpeechCursorStorageLimit);
+  try {
+    storage.setItem(automaticSpeechCursorStorageKey, JSON.stringify(rows));
+  } catch (error) {
+    return;
+  }
+}
+
+function speechBrowserStorage() {
+  return typeof browserStorage === "function" ? browserStorage() : null;
 }
 
 function automaticSpeechAgentKey(lane, item) {
