@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Iterable
 
@@ -1119,16 +1120,30 @@ def _message_sparkline(items: list[message_reader.AssistantMessage]) -> list[int
     return values
 
 
-def messages_payload_for_worktree(
+@dataclass(frozen=True)
+class _ResolvedMessagesThread:
+    thread_id: str
+    predecessor_actor: str
+    renew_intent: bool
+    agent_ensure: dict[str, Any] | None
+    pending_identity: dict[str, Any]
+    pending: int
+
+
+@dataclass(frozen=True)
+class _ThreadMessages:
+    items: list[message_reader.AssistantMessage]
+    error: str | None
+    transcript: message_reader.TranscriptResolution | None
+
+
+def _resolve_messages_thread(
     state: Any,
     target: WorktreeTarget,
     *,
-    limit: int,
-    after: str | None = None,
-    before: str | None = None,
-    expected_thread_id: str | None = None,
-    fast_mode: bool = False,
-) -> dict[str, Any]:
+    expected_thread_id: str | None,
+    fast_mode: bool,
+) -> _ResolvedMessagesThread:
     explicit_thread_id = canonical_thread_id(expected_thread_id or "")
     thread_id = explicit_thread_id or resolve_thread_id_for_target(state, target) or ""
     pending_identity = pending_inbox_identity_payload(target.repo_root)
@@ -1162,36 +1177,91 @@ def messages_payload_for_worktree(
         thread_id = ensured_thread_id
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
+    return _ResolvedMessagesThread(
+        thread_id=thread_id,
+        predecessor_actor=predecessor_actor,
+        renew_intent=renew_intent,
+        agent_ensure=agent_ensure,
+        pending_identity=pending_identity,
+        pending=pending,
+    )
+
+
+def _read_thread_messages(
+    state: Any,
+    target: WorktreeTarget,
+    thread_id: str,
+    *,
+    limit: int,
+    after: str | None,
+    before: str | None,
+) -> _ThreadMessages:
     if not thread_id:
-        items: list[message_reader.AssistantMessage] = []
-        error: str | None = "No agent thread is bound to this worktree yet."
-        transcript: message_reader.TranscriptResolution | None = None
-    else:
-        read = message_reader.assistant_messages_for_thread_id(
-            thread_id,
-            limit=limit,
-            after=after,
-            before=before,
-            cursor=state.rollout_cursor(thread_id) if not before else None,
-            worktree_id=target.id,
-            repo_root=target.repo_root,
+        return _ThreadMessages(
+            items=[],
+            error="No agent thread is bound to this worktree yet.",
+            transcript=None,
         )
-        items = read.items
-        error = read.error
-        transcript = read.transcript
-        items = _merge_task_card_messages(
-            thread_id,
-            items,
-            limit=limit,
-            after=after,
-            before=before,
-        )
+    read = message_reader.assistant_messages_for_thread_id(
+        thread_id,
+        limit=limit,
+        after=after,
+        before=before,
+        cursor=state.rollout_cursor(thread_id) if not before else None,
+        worktree_id=target.id,
+        repo_root=target.repo_root,
+    )
+    items = _merge_task_card_messages(
+        thread_id,
+        read.items,
+        limit=limit,
+        after=after,
+        before=before,
+    )
+    return _ThreadMessages(items=items, error=read.error, transcript=read.transcript)
+
+
+def _messages_renewal_intent(
+    state: Any,
+    target: WorktreeTarget,
+    thread_id: str,
+    predecessor_actor: str,
+    renew_intent: bool,
+) -> Any:
+    if renew_intent and predecessor_actor:
+        return renewal_intent_for_actor(state.team_store, predecessor_actor)
+    return renewal_intent_for_target(state.team_store, target, thread_id)
+
+
+def messages_payload_for_worktree(
+    state: Any,
+    target: WorktreeTarget,
+    *,
+    limit: int,
+    after: str | None = None,
+    before: str | None = None,
+    expected_thread_id: str | None = None,
+    fast_mode: bool = False,
+) -> dict[str, Any]:
+    resolved = _resolve_messages_thread(
+        state, target, expected_thread_id=expected_thread_id, fast_mode=fast_mode
+    )
+    thread_id = resolved.thread_id
+    predecessor_actor = resolved.predecessor_actor
+    renew_intent = resolved.renew_intent
+    agent_ensure = resolved.agent_ensure
+    pending_identity = resolved.pending_identity
+    pending = resolved.pending
+    messages = _read_thread_messages(
+        state, target, thread_id, limit=limit, after=after, before=before
+    )
+    items = messages.items
+    error = messages.error
+    transcript = messages.transcript
     team_facts = team_facts_for_target(state.team_store, target, thread_id)
     team_identity = team_identity_payload(team_facts)
-    renewal_intent = (
-        renewal_intent_for_actor(state.team_store, predecessor_actor)
-        if renew_intent and predecessor_actor
-        else renewal_intent_for_target(state.team_store, target, thread_id)
+    renewal_intent = _messages_renewal_intent(
+        state, target, thread_id, predecessor_actor, renew_intent
     )
     status = agent_status(target.repo_root)
     binding_error = agent_binding_error(target.repo_root, status)
