@@ -786,12 +786,3 @@ function spiceMenuDropTeamId(container) {
   if (container.dataset.spiceMenuUnassigned === "true") return "";
   return container.dataset.spiceMenuTeamId || "";
 }
-
-function targetTeamAgentId(target) {
-  return canonicalThreadActorId(targetIdentityThreadId(target.targetIdentity)) || target.id;
-}
-
-function targetTeamAgentAliases(target) {
-  const actor = canonicalThreadActorId(targetIdentityThreadId(target.targetIdentity));
-  return actor && actor !== target.id ? [target.id] : [];
-}

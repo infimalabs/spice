@@ -247,10 +247,14 @@ def test_assigning_agent_to_new_team_moves_single_open_membership(tmp_path):
 
 def test_assigning_agent_with_target_alias_retires_stale_membership(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    store.create_team(members=["target-a"])
-    destination = store.create_team(members=["agent-b"])
+    store.create_team(members=["target:target-a"])
+    destination = store.create_team(members=["thread:agent-b"])
 
-    store.assign_agent(destination.team_id, "thread-a", aliases=["target-a"])
+    store.assign_agent(
+        destination.team_id,
+        "thread:thread-a",
+        aliases=["target:target-a", "target-a"],
+    )
 
     open_members = {
         team.team_id: {member.agent_id for member in team.members}
@@ -261,8 +265,8 @@ def test_assigning_agent_with_target_alias_retires_stale_membership(tmp_path):
             "SELECT team_id, status FROM teams ORDER BY created_at"
         ).fetchall()
 
-    assert open_members == {destination.team_id: {"thread-a", "agent-b"}}
-    assert store.current_team_for_agent("thread-a") == destination.team_id
+    assert open_members == {destination.team_id: {"thread:thread-a", "thread:agent-b"}}
+    assert store.current_team_for_agent("thread:thread-a") == destination.team_id
     assert [(row["team_id"], row["status"]) for row in team_rows] == [
         (destination.team_id, "open")
     ]
@@ -347,36 +351,36 @@ def test_team_command_service_reorders_team_agents(tmp_path):
 def test_team_command_service_toggles_agent_renewal_intent(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     service = TeamCommandService(store)
-    created = service.apply({"command": "createTeam", "members": ["agent-a"]})
+    created = service.apply({"command": "createTeam", "members": ["thread:agent-a"]})
 
     enabled = service.apply(
         {
             "command": "setAgentRenewalIntent",
-            "agentId": "agent-a",
+            "agentId": "thread:agent-a",
             "requested": True,
             "expectedRevision": created.revision,
         }
     )
     enabled_member = enabled.snapshot.teams[0].to_payload()["members"][0]
 
-    assert store.agent_renewal_requested("agent-a") is True
-    assert store.agent_renewal_active("agent-a") is True
-    assert enabled_member["renewalIntent"]["agentId"] == "agent-a"
+    assert store.agent_renewal_requested("thread:agent-a") is True
+    assert store.agent_renewal_active("thread:agent-a") is True
+    assert enabled_member["renewalIntent"]["agentId"] == "thread:agent-a"
     assert enabled_member["renewalIntent"]["requested"] is True
     assert enabled_member["renewalIntent"]["state"] == "requested"
 
     disabled = service.apply(
         {
             "command": "setAgentRenewalIntent",
-            "agentId": "agent-a",
+            "agentId": "thread:agent-a",
             "requested": False,
             "expectedRevision": enabled.revision,
         }
     )
     disabled_member = disabled.snapshot.teams[0].to_payload()["members"][0]
 
-    assert store.renewal_state_for_agent("agent-a") is None
-    assert store.agent_renewal_active("agent-a") is False
+    assert store.renewal_state_for_agent("thread:agent-a") is None
+    assert store.agent_renewal_active("thread:agent-a") is False
     assert disabled_member["renewalIntent"]["requested"] is False
     assert disabled_member["renewalIntent"]["state"] == ""
 

@@ -243,7 +243,7 @@ def work_tree_send_response_payload(
             text = renewal_handoff_request_text(text)
             try:
                 state.team_store.record_pending_renewal(
-                    agent_id=predecessor, ancestor_thread_id=predecessor
+                    agent_id=predecessor_actor, ancestor_thread_id=predecessor
                 )
             except SpiceError:
                 pass  # renewal bookkeeping requires a team; steering still lands
@@ -283,10 +283,13 @@ def work_tree_send_response_payload(
     send_agent_id = (
         ensured_thread_id or payloads.resolve_thread_id_for_target(state, target) or ""
     )
+    send_actor = ""
     if send_agent_id:
-        payloads.team_actor_for_target(state.team_store, target, send_agent_id)
-    state.record_lane_send(target.id, agent_id=send_agent_id)
-    renewal_agent_id = predecessor_actor if renew_intent else send_agent_id
+        send_actor = payloads.team_actor_for_target(
+            state.team_store, target, send_agent_id
+        )
+    state.record_lane_send(target.id, agent_id=send_actor)
+    renewal_agent_id = predecessor_actor if renew_intent else send_actor
     if renewal_agent_id:
         response_payload["renewalIntent"] = payloads.renewal_intent_for_actor(
             state.team_store, renewal_agent_id
@@ -414,7 +417,11 @@ def team_command_response_payload(
     state: ServeState, payload: dict[str, Any]
 ) -> tuple[dict[str, Any], HTTPStatus]:
     try:
-        result = state.team_commands.apply(payload)
+        result = state.team_commands.apply(
+            payloads.normalize_team_command_payload(
+                payload, targets=state.worktree_targets()
+            )
+        )
     except SpiceError as exc:
         return {"ok": False, "error": str(exc)}, HTTPStatus.CONFLICT
     return (

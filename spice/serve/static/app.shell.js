@@ -328,9 +328,7 @@ async function importTargetIntoTeam(lane, targetId) {
   await requestTeamCommand(
     teamCommandPayload("moveAgentToTeam", {
       teamId: host.teamId,
-      agentId:
-        canonicalThreadActorId(targetIdentityThreadId(target.targetIdentity)) ||
-        target.id,
+      agentId: targetTeamAgentId(target),
       agentAliases: teamImportAliases(target),
     }),
   );
@@ -342,10 +340,7 @@ function emptyTeamImportAliases(target) {
 }
 
 function teamImportAliases(target) {
-  const actor = canonicalThreadActorId(
-    targetIdentityThreadId(target.targetIdentity),
-  );
-  return actor && actor !== target.id ? [target.id] : [];
+  return targetTeamAgentAliases(target);
 }
 
 function teamImportTargets(lane) {

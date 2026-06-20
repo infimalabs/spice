@@ -21,6 +21,8 @@ from spice.serve.worktrees import WorktreeTarget
 
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 THREAD_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+ACTOR_A = f"thread:{THREAD_A}"
+ACTOR_B = f"thread:{THREAD_B}"
 
 
 def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
@@ -29,9 +31,9 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
-    created = state.team_store.create_team(members=[THREAD_A])
+    created = state.team_store.create_team(members=[ACTOR_A])
     state.team_store.record_pending_renewal(
-        agent_id=THREAD_A, ancestor_thread_id=THREAD_A
+        agent_id=ACTOR_A, ancestor_thread_id=THREAD_A
     )
     ensure_calls: list[dict[str, object]] = []
     send_records: list[dict[str, object]] = []
@@ -47,8 +49,8 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
             {
                 "target_id": target_id,
                 "agent_id": agent_id,
-                "predecessor_team": state.team_store.current_team_for_agent(THREAD_A),
-                "successor_team": state.team_store.current_team_for_agent(THREAD_B),
+                "predecessor_team": state.team_store.current_team_for_agent(ACTOR_A),
+                "successor_team": state.team_store.current_team_for_agent(ACTOR_B),
             }
         )
         record_lane_send(target_id, agent_id=agent_id)
@@ -78,13 +80,13 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
     assert send_records == [
         {
             "target_id": target.id,
-            "agent_id": THREAD_B,
+            "agent_id": ACTOR_B,
             "predecessor_team": None,
             "successor_team": created.team_id,
         }
     ]
-    assert state.team_store.current_team_for_agent(THREAD_A) is None
-    assert state.team_store.current_team_for_agent(THREAD_B) == created.team_id
+    assert state.team_store.current_team_for_agent(ACTOR_A) is None
+    assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
 
 
 def test_target_refresh_force_news_pending_renewal_into_original_team(
@@ -93,9 +95,9 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
-    created = state.team_store.create_team(members=[THREAD_A])
+    created = state.team_store.create_team(members=[ACTOR_A])
     state.team_store.record_pending_renewal(
-        agent_id=THREAD_A, ancestor_thread_id=THREAD_A
+        agent_id=ACTOR_A, ancestor_thread_id=THREAD_A
     )
     write_inbox_item(
         repo,
@@ -134,8 +136,8 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
             "force_new": True,
         }
     ]
-    assert state.team_store.current_team_for_agent(THREAD_A) is None
-    assert state.team_store.current_team_for_agent(THREAD_B) == created.team_id
+    assert state.team_store.current_team_for_agent(ACTOR_A) is None
+    assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
 
 
 def test_messages_refresh_force_news_pending_renewal_into_original_team(
@@ -144,9 +146,9 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
     repo = _repo(tmp_path)
     target = _target(repo)
     state = _serve_state(tmp_path, target)
-    created = state.team_store.create_team(members=[THREAD_A])
+    created = state.team_store.create_team(members=[ACTOR_A])
     state.team_store.record_pending_renewal(
-        agent_id=THREAD_A, ancestor_thread_id=THREAD_A
+        agent_id=ACTOR_A, ancestor_thread_id=THREAD_A
     )
     write_inbox_item(
         repo,
@@ -192,8 +194,8 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
             "force_new": True,
         }
     ]
-    assert state.team_store.current_team_for_agent(THREAD_A) is None
-    assert state.team_store.current_team_for_agent(THREAD_B) == created.team_id
+    assert state.team_store.current_team_for_agent(ACTOR_A) is None
+    assert state.team_store.current_team_for_agent(ACTOR_B) == created.team_id
 
 
 def _repo(tmp_path: Path) -> Path:

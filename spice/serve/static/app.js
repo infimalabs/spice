@@ -112,6 +112,66 @@ function canonicalThreadActorId(threadId) {
     .toLowerCase();
 }
 
+function targetTeamActorId(targetId) {
+  const id = String(targetId || "").trim();
+  return id ? "target:" + id : "";
+}
+
+function threadTeamActorId(threadId) {
+  const actor = canonicalThreadActorId(threadId);
+  return actor ? "thread:" + actor : "";
+}
+
+function teamActorKind(actorId) {
+  const actor = String(actorId || "").trim();
+  if (actor.startsWith("target:")) return "target";
+  if (actor.startsWith("thread:")) return "thread";
+  return "";
+}
+
+function teamActorValue(actorId) {
+  const actor = String(actorId || "").trim();
+  return teamActorKind(actor) ? actor.slice(actor.indexOf(":") + 1) : actor;
+}
+
+function teamActorThreadId(actorId) {
+  const actor = String(actorId || "").trim();
+  if (actor.startsWith("thread:")) return canonicalThreadActorId(actor.slice(7));
+  if (actor.startsWith("target:")) return "";
+  return canonicalThreadActorId(actor);
+}
+
+function teamActorMatchesThread(actorId, threadId) {
+  const actorThreadId = teamActorThreadId(actorId);
+  return Boolean(actorThreadId && actorThreadId === canonicalThreadActorId(threadId));
+}
+
+function normalizeTeamActorId(actorId) {
+  const actor = String(actorId || "").trim();
+  if (!actor) return "";
+  if (actor.startsWith("target:")) return targetTeamActorId(actor.slice(7));
+  if (actor.startsWith("thread:")) return threadTeamActorId(actor.slice(7));
+  if (targetById.has(actor)) return targetTeamActorId(actor);
+  return threadTeamActorId(actor);
+}
+
+function targetTeamAgentId(target) {
+  const threadActor = threadTeamActorId(
+    targetIdentityThreadId(target.targetIdentity),
+  );
+  return threadActor || targetTeamActorId(target.id);
+}
+
+function targetTeamAgentAliases(target) {
+  const actor = targetTeamAgentId(target);
+  const aliases = [
+    targetTeamActorId(target.id),
+    String(target.id || "").trim(),
+    teamActorThreadId(actor),
+  ].filter((alias) => alias && alias !== actor);
+  return uniqueStringList(aliases);
+}
+
 function browserStorage() {
   try {
     return window.localStorage || null;
