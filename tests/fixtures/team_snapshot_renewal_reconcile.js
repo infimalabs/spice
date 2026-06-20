@@ -64,6 +64,7 @@ function targetIdentity(threadId) {
     targetId: "target-1",
     worktreeName: "target-1",
     branch: "target-1",
+    driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
     agent: { state: "unconfigured" },
     thread: { state: "bound", threadId },
   };

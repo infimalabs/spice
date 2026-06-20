@@ -52,6 +52,7 @@ function syncComposerShard(lane, shard, member) {
   primary.className = "composer-band composer-band--primary";
   primary.dataset.composerPrimaryTargetId = member.targetId;
   syncComposerBandAccent(primary, lane, member);
+  syncComposerDriverIcon(primary, member);
   const header = composerPrimaryBandHeader(lane, member);
   const previousHeader = primary.querySelector(".composer-band-header--primary");
   if (previousHeader) previousHeader.replaceWith(header);
@@ -73,6 +74,56 @@ function syncComposerBandAccent(band, lane, member) {
 
 function composerMemberAccent(lane, member) {
   return messageOccupantAccent(laneMemberAccentIndex(lane, member));
+}
+
+function syncComposerDriverIcon(band, member) {
+  const icon = composerDriverIcon(member);
+  const existing = band.querySelector("[data-composer-driver-icon]");
+  if (!icon) {
+    existing?.remove();
+    return;
+  }
+  if (existing) existing.replaceWith(icon);
+  else band.append(icon);
+}
+
+function composerDriverIcon(member) {
+  const driver = String((member || {}).driverName || "")
+    .trim()
+    .toLowerCase();
+  const iconPaths = {
+    claude: "/static/icons/claude.svg",
+    codex: "/static/icons/openai.svg",
+    openai: "/static/icons/openai.svg",
+  };
+  const src = iconPaths[driver];
+  if (!src) return null;
+  const tooltip = composerDriverTooltip(member, driver);
+  const icon = document.createElement("span");
+  icon.className = "composer-driver-icon composer-driver-icon--" + driver;
+  icon.dataset.composerDriverIcon = driver;
+  icon.title = tooltip;
+  icon.setAttribute("aria-label", tooltip);
+  icon.setAttribute("role", "img");
+  icon.style.setProperty("--composer-driver-icon-url", 'url("' + src + '")');
+  return icon;
+}
+
+function composerDriverTooltip(member, driver) {
+  const labels = {
+    claude: "Claude driver",
+    codex: "Codex driver",
+    openai: "OpenAI driver",
+  };
+  const parts = [labels[driver] || "Agent driver"];
+  const model = String((member || {}).driverModel || "").trim();
+  const effort = String((member || {}).driverEffort || "").trim();
+  const threadId = String((member || {}).targetThreadId || "").trim();
+  if (model) parts.push("model: " + model);
+  if (effort) parts.push("effort: " + effort);
+  parts.push("thread: " + (threadId || "unbound"));
+  parts.push("source: worktree launch config");
+  return parts.join("; ");
 }
 
 function composerShardQuoteStack(shard, targetId) {

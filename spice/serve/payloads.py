@@ -8,7 +8,7 @@ from typing import Any
 from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.agent.renewal import strip_renewal_handoff_request_suffix
-from spice.config import configured_say_voice
+from spice.config import configured_say_voice, effective_agent_config
 from spice.errors import SpiceError
 from spice.mail.inbox import (
     collect_acked_inbox_items,
@@ -198,6 +198,7 @@ def target_identity_payload(
             target.branch or target.name,
             "target branch",
         ),
+        "driver": _driver_identity_payload(target),
         "agent": _agent_identity_payload(
             _agent_name_for_target(target) if agent_name is None else agent_name
         ),
@@ -208,6 +209,24 @@ def target_identity_payload(
         ),
     }
     return payload
+
+
+def _driver_identity_payload(target: WorktreeTarget) -> dict[str, str]:
+    config = effective_agent_config(target.repo_root)
+    return {
+        "name": _required_identity_string(
+            config.get("driver"),
+            "driver name",
+        ),
+        "model": _required_identity_string(
+            config.get("model"),
+            "driver model",
+        ),
+        "effort": _required_identity_string(
+            config.get("effort"),
+            "driver effort",
+        ),
+    }
 
 
 def team_identity_payload(team_facts: dict[str, Any]) -> dict[str, Any]:
@@ -673,8 +692,12 @@ def _binding_status(thread_id: str, binding_error: str) -> str:
 
 def _lane_info_payload(target: WorktreeTarget, thread_id: str) -> dict[str, Any]:
     agent_name = _agent_name_for_target(target)
+    driver = _driver_identity_payload(target)
     rows = [
         {"key": "agent", "value": agent_name or "-", "span": False},
+        {"key": "driver", "value": driver["name"], "span": False},
+        {"key": "model", "value": driver["model"], "span": False},
+        {"key": "effort", "value": driver["effort"], "span": False},
         {"key": "target", "value": target.id, "span": False},
         {"key": "worktree", "value": target.name or "-", "span": False},
         {"key": "path", "value": str(target.repo_root), "span": True},

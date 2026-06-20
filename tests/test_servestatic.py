@@ -984,6 +984,97 @@ def test_static_composer_headers_use_agent_accent_border():
     assert "syncComposerBandAccent(band, lane, member);" in app_shell
 
 
+def test_static_composer_driver_icons_use_local_driver_assets():
+    css = _serve_css_text()
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_composer = (STATIC_ROOT / "app.composer.js").read_text(encoding="utf-8")
+    openai_icon = STATIC_ROOT / "icons" / "openai.svg"
+    claude_icon = STATIC_ROOT / "icons" / "claude.svg"
+    icon_start = css.index(".composer-driver-icon {")
+    icon_rule = css[icon_start : css.index("}", icon_start)]
+    icon_before_start = css.index(".composer-driver-icon::before {")
+    icon_before_rule = css[icon_before_start : css.index("}", icon_before_start)]
+    claude_rule_start = css.index(".composer-driver-icon--claude {")
+    claude_rule = css[claude_rule_start : css.index("}", claude_rule_start)]
+    openai_rule_start = css.index(
+        ".composer-driver-icon--codex,\n.composer-driver-icon--openai {"
+    )
+    openai_rule = css[openai_rule_start : css.index("}", openai_rule_start)]
+    textarea_start = css.index(".composer-band--primary textarea {")
+    textarea_rule = css[textarea_start : css.index("}", textarea_start)]
+
+    assert openai_icon.is_file()
+    assert claude_icon.is_file()
+    assert 'fill="currentColor"' in openai_icon.read_text(encoding="utf-8")
+    assert 'fill="currentColor"' in claude_icon.read_text(encoding="utf-8")
+    assert "function targetIdentityDriverName(identity)" in app_render
+    assert "function targetIdentityDriverModel(identity)" in app_render
+    assert "function targetIdentityDriverEffort(identity)" in app_render
+    assert "lane.driverName = targetIdentityDriverName(identity);" in app_render
+    assert "lane.driverModel = targetIdentityDriverModel(identity);" in app_render
+    assert "lane.driverEffort = targetIdentityDriverEffort(identity);" in app_render
+    assert 'driverName: emptyTeam ? "" : targetIdentityDriverName(targetIdentity),' in (
+        app_shell
+    )
+    assert (
+        'driverModel: emptyTeam ? "" : targetIdentityDriverModel(targetIdentity),'
+        in (app_shell)
+    )
+    assert (
+        'driverEffort: emptyTeam ? "" : targetIdentityDriverEffort(targetIdentity),'
+        in app_shell
+    )
+    assert "syncComposerDriverIcon(primary, member);" in app_composer
+    assert 'claude: "/static/icons/claude.svg",' in app_composer
+    assert 'codex: "/static/icons/openai.svg",' in app_composer
+    assert 'openai: "/static/icons/openai.svg",' in app_composer
+    assert "icon.dataset.composerDriverIcon = driver;" in app_composer
+    assert "const tooltip = composerDriverTooltip(member, driver);" in app_composer
+    assert "icon.title = tooltip;" in app_composer
+    assert 'icon.setAttribute("aria-label", tooltip);' in app_composer
+    assert 'icon.setAttribute("role", "img");' in app_composer
+    assert '"Codex driver"' in app_composer
+    assert '"model: " + model' in app_composer
+    assert '"effort: " + effort' in app_composer
+    assert '"thread: " + (threadId || "unbound")' in app_composer
+    assert '"source: worktree launch config"' in app_composer
+    assert (
+        'icon.style.setProperty("--composer-driver-icon-url", '
+        "'url(\"' + src + '\")');" in app_composer
+    )
+    for expected in (
+        "bottom: 8px;",
+        "cursor: help;",
+        "height: 18px;",
+        "pointer-events: auto;",
+        "position: absolute;",
+        "right: 8px;",
+        "width: 18px;",
+    ):
+        assert expected in icon_rule
+    for expected in (
+        'content: "";',
+        "inset: 2px;",
+        "-webkit-mask: var(--composer-driver-icon-url) center / contain no-repeat;",
+        "mask: var(--composer-driver-icon-url) center / contain no-repeat;",
+        "position: absolute;",
+    ):
+        assert expected in icon_before_rule
+    assert (
+        "--composer-driver-icon-color: color-mix(in srgb, #d97706 88%, var(--fg));"
+        in (claude_rule)
+    )
+    assert "opacity: 0.72;" in claude_rule
+    assert (
+        "--composer-driver-icon-color: color-mix(in srgb, var(--fg) 86%, var(--control));"
+        in openai_rule
+    )
+    assert "opacity: 0.74;" in openai_rule
+    assert "padding-bottom: 28px;" in textarea_rule
+    assert "padding-right: 32px;" in textarea_rule
+
+
 def test_static_message_accents_follow_team_slots_for_single_member_teams():
     css = _serve_css_text()
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
