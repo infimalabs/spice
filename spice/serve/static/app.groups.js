@@ -700,6 +700,7 @@ function updateComposerMoveDragFromEvent(state, event, handle) {
     state.sourceBand?.classList.add("composer-band--dragging");
     state.sourceShard?.classList.add("composer-shard--dragging");
     ensureComposerMoveDragGhost(state);
+    snapshotComposerReorder(state);
   }
   updateComposerMoveDragGhost(state, event.clientX, event.clientY);
   updateComposerMoveDragTarget(state, event.clientX, event.clientY);
@@ -714,15 +715,20 @@ function composerMoveDragMatches(event) {
 
 function updateComposerMoveDragTarget(state, clientX, clientY) {
   clearLaneFuseHighlights();
-  clearComposerMoveDropHighlights();
   state.dropTarget = null;
   const sourceMember = laneStates.get(state.targetId);
-  if (!sourceMember) return;
+  if (!sourceMember) {
+    clearComposerMoveDropHighlights();
+    return;
+  }
   const reorderTarget = composerReorderDropTarget(state, clientX, clientY);
   if (reorderTarget) {
+    // Reorder owns the shard transforms; leave them in place so the slide
+    // animates frame to frame instead of resetting every pointermove.
     if (reorderTarget.kind !== "noop") state.dropTarget = reorderTarget;
     return;
   }
+  clearComposerMoveDropHighlights();
   const under = visibleLaneElements().find((element) => {
     const rect = element.getBoundingClientRect();
     return (
@@ -740,11 +746,52 @@ function updateComposerMoveDragTarget(state, clientX, clientY) {
   underLane.classList.add("lane--composer-drop");
 }
 
-function composerReorderDropTarget(state, clientX, clientY) {
+// Snapshot the lane's shard geometry once, when the drag actually begins. Every
+// subsequent pointermove resolves the swap target against this frozen layout
+// instead of reading live rects, so moving a neighbor into the hole can never
+// reflow the shards and feed back into hit-testing (the old marker approach
+// overflowed the shards and oscillated scrollbars). Cached in client
+// coordinates; a short drag gesture will not outlive the snapshot.
+function snapshotComposerReorder(state) {
+  state.reorder = null;
   const host = laneGroupHost(state.host);
+  if (!host.shardsEl) return;
   const members = laneGroupMemberLanes(host);
-  if (members.length < 2 || !host.shardsEl) return null;
-  const shardsRect = host.shardsEl.getBoundingClientRect();
+  if (members.length < 2) return;
+  const shardsEl = host.shardsEl;
+  const shardsRect = shardsEl.getBoundingClientRect();
+  const visualShards = [...shardsEl.querySelectorAll(".composer-shard")]
+    .map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        element,
+        targetId: element.dataset.shardTargetId || "",
+        left: rect.left,
+        right: rect.right,
+        width: rect.width,
+      };
+    })
+    .filter((item) => item.targetId && item.width > 0 && item.right > item.left)
+    .sort((left, right) => left.left - right.left);
+  if (visualShards.length < 2) return;
+  if (!visualShards.some((item) => item.targetId === state.targetId)) return;
+  state.reorder = {
+    host,
+    shardsEl,
+    shardsRect,
+    visualShards,
+    currentLogicalIds: members.map((member) => member.targetId),
+  };
+}
+
+// Within a lane, reordering is a pairwise swap: only the lifted shard and the
+// neighbor the pointer is over exchange slots; every other shard stays put. The
+// hole and that neighbor glide past each other via transform, and a release
+// asks the server to swap exactly those two team indexes.
+function composerReorderDropTarget(state, clientX, clientY) {
+  const snapshot = state.reorder;
+  if (!snapshot) return null;
+  const { shardsEl, shardsRect, visualShards } = snapshot;
   if (
     clientX < shardsRect.left ||
     clientX > shardsRect.right ||
@@ -752,80 +799,40 @@ function composerReorderDropTarget(state, clientX, clientY) {
     clientY > shardsRect.bottom
   )
     return null;
-  const visualShards = [...host.shardsEl.querySelectorAll(".composer-shard")]
-    .map((element) => ({
-      element,
-      rect: element.getBoundingClientRect(),
-      targetId: element.dataset.shardTargetId || "",
-    }))
-    .filter((item) => item.targetId && item.rect.width && item.rect.height)
-    .sort((left, right) => left.rect.left - right.rect.left);
-  if (visualShards.length < 2) return null;
-  if (!visualShards.some((item) => item.targetId === state.targetId))
-    return null;
-  const zone = composerVisualInsertionZone(visualShards, clientX, clientY);
-  if (!zone) return null;
-  host.shardsEl.classList.add("composer-shards--move-drop-active");
-  zone.shard.element.classList.add(
-    zone.side === "left"
-      ? "composer-shard--composer-drop-left"
-      : "composer-shard--composer-drop-right",
+  const source = visualShards.find((item) => item.targetId === state.targetId);
+  if (!source) return null;
+  const target = visualShards.find(
+    (item) => clientX >= item.left && clientX <= item.right,
   );
-  const currentVisualIds = visualShards.map((item) => item.targetId);
-  const sourceIndex = currentVisualIds.indexOf(state.targetId);
-  const visualIdsWithoutSource = currentVisualIds.filter(
-    (targetId) => targetId !== state.targetId,
+  const swapping = Boolean(target) && target.targetId !== source.targetId;
+  shardsEl.classList.add(
+    "composer-shards--move-drop-active",
+    "composer-shards--reordering",
   );
-  let insertionIndex = zone.index;
-  if (sourceIndex < insertionIndex) insertionIndex -= 1;
-  insertionIndex = Math.max(
-    0,
-    Math.min(visualIdsWithoutSource.length, insertionIndex),
-  );
-  const nextVisualIds = visualIdsWithoutSource.slice();
-  nextVisualIds.splice(insertionIndex, 0, state.targetId);
-  const nextLogicalIds = composerVisualIdsToLogicalIds(host.shardsEl, nextVisualIds);
-  const currentLogicalIds = members.map((member) => member.targetId);
-  if (sameStringArrays(nextLogicalIds, currentLogicalIds))
+  for (const item of visualShards) {
+    let dx = 0;
+    if (swapping && item.targetId === source.targetId)
+      dx = target.left - source.left;
+    else if (swapping && item.targetId === target.targetId)
+      dx = source.left - target.left;
+    if (Math.abs(dx) < 0.5) dx = 0;
+    item.element.style.transform = dx ? "translateX(" + dx + "px)" : "";
+    item.element.classList.add("composer-shard--reorder-shift");
+  }
+  if (!swapping) return { kind: "noop" };
+  const nextVisualIds = visualShards.map((item) => item.targetId);
+  const sourceIndex = nextVisualIds.indexOf(source.targetId);
+  const targetIndex = nextVisualIds.indexOf(target.targetId);
+  nextVisualIds[sourceIndex] = target.targetId;
+  nextVisualIds[targetIndex] = source.targetId;
+  const nextLogicalIds = composerVisualIdsToLogicalIds(shardsEl, nextVisualIds);
+  if (sameStringArrays(nextLogicalIds, snapshot.currentLogicalIds))
     return { kind: "noop" };
-  return { kind: "reorder", host, orderedTargetIds: nextLogicalIds };
-}
-
-function composerVisualInsertionZone(visualShards, clientX, clientY) {
-  const hit = visualShards.find(
-    (item) =>
-      clientX >= item.rect.left &&
-      clientX <= item.rect.right &&
-      clientY >= item.rect.top &&
-      clientY <= item.rect.bottom,
-  );
-  if (hit) {
-    const before = clientX < hit.rect.left + hit.rect.width / 2;
-    return {
-      index: visualShards.indexOf(hit) + (before ? 0 : 1),
-      shard: hit,
-      side: before ? "left" : "right",
-    };
-  }
-  const first = visualShards[0];
-  const last = visualShards[visualShards.length - 1];
-  if (clientX < first.rect.left)
-    return { index: 0, shard: first, side: "left" };
-  if (clientX > last.rect.right)
-    return { index: visualShards.length, shard: last, side: "right" };
-  for (let index = 0; index < visualShards.length - 1; index += 1) {
-    const left = visualShards[index];
-    const right = visualShards[index + 1];
-    if (clientX < left.rect.right || clientX > right.rect.left) continue;
-    const closerToLeft =
-      clientX - left.rect.right <= right.rect.left - clientX;
-    return {
-      index: index + 1,
-      shard: closerToLeft ? left : right,
-      side: closerToLeft ? "right" : "left",
-    };
-  }
-  return null;
+  return {
+    kind: "reorder",
+    host: snapshot.host,
+    orderedTargetIds: nextLogicalIds,
+  };
 }
 
 function composerVisualIdsToLogicalIds(shardsEl, visualIds) {
@@ -998,13 +1005,18 @@ function clearComposerMoveDrag(state) {
 
 function clearComposerMoveDropHighlights() {
   for (const element of lanesEl.querySelectorAll(
-    ".composer-shards--move-drop-active, .composer-shard--composer-drop-left, .composer-shard--composer-drop-right",
+    ".composer-shards--move-drop-active, .composer-shards--reordering",
   )) {
     element.classList.remove(
       "composer-shards--move-drop-active",
-      "composer-shard--composer-drop-left",
-      "composer-shard--composer-drop-right",
+      "composer-shards--reordering",
     );
+  }
+  for (const element of lanesEl.querySelectorAll(
+    ".composer-shard--reorder-shift",
+  )) {
+    /** @type {HTMLElement} */ (element).style.transform = "";
+    element.classList.remove("composer-shard--reorder-shift");
   }
 }
 

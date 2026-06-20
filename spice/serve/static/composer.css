@@ -76,6 +76,7 @@
   height: 100%;
   min-height: 0;
   min-width: 142px;
+  overflow-x: hidden;
   overflow-y: auto;
   position: relative;
   scrollbar-width: thin;
@@ -84,21 +85,15 @@
   border-radius: 7px;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
 }
-.composer-shard--composer-drop-left::before,
-.composer-shard--composer-drop-right::after {
-  background: var(--accent);
-  border-radius: 999px;
-  bottom: 4px;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  top: 4px;
-  width: 4px;
-  z-index: 4;
+/* Within-lane reorder is a pairwise swap: the lifted shard and the neighbor it
+   is dropped on glide past each other via transform; every other shard holds.
+   Transform-only, so no reflow and no scrollbar churn. */
+.composer-shards--reordering .composer-shard {
+  transition: transform 130ms ease;
 }
-.composer-shard--composer-drop-left::before { left: -5px; }
-.composer-shard--composer-drop-right::after { right: -5px; }
+.composer-shard--reorder-shift {
+  will-change: transform;
+}
 .composer-shard--dragging {
   background: color-mix(in srgb, var(--panel) 72%, transparent);
   border-radius: 7px;
