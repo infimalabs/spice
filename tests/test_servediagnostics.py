@@ -9,8 +9,8 @@ from spice.serve.teams import (
     ServeTeamStore,
     TeamConfig,
 )
-from spice.tasks import lanes, ops
 from spice.tasks import config as task_config
+from spice.tasks import lanes
 
 AGENT_A = "agent-a"
 ANCESTOR_THREAD = "ancestor-thread-a"
@@ -65,7 +65,7 @@ def test_team_diagnostics_include_events_routes_and_taskdrain_filters(tmp_path):
     assert payload["teams"][0]["teamId"] == created.team_id
     assert payload["members"][0]["agentId"] == AGENT_A
     assert route["routeFilters"] == [
-        ops.default_project(AGENT_A),
+        task_config.private_project(AGENT_A),
         *expected_filter_terms,
     ]
     assert route["filterArgs"] == expected_filter_args
@@ -185,7 +185,7 @@ def test_team_diagnostics_reports_drain_as_computed_effective_scope(tmp_path):
     assert route["filterTerms"] == expected_effective_terms
     assert route["filterArgs"] == expected_filter_args
     assert route["routeFilters"] == [
-        ops.default_project(AGENT_A),
+        task_config.private_project(AGENT_A),
         *expected_effective_terms,
     ]
     assert taskdrain["scope"] == "all-assignable"

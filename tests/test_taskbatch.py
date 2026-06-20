@@ -16,7 +16,7 @@ from spice.serve.teams import (
     ServeTeamStore,
     TeamConfig,
 )
-from spice.tasks import config, identity, ops, tw
+from spice.tasks import config, create, identity, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -41,7 +41,7 @@ def task_repo(tmp_path, monkeypatch):
 
 
 def test_parse_add_batch_returns_typed_requests_without_creating_tasks(task_repo):
-    requests = ops.parse_add_batch(
+    requests = create.parse_add_batch(
         [
             "title=Typed batch | project=task.unit | description=Parser seam | "
             "priority=high | flow=todo,review | tags=parser,inline | "
@@ -50,7 +50,7 @@ def test_parse_add_batch_returns_typed_requests_without_creating_tasks(task_repo
     )
 
     assert requests == [
-        ops.TaskAddBatchRequest(
+        create.TaskAddBatchRequest(
             title="Typed batch",
             description="Parser seam",
             project="task.unit",
@@ -65,7 +65,7 @@ def test_parse_add_batch_returns_typed_requests_without_creating_tasks(task_repo
 
 
 def test_parse_add_batch_accepts_task_directive_prefix(task_repo):
-    requests = ops.parse_add_batch(
+    requests = create.parse_add_batch(
         [
             "TASK: title=Prefixed batch | project=task.unit | "
             "acceptance=Same batch parser"
@@ -73,7 +73,7 @@ def test_parse_add_batch_accepts_task_directive_prefix(task_repo):
     )
 
     assert requests == [
-        ops.TaskAddBatchRequest(
+        create.TaskAddBatchRequest(
             title="Prefixed batch",
             description=None,
             project="task.unit",
@@ -89,7 +89,7 @@ def test_parse_add_batch_accepts_task_directive_prefix(task_repo):
 
 def test_add_batch_validates_all_lines_before_creating_tasks(task_repo):
     with pytest.raises(SpiceError, match="batch add rejected"):
-        ops.add_batch(
+        create.add_batch(
             [
                 "title=Would otherwise create | project=task.unit | acceptance=ok",
                 "title=Invalid project depth | project=task | acceptance=bad",
@@ -103,7 +103,7 @@ def test_add_batch_validates_all_lines_before_creating_tasks(task_repo):
 
 
 def test_add_batch_creates_from_parsed_requests(task_repo):
-    handles = ops.add_batch(
+    handles = create.add_batch(
         [
             "title=Created batch | project=task.unit | description=Batch body | "
             "priority=low | acceptance=Batch creation still works"
@@ -119,7 +119,7 @@ def test_add_batch_creates_from_parsed_requests(task_repo):
 
 
 def test_add_batch_can_mark_cli_creation_surface(task_repo):
-    handles = ops.add_batch(
+    handles = create.add_batch(
         [
             "title=CLI marked batch | project=task.unit | "
             "acceptance=Batch task card source is durable"
@@ -138,7 +138,7 @@ def test_add_batch_results_update_drive_task_filter_with_visible_route(task_repo
         config=TeamConfig(lifetime="Drive"),
     )
 
-    results = ops.add_batch_results(
+    results = create.add_batch_results(
         [
             "TASK title=Visible batch | project=task.batch | "
             "acceptance=Batch creation updates routing"
