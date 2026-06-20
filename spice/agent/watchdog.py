@@ -154,6 +154,7 @@ def process_supervised_assistant_message(
                 "inline_task_created=" + _inline_task_result_text(results),
                 log_handle,
             )
+            publish_supervisor_feedback(repo_root, INLINE_TASK_BACKLOG_NOTE, log_handle)
     except Exception as exc:  # pragma: no cover - supervisor-visible task failure
         log_handle.write(f"spice inline task supervisor error: {exc}\n")
         log_handle.flush()
@@ -184,6 +185,15 @@ def publish_supervisor_feedback(
     except Exception as exc:  # pragma: no cover - best-effort stderr feedback
         log_handle.write(f"spice side-channel feedback error: {exc}\n")
         log_handle.flush()
+
+
+# Keyless (no `=`) so the serve notice parser ignores it while the agent still
+# reads it: an inline-created task lands on the backlog and is not the creator's
+# to work — phrased "unless" (not "until") so agents drop it rather than wait.
+INLINE_TASK_BACKLOG_NOTE = (
+    "inline tasks above are on the backlog, not yours — move on "
+    "unless the allocator assigns one back via spice task next"
+)
 
 
 def create_inline_tasks(

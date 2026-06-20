@@ -96,6 +96,7 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert feedback == [
         f"ack_archived={INBOX_KEY}",
         f"inline_task_created={handle}(route_filter=skipped:task.unit:no_team)",
+        watchdog.INLINE_TASK_BACKLOG_NOTE,
     ]
     assigned = ops.next_task()
 
@@ -159,6 +160,7 @@ def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(
     assert feedback == [
         f"ack_archived={INBOX_KEY}",
         f"inline_task_created={handle}(route_filter=skipped:task.unit:no_team)",
+        watchdog.INLINE_TASK_BACKLOG_NOTE,
     ]
 
 
@@ -195,7 +197,8 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
     assert identity.render_handle(assigned or {}) == handle
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert feedback == [
-        f"inline_task_created={handle}(route_filter=added:task.unit:auto:create)"
+        f"inline_task_created={handle}(route_filter=added:task.unit:auto:create)",
+        watchdog.INLINE_TASK_BACKLOG_NOTE,
     ]
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
