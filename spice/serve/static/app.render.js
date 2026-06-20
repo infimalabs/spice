@@ -688,9 +688,9 @@ function renderBadges(ackCount, kind, maximAckCount, taskCardCount) {
     badges.append(badge);
   };
   if (visibleAckCount) add("ACK", "", visibleAckCount);
+  if (visibleTaskCount) add("TASK", "task-badge", visibleTaskCount);
   if (kind === "final") add("FINAL", "final-badge");
   if (maximAckCount) add("MAXIM", "maxim-badge");
-  if (visibleTaskCount) add("TASK", "task-badge", visibleTaskCount);
   return badges;
 }
 
