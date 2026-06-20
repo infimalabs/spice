@@ -520,13 +520,22 @@ def test_static_stream_renders_message_badge_dom():
         "    }\n"
         "    badges.append(badge);\n"
         "  };\n"
-        '  if (maximAckCount) add("MAXIM", "maxim-badge");\n'
-        '  if (kind === "final") add("FINAL", "final-badge");\n'
-        '  if (visibleTaskCount) add("TASK", "task-badge", visibleTaskCount);\n'
         '  if (visibleAckCount) add("ACK", "", visibleAckCount);\n'
+        '  if (kind === "final") add("FINAL", "final-badge");\n'
+        '  if (maximAckCount) add("MAXIM", "maxim-badge");\n'
+        '  if (visibleTaskCount) add("TASK", "task-badge", visibleTaskCount);\n'
         "  return badges;\n"
         "}\n"
         "\n"
+    )
+    assert app_render.index('add("ACK", "", visibleAckCount)') < app_render.index(
+        'add("FINAL", "final-badge")'
+    )
+    assert app_render.index('add("FINAL", "final-badge")') < app_render.index(
+        'add("MAXIM", "maxim-badge")'
+    )
+    assert app_render.index('add("MAXIM", "maxim-badge")') < app_render.index(
+        'add("TASK", "task-badge", visibleTaskCount)'
     )
     assert "    item.task_card_count || 0,\n  );" in app_render
 
