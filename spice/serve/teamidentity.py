@@ -4,9 +4,69 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from dataclasses import dataclass
 
 from spice.serve.teamids import normalized_id as _normalized_id
 from spice.serve.teammodels import TeamAgentIdentity
+
+
+@dataclass(frozen=True, slots=True)
+class AgentIdentityRecordRequest:
+    actor_id: str
+    target_id: str = ""
+    thread_id: str = ""
+    actual_driver: str = ""
+    actual_model: str = ""
+    actual_effort: str = ""
+    actual_service_tier: str = ""
+    desired_driver: str = ""
+    desired_model: str = ""
+    desired_effort: str = ""
+    transcript_owner: str = ""
+    renewal_state: str = ""
+    renewal_ancestor_thread_id: str = ""
+    renewal_successor_thread_id: str = ""
+    renewal_revision: int = 0
+    updated_at: float | None = None
+
+
+def _identity_from_record_request(
+    request: AgentIdentityRecordRequest,
+) -> TeamAgentIdentity:
+    return TeamAgentIdentity(
+        actor_id=_normalized_id(request.actor_id, "actor_id"),
+        target_id=_clean_record_text(request.target_id),
+        thread_id=_clean_record_text(request.thread_id),
+        actual_driver=_clean_record_text(request.actual_driver),
+        actual_model=_clean_record_text(request.actual_model),
+        actual_effort=_clean_record_text(request.actual_effort),
+        actual_service_tier=_clean_record_text(request.actual_service_tier),
+        desired_driver=_clean_record_text(request.desired_driver),
+        desired_model=_clean_record_text(request.desired_model),
+        desired_effort=_clean_record_text(request.desired_effort),
+        transcript_owner=_clean_record_text(request.transcript_owner),
+        renewal_state=_clean_record_text(request.renewal_state),
+        renewal_ancestor_thread_id=_clean_record_text(
+            request.renewal_ancestor_thread_id
+        ),
+        renewal_successor_thread_id=_clean_record_text(
+            request.renewal_successor_thread_id
+        ),
+        renewal_revision=_nonnegative_record_int(request.renewal_revision),
+        updated_at=_record_updated_at(request.updated_at),
+    )
+
+
+def _clean_record_text(value: str) -> str:
+    return str(value or "").strip()
+
+
+def _nonnegative_record_int(value: int) -> int:
+    return max(0, int(value or 0))
+
+
+def _record_updated_at(value: float | None) -> float:
+    return time.time() if value is None else float(value)
 
 
 class TeamIdentityStoreMixin:
@@ -25,42 +85,9 @@ class TeamIdentityStoreMixin:
     def _record_agent_identity_locked(
         self,
         connection: sqlite3.Connection,
-        *,
-        actor_id: str,
-        target_id: str = "",
-        thread_id: str = "",
-        actual_driver: str = "",
-        actual_model: str = "",
-        actual_effort: str = "",
-        actual_service_tier: str = "",
-        desired_driver: str = "",
-        desired_model: str = "",
-        desired_effort: str = "",
-        transcript_owner: str = "",
-        renewal_state: str = "",
-        renewal_ancestor_thread_id: str = "",
-        renewal_successor_thread_id: str = "",
-        renewal_revision: int = 0,
-        updated_at: float | None = None,
+        request: AgentIdentityRecordRequest,
     ) -> TeamAgentIdentity:
-        identity = TeamAgentIdentity(
-            actor_id=_normalized_id(actor_id, "actor_id"),
-            target_id=str(target_id or "").strip(),
-            thread_id=str(thread_id or "").strip(),
-            actual_driver=str(actual_driver or "").strip(),
-            actual_model=str(actual_model or "").strip(),
-            actual_effort=str(actual_effort or "").strip(),
-            actual_service_tier=str(actual_service_tier or "").strip(),
-            desired_driver=str(desired_driver or "").strip(),
-            desired_model=str(desired_model or "").strip(),
-            desired_effort=str(desired_effort or "").strip(),
-            transcript_owner=str(transcript_owner or "").strip(),
-            renewal_state=str(renewal_state or "").strip(),
-            renewal_ancestor_thread_id=str(renewal_ancestor_thread_id or "").strip(),
-            renewal_successor_thread_id=str(renewal_successor_thread_id or "").strip(),
-            renewal_revision=max(0, int(renewal_revision or 0)),
-            updated_at=time.time() if updated_at is None else float(updated_at),
-        )
+        identity = _identity_from_record_request(request)
         connection.execute(
             "INSERT INTO agent_identities (actor_id, target_id, thread_id, "
             "actual_driver, actual_model, actual_effort, actual_service_tier, "
@@ -120,33 +147,37 @@ class TeamIdentityStoreMixin:
         if existing is None:
             self._record_agent_identity_locked(
                 connection,
-                actor_id=actor_id,
-                target_id=target_id_from_actor(actor_id),
-                thread_id=thread_id_from_actor(actor_id),
-                renewal_state=state,
-                renewal_ancestor_thread_id=ancestor_thread_id,
-                renewal_successor_thread_id=successor_thread_id,
-                renewal_revision=revision,
+                AgentIdentityRecordRequest(
+                    actor_id=actor_id,
+                    target_id=target_id_from_actor(actor_id),
+                    thread_id=thread_id_from_actor(actor_id),
+                    renewal_state=state,
+                    renewal_ancestor_thread_id=ancestor_thread_id,
+                    renewal_successor_thread_id=successor_thread_id,
+                    renewal_revision=revision,
+                ),
             )
             return
         identity = agent_identity_from_row(existing)
         self._record_agent_identity_locked(
             connection,
-            actor_id=identity.actor_id,
-            target_id=identity.target_id,
-            thread_id=identity.thread_id,
-            actual_driver=identity.actual_driver,
-            actual_model=identity.actual_model,
-            actual_effort=identity.actual_effort,
-            actual_service_tier=identity.actual_service_tier,
-            desired_driver=identity.desired_driver,
-            desired_model=identity.desired_model,
-            desired_effort=identity.desired_effort,
-            transcript_owner=identity.transcript_owner,
-            renewal_state=state,
-            renewal_ancestor_thread_id=ancestor_thread_id,
-            renewal_successor_thread_id=successor_thread_id,
-            renewal_revision=revision,
+            AgentIdentityRecordRequest(
+                actor_id=identity.actor_id,
+                target_id=identity.target_id,
+                thread_id=identity.thread_id,
+                actual_driver=identity.actual_driver,
+                actual_model=identity.actual_model,
+                actual_effort=identity.actual_effort,
+                actual_service_tier=identity.actual_service_tier,
+                desired_driver=identity.desired_driver,
+                desired_model=identity.desired_model,
+                desired_effort=identity.desired_effort,
+                transcript_owner=identity.transcript_owner,
+                renewal_state=state,
+                renewal_ancestor_thread_id=ancestor_thread_id,
+                renewal_successor_thread_id=successor_thread_id,
+                renewal_revision=revision,
+            ),
         )
 
     def record_agent_identity(
@@ -171,21 +202,23 @@ class TeamIdentityStoreMixin:
         with self.connect() as connection:
             return self._record_agent_identity_locked(
                 connection,
-                actor_id=actor_id,
-                target_id=target_id,
-                thread_id=thread_id,
-                actual_driver=actual_driver,
-                actual_model=actual_model,
-                actual_effort=actual_effort,
-                actual_service_tier=actual_service_tier,
-                desired_driver=desired_driver,
-                desired_model=desired_model,
-                desired_effort=desired_effort,
-                transcript_owner=transcript_owner,
-                renewal_state=renewal_state,
-                renewal_ancestor_thread_id=renewal_ancestor_thread_id,
-                renewal_successor_thread_id=renewal_successor_thread_id,
-                renewal_revision=renewal_revision,
+                AgentIdentityRecordRequest(
+                    actor_id=actor_id,
+                    target_id=target_id,
+                    thread_id=thread_id,
+                    actual_driver=actual_driver,
+                    actual_model=actual_model,
+                    actual_effort=actual_effort,
+                    actual_service_tier=actual_service_tier,
+                    desired_driver=desired_driver,
+                    desired_model=desired_model,
+                    desired_effort=desired_effort,
+                    transcript_owner=transcript_owner,
+                    renewal_state=renewal_state,
+                    renewal_ancestor_thread_id=renewal_ancestor_thread_id,
+                    renewal_successor_thread_id=renewal_successor_thread_id,
+                    renewal_revision=renewal_revision,
+                ),
             )
 
     def agent_identity_for_actor(self, actor_id: str) -> TeamAgentIdentity | None:
