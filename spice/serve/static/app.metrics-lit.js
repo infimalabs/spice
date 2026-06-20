@@ -1,9 +1,5 @@
 const litCoreUrl = "https://cdn.jsdelivr.net/gh/lit/dist@3/core/lit-core.min.js";
-const litCore = await import(litCoreUrl);
-/** @type {typeof HTMLElement} */
-const LitElement = litCore.LitElement;
-/** @type {(strings: TemplateStringsArray, ...values: unknown[]) => unknown} */
-const html = litCore.html;
+const { LitElement, html } = await import(litCoreUrl);
 
 class SpiceLaneMetricsElement extends LitElement {
   static properties = {

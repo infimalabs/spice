@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import DRIVER
-from spice.tasks import config, create, tw
+from spice.tasks import config, ops, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -36,7 +36,7 @@ def test_task_event_file_advances_on_mutation_and_stays_stable_on_export(task_re
     event_path = config.ensure_task_event_file()
     before = event_path.read_text(encoding="utf-8")
 
-    create.add("event signal", project="task.unit")
+    ops.add("event signal", project="task.unit")
     after_add = event_path.read_text(encoding="utf-8")
     tw.export(["status:pending"])
     after_export = event_path.read_text(encoding="utf-8")

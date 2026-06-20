@@ -206,9 +206,9 @@ def create_inline_tasks(
     if empty:
         raise RuntimeError(f"inline TASK directive missing payload at line {empty[0]}")
     actor = _supervised_inline_task_actor(repo_root)
-    from spice.tasks import create
+    from spice.tasks import ops
 
-    results = create.add_batch_results(batch_lines, actor_override=actor)
+    results = ops.add_batch_results(batch_lines, actor_override=actor)
     if results:
         log_handle.write(
             "spice inline task created: " + _inline_task_result_text(results) + "\n"

@@ -37,19 +37,23 @@ from spice.mail.inbox import (
     write_inbox_item,
 )
 from spice.paths import shared_attachment_root
-from spice.serve import agentapi, app, payloads, workroutes
+from spice.serve import (
+    agentapi,
+    app,
+    identitypayload,
+    lanepayload,
+    messagepayload,
+)
 from spice.serve.app import (
     ServeState,
     team_command_response_payload,
     team_snapshot_response_payload,
+    work_tree_send_response_payload,
+    work_tree_task_drain_response_payload,
 )
 from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
 from spice.serve.teams import ServeTeamStore, TeamCommandService
 from spice.serve.web import STATIC_ROOT, render_index_html, send_static_asset
-from spice.serve.workroutes import (
-    work_tree_send_response_payload,
-    work_tree_task_drain_response_payload,
-)
 from spice.serve.worktrees import WorktreeTarget
 from spice.tasks import config as task_config
 
@@ -223,13 +227,13 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert live_attachment["url"].startswith(
         f"/api/work/trees/{target.id}/files/image?path="
     )
-    refresh_payload = payloads.ack_context_payload_for_worktree(
+    refresh_payload = messagepayload.ack_context_payload_for_worktree(
         state, target, keys=[payload["key"]]
     )
     assert refresh_payload["acks"][0]["found"] is True
     assert refresh_payload["acks"][0]["attachments"][0] == live_attachment
     assert archive_ackd_inbox_items(repo, [payload["key"]]) == [payload["key"]]
-    archived_refresh_payload = payloads.ack_context_payload_for_worktree(
+    archived_refresh_payload = messagepayload.ack_context_payload_for_worktree(
         state, target, keys=[payload["key"]]
     )
     assert archived_refresh_payload["acks"][0]["found"] is True
@@ -311,7 +315,7 @@ def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkey
         compose_inbox_text(body="pending", priority=None, stop=False),
     )
     monkeypatch.setattr(
-        payloads, "resolve_thread_id_for_target", lambda *_args: THREAD_A
+        identitypayload, "resolve_thread_id_for_target", lambda *_args: THREAD_A
     )
     monkeypatch.setattr(
         app,
@@ -390,7 +394,9 @@ def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
         + "\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(payloads, "resolve_thread_id_for_target", lambda *_: THREAD_A)
+    monkeypatch.setattr(
+        identitypayload, "resolve_thread_id_for_target", lambda *_: THREAD_A
+    )
     monkeypatch.setattr(
         app,
         "resolve_thread_transcript",
@@ -511,7 +517,7 @@ def test_running_requested_renewal_sends_handoff_and_marks_pending(
     state.team_store.set_agent_renewal_request(ACTOR_A, requested=True)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
     monkeypatch.setattr(
-        payloads,
+        identitypayload,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -569,7 +575,7 @@ def test_stopped_requested_renewal_starts_successor_and_moves_team_membership(
     ensure_calls: list[dict[str, object]] = []
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
-        payloads,
+        identitypayload,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -729,7 +735,7 @@ def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
-    payload = payloads.messages_payload_for_worktree(state, target, limit=5)
+    payload = messagepayload.messages_payload_for_worktree(state, target, limit=5)
 
     assert payload["pendingInboxCount"] == 1
     assert payload["agentEnsure"]["threadId"] == THREAD_A
@@ -761,7 +767,7 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
-    payload = payloads.messages_payload_for_worktree(state, target, limit=5)
+    payload = messagepayload.messages_payload_for_worktree(state, target, limit=5)
 
     assert ensure_calls == INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD
     assert payload["agentEnsure"]["deadletteredInboxKey"] == "20260101T000000000001Z"
@@ -809,7 +815,7 @@ def test_pending_inbox_deadletters_after_generic_ensure_failure(tmp_path, monkey
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
-    payload = payloads.messages_payload_for_worktree(state, target, limit=5)
+    payload = messagepayload.messages_payload_for_worktree(state, target, limit=5)
 
     assert ensure_calls == 1
     assert payload["agentEnsure"]["ok"] is False
@@ -854,9 +860,9 @@ def test_status_line_reports_stale_agent_launch_cwd(tmp_path, monkeypatch):
         prompt_skill_path=repo / ".agents" / "skills" / "spice" / "SKILL.md",
         command=["codex", "exec", "--cd", str(other)],
     )
-    monkeypatch.setattr(payloads, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(lanepayload, "agent_status", lambda *_args, **_kwargs: status)
 
-    line = payloads.status_line_payload(state, target, items=[], error=None)
+    line = lanepayload.status_line_payload(state, target, items=[], error=None)
 
     assert line["bindingStatus"] == "mismatch"
     assert "launch cwd" in line["bindingError"]
@@ -885,9 +891,9 @@ def test_status_line_ignores_stale_prompt_skill_path(tmp_path, monkeypatch):
         prompt_skill_path=stale_skill,
         command=["codex", "exec", "--cd", str(repo)],
     )
-    monkeypatch.setattr(payloads, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(lanepayload, "agent_status", lambda *_args, **_kwargs: status)
 
-    line = payloads.status_line_payload(state, target, items=[], error=None)
+    line = lanepayload.status_line_payload(state, target, items=[], error=None)
 
     assert line["bindingStatus"] == "bound"
     assert line["bindingError"] == ""
@@ -1088,6 +1094,8 @@ def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:
         log_path=None,
         prompt_skill_path=None,
     )
+    monkeypatch.setattr(app, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(agentapi, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(payloads, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(workroutes, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(
+        identitypayload, "agent_status", lambda *_args, **_kwargs: status
+    )

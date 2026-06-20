@@ -8,7 +8,7 @@ from typing import Any, Iterable
 
 from spice.serve.teams import ServeTeamStore, TeamState
 from spice.tasks import config as task_config
-from spice.tasks import lanes
+from spice.tasks import lanes, ops
 
 
 def team_diagnostics_payload(store: ServeTeamStore | None = None) -> dict[str, Any]:
@@ -161,10 +161,7 @@ def _route_payloads(teams: Iterable[TeamState]) -> list[dict[str, Any]]:
                     "configuredFilterTerms": configured_terms,
                     "scope": _filter_scope(team.config.lifetime),
                     "filterArgs": lanes.filter_terms_args(effective_terms),
-                    "routeFilters": [
-                        task_config.private_project(actor),
-                        *effective_terms,
-                    ],
+                    "routeFilters": [ops.default_project(actor), *effective_terms],
                 }
             )
     return routes

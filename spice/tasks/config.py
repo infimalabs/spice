@@ -90,11 +90,6 @@ _REPORT_COLUMNS = "id,project,phase,priority,urgency,claim_by,description"
 _REPORT_LABELS = "ID,Project,Phase,Pri,Urg,Claim,Description"
 
 
-def private_project(actor: str) -> str:
-    alnum_actor = re.sub(r"[^0-9a-z]", "", actor.lower())
-    return f"agent.{alnum_actor}.task"
-
-
 def approved_stems() -> tuple[str, ...]:
     extras = _configured_extra_stems()
     merged = list(BASE_APPROVED_STEMS)
