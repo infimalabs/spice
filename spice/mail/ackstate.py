@@ -22,7 +22,7 @@ from typing import Any, Iterable
 from spice.paths import git_common_dir
 from spice.tasks.config import SHARED_DIR
 
-ACK_STATE_DATABASE_FILENAME = "acks.sqlite3"
+ACK_STATE_DATABASE_FILENAME = "spiceacks.sqlite3"
 # Mirrors task_config.data_dir() == backend_root() / "data"; the ack store is a
 # sibling of the task backend db under the shared git common dir.
 ACK_STATE_DATA_SUBDIR = "data"
