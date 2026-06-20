@@ -30,6 +30,8 @@ if [ -z "${SPICE_SHELL_HOOK_REEXEC_STAGE-}" ]; then
   esac
 fi
 
+set -o pipefail
+
 if [ -n "${SPICE_SHELL_HOOK_ORIGINAL_ZDOTDIR-}" ]; then
   export ZDOTDIR="$SPICE_SHELL_HOOK_ORIGINAL_ZDOTDIR"
 else
