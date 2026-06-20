@@ -65,76 +65,97 @@ def configure_config_parser(subparsers: Any) -> None:
 
 def handle_config(args: argparse.Namespace) -> int:
     repo_root = require_repo_root()
-    action = args.config_action
-    if action == "show":
-        print(json.dumps(config.config_overview(repo_root), indent=2, sort_keys=True))
+    handler = _CONFIG_ACTIONS.get(args.config_action)
+    if handler is None:
+        raise SpiceError(f"unknown config action {args.config_action!r}")
+    return handler(args, repo_root)
+
+
+def _handle_show(args: argparse.Namespace, repo_root: Path) -> int:
+    print(json.dumps(config.config_overview(repo_root), indent=2, sort_keys=True))
+    return 0
+
+
+def _handle_say(args: argparse.Namespace, repo_root: Path) -> int:
+    if args.clear:
+        config.clear_section(repo_root, config.SAY_KEY)
+        print("say config cleared")
         return 0
-    if action == "say":
-        if args.clear:
-            config.clear_section(repo_root, config.SAY_KEY)
-            print("say config cleared")
-            return 0
-        values: dict[str, Any] = {}
-        if args.voice and args.voice.strip():
-            values[config.SAY_VOICE_KEY] = args.voice.strip()
-        if args.words_per_minute and args.words_per_minute > 0:
-            values[config.SAY_WORDS_PER_MINUTE_KEY] = args.words_per_minute
-        if not values:
-            raise SpiceError("config say requires --voice or --words-per-minute")
-        config.update_section(repo_root, config.SAY_KEY, values)
-        print(f"say={' '.join(config.say_command_args(repo_root))}")
+    values: dict[str, Any] = {}
+    if args.voice and args.voice.strip():
+        values[config.SAY_VOICE_KEY] = args.voice.strip()
+    if args.words_per_minute and args.words_per_minute > 0:
+        values[config.SAY_WORDS_PER_MINUTE_KEY] = args.words_per_minute
+    if not values:
+        raise SpiceError("config say requires --voice or --words-per-minute")
+    config.update_section(repo_root, config.SAY_KEY, values)
+    print(f"say={' '.join(config.say_command_args(repo_root))}")
+    return 0
+
+
+def _handle_judge(args: argparse.Namespace, repo_root: Path) -> int:
+    if args.clear:
+        config.clear_section(repo_root, config.JUDGE_KEY)
+        print("judge config cleared")
         return 0
-    if action == "judge":
-        if args.clear:
-            config.clear_section(repo_root, config.JUDGE_KEY)
-            print("judge config cleared")
-            return 0
-        if not args.judge_bin or not args.judge_bin.strip():
-            raise SpiceError("config judge requires --bin")
-        config.update_section(
-            repo_root, config.JUDGE_KEY, {config.JUDGE_BIN_KEY: args.judge_bin.strip()}
-        )
-        print(f"judge_bin={config.configured_judge_bin(repo_root)}")
-        return 0
-    if action == "agent":
-        scope = str(args.scope)
-        if args.clear:
-            if scope == "project":
-                config.clear_project_agent_config(repo_root)
-            else:
-                config.clear_section(repo_root, config.AGENT_KEY)
-            print(f"agent {scope} config cleared")
-            return 0
-        values: dict[str, str] = {}
-        if args.model and args.model.strip():
-            values[config.AGENT_MODEL_KEY] = args.model.strip()
-        if args.effort and args.effort.strip():
-            values[config.AGENT_EFFORT_KEY] = args.effort.strip()
-        if getattr(args, "driver", None):
-            values[config.AGENT_DRIVER_KEY] = str(args.driver)
-        if not values:
-            print(_agent_config_summary(repo_root))
-            return 0
+    if not args.judge_bin or not args.judge_bin.strip():
+        raise SpiceError("config judge requires --bin")
+    config.update_section(
+        repo_root, config.JUDGE_KEY, {config.JUDGE_BIN_KEY: args.judge_bin.strip()}
+    )
+    print(f"judge_bin={config.configured_judge_bin(repo_root)}")
+    return 0
+
+
+def _handle_agent(args: argparse.Namespace, repo_root: Path) -> int:
+    scope = str(args.scope)
+    if args.clear:
         if scope == "project":
-            config.update_project_agent_config(repo_root, values)
+            config.clear_project_agent_config(repo_root)
         else:
-            config.update_section(repo_root, config.AGENT_KEY, values)
+            config.clear_section(repo_root, config.AGENT_KEY)
+        print(f"agent {scope} config cleared")
+        return 0
+    values: dict[str, str] = {}
+    if args.model and args.model.strip():
+        values[config.AGENT_MODEL_KEY] = args.model.strip()
+    if args.effort and args.effort.strip():
+        values[config.AGENT_EFFORT_KEY] = args.effort.strip()
+    if getattr(args, "driver", None):
+        values[config.AGENT_DRIVER_KEY] = str(args.driver)
+    if not values:
         print(_agent_config_summary(repo_root))
         return 0
-    if action == "personality":
-        if args.clear:
-            config.clear_section(repo_root, config.AGENT_KEY)
-            print("personality config cleared")
-            return 0
-        if not args.value:
-            print(f"personality={config.configured_agent_personality(repo_root)}")
-            return 0
-        config.update_section(
-            repo_root, config.AGENT_KEY, {config.AGENT_PERSONALITY_KEY: args.value}
-        )
-        print(f"personality={args.value}")
+    if scope == "project":
+        config.update_project_agent_config(repo_root, values)
+    else:
+        config.update_section(repo_root, config.AGENT_KEY, values)
+    print(_agent_config_summary(repo_root))
+    return 0
+
+
+def _handle_personality(args: argparse.Namespace, repo_root: Path) -> int:
+    if args.clear:
+        config.clear_section(repo_root, config.AGENT_KEY)
+        print("personality config cleared")
         return 0
-    raise SpiceError(f"unknown config action {action!r}")
+    if not args.value:
+        print(f"personality={config.configured_agent_personality(repo_root)}")
+        return 0
+    config.update_section(
+        repo_root, config.AGENT_KEY, {config.AGENT_PERSONALITY_KEY: args.value}
+    )
+    print(f"personality={args.value}")
+    return 0
+
+
+_CONFIG_ACTIONS = {
+    "show": _handle_show,
+    "say": _handle_say,
+    "judge": _handle_judge,
+    "agent": _handle_agent,
+    "personality": _handle_personality,
+}
 
 
 def _agent_config_summary(repo_root: Path) -> str:
