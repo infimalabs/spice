@@ -150,6 +150,73 @@ def test_task_wake_refuses_deferred_oops_triage(task_repo):
         ops.wake([handle])
 
 
+def test_drive_wake_auto_subscribes_woken_project(task_repo):
+    handle = ops.add(
+        "Drive wakes delayed task",
+        project="task.unit",
+        priority="medium",
+        wait=config.OOPS_WAIT,
+        acceptance=["drive wake subscribes delayed work"],
+    )
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drive"))
+    before = store.global_revision()
+
+    output = ops.wake([handle])
+    team_config = store.team_config(team.team_id)
+
+    assert store.global_revision() > before
+    assert f"woke {handle}: wait:" in output
+    assert "route_filter=added:task.unit:auto:create" in output
+    assert team_config.task_filters == ("task.unit",)
+    assert [entry.to_payload() for entry in team_config.task_filter_entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE}
+    ]
+
+
+def test_drain_wake_auto_subscribes_woken_project(task_repo):
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Drain"))
+    handle = ops.add(
+        "Drain wakes delayed task",
+        project="task.unit",
+        priority="medium",
+        wait=config.OOPS_WAIT,
+        acceptance=["drain wake subscribes delayed work"],
+    )
+    assert store.team_config(team.team_id).task_filters == ()
+    before = store.global_revision()
+
+    output = ops.wake([handle])
+    team_config = store.team_config(team.team_id)
+
+    assert store.global_revision() > before
+    assert "route_filter=added:task.unit:auto:create" in output
+    assert team_config.task_filters == ("task.unit",)
+    assert [entry.to_payload() for entry in team_config.task_filter_entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE}
+    ]
+
+
+def test_steer_wake_keeps_preparation_only_boundary(task_repo):
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A], config=TeamConfig(lifetime="Steer"))
+    handle = ops.add(
+        "Steer wakes delayed task",
+        project="task.unit",
+        priority="medium",
+        wait=config.OOPS_WAIT,
+        acceptance=["steer wake remains preparation only"],
+    )
+    before = store.global_revision()
+
+    output = ops.wake([handle])
+
+    assert store.global_revision() == before
+    assert "route_filter=skipped:task.unit:lifetime:Steer" in output
+    assert store.team_config(team.team_id).task_filters == ()
+
+
 def test_task_adopt_mints_task_over_orphan_then_done_captures_it(remote_task_repo):
     orphan = _make_orphan_commit(remote_task_repo, subject="orphan fix worth keeping")
     assert gitsync.commits_ahead_of_baseline(remote_task_repo) == 1

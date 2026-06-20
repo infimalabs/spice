@@ -610,6 +610,23 @@ def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
 
 
 def _subscribe_created_project(project: str, actor: str) -> str:
+    return _subscribe_auto_project(project, actor, allowed_lifetimes=("Drive",))
+
+
+def _subscribe_woken_project(project: str, actor: str) -> str:
+    return _subscribe_auto_project(
+        project,
+        actor,
+        allowed_lifetimes=("Drive", "Drain"),
+    )
+
+
+def _subscribe_auto_project(
+    project: str,
+    actor: str,
+    *,
+    allowed_lifetimes: tuple[str, ...],
+) -> str:
     project = str(project or "").strip()
     if not project or _project_is_subscription_excluded(project):
         return f"route_filter=skipped:{project or '-'}:excluded"
@@ -621,7 +638,7 @@ def _subscribe_created_project(project: str, actor: str) -> str:
     if team_id is None:
         return f"route_filter=skipped:{project}:no_team"
     team_config = store.team_config(team_id)
-    if team_config.lifetime != "Drive":
+    if team_config.lifetime not in allowed_lifetimes:
         return f"route_filter=skipped:{project}:lifetime:{team_config.lifetime}"
     before = {
         (entry.project, entry.source) for entry in team_config.task_filter_entries
@@ -703,7 +720,18 @@ def wake(handles: Sequence[str]) -> str:
 
     tw.run([*(identity.uuid_of(row) for row in rows), "modify", "wait:"])
     fresh = [identity.render_handle(row) for row in rows]
-    lines = [*(f"woke {handle}: wait:" for handle in fresh), "next: spice task next"]
+    actor = tw.current_actor()
+    projects = tuple(
+        dict.fromkeys(str(row.get("project") or "").strip() for row in rows)
+    )
+    route_feedback = [
+        _subscribe_woken_project(project, actor) for project in projects if project
+    ]
+    lines = [
+        *(f"woke {handle}: wait:" for handle in fresh),
+        *route_feedback,
+        "next: spice task next",
+    ]
     return "\n".join(lines)
 
 
