@@ -29,3 +29,12 @@
 .composer-quote-time[data-agent-status] {
   color: var(--agent-status-color);
 }
+
+.filter-pill--waiting {
+  border-style: dotted;
+  color: var(--say-accent);
+}
+
+.filter-pill--waiting.filter-pill--undrainable .filter-pill-count {
+  background: var(--say-accent);
+}

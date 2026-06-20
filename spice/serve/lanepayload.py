@@ -34,15 +34,23 @@ def task_filter_inventory() -> dict[str, Any]:
     from spice.tasks import tw
 
     try:
-        rows = tw.export(["status:pending"])
+        rows = tw.export(["(", "status:pending", "or", "status:waiting", ")"])
     except SpiceError:
         # No Taskwarrior (or no backend yet): the lane UI still works; the
         # filter inventory is simply empty.
         rows = []
     counts: dict[str, int] = {}
+    waiting_count = 0
     for row in rows:
         project = str(row.get("project") or "")
-        if project == task_config.OOPS_PROJECT and not row.get("start"):
+        raw_tags = row.get("tags") or []
+        tags = {raw_tags} if isinstance(raw_tags, str) else set(raw_tags)
+        is_oops = project == task_config.OOPS_PROJECT or "oops" in tags
+        if is_oops and not row.get("start"):
+            continue
+        if str(row.get("status") or "pending") == "waiting":
+            if not is_oops:
+                waiting_count += 1
             continue
         if project:
             counts[project] = counts.get(project, 0) + 1
@@ -61,6 +69,13 @@ def task_filter_inventory() -> dict[str, Any]:
         filters.append({"name": project, "primaryStem": stem, "openTaskCount": count})
         if project not in entry["filters"]:
             entry["filters"].append(project)
+    if waiting_count:
+        stems["waiting"] = {
+            "name": "waiting",
+            "openTaskCount": waiting_count,
+            "filters": [],
+            "waitingTaskCount": waiting_count,
+        }
     return {
         "filters": filters,
         "primaryStems": list(stems.values()),
