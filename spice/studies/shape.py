@@ -47,17 +47,21 @@ def _derived_package_roots(repo_root: Path) -> list[str]:
     setuptools = tool.get("setuptools") if isinstance(tool, dict) else None
     packages = setuptools.get("packages") if isinstance(setuptools, dict) else None
     if isinstance(packages, list):
-        roots: list[str] = []
-        for entry in packages:
-            top = str(entry or "").split(".", 1)[0].strip()
-            if top and top not in roots:
-                roots.append(top)
-        return roots
+        return _explicit_package_roots(packages)
     # Only auto-discover when the project explicitly opts into it; a bare
     # [project] table with no setuptools packaging config derives nothing.
     find = packages.get("find") if isinstance(packages, dict) else None
     if not isinstance(find, dict):
         return []
+    return _find_package_roots(repo_root, find)
+
+
+def _explicit_package_roots(packages: list[object]) -> list[str]:
+    roots = (str(entry or "").split(".", 1)[0].strip() for entry in packages)
+    return list(dict.fromkeys(root for root in roots if root))
+
+
+def _find_package_roots(repo_root: Path, find: dict[str, object]) -> list[str]:
     where_dirs = string_list(find.get("where")) or ["."]
     includes = string_list(find.get("include")) or ["*"]
     excludes = string_list(find.get("exclude"))
@@ -67,19 +71,25 @@ def _derived_package_roots(repo_root: Path) -> list[str]:
         if not base_dir.is_dir():
             continue
         for child in sorted(base_dir.iterdir()):
-            name = child.name
-            if not child.is_dir() or name.startswith("."):
-                continue
-            if not any(fnmatch(name, pattern) for pattern in includes):
-                continue
-            if any(fnmatch(name, pattern) for pattern in excludes):
-                continue
-            if next(child.rglob("*.py"), None) is None:
+            if not _is_find_package_root(child, includes, excludes):
                 continue
             rel = child.relative_to(repo_root).as_posix()
             if rel not in roots:
                 roots.append(rel)
     return roots
+
+
+def _is_find_package_root(
+    child: Path, includes: list[str], excludes: list[str]
+) -> bool:
+    name = child.name
+    return (
+        child.is_dir()
+        and not name.startswith(".")
+        and any(fnmatch(name, pattern) for pattern in includes)
+        and not any(fnmatch(name, pattern) for pattern in excludes)
+        and next(child.rglob("*.py"), None) is not None
+    )
 
 
 def namespace_policy_error(repo_root: Path) -> str:
