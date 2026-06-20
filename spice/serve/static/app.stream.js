@@ -12,9 +12,8 @@ let liveBusReconnectTimer = null;
 let liveBusReconnectAttempt = 0;
 let liveBusLastInboundAt = 0;
 let liveBusHasConnected = false;
-// Covers the lane creation/subscription race without replaying old history.
-// Already-spoken recent messages are suppressed by the persisted speech cursor.
-const initialSpeechStartupGraceMs = 60 * 1000;
+// Covers the short lane creation/subscription race without replaying old history.
+const initialSpeechStartupGraceMs = 5 * 1000;
 
 function liveBusUrl() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
