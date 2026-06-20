@@ -53,28 +53,6 @@ def install_hooks_for_repo(repo_root: Path) -> list[str]:
     return rows
 
 
-def drifted_hooks(repo_root: Path) -> list[str]:
-    """Hook names whose installed shim no longer matches the current shape.
-
-    A shim drifts when its `HOOK_ARGS` entry changes (e.g. a flag is removed)
-    but the worktree has not re-activated since, leaving a stale shim that can
-    reject the current CLI and block commits. The briefing surfaces this so the
-    agent re-activates — which rewrites the shim — rather than failing blind.
-    """
-    directory = hooks_dir(repo_root)
-    if not directory.is_dir():
-        return []
-    drifted: list[str] = []
-    for name, args in HOOK_ARGS.items():
-        try:
-            current = (directory / name).read_text(encoding="utf-8")
-        except OSError:
-            current = ""
-        if current != hook_shim_content(args):
-            drifted.append(name)
-    return drifted
-
-
 def _enable_worktree_config(repo_root: Path) -> None:
     # `git config --worktree` requires extensions.worktreeConfig in multi-
     # worktree repos; setting it in the common config is idempotent.
