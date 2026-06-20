@@ -361,6 +361,12 @@ class ClaudeDriver(AgentDriver):
             "--output-format",
             "stream-json",
             "--verbose",
+            # Stream partial message chunks so the supervisor sees assistant
+            # text in real time instead of one event flushed at turn end —
+            # otherwise steering injection and ACK archival lag by tens of
+            # seconds. The scanner ignores the partial stream_event lines and
+            # still processes the complete assistant event.
+            "--include-partial-messages",
             "--model",
             model or self.default_model,
             "--permission-mode",
