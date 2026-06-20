@@ -6,13 +6,13 @@ from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
 
-from spice.serve import agentapi, app, payloads
-from spice.serve.app import (
-    ServeState,
+from spice.serve import agentapi, app, payloads, workroutes
+from spice.serve.app import ServeState
+from spice.serve.teams import ServeTeamStore, TeamCommandService, TeamConfig
+from spice.serve.workroutes import (
     work_tree_send_response_payload,
     work_tree_task_drain_response_payload,
 )
-from spice.serve.teams import ServeTeamStore, TeamCommandService, TeamConfig
 from spice.serve.worktrees import WorktreeTarget
 
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -236,8 +236,8 @@ def _patch_payload_dependencies(
         return None
 
     monkeypatch.setattr(payloads, "agent_status", lambda _repo: status)
-    monkeypatch.setattr(app, "agent_status", lambda _repo: status)
     monkeypatch.setattr(agentapi, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(workroutes, "agent_status", lambda _repo: status)
     monkeypatch.setattr(payloads, "agent_binding_error", lambda *_args: "")
     monkeypatch.setattr(payloads, "configured_say_voice", lambda _repo: "")
     monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})

@@ -14,9 +14,10 @@ from spice.mail.inbox import (
     inbox_request_body,
     write_inbox_item,
 )
-from spice.serve import agentapi, app, payloads
-from spice.serve.app import ServeState, work_tree_send_response_payload
+from spice.serve import agentapi, payloads, workroutes
+from spice.serve.app import ServeState
 from spice.serve.teams import ServeTeamStore, TeamCommandService
+from spice.serve.workroutes import work_tree_send_response_payload
 from spice.serve.worktrees import WorktreeTarget
 
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -283,6 +284,6 @@ def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:
         log_path=None,
         prompt_skill_path=None,
     )
-    monkeypatch.setattr(app, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(agentapi, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(payloads, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(workroutes, "agent_status", lambda *_args, **_kwargs: status)
