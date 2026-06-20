@@ -410,16 +410,21 @@ def _serve_actor_id(
 
 
 def _actual_launch_identity(status: Any) -> dict[str, str]:
-    thread_id = getattr(status, "thread_id", "")
-    model = getattr(status, "model", "")
-    effort = getattr(status, "reasoning_effort", "")
-    service_tier = getattr(status, "service_tier", "")
-    started_at = getattr(status, "started_at", "")
-    has_actual = bool(thread_id or model or effort or service_tier or started_at)
+    model = str(getattr(status, "model", "") or "")
+    effort = str(getattr(status, "reasoning_effort", "") or "")
+    service_tier = str(getattr(status, "service_tier", "") or "")
+    started_at = str(getattr(status, "started_at", "") or "")
+    has_actual = bool(
+        getattr(status, "thread_id", "")
+        or model
+        or effort
+        or service_tier
+        or started_at
+    )
     return {
-        "model": str(model or ""),
-        "effort": str(effort or ""),
-        "serviceTier": str(service_tier or ""),
+        "model": model,
+        "effort": effort,
+        "serviceTier": service_tier,
         "source": "agent state" if has_actual else "",
     }
 
@@ -512,16 +517,24 @@ def renewal_intent_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any
 
 def target_activity_items(
     target: WorktreeTarget, thread_id: str
-) -> tuple[list[message_reader.AssistantMessage], str | None]:
+) -> tuple[
+    list[message_reader.AssistantMessage],
+    str | None,
+    message_reader.TranscriptResolution | None,
+]:
     if not thread_id:
-        return [], None
-    items, error = message_reader.assistant_messages_for_thread_id(
+        return [], None, None
+    read = message_reader.assistant_messages_for_thread_id(
         thread_id,
         limit=1,
         worktree_id=target.id,
         repo_root=target.repo_root,
     )
-    return _merge_task_card_messages(thread_id, items, limit=1), error
+    return (
+        _merge_task_card_messages(thread_id, read.items, limit=1),
+        read.error,
+        read.transcript,
+    )
 
 
 def _merge_task_card_messages(
@@ -823,19 +836,20 @@ def work_trees_payload(state: Any) -> dict[str, Any]:
         status = agent_status(target.repo_root)
         binding_error = agent_binding_error(target.repo_root, status)
         binding_status = _binding_status(thread_id, binding_error)
+        team_facts = team_facts_for_target(state.team_store, target, thread_id)
+        team_identity = team_identity_payload(team_facts)
+        agent_name = _agent_name_for_target(target)
+        renewal_intent = renewal_intent_for_target(state.team_store, target, thread_id)
+        items, error, transcript = target_activity_items(target, thread_id)
+        transcript_owner = transcript.owner_driver.name if transcript else ""
         serve_identity = serve_agent_identity_payload(
             target,
             thread_id,
             binding_status=binding_status,
             binding_error=binding_error,
-            transcript_owner=_transcript_owner_for_thread(thread_id, target.repo_root),
+            transcript_owner=transcript_owner,
             store=state.team_store,
         )
-        team_facts = team_facts_for_target(state.team_store, target, thread_id)
-        team_identity = team_identity_payload(team_facts)
-        agent_name = _agent_name_for_target(target)
-        renewal_intent = renewal_intent_for_target(state.team_store, target, thread_id)
-        items, error = target_activity_items(target, thread_id)
         status_line = _status_line_payload_from_status(
             status=status,
             thread_id=thread_id,
@@ -895,15 +909,6 @@ def _binding_status(thread_id: str, binding_error: str) -> str:
     if binding_error:
         return "mismatch"
     return "bound" if thread_id else "unbound"
-
-
-def _transcript_owner_for_thread(thread_id: str, repo_root: Any) -> str:
-    if not thread_id:
-        return ""
-    path = message_reader.transcript_path_for_thread(thread_id, repo_root)
-    if path is None or not path.is_file():
-        return ""
-    return message_reader.driver_for_transcript(path).name
 
 
 def _lane_info_payload(target: WorktreeTarget, thread_id: str) -> dict[str, Any]:
@@ -1051,8 +1056,9 @@ def messages_payload_for_worktree(
     if not thread_id:
         items: list[message_reader.AssistantMessage] = []
         error: str | None = "No agent thread is bound to this worktree yet."
+        transcript: message_reader.TranscriptResolution | None = None
     else:
-        items, error = message_reader.assistant_messages_for_thread_id(
+        read = message_reader.assistant_messages_for_thread_id(
             thread_id,
             limit=limit,
             after=after,
@@ -1061,6 +1067,9 @@ def messages_payload_for_worktree(
             worktree_id=target.id,
             repo_root=target.repo_root,
         )
+        items = read.items
+        error = read.error
+        transcript = read.transcript
         items = _merge_task_card_messages(
             thread_id,
             items,
@@ -1074,12 +1083,13 @@ def messages_payload_for_worktree(
     status = agent_status(target.repo_root)
     binding_error = agent_binding_error(target.repo_root, status)
     binding_status = _binding_status(thread_id, binding_error)
+    transcript_owner = transcript.owner_driver.name if transcript else ""
     serve_identity = serve_agent_identity_payload(
         target,
         thread_id,
         binding_status=binding_status,
         binding_error=binding_error,
-        transcript_owner=_transcript_owner_for_thread(thread_id, target.repo_root),
+        transcript_owner=transcript_owner,
         store=state.team_store,
     )
     return {

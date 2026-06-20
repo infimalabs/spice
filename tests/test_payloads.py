@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from spice.agent.driver import CLAUDE_DRIVER
 from spice.errors import SpiceError
 from spice.agent.renewal import RENEWAL_HANDOFF_REQUEST_SUFFIX
 from spice.mail.acks import archive_ackd_inbox_items
@@ -57,12 +58,29 @@ def _message(
     )
 
 
+def _message_read(
+    items: list[AssistantMessage] | None = None,
+    *,
+    error: str | None = None,
+    transcript: message_reader.TranscriptResolution | None = None,
+) -> message_reader.AssistantMessageRead:
+    return message_reader.AssistantMessageRead(
+        items=items or [],
+        error=error,
+        transcript=transcript,
+    )
+
+
 @dataclass(frozen=True)
 class _Status:
     running: bool
     started_at: str
     process_status: str = "idle"
     thread_id: str = ""
+    model: str = ""
+    reasoning_effort: str = ""
+    service_tier: str = ""
+    state_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -611,7 +629,7 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     monkeypatch.setattr(
         payloads.message_reader,
         "assistant_messages_for_thread_id",
-        lambda *_args, **_kwargs: ([], None),
+        lambda *_args, **_kwargs: _message_read(),
     )
 
     payload = payloads.messages_payload_for_worktree(
@@ -924,9 +942,11 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
 
     def fake_assistant_messages_for_thread_id(
         thread_id: str, **kwargs: object
-    ) -> tuple[list[AssistantMessage], None]:
+    ) -> message_reader.AssistantMessageRead:
         calls.append({"thread_id": thread_id, **kwargs})
-        return ([_message(latest, kind="presence:reasoning", preview="thinking")], None)
+        return _message_read(
+            [_message(latest, kind="presence:reasoning", preview="thinking")]
+        )
 
     monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
@@ -975,6 +995,56 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
             "repo_root": tmp_path,
         }
     ]
+
+
+def test_messages_payload_reports_transcript_owner_in_serve_identity(
+    tmp_path, monkeypatch
+):
+    thread_id = "agent-a"
+    transcript = message_reader.TranscriptResolution(
+        thread_id=thread_id,
+        path=tmp_path / "claude.jsonl",
+        owner_driver=CLAUDE_DRIVER,
+    )
+    monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(
+        payloads, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+    )
+    monkeypatch.setattr(
+        payloads,
+        "ensure_agent_for_pending_inbox",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        payloads,
+        "resolve_thread_id_for_target",
+        lambda _state, _target: thread_id,
+    )
+    monkeypatch.setattr(
+        payloads,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id=thread_id,
+            model="actual-model",
+        ),
+    )
+    monkeypatch.setattr(payloads, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(
+        payloads.message_reader,
+        "assistant_messages_for_thread_id",
+        lambda *_args, **_kwargs: _message_read(transcript=transcript),
+    )
+
+    payload = payloads.messages_payload_for_worktree(
+        _State(),
+        _Target(id="wt", repo_root=tmp_path),
+        limit=5,
+    )
+
+    assert payload["serveAgentIdentity"]["driver"]["transcriptOwner"] == "claude"
 
 
 def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
@@ -1040,7 +1110,7 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
     monkeypatch.setattr(
         payloads.message_reader,
         "assistant_messages_for_thread_id",
-        lambda *_args, **_kwargs: ([], None),
+        lambda *_args, **_kwargs: _message_read(),
     )
 
     payload = payloads.messages_payload_for_worktree(
@@ -1246,9 +1316,6 @@ def test_ack_context_payload_does_not_quote_assistant_ack_when_inbox_missing(
     )
     monkeypatch.setattr(
         payloads, "resolve_thread_id_for_target", lambda _state, _target: "thread-a"
-    )
-    monkeypatch.setattr(
-        message_reader, "transcript_path_for_thread", lambda _thread_id: transcript
     )
 
     payload = ack_context_payload_for_worktree(

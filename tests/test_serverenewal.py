@@ -115,7 +115,11 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
     monkeypatch.setattr(
         payloads.message_reader,
         "assistant_messages_for_thread_id",
-        lambda *_args, **_kwargs: ([], None),
+        lambda *_args, **_kwargs: payloads.message_reader.AssistantMessageRead(
+            items=[],
+            error=None,
+            transcript=None,
+        ),
     )
 
     result = payloads.work_trees_payload(state)
@@ -163,7 +167,11 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
 
     def fake_messages(thread_id, **_kwargs):
         message_threads.append(thread_id)
-        return [], None
+        return payloads.message_reader.AssistantMessageRead(
+            items=[],
+            error=None,
+            transcript=None,
+        )
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
     monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
