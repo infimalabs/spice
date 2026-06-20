@@ -123,13 +123,7 @@ def _tee_agent_stdout(
             on_compaction=reminder_gate.note_compaction,
         )
         try:
-            # Use readline() rather than `for line in stdout`: the file-object
-            # iterator reads ahead into an internal buffer, which holds back
-            # sparse lines until that buffer fills. Claude's stream-json events
-            # arrive in bursts, so the read-ahead delayed steering injection and
-            # ACK archival by tens of seconds. readline() yields each line the
-            # moment it arrives.
-            for line in iter(stdout.readline, ""):
+            for line in stdout:
                 log_handle.write(line)
                 log_handle.flush()
                 scanner.process_line(line)
