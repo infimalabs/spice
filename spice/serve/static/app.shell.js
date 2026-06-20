@@ -985,7 +985,7 @@ function renderLaneViewShell(lane) {
   }
   for (const panel of lane.element.querySelectorAll("[data-lane-view-panel]")) {
     const view = panel.dataset.laneViewPanel;
-    const offset = (laneViewModeIndex(view) - position) * 100;
+    const offset = (position - laneViewModeIndex(view)) * 100;
     const active = view === selectedView;
     panel.style.setProperty("--lane-view-x", offset + "%");
     panel.classList.toggle("lane-view-panel--active", active);
