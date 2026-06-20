@@ -521,6 +521,43 @@ def test_task_card_cursor_merges_newer_backend_and_transcript_items(monkeypatch)
     )
 
 
+def test_task_card_tail_merge_drops_cards_older_than_visible_window(monkeypatch):
+    actor = "a" * 32
+    rows = [
+        {
+            "id": 1,
+            "uuid": "stale-task",
+            "incepted": "20260610T060000000001Z",
+            "description": "Stale CLI follow-up",
+            "project": "serve.docs",
+            "origin_thread": actor,
+            "creation_surface": "cli",
+        },
+        {
+            "id": 2,
+            "uuid": "fresh-task",
+            "incepted": "20260610T120001000001Z",
+            "description": "Fresh CLI follow-up",
+            "project": "serve.ui",
+            "origin_thread": actor,
+            "creation_surface": "cli",
+        },
+    ]
+    monkeypatch.setattr(payloads.tw, "export", lambda _filters: rows)
+
+    merged = payloads._merge_task_card_messages(
+        actor,
+        [_message("2026-06-10T12:00:00.000000Z")],
+        limit=5,
+    )
+
+    assert [item.display_text for item in merged] == [
+        "Task capture: Fresh CLI follow-up (serve.ui)",
+        "hello",
+    ]
+    assert all("Stale CLI follow-up" not in item.display_text for item in merged)
+
+
 def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monkeypatch):
     latest = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
     transcript = tmp_path / "rollout.jsonl"

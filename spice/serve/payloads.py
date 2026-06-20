@@ -315,7 +315,15 @@ def _merge_task_card_messages(
     after: str | None = None,
     before: str | None = None,
 ) -> list[message_reader.AssistantMessage]:
-    cards = _task_card_messages_for_thread(thread_id, after=after, before=before)
+    card_after = after
+    if card_after is None and before is None and items:
+        visible_items = [
+            item for item in items if not item.kind.startswith("presence:")
+        ]
+        oldest = _oldest_message(visible_items or items)
+        if oldest is not None:
+            card_after = oldest.key
+    cards = _task_card_messages_for_thread(thread_id, after=card_after, before=before)
     if not cards:
         return items
     bounded = max(1, min(limit, message_reader.MAX_MESSAGE_LIMIT))
@@ -486,6 +494,12 @@ def _newest_message(
 ) -> message_reader.AssistantMessage | None:
     newest = _newest_messages(items, limit=1)
     return newest[0] if newest else None
+
+
+def _oldest_message(
+    items: list[message_reader.AssistantMessage],
+) -> message_reader.AssistantMessage | None:
+    return min(items, key=_message_sort_key) if items else None
 
 
 def _newest_messages(
