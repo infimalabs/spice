@@ -977,6 +977,10 @@ class ServeTeamStore(TeamMetricStoreMixin):
         successor_agent_id = _normalized_id(successor_agent_id, "successor_agent_id")
         team_id = self.open_team_for_agent(predecessor_agent_id)
         with self.connect() as connection:
+            predecessor_row = connection.execute(
+                "SELECT joined_at FROM memberships WHERE team_id = ? AND agent_id = ?",
+                (team_id, predecessor_agent_id),
+            ).fetchone()
             revision = self._record_event(
                 connection,
                 "renewalStarted",
@@ -990,6 +994,17 @@ class ServeTeamStore(TeamMetricStoreMixin):
             connection.execute(
                 "DELETE FROM memberships WHERE agent_id = ?", (predecessor_agent_id,)
             )
+            if predecessor_row is not None:
+                # Keep the successor in the predecessor's roster slot.
+                connection.execute(
+                    "UPDATE memberships SET joined_at = ? "
+                    "WHERE team_id = ? AND agent_id = ?",
+                    (
+                        float(predecessor_row["joined_at"]),
+                        team_id,
+                        successor_agent_id,
+                    ),
+                )
             connection.execute(
                 "INSERT OR REPLACE INTO renewals (agent_id, team_id, state, "
                 "ancestor_thread_id, successor_agent_id, revision) "
