@@ -19,16 +19,22 @@ async function run() {
           buttons.map((button) => ({
             label: button.querySelector(".spice-menu-action-label").textContent,
             detail: button.querySelector(".spice-menu-action-detail").textContent,
+            checked: button.getAttribute("aria-checked"),
           })),
         );
-      const newTeamAction = actions.find((action) => action.label === "New team");
-      if (!newTeamAction)
-        throw new Error("New team action missing: " + JSON.stringify(actions));
-      if (newTeamAction.detail !== "no agents")
-        throw new Error("Unexpected New team detail: " + newTeamAction.detail);
+      const fastModeAction = actions.find((action) => action.label === "Fast mode");
+      if (!fastModeAction)
+        throw new Error("Fast mode action missing: " + JSON.stringify(actions));
+      if (fastModeAction.detail !== "off")
+        throw new Error("Unexpected Fast mode detail: " + fastModeAction.detail);
+      if (fastModeAction.checked !== "false")
+        throw new Error(
+          "Unexpected Fast mode checked state: " + fastModeAction.checked,
+        );
       return {
         actionCount: actions.length,
-        newTeamDetail: newTeamAction.detail,
+        fastModeDetail: fastModeAction.detail,
+        fastModeChecked: fastModeAction.checked,
         url: server.url,
       };
     },

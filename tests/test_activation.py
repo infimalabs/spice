@@ -50,6 +50,9 @@ def test_activation_browser_validation_uses_repo_local_node_playwright():
     assert "run npm install when node_modules is absent" in text
     assert "npm exec" in text
     assert "Node require('playwright')" in text
+    assert "repo-local serve Playwright harness" in text
+    assert ".spice/agent/playwright-mcp.json browser.contextOptions" in text
+    assert "matches the operator's system appearance" in text
     assert "distinguish missing Node dependencies" in text
 
 

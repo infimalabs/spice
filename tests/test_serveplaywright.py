@@ -19,6 +19,35 @@ def test_serve_playwright_harness_starts_short_lived_scratch_server() -> None:
     assert "waitForProcessExit" in harness
 
 
+def test_serve_playwright_harness_loads_shared_agent_context() -> None:
+    harness = (ROOT / "browser" / "serve_playwright_harness.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "defaultPlaywrightConfigPath" in harness
+    assert '".spice"' in harness
+    assert '"agent"' in harness
+    assert '"playwright-mcp.json"' in harness
+    assert "readSharedPlaywrightContextOptions" in harness
+    assert "missing shared Playwright config" in harness
+    assert "config.browser.contextOptions" in harness
+    assert "must define browser.contextOptions" in harness
+    assert "serveBrowserContextOptions" in harness
+    assert "await serveBrowserContextOptions(options)" in harness
+    assert "browser.newContext(options.contextOptions || {})" not in harness
+
+
+def test_serve_playwright_harness_rejects_per_smoke_color_scheme() -> None:
+    harness = (ROOT / "browser" / "serve_playwright_harness.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "rejectColorSchemeOverride" in harness
+    assert 'hasOwnProperty.call(contextOptions, "colorScheme")' in harness
+    assert "inherit colorScheme" in harness
+    assert "shared agent Playwright config" in harness
+
+
 def test_serve_playwright_harness_captures_browser_errors() -> None:
     harness = (ROOT / "browser" / "serve_playwright_harness.js").read_text(
         encoding="utf-8"
@@ -36,4 +65,6 @@ def test_serve_menu_smoke_uses_harness_for_interaction() -> None:
     assert "withServePage(" in smoke
     assert ".spice-menu-button" in smoke
     assert ".spice-context-menu .spice-menu-action" in smoke
-    assert "New team" in smoke
+    assert "Fast mode" in smoke
+    assert "fastModeDetail" in smoke
+    assert "New team" not in smoke

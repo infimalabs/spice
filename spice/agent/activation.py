@@ -39,10 +39,13 @@ def activation_browser_validation_lines() -> list[str]:
             "browser_validation_contract=for executable live browser checks, "
             "use the repo-local Node Playwright package; run npm install when "
             "node_modules is absent, then invoke Playwright through npm exec "
-            "or Node require('playwright'); validation notes must distinguish "
-            "missing Node dependencies from browser coverage not run; do not "
-            "substitute static tests or non-browser checks for required "
-            "browser coverage"
+            "or Node require('playwright'); serve UI checks should use the "
+            "repo-local serve Playwright harness or the shared "
+            ".spice/agent/playwright-mcp.json browser.contextOptions so "
+            "browser validation matches the operator's system appearance; "
+            "validation notes must distinguish missing Node dependencies from "
+            "browser coverage not run; do not substitute static tests or "
+            "non-browser checks for required browser coverage"
         )
     ]
 

@@ -5,6 +5,12 @@ const { spawn } = require("child_process");
 const { chromium } = require("playwright");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
+const defaultPlaywrightConfigPath = path.join(
+  repoRoot,
+  ".spice",
+  "agent",
+  "playwright-mcp.json",
+);
 const defaultStartTimeoutMs = 15000;
 const defaultStopTimeoutMs = 5000;
 
@@ -200,10 +206,78 @@ function assertNoBrowserErrors(errors) {
   );
 }
 
+async function readSharedPlaywrightContextOptions(options = {}) {
+  const configPath = options.playwrightConfigPath || defaultPlaywrightConfigPath;
+  let raw;
+  try {
+    raw = await fs.readFile(configPath, "utf8");
+  } catch (error) {
+    if (error && error.code === "ENOENT")
+      throw new Error(
+        "missing shared Playwright config at " +
+          configPath +
+          "; start the agent through spice so browser validation matches the " +
+          "operator system appearance",
+      );
+    throw error;
+  }
+  let config;
+  try {
+    config = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      "invalid Playwright config JSON at " + configPath + ": " + error.message,
+    );
+  }
+  if (
+    !config ||
+    !config.browser ||
+    typeof config.browser !== "object" ||
+    !config.browser.contextOptions ||
+    typeof config.browser.contextOptions !== "object" ||
+    Array.isArray(config.browser.contextOptions)
+  )
+    throw new Error(
+      "shared Playwright config at " +
+        configPath +
+        " must define browser.contextOptions",
+    );
+  const contextOptions = config.browser.contextOptions;
+  return { ...contextOptions };
+}
+
+function rejectColorSchemeOverride(contextOptions, configPath) {
+  if (
+    contextOptions &&
+    Object.prototype.hasOwnProperty.call(contextOptions, "colorScheme")
+  )
+    throw new Error(
+      "serve Playwright checks inherit colorScheme from " +
+        configPath +
+        "; update the shared agent Playwright config instead of setting a " +
+        "per-smoke colorScheme override",
+    );
+}
+
+async function serveBrowserContextOptions(options = {}) {
+  const callerContextOptions = options.contextOptions || {};
+  const configPath = options.playwrightConfigPath || defaultPlaywrightConfigPath;
+  rejectColorSchemeOverride(callerContextOptions, configPath);
+  return {
+    ...(await readSharedPlaywrightContextOptions({
+      ...options,
+      playwrightConfigPath: configPath,
+    })),
+    ...callerContextOptions,
+  };
+}
+
 async function withServePage(options, callback) {
   const server = await startServe(options);
   const browser = await chromium.launch(options.launchOptions || {});
-  const context = await browser.newContext(options.contextOptions || {});
+  const context = await browser.newContext(
+    await serveBrowserContextOptions(options),
+  );
   const page = await context.newPage();
   const browserErrors = collectBrowserErrors(page, options);
   try {
@@ -232,7 +306,10 @@ async function withServePage(options, callback) {
 module.exports = {
   assertNoBrowserErrors,
   collectBrowserErrors,
+  defaultPlaywrightConfigPath,
+  readSharedPlaywrightContextOptions,
   repoRoot,
+  serveBrowserContextOptions,
   startServe,
   withServePage,
 };
