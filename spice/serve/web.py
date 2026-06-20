@@ -43,7 +43,9 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
     <button id="open-lane" class="spice-menu-button" type="button"
             title="Open {brand_attr} menu" aria-label="Open {brand_attr} menu"
             aria-haspopup="menu" aria-expanded="false">
-      <span class="spice-menu-icon" aria-hidden="true">🌶️</span>
+      <span class="spice-menu-icon" aria-hidden="true">
+        <span class="spice-menu-pepper">🌶️</span>
+      </span>
       <span class="spice-menu-label">{brand_html}</span>
     </button>
   </header>

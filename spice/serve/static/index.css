@@ -167,8 +167,54 @@ button.primary:hover {
   height: 25px;
   justify-content: center;
   line-height: 1;
-  min-width: 30px;
-  padding: 0 6px;
+  min-width: 31px;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  width: 31px;
+}
+.spice-menu-pepper {
+  inset: 50% auto auto 50%;
+  line-height: 1;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+.spice-menu-icon::before {
+  content: "🔥";
+  filter: saturate(1.24) drop-shadow(0 0 5px color-mix(in srgb, var(--say-accent) 72%, transparent));
+  font-size: 21px;
+  inset: 50% auto auto 50%;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(-50%, -50%) scale(0.88) rotate(-12deg);
+  transform-origin: 50% 50%;
+  transition: opacity 160ms ease;
+  z-index: 0;
+}
+.spice-menu-button--fast .spice-menu-icon::before {
+  animation: spice-menu-flame-pulse 1.15s ease-in-out infinite;
+  opacity: 0.9;
+}
+@keyframes spice-menu-flame-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: translate(-50%, -50%) scale(0.84) rotate(-14deg);
+  }
+  45% {
+    opacity: 0.96;
+    transform: translate(-50%, -50%) scale(1.12) rotate(-7deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spice-menu-button--fast .spice-menu-icon::before {
+    animation: none;
+    opacity: 0.84;
+    transform: translate(-50%, -50%) scale(0.98) rotate(-10deg);
+  }
 }
 .spice-menu-label {
   color: currentColor;
