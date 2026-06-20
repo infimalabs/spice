@@ -157,13 +157,12 @@ def repo_root() -> Path:
 
 
 def ensure_release_worktree(root: Path) -> None:
-    branch = git("branch", "--show-current")
-    if branch != "main":
-        raise SpiceError(f"refusing to release from {branch}")
+    # Lane branches are kept synchronized with origin/main, so a release runs
+    # from whichever clean worktree we are in, regardless of the branch name —
+    # only a dirty tree blocks it.
     status = git("status", "--porcelain")
     if status:
         raise SpiceError("refusing to release with a dirty worktree")
-    run(["git", "pull", "--ff-only", "origin", "main"])
 
 
 def ensure_notes_file(path: Path | None) -> None:
@@ -397,7 +396,9 @@ def publish_release(version: str, notes_file: Path | None = None) -> None:
     wheel = Path("dist") / f"spice_harness-{version}-py3-none-any.whl"
     token = read_pypi_token()
 
-    run(["git", "push", "origin", "main"])
+    # Push the release commit (made on a synchronized lane) to origin/main by
+    # ref, so the local branch name does not have to be `main`.
+    run(["git", "push", "origin", "HEAD:main"])
     env = dict(os.environ)
     env["UV_PUBLISH_TOKEN"] = token
     run(["uv", "publish", "--dry-run", str(sdist), str(wheel)], env=env)

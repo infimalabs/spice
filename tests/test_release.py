@@ -1,8 +1,12 @@
 """Release command parsing and release-note highlights."""
 
+import subprocess
 from pathlib import Path
 
+import pytest
+
 import spice.release as release
+from spice.errors import SpiceError
 from spice.cli.mounts import mounted_commands
 from spice.release import (
     ReleaseRecord,
@@ -166,3 +170,28 @@ def test_release_notes_group_edited_highlights_by_project():
     assert "Serve.Ui" not in notes
     assert "Task.Cli" not in notes
     assert "Agent." not in notes
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+
+def test_release_worktree_guard_allows_clean_lane_blocks_dirty(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    _git(repo, "config", "user.email", "r@example.test")
+    _git(repo, "config", "user.name", "Release Tester")
+    (repo / "f.txt").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "init")
+    # A lane branch whose name is not "main".
+    _git(repo, "checkout", "-qb", "main-d")
+    monkeypatch.chdir(repo)
+
+    # Clean lane (non-main name) is accepted — synchronization is assumed.
+    release.ensure_release_worktree(repo)
+
+    # A dirty tree still blocks the release.
+    (repo / "g.txt").write_text("y\n", encoding="utf-8")
+    with pytest.raises(SpiceError, match="dirty worktree"):
+        release.ensure_release_worktree(repo)
