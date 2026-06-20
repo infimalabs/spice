@@ -37,7 +37,7 @@ from spice.mail.inbox import (
     write_inbox_item,
 )
 from spice.paths import shared_attachment_root
-from spice.serve import agentapi, app, payloads, workroutes
+from spice.serve import agentapi, app, identitypayloads, payloads, workroutes
 from spice.serve.app import (
     ServeState,
     team_command_response_payload,
@@ -311,7 +311,7 @@ def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkey
         compose_inbox_text(body="pending", priority=None, stop=False),
     )
     monkeypatch.setattr(
-        payloads, "resolve_thread_id_for_target", lambda *_args: THREAD_A
+        identitypayloads, "resolve_thread_id_for_target", lambda *_args: THREAD_A
     )
     monkeypatch.setattr(
         app,
@@ -390,7 +390,9 @@ def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
         + "\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(payloads, "resolve_thread_id_for_target", lambda *_: THREAD_A)
+    monkeypatch.setattr(
+        identitypayloads, "resolve_thread_id_for_target", lambda *_: THREAD_A
+    )
     monkeypatch.setattr(
         app,
         "resolve_thread_transcript",
@@ -511,7 +513,7 @@ def test_running_requested_renewal_sends_handoff_and_marks_pending(
     state.team_store.set_agent_renewal_request(ACTOR_A, requested=True)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -569,7 +571,7 @@ def test_stopped_requested_renewal_starts_successor_and_moves_team_membership(
     ensure_calls: list[dict[str, object]] = []
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -1090,4 +1092,7 @@ def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:
     )
     monkeypatch.setattr(agentapi, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(payloads, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(
+        identitypayloads, "agent_status", lambda *_args, **_kwargs: status
+    )
     monkeypatch.setattr(workroutes, "agent_status", lambda *_args, **_kwargs: status)

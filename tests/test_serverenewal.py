@@ -14,7 +14,7 @@ from spice.mail.inbox import (
     inbox_request_body,
     write_inbox_item,
 )
-from spice.serve import agentapi, payloads, workroutes
+from spice.serve import agentapi, identitypayloads, payloads, workroutes
 from spice.serve.app import ServeState
 from spice.serve.teams import ServeTeamStore, TeamCommandService
 from spice.serve.workroutes import work_tree_send_response_payload
@@ -42,7 +42,7 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
     record_lane_send = state.record_lane_send
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -121,7 +121,7 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
     ensure_calls: list[dict[str, object]] = []
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -185,7 +185,7 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
     message_threads: list[str] = []
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -286,4 +286,7 @@ def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:
     )
     monkeypatch.setattr(agentapi, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(payloads, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(
+        identitypayloads, "agent_status", lambda *_args, **_kwargs: status
+    )
     monkeypatch.setattr(workroutes, "agent_status", lambda *_args, **_kwargs: status)

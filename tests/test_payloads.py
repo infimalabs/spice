@@ -19,7 +19,7 @@ from spice.paths import shared_attachment_root
 from spice.serve.agentapi import sent_steering_payload
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
-from spice.serve import payloads
+from spice.serve import identitypayloads, payloads
 from spice.serve.payloads import (
     LANE_METRIC_SPARKLINE_BUCKET_SECONDS,
     LANE_METRIC_SPARKLINE_BUCKETS,
@@ -140,7 +140,7 @@ class _InventoryState(_State):
 
 def test_target_identity_payload_rejects_blank_bound_thread_id():
     with pytest.raises(SpiceError, match="thread id must be non-empty"):
-        payloads.target_identity_payload(
+        identitypayloads.target_identity_payload(
             _Target(id="wt"),
             "",
             binding_status="bound",
@@ -161,7 +161,7 @@ def test_target_identity_payload_reports_configured_driver(tmp_path, monkeypatch
     )
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
 
-    identity = payloads.target_identity_payload(
+    identity = identitypayloads.target_identity_payload(
         _Target(id="wt", repo_root=repo),
         "",
         binding_status="unbound",
@@ -173,7 +173,7 @@ def test_target_identity_payload_reports_configured_driver(tmp_path, monkeypatch
         "effort": "medium",
     }
     target = _Target(id="wt", repo_root=repo)
-    serve_identity = payloads.serve_agent_identity_payload(
+    serve_identity = identitypayloads.serve_agent_identity_payload(
         target,
         "",
         binding_status="unbound",
@@ -193,17 +193,17 @@ def test_serve_agent_identity_reports_unbound_target_identity(tmp_path, monkeypa
     _init_repo(repo)
     target = _Target(id="wt", repo_root=repo, name="repo", branch="main")
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-5.5", "effort": "xhigh"},
     )
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "agent_status",
         lambda _repo: _identity_status(repo),
     )
 
-    identity = payloads.serve_agent_identity_payload(target)
+    identity = identitypayloads.serve_agent_identity_payload(target)
 
     assert identity["actorId"] == "target:wt"
     assert identity["target"] == {
@@ -244,12 +244,12 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
     _init_repo(repo)
     target = _Target(id="wt", repo_root=repo, name="repo", branch="main")
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "desired-model", "effort": "high"},
     )
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "agent_status",
         lambda _repo: _identity_status(
             repo,
@@ -264,7 +264,7 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
 
     store = ServeTeamStore(tmp_path / "teams.sqlite")
 
-    identity = payloads.serve_agent_identity_payload(
+    identity = identitypayloads.serve_agent_identity_payload(
         target,
         transcript_owner="claude",
         store=store,
@@ -311,17 +311,17 @@ def test_serve_agent_identity_reports_explicit_actor_renewal(tmp_path, monkeypat
     )
     target = _Target(id="wt", repo_root=repo, name="repo", branch="main")
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-5.5", "effort": "xhigh"},
     )
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "agent_status",
         lambda _repo: _identity_status(repo, thread_id="thread-a"),
     )
 
-    identity = payloads.serve_agent_identity_payload(
+    identity = identitypayloads.serve_agent_identity_payload(
         target,
         actor_id="thread:thread-a",
         store=store,
@@ -337,14 +337,16 @@ def test_serve_agent_identity_reports_explicit_actor_renewal(tmp_path, monkeypat
     }
     assert store.current_team_for_agent("thread:thread-a") is not None
     assert (
-        payloads.serve_agent_identity_payload(target, actor_id="target:wt")["actorId"]
+        identitypayloads.serve_agent_identity_payload(target, actor_id="target:wt")[
+            "actorId"
+        ]
         == "target:wt"
     )
 
 
 def test_team_identity_payload_rejects_missing_member_revisions():
     with pytest.raises(SpiceError, match="team revision is required"):
-        payloads.team_identity_payload({"teamId": "team-1"})
+        identitypayloads.team_identity_payload({"teamId": "team-1"})
 
 
 def _stamp(when: datetime) -> str:
@@ -641,10 +643,20 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        payloads, "resolve_thread_id_for_target", lambda _state, _target: actor
+        identitypayloads, "resolve_thread_id_for_target", lambda _state, _target: actor
     )
     monkeypatch.setattr(
         payloads,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id=actor,
+        ),
+    )
+    monkeypatch.setattr(
+        identitypayloads,
         "agent_status",
         lambda _repo: _Status(
             running=True,
@@ -986,7 +998,7 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "resolve_thread_id_for_target",
         lambda _state, _target: "agent-a",
     )
@@ -1000,8 +1012,18 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
             thread_id="agent-a",
         ),
     )
+    monkeypatch.setattr(
+        identitypayloads,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id="agent-a",
+        ),
+    )
     monkeypatch.setattr(payloads, "agent_binding_error", lambda _repo, _status: "")
-    monkeypatch.setattr(payloads, "configured_say_voice", lambda _repo: "")
+    monkeypatch.setattr(identitypayloads, "configured_say_voice", lambda _repo: "")
     monkeypatch.setattr(
         payloads.message_reader,
         "assistant_messages_for_thread_id",
@@ -1035,7 +1057,7 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
         owner_driver=CLAUDE_DRIVER,
     )
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "desired-model", "effort": "high"},
     )
@@ -1049,12 +1071,23 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "resolve_thread_id_for_target",
         lambda _state, _target: thread_id,
     )
     monkeypatch.setattr(
         payloads,
+        "agent_status",
+        lambda _repo: _identity_status(
+            tmp_path,
+            driver="claude",
+            thread_id=thread_id,
+            model="actual-model",
+            effort="low",
+        ),
+    )
+    monkeypatch.setattr(
+        identitypayloads,
         "agent_status",
         lambda _repo: _identity_status(
             tmp_path,
@@ -1142,12 +1175,22 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        payloads,
+        identitypayloads,
         "resolve_thread_id_for_target",
         lambda _state, _target: "agent-a",
     )
     monkeypatch.setattr(
         payloads,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id="agent-a",
+        ),
+    )
+    monkeypatch.setattr(
+        identitypayloads,
         "agent_status",
         lambda _repo: _Status(
             running=True,
@@ -1262,7 +1305,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     )
     archive_ackd_inbox_items(repo, [inbox_item_key(archived_name)])
     monkeypatch.setattr(
-        payloads, "resolve_thread_id_for_target", lambda _state, _target: ""
+        identitypayloads, "resolve_thread_id_for_target", lambda _state, _target: ""
     )
     monkeypatch.setattr(
         payloads,
@@ -1271,6 +1314,11 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     )
     monkeypatch.setattr(
         payloads,
+        "agent_status",
+        lambda _repo: _Status(running=False, started_at=""),
+    )
+    monkeypatch.setattr(
+        identitypayloads,
         "agent_status",
         lambda _repo: _Status(running=False, started_at=""),
     )
@@ -1369,7 +1417,9 @@ def test_ack_context_payload_does_not_quote_assistant_ack_when_inbox_missing(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        payloads, "resolve_thread_id_for_target", lambda _state, _target: "thread-a"
+        identitypayloads,
+        "resolve_thread_id_for_target",
+        lambda _state, _target: "thread-a",
     )
 
     payload = ack_context_payload_for_worktree(

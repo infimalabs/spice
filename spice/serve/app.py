@@ -26,7 +26,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
 )
 from spice.paths import repo_root_from_cwd, shared_attachment_root
-from spice.serve import payloads
+from spice.serve import identitypayloads, payloads
 from spice.serve.agentapi import (
     agent_ensure_response_payload,
     agent_status_payload,
@@ -213,7 +213,7 @@ def team_command_response_payload(
 ) -> tuple[dict[str, Any], HTTPStatus]:
     try:
         result = state.team_commands.apply(
-            payloads.normalize_team_command_payload(
+            identitypayloads.normalize_team_command_payload(
                 payload, targets=state.worktree_targets()
             )
         )
@@ -255,7 +255,9 @@ def lane_signature_for_target(
     thread_id: str | None,
     transcript: TranscriptResolution | None,
 ) -> tuple[Any, ...]:
-    team_facts = payloads.team_facts_for_target(state.team_store, target, thread_id)
+    team_facts = identitypayloads.team_facts_for_target(
+        state.team_store, target, thread_id
+    )
     return (
         _path_signature(transcript.path if transcript else None),
         transcript.owner_driver.name if transcript else "",
@@ -316,7 +318,7 @@ def serve_metrics_text(state: ServeState) -> str:
     rollout_present = 0
     pending = 0
     for target in state.worktree_targets():
-        thread_id = payloads.resolve_thread_id_for_target(state, target) or ""
+        thread_id = identitypayloads.resolve_thread_id_for_target(state, target) or ""
         if thread_id:
             bound = 1
             transcript = resolve_thread_transcript(thread_id, target.repo_root)
@@ -538,7 +540,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         if offset < 0 or item < 0:
             self.send_error(HTTPStatus.BAD_REQUEST, "offset and item are required")
             return
-        thread_id = payloads.resolve_thread_id_for_target(self.state, target)
+        thread_id = identitypayloads.resolve_thread_id_for_target(self.state, target)
         transcript = (
             resolve_thread_transcript(thread_id, target.repo_root)
             if thread_id
@@ -675,7 +677,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 team_command_payload=lambda payload: team_command_response_payload(
                     state, payload
                 ),
-                thread_id=lambda target: payloads.resolve_thread_id_for_target(
+                thread_id=lambda target: identitypayloads.resolve_thread_id_for_target(
                     state, target
                 ),
                 transcript_resolution=resolve_thread_transcript,

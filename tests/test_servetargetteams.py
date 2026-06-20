@@ -6,7 +6,7 @@ from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
 
-from spice.serve import agentapi, app, payloads, workroutes
+from spice.serve import agentapi, app, identitypayloads, payloads, workroutes
 from spice.serve.app import ServeState
 from spice.serve.teams import ServeTeamStore, TeamCommandService, TeamConfig
 from spice.serve.workroutes import (
@@ -236,10 +236,11 @@ def _patch_payload_dependencies(
         return None
 
     monkeypatch.setattr(payloads, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(identitypayloads, "agent_status", lambda _repo: status)
     monkeypatch.setattr(agentapi, "agent_status", lambda _repo: status)
     monkeypatch.setattr(workroutes, "agent_status", lambda _repo: status)
     monkeypatch.setattr(payloads, "agent_binding_error", lambda *_args: "")
-    monkeypatch.setattr(payloads, "configured_say_voice", lambda _repo: "")
+    monkeypatch.setattr(identitypayloads, "configured_say_voice", lambda _repo: "")
     monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
         payloads, "pending_inbox_identity_payload", lambda _repo: _pending_identity()

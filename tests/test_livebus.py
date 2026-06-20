@@ -17,7 +17,7 @@ import pytest
 
 from spice.agent.driver import CODEX_DRIVER
 from spice.mail.inbox import inbox_dir, pending_inbox_count
-from spice.serve import agentapi, app, livebus, payloads
+from spice.serve import agentapi, app, identitypayloads, livebus, payloads
 from spice.serve.app import ServeState
 from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
@@ -124,6 +124,9 @@ def test_lane_subscription_watch_wakes_stopped_agent_for_external_inbox_write(
     )
     monkeypatch.setattr(agentapi, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(payloads, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(
+        identitypayloads, "agent_status", lambda *_args, **_kwargs: status
+    )
     ensure_calls: list[dict[str, object]] = []
 
     def fake_ensure(ensured_target, **kwargs):
