@@ -1,6 +1,7 @@
 """ACK grammar: the tuned header parser is a core product surface."""
 
 import json
+import sqlite3
 import subprocess
 from types import SimpleNamespace
 
@@ -15,7 +16,12 @@ from spice.mail.acks import (
     extract_task_batch_lines_from_text,
     split_ack_message,
 )
-from spice.mail.ackstate import ack_state_database_path, ack_state_records
+from spice.mail.ackstate import (
+    AckStateWrite,
+    ack_state_database_path,
+    ack_state_records,
+    record_acked_inbox_items,
+)
 from spice.mail.inbox import (
     collect_acked_inbox_items,
     compose_inbox_text,
@@ -144,6 +150,63 @@ def test_ack_state_database_is_centralized_under_git_common_dir(tmp_path):
     # Sibling of the task backend db under the shared common dir, not .spice.
     assert path == common / "spice" / "data" / "spiceacks.sqlite3"
     assert ".spice" not in path.parts
+
+
+def test_ack_state_migrates_existing_rows_to_store_operator_text(tmp_path):
+    _init_repo(tmp_path)
+    path = ack_state_database_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE acked_inbox_items (
+              key TEXT PRIMARY KEY,
+              inbox_name TEXT NOT NULL,
+              archived_at REAL NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO acked_inbox_items (key, inbox_name, archived_at)
+            VALUES (?, ?, ?)
+            """,
+            (KEY_A, f"{KEY_A}.txt", 100.0),
+        )
+
+    text = compose_inbox_text(
+        body="operator text from ack db", priority=None, stop=False
+    )
+    written = record_acked_inbox_items(
+        tmp_path,
+        [
+            AckStateWrite(
+                key=KEY_A,
+                inbox_name=f"{KEY_A}.txt",
+                text=text,
+                attachments=(
+                    {"path": "/tmp/attachment.png", "name": "attachment.png"},
+                ),
+            )
+        ],
+        now=200.0,
+    )
+
+    records = ack_state_records(tmp_path)
+    with sqlite3.connect(path) as connection:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(acked_inbox_items)")
+        }
+    assert written == [KEY_A]
+    assert {"key", "inbox_name", "text", "attachments_json", "archived_at"} <= columns
+    assert [
+        (record.key, record.inbox_name, record.text, record.archived_at)
+        for record in records
+    ] == [(KEY_A, f"{KEY_A}.txt", text, 200.0)]
+    assert records[0].attachments == (
+        {"name": "attachment.png", "path": "/tmp/attachment.png"},
+    )
 
 
 def test_archive_ackd_inbox_items_records_durable_ack_state(tmp_path):
