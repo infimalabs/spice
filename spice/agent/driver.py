@@ -393,6 +393,13 @@ class ClaudeDriver(AgentDriver):
             "bypassPermissions",
             "--mcp-config",
             claude_mcp_config_json(repo_root),
+            # Claude reads CLAUDE.md but not skill files on its own, so pin the
+            # spice skill into the system prompt on every launch. The trailing
+            # prompt is the same skill relpath link (operator prose rides the
+            # supervisor side channel exclusively, never the prompt), so the
+            # agent re-grounds in the skill every turn, not only on bootstrap.
+            "--append-system-prompt",
+            prompt,
         ]
         effort = claude_effort(reasoning_effort or self.default_reasoning_effort)
         if effort:
