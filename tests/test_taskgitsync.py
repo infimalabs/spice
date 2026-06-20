@@ -238,6 +238,112 @@ def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
     assert _git(repo, "status", "--porcelain") == ""
 
 
+def test_integrate_and_publish_hook_aborted_marker_state_guides_retry(
+    tmp_path, monkeypatch
+):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
+    _run(peer, "git", "add", "README.md")
+    _run(peer, "git", "commit", "-m", "baseline work")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+    real_run = gitsync._run
+    merge_attempts = 0
+
+    def hook_aborted_run(
+        repo_root: Path, *args: str
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal merge_attempts
+        if (
+            repo_root == repo
+            and args[:3] == ("merge", "--no-ff", "--no-commit")
+            and merge_attempts == 0
+        ):
+            merge_attempts += 1
+            (repo / "README.md").write_text(
+                "<<<<<<< HEAD\n"
+                "agent work\n"
+                "=======\n"
+                "baseline work\n"
+                ">>>>>>> origin/main\n",
+                encoding="utf-8",
+            )
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(repo), *args],
+                1,
+                stdout="",
+                stderr="reference-transaction hook failed before MERGE_HEAD\n",
+            )
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", hook_aborted_run)
+
+    with pytest.raises(gitsync.MergeConflict) as exc_info:
+        gitsync.integrate_and_publish("TASK-20260101T000000000005Z", repo_root=repo)
+
+    message = str(exc_info.value)
+    assert merge_attempts == 1
+    assert "without an open MERGE_HEAD" in message
+    assert "README.md" in message
+    assert "do not use plain `git commit`" in message
+    assert "commit while MERGE_HEAD exists" not in message
+    assert (
+        "git commit-tree $(git write-tree) -p HEAD -p origin/main "
+        '-m "Resolve baseline overlap for TASK-20260101T000000000005Z"'
+    ) in message
+    assert (
+        'git update-ref refs/heads/$(git branch --show-current) "$merge_commit"'
+        in message
+    )
+    assert _merge_head_missing(repo)
+
+    (repo / "README.md").write_text("resolved hook-aborted work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    rescue_merge = _git(
+        repo,
+        "commit-tree",
+        _git(repo, "write-tree"),
+        "-p",
+        "HEAD",
+        "-p",
+        "origin/main",
+        "-m",
+        "Resolve baseline overlap for TASK-20260101T000000000005Z",
+    )
+    _run(
+        repo,
+        "git",
+        "update-ref",
+        f"refs/heads/{_git(repo, 'branch', '--show-current')}",
+        rescue_merge,
+    )
+    assert _git(repo, "status", "--porcelain") == ""
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000005Z", repo_root=repo
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert captured["done_head"] == rescue_merge
+    assert _merge_parents(repo, rescue_merge)[1] == upstream_head
+    assert _merge_parents(repo, merge_head) == [upstream_head, rescue_merge]
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert _git(repo, "status", "--porcelain") == ""
+
+
 def test_gitsync_network_commands_are_noninteractive_and_bounded(tmp_path, monkeypatch):
     seen: dict[str, object] = {}
 
@@ -347,6 +453,16 @@ def _merge_parents(repo: Path, commit: str) -> list[str]:
 
 def _uda_map(args: list[str]) -> dict[str, str]:
     return dict(item.split(":", 1) for item in args)
+
+
+def _merge_head_missing(repo: Path) -> bool:
+    completed = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--verify", "MERGE_HEAD"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return completed.returncode != 0
 
 
 def _git(repo: Path, *args: str) -> str:
