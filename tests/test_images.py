@@ -3,6 +3,7 @@
 import base64
 import json
 
+from spice.agent.driver import CLAUDE_DRIVER, CODEX_DRIVER
 from spice.serve.images import (
     assistant_image_markdown,
     markdown_image_reference,
@@ -61,7 +62,9 @@ def test_rollout_image_decodes_from_line_offset(tmp_path):
     rollout = tmp_path / "rollout.jsonl"
     rollout.write_text(f"{first}\n{second}\n", encoding="utf-8")
     offset = len(first.encode("utf-8")) + 1
-    result = rollout_image_from_offset(rollout, offset=offset, item_index=0)
+    result = rollout_image_from_offset(
+        rollout, offset=offset, item_index=0, driver=CODEX_DRIVER
+    )
     assert result == (PNG_BYTES, "image/png")
 
 
@@ -99,7 +102,9 @@ def test_claude_image_decodes_from_transcript_owner(tmp_path, monkeypatch):
     transcript.parent.mkdir(parents=True)
     transcript.write_text(f"{line}\n", encoding="utf-8")
 
-    assert rollout_image_from_offset(transcript, offset=0, item_index=0) == (
+    assert rollout_image_from_offset(
+        transcript, offset=0, item_index=0, driver=CLAUDE_DRIVER
+    ) == (
         PNG_BYTES,
         "image/png",
     )

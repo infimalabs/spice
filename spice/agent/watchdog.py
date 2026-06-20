@@ -229,18 +229,18 @@ def _inline_task_result_text(results: list[object]) -> str:
 
 def record_supervised_lane_metrics(repo_root: Path) -> None:
     from spice.agent.lifecycle import agent_status
-    from spice.serve.messages import transcript_path_for_thread
+    from spice.serve.messages import resolve_thread_transcript
     from spice.serve.metrics import record_transcript_metrics_for_agent
     from spice.serve.teams import ServeTeamStore
 
     agent_id = agent_status(repo_root).thread_id
     if not agent_id:
         raise RuntimeError(f"could not resolve supervised agent id for {repo_root}")
-    transcript_path = transcript_path_for_thread(agent_id, repo_root)
-    if transcript_path is None:
+    transcript = resolve_thread_transcript(agent_id, repo_root)
+    if transcript is None:
         raise RuntimeError(f"could not resolve transcript for {agent_id}")
     record_transcript_metrics_for_agent(
-        ServeTeamStore(), agent_id=agent_id, transcript_path=transcript_path
+        ServeTeamStore(), agent_id=agent_id, transcript_path=transcript.path
     )
 
 

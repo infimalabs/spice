@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from spice.agent.driver import driver_for_transcript
+from spice.agent.driver import AgentDriver
 
 DATA_IMAGE_RE = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
 
@@ -67,7 +67,7 @@ def view_image_markdown(payload: dict[str, Any]) -> str | None:
 
 
 def rollout_image_from_offset(
-    rollout_path: Path, *, offset: int, item_index: int
+    rollout_path: Path, *, offset: int, item_index: int, driver: AgentDriver
 ) -> tuple[bytes, str] | None:
     """Decode the embedded image at (line offset, content item) in a rollout."""
     if offset < 0 or item_index < 0:
@@ -84,7 +84,7 @@ def rollout_image_from_offset(
         return None
     if not isinstance(loaded, dict):
         return None
-    event = driver_for_transcript(rollout_path).normalize_transcript_line(loaded)
+    event = driver.normalize_transcript_line(loaded)
     if event is None or event.get("type") != "response_item":
         return None
     payload = event.get("payload")
