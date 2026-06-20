@@ -44,7 +44,8 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert 'aria-label="Open teams"' in html
     assert 'id="open-lane" class="spice-menu-button"' in html
     assert 'aria-haspopup="menu" aria-expanded="false"' in html
-    assert 'class="spice-menu-icon" aria-hidden="true">🌶️</span>' in html
+    assert '<span class="spice-menu-icon" aria-hidden="true">' in html
+    assert '<span class="spice-menu-pepper">🌶️</span>' in html
     assert '<span class="spice-menu-label">spice</span>' in html
     assert 'const spiceServeBranding = {"name": "spice"};' in html
     assert "const serveBrandName = String(spiceServeBranding.name" in app_js
@@ -74,8 +75,11 @@ def test_header_spice_menu_button_uses_cutout_pepper_stamp():
     button_end = css.index(".spice-menu-icon {", button_start)
     button_rules = css[button_start:button_end]
     icon_start = css.index(".spice-menu-icon {")
-    icon_end = css.index(".spice-menu-label {", icon_start)
+    icon_end = css.index(".spice-menu-pepper {", icon_start)
     icon_rules = css[icon_start:icon_end]
+    pepper_start = css.index(".spice-menu-pepper {")
+    pepper_end = css.index(".spice-menu-icon::before {", pepper_start)
+    pepper_rules = css[pepper_start:pepper_end]
     label_start = css.index(".spice-menu-label {")
     label_end = css.index(".icon-button svg", label_start)
     label_rules = css[label_start:label_end]
@@ -104,9 +108,49 @@ def test_header_spice_menu_button_uses_cutout_pepper_stamp():
         in icon_rules
     )
     assert "height: 25px;" in icon_rules
-    assert "min-width: 30px;" in icon_rules
-    assert "padding: 0 6px;" in icon_rules
+    assert "min-width: 31px;" in icon_rules
+    assert "overflow: hidden;" in icon_rules
+    assert "padding: 0;" in icon_rules
+    assert "position: relative;" in icon_rules
+    assert "width: 31px;" in icon_rules
+    assert "inset: 50% auto auto 50%;" in pepper_rules
+    assert "position: absolute;" in pepper_rules
+    assert "transform: translate(-50%, -50%);" in pepper_rules
+    assert "z-index: 1;" in pepper_rules
     assert "font-size: 16px;" in label_rules
+
+
+def test_header_spice_menu_fast_mode_flame_pulses_behind_pepper():
+    css = _serve_css_text()
+    icon_start = css.index(".spice-menu-icon::before {")
+    icon_end = css.index(
+        ".spice-menu-button--fast .spice-menu-icon::before", icon_start
+    )
+    icon_flame_rules = css[icon_start:icon_end]
+    fast_start = css.index(".spice-menu-button--fast .spice-menu-icon::before {")
+    fast_end = css.index("@keyframes spice-menu-flame-pulse", fast_start)
+    fast_rules = css[fast_start:fast_end]
+    keyframes_start = css.index("@keyframes spice-menu-flame-pulse")
+    keyframes_end = css.index(
+        "@media (prefers-reduced-motion: reduce)", keyframes_start
+    )
+    keyframes = css[keyframes_start:keyframes_end]
+    reduced_start = css.index("@media (prefers-reduced-motion: reduce)")
+    reduced_rules = css[reduced_start : css.index(".spice-menu-label {", reduced_start)]
+
+    assert 'content: "🔥";' in icon_flame_rules
+    assert "position: absolute;" in icon_flame_rules
+    assert "opacity: 0;" in icon_flame_rules
+    assert "pointer-events: none;" in icon_flame_rules
+    assert "inset: 50% auto auto 50%;" in icon_flame_rules
+    assert "z-index: 0;" in icon_flame_rules
+    assert "drop-shadow" in icon_flame_rules
+    assert "animation: spice-menu-flame-pulse 1.15s ease-in-out infinite;" in fast_rules
+    assert "opacity: 0.9;" in fast_rules
+    assert "opacity: 0.5;" in keyframes
+    assert "opacity: 0.96;" in keyframes
+    assert "animation: none;" in reduced_rules
+    assert "opacity: 0.84;" in reduced_rules
 
 
 def test_header_spice_menu_button_keeps_cutout_treatment_in_states():
