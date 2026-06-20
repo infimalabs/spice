@@ -94,7 +94,7 @@ def test_record_supervised_lane_sends_updates_current_agent_metrics(
 ):
     repo = _init_repo(tmp_path / "repo")
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    store.create_team(members=["thread-a"])
+    store.create_team(members=["thread:thread-a"])
 
     monkeypatch.setattr(
         "spice.agent.lifecycle.agent_status",
@@ -104,7 +104,7 @@ def test_record_supervised_lane_sends_updates_current_agent_metrics(
 
     watchdog.record_supervised_lane_sends(repo)
 
-    summary = store.lane_metric_summary("thread-a", bucket_count=12)
+    summary = store.lane_metric_summary("thread:thread-a", bucket_count=12)
     assert summary.sends == 1
 
 
