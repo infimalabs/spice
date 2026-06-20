@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable, Iterator
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from spice.agent.driver import driver_for_transcript
 from spice.errors import SpiceError
@@ -355,9 +356,26 @@ def filter_turns(
     turn_ids: list[str] | None = None,
     tools: list[str] | None = None,
 ) -> list[TurnRecord]:
-    kept: list[TurnRecord] = []
     needle = (contains or "").lower()
     turn_filter = {turn_id for turn_id in turn_ids or [] if turn_id}
+    _reject_unavailable_turn_id_filter(turn_filter, turns)
+    tool_filter = {tool for tool in tools or [] if tool}
+    filters = _turn_filter_specs(
+        start=start,
+        end=end,
+        needle=needle,
+        turn_filter=turn_filter,
+        tool_filter=tool_filter,
+    )
+    return [turn for turn in turns if _turn_matches_filters(turn, filters)]
+
+
+TurnFilterSpec = tuple[Callable[[TurnRecord, Any], bool], Any]
+
+
+def _reject_unavailable_turn_id_filter(
+    turn_filter: set[str], turns: list[TurnRecord]
+) -> None:
     # Fail loudly instead of silently returning nothing when a turn-id filter is
     # asked of turns that carry no ids. Codex stamps turn ids from task events;
     # Claude transcripts have no per-turn id, so every turn id is empty and any
@@ -370,22 +388,59 @@ def filter_turns(
             "no Codex-style turn events). Filter by --start/--end/--contains, or "
             "drop --turn-id."
         )
-    tool_filter = {tool for tool in tools or [] if tool}
-    for turn in turns:
-        turn_end = turn.end_ts or turn.last_activity_ts or turn.start_ts
-        if start and turn_end < start:
-            continue
-        if end and turn.start_ts > end:
-            continue
-        if turn_filter and (turn.turn_id or "") not in turn_filter:
-            continue
-        if tool_filter and not any(tool in turn.tool_calls for tool in tool_filter):
-            continue
-        if needle:
-            haystack = "\n".join(
-                [*turn.user_messages, *turn.assistant_commentary, *turn.final_answers]
-            ).lower()
-            if needle not in haystack:
-                continue
-        kept.append(turn)
-    return kept
+
+
+def _turn_filter_specs(
+    *,
+    start: str | None,
+    end: str | None,
+    needle: str,
+    turn_filter: set[str],
+    tool_filter: set[str],
+) -> list[TurnFilterSpec]:
+    specs: list[TurnFilterSpec] = []
+    if start:
+        specs.append((_matches_start, start))
+    if end:
+        specs.append((_matches_end, end))
+    if turn_filter:
+        specs.append((_matches_turn_id, turn_filter))
+    if tool_filter:
+        specs.append((_matches_tool, tool_filter))
+    if needle:
+        specs.append((_matches_text, needle))
+    return specs
+
+
+def _turn_matches_filters(turn: TurnRecord, filters: list[TurnFilterSpec]) -> bool:
+    return all(matcher(turn, expected) for matcher, expected in filters)
+
+
+def _matches_start(turn: TurnRecord, start: str) -> bool:
+    return _turn_end_ts(turn) >= start
+
+
+def _matches_end(turn: TurnRecord, end: str) -> bool:
+    return turn.start_ts <= end
+
+
+def _matches_turn_id(turn: TurnRecord, turn_filter: set[str]) -> bool:
+    return (turn.turn_id or "") in turn_filter
+
+
+def _matches_tool(turn: TurnRecord, tool_filter: set[str]) -> bool:
+    return any(tool in turn.tool_calls for tool in tool_filter)
+
+
+def _matches_text(turn: TurnRecord, needle: str) -> bool:
+    return needle in _turn_text(turn)
+
+
+def _turn_end_ts(turn: TurnRecord) -> str:
+    return turn.end_ts or turn.last_activity_ts or turn.start_ts
+
+
+def _turn_text(turn: TurnRecord) -> str:
+    return "\n".join(
+        [*turn.user_messages, *turn.assistant_commentary, *turn.final_answers]
+    ).lower()
