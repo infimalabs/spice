@@ -95,41 +95,32 @@ def test_task_edit_requires_at_least_one_field(task_repo):
 
 
 def test_task_wake_clears_multiple_waits_and_makes_tasks_current(task_repo):
-    first = ops.add(
-        "Wake delayed task one",
-        project="task.unit",
-        priority="medium",
-        wait=config.OOPS_WAIT,
-    )
-    second = ops.add(
-        "Wake delayed task two",
-        project="task.unit",
-        priority="medium",
-        wait=config.OOPS_WAIT,
-    )
-    delayed = [identity.resolve(first), identity.resolve(second)]
+    handles = [
+        ops.add(
+            f"Wake delayed task {index}",
+            project="task.unit",
+            priority="medium",
+            wait=config.OOPS_WAIT,
+        )
+        for index in range(4)
+    ]
+    delayed = [identity.resolve(handle) for handle in handles]
 
     assert all(row.get("wait") for row in delayed)
     ready_before = {identity.render_handle(row) for row in ops.ready_rows()}
-    assert first not in ready_before
-    assert second not in ready_before
+    assert not set(handles) & ready_before
 
-    output = ops.wake([first, second])
-    first_row = identity.resolve(first)
-    second_row = identity.resolve(second)
+    output = ops.wake(handles)
+    rows = [identity.resolve(handle) for handle in handles]
     ready_after = {identity.render_handle(row) for row in ops.ready_rows()}
 
-    assert f"woke {first}: wait:" in output
-    assert f"woke {second}: wait:" in output
+    for handle in handles:
+        assert f"woke {handle}: wait:" in output
     assert "next: spice task next" in output
-    assert not str(first_row.get("wait") or "")
-    assert not str(second_row.get("wait") or "")
-    assert first in ready_after
-    assert second in ready_after
-    assert not str(first_row.get("claim_by") or "")
-    assert not str(second_row.get("claim_by") or "")
-    assert not first_row.get("start")
-    assert not second_row.get("start")
+    assert all(not str(row.get("wait") or "") for row in rows)
+    assert set(handles) <= ready_after
+    assert all(not str(row.get("claim_by") or "") for row in rows)
+    assert all(not row.get("start") for row in rows)
 
 
 def test_task_wake_rejects_batch_without_partial_clear(task_repo):

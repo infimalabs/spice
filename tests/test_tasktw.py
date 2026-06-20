@@ -45,6 +45,28 @@ def test_task_event_file_advances_on_mutation_and_stays_stable_on_export(task_re
     assert after_export == after_add
 
 
+def test_task_run_disables_bulk_confirmation(monkeypatch, tmp_path):
+    seen: dict[str, list[str]] = {}
+
+    class Result:
+        returncode = 0
+        stdout = "[]"
+        stderr = ""
+
+    def fake_run(command, **_kwargs):
+        seen["command"] = command
+        return Result()
+
+    monkeypatch.setattr(tw, "require_task_binary", lambda: None)
+    monkeypatch.setattr(config, "bootstrap", lambda: tmp_path / "taskrc")
+    monkeypatch.setattr(config, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    tw.run(["export"])
+
+    assert "rc.bulk=0" in seen["command"]
+
+
 def _init_repo(path: Path) -> Path:
     path.mkdir()
     _run(path, "git", "init", "-b", "main")
