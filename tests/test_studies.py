@@ -370,6 +370,16 @@ def test_package_roots_derived_from_hatch_wheel_packages(tmp_path):
     assert configured_package_roots(tmp_path) == [tmp_path / "src" / "gadget"]
 
 
+def test_package_roots_derived_from_hatch_build_include(tmp_path):
+    _make_package(tmp_path / "packages", "gadget")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.hatch.build]\ninclude = ["packages/gadget"]\n',
+        encoding="utf-8",
+    )
+
+    assert configured_package_roots(tmp_path) == [tmp_path / "packages" / "gadget"]
+
+
 def test_package_roots_derived_from_flit_module(tmp_path):
     _make_package(tmp_path, "thing")
     (tmp_path / "pyproject.toml").write_text(
