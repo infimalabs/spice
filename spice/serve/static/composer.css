@@ -179,6 +179,9 @@
   --composer-driver-icon-color: color-mix(in srgb, var(--fg) 86%, var(--control));
   opacity: 0.74;
 }
+.composer-band--menu-open .composer-driver-icon {
+  display: none;
+}
 .composer-band--drag-ready {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
 }

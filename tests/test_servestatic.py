@@ -1001,6 +1001,10 @@ def test_static_composer_driver_icons_use_local_driver_assets():
         ".composer-driver-icon--codex,\n.composer-driver-icon--openai {"
     )
     openai_rule = css[openai_rule_start : css.index("}", openai_rule_start)]
+    menu_open_rule_start = css.index(
+        ".composer-band--menu-open .composer-driver-icon {"
+    )
+    menu_open_rule = css[menu_open_rule_start : css.index("}", menu_open_rule_start)]
     textarea_start = css.index(".composer-band--primary textarea {")
     textarea_rule = css[textarea_start : css.index("}", textarea_start)]
 
@@ -1071,6 +1075,7 @@ def test_static_composer_driver_icons_use_local_driver_assets():
         in openai_rule
     )
     assert "opacity: 0.74;" in openai_rule
+    assert "display: none;" in menu_open_rule
     assert "padding-bottom: 28px;" in textarea_rule
     assert "padding-right: 32px;" in textarea_rule
 
