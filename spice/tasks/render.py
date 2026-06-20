@@ -11,6 +11,11 @@ from spice.tasks import alloc, config, identity, lanes, ops, tw
 
 
 SHOW_ANNOTATIONS_LIMIT = 6
+_ACTIVE_CLAIM_FIELD_PROBLEMS = (
+    ("claim_by", "active without claim_by"),
+    ("claim_until", "active without claim deadline"),
+    ("claim_context_link", "active without claim context link"),
+)
 
 
 def _f(row: dict[str, Any], key: str) -> str:
@@ -309,15 +314,21 @@ def _row_problems(r: dict[str, Any]) -> list[str]:
     idx = ops.phase_index(r)
     if phases and idx < len(phases) and str(r.get("phase")) != phases[idx]:
         found.append(f"{handle} phase != slot[{idx}]")
-    if str(r.get("claim_by") or "") and not r.get("start"):
-        found.append(f"{handle} claimed but not active")
-    if r.get("start") and not str(r.get("claim_by") or ""):
-        found.append(f"{handle} active without claim_by")
-    if r.get("start") and not str(r.get("claim_until") or ""):
-        found.append(f"{handle} active without claim deadline")
-    if r.get("start") and not str(r.get("claim_context_link") or ""):
-        found.append(f"{handle} active without claim context link")
+    for label in _row_claim_problem_labels(r):
+        found.append(f"{handle} {label}")
     return found
+
+
+def _row_claim_problem_labels(r: dict[str, Any]) -> tuple[str, ...]:
+    if str(r.get("claim_by") or "") and not r.get("start"):
+        return ("claimed but not active",)
+    if not r.get("start"):
+        return ()
+    return tuple(
+        label
+        for key, label in _ACTIVE_CLAIM_FIELD_PROBLEMS
+        if not str(r.get(key) or "")
+    )
 
 
 def _identity_problems(rows: list[dict[str, Any]]) -> list[str]:
