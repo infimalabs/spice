@@ -23,6 +23,12 @@ from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies.shape import configured_package_roots
+from spice.studies.typecheck import (
+    PYRIGHT_ARGS,
+    python_typecheck_argv,
+    python_typecheck_targets,
+    run_python_typecheck,
+)
 
 MAGIC_HIGH_THRESHOLD = 100
 MAGIC_HIGH_LITERAL = "125"
@@ -432,3 +438,36 @@ def test_package_roots_malformed_poetry_packages_fails_loudly(tmp_path):
 
     with pytest.raises(SpiceError):
         configured_package_roots(tmp_path)
+
+
+def test_python_typecheck_targets_follow_package_roots(tmp_path):
+    _make_package(tmp_path, "app")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.setuptools.packages.find]\nwhere = ["."]\ninclude = ["app*"]\n',
+        encoding="utf-8",
+    )
+
+    assert python_typecheck_targets(tmp_path) == ("app",)
+
+
+def test_python_typecheck_targets_empty_without_a_package(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n', encoding="utf-8"
+    )
+
+    assert python_typecheck_targets(tmp_path) == ()
+
+
+def test_python_typecheck_argv_appends_fixed_flags_and_targets():
+    argv = python_typecheck_argv(("app",))
+
+    assert argv[-len(PYRIGHT_ARGS) - 1 :] == (*PYRIGHT_ARGS, "app")
+    assert "pyright" in " ".join(argv)
+
+
+def test_run_python_typecheck_noops_without_targets(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n', encoding="utf-8"
+    )
+
+    assert run_python_typecheck(tmp_path) is None

@@ -10,8 +10,9 @@ attempt reports the whole picture:
 4. local paths — no committed absolute macOS user path literals;
 5. serve web typecheck — static browser JavaScript must pass TypeScript
    `checkJs`;
-6. env policy — undeclared environment literals;
-7. shape pressure — file LOC/bytes, routine complexity, magic-number
+6. python typecheck — the project's own package roots must pass `pyright`;
+7. env policy — undeclared environment literals;
+8. shape pressure — file LOC/bytes, routine complexity, magic-number
    regressions, all against staged paths with flex + sticky semantics.
 
 A fully passing gate prunes sticky state that no longer measures over the
@@ -146,6 +147,11 @@ def _builtin_pre_commit_steps(
             "serve-web-typecheck",
             "serve web typecheck",
             lambda: _run_serve_web_typecheck_guard(repo_root),
+        ),
+        PreCommitStep(
+            "python-typecheck",
+            "python typecheck",
+            lambda: _run_python_typecheck_guard(repo_root),
         ),
         PreCommitStep(
             "env-policy",
@@ -529,6 +535,12 @@ def _run_serve_web_typecheck_guard(repo_root: Path) -> None:
     from spice.serve.typecheck import run_serve_web_typecheck
 
     run_serve_web_typecheck(repo_root)
+
+
+def _run_python_typecheck_guard(repo_root: Path) -> None:
+    from spice.studies.typecheck import run_python_typecheck
+
+    run_python_typecheck(repo_root)
 
 
 def _run_env_policy_guard(repo_root: Path, paths: list[Path]) -> None:
