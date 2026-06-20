@@ -94,6 +94,75 @@ def test_task_edit_requires_at_least_one_field(task_repo):
         ops.edit(handle)
 
 
+def test_task_wake_clears_wait_and_makes_task_current(task_repo):
+    handle = ops.add(
+        "Wake delayed task",
+        project="task.unit",
+        priority="medium",
+        wait=config.OOPS_WAIT,
+    )
+    delayed = identity.resolve(handle)
+
+    assert delayed.get("wait")
+    assert handle not in {identity.render_handle(row) for row in ops.ready_rows()}
+
+    output = ops.wake(handle)
+    row = identity.resolve(handle)
+
+    assert f"woke {handle}: wait:" in output
+    assert "next: spice task next" in output
+    assert not str(row.get("wait") or "")
+    assert handle in {identity.render_handle(row) for row in ops.ready_rows()}
+    assert not str(row.get("claim_by") or "")
+    assert not row.get("start")
+
+
+def test_task_wake_can_claim_after_clearing_wait(task_repo):
+    handle = ops.add(
+        "Wake and claim delayed task",
+        project="task.unit",
+        priority="medium",
+        wait=config.OOPS_WAIT,
+    )
+
+    output = ops.wake(handle, claim_after=True)
+    row = identity.resolve(handle)
+
+    assert f"woke {handle}: wait:" in output
+    assert ops.claim_drive_line(handle) in output
+    assert row["status"] == "pending"
+    assert not str(row.get("wait") or "")
+    assert row["claim_by"] == ACTOR_A
+    assert row["start"]
+
+
+def test_task_wake_claim_refuses_dirty_tree_without_clearing_wait(remote_task_repo):
+    handle = ops.add(
+        "Wake claim waits for clean tree",
+        project="task.unit",
+        priority="medium",
+        wait=config.OOPS_WAIT,
+    )
+    (remote_task_repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+
+    with pytest.raises(SpiceError, match="commit or clear the working tree first"):
+        ops.wake(handle, claim_after=True)
+
+    row = identity.resolve(handle)
+    assert row.get("wait")
+    assert handle not in {identity.render_handle(row) for row in ops.ready_rows()}
+    assert not str(row.get("claim_by") or "")
+    assert not row.get("start")
+
+
+def test_task_wake_refuses_deferred_oops_triage(task_repo):
+    created = ops.oops("Delayed oops remains triage", description="triage only")
+    handle = created.split()[1]
+
+    with pytest.raises(SpiceError, match="oops triage"):
+        ops.wake(handle)
+
+
 def test_task_adopt_mints_task_over_orphan_then_done_captures_it(remote_task_repo):
     orphan = _make_orphan_commit(remote_task_repo, subject="orphan fix worth keeping")
     assert gitsync.commits_ahead_of_baseline(remote_task_repo) == 1

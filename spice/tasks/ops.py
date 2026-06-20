@@ -688,6 +688,44 @@ def unclaim(handle: str) -> str:
     return identity.render_handle(row)
 
 
+def wake(handle: str, *, claim_after: bool = False) -> str:
+    """Clear a delayed task's wait, optionally claiming it through normal guards."""
+    row = identity.resolve(handle)
+    _require_pending(row, "wake")
+    rendered = identity.render_handle(row)
+    if _is_oops(row):
+        raise SpiceError(f"cannot wake deferred oops triage task: {rendered}")
+    if row.get("start") or str(row.get("claim_by") or ""):
+        raise SpiceError(f"cannot wake active or claimed task: {rendered}")
+
+    uuid = identity.uuid_of(row)
+    if claim_after:
+        actor = tw.current_actor()
+        _require_manual_claim_allowed(row, actor)
+        _require_single_active_slot(actor, action="task wake --claim", target=row)
+        notes = gitsync.prepare_for_claim().notes
+        if not do_claim(uuid, actor, guard_unclaimed=True):
+            raise SpiceError(
+                "wake claim lost a race: task became active before this claim "
+                "landed; run task next again"
+            )
+        _subscribe_claim_project(row, actor)
+        fresh = identity.render_handle(identity.resolve(rendered))
+        return "\n".join(
+            [
+                *(f"task: {note_text}" for note_text in notes),
+                f"woke {fresh}: wait:",
+                fresh,
+                claim_drive_line(fresh),
+            ]
+        )
+
+    tw.run([uuid, "modify", "wait:"])
+    fresh = identity.render_handle(identity.resolve(rendered))
+    lines = [f"woke {fresh}: wait:", "next: spice task next"]
+    return "\n".join(lines)
+
+
 def edit(
     handle: str,
     *,

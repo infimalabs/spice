@@ -162,7 +162,17 @@ def _configure_task_phase_parsers(actions: Any) -> None:
 
 def _configure_task_edit_parsers(actions: Any) -> None:
     _configure_oops_parser(actions)
+    _configure_note_parser(actions)
+    _configure_depends_parser(actions)
+    _configure_wake_parser(actions)
+    _configure_claim_parser(actions)
+    _configure_unclaim_parser(actions)
+    _configure_edit_parser(actions)
+    _configure_delete_parser(actions)
+    _configure_adopt_parser(actions)
 
+
+def _configure_note_parser(actions: Any) -> None:
     note = actions.add_parser(
         "note",
         help="Append a note annotation.",
@@ -174,6 +184,8 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     note.add_argument("text", nargs="?")
     note.set_defaults(func=handle)
 
+
+def _configure_depends_parser(actions: Any) -> None:
     depends = actions.add_parser(
         "depends",
         help="Add native dependency edges.",
@@ -204,6 +216,26 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     )
     depends.set_defaults(func=handle)
 
+
+def _configure_wake_parser(actions: Any) -> None:
+    wake = actions.add_parser(
+        "wake",
+        help="Make a waiting task current.",
+        recovery_examples=(
+            "spice task wake TASK-20260609T203539640394Z",
+            "spice task wake TASK-20260609T203539640394Z --claim",
+        ),
+    )
+    wake.add_argument("handle")
+    wake.add_argument(
+        "--claim",
+        action="store_true",
+        help="Claim the task after clearing its wait.",
+    )
+    wake.set_defaults(func=handle)
+
+
+def _configure_claim_parser(actions: Any) -> None:
     claim = actions.add_parser(
         "claim",
         help="Claim a task for this actor.",
@@ -213,6 +245,8 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     claim.add_argument("--steal", action="store_true")
     claim.set_defaults(func=handle)
 
+
+def _configure_unclaim_parser(actions: Any) -> None:
     unclaim = actions.add_parser(
         "unclaim",
         help="Release a claim.",
@@ -221,6 +255,8 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     unclaim.add_argument("handle")
     unclaim.set_defaults(func=handle)
 
+
+def _configure_edit_parser(actions: Any) -> None:
     edit = actions.add_parser(
         "edit",
         help="Change a task's priority and/or project in place.",
@@ -233,6 +269,8 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     edit.add_argument("--project", help="Reassign to an assignable dotted project.")
     edit.set_defaults(func=handle)
 
+
+def _configure_delete_parser(actions: Any) -> None:
     delete = actions.add_parser(
         "delete",
         help="Delete a task with a reason.",
@@ -244,6 +282,8 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     delete.add_argument("--reason", required=True)
     delete.set_defaults(func=handle)
 
+
+def _configure_adopt_parser(actions: Any) -> None:
     adopt = actions.add_parser(
         "adopt",
         help="Capture an orphan commit (committed with no task claimed) into a task.",
@@ -534,6 +574,7 @@ _DISPATCH = {
     "oops": _oops,
     "note": _note,
     "depends": lambda a: ops.depends(a.handle, list(a.after)),
+    "wake": lambda a: ops.wake(a.handle, claim_after=a.claim),
     "claim": lambda a: ops.claim(a.handle, steal=a.steal),
     "unclaim": lambda a: ops.unclaim(a.handle),
     "edit": lambda a: ops.edit(a.handle, priority=a.priority, project=a.project),
