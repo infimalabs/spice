@@ -18,6 +18,7 @@ from spice.mail.inbox import (
     compose_inbox_text,
     write_inbox_item,
 )
+from spice.serve.teamids import thread_actor_id
 from spice.serve.teams import (
     TASK_FILTER_SOURCE_AUTO_CREATE,
     ServeTeamStore,
@@ -30,6 +31,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ACTOR_MEMBER = thread_actor_id(ACTOR)
 INBOX_KEY = "20260104T000000000004Z"
 
 
@@ -166,7 +168,9 @@ def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(
 
 def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supervisor):
     store = ServeTeamStore()
-    team = store.create_team(members=[ACTOR], config=TeamConfig(lifetime="Drive"))
+    team = store.create_team(
+        members=[ACTOR_MEMBER], config=TeamConfig(lifetime="Drive")
+    )
     log = io.StringIO()
 
     watchdog.process_supervised_assistant_message(

@@ -601,9 +601,10 @@ def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
         return
 
     from spice.serve.teams import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CLAIM
+    from spice.tasks import lanes
 
     store = ServeTeamStore()
-    team_id = store.current_team_for_agent(actor)
+    team_id = store.current_team_for_agent(lanes.route_actor_id(actor))
     if team_id is None:
         return
     store.add_task_filter(team_id, project, source=TASK_FILTER_SOURCE_AUTO_CLAIM)
@@ -632,9 +633,10 @@ def _subscribe_auto_project(
         return f"route_filter=skipped:{project or '-'}:excluded"
 
     from spice.serve.teams import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CREATE
+    from spice.tasks import lanes
 
     store = ServeTeamStore()
-    team_id = store.current_team_for_agent(actor)
+    team_id = store.current_team_for_agent(lanes.route_actor_id(actor))
     if team_id is None:
         return f"route_filter=skipped:{project}:no_team"
     team_config = store.team_config(team_id)

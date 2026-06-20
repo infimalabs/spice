@@ -84,15 +84,22 @@ def _route_list(entry: RouteEntry, key: str) -> list[str]:
     return value if isinstance(value, list) else []
 
 
+def route_actor_id(actor: str) -> str:
+    from spice.serve.teamids import normalize_actor_id
+
+    return normalize_actor_id(actor)
+
+
 def team_route_for_actor(actor: str) -> RouteEntry | None:
     actor = str(actor or "").strip()
     if not actor:
         return None
+    lookup_id = route_actor_id(actor)
     from spice.serve.teams import ServeTeamStore
 
     for team in ServeTeamStore().team_snapshot().teams:
         member_ids = [member.agent_id for member in team.members]
-        if actor not in member_ids:
+        if lookup_id not in member_ids:
             continue
         filter_terms = [
             f"project:{config.validate_assignable_project(task_filter)}"
