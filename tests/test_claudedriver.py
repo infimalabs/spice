@@ -82,6 +82,7 @@ def test_claude_command_starts_headless_stream_json_with_effort(tmp_path):
     )
     assert command[0] == "claude"
     assert command[1:5] == ["--print", "--output-format", "stream-json", "--verbose"]
+    assert "--include-partial-messages" in command
     assert command[command.index("--model") + 1] == "haiku"
     assert command[command.index("--permission-mode") + 1] == "bypassPermissions"
     assert command[command.index("--effort") + 1] == "xhigh"
