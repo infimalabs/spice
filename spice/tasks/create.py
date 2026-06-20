@@ -25,6 +25,7 @@ class TaskAddBatchRequest:
     tags: tuple[str, ...] = ()
     after: tuple[str, ...] = ()
     due: str | None = None
+    deferred: bool = False
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,16 @@ def _task_acceptance(acceptance: Sequence[str]) -> list[str]:
 
 def _task_creation_surface(value: str | None) -> str:
     return _task_text((value or "").strip())
+
+
+def _resolved_wait(*, wait: str | None, deferred: bool, claim: bool) -> str | None:
+    if not deferred:
+        return wait
+    if wait:
+        raise SpiceError("task add --deferred cannot be combined with --wait")
+    if claim:
+        raise SpiceError("task add --deferred cannot be combined with --claim")
+    return config.OOPS_WAIT
 
 
 def _resolve_add_project(actor: str, project: str | None, system_project: bool) -> str:
@@ -149,6 +160,7 @@ def _add_result(
     acceptance: list[str],
     wait: str | None,
     claim: bool,
+    deferred: bool = False,
     every: str | None = None,
     scheduled: str | None = None,
     until: str | None = None,
@@ -161,6 +173,7 @@ def _add_result(
 ) -> TaskAddResult:
     title = _task_title(title)
     body = _task_description(description)
+    resolved_wait = _resolved_wait(wait=wait, deferred=deferred, claim=claim)
     actor = tw.canonical_actor(actor_override or tw.current_actor())
     if claim:
         ops._require_single_active_slot(actor, action="task add --claim")
@@ -183,7 +196,7 @@ def _add_result(
         tags=tags,
         after=after,
         acceptance=acceptance,
-        wait=wait,
+        wait=resolved_wait,
         every=every,
         scheduled=scheduled,
         until=until,
@@ -262,6 +275,7 @@ def add(
     after: list[str] | None = None,
     acceptance: list[str] | None = None,
     wait: str | None = None,
+    deferred: bool = False,
     claim: bool = False,
     every: str | None = None,
     scheduled: str | None = None,
@@ -279,6 +293,7 @@ def add(
         after=after or [],
         acceptance=acceptance or [],
         wait=wait,
+        deferred=deferred,
         claim=claim,
         every=every,
         scheduled=scheduled,
@@ -335,6 +350,8 @@ def _batch_field_errors(fields: dict[str, str], index: int) -> list[str]:
             config.map_priority(fields["priority"])
         except SpiceError as exc:
             errors.append(f"line {index}: {exc}")
+    if "deferred" in fields and not _batch_bool_field(fields["deferred"]):
+        errors.append(f"line {index}: deferred must be true/false")
     flow = _batch_csv(fields.get("flow", ""))
     if flow and fields.get("project"):
         try:
@@ -360,11 +377,30 @@ def _batch_request_from_fields(fields: dict[str, str]) -> TaskAddBatchRequest:
         after=_batch_csv(fields.get("after", "")),
         acceptance=(fields["acceptance"],),
         due=fields.get("due") or None,
+        deferred=_batch_bool(fields.get("deferred", "")),
     )
 
 
 def _batch_csv(raw: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _batch_bool_field(raw: str) -> bool:
+    return raw.strip().lower() in {
+        "",
+        "0",
+        "1",
+        "false",
+        "no",
+        "off",
+        "on",
+        "true",
+        "yes",
+    }
+
+
+def _batch_bool(raw: str) -> bool:
+    return raw.strip().lower() in {"1", "on", "true", "yes"}
 
 
 def _strip_task_batch_directive(raw: str) -> str:
@@ -419,6 +455,7 @@ def add_batch_results(
             after=list(request.after),
             acceptance=list(request.acceptance),
             wait=None,
+            deferred=request.deferred,
             claim=False,
             due=request.due,
             existing=existing,
