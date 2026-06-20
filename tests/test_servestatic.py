@@ -653,8 +653,9 @@ def test_static_composer_drag_has_ghost_drop_zones_and_reorder_command():
     assert ".composer-shard--drag-ghost" in css
     assert ".composer-shard--dragging > *" in css
     assert ".composer-band--dragging > *" in css
-    assert ".composer-shard--composer-drop-left::before" in css
-    assert ".composer-shard--composer-drop-right::after" in css
+    assert ".composer-shards--reordering .composer-shard" in css
+    assert "transition: transform" in css
+    assert ".composer-shard--reorder-shift" in css
     assert ".lane--composer-drop .composer-shards" in css
     assert ".lane--dragging > *" in css
     assert ".lane-drag-ghost" in css

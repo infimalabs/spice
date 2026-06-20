@@ -88,6 +88,23 @@ def test_serve_menu_smoke_uses_harness_for_interaction() -> None:
     assert "New team" not in smoke
 
 
+def test_serve_composer_reorder_smoke_asserts_swap_contract() -> None:
+    smoke = (ROOT / "browser" / "serve_composer_reorder_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert "snapshotComposerReorder(state)" in smoke
+    assert "composerReorderDropTarget(" in smoke
+    assert "clearComposerMoveDropHighlights()" in smoke
+    # Lifted + dropped-on swap; the middle shard must not move.
+    assert '["gamma", "beta", "alpha"]' in smoke
+    assert "untouched shard beta moved" in smoke
+    assert "gained a horizontal scrollbar" in smoke
+    assert "transforms not cleared on teardown" in smoke
+
+
 def test_serve_identity_smoke_uses_harness_for_mismatch() -> None:
     smoke = (ROOT / "browser" / "serve_identity_smoke.js").read_text(encoding="utf-8")
 
