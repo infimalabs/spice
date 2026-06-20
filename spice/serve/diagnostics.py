@@ -119,7 +119,9 @@ def _member_rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
 def _renewal_rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = connection.execute(
         "SELECT agent_id, team_id, state, ancestor_thread_id, "
-        "successor_agent_id, revision FROM renewals ORDER BY revision, agent_id"
+        "successor_agent_id, successor_thread_id, team_slot, "
+        "predecessor_identity, successor_identity, revision "
+        "FROM renewals ORDER BY revision, agent_id"
     ).fetchall()
     return [
         {
@@ -128,6 +130,10 @@ def _renewal_rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
             "state": str(row["state"]),
             "ancestorThreadId": str(row["ancestor_thread_id"]),
             "successorAgentId": str(row["successor_agent_id"]),
+            "successorThreadId": str(row["successor_thread_id"]),
+            "teamSlot": row["team_slot"],
+            "predecessorIdentity": str(row["predecessor_identity"]),
+            "successorIdentity": str(row["successor_identity"]),
             "revision": int(row["revision"]),
         }
         for row in rows
@@ -290,12 +296,15 @@ def _render_renewals(renewals: list[dict[str, Any]]) -> list[str]:
         return ["  (none)"]
     return [
         "  renewal {agentId} state={state} team={teamId} ancestor={ancestor} "
-        "successor={successor} revision={revision}".format(
+        "successor={successor} successor_thread={successor_thread} "
+        "slot={slot} revision={revision}".format(
             agentId=renewal["agentId"],
             state=renewal["state"],
             teamId=renewal["teamId"],
             ancestor=renewal["ancestorThreadId"] or "-",
             successor=renewal["successorAgentId"] or "-",
+            successor_thread=renewal["successorThreadId"] or "-",
+            slot="-" if renewal["teamSlot"] is None else renewal["teamSlot"],
             revision=renewal["revision"],
         )
         for renewal in renewals

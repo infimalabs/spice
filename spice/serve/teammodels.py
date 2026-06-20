@@ -97,6 +97,10 @@ class TeamRenewalState:
     ancestor_thread_id: str
     successor_agent_id: str
     revision: int
+    successor_thread_id: str = ""
+    team_slot: int | None = None
+    predecessor_identity: dict[str, Any] = field(default_factory=dict)
+    successor_identity: dict[str, Any] = field(default_factory=dict)
 
     @property
     def requested(self) -> bool:
@@ -167,5 +171,15 @@ def renewal_intent_payload(
         "teamId": renewal.team_id if renewal is not None else "",
         "ancestorThreadId": renewal.ancestor_thread_id if renewal is not None else "",
         "successorAgentId": renewal.successor_agent_id if renewal is not None else "",
+        "successorThreadId": (
+            renewal.successor_thread_id if renewal is not None else ""
+        ),
+        "teamSlot": renewal.team_slot if renewal is not None else None,
+        "predecessorIdentity": (
+            dict(renewal.predecessor_identity) if renewal is not None else {}
+        ),
+        "successorIdentity": (
+            dict(renewal.successor_identity) if renewal is not None else {}
+        ),
         "revision": renewal.revision if renewal is not None else 0,
     }

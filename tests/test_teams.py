@@ -26,6 +26,32 @@ RESTORED_SUBGROUP_TOOL_CALL_TOTAL = 42
 IDENTITY_RENEWAL_REVISION = 42
 
 
+def _record_identity(
+    store: ServeTeamStore,
+    actor_id: str,
+    *,
+    target_id: str = "wt-a",
+    thread_id: str = "",
+    actual_model: str = "actual-model",
+    actual_effort: str = "low",
+    desired_model: str = "desired-model",
+    desired_effort: str = "high",
+) -> None:
+    store.record_agent_identity(
+        actor_id=actor_id,
+        target_id=target_id,
+        thread_id=thread_id or actor_id.removeprefix("thread:"),
+        actual_driver="codex",
+        actual_model=actual_model,
+        actual_effort=actual_effort,
+        actual_service_tier="default",
+        desired_driver="codex",
+        desired_model=desired_model,
+        desired_effort=desired_effort,
+        transcript_owner="codex",
+    )
+
+
 def test_empty_team_snapshot_creates_initial_empty_team(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
 
@@ -354,6 +380,7 @@ def test_team_command_service_toggles_agent_renewal_intent(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     service = TeamCommandService(store)
     created = service.apply({"command": "createTeam", "members": ["thread:agent-a"]})
+    _record_identity(store, "thread:agent-a", thread_id="agent-a")
 
     enabled = service.apply(
         {
@@ -370,6 +397,13 @@ def test_team_command_service_toggles_agent_renewal_intent(tmp_path):
     assert enabled_member["renewalIntent"]["agentId"] == "thread:agent-a"
     assert enabled_member["renewalIntent"]["requested"] is True
     assert enabled_member["renewalIntent"]["state"] == "requested"
+    assert enabled_member["renewalIntent"]["teamSlot"] == 0
+    assert enabled_member["renewalIntent"]["predecessorIdentity"]["threadId"] == (
+        "agent-a"
+    )
+    assert enabled_member["renewalIntent"]["successorIdentity"]["desiredModel"] == (
+        "desired-model"
+    )
 
     disabled = service.apply(
         {
@@ -390,6 +424,7 @@ def test_team_command_service_toggles_agent_renewal_intent(tmp_path):
 def test_pending_renewal_remains_active_until_successor_starts(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     store.create_team(members=["agent-a"])
+    _record_identity(store, "agent-a")
 
     store.record_pending_renewal(agent_id="agent-a", ancestor_thread_id="agent-a")
 
@@ -408,6 +443,7 @@ def test_pending_renewal_remains_active_until_successor_starts(tmp_path):
 def test_started_renewal_preserves_predecessor_roster_slot(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(members=["agent-a", "agent-b", "agent-c"])
+    _record_identity(store, "agent-b", target_id="wt-b")
     store.record_pending_renewal(agent_id="agent-b", ancestor_thread_id="agent-b")
 
     store.record_started_renewal(
@@ -427,6 +463,45 @@ def test_started_renewal_preserves_predecessor_roster_slot(tmp_path):
     renewal = store.renewal_state_for_agent("agent-b")
     assert renewal is not None
     assert renewal.successor_agent_id == "agent-b-renewed"
+    assert renewal.successor_thread_id == "agent-b-renewed"
+    assert renewal.team_slot == 1
+    assert renewal.predecessor_identity["actorId"] == "agent-b"
+    assert renewal.predecessor_identity["actualModel"] == "actual-model"
+    assert renewal.successor_identity["actorId"] == "agent-b-renewed"
+    assert renewal.successor_identity["targetId"] == "wt-b"
+    assert renewal.successor_identity["threadId"] == "agent-b-renewed"
+
+
+def test_renewal_records_model_effort_change_for_successor_identity(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.create_team(members=["thread:agent-a"])
+    _record_identity(
+        store,
+        "thread:agent-a",
+        thread_id="agent-a",
+        actual_model="old-model",
+        actual_effort="low",
+        desired_model="new-model",
+        desired_effort="xhigh",
+    )
+
+    pending = store.record_pending_renewal(
+        agent_id="thread:agent-a", ancestor_thread_id="agent-a"
+    )
+    started = store.record_started_renewal(
+        predecessor_agent_id="thread:agent-a",
+        successor_agent_id="thread:agent-b",
+        ancestor_thread_id="agent-a",
+    )
+
+    assert pending.predecessor_identity["actualModel"] == "old-model"
+    assert pending.successor_identity["desiredModel"] == "new-model"
+    assert pending.successor_identity["desiredEffort"] == "xhigh"
+    assert started.successor_thread_id == "agent-b"
+    assert started.successor_identity["actorId"] == "thread:agent-b"
+    assert started.successor_identity["threadId"] == "agent-b"
+    assert started.successor_identity["desiredModel"] == "new-model"
+    assert started.successor_identity["desiredEffort"] == "xhigh"
 
 
 def test_removing_final_agent_closes_team(tmp_path):
@@ -656,6 +731,7 @@ def test_team_store_backfills_agent_identity_from_existing_membership_and_renewa
 ):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(members=["agent-a"])
+    _record_identity(store, "agent-a")
     renewal = store.record_pending_renewal(
         agent_id="agent-a", ancestor_thread_id="agent-a"
     )

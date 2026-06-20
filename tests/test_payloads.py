@@ -36,6 +36,28 @@ from spice.tasks import tw
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 
 
+def _record_identity(
+    store: ServeTeamStore,
+    actor_id: str,
+    *,
+    target_id: str = "wt",
+    thread_id: str = "",
+) -> None:
+    store.record_agent_identity(
+        actor_id=actor_id,
+        target_id=target_id,
+        thread_id=thread_id or actor_id.removeprefix("thread:"),
+        actual_driver="codex",
+        actual_model="actual-model",
+        actual_effort="low",
+        actual_service_tier="fast",
+        desired_driver="codex",
+        desired_model="desired-model",
+        desired_effort="high",
+        transcript_owner="codex",
+    )
+
+
 def _message(
     timestamp: str,
     *,
@@ -285,6 +307,7 @@ def test_serve_agent_identity_normalizes_legacy_bare_actor_and_renewal(
     _init_repo(repo)
     store = ServeTeamStore(tmp_path / "teams.sqlite")
     store.create_team(members=["thread-a", "thread-b"])
+    _record_identity(store, "thread-a", thread_id="thread-a")
     renewal = store.record_pending_renewal(
         agent_id="thread-a", ancestor_thread_id="thread-a"
     )
@@ -1110,6 +1133,7 @@ def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
 def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     store.create_team(members=["thread:agent-a"])
+    _record_identity(store, "thread:agent-a", thread_id="agent-a")
     store.set_agent_renewal_request("thread:agent-a", requested=True)
     monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
@@ -1150,6 +1174,11 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
     assert payload["renewalIntent"]["agentId"] == "thread:agent-a"
     assert payload["renewalIntent"]["requested"] is True
     assert payload["renewalIntent"]["state"] == "requested"
+    assert payload["renewalIntent"]["teamSlot"] == 0
+    assert payload["renewalIntent"]["predecessorIdentity"]["threadId"] == "agent-a"
+    assert payload["renewalIntent"]["successorIdentity"]["desiredModel"] == (
+        "desired-model"
+    )
 
 
 def test_sent_steering_payload_includes_image_attachments(tmp_path):

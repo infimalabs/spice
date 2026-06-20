@@ -19,6 +19,22 @@ TASK_FILTERS = ("serve.ui", "task.review")
 TEAM_ID = "team-main"
 
 
+def _record_identity(store: ServeTeamStore) -> None:
+    store.record_agent_identity(
+        actor_id=AGENT_A,
+        target_id="wt-a",
+        thread_id=AGENT_A,
+        actual_driver="codex",
+        actual_model="actual-model",
+        actual_effort="low",
+        actual_service_tier="fast",
+        desired_driver="codex",
+        desired_model="desired-model",
+        desired_effort="high",
+        transcript_owner="codex",
+    )
+
+
 def test_team_diagnostics_include_events_routes_and_taskdrain_filters(tmp_path):
     store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
     created = store.create_team(
@@ -30,6 +46,7 @@ def test_team_diagnostics_include_events_routes_and_taskdrain_filters(tmp_path):
             selected_view="queue",
         ),
     )
+    _record_identity(store)
     renewal = store.record_pending_renewal(
         agent_id=AGENT_A,
         ancestor_thread_id=ANCESTOR_THREAD,
@@ -64,11 +81,13 @@ def test_team_diagnostics_include_events_routes_and_taskdrain_filters(tmp_path):
     assert "routeFilters=agent.agenta.task,project:serve.ui,project:task.review" in text
     assert "taskdrain team=team-main lifetime=Drive applies=yes" in text
     assert f"renewal {AGENT_A} state=pending team={TEAM_ID}" in text
+    assert "successor_thread=- slot=0" in text
 
 
 def test_team_diagnostics_include_requested_renewal_intent(tmp_path):
     store = ServeTeamStore(path=tmp_path / TEAM_DATABASE_FILENAME)
     store.create_team(team_id=TEAM_ID, members=[AGENT_A])
+    _record_identity(store)
 
     renewal = store.set_agent_renewal_request(AGENT_A, requested=True)
     payload = team_diagnostics_payload(store=store)

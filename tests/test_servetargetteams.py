@@ -73,6 +73,7 @@ def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
     target = _target(repo)
     state = _serve_state(tmp_path, target)
     created = state.team_store.create_team(members=[f"target:{target.id}"])
+    _record_target_identity(state, target)
     state.team_store.set_agent_renewal_request(f"target:{target.id}", requested=True)
     ensure_calls: list[dict[str, object]] = []
     _patch_payload_dependencies(
@@ -188,6 +189,22 @@ def _serve_state(tmp_path: Path, target: WorktreeTarget) -> ServeState:
     state.team_store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     state.team_commands = TeamCommandService(state.team_store)
     return state
+
+
+def _record_target_identity(state: ServeState, target: WorktreeTarget) -> None:
+    state.team_store.record_agent_identity(
+        actor_id=f"target:{target.id}",
+        target_id=target.id,
+        thread_id="",
+        actual_driver="",
+        actual_model="",
+        actual_effort="",
+        actual_service_tier="",
+        desired_driver="codex",
+        desired_model="gpt-next",
+        desired_effort="high",
+        transcript_owner="",
+    )
 
 
 def _pending_identity() -> dict[str, object]:

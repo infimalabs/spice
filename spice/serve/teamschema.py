@@ -76,6 +76,10 @@ CREATE TABLE IF NOT EXISTS renewals (
     state TEXT NOT NULL,
     ancestor_thread_id TEXT NOT NULL,
     successor_agent_id TEXT NOT NULL DEFAULT '',
+    successor_thread_id TEXT NOT NULL DEFAULT '',
+    team_slot INTEGER,
+    predecessor_identity TEXT NOT NULL DEFAULT '{}',
+    successor_identity TEXT NOT NULL DEFAULT '{}',
     revision INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS agent_identities (
