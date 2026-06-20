@@ -6,7 +6,14 @@ from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
 
-from spice.serve import agentapi, app, payloads
+from spice.serve import (
+    agentapi,
+    app,
+    identitypayload,
+    lanepayload,
+    messagepayload,
+    worktreepayload,
+)
 from spice.serve.app import (
     ServeState,
     work_tree_send_response_payload,
@@ -31,7 +38,7 @@ def test_unstarted_target_id_membership_is_visible_in_target_payload(
     )
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
 
-    result = payloads.work_trees_payload(state)
+    result = worktreepayload.work_trees_payload(state)
 
     work_tree = result["workTrees"][0]
     assert work_tree["targetIdentity"]["thread"] == {"state": "unbound"}
@@ -56,7 +63,7 @@ def test_unstarted_target_id_membership_is_visible_in_lane_payload(
     )
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
 
-    result = payloads.messages_payload_for_worktree(state, target, limit=5)
+    result = messagepayload.messages_payload_for_worktree(state, target, limit=5)
     signature = app.lane_signature_for_target(state, target, "", None)
 
     assert result["targetIdentity"]["thread"] == {"state": "unbound"}
@@ -80,7 +87,7 @@ def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
         monkeypatch, thread_id=THREAD_A, running=False, ensure_calls=ensure_calls
     )
 
-    result = payloads.work_trees_payload(state)
+    result = worktreepayload.work_trees_payload(state)
 
     work_tree = result["workTrees"][0]
     members = state.team_store.team_state(created.team_id).members
@@ -235,20 +242,34 @@ def _patch_payload_dependencies(
             ensure_calls.append({"target": target, "pending": pending, **kwargs})
         return None
 
-    monkeypatch.setattr(payloads, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(identitypayload, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(worktreepayload, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(messagepayload, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(lanepayload, "agent_status", lambda _repo: status)
     monkeypatch.setattr(app, "agent_status", lambda _repo: status)
     monkeypatch.setattr(agentapi, "agent_status", lambda _repo: status)
-    monkeypatch.setattr(payloads, "agent_binding_error", lambda *_args: "")
-    monkeypatch.setattr(payloads, "configured_say_voice", lambda _repo: "")
-    monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(worktreepayload, "agent_binding_error", lambda *_args: "")
+    monkeypatch.setattr(messagepayload, "agent_binding_error", lambda *_args: "")
+    monkeypatch.setattr(lanepayload, "agent_binding_error", lambda *_args: "")
+    monkeypatch.setattr(identitypayload, "configured_say_voice", lambda _repo: "")
+    monkeypatch.setattr(worktreepayload, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(messagepayload, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
-        payloads, "pending_inbox_identity_payload", lambda _repo: _pending_identity()
+        worktreepayload,
+        "pending_inbox_identity_payload",
+        lambda _repo: _pending_identity(),
     )
-    monkeypatch.setattr(payloads, "ensure_agent_for_pending_inbox", fake_ensure)
     monkeypatch.setattr(
-        payloads.message_reader,
+        messagepayload,
+        "pending_inbox_identity_payload",
+        lambda _repo: _pending_identity(),
+    )
+    monkeypatch.setattr(worktreepayload, "ensure_agent_for_pending_inbox", fake_ensure)
+    monkeypatch.setattr(messagepayload, "ensure_agent_for_pending_inbox", fake_ensure)
+    monkeypatch.setattr(
+        messagepayload.message_reader,
         "assistant_messages_for_thread_id",
-        lambda *_args, **_kwargs: payloads.message_reader.AssistantMessageRead(
+        lambda *_args, **_kwargs: messagepayload.message_reader.AssistantMessageRead(
             items=[],
             error=None,
             transcript=None,

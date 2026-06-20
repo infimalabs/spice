@@ -28,7 +28,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
 )
 from spice.paths import repo_root_from_cwd, shared_attachment_root
-from spice.serve import payloads
+from spice.serve import identitypayload, messagepayload, worktreepayload
 from spice.serve.agentapi import (
     agent_ensure_response_payload,
     agent_status_payload,
@@ -217,8 +217,8 @@ def work_tree_send_response_payload(
             "ok": False,
             "error": "Message text is required.",
         }, HTTPStatus.BAD_REQUEST
-    predecessor = payloads.resolve_thread_id_for_target(state, target) or ""
-    predecessor_actor = payloads.team_actor_for_target(
+    predecessor = identitypayload.resolve_thread_id_for_target(state, target) or ""
+    predecessor_actor = identitypayload.team_actor_for_target(
         state.team_store, target, predecessor
     )
     renew_intent = bool(
@@ -230,7 +230,7 @@ def work_tree_send_response_payload(
     force_new = False
     if renew_intent:
         status = agent_status(target.repo_root)
-        payloads.serve_agent_identity_payload(
+        identitypayload.serve_agent_identity_payload(
             target,
             predecessor,
             actor_id=predecessor_actor,
@@ -278,31 +278,33 @@ def work_tree_send_response_payload(
     )
     agent_ensure = response_payload.get("agentEnsure")
     if renew_intent and force_new:
-        ensured_thread_id = payloads.record_started_renewal_from_ensure(
+        ensured_thread_id = identitypayload.record_started_renewal_from_ensure(
             state.team_store,
             predecessor_agent_id=predecessor_actor,
             agent_ensure=agent_ensure if isinstance(agent_ensure, dict) else None,
         )
     else:
-        ensured_thread_id = payloads.agent_ensure_thread_id(
+        ensured_thread_id = identitypayload.agent_ensure_thread_id(
             agent_ensure if isinstance(agent_ensure, dict) else None
         )
     send_agent_id = (
-        ensured_thread_id or payloads.resolve_thread_id_for_target(state, target) or ""
+        ensured_thread_id
+        or identitypayload.resolve_thread_id_for_target(state, target)
+        or ""
     )
     send_actor = ""
     if send_agent_id:
-        send_actor = payloads.team_actor_for_target(
+        send_actor = identitypayload.team_actor_for_target(
             state.team_store, target, send_agent_id
         )
     state.record_lane_send(target.id, agent_id=send_actor)
     renewal_agent_id = predecessor_actor if renew_intent else send_actor
     if renewal_agent_id:
-        response_payload["renewalIntent"] = payloads.renewal_intent_for_actor(
+        response_payload["renewalIntent"] = identitypayload.renewal_intent_for_actor(
             state.team_store, renewal_agent_id
         )
     route_thread_id = send_agent_id or predecessor
-    route_actor = payloads.team_actor_for_target(
+    route_actor = identitypayload.team_actor_for_target(
         state.team_store, target, route_thread_id
     )
     response_payload["route"] = _work_tree_route_payload(
@@ -320,8 +322,8 @@ def _apply_lifetime_to_team(
     lifetime = str(payload.get("lifetime") or "").strip()
     if lifetime not in LIFETIME_LABELS:
         return
-    thread_id = payloads.resolve_thread_id_for_target(state, target) or ""
-    actor = payloads.team_actor_for_target(state.team_store, target, thread_id)
+    thread_id = identitypayload.resolve_thread_id_for_target(state, target) or ""
+    actor = identitypayload.team_actor_for_target(state.team_store, target, thread_id)
     team_id = state.team_store.current_team_for_agent(actor)
     if team_id is None:
         return
@@ -348,8 +350,8 @@ def work_tree_task_drain_response_payload(
 ) -> tuple[dict[str, Any], HTTPStatus]:
     _apply_lifetime_to_team(state, target, payload)
     task_filters = payload.get("taskFilters")
-    thread_id = payloads.resolve_thread_id_for_target(state, target) or ""
-    actor = payloads.team_actor_for_target(state.team_store, target, thread_id)
+    thread_id = identitypayload.resolve_thread_id_for_target(state, target) or ""
+    actor = identitypayload.team_actor_for_target(state.team_store, target, thread_id)
     if bool(payload.get("replaceTaskFilters")) and isinstance(task_filters, list):
         if not actor:
             return (
@@ -390,16 +392,16 @@ def _work_tree_route_payload(
     thread_id: str,
     actor: str,
 ) -> dict[str, Any]:
-    facts = payloads.team_facts_for_actor(state.team_store, actor)
+    facts = identitypayload.team_facts_for_actor(state.team_store, actor)
     return {
         "actor": actor,
-        "targetIdentity": payloads.target_identity_payload(target, thread_id),
-        "serveAgentIdentity": payloads.serve_agent_identity_payload(
+        "targetIdentity": identitypayload.target_identity_payload(target, thread_id),
+        "serveAgentIdentity": identitypayload.serve_agent_identity_payload(
             target,
             thread_id,
             store=state.team_store,
         ),
-        "teamIdentity": payloads.team_identity_payload(facts),
+        "teamIdentity": identitypayload.team_identity_payload(facts),
         "memberAgents": [actor] if actor else [],
         "laneName": target.name,
         "taskFilters": facts.get("taskFilters", []),
@@ -430,7 +432,7 @@ def team_command_response_payload(
 ) -> tuple[dict[str, Any], HTTPStatus]:
     try:
         result = state.team_commands.apply(
-            payloads.normalize_team_command_payload(
+            identitypayload.normalize_team_command_payload(
                 payload, targets=state.worktree_targets()
             )
         )
@@ -472,7 +474,9 @@ def lane_signature_for_target(
     thread_id: str | None,
     transcript: TranscriptResolution | None,
 ) -> tuple[Any, ...]:
-    team_facts = payloads.team_facts_for_target(state.team_store, target, thread_id)
+    team_facts = identitypayload.team_facts_for_target(
+        state.team_store, target, thread_id
+    )
     return (
         _path_signature(transcript.path if transcript else None),
         transcript.owner_driver.name if transcript else "",
@@ -533,7 +537,7 @@ def serve_metrics_text(state: ServeState) -> str:
     rollout_present = 0
     pending = 0
     for target in state.worktree_targets():
-        thread_id = payloads.resolve_thread_id_for_target(state, target) or ""
+        thread_id = identitypayload.resolve_thread_id_for_target(state, target) or ""
         if thread_id:
             bound = 1
             transcript = resolve_thread_transcript(thread_id, target.repo_root)
@@ -680,7 +684,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/work/trees":
             self.state.invalidate_targets()
-            self._send_json(payloads.work_trees_payload(self.state))
+            self._send_json(worktreepayload.work_trees_payload(self.state))
             return
         if parsed.path == "/api/teams":
             self._send_json(
@@ -719,7 +723,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         query = parse_qs(query_string)
         if action == "messages":
             self._send_json(
-                payloads.messages_payload_for_worktree(
+                messagepayload.messages_payload_for_worktree(
                     self.state,
                     target,
                     limit=_query_int(query, "limit", DEFAULT_MESSAGE_LIMIT),
@@ -731,7 +735,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
             return
         if action == "acks":
             self._send_json(
-                payloads.ack_context_payload_for_worktree(
+                messagepayload.ack_context_payload_for_worktree(
                     self.state, target, keys=query.get("key", [])
                 )
             )
@@ -755,7 +759,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         if offset < 0 or item < 0:
             self.send_error(HTTPStatus.BAD_REQUEST, "offset and item are required")
             return
-        thread_id = payloads.resolve_thread_id_for_target(self.state, target)
+        thread_id = identitypayload.resolve_thread_id_for_target(self.state, target)
         transcript = (
             resolve_thread_transcript(thread_id, target.repo_root)
             if thread_id
@@ -875,10 +879,13 @@ class _ServeHandler(BaseHTTPRequestHandler):
                     state, selector
                 ),
                 work_trees_payload=lambda: (
-                    state.invalidate_targets() or payloads.work_trees_payload(state)
+                    state.invalidate_targets()
+                    or worktreepayload.work_trees_payload(state)
                 ),
                 messages_payload=lambda target, **kwargs: (
-                    payloads.messages_payload_for_worktree(state, target, **kwargs)
+                    messagepayload.messages_payload_for_worktree(
+                        state, target, **kwargs
+                    )
                 ),
                 send_payload=lambda target, payload: work_tree_send_response_payload(
                     state, target, payload
@@ -892,7 +899,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 team_command_payload=lambda payload: team_command_response_payload(
                     state, payload
                 ),
-                thread_id=lambda target: payloads.resolve_thread_id_for_target(
+                thread_id=lambda target: identitypayload.resolve_thread_id_for_target(
                     state, target
                 ),
                 transcript_resolution=resolve_thread_transcript,

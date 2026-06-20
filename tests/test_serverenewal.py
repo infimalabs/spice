@@ -14,7 +14,14 @@ from spice.mail.inbox import (
     inbox_request_body,
     write_inbox_item,
 )
-from spice.serve import agentapi, app, payloads
+from spice.serve import (
+    agentapi,
+    app,
+    identitypayload,
+    lanepayload,
+    messagepayload,
+    worktreepayload,
+)
 from spice.serve.app import ServeState, work_tree_send_response_payload
 from spice.serve.teams import ServeTeamStore, TeamCommandService
 from spice.serve.worktrees import WorktreeTarget
@@ -41,7 +48,7 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
     record_lane_send = state.record_lane_send
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
-        payloads,
+        identitypayload,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -120,7 +127,7 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
     ensure_calls: list[dict[str, object]] = []
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
-        payloads,
+        identitypayload,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -130,19 +137,19 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
         return {"ok": True, "threadId": THREAD_B}, HTTPStatus.OK
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
-    monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
-    monkeypatch.setattr(payloads, "agent_binding_error", lambda *_args: "")
+    monkeypatch.setattr(worktreepayload, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(worktreepayload, "agent_binding_error", lambda *_args: "")
     monkeypatch.setattr(
-        payloads.message_reader,
+        messagepayload.message_reader,
         "assistant_messages_for_thread_id",
-        lambda *_args, **_kwargs: payloads.message_reader.AssistantMessageRead(
+        lambda *_args, **_kwargs: messagepayload.message_reader.AssistantMessageRead(
             items=[],
             error=None,
             transcript=None,
         ),
     )
 
-    result = payloads.work_trees_payload(state)
+    result = worktreepayload.work_trees_payload(state)
 
     work_tree = result["workTrees"][0]
     assert work_tree["targetIdentity"]["thread"] == {
@@ -184,7 +191,7 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
     message_threads: list[str] = []
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
-        payloads,
+        identitypayload,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -195,21 +202,21 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
 
     def fake_messages(thread_id, **_kwargs):
         message_threads.append(thread_id)
-        return payloads.message_reader.AssistantMessageRead(
+        return messagepayload.message_reader.AssistantMessageRead(
             items=[],
             error=None,
             transcript=None,
         )
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
-    monkeypatch.setattr(payloads, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(messagepayload, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
-        payloads.message_reader,
+        messagepayload.message_reader,
         "assistant_messages_for_thread_id",
         fake_messages,
     )
 
-    result = payloads.messages_payload_for_worktree(
+    result = messagepayload.messages_payload_for_worktree(
         state, target, limit=5, expected_thread_id=THREAD_A
     )
 
@@ -285,4 +292,14 @@ def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:
     )
     monkeypatch.setattr(app, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(agentapi, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(payloads, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(
+        identitypayload, "agent_status", lambda *_args, **_kwargs: status
+    )
+    monkeypatch.setattr(
+        worktreepayload, "agent_status", lambda *_args, **_kwargs: status
+    )
+    monkeypatch.setattr(
+        messagepayload, "agent_status", lambda *_args, **_kwargs: status
+    )
+    monkeypatch.setattr(lanepayload, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(lanepayload, "agent_binding_error", lambda *_args: "")
