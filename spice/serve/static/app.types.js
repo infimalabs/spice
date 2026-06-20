@@ -27,8 +27,14 @@
  * @property {string} targetId
  * @property {string} worktreeName
  * @property {string} branch
+ * @property {DriverIdentity} driver
  * @property {AgentIdentity} agent
  * @property {ThreadIdentity} thread
+ *
+ * @typedef {Object} DriverIdentity
+ * @property {string} name
+ * @property {string} model
+ * @property {string} effort
  *
  * @typedef {Object} AgentIdentity
  * @property {"configured"|"unconfigured"} state

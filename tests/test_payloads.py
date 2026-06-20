@@ -106,6 +106,42 @@ def test_target_identity_payload_rejects_blank_bound_thread_id():
         )
 
 
+def test_target_identity_payload_reports_configured_driver(tmp_path, monkeypatch):
+    from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
+    from spice.config import update_section
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    update_section(
+        repo,
+        "agent",
+        {"driver": "claude", "model": "claude-sonnet-4-5", "effort": "medium"},
+    )
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+
+    identity = payloads.target_identity_payload(
+        _Target(id="wt", repo_root=repo),
+        "",
+        binding_status="unbound",
+    )
+
+    assert identity["driver"] == {
+        "name": "claude",
+        "model": "claude-sonnet-4-5",
+        "effort": "medium",
+    }
+    rows = {
+        row["key"]: row["value"]
+        for row in payloads._lane_info_payload(_Target(id="wt", repo_root=repo), "")[
+            "summaryRows"
+        ]
+    }
+    assert rows["driver"] == "claude"
+    assert rows["model"] == "claude-sonnet-4-5"
+    assert rows["effort"] == "medium"
+
+
 def test_team_identity_payload_rejects_missing_member_revisions():
     with pytest.raises(SpiceError, match="team revision is required"):
         payloads.team_identity_payload({"teamId": "team-1"})

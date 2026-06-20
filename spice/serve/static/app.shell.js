@@ -104,6 +104,9 @@ function createLaneState(targetId, hint = null, options = {}) {
     closed: false,
     laneId: "lane:" + targetId,
     agentName: emptyTeam ? "" : targetIdentityAgentName(targetIdentity),
+    driverName: emptyTeam ? "" : targetIdentityDriverName(targetIdentity),
+    driverModel: emptyTeam ? "" : targetIdentityDriverModel(targetIdentity),
+    driverEffort: emptyTeam ? "" : targetIdentityDriverEffort(targetIdentity),
     branchName: emptyTeam
       ? "empty team"
       : targetIdentityBranch(targetIdentity),
@@ -205,6 +208,9 @@ function syncEmptyTeamLane(lane, team = {}, options = {}) {
     Number(config.revision || lane.configRevision || 0),
   );
   lane.agentName = "";
+  lane.driverName = "";
+  lane.driverModel = "";
+  lane.driverEffort = "";
   lane.branchName = "empty team";
   lane.targetThreadId = "";
   lane.activeThreadId = "";

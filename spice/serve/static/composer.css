@@ -136,6 +136,7 @@
   min-height: 96px;
   min-width: 0;
   overflow: hidden;
+  position: relative;
 }
 .composer-band--primary {
   flex: 0 0 100%;
@@ -144,6 +145,39 @@
   background: color-mix(in srgb, var(--accent) 7%, var(--panel));
   border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
   flex: 0 0 100%;
+}
+.composer-driver-icon {
+  --composer-driver-icon-color: color-mix(
+    in srgb,
+    var(--composer-header-accent) 70%,
+    var(--muted)
+  );
+  bottom: 8px;
+  cursor: help;
+  height: 18px;
+  opacity: 0.54;
+  pointer-events: auto;
+  position: absolute;
+  right: 8px;
+  width: 18px;
+  z-index: 1;
+}
+.composer-driver-icon::before {
+  background: var(--composer-driver-icon-color);
+  content: "";
+  inset: 2px;
+  -webkit-mask: var(--composer-driver-icon-url) center / contain no-repeat;
+  mask: var(--composer-driver-icon-url) center / contain no-repeat;
+  position: absolute;
+}
+.composer-driver-icon--claude {
+  --composer-driver-icon-color: color-mix(in srgb, #d97706 88%, var(--fg));
+  opacity: 0.72;
+}
+.composer-driver-icon--codex,
+.composer-driver-icon--openai {
+  --composer-driver-icon-color: color-mix(in srgb, var(--fg) 86%, var(--control));
+  opacity: 0.74;
 }
 .composer-band--drag-ready {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
@@ -337,6 +371,10 @@
   padding: 7px 9px;
   resize: none;
   width: 100%;
+}
+.composer-band--primary textarea {
+  padding-bottom: 28px;
+  padding-right: 32px;
 }
 .composer-attachments {
   align-items: center;

@@ -55,6 +55,9 @@ function applyLaneTargetIdentity(lane, payload) {
   const identity = payload.targetIdentity || {};
   lane.branchName = targetIdentityBranch(identity);
   lane.agentName = targetIdentityAgentName(identity);
+  lane.driverName = targetIdentityDriverName(identity);
+  lane.driverModel = targetIdentityDriverModel(identity);
+  lane.driverEffort = targetIdentityDriverEffort(identity);
   const threadId = targetIdentityThreadId(identity);
   lane.targetThreadId = threadId;
   lane.activeThreadId = threadId;
@@ -94,6 +97,22 @@ function targetIdentityAgentName(identity) {
   if (state !== "configured")
     throw new Error("invalid agent identity state: " + (state || "-"));
   return requiredIdentityText(agent.name, "agent name");
+}
+
+function targetIdentityDriverName(identity) {
+  return requiredIdentityText(targetIdentityDriver(identity).name, "driver name");
+}
+
+function targetIdentityDriverModel(identity) {
+  return requiredIdentityText(targetIdentityDriver(identity).model, "driver model");
+}
+
+function targetIdentityDriverEffort(identity) {
+  return requiredIdentityText(targetIdentityDriver(identity).effort, "driver effort");
+}
+
+function targetIdentityDriver(identity) {
+  return (identity || {}).driver || {};
 }
 
 function agentBranchLabel(agentName, branchName) {
