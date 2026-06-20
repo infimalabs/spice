@@ -117,6 +117,30 @@ def test_claude_command_resumes_with_dashed_session_id(tmp_path):
     assert command[-1] == "continue"
 
 
+def test_claude_user_event_carries_prompt_id_as_turn_boundary():
+    event = CLAUDE_DRIVER.normalize_transcript_line(
+        {
+            "type": "user",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "promptId": "prompt-xyz",
+            "message": {"content": "operator prompt"},
+        }
+    )
+    assert event is not None
+    assert event["payload"]["prompt_id"] == "prompt-xyz"
+
+    # Tool-result `user` lines are not prompts, so they carry no turn id.
+    tool_result = CLAUDE_DRIVER.normalize_transcript_line(
+        {
+            "type": "user",
+            "timestamp": "2026-01-01T00:00:01Z",
+            "promptId": "prompt-xyz",
+            "message": {"content": [{"type": "tool_result", "content": "ok"}]},
+        }
+    )
+    assert tool_result is None or "prompt_id" not in tool_result.get("payload", {})
+
+
 def test_claude_driver_classifies_out_of_credits_output():
     assert (
         CLAUDE_DRIVER.process_failure_kind(
