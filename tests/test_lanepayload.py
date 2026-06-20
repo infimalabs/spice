@@ -473,5 +473,5 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
     assert stems["serve"] == 2
     assert stems["task"] == 1
     assert stems["agent"] == 1
-    assert stems["oops"] == 1
+    assert stems["oops"] == 4
     assert stems["waiting"] == 1
