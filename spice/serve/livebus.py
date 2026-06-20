@@ -17,6 +17,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any, Callable
 
+from spice.serve.messages import TranscriptResolution
 from spice.serve.websocket import (
     WebSocketConnection,
     WebSocketDisconnect,
@@ -58,9 +59,11 @@ class LiveBusCallbacks:
     team_snapshot_payload: Callable[[int | None], dict[str, Any]]
     team_command_payload: Callable[[dict[str, Any]], tuple[dict[str, Any], Any]]
     thread_id: Callable[[Any], str | None]
-    transcript_path: Callable[[str], Path | None]
-    lane_watch_paths: Callable[[Any, str | None, Path | None], tuple[Path, ...]]
-    lane_signature: Callable[[Any, str | None, Path | None], Any]
+    transcript_resolution: Callable[[str], TranscriptResolution | None]
+    lane_watch_paths: Callable[
+        [Any, str | None, TranscriptResolution | None], tuple[Path, ...]
+    ]
+    lane_signature: Callable[[Any, str | None, TranscriptResolution | None], Any]
 
 
 @dataclass
@@ -271,18 +274,14 @@ class LiveBusSession:
     def _watch_subscription(self, subscription: _LaneSubscription) -> None:
         target = subscription.target
         while not subscription.stop.is_set():
-            thread_id, transcript_path = self._lane_context(target)
-            watch_paths = self.callbacks.lane_watch_paths(
-                target, thread_id, transcript_path
-            )
+            thread_id, transcript = self._lane_context(target)
+            watch_paths = self.callbacks.lane_watch_paths(target, thread_id, transcript)
             changed = _wait_for_change(watch_paths, subscription.stop)
             if subscription.stop.is_set():
                 return
             if not changed:
                 continue
-            signature = self.callbacks.lane_signature(
-                target, thread_id, transcript_path
-            )
+            signature = self.callbacks.lane_signature(target, thread_id, transcript)
             if signature == subscription.last_signature:
                 continue
             subscription.last_signature = signature
@@ -310,16 +309,18 @@ class LiveBusSession:
             except (OSError, WebSocketProtocolError):
                 return
 
-    def _lane_context(self, target: Any) -> tuple[str | None, Path | None]:
+    def _lane_context(
+        self, target: Any
+    ) -> tuple[str | None, TranscriptResolution | None]:
         thread_id = self.callbacks.thread_id(target)
-        path = self.callbacks.transcript_path(thread_id) if thread_id else None
-        return thread_id, path
+        transcript = (
+            self.callbacks.transcript_resolution(thread_id) if thread_id else None
+        )
+        return thread_id, transcript
 
     def _lane_signature(self, subscription: _LaneSubscription) -> Any:
-        thread_id, transcript_path = self._lane_context(subscription.target)
-        return self.callbacks.lane_signature(
-            subscription.target, thread_id, transcript_path
-        )
+        thread_id, transcript = self._lane_context(subscription.target)
+        return self.callbacks.lane_signature(subscription.target, thread_id, transcript)
 
 
 def _wait_for_change(paths: tuple[Path, ...], stop: Event) -> bool:

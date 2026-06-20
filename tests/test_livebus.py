@@ -15,10 +15,12 @@ from typing import Any
 
 import pytest
 
+from spice.agent.driver import CODEX_DRIVER
 from spice.mail.inbox import inbox_dir, pending_inbox_count
 from spice.serve import agentapi, app, livebus, payloads
 from spice.serve.app import ServeState
 from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
+from spice.serve.messages import TranscriptResolution
 from spice.serve.teams import ServeTeamStore
 from spice.serve.worktrees import WorktreeTarget
 
@@ -153,7 +155,9 @@ def test_lane_subscription_watch_wakes_stopped_agent_for_external_inbox_write(
             team_snapshot_payload=lambda _since_revision: {},
             team_command_payload=lambda _payload: ({}, None),
             thread_id=lambda _target: THREAD_ID,
-            transcript_path=lambda _thread_id: transcript,
+            transcript_resolution=lambda _thread_id: _transcript_resolution(
+                THREAD_ID, transcript
+            ),
             lane_watch_paths=lambda bus_target, thread_id, transcript_path: (
                 app.lane_watch_paths_for_target(
                     state, bus_target, thread_id, transcript_path
@@ -253,18 +257,18 @@ def _callbacks(
             "statusLine": {"pendingInboxCount": pending},
         }
 
-    def watch_paths(_target, _thread_id, transcript_path):
+    def watch_paths(_target, _thread_id, transcript):
         paths = [inbox_dir(target.repo_root)]
-        if transcript_path is not None:
-            paths.append(transcript_path)
+        if transcript is not None:
+            paths.append(transcript.path)
         return tuple(paths)
 
-    def signature(_target, _thread_id, transcript_path):
+    def signature(_target, _thread_id, transcript):
         pending_names = ()
         directory = inbox_dir(target.repo_root)
         if directory.is_dir():
             pending_names = tuple(sorted(path.name for path in directory.glob("*.txt")))
-        transcript_size = transcript_path.stat().st_size if transcript_path else 0
+        transcript_size = transcript.path.stat().st_size if transcript else 0
         return (pending_names, transcript_size)
 
     return LiveBusCallbacks(
@@ -276,9 +280,19 @@ def _callbacks(
         team_snapshot_payload=lambda _since_revision: {},
         team_command_payload=lambda _payload: ({}, None),
         thread_id=lambda _target: "thread",
-        transcript_path=lambda _thread_id: transcript,
+        transcript_resolution=lambda _thread_id: _transcript_resolution(
+            "thread", transcript
+        ),
         lane_watch_paths=watch_paths,
         lane_signature=lane_signature or signature,
+    )
+
+
+def _transcript_resolution(thread_id: str, path: Path) -> TranscriptResolution:
+    return TranscriptResolution(
+        thread_id=thread_id,
+        path=path,
+        owner_driver=CODEX_DRIVER,
     )
 
 
