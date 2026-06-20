@@ -182,7 +182,7 @@ button.primary:hover {
 }
 .spice-menu-icon::before {
   content: "🔥";
-  filter: saturate(1.24) drop-shadow(0 0 5px color-mix(in srgb, var(--say-accent) 72%, transparent));
+  font-size: 0.8em;
   inset: 50% auto auto 50%;
   line-height: 1;
   opacity: 0;
