@@ -10,6 +10,7 @@
  * @property {string=} displayName
  * @property {string=} branch
  * @property {TargetIdentity} targetIdentity
+ * @property {ServeAgentIdentity=} serveAgentIdentity
  * @property {string[]=} taskFilters
  * @property {TaskFilterEntry[]=} taskFilterEntries
  * @property {string=} laneFilterVersion
@@ -35,6 +36,27 @@
  * @property {string} name
  * @property {string} model
  * @property {string} effort
+ *
+ * @typedef {Object} ServeAgentIdentity
+ * @property {string} actorId
+ * @property {ServeAgentDriverIdentity} driver
+ * @property {ThreadIdentity} thread
+ * @property {ServeAgentLaunchIdentity} launch
+ *
+ * @typedef {Object} ServeAgentDriverIdentity
+ * @property {string} desired
+ * @property {string=} actual
+ * @property {string=} transcriptOwner
+ *
+ * @typedef {Object} ServeAgentLaunchIdentity
+ * @property {ServeAgentLaunchFacts} desired
+ * @property {ServeAgentLaunchFacts} actual
+ *
+ * @typedef {Object} ServeAgentLaunchFacts
+ * @property {string=} model
+ * @property {string=} effort
+ * @property {string=} serviceTier
+ * @property {string=} source
  *
  * @typedef {Object} AgentIdentity
  * @property {"configured"|"unconfigured"} state

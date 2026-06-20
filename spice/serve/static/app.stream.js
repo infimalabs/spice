@@ -1000,6 +1000,8 @@ function applyTaskDrainRouteConfig(lane, result, options = {}) {
   applyRouteConfigToTargetInventory(lane, config);
   if (payloadHasField(config, "targetIdentity"))
     applyLaneTargetIdentity(lane, config);
+  if (payloadHasField(config, "serveAgentIdentity"))
+    applyLaneServeAgentIdentity(lane, config);
   if (Array.isArray(config.taskFilters)) {
     lane.taskFilters = uniqueStringList(config.taskFilters);
     lane.laneFilterVersion = String(config.laneFilterVersion || "");
@@ -1026,6 +1028,8 @@ function applyRouteConfigToTargetInventory(lane, config) {
   if (!target) return;
   if (payloadHasField(config, "targetIdentity"))
     target.targetIdentity = config.targetIdentity;
+  if (payloadHasField(config, "serveAgentIdentity"))
+    target.serveAgentIdentity = config.serveAgentIdentity;
   if (payloadHasField(config, "teamIdentity"))
     target.teamIdentity = config.teamIdentity;
   if (Array.isArray(config.taskFilters))

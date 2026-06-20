@@ -86,3 +86,14 @@ def test_serve_menu_smoke_uses_harness_for_interaction() -> None:
     assert "Fast mode" in smoke
     assert "fastModeDetail" in smoke
     assert "New team" not in smoke
+
+
+def test_serve_identity_smoke_uses_harness_for_mismatch() -> None:
+    smoke = (ROOT / "browser" / "serve_identity_smoke.js").read_text(encoding="utf-8")
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert "claude -> codex" in smoke
+    assert "claude-opus -> gpt-5.5" in smoke
+    assert "session: claude" in smoke
+    assert "driver actual" in smoke

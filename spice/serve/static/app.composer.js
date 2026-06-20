@@ -88,7 +88,9 @@ function syncComposerDriverIcon(band, member) {
 }
 
 function composerDriverIcon(member) {
-  const driver = String((member || {}).driverName || "")
+  const driver = String(
+    (member || {}).driverIconName || (member || {}).driverName || "",
+  )
     .trim()
     .toLowerCase();
   const iconPaths = {
@@ -116,13 +118,17 @@ function composerDriverTooltip(member, driver) {
     openai: "OpenAI driver",
   };
   const parts = [labels[driver] || "Agent driver"];
+  const driverName = String((member || {}).driverName || "").trim();
   const model = String((member || {}).driverModel || "").trim();
   const effort = String((member || {}).driverEffort || "").trim();
   const threadId = String((member || {}).targetThreadId || "").trim();
+  const session = String((member || {}).driverTranscriptOwner || "").trim();
+  if (driverName && driverName.toLowerCase() !== driver)
+    parts.push("driver: " + driverName);
   if (model) parts.push("model: " + model);
   if (effort) parts.push("effort: " + effort);
   parts.push("thread: " + (threadId || "unbound"));
-  parts.push("source: worktree launch config");
+  if (session) parts.push("session: " + session);
   return parts.join("; ");
 }
 
