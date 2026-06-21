@@ -32,6 +32,7 @@ from spice.mail.attachments import (
     shared_attachment_display_path,
     write_inbox_attachments,
 )
+from spice.locking import exclusive_lock
 from spice.paths import STATE_DIRNAME, fsync_directory
 
 INBOX_DIRNAME = "inbox"
@@ -41,6 +42,7 @@ INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD = 1
 INBOX_ARCHIVE_PREVIEW_LIMIT = 120
 INBOX_ARCHIVE_DEFAULT_LIMIT = 6
 INBOX_COLLISION_MAX = 1000
+INBOX_PUBLISH_LOCK_NAME = ".publish.lock"
 _PREVIEW_ELLIPSIS_CHARS = 3
 SECONDS_PER_MINUTE = 60
 INBOX_MAX_ITEM_AGE_SECONDS = 24 * 60 * 60
@@ -547,6 +549,7 @@ def write_inbox_item(
     text: str,
     *,
     attachments: Sequence[InboxAttachmentInput] = (),
+    dedupe_pending_text: bool = False,
 ) -> Path:
     if repo_root is None:
         raise RuntimeError("Unable to resolve git repo root for inbox send")
@@ -556,18 +559,37 @@ def write_inbox_item(
     directory = inbox_dir(repo_root)
     directory.mkdir(parents=True, exist_ok=True)
     tmp_path = directory / f"{target_name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-    with tmp_path.open("w", encoding="utf-8") as handle:
-        handle.write(text)
-        handle.flush()
-        os.fsync(handle.fileno())
     try:
-        target_path = _atomic_publish_inbox_item(tmp_path, directory / target_name)
-        write_inbox_attachments(target_path, attachments, repo_root=repo_root)
-        notify_inbox_changed(repo_root)
+        with exclusive_lock(directory / INBOX_PUBLISH_LOCK_NAME):
+            if dedupe_pending_text and not attachments:
+                existing_path = _pending_inbox_path_with_text(directory, text)
+                if existing_path is not None:
+                    return existing_path
+            with tmp_path.open("w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+            target_path = _atomic_publish_inbox_item(tmp_path, directory / target_name)
+            write_inbox_attachments(target_path, attachments, repo_root=repo_root)
+            notify_inbox_changed(repo_root)
     finally:
         with contextlib.suppress(FileNotFoundError):
             tmp_path.unlink()
     return target_path
+
+
+def _pending_inbox_path_with_text(directory: Path, text: str) -> Path | None:
+    for path in sorted(_file_paths(directory), key=lambda item: item.name):
+        if path.suffix != ".txt":
+            continue
+        if inbox_attachment_dir(path).is_dir():
+            continue
+        try:
+            if path.read_text(encoding="utf-8", errors="replace") == text:
+                return path
+        except OSError:
+            continue
+    return None
 
 
 def notify_inbox_changed(repo_root: Path | None) -> None:
@@ -797,6 +819,8 @@ def prune_stale_inbox_artifacts(repo_root: str | Path | None) -> None:
         if not candidate.is_dir():
             continue
         for path in _file_paths(candidate):
+            if path.name == INBOX_PUBLISH_LOCK_NAME:
+                continue
             if not inbox_path_is_fresh(path):
                 with contextlib.suppress(FileNotFoundError):
                     path.unlink()
