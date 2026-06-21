@@ -93,7 +93,6 @@ button.primary:hover {
   min-height: 50px;
   padding: 7px 10px;
 }
-.app-header .meta { color: var(--muted); flex: 1; font-size: 12px; text-align: right; }
 .icon-button {
   width: 30px;
   height: 30px;
@@ -132,6 +131,7 @@ button.primary:hover {
   justify-content: center;
   letter-spacing: 0;
   line-height: 1;
+  margin-left: auto;
   padding: 0 8px 0 2px;
   white-space: nowrap;
 }
@@ -226,7 +226,13 @@ button.primary:hover {
 }
 .icon-button--active { border-color: var(--good); color: var(--good); }
 
-.filter-strip { display: flex; gap: 6px; overflow-x: auto; }
+.filter-strip {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+}
 .filter-strip[aria-hidden="true"] { display: none; }
 .filter-pill {
   align-items: center;
@@ -1145,27 +1151,6 @@ button.primary:hover {
     height: auto;
     min-height: 46px;
     padding: 8px;
-  }
-  .app-header .meta {
-    /* Status text is secondary: hold up to 8rem and truncate, but never grow
-       into the pill scroller's space — the pills claim all the free width. */
-    flex: 0 1 8rem;
-    min-width: 0;
-    overflow: hidden;
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .filter-strip {
-    /* Sole grower in the header row: fill the width left after meta + menu
-       before the pills overflow into their horizontal scroller. */
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .spice-menu-button {
-    /* When no task pills are shown, the filter-strip grower is hidden and
-       nothing else fills the row — push the button to the trailing edge. */
-    margin-left: auto;
   }
   .swimlanes {
     --mobile-lane-gap: 8px;

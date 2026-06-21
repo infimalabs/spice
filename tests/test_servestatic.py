@@ -128,20 +128,33 @@ def test_audio_playback_enforces_single_owner():
     assert "function stopActivePlayback()" in app_audio
 
 
-def test_mobile_header_pill_scroller_is_sole_grower():
+def test_header_pill_scroller_is_sole_grower_and_button_stays_right():
     css = _serve_css_text()
-    mobile_start = css.index("@media (max-width: 720px)")
 
-    meta_start = css.index(".app-header .meta {", mobile_start)
-    meta_rule = css[meta_start : css.index("}", meta_start)]
-    strip_start = css.index(".filter-strip {", mobile_start)
+    strip_start = css.index(".filter-strip {")
     strip_rule = css[strip_start : css.index("}", strip_start)]
+    button_start = css.index(".spice-menu-button {")
+    button_rule = css[button_start : css.index("}", button_start)]
 
-    # The status text must not grow, or it splits the header width with the
-    # pill scroller (the bug: the scroller only filled ~half the width).
-    assert "flex: 0 1 8rem;" in meta_rule
+    # No separate status text slot can split header width with the pill scroller.
+    assert ".app-header .meta" not in css
     assert "flex: 1 1 auto;" in strip_rule
     assert "min-width: 0;" in strip_rule
+    assert "margin-left: auto;" in button_rule
+
+
+def test_global_transient_status_renders_in_lane_status_line():
+    app_render = STATIC_ROOT / "app.render.js"
+    script = Path(__file__).with_name("fixtures") / "global_status_line.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(app_render)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_static_css_centers_two_pip_lane_light_stack():

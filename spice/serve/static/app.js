@@ -16,9 +16,6 @@ const openLaneButton = /** @type {HTMLButtonElement} */ (
 const filterStripEl = /** @type {HTMLElement} */ (
   document.querySelector("#filter-strip")
 );
-const globalStatusEl = /** @type {HTMLElement} */ (
-  document.querySelector("#global-status")
-);
 
 const messageLimit = 400;
 const initialRequestLimit = 25;
@@ -196,10 +193,10 @@ async function init() {
 }
 
 window.addEventListener("error", (event) => {
-  setGlobalTransientStatus(event.message || "browser error");
+  setGlobalTransientError(event.message || "browser error");
 });
 window.addEventListener("unhandledrejection", (event) => {
-  setGlobalTransientStatus(String(event.reason || "browser promise error"));
+  setGlobalTransientError(String(event.reason || "browser promise error"));
 });
 window.addEventListener("beforeunload", (event) => {
   if (!servePageHasUnsafeComposerState()) return;
@@ -214,4 +211,4 @@ openLaneButton.addEventListener("click", (event) => {
 
 if (typeof syncFastModeButtonState === "function") syncFastModeButtonState();
 
-init().catch((error) => setGlobalTransientStatus(String(error)));
+init().catch((error) => setGlobalTransientError(String(error)));

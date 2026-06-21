@@ -18,6 +18,9 @@ const messageOccupantAccentPalette = [
   "var(--team-plum-accent)",
 ];
 let globalTransientStatusTimer = null;
+let globalTransientStatusText = "";
+let globalTransientStatusIsError = false;
+let globalActivityStatusText = "";
 
 function renderLaneChrome(lane, payload) {
   const staleTeamConfig = lanePayloadTeamConfigIsStale(lane, payload);
@@ -527,14 +530,24 @@ function reconcileSubmittedMessagePredictions(lane) {
 function setLaneStatus(lane, statusLine) {
   const preview = statusLine.preview || "";
   const previewHasTime = Boolean(preview && statusLine.lastAssistantAt);
-  const status = statusLine.error
-    ? { error: statusLine.error, time: "", preview: "" }
-    : {
-        error: "",
-        time: previewHasTime ? relativeTime(statusLine.lastAssistantAt) : "",
-        preview: previewHasTime ? preview : "",
-      };
-  const fingerprint = status.error + "\u0000" + status.time + "\u0000" + status.preview;
+  const status =
+    globalStatusLineDisplay() ||
+    (statusLine.error
+      ? { source: "lane-error", error: statusLine.error, time: "", preview: "" }
+      : {
+          source: "lane",
+          error: "",
+          time: previewHasTime ? relativeTime(statusLine.lastAssistantAt) : "",
+          preview: previewHasTime ? preview : "",
+        });
+  const fingerprint =
+    status.source +
+    "\u0000" +
+    status.error +
+    "\u0000" +
+    status.time +
+    "\u0000" +
+    status.preview;
   if (fingerprint === lane.renderedStatusFingerprint) return;
   lane.renderedStatusFingerprint = fingerprint;
   setLaneStatusText(lane.statusErrorEl, status.error);
@@ -566,11 +579,76 @@ function setLaneTransientStatus(lane, text) {
 
 function setGlobalTransientStatus(text) {
   if (globalTransientStatusTimer) clearTimeout(globalTransientStatusTimer);
-  globalStatusEl.textContent = text;
+  globalTransientStatusText = text || "";
+  globalTransientStatusIsError = false;
+  rerenderGlobalStatusLines();
   globalTransientStatusTimer = setTimeout(() => {
     globalTransientStatusTimer = null;
-    if (globalStatusEl.textContent === text) globalStatusEl.textContent = "";
+    if (globalTransientStatusText === text) {
+      globalTransientStatusText = "";
+      globalTransientStatusIsError = false;
+      rerenderGlobalStatusLines();
+    }
   }, transientGlobalStatusMilliseconds);
+}
+
+function setGlobalTransientError(text) {
+  if (globalTransientStatusTimer) clearTimeout(globalTransientStatusTimer);
+  globalTransientStatusText = text || "";
+  globalTransientStatusIsError = true;
+  rerenderGlobalStatusLines();
+  globalTransientStatusTimer = setTimeout(() => {
+    globalTransientStatusTimer = null;
+    if (globalTransientStatusText === text) {
+      globalTransientStatusText = "";
+      globalTransientStatusIsError = false;
+      rerenderGlobalStatusLines();
+    }
+  }, transientGlobalStatusMilliseconds);
+}
+
+function setGlobalActivityStatus(text) {
+  globalActivityStatusText = text || "";
+  rerenderGlobalStatusLines();
+}
+
+function clearGlobalActivityStatus(text) {
+  if (text && globalActivityStatusText !== text) return;
+  globalActivityStatusText = "";
+  rerenderGlobalStatusLines();
+}
+
+function globalStatusLineDisplay() {
+  if (globalTransientStatusText)
+    return globalTransientStatusIsError
+      ? {
+          source: "global-error",
+          error: globalTransientStatusText,
+          time: "",
+          preview: "",
+        }
+      : {
+          source: "global-transient",
+          error: "",
+          time: "",
+          preview: globalTransientStatusText,
+        };
+  if (globalActivityStatusText)
+    return {
+      source: "global-activity",
+      error: "",
+      time: "",
+      preview: globalActivityStatusText,
+    };
+  return null;
+}
+
+function rerenderGlobalStatusLines() {
+  if (typeof laneStates === "undefined") return;
+  for (const lane of laneStates.values()) {
+    lane.renderedStatusFingerprint = "";
+    setLaneStatus(lane, lane.lastRenderedStatusLine || {});
+  }
 }
 
 // ---- messages -----------------------------------------------------------------------

@@ -1,5 +1,8 @@
 const { withServePage } = require("./serve_playwright_harness");
 
+const headerRightTolerancePx = 16;
+const pillLeftTolerancePx = 24;
+
 async function run() {
   return withServePage(
     {
@@ -9,6 +12,37 @@ async function run() {
     async ({ page, server }) => {
       const menuButton = page.locator(".spice-menu-button").first();
       await menuButton.waitFor({ state: "visible", timeout: 10000 });
+      const headerLayout = await page.evaluate(() => {
+        const header = document.querySelector(".app-header");
+        const strip = document.querySelector("#filter-strip");
+        const button = document.querySelector("#open-lane");
+        strip.setAttribute("aria-hidden", "false");
+        strip.replaceChildren();
+        const pill = document.createElement("span");
+        pill.className = "filter-pill";
+        pill.textContent = "task";
+        strip.append(pill);
+        const headerRect = header.getBoundingClientRect();
+        const pillRect = pill.getBoundingClientRect();
+        const buttonRect = button.getBoundingClientRect();
+        return {
+          buttonLeft: buttonRect.left,
+          buttonRight: buttonRect.right,
+          headerLeft: headerRect.left,
+          headerRight: headerRect.right,
+          pillLeft: pillRect.left,
+          pillRight: pillRect.right,
+        };
+      });
+      if (
+        Math.abs(headerLayout.headerRight - headerLayout.buttonRight) >
+        headerRightTolerancePx
+      )
+        throw new Error("spice button is not pinned right");
+      if (headerLayout.pillLeft - headerLayout.headerLeft > pillLeftTolerancePx)
+        throw new Error("filter pills are not anchored left");
+      if (headerLayout.pillRight >= headerLayout.buttonLeft)
+        throw new Error("filter pills overlap the spice button");
       await menuButton.click();
       await page.waitForSelector(".spice-context-menu .spice-menu-action", {
         timeout: 5000,
@@ -35,6 +69,7 @@ async function run() {
         actionCount: actions.length,
         fastModeDetail: fastModeAction.detail,
         fastModeChecked: fastModeAction.checked,
+        headerLayout,
         url: server.url,
       };
     },

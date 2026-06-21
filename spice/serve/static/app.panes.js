@@ -717,7 +717,7 @@ function laneMetricSeriesBucketSeconds(rangeSeconds) {
 function reportLaneMetricSeriesError() {
   const status =
     typeof window !== "undefined"
-      ? /** @type {any} */ (window).setGlobalTransientStatus
+      ? /** @type {any} */ (window).setGlobalTransientError
       : null;
   if (typeof status === "function") status("Metric series request failed");
 }
@@ -754,7 +754,7 @@ function loadLaneMetricsLitIsland() {
 }
 
 function reportLaneMetricsLitIslandError(error) {
-  const status = /** @type {any} */ (window).setGlobalTransientStatus;
+  const status = /** @type {any} */ (window).setGlobalTransientError;
   if (typeof status === "function")
     status("Lit metrics island failed: " + String(error));
   throw error;
