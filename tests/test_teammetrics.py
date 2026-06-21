@@ -477,6 +477,61 @@ def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
     assert repeated_after == destination_after
 
 
+def test_team_historical_metric_summary_projects_membership_intervals(
+    tmp_path, monkeypatch
+):
+    clock = {"now": 0.0}
+    monkeypatch.setattr("spice.serve.teams.time.time", lambda: clock["now"])
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+
+    def set_time(timestamp: float) -> None:
+        clock["now"] = timestamp
+
+    set_time(0)
+    team = store.create_team(members=["agent-a", "agent-b"])
+    store.record_agent_metric_delta("agent-a", message_timestamps=[60])
+    store.record_agent_metric_delta("agent-b", message_timestamps=[60])
+
+    set_time(120)
+    split = store.split_team(
+        team.team_id, agent_ids=["agent-a"], new_team_id="team-split"
+    )
+    store.record_agent_metric_delta("agent-a", message_timestamps=[180])
+    store.record_agent_metric_delta("agent-b", message_timestamps=[180])
+
+    set_time(240)
+    store.merge_teams(split.team_id, team.team_id)
+    store.record_agent_metric_delta("agent-a", message_timestamps=[300])
+    store.record_agent_metric_delta("agent-b", message_timestamps=[300])
+
+    set_time(360)
+    store.split_team_back(team.team_id)
+    store.record_agent_metric_delta("agent-a", message_timestamps=[420])
+    store.record_agent_metric_delta("agent-b", message_timestamps=[420])
+
+    set_time(480)
+    store.remove_agent(team.team_id, "agent-b")
+    store.record_agent_metric_delta("agent-b", message_timestamps=[540])
+
+    set_time(600)
+    store.close_team(split.team_id)
+    store.record_agent_metric_delta("agent-a", message_timestamps=[660])
+
+    team_history = store.team_historical_metric_summary(
+        team.team_id, bucket_count=16, now=720
+    )
+    split_history = store.team_historical_metric_summary(
+        split.team_id, bucket_count=16, now=720
+    )
+
+    assert team_history.agent_ids == ("agent-a", "agent-b")
+    assert team_history.messages == 6
+    assert sum(team_history.sparkline) == 6
+    assert split_history.agent_ids == ("agent-a",)
+    assert split_history.messages == 2
+    assert sum(split_history.sparkline) == 2
+
+
 def test_split_team_back_moves_subgroup_metrics_back_to_restored_team(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     source = store.create_team(members=["agent-a", "agent-b"])
