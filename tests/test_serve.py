@@ -563,46 +563,39 @@ def test_task_burndown_metrics_endpoint_rejects_oversized_ranges(tmp_path):
     assert "exceeds" in payload["error"]
 
 
-def test_task_distribution_metrics_endpoint_projects_per_agent_share(tmp_path):
+def _task_distribution_metrics_state(tmp_path):
     repo = _repo(tmp_path)
     state = _serve_state(tmp_path, _target(repo))
     store = state.team_store
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=60
-    )
-    store.record_task_lifecycle_event(
-        "phaseAdvance",
-        task_id="task-a",
-        agent_id="agent-a",
-        team_id="team-a",
-        ts=61,
-    )
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=62
-    )
-    store.record_task_lifecycle_event(
-        "review", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=120
-    )
-    store.record_task_lifecycle_event(
-        "claim", task_id="task-c", agent_id="agent-a", team_id="team-b", ts=180
-    )
-    store.record_task_lifecycle_event(
-        "complete", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=180
-    )
+    for kind, task_id, agent_id, team_id, ts in (
+        ("claim", "task-a", "agent-a", "team-a", 60),
+        ("phaseAdvance", "task-a", "agent-a", "team-a", 61),
+        ("claim", "task-b", "agent-b", "team-a", 62),
+        ("review", "task-b", "agent-b", "team-a", 120),
+        ("claim", "task-c", "agent-a", "team-b", 180),
+        ("complete", "task-a", "agent-a", "team-a", 180),
+    ):
+        store.record_task_lifecycle_event(
+            kind, task_id=task_id, agent_id=agent_id, team_id=team_id, ts=ts
+        )
+    return state
 
+
+def _task_distribution_work_rows(payload):
+    return [
+        {
+            key: point[key]
+            for key in ("bucketStart", "agentId", "claimed", "active", "work")
+        }
+        for point in payload["series"]
+    ]
+
+
+def test_task_distribution_metrics_endpoint_projects_per_agent_share(tmp_path):
+    state = _task_distribution_metrics_state(tmp_path)
     team_payload = app.task_distribution_metrics_response_payload(
         state,
         {
-            "teamId": ["team-a"],
-            "start": ["0"],
-            "end": ["180"],
-            "bucketSeconds": ["60"],
-        },
-    )
-    combined_payload = app.task_distribution_metrics_response_payload(
-        state,
-        {
-            "agentId": ["agent-a"],
             "teamId": ["team-a"],
             "start": ["0"],
             "end": ["180"],
@@ -614,24 +607,18 @@ def test_task_distribution_metrics_endpoint_projects_per_agent_share(tmp_path):
     assert team_payload["lens"] == "task-distribution"
     assert team_payload["teamIds"] == ["team-a"]
     assert team_payload["agentIds"] == []
-    assert team_payload["claimed"] == 2
-    assert team_payload["active"] == 2
-    assert team_payload["work"] == 4
+    assert team_payload["claimed"] == 1
+    assert team_payload["active"] == 4
+    assert team_payload["work"] == 5
     assert team_payload["range"] == {"start": 0, "end": 180}
     assert team_payload["bucketCount"] == 4
-    assert [
-        {
-            key: point[key]
-            for key in ("bucketStart", "agentId", "claimed", "active", "work")
-        }
-        for point in team_payload["series"]
-    ] == [
+    assert _task_distribution_work_rows(team_payload) == [
         {
             "bucketStart": 60,
             "agentId": "agent-a",
-            "claimed": 1,
+            "claimed": 0,
             "active": 1,
-            "work": 2,
+            "work": 1,
         },
         {
             "bucketStart": 60,
@@ -642,29 +629,71 @@ def test_task_distribution_metrics_endpoint_projects_per_agent_share(tmp_path):
         },
         {
             "bucketStart": 120,
+            "agentId": "agent-a",
+            "claimed": 0,
+            "active": 1,
+            "work": 1,
+        },
+        {
+            "bucketStart": 120,
+            "agentId": "agent-b",
+            "claimed": 0,
+            "active": 1,
+            "work": 1,
+        },
+        {
+            "bucketStart": 180,
             "agentId": "agent-b",
             "claimed": 0,
             "active": 1,
             "work": 1,
         },
     ]
-    assert team_payload["series"][0]["share"] == pytest.approx(2 / 3)
-    assert team_payload["series"][1]["share"] == pytest.approx(1 / 3)
-    assert team_payload["series"][2]["share"] == pytest.approx(1.0)
-    assert combined_payload["claimed"] == 1
-    assert combined_payload["active"] == 1
+    assert team_payload["series"][0]["share"] == pytest.approx(1 / 2)
+    assert team_payload["series"][1]["share"] == pytest.approx(1 / 2)
+    assert team_payload["series"][2]["share"] == pytest.approx(1 / 2)
+    assert team_payload["series"][3]["share"] == pytest.approx(1 / 2)
+    assert team_payload["series"][4]["share"] == pytest.approx(1.0)
+
+
+def test_task_distribution_metrics_endpoint_filters_combined_agent_team(tmp_path):
+    state = _task_distribution_metrics_state(tmp_path)
+    combined_payload = app.task_distribution_metrics_response_payload(
+        state,
+        {
+            "agentId": ["agent-a"],
+            "teamId": ["team-a"],
+            "start": ["0"],
+            "end": ["180"],
+            "bucketSeconds": ["60"],
+        },
+    )
+
+    assert combined_payload["claimed"] == 0
+    assert combined_payload["active"] == 2
     assert combined_payload["work"] == 2
     assert combined_payload["series"] == [
         {
             "bucketStart": 60,
             "agentId": "agent-a",
-            "claimed": 1,
+            "claimed": 0,
             "active": 1,
-            "work": 2,
+            "work": 1,
             "share": 1.0,
-        }
+        },
+        {
+            "bucketStart": 120,
+            "agentId": "agent-a",
+            "claimed": 0,
+            "active": 1,
+            "work": 1,
+            "share": 1.0,
+        },
     ]
 
+
+def test_task_distribution_metrics_route_projects_per_agent_share(tmp_path):
+    state = _task_distribution_metrics_state(tmp_path)
     handler = _ImageHandler(state)
     app._ServeHandler._get_task_distribution_metrics(
         handler,
@@ -674,8 +703,8 @@ def test_task_distribution_metrics_endpoint_projects_per_agent_share(tmp_path):
 
     assert handler.status == HTTPStatus.OK
     assert endpoint_payload["lens"] == "task-distribution"
-    assert endpoint_payload["claimed"] == 2
-    assert endpoint_payload["active"] == 2
+    assert endpoint_payload["claimed"] == 1
+    assert endpoint_payload["active"] == 4
 
 
 def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):

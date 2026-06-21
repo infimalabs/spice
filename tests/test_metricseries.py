@@ -363,16 +363,43 @@ def test_task_distribution_series_shows_per_agent_work_share(tmp_path):
         )
         for point in first
     ] == [
-        TaskDistributionSeriesPoint(60, "agent-a", claimed=1, active=1, share=0.0),
+        TaskDistributionSeriesPoint(60, "agent-a", claimed=0, active=1, share=0.0),
         TaskDistributionSeriesPoint(60, "agent-b", claimed=1, active=0, share=0.0),
+        TaskDistributionSeriesPoint(120, "agent-a", claimed=0, active=1, share=0.0),
         TaskDistributionSeriesPoint(120, "agent-b", claimed=0, active=1, share=0.0),
+        TaskDistributionSeriesPoint(180, "agent-b", claimed=0, active=1, share=0.0),
     ]
-    assert first[0].share == pytest.approx(2 / 3)
-    assert first[1].share == pytest.approx(1 / 3)
-    assert first[2].share == pytest.approx(1.0)
+    assert first[0].share == pytest.approx(1 / 2)
+    assert first[1].share == pytest.approx(1 / 2)
+    assert first[2].share == pytest.approx(1 / 2)
+    assert first[3].share == pytest.approx(1 / 2)
+    assert first[4].share == pytest.approx(1.0)
     assert store.task_distribution_series(
         ["agent-a"], team_ids=["team-a"], start=0, end=180
-    ) == (TaskDistributionSeriesPoint(60, "agent-a", 1, 1, 1.0),)
+    ) == (
+        TaskDistributionSeriesPoint(60, "agent-a", 0, 1, 1.0),
+        TaskDistributionSeriesPoint(120, "agent-a", 0, 1, 1.0),
+    )
+
+
+def test_task_distribution_series_carries_staggered_open_claims(tmp_path):
+    store = _store(tmp_path)
+    store.record_task_lifecycle_event(
+        "claim", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=60
+    )
+    store.record_task_lifecycle_event(
+        "claim", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=120
+    )
+
+    series = store.task_distribution_series(team_ids=["team-a"], start=0, end=180)
+
+    assert series == (
+        TaskDistributionSeriesPoint(60, "agent-a", claimed=1, active=0, share=1.0),
+        TaskDistributionSeriesPoint(120, "agent-a", claimed=1, active=0, share=0.5),
+        TaskDistributionSeriesPoint(120, "agent-b", claimed=1, active=0, share=0.5),
+        TaskDistributionSeriesPoint(180, "agent-a", claimed=1, active=0, share=0.5),
+        TaskDistributionSeriesPoint(180, "agent-b", claimed=1, active=0, share=0.5),
+    )
 
 
 def test_task_stall_states_flag_claimed_idle_task_after_threshold(tmp_path):
