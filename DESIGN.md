@@ -96,7 +96,10 @@ worktree target. Agents are *occupants* — renewal hands the lane to a new
 thread while the message stream survives, attributed per occupant. Lanes fuse
 into groups (drag-to-gutter) backed by server-side **teams** (SQLite,
 revisioned, optimistic concurrency; create/close/split/merge/move/config
-commands). Every message send carries a **lifetime** intent on a slider:
+commands). Lane metrics are a projection over current membership — per-agent
+counters are the single source of truth and work follows the agent, not the
+team (see `docs/studies/serve-team-metric-attribution.md`). Every message send
+carries a **lifetime** intent on a slider:
 **Renew** (graceful succession), **Steer** (default), **Drive** (drain the
 task queue through structured control metadata, honor task filters).
 Task filters route board stems to lanes; pills show per-stem open counts and
