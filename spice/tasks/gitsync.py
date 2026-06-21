@@ -353,9 +353,7 @@ def _integrate_advanced_baseline(
     merged_tree = _read(repo_root, "write-tree")
     if not merged_tree:
         raise SpiceError("could not write merged tree")
-    abort = _run(repo_root, "merge", "--abort")
-    if abort.returncode != 0:
-        raise SpiceError(_fail("clear merge state", abort))
+    _clear_temporary_merge_state(repo_root, action="clear merge state")
     return _synthesize_and_fast_forward(
         repo_root, merged_tree, upstream_head, agent_head, message, label=label
     )
@@ -443,9 +441,7 @@ def _retry_publish_after_race(
     merged_tree = _read(repo_root, "write-tree")
     if not merged_tree:
         raise SpiceError("could not write publish-race merged tree")
-    abort = _run(repo_root, "merge", "--abort")
-    if abort.returncode != 0:
-        raise SpiceError(_fail("clear publish-race merge state", abort))
+    _clear_temporary_merge_state(repo_root, action="clear publish-race merge state")
     retry_head = _synthesize_and_fast_forward(
         repo_root,
         merged_tree,
@@ -474,6 +470,17 @@ def _is_non_fast_forward_push(completed: subprocess.CompletedProcess[str]) -> bo
         or "fetch first" in output
         or "stale info" in output
     )
+
+
+def _clear_temporary_merge_state(repo_root: Path, *, action: str) -> None:
+    abort = _run(repo_root, "merge", "--abort")
+    if abort.returncode == 0:
+        return
+    if _read(repo_root, "rev-parse", "--verify", "MERGE_HEAD"):
+        raise SpiceError(_fail(action, abort))
+    reset = _run(repo_root, "reset", "--hard", "HEAD")
+    if reset.returncode != 0:
+        raise SpiceError(_fail(f"{action} after missing MERGE_HEAD", reset))
 
 
 def _synthesize_and_fast_forward(
