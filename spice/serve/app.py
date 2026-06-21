@@ -47,7 +47,10 @@ from spice.serve.messages import (
     TranscriptResolution,
     resolve_thread_transcript,
 )
-from spice.serve.teammetrics import METRIC_BUCKET_SECONDS
+from spice.serve.teammetrics import (
+    METRIC_BUCKET_SECONDS,
+    TEAM_HISTORICAL_MAX_BUCKET_COUNT,
+)
 from spice.serve.teams import ServeTeamStore, TeamCommandService
 from spice.serve.web import render_index_html, send_static_asset
 from spice.serve.websocket import is_websocket_request
@@ -70,9 +73,6 @@ METRICS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 MAX_HTTP_REQUEST_LINE_BYTES = 65536
 HTTP_REQUEST_LINE_READ_LIMIT = MAX_HTTP_REQUEST_LINE_BYTES + 1
 TEAM_HISTORICAL_METRIC_BUCKET_COUNT = 12
-# JSON range endpoints cap buckets to keep accidental huge queries from
-# allocating unbounded sparkline/series payloads.
-TEAM_HISTORICAL_MAX_BUCKET_COUNT = 1440
 TASK_BURNDOWN_BUCKET_COUNT = 12
 TASK_BURNDOWN_MAX_BUCKET_COUNT = 1440
 TASK_DISTRIBUTION_BUCKET_COUNT = 12
