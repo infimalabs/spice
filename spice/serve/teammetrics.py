@@ -12,6 +12,7 @@ from typing import Iterable, Protocol
 
 from spice.errors import SpiceError
 from spice.serve.directivestats import DirectiveTotals
+from spice.serve.teamschema import METRIC_HISTORY_RETENTION_SECONDS
 
 METRIC_BUCKET_SECONDS = 60
 
@@ -69,6 +70,10 @@ class _TeamMetricStore(Protocol):
         connection: sqlite3.Connection,
         agent_ids: Iterable[str],
     ) -> DirectiveTotals: ...
+
+    def _prune_directive_history_locked(
+        self, connection: sqlite3.Connection, *, now: float
+    ) -> None: ...
 
 
 class TeamMetricStoreMixin:
@@ -266,6 +271,18 @@ class TeamMetricStoreMixin:
                 now=summary_time,
             ),
         )
+
+    def _prune_metric_history_locked(
+        self: _TeamMetricStore, connection: sqlite3.Connection, *, now: float
+    ) -> None:
+        # Bound the high-growth per-minute bucket and per-directive series at the
+        # retention horizon; the durable aggregates (agent_metrics tool_calls,
+        # directive_totals) are never pruned. Runs in the snapshot prune pass.
+        floor = int(now) - METRIC_HISTORY_RETENTION_SECONDS
+        connection.execute(
+            "DELETE FROM agent_metric_buckets WHERE bucket_start < ?", (floor,)
+        )
+        self._prune_directive_history_locked(connection, now=now)
 
     def _record_agent_metric_delta_locked(
         self,

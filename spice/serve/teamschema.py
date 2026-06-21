@@ -19,6 +19,10 @@ TASK_FILTER_SOURCES = frozenset(
     }
 )
 TEAM_SQLITE_BUSY_TIMEOUT_MS = 5000
+# Generous horizon for the high-growth per-minute/per-directive history series.
+# Bounds storage without losing graphable range; the durable aggregates
+# (agent_metrics, directive_totals) are never pruned.
+METRIC_HISTORY_RETENTION_SECONDS = 30 * 24 * 60 * 60
 
 TEAM_SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -127,4 +131,8 @@ CREATE TABLE IF NOT EXISTS directive_totals (
     acked INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, team_id)
 );
+CREATE INDEX IF NOT EXISTS agent_metric_buckets_by_start
+    ON agent_metric_buckets (bucket_start);
+CREATE INDEX IF NOT EXISTS directives_by_sent_at
+    ON directives (sent_at);
 """

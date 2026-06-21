@@ -620,6 +620,7 @@ class ServeTeamStore(
     def team_snapshot(self, *, since_revision: int | None = None) -> TeamSnapshot:
         with self.connect() as connection:
             self._prune_zero_activity_closed_teams_locked(connection)
+            self._prune_metric_history_locked(connection, now=time.time())
             self._ensure_open_team_locked(connection)
             revision_row = connection.execute(
                 "SELECT MAX(revision) AS r FROM events"
