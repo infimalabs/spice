@@ -44,6 +44,7 @@ from spice.serve.teammetrics import (
     LaneMetricSummary as LaneMetricSummary,
     MetricSeriesPoint as MetricSeriesPoint,
     TaskLifecycleSeriesPoint as TaskLifecycleSeriesPoint,
+    TaskStallState as TaskStallState,
     TeamHistoricalMetricSummary as TeamHistoricalMetricSummary,
     TeamMetricStoreMixin,
 )
