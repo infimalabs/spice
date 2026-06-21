@@ -242,7 +242,6 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     )
     assert archived_refresh_payload["acks"][0]["found"] is True
     assert archived_refresh_payload["acks"][0]["attachments"][0] == live_attachment
-    assert state.lane_send_count(target.id) == 1
     assert state.team_store.lane_metric_summary(ACTOR_A, bucket_count=12).sends == 1
     assert pending_inbox_count(repo) == 0
     assert inbox_request_body(items[0].text) == "inspect this image"

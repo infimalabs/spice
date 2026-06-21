@@ -398,10 +398,14 @@ def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
     latest = datetime.now(UTC)
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     store.create_team(members=["thread:agent-a"])
+    for index in range(3):
+        store.record_directive_sent(
+            f"d{index}", agent_id="thread:agent-a", team_id="thread:agent-a"
+        )
+    store.mark_directive_acked("d0")
+    store.mark_directive_acked("d1")
     store.record_agent_metric_delta(
         "thread:agent-a",
-        acked=2,
-        sends=3,
         tool_calls=2,
         message_timestamps=[latest.timestamp()] * 4,
     )

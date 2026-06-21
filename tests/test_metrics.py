@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from spice.serve.directivestats import DirectiveTotals
 from spice.serve.metrics import record_transcript_metrics_for_agent
 from spice.serve.teams import ServeTeamStore
 
@@ -38,6 +39,9 @@ def _presence_entry(timestamp: str, payload_type: str) -> dict[str, object]:
 
 def test_transcript_metric_ingestion_advances_cursor_without_double_count(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.record_directive_sent(
+        "20260610T120000000001Z", agent_id="agent-a", team_id="agent-a"
+    )
     rollout = tmp_path / "rollout.jsonl"
     _write_rollout(
         rollout,
@@ -92,6 +96,11 @@ def test_transcript_metric_cursors_follow_alias_rewrite_per_source_path(tmp_path
         ],
     )
 
+    store.record_directive_sent(
+        "20260610T120000000001Z",
+        agent_id="thread:predecessor",
+        team_id=team.team_id,
+    )
     record_transcript_metrics_for_agent(
         store, agent_id="thread:predecessor", transcript_path=predecessor_rollout
     )
@@ -99,6 +108,11 @@ def test_transcript_metric_cursors_follow_alias_rewrite_per_source_path(tmp_path
         team.team_id,
         "thread:successor",
         aliases=["thread:predecessor"],
+    )
+    store.record_directive_sent(
+        "20260610T120100000001Z",
+        agent_id="thread:successor",
+        team_id=team.team_id,
     )
     record_transcript_metrics_for_agent(
         store, agent_id="thread:successor", transcript_path=predecessor_rollout
@@ -153,3 +167,50 @@ def test_lane_metric_sparkline_ages_old_buckets_out(tmp_path):
     assert initial.sparkline == (1, 1, 1, 0)
     assert shifted.sparkline == (1, 1, 0, 0)
     assert expired.sparkline == (0, 0, 0, 0)
+
+
+def test_transcript_ack_flips_its_sent_directive(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    directive_key = "20260610T120000000001Z"
+    store.record_directive_sent(directive_key, agent_id="agent-a", team_id="team-1")
+    rollout = tmp_path / "rollout.jsonl"
+    _write_rollout(
+        rollout,
+        [
+            _assistant_entry(
+                "2026-06-10T12:00:00.000000Z", f"ACK {directive_key}: handled"
+            )
+        ],
+    )
+
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=rollout
+    )
+
+    # The agent acknowledged the key, so its sent directive flips to acked.
+    assert store.directive_totals_for_agents(["agent-a"]) == DirectiveTotals(
+        sends=1, acked=1
+    )
+
+
+def test_transcript_ack_of_unsent_key_is_a_noop(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    rollout = tmp_path / "rollout.jsonl"
+    _write_rollout(
+        rollout,
+        [
+            _assistant_entry(
+                "2026-06-10T12:00:00.000000Z",
+                "ACK 20260610T120000000099Z: handled",
+            )
+        ],
+    )
+
+    record_transcript_metrics_for_agent(
+        store, agent_id="agent-a", transcript_path=rollout
+    )
+
+    # Nothing was recorded as sent, so acking it cannot push acked above sends.
+    assert store.directive_totals_for_agents(["agent-a"]) == DirectiveTotals(
+        sends=0, acked=0
+    )

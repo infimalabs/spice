@@ -28,7 +28,6 @@ def record_transcript_metrics_for_agent(
         return
     store.record_agent_metric_delta(
         agent_id,
-        acked=sum(max(0, item.ack_count) for item in items),
         tool_calls=sum(1 for item in items if item.kind in TOOL_CALL_KINDS),
         message_timestamps=(
             parsed.timestamp()
@@ -36,6 +35,11 @@ def record_transcript_metrics_for_agent(
             if (parsed := message_reader.parse_timestamp(item.timestamp)) is not None
         ),
     )
+    # Each acknowledged key flips its sent directive to acked (no-op if that key
+    # was never recorded as sent, e.g. system steering), keeping acked <= sends.
+    for item in items:
+        for ack_key in item.ack_keys:
+            store.mark_directive_acked(ack_key)
     store.record_agent_metric_cursor(
         agent_id, source_path=source_path, offset=end_offset
     )

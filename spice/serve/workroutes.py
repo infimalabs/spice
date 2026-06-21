@@ -183,7 +183,16 @@ def _work_tree_send_result_payload(
         send_actor = identitypayload.team_actor_for_target(
             state.team_store, target, send_agent_id
         )
-    state.record_lane_send(target.id, agent_id=send_actor)
+    if send_actor:
+        # One operator directive = one send, keyed by its inbox key, attributed
+        # to the actor that will process it (post-renewal). team-at-capture is
+        # that actor's current team, or the actor itself when solo / in no team.
+        # It is acked when the agent acknowledges the key (see
+        # metrics.record_transcript_metrics_for_agent).
+        capture_team = state.team_store.current_team_for_agent(send_actor) or send_actor
+        state.team_store.record_directive_sent(
+            sent.key, agent_id=send_actor, team_id=capture_team
+        )
     renewal_agent_id = predecessor_actor if renew_intent else send_actor
     if renewal_agent_id:
         response_payload["renewalIntent"] = identitypayload.renewal_intent_for_actor(

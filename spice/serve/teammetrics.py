@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Iterable, Protocol
 
 from spice.errors import SpiceError
+from spice.serve.directivestats import DirectiveTotals
 
 METRIC_BUCKET_SECONDS = 60
 
@@ -48,8 +49,6 @@ class _TeamMetricStore(Protocol):
         connection: sqlite3.Connection,
         agent_id: str,
         *,
-        acked: int,
-        sends: int,
         tool_calls: int,
         buckets: Counter[int],
         now: float,
@@ -65,33 +64,33 @@ class _TeamMetricStore(Protocol):
         now: float,
     ) -> LaneMetricSummary: ...
 
+    def _directive_totals_for_agents_locked(
+        self,
+        connection: sqlite3.Connection,
+        agent_ids: Iterable[str],
+    ) -> DirectiveTotals: ...
+
 
 class TeamMetricStoreMixin:
     def record_agent_metric_delta(
         self: _TeamMetricStore,
         agent_id: str,
         *,
-        acked: int = 0,
-        sends: int = 0,
         tool_calls: int = 0,
         message_timestamps: Iterable[float] = (),
     ) -> None:
         agent_id = _normalized_id(agent_id, "agent_id")
-        acked = _nonnegative_int(acked)
-        sends = _nonnegative_int(sends)
         tool_calls = _nonnegative_int(tool_calls)
         buckets = Counter(
             _metric_bucket_start(timestamp) for timestamp in message_timestamps
         )
-        if acked == sends == tool_calls == 0 and not buckets:
+        if tool_calls == 0 and not buckets:
             return
         now = time.time()
         with self.connect() as connection:
             self._record_agent_metric_delta_locked(
                 connection,
                 agent_id,
-                acked=acked,
-                sends=sends,
                 tool_calls=tool_calls,
                 buckets=buckets,
                 now=now,
@@ -165,12 +164,10 @@ class TeamMetricStoreMixin:
             return
         connection.execute(
             "INSERT INTO agent_metrics "
-            "(agent_id, acked, sends, tool_calls, updated_at) "
-            "SELECT ?, acked, sends, tool_calls, updated_at "
+            "(agent_id, tool_calls, updated_at) "
+            "SELECT ?, tool_calls, updated_at "
             "FROM agent_metrics WHERE agent_id = ? "
             "ON CONFLICT(agent_id) DO UPDATE SET "
-            "acked = agent_metrics.acked + excluded.acked, "
-            "sends = agent_metrics.sends + excluded.sends, "
             "tool_calls = agent_metrics.tool_calls + excluded.tool_calls, "
             "updated_at = max(agent_metrics.updated_at, excluded.updated_at)",
             (new_agent_id, old_agent_id),
@@ -275,22 +272,18 @@ class TeamMetricStoreMixin:
         connection: sqlite3.Connection,
         agent_id: str,
         *,
-        acked: int,
-        sends: int,
         tool_calls: int,
         buckets: Counter[int],
         now: float,
     ) -> None:
         connection.execute(
             "INSERT INTO agent_metrics "
-            "(agent_id, acked, sends, tool_calls, updated_at) "
-            "VALUES (?, ?, ?, ?, ?) "
+            "(agent_id, tool_calls, updated_at) "
+            "VALUES (?, ?, ?) "
             "ON CONFLICT(agent_id) DO UPDATE SET "
-            "acked = agent_metrics.acked + excluded.acked, "
-            "sends = agent_metrics.sends + excluded.sends, "
             "tool_calls = agent_metrics.tool_calls + excluded.tool_calls, "
             "updated_at = excluded.updated_at",
-            (agent_id, acked, sends, tool_calls, now),
+            (agent_id, tool_calls, now),
         )
         for bucket_start, count in buckets.items():
             connection.execute(
@@ -302,7 +295,7 @@ class TeamMetricStoreMixin:
             )
 
     def _agent_lane_metric_summary_locked(
-        self,
+        self: _TeamMetricStore,
         connection: sqlite3.Connection,
         agent_ids: tuple[str, ...],
         *,
@@ -319,10 +312,11 @@ class TeamMetricStoreMixin:
                 sparkline=tuple(0 for _ in range(max(0, bucket_count))),
             )
         placeholders = ",".join("?" for _ in agent_ids)
-        totals = connection.execute(
-            "SELECT COALESCE(SUM(acked), 0) AS acked, "
-            "COALESCE(SUM(sends), 0) AS sends, "
-            "COALESCE(SUM(tool_calls), 0) AS tool_calls "
+        # sends/acked are the membership-derived directive totals (acked <= sends
+        # by construction); tool_calls is the per-agent activity counter.
+        directives = self._directive_totals_for_agents_locked(connection, agent_ids)
+        tool_calls_row = connection.execute(
+            "SELECT COALESCE(SUM(tool_calls), 0) AS tool_calls "
             f"FROM agent_metrics WHERE agent_id IN ({placeholders})",
             agent_ids,
         ).fetchone()
@@ -341,8 +335,10 @@ class TeamMetricStoreMixin:
         ).fetchall()
         return _lane_metric_summary_from_rows(
             agent_ids,
-            totals,
             bucket_rows,
+            acked=directives.acked,
+            sends=directives.sends,
+            tool_calls=int(tool_calls_row["tool_calls"] or 0) if tool_calls_row else 0,
             bucket_count=bucket_count,
             bucket_seconds=bucket_seconds,
             now=now,
@@ -615,18 +611,20 @@ def _metric_sparkline(
 
 def _lane_metric_summary_from_rows(
     agent_ids: tuple[str, ...],
-    totals: sqlite3.Row | None,
     bucket_rows: Iterable[sqlite3.Row],
     *,
+    acked: int,
+    sends: int,
+    tool_calls: int,
     bucket_count: int,
     bucket_seconds: int,
     now: float,
 ) -> LaneMetricSummary:
     return LaneMetricSummary(
         agent_ids=agent_ids,
-        acked=int(totals["acked"] or 0) if totals else 0,
-        sends=int(totals["sends"] or 0) if totals else 0,
-        tool_calls=int(totals["tool_calls"] or 0) if totals else 0,
+        acked=acked,
+        sends=sends,
+        tool_calls=tool_calls,
         sparkline=_metric_sparkline(
             (
                 (int(row["bucket_start"]), int(row["messages"] or 0))

@@ -248,19 +248,6 @@ def record_supervised_lane_metrics(repo_root: Path) -> None:
     )
 
 
-def record_supervised_lane_sends(repo_root: Path, *, sends: int = 1) -> None:
-    if sends <= 0:
-        return
-    from spice.agent.lifecycle import agent_status
-    from spice.serve.teamids import thread_actor_id
-    from spice.serve.teams import ServeTeamStore
-
-    thread_id = agent_status(repo_root).thread_id
-    if not thread_id:
-        raise RuntimeError(f"could not resolve supervised agent id for {repo_root}")
-    ServeTeamStore().record_agent_metric_delta(thread_actor_id(thread_id), sends=sends)
-
-
 class StdoutScanner(Protocol):
     def process_line(self, line: str) -> None: ...
 
@@ -399,7 +386,6 @@ def publish_maxim_hits_as_inbox(
     if reminder_gate is not None and not reminder_gate.should_publish(body):
         return []
     paths = [write_inbox_item(repo_root, None, body)]
-    record_supervised_lane_sends(repo_root, sends=len(paths))
     if reminder_gate is not None:
         reminder_gate.mark_sent(body)
     return paths

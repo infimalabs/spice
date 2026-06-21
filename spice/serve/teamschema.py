@@ -96,8 +96,6 @@ CREATE TABLE IF NOT EXISTS agent_identities (
 );
 CREATE TABLE IF NOT EXISTS agent_metrics (
     agent_id TEXT PRIMARY KEY,
-    acked INTEGER NOT NULL DEFAULT 0,
-    sends INTEGER NOT NULL DEFAULT 0,
     tool_calls INTEGER NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL
 );
@@ -113,5 +111,20 @@ CREATE TABLE IF NOT EXISTS agent_metric_cursors (
     offset INTEGER NOT NULL,
     updated_at REAL NOT NULL,
     PRIMARY KEY (agent_id, source_path)
+);
+CREATE TABLE IF NOT EXISTS directives (
+    directive_key TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    sent_at REAL NOT NULL,
+    acked INTEGER NOT NULL DEFAULT 0,
+    acked_at REAL
+);
+CREATE TABLE IF NOT EXISTS directive_totals (
+    agent_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    sends INTEGER NOT NULL DEFAULT 0,
+    acked INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (agent_id, team_id)
 );
 """

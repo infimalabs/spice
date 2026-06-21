@@ -97,7 +97,6 @@ class ServeState:
         self.cached_targets: list[WorktreeTarget] | None = None
         self.rollout_cursors: dict[str, RolloutCursor] = {}
         self.pending_agent_ensure_attempts: dict[str, float] = {}
-        self.lane_send_counts: dict[str, int] = {}
         self.http_request_counts: dict[tuple[str, str], int] = {}
         self.team_store = ServeTeamStore()
         self.team_commands = TeamCommandService(self.team_store)
@@ -117,17 +116,6 @@ class ServeState:
     def invalidate_targets(self) -> None:
         with self.cache_lock:
             self.cached_targets = None
-
-    def record_lane_send(self, target_id: str, *, agent_id: str = "") -> None:
-        with self.cache_lock:
-            count = self.lane_send_counts.get(target_id, 0)
-            self.lane_send_counts[target_id] = count + 1
-        if agent_id:
-            self.team_store.record_agent_metric_delta(agent_id, sends=1)
-
-    def lane_send_count(self, target_id: str) -> int:
-        with self.cache_lock:
-            return self.lane_send_counts.get(target_id, 0)
 
     def record_http_request(self, method: str, path: str) -> None:
         key = (method.upper(), serve_metrics_path_template(path))

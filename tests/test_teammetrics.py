@@ -1,6 +1,36 @@
+import itertools
 import random
 
 from spice.serve.teams import ServeTeamStore, TeamConfig
+
+_directive_seq = itertools.count()
+
+
+def _seed_lane_metrics(
+    store,
+    agent_id,
+    *,
+    acked=0,
+    sends=0,
+    tool_calls=0,
+    team_id=None,
+    message_timestamps=(),
+):
+    # sends/acked are recorded as directives (acked <= sends by construction);
+    # tool_calls and message buckets stay on the per-agent activity counter.
+    team = team_id or agent_id
+    keys = []
+    for _ in range(sends):
+        key = f"dir-{next(_directive_seq)}"
+        store.record_directive_sent(key, agent_id=agent_id, team_id=team)
+        keys.append(key)
+    for key in keys[:acked]:
+        store.mark_directive_acked(key)
+    if tool_calls or message_timestamps:
+        store.record_agent_metric_delta(
+            agent_id, tool_calls=tool_calls, message_timestamps=message_timestamps
+        )
+
 
 TEAM_MERGE_ACKED_TOTAL = 14
 TEAM_MERGE_SEND_TOTAL = 25
@@ -55,17 +85,24 @@ def _agent_metric_totals(
 ) -> dict[str, tuple[int, int, int]]:
     totals = {agent_id: (0, 0, 0) for agent_id in agents}
     with store.connect() as connection:
-        rows = connection.execute(
-            "SELECT agent_id, acked, sends, tool_calls FROM agent_metrics"
+        tool_rows = connection.execute(
+            "SELECT agent_id, tool_calls FROM agent_metrics"
         ).fetchall()
-    for row in rows:
-        agent_id = str(row["agent_id"])
-        if agent_id in totals:
-            totals[agent_id] = (
-                int(row["acked"] or 0),
-                int(row["sends"] or 0),
-                int(row["tool_calls"] or 0),
-            )
+        directive_rows = connection.execute(
+            "SELECT agent_id, COALESCE(SUM(sends), 0) AS sends, "
+            "COALESCE(SUM(acked), 0) AS acked "
+            "FROM directive_totals GROUP BY agent_id"
+        ).fetchall()
+    tool_calls = {
+        str(row["agent_id"]): int(row["tool_calls"] or 0) for row in tool_rows
+    }
+    directives = {
+        str(row["agent_id"]): (int(row["acked"] or 0), int(row["sends"] or 0))
+        for row in directive_rows
+    }
+    for agent_id in agents:
+        acked, sends = directives.get(agent_id, (0, 0))
+        totals[agent_id] = (acked, sends, tool_calls.get(agent_id, 0))
     return totals
 
 
@@ -149,14 +186,13 @@ def _record_random_metric_delta(
     agents = tuple(expected_metrics)
     before = _agent_metric_totals(store, agents)
     agent_id = rng.choice(agents)
-    delta = (
-        rng.randrange(0, 3),
-        rng.randrange(0, 4),
-        rng.randrange(0, 3),
-    )
+    sends = rng.randrange(0, 4)
+    acked = rng.randrange(0, sends + 1)
+    delta = (acked, sends, rng.randrange(0, 3))
     if delta == (0, 0, 0):
-        delta = (1, 0, 0)
-    store.record_agent_metric_delta(
+        delta = (0, 0, 1)
+    _seed_lane_metrics(
+        store,
         agent_id,
         acked=delta[0],
         sends=delta[1],
@@ -376,9 +412,9 @@ def _apply_lifecycle_op(
 def test_lane_metrics_drop_removed_member_counts(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(members=["agent-a"])
-    store.record_agent_metric_delta("agent-a", acked=1, sends=2, tool_calls=3)
+    _seed_lane_metrics(store, "agent-a", acked=1, sends=2, tool_calls=3)
     store.assign_agent(team.team_id, "agent-b")
-    store.record_agent_metric_delta("agent-b", acked=4, sends=5, tool_calls=6)
+    _seed_lane_metrics(store, "agent-b", acked=4, sends=5, tool_calls=6)
     store.remove_agent(team.team_id, "agent-a")
 
     summary = store.lane_metric_summary("agent-b", bucket_count=12)
@@ -395,10 +431,10 @@ def test_lane_metrics_follow_agent_across_move(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     source = store.create_team(members=["agent-a"])
     destination = store.create_team(members=["agent-b"])
-    store.record_agent_metric_delta("agent-a", acked=10, sends=10, tool_calls=10)
+    _seed_lane_metrics(store, "agent-a", acked=10, sends=10, tool_calls=10)
 
     store.assign_agent(destination.team_id, "agent-a")
-    store.record_agent_metric_delta("agent-a", acked=1, sends=2, tool_calls=3)
+    _seed_lane_metrics(store, "agent-a", acked=1, sends=2, tool_calls=3)
 
     destination_summary = store.lane_metric_summary("agent-b", bucket_count=12)
     moved_summary = store.lane_metric_summary("agent-a", bucket_count=12)
@@ -419,9 +455,9 @@ def test_composer_move_carries_agent_metrics_to_destination(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     source = store.create_team(members=["agent-a", "agent-c"])
     destination = store.create_team(members=["agent-b"])
-    store.record_agent_metric_delta("agent-a", acked=10, sends=20, tool_calls=30)
-    store.record_agent_metric_delta("agent-c", acked=1, sends=2, tool_calls=3)
-    store.record_agent_metric_delta("agent-b", acked=4, sends=5, tool_calls=6)
+    _seed_lane_metrics(store, "agent-a", acked=10, sends=20, tool_calls=30)
+    _seed_lane_metrics(store, "agent-c", acked=1, sends=2, tool_calls=3)
+    _seed_lane_metrics(store, "agent-b", acked=4, sends=5, tool_calls=6)
 
     store.assign_agent(destination.team_id, "agent-a")
 
@@ -446,14 +482,16 @@ def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     source = store.create_team(members=["agent-a"])
     destination = store.create_team(members=["agent-b"])
-    store.record_agent_metric_delta(
+    _seed_lane_metrics(
+        store,
         "agent-a",
         acked=10,
         sends=20,
         tool_calls=30,
         message_timestamps=[120, 180],
     )
-    store.record_agent_metric_delta(
+    _seed_lane_metrics(
+        store,
         "agent-b",
         acked=4,
         sends=5,
@@ -489,33 +527,33 @@ def test_team_historical_metric_summary_projects_membership_intervals(
 
     set_time(0)
     team = store.create_team(members=["agent-a", "agent-b"])
-    store.record_agent_metric_delta("agent-a", message_timestamps=[60])
-    store.record_agent_metric_delta("agent-b", message_timestamps=[60])
+    _seed_lane_metrics(store, "agent-a", message_timestamps=[60])
+    _seed_lane_metrics(store, "agent-b", message_timestamps=[60])
 
     set_time(120)
     split = store.split_team(
         team.team_id, agent_ids=["agent-a"], new_team_id="team-split"
     )
-    store.record_agent_metric_delta("agent-a", message_timestamps=[180])
-    store.record_agent_metric_delta("agent-b", message_timestamps=[180])
+    _seed_lane_metrics(store, "agent-a", message_timestamps=[180])
+    _seed_lane_metrics(store, "agent-b", message_timestamps=[180])
 
     set_time(240)
     store.merge_teams(split.team_id, team.team_id)
-    store.record_agent_metric_delta("agent-a", message_timestamps=[300])
-    store.record_agent_metric_delta("agent-b", message_timestamps=[300])
+    _seed_lane_metrics(store, "agent-a", message_timestamps=[300])
+    _seed_lane_metrics(store, "agent-b", message_timestamps=[300])
 
     set_time(360)
     store.split_team_back(team.team_id)
-    store.record_agent_metric_delta("agent-a", message_timestamps=[420])
-    store.record_agent_metric_delta("agent-b", message_timestamps=[420])
+    _seed_lane_metrics(store, "agent-a", message_timestamps=[420])
+    _seed_lane_metrics(store, "agent-b", message_timestamps=[420])
 
     set_time(480)
     store.remove_agent(team.team_id, "agent-b")
-    store.record_agent_metric_delta("agent-b", message_timestamps=[540])
+    _seed_lane_metrics(store, "agent-b", message_timestamps=[540])
 
     set_time(600)
     store.close_team(split.team_id)
-    store.record_agent_metric_delta("agent-a", message_timestamps=[660])
+    _seed_lane_metrics(store, "agent-a", message_timestamps=[660])
 
     team_history = store.team_historical_metric_summary(
         team.team_id, bucket_count=16, now=720
@@ -536,12 +574,12 @@ def test_split_team_back_moves_subgroup_metrics_back_to_restored_team(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     source = store.create_team(members=["agent-a", "agent-b"])
     destination = store.create_team(members=["agent-c"])
-    store.record_agent_metric_delta("agent-a", acked=10, sends=20, tool_calls=30)
-    store.record_agent_metric_delta("agent-b", acked=1, sends=2, tool_calls=3)
-    store.record_agent_metric_delta("agent-c", acked=4, sends=5, tool_calls=6)
+    _seed_lane_metrics(store, "agent-a", acked=10, sends=20, tool_calls=30)
+    _seed_lane_metrics(store, "agent-b", acked=1, sends=2, tool_calls=3)
+    _seed_lane_metrics(store, "agent-c", acked=4, sends=5, tool_calls=6)
 
     store.merge_teams(source.team_id, destination.team_id)
-    store.record_agent_metric_delta("agent-a", acked=7, sends=8, tool_calls=9)
+    _seed_lane_metrics(store, "agent-a", acked=7, sends=8, tool_calls=9)
     store.split_team_back(destination.team_id)
     restored_summary = store.lane_metric_summary("agent-a", bucket_count=12)
     destination_summary = store.lane_metric_summary("agent-c", bucket_count=12)
@@ -562,7 +600,7 @@ def test_zero_activity_prune_reaps_metric_only_but_keeps_config_teams(tmp_path):
     # only history was metric activity carries no durable team state and is
     # correctly pruned; agent-a's counters live on the agent regardless.
     metric_team = store.create_team(team_id="team-metric", members=["agent-a"])
-    store.record_agent_metric_delta("agent-a", sends=1)
+    _seed_lane_metrics(store, "agent-a", sends=1)
     store.remove_agent(metric_team.team_id, "agent-a")
     config_team = store.create_team(
         team_id="team-config",

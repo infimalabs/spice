@@ -35,6 +35,10 @@ from spice.serve.teamidentity import (
     agent_identity_from_row,
     select_agent_identity_rows,
 )
+from spice.serve.directivestats import (
+    DirectiveStatsStoreMixin,
+    DirectiveTotals as DirectiveTotals,
+)
 from spice.serve.teammetrics import (
     METRIC_BUCKET_SECONDS as METRIC_BUCKET_SECONDS,
     LaneMetricSummary as LaneMetricSummary,
@@ -98,6 +102,7 @@ class ServeTeamStore(
     TeamRenewalStoreMixin,
     TeamFilterStoreMixin,
     TeamMetricStoreMixin,
+    DirectiveStatsStoreMixin,
 ):
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or team_database_path()
@@ -149,6 +154,15 @@ class ServeTeamStore(
     def _migrate_team_metric_model_locked(self, connection: sqlite3.Connection) -> None:
         for table in DROPPED_TEAM_METRIC_TABLES:
             connection.execute(f"DROP TABLE IF EXISTS {table}")
+        agent_metric_columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(agent_metrics)")
+        }
+        for legacy_column in ("acked", "sends"):
+            if legacy_column in agent_metric_columns:
+                connection.execute(
+                    f"ALTER TABLE agent_metrics DROP COLUMN {legacy_column}"
+                )
         columns = {
             str(row["name"])
             for row in connection.execute("PRAGMA table_info(memberships)")
@@ -348,6 +362,7 @@ class ServeTeamStore(
                     connection, alias_id, agent_id
                 )
                 self._rewrite_agent_metrics_locked(connection, alias_id, agent_id)
+                self._rewrite_directive_stats_locked(connection, alias_id, agent_id)
         # A renewal successor (or a placeholder promoted to its real thread)
         # arrives carrying its predecessor's id as an alias that already holds a
         # visible slot in this same team. The roster is ordered by position, so
