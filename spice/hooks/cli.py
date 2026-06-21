@@ -38,6 +38,11 @@ def configure_dev_parser(subparsers: Any) -> None:
         help="Hook backend for staged commit checks; commit normally to run it.",
         recovery_examples=("git commit", "spice dev pre-commit --help"),
     )
+    pre_commit.add_argument(
+        "pre_commit_args",
+        nargs=argparse.REMAINDER,
+        help=argparse.SUPPRESS,
+    )
     pre_commit.set_defaults(func=handle_dev)
 
     actions.add_parser(
@@ -102,6 +107,15 @@ def handle_dev(args: argparse.Namespace) -> int:
     if command == "pre-commit":
         from spice.hooks.precommit import handle_pre_commit
 
+        extra = tuple(getattr(args, "pre_commit_args", ()) or ())
+        if extra:
+            joined = " ".join(extra)
+            raise SpiceError(
+                "`spice dev pre-commit` is the repo pre-commit gate and does "
+                f"not accept pre-commit framework arguments: {joined}\n"
+                "Run `spice dev pre-commit` for the staged gate, or `git commit` "
+                "to run it as the hook."
+            )
         return handle_pre_commit(repo_root)
     if command == "serve-web-typecheck":
         from spice.serve.typecheck import run_serve_web_typecheck
