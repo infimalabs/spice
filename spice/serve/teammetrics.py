@@ -27,6 +27,12 @@ class LaneMetricSummary:
 
 
 @dataclass(frozen=True)
+class MetricSeriesPoint:
+    bucket_start: int
+    messages: int
+
+
+@dataclass(frozen=True)
 class TeamHistoricalMetricSummary:
     team_id: str
     agent_ids: tuple[str, ...]
@@ -277,6 +283,40 @@ class TeamMetricStoreMixin:
                 bucket_seconds=bucket_seconds,
                 now=summary_time,
             ),
+        )
+
+    def agent_activity_series(
+        self: _TeamMetricStore,
+        agent_ids: Iterable[str],
+        *,
+        start: float,
+        end: float,
+        bucket_seconds: int = METRIC_BUCKET_SECONDS,
+    ) -> tuple[MetricSeriesPoint, ...]:
+        """Stable, full-fidelity activity series for graphing: summed messages
+        per bucket over the given agents within [start, end]. Unlike the lane
+        sparkline this applies no rolling window or aging — re-querying the same
+        range always yields identical points, so it can be plotted over an
+        arbitrary range (bounded only by the retention horizon)."""
+        ids = tuple(dict.fromkeys(str(agent_id) for agent_id in agent_ids if agent_id))
+        if not ids:
+            return ()
+        bucket_seconds = max(1, int(bucket_seconds))
+        floor = _metric_bucket_start(start, bucket_seconds)
+        ceiling = _metric_bucket_start(end, bucket_seconds)
+        placeholders = ",".join("?" for _ in ids)
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT bucket_start, SUM(messages) AS messages "
+                "FROM agent_metric_buckets "
+                f"WHERE agent_id IN ({placeholders}) "
+                "AND bucket_start >= ? AND bucket_start <= ? "
+                "GROUP BY bucket_start ORDER BY bucket_start",
+                (*ids, floor, ceiling),
+            ).fetchall()
+        return tuple(
+            MetricSeriesPoint(int(row["bucket_start"]), int(row["messages"] or 0))
+            for row in rows
         )
 
     def _prune_metric_history_locked(
