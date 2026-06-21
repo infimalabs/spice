@@ -59,10 +59,11 @@ INBOX_ACK_REMINDER_SECONDS = 15
 INBOX_ACK_ESCALATED_SECONDS = 60
 INBOX_ACK_OVERDUE_SECONDS = 5 * 60
 INBOX_TASK_HINT_ROW = (
-    "Task offload: capture in the moment with "
-    "`TASK title=... | project=<stem.child> | acceptance=...` in an ACK or "
-    "standalone assistant message using the same task-add batch format, or use "
-    "spice task add; then resume allocator flow."
+    "Task offload: capture in the moment with a standalone TASK line: "
+    "`TASK title=... | project=<stem.child> | acceptance=...`; if ACKing "
+    "steering, put ACK prose first and then the TASK line on its own line. "
+    "Use the same task-add batch format, or use spice task add; then resume "
+    "allocator flow."
 )
 INBOX_PEEK_PERSISTENCE_ROW = (
     "Persistence: acknowledged keys clear once processed; unACKed keys "

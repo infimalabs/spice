@@ -856,7 +856,9 @@ def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
     assert output.count("operator steering") == 2
     assert output.count("recently shown") == 1
     assert "Task offload: capture in the moment" in output
+    assert "standalone TASK line" in output
     assert "TASK title=... | project=<stem.child> | acceptance=..." in output
+    assert "ACK prose first and then the TASK line on its own line" in output
     assert "same task-add batch format" in output
 
 

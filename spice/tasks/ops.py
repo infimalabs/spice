@@ -702,12 +702,13 @@ def next_task_drain_line(
         tail = (
             "run spice task next only when explicitly directed to continue "
             "allocator work; capture operator task-creation requests "
-            "immediately with TASK title=... | project=<stem.child> | "
-            "acceptance=... in an ACK or standalone assistant message using "
-            "the same task-add batch format, or spice task add before "
-            "continuing other work; immediate task capture is not allocator "
-            "selection; manual task claims are exceptional and usually "
-            "require explicit operator direction"
+            "immediately with a TASK directive that starts on its own line; "
+            "when ACKing, write ACK <key>: captured the request. then put TASK "
+            "title=... | project=<stem.child> | acceptance=... on the next "
+            "line using the same task-add batch format, or spice task add "
+            "before continuing other work; immediate task capture is not "
+            "allocator selection; manual task claims are exceptional and "
+            "usually require explicit operator direction"
         )
         if review_assignment:
             return (
