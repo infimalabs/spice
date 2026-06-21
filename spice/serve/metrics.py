@@ -28,7 +28,6 @@ def record_transcript_metrics_for_agent(
         return
     store.record_agent_metric_delta(
         agent_id,
-        acked=sum(max(0, item.ack_count) for item in items),
         tool_calls=sum(1 for item in items if item.kind in TOOL_CALL_KINDS),
         message_timestamps=(
             parsed.timestamp()

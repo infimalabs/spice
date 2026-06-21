@@ -46,7 +46,7 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
     )
     ensure_calls: list[dict[str, object]] = []
     send_records: list[dict[str, object]] = []
-    record_lane_send = state.record_lane_send
+    record_directive_sent = state.team_store.record_directive_sent
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
         identitypayload,
@@ -58,19 +58,23 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
         ensure_calls.append({"target": ensured_target, **kwargs})
         return {"ok": True, "threadId": THREAD_B}, HTTPStatus.OK
 
-    def observe_lane_send(target_id: str, *, agent_id: str = "") -> None:
+    def observe_directive_sent(
+        directive_key: str, *, agent_id: str, team_id: str
+    ) -> None:
         send_records.append(
             {
-                "target_id": target_id,
                 "agent_id": agent_id,
+                "team_id": team_id,
                 "predecessor_team": state.team_store.current_team_for_agent(ACTOR_A),
                 "successor_team": state.team_store.current_team_for_agent(ACTOR_B),
             }
         )
-        record_lane_send(target_id, agent_id=agent_id)
+        record_directive_sent(directive_key, agent_id=agent_id, team_id=team_id)
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
-    monkeypatch.setattr(state, "record_lane_send", observe_lane_send)
+    monkeypatch.setattr(
+        state.team_store, "record_directive_sent", observe_directive_sent
+    )
 
     payload, status = work_tree_send_response_payload(
         state,
@@ -99,8 +103,8 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
     ]
     assert send_records == [
         {
-            "target_id": target.id,
             "agent_id": ACTOR_B,
+            "team_id": created.team_id,
             "predecessor_team": None,
             "successor_team": created.team_id,
         }

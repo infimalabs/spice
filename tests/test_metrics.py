@@ -39,6 +39,9 @@ def _presence_entry(timestamp: str, payload_type: str) -> dict[str, object]:
 
 def test_transcript_metric_ingestion_advances_cursor_without_double_count(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    store.record_directive_sent(
+        "20260610T120000000001Z", agent_id="agent-a", team_id="agent-a"
+    )
     rollout = tmp_path / "rollout.jsonl"
     _write_rollout(
         rollout,
@@ -93,6 +96,11 @@ def test_transcript_metric_cursors_follow_alias_rewrite_per_source_path(tmp_path
         ],
     )
 
+    store.record_directive_sent(
+        "20260610T120000000001Z",
+        agent_id="thread:predecessor",
+        team_id=team.team_id,
+    )
     record_transcript_metrics_for_agent(
         store, agent_id="thread:predecessor", transcript_path=predecessor_rollout
     )
@@ -100,6 +108,11 @@ def test_transcript_metric_cursors_follow_alias_rewrite_per_source_path(tmp_path
         team.team_id,
         "thread:successor",
         aliases=["thread:predecessor"],
+    )
+    store.record_directive_sent(
+        "20260610T120100000001Z",
+        agent_id="thread:successor",
+        team_id=team.team_id,
     )
     record_transcript_metrics_for_agent(
         store, agent_id="thread:successor", transcript_path=predecessor_rollout

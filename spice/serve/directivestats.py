@@ -33,6 +33,10 @@ class DirectiveTotals:
 class _DirectiveStatsStore(Protocol):
     def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
 
+    def _directive_totals_for_agents_locked(
+        self, connection: sqlite3.Connection, agent_ids: Iterable[str]
+    ) -> DirectiveTotals: ...
+
 
 class DirectiveStatsStoreMixin:
     def record_directive_sent(
@@ -96,23 +100,60 @@ class DirectiveStatsStoreMixin:
             )
             return True
 
+    def _rewrite_directive_stats_locked(
+        self,
+        connection: sqlite3.Connection,
+        old_agent_id: str,
+        new_agent_id: str,
+    ) -> None:
+        # Renewal folds the predecessor's directives into the successor (the
+        # canonical actor) so sends/acks accumulate across the lineage and only
+        # one id survives — same id-unification as the other per-agent stores.
+        old_agent_id = _normalized_id(old_agent_id, "old_agent_id")
+        new_agent_id = _normalized_id(new_agent_id, "new_agent_id")
+        if old_agent_id == new_agent_id:
+            return
+        connection.execute(
+            "UPDATE directives SET agent_id = ? WHERE agent_id = ?",
+            (new_agent_id, old_agent_id),
+        )
+        connection.execute(
+            "INSERT INTO directive_totals (agent_id, team_id, sends, acked) "
+            "SELECT ?, team_id, sends, acked FROM directive_totals "
+            "WHERE agent_id = ? "
+            "ON CONFLICT(agent_id, team_id) DO UPDATE SET "
+            "sends = directive_totals.sends + excluded.sends, "
+            "acked = directive_totals.acked + excluded.acked",
+            (new_agent_id, old_agent_id),
+        )
+        connection.execute(
+            "DELETE FROM directive_totals WHERE agent_id = ?", (old_agent_id,)
+        )
+
     def directive_totals_for_agents(
         self: _DirectiveStatsStore, agent_ids: Iterable[str]
     ) -> DirectiveTotals:
         """Running send/ack totals summed over the given agents across every
         team they have been tagged under (per-agent lifetime). Team-scoped
         history is available by filtering directive_totals.team_id."""
+        with self.connect() as connection:
+            return self._directive_totals_for_agents_locked(connection, agent_ids)
+
+    def _directive_totals_for_agents_locked(
+        self,
+        connection: sqlite3.Connection,
+        agent_ids: Iterable[str],
+    ) -> DirectiveTotals:
         ids = tuple(dict.fromkeys(str(agent_id) for agent_id in agent_ids if agent_id))
         if not ids:
             return DirectiveTotals(sends=0, acked=0)
         placeholders = ",".join("?" for _ in ids)
-        with self.connect() as connection:
-            row = connection.execute(
-                "SELECT COALESCE(SUM(sends), 0) AS sends, "
-                "COALESCE(SUM(acked), 0) AS acked "
-                f"FROM directive_totals WHERE agent_id IN ({placeholders})",
-                ids,
-            ).fetchone()
+        row = connection.execute(
+            "SELECT COALESCE(SUM(sends), 0) AS sends, "
+            "COALESCE(SUM(acked), 0) AS acked "
+            f"FROM directive_totals WHERE agent_id IN ({placeholders})",
+            ids,
+        ).fetchone()
         return DirectiveTotals(
             sends=int(row["sends"] or 0) if row else 0,
             acked=int(row["acked"] or 0) if row else 0,

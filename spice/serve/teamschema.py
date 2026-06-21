@@ -96,8 +96,6 @@ CREATE TABLE IF NOT EXISTS agent_identities (
 );
 CREATE TABLE IF NOT EXISTS agent_metrics (
     agent_id TEXT PRIMARY KEY,
-    acked INTEGER NOT NULL DEFAULT 0,
-    sends INTEGER NOT NULL DEFAULT 0,
     tool_calls INTEGER NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL
 );
