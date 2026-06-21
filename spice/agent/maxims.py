@@ -83,7 +83,16 @@ BUILTIN_MAXIM_BAGS: dict[str, MaximBag] = {
     "fallbacks": MaximBag(
         name="fallbacks",
         words=frozenset(
-            {"fallback", "fallbacks", "falls back", "option", "optional", "options"}
+            {
+                "fall back",
+                "fall backs",
+                "fallback",
+                "fallbacks",
+                "falls back",
+                "option",
+                "optional",
+                "options",
+            }
         ),
         message=(
             "DO NOT hide uncertainty behind quiet defensive secondary paths; "

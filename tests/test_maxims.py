@@ -155,6 +155,21 @@ def test_builtin_phrase_trigger_matches_whole_phrase_across_punctuation():
     assert maxims.configured_maxim("falls   back") == maxims.builtin_maxim("fallback")
 
 
+@pytest.mark.parametrize(
+    ("statement", "selector"),
+    [
+        ("Do not fall back to a quiet path.", "fall back"),
+        ("The fall backs route hides the real problem.", "fall backs"),
+        ("This falls back to a quiet path.", "falls back"),
+    ],
+)
+def test_builtin_fallback_variants_trigger_fallback_maxim(statement, selector):
+    hits = maxims.triggered_maxims([statement])
+
+    assert [hit.name for hit in hits] == ["fallbacks"]
+    assert maxims.configured_maxim(selector) == maxims.builtin_maxim("fallback")
+
+
 def test_repo_config_declares_phrase_trigger_key(tmp_path):
     repo = _init_repo(tmp_path / "repo")
     _write_pyproject(
