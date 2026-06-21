@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from spice.serve import metricpayload
 from spice.serve.teammetrics import (
+    METRIC_BUCKET_SECONDS,
     MetricSeriesPoint,
     TaskLifecycleSeriesPoint,
     TaskStallState,
 )
 from spice.serve.teams import ServeTeamStore
+
+FIRST_RENEWAL_TS = 120
+LATEST_RENEWAL_TS = 240
+POST_RENEWAL_ACTIVITY_TS = 300
+SERIES_END_TS = 360
 
 
 def _store(tmp_path):
@@ -102,6 +109,52 @@ def test_metric_series_payload_returns_stable_activity_directive_and_task_points
             "active": 0,
             "completed": 1,
             "drained": 0,
+        }
+    ]
+
+
+def test_metric_series_payload_per_session_uses_latest_renewal_boundary(tmp_path):
+    store = _store(tmp_path)
+    state = SimpleNamespace(team_store=store)
+    successor = "thread:successor"
+    store.record_agent_metric_delta(
+        successor,
+        message_timestamps=[
+            FIRST_RENEWAL_TS - METRIC_BUCKET_SECONDS,
+            FIRST_RENEWAL_TS + METRIC_BUCKET_SECONDS,
+            POST_RENEWAL_ACTIVITY_TS,
+        ],
+    )
+    with store.connect() as connection:
+        for timestamp in (FIRST_RENEWAL_TS, LATEST_RENEWAL_TS):
+            connection.execute(
+                "INSERT INTO events (ts, kind, team_id, payload) VALUES (?, ?, ?, ?)",
+                (
+                    timestamp,
+                    "renewalStarted",
+                    "team-a",
+                    json.dumps({"successor": successor}),
+                ),
+            )
+
+    payload = metricpayload.metric_series_payload(
+        state,
+        {
+            "agentId": successor,
+            "metric": "activity",
+            "lens": "perSession",
+            "start": 0,
+            "end": SERIES_END_TS,
+            "bucketSeconds": METRIC_BUCKET_SECONDS,
+        },
+    )
+
+    assert payload["effectiveStart"] == LATEST_RENEWAL_TS
+    assert payload["points"] == [
+        {
+            "bucketStart": POST_RENEWAL_ACTIVITY_TS,
+            "value": 1,
+            "messages": 1,
         }
     ]
 
