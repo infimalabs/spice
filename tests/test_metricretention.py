@@ -25,6 +25,12 @@ def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path):
     store.record_agent_metric_delta(
         "agent-a", tool_calls=RECENT_TOOL_CALLS, message_timestamps=[old, recent]
     )
+    store.record_task_lifecycle_event(
+        "claim", task_id="old-task", agent_id="agent-a", team_id="t", ts=old
+    )
+    store.record_task_lifecycle_event(
+        "claim", task_id="new-task", agent_id="agent-a", team_id="t", ts=recent
+    )
     store.record_directive_sent("old", agent_id="agent-a", team_id="t", sent_at=old)
     store.record_directive_sent("new", agent_id="agent-a", team_id="t", sent_at=recent)
     store.mark_directive_acked("old", acked_at=old)
@@ -44,6 +50,10 @@ def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path):
             str(row["directive_key"])
             for row in connection.execute("SELECT directive_key FROM directives")
         }
+        task_ids = {
+            str(row["task_id"])
+            for row in connection.execute("SELECT task_id FROM task_events")
+        }
         tool_calls = connection.execute(
             "SELECT tool_calls FROM agent_metrics WHERE agent_id = ?", ("agent-a",)
         ).fetchone()["tool_calls"]
@@ -53,6 +63,7 @@ def test_prune_drops_old_series_but_keeps_aggregates_and_recent(tmp_path):
     assert all(start >= floor for start in bucket_starts)
     assert bucket_starts  # the recent bucket remains
     assert directive_keys == {"new"}
+    assert task_ids == {"new-task"}
     # Durable aggregates are untouched by retention.
     assert int(tool_calls) == RECENT_TOOL_CALLS
     assert store.directive_totals_for_agents(["agent-a"]) == DirectiveTotals(

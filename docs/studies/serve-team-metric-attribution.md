@@ -124,7 +124,11 @@ team-historical lenses derive alternate cuts from the same facts.
 **D12 — Task-flow is its own fact source.** Burndown, distribution, and stuck
 signals derive from a task-lifecycle fact series, not from message-activity
 counters. Message and tool-call activity can explain agent effort; task-flow
-facts explain work movement.
+facts explain work movement. The source is the persisted `task_events` fact
+table (`claim`, `phaseAdvance`, `review`, `complete`, `drain`), not a read-time
+projection over Taskwarrior state; Taskwarrior keeps current state plus a small
+timestamp set, not the full reassignment, phase-advance, review, and stall
+history that stable task-flow range queries need.
 
 **D13 — Renewal boundaries are events.** A lineage's session windows come from
 append-only started-renewal events for the successor actor. PER-SESSION
