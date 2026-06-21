@@ -38,6 +38,7 @@ from spice.serve.teamidentity import (
 from spice.serve.teammetrics import (
     METRIC_BUCKET_SECONDS as METRIC_BUCKET_SECONDS,
     LaneMetricSummary as LaneMetricSummary,
+    TeamHistoricalMetricSummary as TeamHistoricalMetricSummary,
     TeamMetricStoreMixin,
 )
 from spice.serve.teammodels import (
