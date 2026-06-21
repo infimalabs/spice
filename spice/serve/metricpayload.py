@@ -286,7 +286,7 @@ def _effective_series_start(
             raise SpiceError("team event payload must be a JSON object")
         if payload.get("successor") in successors:
             starts.append(float(row["ts"] or 0.0))
-    return max(start, min(starts)) if starts else start
+    return max(start, max(starts)) if starts else start
 
 
 def _series_choice(value: Any, allowed: frozenset[str], field_name: str) -> str:
