@@ -757,6 +757,41 @@ button.primary:hover {
   height: calc(var(--lane-metric-sparkline-level, 1) * 3px);
   min-height: 2px;
 }
+.lane-metric-series-controls {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.lane-metric-series-select {
+  background: var(--control);
+  border: 1px solid var(--control-border);
+  color: var(--text);
+  font: inherit;
+  min-width: 0;
+  padding: 4px 6px;
+}
+.lane-metric-series-chart {
+  min-height: 54px;
+}
+.lane-metric-series-svg {
+  display: block;
+  height: 42px;
+  width: 100%;
+}
+.lane-metric-series-line {
+  fill: none;
+  stroke: var(--accent-strong);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+.lane-metric-series-dot {
+  fill: var(--final-accent);
+}
+.lane-metric-series-empty {
+  color: var(--muted);
+  font-size: 11px;
+}
 
 /* ---- info pane ---- */
 .lane-info-grid {

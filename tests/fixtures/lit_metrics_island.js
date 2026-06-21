@@ -51,6 +51,9 @@ class FakeElement {
     this.children = [];
     this.className = "";
     this.textContent = "";
+    this.value = "";
+    this.selected = false;
+    this.attributes = {};
     this.style = new FakeStyle();
     this.classList = new FakeClassList(this);
   }
@@ -61,6 +64,10 @@ class FakeElement {
 
   replaceChildren(...nodes) {
     this.children = [...nodes];
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
   }
 
   querySelector(selector) {
@@ -160,7 +167,7 @@ function lane(metrics = {}, overrides = {}) {
 
   assert(vanillaContext.loaderCallCount() === 0, "default metrics skip Lit loader");
   assert(vanillaLane.metricsSummaryEl.textContent === "live", "summary renders");
-  assert(vanillaLane.metricsGridEl.children.length === 6, "six metric cells render");
+  assert(vanillaLane.metricsGridEl.children.length === 8, "metrics graph cells render");
   assert(
     vanillaLane.metricsGridEl.children[0].children[0].textContent === "2",
     "drained value renders",
@@ -172,6 +179,14 @@ function lane(metrics = {}, overrides = {}) {
   assert(
     sparkline.children[1].style.values["--lane-metric-sparkline-level"] === "4",
     "sparkline levels are normalized",
+  );
+  assert(
+    vanillaLane.metricsGridEl.children[6].classList.contains("lane-metric-series-controls"),
+    "series controls render",
+  );
+  assert(
+    vanillaLane.metricsGridEl.children[7].classList.contains("lane-metric-series-chart"),
+    "series chart renders",
   );
 
   const litContext = createContext();
@@ -187,7 +202,7 @@ function lane(metrics = {}, overrides = {}) {
 
   litContext.renderLaneMetricsPane(litLane);
 
-  assert(litLane.metricsGridEl.children.length === 6, "fallback renders while loading");
+  assert(litLane.metricsGridEl.children.length === 8, "fallback renders while loading");
   await flushAsyncWork();
   assert(litContext.loaderCallCount() === 1, "Lit opt-in starts one loader");
   assert(litLane.metricsGridEl.children.length === 1, "Lit renderer takes over");
@@ -195,6 +210,10 @@ function lane(metrics = {}, overrides = {}) {
   assert(
     litLane.metricsGridEl.children[0].model.cells[0].value === "5",
     "Lit renderer receives shared model",
+  );
+  assert(
+    litLane.metricsGridEl.children[0].model.seriesControls.metric === "activity",
+    "Lit renderer receives graph controls",
   );
 
   litContext.renderLaneMetricsPane(litLane);
