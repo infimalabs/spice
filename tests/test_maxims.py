@@ -43,7 +43,9 @@ message = "DO NOT take shortcuts; keep the direct route."
 
     monkeypatch.setattr(watchdog, "evaluate_maxim_any_violation", judge_violation)
 
-    paths = watchdog.publish_maxim_hits_as_inbox(repo, "Taking shortcuts here.")
+    paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "Taking shortcuts here.", reminder_gate=watchdog.MaximReminderGate()
+    )
     item = collect_inbox_items(repo)[0]
 
     assert len(paths) == 1
@@ -66,6 +68,9 @@ def test_maxim_reminder_gate_suppresses_same_combined_body_until_compaction(
         repo, "alpha beta again", reminder_gate=gate
     )
     archive_ackd_inbox_items(repo, [inbox_item_key(first_paths[0].name)])
+    after_ack_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta", reminder_gate=gate
+    )
     gate.note_compaction()
     after_compaction_paths = watchdog.publish_maxim_hits_as_inbox(
         repo, "alpha beta", reminder_gate=gate
@@ -73,6 +78,7 @@ def test_maxim_reminder_gate_suppresses_same_combined_body_until_compaction(
 
     assert len(first_paths) == 1
     assert duplicate_paths == []
+    assert after_ack_paths == []
     assert len(after_compaction_paths) == 1
     assert after_compaction_paths != first_paths
     assert [item.text for item in collect_inbox_items(repo)] == [
@@ -107,18 +113,29 @@ def test_maxim_reminder_gate_allows_new_combined_body_with_existing_maxim(
     ]
 
 
-def test_maxim_publish_reuses_existing_pending_body_without_process_gate(
+def test_maxim_publish_suppression_uses_in_memory_gate_not_pending_file_scan(
     tmp_path, monkeypatch
 ):
     repo = _init_repo(tmp_path / "repo")
     _write_dual_maxim_config(repo)
     _make_every_maxim_violate(monkeypatch)
+    gate = watchdog.MaximReminderGate()
 
-    first_paths = watchdog.publish_maxim_hits_as_inbox(repo, "alpha beta")
-    second_paths = watchdog.publish_maxim_hits_as_inbox(repo, "alpha beta again")
+    first_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta", reminder_gate=gate
+    )
+    second_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta again", reminder_gate=gate
+    )
+    archive_ackd_inbox_items(repo, [inbox_item_key(first_paths[0].name)])
+    after_ack_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta", reminder_gate=gate
+    )
 
-    assert first_paths == second_paths
-    assert [item.name for item in collect_inbox_items(repo)] == [first_paths[0].name]
+    assert len(first_paths) == 1
+    assert second_paths == []
+    assert after_ack_paths == []
+    assert collect_inbox_items(repo) == []
 
 
 def test_repo_config_overrides_builtin_trigger_words(tmp_path):

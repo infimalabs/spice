@@ -375,7 +375,7 @@ def publish_maxim_hits_as_inbox(
     repo_root: Path,
     message_text: str,
     *,
-    reminder_gate: MaximReminderGate | None = None,
+    reminder_gate: MaximReminderGate,
 ) -> list[Path]:
     statement_text = watchdog_judge_statement(message_text)
     if not statement_text:
@@ -393,11 +393,10 @@ def publish_maxim_hits_as_inbox(
     if not violations:
         return []
     body = _maxim_inbox_body(violations)
-    if reminder_gate is not None and not reminder_gate.should_publish(body):
+    if not reminder_gate.should_publish(body):
         return []
-    paths = [write_inbox_item(repo_root, None, body, dedupe_pending_text=True)]
-    if reminder_gate is not None:
-        reminder_gate.mark_sent(body)
+    paths = [write_inbox_item(repo_root, None, body)]
+    reminder_gate.mark_sent(body)
     return paths
 
 
