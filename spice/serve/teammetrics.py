@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from collections import Counter
@@ -12,13 +13,18 @@ from typing import Iterable, Mapping, Protocol
 
 from spice.errors import SpiceError
 from spice.serve.directivestats import DirectiveTotals
+from spice.serve.teamfilters import shell_settings_from_json
 from spice.serve.teamschema import (
     DEFAULT_STUCK_THRESHOLD_SECONDS,
     METRIC_HISTORY_RETENTION_SECONDS,
 )
 
 METRIC_BUCKET_SECONDS = 60
+METRIC_HISTORY_RETENTION_DAYS_ENV = (
+    "SPICE_METRIC_HISTORY_RETENTION_DAYS"  # env-policy: allow
+)
 TASK_EVENT_KINDS = frozenset({"claim", "phaseAdvance", "review", "complete", "drain"})
+_SECONDS_PER_DAY = 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -119,7 +125,11 @@ class _TeamMetricStore(Protocol):
     ) -> DirectiveTotals: ...
 
     def _prune_directive_history_locked(
-        self, connection: sqlite3.Connection, *, now: float
+        self,
+        connection: sqlite3.Connection,
+        *,
+        now: float,
+        retention_seconds: int = METRIC_HISTORY_RETENTION_SECONDS,
     ) -> None: ...
 
 
@@ -177,6 +187,10 @@ class TeamMetricStoreMixin:
         if row is None:
             return 0
         return max(0, int(row["offset"] or 0))
+
+    def metric_history_retention_seconds(self: _TeamMetricStore) -> int:
+        with self.connect() as connection:
+            return _metric_history_retention_seconds_locked(connection)
 
     def record_agent_metric_cursor(
         self: _TeamMetricStore, agent_id: str, *, source_path: str, offset: int
@@ -516,12 +530,15 @@ class TeamMetricStoreMixin:
         # Bound the high-growth per-minute bucket and per-directive series at the
         # retention horizon; the durable aggregates (agent_metrics tool_calls,
         # directive_totals) are never pruned. Runs in the snapshot prune pass.
-        floor = int(now) - METRIC_HISTORY_RETENTION_SECONDS
+        retention_seconds = _metric_history_retention_seconds_locked(connection)
+        floor = int(now) - retention_seconds
         connection.execute(
             "DELETE FROM agent_metric_buckets WHERE bucket_start < ?", (floor,)
         )
         connection.execute("DELETE FROM task_events WHERE ts < ?", (float(floor),))
-        self._prune_directive_history_locked(connection, now=now)
+        self._prune_directive_history_locked(
+            connection, now=now, retention_seconds=retention_seconds
+        )
 
     def _record_agent_metric_delta_locked(
         self,
@@ -615,6 +632,71 @@ def _normalized_id(value: str, field_name: str) -> str:
     if not normalized:
         raise SpiceError(f"{field_name} must be non-empty")
     return normalized
+
+
+def _metric_history_retention_seconds_locked(connection: sqlite3.Connection) -> int:
+    rows = connection.execute(
+        "SELECT shell_settings FROM teams WHERE status = 'open' "
+        "ORDER BY created_at, team_id"
+    ).fetchall()
+    for row in rows:
+        configured = _retention_seconds_from_settings(
+            shell_settings_from_json(row["shell_settings"])
+        )
+        if configured is not None:
+            return configured
+    env_value = os.environ.get(METRIC_HISTORY_RETENTION_DAYS_ENV, "").strip()
+    if env_value:
+        return _positive_days_seconds(env_value, METRIC_HISTORY_RETENTION_DAYS_ENV)
+    return METRIC_HISTORY_RETENTION_SECONDS
+
+
+def _retention_seconds_from_settings(settings: dict[str, object]) -> int | None:
+    metrics = settings.get("metrics")
+    if metrics is not None and not isinstance(metrics, dict):
+        raise SpiceError("shellSettings.metrics must be an object")
+    metric_settings = metrics if isinstance(metrics, dict) else {}
+    if "historyRetentionSeconds" in metric_settings:
+        return _positive_seconds(
+            metric_settings["historyRetentionSeconds"],
+            "shellSettings.metrics.historyRetentionSeconds",
+        )
+    if "historyRetentionDays" in metric_settings:
+        return _positive_days_seconds(
+            metric_settings["historyRetentionDays"],
+            "shellSettings.metrics.historyRetentionDays",
+        )
+    if "retentionDays" in metric_settings:
+        return _positive_days_seconds(
+            metric_settings["retentionDays"],
+            "shellSettings.metrics.retentionDays",
+        )
+    if "metricHistoryRetentionDays" in settings:
+        return _positive_days_seconds(
+            settings["metricHistoryRetentionDays"],
+            "shellSettings.metricHistoryRetentionDays",
+        )
+    return None
+
+
+def _positive_days_seconds(value: object, field_name: str) -> int:
+    try:
+        days = float(str(value))
+    except (TypeError, ValueError) as exc:
+        raise SpiceError(f"{field_name} must be a positive number") from exc
+    if days <= 0:
+        raise SpiceError(f"{field_name} must be positive")
+    return max(1, int(days * _SECONDS_PER_DAY))
+
+
+def _positive_seconds(value: object, field_name: str) -> int:
+    try:
+        seconds = int(str(value))
+    except (TypeError, ValueError) as exc:
+        raise SpiceError(f"{field_name} must be a positive integer") from exc
+    if seconds <= 0:
+        raise SpiceError(f"{field_name} must be positive")
+    return seconds
 
 
 def _normalized_ids(values: Iterable[str], field_name: str) -> tuple[str, ...]:
