@@ -538,6 +538,16 @@ def test_dev_pre_commit_parser_exposes_hook_backend_command():
     args = build_parser().parse_args(["dev", "pre-commit"])
 
     assert args.dev_command == "pre-commit"
+    assert args.pre_commit_args == []
+
+
+def test_dev_pre_commit_parser_captures_appended_wrapper_arguments():
+    from spice.cli.parser import build_parser
+
+    args = build_parser().parse_args(["dev", "pre-commit", "run", "--all-files"])
+
+    assert args.dev_command == "pre-commit"
+    assert args.pre_commit_args == ["run", "--all-files"]
 
 
 def test_dev_pre_commit_runs_gate(tmp_path, monkeypatch):
@@ -555,6 +565,26 @@ def test_dev_pre_commit_runs_gate(tmp_path, monkeypatch):
 
     assert result == 0
     assert calls == [tmp_path]
+
+
+def test_dev_pre_commit_reports_repo_gate_replacement_for_upstream_args(
+    tmp_path, monkeypatch
+):
+    from spice.hooks import cli as hooks_cli
+
+    monkeypatch.setattr(hooks_cli, "require_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SpiceError) as exc_info:
+        hooks_cli.handle_dev(
+            SimpleNamespace(
+                dev_command="pre-commit",
+                pre_commit_args=["run", "--all-files"],
+            )
+        )
+
+    message = str(exc_info.value)
+    assert "does not accept pre-commit framework arguments: run --all-files" in message
+    assert "Run `spice dev pre-commit` for the staged gate" in message
 
 
 def test_serve_web_typecheck_skips_repo_without_sources(tmp_path, monkeypatch):
