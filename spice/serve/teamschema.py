@@ -99,15 +99,18 @@ CREATE TABLE IF NOT EXISTS agent_identities (
     updated_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS agent_metrics (
-    agent_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
     tool_calls INTEGER NOT NULL DEFAULT 0,
-    updated_at REAL NOT NULL
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (agent_id, team_id)
 );
 CREATE TABLE IF NOT EXISTS agent_metric_buckets (
     agent_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
     bucket_start INTEGER NOT NULL,
     messages INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (agent_id, bucket_start)
+    PRIMARY KEY (agent_id, team_id, bucket_start)
 );
 CREATE TABLE IF NOT EXISTS agent_metric_cursors (
     agent_id TEXT NOT NULL,

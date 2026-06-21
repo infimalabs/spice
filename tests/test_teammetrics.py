@@ -86,7 +86,8 @@ def _agent_metric_totals(
     totals = {agent_id: (0, 0, 0) for agent_id in agents}
     with store.connect() as connection:
         tool_rows = connection.execute(
-            "SELECT agent_id, tool_calls FROM agent_metrics"
+            "SELECT agent_id, COALESCE(SUM(tool_calls), 0) AS tool_calls "
+            "FROM agent_metrics GROUP BY agent_id"
         ).fetchall()
         directive_rows = connection.execute(
             "SELECT agent_id, COALESCE(SUM(sends), 0) AS sends, "
@@ -667,3 +668,35 @@ def test_team_metric_single_basis_invariant_survives_random_lifecycle_sequence(
         seen_ops.add(op)
 
     assert METRIC_INVARIANT_LIFECYCLE_OPS <= seen_ops
+
+
+def test_activity_metrics_are_tagged_with_team_at_capture(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    # Solo agent (no team): tagged with its own id (private team).
+    store.record_agent_metric_delta(
+        "agent-solo", tool_calls=1, message_timestamps=[1000]
+    )
+    # Assigned agent: tagged with the real team it is on at capture time.
+    team = store.create_team(members=["agent-team"])
+    store.record_agent_metric_delta(
+        "agent-team", tool_calls=2, message_timestamps=[1000]
+    )
+
+    with store.connect() as connection:
+        metric_team = {
+            str(row["agent_id"]): str(row["team_id"])
+            for row in connection.execute("SELECT agent_id, team_id FROM agent_metrics")
+        }
+        bucket_team = {
+            str(row["agent_id"]): str(row["team_id"])
+            for row in connection.execute(
+                "SELECT agent_id, team_id FROM agent_metric_buckets"
+            )
+        }
+
+    assert metric_team["agent-solo"] == "agent-solo"
+    assert metric_team["agent-team"] == team.team_id
+    assert bucket_team["agent-solo"] == "agent-solo"
+    assert bucket_team["agent-team"] == team.team_id
+    # The lane read still sums per-agent across teams (membership-derived).
+    assert store.lane_metric_summary("agent-team", bucket_count=12).tool_calls == 2
