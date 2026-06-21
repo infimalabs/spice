@@ -106,33 +106,87 @@ class SpiceLaneMetricsElement extends LitElement {
           <span class="lane-metric-series-empty">no series</span>
         </span>
       `;
-    const max = Math.max(1, ...values);
+    const max = points.some((point) => typeof point.share !== "undefined")
+      ? 1
+      : Math.max(1, ...values);
     const width = 120;
     const height = 36;
-    const step = points.length > 1 ? width / (points.length - 1) : width;
-    const coords = values.map((value, index) => {
-      const x = points.length > 1 ? index * step : width / 2;
-      const y = height - (value / max) * (height - 4) - 2;
-      return [x, y];
-    });
-    const path = coords.map(([x, y]) => x.toFixed(1) + "," + y.toFixed(1)).join(" ");
+    const buckets = this.seriesBuckets(points);
+    const bucketIndex = new Map(buckets.map((bucket, index) => [bucket, index]));
+    const step = buckets.length > 1 ? width / (buckets.length - 1) : width;
     return html`
       <span class="lane-metric-series-chart lane-metric-cell--wide">
-        <svg class="lane-metric-series-svg" viewBox="0 0 120 36" role="img" aria-label="Metric series">
-          <polyline class="lane-metric-series-line" points=${path}></polyline>
-          ${coords.map(
-            ([x, y]) => html`
-              <circle
-                class="lane-metric-series-dot"
-                cx=${x.toFixed(1)}
-                cy=${y.toFixed(1)}
-                r="1.8"
-              ></circle>
-            `,
+        <svg
+          class="lane-metric-series-svg"
+          viewBox="0 0 120 36"
+          role="img"
+          aria-label="Metric series"
+        >
+          ${this.seriesPointGroups(points).map(
+            (group, seriesIndex) => {
+              const coords = group.points.map((point) => {
+                const bucket = this.seriesPointBucket(point);
+                const index = bucketIndex.has(bucket) ? bucketIndex.get(bucket) || 0 : 0;
+                const x = buckets.length > 1 ? index * step : width / 2;
+                const value = Math.max(0, Number(point.value) || 0);
+                const y = height - (value / max) * (height - 4) - 2;
+                return [x, y, point];
+              });
+              const path = coords
+                .map(([x, y]) => x.toFixed(1) + "," + y.toFixed(1))
+                .join(" ");
+              return html`
+                <g
+                  class="lane-metric-series-group"
+                  data-agent-id=${group.agentId || ""}
+                  style=${"--lane-metric-series-color: " + this.seriesColor(seriesIndex)}
+                >
+                  <title>${group.agentId || "series"}</title>
+                  <polyline class="lane-metric-series-line" points=${path}></polyline>
+                  ${coords.map(
+                    ([x, y, point]) => html`
+                      <circle
+                        class="lane-metric-series-dot"
+                        data-agent-id=${point.agentId || ""}
+                        cx=${x.toFixed(1)}
+                        cy=${y.toFixed(1)}
+                        r="1.8"
+                      ></circle>
+                    `,
+                  )}
+                </g>
+              `;
+            },
           )}
         </svg>
       </span>
     `;
+  }
+
+  seriesPointGroups(points) {
+    const groups = new Map();
+    for (const point of points) {
+      const agentId = String(point.agentId || "");
+      const key = agentId || "series";
+      if (!groups.has(key)) groups.set(key, { agentId, points: [] });
+      groups.get(key).points.push(point);
+    }
+    return Array.from(groups.values());
+  }
+
+  seriesBuckets(points) {
+    const buckets = new Set();
+    for (const point of points) buckets.add(this.seriesPointBucket(point));
+    return Array.from(buckets).sort((left, right) => left - right);
+  }
+
+  seriesPointBucket(point) {
+    return Number.isFinite(Number(point.bucketStart)) ? Number(point.bucketStart) : 0;
+  }
+
+  seriesColor(index) {
+    const colors = ["#1677ff", "#d9480f", "#2f9e44", "#ae3ec9", "#0ca678", "#f08c00"];
+    return colors[index % colors.length];
   }
 }
 

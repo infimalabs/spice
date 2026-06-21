@@ -19,7 +19,6 @@ SERIES_METRICS = frozenset(
 SERIES_LENSES = frozenset({"lineage", "perSession", "teamHistorical"})
 TASK_METRIC_FIELDS = {
     "burndown": "completed",
-    "distribution": "claimed",
     "stuck": "active",
     "drained": "drained",
 }
@@ -87,6 +86,14 @@ def _series_points(
             store,
             subject,
             metric=metric,
+            start=start,
+            end=end,
+            bucket_seconds=bucket_seconds,
+        )
+    if metric == "distribution":
+        return _distribution_points(
+            store,
+            subject=subject,
             start=start,
             end=end,
             bucket_seconds=bucket_seconds,
@@ -234,6 +241,35 @@ def _task_points(
             bucket_seconds=bucket_seconds,
         )
         if int(getattr(point, field))
+    ]
+
+
+def _distribution_points(
+    store: Any,
+    *,
+    subject: _SeriesSubject,
+    start: float,
+    end: float,
+    bucket_seconds: int,
+) -> list[dict[str, Any]]:
+    agent_ids = () if subject.team_ids else subject.agent_ids
+    return [
+        {
+            "bucketStart": point.bucket_start,
+            "agentId": point.agent_id,
+            "value": point.share,
+            "share": point.share,
+            "claimed": point.claimed,
+            "active": point.active,
+            "work": point.claimed + point.active,
+        }
+        for point in store.task_distribution_series(
+            agent_ids,
+            team_ids=subject.team_ids,
+            start=start,
+            end=end,
+            bucket_seconds=bucket_seconds,
+        )
     ]
 
 
