@@ -32,6 +32,24 @@ def _seed_lane_metrics(
         )
 
 
+def _record_identity(
+    store: ServeTeamStore, actor_id: str, *, thread_id: str = ""
+) -> None:
+    store.record_agent_identity(
+        actor_id=actor_id,
+        target_id="wt-a",
+        thread_id=thread_id or actor_id.removeprefix("thread:"),
+        actual_driver="codex",
+        actual_model="actual-model",
+        actual_effort="low",
+        actual_service_tier="default",
+        desired_driver="codex",
+        desired_model="desired-model",
+        desired_effort="high",
+        transcript_owner="codex",
+    )
+
+
 TEAM_MERGE_ACKED_TOTAL = 14
 TEAM_MERGE_SEND_TOTAL = 25
 TEAM_MERGE_TOOL_CALL_TOTAL = 36
@@ -514,6 +532,81 @@ def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
     assert sum(destination_after.sparkline) == 3
     assert moved_after == destination_after
     assert repeated_after == destination_after
+
+
+def test_lane_metrics_can_scope_to_latest_renewal_session(tmp_path, monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr("spice.serve.teams.time.time", lambda: clock["now"])
+    monkeypatch.setattr("spice.serve.teammetrics.time.time", lambda: clock["now"])
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    predecessor = "thread:predecessor"
+    successor = "thread:successor"
+
+    team = store.create_team(members=[predecessor])
+    _record_identity(store, predecessor, thread_id="predecessor")
+    store.record_directive_sent(
+        "dir-pre",
+        agent_id=predecessor,
+        team_id=team.team_id,
+        sent_at=60,
+    )
+    store.mark_directive_acked("dir-pre", acked_at=70)
+    store.record_agent_metric_delta(
+        predecessor,
+        tool_calls=3,
+        tool_call_timestamps=[60, 61, 62],
+        message_timestamps=[60, 60],
+    )
+
+    clock["now"] = 120
+    store.record_started_renewal(
+        predecessor_agent_id=predecessor,
+        successor_agent_id=successor,
+        ancestor_thread_id="predecessor",
+    )
+    store.record_directive_sent(
+        "dir-post",
+        agent_id=successor,
+        team_id=team.team_id,
+        sent_at=180,
+    )
+    store.mark_directive_acked("dir-post", acked_at=190)
+    store.record_agent_metric_delta(
+        successor,
+        tool_calls=5,
+        tool_call_timestamps=[180, 181, 182, 183, 184],
+        message_timestamps=[180, 240],
+    )
+
+    lineage = store.lane_metric_summary(successor, bucket_count=5, now=240)
+    session = store.lane_metric_summary(
+        successor,
+        bucket_count=5,
+        now=240,
+        since_latest_renewal=True,
+    )
+
+    assert lineage.agent_ids == (successor,)
+    assert (lineage.acked, lineage.sends, lineage.tool_calls) == (2, 2, 8)
+    assert sum(lineage.sparkline) == 4
+    assert session.agent_ids == (successor,)
+    assert (session.acked, session.sends, session.tool_calls) == (1, 1, 5)
+    assert sum(session.sparkline) == 2
+    with store.connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) AS count FROM agent_metrics WHERE agent_id = ?",
+                (predecessor,),
+            ).fetchone()["count"]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) AS count FROM directives WHERE agent_id = ?",
+                (predecessor,),
+            ).fetchone()["count"]
+            == 0
+        )
 
 
 def test_team_historical_metric_summary_projects_membership_intervals(

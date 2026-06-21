@@ -166,6 +166,15 @@ class ServeTeamStore(
             connection.execute("DROP TABLE IF EXISTS agent_metrics")
             connection.execute("DROP TABLE IF EXISTS agent_metric_buckets")
             connection.executescript(TEAM_SCHEMA)
+        bucket_columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(agent_metric_buckets)")
+        }
+        if "tool_calls" not in bucket_columns:
+            connection.execute(
+                "ALTER TABLE agent_metric_buckets "
+                "ADD COLUMN tool_calls INTEGER NOT NULL DEFAULT 0"
+            )
         columns = {
             str(row["name"])
             for row in connection.execute("PRAGMA table_info(memberships)")

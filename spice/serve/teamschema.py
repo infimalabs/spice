@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS agent_metric_buckets (
     team_id TEXT NOT NULL,
     bucket_start INTEGER NOT NULL,
     messages INTEGER NOT NULL DEFAULT 0,
+    tool_calls INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, team_id, bucket_start)
 );
 CREATE TABLE IF NOT EXISTS agent_metric_cursors (

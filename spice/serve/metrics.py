@@ -29,6 +29,12 @@ def record_transcript_metrics_for_agent(
     store.record_agent_metric_delta(
         agent_id,
         tool_calls=sum(1 for item in items if item.kind in TOOL_CALL_KINDS),
+        tool_call_timestamps=(
+            parsed.timestamp()
+            for item in items
+            if item.kind in TOOL_CALL_KINDS
+            if (parsed := message_reader.parse_timestamp(item.timestamp)) is not None
+        ),
         message_timestamps=(
             parsed.timestamp()
             for item in items

@@ -66,6 +66,18 @@ class _TeamRenewalStore(Protocol):
         aliases: Iterable[str] = (),
     ) -> None: ...
 
+    def _rewrite_agent_metric_cursors_locked(
+        self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
+    ) -> None: ...
+
+    def _rewrite_agent_metrics_locked(
+        self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
+    ) -> None: ...
+
+    def _rewrite_directive_stats_locked(
+        self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
+    ) -> None: ...
+
     def _team_slot_for_agent_locked(
         self, connection: sqlite3.Connection, team_id: str, agent_id: str
     ) -> int | None: ...
@@ -426,6 +438,15 @@ class TeamRenewalStoreMixin:
                     "successorThreadId": successor_thread_id,
                     "teamSlot": team_slot,
                 },
+            )
+            self._rewrite_agent_metric_cursors_locked(
+                connection, predecessor_agent_id, successor_agent_id
+            )
+            self._rewrite_agent_metrics_locked(
+                connection, predecessor_agent_id, successor_agent_id
+            )
+            self._rewrite_directive_stats_locked(
+                connection, predecessor_agent_id, successor_agent_id
             )
             self._assign_locked(connection, team_id, successor_agent_id)
             connection.execute(

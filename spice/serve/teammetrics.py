@@ -8,7 +8,7 @@ import time
 from collections import Counter
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Iterable, Protocol
+from typing import Iterable, Mapping, Protocol
 
 from spice.errors import SpiceError
 from spice.serve.directivestats import DirectiveTotals
@@ -60,7 +60,8 @@ class _TeamMetricStore(Protocol):
         *,
         team_id: str,
         tool_calls: int,
-        buckets: Counter[int],
+        message_buckets: Counter[int],
+        tool_call_buckets: Counter[int],
         now: float,
     ) -> None: ...
 
@@ -72,12 +73,15 @@ class _TeamMetricStore(Protocol):
         bucket_count: int,
         bucket_seconds: int,
         now: float,
+        start_time_by_agent: Mapping[str, float] | None = None,
     ) -> LaneMetricSummary: ...
 
     def _directive_totals_for_agents_locked(
         self,
         connection: sqlite3.Connection,
         agent_ids: Iterable[str],
+        *,
+        start_time_by_agent: Mapping[str, float] | None = None,
     ) -> DirectiveTotals: ...
 
     def _prune_directive_history_locked(
@@ -92,25 +96,37 @@ class TeamMetricStoreMixin:
         *,
         tool_calls: int = 0,
         message_timestamps: Iterable[float] = (),
+        tool_call_timestamps: Iterable[float] = (),
     ) -> None:
         agent_id = _normalized_id(agent_id, "agent_id")
         tool_calls = _nonnegative_int(tool_calls)
-        buckets = Counter(
+        now = time.time()
+        message_buckets = Counter(
             _metric_bucket_start(timestamp) for timestamp in message_timestamps
         )
-        if tool_calls == 0 and not buckets:
+        tool_call_buckets = Counter(
+            _metric_bucket_start(timestamp) for timestamp in tool_call_timestamps
+        )
+        recorded_tool_calls = sum(tool_call_buckets.values())
+        if recorded_tool_calls > tool_calls:
+            raise SpiceError("tool_call_timestamps cannot exceed tool_calls")
+        if tool_calls > recorded_tool_calls:
+            tool_call_buckets[_metric_bucket_start(now)] += (
+                tool_calls - recorded_tool_calls
+            )
+        if tool_calls == 0 and not message_buckets:
             return
         # Tag the activity with the team the agent is on at capture time, or the
         # agent itself when it is in no team / a private solo team.
         team_id = self.current_team_for_agent(agent_id) or agent_id
-        now = time.time()
         with self.connect() as connection:
             self._record_agent_metric_delta_locked(
                 connection,
                 agent_id,
                 team_id=team_id,
                 tool_calls=tool_calls,
-                buckets=buckets,
+                message_buckets=message_buckets,
+                tool_call_buckets=tool_call_buckets,
                 now=now,
             )
 
@@ -192,11 +208,12 @@ class TeamMetricStoreMixin:
         )
         connection.execute(
             "INSERT INTO agent_metric_buckets "
-            "(agent_id, team_id, bucket_start, messages) "
-            "SELECT ?, team_id, bucket_start, messages "
+            "(agent_id, team_id, bucket_start, messages, tool_calls) "
+            "SELECT ?, team_id, bucket_start, messages, tool_calls "
             "FROM agent_metric_buckets WHERE agent_id = ? "
             "ON CONFLICT(agent_id, team_id, bucket_start) DO UPDATE SET "
-            "messages = agent_metric_buckets.messages + excluded.messages",
+            "messages = agent_metric_buckets.messages + excluded.messages, "
+            "tool_calls = agent_metric_buckets.tool_calls + excluded.tool_calls",
             (new_agent_id, old_agent_id),
         )
         connection.execute(
@@ -213,6 +230,7 @@ class TeamMetricStoreMixin:
         bucket_count: int,
         bucket_seconds: int = METRIC_BUCKET_SECONDS,
         now: float | None = None,
+        since_latest_renewal: bool = False,
     ) -> LaneMetricSummary:
         if not str(agent_id or "").strip():
             return LaneMetricSummary(
@@ -243,12 +261,18 @@ class TeamMetricStoreMixin:
                 member_ids = tuple(str(member["agent_id"]) for member in member_rows)
             else:
                 member_ids = (agent_id,)
+            start_time_by_agent = (
+                _latest_renewal_start_times_locked(connection, member_ids)
+                if since_latest_renewal
+                else None
+            )
             return self._agent_lane_metric_summary_locked(
                 connection,
                 member_ids,
                 bucket_count=bucket_count,
                 bucket_seconds=bucket_seconds,
                 now=summary_time,
+                start_time_by_agent=start_time_by_agent,
             )
 
     def team_historical_metric_summary(
@@ -338,7 +362,8 @@ class TeamMetricStoreMixin:
         *,
         team_id: str,
         tool_calls: int,
-        buckets: Counter[int],
+        message_buckets: Counter[int],
+        tool_call_buckets: Counter[int],
         now: float,
     ) -> None:
         connection.execute(
@@ -350,13 +375,22 @@ class TeamMetricStoreMixin:
             "updated_at = excluded.updated_at",
             (agent_id, team_id, tool_calls, now),
         )
-        for bucket_start, count in buckets.items():
+        bucket_starts = sorted(set(message_buckets) | set(tool_call_buckets))
+        for bucket_start in bucket_starts:
             connection.execute(
                 "INSERT INTO agent_metric_buckets "
-                "(agent_id, team_id, bucket_start, messages) VALUES (?, ?, ?, ?) "
+                "(agent_id, team_id, bucket_start, messages, tool_calls) "
+                "VALUES (?, ?, ?, ?, ?) "
                 "ON CONFLICT(agent_id, team_id, bucket_start) DO UPDATE SET "
-                "messages = agent_metric_buckets.messages + excluded.messages",
-                (agent_id, team_id, bucket_start, int(count)),
+                "messages = agent_metric_buckets.messages + excluded.messages, "
+                "tool_calls = agent_metric_buckets.tool_calls + excluded.tool_calls",
+                (
+                    agent_id,
+                    team_id,
+                    bucket_start,
+                    int(message_buckets.get(bucket_start, 0)),
+                    int(tool_call_buckets.get(bucket_start, 0)),
+                ),
             )
 
     def _agent_lane_metric_summary_locked(
@@ -367,6 +401,7 @@ class TeamMetricStoreMixin:
         bucket_count: int,
         bucket_seconds: int,
         now: float,
+        start_time_by_agent: Mapping[str, float] | None = None,
     ) -> LaneMetricSummary:
         if not agent_ids:
             return LaneMetricSummary(
@@ -376,34 +411,31 @@ class TeamMetricStoreMixin:
                 tool_calls=0,
                 sparkline=tuple(0 for _ in range(max(0, bucket_count))),
             )
-        placeholders = ",".join("?" for _ in agent_ids)
+        start_times = _metric_start_times(agent_ids, start_time_by_agent)
         # sends/acked are the membership-derived directive totals (acked <= sends
         # by construction); tool_calls is the per-agent activity counter.
-        directives = self._directive_totals_for_agents_locked(connection, agent_ids)
-        tool_calls_row = connection.execute(
-            "SELECT COALESCE(SUM(tool_calls), 0) AS tool_calls "
-            f"FROM agent_metrics WHERE agent_id IN ({placeholders})",
-            agent_ids,
-        ).fetchone()
+        directives = self._directive_totals_for_agents_locked(
+            connection, agent_ids, start_time_by_agent=start_times
+        )
+        lifetime_tool_calls = _lifetime_tool_calls_locked(connection, agent_ids)
         # Only buckets inside the sparkline window contribute, so bound the read
         # there instead of scanning the agent's whole (unbounded) bucket history
         # on every render. Mirror _metric_sparkline's window start exactly.
         window_floor = _metric_bucket_start(now, bucket_seconds) - (
             (bucket_count - 1) * bucket_seconds
         )
-        bucket_rows = connection.execute(
-            "SELECT bucket_start, SUM(messages) AS messages "
-            "FROM agent_metric_buckets "
-            f"WHERE agent_id IN ({placeholders}) AND bucket_start >= ? "
-            "GROUP BY bucket_start ORDER BY bucket_start",
-            (*agent_ids, window_floor),
-        ).fetchall()
-        return _lane_metric_summary_from_rows(
+        message_buckets, window_tool_calls = _lane_activity_buckets_locked(
+            connection,
             agent_ids,
-            bucket_rows,
+            window_floor=window_floor,
+            start_time_by_agent=start_times,
+        )
+        return _lane_metric_summary_from_buckets(
+            agent_ids,
+            message_buckets.items(),
             acked=directives.acked,
             sends=directives.sends,
-            tool_calls=int(tool_calls_row["tool_calls"] or 0) if tool_calls_row else 0,
+            tool_calls=window_tool_calls if start_times else lifetime_tool_calls,
             bucket_count=bucket_count,
             bucket_seconds=bucket_seconds,
             now=now,
@@ -645,6 +677,114 @@ def _historical_metric_buckets(
     return buckets
 
 
+def _latest_renewal_start_times_locked(
+    connection: sqlite3.Connection,
+    agent_ids: tuple[str, ...],
+) -> dict[str, float]:
+    wanted = set(agent_ids)
+    if not wanted:
+        return {}
+    rows = connection.execute(
+        "SELECT ts, payload FROM events WHERE kind = 'renewalStarted' ORDER BY revision"
+    ).fetchall()
+    start_times: dict[str, float] = {}
+    for row in rows:
+        payload = _event_payload(row)
+        successor = _event_agent_id(payload, "successor")
+        if successor not in wanted:
+            continue
+        start_times[successor] = max(
+            start_times.get(successor, 0.0),
+            float(row["ts"] or 0.0),
+        )
+    return start_times
+
+
+def _metric_start_times(
+    agent_ids: tuple[str, ...],
+    start_time_by_agent: Mapping[str, float] | None,
+) -> dict[str, float]:
+    if not start_time_by_agent:
+        return {}
+    return {
+        agent_id: max(0.0, float(start_time_by_agent[agent_id]))
+        for agent_id in agent_ids
+        if agent_id in start_time_by_agent
+    }
+
+
+def _lifetime_tool_calls_locked(
+    connection: sqlite3.Connection,
+    agent_ids: tuple[str, ...],
+) -> int:
+    placeholders = ",".join("?" for _ in agent_ids)
+    row = connection.execute(
+        "SELECT COALESCE(SUM(tool_calls), 0) AS tool_calls "
+        f"FROM agent_metrics WHERE agent_id IN ({placeholders})",
+        agent_ids,
+    ).fetchone()
+    return int(row["tool_calls"] or 0) if row else 0
+
+
+def _lane_activity_buckets_locked(
+    connection: sqlite3.Connection,
+    agent_ids: tuple[str, ...],
+    *,
+    window_floor: int,
+    start_time_by_agent: Mapping[str, float],
+) -> tuple[Counter[int], int]:
+    if not start_time_by_agent:
+        return _lifetime_lane_activity_buckets_locked(
+            connection, agent_ids, window_floor=window_floor
+        )
+    placeholders = ",".join("?" for _ in agent_ids)
+    earliest_start = min(
+        start_time_by_agent.get(agent_id, 0.0) for agent_id in agent_ids
+    )
+    query_floor = min(window_floor, int(earliest_start))
+    rows = connection.execute(
+        "SELECT agent_id, bucket_start, messages, tool_calls "
+        "FROM agent_metric_buckets "
+        f"WHERE agent_id IN ({placeholders}) AND bucket_start >= ? "
+        "ORDER BY bucket_start",
+        (*agent_ids, query_floor),
+    ).fetchall()
+    message_buckets: Counter[int] = Counter()
+    tool_calls = 0
+    for row in rows:
+        agent_id = str(row["agent_id"])
+        bucket_start = int(row["bucket_start"])
+        if bucket_start < start_time_by_agent.get(agent_id, 0.0):
+            continue
+        if bucket_start >= window_floor:
+            message_buckets[bucket_start] += int(row["messages"] or 0)
+        tool_calls += int(row["tool_calls"] or 0)
+    return message_buckets, tool_calls
+
+
+def _lifetime_lane_activity_buckets_locked(
+    connection: sqlite3.Connection,
+    agent_ids: tuple[str, ...],
+    *,
+    window_floor: int,
+) -> tuple[Counter[int], int]:
+    placeholders = ",".join("?" for _ in agent_ids)
+    rows = connection.execute(
+        "SELECT bucket_start, SUM(messages) AS messages, "
+        "SUM(tool_calls) AS tool_calls "
+        "FROM agent_metric_buckets "
+        f"WHERE agent_id IN ({placeholders}) AND bucket_start >= ? "
+        "GROUP BY bucket_start ORDER BY bucket_start",
+        (*agent_ids, window_floor),
+    ).fetchall()
+    message_buckets: Counter[int] = Counter()
+    tool_calls = 0
+    for row in rows:
+        message_buckets[int(row["bucket_start"])] += int(row["messages"] or 0)
+        tool_calls += int(row["tool_calls"] or 0)
+    return message_buckets, tool_calls
+
+
 def _metric_bucket_start(
     timestamp: float, bucket_seconds: int = METRIC_BUCKET_SECONDS
 ) -> int:
@@ -674,9 +814,9 @@ def _metric_sparkline(
     return tuple(values)
 
 
-def _lane_metric_summary_from_rows(
+def _lane_metric_summary_from_buckets(
     agent_ids: tuple[str, ...],
-    bucket_rows: Iterable[sqlite3.Row],
+    bucket_rows: Iterable[tuple[int, int]],
     *,
     acked: int,
     sends: int,
@@ -691,10 +831,7 @@ def _lane_metric_summary_from_rows(
         sends=sends,
         tool_calls=tool_calls,
         sparkline=_metric_sparkline(
-            (
-                (int(row["bucket_start"]), int(row["messages"] or 0))
-                for row in bucket_rows
-            ),
+            ((int(bucket), int(count)) for bucket, count in bucket_rows),
             bucket_count=bucket_count,
             bucket_seconds=bucket_seconds,
             now=now,
