@@ -303,6 +303,73 @@ def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
     assert _git(repo, "status", "--porcelain") == ""
 
 
+def test_integrate_and_publish_treats_missing_merge_head_abort_as_cleared(
+    tmp_path, monkeypatch
+):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
+    agent_head = _git(repo, "rev-parse", "HEAD")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "baseline.txt").write_text("baseline work\n", encoding="utf-8")
+    _run(peer, "git", "add", "baseline.txt")
+    _run(peer, "git", "commit", "-m", "baseline work")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+    real_run = gitsync._run
+    abort_attempts = 0
+    reset_attempts = 0
+
+    def missing_merge_head_abort(
+        repo_root: Path, *args: str
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal abort_attempts, reset_attempts
+        if repo_root == repo and args == ("merge", "--abort"):
+            abort_attempts += 1
+            (repo / ".git" / "MERGE_HEAD").unlink(missing_ok=True)
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(repo), *args],
+                128,
+                stdout="",
+                stderr="fatal: There is no merge to abort (MERGE_HEAD missing).\n",
+            )
+        if repo_root == repo and args == ("reset", "--hard", "HEAD"):
+            reset_attempts += 1
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", missing_merge_head_abort)
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000007Z",
+        repo_root=repo,
+        meta={
+            "title": "Publish missing merge head cleanup",
+            "actor": ACTOR_A,
+            "phase": "review",
+            "project": "task.unit",
+        },
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert abort_attempts == 1
+    assert reset_attempts == 1
+    assert captured["done_head"] == agent_head
+    assert captured["done_upstream_head"] == upstream_head
+    assert _merge_parents(repo, merge_head) == [upstream_head, agent_head]
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert _git(repo, "status", "--porcelain") == ""
+
+
 def test_integrate_and_publish_hook_aborted_marker_state_guides_retry(
     tmp_path, monkeypatch
 ):
