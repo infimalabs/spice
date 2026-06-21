@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
 from argparse import Namespace
 from pathlib import Path
@@ -9,10 +10,16 @@ from pathlib import Path
 import pytest
 
 from spice.agent import maximcli, maxims, watchdog
+from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.maxims import MaximVerdict
 from spice.errors import SpiceError
 from spice.mail.acks import archive_ackd_inbox_items
-from spice.mail.inbox import collect_inbox_items, inbox_item_key
+from spice.mail.inbox import (
+    collect_inbox_items,
+    compose_inbox_text,
+    inbox_item_key,
+    write_inbox_item,
+)
 
 
 def test_repo_config_declares_new_maxim_bag_for_scan_and_watchdog(
@@ -136,6 +143,32 @@ def test_maxim_publish_suppression_uses_in_memory_gate_not_pending_file_scan(
     assert second_paths == []
     assert after_ack_paths == []
     assert collect_inbox_items(repo) == []
+
+
+def test_stdout_supervisor_discards_its_pending_maxim_reminders_on_shutdown(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    _write_dual_maxim_config(repo)
+    _make_every_maxim_violate(monkeypatch)
+    monkeypatch.setattr(watchdog, "record_supervised_lane_metrics", lambda _repo: None)
+    write_inbox_item(
+        repo,
+        "20260103T000000000001Z.txt",
+        compose_inbox_text(body="operator steering", priority=None, stop=False),
+    )
+    process = _FakeProcess(stdout=io.StringIO("codex\nalpha beta\nexec\n"))
+    log_path = repo / "supervisor.log"
+
+    watchdog._tee_agent_stdout(process, repo, log_path)
+
+    items = collect_inbox_items(repo)
+    assert [item.name for item in items] == ["20260103T000000000001Z.txt"]
+    assert "operator steering" in items[0].text
+    assert "spice maxim supervisor cleanup discarded inbox:" in log_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_repo_config_overrides_builtin_trigger_words(tmp_path):
@@ -328,6 +361,13 @@ def _make_every_maxim_violate(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(watchdog, "evaluate_maxim_any_violation", judge_violation)
+
+
+class _FakeProcess:
+    pid = 12345
+
+    def __init__(self, *, stdout: io.StringIO) -> None:
+        self.stdout = stdout
 
 
 def _init_repo(path: Path) -> Path:
