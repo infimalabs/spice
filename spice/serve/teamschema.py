@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS memberships (
     team_id TEXT NOT NULL,
     agent_id TEXT NOT NULL,
     joined_at REAL NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (team_id, agent_id)
 );
 CREATE TABLE IF NOT EXISTS team_task_filters (
@@ -53,13 +54,6 @@ CREATE TABLE IF NOT EXISTS team_task_filters (
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     PRIMARY KEY (team_id, project, source)
-);
-CREATE TABLE IF NOT EXISTS team_agent_history (
-    team_id TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
-    first_seen_at REAL NOT NULL,
-    last_seen_at REAL NOT NULL,
-    PRIMARY KEY (team_id, agent_id)
 );
 CREATE TABLE IF NOT EXISTS team_merge_subgroups (
     parent_team_id TEXT NOT NULL,
@@ -112,22 +106,6 @@ CREATE TABLE IF NOT EXISTS agent_metric_buckets (
     bucket_start INTEGER NOT NULL,
     messages INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, bucket_start)
-);
-CREATE TABLE IF NOT EXISTS team_agent_metrics (
-    team_id TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
-    acked INTEGER NOT NULL DEFAULT 0,
-    sends INTEGER NOT NULL DEFAULT 0,
-    tool_calls INTEGER NOT NULL DEFAULT 0,
-    updated_at REAL NOT NULL,
-    PRIMARY KEY (team_id, agent_id)
-);
-CREATE TABLE IF NOT EXISTS team_agent_metric_buckets (
-    team_id TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
-    bucket_start INTEGER NOT NULL,
-    messages INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (team_id, agent_id, bucket_start)
 );
 CREATE TABLE IF NOT EXISTS agent_metric_cursors (
     agent_id TEXT PRIMARY KEY,

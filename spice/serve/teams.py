@@ -79,6 +79,11 @@ ZERO_ACTIVITY_EVENT_KINDS = frozenset(
     }
 )
 PRUNE_EVENT_TEAM_ID = "__system__"
+DROPPED_TEAM_METRIC_TABLES = (
+    "team_agent_metrics",
+    "team_agent_metric_buckets",
+    "team_agent_history",
+)
 
 
 def team_database_path() -> Path:
@@ -107,6 +112,7 @@ class ServeTeamStore(
             connection.executescript(TEAM_SCHEMA)
             self._migrate_renewal_identity_columns_locked(connection)
             self._migrate_task_filter_sources_locked(connection)
+            self._migrate_team_metric_model_locked(connection)
             yield connection
             connection.commit()
         finally:
@@ -139,6 +145,31 @@ class ServeTeamStore(
         with self.connect() as connection:
             return self._current_revision_locked(connection)
 
+    def _migrate_team_metric_model_locked(self, connection: sqlite3.Connection) -> None:
+        for table in DROPPED_TEAM_METRIC_TABLES:
+            connection.execute(f"DROP TABLE IF EXISTS {table}")
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(memberships)")
+        }
+        if "position" in columns:
+            return
+        connection.execute(
+            "ALTER TABLE memberships ADD COLUMN position INTEGER NOT NULL DEFAULT 0"
+        )
+        connection.execute(
+            "UPDATE memberships "
+            "SET position = ("
+            "  SELECT COUNT(*) FROM memberships AS prior "
+            "  WHERE prior.team_id = memberships.team_id "
+            "  AND ("
+            "    prior.joined_at < memberships.joined_at "
+            "    OR (prior.joined_at = memberships.joined_at "
+            "        AND prior.agent_id < memberships.agent_id)"
+            "  )"
+            ")"
+        )
+
     def prune_zero_activity_closed_teams(self) -> tuple[str, ...]:
         with self.connect() as connection:
             return self._prune_zero_activity_closed_teams_locked(connection)
@@ -160,10 +191,7 @@ class ServeTeamStore(
         for table in (
             "memberships",
             "team_task_filters",
-            "team_agent_history",
             "team_merge_subgroups",
-            "team_agent_metrics",
-            "team_agent_metric_buckets",
             "renewals",
         ):
             if table == "team_merge_subgroups":
@@ -207,14 +235,6 @@ class ServeTeamStore(
             return False
         if self._team_has_rows_locked(
             connection, "renewals", "team_id = ?", (team_id,)
-        ):
-            return False
-        if self._team_has_rows_locked(
-            connection, "team_agent_metrics", "team_id = ?", (team_id,)
-        ):
-            return False
-        if self._team_has_rows_locked(
-            connection, "team_agent_metric_buckets", "team_id = ?", (team_id,)
         ):
             return False
         if self._team_has_rows_locked(
@@ -353,7 +373,6 @@ class ServeTeamStore(
                 time.time() if inherited_joined_at is None else inherited_joined_at,
             ),
         )
-        self._note_team_agent_history_locked(connection, team_id, agent_id)
         self._close_empty_teams_locked(
             connection,
             [
@@ -458,12 +477,6 @@ class ServeTeamStore(
                 "UPDATE teams SET status = 'open' WHERE team_id = ?",
                 (child_team_id,),
             )
-            self._move_team_metric_rows_for_agents_locked(
-                connection,
-                source_team_id,
-                child_team_id,
-                agent_ids,
-            )
             for agent_id in agent_ids:
                 self._assign_locked(connection, child_team_id, agent_id)
             revision = self._record_event(
@@ -500,9 +513,6 @@ class ServeTeamStore(
                 (source_team_id,),
             ).fetchall()
             agent_ids = [str(row["agent_id"]) for row in rows]
-            self._move_team_metric_rows_locked(
-                connection, source_team_id, destination_team_id
-            )
             for agent_id in agent_ids:
                 self._assign_locked(connection, destination_team_id, agent_id)
             connection.execute(
@@ -675,18 +685,6 @@ class ServeTeamStore(
         if row is None:
             raise SpiceError(f"unknown team: {team_id}")
         return row
-
-    def _note_team_agent_history_locked(
-        self, connection: sqlite3.Connection, team_id: str, agent_id: str
-    ) -> None:
-        now = time.time()
-        connection.execute(
-            "INSERT INTO team_agent_history "
-            "(team_id, agent_id, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(team_id, agent_id) DO UPDATE SET "
-            "last_seen_at = excluded.last_seen_at",
-            (team_id, agent_id, now, now),
-        )
 
     def _record_merge_subgroup_locked(
         self,

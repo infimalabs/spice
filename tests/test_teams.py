@@ -16,6 +16,9 @@ from spice.serve.teams import (
 COMPOSER_MOVE_SOURCE_ACKED_TOTAL = 11
 COMPOSER_MOVE_SOURCE_SEND_TOTAL = 22
 COMPOSER_MOVE_SOURCE_TOOL_CALL_TOTAL = 33
+MOVED_AGENT_ACKED_TOTAL = 11
+MOVED_AGENT_SEND_TOTAL = 12
+MOVED_AGENT_TOOL_CALL_TOTAL = 13
 TEAM_MERGE_ACKED_TOTAL = 14
 TEAM_MERGE_SEND_TOTAL = 25
 TEAM_MERGE_TOOL_CALL_TOTAL = 36
@@ -67,7 +70,7 @@ def test_empty_team_snapshot_creates_initial_empty_team(tmp_path):
     assert [followup_team.team_id for followup_team in followup.teams] == [team.team_id]
 
 
-def test_lane_metrics_aggregate_removed_lifetime_team_members(tmp_path):
+def test_lane_metrics_drop_removed_members_from_current_lane(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(members=["agent-a"])
     store.record_agent_metric_delta("agent-a", acked=1, sends=2, tool_calls=3)
@@ -77,10 +80,10 @@ def test_lane_metrics_aggregate_removed_lifetime_team_members(tmp_path):
 
     summary = store.lane_metric_summary("agent-b", bucket_count=12)
 
-    assert summary.agent_ids == ("agent-a", "agent-b")
-    assert summary.acked == 5
-    assert summary.sends == 7
-    assert summary.tool_calls == 9
+    assert summary.agent_ids == ("agent-b",)
+    assert summary.acked == 4
+    assert summary.sends == 5
+    assert summary.tool_calls == 6
 
 
 def test_lane_metrics_do_not_pull_prior_team_counts_after_agent_moves(tmp_path):
@@ -96,13 +99,13 @@ def test_lane_metrics_do_not_pull_prior_team_counts_after_agent_moves(tmp_path):
     moved_summary = store.lane_metric_summary("agent-a", bucket_count=12)
 
     assert store.team_state(source.team_id).status == "closed"
-    assert destination_summary.acked == 1
-    assert moved_summary.acked == 1
-    assert moved_summary.sends == 2
-    assert moved_summary.tool_calls == 3
+    assert destination_summary.acked == MOVED_AGENT_ACKED_TOTAL
+    assert destination_summary.sends == MOVED_AGENT_SEND_TOTAL
+    assert destination_summary.tool_calls == MOVED_AGENT_TOOL_CALL_TOTAL
+    assert moved_summary == destination_summary
 
 
-def test_composer_move_leaves_source_and_destination_metrics_unchanged(tmp_path):
+def test_composer_move_carries_agent_metrics_to_destination(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     source = store.create_team(members=["agent-a", "agent-c"])
     destination = store.create_team(members=["agent-b"])
@@ -119,18 +122,20 @@ def test_composer_move_leaves_source_and_destination_metrics_unchanged(tmp_path)
     destination_after = store.lane_metric_summary("agent-b", bucket_count=12)
 
     assert store.team_state(source.team_id).status == "open"
-    assert source_after.agent_ids == ("agent-a", "agent-c")
-    assert source_after.acked == source_before.acked == COMPOSER_MOVE_SOURCE_ACKED_TOTAL
-    assert source_after.sends == source_before.sends == COMPOSER_MOVE_SOURCE_SEND_TOTAL
-    assert (
-        source_after.tool_calls
-        == source_before.tool_calls
-        == COMPOSER_MOVE_SOURCE_TOOL_CALL_TOTAL
-    )
-    assert destination_after.agent_ids == ("agent-a", "agent-b")
-    assert destination_after.acked == destination_before.acked == 4
-    assert destination_after.sends == destination_before.sends == 5
-    assert destination_after.tool_calls == destination_before.tool_calls == 6
+    assert source_before.acked == COMPOSER_MOVE_SOURCE_ACKED_TOTAL
+    assert source_before.sends == COMPOSER_MOVE_SOURCE_SEND_TOTAL
+    assert source_before.tool_calls == COMPOSER_MOVE_SOURCE_TOOL_CALL_TOTAL
+    assert source_after.agent_ids == ("agent-c",)
+    assert source_after.acked == 1
+    assert source_after.sends == 2
+    assert source_after.tool_calls == 3
+    assert destination_after.agent_ids == ("agent-b", "agent-a")
+    assert destination_before.acked == 4
+    assert destination_before.sends == 5
+    assert destination_before.tool_calls == 6
+    assert destination_after.acked == TEAM_MERGE_ACKED_TOTAL
+    assert destination_after.sends == TEAM_MERGE_SEND_TOTAL
+    assert destination_after.tool_calls == TEAM_MERGE_TOOL_CALL_TOTAL
 
 
 def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
@@ -159,24 +164,13 @@ def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
     repeated_after = store.lane_metric_summary("agent-b", bucket_count=12, now=180)
 
     assert store.team_state(source.team_id).status == "closed"
-    assert destination_after.agent_ids == ("agent-a", "agent-b")
+    assert destination_after.agent_ids == ("agent-b", "agent-a")
     assert destination_after.acked == TEAM_MERGE_ACKED_TOTAL
     assert destination_after.sends == TEAM_MERGE_SEND_TOTAL
     assert destination_after.tool_calls == TEAM_MERGE_TOOL_CALL_TOTAL
     assert sum(destination_after.sparkline) == 3
     assert moved_after == destination_after
     assert repeated_after == destination_after
-    with store.connect() as connection:
-        source_metric_rows = connection.execute(
-            "SELECT COUNT(*) FROM team_agent_metrics WHERE team_id = ?",
-            (source.team_id,),
-        ).fetchone()[0]
-        source_bucket_rows = connection.execute(
-            "SELECT COUNT(*) FROM team_agent_metric_buckets WHERE team_id = ?",
-            (source.team_id,),
-        ).fetchone()[0]
-    assert source_metric_rows == 0
-    assert source_bucket_rows == 0
 
 
 def test_split_team_back_restores_latest_merged_source_team(tmp_path):
@@ -575,7 +569,7 @@ def test_team_command_service_close_final_team_returns_replacement_empty_team(
     ]
 
 
-def test_zero_activity_prune_preserves_metric_and_config_teams(tmp_path):
+def test_zero_activity_prune_drops_metric_only_team_and_preserves_config(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     metric_team = store.create_team(team_id="team-metric", members=["agent-a"])
     store.record_agent_metric_delta("agent-a", sends=1)
@@ -595,7 +589,6 @@ def test_zero_activity_prune_preserves_metric_and_config_teams(tmp_path):
 
     assert {row["team_id"]: row["status"] for row in team_rows} == {
         "team-config": "closed",
-        "team-metric": "closed",
         snapshot.teams[0].team_id: "open",
     }
 
