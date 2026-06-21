@@ -177,9 +177,9 @@ def test_metric_series_payload_distribution_returns_agent_share_points(tmp_path)
         {
             "bucketStart": 60,
             "agentId": "agent-a",
-            "claimed": 1,
+            "claimed": 0,
             "active": 1,
-            "work": 2,
+            "work": 1,
         },
         {
             "bucketStart": 60,
@@ -190,6 +190,27 @@ def test_metric_series_payload_distribution_returns_agent_share_points(tmp_path)
         },
         {
             "bucketStart": 120,
+            "agentId": "agent-a",
+            "claimed": 0,
+            "active": 1,
+            "work": 1,
+        },
+        {
+            "bucketStart": 120,
+            "agentId": "agent-b",
+            "claimed": 0,
+            "active": 1,
+            "work": 1,
+        },
+        {
+            "bucketStart": 180,
+            "agentId": "agent-a",
+            "claimed": 0,
+            "active": 1,
+            "work": 1,
+        },
+        {
+            "bucketStart": 180,
             "agentId": "agent-b",
             "claimed": 0,
             "active": 1,
@@ -197,9 +218,12 @@ def test_metric_series_payload_distribution_returns_agent_share_points(tmp_path)
         },
     ]
     assert [point["share"] for point in payload["points"]] == [
-        pytest.approx(2 / 3),
-        pytest.approx(1 / 3),
-        pytest.approx(1.0),
+        pytest.approx(1 / 2),
+        pytest.approx(1 / 2),
+        pytest.approx(1 / 2),
+        pytest.approx(1 / 2),
+        pytest.approx(1 / 2),
+        pytest.approx(1 / 2),
     ]
     assert [point["value"] for point in payload["points"]] == [
         pytest.approx(point["share"]) for point in payload["points"]
