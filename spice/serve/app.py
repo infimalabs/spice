@@ -26,7 +26,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
 )
 from spice.paths import repo_root_from_cwd, shared_attachment_root
-from spice.serve import identitypayload, messagepayload, worktreepayload
+from spice.serve import identitypayload, messagepayload, metricpayload, worktreepayload
 from spice.serve.agentapi import (
     agent_ensure_response_payload,
     agent_status_payload,
@@ -667,6 +667,9 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 ),
                 team_command_payload=lambda payload: team_command_response_payload(
                     state, payload
+                ),
+                metric_series_payload=lambda query: metricpayload.metric_series_payload(
+                    state, query
                 ),
                 thread_id=lambda target: identitypayload.resolve_thread_id_for_target(
                     state, target

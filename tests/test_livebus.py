@@ -174,6 +174,7 @@ def test_lane_subscription_watch_wakes_stopped_agent_for_external_inbox_write(
             task_drain_payload=lambda _target, _payload: ({}, None),
             team_snapshot_payload=lambda _since_revision: {},
             team_command_payload=lambda _payload: ({}, None),
+            metric_series_payload=lambda _query: {"ok": True, "points": []},
             thread_id=lambda _target: THREAD_ID,
             transcript_resolution=lambda _thread_id: _transcript_resolution(
                 THREAD_ID, transcript
@@ -299,6 +300,7 @@ def _callbacks(
         task_drain_payload=lambda _target, _payload: ({}, None),
         team_snapshot_payload=lambda _since_revision: {},
         team_command_payload=lambda _payload: ({}, None),
+        metric_series_payload=lambda _query: {"ok": True, "points": []},
         thread_id=lambda _target: "thread",
         transcript_resolution=lambda _thread_id: _transcript_resolution(
             "thread", transcript
