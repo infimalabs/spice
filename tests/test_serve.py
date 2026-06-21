@@ -66,6 +66,7 @@ THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 THREAD_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 ACTOR_A = f"thread:{THREAD_A}"
 ACTOR_B = f"thread:{THREAD_B}"
+TEAM_HISTORICAL_TEST_BUCKET_COUNT = 13
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,11 @@ class _ImageHandler(_StaticHandler):
 
     def _send_bytes(self, data: bytes, content_type: str) -> None:
         app._ServeHandler._send_bytes(self, data, content_type)
+
+    def _send_json(
+        self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK
+    ) -> None:
+        app._ServeHandler._send_json(self, payload, status)
 
 
 def test_serve_parser_exposes_until_path_help(capsys):
@@ -361,6 +367,10 @@ def test_serve_metrics_path_templates_bound_cardinality():
     assert app.serve_metrics_path_template("/") == "/"
     assert app.serve_metrics_path_template("/metrics") == "/metrics"
     assert (
+        app.serve_metrics_path_template("/api/teams/team-a/metrics?start=0")
+        == "/api/teams/{id}/metrics"
+    )
+    assert (
         app.serve_metrics_path_template("/api/work/trees/main/agent/status")
         == "/api/work/trees/{id}/agent/status"
     )
@@ -374,6 +384,96 @@ def test_serve_metrics_path_templates_bound_cardinality():
     )
     assert app.serve_metrics_path_template("/static/index.css") == "/static/{asset}"
     assert app.serve_metrics_path_template("/elsewhere") == "other"
+
+
+def test_team_historical_metrics_endpoint_projects_membership_intervals(
+    tmp_path, monkeypatch
+):
+    clock = {"now": 0.0}
+    monkeypatch.setattr("spice.serve.teams.time.time", lambda: clock["now"])
+    repo = _repo(tmp_path)
+    state = _serve_state(tmp_path, _target(repo))
+
+    def set_time(timestamp: float) -> None:
+        clock["now"] = timestamp
+
+    set_time(0)
+    team = state.team_store.create_team(members=["agent-a", "agent-b"])
+    state.team_store.record_agent_metric_delta("agent-a", message_timestamps=[60])
+    state.team_store.record_agent_metric_delta("agent-b", message_timestamps=[60])
+
+    set_time(120)
+    split = state.team_store.split_team(
+        team.team_id, agent_ids=["agent-a"], new_team_id="team-split"
+    )
+    state.team_store.record_agent_metric_delta("agent-a", message_timestamps=[180])
+    state.team_store.record_agent_metric_delta("agent-b", message_timestamps=[180])
+
+    set_time(240)
+    state.team_store.merge_teams(split.team_id, team.team_id)
+    state.team_store.record_agent_metric_delta("agent-a", message_timestamps=[300])
+    state.team_store.record_agent_metric_delta("agent-b", message_timestamps=[300])
+
+    set_time(360)
+    state.team_store.split_team_back(team.team_id)
+    state.team_store.record_agent_metric_delta("agent-a", message_timestamps=[420])
+    state.team_store.record_agent_metric_delta("agent-b", message_timestamps=[420])
+
+    set_time(480)
+    state.team_store.remove_agent(team.team_id, "agent-b")
+    state.team_store.record_agent_metric_delta("agent-b", message_timestamps=[540])
+
+    set_time(600)
+    state.team_store.close_team(split.team_id)
+    state.team_store.record_agent_metric_delta("agent-a", message_timestamps=[660])
+
+    query = {"start": ["0"], "end": ["720"], "bucketSeconds": ["60"]}
+    team_payload = app.team_historical_metrics_response_payload(
+        state, team.team_id, query
+    )
+    split_payload = app.team_historical_metrics_response_payload(
+        state, split.team_id, query
+    )
+    narrow_payload = app.team_historical_metrics_response_payload(
+        state,
+        team.team_id,
+        {"start": ["120"], "end": ["360"], "bucketSeconds": ["60"]},
+    )
+
+    assert team_payload["ok"] is True
+    assert team_payload["lens"] == "team-historical"
+    assert team_payload["teamId"] == team.team_id
+    assert team_payload["agentIds"] == ["agent-a", "agent-b"]
+    assert team_payload["messages"] == 6
+    assert team_payload["cumulativeMessages"] == 6
+    assert team_payload["range"] == {"start": 0, "end": 720}
+    assert team_payload["bucketCount"] == TEAM_HISTORICAL_TEST_BUCKET_COUNT
+    assert sum(team_payload["sparkline"]) == 6
+    assert sum(point["messages"] for point in team_payload["series"]) == 6
+
+    assert split_payload["teamId"] == split.team_id
+    assert split_payload["agentIds"] == ["agent-a"]
+    assert split_payload["messages"] == 2
+    assert sum(split_payload["sparkline"]) == 2
+
+    handler = _ImageHandler(state)
+    app._ServeHandler._get_team_metrics(
+        handler,
+        team.team_id,
+        "start=0&end=720&bucketSeconds=60",
+    )
+    endpoint_payload = json.loads(handler.body.getvalue())
+
+    assert handler.status == HTTPStatus.OK
+    assert handler.headers["Content-Type"].startswith("application/json")
+    assert endpoint_payload["lens"] == "team-historical"
+    assert endpoint_payload["teamId"] == team.team_id
+    assert endpoint_payload["messages"] == 6
+
+    assert narrow_payload["messages"] == 3
+    assert narrow_payload["cumulativeMessages"] == 5
+    assert narrow_payload["range"] == {"start": 120, "end": 360}
+    assert sum(point["messages"] for point in narrow_payload["series"]) == 3
 
 
 def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
