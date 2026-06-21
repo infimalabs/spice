@@ -50,6 +50,61 @@ message = "DO NOT take shortcuts; keep the direct route."
     assert item.text == "[MAXIM] DO NOT take shortcuts; keep the direct route.\n"
 
 
+def test_maxim_reminder_gate_suppresses_same_combined_body_until_compaction(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_dual_maxim_config(repo)
+    _make_every_maxim_violate(monkeypatch)
+    gate = watchdog.MaximReminderGate()
+
+    first_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta", reminder_gate=gate
+    )
+    duplicate_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta again", reminder_gate=gate
+    )
+    gate.note_compaction()
+    after_compaction_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta", reminder_gate=gate
+    )
+
+    assert len(first_paths) == 1
+    assert duplicate_paths == []
+    assert len(after_compaction_paths) == 1
+    assert [item.text for item in collect_inbox_items(repo)] == [
+        "[MAXIM] FIRST reminder. SECOND reminder.\n",
+        "[MAXIM] FIRST reminder. SECOND reminder.\n",
+    ]
+
+
+def test_maxim_reminder_gate_allows_new_combined_body_with_existing_maxim(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_dual_maxim_config(repo)
+    _make_every_maxim_violate(monkeypatch)
+    gate = watchdog.MaximReminderGate()
+
+    single_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha", reminder_gate=gate
+    )
+    combined_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta", reminder_gate=gate
+    )
+    duplicate_combined_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta again", reminder_gate=gate
+    )
+
+    assert len(single_paths) == 1
+    assert len(combined_paths) == 1
+    assert duplicate_combined_paths == []
+    assert [item.text for item in collect_inbox_items(repo)] == [
+        "[MAXIM] FIRST reminder.\n",
+        "[MAXIM] FIRST reminder. SECOND reminder.\n",
+    ]
+
+
 def test_repo_config_overrides_builtin_trigger_words(tmp_path):
     repo = _init_repo(tmp_path / "repo")
     _write_pyproject(
@@ -196,6 +251,34 @@ message = "DO NOT take the quiet route."
 
 def _write_pyproject(repo: Path, text: str) -> None:
     (repo / "pyproject.toml").write_text(text.strip() + "\n", encoding="utf-8")
+
+
+def _write_dual_maxim_config(repo: Path) -> None:
+    _write_pyproject(
+        repo,
+        """
+[tool.spice.maxims.first]
+words = ["alpha"]
+message = "FIRST reminder."
+
+[tool.spice.maxims.second]
+words = ["beta"]
+message = "SECOND reminder."
+""",
+    )
+
+
+def _make_every_maxim_violate(monkeypatch) -> None:
+    def judge_violation(maxim: str, statement: str) -> MaximVerdict:
+        return MaximVerdict(
+            maxim=maxim,
+            statement=statement,
+            prompt="",
+            answer="NO",
+            attempts=("NO",),
+        )
+
+    monkeypatch.setattr(watchdog, "evaluate_maxim_any_violation", judge_violation)
 
 
 def _init_repo(path: Path) -> Path:
