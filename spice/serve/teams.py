@@ -35,6 +35,10 @@ from spice.serve.teamidentity import (
     agent_identity_from_row,
     select_agent_identity_rows,
 )
+from spice.serve.directivestats import (
+    DirectiveStatsStoreMixin,
+    DirectiveTotals as DirectiveTotals,
+)
 from spice.serve.teammetrics import (
     METRIC_BUCKET_SECONDS as METRIC_BUCKET_SECONDS,
     LaneMetricSummary as LaneMetricSummary,
@@ -98,6 +102,7 @@ class ServeTeamStore(
     TeamRenewalStoreMixin,
     TeamFilterStoreMixin,
     TeamMetricStoreMixin,
+    DirectiveStatsStoreMixin,
 ):
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or team_database_path()
