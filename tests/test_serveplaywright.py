@@ -88,6 +88,21 @@ def test_serve_menu_smoke_uses_harness_for_interaction() -> None:
     assert "New team" not in smoke
 
 
+def test_serve_team_metrics_smoke_asserts_work_follows_agent() -> None:
+    smoke = (ROOT / "browser" / "serve_team_metrics_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert "renderLaneMetricsPane(source)" in smoke
+    assert "laneMetricsRenderModel" in smoke
+    # Work follows the agent: counters leave the source lane and land on the dest.
+    assert "{ acked: 1, sends: 2, toolCalls: 3" in smoke
+    assert "{ acked: 14, sends: 25, toolCalls: 36" in smoke
+    assert "stale/duplicate cells" in smoke
+
+
 def test_serve_composer_reorder_smoke_asserts_swap_contract() -> None:
     smoke = (ROOT / "browser" / "serve_composer_reorder_smoke.js").read_text(
         encoding="utf-8"
