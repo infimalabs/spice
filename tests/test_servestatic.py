@@ -1130,6 +1130,20 @@ def test_static_composer_driver_icons_use_local_driver_assets():
     )
 
 
+def test_composer_driver_icon_rerender_keeps_matching_dom_node():
+    app_composer = STATIC_ROOT / "app.composer.js"
+    script = Path(__file__).with_name("fixtures") / "composer_driver_icon_reconcile.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(app_composer)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_static_composer_driver_icons_style_local_driver_assets():
     css = _serve_css_text()
     icon_start = css.index(".composer-driver-icon {")
