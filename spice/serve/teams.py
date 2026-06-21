@@ -158,11 +158,13 @@ class ServeTeamStore(
             str(row["name"])
             for row in connection.execute("PRAGMA table_info(agent_metrics)")
         }
-        for legacy_column in ("acked", "sends"):
-            if legacy_column in agent_metric_columns:
-                connection.execute(
-                    f"ALTER TABLE agent_metrics DROP COLUMN {legacy_column}"
-                )
+        if "team_id" not in agent_metric_columns:
+            # Pre-team-tagging activity tables: recreate in the team-tagged shape.
+            # The durable per-agent activity history is low-stakes and dropped
+            # rather than reshaped (databases are wiped freely at this stage).
+            connection.execute("DROP TABLE IF EXISTS agent_metrics")
+            connection.execute("DROP TABLE IF EXISTS agent_metric_buckets")
+            connection.executescript(TEAM_SCHEMA)
         columns = {
             str(row["name"])
             for row in connection.execute("PRAGMA table_info(memberships)")

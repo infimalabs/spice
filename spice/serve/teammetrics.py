@@ -45,11 +45,14 @@ class _MembershipInterval:
 class _TeamMetricStore(Protocol):
     def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
 
+    def current_team_for_agent(self, agent_id: str) -> str | None: ...
+
     def _record_agent_metric_delta_locked(
         self,
         connection: sqlite3.Connection,
         agent_id: str,
         *,
+        team_id: str,
         tool_calls: int,
         buckets: Counter[int],
         now: float,
@@ -91,11 +94,15 @@ class TeamMetricStoreMixin:
         )
         if tool_calls == 0 and not buckets:
             return
+        # Tag the activity with the team the agent is on at capture time, or the
+        # agent itself when it is in no team / a private solo team.
+        team_id = self.current_team_for_agent(agent_id) or agent_id
         now = time.time()
         with self.connect() as connection:
             self._record_agent_metric_delta_locked(
                 connection,
                 agent_id,
+                team_id=team_id,
                 tool_calls=tool_calls,
                 buckets=buckets,
                 now=now,
@@ -169,20 +176,20 @@ class TeamMetricStoreMixin:
             return
         connection.execute(
             "INSERT INTO agent_metrics "
-            "(agent_id, tool_calls, updated_at) "
-            "SELECT ?, tool_calls, updated_at "
+            "(agent_id, team_id, tool_calls, updated_at) "
+            "SELECT ?, team_id, tool_calls, updated_at "
             "FROM agent_metrics WHERE agent_id = ? "
-            "ON CONFLICT(agent_id) DO UPDATE SET "
+            "ON CONFLICT(agent_id, team_id) DO UPDATE SET "
             "tool_calls = agent_metrics.tool_calls + excluded.tool_calls, "
             "updated_at = max(agent_metrics.updated_at, excluded.updated_at)",
             (new_agent_id, old_agent_id),
         )
         connection.execute(
             "INSERT INTO agent_metric_buckets "
-            "(agent_id, bucket_start, messages) "
-            "SELECT ?, bucket_start, messages "
+            "(agent_id, team_id, bucket_start, messages) "
+            "SELECT ?, team_id, bucket_start, messages "
             "FROM agent_metric_buckets WHERE agent_id = ? "
-            "ON CONFLICT(agent_id, bucket_start) DO UPDATE SET "
+            "ON CONFLICT(agent_id, team_id, bucket_start) DO UPDATE SET "
             "messages = agent_metric_buckets.messages + excluded.messages",
             (new_agent_id, old_agent_id),
         )
@@ -289,26 +296,27 @@ class TeamMetricStoreMixin:
         connection: sqlite3.Connection,
         agent_id: str,
         *,
+        team_id: str,
         tool_calls: int,
         buckets: Counter[int],
         now: float,
     ) -> None:
         connection.execute(
             "INSERT INTO agent_metrics "
-            "(agent_id, tool_calls, updated_at) "
-            "VALUES (?, ?, ?) "
-            "ON CONFLICT(agent_id) DO UPDATE SET "
+            "(agent_id, team_id, tool_calls, updated_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(agent_id, team_id) DO UPDATE SET "
             "tool_calls = agent_metrics.tool_calls + excluded.tool_calls, "
             "updated_at = excluded.updated_at",
-            (agent_id, tool_calls, now),
+            (agent_id, team_id, tool_calls, now),
         )
         for bucket_start, count in buckets.items():
             connection.execute(
                 "INSERT INTO agent_metric_buckets "
-                "(agent_id, bucket_start, messages) VALUES (?, ?, ?) "
-                "ON CONFLICT(agent_id, bucket_start) DO UPDATE SET "
+                "(agent_id, team_id, bucket_start, messages) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(agent_id, team_id, bucket_start) DO UPDATE SET "
                 "messages = agent_metric_buckets.messages + excluded.messages",
-                (agent_id, bucket_start, int(count)),
+                (agent_id, team_id, bucket_start, int(count)),
             )
 
     def _agent_lane_metric_summary_locked(
