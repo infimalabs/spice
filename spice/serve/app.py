@@ -28,7 +28,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
 )
 from spice.paths import repo_root_from_cwd, shared_attachment_root
-from spice.serve import identitypayload, messagepayload, worktreepayload
+from spice.serve import identitypayload, messagepayload, metricpayload, worktreepayload
 from spice.serve.agentapi import (
     agent_ensure_response_payload,
     agent_status_payload,
@@ -70,6 +70,9 @@ METRICS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 MAX_HTTP_REQUEST_LINE_BYTES = 65536
 HTTP_REQUEST_LINE_READ_LIMIT = MAX_HTTP_REQUEST_LINE_BYTES + 1
 TEAM_HISTORICAL_METRIC_BUCKET_COUNT = 12
+# JSON range endpoints cap buckets to keep accidental huge queries from
+# allocating unbounded sparkline/series payloads.
+TEAM_HISTORICAL_MAX_BUCKET_COUNT = 1440
 TASK_BURNDOWN_BUCKET_COUNT = 12
 TASK_BURNDOWN_MAX_BUCKET_COUNT = 1440
 TASK_DISTRIBUTION_BUCKET_COUNT = 12
@@ -231,24 +234,34 @@ def team_historical_metrics_response_payload(
     query: dict[str, list[str]],
 ) -> dict[str, Any]:
     bucket_seconds = _query_int(query, "bucketSeconds", METRIC_BUCKET_SECONDS)
-    summary_time = _query_float(query, "end", None, minimum=0.0)
+    summary_time = _query_strict_finite_float(query, "end", minimum=0.0)
     if summary_time is None:
-        summary_time = _query_float(query, "now", None, minimum=0.0)
+        summary_time = _query_strict_finite_float(query, "now", minimum=0.0)
     if summary_time is None:
         summary_time = time.time()
-    raw_start = _query_float(query, "start", None, minimum=0.0)
+    raw_start = _query_strict_finite_float(query, "start", minimum=0.0)
     if raw_start is None:
         bucket_count = _query_int(
             query,
             "bucketCount",
             TEAM_HISTORICAL_METRIC_BUCKET_COUNT,
         )
+        if bucket_count > TEAM_HISTORICAL_MAX_BUCKET_COUNT:
+            raise SpiceError(
+                "team historical metrics bucketCount exceeds "
+                f"{TEAM_HISTORICAL_MAX_BUCKET_COUNT} buckets"
+            )
     else:
         bucket_count = _metric_bucket_count_for_range(
             raw_start,
             summary_time,
             bucket_seconds,
         )
+        if bucket_count > TEAM_HISTORICAL_MAX_BUCKET_COUNT:
+            raise SpiceError(
+                "team historical metrics range exceeds "
+                f"{TEAM_HISTORICAL_MAX_BUCKET_COUNT} buckets"
+            )
     summary = state.team_store.team_historical_metric_summary(
         team_id,
         bucket_count=bucket_count,
@@ -903,6 +916,9 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 team_command_payload=lambda payload: team_command_response_payload(
                     state, payload
                 ),
+                metric_series_payload=lambda query: metricpayload.metric_series_payload(
+                    state, query
+                ),
                 thread_id=lambda target: identitypayload.resolve_thread_id_for_target(
                     state, target
                 ),
@@ -1133,6 +1149,26 @@ def _query_finite_float(
     if value is None:
         return default
     return value if math.isfinite(value) else default
+
+
+def _query_strict_finite_float(
+    query: dict[str, list[str]],
+    key: str,
+    *,
+    minimum: float = 0.0,
+) -> float | None:
+    raw = query.get(key, [""])[0].strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise SpiceError(f"{key} must be a finite number") from exc
+    if not math.isfinite(value):
+        raise SpiceError(f"{key} must be a finite number")
+    if value < minimum:
+        raise SpiceError(f"{key} must be at least {minimum:g}")
+    return value
 
 
 def _query_str(query: dict[str, list[str]], key: str) -> str | None:
