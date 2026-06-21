@@ -15,6 +15,7 @@ from spice.serve.directivestats import DirectiveTotals
 from spice.serve.teamschema import METRIC_HISTORY_RETENTION_SECONDS
 
 METRIC_BUCKET_SECONDS = 60
+TASK_EVENT_KINDS = frozenset({"claim", "phaseAdvance", "review", "complete", "drain"})
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,15 @@ class LaneMetricSummary:
 class MetricSeriesPoint:
     bucket_start: int
     messages: int
+
+
+@dataclass(frozen=True)
+class TaskLifecycleSeriesPoint:
+    bucket_start: int
+    claimed: int
+    active: int
+    completed: int
+    drained: int
 
 
 @dataclass(frozen=True)
@@ -142,6 +152,31 @@ class TeamMetricStoreMixin:
                 (agent_id, source_path, max(0, int(offset)), time.time()),
             )
 
+    def record_task_lifecycle_event(
+        self: _TeamMetricStore,
+        kind: str,
+        *,
+        task_id: str,
+        agent_id: str,
+        team_id: str | None = None,
+        ts: float | None = None,
+    ) -> None:
+        kind = _task_event_kind(kind)
+        task_id = _normalized_id(task_id, "task_id")
+        agent_id = _normalized_id(agent_id, "agent_id")
+        capture_team_id = (
+            _normalized_id(team_id, "team_id")
+            if team_id is not None
+            else self.current_team_for_agent(agent_id) or agent_id
+        )
+        event_time = time.time() if ts is None else max(0.0, float(ts))
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT INTO task_events "
+                "(ts, kind, task_id, agent_id, team_id) VALUES (?, ?, ?, ?, ?)",
+                (event_time, kind, task_id, agent_id, capture_team_id),
+            )
+
     def _rewrite_agent_metric_cursors_locked(
         self,
         connection: sqlite3.Connection,
@@ -204,6 +239,21 @@ class TeamMetricStoreMixin:
         )
         connection.execute(
             "DELETE FROM agent_metric_buckets WHERE agent_id = ?", (old_agent_id,)
+        )
+
+    def _rewrite_task_lifecycle_events_locked(
+        self,
+        connection: sqlite3.Connection,
+        old_agent_id: str,
+        new_agent_id: str,
+    ) -> None:
+        old_agent_id = _normalized_id(old_agent_id, "old_agent_id")
+        new_agent_id = _normalized_id(new_agent_id, "new_agent_id")
+        if old_agent_id == new_agent_id:
+            return
+        connection.execute(
+            "UPDATE task_events SET agent_id = ? WHERE agent_id = ?",
+            (new_agent_id, old_agent_id),
         )
 
     def lane_metric_summary(
@@ -319,6 +369,62 @@ class TeamMetricStoreMixin:
             for row in rows
         )
 
+    def task_lifecycle_series(
+        self: _TeamMetricStore,
+        agent_ids: Iterable[str] = (),
+        *,
+        team_ids: Iterable[str] = (),
+        start: float,
+        end: float,
+        bucket_seconds: int = METRIC_BUCKET_SECONDS,
+    ) -> tuple[TaskLifecycleSeriesPoint, ...]:
+        """Stable task-flow series for graphing: task lifecycle facts folded
+        into per-bucket movement counts. The substrate is append-only
+        task_events tagged with actor and team-at-capture, so re-querying the
+        same range yields the same projection until retention prunes it."""
+        agents = _normalized_ids(agent_ids, "agent_id")
+        teams = _normalized_ids(team_ids, "team_id")
+        if not agents and not teams:
+            return ()
+        bucket_seconds = max(1, int(bucket_seconds))
+        start_time = max(0.0, float(start))
+        end_time = max(start_time, float(end))
+        bucket_expr = (
+            f"(CAST(ts AS INTEGER) - (CAST(ts AS INTEGER) % {bucket_seconds}))"
+        )
+        filters = ["ts >= ?", "ts <= ?"]
+        params: list[object] = [start_time, end_time]
+        if agents:
+            filters.append(f"agent_id IN ({_placeholders(agents)})")
+            params.extend(agents)
+        if teams:
+            filters.append(f"team_id IN ({_placeholders(teams)})")
+            params.extend(teams)
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT "
+                f"{bucket_expr} AS bucket_start, "
+                "SUM(CASE WHEN kind = 'claim' THEN 1 ELSE 0 END) AS claimed, "
+                "SUM(CASE WHEN kind IN ('phaseAdvance', 'review') "
+                "THEN 1 ELSE 0 END) AS active, "
+                "SUM(CASE WHEN kind = 'complete' THEN 1 ELSE 0 END) AS completed, "
+                "SUM(CASE WHEN kind = 'drain' THEN 1 ELSE 0 END) AS drained "
+                "FROM task_events "
+                f"WHERE {' AND '.join(filters)} "
+                "GROUP BY bucket_start ORDER BY bucket_start",
+                params,
+            ).fetchall()
+        return tuple(
+            TaskLifecycleSeriesPoint(
+                bucket_start=int(row["bucket_start"]),
+                claimed=int(row["claimed"] or 0),
+                active=int(row["active"] or 0),
+                completed=int(row["completed"] or 0),
+                drained=int(row["drained"] or 0),
+            )
+            for row in rows
+        )
+
     def _prune_metric_history_locked(
         self: _TeamMetricStore, connection: sqlite3.Connection, *, now: float
     ) -> None:
@@ -329,6 +435,7 @@ class TeamMetricStoreMixin:
         connection.execute(
             "DELETE FROM agent_metric_buckets WHERE bucket_start < ?", (floor,)
         )
+        connection.execute("DELETE FROM task_events WHERE ts < ?", (float(floor),))
         self._prune_directive_history_locked(connection, now=now)
 
     def _record_agent_metric_delta_locked(
@@ -415,6 +522,28 @@ def _normalized_id(value: str, field_name: str) -> str:
     if not normalized:
         raise SpiceError(f"{field_name} must be non-empty")
     return normalized
+
+
+def _normalized_ids(values: Iterable[str], field_name: str) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            _normalized_id(value, field_name)
+            for value in values
+            if str(value or "").strip()
+        )
+    )
+
+
+def _task_event_kind(value: str) -> str:
+    kind = str(value or "").strip()
+    if kind not in TASK_EVENT_KINDS:
+        allowed = ", ".join(sorted(TASK_EVENT_KINDS))
+        raise SpiceError(f"task event kind must be one of {allowed}: {kind!r}")
+    return kind
+
+
+def _placeholders(values: tuple[str, ...]) -> str:
+    return ",".join("?" for _value in values)
 
 
 def _nonnegative_int(value: int) -> int:

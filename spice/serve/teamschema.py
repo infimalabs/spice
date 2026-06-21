@@ -119,6 +119,15 @@ CREATE TABLE IF NOT EXISTS agent_metric_cursors (
     updated_at REAL NOT NULL,
     PRIMARY KEY (agent_id, source_path)
 );
+CREATE TABLE IF NOT EXISTS task_events (
+    ts REAL NOT NULL,
+    kind TEXT NOT NULL CHECK (
+        kind IN ('claim', 'phaseAdvance', 'review', 'complete', 'drain')
+    ),
+    task_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    team_id TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS directives (
     directive_key TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
@@ -136,6 +145,10 @@ CREATE TABLE IF NOT EXISTS directive_totals (
 );
 CREATE INDEX IF NOT EXISTS agent_metric_buckets_by_start
     ON agent_metric_buckets (bucket_start);
+CREATE INDEX IF NOT EXISTS task_events_by_ts
+    ON task_events (ts);
+CREATE INDEX IF NOT EXISTS task_events_by_agent_team_ts
+    ON task_events (agent_id, team_id, ts);
 CREATE INDEX IF NOT EXISTS directives_by_sent_at
     ON directives (sent_at);
 """

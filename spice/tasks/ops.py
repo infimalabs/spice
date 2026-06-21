@@ -205,6 +205,7 @@ def do_claim(uuid: str, actor: str, *, guard_unclaimed: bool = True) -> bool:
         if guard_unclaimed:
             return False
         raise
+    _record_task_lifecycle_event(uuid, "claim", actor)
     return True
 
 
@@ -544,6 +545,7 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
     phases = phases_of(row)
     index = phase_index(row)
     handle = identity.render_handle(row)
+    actor = str(row.get("claim_by") or "").strip() or tw.current_actor()
     if index + 1 >= len(phases):
         pace = str(row.get("pace") or "").strip()
         if pace:
@@ -559,9 +561,12 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
                     *CLAIM_CLEAR,
                 ]
             )
+            _record_task_lifecycle_event(uuid, "phaseAdvance", actor)
             return f"looped {handle} -> {phases[0]} (paced {pace}, waits until {wait})"
         project = str(row.get("project") or "")
         tw.run([uuid, "done"])
+        _record_task_lifecycle_event(uuid, "complete", actor)
+        _record_task_lifecycle_event(uuid, "drain", actor)
         _gc_empty_project_task_filters(project)
         return f"completed {handle}"
     nxt = phases[index + 1]
@@ -578,6 +583,7 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
         author = review_author or str(row.get("claim_by") or "") or tw.current_actor()
         args.append(f"review_author:{author}")
     tw.run(args)
+    _record_task_lifecycle_event(uuid, "phaseAdvance", actor)
     return f"advanced {handle} -> {nxt}"
 
 
@@ -679,6 +685,7 @@ def review(
         meta=_publish_meta(row, actor, [note or ""]),
     )
     tw.run([uuid, "modify", *sync.uda_args])
+    _record_task_lifecycle_event(uuid, "review", actor)
     result = _advance(identity.resolve(handle))
     lines = [f"reviewed {identity.render_handle(row)} {finding}; {result}"]
     lines += [f"spawned {h}" for h in spawned]
@@ -718,6 +725,18 @@ def next_task_drain_line(
             f"{tail}"
         )
     return f"next: YOU ARE NOT DONE. Run spice task next; {tail}"
+
+
+def _record_task_lifecycle_event(task_id: str, kind: str, actor: str) -> None:
+    from spice.serve.teams import ServeTeamStore
+    from spice.tasks import lanes
+
+    agent_id = lanes.route_actor_id(actor or tw.current_actor())
+    ServeTeamStore().record_task_lifecycle_event(
+        kind,
+        task_id=task_id,
+        agent_id=agent_id,
+    )
 
 
 def _task_continuation_contract(actor: str | None = None):

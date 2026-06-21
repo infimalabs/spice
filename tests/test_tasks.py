@@ -847,6 +847,58 @@ def test_drive_create_allocate_review_and_gc_capstone(task_repo, monkeypatch):
     assert after_review.task_filter_entries == ()
 
 
+def test_task_lifecycle_events_are_emitted_for_scripted_task_lifecycle(
+    task_repo, monkeypatch
+):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER], config=TeamConfig(lifetime="Drive")
+    )
+    handle = create.add(
+        "Lifecycle metric task",
+        project="task.unit",
+        priority="medium",
+        acceptance=["task lifecycle emits metric facts"],
+    )
+
+    assigned = alloc.next_task()
+    task_uuid = identity.uuid_of(assigned or {})
+    ops.done(handle, validation=["implementation complete"])
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    review = alloc.next_task()
+    ops.review(handle, finding="clean", note="review complete")
+
+    series = store.task_lifecycle_series(
+        team_ids=[team.team_id], start=0, end=4_102_444_800
+    )
+    with store.connect() as connection:
+        rows = connection.execute(
+            "SELECT kind, task_id, agent_id, team_id FROM task_events "
+            "WHERE task_id = ? ORDER BY rowid",
+            (task_uuid,),
+        ).fetchall()
+
+    assert identity.render_handle(assigned or {}) == handle
+    assert identity.render_handle(review or {}) == handle
+    assert [str(row["kind"]) for row in rows] == [
+        "claim",
+        "phaseAdvance",
+        "claim",
+        "review",
+        "complete",
+        "drain",
+    ]
+    assert {str(row["agent_id"]) for row in rows} == {ACTOR_A_MEMBER, PEER_ACTOR_MEMBER}
+    assert {str(row["team_id"]) for row in rows} == {team.team_id}
+    assert (
+        sum(point.claimed for point in series),
+        sum(point.active for point in series),
+        sum(point.completed for point in series),
+        sum(point.drained for point in series),
+    ) == (2, 2, 1, 1)
+
+
 def test_drain_visibility_and_empty_steer_private_fail_closed(task_repo, monkeypatch):
     assert task_repo.is_dir()
     store = ServeTeamStore()
