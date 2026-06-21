@@ -23,6 +23,7 @@ TEAM_SQLITE_BUSY_TIMEOUT_MS = 5000
 # Bounds storage without losing graphable range; the durable aggregates
 # (agent_metrics, directive_totals) are never pruned.
 METRIC_HISTORY_RETENTION_SECONDS = 30 * 24 * 60 * 60
+DEFAULT_STUCK_THRESHOLD_SECONDS = 15 * 60
 
 TEAM_SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (

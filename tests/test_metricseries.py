@@ -5,7 +5,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from spice.serve import metricpayload
-from spice.serve.teammetrics import MetricSeriesPoint, TaskLifecycleSeriesPoint
+from spice.serve.teammetrics import (
+    MetricSeriesPoint,
+    TaskLifecycleSeriesPoint,
+    TaskStallState,
+)
 from spice.serve.teams import ServeTeamStore
 
 
@@ -213,3 +217,62 @@ def test_task_lifecycle_events_rewrite_across_agent_id_assignment(tmp_path):
             drained=0,
         ),
     )
+
+
+def test_task_stall_states_flag_claimed_idle_task_after_threshold(tmp_path):
+    store = _store(tmp_path)
+    store.record_task_lifecycle_event(
+        "claim", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=60
+    )
+
+    states = store.task_stall_states(now=1_000, threshold_seconds=900)
+
+    assert states == (
+        TaskStallState(
+            task_id="task-1",
+            agent_id="agent-a",
+            team_id="team-a",
+            claimed_at=60.0,
+            last_activity_at=0.0,
+            last_progress_at=60.0,
+            idle_seconds=940,
+            threshold_seconds=900,
+            stuck=True,
+        ),
+    )
+
+
+def test_task_stall_states_use_activity_and_phase_progress(tmp_path):
+    store = _store(tmp_path)
+    store.record_task_lifecycle_event(
+        "claim", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=60
+    )
+    store.record_agent_metric_delta("agent-a", message_timestamps=[600])
+
+    active = store.task_stall_states(now=800, threshold_seconds=300)
+
+    assert active == (
+        TaskStallState(
+            task_id="task-1",
+            agent_id="agent-a",
+            team_id="team-a",
+            claimed_at=60.0,
+            last_activity_at=600.0,
+            last_progress_at=600.0,
+            idle_seconds=200,
+            threshold_seconds=300,
+            stuck=False,
+        ),
+    )
+    assert (
+        store.task_stall_states(
+            ["agent-b"], team_ids=["team-a"], now=800, threshold_seconds=300
+        )
+        == ()
+    )
+
+    store.record_task_lifecycle_event(
+        "phaseAdvance", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=900
+    )
+
+    assert store.task_stall_states(now=1_000, threshold_seconds=300) == ()

@@ -12,7 +12,10 @@ from typing import Iterable, Mapping, Protocol
 
 from spice.errors import SpiceError
 from spice.serve.directivestats import DirectiveTotals
-from spice.serve.teamschema import METRIC_HISTORY_RETENTION_SECONDS
+from spice.serve.teamschema import (
+    DEFAULT_STUCK_THRESHOLD_SECONDS,
+    METRIC_HISTORY_RETENTION_SECONDS,
+)
 
 METRIC_BUCKET_SECONDS = 60
 TASK_EVENT_KINDS = frozenset({"claim", "phaseAdvance", "review", "complete", "drain"})
@@ -43,6 +46,19 @@ class TaskLifecycleSeriesPoint:
 
 
 @dataclass(frozen=True)
+class TaskStallState:
+    task_id: str
+    agent_id: str
+    team_id: str
+    claimed_at: float
+    last_activity_at: float
+    last_progress_at: float
+    idle_seconds: int
+    threshold_seconds: int
+    stuck: bool
+
+
+@dataclass(frozen=True)
 class TeamHistoricalMetricSummary:
     team_id: str
     agent_ids: tuple[str, ...]
@@ -56,6 +72,14 @@ class _MembershipInterval:
     agent_id: str
     start: float
     end: float
+
+
+@dataclass(frozen=True)
+class _ActiveTaskClaim:
+    task_id: str
+    agent_id: str
+    team_id: str
+    claimed_at: float
 
 
 class _TeamMetricStore(Protocol):
@@ -449,6 +473,43 @@ class TeamMetricStoreMixin:
             for row in rows
         )
 
+    def task_stall_states(
+        self: _TeamMetricStore,
+        agent_ids: Iterable[str] = (),
+        *,
+        team_ids: Iterable[str] = (),
+        now: float | None = None,
+        threshold_seconds: int = DEFAULT_STUCK_THRESHOLD_SECONDS,
+    ) -> tuple[TaskStallState, ...]:
+        """Current stuck/stall projection over task lifecycle facts.
+
+        A task is a candidate while its latest lifecycle fact is a claim. The
+        stall timer starts at that claim and is reset by later agent activity
+        buckets; a phase advance, review completion, or drain removes the task
+        from the active set because the latest lifecycle fact is no longer a
+        claim.
+        """
+        agents = _normalized_ids(agent_ids, "agent_id")
+        teams = _normalized_ids(team_ids, "team_id")
+        sample_time = time.time() if now is None else max(0.0, float(now))
+        threshold = max(1, int(threshold_seconds))
+        with self.connect() as connection:
+            claims = _active_task_claims_locked(
+                connection, agent_ids=agents, team_ids=teams
+            )
+            activity_by_agent = _activity_bucket_times_by_agent_locked(
+                connection, claims
+            )
+        return tuple(
+            _task_stall_state(
+                claim,
+                activity_by_agent.get(claim.agent_id, ()),
+                now=sample_time,
+                threshold_seconds=threshold,
+            )
+            for claim in claims
+        )
+
     def _prune_metric_history_locked(
         self: _TeamMetricStore, connection: sqlite3.Connection, *, now: float
     ) -> None:
@@ -578,6 +639,97 @@ def _placeholders(values: tuple[str, ...]) -> str:
     return ",".join("?" for _value in values)
 
 
+def _active_task_claims_locked(
+    connection: sqlite3.Connection,
+    *,
+    agent_ids: tuple[str, ...],
+    team_ids: tuple[str, ...],
+) -> tuple[_ActiveTaskClaim, ...]:
+    filters = ["kind = 'claim'"]
+    params: list[object] = []
+    if agent_ids:
+        filters.append(f"agent_id IN ({_placeholders(agent_ids)})")
+        params.extend(agent_ids)
+    if team_ids:
+        filters.append(f"team_id IN ({_placeholders(team_ids)})")
+        params.extend(team_ids)
+    rows = connection.execute(
+        "WITH latest AS ("
+        "  SELECT task_events.rowid, task_events.ts, task_events.kind, "
+        "         task_events.task_id, task_events.agent_id, task_events.team_id "
+        "  FROM task_events "
+        "  JOIN ("
+        "    SELECT task_id, MAX(rowid) AS rowid "
+        "    FROM task_events GROUP BY task_id"
+        "  ) AS latest_event ON task_events.rowid = latest_event.rowid"
+        ") "
+        "SELECT task_id, agent_id, team_id, ts FROM latest "
+        f"WHERE {' AND '.join(filters)} "
+        "ORDER BY ts, task_id",
+        params,
+    ).fetchall()
+    return tuple(
+        _ActiveTaskClaim(
+            task_id=str(row["task_id"]),
+            agent_id=str(row["agent_id"]),
+            team_id=str(row["team_id"]),
+            claimed_at=float(row["ts"] or 0.0),
+        )
+        for row in rows
+    )
+
+
+def _activity_bucket_times_by_agent_locked(
+    connection: sqlite3.Connection,
+    claims: tuple[_ActiveTaskClaim, ...],
+) -> dict[str, tuple[float, ...]]:
+    if not claims:
+        return {}
+    agent_ids = tuple(dict.fromkeys(claim.agent_id for claim in claims))
+    query_floor = min(_metric_bucket_start(claim.claimed_at) for claim in claims)
+    rows = connection.execute(
+        "SELECT agent_id, bucket_start FROM agent_metric_buckets "
+        f"WHERE agent_id IN ({_placeholders(agent_ids)}) "
+        "AND bucket_start >= ? "
+        "AND (messages > 0 OR tool_calls > 0) "
+        "ORDER BY bucket_start",
+        (*agent_ids, query_floor),
+    ).fetchall()
+    by_agent: dict[str, list[float]] = {}
+    for row in rows:
+        by_agent.setdefault(str(row["agent_id"]), []).append(
+            float(row["bucket_start"] or 0.0)
+        )
+    return {agent_id: tuple(times) for agent_id, times in by_agent.items()}
+
+
+def _task_stall_state(
+    claim: _ActiveTaskClaim,
+    activity_times: tuple[float, ...],
+    *,
+    now: float,
+    threshold_seconds: int,
+) -> TaskStallState:
+    activity_floor = _metric_bucket_start(claim.claimed_at)
+    last_activity = max(
+        (timestamp for timestamp in activity_times if timestamp >= activity_floor),
+        default=0.0,
+    )
+    last_progress = max(claim.claimed_at, last_activity)
+    idle_seconds = max(0, int(now - last_progress))
+    return TaskStallState(
+        task_id=claim.task_id,
+        agent_id=claim.agent_id,
+        team_id=claim.team_id,
+        claimed_at=claim.claimed_at,
+        last_activity_at=last_activity,
+        last_progress_at=last_progress,
+        idle_seconds=idle_seconds,
+        threshold_seconds=threshold_seconds,
+        stuck=idle_seconds >= threshold_seconds,
+    )
+
+
 def _nonnegative_int(value: int) -> int:
     return max(0, int(value or 0))
 
@@ -592,6 +744,8 @@ def _membership_intervals_from_events(
     ).fetchall()
     for row in rows:
         timestamp = float(row["ts"] or 0.0)
+        if timestamp > end_time:
+            continue
         team_id = str(row["team_id"] or "")
         kind = str(row["kind"] or "")
         payload = _event_payload(row)

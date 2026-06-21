@@ -66,6 +66,7 @@ THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 THREAD_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 ACTOR_A = f"thread:{THREAD_A}"
 ACTOR_B = f"thread:{THREAD_B}"
+TEAM_HISTORICAL_TEST_BUCKET_COUNT = 13
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,11 @@ class _ImageHandler(_StaticHandler):
 
     def _send_bytes(self, data: bytes, content_type: str) -> None:
         app._ServeHandler._send_bytes(self, data, content_type)
+
+    def _send_json(
+        self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK
+    ) -> None:
+        app._ServeHandler._send_json(self, payload, status)
 
 
 def test_serve_parser_exposes_until_path_help(capsys):
@@ -264,6 +270,34 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert handler.body.getvalue() == b"image-bytes"
 
 
+def test_work_tree_send_reuses_pending_key_for_exact_duplicate_text(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
+
+    first_payload, first_status = work_tree_send_response_payload(
+        state,
+        target,
+        {"text": "same steering"},
+    )
+    second_payload, second_status = work_tree_send_response_payload(
+        state,
+        target,
+        {"text": "same steering"},
+    )
+    items = collect_inbox_items(repo)
+
+    assert first_status == HTTPStatus.OK
+    assert second_status == HTTPStatus.OK
+    assert first_payload["key"] == second_payload["key"]
+    assert second_payload["pendingInboxKeys"] == [first_payload["key"]]
+    assert [inbox_request_body(item.text) for item in items] == ["same steering"]
+    assert pending_inbox_count(repo) == 1
+
+
 def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
     tmp_path, monkeypatch
 ):
@@ -361,6 +395,14 @@ def test_serve_metrics_path_templates_bound_cardinality():
     assert app.serve_metrics_path_template("/") == "/"
     assert app.serve_metrics_path_template("/metrics") == "/metrics"
     assert (
+        app.serve_metrics_path_template("/api/teams/team-a/metrics?start=0")
+        == "/api/teams/{id}/metrics"
+    )
+    assert (
+        app.serve_metrics_path_template("/api/metrics/tasks/burndown?teamId=team-a")
+        == "/api/metrics/tasks/burndown"
+    )
+    assert (
         app.serve_metrics_path_template("/api/work/trees/main/agent/status")
         == "/api/work/trees/{id}/agent/status"
     )
@@ -374,6 +416,192 @@ def test_serve_metrics_path_templates_bound_cardinality():
     )
     assert app.serve_metrics_path_template("/static/index.css") == "/static/{asset}"
     assert app.serve_metrics_path_template("/elsewhere") == "other"
+
+
+def test_team_historical_metrics_endpoint_projects_membership_intervals(
+    tmp_path, monkeypatch
+):
+    clock = {"now": 0.0}
+    monkeypatch.setattr("spice.serve.teams.time.time", lambda: clock["now"])
+    repo = _repo(tmp_path)
+    state = _serve_state(tmp_path, _target(repo))
+
+    def set_time(timestamp: float) -> None:
+        clock["now"] = timestamp
+
+    set_time(0)
+    team = state.team_store.create_team(members=["agent-a", "agent-b"])
+    state.team_store.record_agent_metric_delta("agent-a", message_timestamps=[60])
+    state.team_store.record_agent_metric_delta("agent-b", message_timestamps=[60])
+
+    set_time(120)
+    split = state.team_store.split_team(
+        team.team_id, agent_ids=["agent-a"], new_team_id="team-split"
+    )
+    state.team_store.record_agent_metric_delta("agent-a", message_timestamps=[180])
+    state.team_store.record_agent_metric_delta("agent-b", message_timestamps=[180])
+
+    set_time(240)
+    state.team_store.merge_teams(split.team_id, team.team_id)
+    state.team_store.record_agent_metric_delta("agent-a", message_timestamps=[300])
+    state.team_store.record_agent_metric_delta("agent-b", message_timestamps=[300])
+
+    set_time(360)
+    state.team_store.split_team_back(team.team_id)
+    state.team_store.record_agent_metric_delta("agent-a", message_timestamps=[420])
+    state.team_store.record_agent_metric_delta("agent-b", message_timestamps=[420])
+
+    set_time(480)
+    state.team_store.remove_agent(team.team_id, "agent-b")
+    state.team_store.record_agent_metric_delta("agent-b", message_timestamps=[540])
+
+    set_time(600)
+    state.team_store.close_team(split.team_id)
+    state.team_store.record_agent_metric_delta("agent-a", message_timestamps=[660])
+
+    query = {"start": ["0"], "end": ["720"], "bucketSeconds": ["60"]}
+    team_payload = app.team_historical_metrics_response_payload(
+        state, team.team_id, query
+    )
+    split_payload = app.team_historical_metrics_response_payload(
+        state, split.team_id, query
+    )
+    narrow_payload = app.team_historical_metrics_response_payload(
+        state,
+        team.team_id,
+        {"start": ["120"], "end": ["360"], "bucketSeconds": ["60"]},
+    )
+
+    assert team_payload["ok"] is True
+    assert team_payload["lens"] == "team-historical"
+    assert team_payload["teamId"] == team.team_id
+    assert team_payload["agentIds"] == ["agent-a", "agent-b"]
+    assert team_payload["messages"] == 6
+    assert team_payload["cumulativeMessages"] == 6
+    assert team_payload["range"] == {"start": 0, "end": 720}
+    assert team_payload["bucketCount"] == TEAM_HISTORICAL_TEST_BUCKET_COUNT
+    assert sum(team_payload["sparkline"]) == 6
+    assert sum(point["messages"] for point in team_payload["series"]) == 6
+
+    assert split_payload["teamId"] == split.team_id
+    assert split_payload["agentIds"] == ["agent-a"]
+    assert split_payload["messages"] == 2
+    assert sum(split_payload["sparkline"]) == 2
+
+    handler = _ImageHandler(state)
+    app._ServeHandler._get_team_metrics(
+        handler,
+        team.team_id,
+        "start=0&end=720&bucketSeconds=60",
+    )
+    endpoint_payload = json.loads(handler.body.getvalue())
+
+    assert handler.status == HTTPStatus.OK
+    assert handler.headers["Content-Type"].startswith("application/json")
+    assert endpoint_payload["lens"] == "team-historical"
+    assert endpoint_payload["teamId"] == team.team_id
+    assert endpoint_payload["messages"] == 6
+
+    assert narrow_payload["messages"] == 3
+    assert narrow_payload["cumulativeMessages"] == 5
+    assert narrow_payload["range"] == {"start": 120, "end": 360}
+    assert sum(point["messages"] for point in narrow_payload["series"]) == 3
+
+
+def test_task_burndown_metrics_endpoint_projects_team_and_agent_series(
+    tmp_path,
+):
+    repo = _repo(tmp_path)
+    state = _serve_state(tmp_path, _target(repo))
+    store = state.team_store
+    store.record_task_lifecycle_event(
+        "complete", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=60
+    )
+    store.record_task_lifecycle_event(
+        "drain", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=61
+    )
+    store.record_task_lifecycle_event(
+        "complete", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=120
+    )
+    store.record_task_lifecycle_event(
+        "drain", task_id="task-c", agent_id="agent-a", team_id="team-b", ts=180
+    )
+
+    team_payload = app.task_burndown_metrics_response_payload(
+        state,
+        {
+            "teamId": ["team-a"],
+            "start": ["0"],
+            "end": ["180"],
+            "bucketSeconds": ["60"],
+        },
+    )
+    agent_payload = app.task_burndown_metrics_response_payload(
+        state,
+        {
+            "agentId": ["agent-a"],
+            "start": ["0"],
+            "end": ["180"],
+            "bucketSeconds": ["60"],
+        },
+    )
+    combined_payload = app.task_burndown_metrics_response_payload(
+        state,
+        {
+            "agentId": ["agent-a"],
+            "teamId": ["team-a"],
+            "start": ["0"],
+            "end": ["180"],
+            "bucketSeconds": ["60"],
+        },
+    )
+
+    assert team_payload["ok"] is True
+    assert team_payload["lens"] == "task-burndown"
+    assert team_payload["teamIds"] == ["team-a"]
+    assert team_payload["agentIds"] == []
+    assert team_payload["completed"] == 2
+    assert team_payload["drained"] == 1
+    assert team_payload["range"] == {"start": 0, "end": 180}
+    assert team_payload["series"] == [
+        {"bucketStart": 60, "completed": 1, "drained": 1},
+        {"bucketStart": 120, "completed": 1, "drained": 0},
+    ]
+
+    assert agent_payload["agentIds"] == ["agent-a"]
+    assert agent_payload["teamIds"] == []
+    assert agent_payload["completed"] == 1
+    assert agent_payload["drained"] == 2
+    assert combined_payload["completed"] == 1
+    assert combined_payload["drained"] == 1
+
+    handler = _ImageHandler(state)
+    app._ServeHandler._get_task_burndown_metrics(
+        handler,
+        "teamId=team-a&start=0&end=180&bucketSeconds=60",
+    )
+    endpoint_payload = json.loads(handler.body.getvalue())
+
+    assert handler.status == HTTPStatus.OK
+    assert endpoint_payload["lens"] == "task-burndown"
+    assert endpoint_payload["completed"] == 2
+    assert endpoint_payload["drained"] == 1
+
+
+def test_task_burndown_metrics_endpoint_rejects_oversized_ranges(tmp_path):
+    repo = _repo(tmp_path)
+    state = _serve_state(tmp_path, _target(repo))
+    handler = _ImageHandler(state)
+
+    app._ServeHandler._get_task_burndown_metrics(
+        handler,
+        "teamId=team-a&start=0&end=120000&bucketSeconds=60",
+    )
+    payload = json.loads(handler.body.getvalue())
+
+    assert handler.status == HTTPStatus.BAD_REQUEST
+    assert payload["ok"] is False
+    assert "exceeds" in payload["error"]
 
 
 def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):

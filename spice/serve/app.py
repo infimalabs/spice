@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import errno
 import json
+import math
 import mimetypes
 import os
 import subprocess
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BufferedReader
@@ -45,6 +47,7 @@ from spice.serve.messages import (
     TranscriptResolution,
     resolve_thread_transcript,
 )
+from spice.serve.teammetrics import METRIC_BUCKET_SECONDS
 from spice.serve.teams import ServeTeamStore, TeamCommandService
 from spice.serve.web import render_index_html, send_static_asset
 from spice.serve.websocket import is_websocket_request
@@ -66,6 +69,9 @@ SERVE_UNTIL_WATCHER_JOIN_SECONDS = 1.0
 METRICS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 MAX_HTTP_REQUEST_LINE_BYTES = 65536
 HTTP_REQUEST_LINE_READ_LIMIT = MAX_HTTP_REQUEST_LINE_BYTES + 1
+TEAM_HISTORICAL_METRIC_BUCKET_COUNT = 12
+TASK_BURNDOWN_BUCKET_COUNT = 12
+TASK_BURNDOWN_MAX_BUCKET_COUNT = 1440
 WORK_TREE_API_METRIC_ACTIONS = frozenset(
     {
         "",
@@ -217,6 +223,119 @@ def team_command_response_payload(
     )
 
 
+def team_historical_metrics_response_payload(
+    state: ServeState,
+    team_id: str,
+    query: dict[str, list[str]],
+) -> dict[str, Any]:
+    bucket_seconds = _query_int(query, "bucketSeconds", METRIC_BUCKET_SECONDS)
+    summary_time = _query_float(query, "end", None, minimum=0.0)
+    if summary_time is None:
+        summary_time = _query_float(query, "now", None, minimum=0.0)
+    if summary_time is None:
+        summary_time = time.time()
+    raw_start = _query_float(query, "start", None, minimum=0.0)
+    if raw_start is None:
+        bucket_count = _query_int(
+            query,
+            "bucketCount",
+            TEAM_HISTORICAL_METRIC_BUCKET_COUNT,
+        )
+    else:
+        bucket_count = _metric_bucket_count_for_range(
+            raw_start,
+            summary_time,
+            bucket_seconds,
+        )
+    summary = state.team_store.team_historical_metric_summary(
+        team_id,
+        bucket_count=bucket_count,
+        bucket_seconds=bucket_seconds,
+        now=summary_time,
+    )
+    window_end = _metric_bucket_start(summary_time, bucket_seconds)
+    window_start = window_end - ((len(summary.sparkline) - 1) * bucket_seconds)
+    series = [
+        {"bucketStart": window_start + (index * bucket_seconds), "messages": count}
+        for index, count in enumerate(summary.sparkline)
+    ]
+    range_messages = sum(summary.sparkline)
+    return {
+        "ok": True,
+        "lens": "team-historical",
+        "teamId": summary.team_id,
+        "agentIds": list(summary.agent_ids),
+        "messages": range_messages,
+        "cumulativeMessages": summary.messages,
+        "bucketSeconds": bucket_seconds,
+        "bucketCount": len(summary.sparkline),
+        "range": {"start": window_start, "end": window_end},
+        "sparkline": list(summary.sparkline),
+        "series": series,
+    }
+
+
+def task_burndown_metrics_response_payload(
+    state: ServeState,
+    query: dict[str, list[str]],
+) -> dict[str, Any]:
+    bucket_seconds = _query_int(query, "bucketSeconds", METRIC_BUCKET_SECONDS)
+    end_time = _query_finite_float(query, "end", None, minimum=0.0)
+    if end_time is None:
+        end_time = _query_finite_float(query, "now", None, minimum=0.0)
+    if end_time is None:
+        end_time = time.time()
+    raw_start = _query_finite_float(query, "start", None, minimum=0.0)
+    if raw_start is None:
+        bucket_count = _query_int(query, "bucketCount", TASK_BURNDOWN_BUCKET_COUNT)
+        bucket_count = min(bucket_count, TASK_BURNDOWN_MAX_BUCKET_COUNT)
+        window_end = _metric_bucket_start(end_time, bucket_seconds)
+        window_start = max(0, window_end - ((bucket_count - 1) * bucket_seconds))
+    else:
+        bucket_count = _metric_bucket_count_for_range(
+            raw_start,
+            end_time,
+            bucket_seconds,
+        )
+        if bucket_count > TASK_BURNDOWN_MAX_BUCKET_COUNT:
+            raise SpiceError(
+                f"task burndown range exceeds {TASK_BURNDOWN_MAX_BUCKET_COUNT} buckets"
+            )
+        window_start = _metric_bucket_start(raw_start, bucket_seconds)
+        window_end = _metric_bucket_start(end_time, bucket_seconds)
+    agent_ids = _query_values(query, "agentId")
+    team_ids = _query_values(query, "teamId")
+    series = state.team_store.task_lifecycle_series(
+        agent_ids,
+        team_ids=team_ids,
+        start=window_start,
+        end=window_end,
+        bucket_seconds=bucket_seconds,
+    )
+    points = [
+        {
+            "bucketStart": point.bucket_start,
+            "completed": point.completed,
+            "drained": point.drained,
+        }
+        for point in series
+    ]
+    completed = sum(point.completed for point in series)
+    drained = sum(point.drained for point in series)
+    return {
+        "ok": True,
+        "lens": "task-burndown",
+        "agentIds": list(agent_ids),
+        "teamIds": list(team_ids),
+        "completed": completed,
+        "drained": drained,
+        "bucketSeconds": bucket_seconds,
+        "bucketCount": bucket_count,
+        "range": {"start": window_start, "end": window_end},
+        "series": points,
+    }
+
+
 def lane_watch_paths_for_target(
     state: ServeState,
     target: WorktreeTarget,
@@ -342,11 +461,14 @@ def serve_metrics_path_template(path: str) -> str:
         "/",
         "/metrics",
         "/api/live/bus",
+        "/api/metrics/tasks/burndown",
         "/api/work/trees",
         "/api/teams",
         "/api/teams/command",
     }:
         return route_path
+    if _team_metrics_api_route(route_path) is not None:
+        return "/api/teams/{id}/metrics"
     if route_path.startswith(STATIC_ASSET_ROUTE_PREFIX):
         return "/static/{asset}"
     route = _work_tree_api_route(route_path)
@@ -460,6 +582,13 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 team_snapshot_response_payload(self.state, since_revision=None)
             )
             return
+        if parsed.path == "/api/metrics/tasks/burndown":
+            self._get_task_burndown_metrics(parsed.query)
+            return
+        team_metrics_team_id = _team_metrics_api_route(parsed.path)
+        if team_metrics_team_id is not None:
+            self._get_team_metrics(team_metrics_team_id, parsed.query)
+            return
         route = _work_tree_api_route(parsed.path)
         if route is not None:
             self._get_work_tree(route, parsed.query)
@@ -482,6 +611,29 @@ class _ServeHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND)
 
     # ---- GET routes ----------------------------------------------------
+
+    def _get_team_metrics(self, team_id: str, query_string: str) -> None:
+        try:
+            payload = team_historical_metrics_response_payload(
+                self.state,
+                team_id,
+                parse_qs(query_string),
+            )
+        except SpiceError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(payload)
+
+    def _get_task_burndown_metrics(self, query_string: str) -> None:
+        try:
+            payload = task_burndown_metrics_response_payload(
+                self.state,
+                parse_qs(query_string),
+            )
+        except SpiceError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(payload)
 
     def _get_work_tree(self, route: tuple[str, str], query_string: str) -> None:
         target = resolve_worktree_for_request(self.state, route[0])
@@ -761,6 +913,19 @@ def _work_tree_api_route(path: str) -> tuple[str, str] | None:
     return (target_id, action)
 
 
+def _team_metrics_api_route(path: str) -> str | None:
+    prefix = "/api/teams/"
+    if not path.startswith(prefix):
+        return None
+    remainder = path.removeprefix(prefix)
+    if "/" not in remainder:
+        return None
+    team_id, action = remainder.split("/", 1)
+    if action != "metrics" or not team_id:
+        return None
+    return unquote(team_id)
+
+
 def _work_tree_proxy_target_from_request(
     state: ServeState,
     parsed: Any,
@@ -862,9 +1027,58 @@ def _query_int(
     return value if value >= minimum else default
 
 
+def _query_float(
+    query: dict[str, list[str]],
+    key: str,
+    default: float | None,
+    *,
+    minimum: float = 0.0,
+) -> float | None:
+    raw = query.get(key, [""])[0]
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value >= minimum else default
+
+
+def _query_finite_float(
+    query: dict[str, list[str]],
+    key: str,
+    default: float | None,
+    *,
+    minimum: float = 0.0,
+) -> float | None:
+    value = _query_float(query, key, default, minimum=minimum)
+    if value is None:
+        return default
+    return value if math.isfinite(value) else default
+
+
 def _query_str(query: dict[str, list[str]], key: str) -> str | None:
     raw = query.get(key, [""])[0].strip()
     return raw or None
+
+
+def _query_values(query: dict[str, list[str]], key: str) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(value.strip() for value in query.get(key, []) if value.strip())
+    )
+
+
+def _metric_bucket_count_for_range(
+    start: float, end: float, bucket_seconds: int
+) -> int:
+    start_bucket = _metric_bucket_start(start, bucket_seconds)
+    end_bucket = _metric_bucket_start(end, bucket_seconds)
+    if end_bucket < start_bucket:
+        return 1
+    return ((end_bucket - start_bucket) // bucket_seconds) + 1
+
+
+def _metric_bucket_start(timestamp: float, bucket_seconds: int) -> int:
+    raw = max(0, int(float(timestamp)))
+    return raw - (raw % max(1, int(bucket_seconds)))
 
 
 def _resolve_worktree_image_path(repo_root: Path, raw: str) -> Path | None:
