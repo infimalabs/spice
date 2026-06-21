@@ -78,6 +78,10 @@ class _TeamRenewalStore(Protocol):
         self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
     ) -> None: ...
 
+    def _rewrite_task_lifecycle_events_locked(
+        self, connection: sqlite3.Connection, old_agent_id: str, new_agent_id: str
+    ) -> None: ...
+
     def _team_slot_for_agent_locked(
         self, connection: sqlite3.Connection, team_id: str, agent_id: str
     ) -> int | None: ...
@@ -446,6 +450,9 @@ class TeamRenewalStoreMixin:
                 connection, predecessor_agent_id, successor_agent_id
             )
             self._rewrite_directive_stats_locked(
+                connection, predecessor_agent_id, successor_agent_id
+            )
+            self._rewrite_task_lifecycle_events_locked(
                 connection, predecessor_agent_id, successor_agent_id
             )
             self._assign_locked(connection, team_id, successor_agent_id)
