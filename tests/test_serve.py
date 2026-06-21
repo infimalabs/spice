@@ -508,6 +508,39 @@ def test_team_historical_metrics_endpoint_projects_membership_intervals(
     assert sum(point["messages"] for point in narrow_payload["series"]) == 3
 
 
+@pytest.mark.parametrize(
+    ("query", "error_text"),
+    [
+        ("end=inf", "finite"),
+        ("now=nan", "finite"),
+        ("start=inf&end=120", "finite"),
+        (
+            "start=0&end="
+            f"{app.TEAM_HISTORICAL_MAX_BUCKET_COUNT * app.METRIC_BUCKET_SECONDS}"
+            f"&bucketSeconds={app.METRIC_BUCKET_SECONDS}",
+            "range exceeds",
+        ),
+        (
+            f"bucketCount={app.TEAM_HISTORICAL_MAX_BUCKET_COUNT + 1}",
+            "bucketCount exceeds",
+        ),
+    ],
+)
+def test_team_historical_metrics_endpoint_rejects_unbounded_queries(
+    tmp_path, query, error_text
+):
+    repo = _repo(tmp_path)
+    state = _serve_state(tmp_path, _target(repo))
+    handler = _ImageHandler(state)
+
+    app._ServeHandler._get_team_metrics(handler, "team-a", query)
+    payload = json.loads(handler.body.getvalue())
+
+    assert handler.status == HTTPStatus.BAD_REQUEST
+    assert payload["ok"] is False
+    assert error_text in payload["error"]
+
+
 def test_task_burndown_metrics_endpoint_projects_team_and_agent_series(
     tmp_path,
 ):
