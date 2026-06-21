@@ -24,13 +24,27 @@ async function run() {
         { timeout: 10000 },
       );
 
-      const result = await page.evaluate(() => {
+      const result = await page.evaluate(async () => {
+        const metricSeriesCalls = [];
+        liveBusRequest = (type, fields) => {
+          metricSeriesCalls.push({ type, fields });
+          return Promise.resolve({
+            result: {
+              points: [
+                { bucketStart: 60, value: metricSeriesCalls.length },
+                { bucketStart: 120, value: metricSeriesCalls.length + 1 },
+              ],
+            },
+          });
+        };
         function makeLane(metrics) {
           const grid = document.createElement("div");
           grid.className = "lane-metric-grid";
           const summary = document.createElement("span");
           lanesEl.append(grid);
           return {
+            targetId: "target-" + Math.random().toString(16).slice(2),
+            targetThreadId: "",
             metricsGridEl: grid,
             metricsSummaryEl: summary,
             laneMetrics: metrics,
@@ -56,12 +70,15 @@ async function run() {
         const dest = makeLane({ acked: 4, sends: 5, toolCalls: 6, sparkline: [1] });
         renderLaneMetricsPane(source);
         renderLaneMetricsPane(dest);
+        await new Promise((resolve) => setTimeout(resolve, 0));
         const before = {
           source: readCells(source.metricsGridEl),
           dest: readCells(dest.metricsGridEl),
           sourceCells: cellCount(source.metricsGridEl),
           destCells: cellCount(dest.metricsGridEl),
           sourceStatus: source.metricsSummaryEl.textContent,
+          seriesSvg: Boolean(source.metricsGridEl.querySelector(".lane-metric-series-svg")),
+          firstMetricQuery: metricSeriesCalls[0] && metricSeriesCalls[0].fields.query,
         };
 
         // agent-a moves to the destination: its counters leave the source lane
@@ -70,11 +87,18 @@ async function run() {
         dest.laneMetrics = { acked: 14, sends: 25, toolCalls: 36, sparkline: [2, 1] };
         renderLaneMetricsPane(source);
         renderLaneMetricsPane(dest);
+        const lensSelect = source.metricsGridEl.querySelector(
+          'select[aria-label="Metric lens"]',
+        );
+        lensSelect.value = "perSession";
+        lensSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
         const after = {
           source: readCells(source.metricsGridEl),
           dest: readCells(dest.metricsGridEl),
           sourceCells: cellCount(source.metricsGridEl),
           destCells: cellCount(dest.metricsGridEl),
+          metricSeriesCalls,
         };
 
         source.metricsGridEl.remove();
@@ -92,6 +116,9 @@ function assertMetrics(result) {
   const { before, after } = result;
   if (before.sourceStatus !== "live")
     throw new Error("expected live status, got " + before.sourceStatus);
+  if (!before.seriesSvg) throw new Error("expected metric series SVG to render");
+  if (!before.firstMetricQuery || before.firstMetricQuery.metric !== "activity")
+    throw new Error("expected initial activity metric query");
   // Before the move: source shows agent-a + agent-c; destination shows agent-b.
   expect(before.source, { acked: "11", sends: "22", "tool calls": "33" }, "before.source");
   expect(before.dest, { acked: "4", sends: "5", "tool calls": "6" }, "before.dest");
@@ -105,6 +132,8 @@ function assertMetrics(result) {
       "cell count changed across re-render (stale/duplicate cells): " +
         JSON.stringify({ before, after }),
     );
+  if (!after.metricSeriesCalls.some((call) => call.fields.query.lens === "perSession"))
+    throw new Error("lens toggle did not re-query perSession series");
 }
 
 function expect(actual, expected, label) {

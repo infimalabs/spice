@@ -550,17 +550,38 @@ function mutateLaneTaskFilters(lane, updateFilters) {
 let laneMetricsLitIslandPromise = null;
 let laneMetricsLitIslandRenderer = null;
 const laneMetricsLitIslandModulePath = "/static/app.metrics-lit.js";
+const laneMetricSeriesMetrics = [
+  ["activity", "activity"],
+  ["sends", "sends"],
+  ["acks", "acks"],
+  ["burndown", "burndown"],
+  ["distribution", "distribution"],
+  ["stuck", "stuck"],
+];
+const laneMetricSeriesLenses = [
+  ["lineage", "lineage"],
+  ["perSession", "session"],
+  ["teamHistorical", "team"],
+];
+const laneMetricSeriesRanges = [
+  ["3600", "1h"],
+  ["21600", "6h"],
+  ["86400", "24h"],
+];
 
 function renderLaneMetricsPane(lane) {
   if (!lane.metricsGridEl) return;
+  syncLaneMetricSeriesControlHandler(lane);
   const model = laneMetricsRenderModel(lane);
   lane.metricsSummaryEl.textContent = model.status;
   if (laneMetricsLitIslandEnabled()) {
     if (laneMetricsLitIslandRenderer) {
       laneMetricsLitIslandRenderer(lane.metricsGridEl, model);
+      requestLaneMetricSeries(lane, model);
       return;
     }
     renderLaneMetricsVanilla(lane.metricsGridEl, model);
+    requestLaneMetricSeries(lane, model);
     loadLaneMetricsLitIsland().then(
       (renderer) => {
         if (!lane.metricsGridEl) return;
@@ -571,6 +592,7 @@ function renderLaneMetricsPane(lane) {
     return;
   }
   renderLaneMetricsVanilla(lane.metricsGridEl, model);
+  requestLaneMetricSeries(lane, model);
 }
 
 function renderLaneMetricsVanilla(grid, model) {
@@ -578,6 +600,8 @@ function renderLaneMetricsVanilla(grid, model) {
   grid.replaceChildren(
     ...cells,
     laneMetricSparklineCell(model),
+    laneMetricSeriesControls(model),
+    laneMetricSeriesChartCell(model),
   );
 }
 
@@ -597,7 +621,105 @@ function laneMetricsRenderModel(lane) {
     ],
     sparkline,
     activityTotal: sparkline.reduce((sum, value) => sum + value, 0),
+    series: lane.metricSeries || { points: [] },
+    seriesControls: laneMetricSeriesControlsModel(lane),
   };
+}
+
+function laneMetricSeriesControlsModel(lane) {
+  return {
+    metric: lane.metricSeriesMetric || "activity",
+    lens: lane.metricSeriesLens || "lineage",
+    rangeSeconds: String(lane.metricSeriesRangeSeconds || 3600),
+    metrics: laneMetricSeriesMetrics,
+    lenses: laneMetricSeriesLenses,
+    ranges: laneMetricSeriesRanges,
+  };
+}
+
+function syncLaneMetricSeriesControlHandler(lane) {
+  const grid = lane.metricsGridEl;
+  if (!grid || grid.__spiceMetricSeriesControlHandler) return;
+  if (typeof grid.addEventListener !== "function") return;
+  const handler = (event) => {
+    const detail = (event && event.detail) || {};
+    if (detail.metric) lane.metricSeriesMetric = String(detail.metric);
+    if (detail.lens) lane.metricSeriesLens = String(detail.lens);
+    if (detail.rangeSeconds)
+      lane.metricSeriesRangeSeconds = Math.max(60, Number(detail.rangeSeconds) || 3600);
+    lane.metricSeries = null;
+    lane.metricSeriesRequestKey = "";
+    lane.metricSeriesPendingKey = "";
+    lane.metricSeriesQueryEnd = 0;
+    renderLaneMetricsPane(lane);
+  };
+  grid.addEventListener("spice-metric-series-change", handler);
+  grid.__spiceMetricSeriesControlHandler = handler;
+}
+
+function requestLaneMetricSeries(lane, model) {
+  if (typeof liveBusRequest !== "function") return;
+  const query = laneMetricSeriesQuery(lane, model);
+  if (!query) return;
+  const key = JSON.stringify(query);
+  if (lane.metricSeriesRequestKey === key || lane.metricSeriesPendingKey === key)
+    return;
+  lane.metricSeriesPendingKey = key;
+  liveBusRequest("metrics.series", { query }).then(
+    (message) => {
+      if (lane.metricSeriesPendingKey !== key) return;
+      lane.metricSeriesPendingKey = "";
+      lane.metricSeriesRequestKey = key;
+      lane.metricSeries = (message && message.result) || { points: [] };
+      renderLaneMetricsPane(lane);
+    },
+    () => {
+      if (lane.metricSeriesPendingKey !== key) return;
+      lane.metricSeriesPendingKey = "";
+      reportLaneMetricSeriesError();
+    },
+  );
+}
+
+function laneMetricSeriesQuery(lane, model) {
+  const controls = model.seriesControls || laneMetricSeriesControlsModel(lane);
+  const rangeSeconds = Math.max(60, Number(controls.rangeSeconds) || 3600);
+  const end = lane.metricSeriesQueryEnd || Math.floor(Date.now() / 1000);
+  lane.metricSeriesQueryEnd = end;
+  const query = {
+    metric: controls.metric || "activity",
+    lens: controls.lens || "lineage",
+    start: Math.max(0, end - rangeSeconds),
+    end,
+    bucketSeconds: laneMetricSeriesBucketSeconds(rangeSeconds),
+  };
+  if (query.lens === "teamHistorical") {
+    if (!lane.teamId) return null;
+    query.teamId = lane.teamId;
+    return query;
+  }
+  const agentId = laneMetricSeriesAgentId(lane);
+  if (!agentId) return null;
+  query.agentId = agentId;
+  return query;
+}
+
+function laneMetricSeriesAgentId(lane) {
+  if (!lane || !lane.targetId) return "";
+  if (typeof laneTeamAgentId === "function") return laneTeamAgentId(lane);
+  return "";
+}
+
+function laneMetricSeriesBucketSeconds(rangeSeconds) {
+  return Math.max(60, Math.ceil(rangeSeconds / 24 / 60) * 60);
+}
+
+function reportLaneMetricSeriesError() {
+  const status =
+    typeof window !== "undefined"
+      ? /** @type {any} */ (window).setGlobalTransientStatus
+      : null;
+  if (typeof status === "function") status("Metric series request failed");
 }
 
 function laneMetricsLitIslandEnabled() {
@@ -668,6 +790,99 @@ function laneMetricSparklineCell(model) {
   }
   cell.append(wrap);
   return cell;
+}
+
+function laneMetricSeriesControls(model) {
+  const controls = model.seriesControls || {};
+  const cell = document.createElement("span");
+  cell.className = "lane-metric-series-controls lane-metric-cell--wide";
+  cell.append(
+    laneMetricSeriesSelect("metric", controls.metric, controls.metrics || []),
+    laneMetricSeriesSelect("lens", controls.lens, controls.lenses || []),
+    laneMetricSeriesSelect("rangeSeconds", controls.rangeSeconds, controls.ranges || []),
+  );
+  return cell;
+}
+
+function laneMetricSeriesSelect(name, selectedValue, options) {
+  const select = document.createElement("select");
+  select.className = "lane-metric-series-select";
+  select.setAttribute("aria-label", "Metric " + name);
+  for (const [value, label] of options) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    option.selected = String(value) === String(selectedValue || "");
+    select.append(option);
+  }
+  if (typeof select.addEventListener === "function")
+    select.addEventListener("change", () => {
+      select.dispatchEvent(
+        new CustomEvent("spice-metric-series-change", {
+          bubbles: true,
+          detail: { [name]: select.value },
+        }),
+      );
+    });
+  return select;
+}
+
+function laneMetricSeriesChartCell(model) {
+  const cell = document.createElement("span");
+  cell.className = "lane-metric-series-chart lane-metric-cell--wide";
+  const points = Array.isArray((model.series || {}).points)
+    ? model.series.points
+    : [];
+  if (!points.length) {
+    const empty = document.createElement("span");
+    empty.className = "lane-metric-series-empty";
+    empty.textContent = "no series";
+    cell.append(empty);
+    return cell;
+  }
+  const svg = laneMetricSeriesSvg(points);
+  cell.append(svg);
+  return cell;
+}
+
+function laneMetricSeriesSvg(points) {
+  const svg = createSvgElement("svg");
+  svg.setAttribute("class", "lane-metric-series-svg");
+  svg.setAttribute("viewBox", "0 0 120 36");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Metric series");
+  const values = points.map((point) => Math.max(0, Number(point.value) || 0));
+  const max = Math.max(1, ...values);
+  const width = 120;
+  const height = 36;
+  const step = points.length > 1 ? width / (points.length - 1) : width;
+  const coords = values.map((value, index) => {
+    const x = points.length > 1 ? index * step : width / 2;
+    const y = height - (value / max) * (height - 4) - 2;
+    return [x, y];
+  });
+  const polyline = createSvgElement("polyline");
+  polyline.setAttribute(
+    "points",
+    coords.map(([x, y]) => x.toFixed(1) + "," + y.toFixed(1)).join(" "),
+  );
+  polyline.setAttribute("class", "lane-metric-series-line");
+  svg.append(polyline);
+  for (const [x, y] of coords) {
+    const dot = createSvgElement("circle");
+    dot.setAttribute("cx", x.toFixed(1));
+    dot.setAttribute("cy", y.toFixed(1));
+    dot.setAttribute("r", "1.8");
+    dot.setAttribute("class", "lane-metric-series-dot");
+    svg.append(dot);
+  }
+  return svg;
+}
+
+function createSvgElement(tagName) {
+  if (typeof document.createElementNS === "function")
+    return document.createElementNS("http://www.w3.org/2000/svg", tagName);
+  return document.createElement(tagName);
 }
 
 const metricSecondsPerMinute = 60;
