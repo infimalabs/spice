@@ -92,15 +92,6 @@ BUILTIN_MAXIM_BAGS: dict[str, MaximBag] = {
             "and let violated assumptions fail loudly."
         ),
     ),
-    "modes": MaximBag(
-        name="modes",
-        words=frozenset({"mode", "modes"}),
-        message=(
-            "DO NOT add modes that split behavior into broad parallel paths; model "
-            "the concrete state, capability, or intent and update callers to one "
-            "explicit contract."
-        ),
-    ),
     "backwards-compat": MaximBag(
         name="backwards-compat",
         words=frozenset({"compatibilities", "compatibility", "compatible"}),
