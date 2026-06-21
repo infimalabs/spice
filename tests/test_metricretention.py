@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
+from spice.errors import SpiceError
 from spice.serve.directivestats import DirectiveTotals
 from spice.serve.teammetrics import METRIC_HISTORY_RETENTION_DAYS_ENV
 from spice.serve.teams import ServeTeamStore, TeamConfig
@@ -125,3 +128,49 @@ def test_metric_retention_horizon_uses_env_fallback(tmp_path, monkeypatch):
     store = _store(tmp_path)
 
     assert store.metric_history_retention_seconds() == 14 * SECONDS_PER_DAY
+
+
+@pytest.mark.parametrize("value", ["inf", "nan"])
+def test_metric_retention_env_rejects_non_finite_days(tmp_path, monkeypatch, value):
+    monkeypatch.setenv(METRIC_HISTORY_RETENTION_DAYS_ENV, value)
+    store = _store(tmp_path)
+
+    with pytest.raises(SpiceError) as exc_info:
+        store.metric_history_retention_seconds()
+
+    assert METRIC_HISTORY_RETENTION_DAYS_ENV in str(exc_info.value)
+    assert "finite" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("settings", "field_name"),
+    [
+        (
+            {"metrics": {"historyRetentionDays": "inf"}},
+            "shellSettings.metrics.historyRetentionDays",
+        ),
+        (
+            {"metrics": {"retentionDays": "nan"}},
+            "shellSettings.metrics.retentionDays",
+        ),
+        (
+            {"metricHistoryRetentionDays": float("inf")},
+            "shellSettings.metricHistoryRetentionDays",
+        ),
+    ],
+)
+def test_metric_retention_shell_settings_reject_non_finite_days(
+    tmp_path, settings, field_name
+):
+    store = _store(tmp_path)
+    store.create_team(
+        team_id="team-config",
+        config=TeamConfig(shell_settings=settings),
+        members=[],
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        store.metric_history_retention_seconds()
+
+    assert field_name in str(exc_info.value)
+    assert "finite" in str(exc_info.value)

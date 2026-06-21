@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import time
@@ -771,6 +772,8 @@ def _positive_days_seconds(value: object, field_name: str) -> int:
         days = float(str(value))
     except (TypeError, ValueError) as exc:
         raise SpiceError(f"{field_name} must be a positive number") from exc
+    if not math.isfinite(days):
+        raise SpiceError(f"{field_name} must be finite")
     if days <= 0:
         raise SpiceError(f"{field_name} must be positive")
     return max(1, int(days * _SECONDS_PER_DAY))
