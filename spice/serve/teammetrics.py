@@ -592,6 +592,8 @@ def _membership_intervals_from_events(
     ).fetchall()
     for row in rows:
         timestamp = float(row["ts"] or 0.0)
+        if timestamp > end_time:
+            continue
         team_id = str(row["team_id"] or "")
         kind = str(row["kind"] or "")
         payload = _event_payload(row)
