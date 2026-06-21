@@ -57,7 +57,9 @@ class MaximReminderGate:
 
     The same violation body publishes at most once until the agent's context
     compacts; after a compaction the agent has lost the earlier reminder, so
-    it becomes eligible again.
+    it becomes eligible again. The key is the final inbox body rather than an
+    individual maxim id, so a new combined reminder can publish even if one of
+    its maxims appeared in an earlier reminder.
     """
 
     def __init__(self) -> None:
