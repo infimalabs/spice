@@ -19,11 +19,13 @@ const lane = {
     pendingInboxLabel: "1",
     pendingInboxKeys: ["stale-key"],
     pendingInboxRevision: "stale-rev",
+    pendingInboxVersion: 10,
     statusLine: {
       pendingInboxCount: 1,
       pendingInboxLabel: "1",
       pendingInboxKeys: ["stale-key"],
       pendingInboxRevision: "stale-rev",
+      pendingInboxVersion: 10,
       preview: "previous assistant response",
     },
   },
@@ -36,6 +38,7 @@ const drainedTarget = {
     pendingInboxLabel: "0",
     pendingInboxKeys: [],
     pendingInboxRevision: "drained-rev",
+    pendingInboxVersion: 11,
   },
 };
 
@@ -73,7 +76,15 @@ assert(
 const queuedLane = {
   latestPayload: {
     pendingInboxCount: 0,
-    statusLine: { pendingInboxCount: 0 },
+    pendingInboxKeys: [],
+    pendingInboxRevision: "queued-old",
+    pendingInboxVersion: 11,
+    statusLine: {
+      pendingInboxCount: 0,
+      pendingInboxKeys: [],
+      pendingInboxRevision: "queued-old",
+      pendingInboxVersion: 11,
+    },
   },
 };
 const queuedTarget = {
@@ -83,6 +94,7 @@ const queuedTarget = {
     pendingInboxLabel: "2",
     pendingInboxKeys: ["queued-a", "queued-b"],
     pendingInboxRevision: "queued-rev",
+    pendingInboxVersion: 12,
   },
 };
 context.lanePayloadWithTargetPending(queuedLane, queuedTarget);
@@ -99,11 +111,67 @@ assert(
 const noFreshCountLane = {
   latestPayload: {
     pendingInboxCount: 3,
-    statusLine: { pendingInboxCount: 3 },
+    pendingInboxKeys: ["cached-a", "cached-b", "cached-c"],
+    pendingInboxRevision: "cached-rev",
+    pendingInboxVersion: 13,
+    statusLine: {
+      pendingInboxCount: 3,
+      pendingInboxKeys: ["cached-a", "cached-b", "cached-c"],
+      pendingInboxRevision: "cached-rev",
+      pendingInboxVersion: 13,
+    },
   },
 };
 context.lanePayloadWithTargetPending(noFreshCountLane, { statusLine: {} });
 assert(
   noFreshCountLane.latestPayload.statusLine.pendingInboxCount === 3,
   "missing target count leaves cached lane payload untouched",
+);
+
+const versionedLane = {
+  latestPayload: {
+    pendingInboxCount: 2,
+    pendingInboxKeys: ["new-a", "new-b"],
+    pendingInboxRevision: "rev-new",
+    pendingInboxVersion: 20,
+    statusLine: {
+      pendingInboxCount: 2,
+      pendingInboxKeys: ["new-a", "new-b"],
+      pendingInboxRevision: "rev-new",
+      pendingInboxVersion: 20,
+    },
+  },
+};
+context.lanePayloadWithTargetPending(versionedLane, {
+  statusLine: {
+    pendingInboxCount: 0,
+    pendingInboxKeys: [],
+    pendingInboxRevision: "rev-old",
+    pendingInboxVersion: 10,
+  },
+});
+assert(
+  versionedLane.latestPayload.statusLine.pendingInboxCount === 2,
+  "older target pending snapshot does not rewind cached lane payload",
+);
+assert(
+  versionedLane.latestPayload.pendingInboxRevision === "rev-new",
+  "older target pending snapshot does not replace cached pending revision",
+);
+
+context.lanePayloadWithTargetPending(versionedLane, {
+  statusLine: {
+    pendingInboxCount: 0,
+    pendingInboxKeys: [],
+    pendingInboxRevision: "rev-drained",
+    pendingInboxVersion: 30,
+  },
+});
+assert(
+  versionedLane.latestPayload.statusLine.pendingInboxCount === 0,
+  "newer target pending snapshot clears cached lane payload",
+);
+assert(
+  versionedLane.latestPayload.pendingInboxRevision === "rev-drained",
+  "newer target pending snapshot replaces cached pending revision",
 );

@@ -157,6 +157,7 @@ def _pending_identity(count: int = 0) -> dict[str, object]:
         "pendingInboxLabel": str(count),
         "pendingInboxKeys": [],
         "pendingInboxRevision": f"test-revision-{count}",
+        "pendingInboxVersion": 100 + count,
     }
 
 
@@ -878,6 +879,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         "pendingInboxLabel",
         "pendingInboxKeys",
         "pendingInboxRevision",
+        "pendingInboxVersion",
         "agentEnsure",
         "statusLine",
     }
@@ -891,11 +893,15 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     assert payload["pendingInboxLabel"] == "1"
     assert payload["pendingInboxKeys"] == [inbox_item_key(pending_name)]
     assert payload["pendingInboxRevision"]
+    assert payload["pendingInboxVersion"] > 0
     assert payload["statusLine"]["pendingInboxCount"] == 1
     assert payload["statusLine"]["pendingInboxLabel"] == "1"
     assert payload["statusLine"]["pendingInboxKeys"] == [inbox_item_key(pending_name)]
     assert (
         payload["statusLine"]["pendingInboxRevision"] == payload["pendingInboxRevision"]
+    )
+    assert (
+        payload["statusLine"]["pendingInboxVersion"] == payload["pendingInboxVersion"]
     )
 
 

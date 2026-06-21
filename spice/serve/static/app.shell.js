@@ -190,6 +190,7 @@ function laneBackendState() {
     backendPendingInboxCount: 0,
     backendPendingInboxKeys: new Set(),
     backendPendingInboxRevision: "",
+    backendPendingInboxVersion: 0,
     backendPendingInboxKeysAuthoritative: false,
     optimisticPendingInboxCount: 0,
     optimisticSubmittedInboxKeys: new Set(),

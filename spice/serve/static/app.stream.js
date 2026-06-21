@@ -863,6 +863,7 @@ function applyLaneSendResult(
     pendingInboxCount: result.pendingInboxCount,
     pendingInboxKeys: result.pendingInboxKeys,
     pendingInboxRevision: result.pendingInboxRevision,
+    pendingInboxVersion: result.pendingInboxVersion,
   });
   rememberAckContext(
     lane,

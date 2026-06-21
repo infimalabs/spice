@@ -22,6 +22,7 @@
  * @property {string=} lifetime
  * @property {string[]=} pendingInboxKeys
  * @property {string=} pendingInboxRevision
+ * @property {number=} pendingInboxVersion
  * @property {StatusLine=} statusLine
  *
  * @typedef {Object} TargetIdentity
@@ -112,6 +113,7 @@
  * @property {number=} pendingInboxCount
  * @property {string[]=} pendingInboxKeys
  * @property {string=} pendingInboxRevision
+ * @property {number=} pendingInboxVersion
  *
  * @typedef {Object} MessageAttachment
  * @property {string=} name

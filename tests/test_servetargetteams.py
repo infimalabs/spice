@@ -221,6 +221,7 @@ def _pending_identity() -> dict[str, object]:
         "pendingInboxLabel": "0",
         "pendingInboxKeys": [],
         "pendingInboxRevision": "test-revision",
+        "pendingInboxVersion": 100,
     }
 
 
