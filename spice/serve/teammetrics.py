@@ -38,16 +38,6 @@ class _TeamMetricStore(Protocol):
         now: float,
     ) -> None: ...
 
-    def _team_lane_metric_summary_locked(
-        self,
-        connection: sqlite3.Connection,
-        team_id: str,
-        *,
-        bucket_count: int,
-        bucket_seconds: int,
-        now: float,
-    ) -> LaneMetricSummary: ...
-
     def _agent_lane_metric_summary_locked(
         self,
         connection: sqlite3.Connection,
@@ -96,11 +86,11 @@ class TeamMetricStoreMixin:
         agent_id = _normalized_id(agent_id, "agent_id")
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT source_path, offset FROM agent_metric_cursors "
-                "WHERE agent_id = ?",
-                (agent_id,),
+                "SELECT offset FROM agent_metric_cursors "
+                "WHERE agent_id = ? AND source_path = ?",
+                (agent_id, source_path),
             ).fetchone()
-        if row is None or str(row["source_path"]) != source_path:
+        if row is None:
             return 0
         return max(0, int(row["offset"] or 0))
 
@@ -112,12 +102,77 @@ class TeamMetricStoreMixin:
             connection.execute(
                 "INSERT INTO agent_metric_cursors "
                 "(agent_id, source_path, offset, updated_at) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(agent_id) DO UPDATE SET "
-                "source_path = excluded.source_path, "
+                "ON CONFLICT(agent_id, source_path) DO UPDATE SET "
                 "offset = excluded.offset, "
                 "updated_at = excluded.updated_at",
                 (agent_id, source_path, max(0, int(offset)), time.time()),
             )
+
+    def _rewrite_agent_metric_cursors_locked(
+        self,
+        connection: sqlite3.Connection,
+        old_agent_id: str,
+        new_agent_id: str,
+    ) -> None:
+        old_agent_id = _normalized_id(old_agent_id, "old_agent_id")
+        new_agent_id = _normalized_id(new_agent_id, "new_agent_id")
+        if old_agent_id == new_agent_id:
+            return
+        connection.execute(
+            "INSERT INTO agent_metric_cursors "
+            "(agent_id, source_path, offset, updated_at) "
+            "SELECT ?, source_path, offset, updated_at "
+            "FROM agent_metric_cursors WHERE agent_id = ? "
+            "ON CONFLICT(agent_id, source_path) DO UPDATE SET "
+            "offset = max(agent_metric_cursors.offset, excluded.offset), "
+            "updated_at = max(agent_metric_cursors.updated_at, excluded.updated_at)",
+            (new_agent_id, old_agent_id),
+        )
+        connection.execute(
+            "DELETE FROM agent_metric_cursors WHERE agent_id = ?", (old_agent_id,)
+        )
+
+    def _rewrite_agent_metrics_locked(
+        self,
+        connection: sqlite3.Connection,
+        old_agent_id: str,
+        new_agent_id: str,
+    ) -> None:
+        # Renewal unifies the predecessor's id into the successor (the canonical
+        # actor), so the predecessor's per-agent counters fold into the successor
+        # and only one id survives. This is what makes lineage accumulate under
+        # the membership-derived read; see serve-team-metric-attribution.md (D9).
+        old_agent_id = _normalized_id(old_agent_id, "old_agent_id")
+        new_agent_id = _normalized_id(new_agent_id, "new_agent_id")
+        if old_agent_id == new_agent_id:
+            return
+        connection.execute(
+            "INSERT INTO agent_metrics "
+            "(agent_id, acked, sends, tool_calls, updated_at) "
+            "SELECT ?, acked, sends, tool_calls, updated_at "
+            "FROM agent_metrics WHERE agent_id = ? "
+            "ON CONFLICT(agent_id) DO UPDATE SET "
+            "acked = agent_metrics.acked + excluded.acked, "
+            "sends = agent_metrics.sends + excluded.sends, "
+            "tool_calls = agent_metrics.tool_calls + excluded.tool_calls, "
+            "updated_at = max(agent_metrics.updated_at, excluded.updated_at)",
+            (new_agent_id, old_agent_id),
+        )
+        connection.execute(
+            "INSERT INTO agent_metric_buckets "
+            "(agent_id, bucket_start, messages) "
+            "SELECT ?, bucket_start, messages "
+            "FROM agent_metric_buckets WHERE agent_id = ? "
+            "ON CONFLICT(agent_id, bucket_start) DO UPDATE SET "
+            "messages = agent_metric_buckets.messages + excluded.messages",
+            (new_agent_id, old_agent_id),
+        )
+        connection.execute(
+            "DELETE FROM agent_metrics WHERE agent_id = ?", (old_agent_id,)
+        )
+        connection.execute(
+            "DELETE FROM agent_metric_buckets WHERE agent_id = ?", (old_agent_id,)
+        )
 
     def lane_metric_summary(
         self: _TeamMetricStore,
@@ -140,20 +195,25 @@ class TeamMetricStoreMixin:
         bucket_seconds = max(1, int(bucket_seconds))
         summary_time = time.time() if now is None else max(0.0, float(now))
         with self.connect() as connection:
+            # Derive the lane summary from CURRENT membership: the metric is the
+            # aggregate of the team's current members' per-agent counters, so work
+            # follows the agent across moves rather than staying bolted to a team.
+            # See docs/studies/serve-team-metric-attribution.md (D3, D4).
             row = connection.execute(
                 "SELECT team_id FROM memberships WHERE agent_id = ?", (agent_id,)
             ).fetchone()
             if row is not None:
-                return self._team_lane_metric_summary_locked(
-                    connection,
-                    str(row["team_id"]),
-                    bucket_count=bucket_count,
-                    bucket_seconds=bucket_seconds,
-                    now=summary_time,
-                )
+                member_rows = connection.execute(
+                    "SELECT agent_id FROM memberships WHERE team_id = ? "
+                    "ORDER BY joined_at",
+                    (str(row["team_id"]),),
+                ).fetchall()
+                member_ids = tuple(str(member["agent_id"]) for member in member_rows)
+            else:
+                member_ids = (agent_id,)
             return self._agent_lane_metric_summary_locked(
                 connection,
-                (agent_id,),
+                member_ids,
                 bucket_count=bucket_count,
                 bucket_seconds=bucket_seconds,
                 now=summary_time,
@@ -189,28 +249,6 @@ class TeamMetricStoreMixin:
                 "messages = agent_metric_buckets.messages + excluded.messages",
                 (agent_id, bucket_start, int(count)),
             )
-
-    def _team_lane_metric_summary_locked(
-        self,
-        connection: sqlite3.Connection,
-        team_id: str,
-        *,
-        bucket_count: int,
-        bucket_seconds: int,
-        now: float,
-    ) -> LaneMetricSummary:
-        agent_rows = connection.execute(
-            "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY joined_at",
-            (team_id,),
-        ).fetchall()
-        agent_ids = tuple(str(row["agent_id"]) for row in agent_rows)
-        return self._agent_lane_metric_summary_locked(
-            connection,
-            agent_ids,
-            bucket_count=bucket_count,
-            bucket_seconds=bucket_seconds,
-            now=now,
-        )
 
     def _agent_lane_metric_summary_locked(
         self,
