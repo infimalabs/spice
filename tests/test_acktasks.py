@@ -35,6 +35,10 @@ ACTOR_MEMBER = thread_actor_id(ACTOR)
 INBOX_KEY = "20260104T000000000004Z"
 
 
+def _allowed_project_stems_feedback() -> str:
+    return "allowed_project_stems=" + ",".join(config.assignable_stems())
+
+
 @pytest.fixture
 def task_repo(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
@@ -97,7 +101,8 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert feedback == [
         f"ack_archived={INBOX_KEY}",
-        f"inline_task_created={handle}(route_filter=skipped:task.unit:no_team)",
+        f"inline_task_created={handle}("
+        f"route_filter=skipped:task.unit:no_team;{_allowed_project_stems_feedback()})",
         watchdog.INLINE_TASK_BACKLOG_NOTE,
     ]
     assigned = alloc.next_task()
@@ -161,7 +166,8 @@ def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert feedback == [
         f"ack_archived={INBOX_KEY}",
-        f"inline_task_created={handle}(route_filter=skipped:task.unit:no_team)",
+        f"inline_task_created={handle}("
+        f"route_filter=skipped:task.unit:no_team;{_allowed_project_stems_feedback()})",
         watchdog.INLINE_TASK_BACKLOG_NOTE,
     ]
 
@@ -201,7 +207,8 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
     assert identity.render_handle(assigned or {}) == handle
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert feedback == [
-        f"inline_task_created={handle}(route_filter=added:task.unit:auto:create)",
+        f"inline_task_created={handle}("
+        f"route_filter=added:task.unit:auto:create;{_allowed_project_stems_feedback()})",
         watchdog.INLINE_TASK_BACKLOG_NOTE,
     ]
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
@@ -227,6 +234,7 @@ def test_supervised_standalone_task_batch_rejects_without_partial_creation(
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert len(feedback) == 1
     assert "inline_task_error=batch add rejected" in feedback[0]
+    assert _allowed_project_stems_feedback() in feedback[0]
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
 

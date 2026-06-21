@@ -28,15 +28,16 @@ from spice.agent.maxims import (
     evaluate_maxim_any_violation,
     triggered_maxims,
 )
+from spice.agent.sidechannelnotify import publish_side_channel_notice
 from spice.mail.acks import (
     archive_ackd_inbox_items_from_assistant_message,
     extract_task_batch_lines_from_text,
 )
-from spice.agent.sidechannelnotify import publish_side_channel_notice
-from spice.tasks.create import TaskAddResult
 from spice.mail.inbox import write_inbox_item
 from spice.procs import popen_new_process_group_kwargs
 from spice.sessions.util import first_text
+from spice.tasks import config as task_config
+from spice.tasks.create import TaskAddResult
 
 LEGACY_REMINDER_PREFIX = "WATCHDOG:"
 WATCHDOG_REMINDER_PREFIX = "[MAXIM]"
@@ -163,7 +164,7 @@ def process_supervised_assistant_message(
         log_handle.flush()
         publish_supervisor_feedback(
             repo_root,
-            f"inline_task_error={exc}",
+            f"inline_task_error={exc}; {_allowed_project_stems_feedback()}",
             log_handle,
         )
     try:
@@ -227,7 +228,14 @@ def _supervised_inline_task_actor(repo_root: Path) -> str:
 
 
 def _inline_task_result_text(results: list[TaskAddResult]) -> str:
-    return " ".join(f"{result.handle}({result.route_feedback})" for result in results)
+    stems = _allowed_project_stems_feedback()
+    return " ".join(
+        f"{result.handle}({result.route_feedback};{stems})" for result in results
+    )
+
+
+def _allowed_project_stems_feedback() -> str:
+    return "allowed_project_stems=" + ",".join(task_config.assignable_stems())
 
 
 def record_supervised_lane_metrics(repo_root: Path) -> None:
