@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from spice.agent.driver import CODEX_DRIVER
-from spice.mail.inbox import inbox_dir, pending_inbox_count
+from spice.mail.inbox import inbox_dir
 from spice.serve import (
     agentapi,
     app,
@@ -29,6 +29,7 @@ from spice.serve import (
 from spice.serve.app import ServeState
 from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
+from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.teams import ServeTeamStore
 from spice.serve.worktrees import WorktreeTarget
 
@@ -269,11 +270,11 @@ def _callbacks(
     lane_signature=None,
 ) -> LiveBusCallbacks:
     def messages_payload(_target, **_kwargs):
-        pending = pending_inbox_count(target.repo_root)
+        pending_identity = pending_inbox_identity_payload(target.repo_root)
         return {
             "messages": [],
-            "pendingInboxCount": pending,
-            "statusLine": {"pendingInboxCount": pending},
+            **pending_identity,
+            "statusLine": pending_identity,
         }
 
     def watch_paths(_target, _thread_id, transcript):

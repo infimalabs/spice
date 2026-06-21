@@ -20,12 +20,15 @@ const messageOccupantAccentPalette = [
 let globalTransientStatusTimer = null;
 
 function renderLaneChrome(lane, payload) {
+  const staleTeamConfig = lanePayloadTeamConfigIsStale(lane, payload);
   applyLaneTargetIdentity(lane, payload);
   applyLaneServeAgentIdentity(lane, payload);
-  lane.taskFilters = uniqueStringList(payload.taskFilters || lane.taskFilters);
-  if (payloadHasField(payload, "laneFilterVersion"))
-    lane.laneFilterVersion = String(payload.laneFilterVersion || "");
-  applyLaneTeamIdentity(lane, payload);
+  if (!staleTeamConfig) {
+    lane.taskFilters = uniqueStringList(payload.taskFilters || lane.taskFilters);
+    if (payloadHasField(payload, "laneFilterVersion"))
+      lane.laneFilterVersion = String(payload.laneFilterVersion || "");
+    applyLaneTeamIdentity(lane, payload);
+  }
   if (payload.taskFilterInventory)
     lane.taskFilterInventory = payload.taskFilterInventory;
   if (payload.privateTaskCount !== undefined)
@@ -33,14 +36,20 @@ function renderLaneChrome(lane, payload) {
   if (payload.laneMetrics) lane.laneMetrics = payload.laneMetrics;
   if (payload.laneInfo) lane.laneInfo = payload.laneInfo;
   if (payload.renewalIntent) lane.renewalIntent = payload.renewalIntent;
-  if (payload.lifetime)
+  if (!staleTeamConfig && payload.lifetime)
     applyServerLaneLifetime(lane, payload.lifetime, {
       configRevision: payloadHasField(payload, "teamIdentity")
         ? teamIdentityConfigRevision(payload.teamIdentity)
         : lane.configRevision,
     });
-  const statusLine = applyRetainedLaneStatus(lane, payload.statusLine || {});
-  syncLaneBackendPending(lane, statusLine);
+  const rawStatusLine = payload.statusLine || {};
+  const pendingApplied = syncLaneBackendPending(lane, rawStatusLine);
+  const statusLine = applyRetainedLaneStatus(
+    lane,
+    pendingApplied
+      ? rawStatusLine
+      : statusLineWithLanePendingIdentity(lane, rawStatusLine),
+  );
   renderLaneViewShell(laneGroupHost(lane));
   renderFilterPills();
   syncFusedLaneChrome(laneGroupHost(lane));
@@ -49,6 +58,17 @@ function renderLaneChrome(lane, payload) {
 
 function payloadHasField(payload, name) {
   return Object.prototype.hasOwnProperty.call(payload || {}, name);
+}
+
+function lanePayloadTeamConfigIsStale(lane, payload) {
+  if (!payloadHasField(payload, "teamIdentity")) return false;
+  const incomingRevision = teamIdentityConfigRevision(payload.teamIdentity);
+  const currentRevision = Math.max(0, Number(lane.configRevision) || 0);
+  if (!incomingRevision || !currentRevision || incomingRevision >= currentRevision)
+    return false;
+  const incomingTeamId = teamIdentityTeamId(payload.teamIdentity);
+  const currentTeamId = String(lane.teamId || "");
+  return Boolean(incomingTeamId && currentTeamId && incomingTeamId === currentTeamId);
 }
 
 function applyLaneTargetIdentity(lane, payload) {
@@ -345,7 +365,9 @@ function beginLanePendingSubmission(lane) {
 
 function finishLanePendingSubmission(lane, options = {}) {
   const accepted = Boolean(options.accepted);
-  const hasBackendCount = Number.isFinite(Number(options.pendingInboxCount));
+  const hasBackendCount =
+    Number.isFinite(Number(options.pendingInboxCount)) &&
+    Number.isFinite(Number(options.pendingInboxVersion));
   const inboxKey = String(options.inboxKey || "");
   lane.pendingSubmissionCount = Math.max(0, lane.pendingSubmissionCount - 1);
   if (hasBackendCount) applyLaneBackendPendingPayload(lane, options);
@@ -375,26 +397,30 @@ function finishLanePendingSubmission(lane, options = {}) {
 }
 
 function syncLaneBackendPending(lane, payload) {
-  applyLaneBackendPendingPayload(lane, payload);
-  reconcileSubmittedMessagePredictions(lane);
-  clearDrainedSubmittedMessagePredictions(lane);
+  if (!applyLaneBackendPendingPayload(lane, payload)) return false;
   if (lane.pendingSubmissionCount > 0) {
     lane.optimisticPendingInboxCount = Math.max(
       lane.optimisticPendingInboxCount,
       lane.backendPendingInboxCount,
       laneSubmittedMessagePendingFloor(lane),
     );
-  } else {
-    lane.optimisticPendingInboxCount = Math.max(
-      lane.backendPendingInboxCount,
-      laneSubmittedMessagePendingFloor(lane),
-    );
+    return true;
   }
+  reconcileSubmittedMessagePredictions(lane);
+  clearDrainedSubmittedMessagePredictions(lane);
+  lane.optimisticPendingInboxCount = Math.max(
+    lane.backendPendingInboxCount,
+    laneSubmittedMessagePendingFloor(lane),
+  );
+  return true;
 }
 
 function applyLaneBackendPendingPayload(lane, payload) {
   const identity = pendingIdentityFromPayload(payload);
+  if (!pendingIdentityIsCurrent(lane, identity)) return false;
   lane.backendPendingInboxCount = identity.count;
+  lane.backendPendingInboxVersion =
+    identity.version || lane.backendPendingInboxVersion || 0;
   if (identity.keys !== null) {
     lane.backendPendingInboxKeys = new Set(identity.keys);
     lane.backendPendingInboxRevision = identity.revision;
@@ -402,12 +428,17 @@ function applyLaneBackendPendingPayload(lane, payload) {
   } else {
     lane.backendPendingInboxKeysAuthoritative = false;
   }
+  return true;
 }
 
 function pendingIdentityFromPayload(payload) {
-  const source =
-    payload && typeof payload === "object" ? payload : { pendingInboxCount: payload };
+  if (!payload || typeof payload !== "object")
+    throw new Error("pending identity payload is required");
+  const source = payload;
   const count = Math.max(0, Number(source.pendingInboxCount) || 0);
+  const version = Number(source.pendingInboxVersion);
+  if (!Number.isFinite(version) || version <= 0)
+    throw new Error("pending identity version is required");
   const keys = Array.isArray(source.pendingInboxKeys)
     ? source.pendingInboxKeys.map((key) => String(key)).filter(Boolean)
     : null;
@@ -415,6 +446,25 @@ function pendingIdentityFromPayload(payload) {
     count,
     keys,
     revision: String(source.pendingInboxRevision || ""),
+    version,
+  };
+}
+
+function pendingIdentityIsCurrent(lane, identity) {
+  const currentVersion = Math.max(0, Number(lane.backendPendingInboxVersion) || 0);
+  return !currentVersion || identity.version >= currentVersion;
+}
+
+function statusLineWithLanePendingIdentity(lane, statusLine) {
+  return {
+    ...statusLine,
+    pendingInboxCount: Math.max(0, Number(lane.backendPendingInboxCount) || 0),
+    pendingInboxLabel: String(
+      Math.max(0, Number(lane.backendPendingInboxCount) || 0),
+    ),
+    pendingInboxKeys: [...(lane.backendPendingInboxKeys || new Set())],
+    pendingInboxRevision: lane.backendPendingInboxRevision || "",
+    pendingInboxVersion: Math.max(0, Number(lane.backendPendingInboxVersion) || 0),
   };
 }
 

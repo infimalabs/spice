@@ -3,6 +3,8 @@ const vm = require("vm");
 
 const streamPath = process.argv[2];
 const renderPath = process.argv[3];
+const currentPendingVersion = 20;
+const newerPendingVersion = 30;
 const context = {
   console,
   WebSocket: { OPEN: 1, CONNECTING: 0 },
@@ -35,7 +37,12 @@ function lane(overrides = {}) {
 }
 
 const drained = lane();
-context.syncLaneBackendPending(drained, 0);
+context.syncLaneBackendPending(drained, {
+  pendingInboxCount: 0,
+  pendingInboxKeys: [],
+  pendingInboxRevision: "rev-drained",
+  pendingInboxVersion: 10,
+});
 assert(
   context.lanePendingDisplayCount(drained) === 0,
   "drained backend clears stale optimistic pending count",
@@ -50,7 +57,12 @@ assert(
 );
 
 const submissionInFlight = lane({ pendingSubmissionCount: 1 });
-context.syncLaneBackendPending(submissionInFlight, 0);
+context.syncLaneBackendPending(submissionInFlight, {
+  pendingInboxCount: 0,
+  pendingInboxKeys: [],
+  pendingInboxRevision: "rev-in-flight",
+  pendingInboxVersion: 11,
+});
 assert(
   context.lanePendingDisplayCount(submissionInFlight) === 2,
   "pending submission keeps optimistic pending count through backend zero",
@@ -61,7 +73,12 @@ assert(
 );
 
 const acceptedSendRefresh = lane({ sendAwaitingBackendCount: 1 });
-context.syncLaneBackendPending(acceptedSendRefresh, 0);
+context.syncLaneBackendPending(acceptedSendRefresh, {
+  pendingInboxCount: 0,
+  pendingInboxKeys: [],
+  pendingInboxRevision: "rev-accepted",
+  pendingInboxVersion: 12,
+});
 assert(
   context.lanePendingDisplayCount(acceptedSendRefresh) === 0,
   "accepted send refresh trusts drained backend count",
@@ -81,6 +98,7 @@ context.syncLaneBackendPending(sameCountDifferentKeys, {
   pendingInboxCount: 1,
   pendingInboxKeys: ["other-key"],
   pendingInboxRevision: "rev-other",
+  pendingInboxVersion: 13,
 });
 assert(
   context.lanePendingDisplayCount(sameCountDifferentKeys) === 1,
@@ -105,6 +123,7 @@ context.syncLaneBackendPending(submittedKeyStillPending, {
   pendingInboxCount: 1,
   pendingInboxKeys: ["submitted-key"],
   pendingInboxRevision: "rev-submitted",
+  pendingInboxVersion: 14,
 });
 assert(
   submittedKeyStillPending.optimisticSubmittedInboxKeys.has("submitted-key"),
@@ -112,7 +131,12 @@ assert(
 );
 
 const stillQueued = lane();
-context.syncLaneBackendPending(stillQueued, 2);
+context.syncLaneBackendPending(stillQueued, {
+  pendingInboxCount: 2,
+  pendingInboxKeys: ["inbox-a", "inbox-b"],
+  pendingInboxRevision: "rev-still-queued",
+  pendingInboxVersion: 15,
+});
 assert(
   context.lanePendingDisplayCount(stillQueued) === 2,
   "nonzero backend pending count remains visible",
@@ -120,4 +144,52 @@ assert(
 assert(
   stillQueued.optimisticSubmittedInboxKeys.size === 2,
   "nonzero backend pending count keeps submitted inbox keys",
+);
+
+const versioned = lane({
+  backendPendingInboxCount: 2,
+  backendPendingInboxKeys: new Set(["new-a", "new-b"]),
+  backendPendingInboxRevision: "rev-new",
+  backendPendingInboxVersion: currentPendingVersion,
+  backendPendingInboxKeysAuthoritative: true,
+  optimisticPendingInboxCount: 2,
+  optimisticSubmittedInboxKeys: new Set(),
+  optimisticPendingInboxFloor: 0,
+});
+context.syncLaneBackendPending(versioned, {
+  pendingInboxCount: 0,
+  pendingInboxKeys: [],
+  pendingInboxRevision: "rev-old",
+  pendingInboxVersion: 10,
+});
+assert(
+  context.lanePendingDisplayCount(versioned) === 2,
+  "older pending snapshot does not lower compose badge count",
+);
+assert(
+  versioned.backendPendingInboxRevision === "rev-new",
+  "older pending snapshot does not replace backend revision",
+);
+assert(
+  versioned.backendPendingInboxVersion === currentPendingVersion,
+  "older pending snapshot does not replace backend version",
+);
+
+context.syncLaneBackendPending(versioned, {
+  pendingInboxCount: 0,
+  pendingInboxKeys: [],
+  pendingInboxRevision: "rev-drained",
+  pendingInboxVersion: newerPendingVersion,
+});
+assert(
+  context.lanePendingDisplayCount(versioned) === 0,
+  "newer pending snapshot can clear compose badge count",
+);
+assert(
+  versioned.backendPendingInboxRevision === "rev-drained",
+  "newer pending snapshot replaces backend revision",
+);
+assert(
+  versioned.backendPendingInboxVersion === newerPendingVersion,
+  "newer pending snapshot replaces backend version",
 );

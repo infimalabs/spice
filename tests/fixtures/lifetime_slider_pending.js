@@ -99,6 +99,21 @@ context.applyServerLaneLifetime(currentMatch, "Steer", {
 assert(currentMatch.lifetime === "Steer", "matching response keeps selection");
 assert(currentMatch.pendingLifetimeCommit === "", "matching response settles");
 
+currentMatch.configRevision = 11;
+currentMatch.serverLifetime = "Steer";
+const settledStaleApplied = context.applyServerLaneLifetime(currentMatch, "Drive", {
+  configRevision: 10,
+});
+assert(settledStaleApplied === false, "settled stale revision is ignored");
+assert(
+  currentMatch.lifetime === "Steer",
+  "settled stale revision does not rewind lifetime",
+);
+assert(
+  currentMatch.serverLifetime === "Steer",
+  "settled stale revision does not rewind server lifetime",
+);
+
 const rollback = lane();
 context.setLaneLifetime(rollback, "Drain");
 context.rollbackLaneLifetimeCommit(rollback, "Drain", "Drive", {

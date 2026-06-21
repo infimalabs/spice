@@ -148,6 +148,7 @@ def _pending_identity(count: int = 0) -> dict[str, object]:
         "pendingInboxLabel": str(count),
         "pendingInboxKeys": [],
         "pendingInboxRevision": f"test-revision-{count}",
+        "pendingInboxVersion": 100 + count,
     }
 
 

@@ -75,6 +75,13 @@ function serverLifetimeSettlesPending(host, lifetime, options = {}) {
   );
 }
 
+function serverLifetimeIsOlderThanLaneConfig(host, options = {}) {
+  if (options.force) return false;
+  const revision = laneLifetimeRevision(options);
+  const currentRevision = Math.max(0, Number(host.configRevision) || 0);
+  return revision > 0 && currentRevision > 0 && revision < currentRevision;
+}
+
 function clearLaneLifetimeCommitState(host) {
   host.pendingLifetimeCommit = "";
   host.pendingLifetimeConfigRevision = 0;
@@ -115,6 +122,7 @@ function updateEmptyTeamLifetimeForLane(host) {
 function applyServerLaneLifetime(lane, lifetime, options = {}) {
   if (!agentLifetimeLabels.includes(lifetime)) return false;
   const host = laneGroupHost(lane);
+  if (serverLifetimeIsOlderThanLaneConfig(host, options)) return false;
   if (host.pendingLifetimeCommit && lifetime !== host.pendingLifetimeCommit) {
     if (!serverLifetimeSupersedesPending(host, options)) return false;
     clearLaneLifetimeCommitState(host);

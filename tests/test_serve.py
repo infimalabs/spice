@@ -226,6 +226,7 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert payload["pendingInboxCount"] == 1
     assert payload["pendingInboxKeys"] == [inbox_item_key(items[0].name)]
     assert payload["pendingInboxRevision"]
+    assert payload["pendingInboxVersion"] > 0
     live_attachment = payload["attachments"][0]
     assert live_attachment["name"] == "paste.png"
     assert live_attachment["url"].startswith(
@@ -293,6 +294,7 @@ def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
     assert payload["pendingInboxLabel"] == "0"
     assert payload["pendingInboxKeys"] == []
     assert payload["pendingInboxRevision"]
+    assert payload["pendingInboxVersion"] > 0
     assert payload["agentEnsure"]["ok"] is False
     assert payload["agentEnsure"]["error"] == "Could not ensure agent: invalid config"
     assert payload["agentEnsure"]["deadletteredInboxKey"]

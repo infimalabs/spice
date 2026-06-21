@@ -98,6 +98,8 @@ function lanePayloadWithTargetPending(lane, target) {
   const pending = targetFreshPendingIdentity(target);
   if (pending.count === null && pending.keys === null && !pending.revision)
     return lane.latestPayload;
+  if (targetPendingIdentityIsStaleForPayload(pending, lane.latestPayload))
+    return lane.latestPayload;
   const pendingFields = pendingIdentityFields(pending);
   const statusLine = {
     ...(lane.latestPayload.statusLine || {}),
@@ -109,6 +111,25 @@ function lanePayloadWithTargetPending(lane, target) {
     statusLine,
   };
   return lane.latestPayload;
+}
+
+function targetPendingIdentityIsStaleForPayload(identity, payload) {
+  const incomingVersion = Math.max(0, Number(identity.version) || 0);
+  const currentVersion = payloadPendingIdentityVersion(payload);
+  return (
+    incomingVersion > 0 &&
+    currentVersion > 0 &&
+    incomingVersion < currentVersion
+  );
+}
+
+function payloadPendingIdentityVersion(payload) {
+  const statusLine = (payload && payload.statusLine) || {};
+  const payloadVersion = payload && payload.pendingInboxVersion;
+  return Math.max(
+    0,
+    Number(statusLine.pendingInboxVersion || payloadVersion) || 0,
+  );
 }
 
 function targetFreshPendingIdentity(target) {
@@ -128,10 +149,17 @@ function targetFreshPendingIdentity(target) {
   const keys = Array.isArray(sourceWithKeys.pendingInboxKeys)
     ? sourceWithKeys.pendingInboxKeys.map((key) => String(key)).filter(Boolean)
     : null;
+  const sourceWithVersion =
+    statusLine.pendingInboxVersion !== undefined ? statusLine : target || {};
+  const revision = String(sourceWithKeys.pendingInboxRevision || "");
+  const version = Math.max(0, Number(sourceWithVersion.pendingInboxVersion) || 0);
+  if ((count !== null || keys !== null || revision) && !version)
+    throw new Error("pending identity version is required");
   return {
     count,
     keys,
-    revision: String(sourceWithKeys.pendingInboxRevision || ""),
+    revision,
+    version,
   };
 }
 
@@ -143,6 +171,7 @@ function pendingIdentityFields(identity) {
   }
   if (identity.keys !== null) fields.pendingInboxKeys = identity.keys;
   if (identity.revision) fields.pendingInboxRevision = identity.revision;
+  if (identity.version) fields.pendingInboxVersion = identity.version;
   return fields;
 }
 
