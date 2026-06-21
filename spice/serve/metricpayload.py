@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.serve.teammetrics import METRIC_BUCKET_SECONDS
+from spice.serve.teammetrics import (
+    METRIC_BUCKET_SECONDS,
+    TEAM_HISTORICAL_MAX_BUCKET_COUNT,
+)
 
 SERIES_METRICS = frozenset(
     {"activity", "sends", "acks", "burndown", "distribution", "stuck", "drained"}
@@ -142,6 +146,11 @@ def _historical_activity_points(
     start_bucket = _bucket_start(start, bucket_seconds)
     end_bucket = _bucket_start(end, bucket_seconds)
     bucket_count = ((end_bucket - start_bucket) // bucket_seconds) + 1
+    if bucket_count > TEAM_HISTORICAL_MAX_BUCKET_COUNT:
+        raise SpiceError(
+            "teamHistorical activity series range exceeds "
+            f"{TEAM_HISTORICAL_MAX_BUCKET_COUNT} buckets"
+        )
     summary = store.team_historical_metric_summary(
         team_id,
         bucket_count=bucket_count,
@@ -298,9 +307,12 @@ def _series_choice(value: Any, allowed: frozenset[str], field_name: str) -> str:
 
 def _float_value(value: Any, field_name: str) -> float:
     try:
-        return float(value)
+        parsed = float(value)
     except (TypeError, ValueError) as exc:
         raise SpiceError(f"{field_name} must be numeric") from exc
+    if not math.isfinite(parsed):
+        raise SpiceError(f"{field_name} must be finite")
+    return parsed
 
 
 def _bucket_start(timestamp: float, bucket_seconds: int) -> int:

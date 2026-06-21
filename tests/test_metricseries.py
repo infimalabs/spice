@@ -7,10 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from spice.errors import SpiceError
 from spice.serve import metricpayload
 from spice.serve.teammetrics import (
     METRIC_BUCKET_SECONDS,
     MetricSeriesPoint,
+    TEAM_HISTORICAL_MAX_BUCKET_COUNT,
     TaskDistributionSeriesPoint,
     TaskLifecycleSeriesPoint,
     TaskStallState,
@@ -25,6 +27,18 @@ SERIES_END_TS = 360
 
 def _store(tmp_path):
     return ServeTeamStore(path=tmp_path / "teams.sqlite3")
+
+
+class _NoHistoricalSummaryStore:
+    def __init__(self) -> None:
+        self.summary_calls = 0
+
+    def team_state(self, _team_id):
+        return SimpleNamespace(members=[SimpleNamespace(agent_id="agent-a")])
+
+    def team_historical_metric_summary(self, *_args, **_kwargs):
+        self.summary_calls += 1
+        raise AssertionError("team_historical_metric_summary should not be called")
 
 
 def test_activity_series_is_stable_full_fidelity_and_range_queryable(tmp_path):
@@ -160,6 +174,44 @@ def test_metric_series_payload_per_session_uses_latest_renewal_boundary(tmp_path
             "messages": 1,
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("query", "error_text"),
+    [
+        (
+            {
+                "teamId": "team-a",
+                "metric": "activity",
+                "lens": "teamHistorical",
+                "start": 0,
+                "end": "inf",
+            },
+            "end must be finite",
+        ),
+        (
+            {
+                "teamId": "team-a",
+                "metric": "activity",
+                "lens": "teamHistorical",
+                "start": 0,
+                "end": TEAM_HISTORICAL_MAX_BUCKET_COUNT * METRIC_BUCKET_SECONDS,
+                "bucketSeconds": METRIC_BUCKET_SECONDS,
+            },
+            "range exceeds",
+        ),
+    ],
+)
+def test_metric_series_payload_team_historical_rejects_unbounded_ranges(
+    query, error_text
+):
+    store = _NoHistoricalSummaryStore()
+    state = SimpleNamespace(team_store=store)
+
+    with pytest.raises(SpiceError, match=error_text):
+        metricpayload.metric_series_payload(state, query)
+
+    assert store.summary_calls == 0
 
 
 def test_task_lifecycle_series_is_stable_full_fidelity_and_range_queryable(tmp_path):

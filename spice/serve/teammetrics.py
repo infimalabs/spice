@@ -20,6 +20,9 @@ from spice.serve.teamschema import (
 )
 
 METRIC_BUCKET_SECONDS = 60
+# Cap high-growth historical metric payloads before callers allocate sparkline
+# or series buckets for accidental unbounded ranges.
+TEAM_HISTORICAL_MAX_BUCKET_COUNT = 1440
 METRIC_HISTORY_RETENTION_DAYS_ENV = (
     "SPICE_METRIC_HISTORY_RETENTION_DAYS"  # env-policy: allow
 )
