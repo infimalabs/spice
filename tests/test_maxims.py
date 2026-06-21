@@ -202,7 +202,7 @@ def test_builtin_fallback_maxim_allows_explicit_defaults_and_resolver_order():
     assert "fail loudly" in message
 
 
-def test_repo_config_overrides_builtin_message_for_show_and_meta_judge(
+def test_repo_config_declares_custom_mode_words_for_show_and_meta_judge(
     tmp_path, monkeypatch, capsys
 ):
     repo = _init_repo(tmp_path / "repo")
@@ -211,6 +211,7 @@ def test_repo_config_overrides_builtin_message_for_show_and_meta_judge(
         repo,
         f"""
 [tool.spice.maxims.modes]
+words = ["mode", "modes"]
 message = "{message}"
 """,
     )
