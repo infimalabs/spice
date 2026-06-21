@@ -399,6 +399,10 @@ def test_serve_metrics_path_templates_bound_cardinality():
         == "/api/teams/{id}/metrics"
     )
     assert (
+        app.serve_metrics_path_template("/api/metrics/tasks/burndown?teamId=team-a")
+        == "/api/metrics/tasks/burndown"
+    )
+    assert (
         app.serve_metrics_path_template("/api/work/trees/main/agent/status")
         == "/api/work/trees/{id}/agent/status"
     )
@@ -502,6 +506,102 @@ def test_team_historical_metrics_endpoint_projects_membership_intervals(
     assert narrow_payload["cumulativeMessages"] == 5
     assert narrow_payload["range"] == {"start": 120, "end": 360}
     assert sum(point["messages"] for point in narrow_payload["series"]) == 3
+
+
+def test_task_burndown_metrics_endpoint_projects_team_and_agent_series(
+    tmp_path,
+):
+    repo = _repo(tmp_path)
+    state = _serve_state(tmp_path, _target(repo))
+    store = state.team_store
+    store.record_task_lifecycle_event(
+        "complete", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=60
+    )
+    store.record_task_lifecycle_event(
+        "drain", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=61
+    )
+    store.record_task_lifecycle_event(
+        "complete", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=120
+    )
+    store.record_task_lifecycle_event(
+        "drain", task_id="task-c", agent_id="agent-a", team_id="team-b", ts=180
+    )
+
+    team_payload = app.task_burndown_metrics_response_payload(
+        state,
+        {
+            "teamId": ["team-a"],
+            "start": ["0"],
+            "end": ["180"],
+            "bucketSeconds": ["60"],
+        },
+    )
+    agent_payload = app.task_burndown_metrics_response_payload(
+        state,
+        {
+            "agentId": ["agent-a"],
+            "start": ["0"],
+            "end": ["180"],
+            "bucketSeconds": ["60"],
+        },
+    )
+    combined_payload = app.task_burndown_metrics_response_payload(
+        state,
+        {
+            "agentId": ["agent-a"],
+            "teamId": ["team-a"],
+            "start": ["0"],
+            "end": ["180"],
+            "bucketSeconds": ["60"],
+        },
+    )
+
+    assert team_payload["ok"] is True
+    assert team_payload["lens"] == "task-burndown"
+    assert team_payload["teamIds"] == ["team-a"]
+    assert team_payload["agentIds"] == []
+    assert team_payload["completed"] == 2
+    assert team_payload["drained"] == 1
+    assert team_payload["range"] == {"start": 0, "end": 180}
+    assert team_payload["series"] == [
+        {"bucketStart": 60, "completed": 1, "drained": 1},
+        {"bucketStart": 120, "completed": 1, "drained": 0},
+    ]
+
+    assert agent_payload["agentIds"] == ["agent-a"]
+    assert agent_payload["teamIds"] == []
+    assert agent_payload["completed"] == 1
+    assert agent_payload["drained"] == 2
+    assert combined_payload["completed"] == 1
+    assert combined_payload["drained"] == 1
+
+    handler = _ImageHandler(state)
+    app._ServeHandler._get_task_burndown_metrics(
+        handler,
+        "teamId=team-a&start=0&end=180&bucketSeconds=60",
+    )
+    endpoint_payload = json.loads(handler.body.getvalue())
+
+    assert handler.status == HTTPStatus.OK
+    assert endpoint_payload["lens"] == "task-burndown"
+    assert endpoint_payload["completed"] == 2
+    assert endpoint_payload["drained"] == 1
+
+
+def test_task_burndown_metrics_endpoint_rejects_oversized_ranges(tmp_path):
+    repo = _repo(tmp_path)
+    state = _serve_state(tmp_path, _target(repo))
+    handler = _ImageHandler(state)
+
+    app._ServeHandler._get_task_burndown_metrics(
+        handler,
+        "teamId=team-a&start=0&end=120000&bucketSeconds=60",
+    )
+    payload = json.loads(handler.body.getvalue())
+
+    assert handler.status == HTTPStatus.BAD_REQUEST
+    assert payload["ok"] is False
+    assert "exceeds" in payload["error"]
 
 
 def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
