@@ -270,6 +270,34 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert handler.body.getvalue() == b"image-bytes"
 
 
+def test_work_tree_send_reuses_pending_key_for_exact_duplicate_text(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
+
+    first_payload, first_status = work_tree_send_response_payload(
+        state,
+        target,
+        {"text": "same steering"},
+    )
+    second_payload, second_status = work_tree_send_response_payload(
+        state,
+        target,
+        {"text": "same steering"},
+    )
+    items = collect_inbox_items(repo)
+
+    assert first_status == HTTPStatus.OK
+    assert second_status == HTTPStatus.OK
+    assert first_payload["key"] == second_payload["key"]
+    assert second_payload["pendingInboxKeys"] == [first_payload["key"]]
+    assert [inbox_request_body(item.text) for item in items] == ["same steering"]
+    assert pending_inbox_count(repo) == 1
+
+
 def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
     tmp_path, monkeypatch
 ):

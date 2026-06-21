@@ -44,7 +44,6 @@ def submit_steering_message(
     if target_repo_root is None:
         raise RuntimeError("No target worktree is selected.")
     name = default_inbox_name()
-    key = inbox_item_key(name)
     body = text if text.endswith("\n") else f"{text}\n"
     composed = compose_inbox_text(
         body=body,
@@ -54,8 +53,13 @@ def submit_steering_message(
     )
     prepared_attachments = prepare_inbox_attachments(attachments)
     path = write_inbox_item(
-        target_repo_root, name, composed, attachments=prepared_attachments
+        target_repo_root,
+        name,
+        composed,
+        attachments=prepared_attachments,
+        dedupe_pending_text=True,
     )
+    key = inbox_item_key(path.name)
     return SentSteeringMessage(
         key=key,
         path=path,

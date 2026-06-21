@@ -387,7 +387,7 @@ def publish_maxim_hits_as_inbox(
     body = _maxim_inbox_body(violations)
     if reminder_gate is not None and not reminder_gate.should_publish(body):
         return []
-    paths = [write_inbox_item(repo_root, None, body)]
+    paths = [write_inbox_item(repo_root, None, body, dedupe_pending_text=True)]
     if reminder_gate is not None:
         reminder_gate.mark_sent(body)
     return paths

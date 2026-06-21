@@ -47,6 +47,61 @@ def test_write_then_collect_round_trip(tmp_path):
     assert pending_inbox_count(str(tmp_path)) == 1
 
 
+def test_write_inbox_item_can_dedupe_pending_text(tmp_path):
+    composed = compose_inbox_text(body="same steering", priority=None, stop=False)
+    first = write_inbox_item(
+        tmp_path,
+        "20260101T000000000001Z.txt",
+        composed,
+        dedupe_pending_text=True,
+    )
+    second = write_inbox_item(
+        tmp_path,
+        "20260101T000000000002Z.txt",
+        composed,
+        dedupe_pending_text=True,
+    )
+
+    items = collect_inbox_items(tmp_path)
+
+    assert second == first
+    assert [item.name for item in items] == ["20260101T000000000001Z.txt"]
+    assert pending_inbox_count(tmp_path) == 1
+
+
+def test_write_inbox_item_does_not_dedupe_attachment_messages_by_text_only(tmp_path):
+    _init_repo(tmp_path)
+    composed = compose_inbox_text(body="same steering", priority=None, stop=False)
+    first = write_inbox_item(
+        tmp_path,
+        "20260101T000000000001Z.txt",
+        composed,
+        attachments=prepare_inbox_attachments(
+            [
+                {
+                    "name": "paste.png",
+                    "contentType": "image/png",
+                    "dataUrl": IMAGE_DATA_URL,
+                }
+            ]
+        ),
+        dedupe_pending_text=True,
+    )
+    second = write_inbox_item(
+        tmp_path,
+        "20260101T000000000002Z.txt",
+        composed,
+        dedupe_pending_text=True,
+    )
+
+    assert second != first
+    assert [item.name for item in collect_inbox_items(tmp_path)] == [
+        "20260101T000000000001Z.txt",
+        "20260101T000000000002Z.txt",
+    ]
+    assert pending_inbox_count(tmp_path) == 2
+
+
 def test_compose_parse_round_trip_with_priority_and_stop():
     composed = compose_inbox_text(body="wrap it up", priority="urgent", stop=True)
     parsed = parse_inbox_payload(composed)

@@ -11,7 +11,8 @@ import pytest
 from spice.agent import maximcli, maxims, watchdog
 from spice.agent.maxims import MaximVerdict
 from spice.errors import SpiceError
-from spice.mail.inbox import collect_inbox_items
+from spice.mail.acks import archive_ackd_inbox_items
+from spice.mail.inbox import collect_inbox_items, inbox_item_key
 
 
 def test_repo_config_declares_new_maxim_bag_for_scan_and_watchdog(
@@ -64,6 +65,7 @@ def test_maxim_reminder_gate_suppresses_same_combined_body_until_compaction(
     duplicate_paths = watchdog.publish_maxim_hits_as_inbox(
         repo, "alpha beta again", reminder_gate=gate
     )
+    archive_ackd_inbox_items(repo, [inbox_item_key(first_paths[0].name)])
     gate.note_compaction()
     after_compaction_paths = watchdog.publish_maxim_hits_as_inbox(
         repo, "alpha beta", reminder_gate=gate
@@ -72,8 +74,8 @@ def test_maxim_reminder_gate_suppresses_same_combined_body_until_compaction(
     assert len(first_paths) == 1
     assert duplicate_paths == []
     assert len(after_compaction_paths) == 1
+    assert after_compaction_paths != first_paths
     assert [item.text for item in collect_inbox_items(repo)] == [
-        "[MAXIM] FIRST reminder. SECOND reminder.\n",
         "[MAXIM] FIRST reminder. SECOND reminder.\n",
     ]
 
@@ -103,6 +105,20 @@ def test_maxim_reminder_gate_allows_new_combined_body_with_existing_maxim(
         "[MAXIM] FIRST reminder.\n",
         "[MAXIM] FIRST reminder. SECOND reminder.\n",
     ]
+
+
+def test_maxim_publish_reuses_existing_pending_body_without_process_gate(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_dual_maxim_config(repo)
+    _make_every_maxim_violate(monkeypatch)
+
+    first_paths = watchdog.publish_maxim_hits_as_inbox(repo, "alpha beta")
+    second_paths = watchdog.publish_maxim_hits_as_inbox(repo, "alpha beta again")
+
+    assert first_paths == second_paths
+    assert [item.name for item in collect_inbox_items(repo)] == [first_paths[0].name]
 
 
 def test_repo_config_overrides_builtin_trigger_words(tmp_path):
