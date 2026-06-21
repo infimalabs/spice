@@ -22,16 +22,19 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     css = _serve_css_text()
     app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     header_start = css.index(".app-header {")
-    header_end = css.index(".app-header .meta", header_start)
+    header_end = css.index(".icon-button", header_start)
     header_rules = css[header_start:header_end]
     mobile_header_start = css.index(
         "  .app-header {", css.index("@media (max-width: 720px)")
     )
-    mobile_header_end = css.index("  .app-header .meta", mobile_header_start)
+    mobile_header_end = css.index("  .swimlanes", mobile_header_start)
     mobile_header_rules = css[mobile_header_start:mobile_header_end]
-    mobile_filter_start = css.index("  .filter-strip {", mobile_header_start)
-    mobile_filter_end = css.index("  .swimlanes", mobile_filter_start)
-    mobile_filter_rules = css[mobile_filter_start:mobile_filter_end]
+    filter_start = css.index(".filter-strip {")
+    filter_end = css.index(".filter-strip[aria-hidden", filter_start)
+    filter_rules = css[filter_start:filter_end]
+    button_start = css.index(".spice-menu-button {")
+    button_end = css.index(".spice-menu-button:hover", button_start)
+    button_rules = css[button_start:button_end]
 
     assert 'id="fast-mode-toggle"' not in html
     assert 'class="add-lane"' not in html
@@ -42,6 +45,7 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert html.index("/static/app.lanes.js") < html.index("/static/app.menu.js")
     assert html.index("/static/app.menu.js") < html.index("/static/app.shell.js")
     assert 'aria-label="Open teams"' in html
+    assert 'id="global-status"' not in html
     assert 'id="open-lane" class="spice-menu-button"' in html
     assert 'aria-haspopup="menu" aria-expanded="false"' in html
     assert '<span class="spice-menu-icon" aria-hidden="true">' in html
@@ -50,12 +54,14 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert 'const spiceServeBranding = {"name": "spice"};' in html
     assert "const serveBrandName = String(spiceServeBranding.name" in app_js
     assert "function serveBrandMenuTitle()" in app_js
+    assert 'querySelector("#global-status")' not in app_js
     assert 'querySelector("#fast-mode-toggle")' not in app_js
     assert 'openLaneButton.addEventListener("click", (event) => {' in app_js
     assert "button.primary:hover {\n  background: var(--accent-strong);" in css
     assert "button.primary:hover,\n.spice-menu-button:hover" not in css
     assert "min-height: 50px;" in header_rules
     assert "padding: 7px 10px;" in header_rules
+    assert ".app-header .meta" not in css
     assert (
         "--control-border-soft: color-mix(in srgb, var(--border) 36%, transparent);"
         in css
@@ -65,8 +71,9 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert "flex-wrap: nowrap;" in mobile_header_rules
     assert "min-height: 46px;" in mobile_header_rules
     assert "padding: 8px;" in mobile_header_rules
-    assert "flex: 1 1 auto;" in mobile_filter_rules
-    assert "min-width: 0;" in mobile_filter_rules
+    assert "flex: 1 1 auto;" in filter_rules
+    assert "min-width: 0;" in filter_rules
+    assert "margin-left: auto;" in button_rules
 
 
 def test_header_spice_menu_button_uses_cutout_pepper_stamp():
@@ -548,7 +555,7 @@ def test_static_spice_menu_team_groups_and_actions():
     assert 'else if (group && !group.unassigned) actionLabel = "Open team";' in app_menu
     assert 'button.classList.toggle("target-choice--open", alreadyOpen);' in app_menu
     assert 'if (laneStates.has(target.id)) parts.push("open");' in app_lanes
-    assert 'setGlobalTransientStatus("open team failed");' in app_menu
+    assert 'setGlobalTransientError("open team failed");' in app_menu
     assert (
         'function targetChoiceButton(target, actionLabel, onClick, role = "menuitem")'
         in app_lanes

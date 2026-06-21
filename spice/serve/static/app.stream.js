@@ -59,7 +59,7 @@ function connectLiveBus() {
   socket.addEventListener("message", (event) => {
     noteLiveBusInbound();
     handleLiveBusMessage(event.data).catch((error) => {
-      setGlobalTransientStatus(String(error || "live bus message failed"));
+      setGlobalTransientError(String(error || "live bus message failed"));
     });
   });
   socket.addEventListener("close", () => {
@@ -160,7 +160,7 @@ async function handleLiveBusMessage(data) {
     if (lane && isLaneOpen(lane))
       await applyLaneBusPayload(lane, message.payload || {}, message.source || "bus");
   } else if (message.type === "bus.error") {
-    setGlobalTransientStatus(message.error || "live bus error");
+    setGlobalTransientError(message.error || "live bus error");
   }
 }
 

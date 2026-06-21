@@ -39,7 +39,6 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
 <body>
   <header class="app-header">
     <div id="filter-strip" class="filter-strip" aria-hidden="true"></div>
-    <div class="meta" id="global-status"></div>
     <button id="open-lane" class="spice-menu-button" type="button"
             title="Open {brand_attr} menu" aria-label="Open {brand_attr} menu"
             aria-haspopup="menu" aria-expanded="false">

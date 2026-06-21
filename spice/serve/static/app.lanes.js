@@ -32,14 +32,14 @@ async function refreshServerTopology() {
 function refreshTargets() {
   if (targetsLoadPromise) return targetsLoadPromise;
   targetsLoading = true;
-  if (!targetsLoaded) globalStatusEl.textContent = "loading teams";
+  if (!targetsLoaded) setGlobalActivityStatus("loading teams");
   if (spiceMenuEl) renderSpiceMenuIfAvailable();
   targetsLoadPromise = (async () => {
     try {
       const response = await liveBusRequest("targets.refresh");
       applyTargetsPayload(response.payload || {});
     } catch (error) {
-      setGlobalTransientStatus("team refresh failed");
+      setGlobalTransientError("team refresh failed");
     } finally {
       targetsLoading = false;
       targetsLoadPromise = null;
@@ -53,7 +53,7 @@ function applyTargetsPayload(payload) {
   targets = payload.workTrees || [];
   targetById = new Map(targets.map((target) => [target.id, target]));
   targetsLoaded = true;
-  globalStatusEl.textContent = "";
+  clearGlobalActivityStatus("loading teams");
   taskFilterStemPills = taskFilterStemPillsFromInventory(
     payload.taskFilterInventory || {},
   );

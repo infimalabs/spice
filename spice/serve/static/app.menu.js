@@ -395,7 +395,7 @@ function renderTargetChoice(target, group = null) {
   else if (group && !group.unassigned) actionLabel = "Open team";
   const button = targetChoiceButton(target, actionLabel, () => {
     openTargetTeam(target.id).catch(() => {
-      setGlobalTransientStatus("open team failed");
+      setGlobalTransientError("open team failed");
     });
   });
   button.classList.toggle("target-choice--open", alreadyOpen);
@@ -553,7 +553,7 @@ function finishSpiceMenuTargetDragFromEvent(event, target) {
   if (hasMenuDrop) {
     moveTargetToMenuTeamOptimisticUi(menuDropTeamId, target.id);
     moveTargetToMenuTeam(menuDropTeamId, target.id, sourceTarget).catch(() => {
-      setGlobalTransientStatus(
+      setGlobalTransientError(
         menuDropTeamId === spiceMenuNewTeamDropId
           ? "create team failed"
           : menuDropTeamId
@@ -565,7 +565,7 @@ function finishSpiceMenuTargetDragFromEvent(event, target) {
   } else if (shouldOpenDesktop) {
     flushPendingSpiceMenuRender();
     openTargetTeam(target.id, { keepMenuOpen: true }).catch(() => {
-      setGlobalTransientStatus("open team failed");
+      setGlobalTransientError("open team failed");
     });
   } else {
     flushPendingSpiceMenuRender();
