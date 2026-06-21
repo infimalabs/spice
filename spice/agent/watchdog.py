@@ -33,7 +33,11 @@ from spice.mail.acks import (
     archive_ackd_inbox_items_from_assistant_message,
     extract_task_batch_lines_from_text,
 )
-from spice.mail.inbox import write_inbox_item
+from spice.mail.inbox import (
+    discard_inbox_items,
+    notify_inbox_changed,
+    write_inbox_item,
+)
 from spice.procs import popen_new_process_group_kwargs
 from spice.sessions.util import first_text
 from spice.tasks import config as task_config
@@ -66,6 +70,7 @@ class MaximReminderGate:
     def __init__(self) -> None:
         self._compaction_index = 0
         self._sent: dict[str, int] = {}
+        self._published: dict[Path, str] = {}
 
     def note_compaction(self) -> None:
         self._compaction_index += 1
@@ -73,8 +78,16 @@ class MaximReminderGate:
     def should_publish(self, reminder_key: str) -> bool:
         return self._sent.get(reminder_key) != self._compaction_index
 
-    def mark_sent(self, reminder_key: str) -> None:
+    def mark_sent(self, reminder_key: str, path: Path) -> None:
         self._sent[reminder_key] = self._compaction_index
+        self._published[path] = reminder_key
+
+    def published_reminders(self) -> tuple[tuple[Path, str], ...]:
+        return tuple(self._published.items())
+
+    def forget_published(self, paths: set[Path]) -> None:
+        for path in paths:
+            self._published.pop(path, None)
 
 
 def spawn_supervised_agent(
@@ -133,6 +146,18 @@ def _tee_agent_stdout(
                 scanner.process_line(line)
         finally:
             scanner.close()
+            try:
+                discarded = discard_pending_maxim_reminders(repo_root, reminder_gate)
+            except Exception as exc:  # pragma: no cover - defensive supervisor logging
+                log_handle.write(f"spice maxim supervisor cleanup error: {exc}\n")
+                log_handle.flush()
+            else:
+                if discarded:
+                    keys = " ".join(path.stem for path in discarded)
+                    log_handle.write(
+                        f"spice maxim supervisor cleanup discarded inbox: {keys}\n"
+                    )
+                    log_handle.flush()
 
 
 def process_supervised_assistant_message(
@@ -395,9 +420,38 @@ def publish_maxim_hits_as_inbox(
     body = _maxim_inbox_body(violations)
     if not reminder_gate.should_publish(body):
         return []
-    paths = [write_inbox_item(repo_root, None, body)]
-    reminder_gate.mark_sent(body)
+    path = write_inbox_item(repo_root, None, body)
+    reminder_gate.mark_sent(body, path)
+    paths = [path]
     return paths
+
+
+def discard_pending_maxim_reminders(
+    repo_root: Path, reminder_gate: MaximReminderGate
+) -> list[Path]:
+    """Discard still-pending maxim reminders authored by this supervisor."""
+    items: list[dict[str, str]] = []
+    discarded: list[Path] = []
+    forget: set[Path] = set()
+    for path, expected_text in reminder_gate.published_reminders():
+        try:
+            current_text = path.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            forget.add(path)
+            continue
+        except OSError:
+            continue
+        if current_text != expected_text:
+            continue
+        items.append({"source_path": str(path)})
+        discarded.append(path)
+        forget.add(path)
+    if items:
+        discard_inbox_items(items)
+        notify_inbox_changed(repo_root)
+    if forget:
+        reminder_gate.forget_published(forget)
+    return discarded
 
 
 def watchdog_judge_statement(message_text: str) -> str:
