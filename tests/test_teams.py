@@ -127,8 +127,8 @@ def test_composer_move_carries_agent_metrics_to_destination(tmp_path):
 
     assert store.team_state(source.team_id).status == "open"
     # agent-a moved out: the source lane shows only agent-c; the destination lane
-    # gains agent-a's counters on top of agent-b's. (agent_ids order is roster
-    # order and is asserted as a set so the later position-ordering work is free.)
+    # gains agent-a's counters on top of agent-b's. The metric assertion is about
+    # membership, so it does not depend on the exact visible roster order.
     assert source_after.agent_ids == ("agent-c",)
     assert source_after.acked == 1
     assert source_after.sends == 2
@@ -355,6 +355,14 @@ def test_team_command_service_reorders_team_agents(tmp_path):
         }
     )
     team = created.snapshot.teams[0]
+    with store.connect() as connection:
+        joined_before = {
+            row["agent_id"]: row["joined_at"]
+            for row in connection.execute(
+                "SELECT agent_id, joined_at FROM memberships WHERE team_id = ?",
+                (team.team_id,),
+            )
+        }
 
     result = service.apply(
         {
@@ -366,11 +374,26 @@ def test_team_command_service_reorders_team_agents(tmp_path):
     )
 
     state = store.team_state(team.team_id)
+    with store.connect() as connection:
+        membership_rows = connection.execute(
+            "SELECT agent_id, joined_at, position FROM memberships "
+            "WHERE team_id = ? ORDER BY position",
+            (team.team_id,),
+        ).fetchall()
+
     assert result.revision > created.revision
     assert [member.agent_id for member in state.members] == [
         "agent-c",
         "agent-a",
         "agent-b",
+    ]
+    assert {row["agent_id"]: row["joined_at"] for row in membership_rows} == (
+        joined_before
+    )
+    assert [(row["agent_id"], row["position"]) for row in membership_rows] == [
+        ("agent-c", 0),
+        ("agent-a", 1),
+        ("agent-b", 2),
     ]
 
 
@@ -474,6 +497,62 @@ def test_started_renewal_preserves_predecessor_roster_slot(tmp_path):
     assert renewal.successor_identity["actorId"] == "thread:agent-b-renewed"
     assert renewal.successor_identity["targetId"] == "wt-b"
     assert renewal.successor_identity["threadId"] == "agent-b-renewed"
+
+
+def test_reorder_then_renew_preserves_successor_visible_slot(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(
+        members=["thread:agent-a", "thread:agent-b", "thread:agent-c"]
+    )
+    store.reorder_team_agents(
+        team.team_id,
+        ["thread:agent-c", "thread:agent-a", "thread:agent-b"],
+    )
+    _record_identity(store, "thread:agent-b", target_id="wt-b", thread_id="agent-b")
+    store.record_pending_renewal(
+        agent_id="thread:agent-b", ancestor_thread_id="agent-b"
+    )
+
+    store.record_started_renewal(
+        predecessor_agent_id="thread:agent-b",
+        successor_agent_id="thread:agent-b-renewed",
+        ancestor_thread_id="agent-b",
+    )
+
+    state = store.team_state(team.team_id)
+    assert [member.agent_id for member in state.members] == [
+        "thread:agent-c",
+        "thread:agent-a",
+        "thread:agent-b-renewed",
+    ]
+
+
+def test_renew_then_reorder_moves_successor_by_position(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(
+        members=["thread:agent-a", "thread:agent-b", "thread:agent-c"]
+    )
+    _record_identity(store, "thread:agent-b", target_id="wt-b", thread_id="agent-b")
+    store.record_pending_renewal(
+        agent_id="thread:agent-b", ancestor_thread_id="agent-b"
+    )
+    store.record_started_renewal(
+        predecessor_agent_id="thread:agent-b",
+        successor_agent_id="thread:agent-b-renewed",
+        ancestor_thread_id="agent-b",
+    )
+
+    store.reorder_team_agents(
+        team.team_id,
+        ["thread:agent-c", "thread:agent-b-renewed", "thread:agent-a"],
+    )
+
+    state = store.team_state(team.team_id)
+    assert [member.agent_id for member in state.members] == [
+        "thread:agent-c",
+        "thread:agent-b-renewed",
+        "thread:agent-a",
+    ]
 
 
 def test_renewal_records_model_effort_change_for_successor_identity(tmp_path):

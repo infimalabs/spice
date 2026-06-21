@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import time
 from collections.abc import Iterable, Mapping
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
@@ -238,12 +237,11 @@ class TeamRenewalStoreMixin:
             team_slot = len(member_ids)
         insert_at = max(0, min(team_slot, len(member_ids)))
         member_ids.insert(insert_at, successor_agent_id)
-        now = time.time()
         for index, member_id in enumerate(member_ids):
             connection.execute(
-                "UPDATE memberships SET joined_at = ? "
+                "UPDATE memberships SET position = ? "
                 "WHERE team_id = ? AND agent_id = ?",
-                (now + index * 0.000001, team_id, member_id),
+                (index, team_id, member_id),
             )
 
     def set_agent_renewal_request(

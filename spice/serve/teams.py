@@ -349,32 +349,40 @@ class ServeTeamStore(
                 self._rewrite_agent_metrics_locked(connection, alias_id, agent_id)
         # A renewal successor (or a placeholder promoted to its real thread)
         # arrives carrying its predecessor's id as an alias that already holds a
-        # slot in this same team. The roster is ordered by joined_at, so reusing
-        # the predecessor's joined_at keeps the successor in the ancestor's slot
-        # instead of appending it to the end; a genuinely new agent has no such
-        # slot and falls back to now.
-        inherited_joined_at: float | None = None
+        # visible slot in this same team. The roster is ordered by position, so
+        # reusing the predecessor's position keeps the successor in that slot;
+        # a genuinely new agent appends to the end and gets a fresh joined_at.
+        inherited_position: int | None = None
         for alias_id in alias_ids:
             previous_rows = connection.execute(
-                "SELECT team_id, joined_at FROM memberships WHERE agent_id = ?",
+                "SELECT team_id, position FROM memberships WHERE agent_id = ?",
                 (alias_id,),
             ).fetchall()
             for row in previous_rows:
                 if row["team_id"] not in previous_team_ids:
                     previous_team_ids.append(row["team_id"])
-                if row["team_id"] == team_id and row["joined_at"] is not None:
-                    joined_at = float(row["joined_at"])
-                    if inherited_joined_at is None or joined_at < inherited_joined_at:
-                        inherited_joined_at = joined_at
+                if row["team_id"] == team_id:
+                    position = int(row["position"] or 0)
+                    if inherited_position is None or position < inherited_position:
+                        inherited_position = position
             connection.execute(
                 "DELETE FROM memberships WHERE agent_id = ?", (alias_id,)
             )
+        if inherited_position is None:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(position) + 1, 0) AS position "
+                "FROM memberships WHERE team_id = ?",
+                (team_id,),
+            ).fetchone()
+            inherited_position = int(row["position"] or 0)
         connection.execute(
-            "INSERT INTO memberships (team_id, agent_id, joined_at) VALUES (?, ?, ?)",
+            "INSERT INTO memberships (team_id, agent_id, joined_at, position) "
+            "VALUES (?, ?, ?, ?)",
             (
                 team_id,
                 agent_id,
-                time.time() if inherited_joined_at is None else inherited_joined_at,
+                time.time(),
+                inherited_position,
             ),
         )
         self._close_empty_teams_locked(
@@ -513,7 +521,7 @@ class ServeTeamStore(
             self._require_team(connection, source_team_id)
             self._require_team(connection, destination_team_id)
             rows = connection.execute(
-                "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY joined_at",
+                "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY position",
                 (source_team_id,),
             ).fetchall()
             agent_ids = [str(row["agent_id"]) for row in rows]
@@ -546,18 +554,17 @@ class ServeTeamStore(
         with self.connect() as connection:
             self._require_team(connection, team_id)
             rows = connection.execute(
-                "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY joined_at",
+                "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY position",
                 (team_id,),
             ).fetchall()
             current_agent_ids = [str(row["agent_id"]) for row in rows]
             if set(ordered_agent_ids) != set(current_agent_ids):
                 raise SpiceError("reorder requires exactly the current team members")
-            now = time.time()
             for index, agent_id in enumerate(ordered_agent_ids):
                 connection.execute(
-                    "UPDATE memberships SET joined_at = ? "
+                    "UPDATE memberships SET position = ? "
                     "WHERE team_id = ? AND agent_id = ?",
-                    (now + index * 0.000001, team_id, agent_id),
+                    (index, team_id, agent_id),
                 )
             return self._record_event(
                 connection,
@@ -570,7 +577,7 @@ class ServeTeamStore(
         self, connection: sqlite3.Connection, team_id: str
     ) -> list[str]:
         rows = connection.execute(
-            "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY joined_at",
+            "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY position",
             (team_id,),
         ).fetchall()
         return [str(row["agent_id"]) for row in rows]
@@ -626,7 +633,7 @@ class ServeTeamStore(
     ) -> TeamState:
         row = self._require_team(connection, team_id)
         member_rows = connection.execute(
-            "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY joined_at",
+            "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY position",
             (team_id,),
         ).fetchall()
         identity_by_actor: dict[str, TeamAgentIdentity] = {}

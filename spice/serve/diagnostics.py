@@ -103,14 +103,15 @@ def _team_row(row: sqlite3.Row) -> dict[str, Any]:
 
 def _member_rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = connection.execute(
-        "SELECT team_id, agent_id, joined_at "
-        "FROM memberships ORDER BY team_id, joined_at"
+        "SELECT team_id, agent_id, joined_at, position "
+        "FROM memberships ORDER BY team_id, position"
     ).fetchall()
     return [
         {
             "teamId": str(row["team_id"]),
             "agentId": str(row["agent_id"]),
             "joinedAt": row["joined_at"],
+            "position": int(row["position"]),
         }
         for row in rows
     ]
@@ -246,9 +247,10 @@ def _render_members(members: list[dict[str, Any]]) -> list[str]:
     if not members:
         return ["  (none)"]
     return [
-        "  member {agentId} team={teamId} joinedAt={joinedAt}".format(
+        "  member {agentId} team={teamId} position={position} joinedAt={joinedAt}".format(
             agentId=member["agentId"],
             teamId=member["teamId"],
+            position=member["position"],
             joinedAt=member["joinedAt"],
         )
         for member in members

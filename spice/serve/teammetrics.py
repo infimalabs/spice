@@ -205,7 +205,7 @@ class TeamMetricStoreMixin:
             if row is not None:
                 member_rows = connection.execute(
                     "SELECT agent_id FROM memberships WHERE team_id = ? "
-                    "ORDER BY joined_at",
+                    "ORDER BY position",
                     (str(row["team_id"]),),
                 ).fetchall()
                 member_ids = tuple(str(member["agent_id"]) for member in member_rows)
