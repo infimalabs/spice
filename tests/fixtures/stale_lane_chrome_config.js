@@ -104,6 +104,51 @@ assert(
 assert(statusWrites.at(-1).pendingInboxCount === 1, "status still renders");
 
 context.renderLaneChrome(guarded, {
+  teamIdentity: { state: "none" },
+  taskFilters: [],
+  laneFilterVersion: "",
+  lifetime: "Steer",
+  statusLine: {
+    agentProcessStatus: "idle",
+    pendingInboxCount: 0,
+    pendingInboxKeys: [],
+    pendingInboxRevision: "rev-clear",
+    pendingInboxVersion: 21,
+  },
+});
+
+assert(
+  guarded.teamId === "team-a",
+  "revisionless none team identity does not clear accepted team id",
+);
+assert(
+  guarded.configRevision === currentConfigRevision,
+  "revisionless none team identity does not clear accepted config revision",
+);
+assert(
+  guarded.teamRevision === 4,
+  "revisionless none team identity does not clear accepted team revision",
+);
+assert(
+  guarded.taskFilters.join(",") === "serve.ui",
+  "revisionless none payload does not clear accepted task filters",
+);
+assert(
+  guarded.laneFilterVersion === "v11",
+  "revisionless none payload does not clear accepted filter version",
+);
+assert(
+  guarded.lifetime === "Drain",
+  "revisionless none payload does not clear accepted lifetime",
+);
+assert(lifetimeCalls.length === 0, "revisionless none lifetime is ignored");
+assert(
+  guarded.backendPendingInboxCount === 0,
+  "revisionless stale chrome still applies non-config pending state",
+);
+assert(statusWrites.at(-1).pendingInboxCount === 0, "clear status still renders");
+
+context.renderLaneChrome(guarded, {
   teamIdentity: {
     state: "member",
     teamId: "team-a",
