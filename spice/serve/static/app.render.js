@@ -62,12 +62,23 @@ function payloadHasField(payload, name) {
 
 function lanePayloadTeamConfigIsStale(lane, payload) {
   if (!payloadHasField(payload, "teamIdentity")) return false;
-  const incomingRevision = teamIdentityConfigRevision(payload.teamIdentity);
-  const currentRevision = Math.max(0, Number(lane.configRevision) || 0);
-  if (!incomingRevision || !currentRevision || incomingRevision >= currentRevision)
-    return false;
-  const incomingTeamId = teamIdentityTeamId(payload.teamIdentity);
+  const identity = payload.teamIdentity || {};
+  const incomingState = identityPayloadState(identity, "team identity");
   const currentTeamId = String(lane.teamId || "");
+  const currentConfigRevision = Math.max(0, Number(lane.configRevision) || 0);
+  const currentTeamRevision = Math.max(0, Number(lane.teamRevision) || 0);
+  if (incomingState === "none")
+    return Boolean(currentTeamId && (currentConfigRevision || currentTeamRevision));
+  if (incomingState !== "member")
+    throw new Error("invalid team identity state: " + (incomingState || "-"));
+  const incomingRevision = teamIdentityConfigRevision(identity);
+  if (
+    !incomingRevision ||
+    !currentConfigRevision ||
+    incomingRevision >= currentConfigRevision
+  )
+    return false;
+  const incomingTeamId = teamIdentityTeamId(identity);
   return Boolean(incomingTeamId && currentTeamId && incomingTeamId === currentTeamId);
 }
 
