@@ -326,12 +326,18 @@ class TeamMetricStoreMixin:
             f"FROM agent_metrics WHERE agent_id IN ({placeholders})",
             agent_ids,
         ).fetchone()
+        # Only buckets inside the sparkline window contribute, so bound the read
+        # there instead of scanning the agent's whole (unbounded) bucket history
+        # on every render. Mirror _metric_sparkline's window start exactly.
+        window_floor = _metric_bucket_start(now, bucket_seconds) - (
+            (bucket_count - 1) * bucket_seconds
+        )
         bucket_rows = connection.execute(
             "SELECT bucket_start, SUM(messages) AS messages "
             "FROM agent_metric_buckets "
-            f"WHERE agent_id IN ({placeholders}) "
+            f"WHERE agent_id IN ({placeholders}) AND bucket_start >= ? "
             "GROUP BY bucket_start ORDER BY bucket_start",
-            agent_ids,
+            (*agent_ids, window_floor),
         ).fetchall()
         return _lane_metric_summary_from_rows(
             agent_ids,
