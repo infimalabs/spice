@@ -780,13 +780,13 @@ button.primary:hover {
 }
 .lane-metric-series-line {
   fill: none;
-  stroke: var(--accent-strong);
+  stroke: var(--lane-metric-series-color, var(--accent-strong));
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
 }
 .lane-metric-series-dot {
-  fill: var(--final-accent);
+  fill: var(--lane-metric-series-color, var(--final-accent));
 }
 .lane-metric-series-empty {
   color: var(--muted);

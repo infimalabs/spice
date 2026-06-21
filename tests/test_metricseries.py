@@ -130,6 +130,82 @@ def test_metric_series_payload_returns_stable_activity_directive_and_task_points
     ]
 
 
+def test_metric_series_payload_distribution_returns_agent_share_points(tmp_path):
+    store = _store(tmp_path)
+    state = SimpleNamespace(team_store=store)
+    store.create_team(team_id="team-a", members=["agent-a", "agent-b"])
+    store.record_task_lifecycle_event(
+        "claim", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=60
+    )
+    store.record_task_lifecycle_event(
+        "phaseAdvance",
+        task_id="task-a",
+        agent_id="agent-a",
+        team_id="team-a",
+        ts=61,
+    )
+    store.record_task_lifecycle_event(
+        "claim", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=62
+    )
+    store.record_task_lifecycle_event(
+        "review", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=120
+    )
+
+    payload = metricpayload.metric_series_payload(
+        state,
+        {
+            "agentId": "agent-a",
+            "metric": "distribution",
+            "start": 0,
+            "end": 180,
+            "bucketSeconds": 60,
+        },
+    )
+
+    assert payload["metric"] == "distribution"
+    assert payload["subject"]["teamId"] == "team-a"
+    assert [
+        {
+            "bucketStart": point["bucketStart"],
+            "agentId": point["agentId"],
+            "claimed": point["claimed"],
+            "active": point["active"],
+            "work": point["work"],
+        }
+        for point in payload["points"]
+    ] == [
+        {
+            "bucketStart": 60,
+            "agentId": "agent-a",
+            "claimed": 1,
+            "active": 1,
+            "work": 2,
+        },
+        {
+            "bucketStart": 60,
+            "agentId": "agent-b",
+            "claimed": 1,
+            "active": 0,
+            "work": 1,
+        },
+        {
+            "bucketStart": 120,
+            "agentId": "agent-b",
+            "claimed": 0,
+            "active": 1,
+            "work": 1,
+        },
+    ]
+    assert [point["share"] for point in payload["points"]] == [
+        pytest.approx(2 / 3),
+        pytest.approx(1 / 3),
+        pytest.approx(1.0),
+    ]
+    assert [point["value"] for point in payload["points"]] == [
+        pytest.approx(point["share"]) for point in payload["points"]
+    ]
+
+
 def test_metric_series_payload_per_session_uses_latest_renewal_boundary(tmp_path):
     store = _store(tmp_path)
     state = SimpleNamespace(team_store=store)

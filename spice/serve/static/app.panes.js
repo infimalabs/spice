@@ -852,31 +852,78 @@ function laneMetricSeriesSvg(points) {
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "Metric series");
   const values = points.map((point) => Math.max(0, Number(point.value) || 0));
-  const max = Math.max(1, ...values);
+  const max = points.some((point) => typeof point.share !== "undefined")
+    ? 1
+    : Math.max(1, ...values);
   const width = 120;
   const height = 36;
-  const step = points.length > 1 ? width / (points.length - 1) : width;
-  const coords = values.map((value, index) => {
-    const x = points.length > 1 ? index * step : width / 2;
-    const y = height - (value / max) * (height - 4) - 2;
-    return [x, y];
-  });
-  const polyline = createSvgElement("polyline");
-  polyline.setAttribute(
-    "points",
-    coords.map(([x, y]) => x.toFixed(1) + "," + y.toFixed(1)).join(" "),
-  );
-  polyline.setAttribute("class", "lane-metric-series-line");
-  svg.append(polyline);
-  for (const [x, y] of coords) {
-    const dot = createSvgElement("circle");
-    dot.setAttribute("cx", x.toFixed(1));
-    dot.setAttribute("cy", y.toFixed(1));
-    dot.setAttribute("r", "1.8");
-    dot.setAttribute("class", "lane-metric-series-dot");
-    svg.append(dot);
+  const buckets = laneMetricSeriesBuckets(points);
+  const bucketIndex = new Map(buckets.map((bucket, index) => [bucket, index]));
+  const step = buckets.length > 1 ? width / (buckets.length - 1) : width;
+  for (const [seriesIndex, group] of laneMetricSeriesPointGroups(points).entries()) {
+    const groupEl = createSvgElement("g");
+    groupEl.setAttribute("class", "lane-metric-series-group");
+    if (group.agentId) groupEl.setAttribute("data-agent-id", group.agentId);
+    groupEl.style.setProperty(
+      "--lane-metric-series-color",
+      laneMetricSeriesColor(seriesIndex),
+    );
+    const title = createSvgElement("title");
+    title.textContent = group.agentId || "series";
+    groupEl.append(title);
+    const coords = group.points.map((point) => {
+      const bucket = laneMetricSeriesPointBucket(point);
+      const index = bucketIndex.has(bucket) ? bucketIndex.get(bucket) || 0 : 0;
+      const x = buckets.length > 1 ? index * step : width / 2;
+      const value = Math.max(0, Number(point.value) || 0);
+      const y = height - (value / max) * (height - 4) - 2;
+      return [x, y, point];
+    });
+    const polyline = createSvgElement("polyline");
+    polyline.setAttribute(
+      "points",
+      coords.map(([x, y]) => x.toFixed(1) + "," + y.toFixed(1)).join(" "),
+    );
+    polyline.setAttribute("class", "lane-metric-series-line");
+    groupEl.append(polyline);
+    for (const [x, y, point] of coords) {
+      const dot = createSvgElement("circle");
+      dot.setAttribute("cx", x.toFixed(1));
+      dot.setAttribute("cy", y.toFixed(1));
+      dot.setAttribute("r", "1.8");
+      dot.setAttribute("class", "lane-metric-series-dot");
+      if (point.agentId) dot.setAttribute("data-agent-id", String(point.agentId));
+      groupEl.append(dot);
+    }
+    svg.append(groupEl);
   }
   return svg;
+}
+
+function laneMetricSeriesPointGroups(points) {
+  const groups = new Map();
+  for (const point of points) {
+    const agentId = String(point.agentId || "");
+    const key = agentId || "series";
+    if (!groups.has(key)) groups.set(key, { agentId, points: [] });
+    groups.get(key).points.push(point);
+  }
+  return Array.from(groups.values());
+}
+
+function laneMetricSeriesBuckets(points) {
+  const buckets = new Set();
+  for (const point of points) buckets.add(laneMetricSeriesPointBucket(point));
+  return Array.from(buckets).sort((left, right) => left - right);
+}
+
+function laneMetricSeriesPointBucket(point) {
+  return Number.isFinite(Number(point.bucketStart)) ? Number(point.bucketStart) : 0;
+}
+
+function laneMetricSeriesColor(index) {
+  const colors = ["#1677ff", "#d9480f", "#2f9e44", "#ae3ec9", "#0ca678", "#f08c00"];
+  return colors[index % colors.length];
 }
 
 function createSvgElement(tagName) {
