@@ -132,6 +132,48 @@ class TeamMetricStoreMixin:
             "DELETE FROM agent_metric_cursors WHERE agent_id = ?", (old_agent_id,)
         )
 
+    def _rewrite_agent_metrics_locked(
+        self,
+        connection: sqlite3.Connection,
+        old_agent_id: str,
+        new_agent_id: str,
+    ) -> None:
+        # Renewal unifies the predecessor's id into the successor (the canonical
+        # actor), so the predecessor's per-agent counters fold into the successor
+        # and only one id survives. This is what makes lineage accumulate under
+        # the membership-derived read; see serve-team-metric-attribution.md (D9).
+        old_agent_id = _normalized_id(old_agent_id, "old_agent_id")
+        new_agent_id = _normalized_id(new_agent_id, "new_agent_id")
+        if old_agent_id == new_agent_id:
+            return
+        connection.execute(
+            "INSERT INTO agent_metrics "
+            "(agent_id, acked, sends, tool_calls, updated_at) "
+            "SELECT ?, acked, sends, tool_calls, updated_at "
+            "FROM agent_metrics WHERE agent_id = ? "
+            "ON CONFLICT(agent_id) DO UPDATE SET "
+            "acked = agent_metrics.acked + excluded.acked, "
+            "sends = agent_metrics.sends + excluded.sends, "
+            "tool_calls = agent_metrics.tool_calls + excluded.tool_calls, "
+            "updated_at = max(agent_metrics.updated_at, excluded.updated_at)",
+            (new_agent_id, old_agent_id),
+        )
+        connection.execute(
+            "INSERT INTO agent_metric_buckets "
+            "(agent_id, bucket_start, messages) "
+            "SELECT ?, bucket_start, messages "
+            "FROM agent_metric_buckets WHERE agent_id = ? "
+            "ON CONFLICT(agent_id, bucket_start) DO UPDATE SET "
+            "messages = agent_metric_buckets.messages + excluded.messages",
+            (new_agent_id, old_agent_id),
+        )
+        connection.execute(
+            "DELETE FROM agent_metrics WHERE agent_id = ?", (old_agent_id,)
+        )
+        connection.execute(
+            "DELETE FROM agent_metric_buckets WHERE agent_id = ?", (old_agent_id,)
+        )
+
     def lane_metric_summary(
         self: _TeamMetricStore,
         agent_id: str,

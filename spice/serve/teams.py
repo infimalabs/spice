@@ -326,6 +326,7 @@ class ServeTeamStore(
                 self._rewrite_agent_metric_cursors_locked(
                     connection, alias_id, agent_id
                 )
+                self._rewrite_agent_metrics_locked(connection, alias_id, agent_id)
         # A renewal successor (or a placeholder promoted to its real thread)
         # arrives carrying its predecessor's id as an alias that already holds a
         # slot in this same team. The roster is ordered by joined_at, so reusing
