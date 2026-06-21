@@ -286,7 +286,11 @@ def test_inbox_payload_rows_prompt_immediate_task_offload(tmp_path):
 
     assert INBOX_TASK_HINT_ROW in rows
     assert "capture in the moment" in INBOX_TASK_HINT_ROW
+    assert "standalone TASK line" in INBOX_TASK_HINT_ROW
     assert "TASK title=... | project=<stem.child> | acceptance=..." in (
+        INBOX_TASK_HINT_ROW
+    )
+    assert "ACK prose first and then the TASK line on its own line" in (
         INBOX_TASK_HINT_ROW
     )
     assert "same task-add batch format" in INBOX_TASK_HINT_ROW

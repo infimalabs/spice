@@ -26,11 +26,12 @@ STEER_MANUAL_CLAIM = (
     "manual task claims are exceptional and usually require explicit operator direction"
 )
 TASK_CAPTURE_IMMEDIATE = (
-    "capture operator task-creation requests immediately with TASK title=... | "
-    "project=<stem.child> | acceptance=... in an ACK or standalone assistant "
-    "message using the same task-add batch format"
+    "capture operator task-creation requests immediately with a TASK directive "
+    "that starts on its own line"
 )
 TASK_CAPTURE_NOT_ALLOCATOR = "immediate task capture is not allocator selection"
+TASK_CAPTURE_ACK_EXAMPLE = "ACK <key>: captured the request."
+TASK_CAPTURE_LINE_EXAMPLE = "TASK title=... | project=<stem.child> | acceptance=..."
 
 
 @pytest.fixture
@@ -109,6 +110,8 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert "next: review assignment pending" in done_output
     assert STEER_EXPLICIT_DIRECTION in done_output
     assert TASK_CAPTURE_IMMEDIATE in done_output
+    assert TASK_CAPTURE_ACK_EXAMPLE in done_output
+    assert TASK_CAPTURE_LINE_EXAMPLE in done_output
     assert TASK_CAPTURE_NOT_ALLOCATOR in done_output
     assert STEER_MANUAL_CLAIM in done_output
     assert "self-review only if next assigns it" in done_output
@@ -116,6 +119,8 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert "YOU ARE NOT DONE" not in shown
     assert STEER_EXPLICIT_DIRECTION in shown
     assert TASK_CAPTURE_IMMEDIATE in shown
+    assert TASK_CAPTURE_ACK_EXAMPLE in shown
+    assert TASK_CAPTURE_LINE_EXAMPLE in shown
     assert TASK_CAPTURE_NOT_ALLOCATOR in shown
     assert STEER_MANUAL_CLAIM in shown
 
@@ -129,6 +134,8 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert "next: phase boundary reached" in review_output
     assert STEER_EXPLICIT_DIRECTION in review_output
     assert TASK_CAPTURE_IMMEDIATE in review_output
+    assert TASK_CAPTURE_ACK_EXAMPLE in review_output
+    assert TASK_CAPTURE_LINE_EXAMPLE in review_output
     assert TASK_CAPTURE_NOT_ALLOCATOR in review_output
     assert STEER_MANUAL_CLAIM in review_output
 

@@ -23,6 +23,8 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "task_steer_contract=steer lanes treat allocator continuation" in text
     assert "manual task claims are exceptional" in text
     assert "task_capture_contract=operator requests to create or capture tasks" in text
+    assert "TASK directive that starts on its own line" in text
+    assert "ACK <key>: captured the request." in text
     assert "TASK title=... | project=<stem.child> | acceptance=..." in text
     assert "same key=value batch format as task add" in text
     assert "immediate task capture is not allocator selection" in text
@@ -31,6 +33,7 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "acknowledged keys clear from pending" in text
     assert "do not bury ACKs mid-message or defer them to final response" in text
     assert "task_add_public=TASK title=... | project=<stem.child>" in text
+    assert "must start on its own line" in text
     assert "same task-add batch format" in text
     assert "task_project_depth=public task project depth bounds" in text
 
