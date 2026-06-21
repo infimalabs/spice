@@ -36,6 +36,11 @@ def record_transcript_metrics_for_agent(
             if (parsed := message_reader.parse_timestamp(item.timestamp)) is not None
         ),
     )
+    # Each acknowledged key flips its sent directive to acked (no-op if that key
+    # was never recorded as sent, e.g. system steering), keeping acked <= sends.
+    for item in items:
+        for ack_key in item.ack_keys:
+            store.mark_directive_acked(ack_key)
     store.record_agent_metric_cursor(
         agent_id, source_path=source_path, offset=end_offset
     )

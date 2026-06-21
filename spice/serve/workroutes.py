@@ -98,6 +98,18 @@ def work_tree_send_response_payload(
         )
     except (RuntimeError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}, steering_submit_error_status(exc)
+    if predecessor_actor:
+        # One operator directive = one send, keyed by its inbox key. team-at-
+        # capture is the actor's current team, or the actor itself when it is in
+        # no team / a private solo team. Acked when the agent acknowledges the
+        # key (see metrics.record_transcript_metrics_for_agent).
+        capture_team = (
+            state.team_store.current_team_for_agent(predecessor_actor)
+            or predecessor_actor
+        )
+        state.team_store.record_directive_sent(
+            sent.key, agent_id=predecessor_actor, team_id=capture_team
+        )
     response_payload = _work_tree_send_result_payload(
         state,
         target,
