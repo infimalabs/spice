@@ -310,7 +310,7 @@ def _integrate_task_work(
 ) -> str:
     if _is_ancestor(repo_root, upstream_head, "HEAD"):
         return _integrate_already_contains_baseline(
-            repo_root, agent_head, upstream_head, message
+            repo_root, label, agent_head, upstream_head, message
         )
     return _integrate_advanced_baseline(
         repo_root,
@@ -323,14 +323,14 @@ def _integrate_task_work(
 
 
 def _integrate_already_contains_baseline(
-    repo_root: Path, agent_head: str, upstream_head: str, message: str
+    repo_root: Path, label: str, agent_head: str, upstream_head: str, message: str
 ) -> str:
     # The baseline contributes no new tree content, but first-parent history
     # still needs the baseline as mainline for generated merges.
     if _is_merge_with_first_parent(repo_root, "HEAD", upstream_head):
         return agent_head
     return _synthesize_and_fast_forward(
-        repo_root, agent_head, upstream_head, agent_head, message
+        repo_root, agent_head, upstream_head, agent_head, message, label=label
     )
 
 
@@ -357,7 +357,7 @@ def _integrate_advanced_baseline(
     if abort.returncode != 0:
         raise SpiceError(_fail("clear merge state", abort))
     return _synthesize_and_fast_forward(
-        repo_root, merged_tree, upstream_head, agent_head, message
+        repo_root, merged_tree, upstream_head, agent_head, message, label=label
     )
 
 
@@ -447,7 +447,12 @@ def _retry_publish_after_race(
     if abort.returncode != 0:
         raise SpiceError(_fail("clear publish-race merge state", abort))
     retry_head = _synthesize_and_fast_forward(
-        repo_root, merged_tree, fresh_upstream_head, merge_head, message
+        repo_root,
+        merged_tree,
+        fresh_upstream_head,
+        merge_head,
+        message,
+        label=label,
     )
     flagged = _conflict_marker_paths(repo_root, fresh_upstream_head, retry_head)
     if flagged:
@@ -477,14 +482,61 @@ def _synthesize_and_fast_forward(
     first_parent: str,
     second_parent: str,
     message: str,
+    *,
+    label: str,
 ) -> str:
     merge_head = _synthesize_merge(
         repo_root, treeish, first_parent, second_parent, message
     )
+    expected_head = _read(repo_root, "rev-parse", "HEAD")
     ff = _run(repo_root, "merge", "--ff-only", merge_head)
     if ff.returncode != 0:
+        if _is_head_ref_lock_race(ff):
+            raise SpiceError(
+                _head_ref_lock_race_recovery(
+                    label,
+                    expected_head=expected_head,
+                    current_head=_read(repo_root, "rev-parse", "HEAD"),
+                    completed=ff,
+                )
+            )
         raise SpiceError(_fail("advance branch to merge commit", ff))
     return merge_head
+
+
+def _is_head_ref_lock_race(completed: subprocess.CompletedProcess[str]) -> bool:
+    output = (completed.stdout + "\n" + completed.stderr).lower()
+    return (
+        "cannot lock ref" in output
+        and " is at " in output
+        and " but expected " in output
+    )
+
+
+def _head_ref_lock_race_recovery(
+    label: str,
+    *,
+    expected_head: str,
+    current_head: str,
+    completed: subprocess.CompletedProcess[str],
+) -> str:
+    lines = [
+        "HEAD moved while spice was advancing the generated task commit; "
+        "task state was not advanced",
+        "spice did not intentionally change the index or working tree after "
+        "Git reported the ref-lock race; inspect the preserved state and retry "
+        "from current HEAD",
+        "next commands:",
+        "  git status --short",
+        "  git rev-parse HEAD",
+        f'  spice task done {label} --validation "..."',
+    ]
+    if expected_head:
+        lines.append(f"expected_head={expected_head}")
+    if current_head:
+        lines.append(f"current_head={current_head}")
+    lines.extend(["git output:", _fail("advance branch to merge commit", completed)])
+    return "\n".join(lines)
 
 
 def _conflict_marker_paths(repo_root: Path, baseline: str, treeish: str) -> list[str]:

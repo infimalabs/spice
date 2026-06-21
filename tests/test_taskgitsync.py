@@ -126,6 +126,71 @@ def test_integrate_and_publish_retries_non_fast_forward_publish_race(
     assert _git(repo, "status", "--porcelain") == ""
 
 
+def test_integrate_and_publish_reports_local_head_ref_lock_race(tmp_path, monkeypatch):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    upstream_head = _git(repo, "rev-parse", "HEAD")
+
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
+    agent_head = _git(repo, "rev-parse", "HEAD")
+    real_run = gitsync._run
+    ff_attempts = 0
+    raced_head = ""
+
+    def racing_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        nonlocal ff_attempts, raced_head
+        if repo_root == repo and args[:2] == ("merge", "--ff-only"):
+            ff_attempts += 1
+            (repo / "raced.txt").write_text("local race\n", encoding="utf-8")
+            _run(repo, "git", "add", "raced.txt")
+            _run(repo, "git", "commit", "-m", "local race")
+            raced_head = _git(repo, "rev-parse", "HEAD")
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(repo), *args],
+                128,
+                stdout="",
+                stderr=(
+                    "fatal: cannot lock ref 'refs/heads/main': "
+                    f"is at {raced_head} but expected {agent_head}\n"
+                ),
+            )
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", racing_run)
+
+    with pytest.raises(SpiceError) as exc_info:
+        gitsync.integrate_and_publish(
+            "TASK-20260101T000000000006Z",
+            repo_root=repo,
+            meta={
+                "title": "Publish local head race",
+                "actor": ACTOR_A,
+                "phase": "todo",
+                "project": "task.unit",
+            },
+        )
+
+    message = str(exc_info.value)
+    assert ff_attempts == 1
+    assert "HEAD moved while spice was advancing the generated task commit" in message
+    assert "task state was not advanced" in message
+    assert "git status --short" in message
+    assert "git rev-parse HEAD" in message
+    assert 'spice task done TASK-20260101T000000000006Z --validation "..."' in message
+    assert f"expected_head={agent_head}" in message
+    assert f"current_head={raced_head}" in message
+    assert _git(repo, "rev-parse", "HEAD") == raced_head
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == (
+        upstream_head
+    )
+    assert _git(repo, "status", "--porcelain") == ""
+
+
 def test_merge_message_omits_task_description_body():
     message = gitsync._compose_message(
         "TASK-20260101T000000000003Z",
