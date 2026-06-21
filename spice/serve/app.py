@@ -75,6 +75,8 @@ TEAM_HISTORICAL_METRIC_BUCKET_COUNT = 12
 TEAM_HISTORICAL_MAX_BUCKET_COUNT = 1440
 TASK_BURNDOWN_BUCKET_COUNT = 12
 TASK_BURNDOWN_MAX_BUCKET_COUNT = 1440
+TASK_DISTRIBUTION_BUCKET_COUNT = 12
+TASK_DISTRIBUTION_MAX_BUCKET_COUNT = 1440
 WORK_TREE_API_METRIC_ACTIONS = frozenset(
     {
         "",
@@ -349,6 +351,72 @@ def task_burndown_metrics_response_payload(
     }
 
 
+def task_distribution_metrics_response_payload(
+    state: ServeState,
+    query: dict[str, list[str]],
+) -> dict[str, Any]:
+    bucket_seconds = _query_int(query, "bucketSeconds", METRIC_BUCKET_SECONDS)
+    end_time = _query_finite_float(query, "end", None, minimum=0.0)
+    if end_time is None:
+        end_time = _query_finite_float(query, "now", None, minimum=0.0)
+    if end_time is None:
+        end_time = time.time()
+    raw_start = _query_finite_float(query, "start", None, minimum=0.0)
+    if raw_start is None:
+        bucket_count = _query_int(query, "bucketCount", TASK_DISTRIBUTION_BUCKET_COUNT)
+        bucket_count = min(bucket_count, TASK_DISTRIBUTION_MAX_BUCKET_COUNT)
+        window_end = _metric_bucket_start(end_time, bucket_seconds)
+        window_start = max(0, window_end - ((bucket_count - 1) * bucket_seconds))
+    else:
+        bucket_count = _metric_bucket_count_for_range(
+            raw_start,
+            end_time,
+            bucket_seconds,
+        )
+        if bucket_count > TASK_DISTRIBUTION_MAX_BUCKET_COUNT:
+            raise SpiceError(
+                "task distribution range exceeds "
+                f"{TASK_DISTRIBUTION_MAX_BUCKET_COUNT} buckets"
+            )
+        window_start = _metric_bucket_start(raw_start, bucket_seconds)
+        window_end = _metric_bucket_start(end_time, bucket_seconds)
+    agent_ids = _query_values(query, "agentId")
+    team_ids = _query_values(query, "teamId")
+    series = state.team_store.task_distribution_series(
+        agent_ids,
+        team_ids=team_ids,
+        start=window_start,
+        end=window_end,
+        bucket_seconds=bucket_seconds,
+    )
+    points = [
+        {
+            "bucketStart": point.bucket_start,
+            "agentId": point.agent_id,
+            "claimed": point.claimed,
+            "active": point.active,
+            "work": point.claimed + point.active,
+            "share": point.share,
+        }
+        for point in series
+    ]
+    claimed = sum(point.claimed for point in series)
+    active = sum(point.active for point in series)
+    return {
+        "ok": True,
+        "lens": "task-distribution",
+        "agentIds": list(agent_ids),
+        "teamIds": list(team_ids),
+        "claimed": claimed,
+        "active": active,
+        "work": claimed + active,
+        "bucketSeconds": bucket_seconds,
+        "bucketCount": bucket_count,
+        "range": {"start": window_start, "end": window_end},
+        "series": points,
+    }
+
+
 def lane_watch_paths_for_target(
     state: ServeState,
     target: WorktreeTarget,
@@ -475,6 +543,7 @@ def serve_metrics_path_template(path: str) -> str:
         "/metrics",
         "/api/live/bus",
         "/api/metrics/tasks/burndown",
+        "/api/metrics/tasks/distribution",
         "/api/work/trees",
         "/api/teams",
         "/api/teams/command",
@@ -598,6 +667,9 @@ class _ServeHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/metrics/tasks/burndown":
             self._get_task_burndown_metrics(parsed.query)
             return
+        if parsed.path == "/api/metrics/tasks/distribution":
+            self._get_task_distribution_metrics(parsed.query)
+            return
         team_metrics_team_id = _team_metrics_api_route(parsed.path)
         if team_metrics_team_id is not None:
             self._get_team_metrics(team_metrics_team_id, parsed.query)
@@ -640,6 +712,17 @@ class _ServeHandler(BaseHTTPRequestHandler):
     def _get_task_burndown_metrics(self, query_string: str) -> None:
         try:
             payload = task_burndown_metrics_response_payload(
+                self.state,
+                parse_qs(query_string),
+            )
+        except SpiceError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(payload)
+
+    def _get_task_distribution_metrics(self, query_string: str) -> None:
+        try:
+            payload = task_distribution_metrics_response_payload(
                 self.state,
                 parse_qs(query_string),
             )
