@@ -106,12 +106,16 @@ class DirectiveStatsStoreMixin:
             return True
 
     def _prune_directive_history_locked(
-        self, connection: sqlite3.Connection, *, now: float
+        self,
+        connection: sqlite3.Connection,
+        *,
+        now: float,
+        retention_seconds: int = METRIC_HISTORY_RETENTION_SECONDS,
     ) -> None:
         # Drop directive ROWS past the retention horizon; the running totals
         # (directive_totals) are the durable aggregate and stay. A later ack of a
         # pruned key is a harmless no-op (the send was already counted).
-        floor = float(now) - METRIC_HISTORY_RETENTION_SECONDS
+        floor = float(now) - max(0, int(retention_seconds))
         connection.execute("DELETE FROM directives WHERE sent_at < ?", (floor,))
 
     def _rewrite_directive_stats_locked(
