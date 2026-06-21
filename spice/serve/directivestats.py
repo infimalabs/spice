@@ -19,7 +19,7 @@ import sqlite3
 import time
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Iterable, Protocol
+from typing import Iterable, Mapping, Protocol
 
 from spice.serve.teamids import normalized_id as _normalized_id
 from spice.serve.teamschema import METRIC_HISTORY_RETENTION_SECONDS
@@ -35,7 +35,11 @@ class _DirectiveStatsStore(Protocol):
     def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
 
     def _directive_totals_for_agents_locked(
-        self, connection: sqlite3.Connection, agent_ids: Iterable[str]
+        self,
+        connection: sqlite3.Connection,
+        agent_ids: Iterable[str],
+        *,
+        start_time_by_agent: Mapping[str, float] | None = None,
     ) -> DirectiveTotals: ...
 
 
@@ -153,10 +157,15 @@ class DirectiveStatsStoreMixin:
         self,
         connection: sqlite3.Connection,
         agent_ids: Iterable[str],
+        *,
+        start_time_by_agent: Mapping[str, float] | None = None,
     ) -> DirectiveTotals:
         ids = tuple(dict.fromkeys(str(agent_id) for agent_id in agent_ids if agent_id))
         if not ids:
             return DirectiveTotals(sends=0, acked=0)
+        start_times = _directive_start_times(ids, start_time_by_agent)
+        if start_times:
+            return _directive_totals_since_locked(connection, ids, start_times)
         placeholders = ",".join("?" for _ in ids)
         row = connection.execute(
             "SELECT COALESCE(SUM(sends), 0) AS sends, "
@@ -168,3 +177,39 @@ class DirectiveStatsStoreMixin:
             sends=int(row["sends"] or 0) if row else 0,
             acked=int(row["acked"] or 0) if row else 0,
         )
+
+
+def _directive_start_times(
+    agent_ids: tuple[str, ...],
+    start_time_by_agent: Mapping[str, float] | None,
+) -> dict[str, float]:
+    if not start_time_by_agent:
+        return {}
+    return {
+        agent_id: max(0.0, float(start_time_by_agent[agent_id]))
+        for agent_id in agent_ids
+        if agent_id in start_time_by_agent
+    }
+
+
+def _directive_totals_since_locked(
+    connection: sqlite3.Connection,
+    agent_ids: tuple[str, ...],
+    start_time_by_agent: Mapping[str, float],
+) -> DirectiveTotals:
+    placeholders = ",".join("?" for _ in agent_ids)
+    rows = connection.execute(
+        "SELECT agent_id, sent_at, acked FROM directives "
+        f"WHERE agent_id IN ({placeholders}) ORDER BY sent_at",
+        agent_ids,
+    ).fetchall()
+    sends = 0
+    acked = 0
+    for row in rows:
+        agent_id = str(row["agent_id"])
+        sent_at = float(row["sent_at"] or 0.0)
+        if sent_at < start_time_by_agent.get(agent_id, 0.0):
+            continue
+        sends += 1
+        acked += 1 if int(row["acked"] or 0) else 0
+    return DirectiveTotals(sends=sends, acked=acked)
