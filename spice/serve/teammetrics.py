@@ -508,7 +508,7 @@ class TeamMetricStoreMixin:
         end: float,
         bucket_seconds: int = METRIC_BUCKET_SECONDS,
     ) -> tuple[TaskDistributionSeriesPoint, ...]:
-        """Per-agent share of claimed/active task-flow movement by bucket."""
+        """Per-agent share of claimed/active in-flight tasks by bucket."""
         agents = _normalized_ids(agent_ids, "agent_id")
         teams = _normalized_ids(team_ids, "team_id")
         if not agents and not teams:
@@ -516,15 +516,10 @@ class TeamMetricStoreMixin:
         bucket_seconds = max(1, int(bucket_seconds))
         start_time = max(0.0, float(start))
         end_time = max(start_time, float(end))
-        bucket_expr = (
-            f"(CAST(ts AS INTEGER) - (CAST(ts AS INTEGER) % {bucket_seconds}))"
-        )
-        filters = [
-            "ts >= ?",
-            "ts <= ?",
-            "kind IN ('claim', 'phaseAdvance', 'review')",
-        ]
-        params: list[object] = [start_time, end_time]
+        start_bucket = _metric_bucket_start(start_time, bucket_seconds)
+        end_bucket = _metric_bucket_start(end_time, bucket_seconds)
+        filters = ["ts <= ?"]
+        params: list[object] = [end_time]
         if agents:
             filters.append(f"agent_id IN ({_placeholders(agents)})")
             params.extend(agents)
@@ -533,39 +528,51 @@ class TeamMetricStoreMixin:
             params.extend(teams)
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT "
-                f"{bucket_expr} AS bucket_start, "
-                "agent_id, "
-                "SUM(CASE WHEN kind = 'claim' THEN 1 ELSE 0 END) AS claimed, "
-                "SUM(CASE WHEN kind IN ('phaseAdvance', 'review') "
-                "THEN 1 ELSE 0 END) AS active "
+                "SELECT ts, kind, task_id, agent_id "
                 "FROM task_events "
                 f"WHERE {' AND '.join(filters)} "
-                "GROUP BY bucket_start, agent_id ORDER BY bucket_start, agent_id",
+                "ORDER BY ts, rowid",
                 params,
             ).fetchall()
-        totals_by_bucket: Counter[int] = Counter()
-        parsed_rows: list[tuple[int, str, int, int]] = []
+        task_states: dict[str, tuple[str, str]] = {}
+        events_by_bucket: dict[int, list[sqlite3.Row]] = {}
         for row in rows:
-            bucket_start = int(row["bucket_start"])
-            agent_id = str(row["agent_id"])
-            claimed = int(row["claimed"] or 0)
-            active = int(row["active"] or 0)
-            work = claimed + active
-            if work <= 0:
-                continue
-            parsed_rows.append((bucket_start, agent_id, claimed, active))
-            totals_by_bucket[bucket_start] += work
-        return tuple(
-            TaskDistributionSeriesPoint(
-                bucket_start=bucket_start,
-                agent_id=agent_id,
-                claimed=claimed,
-                active=active,
-                share=(claimed + active) / totals_by_bucket[bucket_start],
+            event_bucket = _metric_bucket_start(float(row["ts"] or 0.0), bucket_seconds)
+            if event_bucket < start_bucket:
+                _apply_task_distribution_event(task_states, row)
+            else:
+                events_by_bucket.setdefault(event_bucket, []).append(row)
+        points: list[TaskDistributionSeriesPoint] = []
+        bucket_start = start_bucket
+        while bucket_start <= end_bucket:
+            for row in events_by_bucket.get(bucket_start, ()):
+                _apply_task_distribution_event(task_states, row)
+            counts_by_agent: dict[str, list[int]] = {}
+            for agent_id, state in task_states.values():
+                counts = counts_by_agent.setdefault(agent_id, [0, 0])
+                if state == "claimed":
+                    counts[0] += 1
+                else:
+                    counts[1] += 1
+            total_work = sum(
+                claimed + active for claimed, active in counts_by_agent.values()
             )
-            for bucket_start, agent_id, claimed, active in parsed_rows
-        )
+            for agent_id in sorted(counts_by_agent):
+                claimed, active = counts_by_agent[agent_id]
+                work = claimed + active
+                if work <= 0:
+                    continue
+                points.append(
+                    TaskDistributionSeriesPoint(
+                        bucket_start=bucket_start,
+                        agent_id=agent_id,
+                        claimed=claimed,
+                        active=active,
+                        share=work / total_work,
+                    )
+                )
+            bucket_start += bucket_seconds
+        return tuple(points)
 
     def task_stall_states(
         self: _TeamMetricStore,
@@ -795,6 +802,19 @@ def _task_event_kind(value: str) -> str:
         allowed = ", ".join(sorted(TASK_EVENT_KINDS))
         raise SpiceError(f"task event kind must be one of {allowed}: {kind!r}")
     return kind
+
+
+def _apply_task_distribution_event(
+    task_states: dict[str, tuple[str, str]], row: sqlite3.Row
+) -> None:
+    task_id = str(row["task_id"])
+    kind = str(row["kind"])
+    if kind == "claim":
+        task_states[task_id] = (str(row["agent_id"]), "claimed")
+    elif kind in {"phaseAdvance", "review"}:
+        task_states[task_id] = (str(row["agent_id"]), "active")
+    elif kind in {"complete", "drain"}:
+        task_states.pop(task_id, None)
 
 
 def _placeholders(values: tuple[str, ...]) -> str:
