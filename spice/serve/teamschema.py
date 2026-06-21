@@ -130,9 +130,10 @@ CREATE TABLE IF NOT EXISTS team_agent_metric_buckets (
     PRIMARY KEY (team_id, agent_id, bucket_start)
 );
 CREATE TABLE IF NOT EXISTS agent_metric_cursors (
-    agent_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
     source_path TEXT NOT NULL,
     offset INTEGER NOT NULL,
-    updated_at REAL NOT NULL
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (agent_id, source_path)
 );
 """

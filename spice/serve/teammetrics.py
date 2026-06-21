@@ -123,11 +123,11 @@ class TeamMetricStoreMixin:
         agent_id = _normalized_id(agent_id, "agent_id")
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT source_path, offset FROM agent_metric_cursors "
-                "WHERE agent_id = ?",
-                (agent_id,),
+                "SELECT offset FROM agent_metric_cursors "
+                "WHERE agent_id = ? AND source_path = ?",
+                (agent_id, source_path),
             ).fetchone()
-        if row is None or str(row["source_path"]) != source_path:
+        if row is None:
             return 0
         return max(0, int(row["offset"] or 0))
 
@@ -139,12 +139,35 @@ class TeamMetricStoreMixin:
             connection.execute(
                 "INSERT INTO agent_metric_cursors "
                 "(agent_id, source_path, offset, updated_at) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(agent_id) DO UPDATE SET "
-                "source_path = excluded.source_path, "
+                "ON CONFLICT(agent_id, source_path) DO UPDATE SET "
                 "offset = excluded.offset, "
                 "updated_at = excluded.updated_at",
                 (agent_id, source_path, max(0, int(offset)), time.time()),
             )
+
+    def _rewrite_agent_metric_cursors_locked(
+        self,
+        connection: sqlite3.Connection,
+        old_agent_id: str,
+        new_agent_id: str,
+    ) -> None:
+        old_agent_id = _normalized_id(old_agent_id, "old_agent_id")
+        new_agent_id = _normalized_id(new_agent_id, "new_agent_id")
+        if old_agent_id == new_agent_id:
+            return
+        connection.execute(
+            "INSERT INTO agent_metric_cursors "
+            "(agent_id, source_path, offset, updated_at) "
+            "SELECT ?, source_path, offset, updated_at "
+            "FROM agent_metric_cursors WHERE agent_id = ? "
+            "ON CONFLICT(agent_id, source_path) DO UPDATE SET "
+            "offset = max(agent_metric_cursors.offset, excluded.offset), "
+            "updated_at = max(agent_metric_cursors.updated_at, excluded.updated_at)",
+            (new_agent_id, old_agent_id),
+        )
+        connection.execute(
+            "DELETE FROM agent_metric_cursors WHERE agent_id = ?", (old_agent_id,)
+        )
 
     def lane_metric_summary(
         self: _TeamMetricStore,

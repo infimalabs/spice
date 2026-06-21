@@ -66,6 +66,73 @@ def test_transcript_metric_ingestion_advances_cursor_without_double_count(tmp_pa
     assert sum(summary.sparkline) == 3
 
 
+def test_transcript_metric_cursors_follow_alias_rewrite_per_source_path(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(members=["thread:predecessor"])
+    predecessor_rollout = tmp_path / "predecessor.jsonl"
+    successor_rollout = tmp_path / "successor.jsonl"
+    _write_rollout(
+        predecessor_rollout,
+        [
+            _assistant_entry(
+                "2026-06-10T12:00:00.000000Z",
+                "ACK 20260610T120000000001Z: predecessor",
+            ),
+            _presence_entry("2026-06-10T12:00:01.000000Z", "function_call"),
+        ],
+    )
+    _write_rollout(
+        successor_rollout,
+        [
+            _assistant_entry(
+                "2026-06-10T12:01:00.000000Z",
+                "ACK 20260610T120100000001Z: successor",
+            ),
+            _presence_entry("2026-06-10T12:01:01.000000Z", "custom_tool_call"),
+        ],
+    )
+
+    record_transcript_metrics_for_agent(
+        store, agent_id="thread:predecessor", transcript_path=predecessor_rollout
+    )
+    store.assign_agent(
+        team.team_id,
+        "thread:successor",
+        aliases=["thread:predecessor"],
+    )
+    record_transcript_metrics_for_agent(
+        store, agent_id="thread:successor", transcript_path=predecessor_rollout
+    )
+    record_transcript_metrics_for_agent(
+        store, agent_id="thread:successor", transcript_path=successor_rollout
+    )
+    record_transcript_metrics_for_agent(
+        store, agent_id="thread:successor", transcript_path=successor_rollout
+    )
+
+    now = datetime(2026, 6, 10, 12, 1, 1, tzinfo=UTC).timestamp()
+    summary = store.lane_metric_summary("thread:successor", bucket_count=12, now=now)
+    with store.connect() as connection:
+        cursor_rows = connection.execute(
+            "SELECT agent_id, source_path, offset FROM agent_metric_cursors "
+            "ORDER BY source_path"
+        ).fetchall()
+
+    assert summary.acked == 2
+    assert summary.tool_calls == 2
+    assert sum(summary.sparkline) == 4
+    assert [
+        (row["agent_id"], row["source_path"], row["offset"]) for row in cursor_rows
+    ] == [
+        (
+            "thread:successor",
+            str(predecessor_rollout),
+            predecessor_rollout.stat().st_size,
+        ),
+        ("thread:successor", str(successor_rollout), successor_rollout.stat().st_size),
+    ]
+
+
 def test_lane_metric_sparkline_ages_old_buckets_out(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     store.record_agent_metric_delta(
