@@ -3,7 +3,7 @@
 Requests carry a `requestId` the response echoes; pushes carry none. Verbs:
 `bus.ping`, `targets.refresh`, `teams.refresh`, `teams.command`,
 `lane.subscribe`, `lane.configure`, `lane.unsubscribe`, `lane.refresh`,
-`lane.history`, `lane.send`, `lane.taskDrain`. A subscription tails the
+`lane.history`, `lane.send`, `lane.taskDrain`, `metrics.series`. A subscription tails the
 agent's transcript and pushes `lane.payload` frames the moment new lines
 land — kqueue watches the open file descriptor on macOS (FSEvents misses
 appends through a held-open handle), watchfiles covers Linux/Windows.
@@ -59,6 +59,7 @@ class LiveBusCallbacks:
     task_drain_payload: Callable[[Any, dict[str, Any]], tuple[dict[str, Any], Any]]
     team_snapshot_payload: Callable[[int | None], dict[str, Any]]
     team_command_payload: Callable[[dict[str, Any]], tuple[dict[str, Any], Any]]
+    metric_series_payload: Callable[[dict[str, Any]], dict[str, Any]]
     thread_id: Callable[[Any], str | None]
     transcript_resolution: Callable[[str], TranscriptResolution | None]
     lane_watch_paths: Callable[
@@ -131,6 +132,7 @@ class LiveBusSession:
                 "lane.history": self._handle_lane_history,
                 "lane.send": self._handle_lane_send,
                 "lane.taskDrain": self._handle_lane_task_drain,
+                "metrics.series": self._handle_metrics_series,
             }.get(kind)
             if handler is None:
                 self._reply(
@@ -254,6 +256,10 @@ class LiveBusSession:
             target, message.get("payload") or {}
         )
         self._reply(message, {"type": "lane.taskDrainResult", "result": result})
+
+    def _handle_metrics_series(self, message: dict[str, Any]) -> None:
+        result = self.callbacks.metric_series_payload(message.get("query") or {})
+        self._reply(message, {"type": "metrics.seriesResult", "result": result})
 
     # ---- watchers ------------------------------------------------------
 

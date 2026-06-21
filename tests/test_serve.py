@@ -1133,16 +1133,8 @@ def test_status_line_ignores_stale_prompt_skill_path(tmp_path, monkeypatch):
     assert line["rolloutStatus"] == "ok"
 
 
-def test_livebus_routes_send_task_drain_team_command_and_history_requests():
-    target = _BusTarget(id="lane")
-    connection = _Connection()
-    calls: list[tuple[str, dict[str, Any]]] = []
-
-    def messages_payload(_target, **kwargs):
-        calls.append(("messages", kwargs))
-        return {"messages": [{"key": "m1"}], "statusLine": {}}
-
-    callbacks = LiveBusCallbacks(
+def _route_test_livebus_callbacks(target, calls, messages_payload):
+    return LiveBusCallbacks(
         resolve_target=lambda selector: target if selector == target.id else None,
         work_trees_payload=lambda: {"workTrees": []},
         messages_payload=messages_payload,
@@ -1162,6 +1154,7 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
             calls.append(("teamCommand", payload)) or {"ok": True, "revision": 2},
             HTTPStatus.OK,
         ),
+        metric_series_payload=lambda _query: {"ok": True, "points": []},
         thread_id=lambda _target: "thread",
         transcript_resolution=lambda _thread_id: _transcript_resolution(
             "thread", Path("rollout.jsonl")
@@ -1169,6 +1162,18 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
         lane_watch_paths=lambda *_args: (),
         lane_signature=lambda *_args: (),
     )
+
+
+def test_livebus_routes_send_task_drain_team_command_and_history_requests():
+    target = _BusTarget(id="lane")
+    connection = _Connection()
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def messages_payload(_target, **kwargs):
+        calls.append(("messages", kwargs))
+        return {"messages": [{"key": "m1"}], "statusLine": {}}
+
+    callbacks = _route_test_livebus_callbacks(target, calls, messages_payload)
     session = LiveBusSession(connection, callbacks)
 
     session._handle_lane_send(
@@ -1202,7 +1207,6 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
             "query": {"limit": 9, "before": "oldest", "threadId": "thread"},
         }
     )
-
     assert connection.sent == [
         {
             "type": "lane.sendResult",
@@ -1234,6 +1238,41 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
             {"limit": 9, "before": "oldest", "expected_thread_id": "thread"},
         ),
     ]
+
+
+def test_livebus_routes_metric_series_requests():
+    query = {"metric": "activity", "agentId": "agent-a", "start": 0, "end": 60}
+    connection = _Connection()
+    calls: list[dict[str, Any]] = []
+    callbacks = LiveBusCallbacks(
+        resolve_target=lambda _selector: None,
+        work_trees_payload=lambda: {"workTrees": []},
+        messages_payload=lambda _target, **_kwargs: {},
+        send_payload=lambda _target, _payload: ({}, HTTPStatus.OK),
+        task_drain_payload=lambda _target, _payload: ({}, HTTPStatus.OK),
+        team_snapshot_payload=lambda _since_revision: {},
+        team_command_payload=lambda _payload: ({}, HTTPStatus.OK),
+        metric_series_payload=lambda payload: (
+            calls.append(payload) or {"ok": True, "points": []}
+        ),
+        thread_id=lambda _target: "thread",
+        transcript_resolution=lambda _thread_id: None,
+        lane_watch_paths=lambda *_args: (),
+        lane_signature=lambda *_args: (),
+    )
+
+    LiveBusSession(connection, callbacks)._handle_metrics_series(
+        {"type": "metrics.series", "requestId": "metrics-1", "query": query}
+    )
+
+    assert connection.sent == [
+        {
+            "type": "metrics.seriesResult",
+            "result": {"ok": True, "points": []},
+            "requestId": "metrics-1",
+        }
+    ]
+    assert calls == [query]
 
 
 def test_index_links_and_serves_packaged_favicon():

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from spice.serve import metricpayload
 from spice.serve.teammetrics import (
     MetricSeriesPoint,
     TaskLifecycleSeriesPoint,
@@ -45,6 +48,62 @@ def test_activity_series_sums_across_agents(tmp_path):
     series = store.agent_activity_series(["agent-a", "agent-b"], start=0, end=180)
 
     assert series == (MetricSeriesPoint(60, 2), MetricSeriesPoint(120, 1))
+
+
+def test_metric_series_payload_returns_stable_activity_directive_and_task_points(
+    tmp_path,
+):
+    store = _store(tmp_path)
+    state = SimpleNamespace(team_store=store)
+    team = store.create_team(team_id="team-a", members=["agent-a"])
+    store.record_agent_metric_delta("agent-a", message_timestamps=[60, 120])
+    store.record_directive_sent(
+        "dir-1", agent_id="agent-a", team_id="team-a", sent_at=60
+    )
+    store.mark_directive_acked("dir-1", acked_at=120)
+    store.record_task_lifecycle_event(
+        "complete", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=180
+    )
+
+    activity = metricpayload.metric_series_payload(
+        state,
+        {"agentId": "agent-a", "metric": "activity", "start": 0, "end": 180},
+    )
+    sends = metricpayload.metric_series_payload(
+        state,
+        {"agentId": "agent-a", "metric": "sends", "start": 0, "end": 180},
+    )
+    acks = metricpayload.metric_series_payload(
+        state,
+        {"agentId": "agent-a", "metric": "acks", "start": 0, "end": 180},
+    )
+    team_sends = metricpayload.metric_series_payload(
+        state,
+        {"teamId": team.team_id, "metric": "sends", "start": 0, "end": 180},
+    )
+    burndown = metricpayload.metric_series_payload(
+        state,
+        {"agentId": "agent-a", "metric": "burndown", "start": 0, "end": 180},
+    )
+
+    assert activity["points"] == [
+        {"bucketStart": 60, "value": 1, "messages": 1},
+        {"bucketStart": 120, "value": 1, "messages": 1},
+    ]
+    assert sends["points"] == [{"bucketStart": 60, "value": 1, "sends": 1}]
+    assert acks["points"] == [{"bucketStart": 120, "value": 1, "acks": 1}]
+    assert team_sends["subject"]["teamId"] == team.team_id
+    assert team_sends["points"] == sends["points"]
+    assert burndown["points"] == [
+        {
+            "bucketStart": 180,
+            "value": 1,
+            "claimed": 0,
+            "active": 0,
+            "completed": 1,
+            "drained": 0,
+        }
+    ]
 
 
 def test_task_lifecycle_series_is_stable_full_fidelity_and_range_queryable(tmp_path):
