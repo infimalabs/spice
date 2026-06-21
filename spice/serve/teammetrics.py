@@ -46,6 +46,15 @@ class TaskLifecycleSeriesPoint:
 
 
 @dataclass(frozen=True)
+class TaskDistributionSeriesPoint:
+    bucket_start: int
+    agent_id: str
+    claimed: int
+    active: int
+    share: float
+
+
+@dataclass(frozen=True)
 class TaskStallState:
     task_id: str
     agent_id: str
@@ -471,6 +480,74 @@ class TeamMetricStoreMixin:
                 drained=int(row["drained"] or 0),
             )
             for row in rows
+        )
+
+    def task_distribution_series(
+        self: _TeamMetricStore,
+        agent_ids: Iterable[str] = (),
+        *,
+        team_ids: Iterable[str] = (),
+        start: float,
+        end: float,
+        bucket_seconds: int = METRIC_BUCKET_SECONDS,
+    ) -> tuple[TaskDistributionSeriesPoint, ...]:
+        """Per-agent share of claimed/active task-flow movement by bucket."""
+        agents = _normalized_ids(agent_ids, "agent_id")
+        teams = _normalized_ids(team_ids, "team_id")
+        if not agents and not teams:
+            return ()
+        bucket_seconds = max(1, int(bucket_seconds))
+        start_time = max(0.0, float(start))
+        end_time = max(start_time, float(end))
+        bucket_expr = (
+            f"(CAST(ts AS INTEGER) - (CAST(ts AS INTEGER) % {bucket_seconds}))"
+        )
+        filters = [
+            "ts >= ?",
+            "ts <= ?",
+            "kind IN ('claim', 'phaseAdvance', 'review')",
+        ]
+        params: list[object] = [start_time, end_time]
+        if agents:
+            filters.append(f"agent_id IN ({_placeholders(agents)})")
+            params.extend(agents)
+        if teams:
+            filters.append(f"team_id IN ({_placeholders(teams)})")
+            params.extend(teams)
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT "
+                f"{bucket_expr} AS bucket_start, "
+                "agent_id, "
+                "SUM(CASE WHEN kind = 'claim' THEN 1 ELSE 0 END) AS claimed, "
+                "SUM(CASE WHEN kind IN ('phaseAdvance', 'review') "
+                "THEN 1 ELSE 0 END) AS active "
+                "FROM task_events "
+                f"WHERE {' AND '.join(filters)} "
+                "GROUP BY bucket_start, agent_id ORDER BY bucket_start, agent_id",
+                params,
+            ).fetchall()
+        totals_by_bucket: Counter[int] = Counter()
+        parsed_rows: list[tuple[int, str, int, int]] = []
+        for row in rows:
+            bucket_start = int(row["bucket_start"])
+            agent_id = str(row["agent_id"])
+            claimed = int(row["claimed"] or 0)
+            active = int(row["active"] or 0)
+            work = claimed + active
+            if work <= 0:
+                continue
+            parsed_rows.append((bucket_start, agent_id, claimed, active))
+            totals_by_bucket[bucket_start] += work
+        return tuple(
+            TaskDistributionSeriesPoint(
+                bucket_start=bucket_start,
+                agent_id=agent_id,
+                claimed=claimed,
+                active=active,
+                share=(claimed + active) / totals_by_bucket[bucket_start],
+            )
+            for bucket_start, agent_id, claimed, active in parsed_rows
         )
 
     def task_stall_states(

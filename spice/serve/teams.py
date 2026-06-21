@@ -43,6 +43,7 @@ from spice.serve.teammetrics import (
     METRIC_BUCKET_SECONDS as METRIC_BUCKET_SECONDS,
     LaneMetricSummary as LaneMetricSummary,
     MetricSeriesPoint as MetricSeriesPoint,
+    TaskDistributionSeriesPoint as TaskDistributionSeriesPoint,
     TaskLifecycleSeriesPoint as TaskLifecycleSeriesPoint,
     TaskStallState as TaskStallState,
     TeamHistoricalMetricSummary as TeamHistoricalMetricSummary,

@@ -403,6 +403,10 @@ def test_serve_metrics_path_templates_bound_cardinality():
         == "/api/metrics/tasks/burndown"
     )
     assert (
+        app.serve_metrics_path_template("/api/metrics/tasks/distribution?teamId=team-a")
+        == "/api/metrics/tasks/distribution"
+    )
+    assert (
         app.serve_metrics_path_template("/api/work/trees/main/agent/status")
         == "/api/work/trees/{id}/agent/status"
     )
@@ -602,6 +606,121 @@ def test_task_burndown_metrics_endpoint_rejects_oversized_ranges(tmp_path):
     assert handler.status == HTTPStatus.BAD_REQUEST
     assert payload["ok"] is False
     assert "exceeds" in payload["error"]
+
+
+def test_task_distribution_metrics_endpoint_projects_per_agent_share(tmp_path):
+    repo = _repo(tmp_path)
+    state = _serve_state(tmp_path, _target(repo))
+    store = state.team_store
+    store.record_task_lifecycle_event(
+        "claim", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=60
+    )
+    store.record_task_lifecycle_event(
+        "phaseAdvance",
+        task_id="task-a",
+        agent_id="agent-a",
+        team_id="team-a",
+        ts=61,
+    )
+    store.record_task_lifecycle_event(
+        "claim", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=62
+    )
+    store.record_task_lifecycle_event(
+        "review", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=120
+    )
+    store.record_task_lifecycle_event(
+        "claim", task_id="task-c", agent_id="agent-a", team_id="team-b", ts=180
+    )
+    store.record_task_lifecycle_event(
+        "complete", task_id="task-a", agent_id="agent-a", team_id="team-a", ts=180
+    )
+
+    team_payload = app.task_distribution_metrics_response_payload(
+        state,
+        {
+            "teamId": ["team-a"],
+            "start": ["0"],
+            "end": ["180"],
+            "bucketSeconds": ["60"],
+        },
+    )
+    combined_payload = app.task_distribution_metrics_response_payload(
+        state,
+        {
+            "agentId": ["agent-a"],
+            "teamId": ["team-a"],
+            "start": ["0"],
+            "end": ["180"],
+            "bucketSeconds": ["60"],
+        },
+    )
+
+    assert team_payload["ok"] is True
+    assert team_payload["lens"] == "task-distribution"
+    assert team_payload["teamIds"] == ["team-a"]
+    assert team_payload["agentIds"] == []
+    assert team_payload["claimed"] == 2
+    assert team_payload["active"] == 2
+    assert team_payload["work"] == 4
+    assert team_payload["range"] == {"start": 0, "end": 180}
+    assert team_payload["bucketCount"] == 4
+    assert [
+        {
+            key: point[key]
+            for key in ("bucketStart", "agentId", "claimed", "active", "work")
+        }
+        for point in team_payload["series"]
+    ] == [
+        {
+            "bucketStart": 60,
+            "agentId": "agent-a",
+            "claimed": 1,
+            "active": 1,
+            "work": 2,
+        },
+        {
+            "bucketStart": 60,
+            "agentId": "agent-b",
+            "claimed": 1,
+            "active": 0,
+            "work": 1,
+        },
+        {
+            "bucketStart": 120,
+            "agentId": "agent-b",
+            "claimed": 0,
+            "active": 1,
+            "work": 1,
+        },
+    ]
+    assert team_payload["series"][0]["share"] == pytest.approx(2 / 3)
+    assert team_payload["series"][1]["share"] == pytest.approx(1 / 3)
+    assert team_payload["series"][2]["share"] == pytest.approx(1.0)
+    assert combined_payload["claimed"] == 1
+    assert combined_payload["active"] == 1
+    assert combined_payload["work"] == 2
+    assert combined_payload["series"] == [
+        {
+            "bucketStart": 60,
+            "agentId": "agent-a",
+            "claimed": 1,
+            "active": 1,
+            "work": 2,
+            "share": 1.0,
+        }
+    ]
+
+    handler = _ImageHandler(state)
+    app._ServeHandler._get_task_distribution_metrics(
+        handler,
+        "teamId=team-a&start=0&end=180&bucketSeconds=60",
+    )
+    endpoint_payload = json.loads(handler.body.getvalue())
+
+    assert handler.status == HTTPStatus.OK
+    assert endpoint_payload["lens"] == "task-distribution"
+    assert endpoint_payload["claimed"] == 2
+    assert endpoint_payload["active"] == 2
 
 
 def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
