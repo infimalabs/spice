@@ -13,12 +13,15 @@ from spice.serve.teams import (
     TeamConfig,
 )
 
-COMPOSER_MOVE_SOURCE_ACKED_TOTAL = 11
-COMPOSER_MOVE_SOURCE_SEND_TOTAL = 22
-COMPOSER_MOVE_SOURCE_TOOL_CALL_TOTAL = 33
 TEAM_MERGE_ACKED_TOTAL = 14
 TEAM_MERGE_SEND_TOTAL = 25
 TEAM_MERGE_TOOL_CALL_TOTAL = 36
+AGENT_MOVE_LIFETIME_ACKED = 11
+AGENT_MOVE_LIFETIME_SEND = 12
+AGENT_MOVE_LIFETIME_TOOL_CALL = 13
+COMPOSER_MOVE_DEST_ACKED = 14
+COMPOSER_MOVE_DEST_SEND = 25
+COMPOSER_MOVE_DEST_TOOL_CALL = 36
 RESTORED_SUBGROUP_ACKED_TOTAL = 18
 RESTORED_SUBGROUP_SEND_TOTAL = 30
 RESTORED_SUBGROUP_TOOL_CALL_TOTAL = 42
@@ -67,7 +70,7 @@ def test_empty_team_snapshot_creates_initial_empty_team(tmp_path):
     assert [followup_team.team_id for followup_team in followup.teams] == [team.team_id]
 
 
-def test_lane_metrics_aggregate_removed_lifetime_team_members(tmp_path):
+def test_lane_metrics_drop_removed_member_counts(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(members=["agent-a"])
     store.record_agent_metric_delta("agent-a", acked=1, sends=2, tool_calls=3)
@@ -77,13 +80,15 @@ def test_lane_metrics_aggregate_removed_lifetime_team_members(tmp_path):
 
     summary = store.lane_metric_summary("agent-b", bucket_count=12)
 
-    assert summary.agent_ids == ("agent-a", "agent-b")
-    assert summary.acked == 5
-    assert summary.sends == 7
-    assert summary.tool_calls == 9
+    # Work follows the agent: agent-a left, so its counters leave the lane (they
+    # live on the agent and resurface wherever it lands next).
+    assert summary.agent_ids == ("agent-b",)
+    assert summary.acked == 4
+    assert summary.sends == 5
+    assert summary.tool_calls == 6
 
 
-def test_lane_metrics_do_not_pull_prior_team_counts_after_agent_moves(tmp_path):
+def test_lane_metrics_follow_agent_across_move(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     source = store.create_team(members=["agent-a"])
     destination = store.create_team(members=["agent-b"])
@@ -96,13 +101,15 @@ def test_lane_metrics_do_not_pull_prior_team_counts_after_agent_moves(tmp_path):
     moved_summary = store.lane_metric_summary("agent-a", bucket_count=12)
 
     assert store.team_state(source.team_id).status == "closed"
-    assert destination_summary.acked == 1
-    assert moved_summary.acked == 1
-    assert moved_summary.sends == 2
-    assert moved_summary.tool_calls == 3
+    # agent-a carries its full lifetime counters (10+1 / 10+2 / 10+3) into the
+    # destination lane; agent-b contributes nothing.
+    assert destination_summary.acked == AGENT_MOVE_LIFETIME_ACKED
+    assert moved_summary.acked == AGENT_MOVE_LIFETIME_ACKED
+    assert moved_summary.sends == AGENT_MOVE_LIFETIME_SEND
+    assert moved_summary.tool_calls == AGENT_MOVE_LIFETIME_TOOL_CALL
 
 
-def test_composer_move_leaves_source_and_destination_metrics_unchanged(tmp_path):
+def test_composer_move_carries_agent_metrics_to_destination(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     source = store.create_team(members=["agent-a", "agent-c"])
     destination = store.create_team(members=["agent-b"])
@@ -110,27 +117,23 @@ def test_composer_move_leaves_source_and_destination_metrics_unchanged(tmp_path)
     store.record_agent_metric_delta("agent-c", acked=1, sends=2, tool_calls=3)
     store.record_agent_metric_delta("agent-b", acked=4, sends=5, tool_calls=6)
 
-    source_before = store.lane_metric_summary("agent-c", bucket_count=12)
-    destination_before = store.lane_metric_summary("agent-b", bucket_count=12)
-
     store.assign_agent(destination.team_id, "agent-a")
 
     source_after = store.lane_metric_summary("agent-c", bucket_count=12)
     destination_after = store.lane_metric_summary("agent-b", bucket_count=12)
 
     assert store.team_state(source.team_id).status == "open"
-    assert source_after.agent_ids == ("agent-a", "agent-c")
-    assert source_after.acked == source_before.acked == COMPOSER_MOVE_SOURCE_ACKED_TOTAL
-    assert source_after.sends == source_before.sends == COMPOSER_MOVE_SOURCE_SEND_TOTAL
-    assert (
-        source_after.tool_calls
-        == source_before.tool_calls
-        == COMPOSER_MOVE_SOURCE_TOOL_CALL_TOTAL
-    )
-    assert destination_after.agent_ids == ("agent-a", "agent-b")
-    assert destination_after.acked == destination_before.acked == 4
-    assert destination_after.sends == destination_before.sends == 5
-    assert destination_after.tool_calls == destination_before.tool_calls == 6
+    # agent-a moved out: the source lane shows only agent-c; the destination lane
+    # gains agent-a's counters on top of agent-b's. (agent_ids order is roster
+    # order and is asserted as a set so the later position-ordering work is free.)
+    assert source_after.agent_ids == ("agent-c",)
+    assert source_after.acked == 1
+    assert source_after.sends == 2
+    assert source_after.tool_calls == 3
+    assert set(destination_after.agent_ids) == {"agent-a", "agent-b"}
+    assert destination_after.acked == COMPOSER_MOVE_DEST_ACKED
+    assert destination_after.sends == COMPOSER_MOVE_DEST_SEND
+    assert destination_after.tool_calls == COMPOSER_MOVE_DEST_TOOL_CALL
 
 
 def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
@@ -159,7 +162,7 @@ def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
     repeated_after = store.lane_metric_summary("agent-b", bucket_count=12, now=180)
 
     assert store.team_state(source.team_id).status == "closed"
-    assert destination_after.agent_ids == ("agent-a", "agent-b")
+    assert set(destination_after.agent_ids) == {"agent-a", "agent-b"}
     assert destination_after.acked == TEAM_MERGE_ACKED_TOTAL
     assert destination_after.sends == TEAM_MERGE_SEND_TOTAL
     assert destination_after.tool_calls == TEAM_MERGE_TOOL_CALL_TOTAL
@@ -575,8 +578,11 @@ def test_team_command_service_close_final_team_returns_replacement_empty_team(
     ]
 
 
-def test_zero_activity_prune_preserves_metric_and_config_teams(tmp_path):
+def test_zero_activity_prune_reaps_metric_only_but_keeps_config_teams(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    # Metrics are per-agent now (no team-scoped counter), so a closed team whose
+    # only history was metric activity carries no durable team state and is
+    # correctly pruned; agent-a's counters live on the agent regardless.
     metric_team = store.create_team(team_id="team-metric", members=["agent-a"])
     store.record_agent_metric_delta("agent-a", sends=1)
     store.remove_agent(metric_team.team_id, "agent-a")
@@ -593,11 +599,13 @@ def test_zero_activity_prune_preserves_metric_and_config_teams(tmp_path):
             "SELECT team_id, status FROM teams ORDER BY team_id"
         ).fetchall()
 
+    # team-metric is gone (pruned); team-config survives on its task filter.
     assert {row["team_id"]: row["status"] for row in team_rows} == {
         "team-config": "closed",
-        "team-metric": "closed",
         snapshot.teams[0].team_id: "open",
     }
+    # agent-a's send is preserved on the agent even though its team was reaped.
+    assert store.lane_metric_summary("agent-a", bucket_count=12).sends == 1
 
 
 def test_team_command_service_keeps_revisioned_config_history(tmp_path):
