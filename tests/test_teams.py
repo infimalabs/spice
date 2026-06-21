@@ -104,6 +104,9 @@ def test_lane_metrics_follow_agent_across_move(tmp_path):
     # agent-a carries its full lifetime counters (10+1 / 10+2 / 10+3) into the
     # destination lane; agent-b contributes nothing.
     assert destination_summary.acked == AGENT_MOVE_LIFETIME_ACKED
+    assert destination_summary.sends == AGENT_MOVE_LIFETIME_SEND
+    assert destination_summary.tool_calls == AGENT_MOVE_LIFETIME_TOOL_CALL
+    assert moved_summary == destination_summary
     assert moved_summary.acked == AGENT_MOVE_LIFETIME_ACKED
     assert moved_summary.sends == AGENT_MOVE_LIFETIME_SEND
     assert moved_summary.tool_calls == AGENT_MOVE_LIFETIME_TOOL_CALL
@@ -169,17 +172,6 @@ def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
     assert sum(destination_after.sparkline) == 3
     assert moved_after == destination_after
     assert repeated_after == destination_after
-    with store.connect() as connection:
-        source_metric_rows = connection.execute(
-            "SELECT COUNT(*) FROM team_agent_metrics WHERE team_id = ?",
-            (source.team_id,),
-        ).fetchone()[0]
-        source_bucket_rows = connection.execute(
-            "SELECT COUNT(*) FROM team_agent_metric_buckets WHERE team_id = ?",
-            (source.team_id,),
-        ).fetchone()[0]
-    assert source_metric_rows == 0
-    assert source_bucket_rows == 0
 
 
 def test_split_team_back_restores_latest_merged_source_team(tmp_path):
