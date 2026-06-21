@@ -97,6 +97,45 @@ accumulate across a renewal because the successor's id is unified to the
 canonical actor by the existing alias rewrite. The successor inherits the
 predecessor's counters by id-unification, never by copying rows.
 
+## Views & projections
+
+**D10 — One fact log.** Every metric derives from append-only, timestamped,
+actor+team-tagged facts: directives (send/ack), activity buckets
+(messages/tool_calls), task-lifecycle events (claim/phase/complete/drain), and
+membership events from the team event log. `directive_totals` and
+`agent_metrics` are materialized running totals over those facts, not separate
+truths. Every displayed number is a projection over the fact log plus event log;
+new views add folds, not mutable aggregate stores.
+
+**D11 — Three lenses, one default.** Lane default =
+LINEAGE-CUMULATIVE: D9 inheritance means the lane shows total work achieved by
+that lineage across renewals. PER-SESSION is the selectable lens over facts
+since the lineage's last renewal boundary. TEAM-HISTORICAL is the selectable D7
+lens over facts inside reconstructed team membership intervals. The monotonic
+lifetime number is therefore one view in a triad, never the only number the UI
+can expose.
+
+This is the canonical answer to the renewal-monotonicity concern: long-lived
+trees and renewal inheritance intentionally make the default lane total
+monotonic, because it represents work achieved at that lane. Nothing is lost,
+and the operator is not stuck with only that total; per-session and
+team-historical lenses derive alternate cuts from the same facts.
+
+**D12 — Task-flow is its own fact source.** Burndown, distribution, and stuck
+signals derive from a task-lifecycle fact series, not from message-activity
+counters. Message and tool-call activity can explain agent effort; task-flow
+facts explain work movement.
+
+**D13 — Renewal boundaries are events.** A lineage's session windows come from
+append-only started-renewal events for the successor actor. PER-SESSION
+projections compute their windows from those events; no mutable session counter
+exists.
+
+**D14 — Retention is configurable.** The retention horizon is config-driven
+(default 30d). Durable aggregates are never pruned; retention limits only the
+raw fact/event material that the configured horizon allows, and any retained
+materialized totals remain derivable from surviving durable facts.
+
 ## The invariant
 
 For any actor A with current team T:
