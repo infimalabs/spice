@@ -77,38 +77,56 @@ function composerMemberAccent(lane, member) {
 }
 
 function syncComposerDriverIcon(band, member) {
-  const icon = composerDriverIcon(member);
+  const driver = composerDriverIconName(member);
+  const src = composerDriverIconPath(driver);
   const existing = band.querySelector("[data-composer-driver-icon]");
-  if (!icon) {
+  if (!src) {
     existing?.remove();
     return;
   }
+  if (existing && existing.dataset.composerDriverIcon === driver) {
+    syncComposerDriverIconElement(existing, member, driver, src);
+    return;
+  }
+  const icon = composerDriverIcon(member);
   if (existing) existing.replaceWith(icon);
   else band.append(icon);
 }
 
-function composerDriverIcon(member) {
-  const driver = String(
+function composerDriverIconName(member) {
+  return String(
     (member || {}).driverIconName || (member || {}).driverName || "",
   )
     .trim()
     .toLowerCase();
+}
+
+function composerDriverIconPath(driver) {
   const iconPaths = {
     claude: "/static/icons/claude.svg",
     codex: "/static/icons/openai.svg",
     openai: "/static/icons/openai.svg",
   };
-  const src = iconPaths[driver];
+  return iconPaths[driver] || "";
+}
+
+function composerDriverIcon(member) {
+  const driver = composerDriverIconName(member);
+  const src = composerDriverIconPath(driver);
   if (!src) return null;
-  const tooltip = composerDriverTooltip(member, driver);
   const icon = document.createElement("span");
+  syncComposerDriverIconElement(icon, member, driver, src);
+  return icon;
+}
+
+function syncComposerDriverIconElement(icon, member, driver, src) {
+  const tooltip = composerDriverTooltip(member, driver);
   icon.className = "composer-driver-icon composer-driver-icon--" + driver;
   icon.dataset.composerDriverIcon = driver;
   icon.title = tooltip;
   icon.setAttribute("aria-label", tooltip);
   icon.setAttribute("role", "img");
   icon.style.setProperty("--composer-driver-icon-url", 'url("' + src + '")');
-  return icon;
 }
 
 function composerDriverTooltip(member, driver) {
