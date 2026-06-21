@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Iterable, Protocol
 
 from spice.serve.teamids import normalized_id as _normalized_id
+from spice.serve.teamschema import METRIC_HISTORY_RETENTION_SECONDS
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,15 @@ class DirectiveStatsStoreMixin:
                 (str(row["agent_id"]), str(row["team_id"])),
             )
             return True
+
+    def _prune_directive_history_locked(
+        self, connection: sqlite3.Connection, *, now: float
+    ) -> None:
+        # Drop directive ROWS past the retention horizon; the running totals
+        # (directive_totals) are the durable aggregate and stay. A later ack of a
+        # pruned key is a harmless no-op (the send was already counted).
+        floor = float(now) - METRIC_HISTORY_RETENTION_SECONDS
+        connection.execute("DELETE FROM directives WHERE sent_at < ?", (floor,))
 
     def _rewrite_directive_stats_locked(
         self,
