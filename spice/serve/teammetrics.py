@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from collections import Counter
@@ -21,6 +22,22 @@ class LaneMetricSummary:
     sends: int
     tool_calls: int
     sparkline: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class TeamHistoricalMetricSummary:
+    team_id: str
+    agent_ids: tuple[str, ...]
+    messages: int
+    sparkline: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _MembershipInterval:
+    team_id: str
+    agent_id: str
+    start: float
+    end: float
 
 
 class _TeamMetricStore(Protocol):
@@ -219,6 +236,40 @@ class TeamMetricStoreMixin:
                 now=summary_time,
             )
 
+    def team_historical_metric_summary(
+        self: _TeamMetricStore,
+        team_id: str,
+        *,
+        bucket_count: int,
+        bucket_seconds: int = METRIC_BUCKET_SECONDS,
+        now: float | None = None,
+    ) -> TeamHistoricalMetricSummary:
+        team_id = _normalized_id(team_id, "team_id")
+        bucket_count = max(1, int(bucket_count))
+        bucket_seconds = max(1, int(bucket_seconds))
+        summary_time = time.time() if now is None else max(0.0, float(now))
+        with self.connect() as connection:
+            intervals = [
+                interval
+                for interval in _membership_intervals_from_events(
+                    connection, end_time=summary_time
+                )
+                if interval.team_id == team_id
+            ]
+            agent_ids = _historical_agent_ids(intervals)
+            buckets = _historical_metric_buckets(connection, intervals, agent_ids)
+        return TeamHistoricalMetricSummary(
+            team_id=team_id,
+            agent_ids=agent_ids,
+            messages=sum(buckets.values()),
+            sparkline=_metric_sparkline(
+                buckets.items(),
+                bucket_count=bucket_count,
+                bucket_seconds=bucket_seconds,
+                now=summary_time,
+            ),
+        )
+
     def _record_agent_metric_delta_locked(
         self,
         connection: sqlite3.Connection,
@@ -301,6 +352,230 @@ def _normalized_id(value: str, field_name: str) -> str:
 
 def _nonnegative_int(value: int) -> int:
     return max(0, int(value or 0))
+
+
+def _membership_intervals_from_events(
+    connection: sqlite3.Connection, *, end_time: float
+) -> list[_MembershipInterval]:
+    open_memberships: dict[str, tuple[str, float]] = {}
+    intervals: list[_MembershipInterval] = []
+    rows = connection.execute(
+        "SELECT ts, kind, team_id, payload FROM events ORDER BY revision"
+    ).fetchall()
+    for row in rows:
+        timestamp = float(row["ts"] or 0.0)
+        team_id = str(row["team_id"] or "")
+        kind = str(row["kind"] or "")
+        payload = _event_payload(row)
+        if kind == "createTeam":
+            for agent_id in _event_agent_ids(payload, "members"):
+                _move_membership(
+                    open_memberships, intervals, agent_id, team_id, timestamp
+                )
+        elif kind == "assignAgent":
+            _move_membership(
+                open_memberships,
+                intervals,
+                _event_agent_id(payload, "agentId"),
+                team_id,
+                timestamp,
+            )
+        elif kind == "removeAgent":
+            _close_membership(
+                open_memberships,
+                intervals,
+                _event_agent_id(payload, "agentId"),
+                team_id,
+                timestamp,
+            )
+        elif kind == "closeTeam":
+            _close_team_memberships(open_memberships, intervals, team_id, timestamp)
+        elif kind == "mergeTeams":
+            source_team_id = _event_team_id(payload, "sourceTeamId")
+            for agent_id in _event_agent_ids(payload, "agents"):
+                _move_membership_from_team(
+                    open_memberships,
+                    intervals,
+                    agent_id,
+                    source_team_id,
+                    team_id,
+                    timestamp,
+                )
+        elif kind == "splitTeam":
+            new_team_id = _event_team_id(payload, "newTeamId")
+            for agent_id in _event_agent_ids(payload, "agents"):
+                _move_membership_from_team(
+                    open_memberships,
+                    intervals,
+                    agent_id,
+                    team_id,
+                    new_team_id,
+                    timestamp,
+                )
+        elif kind == "splitTeamBack":
+            restored_team_id = _event_team_id(payload, "restoredTeamId")
+            for agent_id in _event_agent_ids(payload, "agents"):
+                _move_membership_from_team(
+                    open_memberships,
+                    intervals,
+                    agent_id,
+                    team_id,
+                    restored_team_id,
+                    timestamp,
+                )
+    for agent_id, (team_id, start) in open_memberships.items():
+        intervals.append(
+            _MembershipInterval(
+                team_id=team_id,
+                agent_id=agent_id,
+                start=start,
+                end=end_time,
+            )
+        )
+    return intervals
+
+
+def _event_payload(row: sqlite3.Row) -> dict[str, object]:
+    payload = json.loads(str(row["payload"] or "{}"))
+    if not isinstance(payload, dict):
+        raise SpiceError("team event payload must be a JSON object")
+    return payload
+
+
+def _event_agent_id(payload: dict[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise SpiceError(f"team event payload {key} must be a non-empty string")
+    return value
+
+
+def _event_team_id(payload: dict[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise SpiceError(f"team event payload {key} must be a non-empty string")
+    return value
+
+
+def _event_agent_ids(payload: dict[str, object], key: str) -> list[str]:
+    value = payload.get(key)
+    if not isinstance(value, list) or not all(
+        isinstance(agent_id, str) and agent_id for agent_id in value
+    ):
+        raise SpiceError(f"team event payload {key} must be a list of agent ids")
+    return [str(agent_id) for agent_id in value]
+
+
+def _move_membership(
+    open_memberships: dict[str, tuple[str, float]],
+    intervals: list[_MembershipInterval],
+    agent_id: str,
+    team_id: str,
+    timestamp: float,
+) -> None:
+    current = open_memberships.pop(agent_id, None)
+    if current is not None:
+        current_team_id, started_at = current
+        intervals.append(
+            _MembershipInterval(
+                team_id=current_team_id,
+                agent_id=agent_id,
+                start=started_at,
+                end=timestamp,
+            )
+        )
+    open_memberships[agent_id] = (team_id, timestamp)
+
+
+def _move_membership_from_team(
+    open_memberships: dict[str, tuple[str, float]],
+    intervals: list[_MembershipInterval],
+    agent_id: str,
+    source_team_id: str,
+    destination_team_id: str,
+    timestamp: float,
+) -> None:
+    _close_membership(open_memberships, intervals, agent_id, source_team_id, timestamp)
+    open_memberships[agent_id] = (destination_team_id, timestamp)
+
+
+def _close_membership(
+    open_memberships: dict[str, tuple[str, float]],
+    intervals: list[_MembershipInterval],
+    agent_id: str,
+    team_id: str,
+    timestamp: float,
+) -> None:
+    current = open_memberships.pop(agent_id, None)
+    if current is None or current[0] != team_id:
+        raise SpiceError(
+            f"cannot reconstruct team metric interval for {agent_id} in {team_id}"
+        )
+    intervals.append(
+        _MembershipInterval(
+            team_id=team_id,
+            agent_id=agent_id,
+            start=current[1],
+            end=timestamp,
+        )
+    )
+
+
+def _close_team_memberships(
+    open_memberships: dict[str, tuple[str, float]],
+    intervals: list[_MembershipInterval],
+    team_id: str,
+    timestamp: float,
+) -> None:
+    for agent_id, (current_team_id, started_at) in tuple(open_memberships.items()):
+        if current_team_id != team_id:
+            continue
+        intervals.append(
+            _MembershipInterval(
+                team_id=team_id,
+                agent_id=agent_id,
+                start=started_at,
+                end=timestamp,
+            )
+        )
+        del open_memberships[agent_id]
+
+
+def _historical_agent_ids(
+    intervals: list[_MembershipInterval],
+) -> tuple[str, ...]:
+    ordered = sorted(
+        intervals, key=lambda interval: (interval.start, interval.agent_id)
+    )
+    return tuple(dict.fromkeys(interval.agent_id for interval in ordered))
+
+
+def _historical_metric_buckets(
+    connection: sqlite3.Connection,
+    intervals: list[_MembershipInterval],
+    agent_ids: tuple[str, ...],
+) -> Counter[int]:
+    if not agent_ids:
+        return Counter()
+    intervals_by_agent: dict[str, list[_MembershipInterval]] = {}
+    for interval in intervals:
+        intervals_by_agent.setdefault(interval.agent_id, []).append(interval)
+    placeholders = ",".join("?" for _agent_id in agent_ids)
+    rows = connection.execute(
+        "SELECT agent_id, bucket_start, messages FROM agent_metric_buckets "
+        f"WHERE agent_id IN ({placeholders}) ORDER BY bucket_start",
+        agent_ids,
+    ).fetchall()
+    buckets: Counter[int] = Counter()
+    for row in rows:
+        agent_id = str(row["agent_id"])
+        bucket_start = int(row["bucket_start"])
+        messages = int(row["messages"] or 0)
+        if any(
+            interval.start <= bucket_start < interval.end
+            for interval in intervals_by_agent[agent_id]
+        ):
+            buckets[bucket_start] += messages
+    return buckets
 
 
 def _metric_bucket_start(

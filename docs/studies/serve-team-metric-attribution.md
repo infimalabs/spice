@@ -78,6 +78,16 @@ membership intervals. It is not the lane default and not load-bearing. This
 preserves the original durable-team intent as a projection rather than a second
 mutable truth.
 
+The optional historical lens is worth surfacing only when the operator is
+asking about a team's past output as an entity: "what did this lane accomplish
+before it split?", "what work passed through this merged group?", or "how much
+activity happened while this agent belonged here?" It differs from the live
+lane default in the important direction: the default answers "what are the
+current members carrying now?", while the historical lens answers "what bucketed
+activity fell inside this team's reconstructed membership intervals?" The lens
+is therefore an explicit mode/API, not a pane default, and it must remain a pure
+projection over `events` and `agent_metric_buckets`.
+
 **D8 — A permanent home team is decoupled from metrics.** Under D2/D3, team-id
 churn no longer fragments anything, so a permanent home team is evaluated on UX
 merits only, never for metric reasons.
