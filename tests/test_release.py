@@ -99,6 +99,18 @@ def test_release_notes_mode_writes_output_without_release_sync(tmp_path, monkeyp
     )
 
 
+def test_hermetic_wheel_env_drops_source_shadowing_entries(monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", "/some/worktree")
+    monkeypatch.setenv("VIRTUAL_ENV", "/some/venv")
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    env = release.hermetic_wheel_env()
+
+    assert "PYTHONPATH" not in env
+    assert "VIRTUAL_ENV" not in env
+    assert env["PATH"] == "/usr/bin"
+
+
 def test_release_highlight_rewrites_commit_subjects_into_sentences():
     assert (
         edited_release_highlight("Fix speech excerpts for final ACK messages")
