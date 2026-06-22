@@ -34,7 +34,6 @@ def test_doctor_reports_missing_hooks_and_fix_installs_them(tmp_path, monkeypatc
 def test_doctor_fails_dirty_worktree_with_investigation_command(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
     install_hooks_for_repo(repo)
-    doctor._ensure_state_excluded(repo)
     _patch_non_hook_checks(monkeypatch)
     (repo / "pkg" / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
 
@@ -52,7 +51,6 @@ def test_doctor_warns_about_executable_default_hooks_shadowed_by_spice(
 ):
     repo = _repo(tmp_path)
     install_hooks_for_repo(repo)
-    doctor._ensure_state_excluded(repo)
     _patch_non_hook_checks(monkeypatch)
     for name in ("pre-push", "post-merge"):
         path = repo / ".git" / "hooks" / name
@@ -82,7 +80,6 @@ def test_doctor_warns_about_repo_local_hooks_path_shadowed_by_spice(
     _run(repo, "git", "commit", "-m", "add repo hooks")
     _run(repo, "git", "config", "core.hooksPath", ".githooks")
     install_hooks_for_repo(repo)
-    doctor._ensure_state_excluded(repo)
     _patch_non_hook_checks(monkeypatch)
 
     report = doctor.run_doctor(repo)

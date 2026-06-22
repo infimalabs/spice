@@ -97,28 +97,9 @@ def render_doctor(repo_root: Path) -> str:
 def _apply_safe_fixes(repo_root: Path) -> list[str]:
     from spice.hooks.install import install_hooks_for_repo
 
+    # install_hooks_for_repo also materializes the `.spice/.gitignore` marker.
     rows = install_hooks_for_repo(repo_root)
-    rows.extend(_ensure_state_excluded(repo_root))
     return [", ".join(rows)]
-
-
-def _ensure_state_excluded(repo_root: Path) -> list[str]:
-    from spice.hooks.install import exclude_rows
-
-    exclude = git_common_dir(repo_root) / "info" / "exclude"
-    try:
-        existing = exclude.read_text(encoding="utf-8")
-    except OSError:
-        existing = ""
-    missing = [row for row in exclude_rows() if row not in existing.splitlines()]
-    if not missing:
-        return []
-    exclude.parent.mkdir(parents=True, exist_ok=True)
-    with exclude.open("a", encoding="utf-8") as handle:
-        if existing and not existing.endswith("\n"):
-            handle.write("\n")
-        handle.writelines(row + "\n" for row in missing)
-    return [f"git_exclude+={row}" for row in missing]
 
 
 def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
