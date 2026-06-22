@@ -69,7 +69,7 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
     watcher_ready = Event()
     change_written = Event()
 
-    def observed_wait(paths: tuple[Path, ...], stop) -> bool:
+    def observed_wait(paths: tuple[Path, ...], stop, watch=None) -> bool:
         assert inbox_dir(repo) in paths
         watcher_ready.set()
         change_written.wait(timeout=1.0)
@@ -141,7 +141,7 @@ def test_lane_subscription_watch_wakes_stopped_agent_for_external_inbox_write(
     watcher_ready = Event()
     change_written = Event()
 
-    def observed_wait(paths: tuple[Path, ...], stop) -> bool:
+    def observed_wait(paths: tuple[Path, ...], stop, watch=None) -> bool:
         assert inbox_dir(repo) in paths
         watcher_ready.set()
         change_written.wait(timeout=1.0)
@@ -213,7 +213,7 @@ def test_lane_subscription_suppresses_duplicate_push_for_unchanged_signature(
     waits = 0
     signature_calls = 0
 
-    def fake_wait(_paths: tuple[Path, ...], stop) -> bool:
+    def fake_wait(_paths: tuple[Path, ...], stop, watch=None) -> bool:
         nonlocal waits
         waits += 1
         if waits > 2:
@@ -248,6 +248,27 @@ def test_lane_subscription_suppresses_duplicate_push_for_unchanged_signature(
         assert waits >= 2
     finally:
         session._teardown()
+
+
+def test_kqueue_watch_rearms_only_when_watched_paths_change(tmp_path):
+    if not livebus._HAVE_KQUEUE:
+        pytest.skip("kqueue-only behavior")
+    (tmp_path / "a").write_text("", encoding="utf-8")
+    (tmp_path / "b").write_text("", encoding="utf-8")
+    watch = livebus._KqueueWatch()
+    try:
+        watch._arm((tmp_path / "a",))
+        armed = watch._kqueue
+        assert armed is not None
+
+        watch._arm((tmp_path / "a",))
+        assert watch._kqueue is armed  # unchanged paths keep the same kqueue
+
+        watch._arm((tmp_path / "a", tmp_path / "b"))
+        assert watch._kqueue is not armed  # changed paths rebuild it
+    finally:
+        watch.close()
+    assert watch._kqueue is None
 
 
 def test_metrics_series_replies_from_worker_off_the_dispatch_loop(tmp_path):
