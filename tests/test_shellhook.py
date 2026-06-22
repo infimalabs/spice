@@ -345,7 +345,10 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
         shellhook.render_agent_wrapper_lines(tmp_path)
     )
     assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
-        _expected_rtk_wrapper_lines(_default_builtin_rtk_selectors())
+        [
+            *_expected_rtk_wrapper_lines(_default_builtin_rtk_selectors()),
+            *_expected_spice_agent_rg_wrapper_lines(),
+        ]
     )
     assert env[shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV] == ""
     assert env[shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV] == ""
@@ -582,9 +585,10 @@ def test_agent_wrapper_lines_adds_ordered_agent_wrapper_functions(tmp_path):
 
 
 def test_agent_wrapper_lines_uses_builtin_common_default(tmp_path):
-    assert shellhook.render_agent_wrapper_lines(
-        tmp_path
-    ) == _expected_rtk_wrapper_lines(_default_builtin_rtk_selectors())
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
+        *_expected_rtk_wrapper_lines(_default_builtin_rtk_selectors()),
+        *_expected_spice_agent_rg_wrapper_lines(),
+    ]
 
 
 def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_path):
@@ -594,9 +598,10 @@ def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_
         groups={},
     )
 
-    assert shellhook.render_agent_wrapper_lines(
-        tmp_path
-    ) == _expected_rtk_wrapper_lines(_default_builtin_rtk_selectors())
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
+        *_expected_rtk_wrapper_lines(_default_builtin_rtk_selectors()),
+        *_expected_spice_agent_rg_wrapper_lines(),
+    ]
 
 
 def test_agent_wrapper_lines_project_common_group_overrides_builtin_default(tmp_path):
@@ -609,6 +614,15 @@ def test_agent_wrapper_lines_project_common_group_overrides_builtin_default(tmp_
     assert shellhook.render_agent_wrapper_lines(
         tmp_path
     ) == _expected_rtk_wrapper_lines(["grep"])
+
+
+def test_agent_wrapper_lines_builtin_common_adds_safe_rg_wrapper(tmp_path):
+    lines = shellhook.render_agent_wrapper_lines(tmp_path)
+    wrapper_start = lines.index("rg() {")
+
+    assert lines[wrapper_start - 1 : wrapper_start + 3] == (
+        _expected_spice_agent_rg_wrapper_lines()
+    )
 
 
 def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
@@ -1033,6 +1047,42 @@ def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
     assert "rtk:grep needle /dev/null" in lines
 
 
+def test_zshenv_hook_rg_wrapper_routes_searches_and_preserves_files_mode(tmp_path):
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    trace = tmp_path / "trace.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("rtk", "rg"):
+        path = bin_dir / name
+        path.write_text(
+            f'#!/bin/sh\nprintf \'{name}:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    env = {
+        "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
+        "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+        shellhook.ZDOTDIR_ENV: str(hook_dir),
+        shellhook.SHELL_HOOK_REEXEC_STAGE_ENV: "1",
+        SHELL_TRACE_ENV: str(trace),
+        shellhook.SHELL_HOOK_WRAPPERS_ENV: "\n".join(
+            shellhook.render_agent_wrapper_lines(tmp_path)
+        ),
+        **shellhook.shell_steering_runtime_environment(
+            base_env={}, python_command=[sys.executable], repo_root=tmp_path
+        ),
+    }
+
+    subprocess.run([zsh, "-c", "rg needle src; rg --files src"], check=True, env=env)
+
+    lines = _trace_lines(trace, expected_prefix="rtk:")
+    assert "rtk:grep needle src" in lines
+    assert "rg:--files src" in lines
+
+
 def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_path):
     bash = shutil.which("bash")
     if bash is None:
@@ -1205,6 +1255,15 @@ def _expected_python_module_wrapper_lines(selectors: list[str]) -> list[str]:
     for selector in selectors:
         lines.extend(["", f"{selector}() {{", f'  python -m {selector} "$@"', "}"])
     return lines
+
+
+def _expected_spice_agent_rg_wrapper_lines() -> list[str]:
+    return [
+        "",
+        "rg() {",
+        '  "$SPICE_SHELL_HOOK_PYTHON" -m spice.agent.rgwrap "$@"',
+        "}",
+    ]
 
 
 def _expected_active_python_module_wrapper_lines(selectors: list[str]) -> list[str]:
