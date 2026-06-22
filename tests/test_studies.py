@@ -510,7 +510,7 @@ def test_name_cluster_flags_shared_prefix_run(tmp_path):
 
 
 def test_name_cluster_flags_shared_suffix_run(tmp_path):
-    _name_cluster_repo(tmp_path, ["identitypayload", "messagepayload", "metricpayload"])
+    _name_cluster_repo(tmp_path, ["onepayload", "twopayload", "redpayload"])
 
     assert "suffix 'payload'" in name_cluster_error(tmp_path)
 

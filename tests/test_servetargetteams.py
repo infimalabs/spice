@@ -6,15 +6,8 @@ from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
 
-from spice.serve import (
-    agentapi,
-    app,
-    identitypayload,
-    lanepayload,
-    messagepayload,
-    workroutes,
-    worktreepayload,
-)
+from spice.serve import agentapi, app, workroutes, worktreepayload
+from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
 from spice.serve.team.store import ServeTeamStore, TeamCommandService, TeamConfig
 from spice.serve.workroutes import (
@@ -64,7 +57,7 @@ def test_unstarted_target_id_membership_is_visible_in_lane_payload(
     )
     _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
 
-    result = messagepayload.messages_payload_for_worktree(state, target, limit=5)
+    result = message.messages_payload_for_worktree(state, target, limit=5)
     signature = app.lane_signature_for_target(state, target, "", None)
 
     assert result["targetIdentity"]["thread"] == {"state": "unbound"}
@@ -244,20 +237,20 @@ def _patch_payload_dependencies(
             ensure_calls.append({"target": target, "pending": pending, **kwargs})
         return None
 
-    monkeypatch.setattr(identitypayload, "agent_status", lambda _repo: status)
-    monkeypatch.setattr(lanepayload, "agent_status", lambda _repo: status)
-    monkeypatch.setattr(messagepayload, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(identity, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(lane, "agent_status", lambda _repo: status)
+    monkeypatch.setattr(message, "agent_status", lambda _repo: status)
     monkeypatch.setattr(worktreepayload, "agent_status", lambda _repo: status)
     monkeypatch.setattr(agentapi, "agent_status", lambda _repo: status)
     monkeypatch.setattr(workroutes, "agent_status", lambda _repo: status)
-    monkeypatch.setattr(lanepayload, "agent_binding_error", lambda *_args: "")
-    monkeypatch.setattr(messagepayload, "agent_binding_error", lambda *_args: "")
+    monkeypatch.setattr(lane, "agent_binding_error", lambda *_args: "")
+    monkeypatch.setattr(message, "agent_binding_error", lambda *_args: "")
     monkeypatch.setattr(worktreepayload, "agent_binding_error", lambda *_args: "")
-    monkeypatch.setattr(identitypayload, "configured_say_voice", lambda _repo: "")
-    monkeypatch.setattr(messagepayload, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(identity, "configured_say_voice", lambda _repo: "")
+    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(worktreepayload, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
-        messagepayload,
+        message,
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
@@ -268,9 +261,9 @@ def _patch_payload_dependencies(
     )
     monkeypatch.setattr(worktreepayload, "ensure_agent_for_pending_inbox", fake_ensure)
     monkeypatch.setattr(
-        messagepayload.message_reader,
+        message.message_reader,
         "assistant_messages_for_thread_id",
-        lambda *_args, **_kwargs: messagepayload.message_reader.AssistantMessageRead(
+        lambda *_args, **_kwargs: message.message_reader.AssistantMessageRead(
             items=[],
             error=None,
             transcript=None,

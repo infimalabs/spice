@@ -23,7 +23,8 @@ from spice.mail.inbox import (
     pending_inbox_count,
     write_inbox_item,
 )
-from spice.serve import agentapi, identitypayload, lanepayload, messagepayload
+from spice.serve import agentapi
+from spice.serve.payload import identity, lane, message
 from spice.serve.app import (
     team_command_response_payload,
     team_snapshot_response_payload,
@@ -91,7 +92,7 @@ def test_running_requested_renewal_sends_handoff_and_marks_pending(
     state.team_store.set_agent_renewal_request(ACTOR_A, requested=True)
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=True)
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -149,7 +150,7 @@ def test_stopped_requested_renewal_starts_successor_and_moves_team_membership(
     ensure_calls: list[dict[str, object]] = []
     _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-next", "effort": "high"},
     )
@@ -309,7 +310,7 @@ def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
-    payload = messagepayload.messages_payload_for_worktree(state, target, limit=5)
+    payload = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert payload["pendingInboxCount"] == 1
     assert payload["agentEnsure"]["threadId"] == THREAD_A
@@ -341,7 +342,7 @@ def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
-    payload = messagepayload.messages_payload_for_worktree(state, target, limit=5)
+    payload = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert ensure_calls == INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD
     assert payload["agentEnsure"]["deadletteredInboxKey"] == "20260101T000000000001Z"
@@ -389,7 +390,7 @@ def test_pending_inbox_deadletters_after_generic_ensure_failure(tmp_path, monkey
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
-    payload = messagepayload.messages_payload_for_worktree(state, target, limit=5)
+    payload = message.messages_payload_for_worktree(state, target, limit=5)
 
     assert ensure_calls == 1
     assert payload["agentEnsure"]["ok"] is False
@@ -434,9 +435,9 @@ def test_status_line_reports_stale_agent_launch_cwd(tmp_path, monkeypatch):
         prompt_skill_path=repo / ".agents" / "skills" / "spice" / "SKILL.md",
         command=["codex", "exec", "--cd", str(other)],
     )
-    monkeypatch.setattr(lanepayload, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(lane, "agent_status", lambda *_args, **_kwargs: status)
 
-    line = lanepayload.status_line_payload(state, target, items=[], error=None)
+    line = lane.status_line_payload(state, target, items=[], error=None)
 
     assert line["bindingStatus"] == "mismatch"
     assert "launch cwd" in line["bindingError"]
@@ -465,9 +466,9 @@ def test_status_line_ignores_stale_prompt_skill_path(tmp_path, monkeypatch):
         prompt_skill_path=stale_skill,
         command=["codex", "exec", "--cd", str(repo)],
     )
-    monkeypatch.setattr(lanepayload, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(lane, "agent_status", lambda *_args, **_kwargs: status)
 
-    line = lanepayload.status_line_payload(state, target, items=[], error=None)
+    line = lane.status_line_payload(state, target, items=[], error=None)
 
     assert line["bindingStatus"] == "bound"
     assert line["bindingError"] == ""

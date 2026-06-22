@@ -10,11 +10,8 @@ from types import SimpleNamespace
 
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
-from spice.serve import (
-    identitypayload,
-    messagepayload,
-    worktreepayload,
-)
+from spice.serve import worktreepayload
+from spice.serve.payload import identity, message
 from spice.serve.team.store import ServeTeamStore
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
@@ -219,7 +216,7 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
         ),
     )
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "agent_status",
         lambda _repo: _Status(
             running=True,
@@ -231,9 +228,9 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
     monkeypatch.setattr(
         worktreepayload, "agent_binding_error", lambda _repo, _status: ""
     )
-    monkeypatch.setattr(identitypayload, "configured_say_voice", lambda _repo: "")
+    monkeypatch.setattr(identity, "configured_say_voice", lambda _repo: "")
     monkeypatch.setattr(
-        messagepayload.message_reader,
+        message.message_reader,
         "assistant_messages_for_thread_id",
         fake_assistant_messages_for_thread_id,
     )

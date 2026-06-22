@@ -12,10 +12,7 @@ import pytest
 from spice.errors import SpiceError
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
-from spice.serve import (
-    identitypayload,
-    lanepayload,
-)
+from spice.serve.payload import identity, lane
 from spice.serve.team.store import ServeTeamStore
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
@@ -180,7 +177,7 @@ def _identity_status(
 
 def test_target_identity_payload_rejects_blank_bound_thread_id():
     with pytest.raises(SpiceError, match="thread id must be non-empty"):
-        identitypayload.target_identity_payload(
+        identity.target_identity_payload(
             _Target(id="wt"),
             "",
             binding_status="bound",
@@ -201,26 +198,26 @@ def test_target_identity_payload_reports_configured_driver(tmp_path, monkeypatch
     )
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
 
-    identity = identitypayload.target_identity_payload(
+    payload = identity.target_identity_payload(
         _Target(id="wt", repo_root=repo),
         "",
         binding_status="unbound",
     )
 
-    assert identity["driver"] == {
+    assert payload["driver"] == {
         "name": "claude",
         "model": "claude-sonnet-4-5",
         "effort": "medium",
     }
     target = _Target(id="wt", repo_root=repo)
-    serve_identity = identitypayload.serve_agent_identity_payload(
+    serve_identity = identity.serve_agent_identity_payload(
         target,
         "",
         binding_status="unbound",
     )
     rows = {
         row["key"]: row["value"]
-        for row in lanepayload._lane_info_payload(target, serve_identity)["summaryRows"]
+        for row in lane._lane_info_payload(target, serve_identity)["summaryRows"]
     }
     assert rows["driver"] == "claude"
     assert rows["model"] == "claude-sonnet-4-5"
@@ -233,43 +230,43 @@ def test_serve_agent_identity_reports_unbound_target_identity(tmp_path, monkeypa
     _init_repo(repo)
     target = _Target(id="wt", repo_root=repo, name="repo", branch="main")
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-5.5", "effort": "xhigh"},
     )
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "agent_status",
         lambda _repo: _identity_status(repo),
     )
 
-    identity = identitypayload.serve_agent_identity_payload(target)
+    payload = identity.serve_agent_identity_payload(target)
 
-    assert identity["actorId"] == "target:wt"
-    assert identity["target"] == {
+    assert payload["actorId"] == "target:wt"
+    assert payload["target"] == {
         "id": "wt",
         "worktreeName": "repo",
         "repoRoot": str(repo),
         "branch": "main",
     }
-    assert identity["thread"] == {"state": "unbound"}
-    assert identity["driver"] == {
+    assert payload["thread"] == {"state": "unbound"}
+    assert payload["driver"] == {
         "desired": "codex",
         "actual": "",
         "transcriptOwner": "",
     }
-    assert identity["launch"]["desired"] == {
+    assert payload["launch"]["desired"] == {
         "model": "gpt-5.5",
         "effort": "xhigh",
         "source": "effective agent config",
     }
-    assert identity["launch"]["actual"] == {
+    assert payload["launch"]["actual"] == {
         "model": "",
         "effort": "",
         "serviceTier": "",
         "source": "",
     }
-    assert identity["renewal"] == {
+    assert payload["renewal"] == {
         "state": "none",
         "teamIndex": None,
         "ancestorThreadId": "",
@@ -284,12 +281,12 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
     _init_repo(repo)
     target = _Target(id="wt", repo_root=repo, name="repo", branch="main")
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "desired-model", "effort": "high"},
     )
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "agent_status",
         lambda _repo: _identity_status(
             repo,
@@ -304,22 +301,22 @@ def test_serve_agent_identity_splits_actual_and_desired_launch(tmp_path, monkeyp
 
     store = ServeTeamStore(tmp_path / "teams.sqlite")
 
-    identity = identitypayload.serve_agent_identity_payload(
+    payload = identity.serve_agent_identity_payload(
         target,
         transcript_owner="claude",
         store=store,
     )
     stored = store.agent_identity_for_actor("thread:thread-a")
 
-    assert identity["actorId"] == "thread:thread-a"
-    assert identity["thread"] == {"state": "bound", "threadId": "thread-a"}
-    assert identity["driver"] == {
+    assert payload["actorId"] == "thread:thread-a"
+    assert payload["thread"] == {"state": "bound", "threadId": "thread-a"}
+    assert payload["driver"] == {
         "desired": "codex",
         "actual": "claude",
         "transcriptOwner": "claude",
     }
-    assert identity["launch"]["desired"]["model"] == "desired-model"
-    assert identity["launch"]["actual"] == {
+    assert payload["launch"]["desired"]["model"] == "desired-model"
+    assert payload["launch"]["actual"] == {
         "model": "actual-model",
         "effort": "low",
         "serviceTier": "fast",
@@ -351,24 +348,24 @@ def test_serve_agent_identity_reports_explicit_actor_renewal(tmp_path, monkeypat
     )
     target = _Target(id="wt", repo_root=repo, name="repo", branch="main")
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "gpt-5.5", "effort": "xhigh"},
     )
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "agent_status",
         lambda _repo: _identity_status(repo, thread_id="thread-a"),
     )
 
-    identity = identitypayload.serve_agent_identity_payload(
+    payload = identity.serve_agent_identity_payload(
         target,
         actor_id="thread:thread-a",
         store=store,
     )
 
-    assert identity["actorId"] == "thread:thread-a"
-    assert identity["renewal"] == {
+    assert payload["actorId"] == "thread:thread-a"
+    assert payload["renewal"] == {
         "state": "pending",
         "teamIndex": 0,
         "ancestorThreadId": "thread-a",
@@ -377,13 +374,11 @@ def test_serve_agent_identity_reports_explicit_actor_renewal(tmp_path, monkeypat
     }
     assert store.current_team_for_agent("thread:thread-a") is not None
     assert (
-        identitypayload.serve_agent_identity_payload(target, actor_id="target:wt")[
-            "actorId"
-        ]
+        identity.serve_agent_identity_payload(target, actor_id="target:wt")["actorId"]
         == "target:wt"
     )
 
 
 def test_team_identity_payload_rejects_missing_member_revisions():
     with pytest.raises(SpiceError, match="team revision is required"):
-        identitypayload.team_identity_payload({"teamId": "team-1"})
+        identity.team_identity_payload({"teamId": "team-1"})

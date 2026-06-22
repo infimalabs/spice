@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from spice.errors import SpiceError
-from spice.serve import metricpayload
+from spice.serve.payload import metric
 from spice.serve.team.metrics import (
     METRIC_BUCKET_SECONDS,
     MetricSeriesPoint,
@@ -89,23 +89,23 @@ def test_metric_series_payload_returns_stable_activity_directive_and_task_points
         "complete", task_id="task-1", agent_id="agent-a", team_id="team-a", ts=180
     )
 
-    activity = metricpayload.metric_series_payload(
+    activity = metric.metric_series_payload(
         state,
         {"agentId": "agent-a", "metric": "activity", "start": 0, "end": 180},
     )
-    sends = metricpayload.metric_series_payload(
+    sends = metric.metric_series_payload(
         state,
         {"agentId": "agent-a", "metric": "sends", "start": 0, "end": 180},
     )
-    acks = metricpayload.metric_series_payload(
+    acks = metric.metric_series_payload(
         state,
         {"agentId": "agent-a", "metric": "acks", "start": 0, "end": 180},
     )
-    team_sends = metricpayload.metric_series_payload(
+    team_sends = metric.metric_series_payload(
         state,
         {"teamId": team.team_id, "metric": "sends", "start": 0, "end": 180},
     )
-    burndown = metricpayload.metric_series_payload(
+    burndown = metric.metric_series_payload(
         state,
         {"agentId": "agent-a", "metric": "burndown", "start": 0, "end": 180},
     )
@@ -151,7 +151,7 @@ def test_metric_series_payload_distribution_returns_agent_share_points(tmp_path)
         "review", task_id="task-b", agent_id="agent-b", team_id="team-a", ts=120
     )
 
-    payload = metricpayload.metric_series_payload(
+    payload = metric.metric_series_payload(
         state,
         {
             "agentId": "agent-a",
@@ -254,7 +254,7 @@ def test_metric_series_payload_per_session_uses_latest_renewal_boundary(tmp_path
                 ),
             )
 
-    payload = metricpayload.metric_series_payload(
+    payload = metric.metric_series_payload(
         state,
         {
             "agentId": successor,
@@ -309,7 +309,7 @@ def test_metric_series_payload_team_historical_rejects_unbounded_ranges(
     state = SimpleNamespace(team_store=store)
 
     with pytest.raises(SpiceError, match=error_text):
-        metricpayload.metric_series_payload(state, query)
+        metric.metric_series_payload(state, query)
 
     assert store.summary_calls == 0
 
