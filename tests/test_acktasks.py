@@ -18,8 +18,8 @@ from spice.mail.inbox import (
     compose_inbox_text,
     write_inbox_item,
 )
-from spice.serve.teamids import thread_actor_id
-from spice.serve.teams import (
+from spice.serve.team.ids import thread_actor_id
+from spice.serve.team.store import (
     TASK_FILTER_SOURCE_AUTO_CREATE,
     ServeTeamStore,
     TeamConfig,

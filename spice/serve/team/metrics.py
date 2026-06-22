@@ -14,8 +14,8 @@ from typing import Iterable, Mapping, Protocol
 
 from spice.errors import SpiceError
 from spice.serve.directivestats import DirectiveTotals
-from spice.serve.teamfilters import shell_settings_from_json
-from spice.serve.teamschema import (
+from spice.serve.team.filters import shell_settings_from_json
+from spice.serve.team.schema import (
     DEFAULT_STUCK_THRESHOLD_SECONDS,
     METRIC_HISTORY_RETENTION_SECONDS,
 )

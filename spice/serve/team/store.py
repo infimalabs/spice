@@ -22,15 +22,15 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from spice.errors import SpiceError
-from spice.serve.teamfilters import (
+from spice.serve.team.filters import (
     TeamFilterStoreMixin,
     config_from_row,
     shell_settings_from_json,
     task_filter_projects_from_json,
 )
-from spice.serve.teamids import agent_alias_ids as _agent_alias_ids
-from spice.serve.teamids import normalized_id as _normalized_id
-from spice.serve.teamidentity import (
+from spice.serve.team.ids import agent_alias_ids as _agent_alias_ids
+from spice.serve.team.ids import normalized_id as _normalized_id
+from spice.serve.team.identity import (
     TeamIdentityStoreMixin,
     agent_identity_from_row,
     select_agent_identity_rows,
@@ -39,7 +39,7 @@ from spice.serve.directivestats import (
     DirectiveStatsStoreMixin,
     DirectiveTotals as DirectiveTotals,
 )
-from spice.serve.teammetrics import (
+from spice.serve.team.metrics import (
     METRIC_BUCKET_SECONDS as METRIC_BUCKET_SECONDS,
     LaneMetricSummary as LaneMetricSummary,
     MetricSeriesPoint as MetricSeriesPoint,
@@ -49,7 +49,7 @@ from spice.serve.teammetrics import (
     TeamHistoricalMetricSummary as TeamHistoricalMetricSummary,
     TeamMetricStoreMixin,
 )
-from spice.serve.teammodels import (
+from spice.serve.team.models import (
     TeamAgentIdentity as TeamAgentIdentity,
     TeamConfig as TeamConfig,
     TeamMember,
@@ -59,11 +59,11 @@ from spice.serve.teammodels import (
     TeamTaskFilter as TeamTaskFilter,
     renewal_intent_payload as renewal_intent_payload,
 )
-from spice.serve.teamrenewals import (
+from spice.serve.team.renewals import (
     TeamRenewalStoreMixin,
     renewal_state_from_row,
 )
-from spice.serve.teamschema import (
+from spice.serve.team.schema import (
     DEFAULT_LIFETIME as DEFAULT_LIFETIME,
     DEFAULT_SELECTED_VIEW as DEFAULT_SELECTED_VIEW,
     DEFAULT_SPEECH_MODE as DEFAULT_SPEECH_MODE,
@@ -805,7 +805,7 @@ def _json_source(raw: object) -> str | bytes | bytearray:
     return raw if isinstance(raw, str | bytes | bytearray) else ""
 
 
-from spice.serve.teamcommands import (  # noqa: E402
+from spice.serve.team.commands import (  # noqa: E402
     TeamCommandResult as TeamCommandResult,
     TeamCommandService as TeamCommandService,
 )

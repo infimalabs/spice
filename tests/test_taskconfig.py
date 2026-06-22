@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from spice.errors import SpiceError
-from spice.serve.teams import team_database_path
-from spice.serve.teamschema import TEAM_DATABASE_FILENAME
+from spice.serve.team.store import team_database_path
+from spice.serve.team.schema import TEAM_DATABASE_FILENAME
 from spice.tasks import config, render
 
 

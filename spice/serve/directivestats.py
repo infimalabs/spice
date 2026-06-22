@@ -21,8 +21,8 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Protocol
 
-from spice.serve.teamids import normalized_id as _normalized_id
-from spice.serve.teamschema import METRIC_HISTORY_RETENTION_SECONDS
+from spice.serve.team.ids import normalized_id as _normalized_id
+from spice.serve.team.schema import METRIC_HISTORY_RETENTION_SECONDS
 
 
 @dataclass(frozen=True)

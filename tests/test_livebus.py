@@ -30,7 +30,7 @@ from spice.serve.app import ServeState
 from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
 from spice.serve.pending import pending_inbox_identity_payload
-from spice.serve.teams import ServeTeamStore
+from spice.serve.team.store import ServeTeamStore
 from spice.serve.worktrees import WorktreeTarget
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

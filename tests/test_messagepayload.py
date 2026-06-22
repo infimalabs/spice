@@ -25,7 +25,7 @@ from spice.serve import (
 )
 from spice.serve.messagepayload import ack_context_payload_for_worktree
 from spice.serve.steering import submit_steering_message
-from spice.serve.teams import ServeTeamStore
+from spice.serve.team.store import ServeTeamStore
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 

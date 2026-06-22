@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from spice.serve import messages as message_reader
-from spice.serve.teams import ServeTeamStore
+from spice.serve.team.store import ServeTeamStore
 
 TOOL_CALL_KINDS = frozenset(
     {

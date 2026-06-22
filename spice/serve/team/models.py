@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from spice.serve.teamschema import (
+from spice.serve.team.schema import (
     DEFAULT_LIFETIME,
     DEFAULT_SELECTED_VIEW,
     DEFAULT_SPEECH_MODE,

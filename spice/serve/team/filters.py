@@ -10,8 +10,8 @@ from typing import Any, Iterable
 from typing import Protocol
 
 from spice.errors import SpiceError
-from spice.serve.teammodels import TeamConfig, TeamTaskFilter
-from spice.serve.teamschema import (
+from spice.serve.team.models import TeamConfig, TeamTaskFilter
+from spice.serve.team.schema import (
     TASK_FILTER_SOURCE_MANUAL,
     TASK_FILTER_SOURCES,
 )

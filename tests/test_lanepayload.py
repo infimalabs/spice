@@ -21,7 +21,7 @@ from spice.serve.lanepayload import (
     lane_metrics_payload,
     task_filter_inventory,
 )
-from spice.serve.teams import ServeTeamStore
+from spice.serve.team.store import ServeTeamStore
 from spice.tasks import tw
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="

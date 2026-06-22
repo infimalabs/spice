@@ -16,7 +16,7 @@ from spice.serve import (
     worktreepayload,
 )
 from spice.serve.app import ServeState
-from spice.serve.teams import ServeTeamStore, TeamCommandService, TeamConfig
+from spice.serve.team.store import ServeTeamStore, TeamCommandService, TeamConfig
 from spice.serve.workroutes import (
     work_tree_send_response_payload,
     work_tree_task_drain_response_payload,

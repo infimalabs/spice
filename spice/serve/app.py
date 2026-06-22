@@ -47,11 +47,11 @@ from spice.serve.messages import (
     TranscriptResolution,
     resolve_thread_transcript,
 )
-from spice.serve.teammetrics import (
+from spice.serve.team.metrics import (
     METRIC_BUCKET_SECONDS,
     TEAM_HISTORICAL_MAX_BUCKET_COUNT,
 )
-from spice.serve.teams import ServeTeamStore, TeamCommandService
+from spice.serve.team.store import ServeTeamStore, TeamCommandService
 from spice.serve.web import render_index_html, send_static_asset
 from spice.serve.websocket import is_websocket_request
 from spice.serve.workroutes import (

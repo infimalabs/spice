@@ -1,7 +1,7 @@
 import itertools
 import random
 
-from spice.serve.teams import ServeTeamStore, TaskLifecycleSeriesPoint, TeamConfig
+from spice.serve.team.store import ServeTeamStore, TaskLifecycleSeriesPoint, TeamConfig
 
 _directive_seq = itertools.count()
 
@@ -536,8 +536,8 @@ def test_lane_merge_moves_source_metrics_into_destination_once(tmp_path):
 
 def test_lane_metrics_can_scope_to_latest_renewal_session(tmp_path, monkeypatch):
     clock = {"now": 0.0}
-    monkeypatch.setattr("spice.serve.teams.time.time", lambda: clock["now"])
-    monkeypatch.setattr("spice.serve.teammetrics.time.time", lambda: clock["now"])
+    monkeypatch.setattr("spice.serve.team.store.time.time", lambda: clock["now"])
+    monkeypatch.setattr("spice.serve.team.metrics.time.time", lambda: clock["now"])
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     predecessor = "thread:predecessor"
     successor = "thread:successor"
@@ -611,7 +611,7 @@ def test_lane_metrics_can_scope_to_latest_renewal_session(tmp_path, monkeypatch)
 
 def test_started_renewal_rewrites_task_lifecycle_events(tmp_path, monkeypatch):
     clock = {"now": 0.0}
-    monkeypatch.setattr("spice.serve.teams.time.time", lambda: clock["now"])
+    monkeypatch.setattr("spice.serve.team.store.time.time", lambda: clock["now"])
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     predecessor = "thread:predecessor"
     successor = "thread:successor"
@@ -664,7 +664,7 @@ def test_team_historical_metric_summary_projects_membership_intervals(
     tmp_path, monkeypatch
 ):
     clock = {"now": 0.0}
-    monkeypatch.setattr("spice.serve.teams.time.time", lambda: clock["now"])
+    monkeypatch.setattr("spice.serve.team.store.time.time", lambda: clock["now"])
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
 
     def set_time(timestamp: float) -> None:

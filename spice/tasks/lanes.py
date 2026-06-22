@@ -85,7 +85,7 @@ def _route_list(entry: RouteEntry, key: str) -> list[str]:
 
 
 def route_actor_id(actor: str) -> str:
-    from spice.serve.teamids import normalize_actor_id
+    from spice.serve.team.ids import normalize_actor_id
 
     return normalize_actor_id(actor)
 
@@ -95,7 +95,7 @@ def team_route_for_actor(actor: str) -> RouteEntry | None:
     if not actor:
         return None
     lookup_id = route_actor_id(actor)
-    from spice.serve.teams import ServeTeamStore
+    from spice.serve.team.store import ServeTeamStore
 
     for team in ServeTeamStore().team_snapshot().teams:
         member_ids = [member.agent_id for member in team.members]

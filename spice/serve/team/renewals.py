@@ -9,10 +9,10 @@ from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
 from spice.errors import SpiceError
-from spice.serve.teamids import normalized_id as _normalized_id
-from spice.serve.teamidentity import agent_identity_from_row, thread_id_from_actor
-from spice.serve.teammodels import TeamRenewalState
-from spice.serve.teamschema import (
+from spice.serve.team.ids import normalized_id as _normalized_id
+from spice.serve.team.identity import agent_identity_from_row, thread_id_from_actor
+from spice.serve.team.models import TeamRenewalState
+from spice.serve.team.schema import (
     RENEWAL_STATE_PENDING,
     RENEWAL_STATE_REQUESTED,
     RENEWAL_STATE_STARTED,

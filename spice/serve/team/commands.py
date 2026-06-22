@@ -19,7 +19,7 @@ class TeamCommandService:
 
     def __init__(self, store: Any | None = None) -> None:
         if store is None:
-            from spice.serve.teams import ServeTeamStore
+            from spice.serve.team.store import ServeTeamStore
 
             store = ServeTeamStore()
         self.store = store
@@ -106,7 +106,7 @@ class TeamCommandService:
 
 
 def _required(payload: dict[str, Any], key: str) -> str:
-    from spice.serve.teams import _normalized_id
+    from spice.serve.team.store import _normalized_id
 
     return _normalized_id(str(payload.get(key) or ""), key)
 
@@ -116,7 +116,7 @@ def _aliases(payload: dict[str, Any]) -> list[str]:
 
 
 def _config_from_payload(raw: Any) -> Any:
-    from spice.serve.teams import TeamConfig
+    from spice.serve.team.store import TeamConfig
 
     if not isinstance(raw, dict):
         return TeamConfig()
@@ -124,8 +124,8 @@ def _config_from_payload(raw: Any) -> Any:
 
 
 def _patched_config(current: Any, patch: dict[str, Any]) -> Any:
-    from spice.serve.teamfilters import validated_task_filter_projects
-    from spice.serve.teams import TeamConfig
+    from spice.serve.team.filters import validated_task_filter_projects
+    from spice.serve.team.store import TeamConfig
 
     task_filters = current.task_filters
     if isinstance(patch.get("taskFilters"), list):
