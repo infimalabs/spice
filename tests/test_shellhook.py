@@ -2,7 +2,6 @@
 
 import io
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -123,7 +122,6 @@ def test_wrapper_rewrites_codex_snapshot_trailing_shell_exec(monkeypatch):
         ["/bin/zsh", "-c", snapshot], rewrite_rtk=True
     )
 
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     assert command == [
         "/bin/zsh",
         "-c",
@@ -131,50 +129,10 @@ def test_wrapper_rewrites_codex_snapshot_trailing_shell_exec(monkeypatch):
             '__CODEX_SNAPSHOT_OVERRIDE_SET_0="${CODEX_THREAD_ID+x}"\n'
             "if . '.codex/shell_snapshots/thread.sh' >/dev/null 2>&1; "
             "then :; fi\n"
-            f"unset {shellhook.SHELL_HOOK_REEXEC_STAGE_ENV}\n"
-            f"export ZDOTDIR={shlex.quote(str(static_hook_dir))}\n"
-            "export BASH_ENV="
-            f"{shlex.quote(str(static_hook_dir / shellhook.BASH_HOOK_NAME))}\n"
             "exec /bin/zsh -c 'rtk git status --short'"
         ),
     ]
     assert calls == [(snapshot,), ("git status --short",)]
-
-
-def test_wrapper_sanitizes_codex_snapshot_trailing_shell_exec_without_rtk_match(
-    monkeypatch,
-):
-    calls: list[tuple[str, ...]] = []
-
-    def fake_rewrite(*args: str) -> str | None:
-        calls.append(args)
-        return None
-
-    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
-
-    snapshot = (
-        "if . '.codex/shell_snapshots/thread.sh' >/dev/null 2>&1; then :; fi\n"
-        "exec '/bin/zsh' -c 'printf ok'"
-    )
-
-    command = wrap.build_agent_run_command(
-        ["/bin/zsh", "-c", snapshot], rewrite_rtk=True
-    )
-
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
-    assert command == [
-        "/bin/zsh",
-        "-c",
-        (
-            "if . '.codex/shell_snapshots/thread.sh' >/dev/null 2>&1; then :; fi\n"
-            f"unset {shellhook.SHELL_HOOK_REEXEC_STAGE_ENV}\n"
-            f"export ZDOTDIR={shlex.quote(str(static_hook_dir))}\n"
-            "export BASH_ENV="
-            f"{shlex.quote(str(static_hook_dir / shellhook.BASH_HOOK_NAME))}\n"
-            "exec /bin/zsh -c 'printf ok'"
-        ),
-    ]
-    assert calls == [(snapshot,), ("printf ok",)]
 
 
 def test_wrapper_rewrites_direct_agent_command_with_rtk_source_of_truth(monkeypatch):
@@ -320,7 +278,7 @@ def test_wrapper_non_shell_commands_inherit_ambient_shell_hook_environment(
     assert env is None
 
 
-def test_wrapper_route_environment_carries_ambient_shell_hook_environment(
+def test_wrapper_route_environment_uses_static_hook_stage_for_shell_execution(
     tmp_path, monkeypatch
 ):
     _write_spice_product_shape(tmp_path)
@@ -334,16 +292,17 @@ def test_wrapper_route_environment_carries_ambient_shell_hook_environment(
     )
 
     assert env is not None
-    assert env["ZDOTDIR"] == "hook"
-    assert env["BASH_ENV"] == "hook"
-    assert env[shellhook.SHELL_HOOK_REEXEC_STAGE_ENV] == "1"
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
+    assert env["ZDOTDIR"] == str(static_hook_dir)
+    assert env["BASH_ENV"] == str(static_hook_dir / shellhook.BASH_HOOK_NAME)
+    assert shellhook.SHELL_HOOK_REEXEC_STAGE_ENV not in env
 
 
-def test_wrapper_route_environment_sets_reexec_stage_for_shell_execution(
+def test_wrapper_route_environment_scrubs_reexec_stage_for_shell_execution(
     tmp_path, monkeypatch
 ):
     _write_spice_product_shape(tmp_path)
-    monkeypatch.delenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, raising=False)
+    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
 
     env = wrap.build_agent_run_environment(
         ["zsh", "-c", "true"],
@@ -351,7 +310,10 @@ def test_wrapper_route_environment_sets_reexec_stage_for_shell_execution(
     )
 
     assert env is not None
-    assert env[shellhook.SHELL_HOOK_REEXEC_STAGE_ENV] == "1"
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
+    assert env["ZDOTDIR"] == str(static_hook_dir)
+    assert env["BASH_ENV"] == str(static_hook_dir / shellhook.BASH_HOOK_NAME)
+    assert shellhook.SHELL_HOOK_REEXEC_STAGE_ENV not in env
 
 
 def test_wrapper_does_not_install_shell_hook_environment_for_direct_shell_commands(

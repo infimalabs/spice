@@ -72,7 +72,6 @@ PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
 SHELL_EXECUTION_COMMANDS = frozenset(("bash", "dash", "sh", "zsh"))
 SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
 RTK_REWRITE_COMMAND = ("rtk", "rewrite")
-CODEX_SHELL_SNAPSHOT_MARKER = "shell_snapshots/"
 # RTK prints a rewritten command and returns 3 from the hook path on this lane.
 RTK_REWRITE_MATCH_EXIT_CODES = frozenset((0, 3))
 PYTHON_ROUTE_FAILURE = (
@@ -208,27 +207,11 @@ def rtk_rewrite_trailing_exec_shell_command(command_text: str) -> str | None:
         or flag not in SHELL_EXECUTION_FLAGS
     ):
         return None
-    rewritten = rtk_rewrite_command_text(nested_command) or nested_command
-    normalized_prefix = codex_snapshot_normalized_prefix(prefix)
-    if rewritten == nested_command and normalized_prefix == prefix:
+    rewritten = rtk_rewrite_command_text(nested_command)
+    if rewritten is None:
         return None
     return (
-        f"{normalized_prefix}exec {shlex.quote(shell)} {flag} "
-        f"{shlex.quote(rewritten)}{trailing}"
-    )
-
-
-def codex_snapshot_normalized_prefix(prefix: str) -> str:
-    if CODEX_SHELL_SNAPSHOT_MARKER not in prefix:
-        return prefix
-    static_hook_dir = packaged_shell_steering_static_hook_dir()
-    normalized = prefix if prefix.endswith("\n") else f"{prefix}\n"
-    return (
-        normalized
-        + f"unset {SHELL_HOOK_REEXEC_STAGE_ENV}\n"
-        + f"export {ZDOTDIR_ENV}={shlex.quote(str(static_hook_dir))}\n"
-        + f"export {BASH_ENV_ENV}="
-        + f"{shlex.quote(str(static_hook_dir / BASH_HOOK_NAME))}\n"
+        f"{prefix}exec {shlex.quote(shell)} {flag} {shlex.quote(rewritten)}{trailing}"
     )
 
 
@@ -301,10 +284,11 @@ def agent_run_child_worktree_environment(
     base_env: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     env = worktree_spice_environment(repo_root, base_env=base_env)
-    if shell_execution_command_index(args) is None:
-        env.pop(SHELL_HOOK_REEXEC_STAGE_ENV, None)
-    else:
-        env[SHELL_HOOK_REEXEC_STAGE_ENV] = "1"
+    env.pop(SHELL_HOOK_REEXEC_STAGE_ENV, None)
+    if shell_execution_command_index(args) is not None:
+        static_hook_dir = packaged_shell_steering_static_hook_dir()
+        env[ZDOTDIR_ENV] = str(static_hook_dir)
+        env[BASH_ENV_ENV] = str(static_hook_dir / BASH_HOOK_NAME)
     return env
 
 
