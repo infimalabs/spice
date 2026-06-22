@@ -773,6 +773,26 @@ def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monke
     ]
 
 
+def test_run_agent_command_reports_missing_command_without_traceback(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    stderr = io.StringIO()
+
+    def fake_popen(command, env=None):
+        raise FileNotFoundError(2, "No such file or directory", command[0])
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        ["nonexistent-cmd-xyz"],
+        popen_factory=fake_popen,
+        stderr=stderr,
+    )
+
+    assert exit_code == wrap.COMMAND_NOT_FOUND_EXIT_CODE
+    assert "command not found: nonexistent-cmd-xyz" in stderr.getvalue()
+
+
 def test_wrapper_leaves_plain_commands_native_without_rtk_rewrite():
     assert wrap.build_agent_run_command(["find", ".", "-maxdepth", "0", "-print"]) == [
         "find",
