@@ -91,6 +91,7 @@ AGENT_RUN_CONTEXT_METER_CACHE_SECONDS = 15.0
 AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS = 15.0 * 60.0
 AGENT_RUN_SIDE_CHANNEL_READ_BYTES = 8192
 INTERRUPTED_EXIT_CODE = 130
+COMMAND_NOT_FOUND_EXIT_CODE = 127
 _UV_RUN_SPICE = ["uv", "run", "spice"]
 
 InboxSignature = tuple[tuple[str, int, int], ...]
@@ -122,10 +123,16 @@ def run_agent_command(
         raw_args,
         repo_root=repo_root,
     )
-    if environment is None:
-        process = popen_factory(command)
-    else:
-        process = popen_factory(command, env=environment)
+    try:
+        if environment is None:
+            process = popen_factory(command)
+        else:
+            process = popen_factory(command, env=environment)
+    except FileNotFoundError:
+        executable = command[0] if command else ""
+        stderr.write(f"spice agent run: command not found: {executable}\n")
+        stderr.flush()
+        return COMMAND_NOT_FOUND_EXIT_CODE
     watch_thread = start_agent_side_channel_watch(
         repo_root,
         parent_pid=int(getattr(process, "pid", 0) or 0),
@@ -306,7 +313,9 @@ def rtk_rewrite_direct_args(args: Sequence[str]) -> list[str] | None:
 def rtk_rewrite_command_text(*args: str) -> str | None:
     try:
         completed = subprocess.run(
-            [*RTK_REWRITE_COMMAND, *args],
+            # `--` stops rtk option parsing so a flag-leading command (e.g.
+            # `--help`) is rewritten as a command, not read as rtk's own option.
+            [*RTK_REWRITE_COMMAND, "--", *args],
             stdout=subprocess.PIPE,
             text=True,
             check=False,
