@@ -596,17 +596,22 @@ function renderLaneMetricsPane(lane) {
 }
 
 function renderLaneMetricsVanilla(grid, model) {
-  const cells = model.cells.map((cell) => laneMetricCell(cell.label, cell.value));
-  const controls = laneMetricSeriesControls(
-    model,
-    grid.querySelector(".lane-metric-series-controls"),
-  );
-  grid.replaceChildren(
-    laneMetricSeriesChartCell(model),
-    controls,
+  const cells = model.cells.map((cell) => {
+    const slot = "cell:" + cell.label;
+    return laneMetricCell(
+      cell.label,
+      cell.value,
+      laneMetricGridSlot(grid, slot),
+      slot,
+    );
+  });
+  const nodes = [
+    laneMetricSeriesChartCell(model, laneMetricGridSlot(grid, "series-chart")),
+    laneMetricSeriesControls(model, laneMetricGridSlot(grid, "series-controls")),
     ...cells,
-    laneMetricSparklineCell(model),
-  );
+    laneMetricSparklineCell(model, laneMetricGridSlot(grid, "activity")),
+  ];
+  syncLaneMetricElementChildren(grid, nodes);
 }
 
 function laneMetricsRenderModel(lane) {
@@ -764,25 +769,65 @@ function reportLaneMetricsLitIslandError(error) {
   throw error;
 }
 
-function laneMetricCell(label, value) {
-  const cell = document.createElement("span");
+function laneMetricGridSlot(grid, slot) {
+  for (const child of grid.children || []) {
+    if (child.__spiceLaneMetricSlot === slot) return child;
+  }
+  return null;
+}
+
+function markLaneMetricSlot(element, slot) {
+  element.__spiceLaneMetricSlot = slot;
+  return element;
+}
+
+function syncLaneMetricElementChildren(element, nodes) {
+  const children = Array.from(element.children || []);
+  if (
+    children.length === nodes.length &&
+    nodes.every((node, index) => children[index] === node)
+  )
+    return;
+  element.replaceChildren(...nodes);
+}
+
+function laneMetricElementWithClass(parent, className, tagName = "span") {
+  let element = parent.querySelector("." + className);
+  if (!element) {
+    element = document.createElement(tagName);
+    element.className = className;
+  }
+  return element;
+}
+
+function laneMetricCell(label, value, existing = null, slot = "") {
+  const cell = existing || document.createElement("span");
   cell.className = "lane-metric-cell";
-  const valueEl = document.createElement("span");
-  valueEl.className = "lane-metric-value";
+  if (slot) markLaneMetricSlot(cell, slot);
+  const valueEl = laneMetricElementWithClass(cell, "lane-metric-value");
   valueEl.textContent = value;
-  const labelEl = document.createElement("span");
-  labelEl.className = "lane-metric-label";
+  const labelEl = laneMetricElementWithClass(cell, "lane-metric-label");
   labelEl.textContent = label;
-  cell.append(valueEl, labelEl);
+  syncLaneMetricElementChildren(cell, [valueEl, labelEl]);
   return cell;
 }
 
-function laneMetricSparklineCell(model) {
-  const cell = laneMetricCell("activity", model.activityTotal + " messages");
+function laneMetricSparklineCell(model, existing = null) {
+  const cell = laneMetricCell(
+    "activity",
+    model.activityTotal + " messages",
+    existing,
+    "activity",
+  );
   cell.classList.add("lane-metric-cell--wide");
-  const wrap = document.createElement("div");
+  let wrap = cell.querySelector(".lane-metric-sparkline");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.className = "lane-metric-sparkline";
+  }
   wrap.className = "lane-metric-sparkline";
   const max = Math.max(1, ...model.sparkline);
+  const bars = [];
   for (const value of model.sparkline) {
     const bar = document.createElement("span");
     bar.className = "lane-metric-sparkline-bar";
@@ -790,84 +835,104 @@ function laneMetricSparklineCell(model) {
       "--lane-metric-sparkline-level",
       String(Math.max(1, Math.ceil((value / max) * 8))),
     );
-    wrap.append(bar);
+    bars.push(bar);
   }
-  cell.append(wrap);
+  wrap.replaceChildren(...bars);
+  const valueEl = laneMetricElementWithClass(cell, "lane-metric-value");
+  const labelEl = laneMetricElementWithClass(cell, "lane-metric-label");
+  syncLaneMetricElementChildren(cell, [valueEl, labelEl, wrap]);
   return cell;
 }
 
-function laneMetricSeriesControls(model, existingCell = null) {
+function laneMetricSeriesControls(model, existing = null) {
   const controls = model.seriesControls || {};
-  const cell = existingCell || document.createElement("span");
+  const cell = existing || document.createElement("span");
+  markLaneMetricSlot(cell, "series-controls");
   cell.className = "lane-metric-series-controls lane-metric-cell--wide";
-  const specs = [
-    ["metric", controls.metric, controls.metrics || []],
-    ["lens", controls.lens, controls.lenses || []],
-    ["rangeSeconds", controls.rangeSeconds, controls.ranges || []],
-  ];
-  if (cell.children.length !== specs.length) {
-    cell.replaceChildren(
-      ...specs.map(([name, selectedValue, options]) =>
-        laneMetricSeriesSelect(name, selectedValue, options),
+  syncLaneMetricElementChildren(
+    cell,
+    [
+      laneMetricSeriesSelect("metric", controls.metric, controls.metrics || [], cell),
+      laneMetricSeriesSelect("lens", controls.lens, controls.lenses || [], cell),
+      laneMetricSeriesSelect(
+        "rangeSeconds",
+        controls.rangeSeconds,
+        controls.ranges || [],
+        cell,
       ),
-    );
-    return cell;
-  }
-  specs.forEach(([name, selectedValue, options], index) => {
-    syncLaneMetricSeriesSelect(cell.children[index], name, selectedValue, options);
-  });
+    ],
+  );
   return cell;
 }
 
-function laneMetricSeriesSelect(name, selectedValue, options) {
-  const select = document.createElement("select");
-  syncLaneMetricSeriesSelect(select, name, selectedValue, options);
+function laneMetricSeriesSelect(name, selectedValue, options, container = null) {
+  let select = laneMetricSeriesSelectForName(container, name);
+  if (!select) {
+    select = document.createElement("select");
+    select.__spiceLaneMetricSeriesSelect = name;
+    select.setAttribute("aria-label", "Metric " + name);
+    if (typeof select.addEventListener === "function")
+      select.addEventListener("change", () => {
+        select.dispatchEvent(
+          new CustomEvent("spice-metric-series-change", {
+            bubbles: true,
+            detail: { [name]: select.value },
+          }),
+        );
+      });
+  }
+  select.className = "lane-metric-series-select";
+  syncLaneMetricSeriesSelectOptions(select, selectedValue, options);
   return select;
 }
 
-function syncLaneMetricSeriesSelect(select, name, selectedValue, options) {
-  select.className = "lane-metric-series-select";
-  select.__spiceMetricSeriesName = name;
-  select.setAttribute("aria-label", "Metric " + name);
-  select.replaceChildren(
-    ...options.map(([value, label]) => {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      option.selected = String(value) === String(selectedValue || "");
-      return option;
-    }),
-  );
-  select.value = String(selectedValue || "");
-  if (select.__spiceMetricSeriesChangeHandler) return;
-  select.__spiceMetricSeriesChangeHandler = true;
-  if (typeof select.addEventListener !== "function") return;
-  select.addEventListener("change", () => {
-    const detail = { [select.__spiceMetricSeriesName]: select.value };
-    select.dispatchEvent(
-      new CustomEvent("spice-metric-series-change", {
-        bubbles: true,
-        detail,
-      }),
-    );
-  });
+function laneMetricSeriesSelectForName(container, name) {
+  if (!container) return null;
+  for (const child of container.children || []) {
+    if (child.__spiceLaneMetricSeriesSelect === name) return child;
+  }
+  return null;
 }
 
-function laneMetricSeriesChartCell(model) {
-  const cell = document.createElement("span");
+function syncLaneMetricSeriesSelectOptions(select, selectedValue, options) {
+  const selected = String(selectedValue || "");
+  const optionNodes = [];
+  const existingByValue = laneMetricSeriesOptionsByValue(select);
+  for (const [value, label] of options) {
+    const optionValue = String(value);
+    const option = existingByValue.get(optionValue) || document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    option.selected = optionValue === selected;
+    optionNodes.push(option);
+  }
+  syncLaneMetricElementChildren(select, optionNodes);
+  select.value = selected;
+}
+
+function laneMetricSeriesOptionsByValue(select) {
+  const options = new Map();
+  for (const option of select.children || []) options.set(String(option.value), option);
+  return options;
+}
+
+function laneMetricSeriesChartCell(model, existing = null) {
+  const cell = existing || document.createElement("span");
+  markLaneMetricSlot(cell, "series-chart");
   cell.className = "lane-metric-series-chart lane-metric-cell--wide";
   const points = Array.isArray((model.series || {}).points)
     ? model.series.points
     : [];
   if (!points.length) {
-    const empty = document.createElement("span");
+    let empty = cell.querySelector(".lane-metric-series-empty");
+    if (!empty) empty = document.createElement("span");
     empty.className = "lane-metric-series-empty";
     empty.textContent = "no series";
-    cell.append(empty);
+    syncLaneMetricElementChildren(cell, [empty]);
     return cell;
   }
   const svg = laneMetricSeriesSvg(points);
-  cell.append(svg);
+  syncLaneMetricElementChildren(cell, [svg]);
   return cell;
 }
 

@@ -578,6 +578,10 @@ button.primary:hover {
   overflow: hidden;
   padding: 0 10px;
 }
+.lane-view-panel[data-lane-view-panel="metrics"] {
+  display: flex;
+  flex-direction: column;
+}
 
 .lane-pane-head {
   color: var(--muted);
@@ -728,8 +732,11 @@ button.primary:hover {
 /* ---- metrics pane ---- */
 .lane-metrics-grid {
   display: grid;
+  flex: 1 1 auto;
   gap: 6px;
   grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: minmax(96px, 1fr) repeat(4, max-content);
+  min-height: 0;
 }
 .lane-metric-cell {
   background: var(--control-surface-soft);
@@ -777,11 +784,14 @@ button.primary:hover {
   padding: 4px 6px;
 }
 .lane-metric-series-chart {
-  min-height: 54px;
+  display: flex;
+  min-height: 0;
 }
 .lane-metric-series-svg {
   display: block;
-  height: 42px;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
   width: 100%;
 }
 .lane-metric-series-line {
@@ -1195,6 +1205,9 @@ button.primary:hover {
   .lane-metrics-grid,
   .lane-info-grid {
     grid-template-columns: 1fr;
+  }
+  .lane-metrics-grid {
+    grid-template-rows: minmax(96px, 1fr) repeat(7, max-content);
   }
   .lane-metric-cell--wide { grid-column: span 1; }
   .lane-statusline {
