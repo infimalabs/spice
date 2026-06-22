@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import spice.release as release
+from spice.agent.gitshadow import AGENT_GIT_SHADOW_CONFIG_INDEXES_ENV
 from spice.errors import SpiceError
 from spice.cli.mounts import mounted_commands
 from spice.release import (
@@ -97,6 +98,21 @@ def test_release_notes_mode_writes_output_without_release_sync(tmp_path, monkeyp
     assert notes_path.read_text(encoding="utf-8") == (
         "notes for 0.3.0 at commit-for-0.3.0\n"
     )
+
+
+def test_release_environment_scrubs_agent_git_shadow(monkeypatch):
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "includeIf.gitdir:/repo/.git.path")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "/repo/.git/agent.gitconfig")
+    monkeypatch.setenv(AGENT_GIT_SHADOW_CONFIG_INDEXES_ENV, "0")
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    env = release.release_environment()
+
+    assert AGENT_GIT_SHADOW_CONFIG_INDEXES_ENV not in env
+    assert "GIT_CONFIG_KEY_0" not in env
+    assert "GIT_CONFIG_COUNT" not in env
+    assert env["PATH"] == "/usr/bin"
 
 
 def test_hermetic_wheel_env_drops_source_shadowing_entries(monkeypatch):
