@@ -14,8 +14,8 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
 
     assert "using the\n`spice` command directly" in text
     assert "agents should not switch entrypoints" in text
-    assert "only as a command-routing marker" in text
-    assert "It still goes through `agent run`" in text
+    assert "reexecs itself through `spice agent run`" in text
+    assert "RTK rewrite routing before the requested command" in text
     assert "same key=value batch format as task-add batch input" in text
     assert "starts on its own line" in text
     assert "`ACK <key>: captured the request.`" in text
