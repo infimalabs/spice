@@ -15,10 +15,11 @@ Spice has two command-extension surfaces with different owners:
 
 ## Agent Command Wrapper
 
-Agent launch installs static shell startup hooks for zsh and bash and
-precomputes configured wrapper functions into `SPICE_SHELL_HOOK_WRAPPERS`. The
-first non-interactive command shell with an execution string sees
-`SPICE_SHELL_HOOK_REEXEC_STAGE` unset, sets it, and reexecs through:
+Agent launch installs static shell startup hooks for zsh and bash, clears any
+inherited `SPICE_SHELL_HOOK_REEXEC_STAGE` marker, and precomputes configured
+wrapper functions into `SPICE_SHELL_HOOK_WRAPPERS`. The first non-interactive
+command shell with an execution string sees `SPICE_SHELL_HOOK_REEXEC_STAGE`
+unset, sets it, and reexecs through:
 
 ```sh
 spice agent run -- <shell> -c "<original command>"
@@ -28,7 +29,8 @@ Agents normally run shell commands directly; the startup hooks perform this
 reexec. Descendant shells inherit `SPICE_SHELL_HOOK_REEXEC_STAGE=1` and perform
 stage-2 startup only: source the user's real startup files, rearm the packaged
 hook environment, and eval `SPICE_SHELL_HOOK_WRAPPERS` without a second
-`agent run` hop or second steering injection. Use
+`agent run` hop or second steering injection. The marker is a sentinel, not a
+counter; there is no `SPICE_SHELL_HOOK_REEXEC_STAGE=2` value. Use
 `spice agent run -- <command>` explicitly only when recovering a command path or
 inspecting wrapper behavior.
 

@@ -1037,6 +1037,46 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
     assert f"ran:{hook_dir}:{hook_dir / shellhook.BASH_HOOK_NAME}" in lines
 
 
+def test_agent_shell_environment_scrubs_inherited_reexec_stage(tmp_path):
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    trace = tmp_path / "trace.log"
+    fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
+    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    base_env = {
+        "PATH": os.environ.get("PATH", ""),
+        "SHELL": zsh,
+        shellhook.SHELL_HOOK_REEXEC_STAGE_ENV: "1",
+        SHELL_TRACE_ENV: str(trace),
+    }
+    env = shellhook.apply_shell_steering_environment(
+        tmp_path,
+        driver_state_dirname=DRIVER.state_dirname,
+        base_env=base_env,
+    )
+    env[shellhook.SHELL_HOOK_PYTHON_ENV] = str(fake_python)
+    command = (
+        "printf 'ran:%s:%s\\n' "
+        f'"${{{shellhook.ZDOTDIR_ENV}-unset}}" '
+        f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
+        f'>> "${{{SHELL_TRACE_ENV}}}"; '
+        "exit 7"
+    )
+
+    completed = subprocess.run([zsh, "-c", command], check=False, env=env, timeout=2)
+
+    assert completed.returncode == 7
+    lines = _trace_lines(trace, expected_prefix="ran:")
+    agent_run_lines = [line for line in lines if "-m spice agent run --" in line]
+    assert len(agent_run_lines) == 1
+    assert agent_run_lines[0].startswith(
+        f"fake:{hook_dir}:{hook_dir / shellhook.BASH_HOOK_NAME}:"
+    )
+    assert f" {zsh} -c " in agent_run_lines[0]
+    assert f"ran:{hook_dir}:{hook_dir / shellhook.BASH_HOOK_NAME}" in lines
+
+
 def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
     zsh = shutil.which("zsh")
     if zsh is None:
