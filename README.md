@@ -78,8 +78,8 @@ spice init               # hooks, skill copy, state scaffolding
 spice dev doctor         # verify drivers, backends, and policy
 ```
 
-`spice init` writes machine-local git hook shims under `.spice/` (ignored via
-the common git dir's `.git/info/exclude`), materializes the worktree skill copy, and prepares state
+`spice init` writes machine-local git hook shims under `.spice/` (ignored via a
+generated `.spice/.gitignore`), materializes the worktree skill copy, and prepares state
 scaffolding. Repo-tracked policy lives in your `pyproject.toml` under
 `[tool.spice.*]` tables. The command surface is always `spice …`. Entrypoint
 resolution is worktree-true under the hood: generated git hooks invoke ambient

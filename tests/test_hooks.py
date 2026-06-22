@@ -463,6 +463,21 @@ def test_init_repo_reports_generated_worktree_skill_ignore(tmp_path):
     assert _git(repo, "status", "--short").stdout == ""
 
 
+def test_init_repo_generates_state_gitignore(tmp_path):
+    from spice.hooks.install import STATE_GITIGNORE_CONTENT
+
+    repo = _git_init(tmp_path / "repo")
+
+    rows = init_repo(repo)
+
+    assert "state_ignore=.spice/.gitignore" in rows
+    assert (repo / ".spice" / ".gitignore").read_text(
+        encoding="utf-8"
+    ) == STATE_GITIGNORE_CONTENT
+    # `.spice/` is excluded by its own generated marker, so init leaves a clean tree.
+    assert _git(repo, "status", "--short").stdout == ""
+
+
 def test_install_hooks_writes_ambient_spice_shims_for_spice_checkout(tmp_path):
     repo = _git_init(tmp_path / "repo")
     _write_spice_product_shape(repo)
