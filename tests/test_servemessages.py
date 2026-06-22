@@ -163,6 +163,62 @@ def test_append_only_read_reports_cross_boundary_image_pair_removal(
     assert [item.key for item in cursor.window or []] == [item.key for item in expected]
 
 
+def test_append_only_read_with_after_reports_cross_boundary_image_pair_removal(
+    tmp_path, monkeypatch
+):
+    transcript = tmp_path / "rollout.jsonl"
+    _append_codex_payload(
+        transcript,
+        TIMESTAMP,
+        {
+            "type": "function_call",
+            "name": "view_image",
+            "arguments": json.dumps({"path": "shot.png"}),
+        },
+    )
+    cursor = RolloutCursor()
+    initial = read_assistant_messages(
+        transcript, limit=5, cursor=cursor, driver=CODEX_DRIVER, worktree_id="wt"
+    )
+    after = cursor.last_key
+    _append_codex_payload(
+        transcript,
+        "2026-06-20T04:46:00.000000Z",
+        {
+            "type": "function_call_output",
+            "output": [
+                {
+                    "type": "input_image",
+                    "image_url": {"url": "data:image/png;base64,aW1n"},
+                }
+            ],
+        },
+    )
+    expected = read_assistant_messages(
+        transcript, limit=5, driver=CODEX_DRIVER, worktree_id="wt"
+    )
+
+    def fail_window(*_args, **_kwargs):
+        raise AssertionError("append-only after-cursor growth must not rescan")
+
+    monkeypatch.setattr(message_reader, "_read_window", fail_window)
+
+    delta = read_assistant_messages(
+        transcript,
+        limit=5,
+        after=after,
+        append_only=True,
+        cursor=cursor,
+        driver=CODEX_DRIVER,
+        worktree_id="wt",
+    )
+
+    assert [item.source_kind for item in initial] == ["view_image_call"]
+    assert [item.source_kind for item in delta] == ["tool_output_image"]
+    assert cursor.removed_keys == [initial[0].key]
+    assert [item.key for item in cursor.window or []] == [item.key for item in expected]
+
+
 def _repo(path: Path) -> Path:
     path.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)

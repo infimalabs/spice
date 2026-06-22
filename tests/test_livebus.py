@@ -284,6 +284,8 @@ def test_lane_subscription_watch_requests_append_only_payload(tmp_path, monkeypa
     target = _Target(id="lane", repo_root=repo)
     connection = _Connection()
     waits = 0
+    watcher_ready = Event()
+    configured = Event()
     payload_kwargs: list[dict[str, Any]] = []
 
     def fake_wait(_paths: tuple[Path, ...], stop, watch=None) -> bool:
@@ -292,6 +294,8 @@ def test_lane_subscription_watch_requests_append_only_payload(tmp_path, monkeypa
         if waits > 1:
             stop.set()
             return False
+        watcher_ready.set()
+        configured.wait(timeout=1.0)
         return True
 
     def messages_payload(_target, **kwargs):
@@ -310,12 +314,26 @@ def test_lane_subscription_watch_requests_append_only_payload(tmp_path, monkeypa
         session._handle_lane_subscribe(
             {"type": "lane.subscribe", "targetId": target.id, "query": {"limit": 5}}
         )
+        assert watcher_ready.wait(timeout=1.0)
+        session._handle_lane_configure(
+            {
+                "type": "lane.configure",
+                "targetId": target.id,
+                "query": {"limit": 5, "after": "newest-key"},
+            }
+        )
+        configured.set()
         _wait_for_watch_push(connection)
     finally:
+        configured.set()
         session._teardown()
 
     assert payload_kwargs[0] == {"limit": 5}
-    assert payload_kwargs[1] == {"limit": 5, "append_only": True}
+    assert payload_kwargs[1] == {
+        "limit": 5,
+        "append_only": True,
+        "after": "newest-key",
+    }
 
 
 def test_kqueue_watch_rearms_only_when_watched_paths_change(tmp_path):
