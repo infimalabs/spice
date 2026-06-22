@@ -29,6 +29,7 @@ include = ["spice*"]
 namespaces = true
 
 [tool.setuptools.package-data]
+"spice" = ["py.typed"]
 "spice.agent" = [
     "*.md",
     "shellhooks/.zshenv",
