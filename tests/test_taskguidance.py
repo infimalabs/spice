@@ -154,6 +154,48 @@ def test_task_claim_outputs_drive_to_completion_guidance(task_repo):
     assert ops.claim_drive_line(handle) in claim_output
 
 
+def _gain_runner(total_commands: float, avg_savings_pct: float):
+    import json as _json
+
+    payload = _json.dumps(
+        {
+            "summary": {
+                "total_commands": total_commands,
+                "avg_savings_pct": avg_savings_pct,
+            }
+        }
+    )
+
+    def runner(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout=payload, stderr="")
+
+    return runner
+
+
+def test_rtk_usage_nudge_fires_when_savings_are_poor(monkeypatch):
+    monkeypatch.setattr(
+        ops.subprocess, "run", _gain_runner(ops.RTK_NUDGE_MIN_COMMANDS + 4, 2.0)
+    )
+
+    nudge = ops.rtk_usage_nudge()
+
+    assert nudge is not None
+    assert nudge.startswith("rtk:")
+    assert "discretely" in nudge
+
+
+def test_rtk_usage_nudge_stays_silent_when_feeding_rtk_well(monkeypatch):
+    monkeypatch.setattr(
+        ops.subprocess,
+        "run",
+        _gain_runner(
+            ops.RTK_NUDGE_MIN_COMMANDS + 4, ops.RTK_NUDGE_SAVINGS_FLOOR_PCT + 10.0
+        ),
+    )
+
+    assert ops.rtk_usage_nudge() is None
+
+
 def test_task_next_output_drives_allocated_task_to_completion(task_repo, monkeypatch):
     assert task_repo.is_dir()
     next_handle = create.add(

@@ -61,6 +61,15 @@ def activation_command_surface_lines() -> list[str]:
             "shells enter the static hook stage before exported "
             "snapshot/descendant state is captured"
         ),
+        (
+            "rtk_contract=the agent-run wrapper already routes your shell "
+            "commands through rtk rewrite, which compacts verbose tool output "
+            "to save context tokens; you only capture that by feeding it well "
+            "-- run read-heavy commands (git, grep, ls, cat, find, diff, log, "
+            "tree) as discrete commands, not buried in heredocs, for-loops, or "
+            "$(...) subshells that rtk cannot rewrite, and let rtk compact full "
+            "output instead of pre-tersing with --oneline/-s/--stat/|head/|tail"
+        ),
         "session=spice session briefing",
         "task_status=spice task status",
         "task_next=spice task next",

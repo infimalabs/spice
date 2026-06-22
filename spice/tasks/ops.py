@@ -6,7 +6,9 @@ Taskwarrior.
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 from datetime import UTC, datetime, timedelta
 from typing import Any, Sequence
 
@@ -250,6 +252,47 @@ def claim_drive_line(handle: str) -> str:
     return (
         f"drive: continue {handle}; drive the current phase to completion "
         "with normal validation"
+    )
+
+
+# Nudge only with enough signal and genuinely poor compaction, so it stays
+# occasional and silent once the agent feeds rtk well (or rtk is absent).
+RTK_NUDGE_MIN_COMMANDS = 6
+RTK_NUDGE_SAVINGS_FLOOR_PCT = 12.0
+
+
+def rtk_usage_nudge() -> str | None:
+    """One-line rtk-feeding reminder, emitted only when rtk savings are poor.
+
+    Reads rtk's own gain summary (`rtk gain -f json`) so the reminder is
+    self-correcting and silent when the agent is already feeding rtk well,
+    when there is too little signal, or when rtk is not installed.
+    """
+    try:
+        completed = subprocess.run(
+            ["rtk", "gain", "-f", "json"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        summary = json.loads(completed.stdout)["summary"]
+        commands = int(summary["total_commands"])
+        avg_savings = float(summary["avg_savings_pct"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    if commands < RTK_NUDGE_MIN_COMMANDS or avg_savings >= RTK_NUDGE_SAVINGS_FLOOR_PCT:
+        return None
+    return (
+        "rtk: command output is barely compacting -- run read-heavy commands "
+        "discretely (no heredocs/subshells) and let rtk shrink full output "
+        "instead of pre-tersing with --oneline/-s/|head/|tail"
     )
 
 
