@@ -443,6 +443,97 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     assert "<dt>handle</dt><dd>UI-20260610T120001000001Z</dd>" in item["display_html"]
 
 
+def test_messages_payload_after_cursor_preserves_transcript_delta(
+    tmp_path, monkeypatch
+):
+    actor = "a" * 32
+    row = {
+        "id": 43,
+        "uuid": "newer-task",
+        "incepted": "20260610T120002000001Z",
+        "description": "Later CLI follow-up",
+        "project": "serve.ui",
+        "origin_thread": actor,
+        "creation_surface": "cli",
+        "status": "pending",
+    }
+    boundary_key = "2026-06-10T12:00:01.000001Z#task-card:older-task"
+    seen: dict[str, object] = {}
+
+    def fake_messages(_thread_id: str, **kwargs) -> message_reader.AssistantMessageRead:
+        seen["reader_kwargs"] = kwargs
+        return _message_read([_message("2026-06-10T12:00:03.000000Z")])
+
+    monkeypatch.setattr(message.tw, "export", lambda _filters: [row])
+    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(
+        message,
+        "pending_inbox_identity_payload",
+        lambda _repo: _pending_identity(),
+    )
+    monkeypatch.setattr(
+        inventory,
+        "pending_inbox_identity_payload",
+        lambda _repo: _pending_identity(),
+    )
+    monkeypatch.setattr(
+        inventory,
+        "ensure_agent_for_pending_inbox",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        message, "resolve_thread_id_for_target", lambda _state, _target: actor
+    )
+    monkeypatch.setattr(
+        message,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id=actor,
+        ),
+    )
+    monkeypatch.setattr(
+        identity,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id=actor,
+        ),
+    )
+    monkeypatch.setattr(
+        lane,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id=actor,
+        ),
+    )
+    monkeypatch.setattr(message, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(lane, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(
+        message.message_reader,
+        "assistant_messages_for_thread_id",
+        fake_messages,
+    )
+
+    payload = message.messages_payload_for_worktree(
+        _State(),
+        _Target(id="wt", repo_root=tmp_path),
+        limit=5,
+        after=boundary_key,
+    )
+
+    assert seen["reader_kwargs"]["after"] == boundary_key
+    assert [item["display_text"] for item in payload["messages"]] == ["hello"]
+    assert payload["messages"][0]["timestamp"] == "2026-06-10T12:00:03.000000Z"
+
+
 def test_cli_review_followup_row_renders_standalone_task_card(monkeypatch):
     actor = "a" * 32
     row = {
@@ -485,7 +576,7 @@ def test_cli_review_followup_row_renders_standalone_task_card(monkeypatch):
     )
 
 
-def test_task_card_cursor_merges_newer_backend_and_transcript_items(monkeypatch):
+def test_task_card_cursor_keeps_append_window_to_transcript_items(monkeypatch):
     actor = "a" * 32
     rows = [
         {
@@ -518,10 +609,7 @@ def test_task_card_cursor_merges_newer_backend_and_transcript_items(monkeypatch)
         after=boundary_key,
     )
 
-    assert [item.display_text for item in merged] == [
-        "hello",
-        "Task capture: Later CLI follow-up (serve.ui)",
-    ]
+    assert [item.display_text for item in merged] == ["hello"]
     boundary = message_reader.parse_timestamp("2026-06-10T12:00:01.000001Z")
     assert boundary is not None
     assert all(
