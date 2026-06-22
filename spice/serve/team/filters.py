@@ -52,30 +52,6 @@ class _TeamFilterStore(Protocol):
 
 
 class TeamFilterStoreMixin:
-    def _migrate_task_filter_sources_locked(
-        self, connection: sqlite3.Connection
-    ) -> None:
-        rows = connection.execute(
-            "SELECT team_id, task_filters FROM teams ORDER BY created_at"
-        ).fetchall()
-        now = time.time()
-        for row in rows:
-            team_id = str(row["team_id"])
-            existing = connection.execute(
-                "SELECT COUNT(*) AS count FROM team_task_filters WHERE team_id = ?",
-                (team_id,),
-            ).fetchone()
-            if existing and int(existing["count"] or 0) > 0:
-                continue
-            for project in task_filter_projects_from_json(row["task_filters"]):
-                connection.execute(
-                    "INSERT OR IGNORE INTO team_task_filters "
-                    "(team_id, project, source, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (team_id, project, TASK_FILTER_SOURCE_MANUAL, now, now),
-                )
-            self._sync_task_filter_projection_locked(connection, team_id)
-
     def _task_filter_entries_locked(
         self, connection: sqlite3.Connection, team_id: str
     ) -> tuple[TeamTaskFilter, ...]:
