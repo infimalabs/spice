@@ -30,8 +30,8 @@ from spice.agent.maxims import (
 )
 from spice.agent.sidechannelnotify import publish_side_channel_notice
 from spice.mail.acks import (
-    archive_ackd_inbox_items_from_assistant_message,
     extract_task_batch_lines_from_text,
+    summarize_ack_archival,
 )
 from spice.mail.inbox import (
     discard_inbox_items,
@@ -166,13 +166,17 @@ def process_supervised_assistant_message(
     log_handle: TextIO,
     reminder_gate: MaximReminderGate,
 ) -> None:
-    acked_keys = archive_ackd_inbox_items_from_assistant_message(
-        repo_root, message_text
-    )
-    if acked_keys:
+    ack_summary = summarize_ack_archival(repo_root, message_text)
+    if ack_summary.archived:
         publish_supervisor_feedback(
             repo_root,
-            "ack_archived=" + " ".join(acked_keys),
+            "ack_archived=" + " ".join(ack_summary.archived),
+            log_handle,
+        )
+    if ack_summary.unmatched:
+        publish_supervisor_feedback(
+            repo_root,
+            "ack_unmatched=" + " ".join(ack_summary.unmatched),
             log_handle,
         )
     try:

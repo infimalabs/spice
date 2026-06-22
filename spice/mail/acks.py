@@ -188,11 +188,41 @@ def archive_ackd_inbox_items(
     return [inbox_item_key(item.name) for item in to_retire]
 
 
-def archive_ackd_inbox_items_from_assistant_message(
+@dataclass(frozen=True)
+class AckArchivalSummary:
+    """Disposition of the ACK keys named by one assistant message.
+
+    `archived` are the inbox keys whose pending item this message retired.
+    `unmatched` are keys the message ACK'd that retired nothing — already
+    archived, stale, or never delivered — surfaced so the agent learns the ACK
+    was a no-op instead of the key being dropped without a word.
+    """
+
+    archived: list[str]
+    unmatched: list[str]
+
+
+def summarize_ack_archival(
     repo_root: Path | None, message_text: str
-) -> list[str]:
-    """Archive inbox items ACK'd by one supervisor-observed assistant message."""
-    return archive_ackd_inbox_items(repo_root, extract_ack_keys_from_text(message_text))
+) -> AckArchivalSummary:
+    """Archive inbox items ACK'd by one assistant message, reporting disposition.
+
+    Mirrors inline-task creation feedback: every key the message ACK'd is
+    accounted for, split into the items actually retired and the keys that
+    matched no pending item, so the supervisor can tell the agent exactly which
+    acknowledgments landed.
+    """
+    requested = list(
+        dict.fromkeys(key for key in extract_ack_keys_from_text(message_text) if key)
+    )
+    archived = archive_ackd_inbox_items(repo_root, requested)
+    archived_aliases: set[str] = set()
+    for key in archived:
+        archived_aliases |= inbox_item_key_aliases(key)
+    unmatched = [
+        key for key in requested if not (inbox_item_key_aliases(key) & archived_aliases)
+    ]
+    return AckArchivalSummary(archived=archived, unmatched=unmatched)
 
 
 def _ack_state_attachments(item: Any) -> tuple[dict[str, Any], ...]:

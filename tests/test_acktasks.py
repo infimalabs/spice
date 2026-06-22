@@ -172,6 +172,22 @@ def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(
     ]
 
 
+def test_supervised_ack_reports_unmatched_keys(task_repo, quiet_supervisor):
+    missing_key = "20260104T000000000099Z"
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        f"ACK {missing_key}: nothing pending under this key.",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    assert collect_acked_inbox_items(task_repo) == []
+    feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
+    assert feedback == [f"ack_unmatched={missing_key}"]
+
+
 def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supervisor):
     store = ServeTeamStore()
     team = store.create_team(
