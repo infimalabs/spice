@@ -603,9 +603,12 @@ def test_livebus_routes_metric_series_requests():
         lane_signature=lambda *_args: (),
     )
 
-    LiveBusSession(connection, callbacks)._handle_metrics_series(
+    session = LiveBusSession(connection, callbacks)
+    session._handle_metrics_series(
         {"type": "metrics.series", "requestId": "metrics-1", "query": query}
     )
+    # Metrics run on a dedicated worker; teardown drains it deterministically.
+    session._teardown()
 
     assert connection.sent == [
         {
