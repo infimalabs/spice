@@ -14,6 +14,7 @@ from spice.mail.acks import (
     extract_ack_keys_from_text,
     extract_ack_segments_from_text,
     extract_task_batch_lines_from_text,
+    summarize_ack_archival,
     split_ack_message,
 )
 from spice.mail.ackstate import (
@@ -199,11 +200,26 @@ def test_ack_state_migrates_existing_rows_to_store_operator_text(tmp_path):
             for row in connection.execute("PRAGMA table_info(acked_inbox_items)")
         }
     assert written == [KEY_A]
-    assert {"key", "inbox_name", "text", "attachments_json", "archived_at"} <= columns
+    assert {
+        "key",
+        "inbox_name",
+        "text",
+        "attachments_json",
+        "ack_text",
+        "ack_content",
+        "archived_at",
+    } <= columns
     assert [
-        (record.key, record.inbox_name, record.text, record.archived_at)
+        (
+            record.key,
+            record.inbox_name,
+            record.text,
+            record.ack_text,
+            record.ack_content,
+            record.archived_at,
+        )
         for record in records
-    ] == [(KEY_A, f"{KEY_A}.txt", text, 200.0)]
+    ] == [(KEY_A, f"{KEY_A}.txt", text, "", "", 200.0)]
     assert records[0].attachments == (
         {"name": "attachment.png", "path": "/tmp/attachment.png"},
     )
@@ -229,6 +245,22 @@ def test_archive_ackd_inbox_items_records_durable_ack_state(tmp_path):
     ]
 
 
+def test_summarize_ack_archival_records_ack_content_in_ack_state(tmp_path):
+    _init_repo(tmp_path)
+    name = f"{KEY_A}.txt"
+    text = compose_inbox_text(body="durable ack content", priority=None, stop=False)
+    write_inbox_item(tmp_path, name, text)
+
+    summary = summarize_ack_archival(tmp_path, f"ACK {KEY_A[:-1]}: handled fully.")
+
+    records = ack_state_records(tmp_path)
+    assert summary.archived == [KEY_A]
+    assert summary.unmatched == []
+    assert [
+        (record.key, record.ack_text, record.ack_content) for record in records
+    ] == [(KEY_A, f"ACK {KEY_A[:-1]}: handled fully.", "handled fully.")]
+
+
 def test_ack_state_supplies_archive_context_without_archive_files(tmp_path):
     _init_repo(tmp_path)
     name = f"{KEY_B}.txt"
@@ -248,6 +280,54 @@ def test_ack_state_supplies_archive_context_without_archive_files(tmp_path):
     assert [(item.name, item.text) for item in archived] == [(name, text)]
     assert [(record.key, record.inbox_name, record.text) for record in records] == [
         (KEY_B, name, text)
+    ]
+
+
+def test_collect_ack_keys_uses_ack_state_when_repo_root_is_authoritative(tmp_path):
+    _init_repo(tmp_path)
+    missing_transcript = tmp_path / "missing.jsonl"
+    record_acked_inbox_items(
+        tmp_path,
+        [
+            AckStateWrite(
+                key=KEY_A,
+                inbox_name=f"{KEY_A}.txt",
+                text=compose_inbox_text(body="first", priority=None, stop=False),
+            ),
+            AckStateWrite(
+                key=KEY_B,
+                inbox_name=f"{KEY_B}.txt",
+                text=compose_inbox_text(body="second", priority=None, stop=False),
+            ),
+        ],
+        now=200.0,
+    )
+
+    keys = collect_unique_ack_keys([missing_transcript], repo_root=tmp_path)
+
+    assert keys == [KEY_A, KEY_B]
+
+
+def test_collect_ack_segments_uses_ack_state_content_when_authoritative(tmp_path):
+    _init_repo(tmp_path)
+    missing_transcript = tmp_path / "missing.jsonl"
+    record_acked_inbox_items(
+        tmp_path,
+        [
+            AckStateWrite(
+                key=KEY_A,
+                inbox_name=f"{KEY_A}.txt",
+                text=compose_inbox_text(body="first", priority=None, stop=False),
+                ack_content="first handled",
+            )
+        ],
+        now=200.0,
+    )
+
+    segments = collect_ack_segments([missing_transcript], repo_root=tmp_path)
+
+    assert [(segment.keys, segment.content) for segment in segments] == [
+        ((KEY_A,), "first handled")
     ]
 
 
