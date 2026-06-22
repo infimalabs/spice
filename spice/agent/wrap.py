@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import select
 import shlex
 import socket
@@ -73,6 +74,9 @@ SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
 RTK_REWRITE_COMMAND = ("rtk", "rewrite")
 # RTK prints a rewritten command and returns 3 from the hook path on this lane.
 RTK_REWRITE_MATCH_EXIT_CODES = frozenset((0, 3))
+# Claude Code wraps each command as `... && eval '<command>' ...`; this anchors
+# the embedded eval whose quoted argument carries the real command to rewrite.
+CLAUDE_EVAL_MARKER_RE = re.compile(r"&&\s+eval\s+")
 PYTHON_ROUTE_FAILURE = (
     "import sys;"
     "sys.stderr.write("
@@ -185,7 +189,10 @@ def rtk_rewrite_shell_execution_text(command_text: str) -> str | None:
     rewritten = rtk_rewrite_command_text(command_text)
     if rewritten is not None:
         return rewritten
-    return rtk_rewrite_trailing_exec_shell_command(command_text)
+    trailing = rtk_rewrite_trailing_exec_shell_command(command_text)
+    if trailing is not None:
+        return trailing
+    return rtk_rewrite_eval_envelope_command(command_text)
 
 
 def rtk_rewrite_trailing_exec_shell_command(command_text: str) -> str | None:
@@ -212,6 +219,72 @@ def rtk_rewrite_trailing_exec_shell_command(command_text: str) -> str | None:
     return (
         f"{prefix}exec {shlex.quote(shell)} {flag} {shlex.quote(rewritten)}{trailing}"
     )
+
+
+def rtk_rewrite_eval_envelope_command(command_text: str) -> str | None:
+    """Rewrite the command Claude Code embeds in its `eval` execution envelope.
+
+    Claude Code's Bash tool runs every command as
+    `source <snapshot> ... && eval '<command>' < /dev/null && pwd -P >| <file>`.
+    The trailing-exec handler only matches a tail `exec <shell> -c <command>`, so
+    the mid-string `eval '<command>'` slips past it and rtk never sees the real
+    command. Locate the eval's single quoted argument, rewrite it, and splice the
+    rewrite back so the snapshot prelude and cwd-capture suffix stay verbatim.
+    """
+    marker = CLAUDE_EVAL_MARKER_RE.search(command_text)
+    if marker is None:
+        return None
+    start = marker.end()
+    end = shell_word_end(command_text, start)
+    if end <= start:
+        return None
+    try:
+        words = shlex.split(command_text[start:end])
+    except ValueError:
+        return None
+    if len(words) != 1:
+        return None
+    rewritten = rtk_rewrite_command_text(words[0])
+    if rewritten is None:
+        return None
+    return command_text[:start] + shlex.quote(rewritten) + command_text[end:]
+
+
+def shell_word_end(text: str, start: int) -> int:
+    """Return the index past the first POSIX shell word beginning at ``start``.
+
+    Tracks single quotes (literal contents), double quotes (backslash escapes),
+    and unquoted backslash escapes, stopping at the first unquoted whitespace.
+    """
+    quote: str | None = None
+    index = start
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if quote == "'":
+            if char == "'":
+                quote = None
+            index += 1
+        elif quote == '"':
+            if char == "\\" and index + 1 < length:
+                index += 2
+            else:
+                if char == '"':
+                    quote = None
+                index += 1
+        elif char.isspace():
+            break
+        elif char == "'":
+            quote = "'"
+            index += 1
+        elif char == '"':
+            quote = '"'
+            index += 1
+        elif char == "\\" and index + 1 < length:
+            index += 2
+        else:
+            index += 1
+    return index
 
 
 def rtk_rewrite_direct_args(args: Sequence[str]) -> list[str] | None:

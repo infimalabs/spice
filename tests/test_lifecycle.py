@@ -807,6 +807,68 @@ def test_wrapper_leaves_plain_commands_native_without_rtk_rewrite():
     assert wrap.build_agent_run_command(["rg", "needle"]) == ["rg", "needle"]
 
 
+CLAUDE_EVAL_ENVELOPE = (
+    "source /tmp/snapshot-zsh-1.sh 2>/dev/null || true "
+    "&& setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null || true "
+    "&& eval 'git show HEAD' < /dev/null && pwd -P >| /tmp/claude-cwd"
+)
+
+
+def test_wrapper_rewrites_claude_eval_envelope_inner_command(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_rewrite(*args: str) -> str | None:
+        calls.append(args)
+        return "rtk git show HEAD" if args == ("git show HEAD",) else None
+
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
+
+    rewritten = wrap.build_agent_run_command(
+        ["zsh", "-c", CLAUDE_EVAL_ENVELOPE], rewrite_rtk=True
+    )
+
+    assert calls == [(CLAUDE_EVAL_ENVELOPE,), ("git show HEAD",)]
+    assert rewritten == [
+        "zsh",
+        "-c",
+        (
+            "source /tmp/snapshot-zsh-1.sh 2>/dev/null "
+            "|| true && setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null "
+            "|| true && eval 'rtk git show HEAD' < /dev/null && pwd -P >| /tmp/claude-cwd"
+        ),
+    ]
+
+
+def test_wrapper_eval_envelope_preserves_embedded_single_quotes(monkeypatch):
+    envelope = "x=1 && eval 'echo '\\''hi there'\\''' < /dev/null && pwd"
+    seen: list[tuple[str, ...]] = []
+
+    def fake_rewrite(*args: str) -> str | None:
+        seen.append(args)
+        return None
+
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
+
+    assert wrap.rtk_rewrite_eval_envelope_command(envelope) is None
+    assert seen == [("echo 'hi there'",)]
+
+
+def test_wrapper_leaves_non_eval_commands_native(monkeypatch):
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    assert wrap.rtk_rewrite_eval_envelope_command("git status --short") is None
+    assert wrap.rtk_rewrite_eval_envelope_command("exec bash -lc 'git show'") is None
+
+
+def test_shell_word_end_tracks_quotes_and_escapes():
+    text = "eval 'a b'\\''c' rest"
+    start = len("eval ")
+    end = wrap.shell_word_end(text, start)
+    assert text[start:end] == "'a b'\\''c'"
+    double = 'eval "a \\" b" rest'
+    dstart = len("eval ")
+    assert double[dstart : wrap.shell_word_end(double, dstart)] == '"a \\" b"'
+
+
 def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
