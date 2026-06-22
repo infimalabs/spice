@@ -596,7 +596,7 @@ function renderLaneMetricsPane(lane) {
 }
 
 function renderLaneMetricsVanilla(grid, model) {
-  const nodes = model.cells.map((cell) => {
+  const cells = model.cells.map((cell) => {
     const slot = "cell:" + cell.label;
     return laneMetricCell(
       cell.label,
@@ -605,11 +605,12 @@ function renderLaneMetricsVanilla(grid, model) {
       slot,
     );
   });
-  nodes.push(
-    laneMetricSparklineCell(model, laneMetricGridSlot(grid, "activity")),
-    laneMetricSeriesControls(model, laneMetricGridSlot(grid, "series-controls")),
+  const nodes = [
     laneMetricSeriesChartCell(model, laneMetricGridSlot(grid, "series-chart")),
-  );
+    laneMetricSeriesControls(model, laneMetricGridSlot(grid, "series-controls")),
+    ...cells,
+    laneMetricSparklineCell(model, laneMetricGridSlot(grid, "activity")),
+  ];
   syncLaneMetricElementChildren(grid, nodes);
 }
 

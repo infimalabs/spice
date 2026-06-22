@@ -7,12 +7,14 @@
 //
 // The membership-derived DERIVATION itself (lane_metric_summary) is exhaustively
 // unit-tested in tests/test_teams.py; this smoke covers the live render/update
-// of that summary in the browser, which the unit tests cannot.
+// of that summary in the browser, which the unit tests cannot. It also asserts
+// the graph-first pane order and that metric controls are reused across refreshes.
 const { withServePage } = require("./serve_playwright_harness");
 
 const SIX_HOUR_RANGE_SECONDS = "21600";
 const SIX_HOUR_BUCKET_SECONDS = 900;
 const MIN_METRICS_CHART_HEIGHT_PX = 96;
+const MIN_METRICS_GRID_WIDTH_PX = 520;
 
 async function run() {
   return withServePage(
@@ -44,6 +46,7 @@ async function installMetricsSmokeHelpers(page) {
       makeMetricsSmokePanel,
       readMetricsSmokeCells,
       countMetricsSmokeCells,
+      readMetricsSmokeOrder,
       metricsSmokeSelects,
       readMetricsSmokeSelectState,
       readMetricsSmokeLayout,
@@ -176,6 +179,7 @@ function readInitialMetricsSmokePage() {
     dest: readMetricsSmokeCells(dest.metricsGridEl),
     sourceCells: countMetricsSmokeCells(source.metricsGridEl),
     destCells: countMetricsSmokeCells(dest.metricsGridEl),
+    sourceOrder: readMetricsSmokeOrder(source.metricsGridEl),
     sourceStatus: source.metricsSummaryEl.textContent,
     seriesSvg: Boolean(source.metricsGridEl.querySelector(".lane-metric-series-svg")),
     firstMetricQuery: metricSeriesCalls[0] && metricSeriesCalls[0].fields.query,
@@ -196,6 +200,19 @@ function readMetricsSmokeCells(grid) {
 
 function countMetricsSmokeCells(grid) {
   return grid.querySelectorAll(".lane-metric-cell").length;
+}
+
+function readMetricsSmokeOrder(grid) {
+  return [...grid.children].map((child) => {
+    if (child.classList.contains("lane-metric-series-chart"))
+      return child.querySelector(".lane-metric-series-svg")
+        ? "series-chart:svg"
+        : "series-chart:empty";
+    if (child.classList.contains("lane-metric-series-controls"))
+      return "series-controls";
+    const label = child.querySelector(".lane-metric-label");
+    return "cell:" + (label ? label.textContent : child.className);
+  });
 }
 
 async function updateMetricsSmokePage({ rangeSeconds }) {
@@ -236,6 +253,7 @@ function readUpdatedMetricsSmokePage() {
     dest: readMetricsSmokeCells(dest.metricsGridEl),
     sourceCells: countMetricsSmokeCells(source.metricsGridEl),
     destCells: countMetricsSmokeCells(dest.metricsGridEl),
+    sourceOrder: readMetricsSmokeOrder(source.metricsGridEl),
     distributionGroups: readDistributionSmokeGroups(source.metricsGridEl),
     distributionDots: readDistributionSmokeDots(source.metricsGridEl),
     distributionLineCount: source.metricsGridEl.querySelectorAll(
@@ -278,13 +296,17 @@ function readMetricsSmokeLayout(grid) {
   const controlsRect = controls.getBoundingClientRect();
   const chartRect = chart.getBoundingClientRect();
   const svgRect = svg.getBoundingClientRect();
+  const summaryCells = [...grid.querySelectorAll(".lane-metric-cell")];
   return {
     gridHeight: Math.round(gridRect.height),
     gridWidth: Math.round(gridRect.width),
-    controlsBeforeChart: controlsRect.bottom <= chartRect.top,
+    chartBeforeControls: chartRect.bottom <= controlsRect.top,
+    summaryBelowControls: summaryCells.every(
+      (cell) => cell.getBoundingClientRect().top >= controlsRect.bottom - 1,
+    ),
     chartHeight: Math.round(chartRect.height),
     chartWidth: Math.round(chartRect.width),
-    chartBottomGap: Math.round(gridRect.bottom - chartRect.bottom),
+    chartTopGap: Math.round(chartRect.top - gridRect.top),
     svgHeight: Math.round(svgRect.height),
     svgWidth: Math.round(svgRect.width),
   };
@@ -326,7 +348,23 @@ function assertMetrics(result) {
   if (!before.seriesSvg) throw new Error("expected metric series SVG to render");
   if (!before.firstMetricQuery || before.firstMetricQuery.metric !== "activity")
     throw new Error("expected initial activity metric query");
-  expect(before.selectState, { metric: "activity", lens: "lineage", rangeSeconds: "3600" }, "before.selectState");
+  const expectedSourceOrder = [
+    "series-chart:svg",
+    "series-controls",
+    "cell:drained",
+    "cell:acked",
+    "cell:sends",
+    "cell:tool calls",
+    "cell:uptime",
+    "cell:activity",
+  ];
+  expectArray(before.sourceOrder, expectedSourceOrder, "before.sourceOrder");
+  expectArray(after.sourceOrder, expectedSourceOrder, "after.sourceOrder");
+  expect(
+    before.selectState,
+    { metric: "activity", lens: "lineage", rangeSeconds: "3600" },
+    "before.selectState",
+  );
   assertMetricsLayout(before.layout, "before.layout");
   // Before the move: source shows agent-a + agent-c; destination shows agent-b.
   expect(before.source, { acked: "11", sends: "22", "tool calls": "33" }, "before.source");
@@ -334,8 +372,8 @@ function assertMetrics(result) {
   // After the move: agent-a's counters left the source and followed to the dest.
   expect(after.source, { acked: "1", sends: "2", "tool calls": "3" }, "after.source");
   expect(after.dest, { acked: "14", sends: "25", "tool calls": "36" }, "after.dest");
-  // The vanilla renderer uses replaceChildren, so re-render must not leave stale
-  // or duplicated cells: the cell count is identical before and after.
+  // The vanilla renderer reconciles children by slot, so re-render must not leave
+  // stale or duplicated cells: the cell count is identical before and after.
   if (before.sourceCells !== after.sourceCells || before.destCells !== after.destCells)
     throw new Error(
       "cell count changed across re-render (stale/duplicate cells): " +
@@ -388,12 +426,20 @@ function assertMetrics(result) {
 }
 
 function assertMetricsLayout(layout, label) {
-  if (!layout.controlsBeforeChart)
-    throw new Error(label + " controls overlap or follow the chart: " + JSON.stringify(layout));
+  if (!layout.chartBeforeControls)
+    throw new Error(
+      label + " chart overlaps or follows the controls: " + JSON.stringify(layout),
+    );
+  if (!layout.summaryBelowControls)
+    throw new Error(label + " summary cells are not below controls: " + JSON.stringify(layout));
   if (layout.chartHeight < MIN_METRICS_CHART_HEIGHT_PX)
-    throw new Error(label + " chart did not use full pane height: " + JSON.stringify(layout));
-  if (Math.abs(layout.chartBottomGap) > 2)
-    throw new Error(label + " chart does not reach grid bottom: " + JSON.stringify(layout));
+    throw new Error(label + " chart did not use top metrics area: " + JSON.stringify(layout));
+  if (layout.gridWidth < MIN_METRICS_GRID_WIDTH_PX)
+    throw new Error(
+      label + " grid did not use available horizontal space: " + JSON.stringify(layout),
+    );
+  if (Math.abs(layout.chartTopGap) > 2)
+    throw new Error(label + " chart does not start at grid top: " + JSON.stringify(layout));
   if (layout.svgHeight < layout.chartHeight - 2)
     throw new Error(label + " svg does not fill chart height: " + JSON.stringify(layout));
   if (layout.chartWidth < layout.gridWidth - 2 || layout.svgWidth < layout.chartWidth - 2)

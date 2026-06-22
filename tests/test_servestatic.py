@@ -248,7 +248,7 @@ def test_static_draft_composers_use_14px_font():
     assert "font-size: 14px;" in textarea_rule
 
 
-def test_static_metrics_pane_preserves_controls_and_full_height_chart():
+def test_static_metrics_pane_preserves_controls_and_top_chart():
     css = _serve_css_text()
     app_panes = (STATIC_ROOT / "app.panes.js").read_text(encoding="utf-8")
     metrics_panel_rule = _between(
@@ -260,11 +260,13 @@ def test_static_metrics_pane_preserves_controls_and_full_height_chart():
 
     assert "display: flex;" in metrics_panel_rule
     assert "flex-direction: column;" in metrics_panel_rule
+    assert "width: 100%;" in metrics_panel_rule
     assert "flex: 1 1 auto;" in metrics_grid_rule
-    assert "grid-template-rows: repeat(4, max-content) minmax(0, 1fr);" in (
+    assert "grid-template-rows: minmax(96px, 1fr) repeat(4, max-content);" in (
         metrics_grid_rule
     )
     assert "min-height: 0;" in metrics_grid_rule
+    assert "width: 100%;" in metrics_grid_rule
     assert "display: flex;" in chart_rule
     assert "height: 100%;" in svg_rule
     assert "min-height: 0;" in svg_rule

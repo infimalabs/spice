@@ -169,10 +169,18 @@ function lane(metrics = {}, overrides = {}) {
   assert(vanillaLane.metricsSummaryEl.textContent === "live", "summary renders");
   assert(vanillaLane.metricsGridEl.children.length === 8, "metrics graph cells render");
   assert(
-    vanillaLane.metricsGridEl.children[0].children[0].textContent === "2",
+    vanillaLane.metricsGridEl.children[0].classList.contains("lane-metric-series-chart"),
+    "series chart renders first",
+  );
+  assert(
+    vanillaLane.metricsGridEl.children[1].classList.contains("lane-metric-series-controls"),
+    "series controls render below graph",
+  );
+  assert(
+    vanillaLane.metricsGridEl.children[2].children[0].textContent === "2",
     "drained value renders",
   );
-  const sparkline = vanillaLane.metricsGridEl.children[5].querySelector(
+  const sparkline = vanillaLane.metricsGridEl.children[7].querySelector(
     ".lane-metric-sparkline",
   );
   assert(sparkline.children.length === 3, "sparkline bars render");
@@ -180,14 +188,9 @@ function lane(metrics = {}, overrides = {}) {
     sparkline.children[1].style.values["--lane-metric-sparkline-level"] === "4",
     "sparkline levels are normalized",
   );
-  assert(
-    vanillaLane.metricsGridEl.children[6].classList.contains("lane-metric-series-controls"),
-    "series controls render",
-  );
-  assert(
-    vanillaLane.metricsGridEl.children[7].classList.contains("lane-metric-series-chart"),
-    "series chart renders",
-  );
+  const controls = vanillaLane.metricsGridEl.children[1];
+  vanillaContext.renderLaneMetricsPane(vanillaLane);
+  assert(vanillaLane.metricsGridEl.children[1] === controls, "series controls stay stable");
 
   const litContext = createContext();
   litContext.window.location.search = "?litMetrics=1";
