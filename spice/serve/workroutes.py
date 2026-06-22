@@ -10,7 +10,7 @@ from spice.agent.lifecycle import agent_status
 from spice.agent.renewal import renewal_handoff_request_text, renewal_steering_text
 from spice.errors import SpiceError
 from spice.serve.payload import identity
-from spice.serve.agentapi import sent_steering_response_payload
+from spice.serve.agentapi import sent_steering_payload, sent_steering_response_payload
 from spice.serve.drive import drive_drain_queue_controls
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.steering import steering_submit_error_status, submit_steering_message
@@ -184,11 +184,11 @@ def _work_tree_send_result_payload(
     ensure_agent_before_reply: bool,
 ) -> dict[str, Any]:
     if not ensure_agent_before_reply:
-        response_payload = {
-            "ok": True,
-            "key": sent.key,
-            **pending_inbox_identity_payload(target.repo_root),
-        }
+        response_payload = sent_steering_payload(
+            sent,
+            target=target,
+            pending_identity=pending_inbox_identity_payload(target.repo_root),
+        )
         send_actor = identity.team_actor_for_target(
             state.team_store, target, predecessor
         )

@@ -98,27 +98,43 @@ def test_work_tree_send_accepted_response_does_not_ensure_synchronously(
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
 
     payload, status = work_tree_send_accepted_response_payload(
-        state, target, {"text": "wake this lane", "fastMode": True}
+        state,
+        target,
+        {
+            "text": "> > quoted context\n> > with newline\n\nwake this lane",
+            "fastMode": True,
+            "attachments": [
+                {
+                    "name": "paste.png",
+                    "contentType": "image/png",
+                    "dataUrl": IMAGE_DATA_URL,
+                }
+            ],
+        },
     )
 
     items = collect_inbox_items(repo)
     assert status == HTTPStatus.OK
-    assert set(payload) == {
-        "ok",
-        "key",
-        "pendingInboxCount",
-        "pendingInboxLabel",
-        "pendingInboxKeys",
-        "pendingInboxRevision",
-        "pendingInboxVersion",
-    }
     assert payload["ok"] is True
+    assert (
+        payload["requestText"]
+        == "> > quoted context\n> > with newline\n\nwake this lane"
+    )
+    assert payload["requestHtml"] == (
+        "<blockquote><blockquote><p>quoted context<br>with newline</p>"
+        "</blockquote></blockquote><p>wake this lane</p>"
+    )
+    assert payload["attachments"][0]["name"] == "paste.png"
+    assert payload["attachments"][0]["contentType"] == "image/png"
+    assert payload["agentEnsure"] == {}
     assert payload["pendingInboxCount"] == 1
     assert payload["pendingInboxLabel"] == "1"
     assert payload["pendingInboxKeys"] == [payload["key"]]
     assert payload["pendingInboxRevision"]
     assert payload["pendingInboxVersion"] > 0
-    assert inbox_request_body(items[0].text) == "wake this lane"
+    assert inbox_request_body(items[0].text) == (
+        "> > quoted context\n> > with newline\n\nwake this lane"
+    )
     assert ensure_calls == []
 
 
