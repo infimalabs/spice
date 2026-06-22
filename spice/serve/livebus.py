@@ -365,7 +365,8 @@ class LiveBusSession:
             with subscription.lock:
                 query = dict(subscription.query)
             kwargs: dict[str, Any] = {
-                "limit": _bounded_int(query.get("limit"), DEFAULT_BUS_MESSAGE_LIMIT)
+                "limit": _bounded_int(query.get("limit"), DEFAULT_BUS_MESSAGE_LIMIT),
+                "append_only": True,
             }
             after = str(query.get("after") or "")
             if after:

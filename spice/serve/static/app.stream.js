@@ -270,6 +270,7 @@ async function applyLaneBusPayload(lane, payload, source) {
     lane.renderedMessageFingerprint = "";
     lane.renderedStatusFingerprint = "";
   }
+  removePayloadMessages(lane, payload);
   mergePayloadMessages(lane, payload);
   lane.latestPayload = payload;
   renderLaneChrome(lane, payload);
@@ -368,6 +369,13 @@ function mergePayloadMessages(lane, payload) {
     upsertKnownMessage(lane, item, "newest");
   }
   trimKnownMessages(lane);
+}
+
+function removePayloadMessages(lane, payload) {
+  const keys = new Set(payload.removedMessageKeys || []);
+  if (!keys.size) return;
+  lane.knownMessages = lane.knownMessages.filter((item) => !keys.has(item.key));
+  lane.knownMessageKeys = new Set(lane.knownMessages.map((item) => item.key));
 }
 
 function mergeOlderPayloadMessages(lane, payload) {

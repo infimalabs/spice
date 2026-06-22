@@ -476,6 +476,13 @@ def test_static_stream_uses_message_payload_merge_shape():
         "  trimKnownMessages(lane);\n"
         "}\n"
         "\n"
+        "function removePayloadMessages(lane, payload) {\n"
+        "  const keys = new Set(payload.removedMessageKeys || []);\n"
+        "  if (!keys.size) return;\n"
+        "  lane.knownMessages = lane.knownMessages.filter((item) => !keys.has(item.key));\n"
+        "  lane.knownMessageKeys = new Set(lane.knownMessages.map((item) => item.key));\n"
+        "}\n"
+        "\n"
         "function mergeOlderPayloadMessages(lane, payload) {\n"
         '  const threadId = payloadHasField(payload, "targetIdentity")\n'
         "    ? targetIdentityThreadId(payload.targetIdentity)\n"
