@@ -104,6 +104,7 @@ def test_serve_team_metrics_smoke_asserts_work_follows_agent() -> None:
     assert "selectsStable" in smoke
     assert "focused metric lens select did not survive refresh" in smoke
     assert "chart did not use top metrics area" in smoke
+    assert "grid did not use available horizontal space" in smoke
 
 
 def test_serve_composer_reorder_smoke_asserts_swap_contract() -> None:

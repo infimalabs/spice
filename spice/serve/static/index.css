@@ -581,6 +581,7 @@ button.primary:hover {
 .lane-view-panel[data-lane-view-panel="metrics"] {
   display: flex;
   flex-direction: column;
+  width: 100%;
 }
 
 .lane-pane-head {
@@ -737,6 +738,7 @@ button.primary:hover {
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: minmax(96px, 1fr) repeat(4, max-content);
   min-height: 0;
+  width: 100%;
 }
 .lane-metric-cell {
   background: var(--control-surface-soft);

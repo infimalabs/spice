@@ -14,6 +14,7 @@ const { withServePage } = require("./serve_playwright_harness");
 const SIX_HOUR_RANGE_SECONDS = "21600";
 const SIX_HOUR_BUCKET_SECONDS = 900;
 const MIN_METRICS_CHART_HEIGHT_PX = 96;
+const MIN_METRICS_GRID_WIDTH_PX = 520;
 
 async function run() {
   return withServePage(
@@ -433,6 +434,10 @@ function assertMetricsLayout(layout, label) {
     throw new Error(label + " summary cells are not below controls: " + JSON.stringify(layout));
   if (layout.chartHeight < MIN_METRICS_CHART_HEIGHT_PX)
     throw new Error(label + " chart did not use top metrics area: " + JSON.stringify(layout));
+  if (layout.gridWidth < MIN_METRICS_GRID_WIDTH_PX)
+    throw new Error(
+      label + " grid did not use available horizontal space: " + JSON.stringify(layout),
+    );
   if (Math.abs(layout.chartTopGap) > 2)
     throw new Error(label + " chart does not start at grid top: " + JSON.stringify(layout));
   if (layout.svgHeight < layout.chartHeight - 2)
