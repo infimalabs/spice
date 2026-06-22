@@ -119,6 +119,7 @@ class SpiceLaneMetricsElement extends LitElement {
         <svg
           class="lane-metric-series-svg"
           viewBox="0 0 120 36"
+          preserveAspectRatio="none"
           role="img"
           aria-label="Metric series"
         >

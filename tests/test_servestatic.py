@@ -270,6 +270,7 @@ def test_static_metrics_pane_preserves_controls_and_top_chart():
     assert "display: flex;" in chart_rule
     assert "height: 100%;" in svg_rule
     assert "min-height: 0;" in svg_rule
+    assert 'svg.setAttribute("preserveAspectRatio", "none");' in app_panes
     _assert_contains_all(
         app_panes,
         (

@@ -940,6 +940,7 @@ function laneMetricSeriesSvg(points) {
   const svg = createSvgElement("svg");
   svg.setAttribute("class", "lane-metric-series-svg");
   svg.setAttribute("viewBox", "0 0 120 36");
+  svg.setAttribute("preserveAspectRatio", "none");
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "Metric series");
   const values = points.map((point) => Math.max(0, Number(point.value) || 0));
