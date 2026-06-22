@@ -313,7 +313,7 @@ def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
         in app_stream
     )
     assert "sendLanePayload(lane, payload, sourceLane, options);" in app_stream
-    assert "refreshLane(lane).catch(() => {});" in app_stream
+    assert "refreshLane(lane).catch(() => {});" not in app_stream
     assert "await refreshLane(lane);" not in app_stream
     assert "options = {}," in result_body
     assert (
