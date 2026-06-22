@@ -160,6 +160,12 @@ class ServeTeamStore(
         connection.execute(
             "UPDATE teams SET revision = ? WHERE team_id = ?", (revision, team_id)
         )
+        # Wake the serve lane watcher: it watches the task event file, not the
+        # team store (whose writes are dominated by non-display metric churn),
+        # so a real team event bumps the event file to surface in the UI.
+        from spice.tasks.config import mark_task_backend_changed
+
+        mark_task_backend_changed("team")
         return revision
 
     def _current_revision_locked(self, connection: sqlite3.Connection) -> int:
