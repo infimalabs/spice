@@ -20,6 +20,7 @@ const messageOccupantAccentPalette = [
 let globalTransientStatusTimer = null;
 let globalTransientStatusText = "";
 let globalTransientStatusIsError = false;
+let globalTransientStatusTimestamp = "";
 let globalActivityStatusText = "";
 
 function renderLaneChrome(lane, payload) {
@@ -533,11 +534,18 @@ function setLaneStatus(lane, statusLine) {
   const status =
     globalStatusLineDisplay() ||
     (statusLine.error
-      ? { source: "lane-error", error: statusLine.error, time: "", preview: "" }
+      ? {
+          source: "lane-error",
+          error: statusLine.error,
+          time: "",
+          timeTimestamp: "",
+          preview: "",
+        }
       : {
           source: "lane",
           error: "",
           time: previewHasTime ? relativeTime(statusLine.lastAssistantAt) : "",
+          timeTimestamp: "",
           preview: previewHasTime ? preview : "",
         });
   const fingerprint =
@@ -547,15 +555,21 @@ function setLaneStatus(lane, statusLine) {
     "\u0000" +
     status.time +
     "\u0000" +
+    (status.timeTimestamp || "") +
+    "\u0000" +
     status.preview;
   if (fingerprint === lane.renderedStatusFingerprint) return;
   lane.renderedStatusFingerprint = fingerprint;
-  setLaneStatusText(lane.statusErrorEl, status.error);
+  const hasError = setLaneStatusText(lane.statusErrorEl, status.error);
   const hasTime = setLaneStatusText(lane.statusTimeEl, status.time);
   const hasPreview = setLaneStatusText(lane.statusPreviewEl, status.preview);
+  lane.statusErrorSeparatorEl.hidden = !(hasError && hasTime);
   lane.statusSeparatorEl.hidden = !(hasTime && hasPreview);
   if (status.time) {
-    lane.statusTimeEl.dataset.relativeTimestamp = statusLine.lastAssistantAt;
+    lane.statusTimeEl.dataset.relativeTimestamp =
+      status.timeTimestamp || statusLine.lastAssistantAt;
+  } else {
+    delete lane.statusTimeEl.dataset.relativeTimestamp;
   }
 }
 
@@ -581,12 +595,14 @@ function setGlobalTransientStatus(text) {
   if (globalTransientStatusTimer) clearTimeout(globalTransientStatusTimer);
   globalTransientStatusText = text || "";
   globalTransientStatusIsError = false;
+  globalTransientStatusTimestamp = "";
   rerenderGlobalStatusLines();
   globalTransientStatusTimer = setTimeout(() => {
     globalTransientStatusTimer = null;
     if (globalTransientStatusText === text) {
       globalTransientStatusText = "";
       globalTransientStatusIsError = false;
+      globalTransientStatusTimestamp = "";
       rerenderGlobalStatusLines();
     }
   }, transientGlobalStatusMilliseconds);
@@ -596,12 +612,16 @@ function setGlobalTransientError(text) {
   if (globalTransientStatusTimer) clearTimeout(globalTransientStatusTimer);
   globalTransientStatusText = text || "";
   globalTransientStatusIsError = true;
+  globalTransientStatusTimestamp = globalTransientStatusText
+    ? new Date().toISOString()
+    : "";
   rerenderGlobalStatusLines();
   globalTransientStatusTimer = setTimeout(() => {
     globalTransientStatusTimer = null;
     if (globalTransientStatusText === text) {
       globalTransientStatusText = "";
       globalTransientStatusIsError = false;
+      globalTransientStatusTimestamp = "";
       rerenderGlobalStatusLines();
     }
   }, transientGlobalStatusMilliseconds);
@@ -624,13 +644,15 @@ function globalStatusLineDisplay() {
       ? {
           source: "global-error",
           error: globalTransientStatusText,
-          time: "",
+          time: relativeTime(globalTransientStatusTimestamp),
+          timeTimestamp: globalTransientStatusTimestamp,
           preview: "",
         }
       : {
           source: "global-transient",
           error: "",
           time: "",
+          timeTimestamp: "",
           preview: globalTransientStatusText,
         };
   if (globalActivityStatusText)
@@ -638,6 +660,7 @@ function globalStatusLineDisplay() {
       source: "global-activity",
       error: "",
       time: "",
+      timeTimestamp: "",
       preview: globalActivityStatusText,
     };
   return null;

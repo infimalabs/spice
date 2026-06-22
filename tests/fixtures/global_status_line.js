@@ -6,11 +6,11 @@ const source = fs.readFileSync(renderPath, "utf8");
 let nextTimerId = 1;
 const timers = new Map();
 
-function fakeNode() {
+function fakeNode(text = "") {
   return {
     dataset: {},
     hidden: true,
-    textContent: "",
+    textContent: text,
   };
 }
 
@@ -23,6 +23,7 @@ function fakeLane(preview) {
     renderedStatusFingerprint: "",
     lastRenderedStatusLine: statusLine,
     statusErrorEl: fakeNode(),
+    statusErrorSeparatorEl: fakeNode("·"),
     statusPreviewEl: fakeNode(),
     statusSeparatorEl: fakeNode(),
     statusTimeEl: fakeNode(),
@@ -64,6 +65,13 @@ assert(lane.statusErrorEl.hidden, "global activity is not an error");
 context.setGlobalTransientError("team refresh failed");
 assert(lane.statusErrorEl.textContent === "team refresh failed", "global error renders");
 assert(!lane.statusErrorEl.hidden, "global error is visible");
+assert(!lane.statusErrorSeparatorEl.hidden, "global error time separator is visible");
+assert(!lane.statusTimeEl.hidden, "global error relative time is visible");
+assert(lane.statusTimeEl.textContent.trim().endsWith("s"), "global error time renders");
+assert(
+  Boolean(lane.statusTimeEl.dataset.relativeTimestamp),
+  "global error time has live relative timestamp",
+);
 assert(lane.statusPreviewEl.hidden, "global error blocks status preview");
 
 lane.lastRenderedStatusLine = {
@@ -80,6 +88,7 @@ context.clearGlobalActivityStatus("loading teams");
 for (const callback of [...timers.values()]) callback();
 timers.clear();
 assert(lane.statusErrorEl.hidden, "global error clears after linger");
+assert(lane.statusErrorSeparatorEl.hidden, "global error separator clears after linger");
 assert(
   lane.statusPreviewEl.textContent === "new activity arrived",
   "latest lane activity restores",
