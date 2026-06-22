@@ -6,8 +6,9 @@ Status: implemented contract.
 
 Agent launch owns the shell environment. For an agent-bound worktree, launch
 sets `ZDOTDIR` and `BASH_ENV` to packaged static spice shell startup files,
-records the original startup values in runtime environment variables, and
-precomputes configured wrapper functions into `SPICE_SHELL_HOOK_WRAPPERS`.
+records the original startup values in runtime environment variables, clears any
+inherited `SPICE_SHELL_HOOK_REEXEC_STAGE` marker, and precomputes configured
+wrapper functions into `SPICE_SHELL_HOOK_WRAPPERS`.
 
 For the first non-interactive zsh or bash command shell with an execution
 string, the packaged hook sees `SPICE_SHELL_HOOK_REEXEC_STAGE` unset, sets it to
@@ -25,7 +26,8 @@ Descendant shells inherit
 again. Stage-2 startup restores the user's original `ZDOTDIR`, `BASH_ENV`, and
 zsh history file, sources the real startup file when present, rearms the
 packaged hook environment for later descendants, and evals
-`SPICE_SHELL_HOOK_WRAPPERS`.
+`SPICE_SHELL_HOOK_WRAPPERS`. The marker is a sentinel, not a counter; there is
+no `SPICE_SHELL_HOOK_REEXEC_STAGE=2` value.
 
 ## Shells
 
@@ -84,7 +86,9 @@ until that resolver exists.
 - Do not touch the agent's stdin.
 - ACK semantics are transcript-based: items retire only on `ACK <key>`.
 - The side-channel repeat policy remains the rate limiter.
-- `SPICE_SHELL_HOOK_REEXEC_STAGE` is the sole reexec gate.
+- `SPICE_SHELL_HOOK_REEXEC_STAGE` is the sole per-shell reexec gate; agent
+  launch clears inherited marker values before exposing top-level command
+  shells.
 - `SPICE_SHELL_HOOK_WRAPPERS` is generated before shell startup; hooks eval it
   but do not regenerate wrapper functions.
 - The direct shell-startup path is the only command-injection contract.

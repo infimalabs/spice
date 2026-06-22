@@ -57,7 +57,9 @@ def activation_command_surface_lines() -> list[str]:
             "hooks reexec the first zsh/bash command shell through spice agent "
             "run so inbox steering and keep-working guidance inject before the "
             "requested command; descendant shells use static hooks and "
-            "precomputed wrappers without another reexec"
+            "precomputed wrappers without another reexec; agent launch clears "
+            "inherited reexec markers so new top-level command shells still "
+            "enter this path"
         ),
         "session=spice session briefing",
         "task_status=spice task status",
