@@ -20,52 +20,7 @@ ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zshrc", ".zlogin")
 AGENT_WRAPPERS_KEY = "wrappers"
 DEFAULT_AGENT_WRAPPER_GROUP = "common"
 BUILTIN_AGENT_WRAPPER_GROUPS = {
-    DEFAULT_AGENT_WRAPPER_GROUP: {
-        "rtk": [
-            "aws",
-            "cargo",
-            "curl",
-            "diff",
-            "docker",
-            "dotnet",
-            "env",
-            "find",
-            "gh",
-            "git",
-            "glab",
-            "go",
-            "golangci-lint",
-            "gradlew",
-            "grep",
-            "gt",
-            "jest",
-            "kubectl",
-            "lint",
-            "ls",
-            "mypy",
-            "next",
-            "npm",
-            "npx",
-            "pip",
-            "playwright",
-            "pnpm",
-            "prettier",
-            "prisma",
-            "proxy",
-            "psql",
-            "pytest",
-            "rake",
-            "rspec",
-            "rubocop",
-            "ruff",
-            "run",
-            "tree",
-            "tsc",
-            "vitest",
-            "wc",
-            "wget",
-        ]
-    },
+    DEFAULT_AGENT_WRAPPER_GROUP: {},
 }
 SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
 SHELL_HOOK_REPO_ROOT_ENV = "SPICE_SHELL_HOOK_REPO_ROOT"  # env-policy: allow
