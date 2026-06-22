@@ -175,6 +175,16 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
         change_written.wait(timeout=1.0)
         return change_written.is_set() and not stop.is_set()
 
+    def pending_signature(_target, _thread_id, _transcript_path):
+        pending_names = tuple(
+            sorted(path.name for path in inbox_dir(repo).glob("*.txt"))
+        )
+        return LaneSignature(
+            transcript=transcript.stat().st_size,
+            inbox=pending_names,
+            other=(),
+        )
+
     monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
     session = LiveBusSession(
         connection,
@@ -198,11 +208,7 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
                     state, bus_target, thread_id, transcript_path
                 )
             ),
-            lane_signature=lambda bus_target, thread_id, transcript_path: (
-                app.lane_signature_for_target(
-                    state, bus_target, thread_id, transcript_path
-                )
-            ),
+            lane_signature=pending_signature,
         ),
     )
 
@@ -224,6 +230,97 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
         assert ensure_calls == []
     finally:
         change_written.set()
+        session._teardown()
+
+
+def test_lane_send_replies_before_send_followup_payload_completes(tmp_path):
+    target = _Target(id="lane", repo_root=tmp_path)
+    connection = _Connection()
+    followup_entered = Event()
+    followup_continue = Event()
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def send_payload(_target, payload):
+        calls.append(("send", payload))
+        return {"ok": True, "key": "inbox-key"}, HTTPStatus.OK
+
+    def send_followup_payload(_target, payload):
+        calls.append(("followup", payload))
+        followup_entered.set()
+        followup_continue.wait(timeout=1.0)
+        return {"messages": [], "statusLine": {"pendingInboxCount": 1}}
+
+    session = LiveBusSession(
+        connection,
+        LiveBusCallbacks(
+            resolve_target=lambda selector: target if selector == target.id else None,
+            work_trees_payload=lambda: {},
+            messages_payload=lambda _target, **_kwargs: {},
+            send_payload=send_payload,
+            task_drain_payload=lambda _target, _payload: ({}, None),
+            team_snapshot_payload=lambda _since_revision: {},
+            team_command_payload=lambda _payload: ({}, None),
+            metric_series_payload=lambda _query: {"ok": True, "points": []},
+            thread_id=lambda _target: "thread",
+            transcript_resolution=lambda _thread_id: None,
+            lane_watch_paths=lambda *_args: (),
+            lane_signature=lambda *_args: (),
+            send_followup_payload=send_followup_payload,
+        ),
+    )
+
+    try:
+        session._handle_lane_send(
+            {
+                "type": "lane.send",
+                "requestId": "send-1",
+                "targetId": "lane",
+                "payload": {"text": "hello"},
+            }
+        )
+
+        assert followup_entered.wait(timeout=1.0)
+        with connection.lock:
+            assert connection.sent == [
+                {
+                    "type": "lane.sendResult",
+                    "result": {"ok": True, "key": "inbox-key"},
+                    "requestId": "send-1",
+                }
+            ]
+        followup_continue.set()
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            with connection.lock:
+                send_pushes = [
+                    payload
+                    for payload in connection.sent
+                    if payload.get("source") == "send"
+                ]
+            if send_pushes:
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail(
+                f"timed out waiting for send followup; sent={connection.sent!r}"
+            )
+        assert send_pushes == [
+            {
+                "type": "lane.payload",
+                "targetId": "lane",
+                "source": "send",
+                "payload": {
+                    "messages": [],
+                    "statusLine": {"pendingInboxCount": 1},
+                },
+            }
+        ]
+        assert calls == [
+            ("send", {"text": "hello"}),
+            ("followup", {"text": "hello"}),
+        ]
+    finally:
+        followup_continue.set()
         session._teardown()
 
 
@@ -484,6 +581,6 @@ def _wait_for_watch_push(
                 if payload.get("source") == "watch"
             ]
         if pushes:
-            return pushes[-1]
+            return pushes[0]
         time.sleep(0.02)
     pytest.fail(f"timed out waiting for watch push; sent={connection.sent!r}")

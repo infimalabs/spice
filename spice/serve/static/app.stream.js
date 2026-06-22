@@ -904,7 +904,7 @@ async function sendLanePayload(lane, payload, sourceLane = lane, options = {}) {
     const result = response.result || {};
     if (!isLaneOpen(lane)) return;
     applyLaneSendResult(lane, payload, result, sourceLane, options);
-    await refreshLane(lane);
+    refreshLane(lane).catch(() => {});
   } catch (error) {
     if (isLaneOpen(lane)) {
       finishLanePendingSubmission(lane, { accepted: false });

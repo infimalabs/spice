@@ -12,6 +12,7 @@ from spice.errors import SpiceError
 from spice.serve.payload import identity
 from spice.serve.agentapi import sent_steering_response_payload
 from spice.serve.drive import drive_drain_queue_controls
+from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.steering import steering_submit_error_status, submit_steering_message
 from spice.serve.team.store import TeamConfig
 from spice.serve.worktree.target import WorktreeTarget, match_serve_worktree
@@ -64,6 +65,28 @@ def work_tree_send_response_payload(
     target: WorktreeTarget,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], HTTPStatus]:
+    return _work_tree_send_response_payload(
+        state, target, payload, ensure_agent_before_reply=True
+    )
+
+
+def work_tree_send_accepted_response_payload(
+    state: Any,
+    target: WorktreeTarget,
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], HTTPStatus]:
+    return _work_tree_send_response_payload(
+        state, target, payload, ensure_agent_before_reply=False
+    )
+
+
+def _work_tree_send_response_payload(
+    state: Any,
+    target: WorktreeTarget,
+    payload: dict[str, Any],
+    *,
+    ensure_agent_before_reply: bool,
+) -> tuple[dict[str, Any], HTTPStatus]:
     request, error_response = _validate_work_tree_send_request(payload)
     if error_response is not None:
         return error_response
@@ -107,6 +130,7 @@ def work_tree_send_response_payload(
         renew_intent=renew_intent,
         predecessor=predecessor,
         predecessor_actor=predecessor_actor,
+        ensure_agent_before_reply=ensure_agent_before_reply,
     )
     return response_payload, HTTPStatus.OK
 
@@ -157,7 +181,21 @@ def _work_tree_send_result_payload(
     renew_intent: bool,
     predecessor: str,
     predecessor_actor: str,
+    ensure_agent_before_reply: bool,
 ) -> dict[str, Any]:
+    if not ensure_agent_before_reply:
+        response_payload = {
+            "ok": True,
+            "key": sent.key,
+            **pending_inbox_identity_payload(target.repo_root),
+        }
+        send_actor = identity.team_actor_for_target(
+            state.team_store, target, predecessor
+        )
+        if not force_new:
+            _record_directive_sent(state, sent.key, send_actor=send_actor)
+        return response_payload
+
     response_payload = sent_steering_response_payload(
         sent,
         state=state,
@@ -182,15 +220,7 @@ def _work_tree_send_result_payload(
             state.team_store, target, send_agent_id
         )
     if send_actor:
-        # One operator directive = one send, keyed by its inbox key, attributed
-        # to the actor that will process it (post-renewal). team-at-capture is
-        # that actor's current team, or the actor itself when solo / in no team.
-        # It is acked when the agent acknowledges the key (see
-        # metrics.record_transcript_metrics_for_agent).
-        capture_team = state.team_store.current_team_for_agent(send_actor) or send_actor
-        state.team_store.record_directive_sent(
-            sent.key, agent_id=send_actor, team_id=capture_team
-        )
+        _record_directive_sent(state, sent.key, send_actor=send_actor)
     renewal_agent_id = predecessor_actor if renew_intent else send_actor
     if renewal_agent_id:
         response_payload["renewalIntent"] = identity.renewal_intent_for_actor(
@@ -207,6 +237,19 @@ def _work_tree_send_result_payload(
         actor=route_actor,
     )
     return response_payload
+
+
+def _record_directive_sent(state: Any, directive_key: str, *, send_actor: str) -> None:
+    if not send_actor:
+        return
+    # One operator directive = one send, keyed by its inbox key, attributed to
+    # the actor that will process it. team-at-capture is that actor's current
+    # team, or the actor itself when solo / in no team. It is acked when the
+    # agent acknowledges the key (see metrics.record_transcript_metrics_for_agent).
+    capture_team = state.team_store.current_team_for_agent(send_actor) or send_actor
+    state.team_store.record_directive_sent(
+        directive_key, agent_id=send_actor, team_id=capture_team
+    )
 
 
 def _work_tree_send_ensured_thread_id(

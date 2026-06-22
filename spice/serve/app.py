@@ -57,6 +57,7 @@ from spice.serve.web import render_index_html, send_static_asset
 from spice.serve.websocket import is_websocket_request
 from spice.serve.workroutes import (
     resolve_worktree_for_request,
+    work_tree_send_accepted_response_payload,
     work_tree_send_response_payload,
     work_tree_task_drain_response_payload,
 )
@@ -896,8 +897,8 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 messages_payload=lambda target, **kwargs: (
                     message.messages_payload_for_worktree(state, target, **kwargs)
                 ),
-                send_payload=lambda target, payload: work_tree_send_response_payload(
-                    state, target, payload
+                send_payload=lambda target, payload: (
+                    work_tree_send_accepted_response_payload(state, target, payload)
                 ),
                 task_drain_payload=lambda target, payload: (
                     work_tree_task_drain_response_payload(state, target, payload)
@@ -922,6 +923,14 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 ),
                 lane_signature=lambda target, thread_id, transcript_path: (
                     lane_signature_for_target(state, target, thread_id, transcript_path)
+                ),
+                send_followup_payload=lambda target, payload: (
+                    message.messages_payload_for_worktree(
+                        state,
+                        target,
+                        limit=DEFAULT_MESSAGE_LIMIT,
+                        fast_mode=bool(payload.get("fastMode")),
+                    )
                 ),
             ),
         )
