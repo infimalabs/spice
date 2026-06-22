@@ -15,6 +15,7 @@ const SIX_HOUR_RANGE_SECONDS = "21600";
 const SIX_HOUR_BUCKET_SECONDS = 900;
 const MIN_METRICS_CHART_HEIGHT_PX = 96;
 const MIN_METRICS_GRID_WIDTH_PX = 520;
+const MAX_METRICS_PLOT_SIDE_GAP_PX = 12;
 
 async function run() {
   return withServePage(
@@ -297,6 +298,11 @@ function readMetricsSmokeLayout(grid) {
   const chartRect = chart.getBoundingClientRect();
   const svgRect = svg.getBoundingClientRect();
   const summaryCells = [...grid.querySelectorAll(".lane-metric-cell")];
+  const dotRects = [...grid.querySelectorAll(".lane-metric-series-dot")].map((dot) =>
+    dot.getBoundingClientRect(),
+  );
+  const plotLeft = Math.min(...dotRects.map((rect) => rect.left));
+  const plotRight = Math.max(...dotRects.map((rect) => rect.right));
   return {
     gridHeight: Math.round(gridRect.height),
     gridWidth: Math.round(gridRect.width),
@@ -307,6 +313,8 @@ function readMetricsSmokeLayout(grid) {
     chartHeight: Math.round(chartRect.height),
     chartWidth: Math.round(chartRect.width),
     chartTopGap: Math.round(chartRect.top - gridRect.top),
+    plotLeftGap: Math.round(plotLeft - svgRect.left),
+    plotRightGap: Math.round(svgRect.right - plotRight),
     svgHeight: Math.round(svgRect.height),
     svgWidth: Math.round(svgRect.width),
   };
@@ -437,6 +445,13 @@ function assertMetricsLayout(layout, label) {
   if (layout.gridWidth < MIN_METRICS_GRID_WIDTH_PX)
     throw new Error(
       label + " grid did not use available horizontal space: " + JSON.stringify(layout),
+    );
+  if (
+    layout.plotLeftGap > MAX_METRICS_PLOT_SIDE_GAP_PX ||
+    layout.plotRightGap > MAX_METRICS_PLOT_SIDE_GAP_PX
+  )
+    throw new Error(
+      label + " plot did not span available SVG width: " + JSON.stringify(layout),
     );
   if (Math.abs(layout.chartTopGap) > 2)
     throw new Error(label + " chart does not start at grid top: " + JSON.stringify(layout));

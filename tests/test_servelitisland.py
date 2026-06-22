@@ -37,6 +37,7 @@ def test_static_metrics_lit_island_records_comparison():
     assert "createRenderRoot()" in app_lit
     assert "return this;" in app_lit
     assert "renderLaneMetricsLitIsland(host, model)" in app_lit
+    assert 'preserveAspectRatio="none"' in app_lit
     assert "https://cdn.jsdelivr.net/gh/lit/dist@3/core/lit-core.min.js" in app_lit
     assert ".lane-metrics-lit-island { display: contents; }" in css
     assert "## Code Size" in doc
