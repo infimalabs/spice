@@ -62,12 +62,6 @@ def activation_command_surface_lines() -> list[str]:
             "SPICE_SHELL_HOOK_REEXEC_STAGE=1 is expected inside the taken-over "
             "shell"
         ),
-        (
-            "rtk_rewrite_contract=the native harness or shell startup hook must "
-            "hand the complete top-level shell command string to spice agent run "
-            "exactly once; agent run is the RTK rewrite owner because it is the "
-            "only layer that sees the full shell string before execution"
-        ),
         "session=spice session briefing",
         "task_status=spice task status",
         "task_next=spice task next",
