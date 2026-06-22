@@ -809,6 +809,17 @@ def test_static_pending_count_clears_stale_submitted_predictions_after_drain():
     )
 
 
+def test_static_lane_differential_frames_update_pending_and_messages():
+    app_render = STATIC_ROOT / "app.render.js"
+    app_stream = STATIC_ROOT / "app.stream.js"
+    script = Path(__file__).with_name("fixtures") / "lane_diff_frames.js"
+
+    subprocess.run(
+        ["node", str(script), str(app_render), str(app_stream)],
+        check=True,
+    )
+
+
 def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag():
     app = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
