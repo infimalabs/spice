@@ -97,6 +97,7 @@ def _study_shape(args: argparse.Namespace, root: Path) -> int:
         for error in (
             shape.namespace_policy_error(root),
             shape.path_shape_error(root),
+            shape.name_cluster_error(root),
         )
         if error
     ]

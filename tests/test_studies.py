@@ -525,3 +525,12 @@ def test_name_cluster_ignores_short_affix(tmp_path):
     _name_cluster_repo(tmp_path, ["webapp", "webcli", "webrun"])
 
     assert name_cluster_errors(tmp_path) == []
+
+
+def test_study_shape_cli_fails_on_name_cluster(tmp_path, monkeypatch, capsys):
+    _name_cluster_repo(tmp_path, ["teamcommands", "teamfilters", "teammetrics"])
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    args = build_parser().parse_args(["study", "shape"])
+
+    assert args.func(args) == 1
+    assert "name-cluster policy violation" in capsys.readouterr().out

@@ -446,6 +446,7 @@ def _run_shape_guards(repo_root: Path) -> None:
         for error in (
             shape.namespace_policy_error(repo_root),
             shape.path_shape_error(repo_root),
+            shape.name_cluster_error(repo_root),
         )
         if error
     ]
