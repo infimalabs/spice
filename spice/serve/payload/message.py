@@ -297,6 +297,7 @@ class _ThreadMessages:
     items: list[message_reader.AssistantMessage]
     error: str | None
     transcript: message_reader.TranscriptResolution | None
+    removed_keys: list[str]
 
 
 def _resolve_messages_thread(
@@ -331,19 +332,23 @@ def _read_thread_messages(
     limit: int,
     after: str | None,
     before: str | None,
+    append_only: bool,
 ) -> _ThreadMessages:
     if not thread_id:
         return _ThreadMessages(
             items=[],
             error="No agent thread is bound to this worktree yet.",
             transcript=None,
+            removed_keys=[],
         )
+    cursor = state.rollout_cursor(thread_id) if not before else None
     read = message_reader.assistant_messages_for_thread_id(
         thread_id,
         limit=limit,
         after=after,
         before=before,
-        cursor=state.rollout_cursor(thread_id) if not before else None,
+        append_only=append_only,
+        cursor=cursor,
         worktree_id=target.id,
         repo_root=target.repo_root,
     )
@@ -354,7 +359,13 @@ def _read_thread_messages(
         after=after,
         before=before,
     )
-    return _ThreadMessages(items=items, error=read.error, transcript=read.transcript)
+    removed_keys = list(cursor.removed_keys) if cursor is not None else []
+    return _ThreadMessages(
+        items=items,
+        error=read.error,
+        transcript=read.transcript,
+        removed_keys=removed_keys,
+    )
 
 
 def messages_payload_for_worktree(
@@ -366,6 +377,7 @@ def messages_payload_for_worktree(
     before: str | None = None,
     expected_thread_id: str | None = None,
     fast_mode: bool = False,
+    append_only: bool = False,
 ) -> dict[str, Any]:
     resolved = _resolve_messages_thread(
         state, target, expected_thread_id=expected_thread_id, fast_mode=fast_mode
@@ -377,6 +389,7 @@ def messages_payload_for_worktree(
         limit=limit,
         after=after,
         before=before,
+        append_only=append_only,
     )
     return _messages_worktree_payload(
         state,
@@ -388,6 +401,7 @@ def messages_payload_for_worktree(
         pending=resolved.pending,
         pending_identity=resolved.pending_identity,
         items=messages.items,
+        removed_keys=messages.removed_keys,
         error=messages.error,
         transcript=messages.transcript,
     )
@@ -404,6 +418,7 @@ def _messages_worktree_payload(
     pending: int,
     pending_identity: dict[str, Any],
     items: list[message_reader.AssistantMessage],
+    removed_keys: list[str],
     error: str | None,
     transcript: message_reader.TranscriptResolution | None,
 ) -> dict[str, Any]:
@@ -424,7 +439,7 @@ def _messages_worktree_payload(
         transcript_owner=transcript_owner,
         store=state.team_store,
     )
-    return {
+    payload = {
         "messages": [item.to_payload() for item in items],
         "targetWorktreeName": target.name,
         "targetBranch": target.branch or target.name,
@@ -458,6 +473,9 @@ def _messages_worktree_payload(
             pending_identity=pending_identity,
         ),
     }
+    if removed_keys:
+        payload["removedMessageKeys"] = list(removed_keys)
+    return payload
 
 
 def ack_context_payload_for_worktree(
