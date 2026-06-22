@@ -65,7 +65,7 @@ def test_unstarted_target_id_membership_is_visible_in_lane_payload(
     assert result["teamIdentity"]["teamId"] == created.team_id
     assert result["lifetime"] == "Drain"
     assert result["taskFilters"] == ["serve.ui"]
-    assert signature[3][0] == created.team_id
+    assert signature.other[0] == created.team_id
 
 
 def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
