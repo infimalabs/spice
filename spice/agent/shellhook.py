@@ -64,8 +64,7 @@ BUILTIN_AGENT_WRAPPER_GROUPS = {
             "vitest",
             "wc",
             "wget",
-        ],
-        "rg": {"argv": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "spice.agent.rgwrap"]},
+        ]
     },
 }
 SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
