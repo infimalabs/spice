@@ -64,6 +64,7 @@ const laneTemplate =
   "</div>" +
   '<div class="lane-statusline">' +
   '  <span class="lane-status-error" data-status-error hidden></span>' +
+  '  <span class="dot-separator" data-status-error-separator hidden>·</span>' +
   '  <span class="lane-status-time" data-status-time hidden></span>' +
   '  <span class="dot-separator" data-status-separator hidden>·</span>' +
   '  <span class="lane-status-preview" data-status-preview hidden></span>' +
@@ -341,6 +342,7 @@ function syncEmptyTeamLane(lane, team = {}, options = {}) {
   lane.statusPreviewEl.textContent = "choose an agent to import";
   lane.statusTimeEl.hidden = true;
   lane.statusErrorEl.hidden = true;
+  lane.statusErrorSeparatorEl.hidden = true;
   lane.statusSeparatorEl.hidden = true;
   lane.pipEl.hidden = true;
   lane.laneLightsEl.hidden = true;
@@ -565,6 +567,7 @@ function laneElementRefs(element) {
     infoSummaryEl: element.querySelector("[data-info-summary]"),
     infoGridEl: element.querySelector("[data-info-grid]"),
     statusErrorEl: element.querySelector("[data-status-error]"),
+    statusErrorSeparatorEl: element.querySelector("[data-status-error-separator]"),
     statusTimeEl: element.querySelector("[data-status-time]"),
     statusSeparatorEl: element.querySelector("[data-status-separator]"),
     statusPreviewEl: element.querySelector("[data-status-preview]"),
