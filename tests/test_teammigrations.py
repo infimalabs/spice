@@ -1,6 +1,6 @@
 import sqlite3
 
-from spice.serve.teams import ServeTeamStore
+from spice.serve.team.store import ServeTeamStore
 
 MIGRATED_POSITION_SENTINEL = 99
 

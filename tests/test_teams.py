@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from spice.errors import SpiceError
-from spice.serve.teams import (
+from spice.serve.team.store import (
     TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE,
     TASK_FILTER_SOURCE_MANUAL,

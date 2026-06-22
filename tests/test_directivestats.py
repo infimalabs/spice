@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from spice.serve.directivestats import DirectiveTotals
-from spice.serve.teams import ServeTeamStore
+from spice.serve.team.store import ServeTeamStore
 
 DIRECTIVE_SENT_AT = 100.0
 DIRECTIVE_ACKED_AT = 140.0

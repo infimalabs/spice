@@ -10,8 +10,8 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
-from spice.serve.teamids import thread_actor_id
-from spice.serve.teams import (
+from spice.serve.team.ids import thread_actor_id
+from spice.serve.team.store import (
     TASK_FILTER_SOURCE_AUTO_CREATE,
     ServeTeamStore,
     TeamConfig,

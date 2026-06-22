@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.serve.teammetrics import (
+from spice.serve.team.metrics import (
     METRIC_BUCKET_SECONDS,
     TEAM_HISTORICAL_MAX_BUCKET_COUNT,
 )

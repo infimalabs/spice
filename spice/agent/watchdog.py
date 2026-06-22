@@ -271,8 +271,8 @@ def record_supervised_lane_metrics(repo_root: Path) -> None:
     from spice.agent.lifecycle import agent_status
     from spice.serve.messages import resolve_thread_transcript
     from spice.serve.metrics import record_transcript_metrics_for_agent
-    from spice.serve.teamids import thread_actor_id
-    from spice.serve.teams import ServeTeamStore
+    from spice.serve.team.ids import thread_actor_id
+    from spice.serve.team.store import ServeTeamStore
 
     thread_id = agent_status(repo_root).thread_id
     if not thread_id:

@@ -65,7 +65,7 @@ then tries the other shipped drivers. That fallback keeps old transcripts
 readable after configuration changes, but the owner driver discovered during
 lookup is not returned as durable lane identity.
 
-Team state in `spice/serve/teams.py` is keyed by `agent_id`. Before a thread is
+Team state in `spice/serve/team/store.py` is keyed by `agent_id`. Before a thread is
 known, `team_actor_for_target()` uses the worktree target id as a placeholder.
 After a thread appears, it rewrites placeholder membership to the canonical
 thread id. Renewals record predecessor and successor ids, but those ids are

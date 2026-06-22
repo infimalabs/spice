@@ -348,7 +348,7 @@ def test_team_historical_metrics_endpoint_projects_membership_intervals(
     tmp_path, monkeypatch
 ):
     clock = {"now": 0.0}
-    monkeypatch.setattr("spice.serve.teams.time.time", lambda: clock["now"])
+    monkeypatch.setattr("spice.serve.team.store.time.time", lambda: clock["now"])
     repo = _repo(tmp_path)
     state = _serve_state(tmp_path, _target(repo))
 

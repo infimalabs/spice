@@ -260,7 +260,7 @@ def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
     if _project_is_subscription_excluded(project):
         return
 
-    from spice.serve.teams import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CLAIM
+    from spice.serve.team.store import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CLAIM
     from spice.tasks import lanes
 
     store = ServeTeamStore()
@@ -292,7 +292,7 @@ def _subscribe_auto_project(
     if not project or _project_is_subscription_excluded(project):
         return f"route_filter=skipped:{project or '-'}:excluded"
 
-    from spice.serve.teams import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CREATE
+    from spice.serve.team.store import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CREATE
     from spice.tasks import lanes
 
     store = ServeTeamStore()
@@ -327,7 +327,7 @@ def _gc_empty_project_task_filters(project: str) -> None:
     except SpiceError:
         return
 
-    from spice.serve.teams import (
+    from spice.serve.team.store import (
         TASK_FILTER_SOURCE_AUTO_CLAIM,
         TASK_FILTER_SOURCE_AUTO_CREATE,
         ServeTeamStore,
@@ -729,7 +729,7 @@ def next_task_drain_line(
 
 
 def _record_task_lifecycle_event(task_id: str, kind: str, actor: str) -> None:
-    from spice.serve.teams import ServeTeamStore
+    from spice.serve.team.store import ServeTeamStore
     from spice.tasks import lanes
 
     agent_id = lanes.route_actor_id(actor or tw.current_actor())

@@ -23,7 +23,7 @@ from spice.serve import (
     worktreepayload,
 )
 from spice.serve.app import ServeState
-from spice.serve.teams import ServeTeamStore, TeamCommandService
+from spice.serve.team.store import ServeTeamStore, TeamCommandService
 from spice.serve.workroutes import work_tree_send_response_payload
 from spice.serve.worktrees import WorktreeTarget
 

@@ -8,8 +8,8 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Protocol
 
-from spice.serve.teamids import normalized_id as _normalized_id
-from spice.serve.teammodels import TeamAgentIdentity
+from spice.serve.team.ids import normalized_id as _normalized_id
+from spice.serve.team.models import TeamAgentIdentity
 
 
 @dataclass(frozen=True, slots=True)

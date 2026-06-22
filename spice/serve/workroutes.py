@@ -13,7 +13,7 @@ from spice.serve import identitypayload
 from spice.serve.agentapi import sent_steering_response_payload
 from spice.serve.drive import drive_drain_queue_controls
 from spice.serve.steering import steering_submit_error_status, submit_steering_message
-from spice.serve.teams import TeamConfig
+from spice.serve.team.store import TeamConfig
 from spice.serve.worktrees import WorktreeTarget, match_serve_worktree
 
 LIFETIME_LABELS = ("Steer", "Drive", "Drain")

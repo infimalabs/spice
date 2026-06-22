@@ -9,7 +9,7 @@ import pytest
 
 from spice.errors import SpiceError
 from spice.serve import metricpayload
-from spice.serve.teammetrics import (
+from spice.serve.team.metrics import (
     METRIC_BUCKET_SECONDS,
     MetricSeriesPoint,
     TEAM_HISTORICAL_MAX_BUCKET_COUNT,
@@ -17,7 +17,7 @@ from spice.serve.teammetrics import (
     TaskLifecycleSeriesPoint,
     TaskStallState,
 )
-from spice.serve.teams import ServeTeamStore
+from spice.serve.team.store import ServeTeamStore
 
 FIRST_RENEWAL_TS = 120
 LATEST_RENEWAL_TS = 240

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from spice.serve.directivestats import DirectiveTotals
 from spice.serve.metrics import record_transcript_metrics_for_agent
-from spice.serve.teams import ServeTeamStore
+from spice.serve.team.store import ServeTeamStore
 
 
 def _write_rollout(path, entries):

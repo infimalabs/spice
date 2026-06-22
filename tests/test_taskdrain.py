@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import DRIVER
-from spice.serve.teamids import thread_actor_id
-from spice.serve.teams import ServeTeamStore, TeamConfig
+from spice.serve.team.ids import thread_actor_id
+from spice.serve.team.store import ServeTeamStore, TeamConfig
 from spice.tasks import alloc, config, create, identity, ops
 
 pytestmark = pytest.mark.skipif(

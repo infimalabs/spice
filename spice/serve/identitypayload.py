@@ -9,8 +9,8 @@ from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import agent_status
 from spice.config import configured_say_voice, effective_agent_config
 from spice.errors import SpiceError
-from spice.serve.teams import ServeTeamStore, renewal_intent_payload
-from spice.serve.teamids import (
+from spice.serve.team.store import ServeTeamStore, renewal_intent_payload
+from spice.serve.team.ids import (
     normalize_actor_id,
     target_actor_id,
     thread_actor_id,

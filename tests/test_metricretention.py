@@ -8,9 +8,9 @@ import pytest
 
 from spice.errors import SpiceError
 from spice.serve.directivestats import DirectiveTotals
-from spice.serve.teammetrics import METRIC_HISTORY_RETENTION_DAYS_ENV
-from spice.serve.teams import ServeTeamStore, TeamConfig
-from spice.serve.teamschema import METRIC_HISTORY_RETENTION_SECONDS
+from spice.serve.team.metrics import METRIC_HISTORY_RETENTION_DAYS_ENV
+from spice.serve.team.store import ServeTeamStore, TeamConfig
+from spice.serve.team.schema import METRIC_HISTORY_RETENTION_SECONDS
 
 RECENT_TOOL_CALLS = 4
 SECONDS_PER_DAY = 24 * 60 * 60

@@ -19,7 +19,7 @@ from spice.serve import (
     worktreepayload,
 )
 from spice.serve.app import ServeState
-from spice.serve.teams import ServeTeamStore, TeamCommandService
+from spice.serve.team.store import ServeTeamStore, TeamCommandService
 from spice.serve.worktrees import WorktreeTarget
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="

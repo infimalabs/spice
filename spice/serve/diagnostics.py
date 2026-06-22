@@ -6,7 +6,7 @@ import json
 import sqlite3
 from typing import Any, Iterable
 
-from spice.serve.teams import ServeTeamStore, TeamState
+from spice.serve.team.store import ServeTeamStore, TeamState
 from spice.tasks import config as task_config
 from spice.tasks import lanes
 

@@ -15,7 +15,7 @@ from spice.serve import (
     messagepayload,
     worktreepayload,
 )
-from spice.serve.teams import ServeTeamStore
+from spice.serve.team.store import ServeTeamStore
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 

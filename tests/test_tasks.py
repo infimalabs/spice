@@ -12,14 +12,14 @@ from spice.cli.parser import build_parser
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
 from spice.paths import shared_attachment_root
-from spice.serve.teams import (
+from spice.serve.team.store import (
     TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE,
     TASK_FILTER_SOURCE_MANUAL,
     ServeTeamStore,
     TeamConfig,
 )
-from spice.serve.teamids import thread_actor_id
+from spice.serve.team.ids import thread_actor_id
 from spice.tasks import alloc, config, create, gitsync, identity, lanes, ops, render, tw
 
 pytestmark = pytest.mark.skipif(

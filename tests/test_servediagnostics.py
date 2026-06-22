@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from spice.cli.parser import build_parser
 from spice.serve.cli import run_serve_team_diagnostics
 from spice.serve.diagnostics import render_team_diagnostics, team_diagnostics_payload
-from spice.serve.teams import (
+from spice.serve.team.store import (
     TEAM_DATABASE_FILENAME,
     ServeTeamStore,
     TeamConfig,
