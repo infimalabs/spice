@@ -319,6 +319,7 @@ async function applyLaneAppendBusPayload(lane, payload) {
     ? []
     : initialPayloadSpeechMessages(lane, messages);
   lane.serverReachable = true;
+  removePayloadMessages(lane, payload);
   mergePayloadMessages(lane, { ...payload, messages });
   await hydrateAckContextsForMessages(lane, lane.knownMessages);
   renderMessagesIfChanged(lane);
