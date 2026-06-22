@@ -11,6 +11,7 @@ appends through a held-open handle), watchfiles covers Linux/Windows.
 
 from __future__ import annotations
 
+import os
 import select
 from dataclasses import dataclass, field
 from importlib import import_module
@@ -312,10 +313,19 @@ class LiveBusSession:
 
     def _watch_subscription(self, subscription: _LaneSubscription) -> None:
         target = subscription.target
+        watch = _KqueueWatch()
+        try:
+            self._run_watch_loop(subscription, target, watch)
+        finally:
+            watch.close()
+
+    def _run_watch_loop(
+        self, subscription: _LaneSubscription, target: Any, watch: _KqueueWatch
+    ) -> None:
         while not subscription.stop.is_set():
             thread_id, transcript = self._lane_context(target)
             watch_paths = self.callbacks.lane_watch_paths(target, thread_id, transcript)
-            changed = _wait_for_change(watch_paths, subscription.stop)
+            changed = _wait_for_change(watch_paths, subscription.stop, watch)
             if subscription.stop.is_set():
                 return
             if not changed:
@@ -362,15 +372,92 @@ class LiveBusSession:
         return self.callbacks.lane_signature(subscription.target, thread_id, transcript)
 
 
-def _wait_for_change(paths: tuple[Path, ...], stop: Event) -> bool:
-    """Block until a watched path changes or `stop` is set."""
+def _wait_for_change(
+    paths: tuple[Path, ...], stop: Event, watch: _KqueueWatch | None = None
+) -> bool:
+    """Block until a watched path changes or `stop` is set.
+
+    A `watch` keeps the kqueue armed across calls so a change that fires
+    between calls — e.g. while the caller is pushing a payload — is kernel
+    queued and delivered on the next call instead of being lost in a reopen
+    gap. Without one (or off kqueue) the watch is opened per call.
+    """
     watch_paths = _existing_watch_paths(paths)
     if not watch_paths:
         stop.wait(LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S)
         return False
     if _HAVE_KQUEUE:
+        if watch is not None:
+            return watch.wait(watch_paths, stop)
         return _wait_for_change_kqueue(watch_paths, stop)
     return _wait_for_change_watchfiles(watch_paths, stop)
+
+
+class _KqueueWatch:
+    """A kqueue VNODE watch kept armed across waits.
+
+    The fd set and kqueue are rebuilt only when the watched paths change;
+    otherwise the same armed kqueue is reused, so vnode events that fire while
+    the caller is between waits stay queued in the kernel and surface on the
+    next wait. Not a poll: each wait blocks on `kqueue.control`.
+    """
+
+    def __init__(self) -> None:
+        self._paths: tuple[Path, ...] = ()
+        self._descriptors: list[int] = []
+        self._kqueue: Any = None
+        self._events: list[Any] = []
+
+    def wait(self, paths: tuple[Path, ...], stop: Event) -> bool:
+        self._arm(paths)
+        if not self._events:
+            stop.wait(LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S)
+            return False
+        while not stop.is_set():
+            triggered = self._kqueue.control(
+                self._events, len(self._events), LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
+            )
+            if triggered:
+                return True
+        return False
+
+    def _arm(self, paths: tuple[Path, ...]) -> None:
+        if paths == self._paths and self._kqueue is not None:
+            return
+        self.close()
+        self._paths = paths
+        descriptors: list[int] = []
+        for path in paths:
+            try:
+                descriptors.append(os.open(path, os.O_RDONLY))
+            except OSError:
+                continue
+        if not descriptors:
+            return
+        self._descriptors = descriptors
+        self._kqueue = select.kqueue()
+        self._events = [
+            select.kevent(
+                descriptor,
+                filter=select.KQ_FILTER_VNODE,
+                flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+                fflags=_KQUEUE_VNODE_FFLAGS,
+            )
+            for descriptor in descriptors
+        ]
+
+    def close(self) -> None:
+        if self._kqueue is not None:
+            self._kqueue.close()
+            self._kqueue = None
+        for descriptor in self._descriptors:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        self._descriptors = []
+        self._events = []
+        self._paths = ()
 
 
 def _existing_watch_paths(paths: tuple[Path, ...]) -> tuple[Path, ...]:
