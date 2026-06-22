@@ -287,6 +287,7 @@ def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monke
     item = items[0]
     assert item.kind == "presence:function_call_output"
     assert item.preview == (
+        "Acknowledged: 20260610T120000000000Z "
         "Tasks captured: FILTERS-20260610T120000000001Z, UI-20260610T120000000002Z"
     )
     assert line["preview"] == item.preview

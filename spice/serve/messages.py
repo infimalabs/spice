@@ -71,6 +71,8 @@ _SUPERVISOR_FEEDBACK_OUTPUT_TYPES = frozenset(
 _SUPERVISOR_FEEDBACK_HEADING = "Supervisor Feedback"
 _INLINE_TASK_CREATED_NOTICE = "inline_task_created"
 _INLINE_TASK_ERROR_NOTICE = "inline_task_error"
+_ACK_ARCHIVED_NOTICE = "ack_archived"
+_ACK_UNMATCHED_NOTICE = "ack_unmatched"
 
 
 @dataclass(frozen=True)
@@ -607,7 +609,7 @@ def _payload_output_text(payload: dict[str, Any]) -> str:
     return ""
 
 
-def _inline_task_feedback_items(output: str) -> list[dict[str, Any]]:
+def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for key, value in _supervisor_feedback_notice_pairs(output):
         if key == _INLINE_TASK_CREATED_NOTICE:
@@ -631,13 +633,35 @@ def _inline_task_feedback_items(output: str) -> list[dict[str, Any]]:
                     "detail": value.strip() or "unknown error",
                 }
             )
+        elif key == _ACK_ARCHIVED_NOTICE:
+            keys = [acked for acked in value.split() if acked]
+            if keys:
+                items.append(
+                    {
+                        "kind": "ack_archived",
+                        "label": "Acknowledged",
+                        "detail": ", ".join(keys),
+                        "keys": keys,
+                    }
+                )
+        elif key == _ACK_UNMATCHED_NOTICE:
+            keys = [acked for acked in value.split() if acked]
+            if keys:
+                items.append(
+                    {
+                        "kind": "ack_unmatched",
+                        "label": "Acknowledged (no pending match)",
+                        "detail": ", ".join(keys),
+                        "keys": keys,
+                    }
+                )
     return items
 
 
 def _supervisor_feedback_preview(payload: dict[str, Any]) -> str:
     if payload.get("type") not in _SUPERVISOR_FEEDBACK_OUTPUT_TYPES:
         return ""
-    items = _inline_task_feedback_items(_payload_output_text(payload))
+    items = _supervisor_feedback_items(_payload_output_text(payload))
     return _preview_from_text(
         "\n".join(f"{item['label']}: {item['detail']}" for item in items)
     )
