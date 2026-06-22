@@ -1144,6 +1144,20 @@ def test_composer_driver_icon_rerender_keeps_matching_dom_node():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_accepted_composer_send_clears_duplicate_draft_text():
+    app_composer = STATIC_ROOT / "app.composer.js"
+    script = Path(__file__).with_name("fixtures") / "composer_accepted_draft_clear.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(app_composer)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_static_composer_driver_icons_style_local_driver_assets():
     css = _serve_css_text()
     icon_start = css.index(".composer-driver-icon {")

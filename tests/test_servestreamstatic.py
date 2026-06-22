@@ -315,7 +315,11 @@ def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
     assert "sendLanePayload(lane, payload, sourceLane, options);" in app_stream
     assert "options = {}," in result_body
     assert (
-        "resetLaneComposerDraft(sourceLane, lane.targetId);\n"
+        "clearAcceptedComposerDrafts(\n"
+        "    sourceLane,\n"
+        "    lane.targetId,\n"
+        "    result.requestText || payload.text,\n"
+        "  );\n"
         "  focusAfterComposerReset(options.focusAfterReset);"
     ) in result_body
     assert (
