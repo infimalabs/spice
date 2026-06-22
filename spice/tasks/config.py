@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -329,9 +330,22 @@ def _atomic_write_text(path: Path, text: str) -> None:
             return
     except OSError:
         pass
-    tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    # A per-call unique temp name: concurrent same-process writers (e.g. the
+    # serve team store and side-channel threads) would otherwise share one
+    # `{pid}.tmp` path and race os.replace into FileNotFoundError.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f"{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def ensure_task_event_file(root: Path | None = None) -> Path:
