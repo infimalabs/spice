@@ -171,6 +171,6 @@ def test_wrapper_command_contract_is_linked_from_readme():
     )
     assert "spice agent run -- <cmd>" in contract
     assert "[tool.spice.commands]" in contract
-    assert "spice agent run -- proxy <command>" in contract
+    assert "RTK rewrite routing" in contract
     assert 'wrappers = ["common", "repo-tools"]' in contract
     assert "[tool.spice.wrappers.repo-tools]" in contract

@@ -48,9 +48,6 @@ def test_wrapper_gitshadow_route_uses_shadow_and_spice_route_scrubs(
     )
 
     git_env = wrap.build_agent_run_environment(["git", "status"], repo_root=tmp_path)
-    proxy_git_env = wrap.build_agent_run_environment(
-        ["proxy", "git", "status"], repo_root=tmp_path
-    )
     spice_env = wrap.build_agent_run_environment(
         ["spice", "task", "status"], repo_root=tmp_path
     )
@@ -64,15 +61,9 @@ def test_wrapper_gitshadow_route_uses_shadow_and_spice_route_scrubs(
         "ZDOTDIR": "hook",
         "BASH_ENV": "hook",
     }
-    assert proxy_git_env == {
-        "route": "git",
-        "repo": str(tmp_path),
-        "ZDOTDIR": "hook",
-        "BASH_ENV": "hook",
-    }
     assert spice_env == {"route": "spice", "ZDOTDIR": "hook", "BASH_ENV": "hook"}
     assert uv_spice_env == {"route": "spice", "ZDOTDIR": "hook", "BASH_ENV": "hook"}
-    assert shadow_calls == [tmp_path, tmp_path]
+    assert shadow_calls == [tmp_path]
     assert len(scrub_calls) == 2
 
 
@@ -92,6 +83,53 @@ def test_wrapper_routes_worktree_spice_commands_through_python_module(
     assert uv_spice_command == [sys.executable, "-m", "spice", "task", "status"]
 
 
+def test_wrapper_rewrites_stage_one_shell_command_before_stage_two(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_rewrite(*args: str) -> str | None:
+        calls.append(args)
+        return "rtk git status --short"
+
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
+
+    command = wrap.build_agent_run_command(
+        ["zsh", "-c", "git status --short"], rewrite_rtk=True
+    )
+
+    assert command == ["zsh", "-c", "rtk git status --short"]
+    assert calls == [("git status --short",)]
+
+
+def test_wrapper_rewrites_direct_agent_command_with_rtk_source_of_truth(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_rewrite(*args: str) -> str | None:
+        calls.append(args)
+        return "rtk grep needle"
+
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
+
+    command = wrap.build_agent_run_command(["rg", "needle"], rewrite_rtk=True)
+
+    assert command == ["rtk", "grep", "needle"]
+    assert calls == [("rg", "needle")]
+
+
+def test_wrapper_does_not_special_case_proxy_argv(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_rewrite(*args: str) -> str | None:
+        calls.append(args)
+        return None
+
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
+
+    command = wrap.build_agent_run_command(["proxy", "git", "status"], rewrite_rtk=True)
+
+    assert command == ["proxy", "git", "status"]
+    assert calls == [("proxy", "git", "status")]
+
+
 def test_wrapper_routes_worktree_python_commands_through_active_interpreter(
     tmp_path, monkeypatch
 ):
@@ -103,16 +141,12 @@ def test_wrapper_routes_worktree_python_commands_through_active_interpreter(
     python3_command = wrap.build_agent_run_command(
         ["python3", "-m", "pip", "--version"], repo_root=tmp_path
     )
-    proxy_python_command = wrap.build_agent_run_command(
-        ["proxy", "python", "-m", "pip", "--version"], repo_root=tmp_path
-    )
 
     assert python_command == [sys.executable, "-m", "pip", "--version"]
     assert python3_command == [sys.executable, "-m", "pip", "--version"]
-    assert proxy_python_command == [sys.executable, "-m", "pip", "--version"]
 
 
-def test_wrapper_proxy_marker_drops_after_worktree_python_routing(tmp_path):
+def test_wrapper_does_not_python_route_proxy_argv(tmp_path):
     _write_spice_product_shape(tmp_path)
 
     assert wrap.build_agent_run_command(
@@ -120,7 +154,7 @@ def test_wrapper_proxy_marker_drops_after_worktree_python_routing(tmp_path):
     ) == [sys.executable, "-m", "pip", "--version"]
     assert wrap.build_agent_run_command(
         ["proxy", "python", "-m", "pip", "--version"], repo_root=tmp_path
-    ) == [sys.executable, "-m", "pip", "--version"]
+    ) == ["proxy", "python", "-m", "pip", "--version"]
 
 
 def test_wrapper_routes_target_repo_python_commands_through_virtualenv_default(
@@ -292,6 +326,7 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
         encoding="utf-8",
     )
     wrap_bin.chmod(0o755)
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
     base_env = dict(os.environ)
     base_env["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
@@ -616,7 +651,7 @@ def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
         order=None,
         groups={
             "common": {
-                "wrap": ["run", "proxy", "grep", "find", "git"],
+                "wrap": ["run", "grep", "find", "git"],
                 "pytest": {"argv": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
             }
         },
@@ -1150,7 +1185,7 @@ def _toml_key(value: str) -> str:
 
 def _expected_project_common_with_pytest_wrapper_lines() -> list[str]:
     return [
-        *_expected_wrapper_lines("wrap", ["run", "proxy", "grep", "find", "git"]),
+        *_expected_wrapper_lines("wrap", ["run", "grep", "find", "git"]),
         *_expected_active_python_module_wrapper_lines(["pytest"]),
     ]
 

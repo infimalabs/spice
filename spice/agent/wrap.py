@@ -22,6 +22,7 @@ import contextlib
 import json
 import os
 import select
+import shlex
 import socket
 import subprocess
 import sys
@@ -61,6 +62,11 @@ from spice.sessions.meter import (
 )
 
 PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
+SHELL_EXECUTION_COMMANDS = frozenset(("bash", "dash", "sh", "zsh"))
+SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
+RTK_REWRITE_COMMAND = ("rtk", "rewrite")
+# RTK prints a rewritten command and returns 3 from the hook path on this lane.
+RTK_REWRITE_MATCH_EXIT_CODES = frozenset((0, 3))
 PYTHON_ROUTE_FAILURE = (
     "import sys;"
     "sys.stderr.write("
@@ -101,7 +107,7 @@ def run_agent_command(
     stderr: TextIO = sys.stderr,
 ) -> int:
     emit_initial_side_channel_payload(repo_root, stderr=stderr)
-    command = build_agent_run_command(raw_args, repo_root=repo_root)
+    command = build_agent_run_command(raw_args, repo_root=repo_root, rewrite_rtk=True)
     environment = build_agent_run_environment(
         raw_args,
         repo_root=repo_root,
@@ -146,11 +152,67 @@ def emit_initial_side_channel_payload(
 
 
 def build_agent_run_command(
-    raw_args: Sequence[str], *, repo_root: Path | None = None
+    raw_args: Sequence[str], *, repo_root: Path | None = None, rewrite_rtk: bool = False
 ) -> list[str]:
     args = normalize_agent_run_args(raw_args)
+    if rewrite_rtk:
+        args = rtk_rewrite_agent_run_args(args)
     routed_args = worktree_route_command(args, repo_root=repo_root)
-    return routed_args[1:] if routed_args[:1] == ["proxy"] else routed_args
+    if rewrite_rtk and args == routed_args:
+        return rtk_rewrite_direct_args(routed_args) or routed_args
+    return routed_args
+
+
+def rtk_rewrite_agent_run_args(args: Sequence[str]) -> list[str]:
+    shell_command_index = shell_execution_command_index(args)
+    if shell_command_index is None:
+        return list(args)
+    rewritten = rtk_rewrite_command_text(args[shell_command_index])
+    if rewritten is None:
+        return list(args)
+    result = list(args)
+    result[shell_command_index] = rewritten
+    return result
+
+
+def rtk_rewrite_direct_args(args: Sequence[str]) -> list[str] | None:
+    if (
+        not args
+        or args[:1] == ["rtk"]
+        or shell_execution_command_index(args) is not None
+    ):
+        return None
+    rewritten = rtk_rewrite_command_text(*args)
+    if rewritten is None:
+        return None
+    try:
+        return shlex.split(rewritten)
+    except ValueError:
+        return None
+
+
+def rtk_rewrite_command_text(*args: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            [*RTK_REWRITE_COMMAND, *args],
+            stdout=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    if completed.returncode not in RTK_REWRITE_MATCH_EXIT_CODES:
+        return None
+    rewritten = completed.stdout.strip()
+    return rewritten or None
+
+
+def shell_execution_command_index(args: Sequence[str]) -> int | None:
+    if len(args) < 3 or args[1] not in SHELL_EXECUTION_FLAGS:
+        return None
+    if Path(args[0]).name not in SHELL_EXECUTION_COMMANDS:
+        return None
+    return 2
 
 
 def build_agent_run_environment(
@@ -172,7 +234,7 @@ def build_agent_run_environment(
 
 
 def is_direct_git_route(args: Sequence[str]) -> bool:
-    return args[:1] == ["git"] or args[:2] == ["proxy", "git"]
+    return args[:1] == ["git"]
 
 
 def is_spice_route(args: Sequence[str]) -> bool:
@@ -204,8 +266,6 @@ def worktree_python_route_command(
 ) -> list[str]:
     if args[:1] and args[0] in PYTHON_ROUTE_COMMANDS:
         return [*python_route_command_prefix(repo_root), *args[1:]]
-    if len(args) >= 2 and args[0] == "proxy" and args[1] in PYTHON_ROUTE_COMMANDS:
-        return ["proxy", *python_route_command_prefix(repo_root), *args[2:]]
     return list(args)
 
 

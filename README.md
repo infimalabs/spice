@@ -99,10 +99,11 @@ spice agent run -- <shell> -c "<original command>"
 
 That wrapper owns stderr before the command runs. It prints pending inbox
 steering and keep-working guidance, connects to the supervisor side
-channel, routes git through the worktree shadow environment, routes `spice` and
-`python` to the correct source checkout or target virtualenv, and loads
-configured wrapper groups. Descendant shells keep the static hook environment
-without a second reexec, so steering is delivered at command boundaries without
+channel, asks `rtk rewrite` for command telemetry routing when RTK is installed,
+routes git through the worktree shadow environment, routes `spice` and `python`
+to the correct source checkout or target virtualenv, and loads configured
+wrapper groups. Descendant shells keep the static hook environment without a
+second reexec, so steering is delivered at command boundaries without
 double-injecting nested shells.
 
 Wrapper groups live in tracked config:
@@ -112,14 +113,14 @@ Wrapper groups live in tracked config:
 wrappers = ["common", "repo-tools"]
 
 [tool.spice.wrappers.common]
-rtk = ["run", "proxy", "grep", "find", "git"]
+wrap = ["grep", "find", "git"]
 
 [tool.spice.wrappers.repo-tools]
 codegen = { argv = ["uv", "run", "python", "-m", "tools.codegen"] }
 ```
 
 Use wrappers for agent-owned execution where command output is also an
-operator steering surface. The full contract, including `proxy` routing and
+operator steering surface. The full contract, including RTK rewrite routing and
 mounted-command boundaries, is in
 [`docs/cli/wrapper-commands.md`](docs/cli/wrapper-commands.md).
 
@@ -204,7 +205,7 @@ or first add the helper to this seam with tests and a stability note.
 
 | Surface | Command | What it does |
 | --- | --- | --- |
-| Command surface | `spice agent run -- <cmd>` | Runs shell commands with git-shadow env, configured wrapper groups, and steering injection on stderr. |
+| Command surface | `spice agent run -- <cmd>` | Runs shell commands with RTK rewrite routing, git-shadow env, configured wrapper groups, and steering injection on stderr. |
 | Lifecycle | `spice agent ensure` / `supervise` | One worktree-bound agent per worktree, started under a neutral skill prompt, watched by a durable supervisor. |
 | Steering | filesystem inbox under `.spice/inbox/` | Durable operator messages; items retire only when the agent semantically ACKs their key in its transcript. |
 | Tasks | `spice task …` | Phase-native Taskwarrior board shared by all worktrees; `task next` is allocator-owned; git sync happens at task boundaries. |
