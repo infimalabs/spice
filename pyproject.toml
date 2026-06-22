@@ -42,7 +42,15 @@ namespaces = true
     "shellhooks2/.zlogin",
     "shellhooks2/bash_env",
 ]
-"spice.serve.static" = ["*.css", "*.js", "*.ico"]
+"spice.serve.static" = [
+    "*.css",
+    "*.js",
+    "*.ico",
+    "*.png",
+    "*.svg",
+    "*.webmanifest",
+    "icons/*.svg",
+]
 
 [dependency-groups]
 dev = [
