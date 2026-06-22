@@ -101,6 +101,9 @@ def test_serve_team_metrics_smoke_asserts_work_follows_agent() -> None:
     assert "{ acked: 1, sends: 2, toolCalls: 3" in smoke
     assert "{ acked: 14, sends: 25, toolCalls: 36" in smoke
     assert "stale/duplicate cells" in smoke
+    assert "selectsStable" in smoke
+    assert "focused metric lens select did not survive refresh" in smoke
+    assert "chart did not use full pane height" in smoke
 
 
 def test_serve_composer_reorder_smoke_asserts_swap_contract() -> None:

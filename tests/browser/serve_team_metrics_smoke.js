@@ -1,8 +1,9 @@
 // Browser coverage for the lane metric pane. It drives the real client render
 // path (renderLaneMetricsPane -> laneMetricsRenderModel -> the vanilla DOM
-// renderer) in a real Chromium against the served CSS, and asserts that when a
+// renderer) in a real Chromium against the served CSS. It asserts that when a
 // server-derived summary changes the way it does under a work-follows-agent
-// move, the pane re-renders the new numbers with no stale or duplicated cells.
+// move, the pane re-renders the new numbers while preserving metric controls
+// and giving the graph the remaining metrics pane area.
 //
 // The membership-derived DERIVATION itself (lane_metric_summary) is exhaustively
 // unit-tested in tests/test_teams.py; this smoke covers the live render/update
@@ -11,6 +12,7 @@ const { withServePage } = require("./serve_playwright_harness");
 
 const SIX_HOUR_RANGE_SECONDS = "21600";
 const SIX_HOUR_BUCKET_SECONDS = 900;
+const MIN_METRICS_CHART_HEIGHT_PX = 96;
 
 async function run() {
   return withServePage(
@@ -39,8 +41,12 @@ async function installMetricsSmokeHelpers(page) {
   await page.addScriptTag({
     content: [
       makeMetricsSmokeLane,
+      makeMetricsSmokePanel,
       readMetricsSmokeCells,
       countMetricsSmokeCells,
+      metricsSmokeSelects,
+      readMetricsSmokeSelectState,
+      readMetricsSmokeLayout,
       readDistributionSmokeGroups,
       readDistributionSmokeDots,
       readDistributionSmokeLines,
@@ -92,25 +98,69 @@ async function setupMetricsSmokePage() {
       },
     });
   };
-  const sourceGrid = document.createElement("div");
-  const destGrid = document.createElement("div");
-  sourceGrid.className = "lane-metric-grid";
-  destGrid.className = "lane-metric-grid";
-  lanesEl.append(sourceGrid, destGrid);
-  const sourceSummary = document.createElement("span");
-  const destSummary = document.createElement("span");
-  const source = makeMetricsSmokeLane(sourceGrid, sourceSummary, 11, 22, 33, [1, 2]);
-  const dest = makeMetricsSmokeLane(destGrid, destSummary, 4, 5, 6, [1]);
-  window.__spiceMetricsSmoke = { source, dest, metricSeriesCalls };
+  const sourcePanel = makeMetricsSmokePanel("source");
+  const destPanel = makeMetricsSmokePanel("dest");
+  lanesEl.append(sourcePanel.panel, destPanel.panel);
+  const source = makeMetricsSmokeLane(
+    sourcePanel.panel,
+    sourcePanel.grid,
+    sourcePanel.summary,
+    11,
+    22,
+    33,
+    [1, 2],
+  );
+  const dest = makeMetricsSmokeLane(
+    destPanel.panel,
+    destPanel.grid,
+    destPanel.summary,
+    4,
+    5,
+    6,
+    [1],
+  );
+  window.__spiceMetricsSmoke = {
+    source,
+    dest,
+    metricSeriesCalls,
+    sourceSelects: null,
+    focusStableAfterRefresh: false,
+  };
   renderLaneMetricsPane(source);
   renderLaneMetricsPane(dest);
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function makeMetricsSmokeLane(grid, summary, acked, sends, toolCalls, sparkline) {
+function makeMetricsSmokePanel(label) {
+  const panel = document.createElement("section");
+  panel.className = "lane-view-panel lane-view-panel--active";
+  panel.dataset.laneViewPanel = "metrics";
+  panel.style.setProperty("--lane-pane-expanded-height", "480px");
+  const head = document.createElement("div");
+  head.className = "lane-pane-head";
+  const title = document.createElement("span");
+  title.textContent = label + " metrics";
+  const summary = document.createElement("span");
+  head.append(title, summary);
+  const grid = document.createElement("div");
+  grid.className = "lane-metrics-grid";
+  panel.append(head, grid);
+  return { panel, grid, summary };
+}
+
+function makeMetricsSmokeLane(
+  panel,
+  grid,
+  summary,
+  acked,
+  sends,
+  toolCalls,
+  sparkline,
+) {
   return {
     targetId: "target-" + Math.random().toString(16).slice(2),
     targetThreadId: "",
+    metricsPanelEl: panel,
     metricsGridEl: grid,
     metricsSummaryEl: summary,
     laneMetrics: { acked, sends, toolCalls, sparkline },
@@ -120,6 +170,7 @@ function makeMetricsSmokeLane(grid, summary, acked, sends, toolCalls, sparkline)
 
 function readInitialMetricsSmokePage() {
   const { source, dest, metricSeriesCalls } = window.__spiceMetricsSmoke;
+  window.__spiceMetricsSmoke.sourceSelects = metricsSmokeSelects(source.metricsGridEl);
   return {
     source: readMetricsSmokeCells(source.metricsGridEl),
     dest: readMetricsSmokeCells(dest.metricsGridEl),
@@ -128,6 +179,8 @@ function readInitialMetricsSmokePage() {
     sourceStatus: source.metricsSummaryEl.textContent,
     seriesSvg: Boolean(source.metricsGridEl.querySelector(".lane-metric-series-svg")),
     firstMetricQuery: metricSeriesCalls[0] && metricSeriesCalls[0].fields.query,
+    selectState: readMetricsSmokeSelectState(source.metricsGridEl),
+    layout: readMetricsSmokeLayout(source.metricsGridEl),
   };
 }
 
@@ -147,32 +200,37 @@ function countMetricsSmokeCells(grid) {
 
 async function updateMetricsSmokePage({ rangeSeconds }) {
   const { source, dest } = window.__spiceMetricsSmoke;
+  const initialSelects = window.__spiceMetricsSmoke.sourceSelects;
+  initialSelects.lens.focus();
   source.laneMetrics = { acked: 1, sends: 2, toolCalls: 3, sparkline: [1] };
   dest.laneMetrics = { acked: 14, sends: 25, toolCalls: 36, sparkline: [2, 1] };
   renderLaneMetricsPane(source);
   renderLaneMetricsPane(dest);
-  const lensSelect = source.metricsGridEl.querySelector(
-    'select[aria-label="Metric lens"]',
-  );
+  window.__spiceMetricsSmoke.focusStableAfterRefresh =
+    document.activeElement === initialSelects.lens;
+  const lensSelect = metricsSmokeSelects(source.metricsGridEl).lens;
   lensSelect.value = "perSession";
   lensSelect.dispatchEvent(new Event("change", { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  const metricSelect = source.metricsGridEl.querySelector(
-    'select[aria-label="Metric metric"]',
-  );
+  const metricSelect = metricsSmokeSelects(source.metricsGridEl).metric;
   metricSelect.value = "distribution";
   metricSelect.dispatchEvent(new Event("change", { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  const rangeSelect = source.metricsGridEl.querySelector(
-    'select[aria-label="Metric rangeSeconds"]',
-  );
+  const rangeSelect = metricsSmokeSelects(source.metricsGridEl).rangeSeconds;
   rangeSelect.value = rangeSeconds;
   rangeSelect.dispatchEvent(new Event("change", { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function readUpdatedMetricsSmokePage() {
-  const { source, dest, metricSeriesCalls } = window.__spiceMetricsSmoke;
+  const {
+    source,
+    dest,
+    metricSeriesCalls,
+    sourceSelects,
+    focusStableAfterRefresh,
+  } = window.__spiceMetricsSmoke;
+  const currentSelects = metricsSmokeSelects(source.metricsGridEl);
   return {
     source: readMetricsSmokeCells(source.metricsGridEl),
     dest: readMetricsSmokeCells(dest.metricsGridEl),
@@ -185,6 +243,50 @@ function readUpdatedMetricsSmokePage() {
     ).length,
     distributionLines: readDistributionSmokeLines(source.metricsGridEl),
     metricSeriesCalls,
+    selectState: readMetricsSmokeSelectState(source.metricsGridEl),
+    selectsStable:
+      currentSelects.metric === sourceSelects.metric &&
+      currentSelects.lens === sourceSelects.lens &&
+      currentSelects.rangeSeconds === sourceSelects.rangeSeconds,
+    focusStableAfterRefresh,
+    layout: readMetricsSmokeLayout(source.metricsGridEl),
+  };
+}
+
+function metricsSmokeSelects(grid) {
+  return {
+    metric: grid.querySelector('select[aria-label="Metric metric"]'),
+    lens: grid.querySelector('select[aria-label="Metric lens"]'),
+    rangeSeconds: grid.querySelector('select[aria-label="Metric rangeSeconds"]'),
+  };
+}
+
+function readMetricsSmokeSelectState(grid) {
+  const selects = metricsSmokeSelects(grid);
+  return {
+    metric: selects.metric && selects.metric.value,
+    lens: selects.lens && selects.lens.value,
+    rangeSeconds: selects.rangeSeconds && selects.rangeSeconds.value,
+  };
+}
+
+function readMetricsSmokeLayout(grid) {
+  const controls = grid.querySelector(".lane-metric-series-controls");
+  const chart = grid.querySelector(".lane-metric-series-chart");
+  const svg = grid.querySelector(".lane-metric-series-svg");
+  const gridRect = grid.getBoundingClientRect();
+  const controlsRect = controls.getBoundingClientRect();
+  const chartRect = chart.getBoundingClientRect();
+  const svgRect = svg.getBoundingClientRect();
+  return {
+    gridHeight: Math.round(gridRect.height),
+    gridWidth: Math.round(gridRect.width),
+    controlsBeforeChart: controlsRect.bottom <= chartRect.top,
+    chartHeight: Math.round(chartRect.height),
+    chartWidth: Math.round(chartRect.width),
+    chartBottomGap: Math.round(gridRect.bottom - chartRect.bottom),
+    svgHeight: Math.round(svgRect.height),
+    svgWidth: Math.round(svgRect.width),
   };
 }
 
@@ -212,8 +314,8 @@ function readDistributionSmokeLines(grid) {
 
 function cleanupMetricsSmokePage() {
   const { source, dest } = window.__spiceMetricsSmoke;
-  source.metricsGridEl.remove();
-  dest.metricsGridEl.remove();
+  source.metricsPanelEl.remove();
+  dest.metricsPanelEl.remove();
   delete window.__spiceMetricsSmoke;
 }
 
@@ -224,6 +326,8 @@ function assertMetrics(result) {
   if (!before.seriesSvg) throw new Error("expected metric series SVG to render");
   if (!before.firstMetricQuery || before.firstMetricQuery.metric !== "activity")
     throw new Error("expected initial activity metric query");
+  expect(before.selectState, { metric: "activity", lens: "lineage", rangeSeconds: "3600" }, "before.selectState");
+  assertMetricsLayout(before.layout, "before.layout");
   // Before the move: source shows agent-a + agent-c; destination shows agent-b.
   expect(before.source, { acked: "11", sends: "22", "tool calls": "33" }, "before.source");
   expect(before.dest, { acked: "4", sends: "5", "tool calls": "6" }, "before.dest");
@@ -237,6 +341,16 @@ function assertMetrics(result) {
       "cell count changed across re-render (stale/duplicate cells): " +
         JSON.stringify({ before, after }),
     );
+  if (!after.selectsStable)
+    throw new Error("metric/lens/range selects were replaced across refresh");
+  if (!after.focusStableAfterRefresh)
+    throw new Error("focused metric lens select did not survive refresh");
+  expect(
+    after.selectState,
+    { metric: "distribution", lens: "perSession", rangeSeconds: SIX_HOUR_RANGE_SECONDS },
+    "after.selectState",
+  );
+  assertMetricsLayout(after.layout, "after.layout");
   if (!after.metricSeriesCalls.some((call) => call.fields.query.lens === "perSession"))
     throw new Error("lens toggle did not re-query perSession series");
   expectArray(
@@ -271,6 +385,19 @@ function assertMetrics(result) {
     )
   )
     throw new Error("range toggle did not re-query distribution at 6h bucket size");
+}
+
+function assertMetricsLayout(layout, label) {
+  if (!layout.controlsBeforeChart)
+    throw new Error(label + " controls overlap or follow the chart: " + JSON.stringify(layout));
+  if (layout.chartHeight < MIN_METRICS_CHART_HEIGHT_PX)
+    throw new Error(label + " chart did not use full pane height: " + JSON.stringify(layout));
+  if (Math.abs(layout.chartBottomGap) > 2)
+    throw new Error(label + " chart does not reach grid bottom: " + JSON.stringify(layout));
+  if (layout.svgHeight < layout.chartHeight - 2)
+    throw new Error(label + " svg does not fill chart height: " + JSON.stringify(layout));
+  if (layout.chartWidth < layout.gridWidth - 2 || layout.svgWidth < layout.chartWidth - 2)
+    throw new Error(label + " chart does not fill grid width: " + JSON.stringify(layout));
 }
 
 function expect(actual, expected, label) {
