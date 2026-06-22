@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from spice.errors import SpiceError
+from spice.tasks import config as task_config
 from spice.serve.team.store import (
     TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE,
@@ -40,6 +41,41 @@ def _record_identity(
         desired_effort=desired_effort,
         transcript_owner="codex",
     )
+
+
+def test_team_event_wakes_task_event_file_after_commit(tmp_path):
+    task_config.set_backend(str(tmp_path / "task-backend"))
+    try:
+        event_path = task_config.ensure_task_event_file()
+        before = event_path.read_text(encoding="utf-8")
+        store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+
+        with store.connect() as connection:
+            store._create_team_locked(
+                connection, "team-display-event", TeamConfig(), ["agent-a"]
+            )
+            assert event_path.read_text(encoding="utf-8") == before
+
+        after = event_path.read_text(encoding="utf-8")
+        assert after != before
+        assert after.endswith(" team\n")
+    finally:
+        task_config.set_backend(None)
+
+
+def test_team_metric_write_does_not_wake_task_event_file(tmp_path):
+    task_config.set_backend(str(tmp_path / "task-backend"))
+    try:
+        event_path = task_config.ensure_task_event_file()
+        store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+        store.create_team(team_id="team-metric", members=["agent-a"])
+        after_create = event_path.read_text(encoding="utf-8")
+
+        store.record_agent_metric_delta("agent-a", tool_calls=1)
+
+        assert event_path.read_text(encoding="utf-8") == after_create
+    finally:
+        task_config.set_backend(None)
 
 
 def test_empty_team_snapshot_creates_initial_empty_team(tmp_path):

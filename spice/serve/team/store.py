@@ -114,6 +114,7 @@ class ServeTeamStore(
 
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or team_database_path()
+        self._task_event_wake_connection_ids: set[int] = set()
 
     def _ensure_schema(self) -> None:
         if self.path in self._initialized_paths:
@@ -140,7 +141,15 @@ class ServeTeamStore(
             connection.execute(f"PRAGMA busy_timeout = {TEAM_SQLITE_BUSY_TIMEOUT_MS}")
             yield connection
             connection.commit()
+            if id(connection) in self._task_event_wake_connection_ids:
+                # Wake only after the team transaction is visible. Otherwise the
+                # lane watcher can observe the event file and re-read stale team
+                # facts before the commit lands.
+                from spice.tasks.config import mark_task_backend_changed
+
+                mark_task_backend_changed("team")
         finally:
+            self._task_event_wake_connection_ids.discard(id(connection))
             connection.close()
 
     # ---- events / revisions -------------------------------------------
@@ -160,12 +169,11 @@ class ServeTeamStore(
         connection.execute(
             "UPDATE teams SET revision = ? WHERE team_id = ?", (revision, team_id)
         )
-        # Wake the serve lane watcher: it watches the task event file, not the
-        # team store (whose writes are dominated by non-display metric churn),
-        # so a real team event bumps the event file to surface in the UI.
-        from spice.tasks.config import mark_task_backend_changed
-
-        mark_task_backend_changed("team")
+        # Wake the serve lane watcher after commit: it watches the task event
+        # file, not the team store (whose writes are dominated by non-display
+        # metric churn), so a real team event surfaces in the UI without waking
+        # readers before the transaction is visible.
+        self._task_event_wake_connection_ids.add(id(connection))
         return revision
 
     def _current_revision_locked(self, connection: sqlite3.Connection) -> int:
