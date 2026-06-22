@@ -248,6 +248,39 @@ def test_static_draft_composers_use_14px_font():
     assert "font-size: 14px;" in textarea_rule
 
 
+def test_static_metrics_pane_preserves_controls_and_full_height_chart():
+    css = _serve_css_text()
+    app_panes = (STATIC_ROOT / "app.panes.js").read_text(encoding="utf-8")
+    metrics_panel_rule = _between(
+        css, '.lane-view-panel[data-lane-view-panel="metrics"] {', "}"
+    )
+    metrics_grid_rule = _between(css, ".lane-metrics-grid {", "}")
+    chart_rule = _between(css, ".lane-metric-series-chart {", "}")
+    svg_rule = _between(css, ".lane-metric-series-svg {", "}")
+
+    assert "display: flex;" in metrics_panel_rule
+    assert "flex-direction: column;" in metrics_panel_rule
+    assert "flex: 1 1 auto;" in metrics_grid_rule
+    assert "grid-template-rows: repeat(4, max-content) minmax(0, 1fr);" in (
+        metrics_grid_rule
+    )
+    assert "min-height: 0;" in metrics_grid_rule
+    assert "display: flex;" in chart_rule
+    assert "height: 100%;" in svg_rule
+    assert "min-height: 0;" in svg_rule
+    _assert_contains_all(
+        app_panes,
+        (
+            "function laneMetricGridSlot(grid, slot)",
+            "syncLaneMetricElementChildren(grid, nodes);",
+            "__spiceLaneMetricSlot",
+            "__spiceLaneMetricSeriesSelect",
+            "syncLaneMetricSeriesSelectOptions(select, selectedValue, options);",
+            "select.value = selected;",
+        ),
+    )
+
+
 def test_static_composer_shards_reverse_visually_without_retargeting():
     css = _serve_css_text()
     app_shell = _shell_and_composer_text()
