@@ -14,12 +14,13 @@ from spice.mail.inbox import (
     inbox_request_body,
     write_inbox_item,
 )
-from spice.serve import agentapi, workroutes, worktreepayload
+from spice.serve import agentapi, workroutes
+from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
 from spice.serve.team.store import ServeTeamStore, TeamCommandService
 from spice.serve.workroutes import work_tree_send_response_payload
-from spice.serve.worktrees import WorktreeTarget
+from spice.serve.worktree.target import WorktreeTarget
 
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 THREAD_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -136,8 +137,8 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
         return {"ok": True, "threadId": THREAD_B}, HTTPStatus.OK
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
-    monkeypatch.setattr(worktreepayload, "task_filter_inventory", lambda: {})
-    monkeypatch.setattr(worktreepayload, "agent_binding_error", lambda *_args: "")
+    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(inventory, "agent_binding_error", lambda *_args: "")
     monkeypatch.setattr(
         message.message_reader,
         "assistant_messages_for_thread_id",
@@ -148,7 +149,7 @@ def test_target_refresh_force_news_pending_renewal_into_original_team(
         ),
     )
 
-    result = worktreepayload.work_trees_payload(state)
+    result = inventory.work_trees_payload(state)
 
     work_tree = result["workTrees"][0]
     assert work_tree["targetIdentity"]["thread"] == {
@@ -208,7 +209,7 @@ def test_messages_refresh_force_news_pending_renewal_into_original_team(
         )
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
-    monkeypatch.setattr(worktreepayload, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
         message.message_reader,
         "assistant_messages_for_thread_id",
@@ -294,6 +295,4 @@ def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:
     monkeypatch.setattr(lane, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(message, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(workroutes, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(
-        worktreepayload, "agent_status", lambda *_args, **_kwargs: status
-    )
+    monkeypatch.setattr(inventory, "agent_status", lambda *_args, **_kwargs: status)

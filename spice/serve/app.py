@@ -28,7 +28,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
 )
 from spice.paths import repo_root_from_cwd, shared_attachment_root
-from spice.serve import worktreepayload
+from spice.serve.worktree import inventory
 from spice.serve.payload import identity, message, metric
 from spice.serve.agentapi import (
     agent_ensure_response_payload,
@@ -60,7 +60,7 @@ from spice.serve.workroutes import (
     work_tree_send_response_payload,
     work_tree_task_drain_response_payload,
 )
-from spice.serve.worktrees import (
+from spice.serve.worktree.target import (
     WorktreeTarget,
     discover_serve_worktrees,
 )
@@ -656,7 +656,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/work/trees":
             self.state.invalidate_targets()
-            self._send_json(worktreepayload.work_trees_payload(self.state))
+            self._send_json(inventory.work_trees_payload(self.state))
             return
         if parsed.path == "/api/teams":
             self._send_json(
@@ -895,8 +895,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                     state, selector
                 ),
                 work_trees_payload=lambda: (
-                    state.invalidate_targets()
-                    or worktreepayload.work_trees_payload(state)
+                    state.invalidate_targets() or inventory.work_trees_payload(state)
                 ),
                 messages_payload=lambda target, **kwargs: (
                     message.messages_payload_for_worktree(state, target, **kwargs)

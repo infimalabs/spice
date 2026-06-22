@@ -17,7 +17,7 @@ from spice.paths import shared_attachment_root
 from spice.serve.agentapi import sent_steering_payload
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
-from spice.serve import worktreepayload
+from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.payload.message import ack_context_payload_for_worktree
 from spice.serve.steering import submit_steering_message
@@ -362,12 +362,12 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        worktreepayload,
+        inventory,
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        worktreepayload,
+        inventory,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: None,
     )
@@ -589,12 +589,12 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        worktreepayload,
+        inventory,
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        worktreepayload,
+        inventory,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: None,
     )
@@ -679,12 +679,12 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        worktreepayload,
+        inventory,
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        worktreepayload,
+        inventory,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: None,
     )
@@ -833,7 +833,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         message, "resolve_thread_id_for_target", lambda _state, _target: ""
     )
     monkeypatch.setattr(
-        worktreepayload,
+        inventory,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: None,
     )

@@ -13,7 +13,7 @@ from spice.serve.payload.identity import (
     team_actor_for_target,
 )
 from spice.serve.pending import pending_inbox_identity_payload
-from spice.serve.worktrees import WorktreeTarget
+from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import config as task_config
 
 LANE_METRIC_SPARKLINE_BUCKETS = 12
