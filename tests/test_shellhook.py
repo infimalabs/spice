@@ -2,6 +2,7 @@
 
 import io
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -850,7 +851,7 @@ def test_zsh_login_hook_reexec_restores_across_startup_files(tmp_path):
     subprocess.run([zsh, "-lc", "sleep 0.1"], check=True, env=env, timeout=2)
 
     lines = _trace_lines(trace, expected_prefix="real:")
-    assert lines[0].startswith(f"fake:{hook_dir}:unset:-m spice agent run --")
+    assert lines[0].startswith("fake:unset:unset:-m spice agent run --")
     assert lines[1:] == ["real:.zshenv", "real:.zprofile", "real:.zlogin"]
 
 
@@ -1083,7 +1084,7 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
     lines = _trace_lines(trace, expected_prefix="ran:")
     agent_run_lines = [line for line in lines if "-m spice agent run --" in line]
     assert len(agent_run_lines) == 1
-    assert agent_run_lines[0].startswith(f"fake:{hook_dir}:unset:")
+    assert agent_run_lines[0].startswith("fake:unset:unset:")
     assert f" {zsh} -c " in agent_run_lines[0]
     assert (
         f"ran:{static_hook_dir}:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
@@ -1096,7 +1097,6 @@ def test_agent_shell_environment_routes_reexeced_shell_to_static_stage(tmp_path)
         pytest.skip("zsh is not installed")
     trace = tmp_path / "trace.log"
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
-    hook_dir = shellhook.packaged_shell_steering_hook_dir()
     static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     base_env = {
         "PATH": os.environ.get("PATH", ""),
@@ -1123,9 +1123,7 @@ def test_agent_shell_environment_routes_reexeced_shell_to_static_stage(tmp_path)
     lines = _trace_lines(trace, expected_prefix="ran:")
     agent_run_lines = [line for line in lines if "-m spice agent run --" in line]
     assert len(agent_run_lines) == 1
-    assert agent_run_lines[0].startswith(
-        f"fake:{hook_dir}:{hook_dir / shellhook.BASH_HOOK_NAME}:"
-    )
+    assert agent_run_lines[0].startswith("fake:unset:unset:")
     assert f" {zsh} -c " in agent_run_lines[0]
     assert (
         f"ran:{static_hook_dir}:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
@@ -1202,9 +1200,7 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
     lines = _trace_lines(trace, expected_prefix="ran:")
     agent_run_lines = [line for line in lines if "-m spice agent run --" in line]
     assert len(agent_run_lines) == 1
-    assert agent_run_lines[0].startswith(
-        f"fake:unset:{hook_dir / shellhook.BASH_HOOK_NAME}:"
-    )
+    assert agent_run_lines[0].startswith("fake:unset:unset:")
     assert f" {bash} -c " in agent_run_lines[0]
     assert f"ran:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
 
@@ -1316,6 +1312,7 @@ def _expected_active_python_module_wrapper_lines(selectors: list[str]) -> list[s
 
 def _fake_spice_python(tmp_path: Path, *, run_agent_commands: bool = False) -> Path:
     path = tmp_path / "fake-python"
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     agent_run_exec = (
         (
             'if [ "$1" = "-m" ] && [ "$2" = "spice" ] '
@@ -1323,19 +1320,8 @@ def _fake_spice_python(tmp_path: Path, *, run_agent_commands: bool = False) -> P
             '&& [ "$5" = "--" ]; then\n'
             "  shift 5\n"
             '  if [ "$2" = "-c" ] || [ "$2" = "-lc" ]; then\n'
-            '    _spice_static_hook_dir=""\n'
-            '    if [ -n "${ZDOTDIR-}" ]; then\n'
-            '      _spice_static_hook_dir="${ZDOTDIR%/shellhooks}/shellhooks2"\n'
-            '    elif [ -n "${BASH_ENV-}" ]; then\n'
-            '      _spice_hook_dir="${BASH_ENV%/*}"\n'
-            '      _spice_static_hook_dir="${_spice_hook_dir%/shellhooks}/shellhooks2"\n'
-            "    fi\n"
-            '    if [ -n "$_spice_static_hook_dir" ]; then\n'
-            '      export ZDOTDIR="$_spice_static_hook_dir"\n'
-            '      export BASH_ENV="$_spice_static_hook_dir/bash_env"\n'
-            "    fi\n"
-            "    unset _spice_hook_dir\n"
-            "    unset _spice_static_hook_dir\n"
+            f"    export ZDOTDIR={shlex.quote(str(static_hook_dir))}\n"
+            f"    export BASH_ENV={shlex.quote(str(static_hook_dir / shellhook.BASH_HOOK_NAME))}\n"
             "  fi\n"
             '  exec "$@"\n'
             "fi\n"
