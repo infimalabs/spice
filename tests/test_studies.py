@@ -24,7 +24,11 @@ from spice.studies import cli as studies_cli
 from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies.magicnums import scan_text_magic_numbers
-from spice.studies.shape import configured_package_roots
+from spice.studies.shape import (
+    configured_package_roots,
+    name_cluster_error,
+    name_cluster_errors,
+)
 from spice.studies.typecheck import (
     PYRIGHT_ARGS,
     python_typecheck_argv,
@@ -483,3 +487,41 @@ def test_run_python_typecheck_noops_without_targets(tmp_path):
     )
 
     assert run_python_typecheck(tmp_path) is None
+
+
+def _name_cluster_repo(tmp_path: Path, names: list[str]) -> Path:
+    pkg = tmp_path / "app"
+    pkg.mkdir()
+    for name in names:
+        (pkg / f"{name}.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\npackage_roots = ["app"]\n', encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_name_cluster_flags_shared_prefix_run(tmp_path):
+    _name_cluster_repo(tmp_path, ["teamcommands", "teamfilters", "teammetrics"])
+
+    error = name_cluster_error(tmp_path)
+    assert "name-cluster policy violation" in error
+    assert "prefix 'team'" in error
+    assert "namespace subpackage" in error
+
+
+def test_name_cluster_flags_shared_suffix_run(tmp_path):
+    _name_cluster_repo(tmp_path, ["identitypayload", "messagepayload", "metricpayload"])
+
+    assert "suffix 'payload'" in name_cluster_error(tmp_path)
+
+
+def test_name_cluster_passes_two_siblings(tmp_path):
+    _name_cluster_repo(tmp_path, ["teamcommands", "teamfilters"])
+
+    assert name_cluster_errors(tmp_path) == []
+
+
+def test_name_cluster_ignores_short_affix(tmp_path):
+    _name_cluster_repo(tmp_path, ["webapp", "webcli", "webrun"])
+
+    assert name_cluster_errors(tmp_path) == []

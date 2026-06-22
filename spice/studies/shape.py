@@ -4,6 +4,11 @@ These guards bite inside the package roots a repo declares in its tracked
 `pyproject.toml` under `[tool.spice.policy] package_roots` (plus `tests/`
 when present). Repos without a declaration skip them — the opinions are
 Python-package-specific; the rest of the constitution still applies.
+
+The name-cluster guard flags a run of sibling modules sharing a long prefix or
+suffix — a package hiding behind an affix. `name_cluster_error` computes it;
+wiring it into a gate is a separate, deliberate step so a codebase can be
+brought in line before the blocker is turned on.
 """
 
 from __future__ import annotations
@@ -25,6 +30,13 @@ GENERIC_SPLIT_RES = (
     re.compile(r"\d+\.py$"),
 )
 ALLOWED_NON_SHAPE_FILES = frozenset({"__main__.py", "py.typed"})
+# Three or more sibling modules sharing a long prefix or suffix are a package
+# wearing an affix as a disguise. The limit is low and fixed — the third
+# sibling trips it — so the pressure stays toward a real namespace instead of
+# run-on names. No flex headroom: unlike file size, a name cluster is not a
+# throughput knob, so there is nothing to amortize.
+NAME_CLUSTER_THRESHOLD = 3
+NAME_CLUSTER_MIN_AFFIX = 4
 
 
 def configured_package_roots(repo_root: Path) -> list[Path]:
@@ -351,3 +363,96 @@ def path_shape_error(repo_root: Path) -> str:
     if not errors:
         return ""
     return "path-shape policy violation(s):\n" + "\n".join(errors)
+
+
+def _normalized_module_stem(path: Path) -> str:
+    return path.stem.strip("_")
+
+
+def _common_affix(left: str, right: str, *, suffix: bool) -> str:
+    """Longest shared prefix (or suffix, when `suffix`) of two stems."""
+    limit = min(len(left), len(right))
+    index = 0
+    if suffix:
+        while index < limit and left[-1 - index] == right[-1 - index]:
+            index += 1
+        return left[len(left) - index :] if index else ""
+    while index < limit and left[index] == right[index]:
+        index += 1
+    return left[:index]
+
+
+def _has_affix(stem: str, affix: str, *, suffix: bool) -> bool:
+    if len(stem) <= len(affix):
+        return False
+    return stem.endswith(affix) if suffix else stem.startswith(affix)
+
+
+def _name_cluster_candidates(
+    modules: tuple[Path, ...], *, suffix: bool
+) -> list[tuple[str, tuple[Path, ...]]]:
+    entries = [
+        (_normalized_module_stem(path), path)
+        for path in modules
+        if _normalized_module_stem(path)
+    ]
+    affixes: set[str] = set()
+    for index, (left_stem, _) in enumerate(entries):
+        for right_stem, _ in entries[index + 1 :]:
+            affix = _common_affix(left_stem, right_stem, suffix=suffix)
+            if len(affix) >= NAME_CLUSTER_MIN_AFFIX and affix.isalpha():
+                affixes.add(affix)
+    candidates: list[tuple[str, tuple[Path, ...]]] = []
+    for affix in sorted(affixes, key=lambda candidate: (len(candidate), candidate)):
+        members = tuple(
+            path for stem, path in entries if _has_affix(stem, affix, suffix=suffix)
+        )
+        if len(members) >= NAME_CLUSTER_THRESHOLD:
+            candidates.append((affix, members))
+    # Keep the broadest cluster: a longer affix whose members are a subset of an
+    # already-selected shorter one adds no new offender, only noise.
+    selected: list[tuple[str, tuple[Path, ...]]] = []
+    selected_member_sets: list[frozenset[Path]] = []
+    for affix, members in candidates:
+        member_set = frozenset(members)
+        if any(member_set <= chosen for chosen in selected_member_sets):
+            continue
+        selected.append((affix, members))
+        selected_member_sets.append(member_set)
+    return selected
+
+
+def name_cluster_errors(repo_root: Path) -> list[str]:
+    offenders: list[str] = []
+    for root in configured_package_roots(repo_root):
+        modules_by_directory: dict[Path, list[Path]] = {}
+        for path in sorted(root.rglob("*.py")):
+            if _is_residue_path(path):
+                continue
+            if path.name in ALLOWED_NON_SHAPE_FILES:
+                continue
+            if not BOUNDARY_UNDERSCORE_RE.fullmatch(path.stem):
+                continue
+            modules_by_directory.setdefault(path.parent, []).append(path)
+        for directory, modules in sorted(modules_by_directory.items()):
+            for suffix in (False, True):
+                for affix, members in _name_cluster_candidates(
+                    tuple(modules), suffix=suffix
+                ):
+                    relative = directory.relative_to(repo_root).as_posix()
+                    names = ", ".join(path.name for path in members)
+                    kind = "suffix" if suffix else "prefix"
+                    offenders.append(
+                        f"{relative}/: {len(members)} sibling modules share the "
+                        f"{kind} '{affix}' ({names}); that shared concept is a "
+                        "package wearing a name affix — split them into a namespace "
+                        "subpackage"
+                    )
+    return offenders
+
+
+def name_cluster_error(repo_root: Path) -> str:
+    offenders = name_cluster_errors(repo_root)
+    if not offenders:
+        return ""
+    return "name-cluster policy violation(s):\n" + "\n".join(offenders)
