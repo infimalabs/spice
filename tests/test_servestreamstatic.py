@@ -298,6 +298,12 @@ def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
     focus_reset_body = app_stream[
         focus_reset_start : app_stream.index("\n}", focus_reset_start)
     ]
+    send_payload_start = app_stream.index("async function sendLanePayload(")
+    send_payload_body = app_stream[
+        send_payload_start : app_stream.index(
+            "\n}\n\nfunction applyLaneSendResult", send_payload_start
+        )
+    ]
 
     assert "const focusAfterReset = keyboardSubmitFocusTarget(" in submit_body
     assert "{ focusAfterReset }" in submit_body
@@ -313,8 +319,14 @@ def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
         in app_stream
     )
     assert "sendLanePayload(lane, payload, sourceLane, options);" in app_stream
-    assert "refreshLane(lane).catch(() => {});" not in app_stream
-    assert "await refreshLane(lane);" not in app_stream
+    assert (
+        "    const result = response.result || {};\n"
+        "    if (!isLaneOpen(lane)) return;\n"
+        "    applyLaneSendResult(lane, payload, result, sourceLane, options);\n"
+        "  } catch (error) {\n"
+        "    if (isLaneOpen(lane)) {\n"
+        "      finishLanePendingSubmission(lane, { accepted: false });"
+    ) in send_payload_body
     assert "options = {}," in result_body
     assert (
         "clearAcceptedComposerDrafts(\n"
