@@ -292,7 +292,11 @@ def _read_locked(
             worktree_id=worktree_id,
             driver=driver,
         )
-    if append_only and cursor is not None and after is None:
+    if (
+        append_only
+        and cursor is not None
+        and (after is None or after == cursor.last_key)
+    ):
         return _read_appended_window(
             transcript_path,
             limit=limit,
