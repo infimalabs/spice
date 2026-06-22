@@ -75,6 +75,7 @@ class LiveBusCallbacks:
         [Any, str | None, TranscriptResolution | None], tuple[Path, ...]
     ]
     lane_signature: Callable[[Any, str | None, TranscriptResolution | None], Any]
+    send_followup_payload: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,8 @@ class LiveBusSession:
         # responsive — replies still carry the requestId the client matches on.
         self._metrics_queue: Queue[dict[str, Any] | None] = Queue()
         self._metrics_worker: Thread | None = None
+        self._send_followup_queue: Queue[tuple[Any, dict[str, Any]] | None] = Queue()
+        self._send_followup_worker: Thread | None = None
 
     def run(self) -> None:
         self.connection.set_read_timeout(LIVE_BUS_READ_TIMEOUT_S)
@@ -132,6 +135,10 @@ class LiveBusSession:
             self._metrics_queue.put(None)
             self._metrics_worker.join(timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
             self._metrics_worker = None
+        if self._send_followup_worker is not None:
+            self._send_followup_queue.put(None)
+            self._send_followup_worker.join(timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
+            self._send_followup_worker = None
 
     def _send(self, payload: dict[str, Any]) -> None:
         with self.send_lock:
@@ -269,10 +276,48 @@ class LiveBusSession:
         target = self._require_target(message)
         if target is None:
             return
-        result, _status = self.callbacks.send_payload(
-            target, message.get("payload") or {}
-        )
+        payload = message.get("payload") or {}
+        result, _status = self.callbacks.send_payload(target, payload)
         self._reply(message, {"type": "lane.sendResult", "result": result})
+        if result.get("ok") is True:
+            self._queue_lane_send_followup(target, payload)
+
+    def _queue_lane_send_followup(self, target: Any, payload: dict[str, Any]) -> None:
+        if self.callbacks.send_followup_payload is None:
+            return
+        if self._send_followup_worker is None:
+            self._send_followup_worker = Thread(
+                target=self._send_followup_loop,
+                name="spice-live-bus-send-followup",
+                daemon=True,
+            )
+            self._send_followup_worker.start()
+        self._send_followup_queue.put((target, dict(payload)))
+
+    def _send_followup_loop(self) -> None:
+        send_followup_payload = self.callbacks.send_followup_payload
+        if send_followup_payload is None:
+            return
+        while True:
+            item = self._send_followup_queue.get()
+            if item is None:
+                return
+            target, send_payload = item
+            try:
+                payload = send_followup_payload(target, send_payload)
+            except Exception as exc:
+                payload = {"error": str(exc), "messages": [], "statusLine": {}}
+            try:
+                self._send(
+                    {
+                        "type": "lane.payload",
+                        "targetId": target.id,
+                        "source": "send",
+                        "payload": payload,
+                    }
+                )
+            except (OSError, WebSocketProtocolError, WebSocketDisconnect):
+                return
 
     def _handle_lane_task_drain(self, message: dict[str, Any]) -> None:
         target = self._require_target(message)

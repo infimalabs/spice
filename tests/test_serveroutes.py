@@ -33,6 +33,7 @@ from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
 from spice.serve.web import STATIC_ROOT, render_index_html, send_static_asset
 from spice.serve.workroutes import (
     work_tree_send_response_payload,
+    work_tree_send_accepted_response_payload,
     work_tree_task_drain_response_payload,
 )
 from tests.test_servehelpers import (
@@ -79,6 +80,46 @@ def test_work_tree_send_drive_keeps_control_out_of_request_text(tmp_path, monkey
     assert "control=drive-drain-queue: DRAIN QUEUE ASAP: spice task next" in readout
     assert empty_status == HTTPStatus.BAD_REQUEST
     assert empty_payload == {"ok": False, "error": "Message text is required."}
+
+
+def test_work_tree_send_accepted_response_does_not_ensure_synchronously(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    ensure_calls: list[dict[str, object]] = []
+
+    def fake_ensure(ensured_target, **kwargs):
+        ensure_calls.append({"target": ensured_target, **kwargs})
+        raise AssertionError("accepted send must not ensure synchronously")
+
+    monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+
+    payload, status = work_tree_send_accepted_response_payload(
+        state, target, {"text": "wake this lane", "fastMode": True}
+    )
+
+    items = collect_inbox_items(repo)
+    assert status == HTTPStatus.OK
+    assert set(payload) == {
+        "ok",
+        "key",
+        "pendingInboxCount",
+        "pendingInboxLabel",
+        "pendingInboxKeys",
+        "pendingInboxRevision",
+        "pendingInboxVersion",
+    }
+    assert payload["ok"] is True
+    assert payload["pendingInboxCount"] == 1
+    assert payload["pendingInboxLabel"] == "1"
+    assert payload["pendingInboxKeys"] == [payload["key"]]
+    assert payload["pendingInboxRevision"]
+    assert payload["pendingInboxVersion"] > 0
+    assert inbox_request_body(items[0].text) == "wake this lane"
+    assert ensure_calls == []
 
 
 def test_running_requested_renewal_sends_handoff_and_marks_pending(
