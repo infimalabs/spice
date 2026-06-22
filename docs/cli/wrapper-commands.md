@@ -5,9 +5,9 @@ Status: implemented contract.
 Spice has two command-extension surfaces with different owners:
 
 - `spice agent run -- <cmd>` is the agent shell wrapper. It is how agent-run
-  shell commands receive steering, keep-working guidance, git-shadow routing, source
-  checkout routing, and configured wrapper functions before the requested
-  command executes.
+  shell commands receive steering, keep-working guidance, RTK rewrite routing,
+  git-shadow routing, source checkout routing, and configured wrapper functions
+  before the requested command executes.
 - `[tool.spice.commands]` mounted commands are repository-owned command paths.
   They let a project expose its own tools under `spice <verb>` or
   `spice <verb> <subcommand> ...` without making those tools built-ins for
@@ -36,14 +36,12 @@ The wrapper does this before running the requested command:
 
 - prints pending operator steering and keep-working guidance on stderr;
 - preserves ACK semantics by leaving inbox retirement to transcript ACK lines;
+- asks `rtk rewrite` for the stage-2 shell command string or direct argv
+  replacement when RTK is installed;
 - routes git through the worktree shadow environment;
 - routes `spice` and `python` commands to the correct worktree source checkout
   or target repository virtual environment;
 - makes configured shell wrapper functions available.
-
-`spice agent run -- proxy <command>` is only a routing marker. It still goes
-through `agent run`; the marker lets configured shell wrapper functions choose
-the proxy route before the underlying command is executed.
 
 ## Wrapper Groups
 
@@ -52,14 +50,14 @@ The selected groups come from `[tool.spice.agent] wrappers = [...]`. When no
 list is configured, spice selects the built-in `common` group. An explicit empty
 list disables wrapper generation.
 
-The built-in `common` group maps `rtk` to a broad set of shell-function-safe
-command selectors that benefit from RTK routing, including common tools such as
-`git`, `grep`, `gh`, `npm`, `ruff`, `docker`, and `kubectl`. Repos
-that need exact control can override the group:
+The built-in `common` group is intentionally empty. RTK command coverage comes
+from the `rtk rewrite` handoff inside `spice agent run`, so RTK remains the
+single source of truth for which raw commands become `rtk ...` telemetry.
+Repos that need exact shell-function control can override or extend groups:
 
 ```toml
 [tool.spice.wrappers.common]
-rtk = ["run", "proxy", "grep", "find", "git"]
+wrap = ["grep", "find", "git"]
 ```
 
 Selectors are command names, not paths. Path selectors such as `/bin/sh` fail
@@ -127,7 +125,8 @@ expanded with tests and documentation.
 ## Choosing A Surface
 
 Use `spice agent run -- <cmd>` for agent-owned execution where steering,
-keep-working guidance, worktree routing, and wrapper functions must apply.
+keep-working guidance, RTK rewrite routing, worktree routing, and wrapper
+functions must apply.
 
 Use a mounted command for repository-owned tools that operators or hooks should
 run as `spice <verb>` in that repository only. Release tooling is mounted in

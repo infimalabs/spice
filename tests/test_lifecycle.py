@@ -661,11 +661,10 @@ def test_side_channel_binding_diagnostic_refuses_wrong_repo_root(tmp_path):
     assert "steering_delivery=refused" in diagnostic
 
 
-def test_wrapper_proxy_marker_plain_exec_starts_side_channel_watch(
-    tmp_path, monkeypatch
-):
+def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
     events: list[tuple[str, object, object | None]] = []
     stderr = io.StringIO()
     watch_thread = object()
@@ -705,7 +704,7 @@ def test_wrapper_proxy_marker_plain_exec_starts_side_channel_watch(
 
     exit_code = wrap.run_agent_command(
         tmp_path,
-        ["proxy", "find", ".", "-maxdepth", "0", "-print"],
+        ["find", ".", "-maxdepth", "0", "-print"],
         popen_factory=fake_popen,
         stderr=stderr,
     )
@@ -719,7 +718,62 @@ def test_wrapper_proxy_marker_plain_exec_starts_side_channel_watch(
     ]
 
 
-def test_wrapper_drops_proxy_marker_and_leaves_plain_commands_native():
+def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monkeypatch):
+    calls: list[tuple[str, ...]] = []
+    events: list[tuple[str, object, object | None]] = []
+    stderr = io.StringIO()
+    watch_thread = object()
+
+    def fake_rewrite(*args: str) -> str | None:
+        calls.append(args)
+        return "rtk git status --short"
+
+    class FakeProcess:
+        pid = 321
+
+        def wait(self) -> int:
+            events.append(("wait", None, None))
+            return 0
+
+    def fake_popen(command: list[str], env=None) -> FakeProcess:
+        events.append(("popen", command, env))
+        return FakeProcess()
+
+    def fake_watch(repo_root, *, parent_pid, stderr, initial_payload_already_rendered):
+        events.append(
+            (
+                "watch",
+                repo_root,
+                (parent_pid, stderr, initial_payload_already_rendered),
+            )
+        )
+        return watch_thread
+
+    def fake_join(thread):
+        events.append(("join", thread, None))
+
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
+    monkeypatch.setattr(wrap, "start_agent_side_channel_watch", fake_watch)
+    monkeypatch.setattr(wrap, "join_agent_side_channel_watch", fake_join)
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        ["zsh", "-c", "git status --short"],
+        popen_factory=fake_popen,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0
+    assert calls == [("git status --short",)]
+    assert events == [
+        ("popen", ["zsh", "-c", "rtk git status --short"], None),
+        ("watch", tmp_path, (321, stderr, True)),
+        ("wait", None, None),
+        ("join", watch_thread, None),
+    ]
+
+
+def test_wrapper_leaves_plain_commands_native_without_rtk_rewrite():
     assert wrap.build_agent_run_command(["find", ".", "-maxdepth", "0", "-print"]) == [
         "find",
         ".",
@@ -749,13 +803,14 @@ def test_wrapper_drops_proxy_marker_and_leaves_plain_commands_native():
     ]
     assert wrap.build_agent_run_command(
         ["proxy", "find", ".", "-maxdepth", "0", "-print"]
-    ) == ["find", ".", "-maxdepth", "0", "-print"]
+    ) == ["proxy", "find", ".", "-maxdepth", "0", "-print"]
     assert wrap.build_agent_run_command(["rg", "needle"]) == ["rg", "needle"]
 
 
 def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
     events: list[tuple[str, object, object | None]] = []
     stderr = io.StringIO()
     watch_thread = object()
