@@ -25,7 +25,7 @@ from spice.serve.payload.lane import (
     task_filter_inventory,
 )
 from spice.serve.pending import pending_inbox_identity_payload
-from spice.serve.worktrees import WorktreeTarget
+from spice.serve.worktree.target import WorktreeTarget
 
 
 def work_trees_payload(state: Any) -> dict[str, Any]:

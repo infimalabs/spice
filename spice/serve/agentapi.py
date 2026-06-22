@@ -27,7 +27,7 @@ from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.steering import SentSteeringMessage
-from spice.serve.worktrees import WorktreeTarget
+from spice.serve.worktree.target import WorktreeTarget
 
 PENDING_AGENT_ENSURE_RETRY_SECONDS = 5.0
 

@@ -35,11 +35,11 @@ from spice.serve.payload.lane import (
 )
 from spice.serve.markdown import render_message_html
 from spice.serve.pending import pending_inbox_identity_payload
-from spice.serve.worktreepayload import (
+from spice.serve.worktree.inventory import (
     _ensure_work_tree_agent,
     _work_tree_renewal_intent,
 )
-from spice.serve.worktrees import WorktreeTarget
+from spice.serve.worktree.target import WorktreeTarget
 from spice.tasks import config as task_config
 from spice.tasks import identity as task_identity
 from spice.tasks import tw

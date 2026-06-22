@@ -9,11 +9,12 @@ from types import SimpleNamespace
 from typing import Any
 
 from spice.agent.driver import CODEX_DRIVER
-from spice.serve import agentapi, app, workroutes, worktreepayload
+from spice.serve import agentapi, app, workroutes
+from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
 from spice.serve.team.store import ServeTeamStore, TeamCommandService
-from spice.serve.worktrees import WorktreeTarget
+from spice.serve.worktree.target import WorktreeTarget
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -147,6 +148,4 @@ def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:
     monkeypatch.setattr(lane, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(message, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(workroutes, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(
-        worktreepayload, "agent_status", lambda *_args, **_kwargs: status
-    )
+    monkeypatch.setattr(inventory, "agent_status", lambda *_args, **_kwargs: status)

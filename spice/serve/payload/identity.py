@@ -16,7 +16,7 @@ from spice.serve.team.ids import (
     thread_actor_id,
     thread_id_for_actor,
 )
-from spice.serve.worktrees import WorktreeTarget
+from spice.serve.worktree.target import WorktreeTarget
 
 
 def agent_ensure_thread_id(agent_ensure: dict[str, Any] | None) -> str:

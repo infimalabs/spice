@@ -17,14 +17,15 @@ import pytest
 
 from spice.agent.driver import CODEX_DRIVER
 from spice.mail.inbox import inbox_dir
-from spice.serve import agentapi, app, livebus, worktreepayload
+from spice.serve import agentapi, app, livebus
+from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
 from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.team.store import ServeTeamStore
-from spice.serve.worktrees import WorktreeTarget
+from spice.serve.worktree.target import WorktreeTarget
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 THREAD_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -128,9 +129,7 @@ def test_lane_subscription_watch_wakes_stopped_agent_for_external_inbox_write(
     monkeypatch.setattr(identity, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(lane, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(message, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(
-        worktreepayload, "agent_status", lambda *_args, **_kwargs: status
-    )
+    monkeypatch.setattr(inventory, "agent_status", lambda *_args, **_kwargs: status)
     ensure_calls: list[dict[str, object]] = []
 
     def fake_ensure(ensured_target, **kwargs):

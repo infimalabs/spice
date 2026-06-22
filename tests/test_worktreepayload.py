@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
-from spice.serve import worktreepayload
+from spice.serve.worktree import inventory
 from spice.serve.payload import identity, message
 from spice.serve.team.store import ServeTeamStore
 
@@ -189,24 +189,24 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
             [_message(latest, kind="presence:reasoning", preview="thinking")]
         )
 
-    monkeypatch.setattr(worktreepayload, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(inventory, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
-        worktreepayload,
+        inventory,
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
     monkeypatch.setattr(
-        worktreepayload,
+        inventory,
         "ensure_agent_for_pending_inbox",
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        worktreepayload,
+        inventory,
         "resolve_thread_id_for_target",
         lambda _state, _target: "agent-a",
     )
     monkeypatch.setattr(
-        worktreepayload,
+        inventory,
         "agent_status",
         lambda _repo: _Status(
             running=True,
@@ -225,9 +225,7 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
             thread_id="agent-a",
         ),
     )
-    monkeypatch.setattr(
-        worktreepayload, "agent_binding_error", lambda _repo, _status: ""
-    )
+    monkeypatch.setattr(inventory, "agent_binding_error", lambda _repo, _status: "")
     monkeypatch.setattr(identity, "configured_say_voice", lambda _repo: "")
     monkeypatch.setattr(
         message.message_reader,
@@ -235,7 +233,7 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
         fake_assistant_messages_for_thread_id,
     )
 
-    payload = worktreepayload.work_trees_payload(_InventoryState(target))
+    payload = inventory.work_trees_payload(_InventoryState(target))
 
     work_tree = payload["workTrees"][0]
     assert work_tree["lastAssistantAt"] == latest

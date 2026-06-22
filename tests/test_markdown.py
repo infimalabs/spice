@@ -11,7 +11,7 @@ from spice.serve.app import (
     _work_tree_proxy_target_from_request,
 )
 from spice.serve.markdown import render_message_html
-from spice.serve.worktrees import WorktreeTarget
+from spice.serve.worktree.target import WorktreeTarget
 
 
 def test_markdown_splits_paragraphs_and_lists_without_blank_lines():
