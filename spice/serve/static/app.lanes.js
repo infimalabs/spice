@@ -54,9 +54,7 @@ function applyTargetsPayload(payload) {
   targetById = new Map(targets.map((target) => [target.id, target]));
   targetsLoaded = true;
   clearGlobalActivityStatus("loading teams");
-  taskFilterStemPills = taskFilterStemPillsFromInventory(
-    payload.taskFilterInventory || {},
-  );
+  applyTaskFilterInventory(payload.taskFilterInventory || {});
   for (const lane of [...laneStates.values()]) {
     if (!targetById.has(lane.targetId) && !lane.emptyTeam) closeLaneCore(lane);
   }
@@ -90,6 +88,10 @@ function targetPayloadShim(target) {
     privateTaskCount: Math.max(0, Number(target.privateTaskCount) || 0),
     statusLine: target.statusLine || {},
   };
+}
+
+function applyTaskFilterInventory(inventory) {
+  taskFilterStemPills = taskFilterStemPillsFromInventory(inventory || {});
 }
 
 function lanePayloadWithTargetPending(lane, target) {

@@ -93,6 +93,20 @@ def test_static_filter_header_pills_render_models_and_styles():
     assert ".filter-pill--system { color: var(--warn); }" in css
 
 
+def test_live_lane_payload_refreshes_global_task_filter_inventory():
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+
+    assert "function applyTaskFilterInventory(inventory)" in app_lanes
+    assert "applyTaskFilterInventory(payload.taskFilterInventory || {});" in app_lanes
+    assert (
+        "if (payload.taskFilterInventory) {\n"
+        "    lane.taskFilterInventory = payload.taskFilterInventory;\n"
+        "    applyTaskFilterInventory(payload.taskFilterInventory);\n"
+        "  }" in app_render
+    )
+
+
 def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
     css = _serve_css_text()
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
