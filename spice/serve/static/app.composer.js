@@ -363,6 +363,30 @@ function resetLaneComposerDraft(lane, targetId) {
   if (host.quoteDrafts.delete(targetId)) renderComposerQuoteBands(host);
 }
 
+function clearAcceptedComposerDrafts(lane, targetId, acceptedText) {
+  const host = laneGroupHost(lane);
+  resetLaneComposerDraft(host, targetId);
+  const normalizedAccepted = normalizeComposerSubmittedText(acceptedText);
+  if (!normalizedAccepted) return;
+  let quotesChanged = false;
+  for (const [draftTargetId, textarea] of host.shardTextareas) {
+    if (draftTargetId === targetId) continue;
+    const draftText = laneComposerSubmissionText(
+      host,
+      draftTargetId,
+      textarea.value,
+    );
+    if (normalizeComposerSubmittedText(draftText) !== normalizedAccepted) continue;
+    textarea.value = "";
+    if (host.quoteDrafts.delete(draftTargetId)) quotesChanged = true;
+  }
+  if (quotesChanged) renderComposerQuoteBands(host);
+}
+
+function normalizeComposerSubmittedText(text) {
+  return String(text || "").trim();
+}
+
 function composerAttachmentStrip(lane, targetId) {
   const wrap = document.createElement("div");
   wrap.className = "composer-attachments";
