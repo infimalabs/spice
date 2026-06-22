@@ -2,6 +2,7 @@
 
 import io
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -122,6 +123,7 @@ def test_wrapper_rewrites_codex_snapshot_trailing_shell_exec(monkeypatch):
         ["/bin/zsh", "-c", snapshot], rewrite_rtk=True
     )
 
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     assert command == [
         "/bin/zsh",
         "-c",
@@ -129,10 +131,50 @@ def test_wrapper_rewrites_codex_snapshot_trailing_shell_exec(monkeypatch):
             '__CODEX_SNAPSHOT_OVERRIDE_SET_0="${CODEX_THREAD_ID+x}"\n'
             "if . '.codex/shell_snapshots/thread.sh' >/dev/null 2>&1; "
             "then :; fi\n"
+            f"unset {shellhook.SHELL_HOOK_REEXEC_STAGE_ENV}\n"
+            f"export ZDOTDIR={shlex.quote(str(static_hook_dir))}\n"
+            "export BASH_ENV="
+            f"{shlex.quote(str(static_hook_dir / shellhook.BASH_HOOK_NAME))}\n"
             "exec /bin/zsh -c 'rtk git status --short'"
         ),
     ]
     assert calls == [(snapshot,), ("git status --short",)]
+
+
+def test_wrapper_sanitizes_codex_snapshot_trailing_shell_exec_without_rtk_match(
+    monkeypatch,
+):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_rewrite(*args: str) -> str | None:
+        calls.append(args)
+        return None
+
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
+
+    snapshot = (
+        "if . '.codex/shell_snapshots/thread.sh' >/dev/null 2>&1; then :; fi\n"
+        "exec '/bin/zsh' -c 'printf ok'"
+    )
+
+    command = wrap.build_agent_run_command(
+        ["/bin/zsh", "-c", snapshot], rewrite_rtk=True
+    )
+
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
+    assert command == [
+        "/bin/zsh",
+        "-c",
+        (
+            "if . '.codex/shell_snapshots/thread.sh' >/dev/null 2>&1; then :; fi\n"
+            f"unset {shellhook.SHELL_HOOK_REEXEC_STAGE_ENV}\n"
+            f"export ZDOTDIR={shlex.quote(str(static_hook_dir))}\n"
+            "export BASH_ENV="
+            f"{shlex.quote(str(static_hook_dir / shellhook.BASH_HOOK_NAME))}\n"
+            "exec /bin/zsh -c 'printf ok'"
+        ),
+    ]
+    assert calls == [(snapshot,), ("printf ok",)]
 
 
 def test_wrapper_rewrites_direct_agent_command_with_rtk_source_of_truth(monkeypatch):
@@ -254,6 +296,15 @@ def test_wrapper_worktree_plain_commands_scrub_reexec_stage(tmp_path, monkeypatc
 
     assert env is not None
     assert shellhook.SHELL_HOOK_REEXEC_STAGE_ENV not in env
+
+
+def test_static_shell_hook_paths_count_as_generated():
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
+
+    assert shellhook.is_generated_shell_hook_path(str(static_hook_dir))
+    assert shellhook.is_generated_shell_hook_path(
+        str(static_hook_dir / shellhook.BASH_HOOK_NAME)
+    )
 
 
 def test_wrapper_non_shell_commands_inherit_ambient_shell_hook_environment(
@@ -636,35 +687,45 @@ def test_shell_steering_files_are_stable_across_original_env_changes():
 
 def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
-    surfaces = {
-        ".zshenv": True,
-        ".zprofile": True,
-        ".zlogin": True,
-        shellhook.BASH_HOOK_NAME: True,
-        ".zshrc": False,
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
+    dynamic_surfaces = {
+        ".zshenv",
+        ".zprofile",
+        ".zlogin",
+        shellhook.BASH_HOOK_NAME,
     }
 
-    for filename, reexecs in surfaces.items():
+    for filename in (*shellhook.ZSH_HOOK_NAMES, shellhook.BASH_HOOK_NAME):
         text = (hook_dir / filename).read_text(encoding="utf-8")
         assert "spice agent shell-hook" not in text
         assert shellhook.SHELL_HOOK_WRAPPERS_ENV in text
         assert shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV in text
         assert shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV in text
-        if reexecs:
+        if filename in dynamic_surfaces:
             assert shellhook.SHELL_HOOK_REEXEC_STAGE_ENV in text
             assert "spice agent run --" in text
         else:
-            assert shellhook.SHELL_HOOK_REEXEC_STAGE_ENV not in text
+            assert f"unset {shellhook.SHELL_HOOK_REEXEC_STAGE_ENV}" in text
+        assert "shellhooks2" in text
         assert "--preserve-shell-hook-env" not in text
         if filename == shellhook.BASH_HOOK_NAME:
             assert shellhook.SHELL_HOOK_ORIGINAL_HISTFILE_ENV not in text
         else:
             assert shellhook.SHELL_HOOK_ORIGINAL_HISTFILE_ENV in text
 
+        static_text = (static_hook_dir / filename).read_text(encoding="utf-8")
+        assert "spice agent shell-hook" not in static_text
+        assert "spice agent run --" not in static_text
+        assert f"unset {shellhook.SHELL_HOOK_REEXEC_STAGE_ENV}" in static_text
+        assert shellhook.SHELL_HOOK_WRAPPERS_ENV in static_text
+        assert shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV in static_text
+        assert shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV in static_text
+
     package_data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))[
         "tool"
     ]["setuptools"]["package-data"]["spice.agent"]
     assert "shellhooks/.zshrc" in package_data
+    assert "shellhooks2/.zshrc" in package_data
 
 
 def test_agent_wrapper_lines_adds_ordered_agent_wrapper_functions(tmp_path):
@@ -808,6 +869,7 @@ def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
     )
     base_env = {"HOME": str(home)}
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     command = (
         "sleep 0.1; "
         "printf 'after:%s:%s\\n' "
@@ -829,7 +891,9 @@ def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
     subprocess.run([zsh, "-c", command], check=True, env=env)
 
     lines = _trace_lines(trace, expected_prefix="after:")
-    assert f"after:{hook_dir}:{hook_dir / shellhook.BASH_HOOK_NAME}" in lines
+    assert (
+        f"after:{static_hook_dir}:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
+    )
     assert lines.count("real-zshenv:unset") == 2
 
 
@@ -1037,6 +1101,7 @@ def test_bash_env_hook_reexec_restores_for_nested_shells(tmp_path):
     )
     base_env = {"HOME": str(home), shellhook.BASH_ENV_ENV: str(real_bash_env)}
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     command = (
         "sleep 0.1; "
         "printf 'after:%s\\n' "
@@ -1057,7 +1122,7 @@ def test_bash_env_hook_reexec_restores_for_nested_shells(tmp_path):
     subprocess.run([bash, "-c", command], check=True, env=env)
 
     lines = _trace_lines(trace, expected_prefix="after:")
-    assert f"after:{hook_dir / shellhook.BASH_HOOK_NAME}" in lines
+    assert f"after:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
     assert lines.count(f"real-bash:{real_bash_env}") == 2
 
 
@@ -1069,6 +1134,7 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
     base_env = {}
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     command = (
         "printf 'ran:%s:%s\\n' "
         f'"${{{shellhook.ZDOTDIR_ENV}-unset}}" '
@@ -1094,7 +1160,9 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
     assert len(agent_run_lines) == 1
     assert agent_run_lines[0].startswith(f"fake:{hook_dir}:unset:")
     assert f" {zsh} -c " in agent_run_lines[0]
-    assert f"ran:{hook_dir}:{hook_dir / shellhook.BASH_HOOK_NAME}" in lines
+    assert (
+        f"ran:{static_hook_dir}:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
+    )
 
 
 def test_agent_shell_environment_scrubs_inherited_reexec_stage(tmp_path):
@@ -1104,6 +1172,7 @@ def test_agent_shell_environment_scrubs_inherited_reexec_stage(tmp_path):
     trace = tmp_path / "trace.log"
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     base_env = {
         "PATH": os.environ.get("PATH", ""),
         "SHELL": zsh,
@@ -1134,7 +1203,9 @@ def test_agent_shell_environment_scrubs_inherited_reexec_stage(tmp_path):
         f"fake:{hook_dir}:{hook_dir / shellhook.BASH_HOOK_NAME}:"
     )
     assert f" {zsh} -c " in agent_run_lines[0]
-    assert f"ran:{hook_dir}:{hook_dir / shellhook.BASH_HOOK_NAME}" in lines
+    assert (
+        f"ran:{static_hook_dir}:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
+    )
 
 
 def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
@@ -1185,6 +1256,7 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
     base_env = {}
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     command = (
         "printf 'ran:%s\\n' "
         f'"${{{shellhook.BASH_ENV_ENV}-unset}}" '
@@ -1210,7 +1282,7 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
         f"fake:unset:{hook_dir / shellhook.BASH_HOOK_NAME}:"
     )
     assert f" {bash} -c " in agent_run_lines[0]
-    assert f"ran:{hook_dir / shellhook.BASH_HOOK_NAME}" in lines
+    assert f"ran:{static_hook_dir / shellhook.BASH_HOOK_NAME}" in lines
 
 
 def test_bash_env_hook_fails_noninteractive_shell_without_execution_string(tmp_path):

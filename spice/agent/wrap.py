@@ -44,7 +44,13 @@ from spice.agent.gitshadow import (
 )
 from spice.agent.identity import ambient_thread_id
 from spice.agent.paths import agent_state_dir
-from spice.agent.shellhook import SHELL_HOOK_REEXEC_STAGE_ENV
+from spice.agent.shellhook import (
+    BASH_ENV_ENV,
+    BASH_HOOK_NAME,
+    SHELL_HOOK_REEXEC_STAGE_ENV,
+    ZDOTDIR_ENV,
+    packaged_shell_steering_static_hook_dir,
+)
 from spice.paths import (
     STATE_DIRNAME,
     worktree_spice_environment,
@@ -66,6 +72,7 @@ PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
 SHELL_EXECUTION_COMMANDS = frozenset(("bash", "dash", "sh", "zsh"))
 SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
 RTK_REWRITE_COMMAND = ("rtk", "rewrite")
+CODEX_SHELL_SNAPSHOT_MARKER = "shell_snapshots/"
 # RTK prints a rewritten command and returns 3 from the hook path on this lane.
 RTK_REWRITE_MATCH_EXIT_CODES = frozenset((0, 3))
 PYTHON_ROUTE_FAILURE = (
@@ -201,11 +208,29 @@ def rtk_rewrite_trailing_exec_shell_command(command_text: str) -> str | None:
         or flag not in SHELL_EXECUTION_FLAGS
     ):
         return None
-    rewritten = rtk_rewrite_command_text(nested_command)
-    if rewritten is None:
+    rewritten = rtk_rewrite_command_text(nested_command) or nested_command
+    normalized_prefix = codex_snapshot_normalized_prefix(prefix)
+    if rewritten == nested_command and normalized_prefix == prefix:
         return None
     return (
-        f"{prefix}exec {shlex.quote(shell)} {flag} {shlex.quote(rewritten)}{trailing}"
+        f"{normalized_prefix}exec {shlex.quote(shell)} {flag} "
+        f"{shlex.quote(rewritten)}{trailing}"
+    )
+
+
+def codex_snapshot_normalized_prefix(prefix: str) -> str:
+    if CODEX_SHELL_SNAPSHOT_MARKER not in prefix:
+        return prefix
+    if f"unset {SHELL_HOOK_REEXEC_STAGE_ENV}" in prefix:
+        return prefix
+    static_hook_dir = packaged_shell_steering_static_hook_dir()
+    normalized = prefix if prefix.endswith("\n") else f"{prefix}\n"
+    return (
+        normalized
+        + f"unset {SHELL_HOOK_REEXEC_STAGE_ENV}\n"
+        + f"export {ZDOTDIR_ENV}={shlex.quote(str(static_hook_dir))}\n"
+        + f"export {BASH_ENV_ENV}="
+        + f"{shlex.quote(str(static_hook_dir / BASH_HOOK_NAME))}\n"
     )
 
 
