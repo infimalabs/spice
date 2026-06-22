@@ -18,13 +18,6 @@ from spice.serve.team.schema import (
     RENEWAL_STATE_STARTED,
 )
 
-RENEWAL_IDENTITY_COLUMNS = (
-    ("successor_thread_id", "TEXT NOT NULL DEFAULT ''"),
-    ("team_slot", "INTEGER"),
-    ("predecessor_identity", "TEXT NOT NULL DEFAULT '{}'"),
-    ("successor_identity", "TEXT NOT NULL DEFAULT '{}'"),
-)
-
 
 class _TeamRenewalStore(Protocol):
     def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
@@ -143,23 +136,6 @@ class _TeamRenewalStore(Protocol):
 
 
 class TeamRenewalStoreMixin:
-    def _migrate_renewal_identity_columns_locked(
-        self, connection: sqlite3.Connection
-    ) -> None:
-        columns = {
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(renewals)")
-        }
-        for column, definition in RENEWAL_IDENTITY_COLUMNS:
-            if column not in columns:
-                connection.execute(
-                    f"ALTER TABLE renewals ADD COLUMN {column} {definition}"
-                )
-        connection.execute(
-            "UPDATE renewals SET successor_thread_id = substr(successor_agent_id, 8) "
-            "WHERE successor_thread_id = '' AND successor_agent_id LIKE 'thread:%'"
-        )
-
     def _rewrite_renewal_agent_locked(
         self,
         connection: sqlite3.Connection,

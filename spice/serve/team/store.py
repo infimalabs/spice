@@ -19,6 +19,7 @@ import time
 import uuid as uuidlib
 from contextlib import contextmanager
 from pathlib import Path
+from threading import Lock
 from typing import Any, Iterable, Iterator
 
 from spice.errors import SpiceError
@@ -88,11 +89,6 @@ ZERO_ACTIVITY_EVENT_KINDS = frozenset(
     }
 )
 PRUNE_EVENT_TEAM_ID = "__system__"
-DROPPED_TEAM_METRIC_TABLES = (
-    "team_agent_metrics",
-    "team_agent_metric_buckets",
-    "team_agent_history",
-)
 
 
 def team_database_path() -> Path:
@@ -108,21 +104,40 @@ class ServeTeamStore(
     TeamMetricStoreMixin,
     DirectiveStatsStoreMixin,
 ):
+    # Schema is created once per database path per process. Running the DDL on
+    # every connect took an exclusive lock each time, serializing all access
+    # (reads included) and stalling on `busy_timeout` under concurrency. There
+    # are no migrations: the database is disposable and recreated from the
+    # current TEAM_SCHEMA, so the schema is edited in place.
+    _init_lock = Lock()
+    _initialized_paths: set[Path] = set()
+
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or team_database_path()
 
+    def _ensure_schema(self) -> None:
+        if self.path in self._initialized_paths:
+            return
+        with self._init_lock:
+            if self.path in self._initialized_paths:
+                return
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            connection = sqlite3.connect(self.path)
+            try:
+                connection.execute("PRAGMA journal_mode = WAL")
+                connection.executescript(TEAM_SCHEMA)
+                connection.commit()
+            finally:
+                connection.close()
+            self._initialized_paths.add(self.path)
+
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_schema()
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         try:
             connection.execute(f"PRAGMA busy_timeout = {TEAM_SQLITE_BUSY_TIMEOUT_MS}")
-            connection.execute("PRAGMA journal_mode = WAL")
-            connection.executescript(TEAM_SCHEMA)
-            self._migrate_renewal_identity_columns_locked(connection)
-            self._migrate_task_filter_sources_locked(connection)
-            self._migrate_team_metric_model_locked(connection)
             yield connection
             connection.commit()
         finally:
@@ -154,51 +169,6 @@ class ServeTeamStore(
     def global_revision(self) -> int:
         with self.connect() as connection:
             return self._current_revision_locked(connection)
-
-    def _migrate_team_metric_model_locked(self, connection: sqlite3.Connection) -> None:
-        for table in DROPPED_TEAM_METRIC_TABLES:
-            connection.execute(f"DROP TABLE IF EXISTS {table}")
-        agent_metric_columns = {
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(agent_metrics)")
-        }
-        if "team_id" not in agent_metric_columns:
-            # Pre-team-tagging activity tables: recreate in the team-tagged shape.
-            # The durable per-agent activity history is low-stakes and dropped
-            # rather than reshaped (databases are wiped freely at this stage).
-            connection.execute("DROP TABLE IF EXISTS agent_metrics")
-            connection.execute("DROP TABLE IF EXISTS agent_metric_buckets")
-            connection.executescript(TEAM_SCHEMA)
-        bucket_columns = {
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(agent_metric_buckets)")
-        }
-        if "tool_calls" not in bucket_columns:
-            connection.execute(
-                "ALTER TABLE agent_metric_buckets "
-                "ADD COLUMN tool_calls INTEGER NOT NULL DEFAULT 0"
-            )
-        columns = {
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(memberships)")
-        }
-        if "position" in columns:
-            return
-        connection.execute(
-            "ALTER TABLE memberships ADD COLUMN position INTEGER NOT NULL DEFAULT 0"
-        )
-        connection.execute(
-            "UPDATE memberships "
-            "SET position = ("
-            "  SELECT COUNT(*) FROM memberships AS prior "
-            "  WHERE prior.team_id = memberships.team_id "
-            "  AND ("
-            "    prior.joined_at < memberships.joined_at "
-            "    OR (prior.joined_at = memberships.joined_at "
-            "        AND prior.agent_id < memberships.agent_id)"
-            "  )"
-            ")"
-        )
 
     def prune_zero_activity_closed_teams(self) -> tuple[str, ...]:
         with self.connect() as connection:
