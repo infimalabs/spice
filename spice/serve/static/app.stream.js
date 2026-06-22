@@ -158,7 +158,11 @@ async function handleLiveBusMessage(data) {
   } else if (message.type === "lane.payload") {
     const lane = laneStates.get(message.targetId);
     if (lane && isLaneOpen(lane))
-      await applyLaneBusPayload(lane, message.payload || {}, message.source || "bus");
+      await applyLaneBusPayload(
+        lane,
+        message.payload || {},
+        message.source || "bus",
+      );
   } else if (message.type === "lane.pending") {
     const lane = laneStates.get(message.targetId);
     if (lane && isLaneOpen(lane))
@@ -272,8 +276,8 @@ async function applyLaneBusPayload(lane, payload, source) {
   }
   removePayloadMessages(lane, payload);
   mergePayloadMessages(lane, payload);
-  lane.latestPayload = payload;
   renderLaneChrome(lane, payload);
+  cacheLaneLatestPayload(lane, payload);
   await hydrateAckContextsForMessages(lane, lane.knownMessages);
   renderMessagesIfChanged(lane);
   if (source === "watch" && (payload.messages || []).length)
@@ -293,21 +297,30 @@ async function applyLaneBusPayload(lane, payload, source) {
 function applyLanePendingBusPayload(lane, payload) {
   lane.serverReachable = true;
   if (!syncLaneBackendPending(lane, payload)) return;
-  mergeLanePendingIntoLatestPayload(lane);
+  if (lane.latestPayload) cacheLaneLatestPayload(lane, lane.latestPayload);
   renderLaneViewShell(laneGroupHost(lane));
   syncComposerPlaceholders(laneGroupHost(lane));
 }
 
-function mergeLanePendingIntoLatestPayload(lane) {
-  if (!lane.latestPayload) return;
-  const pendingFields = statusLineWithLanePendingIdentity(lane, {});
+function cacheLaneLatestPayload(lane, payload) {
+  const latestPayload = payload || {};
+  const version = Math.max(0, Number(lane.backendPendingInboxVersion) || 0);
+  if (!version) {
+    lane.latestPayload = latestPayload;
+    return;
+  }
+  const statusLine = statusLineWithLanePendingIdentity(
+    lane,
+    latestPayload.statusLine || {},
+  );
   lane.latestPayload = {
-    ...lane.latestPayload,
-    ...pendingFields,
-    statusLine: {
-      ...(lane.latestPayload.statusLine || {}),
-      ...pendingFields,
-    },
+    ...latestPayload,
+    pendingInboxCount: statusLine.pendingInboxCount,
+    pendingInboxLabel: statusLine.pendingInboxLabel,
+    pendingInboxKeys: statusLine.pendingInboxKeys,
+    pendingInboxRevision: statusLine.pendingInboxRevision,
+    pendingInboxVersion: statusLine.pendingInboxVersion,
+    statusLine,
   };
 }
 

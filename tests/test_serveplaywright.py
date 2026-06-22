@@ -107,6 +107,21 @@ def test_serve_team_metrics_smoke_asserts_work_follows_agent() -> None:
     assert "grid did not use available horizontal space" in smoke
 
 
+def test_serve_pending_badge_smoke_asserts_differential_ack() -> None:
+    smoke = (ROOT / "browser" / "serve_pending_badge_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert "LARGE_MESSAGE_COUNT = 5000" in smoke
+    assert "lane.pending" in smoke
+    assert "pendingSmokeWithTimeout" in smoke
+    assert "waitForPendingSmokeCondition" not in smoke
+    assert "latestPayloadPending" in smoke
+    assert "lane.pending ack triggered an unexpected refresh" in smoke
+
+
 def test_serve_composer_reorder_smoke_asserts_swap_contract() -> None:
     smoke = (ROOT / "browser" / "serve_composer_reorder_smoke.js").read_text(
         encoding="utf-8"
