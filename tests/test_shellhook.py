@@ -278,15 +278,20 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
     if zsh is None:
         pytest.skip("zsh is not installed")
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["common"],
+        groups={"common": {"wrap": ["grep"]}},
+    )
     trace = tmp_path / "trace.log"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    rtk = bin_dir / "rtk"
-    rtk.write_text(
-        f'#!/bin/sh\nprintf \'rtk:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+    wrap_bin = bin_dir / "wrap"
+    wrap_bin.write_text(
+        f'#!/bin/sh\nprintf \'wrap:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
         encoding="utf-8",
     )
-    rtk.chmod(0o755)
+    wrap_bin.chmod(0o755)
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
     base_env = dict(os.environ)
     base_env["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
@@ -310,8 +315,8 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
     )
 
     assert exit_code == 0
-    lines = _trace_lines(trace, expected_prefix="rtk:")
-    assert "rtk:grep needle /dev/null" in lines
+    lines = _trace_lines(trace, expected_prefix="wrap:")
+    assert "wrap:grep needle /dev/null" in lines
 
 
 def test_agent_environment_inherits_worktree_spice_pythonpath(tmp_path, monkeypatch):
@@ -344,9 +349,7 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
     assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
         shellhook.render_agent_wrapper_lines(tmp_path)
     )
-    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
-        _expected_rtk_wrapper_lines(_default_builtin_rtk_selectors())
-    )
+    assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == ""
     assert env[shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV] == ""
     assert env[shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV] == ""
     zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
@@ -366,7 +369,7 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
         order=["common"],
         groups={
             "common": {
-                "rtk": ["grep", "git"],
+                "wrap": ["grep", "git"],
                 "pytest": {"argv": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
             }
         },
@@ -382,7 +385,7 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
     )
     assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
         [
-            *_expected_rtk_wrapper_lines(["grep", "git"]),
+            *_expected_wrapper_lines("wrap", ["grep", "git"]),
             *_expected_active_python_module_wrapper_lines(["pytest"]),
         ]
     )
@@ -573,18 +576,16 @@ def test_agent_wrapper_lines_adds_ordered_agent_wrapper_functions(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
         order=["common"],
-        groups={"common": {"rtk": ["grep", "find", "git"]}},
+        groups={"common": {"wrap": ["grep", "find", "git"]}},
     )
 
-    assert shellhook.render_agent_wrapper_lines(
-        tmp_path
-    ) == _expected_rtk_wrapper_lines(["grep", "find", "git"])
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == _expected_wrapper_lines(
+        "wrap", ["grep", "find", "git"]
+    )
 
 
 def test_agent_wrapper_lines_uses_builtin_common_default(tmp_path):
-    assert shellhook.render_agent_wrapper_lines(
-        tmp_path
-    ) == _expected_rtk_wrapper_lines(_default_builtin_rtk_selectors())
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == []
 
 
 def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_path):
@@ -594,21 +595,19 @@ def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_
         groups={},
     )
 
-    assert shellhook.render_agent_wrapper_lines(
-        tmp_path
-    ) == _expected_rtk_wrapper_lines(_default_builtin_rtk_selectors())
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == []
 
 
 def test_agent_wrapper_lines_project_common_group_overrides_builtin_default(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
         order=None,
-        groups={"common": {"rtk": ["grep"]}},
+        groups={"common": {"wrap": ["grep"]}},
     )
 
-    assert shellhook.render_agent_wrapper_lines(
-        tmp_path
-    ) == _expected_rtk_wrapper_lines(["grep"])
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == _expected_wrapper_lines(
+        "wrap", ["grep"]
+    )
 
 
 def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
@@ -617,7 +616,7 @@ def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
         order=None,
         groups={
             "common": {
-                "rtk": ["run", "proxy", "grep", "find", "git"],
+                "wrap": ["run", "proxy", "grep", "find", "git"],
                 "pytest": {"argv": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
             }
         },
@@ -657,7 +656,7 @@ def test_agent_wrapper_lines_honors_empty_agent_wrapper_list(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
         order=[],
-        groups={"common": {"rtk": ["grep"]}},
+        groups={"common": {"wrap": ["grep"]}},
     )
 
     assert shellhook.render_agent_wrapper_lines(tmp_path) == []
@@ -689,7 +688,7 @@ def test_agent_wrapper_lines_fails_loudly_for_duplicate_wrapper_selectors(tmp_pa
     _write_agent_wrapper_config(
         tmp_path,
         order=["base", "shells"],
-        groups={"base": {"rtk": ["sh"]}, "shells": {"dash": ["sh"]}},
+        groups={"base": {"wrap": ["sh"]}, "shells": {"dash": ["sh"]}},
     )
 
     with pytest.raises(SpiceError, match="configured by both"):
@@ -775,18 +774,23 @@ def test_zshrc_hook_sources_real_interactive_zshrc_and_loads_wrappers(tmp_path):
     zsh = shutil.which("zsh")
     if zsh is None:
         pytest.skip("zsh is not installed")
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["common"],
+        groups={"common": {"wrap": ["grep"]}},
+    )
     home = tmp_path / "home"
     home.mkdir()
     trace = tmp_path / "trace.log"
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    rtk = bin_dir / "rtk"
-    rtk.write_text(
-        f'#!/bin/sh\nprintf \'rtk:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+    wrap_bin = bin_dir / "wrap"
+    wrap_bin.write_text(
+        f'#!/bin/sh\nprintf \'wrap:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
         encoding="utf-8",
     )
-    rtk.chmod(0o755)
+    wrap_bin.chmod(0o755)
     (home / ".zshenv").write_text(
         f"print -r -- 'real:.zshenv' >> \"${{{SHELL_TRACE_ENV}}}\"\n",
         encoding="utf-8",
@@ -827,11 +831,11 @@ def test_zshrc_hook_sources_real_interactive_zshrc_and_loads_wrappers(tmp_path):
     )
 
     assert completed.returncode == 0, _completed_process_detail(completed, trace)
-    lines = _trace_lines(trace, expected_prefix="rtk:")
+    lines = _trace_lines(trace, expected_prefix="wrap:")
     assert lines.count("real:.zshenv") == 1
     assert lines.count("real:.zshrc") == 1
     assert f"histfile:{home / '.zsh_history'}" in lines
-    assert "rtk:grep needle /dev/null" in lines
+    assert "wrap:grep needle /dev/null" in lines
     assert not any(line.startswith("fake:") for line in lines)
     assert not (hook_dir / ".zsh_history").exists()
 
@@ -1002,16 +1006,21 @@ def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
     zsh = shutil.which("zsh")
     if zsh is None:
         pytest.skip("zsh is not installed")
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["common"],
+        groups={"common": {"wrap": ["grep"]}},
+    )
     trace = tmp_path / "trace.log"
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    rtk = bin_dir / "rtk"
-    rtk.write_text(
-        (f'#!/bin/sh\nprintf \'rtk:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n'),
+    wrap_bin = bin_dir / "wrap"
+    wrap_bin.write_text(
+        (f'#!/bin/sh\nprintf \'wrap:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n'),
         encoding="utf-8",
     )
-    rtk.chmod(0o755)
+    wrap_bin.chmod(0o755)
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     env = {
         "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
@@ -1029,8 +1038,8 @@ def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
 
     subprocess.run([zsh, "-c", "grep needle /dev/null"], check=True, env=env)
 
-    lines = _trace_lines(trace, expected_prefix="rtk:")
-    assert "rtk:grep needle /dev/null" in lines
+    lines = _trace_lines(trace, expected_prefix="wrap:")
+    assert "wrap:grep needle /dev/null" in lines
 
 
 def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_path):
@@ -1141,62 +1150,15 @@ def _toml_key(value: str) -> str:
 
 def _expected_project_common_with_pytest_wrapper_lines() -> list[str]:
     return [
-        *_expected_rtk_wrapper_lines(["run", "proxy", "grep", "find", "git"]),
+        *_expected_wrapper_lines("wrap", ["run", "proxy", "grep", "find", "git"]),
         *_expected_active_python_module_wrapper_lines(["pytest"]),
     ]
 
 
-def _default_builtin_rtk_selectors() -> list[str]:
-    return [
-        "aws",
-        "cargo",
-        "curl",
-        "diff",
-        "docker",
-        "dotnet",
-        "env",
-        "find",
-        "gh",
-        "git",
-        "glab",
-        "go",
-        "golangci-lint",
-        "gradlew",
-        "grep",
-        "gt",
-        "jest",
-        "kubectl",
-        "lint",
-        "ls",
-        "mypy",
-        "next",
-        "npm",
-        "npx",
-        "pip",
-        "playwright",
-        "pnpm",
-        "prettier",
-        "prisma",
-        "proxy",
-        "psql",
-        "pytest",
-        "rake",
-        "rspec",
-        "rubocop",
-        "ruff",
-        "run",
-        "tree",
-        "tsc",
-        "vitest",
-        "wc",
-        "wget",
-    ]
-
-
-def _expected_rtk_wrapper_lines(selectors: list[str]) -> list[str]:
+def _expected_wrapper_lines(wrapper: str, selectors: list[str]) -> list[str]:
     lines: list[str] = []
     for selector in selectors:
-        lines.extend(["", f"{selector}() {{", f'  rtk {selector} "$@"', "}"])
+        lines.extend(["", f"{selector}() {{", f'  {wrapper} {selector} "$@"', "}"])
     return lines
 
 
