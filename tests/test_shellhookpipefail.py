@@ -33,13 +33,12 @@ def test_stage_two_shell_hooks_enable_pipefail(
         pytest.skip(f"{shell_name} is not installed")
     home = tmp_path / "home"
     home.mkdir()
-    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     hook_path = hook_dir / env_value if env_value else hook_dir
     env = {
         "HOME": str(home),
         "PATH": os.environ.get("PATH", ""),
         env_name: str(hook_path),
-        shellhook.SHELL_HOOK_REEXEC_STAGE_ENV: "1",
         shellhook.SHELL_HOOK_WRAPPERS_ENV: "",
         **shellhook.shell_steering_runtime_environment(base_env={"HOME": str(home)}),
     }
@@ -63,7 +62,7 @@ def test_stage_two_shell_hooks_enable_pipefail(
         ("zsh", shellhook.ZDOTDIR_ENV, ""),
     ],
 )
-def test_stage_two_shell_snapshot_exports_omit_reexec_marker(
+def test_stage_two_shell_snapshot_exports_static_hook_paths(
     tmp_path, shell_name: str, env_name: str, env_value: str
 ):
     shell = shutil.which(shell_name)
@@ -71,14 +70,12 @@ def test_stage_two_shell_snapshot_exports_omit_reexec_marker(
         pytest.skip(f"{shell_name} is not installed")
     home = tmp_path / "home"
     home.mkdir()
-    hook_dir = shellhook.packaged_shell_steering_hook_dir()
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
+    hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     hook_path = hook_dir / env_value if env_value else hook_dir
     env = {
         "HOME": str(home),
         "PATH": os.environ.get("PATH", ""),
         env_name: str(hook_path),
-        shellhook.SHELL_HOOK_REEXEC_STAGE_ENV: "1",
         shellhook.SHELL_HOOK_WRAPPERS_ENV: "",
         **shellhook.shell_steering_runtime_environment(base_env={"HOME": str(home)}),
     }
@@ -88,7 +85,6 @@ def test_stage_two_shell_snapshot_exports_omit_reexec_marker(
             shell,
             "-c",
             (
-                "env | grep '^SPICE_SHELL_HOOK_REEXEC_STAGE=' && exit 42; "
                 'case "$ZDOTDIR" in */shellhooks2) ;; *) exit 43;; esac; '
                 'case "$BASH_ENV" in */shellhooks2/bash_env) ;; *) exit 44;; esac; '
                 'printf \'%s\\n%s\\n\' "$ZDOTDIR" "$BASH_ENV"'
@@ -103,8 +99,8 @@ def test_stage_two_shell_snapshot_exports_omit_reexec_marker(
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.splitlines() == [
-        str(static_hook_dir),
-        str(static_hook_dir / shellhook.BASH_HOOK_NAME),
+        str(hook_dir),
+        str(hook_dir / shellhook.BASH_HOOK_NAME),
     ]
 
 
@@ -123,14 +119,13 @@ def test_stage_two_descendant_shells_use_static_hooks_without_reexec(
         pytest.skip(f"{shell_name} is not installed")
     home = tmp_path / "home"
     home.mkdir()
-    hook_dir = shellhook.packaged_shell_steering_hook_dir()
+    hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     hook_path = hook_dir / env_value if env_value else hook_dir
     env = {
         "CHILD_SHELL": shell,
         "HOME": str(home),
         "PATH": os.environ.get("PATH", ""),
         env_name: str(hook_path),
-        shellhook.SHELL_HOOK_REEXEC_STAGE_ENV: "1",
         shellhook.SHELL_HOOK_WRAPPERS_ENV: "",
         **shellhook.shell_steering_runtime_environment(
             base_env={"HOME": str(home)},

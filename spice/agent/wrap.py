@@ -47,7 +47,6 @@ from spice.agent.paths import agent_state_dir
 from spice.agent.shellhook import (
     BASH_ENV_ENV,
     BASH_HOOK_NAME,
-    SHELL_HOOK_REEXEC_STAGE_ENV,
     ZDOTDIR_ENV,
     packaged_shell_steering_static_hook_dir,
 )
@@ -284,7 +283,6 @@ def agent_run_child_worktree_environment(
     base_env: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     env = worktree_spice_environment(repo_root, base_env=base_env)
-    env.pop(SHELL_HOOK_REEXEC_STAGE_ENV, None)
     if shell_execution_command_index(args) is not None:
         static_hook_dir = packaged_shell_steering_static_hook_dir()
         env[ZDOTDIR_ENV] = str(static_hook_dir)
