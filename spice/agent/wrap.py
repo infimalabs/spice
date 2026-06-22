@@ -27,7 +27,7 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from threading import Thread
 from typing import Any, TextIO
@@ -44,6 +44,7 @@ from spice.agent.gitshadow import (
 )
 from spice.agent.identity import ambient_thread_id
 from spice.agent.paths import agent_state_dir
+from spice.agent.shellhook import SHELL_HOOK_REEXEC_STAGE_ENV
 from spice.paths import (
     STATE_DIRNAME,
     worktree_spice_environment,
@@ -221,16 +222,34 @@ def build_agent_run_environment(
     repo_root: Path | None = None,
 ) -> dict[str, str] | None:
     args = normalize_agent_run_args(raw_args)
-    worktree_env = worktree_spice_environment(repo_root)
+    worktree_env = agent_run_child_worktree_environment(args, repo_root=repo_root)
     if is_direct_git_route(args):
         return agent_git_shadow_environment(repo_root, base_env=worktree_env)
     if is_spice_route(args):
         # Harness internals must see real upstream config.
         scrubbed = scrub_agent_git_shadow_environment(os.environ)
-        return worktree_spice_environment(repo_root, base_env=scrubbed)
+        return agent_run_child_worktree_environment(
+            args,
+            repo_root=repo_root,
+            base_env=scrubbed,
+        )
     if worktree_spice_source(repo_root) is not None:
         return worktree_env
     return None
+
+
+def agent_run_child_worktree_environment(
+    args: Sequence[str],
+    *,
+    repo_root: Path | None,
+    base_env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    env = worktree_spice_environment(repo_root, base_env=base_env)
+    if shell_execution_command_index(args) is None:
+        env.pop(SHELL_HOOK_REEXEC_STAGE_ENV, None)
+    else:
+        env[SHELL_HOOK_REEXEC_STAGE_ENV] = "1"
+    return env
 
 
 def is_direct_git_route(args: Sequence[str]) -> bool:
