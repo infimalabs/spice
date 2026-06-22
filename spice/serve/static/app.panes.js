@@ -597,11 +597,15 @@ function renderLaneMetricsPane(lane) {
 
 function renderLaneMetricsVanilla(grid, model) {
   const cells = model.cells.map((cell) => laneMetricCell(cell.label, cell.value));
+  const controls = laneMetricSeriesControls(
+    model,
+    grid.querySelector(".lane-metric-series-controls"),
+  );
   grid.replaceChildren(
+    laneMetricSeriesChartCell(model),
+    controls,
     ...cells,
     laneMetricSparklineCell(model),
-    laneMetricSeriesControls(model),
-    laneMetricSeriesChartCell(model),
   );
 }
 
@@ -792,39 +796,61 @@ function laneMetricSparklineCell(model) {
   return cell;
 }
 
-function laneMetricSeriesControls(model) {
+function laneMetricSeriesControls(model, existingCell = null) {
   const controls = model.seriesControls || {};
-  const cell = document.createElement("span");
+  const cell = existingCell || document.createElement("span");
   cell.className = "lane-metric-series-controls lane-metric-cell--wide";
-  cell.append(
-    laneMetricSeriesSelect("metric", controls.metric, controls.metrics || []),
-    laneMetricSeriesSelect("lens", controls.lens, controls.lenses || []),
-    laneMetricSeriesSelect("rangeSeconds", controls.rangeSeconds, controls.ranges || []),
-  );
+  const specs = [
+    ["metric", controls.metric, controls.metrics || []],
+    ["lens", controls.lens, controls.lenses || []],
+    ["rangeSeconds", controls.rangeSeconds, controls.ranges || []],
+  ];
+  if (cell.children.length !== specs.length) {
+    cell.replaceChildren(
+      ...specs.map(([name, selectedValue, options]) =>
+        laneMetricSeriesSelect(name, selectedValue, options),
+      ),
+    );
+    return cell;
+  }
+  specs.forEach(([name, selectedValue, options], index) => {
+    syncLaneMetricSeriesSelect(cell.children[index], name, selectedValue, options);
+  });
   return cell;
 }
 
 function laneMetricSeriesSelect(name, selectedValue, options) {
   const select = document.createElement("select");
-  select.className = "lane-metric-series-select";
-  select.setAttribute("aria-label", "Metric " + name);
-  for (const [value, label] of options) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    option.selected = String(value) === String(selectedValue || "");
-    select.append(option);
-  }
-  if (typeof select.addEventListener === "function")
-    select.addEventListener("change", () => {
-      select.dispatchEvent(
-        new CustomEvent("spice-metric-series-change", {
-          bubbles: true,
-          detail: { [name]: select.value },
-        }),
-      );
-    });
+  syncLaneMetricSeriesSelect(select, name, selectedValue, options);
   return select;
+}
+
+function syncLaneMetricSeriesSelect(select, name, selectedValue, options) {
+  select.className = "lane-metric-series-select";
+  select.__spiceMetricSeriesName = name;
+  select.setAttribute("aria-label", "Metric " + name);
+  select.replaceChildren(
+    ...options.map(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      option.selected = String(value) === String(selectedValue || "");
+      return option;
+    }),
+  );
+  select.value = String(selectedValue || "");
+  if (select.__spiceMetricSeriesChangeHandler) return;
+  select.__spiceMetricSeriesChangeHandler = true;
+  if (typeof select.addEventListener !== "function") return;
+  select.addEventListener("change", () => {
+    const detail = { [select.__spiceMetricSeriesName]: select.value };
+    select.dispatchEvent(
+      new CustomEvent("spice-metric-series-change", {
+        bubbles: true,
+        detail,
+      }),
+    );
+  });
 }
 
 function laneMetricSeriesChartCell(model) {

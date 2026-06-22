@@ -6,7 +6,8 @@
 //
 // The membership-derived DERIVATION itself (lane_metric_summary) is exhaustively
 // unit-tested in tests/test_teams.py; this smoke covers the live render/update
-// of that summary in the browser, which the unit tests cannot.
+// of that summary in the browser, which the unit tests cannot. It also asserts
+// the graph-first pane order and that metric controls are reused across refreshes.
 const { withServePage } = require("./serve_playwright_harness");
 
 const SIX_HOUR_RANGE_SECONDS = "21600";
@@ -41,6 +42,9 @@ async function installMetricsSmokeHelpers(page) {
       makeMetricsSmokeLane,
       readMetricsSmokeCells,
       countMetricsSmokeCells,
+      readMetricsSmokeOrder,
+      rememberMetricsSmokeControls,
+      readMetricsSmokeControlStability,
       readDistributionSmokeGroups,
       readDistributionSmokeDots,
       readDistributionSmokeLines,
@@ -120,11 +124,13 @@ function makeMetricsSmokeLane(grid, summary, acked, sends, toolCalls, sparkline)
 
 function readInitialMetricsSmokePage() {
   const { source, dest, metricSeriesCalls } = window.__spiceMetricsSmoke;
+  rememberMetricsSmokeControls(source);
   return {
     source: readMetricsSmokeCells(source.metricsGridEl),
     dest: readMetricsSmokeCells(dest.metricsGridEl),
     sourceCells: countMetricsSmokeCells(source.metricsGridEl),
     destCells: countMetricsSmokeCells(dest.metricsGridEl),
+    sourceOrder: readMetricsSmokeOrder(source.metricsGridEl),
     sourceStatus: source.metricsSummaryEl.textContent,
     seriesSvg: Boolean(source.metricsGridEl.querySelector(".lane-metric-series-svg")),
     firstMetricQuery: metricSeriesCalls[0] && metricSeriesCalls[0].fields.query,
@@ -143,6 +149,40 @@ function readMetricsSmokeCells(grid) {
 
 function countMetricsSmokeCells(grid) {
   return grid.querySelectorAll(".lane-metric-cell").length;
+}
+
+function readMetricsSmokeOrder(grid) {
+  return [...grid.children].map((child) => {
+    if (child.classList.contains("lane-metric-series-chart"))
+      return child.querySelector(".lane-metric-series-svg")
+        ? "series-chart:svg"
+        : "series-chart:empty";
+    if (child.classList.contains("lane-metric-series-controls"))
+      return "series-controls";
+    const label = child.querySelector(".lane-metric-label");
+    return "cell:" + (label ? label.textContent : child.className);
+  });
+}
+
+function rememberMetricsSmokeControls(lane) {
+  const controls = lane.metricsGridEl.querySelector(".lane-metric-series-controls");
+  lane.__metricsControls = {
+    controls,
+    selects: controls ? [...controls.querySelectorAll("select")] : [],
+  };
+}
+
+function readMetricsSmokeControlStability(lane) {
+  const controls = lane.metricsGridEl.querySelector(".lane-metric-series-controls");
+  const selects = controls ? [...controls.querySelectorAll("select")] : [];
+  const previous = lane.__metricsControls || { controls: null, selects: [] };
+  return {
+    controlsStable: controls === previous.controls,
+    selectNodesStable:
+      selects.length === previous.selects.length &&
+      selects.every((select, index) => select === previous.selects[index]),
+    selectedValues: selects.map((select) => select.value),
+  };
 }
 
 async function updateMetricsSmokePage({ rangeSeconds }) {
@@ -178,6 +218,8 @@ function readUpdatedMetricsSmokePage() {
     dest: readMetricsSmokeCells(dest.metricsGridEl),
     sourceCells: countMetricsSmokeCells(source.metricsGridEl),
     destCells: countMetricsSmokeCells(dest.metricsGridEl),
+    sourceOrder: readMetricsSmokeOrder(source.metricsGridEl),
+    controlStability: readMetricsSmokeControlStability(source),
     distributionGroups: readDistributionSmokeGroups(source.metricsGridEl),
     distributionDots: readDistributionSmokeDots(source.metricsGridEl),
     distributionLineCount: source.metricsGridEl.querySelectorAll(
@@ -224,6 +266,27 @@ function assertMetrics(result) {
   if (!before.seriesSvg) throw new Error("expected metric series SVG to render");
   if (!before.firstMetricQuery || before.firstMetricQuery.metric !== "activity")
     throw new Error("expected initial activity metric query");
+  const expectedSourceOrder = [
+    "series-chart:svg",
+    "series-controls",
+    "cell:drained",
+    "cell:acked",
+    "cell:sends",
+    "cell:tool calls",
+    "cell:uptime",
+    "cell:activity",
+  ];
+  expectArray(before.sourceOrder, expectedSourceOrder, "before.sourceOrder");
+  expectArray(after.sourceOrder, expectedSourceOrder, "after.sourceOrder");
+  if (!after.controlStability.controlsStable)
+    throw new Error("metric controls container was replaced across refresh");
+  if (!after.controlStability.selectNodesStable)
+    throw new Error("metric control selects were replaced across refresh");
+  expectArray(
+    after.controlStability.selectedValues,
+    ["distribution", "perSession", SIX_HOUR_RANGE_SECONDS],
+    "control selectedValues",
+  );
   // Before the move: source shows agent-a + agent-c; destination shows agent-b.
   expect(before.source, { acked: "11", sends: "22", "tool calls": "33" }, "before.source");
   expect(before.dest, { acked: "4", sends: "5", "tool calls": "6" }, "before.dest");

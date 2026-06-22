@@ -25,6 +25,8 @@ class SpiceLaneMetricsElement extends LitElement {
     const sparkline = Array.isArray(model.sparkline) ? model.sparkline : [];
     const max = Math.max(1, ...sparkline);
     return html`
+      ${this.renderSeriesChart(((model.series || {}).points) || [])}
+      ${this.renderSeriesControls(model.seriesControls || {})}
       ${cells.map((cell) => this.renderCell(cell.label, cell.value))}
       <span class="lane-metric-cell lane-metric-cell--wide">
         <span class="lane-metric-value">${model.activityTotal || 0} messages</span>
@@ -33,8 +35,6 @@ class SpiceLaneMetricsElement extends LitElement {
           ${sparkline.map((value) => this.renderSparklineBar(value, max))}
         </div>
       </span>
-      ${this.renderSeriesControls(model.seriesControls || {})}
-      ${this.renderSeriesChart(((model.series || {}).points) || [])}
     `;
   }
 
