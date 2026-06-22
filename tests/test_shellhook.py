@@ -211,6 +211,16 @@ def test_wrapper_plain_commands_inherit_worktree_spice_pythonpath(tmp_path):
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path.resolve())
 
 
+def test_wrapper_worktree_plain_commands_scrub_reexec_stage(tmp_path, monkeypatch):
+    _write_spice_product_shape(tmp_path)
+    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
+
+    env = wrap.build_agent_run_environment(["pytest"], repo_root=tmp_path)
+
+    assert env is not None
+    assert shellhook.SHELL_HOOK_REEXEC_STAGE_ENV not in env
+
+
 def test_wrapper_non_shell_commands_inherit_ambient_shell_hook_environment(
     tmp_path, monkeypatch
 ):
@@ -240,6 +250,21 @@ def test_wrapper_route_environment_carries_ambient_shell_hook_environment(
     assert env is not None
     assert env["ZDOTDIR"] == "hook"
     assert env["BASH_ENV"] == "hook"
+    assert env[shellhook.SHELL_HOOK_REEXEC_STAGE_ENV] == "1"
+
+
+def test_wrapper_route_environment_sets_reexec_stage_for_shell_execution(
+    tmp_path, monkeypatch
+):
+    _write_spice_product_shape(tmp_path)
+    monkeypatch.delenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, raising=False)
+
+    env = wrap.build_agent_run_environment(
+        ["zsh", "-c", "true"],
+        repo_root=tmp_path,
+    )
+
+    assert env is not None
     assert env[shellhook.SHELL_HOOK_REEXEC_STAGE_ENV] == "1"
 
 
