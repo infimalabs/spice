@@ -58,8 +58,15 @@ def activation_command_surface_lines() -> list[str]:
             "run so inbox steering and keep-working guidance inject before the "
             "requested command; descendant shells use static hooks and "
             "precomputed wrappers without another reexec; agent launch clears "
-            "inherited reexec markers so new top-level command shells still "
-            "enter this path"
+            "inherited reexec markers before the first takeover, then "
+            "SPICE_SHELL_HOOK_REEXEC_STAGE=1 is expected inside the taken-over "
+            "shell"
+        ),
+        (
+            "rtk_rewrite_contract=the native harness or shell startup hook must "
+            "hand the complete top-level shell command string to spice agent run "
+            "exactly once; agent run is the RTK rewrite owner because it is the "
+            "only layer that sees the full shell string before execution"
         ),
         "session=spice session briefing",
         "task_status=spice task status",
