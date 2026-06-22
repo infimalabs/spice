@@ -424,13 +424,16 @@ def lane_watch_paths_for_target(
     thread_id: str | None,
     transcript: TranscriptResolution | None,
 ) -> tuple[Path, ...]:
-    del thread_id
+    del thread_id, state
     target_inbox = inbox_dir(target.repo_root)
     target_inbox.mkdir(parents=True, exist_ok=True)
-    team_path = state.team_store.path
+    # The team store is deliberately NOT watched: connect-per-op checkpoints the
+    # WAL into the main db on close, so every team-store write — including the
+    # frequent metric writes — bumps the db mtime and would wake the watcher
+    # into a full transcript reparse. Real, display-relevant team events bump
+    # the task event file instead, which is what we watch.
     paths = [
         target_inbox,
-        *_team_store_watch_paths(team_path),
         task_config.ensure_task_event_file(),
     ]
     if transcript is not None:
@@ -466,16 +469,7 @@ def lane_signature_for_target(
                 )
             ),
         ),
-        _path_signature(state.team_store.path),
         _path_signature(task_config.ensure_task_event_file()),
-    )
-
-
-def _team_store_watch_paths(path: Path) -> tuple[Path, ...]:
-    return (
-        path,
-        path.with_name(f"{path.name}-wal"),
-        path.with_name(f"{path.name}-shm"),
     )
 
 

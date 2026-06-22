@@ -92,7 +92,6 @@ def test_lane_watch_paths_use_exact_live_bus_sources(tmp_path):
     state = _serve_state(tmp_path, target)
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text("", encoding="utf-8")
-    team_path = state.team_store.path
     backend = tmp_path / "task-backend"
 
     task_config.set_backend(str(backend))
@@ -110,9 +109,6 @@ def test_lane_watch_paths_use_exact_live_bus_sources(tmp_path):
     assert inbox_dir(repo).is_dir()
     assert paths == (
         inbox_dir(repo),
-        team_path,
-        team_path.with_name(f"{team_path.name}-wal"),
-        team_path.with_name(f"{team_path.name}-shm"),
         event_path,
         transcript,
     )
