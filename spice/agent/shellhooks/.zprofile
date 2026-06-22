@@ -16,10 +16,14 @@ if [ -n "${ZSH_EXECUTION_STRING-}" ]; then
     exit 127
   fi
   if [[ -o login ]]; then
+    unset ZDOTDIR
+    unset BASH_ENV
     exec "$SPICE_SHELL_HOOK_PYTHON" -m spice agent run -- "$_spice_shell_bin" -lc "$ZSH_EXECUTION_STRING"
     printf "%s\n" "spice shell hook: failed to exec agent run" >&2
     exit 127
   fi
+  unset ZDOTDIR
+  unset BASH_ENV
   exec "$SPICE_SHELL_HOOK_PYTHON" -m spice agent run -- "$_spice_shell_bin" -c "$ZSH_EXECUTION_STRING"
   printf "%s\n" "spice shell hook: failed to exec agent run" >&2
   exit 127
