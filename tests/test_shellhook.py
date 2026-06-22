@@ -246,16 +246,6 @@ def test_wrapper_plain_commands_inherit_worktree_spice_pythonpath(tmp_path):
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path.resolve())
 
 
-def test_wrapper_worktree_plain_commands_scrub_reexec_stage(tmp_path, monkeypatch):
-    _write_spice_product_shape(tmp_path)
-    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
-
-    env = wrap.build_agent_run_environment(["pytest"], repo_root=tmp_path)
-
-    assert env is not None
-    assert shellhook.SHELL_HOOK_REEXEC_STAGE_ENV not in env
-
-
 def test_static_shell_hook_paths_count_as_generated():
     static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
 
@@ -270,7 +260,6 @@ def test_wrapper_non_shell_commands_inherit_ambient_shell_hook_environment(
 ):
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
-    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
     monkeypatch.setenv(SHELL_TRACE_ENV, "preserved")
 
     env = wrap.build_agent_run_environment(["true"], repo_root=tmp_path)
@@ -284,7 +273,6 @@ def test_wrapper_route_environment_uses_static_hook_stage_for_shell_execution(
     _write_spice_product_shape(tmp_path)
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
-    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
 
     env = wrap.build_agent_run_environment(
         ["zsh", "-c", "true"],
@@ -295,25 +283,6 @@ def test_wrapper_route_environment_uses_static_hook_stage_for_shell_execution(
     static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     assert env["ZDOTDIR"] == str(static_hook_dir)
     assert env["BASH_ENV"] == str(static_hook_dir / shellhook.BASH_HOOK_NAME)
-    assert shellhook.SHELL_HOOK_REEXEC_STAGE_ENV not in env
-
-
-def test_wrapper_route_environment_scrubs_reexec_stage_for_shell_execution(
-    tmp_path, monkeypatch
-):
-    _write_spice_product_shape(tmp_path)
-    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
-
-    env = wrap.build_agent_run_environment(
-        ["zsh", "-c", "true"],
-        repo_root=tmp_path,
-    )
-
-    assert env is not None
-    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
-    assert env["ZDOTDIR"] == str(static_hook_dir)
-    assert env["BASH_ENV"] == str(static_hook_dir / shellhook.BASH_HOOK_NAME)
-    assert shellhook.SHELL_HOOK_REEXEC_STAGE_ENV not in env
 
 
 def test_wrapper_does_not_install_shell_hook_environment_for_direct_shell_commands(
@@ -321,7 +290,6 @@ def test_wrapper_does_not_install_shell_hook_environment_for_direct_shell_comman
 ):
     monkeypatch.delenv("ZDOTDIR", raising=False)
     monkeypatch.delenv("BASH_ENV", raising=False)
-    monkeypatch.setenv(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, "1")
 
     env = wrap.build_agent_run_environment(["zsh", "-c", "true"], repo_root=tmp_path)
 
@@ -406,7 +374,6 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
     base_env[SHELL_TRACE_ENV] = str(trace)
     base_env.pop(shellhook.ZDOTDIR_ENV, None)
     base_env.pop(shellhook.BASH_ENV_ENV, None)
-    base_env.pop(shellhook.SHELL_HOOK_REEXEC_STAGE_ENV, None)
     ambient_env = shellhook.apply_shell_steering_environment(
         tmp_path,
         driver_state_dirname=DRIVER.state_dirname,
@@ -664,10 +631,7 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
         assert shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV in text
         assert shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV in text
         if filename in dynamic_surfaces:
-            assert shellhook.SHELL_HOOK_REEXEC_STAGE_ENV in text
             assert "spice agent run --" in text
-        else:
-            assert f"unset {shellhook.SHELL_HOOK_REEXEC_STAGE_ENV}" in text
         assert "shellhooks2" in text
         assert "--preserve-shell-hook-env" not in text
         if filename == shellhook.BASH_HOOK_NAME:
@@ -678,7 +642,6 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
         static_text = (static_hook_dir / filename).read_text(encoding="utf-8")
         assert "spice agent shell-hook" not in static_text
         assert "spice agent run --" not in static_text
-        assert f"unset {shellhook.SHELL_HOOK_REEXEC_STAGE_ENV}" in static_text
         assert shellhook.SHELL_HOOK_WRAPPERS_ENV in static_text
         assert shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV in static_text
         assert shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV in static_text
@@ -1127,7 +1090,7 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
     )
 
 
-def test_agent_shell_environment_scrubs_inherited_reexec_stage(tmp_path):
+def test_agent_shell_environment_routes_reexeced_shell_to_static_stage(tmp_path):
     zsh = shutil.which("zsh")
     if zsh is None:
         pytest.skip("zsh is not installed")
@@ -1138,7 +1101,6 @@ def test_agent_shell_environment_scrubs_inherited_reexec_stage(tmp_path):
     base_env = {
         "PATH": os.environ.get("PATH", ""),
         "SHELL": zsh,
-        shellhook.SHELL_HOOK_REEXEC_STAGE_ENV: "1",
         SHELL_TRACE_ENV: str(trace),
     }
     env = shellhook.apply_shell_steering_environment(
@@ -1360,6 +1322,21 @@ def _fake_spice_python(tmp_path: Path, *, run_agent_commands: bool = False) -> P
             '&& [ "$3" = "agent" ] && [ "$4" = "run" ] '
             '&& [ "$5" = "--" ]; then\n'
             "  shift 5\n"
+            '  if [ "$2" = "-c" ] || [ "$2" = "-lc" ]; then\n'
+            '    _spice_static_hook_dir=""\n'
+            '    if [ -n "${ZDOTDIR-}" ]; then\n'
+            '      _spice_static_hook_dir="${ZDOTDIR%/shellhooks}/shellhooks2"\n'
+            '    elif [ -n "${BASH_ENV-}" ]; then\n'
+            '      _spice_hook_dir="${BASH_ENV%/*}"\n'
+            '      _spice_static_hook_dir="${_spice_hook_dir%/shellhooks}/shellhooks2"\n'
+            "    fi\n"
+            '    if [ -n "$_spice_static_hook_dir" ]; then\n'
+            '      export ZDOTDIR="$_spice_static_hook_dir"\n'
+            '      export BASH_ENV="$_spice_static_hook_dir/bash_env"\n'
+            "    fi\n"
+            "    unset _spice_hook_dir\n"
+            "    unset _spice_static_hook_dir\n"
+            "  fi\n"
             '  exec "$@"\n'
             "fi\n"
         )

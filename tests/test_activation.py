@@ -15,8 +15,7 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "command_surface=run shell commands normally" in text
     assert "reexec the first zsh/bash command shell through spice agent run" in text
     assert "descendant shells use static hooks and precomputed wrappers" in text
-    assert "agent launch clears inherited reexec markers" in text
-    assert "taken-over shell consumes the reexec marker" in text
+    assert "agent-run child shells enter the static hook stage" in text
     assert "snapshot/descendant state is captured" in text
     assert "session=spice session briefing" in text
     assert (

@@ -36,7 +36,6 @@ SHELL_HOOK_ORIGINAL_BASH_ENV_ENV = (
 SHELL_HOOK_ORIGINAL_HISTFILE_ENV = (
     "SPICE_SHELL_HOOK_ORIGINAL_HISTFILE"  # env-policy: allow
 )
-SHELL_HOOK_REEXEC_STAGE_ENV = "SPICE_SHELL_HOOK_REEXEC_STAGE"  # env-policy: allow
 SHELL_HOOK_SURFACE_FILES = {
     BASH_HOOK_NAME: BASH_HOOK_NAME,
     "zshenv": ".zshenv",
@@ -56,9 +55,6 @@ def apply_shell_steering_environment(
     base_env: Mapping[str, str],
 ) -> dict[str, str]:
     env = dict(base_env)
-    # Reexec stage is scoped to one agent-run child shell. A newly launched
-    # agent must not inherit it or future top-level command shells skip routing.
-    env.pop(SHELL_HOOK_REEXEC_STAGE_ENV, None)
     env.update(shell_steering_runtime_environment(base_env=env, repo_root=repo_root))
     env[SHELL_HOOK_WRAPPERS_ENV] = "\n".join(render_agent_wrapper_lines(repo_root))
     hook_dir = packaged_shell_steering_hook_dir()
