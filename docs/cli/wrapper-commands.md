@@ -16,10 +16,10 @@ Spice has two command-extension surfaces with different owners:
 ## Agent Command Wrapper
 
 Agent launch installs static shell startup hooks for zsh and bash, clears any
-inherited `SPICE_SHELL_HOOK_REEXEC_STAGE` marker, and precomputes configured
-wrapper functions into `SPICE_SHELL_HOOK_WRAPPERS`. The first non-interactive
-command shell with an execution string sees `SPICE_SHELL_HOOK_REEXEC_STAGE`
-unset, sets it, and reexecs through:
+inherited `SPICE_SHELL_HOOK_REEXEC_STAGE` marker before the first takeover, and
+precomputes configured wrapper functions into `SPICE_SHELL_HOOK_WRAPPERS`. The
+first non-interactive command shell with an execution string sees
+`SPICE_SHELL_HOOK_REEXEC_STAGE` unset, sets it, and reexecs through:
 
 ```sh
 spice agent run -- <shell> -c "<original command>"
@@ -30,9 +30,14 @@ reexec. Descendant shells inherit `SPICE_SHELL_HOOK_REEXEC_STAGE=1` and perform
 stage-2 startup only: source the user's real startup files, rearm the packaged
 hook environment, and eval `SPICE_SHELL_HOOK_WRAPPERS` without a second
 `agent run` hop or second steering injection. The marker is a sentinel, not a
-counter; there is no `SPICE_SHELL_HOOK_REEXEC_STAGE=2` value. Use
+counter; there is no `SPICE_SHELL_HOOK_REEXEC_STAGE=2` value, and
+`SPICE_SHELL_HOOK_REEXEC_STAGE=1` is expected inside the taken-over shell. Use
 `spice agent run -- <command>` explicitly only when recovering a command path or
 inspecting wrapper behavior.
+
+The native harness or shell startup hook must hand the complete top-level shell
+command string to `spice agent run` exactly once. `agent run` owns RTK rewrite
+because it is the only layer that sees the full shell string before execution.
 
 The wrapper does this before running the requested command:
 

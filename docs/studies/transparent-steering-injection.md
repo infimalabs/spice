@@ -7,8 +7,8 @@ Status: implemented contract.
 Agent launch owns the shell environment. For an agent-bound worktree, launch
 sets `ZDOTDIR` and `BASH_ENV` to packaged static spice shell startup files,
 records the original startup values in runtime environment variables, clears any
-inherited `SPICE_SHELL_HOOK_REEXEC_STAGE` marker, and precomputes configured
-wrapper functions into `SPICE_SHELL_HOOK_WRAPPERS`.
+inherited `SPICE_SHELL_HOOK_REEXEC_STAGE` marker before the first takeover, and
+precomputes configured wrapper functions into `SPICE_SHELL_HOOK_WRAPPERS`.
 
 For the first non-interactive zsh or bash command shell with an execution
 string, the packaged hook sees `SPICE_SHELL_HOOK_REEXEC_STAGE` unset, sets it to
@@ -27,7 +27,12 @@ again. Stage-2 startup restores the user's original `ZDOTDIR`, `BASH_ENV`, and
 zsh history file, sources the real startup file when present, rearms the
 packaged hook environment for later descendants, and evals
 `SPICE_SHELL_HOOK_WRAPPERS`. The marker is a sentinel, not a counter; there is
-no `SPICE_SHELL_HOOK_REEXEC_STAGE=2` value.
+no `SPICE_SHELL_HOOK_REEXEC_STAGE=2` value, and
+`SPICE_SHELL_HOOK_REEXEC_STAGE=1` is expected inside the taken-over shell.
+
+The native harness or shell startup hook must hand the complete top-level shell
+command string to `spice agent run` exactly once. `agent run` owns RTK rewrite
+because it is the only layer that sees the full shell string before execution.
 
 ## Shells
 
@@ -87,8 +92,10 @@ until that resolver exists.
 - ACK semantics are transcript-based: items retire only on `ACK <key>`.
 - The side-channel repeat policy remains the rate limiter.
 - `SPICE_SHELL_HOOK_REEXEC_STAGE` is the sole per-shell reexec gate; agent
-  launch clears inherited marker values before exposing top-level command
-  shells.
+  launch clears inherited marker values before first takeover, and
+  `SPICE_SHELL_HOOK_REEXEC_STAGE=1` is expected after takeover.
+- RTK rewrite happens in `spice agent run`, where the complete shell command
+  string is still available.
 - `SPICE_SHELL_HOOK_WRAPPERS` is generated before shell startup; hooks eval it
   but do not regenerate wrapper functions.
 - The direct shell-startup path is the only command-injection contract.
