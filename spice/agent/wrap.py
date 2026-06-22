@@ -168,12 +168,45 @@ def rtk_rewrite_agent_run_args(args: Sequence[str]) -> list[str]:
     shell_command_index = shell_execution_command_index(args)
     if shell_command_index is None:
         return list(args)
-    rewritten = rtk_rewrite_command_text(args[shell_command_index])
+    rewritten = rtk_rewrite_shell_execution_text(args[shell_command_index])
     if rewritten is None:
         return list(args)
     result = list(args)
     result[shell_command_index] = rewritten
     return result
+
+
+def rtk_rewrite_shell_execution_text(command_text: str) -> str | None:
+    rewritten = rtk_rewrite_command_text(command_text)
+    if rewritten is not None:
+        return rewritten
+    return rtk_rewrite_trailing_exec_shell_command(command_text)
+
+
+def rtk_rewrite_trailing_exec_shell_command(command_text: str) -> str | None:
+    stripped = command_text.rstrip()
+    trailing = command_text[len(stripped) :]
+    line_start = stripped.rfind("\n") + 1
+    prefix = stripped[:line_start]
+    line = stripped[line_start:]
+    try:
+        parts = shlex.split(line)
+    except ValueError:
+        return None
+    if len(parts) != 4 or parts[0] != "exec":
+        return None
+    shell, flag, nested_command = parts[1:]
+    if (
+        Path(shell).name not in SHELL_EXECUTION_COMMANDS
+        or flag not in SHELL_EXECUTION_FLAGS
+    ):
+        return None
+    rewritten = rtk_rewrite_command_text(nested_command)
+    if rewritten is None:
+        return None
+    return (
+        f"{prefix}exec {shlex.quote(shell)} {flag} {shlex.quote(rewritten)}{trailing}"
+    )
 
 
 def rtk_rewrite_direct_args(args: Sequence[str]) -> list[str] | None:

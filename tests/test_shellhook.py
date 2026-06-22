@@ -100,6 +100,41 @@ def test_wrapper_rewrites_stage_one_shell_command_before_stage_two(monkeypatch):
     assert calls == [("git status --short",)]
 
 
+def test_wrapper_rewrites_codex_snapshot_trailing_shell_exec(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+
+    def fake_rewrite(*args: str) -> str | None:
+        calls.append(args)
+        if args == ("git status --short",):
+            return "rtk git status --short"
+        return None
+
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
+
+    snapshot = (
+        '__CODEX_SNAPSHOT_OVERRIDE_SET_0="${CODEX_THREAD_ID+x}"\n'
+        "if . '.codex/shell_snapshots/thread.sh' >/dev/null 2>&1; "
+        "then :; fi\n"
+        "exec '/bin/zsh' -c 'git status --short'"
+    )
+
+    command = wrap.build_agent_run_command(
+        ["/bin/zsh", "-c", snapshot], rewrite_rtk=True
+    )
+
+    assert command == [
+        "/bin/zsh",
+        "-c",
+        (
+            '__CODEX_SNAPSHOT_OVERRIDE_SET_0="${CODEX_THREAD_ID+x}"\n'
+            "if . '.codex/shell_snapshots/thread.sh' >/dev/null 2>&1; "
+            "then :; fi\n"
+            "exec /bin/zsh -c 'rtk git status --short'"
+        ),
+    ]
+    assert calls == [(snapshot,), ("git status --short",)]
+
+
 def test_wrapper_rewrites_direct_agent_command_with_rtk_source_of_truth(monkeypatch):
     calls: list[tuple[str, ...]] = []
 
