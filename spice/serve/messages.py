@@ -127,6 +127,14 @@ class RolloutCursor:
     offset: int = 0
     last_key: str | None = None
     lock: RLock = field(default_factory=RLock, repr=False)
+    # Append-only transcripts: a no-`before` window read is fully determined by
+    # the file size and the limit, so when neither changed the prior result is
+    # reused verbatim instead of rescanning. This is what keeps inbox-only
+    # changes (a send/ack, with the transcript unchanged) from re-parsing the
+    # whole tail on every watcher push.
+    window: list[AssistantMessage] | None = field(default=None, repr=False)
+    window_size: int = -1
+    window_limit: int = -1
 
 
 @dataclass(frozen=True)
@@ -366,6 +374,14 @@ def _read_window(
     """Newest-first window ending at `end_offset` (or EOF), tail-scanned."""
     try:
         file_size = transcript_path.stat().st_size
+        if (
+            end_offset is None
+            and cursor is not None
+            and cursor.window is not None
+            and cursor.window_size == file_size
+            and cursor.window_limit == limit
+        ):
+            return list(cursor.window)
         scan_end = file_size if end_offset is None else min(end_offset, file_size)
         start = max(0, scan_end - TAIL_SCAN_MAX_BYTES)
         newest: list[AssistantMessage] = []
@@ -391,12 +407,16 @@ def _read_window(
             transcript_path, end_offset, driver=driver
         ):
             kept = _drop_trailing_view_image_call(kept)
+        result = list(reversed(kept))
         if cursor is not None and end_offset is None:
             cursor.offset = file_size
             cursor.last_key = kept[-1].key if kept else None
+            cursor.window = result
+            cursor.window_size = file_size
+            cursor.window_limit = limit
+        return result
     except OSError:
         return []
-    return list(reversed(kept))
 
 
 def _scan_span(
