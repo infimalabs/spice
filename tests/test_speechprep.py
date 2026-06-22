@@ -113,8 +113,8 @@ def test_manual_speech_playback_reads_all_display_paragraphs():
 
 def test_speech_session_updates_page_title_and_media_metadata():
     assert _speech_session_title_states("Ops Console") == {
-        "activeTitle": "Ops Console - Matilda",
-        "activeMediaTitle": "Ops Console - Matilda",
+        "activeTitle": "Matilda - Ops Console",
+        "activeMediaTitle": "Matilda - Ops Console",
         "activeMediaArtist": "Ops Console",
         "activePlaybackState": "playing",
         "idleTitle": "Ops Console",
