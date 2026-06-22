@@ -17,13 +17,9 @@ from spice.paths import shared_attachment_root
 from spice.serve.agentapi import sent_steering_payload
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
-from spice.serve import (
-    identitypayload,
-    lanepayload,
-    messagepayload,
-    worktreepayload,
-)
-from spice.serve.messagepayload import ack_context_payload_for_worktree
+from spice.serve import worktreepayload
+from spice.serve.payload import identity, lane, message
+from spice.serve.payload.message import ack_context_payload_for_worktree
 from spice.serve.steering import submit_steering_message
 from spice.serve.team.store import ServeTeamStore
 
@@ -358,10 +354,10 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
             return [row]
         return []
 
-    monkeypatch.setattr(messagepayload.tw, "export", fake_export)
-    monkeypatch.setattr(messagepayload, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(message.tw, "export", fake_export)
+    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
-        messagepayload,
+        message,
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
@@ -376,10 +372,10 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        messagepayload, "resolve_thread_id_for_target", lambda _state, _target: actor
+        message, "resolve_thread_id_for_target", lambda _state, _target: actor
     )
     monkeypatch.setattr(
-        messagepayload,
+        message,
         "agent_status",
         lambda _repo: _Status(
             running=True,
@@ -389,7 +385,7 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         ),
     )
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "agent_status",
         lambda _repo: _Status(
             running=True,
@@ -399,7 +395,7 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         ),
     )
     monkeypatch.setattr(
-        lanepayload,
+        lane,
         "agent_status",
         lambda _repo: _Status(
             running=True,
@@ -408,17 +404,15 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
             thread_id=actor,
         ),
     )
+    monkeypatch.setattr(message, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(lane, "agent_binding_error", lambda _repo, _status: "")
     monkeypatch.setattr(
-        messagepayload, "agent_binding_error", lambda _repo, _status: ""
-    )
-    monkeypatch.setattr(lanepayload, "agent_binding_error", lambda _repo, _status: "")
-    monkeypatch.setattr(
-        messagepayload.message_reader,
+        message.message_reader,
         "assistant_messages_for_thread_id",
         lambda *_args, **_kwargs: _message_read(),
     )
 
-    payload = messagepayload.messages_payload_for_worktree(
+    payload = message.messages_payload_for_worktree(
         _State(),
         _Target(id="wt", repo_root=tmp_path),
         limit=5,
@@ -469,11 +463,9 @@ def test_cli_review_followup_row_renders_standalone_task_card(monkeypatch):
         seen["filters"] = filters
         return [row]
 
-    monkeypatch.setattr(messagepayload.tw, "export", fake_export)
+    monkeypatch.setattr(message.tw, "export", fake_export)
 
-    cards = messagepayload._task_card_messages_for_thread(
-        actor, after=None, before=None
-    )
+    cards = message._task_card_messages_for_thread(actor, after=None, before=None)
 
     assert seen["filters"] == [
         "status.any:",
@@ -517,9 +509,9 @@ def test_task_card_cursor_merges_newer_backend_and_transcript_items(monkeypatch)
     ]
     boundary_key = "2026-06-10T12:00:01.000001Z#task-card:older-task"
 
-    monkeypatch.setattr(messagepayload.tw, "export", lambda _filters: rows)
+    monkeypatch.setattr(message.tw, "export", lambda _filters: rows)
 
-    merged = messagepayload._merge_task_card_messages(
+    merged = message._merge_task_card_messages(
         actor,
         [_message("2026-06-10T12:00:03.000000Z")],
         limit=5,
@@ -561,9 +553,9 @@ def test_task_card_tail_merge_drops_cards_older_than_visible_window(monkeypatch)
             "creation_surface": "cli",
         },
     ]
-    monkeypatch.setattr(messagepayload.tw, "export", lambda _filters: rows)
+    monkeypatch.setattr(message.tw, "export", lambda _filters: rows)
 
-    merged = messagepayload._merge_task_card_messages(
+    merged = message._merge_task_card_messages(
         actor,
         [_message("2026-06-10T12:00:00.000000Z")],
         limit=5,
@@ -586,13 +578,13 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
         owner_driver=CLAUDE_DRIVER,
     )
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "effective_agent_config",
         lambda _repo: {"driver": "codex", "model": "desired-model", "effort": "high"},
     )
-    monkeypatch.setattr(messagepayload, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
-        messagepayload,
+        message,
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
@@ -607,12 +599,12 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        messagepayload,
+        message,
         "resolve_thread_id_for_target",
         lambda _state, _target: thread_id,
     )
     monkeypatch.setattr(
-        messagepayload,
+        message,
         "agent_status",
         lambda _repo: _identity_status(
             tmp_path,
@@ -623,7 +615,7 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
         ),
     )
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "agent_status",
         lambda _repo: _identity_status(
             tmp_path,
@@ -634,7 +626,7 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
         ),
     )
     monkeypatch.setattr(
-        lanepayload,
+        lane,
         "agent_status",
         lambda _repo: _identity_status(
             tmp_path,
@@ -644,17 +636,15 @@ def test_messages_payload_reports_transcript_owner_in_serve_identity(
             effort="low",
         ),
     )
+    monkeypatch.setattr(message, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(lane, "agent_binding_error", lambda _repo, _status: "")
     monkeypatch.setattr(
-        messagepayload, "agent_binding_error", lambda _repo, _status: ""
-    )
-    monkeypatch.setattr(lanepayload, "agent_binding_error", lambda _repo, _status: "")
-    monkeypatch.setattr(
-        messagepayload.message_reader,
+        message.message_reader,
         "assistant_messages_for_thread_id",
         lambda *_args, **_kwargs: _message_read(transcript=transcript),
     )
 
-    payload = messagepayload.messages_payload_for_worktree(
+    payload = message.messages_payload_for_worktree(
         _State(),
         _Target(id="wt", repo_root=tmp_path),
         limit=5,
@@ -682,9 +672,9 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
     store.create_team(members=["thread:agent-a"])
     _record_identity(store, "thread:agent-a", thread_id="agent-a")
     store.set_agent_renewal_request("thread:agent-a", requested=True)
-    monkeypatch.setattr(messagepayload, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
     monkeypatch.setattr(
-        messagepayload,
+        message,
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
@@ -699,12 +689,12 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        messagepayload,
+        message,
         "resolve_thread_id_for_target",
         lambda _state, _target: "agent-a",
     )
     monkeypatch.setattr(
-        messagepayload,
+        message,
         "agent_status",
         lambda _repo: _Status(
             running=True,
@@ -714,7 +704,7 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "agent_status",
         lambda _repo: _Status(
             running=True,
@@ -724,7 +714,7 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr(
-        lanepayload,
+        lane,
         "agent_status",
         lambda _repo: _Status(
             running=True,
@@ -733,14 +723,14 @@ def test_messages_payload_reports_agent_renewal_intent(monkeypatch, tmp_path):
             thread_id="agent-a",
         ),
     )
-    monkeypatch.setattr(lanepayload, "agent_binding_error", lambda _repo, _status: "")
+    monkeypatch.setattr(lane, "agent_binding_error", lambda _repo, _status: "")
     monkeypatch.setattr(
-        messagepayload.message_reader,
+        message.message_reader,
         "assistant_messages_for_thread_id",
         lambda *_args, **_kwargs: _message_read(),
     )
 
-    payload = messagepayload.messages_payload_for_worktree(
+    payload = message.messages_payload_for_worktree(
         _State(team_store=store),
         _Target(id="wt", repo_root=tmp_path),
         limit=5,
@@ -840,7 +830,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     )
     archive_ackd_inbox_items(repo, [inbox_item_key(archived_name)])
     monkeypatch.setattr(
-        messagepayload, "resolve_thread_id_for_target", lambda _state, _target: ""
+        message, "resolve_thread_id_for_target", lambda _state, _target: ""
     )
     monkeypatch.setattr(
         worktreepayload,
@@ -848,13 +838,13 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        messagepayload,
+        message,
         "agent_status",
         lambda _repo: _Status(running=False, started_at=""),
     )
-    monkeypatch.setattr(messagepayload, "task_filter_inventory", lambda: {})
+    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
 
-    payload = messagepayload.messages_payload_for_worktree(
+    payload = message.messages_payload_for_worktree(
         _State(),
         _Target(id="wt", repo_root=repo),
         limit=5,
@@ -952,7 +942,7 @@ def test_ack_context_payload_does_not_quote_assistant_ack_when_inbox_missing(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        identitypayload,
+        identity,
         "resolve_thread_id_for_target",
         lambda _state, _target: "thread-a",
     )

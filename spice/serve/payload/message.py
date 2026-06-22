@@ -19,7 +19,7 @@ from spice.mail.inbox import (
 )
 from spice.serve import messages as message_reader
 from spice.serve.attachments import inbox_attachment_payloads
-from spice.serve.identitypayload import (
+from spice.serve.payload.identity import (
     _binding_status,
     resolve_thread_id_for_target,
     serve_agent_identity_payload,
@@ -27,7 +27,7 @@ from spice.serve.identitypayload import (
     team_facts_for_target,
     team_identity_payload,
 )
-from spice.serve.lanepayload import (
+from spice.serve.payload.lane import (
     _lane_info_payload,
     lane_metrics_payload,
     status_line_payload,

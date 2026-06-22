@@ -17,15 +17,8 @@ import pytest
 
 from spice.agent.driver import CODEX_DRIVER
 from spice.mail.inbox import inbox_dir
-from spice.serve import (
-    agentapi,
-    app,
-    identitypayload,
-    lanepayload,
-    livebus,
-    messagepayload,
-    worktreepayload,
-)
+from spice.serve import agentapi, app, livebus, worktreepayload
+from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
 from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
@@ -132,13 +125,9 @@ def test_lane_subscription_watch_wakes_stopped_agent_for_external_inbox_write(
         prompt_skill_path=None,
     )
     monkeypatch.setattr(agentapi, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(
-        identitypayload, "agent_status", lambda *_args, **_kwargs: status
-    )
-    monkeypatch.setattr(lanepayload, "agent_status", lambda *_args, **_kwargs: status)
-    monkeypatch.setattr(
-        messagepayload, "agent_status", lambda *_args, **_kwargs: status
-    )
+    monkeypatch.setattr(identity, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(lane, "agent_status", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(message, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(
         worktreepayload, "agent_status", lambda *_args, **_kwargs: status
     )
@@ -166,9 +155,7 @@ def test_lane_subscription_watch_wakes_stopped_agent_for_external_inbox_write(
             resolve_target=lambda selector: target if selector == target.id else None,
             work_trees_payload=lambda: {},
             messages_payload=lambda bus_target, **kwargs: (
-                messagepayload.messages_payload_for_worktree(
-                    state, bus_target, **kwargs
-                )
+                message.messages_payload_for_worktree(state, bus_target, **kwargs)
             ),
             send_payload=lambda _target, _payload: ({}, None),
             task_drain_payload=lambda _target, _payload: ({}, None),

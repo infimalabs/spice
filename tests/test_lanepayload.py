@@ -10,10 +10,8 @@ from types import SimpleNamespace
 
 from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
-from spice.serve import (
-    lanepayload,
-)
-from spice.serve.lanepayload import (
+from spice.serve.payload import lane
+from spice.serve.payload.lane import (
     LANE_METRIC_SPARKLINE_BUCKET_SECONDS,
     LANE_METRIC_SPARKLINE_BUCKETS,
     _agent_uptime_seconds,
@@ -228,17 +226,17 @@ def test_status_line_pairs_activity_preview_with_activity_timestamp(
     target = _Target(id="wt", repo_root=tmp_path)
     items = [_message(latest, kind="presence:reasoning", preview="thinking")]
     monkeypatch.setattr(
-        lanepayload,
+        lane,
         "agent_status",
         lambda _repo: _Status(running=True, started_at="", process_status="running"),
     )
     monkeypatch.setattr(
-        lanepayload,
+        lane,
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
 
-    line = lanepayload.status_line_payload(_State(), target, items=items, error=None)
+    line = lane.status_line_payload(_State(), target, items=items, error=None)
 
     assert line["lastAssistantAt"] == latest
     assert line["preview"] == "thinking"
@@ -268,18 +266,18 @@ def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monke
         },
     )
     monkeypatch.setattr(
-        lanepayload,
+        lane,
         "agent_status",
         lambda _repo: _Status(running=True, started_at="", process_status="running"),
     )
     monkeypatch.setattr(
-        lanepayload,
+        lane,
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
 
     items = message_reader.read_assistant_messages(transcript, limit=5)
-    line = lanepayload.status_line_payload(
+    line = lane.status_line_payload(
         _State(), _Target(id="wt", repo_root=tmp_path), items=items, error=None
     )
 
@@ -376,18 +374,18 @@ def test_status_line_prefers_latest_claude_presence_over_visible_message(
     )
     target = _Target(id="wt", repo_root=tmp_path)
     monkeypatch.setattr(
-        lanepayload,
+        lane,
         "agent_status",
         lambda _repo: _Status(running=True, started_at="", process_status="running"),
     )
     monkeypatch.setattr(
-        lanepayload,
+        lane,
         "pending_inbox_identity_payload",
         lambda _repo: _pending_identity(),
     )
 
     items = message_reader.read_assistant_messages(transcript, limit=5)
-    line = lanepayload.status_line_payload(_State(), target, items=items, error=None)
+    line = lane.status_line_payload(_State(), target, items=items, error=None)
 
     assert items[0].kind == "presence:function_call"
     assert line["lastAssistantAt"] == latest

@@ -23,12 +23,8 @@ from spice.mail.inbox import (
     write_inbox_item,
 )
 from spice.paths import shared_attachment_root
-from spice.serve import (
-    agentapi,
-    app,
-    identitypayload,
-    messagepayload,
-)
+from spice.serve import agentapi, app
+from spice.serve.payload import identity, message
 from spice.serve.workroutes import work_tree_send_response_payload
 from spice.tasks import config as task_config
 from tests.test_servehelpers import (
@@ -160,13 +156,13 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert live_attachment["url"].startswith(
         f"/api/work/trees/{target.id}/files/image?path="
     )
-    refresh_payload = messagepayload.ack_context_payload_for_worktree(
+    refresh_payload = message.ack_context_payload_for_worktree(
         state, target, keys=[payload["key"]]
     )
     assert refresh_payload["acks"][0]["found"] is True
     assert refresh_payload["acks"][0]["attachments"][0] == live_attachment
     assert archive_ackd_inbox_items(repo, [payload["key"]]) == [payload["key"]]
-    archived_refresh_payload = messagepayload.ack_context_payload_for_worktree(
+    archived_refresh_payload = message.ack_context_payload_for_worktree(
         state, target, keys=[payload["key"]]
     )
     assert archived_refresh_payload["acks"][0]["found"] is True
@@ -276,7 +272,7 @@ def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkey
         compose_inbox_text(body="pending", priority=None, stop=False),
     )
     monkeypatch.setattr(
-        identitypayload, "resolve_thread_id_for_target", lambda *_args: THREAD_A
+        identity, "resolve_thread_id_for_target", lambda *_args: THREAD_A
     )
     monkeypatch.setattr(
         app,
@@ -730,9 +726,7 @@ def test_message_image_route_accepts_zero_item_index(tmp_path, monkeypatch):
         + "\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        identitypayload, "resolve_thread_id_for_target", lambda *_: THREAD_A
-    )
+    monkeypatch.setattr(identity, "resolve_thread_id_for_target", lambda *_: THREAD_A)
     monkeypatch.setattr(
         app,
         "resolve_thread_transcript",

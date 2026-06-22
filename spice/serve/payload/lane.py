@@ -7,7 +7,7 @@ from typing import Any
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.serve import messages as message_reader
-from spice.serve.identitypayload import (
+from spice.serve.payload.identity import (
     _agent_name_for_target,
     _binding_status,
     team_actor_for_target,

@@ -28,7 +28,8 @@ from spice.mail.inbox import (
     pending_inbox_count,
 )
 from spice.paths import repo_root_from_cwd, shared_attachment_root
-from spice.serve import identitypayload, messagepayload, metricpayload, worktreepayload
+from spice.serve import worktreepayload
+from spice.serve.payload import identity, message, metric
 from spice.serve.agentapi import (
     agent_ensure_response_payload,
     agent_status_payload,
@@ -212,7 +213,7 @@ def team_command_response_payload(
 ) -> tuple[dict[str, Any], HTTPStatus]:
     try:
         result = state.team_commands.apply(
-            identitypayload.normalize_team_command_payload(
+            identity.normalize_team_command_payload(
                 payload, targets=state.worktree_targets()
             )
         )
@@ -443,9 +444,7 @@ def lane_signature_for_target(
     thread_id: str | None,
     transcript: TranscriptResolution | None,
 ) -> tuple[Any, ...]:
-    team_facts = identitypayload.team_facts_for_target(
-        state.team_store, target, thread_id
-    )
+    team_facts = identity.team_facts_for_target(state.team_store, target, thread_id)
     return (
         _path_signature(transcript.path if transcript else None),
         transcript.owner_driver.name if transcript else "",
@@ -506,7 +505,7 @@ def serve_metrics_text(state: ServeState) -> str:
     rollout_present = 0
     pending = 0
     for target in state.worktree_targets():
-        thread_id = identitypayload.resolve_thread_id_for_target(state, target) or ""
+        thread_id = identity.resolve_thread_id_for_target(state, target) or ""
         if thread_id:
             bound = 1
             transcript = resolve_thread_transcript(thread_id, target.repo_root)
@@ -740,7 +739,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         query = parse_qs(query_string)
         if action == "messages":
             self._send_json(
-                messagepayload.messages_payload_for_worktree(
+                message.messages_payload_for_worktree(
                     self.state,
                     target,
                     limit=_query_int(query, "limit", DEFAULT_MESSAGE_LIMIT),
@@ -752,7 +751,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
             return
         if action == "acks":
             self._send_json(
-                messagepayload.ack_context_payload_for_worktree(
+                message.ack_context_payload_for_worktree(
                     self.state, target, keys=query.get("key", [])
                 )
             )
@@ -776,7 +775,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         if offset < 0 or item < 0:
             self.send_error(HTTPStatus.BAD_REQUEST, "offset and item are required")
             return
-        thread_id = identitypayload.resolve_thread_id_for_target(self.state, target)
+        thread_id = identity.resolve_thread_id_for_target(self.state, target)
         transcript = (
             resolve_thread_transcript(thread_id, target.repo_root)
             if thread_id
@@ -900,9 +899,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                     or worktreepayload.work_trees_payload(state)
                 ),
                 messages_payload=lambda target, **kwargs: (
-                    messagepayload.messages_payload_for_worktree(
-                        state, target, **kwargs
-                    )
+                    message.messages_payload_for_worktree(state, target, **kwargs)
                 ),
                 send_payload=lambda target, payload: work_tree_send_response_payload(
                     state, target, payload
@@ -916,10 +913,10 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 team_command_payload=lambda payload: team_command_response_payload(
                     state, payload
                 ),
-                metric_series_payload=lambda query: metricpayload.metric_series_payload(
+                metric_series_payload=lambda query: metric.metric_series_payload(
                     state, query
                 ),
-                thread_id=lambda target: identitypayload.resolve_thread_id_for_target(
+                thread_id=lambda target: identity.resolve_thread_id_for_target(
                     state, target
                 ),
                 transcript_resolution=resolve_thread_transcript,

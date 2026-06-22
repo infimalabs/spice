@@ -6,7 +6,7 @@ from typing import Any
 
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.serve.agentapi import ensure_agent_for_pending_inbox
-from spice.serve.identitypayload import (
+from spice.serve.payload.identity import (
     _agent_name_for_target,
     _binding_status,
     record_started_renewal_from_ensure,
@@ -19,7 +19,7 @@ from spice.serve.identitypayload import (
     team_facts_for_target,
     team_identity_payload,
 )
-from spice.serve.lanepayload import (
+from spice.serve.payload.lane import (
     _lane_info_payload,
     _status_line_payload_from_status,
     task_filter_inventory,
@@ -144,7 +144,7 @@ def _work_tree_status_payloads(
     status: Any,
     pending_identity: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    from spice.serve.messagepayload import target_activity_items
+    from spice.serve.payload.message import target_activity_items
 
     items, error, transcript = target_activity_items(target, thread_id)
     transcript_owner = transcript.owner_driver.name if transcript else ""

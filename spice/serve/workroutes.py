@@ -9,7 +9,7 @@ from typing import Any
 from spice.agent.lifecycle import agent_status
 from spice.agent.renewal import renewal_handoff_request_text, renewal_steering_text
 from spice.errors import SpiceError
-from spice.serve import identitypayload
+from spice.serve.payload import identity
 from spice.serve.agentapi import sent_steering_response_payload
 from spice.serve.drive import drive_drain_queue_controls
 from spice.serve.steering import steering_submit_error_status, submit_steering_message
@@ -68,8 +68,8 @@ def work_tree_send_response_payload(
     if error_response is not None:
         return error_response
     assert request is not None
-    predecessor = identitypayload.resolve_thread_id_for_target(state, target) or ""
-    predecessor_actor = identitypayload.team_actor_for_target(
+    predecessor = identity.resolve_thread_id_for_target(state, target) or ""
+    predecessor_actor = identity.team_actor_for_target(
         state.team_store, target, predecessor
     )
     renew_intent = _work_tree_send_renewal_active(
@@ -128,7 +128,7 @@ def _work_tree_renewal_request_text(
     predecessor_actor: str,
 ) -> tuple[str, bool]:
     status = agent_status(target.repo_root)
-    identitypayload.serve_agent_identity_payload(
+    identity.serve_agent_identity_payload(
         target,
         predecessor,
         actor_id=predecessor_actor,
@@ -174,13 +174,11 @@ def _work_tree_send_result_payload(
         predecessor_actor=predecessor_actor,
     )
     send_agent_id = (
-        ensured_thread_id
-        or identitypayload.resolve_thread_id_for_target(state, target)
-        or ""
+        ensured_thread_id or identity.resolve_thread_id_for_target(state, target) or ""
     )
     send_actor = ""
     if send_agent_id:
-        send_actor = identitypayload.team_actor_for_target(
+        send_actor = identity.team_actor_for_target(
             state.team_store, target, send_agent_id
         )
     if send_actor:
@@ -195,11 +193,11 @@ def _work_tree_send_result_payload(
         )
     renewal_agent_id = predecessor_actor if renew_intent else send_actor
     if renewal_agent_id:
-        response_payload["renewalIntent"] = identitypayload.renewal_intent_for_actor(
+        response_payload["renewalIntent"] = identity.renewal_intent_for_actor(
             state.team_store, renewal_agent_id
         )
     route_thread_id = send_agent_id or predecessor
-    route_actor = identitypayload.team_actor_for_target(
+    route_actor = identity.team_actor_for_target(
         state.team_store, target, route_thread_id
     )
     response_payload["route"] = _work_tree_route_payload(
@@ -221,12 +219,12 @@ def _work_tree_send_ensured_thread_id(
 ) -> str:
     agent_ensure_payload = agent_ensure if isinstance(agent_ensure, dict) else None
     if renew_intent and force_new:
-        return identitypayload.record_started_renewal_from_ensure(
+        return identity.record_started_renewal_from_ensure(
             state.team_store,
             predecessor_agent_id=predecessor_actor,
             agent_ensure=agent_ensure_payload,
         )
-    return identitypayload.agent_ensure_thread_id(agent_ensure_payload)
+    return identity.agent_ensure_thread_id(agent_ensure_payload)
 
 
 def _apply_lifetime_to_team(
@@ -235,8 +233,8 @@ def _apply_lifetime_to_team(
     lifetime = str(payload.get("lifetime") or "").strip()
     if lifetime not in LIFETIME_LABELS:
         return
-    thread_id = identitypayload.resolve_thread_id_for_target(state, target) or ""
-    actor = identitypayload.team_actor_for_target(state.team_store, target, thread_id)
+    thread_id = identity.resolve_thread_id_for_target(state, target) or ""
+    actor = identity.team_actor_for_target(state.team_store, target, thread_id)
     team_id = state.team_store.current_team_for_agent(actor)
     if team_id is None:
         return
@@ -263,8 +261,8 @@ def work_tree_task_drain_response_payload(
 ) -> tuple[dict[str, Any], HTTPStatus]:
     _apply_lifetime_to_team(state, target, payload)
     task_filters = payload.get("taskFilters")
-    thread_id = identitypayload.resolve_thread_id_for_target(state, target) or ""
-    actor = identitypayload.team_actor_for_target(state.team_store, target, thread_id)
+    thread_id = identity.resolve_thread_id_for_target(state, target) or ""
+    actor = identity.team_actor_for_target(state.team_store, target, thread_id)
     if bool(payload.get("replaceTaskFilters")) and isinstance(task_filters, list):
         if not actor:
             return (
@@ -305,16 +303,16 @@ def _work_tree_route_payload(
     thread_id: str,
     actor: str,
 ) -> dict[str, Any]:
-    facts = identitypayload.team_facts_for_actor(state.team_store, actor)
+    facts = identity.team_facts_for_actor(state.team_store, actor)
     return {
         "actor": actor,
-        "targetIdentity": identitypayload.target_identity_payload(target, thread_id),
-        "serveAgentIdentity": identitypayload.serve_agent_identity_payload(
+        "targetIdentity": identity.target_identity_payload(target, thread_id),
+        "serveAgentIdentity": identity.serve_agent_identity_payload(
             target,
             thread_id,
             store=state.team_store,
         ),
-        "teamIdentity": identitypayload.team_identity_payload(facts),
+        "teamIdentity": identity.team_identity_payload(facts),
         "memberAgents": [actor] if actor else [],
         "laneName": target.name,
         "taskFilters": facts.get("taskFilters", []),
