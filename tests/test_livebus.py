@@ -21,7 +21,7 @@ from spice.serve import agentapi, app, livebus
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
-from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
+from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.messages import TranscriptResolution
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.team.store import ServeTeamStore
@@ -76,9 +76,27 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
         return change_written.is_set() and not stop.is_set()
 
     monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
+    message_payload_calls = 0
+
+    def messages_payload(_target, **_kwargs):
+        nonlocal message_payload_calls
+        message_payload_calls += 1
+        if message_payload_calls > 1:
+            raise AssertionError("inbox-only change must not read messages payload")
+        pending_identity = pending_inbox_identity_payload(target.repo_root)
+        return {
+            "messages": [],
+            **pending_identity,
+            "statusLine": pending_identity,
+        }
+
     session = LiveBusSession(
         connection,
-        _callbacks(target=target, transcript=transcript),
+        _callbacks(
+            target=target,
+            transcript=transcript,
+            messages_payload=messages_payload,
+        ),
     )
 
     try:
@@ -92,15 +110,25 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
         change_written.set()
 
         pushed = _wait_for_watch_push(connection)
+        assert pushed["type"] == "lane.pending"
         assert pushed["payload"]["pendingInboxCount"] == 1
-        assert pushed["payload"]["statusLine"]["pendingInboxCount"] == 1
+        assert pushed["payload"]["pendingInboxKeys"] == ["20260101T000000000001Z"]
+        assert pushed["payload"]["pendingInboxRevision"]
+        assert pushed["payload"]["pendingInboxVersion"] > 0
+        assert set(pushed["payload"]) == {
+            "pendingInboxCount",
+            "pendingInboxKeys",
+            "pendingInboxRevision",
+            "pendingInboxVersion",
+        }
+        assert message_payload_calls == 1
         assert transcript.read_text(encoding="utf-8") == ""
     finally:
         change_written.set()
         session._teardown()
 
 
-def test_lane_subscription_watch_wakes_stopped_agent_for_external_inbox_write(
+def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(livebus, "LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S", 0.05)
@@ -189,13 +217,11 @@ def test_lane_subscription_watch_wakes_stopped_agent_for_external_inbox_write(
         change_written.set()
 
         pushed = _wait_for_watch_push(connection)
+        assert pushed["type"] == "lane.pending"
         assert pushed["payload"]["pendingInboxCount"] == 1
-        assert pushed["payload"]["statusLine"]["pendingInboxCount"] == 1
-        assert pushed["payload"]["statusLine"]["pendingInboxLabel"] == "1"
-        assert pushed["payload"]["agentEnsure"]["threadId"] == THREAD_ID
-        assert ensure_calls == [
-            {"target": target, "fast_mode": False, "force_new": False}
-        ]
+        assert pushed["payload"]["pendingInboxKeys"] == ["20260101T000000000001Z"]
+        assert "agentEnsure" not in pushed["payload"]
+        assert ensure_calls == []
     finally:
         change_written.set()
         session._teardown()
@@ -309,8 +335,9 @@ def _callbacks(
     target: _Target,
     transcript: Path,
     lane_signature=None,
+    messages_payload=None,
 ) -> LiveBusCallbacks:
-    def messages_payload(_target, **_kwargs):
+    def default_messages_payload(_target, **_kwargs):
         pending_identity = pending_inbox_identity_payload(target.repo_root)
         return {
             "messages": [],
@@ -330,12 +357,16 @@ def _callbacks(
         if directory.is_dir():
             pending_names = tuple(sorted(path.name for path in directory.glob("*.txt")))
         transcript_size = transcript.path.stat().st_size if transcript else 0
-        return (pending_names, transcript_size)
+        return LaneSignature(
+            transcript=transcript_size,
+            inbox=pending_names,
+            other=(),
+        )
 
     return LiveBusCallbacks(
         resolve_target=lambda selector: target if selector == target.id else None,
         work_trees_payload=lambda: {},
-        messages_payload=messages_payload,
+        messages_payload=messages_payload or default_messages_payload,
         send_payload=lambda _target, _payload: ({}, None),
         task_drain_payload=lambda _target, _payload: ({}, None),
         team_snapshot_payload=lambda _since_revision: {},

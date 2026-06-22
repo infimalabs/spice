@@ -21,6 +21,7 @@ from threading import Event, Lock, Thread
 from typing import Any, Callable, cast
 
 from spice.serve.messages import TranscriptResolution
+from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.websocket import (
     WebSocketConnection,
     WebSocketDisconnect,
@@ -30,6 +31,12 @@ from spice.serve.websocket import (
 
 DEFAULT_BUS_MESSAGE_LIMIT = 50
 INITIAL_BUS_MESSAGE_LIMIT = 25
+PENDING_LANE_PAYLOAD_KEYS = (
+    "pendingInboxCount",
+    "pendingInboxKeys",
+    "pendingInboxRevision",
+    "pendingInboxVersion",
+)
 
 _HAVE_KQUEUE = hasattr(select, "kqueue")
 if _HAVE_KQUEUE:
@@ -68,6 +75,13 @@ class LiveBusCallbacks:
         [Any, str | None, TranscriptResolution | None], tuple[Path, ...]
     ]
     lane_signature: Callable[[Any, str | None, TranscriptResolution | None], Any]
+
+
+@dataclass(frozen=True)
+class LaneSignature:
+    transcript: Any
+    inbox: Any
+    other: Any
 
 
 @dataclass
@@ -331,9 +345,23 @@ class LiveBusSession:
             if not changed:
                 continue
             signature = self.callbacks.lane_signature(target, thread_id, transcript)
-            if signature == subscription.last_signature:
+            previous_signature = subscription.last_signature
+            if signature == previous_signature:
                 continue
             subscription.last_signature = signature
+            if _pending_only_signature_change(previous_signature, signature):
+                try:
+                    self._send(
+                        {
+                            "type": "lane.pending",
+                            "targetId": target.id,
+                            "source": "watch",
+                            "payload": _pending_lane_payload(target),
+                        }
+                    )
+                except (OSError, WebSocketProtocolError):
+                    return
+                continue
             with subscription.lock:
                 query = dict(subscription.query)
             kwargs: dict[str, Any] = {
@@ -370,6 +398,29 @@ class LiveBusSession:
     def _lane_signature(self, subscription: _LaneSubscription) -> Any:
         thread_id, transcript = self._lane_context(subscription.target)
         return self.callbacks.lane_signature(subscription.target, thread_id, transcript)
+
+
+def _pending_only_signature_change(previous: Any, current: Any) -> bool:
+    if not isinstance(previous, LaneSignature) or not isinstance(
+        current, LaneSignature
+    ):
+        return False
+    return (
+        previous.inbox != current.inbox
+        and previous.transcript == current.transcript
+        and previous.other == current.other
+    )
+
+
+def _pending_lane_payload(target: Any) -> dict[str, Any]:
+    pending_identity = pending_inbox_identity_payload(
+        getattr(target, "repo_root", None)
+    )
+    return {
+        key: pending_identity[key]
+        for key in PENDING_LANE_PAYLOAD_KEYS
+        if key in pending_identity
+    }
 
 
 def _wait_for_change(

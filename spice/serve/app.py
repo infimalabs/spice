@@ -41,7 +41,7 @@ from spice.serve.audio import (
 )
 from spice.serve.filewatch import start_exit_file_watch
 from spice.serve.images import rollout_image_from_offset
-from spice.serve.livebus import LiveBusCallbacks, serve_live_bus
+from spice.serve.livebus import LaneSignature, LiveBusCallbacks, serve_live_bus
 from spice.serve.messages import (
     DEFAULT_MESSAGE_LIMIT,
     RolloutCursor,
@@ -446,13 +446,15 @@ def lane_signature_for_target(
     target: WorktreeTarget,
     thread_id: str | None,
     transcript: TranscriptResolution | None,
-) -> tuple[Any, ...]:
+) -> LaneSignature:
     team_facts = identity.team_facts_for_target(state.team_store, target, thread_id)
-    return (
-        _path_signature(transcript.path if transcript else None),
-        transcript.owner_driver.name if transcript else "",
-        _inbox_signature(target.repo_root),
-        (
+    return LaneSignature(
+        transcript=(
+            _path_signature(transcript.path if transcript else None),
+            transcript.owner_driver.name if transcript else "",
+        ),
+        inbox=_inbox_signature(target.repo_root),
+        other=(
             team_facts.get("teamId", ""),
             team_facts.get("teamRevision", 0),
             team_facts.get("configRevision", 0),
@@ -468,8 +470,8 @@ def lane_signature_for_target(
                     "revision",
                 )
             ),
+            _path_signature(task_config.ensure_task_event_file()),
         ),
-        _path_signature(task_config.ensure_task_event_file()),
     )
 
 
