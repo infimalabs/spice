@@ -58,9 +58,9 @@ def activation_command_surface_lines() -> list[str]:
             "run so inbox steering and keep-working guidance inject before the "
             "requested command; descendant shells use static hooks and "
             "precomputed wrappers without another reexec; agent launch clears "
-            "inherited reexec markers before the first takeover, then "
-            "SPICE_SHELL_HOOK_REEXEC_STAGE=1 is expected inside the taken-over "
-            "shell"
+            "inherited reexec markers before the first takeover, and the "
+            "taken-over shell consumes the reexec marker before exported "
+            "snapshot/descendant state is captured"
         ),
         "session=spice session briefing",
         "task_status=spice task status",

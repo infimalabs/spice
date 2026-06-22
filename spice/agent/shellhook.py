@@ -17,6 +17,8 @@ HISTFILE_ENV = "HISTFILE"
 ZSH_COMPDUMP_ENV = "ZSH_COMPDUMP"
 BASH_HOOK_NAME = "bash_env"
 ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zshrc", ".zlogin")
+SHELL_HOOK_DIR_NAME = "shellhooks"
+STATIC_SHELL_HOOK_DIR_NAME = "shellhooks2"
 AGENT_WRAPPERS_KEY = "wrappers"
 DEFAULT_AGENT_WRAPPER_GROUP = "common"
 BUILTIN_AGENT_WRAPPER_GROUPS = {
@@ -78,17 +80,25 @@ def apply_shell_steering_environment(
 
 
 def packaged_shell_steering_hook_dir() -> Path:
-    hook_dir = Path(__file__).resolve().parent / "shellhooks"
+    hook_dir = Path(__file__).resolve().parent / SHELL_HOOK_DIR_NAME
+    static_hook_dir = packaged_shell_steering_static_hook_dir()
     missing = [
-        name
-        for name in (*ZSH_HOOK_NAMES, BASH_HOOK_NAME)
-        if not (hook_dir / name).is_file()
+        str(path.relative_to(Path(__file__).resolve().parent))
+        for path in (
+            *((hook_dir / name) for name in (*ZSH_HOOK_NAMES, BASH_HOOK_NAME)),
+            *((static_hook_dir / name) for name in (*ZSH_HOOK_NAMES, BASH_HOOK_NAME)),
+        )
+        if not path.is_file()
     ]
     if missing:
         raise SpiceError(
             "spice shell hook: packaged hook files missing: " + ", ".join(missing)
         )
     return hook_dir
+
+
+def packaged_shell_steering_static_hook_dir() -> Path:
+    return Path(__file__).resolve().parent / STATIC_SHELL_HOOK_DIR_NAME
 
 
 def shell_steering_runtime_environment(
@@ -159,7 +169,7 @@ def is_generated_shell_hook_path(value: str) -> bool:
     parts = hook_dir.parts
     return (
         len(parts) >= 3
-        and parts[-1] == "shellhooks"
+        and parts[-1] in {SHELL_HOOK_DIR_NAME, STATIC_SHELL_HOOK_DIR_NAME}
         and parts[-2] == "agent"
         and parts[-3] == "spice"
     )

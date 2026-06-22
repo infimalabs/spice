@@ -57,8 +57,10 @@ if [ -r "$_spice_shell_real_source" ] && [ "$_spice_shell_real_source" != "$_spi
   . "$_spice_shell_real_source"
 fi
 
-export ZDOTDIR="$_spice_shell_hook_dir"
-export BASH_ENV="${_spice_shell_hook_dir}/bash_env"
+_spice_shell_static_hook_dir="${_spice_shell_hook_dir%/shellhooks}/shellhooks2"
+export ZDOTDIR="$_spice_shell_static_hook_dir"
+export BASH_ENV="${_spice_shell_static_hook_dir}/bash_env"
+unset SPICE_SHELL_HOOK_REEXEC_STAGE
 eval "${SPICE_SHELL_HOOK_WRAPPERS-}"
 
 unset _spice_shell_bin
@@ -67,3 +69,4 @@ unset _spice_shell_hook_name
 unset _spice_shell_hook_self
 unset _spice_shell_real_source
 unset _spice_shell_real_zdotdir
+unset _spice_shell_static_hook_dir

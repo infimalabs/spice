@@ -16,7 +16,8 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "reexec the first zsh/bash command shell through spice agent run" in text
     assert "descendant shells use static hooks and precomputed wrappers" in text
     assert "agent launch clears inherited reexec markers" in text
-    assert "SPICE_SHELL_HOOK_REEXEC_STAGE=1 is expected inside" in text
+    assert "taken-over shell consumes the reexec marker" in text
+    assert "snapshot/descendant state is captured" in text
     assert "session=spice session briefing" in text
     assert (
         "task_drain_contract=drive/drain lanes are not done after a task phase boundary"
