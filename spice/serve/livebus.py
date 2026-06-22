@@ -15,6 +15,7 @@ import select
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
+from queue import Queue
 from threading import Event, Lock, Thread
 from typing import Any, Callable, cast
 
@@ -86,6 +87,12 @@ class LiveBusSession:
         self.callbacks = callbacks
         self.subscriptions: dict[str, _LaneSubscription] = {}
         self.send_lock = Lock()
+        # Metrics are read-only display data whose queries can be heavy; running
+        # them inline would block interactive frames (lane.send, acks) on this
+        # one socket. A dedicated worker drains them so the dispatch loop stays
+        # responsive — replies still carry the requestId the client matches on.
+        self._metrics_queue: Queue[dict[str, Any] | None] = Queue()
+        self._metrics_worker: Thread | None = None
 
     def run(self) -> None:
         self.connection.set_read_timeout(LIVE_BUS_READ_TIMEOUT_S)
@@ -106,6 +113,10 @@ class LiveBusSession:
         for subscription in list(self.subscriptions.values()):
             self._stop_subscription(subscription)
         self.subscriptions.clear()
+        if self._metrics_worker is not None:
+            self._metrics_queue.put(None)
+            self._metrics_worker.join(timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
+            self._metrics_worker = None
 
     def _send(self, payload: dict[str, Any]) -> None:
         with self.send_lock:
@@ -258,8 +269,29 @@ class LiveBusSession:
         self._reply(message, {"type": "lane.taskDrainResult", "result": result})
 
     def _handle_metrics_series(self, message: dict[str, Any]) -> None:
-        result = self.callbacks.metric_series_payload(message.get("query") or {})
-        self._reply(message, {"type": "metrics.seriesResult", "result": result})
+        if self._metrics_worker is None:
+            self._metrics_worker = Thread(
+                target=self._metrics_loop,
+                name="spice-live-bus-metrics",
+                daemon=True,
+            )
+            self._metrics_worker.start()
+        self._metrics_queue.put(message)
+
+    def _metrics_loop(self) -> None:
+        while True:
+            message = self._metrics_queue.get()
+            if message is None:
+                return
+            try:
+                result = self.callbacks.metric_series_payload(
+                    message.get("query") or {}
+                )
+                self._reply(message, {"type": "metrics.seriesResult", "result": result})
+            except WebSocketDisconnect:
+                return
+            except Exception as exc:  # surface, never kill the worker silently
+                self._reply(message, {"type": "bus.error", "error": str(exc)})
 
     # ---- watchers ------------------------------------------------------
 

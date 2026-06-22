@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http import HTTPStatus
 from pathlib import Path
 from threading import Event, Lock
@@ -248,6 +248,39 @@ def test_lane_subscription_suppresses_duplicate_push_for_unchanged_signature(
         assert waits >= 2
     finally:
         session._teardown()
+
+
+def test_metrics_series_replies_from_worker_off_the_dispatch_loop(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=repo)
+    connection = _Connection()
+    seen: list[dict[str, Any]] = []
+
+    def metric_series(query):
+        seen.append(query)
+        return {"ok": True, "points": [], "echo": query.get("series")}
+
+    callbacks = replace(
+        _callbacks(target=target, transcript=transcript),
+        metric_series_payload=metric_series,
+    )
+    session = LiveBusSession(connection, callbacks)
+
+    session._handle_metrics_series(
+        {"type": "metrics.series", "requestId": "r1", "query": {"series": "burndown"}}
+    )
+    # Teardown enqueues the stop sentinel behind the request and joins the
+    # worker, so the metrics reply is delivered deterministically — no polling.
+    session._teardown()
+
+    assert seen == [{"series": "burndown"}]
+    results = [m for m in connection.sent if m.get("type") == "metrics.seriesResult"]
+    assert len(results) == 1
+    assert results[0]["requestId"] == "r1"
+    assert results[0]["result"]["echo"] == "burndown"
 
 
 def _callbacks(
