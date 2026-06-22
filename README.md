@@ -78,8 +78,8 @@ spice init               # hooks, skill copy, state scaffolding
 spice dev doctor         # verify drivers, backends, and policy
 ```
 
-`spice init` writes machine-local git hook shims under `.spice/` (ignored via
-`.git/info/exclude`), materializes the worktree skill copy, and prepares state
+`spice init` writes machine-local git hook shims under `.spice/` (ignored via a
+tracked `.gitignore` row), materializes the worktree skill copy, and prepares state
 scaffolding. Repo-tracked policy lives in your `pyproject.toml` under
 `[tool.spice.*]` tables. The command surface is always `spice …`. Entrypoint
 resolution is worktree-true under the hood: generated git hooks invoke ambient
@@ -285,9 +285,10 @@ formatters = false
 ```
 
 Built-in pre-commit keys are `repo-shape`, `staging`, `repo-docs`,
-`formatters`, `local-paths`, `serve-web-typecheck`, `env-policy`,
-`file-shape`, `complexity`, and `magic-numbers` (`serve-web-typecheck`
-no-ops in repos without the serve static sources it gates). They run before
+`formatters`, `local-paths`, `serve-web-typecheck`, `python-typecheck`,
+`env-policy`, `file-shape`, `complexity`, and `magic-numbers`
+(`serve-web-typecheck` no-ops in repos without the serve static sources it
+gates). They run before
 extension steps unless an individual built-in is disabled or replaced in
 tracked policy. `pre_commit_success` uses the same command shape as
 `pre_commit`, but runs only after the whole gate has passed, alongside sticky
