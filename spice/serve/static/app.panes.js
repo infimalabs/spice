@@ -547,9 +547,6 @@ function mutateLaneTaskFilters(lane, updateFilters) {
 
 // ---- metrics pane -------------------------------------------------------------------------
 
-let laneMetricsLitIslandPromise = null;
-let laneMetricsLitIslandRenderer = null;
-const laneMetricsLitIslandModulePath = "/static/app.metrics-lit.js";
 const laneMetricSeriesMetrics = [
   ["activity", "activity"],
   ["sends", "sends"],
@@ -574,23 +571,6 @@ function renderLaneMetricsPane(lane) {
   syncLaneMetricSeriesControlHandler(lane);
   const model = laneMetricsRenderModel(lane);
   lane.metricsSummaryEl.textContent = model.status;
-  if (laneMetricsLitIslandEnabled()) {
-    if (laneMetricsLitIslandRenderer) {
-      laneMetricsLitIslandRenderer(lane.metricsGridEl, model);
-      requestLaneMetricSeries(lane, model);
-      return;
-    }
-    renderLaneMetricsVanilla(lane.metricsGridEl, model);
-    requestLaneMetricSeries(lane, model);
-    loadLaneMetricsLitIsland().then(
-      (renderer) => {
-        if (!lane.metricsGridEl) return;
-        renderer(lane.metricsGridEl, laneMetricsRenderModel(lane));
-      },
-      (error) => reportLaneMetricsLitIslandError(error),
-    );
-    return;
-  }
   renderLaneMetricsVanilla(lane.metricsGridEl, model);
   requestLaneMetricSeries(lane, model);
 }
@@ -729,44 +709,6 @@ function reportLaneMetricSeriesError() {
       ? /** @type {any} */ (window).setGlobalTransientError
       : null;
   if (typeof status === "function") status("Metric series request failed");
-}
-
-function laneMetricsLitIslandEnabled() {
-  if (typeof window === "undefined") return false;
-  if (/** @type {any} */ (window).__spiceForceLitMetricsIsland === true)
-    return true;
-  try {
-    const params = new URLSearchParams(window.location.search || "");
-    if (params.get("litMetrics") === "1") return true;
-  } catch (error) {
-    // Fall through to storage; malformed synthetic locations should not break metrics.
-  }
-  const storage = browserStorage();
-  return storage ? storage.getItem("spice.serve.litMetrics") === "1" : false;
-}
-
-function loadLaneMetricsLitIsland() {
-  if (laneMetricsLitIslandPromise) return laneMetricsLitIslandPromise;
-  const loader =
-    /** @type {any} */ (window).__spiceLitMetricsModuleLoader ||
-    (() => import(laneMetricsLitIslandModulePath));
-  laneMetricsLitIslandPromise = Promise.resolve()
-    .then(() => loader())
-    .then((module) => {
-      const renderer = module && module.renderLaneMetricsLitIsland;
-      if (typeof renderer !== "function")
-        throw new Error("Lit metrics island did not export a renderer");
-      laneMetricsLitIslandRenderer = renderer;
-      return renderer;
-    });
-  return laneMetricsLitIslandPromise;
-}
-
-function reportLaneMetricsLitIslandError(error) {
-  const status = /** @type {any} */ (window).setGlobalTransientError;
-  if (typeof status === "function")
-    status("Lit metrics island failed: " + String(error));
-  throw error;
 }
 
 function laneMetricGridSlot(grid, slot) {

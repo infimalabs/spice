@@ -94,24 +94,27 @@ clean state seams.
 3. Add direct unit tests for those helpers and keep browser tests for the real
    pointer workflows.
 4. Convert one low-risk panel to a component-shaped vanilla module.
-5. If component-shaped vanilla still feels too heavy, prototype the same panel
-   as a Lit island and compare code size, test clarity, CSS friction, and
-   browser behavior.
-6. Decide after the island pilot. Do not migrate the lane shell first.
+5. If component-shaped vanilla stops scaling, evaluate a single replacement path
+   for the problem in front of us: a graphing library for chart complexity, or a
+   UI component library for component lifecycle/state complexity.
+6. Do not keep parallel renderers for the same pane.
 
 ## Follow-Ups
 
 - Extract serve UI state and drag geometry helpers from DOM adapters.
 - Add a reusable Playwright harness for serve UI interaction checks.
-- Optional after those land: prototype one Lit island in a non-core panel.
+- Optional after those land: evaluate a focused graphing library if metrics chart
+  requirements outgrow the current SVG helper.
 
 ## Pilot Result
 
 The first Lit island prototype is recorded in
-`docs/studies/serve-ui-lit-island-prototype.md`. It keeps the metrics pane
-vanilla by default, adds an opt-in Lit custom element behind `?litMetrics=1`,
-and rejects broader adoption until spice has a local bundle/package-serving
-policy and a second eventful-panel pilot.
+`docs/studies/serve-ui-lit-island-prototype.md`. The pilot was closed and
+decommissioned: it proved Lit could mount as a no-build Web Component island, but
+the metrics implementation still duplicated the same hand-built SVG chart. The
+serve UI keeps one metrics renderer, the vanilla `app.panes.js` path. A future
+graphing library should replace that chart path directly rather than adding a
+second optional renderer.
 
 ## Sources
 
