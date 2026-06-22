@@ -127,14 +127,13 @@ class RolloutCursor:
     offset: int = 0
     last_key: str | None = None
     lock: RLock = field(default_factory=RLock, repr=False)
-    # Append-only transcripts: a no-`before` window read is fully determined by
-    # the file size and the limit, so when neither changed the prior result is
-    # reused verbatim instead of rescanning. This is what keeps inbox-only
-    # changes (a send/ack, with the transcript unchanged) from re-parsing the
-    # whole tail on every watcher push.
+    # Append-only transcripts: the initial no-`before` read seeds this cache;
+    # same-size reads reuse it, and watcher growth reads extend it from
+    # `offset` instead of rescanning the transcript tail.
     window: list[AssistantMessage] | None = field(default=None, repr=False)
     window_size: int = -1
     window_limit: int = -1
+    removed_keys: list[str] = field(default_factory=list, repr=False)
 
 
 @dataclass(frozen=True)
@@ -178,6 +177,7 @@ def assistant_messages_for_thread_id(
     limit: int = DEFAULT_MESSAGE_LIMIT,
     after: str | None = None,
     before: str | None = None,
+    append_only: bool = False,
     cursor: RolloutCursor | None = None,
     worktree_id: str | None = None,
     repo_root: Path | None = None,
@@ -195,6 +195,7 @@ def assistant_messages_for_thread_id(
             limit=limit,
             after=after,
             before=before,
+            append_only=append_only,
             cursor=cursor,
             worktree_id=worktree_id,
             driver=transcript.owner_driver,
@@ -210,6 +211,7 @@ def read_assistant_messages(
     limit: int = DEFAULT_MESSAGE_LIMIT,
     after: str | None = None,
     before: str | None = None,
+    append_only: bool = False,
     cursor: RolloutCursor | None = None,
     worktree_id: str | None = None,
     driver: AgentDriver | None = None,
@@ -218,11 +220,13 @@ def read_assistant_messages(
     owner_driver = driver or driver_for_transcript(transcript_path)
     if cursor is not None:
         with cursor.lock:
+            cursor.removed_keys = []
             return _read_locked(
                 transcript_path,
                 limit=bounded,
                 after=after,
                 before=before,
+                append_only=append_only,
                 cursor=cursor,
                 worktree_id=worktree_id,
                 driver=owner_driver,
@@ -232,6 +236,7 @@ def read_assistant_messages(
         limit=bounded,
         after=after,
         before=before,
+        append_only=append_only,
         cursor=None,
         worktree_id=worktree_id,
         driver=owner_driver,
@@ -270,6 +275,7 @@ def _read_locked(
     limit: int,
     after: str | None,
     before: str | None,
+    append_only: bool,
     cursor: RolloutCursor | None,
     worktree_id: str | None,
     driver: AgentDriver,
@@ -283,6 +289,18 @@ def _read_locked(
             limit=limit,
             end_offset=end_offset,
             cursor=None,
+            worktree_id=worktree_id,
+            driver=driver,
+        )
+    if (
+        append_only
+        and cursor is not None
+        and (after is None or after == cursor.last_key)
+    ):
+        return _read_appended_window(
+            transcript_path,
+            limit=limit,
+            cursor=cursor,
             worktree_id=worktree_id,
             driver=driver,
         )
@@ -335,31 +353,105 @@ def _read_from_offset(
     worktree_id: str | None,
     driver: AgentDriver,
 ) -> list[AssistantMessage]:
-    messages: list[AssistantMessage] = []
     try:
-        file_size = transcript_path.stat().st_size
-        if file_size < start_offset:
-            start_offset = 0
-        with transcript_path.open(encoding="utf-8", errors="replace") as handle:
-            handle.seek(start_offset)
-            while True:
-                line_offset = handle.tell()
-                line = handle.readline()
-                if not line:
-                    break
-                message = _build_message(
-                    line_offset, line, driver=driver, worktree_id=worktree_id
-                )
-                if message is not None:
-                    messages.append(message)
-                    messages = _trim_chronological(messages, limit)
-            if cursor is not None:
-                cursor.offset = handle.tell()
-                if messages:
-                    cursor.last_key = messages[-1].key
+        messages, end_offset = _read_chronological_from_offset(
+            transcript_path,
+            start_offset=start_offset,
+            worktree_id=worktree_id,
+            driver=driver,
+        )
     except OSError:
         return []
-    return list(reversed(_collapse_view_image_pairs(messages)))
+    kept = _trim_chronological(messages, limit)
+    if cursor is not None:
+        cursor.offset = end_offset
+        if messages:
+            cursor.last_key = messages[-1].key
+    return list(reversed(_collapse_view_image_pairs(kept)))
+
+
+def _read_appended_window(
+    transcript_path: Path,
+    *,
+    limit: int,
+    cursor: RolloutCursor,
+    worktree_id: str | None,
+    driver: AgentDriver,
+) -> list[AssistantMessage]:
+    try:
+        file_size = transcript_path.stat().st_size
+    except OSError:
+        return []
+    if (
+        cursor.window is None
+        or cursor.window_limit != limit
+        or file_size < cursor.offset
+        or file_size < cursor.window_size
+    ):
+        return _read_window(
+            transcript_path,
+            limit=limit,
+            end_offset=None,
+            cursor=cursor,
+            worktree_id=worktree_id,
+            driver=driver,
+        )
+    if file_size == cursor.window_size:
+        cursor.offset = file_size
+        return []
+    try:
+        appended, end_offset = _read_chronological_from_offset(
+            transcript_path,
+            start_offset=cursor.offset,
+            worktree_id=worktree_id,
+            driver=driver,
+        )
+    except OSError:
+        return []
+    previous = list(reversed(cursor.window))
+    previous_tail = previous[-1:] if previous else []
+    combined = previous + appended
+    window = _collapse_view_image_pairs(_trim_chronological(combined, limit))
+    delta = _collapse_view_image_pairs(
+        previous_tail + _trim_chronological(appended, limit)
+    )
+    tail_keys = {message.key for message in previous_tail}
+    delta_keys = {message.key for message in delta}
+    cursor.removed_keys = [
+        message.key for message in previous_tail if message.key not in delta_keys
+    ]
+    cursor.offset = end_offset
+    if appended:
+        cursor.last_key = appended[-1].key
+    cursor.window = list(reversed(window))
+    cursor.window_size = end_offset
+    cursor.window_limit = limit
+    return [message for message in reversed(delta) if message.key not in tail_keys]
+
+
+def _read_chronological_from_offset(
+    transcript_path: Path,
+    *,
+    start_offset: int,
+    worktree_id: str | None,
+    driver: AgentDriver,
+) -> tuple[list[AssistantMessage], int]:
+    file_size = transcript_path.stat().st_size
+    if file_size < start_offset:
+        start_offset = 0
+    messages: list[AssistantMessage] = []
+    with transcript_path.open(encoding="utf-8", errors="replace") as handle:
+        handle.seek(start_offset)
+        while True:
+            line_offset = handle.tell()
+            line = handle.readline()
+            if not line:
+                return messages, handle.tell()
+            message = _build_message(
+                line_offset, line, driver=driver, worktree_id=worktree_id
+            )
+            if message is not None:
+                messages.append(message)
 
 
 def _read_window(

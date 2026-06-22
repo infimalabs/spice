@@ -167,6 +167,10 @@ async function handleLiveBusMessage(data) {
     const lane = laneStates.get(message.targetId);
     if (lane && isLaneOpen(lane))
       applyLanePendingBusPayload(lane, message.payload || {});
+  } else if (message.type === "lane.append") {
+    const lane = laneStates.get(message.targetId);
+    if (lane && isLaneOpen(lane))
+      await applyLaneAppendBusPayload(lane, message.payload || {});
   } else if (message.type === "bus.error") {
     setGlobalTransientError(message.error || "live bus error");
   }
@@ -270,6 +274,7 @@ async function applyLaneBusPayload(lane, payload, source) {
     lane.renderedMessageFingerprint = "";
     lane.renderedStatusFingerprint = "";
   }
+  removePayloadMessages(lane, payload);
   mergePayloadMessages(lane, payload);
   renderLaneChrome(lane, payload);
   cacheLaneLatestPayload(lane, payload);
@@ -290,15 +295,11 @@ async function applyLaneBusPayload(lane, payload, source) {
 }
 
 function applyLanePendingBusPayload(lane, payload) {
+  lane.serverReachable = true;
   if (!syncLaneBackendPending(lane, payload)) return;
-  const latestPayload = lane.latestPayload || {};
-  const statusLine = {
-    ...(latestPayload.statusLine || lane.lastRenderedStatusLine || {}),
-    ...payload,
-  };
-  lane.latestPayload = { ...latestPayload, ...payload, statusLine };
-  renderLaneChrome(lane, { statusLine });
-  cacheLaneLatestPayload(lane, lane.latestPayload);
+  if (lane.latestPayload) cacheLaneLatestPayload(lane, lane.latestPayload);
+  renderLaneViewShell(laneGroupHost(lane));
+  syncComposerPlaceholders(laneGroupHost(lane));
 }
 
 function cacheLaneLatestPayload(lane, payload) {
@@ -321,6 +322,33 @@ function cacheLaneLatestPayload(lane, payload) {
     pendingInboxVersion: statusLine.pendingInboxVersion,
     statusLine,
   };
+}
+
+async function applyLaneAppendBusPayload(lane, payload) {
+  const messages = laneAppendMessages(payload);
+  const wasSpeechPrimed = lane.speechPrimed;
+  const knownBefore = new Set(lane.knownMessageKeys);
+  const initialSpeechMessages = wasSpeechPrimed
+    ? []
+    : initialPayloadSpeechMessages(lane, messages);
+  lane.serverReachable = true;
+  removePayloadMessages(lane, payload);
+  mergePayloadMessages(lane, { ...payload, messages });
+  await hydrateAckContextsForMessages(lane, lane.knownMessages);
+  renderMessagesIfChanged(lane);
+  if (!lane.speechPrimed) {
+    queueSpeechForMessages(lane, initialSpeechMessages);
+    primeSpeechBoundary(lane);
+  } else if (wasSpeechPrimed) {
+    const fresh = messages.filter((item) => item.key && !knownBefore.has(item.key));
+    queueSpeechForMessages(lane, fresh);
+  }
+}
+
+function laneAppendMessages(payload) {
+  if (!payload || !Array.isArray(payload.messages))
+    throw new Error("lane.append messages are required");
+  return payload.messages;
 }
 
 function initialPayloadSpeechMessages(lane, messages) {
@@ -355,6 +383,13 @@ function mergePayloadMessages(lane, payload) {
     upsertKnownMessage(lane, item, "newest");
   }
   trimKnownMessages(lane);
+}
+
+function removePayloadMessages(lane, payload) {
+  const keys = new Set(payload.removedMessageKeys || []);
+  if (!keys.size) return;
+  lane.knownMessages = lane.knownMessages.filter((item) => !keys.has(item.key));
+  lane.knownMessageKeys = new Set(lane.knownMessages.map((item) => item.key));
 }
 
 function mergeOlderPayloadMessages(lane, payload) {

@@ -276,6 +276,66 @@ def test_lane_subscription_suppresses_duplicate_push_for_unchanged_signature(
         session._teardown()
 
 
+def test_lane_subscription_watch_requests_append_only_payload(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=repo)
+    connection = _Connection()
+    waits = 0
+    watcher_ready = Event()
+    configured = Event()
+    payload_kwargs: list[dict[str, Any]] = []
+
+    def fake_wait(_paths: tuple[Path, ...], stop, watch=None) -> bool:
+        nonlocal waits
+        waits += 1
+        if waits > 1:
+            stop.set()
+            return False
+        watcher_ready.set()
+        configured.wait(timeout=1.0)
+        return True
+
+    def messages_payload(_target, **kwargs):
+        payload_kwargs.append(kwargs)
+        return {"messages": [], "statusLine": {}}
+
+    monkeypatch.setattr(livebus, "_wait_for_change", fake_wait)
+    callbacks = replace(
+        _callbacks(target=target, transcript=transcript),
+        messages_payload=messages_payload,
+        lane_signature=lambda *_args: object(),
+    )
+    session = LiveBusSession(connection, callbacks)
+
+    try:
+        session._handle_lane_subscribe(
+            {"type": "lane.subscribe", "targetId": target.id, "query": {"limit": 5}}
+        )
+        assert watcher_ready.wait(timeout=1.0)
+        session._handle_lane_configure(
+            {
+                "type": "lane.configure",
+                "targetId": target.id,
+                "query": {"limit": 5, "after": "newest-key"},
+            }
+        )
+        configured.set()
+        _wait_for_watch_push(connection)
+    finally:
+        configured.set()
+        session._teardown()
+
+    assert payload_kwargs[0] == {"limit": 5}
+    assert payload_kwargs[1] == {
+        "limit": 5,
+        "append_only": True,
+        "after": "newest-key",
+    }
+
+
 def test_kqueue_watch_rearms_only_when_watched_paths_change(tmp_path):
     if not livebus._HAVE_KQUEUE:
         pytest.skip("kqueue-only behavior")
