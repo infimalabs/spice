@@ -756,6 +756,17 @@ def test_static_narration_mode_holds_media_session_state():
     assert "syncNarrationMediaSession();" in close_body
 
 
+def test_static_speech_session_title_leads_with_agent_identity():
+    script = Path(__file__).with_name("fixtures") / "speech_session_title.js"
+
+    subprocess.run(
+        ["node", str(script), str(STATIC_ROOT / "app.audio.js")],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_static_speech_sync_updates_now_playing_message_accent():
     css = _serve_css_text()
     app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")

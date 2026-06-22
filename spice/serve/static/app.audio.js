@@ -429,8 +429,10 @@ function narrationMediaSessionActive() {
 
 function speechSessionTitle(entry) {
   const lane = entry.targetLane || entry.lane || {};
-  const name = lane.agentName || lane.branchName || "";
-  return name ? defaultDocumentTitle + " - " + name : defaultDocumentTitle;
+  const name = String(lane.agentName || lane.branchName || "").trim();
+  if (!name) return defaultDocumentTitle;
+  if (name.toLowerCase() === defaultDocumentTitle.toLowerCase()) return name;
+  return name + " - " + defaultDocumentTitle;
 }
 
 function syncNowPlayingMessages() {
