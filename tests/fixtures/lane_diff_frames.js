@@ -174,6 +174,35 @@ async function main() {
     subject.queuedSpeechKeys.at(-1) === appended.key,
     "append queues fresh speech through existing path",
   );
+
+  const replacement = message("2026-06-22T03:02:00.000000Z#3", "replacement");
+  await context.handleLiveBusMessage(
+    JSON.stringify({
+      type: "lane.append",
+      targetId: subject.targetId,
+      payload: {
+        messages: [replacement],
+        removedMessageKeys: [initial.key],
+      },
+    }),
+  );
+  assert(
+    subject.knownMessages[0].key === replacement.key,
+    "append with removals adds replacement message",
+  );
+  assert(
+    subject.knownMessages[1].key === appended.key,
+    "append with removals preserves unrelated cached messages",
+  );
+  assert(
+    !subject.knownMessageKeys.has(initial.key),
+    "append with removals drops removed message key",
+  );
+  assert(subject.messageRenders === 3, "append with removals rerenders message list");
+  assert(
+    subject.queuedSpeechKeys.at(-1) === replacement.key,
+    "append with removals queues speech for replacement",
+  );
 }
 
 main().catch((error) => {
