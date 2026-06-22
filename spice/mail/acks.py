@@ -32,9 +32,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Mapping
 
-from spice.mail.ackstate import AckStateWrite, record_acked_inbox_items
+from spice.mail.ackstate import (
+    AckStateWrite,
+    ack_state_records,
+    record_acked_inbox_items,
+)
 from spice.mail.inbox import (
     collect_inbox_items,
     discard_inbox_items,
@@ -149,7 +153,11 @@ def ack_content_by_key(segments: Iterable[AckSegment]) -> dict[str, str]:
 
 
 def archive_ackd_inbox_items(
-    repo_root: Path | None, ack_keys: Iterable[str]
+    repo_root: str | Path | None,
+    ack_keys: Iterable[str],
+    *,
+    ack_text: str = "",
+    ack_content_by_key: Mapping[str, str] | None = None,
 ) -> list[str]:
     """Retire pending inbox items whose key appears in assistant ACK text.
 
@@ -159,13 +167,14 @@ def archive_ackd_inbox_items(
     """
     if repo_root is None:
         return []
+    root = Path(repo_root)
     acked_aliases: set[str] = set()
     for key in ack_keys:
         if key:
             acked_aliases |= inbox_item_key_aliases(key)
     if not acked_aliases:
         return []
-    pending = collect_inbox_items(str(repo_root))
+    pending = collect_inbox_items(str(root))
     to_retire = [
         item for item in pending if inbox_item_key_aliases(item.name) & acked_aliases
     ]
@@ -179,12 +188,14 @@ def archive_ackd_inbox_items(
                 inbox_name=item.name,
                 text=item.text,
                 attachments=_ack_state_attachments(item),
+                ack_text=ack_text,
+                ack_content=_ack_content_for_item(item.name, ack_content_by_key),
             )
             for item in to_retire
         ],
     )
     discard_inbox_items(inbox_payload_items(to_retire))
-    notify_inbox_changed(repo_root)
+    notify_inbox_changed(root)
     return [inbox_item_key(item.name) for item in to_retire]
 
 
@@ -203,7 +214,7 @@ class AckArchivalSummary:
 
 
 def summarize_ack_archival(
-    repo_root: Path | None, message_text: str
+    repo_root: str | Path | None, message_text: str
 ) -> AckArchivalSummary:
     """Archive inbox items ACK'd by one assistant message, reporting disposition.
 
@@ -212,10 +223,14 @@ def summarize_ack_archival(
     matched no pending item, so the supervisor can tell the agent exactly which
     acknowledgments landed.
     """
-    requested = list(
-        dict.fromkeys(key for key in extract_ack_keys_from_text(message_text) if key)
+    segments = extract_ack_segments_from_text(message_text)
+    requested = list(dict.fromkeys(key for segment in segments for key in segment.keys))
+    archived = archive_ackd_inbox_items(
+        repo_root,
+        requested,
+        ack_text=message_text,
+        ack_content_by_key=ack_content_by_key(segments),
     )
-    archived = archive_ackd_inbox_items(repo_root, requested)
     archived_aliases: set[str] = set()
     for key in archived:
         archived_aliases |= inbox_item_key_aliases(key)
@@ -235,6 +250,17 @@ def _ack_state_attachments(item: Any) -> tuple[dict[str, Any], ...]:
         }
         for attachment in item.attachments
     )
+
+
+def _ack_content_for_item(
+    inbox_name: str, content_by_key: Mapping[str, str] | None
+) -> str:
+    if not content_by_key:
+        return ""
+    for alias in inbox_item_key_aliases(inbox_name):
+        if alias in content_by_key:
+            return content_by_key[alias]
+    return ""
 
 
 def _ack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...]]]:
@@ -454,6 +480,7 @@ def iter_assistant_ack_keys(
     start_ts: str | None = None,
     end_ts: str | None = None,
     turn_ids: Iterable[str] | None = None,
+    repo_root: str | Path | None = None,
 ) -> Iterator[str]:
     """Walk JSONL transcripts and emit ACK'd keys in source order.
 
@@ -461,6 +488,9 @@ def iter_assistant_ack_keys(
     normalization. `turn_ids` filters to assistant messages produced inside
     the listed turns. Both are optional; omitting them is fastest.
     """
+    if _ack_state_is_authoritative(repo_root, start_ts, end_ts, turn_ids):
+        yield from iter_ack_state_keys(repo_root)
+        return
     for text in iter_assistant_message_texts(
         files, start_ts=start_ts, end_ts=end_ts, turn_ids=turn_ids
     ):
@@ -473,12 +503,50 @@ def iter_assistant_ack_segments(
     start_ts: str | None = None,
     end_ts: str | None = None,
     turn_ids: Iterable[str] | None = None,
+    repo_root: str | Path | None = None,
 ) -> Iterator[AckSegment]:
     """Walk JSONL transcripts and emit ACK segments in source order."""
+    if _ack_state_is_authoritative(repo_root, start_ts, end_ts, turn_ids):
+        yield from iter_ack_state_segments(repo_root)
+        return
     for text in iter_assistant_message_texts(
         files, start_ts=start_ts, end_ts=end_ts, turn_ids=turn_ids
     ):
         yield from extract_ack_segments_from_text(text)
+
+
+def iter_ack_state_keys(repo_root: str | Path | None) -> Iterator[str]:
+    """Yield ACK'd inbox keys from durable ACK state in archive order."""
+    if repo_root is None:
+        return
+    for record in _ack_state_records_in_archive_order(repo_root):
+        if record.key:
+            yield record.key
+
+
+def iter_ack_state_segments(repo_root: str | Path | None) -> Iterator[AckSegment]:
+    """Yield ACK segments from durable ACK state when ACK content was recorded."""
+    if repo_root is None:
+        return
+    for record in _ack_state_records_in_archive_order(repo_root):
+        if record.key:
+            yield AckSegment(keys=(record.key,), content=record.ack_content)
+
+
+def _ack_state_is_authoritative(
+    repo_root: str | Path | None,
+    start_ts: str | None,
+    end_ts: str | None,
+    turn_ids: Iterable[str] | None,
+) -> bool:
+    return repo_root is not None and not (start_ts or end_ts or turn_ids)
+
+
+def _ack_state_records_in_archive_order(repo_root: str | Path):
+    return sorted(
+        ack_state_records(repo_root),
+        key=lambda record: (record.archived_at, record.key),
+    )
 
 
 def iter_assistant_message_texts(
@@ -618,12 +686,17 @@ def collect_unique_ack_keys(
     start_ts: str | None = None,
     end_ts: str | None = None,
     turn_ids: Iterable[str] | None = None,
+    repo_root: str | Path | None = None,
 ) -> list[str]:
     """Return ACK'd keys in source order, each one at most once."""
     seen: set[str] = set()
     ordered: list[str] = []
     for key in iter_assistant_ack_keys(
-        files, start_ts=start_ts, end_ts=end_ts, turn_ids=turn_ids
+        files,
+        start_ts=start_ts,
+        end_ts=end_ts,
+        turn_ids=turn_ids,
+        repo_root=repo_root,
     ):
         if key in seen:
             continue
@@ -638,6 +711,7 @@ def collect_ack_segments(
     start_ts: str | None = None,
     end_ts: str | None = None,
     turn_ids: Iterable[str] | None = None,
+    repo_root: str | Path | None = None,
 ) -> list[AckSegment]:
     """Return every ACK segment across `files` in source order.
 
@@ -647,7 +721,11 @@ def collect_ack_segments(
     """
     return list(
         iter_assistant_ack_segments(
-            files, start_ts=start_ts, end_ts=end_ts, turn_ids=turn_ids
+            files,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            turn_ids=turn_ids,
+            repo_root=repo_root,
         )
     )
 
