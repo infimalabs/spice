@@ -421,7 +421,27 @@ function upsertKnownMessage(lane, item, position) {
   return true;
 }
 
+function compareKnownMessagesNewestFirst(a, b) {
+  // Mirror the server's _message_sort_key (epoch, index, key), newest first.
+  // upsert appends new keys at the front, so a full-window payload (which is
+  // the only place task cards appear) would otherwise drop an older task card
+  // ahead of newer transcript messages already cached from live appends.
+  const aEpoch = Date.parse(a.timestamp || "");
+  const bEpoch = Date.parse(b.timestamp || "");
+  const aTime = Number.isFinite(aEpoch) ? aEpoch : 0;
+  const bTime = Number.isFinite(bEpoch) ? bEpoch : 0;
+  if (aTime !== bTime) return bTime - aTime;
+  const aIndex = Number(a.index) || 0;
+  const bIndex = Number(b.index) || 0;
+  if (aIndex !== bIndex) return bIndex - aIndex;
+  const aKey = a.key || "";
+  const bKey = b.key || "";
+  if (aKey === bKey) return 0;
+  return aKey < bKey ? 1 : -1;
+}
+
 function trimKnownMessages(lane) {
+  lane.knownMessages.sort(compareKnownMessagesNewestFirst);
   const visible = [];
   let latestPresence = null;
   for (const item of lane.knownMessages) {
