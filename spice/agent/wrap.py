@@ -221,8 +221,6 @@ def rtk_rewrite_trailing_exec_shell_command(command_text: str) -> str | None:
 def codex_snapshot_normalized_prefix(prefix: str) -> str:
     if CODEX_SHELL_SNAPSHOT_MARKER not in prefix:
         return prefix
-    if f"unset {SHELL_HOOK_REEXEC_STAGE_ENV}" in prefix:
-        return prefix
     static_hook_dir = packaged_shell_steering_static_hook_dir()
     normalized = prefix if prefix.endswith("\n") else f"{prefix}\n"
     return (
