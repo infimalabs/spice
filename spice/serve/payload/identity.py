@@ -96,7 +96,13 @@ def team_actor_for_target(
 def team_facts_for_target(
     store: ServeTeamStore, target: WorktreeTarget, thread_id: str | None
 ) -> dict[str, Any]:
-    return team_facts_for_actor(store, team_actor_for_target(store, target, thread_id))
+    # Read-only: this feeds display/poll paths (inventory, messages, the lane
+    # watch signature), which run constantly. Resolving via the read-only
+    # `target_bound_actor` avoids `team_actor_for_target`'s placeholder-promotion
+    # write — that write churned the watched team DB on every signature poll,
+    # contending with real work and forcing the lane watcher to reopen its
+    # kqueue each push. Promotion still happens on the active send path.
+    return team_facts_for_actor(store, target_bound_actor(target, thread_id))
 
 
 def target_bound_actor(target: WorktreeTarget, thread_id: str | None) -> str:
