@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -526,6 +527,59 @@ def test_static_stream_uses_message_payload_merge_shape():
         "}\n"
         "\n"
     )
+
+
+_KNOWN_MESSAGE_ORDER_SCRIPT = """
+const fs = require("fs");
+const vm = require("vm");
+const ctx = { console, Date, Set, Map, Number, Math, JSON, Boolean, String, Array, Object };
+ctx.window = ctx;
+ctx.document = { querySelectorAll: () => [] };
+ctx.payloadHasField = () => false;
+ctx.targetIdentityThreadId = () => "";
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), ctx);
+const lane = {
+  knownMessages: [],
+  knownMessageKeys: new Set(),
+  retainedMessageLimit: 200,
+  activeThreadId: "t",
+  occupants: new Map(),
+  recentSentAckKeys: new Set(),
+  ackContextByKey: new Map(),
+  missingAckContextKeys: new Set(),
+};
+const tmsg = (t, i) => ({ key: t + "#" + i, timestamp: t, index: i, kind: "assistant" });
+// Live appends populate the cache transcript-only, newest first.
+ctx.mergePayloadMessages(lane, { messages: [
+  tmsg("2026-06-22T15:36:00.000Z", 50),
+  tmsg("2026-06-22T15:30:00.000Z", 40),
+  tmsg("2026-06-22T15:20:00.000Z", 30),
+] });
+// A full-window payload (the only place task cards appear) folds an older task
+// card back in; it must land by timestamp, not jump to the newest slot.
+ctx.mergePayloadMessages(lane, { messages: [
+  tmsg("2026-06-22T15:36:00.000Z", 50),
+  { key: "2026-06-22T15:29:00.000Z#task-card:RTK", timestamp: "2026-06-22T15:29:00.000Z", index: 0, kind: "task-card" },
+  tmsg("2026-06-22T15:30:00.000Z", 40),
+] });
+process.stdout.write(JSON.stringify(lane.knownMessages.map((m) => m.timestamp)));
+"""
+
+
+def test_stream_merge_keeps_known_messages_newest_first_with_task_cards():
+    result = subprocess.run(
+        ["node", "-e", _KNOWN_MESSAGE_ORDER_SCRIPT, str(STATIC_ROOT / "app.stream.js")],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads(result.stdout) == [
+        "2026-06-22T15:36:00.000Z",
+        "2026-06-22T15:30:00.000Z",
+        "2026-06-22T15:29:00.000Z",
+        "2026-06-22T15:20:00.000Z",
+    ]
 
 
 def test_static_stream_renders_message_badge_dom():
