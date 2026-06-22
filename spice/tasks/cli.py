@@ -591,6 +591,11 @@ _DISPATCH = {
 }
 
 
+# Work-driving packets carry the occasional rtk-feeding nudge (emitted only
+# when rtk's own gain shows poor compaction); other actions stay quiet.
+_RTK_NUDGE_ACTIONS = frozenset({"next", "claim"})
+
+
 def _canonicalize_cli_task_handles(args: argparse.Namespace) -> list[str]:
     notices: list[str] = []
     raw_handle = getattr(args, "handle", None)
@@ -626,6 +631,10 @@ def handle(args: argparse.Namespace) -> int:
     for notice in _canonicalize_cli_task_handles(args):
         print(notice)
     print(func(args))
+    if action in _RTK_NUDGE_ACTIONS:
+        nudge = ops.rtk_usage_nudge()
+        if nudge:
+            print(nudge)
     return 0
 
 
