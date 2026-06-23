@@ -70,6 +70,17 @@ def activation_command_surface_lines() -> list[str]:
             "$(...) subshells that rtk cannot rewrite, and let rtk compact full "
             "output instead of pre-tersing with --oneline/-s/--stat/|head/|tail"
         ),
+        (
+            "interaction_contract=spice is a live shell loop, not a batch job: "
+            "operator steering reaches you only on shell-command stderr, so "
+            "interact roughly every 30-60s. Emit small narrated steps "
+            "continuously -- a short status line plus a real action -- instead "
+            "of front-loading a long silent investigation and one big message. "
+            "Run a command, say what you saw, take the next step; do not stop to "
+            "ask permission when you can act and let live steering correct you. "
+            "Sparse shell interaction means you miss messages and wake cold. "
+            "Favor latency and experimentation over nailing it in one shot"
+        ),
         "session=spice session briefing",
         "task_status=spice task status",
         "task_next=spice task next",
