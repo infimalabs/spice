@@ -8,15 +8,15 @@ config):
 * ``GIT_CONFIG_SYSTEM`` points git at a generated per-lane file holding
   ``branch.<lane>.merge = refs/heads/<lane>``. System config is read *first*, and
   ``@{upstream}`` uses the *first* ``branch.merge`` value, so the agent's upstream
-  resolves to itself. (The native ``merge`` stays last, so ``git config --get``
-  still returns the real branch — the control plane reads truth.)
-* a command-scope ``branch.<lane>.remote=.`` pair (read *last*, where ``remote``
-  is resolved) completes the self-reference.
+  resolves to itself.
+* command-scope pairs (read *last*) carry ``branch.<lane>.remote=.`` for the
+  self-reference and, when resolvable, the true ``branch.<lane>.merge`` value
+  that ``git config --get`` should report.
 
 The operator runs without these vars and sees the real upstream untouched. The
 task control plane reads the integration branch with ``git config --get`` (see
-``spice.tasks.gitsync``), which returns the native worktree value despite the
-system-scope self merge, so it needs no scrubbing.
+``spice.tasks.gitsync``), which returns the final command-scope true merge while
+``@{upstream}`` still uses the first system-scope self merge.
 """
 
 from __future__ import annotations
@@ -39,6 +39,9 @@ def shadow_environment(
     if config_path is None:
         return env
     env["GIT_CONFIG_SYSTEM"] = str(config_path)
+    true_merge = true_branch_merge(repo_root, branch, base_env=base_env)
+    if true_merge:
+        env = append_git_config_pair(env, f"branch.{branch}.merge", true_merge)
     return append_git_config_pair(env, f"branch.{branch}.remote", ".")
 
 
@@ -81,17 +84,44 @@ def append_git_config_pair(
     except ValueError:
         count = 0
     for index in range(count):
-        # Idempotent: re-applying to an env that already carries the shadow must
-        # not duplicate the command-scope remote pair.
-        if (
-            result.get(f"GIT_CONFIG_KEY_{index}") == key
-            and result.get(f"GIT_CONFIG_VALUE_{index}") == value
-        ):
+        # Idempotent/updating: re-applying to an env that already carries the
+        # shadow must not duplicate command-scope pairs, and a re-resolved true
+        # merge should replace the previous value for that key.
+        if result.get(f"GIT_CONFIG_KEY_{index}") == key:
+            result[f"GIT_CONFIG_VALUE_{index}"] = value
             return result
     result[f"GIT_CONFIG_KEY_{count}"] = key
     result[f"GIT_CONFIG_VALUE_{count}"] = value
     result["GIT_CONFIG_COUNT"] = str(count + 1)
     return result
+
+
+def true_branch_merge(
+    repo_root: Path, branch: str, *, base_env: Mapping[str, str] | None = None
+) -> str:
+    native_env = native_git_env(base_env)
+    configured = _git_read(
+        repo_root, "config", "--get", f"branch.{branch}.merge", env=native_env
+    )
+    if configured:
+        return configured
+    head_ref = _git_read(
+        repo_root, "symbolic-ref", "refs/remotes/origin/HEAD", env=native_env
+    )
+    prefix = "refs/remotes/origin/"
+    if not head_ref.startswith(prefix):
+        return ""
+    return f"refs/heads/{head_ref[len(prefix) :]}"
+
+
+def native_git_env(base_env: Mapping[str, str] | None = None) -> dict[str, str]:
+    env = dict(os.environ if base_env is None else base_env)
+    env.pop("GIT_CONFIG_SYSTEM", None)
+    env.pop("GIT_CONFIG_COUNT", None)
+    for name in list(env):
+        if name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+            env.pop(name, None)
+    return env
 
 
 def ensure_origin_head(repo_root: Path | None) -> None:
@@ -130,6 +160,11 @@ def current_git_branch(repo_root: Path | None) -> str:
     if repo_root is None:
         return ""
     completed = _git(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    return completed.stdout.strip() if completed.returncode == 0 else ""
+
+
+def _git_read(repo_root: Path, *args: str, env: Mapping[str, str] | None = None) -> str:
+    completed = _git(repo_root, *args, env=env)
     return completed.stdout.strip() if completed.returncode == 0 else ""
 
 
