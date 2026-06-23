@@ -257,6 +257,7 @@ def test_static_metrics_pane_preserves_controls_and_top_chart():
     metrics_grid_rule = _between(css, ".lane-metrics-grid {", "}")
     chart_rule = _between(css, ".lane-metric-series-chart {", "}")
     svg_rule = _between(css, ".lane-metric-series-svg {", "}")
+    line_rule = _between(css, ".lane-metric-series-line {", "}")
 
     assert "display: flex;" in metrics_panel_rule
     assert "flex-direction: column;" in metrics_panel_rule
@@ -270,7 +271,10 @@ def test_static_metrics_pane_preserves_controls_and_top_chart():
     assert "display: flex;" in chart_rule
     assert "height: 100%;" in svg_rule
     assert "min-height: 0;" in svg_rule
+    assert "stroke-width: 1.1;" in line_rule
+    assert "vector-effect: non-scaling-stroke;" in line_rule
     assert 'svg.setAttribute("preserveAspectRatio", "none");' in app_panes
+    assert 'dot.setAttribute("r", "0.65");' in app_panes
     _assert_contains_all(
         app_panes,
         (
