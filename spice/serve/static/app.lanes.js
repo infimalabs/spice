@@ -91,7 +91,41 @@ function targetPayloadShim(target) {
 }
 
 function applyTaskFilterInventory(inventory) {
+  if (!taskFilterInventoryIsFresh(inventory || {})) return false;
+  taskFilterInventoryRevision = taskFilterInventoryRevisionValue(inventory || {});
   taskFilterStemPills = taskFilterStemPillsFromInventory(inventory || {});
+  return true;
+}
+
+function taskFilterInventoryIsFresh(inventory) {
+  const incomingRevision = taskFilterInventoryRevisionValue(inventory);
+  if (!incomingRevision) return !taskFilterInventoryRevision;
+  if (!taskFilterInventoryRevision) return true;
+  return compareNonnegativeIntegerStrings(
+    incomingRevision,
+    taskFilterInventoryRevision,
+  ) >= 0;
+}
+
+function taskFilterInventoryRevisionValue(inventory) {
+  return String((inventory || {}).revision || "");
+}
+
+function compareNonnegativeIntegerStrings(left, right) {
+  const lhs = normalizedNonnegativeIntegerString(left);
+  const rhs = normalizedNonnegativeIntegerString(right);
+  if (!lhs && !rhs) return 0;
+  if (!lhs) return -1;
+  if (!rhs) return 1;
+  if (lhs.length !== rhs.length) return lhs.length < rhs.length ? -1 : 1;
+  if (lhs === rhs) return 0;
+  return lhs < rhs ? -1 : 1;
+}
+
+function normalizedNonnegativeIntegerString(value) {
+  const text = String(value || "");
+  if (!/^\d+$/.test(text)) return "";
+  return text.replace(/^0+(?=\d)/, "");
 }
 
 function lanePayloadWithTargetPending(lane, target) {

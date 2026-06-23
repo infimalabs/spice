@@ -99,11 +99,14 @@ def test_live_lane_payload_refreshes_global_task_filter_inventory():
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
 
     assert "function applyTaskFilterInventory(inventory)" in app_lanes
+    assert "function taskFilterInventoryIsFresh(inventory)" in app_lanes
     assert "applyTaskFilterInventory(payload.taskFilterInventory || {});" in app_lanes
     assert (
-        "if (payload.taskFilterInventory) {\n"
+        "if (\n"
+        "    payload.taskFilterInventory &&\n"
+        "    applyTaskFilterInventory(payload.taskFilterInventory)\n"
+        "  ) {\n"
         "    lane.taskFilterInventory = payload.taskFilterInventory;\n"
-        "    applyTaskFilterInventory(payload.taskFilterInventory);\n"
         "  }" in app_render
     )
 

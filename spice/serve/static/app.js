@@ -73,6 +73,7 @@ let targetsLoaded = false;
 let targetsLoading = false;
 let targetsLoadPromise = null;
 let taskFilterStemPills = [];
+let taskFilterInventoryRevision = "";
 let renderedFilterPillsFingerprint = "";
 let spiceMenuEl = null;
 let spiceMenuPositionHandler = null;

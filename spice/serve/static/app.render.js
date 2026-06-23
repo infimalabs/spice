@@ -33,9 +33,11 @@ function renderLaneChrome(lane, payload) {
       lane.laneFilterVersion = String(payload.laneFilterVersion || "");
     applyLaneTeamIdentity(lane, payload);
   }
-  if (payload.taskFilterInventory) {
+  if (
+    payload.taskFilterInventory &&
+    applyTaskFilterInventory(payload.taskFilterInventory)
+  ) {
     lane.taskFilterInventory = payload.taskFilterInventory;
-    applyTaskFilterInventory(payload.taskFilterInventory);
   }
   if (payload.privateTaskCount !== undefined)
     lane.privateTaskCount = Math.max(0, Number(payload.privateTaskCount) || 0);

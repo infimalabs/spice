@@ -105,6 +105,30 @@ def _serve_state(tmp_path: Path, target: WorktreeTarget) -> ServeState:
     return state
 
 
+def test_task_filter_inventory_carries_task_event_revision(tmp_path, monkeypatch):
+    from spice.tasks import tw
+
+    event_path = tmp_path / "events"
+    event_path.write_text("123456789 unit\n", encoding="utf-8")
+    calls: list[str] = []
+
+    def ensure_event_file() -> Path:
+        calls.append("revision")
+        return event_path
+
+    def export_tasks(_args):
+        calls.append("export")
+        return []
+
+    monkeypatch.setattr(lane.task_config, "ensure_task_event_file", ensure_event_file)
+    monkeypatch.setattr(tw, "export", export_tasks)
+
+    inventory_payload = lane.task_filter_inventory()
+
+    assert inventory_payload["revision"] == "123456789"
+    assert calls == ["revision", "export"]
+
+
 def _record_identity(
     state: ServeState,
     target: WorktreeTarget,
