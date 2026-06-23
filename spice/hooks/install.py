@@ -52,7 +52,7 @@ def install_hooks_for_repo(repo_root: Path) -> list[str]:
         rows.append(f"hook {name} -> {path.relative_to(repo_root).as_posix()}")
     relative_hooks = directory.relative_to(repo_root).as_posix()
     if git_worktree_config_get(repo_root, "core.hooksPath") != relative_hooks:
-        _enable_worktree_config(repo_root)
+        enable_worktree_config(repo_root)
         git_worktree_config_set(repo_root, "core.hooksPath", relative_hooks)
     rows.append(f"core.hooksPath={relative_hooks}")
     if materialize_state_gitignore(repo_root):
@@ -81,20 +81,39 @@ def materialize_state_gitignore(repo_root: Path) -> bool:
     return True
 
 
-def _enable_worktree_config(repo_root: Path) -> None:
+def enable_worktree_config(repo_root: Path) -> None:
     # `git config --worktree` requires extensions.worktreeConfig in multi-
     # worktree repos; setting it in the common config is idempotent. The
     # worktree-local non-bare override keeps linked checkouts usable when their
     # common git dir is intentionally bare.
+    _run_git_config(
+        repo_root,
+        ["config", "extensions.worktreeConfig", "true"],
+        "enable worktree-local git config",
+    )
+    _run_git_config(
+        repo_root,
+        ["config", "--worktree", "core.bare", "false"],
+        "mark this linked worktree non-bare",
+    )
+
+
+def _run_git_config(repo_root: Path, args: list[str], action: str) -> None:
     import subprocess
 
-    subprocess.run(
-        ["git", "-C", str(repo_root), "config", "extensions.worktreeConfig", "true"],
+    from spice.errors import SpiceError
+
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), *args],
+        capture_output=True,
         check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        text=True,
     )
-    git_worktree_config_set(repo_root, "core.bare", "false")
+    if result.returncode == 0:
+        return
+    detail = (result.stderr or result.stdout).strip()
+    suffix = f": {detail}" if detail else ""
+    raise SpiceError(f"could not {action} for {repo_root}{suffix}")
 
 
 def init_repo(repo_root: Path) -> list[str]:

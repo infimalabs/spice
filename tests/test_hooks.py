@@ -498,6 +498,27 @@ def test_init_repo_keeps_bare_common_linked_worktree_non_bare(tmp_path):
     assert status.returncode == 0
 
 
+def test_init_cli_bootstraps_bare_common_linked_worktree_before_repo_detection(
+    tmp_path,
+):
+    seed = _git_init(tmp_path / "seed")
+    _commit(seed, "README.md", "seed\n", "seed")
+    source = tmp_path / "source.git"
+    _run(["git", "clone", "--bare", str(seed), str(source)])
+    lane = tmp_path / "lane"
+    _git(source, "worktree", "add", str(lane), "main")
+
+    result = _run([sys.executable, "-m", "spice", "init"], cwd=lane)
+
+    assert result.returncode == 0
+    assert "core.hooksPath=.spice/hooks" in result.stdout
+    assert _git(lane, "config", "--worktree", "--get", "core.bare").stdout.strip() == (
+        "false"
+    )
+    assert _git(lane, "rev-parse", "--show-toplevel").stdout.strip() == str(lane)
+    assert _git(lane, "rev-parse", "--is-inside-work-tree").stdout.strip() == "true"
+
+
 def test_install_hooks_writes_ambient_spice_shims_for_spice_checkout(tmp_path):
     repo = _git_init(tmp_path / "repo")
     _write_spice_product_shape(repo)
@@ -893,7 +914,9 @@ def _git(
     return _run(["git", "-C", str(repo), *args], check=check)
 
 
-def _run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+def _run(
+    args: list[str], *, check: bool = True, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(
         entry for entry in (str(PROJECT_ROOT), env.get("PYTHONPATH", "")) if entry
@@ -902,6 +925,7 @@ def _run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[
         args,
         capture_output=True,
         check=False,
+        cwd=cwd,
         env=env,
         text=True,
     )
