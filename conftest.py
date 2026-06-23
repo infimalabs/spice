@@ -10,3 +10,10 @@ behavior is exercised through explicit ``select_driver("claude")`` calls.
 import os
 
 os.environ["SPICE_AGENT_DRIVER"] = "codex"  # env-policy: allow
+
+# The suite runs inside an agent shell that injects a git shadow
+# (GIT_CONFIG_SYSTEM + GIT_CONFIG_KEY/VALUE/COUNT pairs, and possibly GIT_DIR).
+# Scrub every GIT_* var so tests build and read their own repos hermetically and
+# never inherit a lane's self-tracking shadow.
+for _name in [_n for _n in os.environ if _n.startswith("GIT_")]:  # env-policy: allow
+    del os.environ[_name]
