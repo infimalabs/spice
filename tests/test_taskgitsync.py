@@ -571,6 +571,46 @@ def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
     assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
 
 
+def test_branch_upstream_target_reads_branch_merge_under_shadow_env(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "agent"
+    repo.mkdir()
+    _run(repo, "git", "init", "-b", "lane")
+    _configure_git_identity(repo)
+    _run(repo, "git", "remote", "add", "origin", str(tmp_path / "remote.git"))
+    _run(repo, "git", "config", "branch.lane.remote", "origin")
+    _run(repo, "git", "config", "branch.lane.merge", "refs/heads/trunk")
+
+    shadow_config = tmp_path / "system-shadow.gitconfig"
+    shadow_config.write_text(
+        '[branch "lane"]\n\tmerge = refs/heads/lane\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(shadow_config))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "branch.lane.remote")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", ".")
+
+    assert gitsync.branch_upstream_target(repo) == ("origin", "origin/trunk")
+
+
+def test_branch_upstream_target_uses_origin_head_only_as_backstop(tmp_path):
+    repo = tmp_path / "agent"
+    repo.mkdir()
+    _run(repo, "git", "init", "-b", "lane")
+    _configure_git_identity(repo)
+    _run(repo, "git", "remote", "add", "origin", str(tmp_path / "remote.git"))
+    _run(
+        repo,
+        "git",
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/dev",
+    )
+
+    assert gitsync.branch_upstream_target(repo) == ("origin", "origin/dev")
+
+
 def _init_repo(path: Path) -> Path:
     path.mkdir()
     _run(path, "git", "init", "-b", "main")

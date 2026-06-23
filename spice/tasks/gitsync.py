@@ -108,23 +108,35 @@ def _resolve_target(repo_root: Path) -> tuple[str, str] | None:
 
 
 def branch_upstream_target(repo_root: Path) -> tuple[str, str] | None:
-    # Lanes self-track (branch.<lane>.merge points at themselves), so branch
-    # config no longer names the integration upstream. The single source of
-    # truth is origin's default branch, recorded in the origin/HEAD symref and
-    # set at agent setup. With no origin remote the tree is local-only and the
-    # caller degrades to a safe no-op; an origin without origin/HEAD is a setup
-    # error that fails loud rather than guessing a default.
-    remote = "origin"
-    if _run(repo_root, "remote", "get-url", remote).returncode != 0:
+    # The lane's own tracking (branch.<lane>.merge) is the single source of
+    # truth — and it stays readable under the agent shadow: the shadow's
+    # self-merge lives in *system* scope, so `git config --get` returns the
+    # native *worktree* value (the real upstream branch). The remote is `origin`
+    # by convention (branch.<lane>.remote is poisoned to `.` by the shadow's
+    # command-scope pair, so it cannot be trusted). origin/HEAD is only a
+    # backstop when the lane has no tracking configured.
+    if _run(repo_root, "remote", "get-url", "origin").returncode != 0:
         return None
+    branch = _read(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    prefix = "refs/heads/"
+    merge = (
+        _read(repo_root, "config", "--get", f"branch.{branch}.merge") if branch else ""
+    )
+    if merge.startswith(prefix):
+        return "origin", f"origin/{merge[len(prefix) :]}"
+    return _origin_head_backstop_target(repo_root)
+
+
+def _origin_head_backstop_target(repo_root: Path) -> tuple[str, str]:
     head_ref = _read(repo_root, "symbolic-ref", "refs/remotes/origin/HEAD")
     prefix = "refs/remotes/"
     if not head_ref.startswith(prefix):
         raise SpiceError(
-            "origin/HEAD is unset; run `git remote set-head origin --auto` so "
-            "the task baseline can resolve origin's default branch"
+            "the lane has no branch.<lane>.merge and origin/HEAD is unset; run "
+            "`git remote set-head origin --auto` or configure branch tracking so "
+            "the task baseline can resolve the integration branch"
         )
-    return remote, head_ref[len(prefix) :]
+    return "origin", head_ref[len(prefix) :]
 
 
 def _is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:

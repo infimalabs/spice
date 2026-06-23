@@ -14,9 +14,9 @@ config):
   is resolved) completes the self-reference.
 
 The operator runs without these vars and sees the real upstream untouched. The
-task control plane reads the integration baseline from ``origin/HEAD`` (see
-``spice.tasks.gitsync``), which is independent of branch config, so it needs no
-scrubbing.
+task control plane reads the integration branch with ``git config --get`` (see
+``spice.tasks.gitsync``), which returns the native worktree value despite the
+system-scope self merge, so it needs no scrubbing.
 """
 
 from __future__ import annotations
@@ -81,8 +81,8 @@ def append_git_config_pair(
     except ValueError:
         count = 0
     for index in range(count):
-        # Idempotent: re-injecting the same pair (lifecycle env, then the wrap
-        # re-apply on a child env that already carries it) must not duplicate.
+        # Idempotent: re-applying to an env that already carries the shadow must
+        # not duplicate the command-scope remote pair.
         if (
             result.get(f"GIT_CONFIG_KEY_{index}") == key
             and result.get(f"GIT_CONFIG_VALUE_{index}") == value
@@ -95,7 +95,7 @@ def append_git_config_pair(
 
 
 def ensure_origin_head(repo_root: Path | None) -> None:
-    """Ensure ``origin/HEAD`` names origin's default branch (the sync baseline).
+    """Ensure ``origin/HEAD`` names origin's default branch (the baseline fallback).
 
     Set it only when an origin remote exists and the symref is missing, so a
     deliberately repointed ``origin/HEAD`` is left untouched.
