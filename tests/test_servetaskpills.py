@@ -49,11 +49,10 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
 
     assert "model.drainability.boundaryDissolved" in app_lanes
     assert 'classes.push("filter-pill--implicit");' in app_lanes
-    assert "background: color-mix(in srgb, var(--good) 8%, transparent);" in (
-        implicit_rule
+    assert (
+        implicit_rule == ".filter-pill--implicit {\n"
+        "  background: color-mix(in srgb, var(--good) 8%, transparent);\n"
     )
-    assert "border" not in implicit_rule
-    assert "box-shadow" not in implicit_rule
     assert "border-color: var(--good);" in drainable_rule
 
 
