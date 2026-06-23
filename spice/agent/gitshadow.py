@@ -101,20 +101,16 @@ def ensure_origin_head(repo_root: Path | None) -> None:
 
 
 def real_system_config_path(repo_root: Path) -> str | None:
-    # Ask git for the system config's own path with our override removed, so we
-    # chain the genuine file. Empty system config reveals no path -> nothing to
-    # preserve.
+    # `git config --system --edit` invokes $GIT_EDITOR on the system config
+    # file, so a no-op editor (echo) prints git's compile-time system path even
+    # when that file is empty or absent — and does not modify it. Query with our
+    # GIT_CONFIG_SYSTEM override removed so we get git's genuine default.
     env = {k: v for k, v in os.environ.items() if k != "GIT_CONFIG_SYSTEM"}
-    completed = _git(
-        repo_root, "config", "--system", "--show-origin", "--list", env=env
-    )
+    env["GIT_EDITOR"] = "echo"
+    completed = _git(repo_root, "config", "--system", "--edit", env=env)
     if completed.returncode != 0:
         return None
-    for line in completed.stdout.splitlines():
-        if line.startswith("file:"):
-            path = line[len("file:") :].split("\t", 1)[0]
-            return path or None
-    return None
+    return completed.stdout.strip() or None
 
 
 def quote_git_config_subsection(value: str) -> str:
