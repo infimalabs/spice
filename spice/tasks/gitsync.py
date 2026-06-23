@@ -12,10 +12,11 @@ places, both owned by the task control plane:
   conflict is the one and only thing surfaced to the agent — framed as an
   overlap with the baseline, never as a sync with an upstream.
 
-The default baseline is the current branch's real upstream (for example
-``origin/main``). When no remote exists (local-only trees, or test harnesses)
-every operation degrades to a safe no-op that still records the local HEAD,
-so the captured review record holds without a remote.
+The default baseline is the current branch's user-managed merge target on the
+conventional ``origin`` remote, or ``origin/HEAD`` when no merge is configured.
+When no remote exists (local-only trees, or test harnesses) every operation
+degrades to a safe no-op that still records the local HEAD, so the captured
+review record holds without a remote.
 """
 
 from __future__ import annotations
@@ -93,8 +94,8 @@ def _resolve_target(repo_root: Path) -> tuple[str, str] | None:
     """Return ``(remote, baseline_ref)`` for this worktree's task baseline,
     or ``None`` when the configured remote is absent (local-only).
 
-    The current branch upstream is authoritative. Missing upstream in a
-    remote-backed worktree is a setup error.
+    The current branch's configured merge is authoritative. Missing merge
+    config falls back to ``origin/HEAD`` in remote-backed worktrees.
     """
     upstream = branch_upstream_target(repo_root)
     if upstream is not None:
@@ -102,16 +103,16 @@ def _resolve_target(repo_root: Path) -> tuple[str, str] | None:
     if not _read(repo_root, "remote"):
         return None
     raise SpiceError(
-        "cannot resolve task baseline: current branch has no upstream; "
-        "run `spice dev install-hooks` to configure branch tracking"
+        "cannot resolve task baseline: origin remote is unavailable; add an "
+        "origin remote, configure branch tracking, or use a local-only tree"
     )
 
 
 def branch_upstream_target(repo_root: Path) -> tuple[str, str] | None:
-    # The lane's own tracking (branch.<lane>.merge) is the single source of
+    # The lane's user-managed merge (branch.<lane>.merge) is the single source of
     # truth — and it stays readable under the agent shadow: the shadow's
     # self-merge lives in *system* scope, so `git config --get` returns the
-    # native *worktree* value (the real upstream branch). The remote is `origin`
+    # native value (worktree or common config). The remote is `origin`
     # by convention (branch.<lane>.remote is poisoned to `.` by the shadow's
     # command-scope pair, so it cannot be trusted). origin/HEAD is only a
     # backstop when the lane has no tracking configured.

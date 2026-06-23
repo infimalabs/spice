@@ -1,9 +1,9 @@
 """The per-process git shadow environment, injected for agent processes only.
 
 An agent's branch should track *itself* so its ``git status`` never moves when
-origin advances — but the operator working in the same repo must still see the
-real upstream. So the shadow is environment-only (never written to shared
-config):
+origin advances — but the operator working in the same repo must still keep
+native branch config untouched. So the shadow is environment-only (never written
+to shared config):
 
 * ``GIT_CONFIG_SYSTEM`` points git at a generated per-lane file holding
   ``branch.<lane>.merge = refs/heads/<lane>``. System config is read *first*, and
@@ -13,7 +13,7 @@ config):
   self-reference and, when resolvable, the true ``branch.<lane>.merge`` value
   that ``git config --get`` should report.
 
-The operator runs without these vars and sees the real upstream untouched. The
+The operator runs without these vars and sees native Git config untouched. The
 task control plane reads the integration branch with ``git config --get`` (see
 ``spice.tasks.gitsync``), which returns the final command-scope true merge while
 ``@{upstream}`` still uses the first system-scope self merge.

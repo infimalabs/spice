@@ -5,7 +5,8 @@ Shell startup hooks reexec zsh/bash commands through
 
 * runs routed commands in the worktree env, which inherits the per-process git
   shadow the supervisor exports once (so the agent's git upstream reads as its
-  own branch); the control plane reads the real branch via `git config --get`;
+  own branch); the control plane reads the real integration branch via
+  `git config --get`;
 * connects to the supervisor side-channel socket (when one is live) and
   relays its payload to stderr;
 * injects pending inbox steering into stderr, re-displaying every 15s until ACK;
@@ -342,8 +343,8 @@ def build_agent_run_environment(
     # The git shadow is exported once by the supervisor (lifecycle.agent_env) and
     # inherited through worktree_env; the wrapper does not re-inject it per
     # command. git sees the shadow (upstream=self); the control plane reads the
-    # real branch via `git config --get` (the native worktree value wins over the
-    # system-scope shadow), so spice routes need no scrub.
+    # real integration branch via `git config --get`, where the command-scope
+    # true merge wins over the system-scope self merge.
     if (
         is_direct_git_route(args)
         or is_spice_route(args)

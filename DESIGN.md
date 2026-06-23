@@ -64,13 +64,14 @@ supervisor refuses to start with an ambient thread id set, and each agent's git
 runs in a per-process shadow (`GIT_CONFIG_SYSTEM` supplies
 `branch.X.merge=refs/heads/X` first + a command-scope `branch.X.remote=.`) so
 upstream noise never reaches them — while the operator's own shell, without that
-env, still sees the real upstream. Sync is not theirs to do; the control plane
-reads the real integration branch from `branch.X.merge` with `git config --get`
-(`origin/HEAD` is only the missing-merge backstop). The shadow is the *only*
-agent-process-only layer: shared per-worktree settings — `core.bare=false` (the
-checkout over a bare repo), `core.hooksPath` (the gate, which must bind the
-operator's commits too), and the real `branch.X` tracking — stay in
-`config.worktree` so every reader sees them.
+env, still sees native Git config untouched. Sync is not theirs to do; the
+control plane treats `origin` as the conventional remote and reads the real
+integration branch from user-managed `branch.X.merge` with `git config --get`,
+falling back to `origin/HEAD` only when that merge is unset. The shadow is the
+*only* agent-process-only layer: shared settings that Spice actually owns, such
+as `core.bare=false` (the checkout over a bare repo) and `core.hooksPath` (the
+gate, which must bind the operator's commits too), stay in shared Git config so
+every reader sees them.
 
 ### 3. The conscience (maxims)
 
