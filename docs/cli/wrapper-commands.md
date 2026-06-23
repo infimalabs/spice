@@ -58,7 +58,10 @@ list disables wrapper generation.
 
 The built-in `common` group is intentionally empty. RTK command coverage comes
 from the `rtk rewrite` handoff inside `spice agent run`, so RTK remains the
-single source of truth for which raw commands become `rtk ...` telemetry.
+single source of truth for which raw commands become `rtk ...` telemetry. Spice
+does not carry per-command semantic shims after the rewrite; if RTK maps a
+command shape to a non-equivalent `rtk ...` argv, the fix belongs in RTK's
+rewrite model.
 Repos that need exact shell-function control can override or extend groups:
 
 ```toml
