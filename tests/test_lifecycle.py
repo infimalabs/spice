@@ -988,6 +988,25 @@ def test_shadow_environment_masks_upstream_to_self(tmp_path):
     assert truth.stdout.strip() == "refs/heads/main"
 
 
+def test_shadow_environment_reinjection_is_idempotent(tmp_path):
+    repo = tmp_path / "lane"
+    subprocess.run(["git", "init", "-q", "-b", "main-d", str(repo)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "c0"],
+        check=True,
+    )
+
+    first = shadow_environment(repo, base_env={"PATH": os.environ["PATH"]})
+    # Re-applying on an env that already carries the shadow (lifecycle env, then
+    # the wrap per-command re-apply) must not append a duplicate remote pair.
+    second = shadow_environment(repo, base_env=first)
+
+    assert first["GIT_CONFIG_COUNT"] == "1"
+    assert second["GIT_CONFIG_COUNT"] == "1"
+    remote_keys = [v for k, v in second.items() if k.startswith("GIT_CONFIG_KEY_")]
+    assert remote_keys.count("branch.main-d.remote") == 1
+
+
 def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
     write_inbox_item(
         tmp_path,
