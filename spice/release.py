@@ -15,7 +15,6 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
-from spice.agent.gitshadow import scrub_agent_git_shadow_environment
 from spice.errors import SpiceError
 
 BUMP_CHOICES = ("minor", "patch")
@@ -204,7 +203,7 @@ def hermetic_wheel_env() -> dict[str, str]:
     # shadow the venv's site-packages and let the smoke pass against worktree
     # source even if the built wheel were broken. Strip both so the gate
     # validates the artifact it just installed.
-    env = release_environment()
+    env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     env.pop("VIRTUAL_ENV", None)
     return env
@@ -413,7 +412,7 @@ def publish_release(version: str, notes_file: Path | None = None) -> None:
     # Push the release commit (made on a synchronized lane) to origin/main by
     # ref, so the local branch name does not have to be `main`.
     run(["git", "push", "origin", "HEAD:main"])
-    env = release_environment()
+    env = dict(os.environ)
     env["UV_PUBLISH_TOKEN"] = token
     run(["uv", "publish", "--dry-run", str(sdist), str(wheel)], env=env)
     run(["uv", "publish", str(sdist), str(wheel)], env=env)
@@ -529,16 +528,8 @@ def run(
         check=True,
         text=True,
         capture_output=capture,
-        env=release_environment() if env is None else env,
+        env=env,
     )
-
-
-def release_environment() -> dict[str, str]:
-    # Release git ops must see the real upstream, not the agent git-shadow
-    # (branch.<name>.remote = . injected via GIT_CONFIG_KEY_n pairs) that makes
-    # `git status`/push compare against a stale local ref. Scrubbing the shadow
-    # pairs keeps the ahead-count, push, tag, and range queries on real origin.
-    return scrub_agent_git_shadow_environment(os.environ)
 
 
 if __name__ == "__main__":

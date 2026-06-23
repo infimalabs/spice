@@ -54,6 +54,7 @@ def remote_task_repo(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
     _run(repo, "git", "remote", "add", "origin", str(remote))
     _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
     backend = tmp_path / "task-backend"
     monkeypatch.chdir(repo)
     monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)

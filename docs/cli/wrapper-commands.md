@@ -6,7 +6,7 @@ Spice has two command-extension surfaces with different owners:
 
 - `spice agent run -- <cmd>` is the agent shell wrapper. It is how agent-run
   shell commands receive steering, keep-working guidance, RTK rewrite routing,
-  git-shadow routing, source checkout routing, and configured wrapper functions
+  source checkout routing, and configured wrapper functions
   before the requested command executes.
 - `[tool.spice.commands]` mounted commands are repository-owned command paths.
   They let a project expose its own tools under `spice <verb>` or

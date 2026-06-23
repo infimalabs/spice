@@ -33,7 +33,7 @@ from threading import Thread
 from typing import Any, Iterator, Sequence, cast
 
 from spice.agent.driver import driver_for
-from spice.agent.gitshadow import agent_git_shadow_environment
+from spice.agent.gitshadow import ensure_lane_self_tracking
 from spice.agent.identity import ambient_thread, ambient_thread_id, canonical_thread_id
 from spice.agent.paths import (
     agent_state_dir,
@@ -241,6 +241,7 @@ def ensure_agent(
                 prompt=prompt,
                 log_path=None,
             )
+        ensure_lane_self_tracking(resolved_root)
         log_path = start_agent(
             resolved_root,
             action=action,
@@ -849,9 +850,10 @@ def agent_environment(repo_root: Path | None = None) -> dict[str, str]:
             "agent ensure"
         )
     driver = driver_for(repo_root)
-    env = agent_git_shadow_environment(
-        repo_root, base_env=worktree_spice_environment(repo_root)
-    )
+    # Lane self-tracking lives in the worktree's own git config (written at
+    # agent setup), not in the environment — so no upstream masking is injected
+    # here.
+    env = worktree_spice_environment(repo_root)
     if repo_root is not None:
         env = apply_shell_steering_environment(
             repo_root,

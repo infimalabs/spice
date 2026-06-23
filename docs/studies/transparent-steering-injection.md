@@ -18,7 +18,7 @@ spice agent run -- <shell> -c "<original command>"
 ```
 
 That gives `spice agent run` ownership of stderr for steering injection,
-keep-working guidance, RTK rewrite routing, git-shadow routing,
+keep-working guidance, RTK rewrite routing,
 source-checkout routing, and wrapper setup before the requested command.
 `agent run` repoints `ZDOTDIR`/`BASH_ENV` at the packaged static hook dir for
 the shell command it runs, so that shell and its descendants do not reexec and

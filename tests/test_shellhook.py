@@ -21,33 +21,27 @@ SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
 
 
-def test_wrapper_gitshadow_route_uses_shadow_and_spice_route_scrubs(
-    tmp_path, monkeypatch
-):
-    shadow_calls: list[object] = []
-    scrub_calls: list[object] = []
+def test_wrapper_git_and_spice_routes_use_plain_worktree_env(tmp_path, monkeypatch):
+    # Lane self-tracking lives in the worktree git config, so the agent-run
+    # wrapper no longer injects or scrubs a git shadow; every routed command
+    # shares the same plain worktree environment.
     monkeypatch.setattr(
         wrap,
-        "agent_git_shadow_environment",
-        lambda repo_root, *, base_env=None: (
-            shadow_calls.append(repo_root)
-            or {
-                "route": "git",
-                "repo": str(repo_root),
-                "ZDOTDIR": "hook",
-                "BASH_ENV": "hook",
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        wrap,
-        "scrub_agent_git_shadow_environment",
-        lambda env: (
-            scrub_calls.append(env)
-            or {"route": "spice", "ZDOTDIR": "hook", "BASH_ENV": "hook"}
-        ),
+        "agent_run_child_worktree_environment",
+        lambda args, *, repo_root=None, base_env=None: {
+            "route": "worktree",
+            "repo": str(repo_root),
+            "ZDOTDIR": "hook",
+            "BASH_ENV": "hook",
+        },
     )
 
+    expected = {
+        "route": "worktree",
+        "repo": str(tmp_path),
+        "ZDOTDIR": "hook",
+        "BASH_ENV": "hook",
+    }
     git_env = wrap.build_agent_run_environment(["git", "status"], repo_root=tmp_path)
     spice_env = wrap.build_agent_run_environment(
         ["spice", "task", "status"], repo_root=tmp_path
@@ -56,16 +50,9 @@ def test_wrapper_gitshadow_route_uses_shadow_and_spice_route_scrubs(
         ["uv", "run", "spice", "task", "status"], repo_root=tmp_path
     )
 
-    assert git_env == {
-        "route": "git",
-        "repo": str(tmp_path),
-        "ZDOTDIR": "hook",
-        "BASH_ENV": "hook",
-    }
-    assert spice_env == {"route": "spice", "ZDOTDIR": "hook", "BASH_ENV": "hook"}
-    assert uv_spice_env == {"route": "spice", "ZDOTDIR": "hook", "BASH_ENV": "hook"}
-    assert shadow_calls == [tmp_path]
-    assert len(scrub_calls) == 2
+    assert git_env == expected
+    assert spice_env == expected
+    assert uv_spice_env == expected
 
 
 def test_wrapper_routes_worktree_spice_commands_through_python_module(
