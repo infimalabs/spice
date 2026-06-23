@@ -26,7 +26,7 @@ from spice.agent.driver import (
     playwright_mcp_args,
     write_playwright_mcp_config,
 )
-from spice.agent.selftracking import agent_self_tracking_environment
+from spice.agent.shadow import shadow_environment
 from spice.errors import SpiceError
 from spice.mail.inbox import compose_inbox_text, write_inbox_item
 from spice.sessions.meter import (
@@ -944,7 +944,7 @@ def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
     ]
 
 
-def test_agent_self_tracking_environment_masks_upstream_to_self(tmp_path):
+def test_shadow_environment_masks_upstream_to_self(tmp_path):
     repo = tmp_path / "lane"
     subprocess.run(["git", "init", "-q", "-b", "main-d", str(repo)], check=True)
     for key, value in (
@@ -960,7 +960,7 @@ def test_agent_self_tracking_environment_masks_upstream_to_self(tmp_path):
         check=True,
     )
 
-    env = agent_self_tracking_environment(repo, base_env={"PATH": os.environ["PATH"]})
+    env = shadow_environment(repo, base_env={"PATH": os.environ["PATH"]})
 
     # System config (read first) carries the self merge; remote=. is appended last.
     assert "GIT_CONFIG_SYSTEM" in env
