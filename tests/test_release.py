@@ -113,6 +113,42 @@ def test_release_notes_mode_writes_output_without_release_sync(tmp_path, monkeyp
     )
 
 
+def test_release_commit_for_tagged_version_uses_tagged_commit(monkeypatch):
+    def fake_git(*args):
+        if args == ("tag", "--list", "v0.9.0"):
+            return "v0.9.0"
+        if args == ("rev-list", "-n", "1", "v0.9.0"):
+            return "tagged-commit"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release, "git", fake_git)
+
+    assert release.release_commit_for_version("0.9.0") == "tagged-commit"
+
+
+def test_release_commit_for_current_unreleased_version_uses_head(monkeypatch):
+    def fake_git(*args):
+        if args == ("tag", "--list", "v0.9.0"):
+            return ""
+        if args == ("rev-parse", "HEAD"):
+            return "current-head"
+        if args == (
+            "log",
+            "--format=%H",
+            "--grep",
+            "^release: bump to 0.9.0$",
+            "-n",
+            "1",
+        ):
+            return "old-bump-commit"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release, "git", fake_git)
+    monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
+
+    assert release.release_commit_for_version("0.9.0") == "current-head"
+
+
 def test_hermetic_wheel_env_drops_source_shadowing_entries(monkeypatch):
     monkeypatch.setenv("PYTHONPATH", "/some/worktree")
     monkeypatch.setenv("VIRTUAL_ENV", "/some/venv")
