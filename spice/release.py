@@ -63,12 +63,23 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
     notes = actions.add_parser("notes", help="Generate edited release-note highlights.")
     notes.add_argument("version", nargs="?")
     notes.add_argument("--output", type=Path, help="Write notes to this path.")
+    notes.add_argument(
+        "--release-commit",
+        help="Commit-ish to use as the release notes target instead of the default.",
+    )
     notes.set_defaults(func=handle_release, release_mode="notes")
 
     publish = actions.add_parser(
         "publish", help="Validate the prepared version, then push and publish."
     )
     publish.add_argument("--notes-file", type=Path)
+    publish.add_argument(
+        "--release-commit",
+        help=(
+            "Explicit release commit; must resolve to HEAD because publish "
+            "builds artifacts from the current worktree."
+        ),
+    )
     publish.set_defaults(func=handle_release, release_mode="publish")
 
     github = actions.add_parser(
@@ -76,6 +87,10 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
     )
     github.add_argument("version", nargs="?")
     github.add_argument("--notes-file", type=Path)
+    github.add_argument(
+        "--release-commit",
+        help="Commit-ish to tag and use as the release notes target.",
+    )
     github.set_defaults(func=handle_release, release_mode="github")
     return parser
 
@@ -127,7 +142,9 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
 
     if mode == "notes":
         version = str(args.version or current_version())
-        release_commit = release_commit_for_version(version)
+        release_commit = release_commit_for_target(
+            version, getattr(args, "release_commit", None)
+        )
         output = release_notes_for_version(version, release_commit)
         notes_output = getattr(args, "output", None)
         if notes_output:
@@ -139,14 +156,25 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
 
     if mode == "publish":
         version = current_version()
+        release_commit = release_commit_for_target(
+            version, getattr(args, "release_commit", None)
+        )
+        ensure_publish_release_commit_is_head(release_commit)
         run_constitution_gate()
         run_artifact_gate(version)
-        publish_release(version, getattr(args, "notes_file", None))
+        publish_release(
+            version, getattr(args, "notes_file", None), release_commit=release_commit
+        )
         return 0
 
     if mode == "github":
         version = str(args.version or current_version())
-        publish_github_release(version, getattr(args, "notes_file", None))
+        release_commit = release_commit_for_target(
+            version, getattr(args, "release_commit", None)
+        )
+        publish_github_release(
+            version, getattr(args, "notes_file", None), release_commit=release_commit
+        )
         return 0
 
     raise SpiceError(f"unknown release action {mode!r}")
@@ -231,6 +259,25 @@ def release_commit_for_version(version: str) -> str:
         "log", "--format=%H", "--grep", f"^release: bump to {version}$", "-n", "1"
     )
     return commit or git("rev-parse", "HEAD")
+
+
+def release_commit_for_target(version: str, target: str | None) -> str:
+    if target is None:
+        return release_commit_for_version(version)
+    try:
+        return git("rev-parse", "--verify", f"{target}^{{commit}}")
+    except subprocess.CalledProcessError as exc:
+        raise SpiceError(f"release commit not found: {target}") from exc
+
+
+def ensure_publish_release_commit_is_head(release_commit: str) -> None:
+    head = git("rev-parse", "HEAD")
+    if release_commit != head:
+        raise SpiceError(
+            "--release-commit must resolve to HEAD for publish because publish "
+            "builds artifacts from the current worktree; use `spice release "
+            "github --release-commit ...` for tag or GitHub release repair"
+        )
 
 
 def previous_release_tag(current_tag: str) -> str:
@@ -410,7 +457,14 @@ def short_commit(commit: str) -> str:
     return git("rev-parse", "--short", commit)
 
 
-def publish_release(version: str, notes_file: Path | None = None) -> None:
+def publish_release(
+    version: str,
+    notes_file: Path | None = None,
+    *,
+    release_commit: str | None = None,
+) -> None:
+    release_commit = release_commit or release_commit_for_version(version)
+    ensure_publish_release_commit_is_head(release_commit)
     sdist = Path("dist") / f"spice_harness-{version}.tar.gz"
     wheel = Path("dist") / f"spice_harness-{version}-py3-none-any.whl"
     token = read_pypi_token()
@@ -423,13 +477,18 @@ def publish_release(version: str, notes_file: Path | None = None) -> None:
     run(["uv", "publish", "--dry-run", str(sdist), str(wheel)], env=env)
     run(["uv", "publish", str(sdist), str(wheel)], env=env)
     wait_for_pypi(version)
-    publish_github_release(version, notes_file)
+    publish_github_release(version, notes_file, release_commit=release_commit)
     run(["git", "status", "--short", "--branch"])
 
 
-def publish_github_release(version: str, notes_file: Path | None = None) -> None:
+def publish_github_release(
+    version: str,
+    notes_file: Path | None = None,
+    *,
+    release_commit: str | None = None,
+) -> None:
     tag = f"v{version}"
-    release_commit = release_commit_for_version(version)
+    release_commit = release_commit or release_commit_for_version(version)
     existing_tag = git("tag", "--list", tag)
     if existing_tag:
         tagged_commit = git("rev-list", "-n", "1", tag)

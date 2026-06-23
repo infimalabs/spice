@@ -324,6 +324,14 @@ first-parent commits in the exact previous-release-tag-to-release-commit range,
 grouped by landed task project metadata, rewritten into highlight-style bullets,
 and records that range in the package notes.
 
+When release history is unusual, pass `--release-commit <rev>` to choose the
+commit used for `spice release notes` or `spice release github`. Use it for
+tag repair, delayed publication, or a prepared version whose correct release
+target is not the default resolver. `spice release publish --release-commit`
+is intentionally stricter: the commit must resolve to `HEAD`, because publish
+builds and uploads artifacts from the current worktree before creating the
+GitHub release.
+
 Use a minor release when users can do something new or observe changed
 behavior: new commands or flags, new configuration, new `spice serve` or task
 workflow behavior, additions to the public library seam, changed output or
