@@ -22,9 +22,8 @@ SHELL_HOOK_FAILURE_EXIT_CODE = 127
 
 
 def test_wrapper_git_and_spice_routes_use_plain_worktree_env(tmp_path, monkeypatch):
-    # The git route runs in the shadow env and the spice route in the plain
-    # worktree env; with no lane branch in this tmp_path the shadow is a no-op,
-    # so both resolve to the worktree environment builder's output.
+    # The supervisor exports the git shadow once; the wrapper just inherits the
+    # worktree env for git and spice routes instead of re-injecting per command.
     monkeypatch.setattr(
         wrap,
         "agent_run_child_worktree_environment",

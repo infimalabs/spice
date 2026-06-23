@@ -65,7 +65,8 @@ runs in a per-process shadow (`GIT_CONFIG_SYSTEM` supplies
 `branch.X.merge=refs/heads/X` first + a command-scope `branch.X.remote=.`) so
 upstream noise never reaches them — while the operator's own shell, without that
 env, still sees the real upstream. Sync is not theirs to do; the control plane
-reads the real integration baseline from `origin/HEAD`. The shadow is the *only*
+reads the real integration branch from `branch.X.merge` with `git config --get`
+(`origin/HEAD` is only the missing-merge backstop). The shadow is the *only*
 agent-process-only layer: shared per-worktree settings — `core.bare=false` (the
 checkout over a bare repo), `core.hooksPath` (the gate, which must bind the
 operator's commits too), and the real `branch.X` tracking — stay in
@@ -270,9 +271,9 @@ The one idea above isn't arbitrary; four theses generate it.
 - ACK grammar: standalone token, key shape, fillers,
   separators, `Z`-dropped aliases, `::directive{}` scrubbing, segment
   splitting with preamble.
-- Wrapper: proxy routing (`proxy` verb passthrough), per-process git shadow
-  env for direct `git` and plain worktree env for nested harness calls,
-  side-channel hello
+- Wrapper: proxy routing (`proxy` verb passthrough), inherited worktree env for
+  direct `git` and nested harness calls (the supervisor exports the per-process
+  git shadow once), side-channel hello
   protocol, context-meter cache (15s) and warning repeat (15m, persisted),
   pressure levels green/<75/yellow/85/orange/90/red with keep-working
   instructions that forbid finish-before-rollover behavior.
