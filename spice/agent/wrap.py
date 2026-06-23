@@ -3,9 +3,9 @@
 Shell startup hooks reexec zsh/bash commands through
 `spice agent run -- <cmd…>`. The command surface:
 
-* runs direct `git` and nested `spice` invocations in the plain worktree
-  environment (lane self-tracking lives in the worktree's git config, so no
-  upstream masking is injected here);
+* gives direct `git` invocations the per-process lane self-tracking env (so the
+  agent's upstream is its own branch) and nested `spice` invocations the plain
+  worktree env (the control plane reads the real baseline from `origin/HEAD`);
 * connects to the supervisor side-channel socket (when one is live) and
   relays its payload to stderr;
 * injects pending inbox steering into stderr, re-displaying every 15s until ACK;
@@ -39,6 +39,7 @@ from spice.agent.sidechannelnotify import (
     consume_side_channel_notices,
     side_channel_marker_path as side_channel_marker_path,
 )
+from spice.agent.gitshadow import agent_self_tracking_environment
 from spice.agent.identity import ambient_thread_id
 from spice.agent.paths import agent_state_dir
 from spice.agent.shellhook import (
@@ -339,13 +340,10 @@ def build_agent_run_environment(
 ) -> dict[str, str] | None:
     args = normalize_agent_run_args(raw_args)
     worktree_env = agent_run_child_worktree_environment(args, repo_root=repo_root)
-    # Lane self-tracking lives in the worktree's git config, not the
-    # environment, so git and spice routes share the same plain worktree env.
-    if (
-        is_direct_git_route(args)
-        or is_spice_route(args)
-        or worktree_spice_source(repo_root) is not None
-    ):
+    if is_direct_git_route(args):
+        # Direct git sees the per-process lane self-tracking mask.
+        return agent_self_tracking_environment(repo_root, base_env=worktree_env)
+    if is_spice_route(args) or worktree_spice_source(repo_root) is not None:
         return worktree_env
     return None
 

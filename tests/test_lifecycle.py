@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 from threading import Thread
 from types import SimpleNamespace
 
@@ -25,7 +26,7 @@ from spice.agent.driver import (
     playwright_mcp_args,
     write_playwright_mcp_config,
 )
-from spice.agent.gitshadow import ensure_lane_self_tracking
+from spice.agent.gitshadow import agent_self_tracking_environment
 from spice.errors import SpiceError
 from spice.mail.inbox import compose_inbox_text, write_inbox_item
 from spice.sessions.meter import (
@@ -943,33 +944,48 @@ def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
     ]
 
 
-def test_ensure_lane_self_tracking_replaces_upstream_with_self(tmp_path):
+def test_agent_self_tracking_environment_masks_upstream_to_self(tmp_path):
     repo = tmp_path / "lane"
     subprocess.run(["git", "init", "-q", "-b", "main-d", str(repo)], check=True)
     for key, value in (
-        ("extensions.worktreeConfig", "true"),
         ("user.email", "t@t.t"),
         ("user.name", "t"),
-        # Pre-existing upstream tracking that must be replaced, not appended.
+        # Native tracking the operator (no env) sees: a real upstream.
         ("branch.main-d.remote", "origin"),
         ("branch.main-d.merge", "refs/heads/main"),
     ):
         subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "c0"],
+        check=True,
+    )
 
-    ensure_lane_self_tracking(repo)
+    env = agent_self_tracking_environment(repo, base_env={"PATH": os.environ["PATH"]})
 
-    merge = subprocess.run(
-        ["git", "-C", str(repo), "config", "--get-all", "branch.main-d.merge"],
+    # System config (read first) carries the self merge; remote=. is appended last.
+    assert "GIT_CONFIG_SYSTEM" in env
+    assert env[f"GIT_CONFIG_KEY_{int(env['GIT_CONFIG_COUNT']) - 1}"] == (
+        "branch.main-d.remote"
+    )
+    self_config = Path(env["GIT_CONFIG_SYSTEM"]).read_text(encoding="utf-8")
+    assert "merge = refs/heads/main-d" in self_config
+
+    # The agent (with env) resolves upstream to itself...
+    agent = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "main-d@{upstream}"],
         capture_output=True,
         text=True,
+        env={**os.environ, **env},
     )
-    remote = subprocess.run(
-        ["git", "-C", str(repo), "config", "--get-all", "branch.main-d.remote"],
+    assert agent.stdout.strip() == "main-d"
+    # ...while the operator (no env) still sees the native branch.merge as truth.
+    truth = subprocess.run(
+        ["git", "-C", str(repo), "config", "--get", "branch.main-d.merge"],
         capture_output=True,
         text=True,
+        env={**os.environ, **env},
     )
-    assert merge.stdout.split() == ["refs/heads/main-d"]
-    assert remote.stdout.split() == ["."]
+    assert truth.stdout.strip() == "refs/heads/main"
 
 
 def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
