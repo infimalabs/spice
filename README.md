@@ -306,9 +306,10 @@ so the formatted content lands in the commit.
 
 ## Release
 
-Releases are cut from a clean `main` worktree with this repository's mounted
-`spice release` command. Other repositories can mount their own release command
-without competing with a spice built-in.
+Releases are cut from a clean synchronized worktree with this repository's
+mounted `spice release` command. Lane branches are allowed; the release command
+pushes the prepared release commit to `origin/main`. Other repositories can
+mount their own release command without competing with a spice built-in.
 
 ```sh
 spice release prepare minor   # bump, validate, commit, stop before publish
