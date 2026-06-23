@@ -21,9 +21,16 @@ SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
 
 
-def test_wrapper_git_and_spice_routes_use_plain_worktree_env(tmp_path, monkeypatch):
+def test_wrapper_git_route_inherits_ambient_supervisor_environment(tmp_path):
+    env = wrap.build_agent_run_environment(["git", "status"], repo_root=tmp_path)
+    source = "ambient" if env is None else "explicit"
+
+    assert source == "ambient"
+
+
+def test_wrapper_spice_routes_use_plain_worktree_env(tmp_path, monkeypatch):
     # The supervisor exports the git shadow once; the wrapper just inherits the
-    # worktree env for git and spice routes instead of re-injecting per command.
+    # worktree env for spice routes instead of re-injecting per command.
     monkeypatch.setattr(
         wrap,
         "agent_run_child_worktree_environment",
@@ -41,7 +48,6 @@ def test_wrapper_git_and_spice_routes_use_plain_worktree_env(tmp_path, monkeypat
         "ZDOTDIR": "hook",
         "BASH_ENV": "hook",
     }
-    git_env = wrap.build_agent_run_environment(["git", "status"], repo_root=tmp_path)
     spice_env = wrap.build_agent_run_environment(
         ["spice", "task", "status"], repo_root=tmp_path
     )
@@ -49,7 +55,6 @@ def test_wrapper_git_and_spice_routes_use_plain_worktree_env(tmp_path, monkeypat
         ["uv", "run", "spice", "task", "status"], repo_root=tmp_path
     )
 
-    assert git_env == expected
     assert spice_env == expected
     assert uv_spice_env == expected
 

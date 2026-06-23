@@ -313,6 +313,64 @@ def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
     ]
 
 
+def test_agent_run_direct_git_inherits_ambient_shadow_environment(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", "shadow-system")
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    events: list[tuple[str, object, object | None]] = []
+    stderr = io.StringIO()
+    watch_thread = object()
+
+    class FakeProcess:
+        pid = 321
+
+        def wait(self) -> int:
+            events.append(("wait", None, None))
+            return 0
+
+    def fake_popen(command: list[str], env=None) -> FakeProcess:
+        source = "ambient" if env is None else "explicit"
+        shadow = (
+            os.environ["GIT_CONFIG_SYSTEM"]
+            if env is None
+            else env.get("GIT_CONFIG_SYSTEM")
+        )
+        events.append(("popen", command, (source, shadow)))
+        return FakeProcess()
+
+    def fake_watch(repo_root, *, parent_pid, stderr, initial_payload_already_rendered):
+        events.append(
+            (
+                "watch",
+                repo_root,
+                (parent_pid, stderr, initial_payload_already_rendered),
+            )
+        )
+        return watch_thread
+
+    def fake_join(thread):
+        events.append(("join", thread, None))
+
+    monkeypatch.setattr(wrap, "start_agent_side_channel_watch", fake_watch)
+    monkeypatch.setattr(wrap, "join_agent_side_channel_watch", fake_join)
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        ["git", "status"],
+        popen_factory=fake_popen,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0
+    assert events == [
+        ("popen", ["git", "status"], ("ambient", "shadow-system")),
+        ("watch", tmp_path, (321, stderr, True)),
+        ("wait", None, None),
+        ("join", watch_thread, None),
+    ]
+
+
 def test_shadow_environment_masks_upstream_to_self(tmp_path):
     repo = tmp_path / "lane"
     subprocess.run(["git", "init", "-q", "-b", "main-d", str(repo)], check=True)
