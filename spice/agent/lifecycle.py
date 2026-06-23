@@ -33,7 +33,7 @@ from threading import Thread
 from typing import Any, Iterator, Sequence, cast
 
 from spice.agent.driver import driver_for
-from spice.agent.gitshadow import (
+from spice.agent.selftracking import (
     agent_self_tracking_environment,
     ensure_origin_head,
 )

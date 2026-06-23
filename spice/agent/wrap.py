@@ -39,7 +39,7 @@ from spice.agent.sidechannelnotify import (
     consume_side_channel_notices,
     side_channel_marker_path as side_channel_marker_path,
 )
-from spice.agent.gitshadow import agent_self_tracking_environment
+from spice.agent.selftracking import agent_self_tracking_environment
 from spice.agent.identity import ambient_thread_id
 from spice.agent.paths import agent_state_dir
 from spice.agent.shellhook import (
