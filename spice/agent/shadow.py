@@ -80,6 +80,14 @@ def append_git_config_pair(
         count = max(int(result.get("GIT_CONFIG_COUNT", "0") or "0"), 0)
     except ValueError:
         count = 0
+    for index in range(count):
+        # Idempotent: re-injecting the same pair (lifecycle env, then the wrap
+        # re-apply on a child env that already carries it) must not duplicate.
+        if (
+            result.get(f"GIT_CONFIG_KEY_{index}") == key
+            and result.get(f"GIT_CONFIG_VALUE_{index}") == value
+        ):
+            return result
     result[f"GIT_CONFIG_KEY_{count}"] = key
     result[f"GIT_CONFIG_VALUE_{count}"] = value
     result["GIT_CONFIG_COUNT"] = str(count + 1)
