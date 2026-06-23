@@ -116,8 +116,10 @@ def test_serve_pending_badge_smoke_asserts_differential_ack() -> None:
     assert "withServePage(" in smoke
     assert "LARGE_MESSAGE_COUNT = 5000" in smoke
     assert "lane.pending" in smoke
-    assert "pendingSmokeWithTimeout" in smoke
-    assert "waitForPendingSmokeCondition" not in smoke
+    assert "placeholderAfterSend" in smoke
+    assert "placeholderAfterAck" in smoke
+    assert "composer placeholder did not show submitted inbox" in smoke
+    assert "composer placeholder did not clear after lane.pending ack" in smoke
     assert "latestPayloadPending" in smoke
     assert "lane.pending ack triggered an unexpected refresh" in smoke
 

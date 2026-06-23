@@ -380,6 +380,7 @@ function beginLanePendingSubmission(lane) {
   lane.pendingSubmissionCount += 1;
   lane.optimisticPendingInboxCount = lanePendingDisplayCount(lane) + 1;
   renderLaneViewShell(laneGroupHost(lane));
+  syncComposerPlaceholders(laneGroupHost(lane));
 }
 
 function finishLanePendingSubmission(lane, options = {}) {
