@@ -3,9 +3,9 @@
 Shell startup hooks reexec zsh/bash commands through
 `spice agent run -- <cmd…>`. The command surface:
 
-* gives direct `git` invocations the agent git-shadow environment, and gives
-  nested `spice` invocations a scrubbed one (harness internals must see real
-  upstream config);
+* runs direct `git` and nested `spice` invocations in the plain worktree
+  environment (lane self-tracking lives in the worktree's git config, so no
+  upstream masking is injected here);
 * connects to the supervisor side-channel socket (when one is live) and
   relays its payload to stderr;
 * injects pending inbox steering into stderr, re-displaying every 15s until ACK;
@@ -38,10 +38,6 @@ from spice.agent.sidechannelnotify import (
     active_agent_side_channel_socket_path,
     consume_side_channel_notices,
     side_channel_marker_path as side_channel_marker_path,
-)
-from spice.agent.gitshadow import (
-    agent_git_shadow_environment,
-    scrub_agent_git_shadow_environment,
 )
 from spice.agent.identity import ambient_thread_id
 from spice.agent.paths import agent_state_dir
@@ -343,17 +339,13 @@ def build_agent_run_environment(
 ) -> dict[str, str] | None:
     args = normalize_agent_run_args(raw_args)
     worktree_env = agent_run_child_worktree_environment(args, repo_root=repo_root)
-    if is_direct_git_route(args):
-        return agent_git_shadow_environment(repo_root, base_env=worktree_env)
-    if is_spice_route(args):
-        # Harness internals must see real upstream config.
-        scrubbed = scrub_agent_git_shadow_environment(os.environ)
-        return agent_run_child_worktree_environment(
-            args,
-            repo_root=repo_root,
-            base_env=scrubbed,
-        )
-    if worktree_spice_source(repo_root) is not None:
+    # Lane self-tracking lives in the worktree's git config, not the
+    # environment, so git and spice routes share the same plain worktree env.
+    if (
+        is_direct_git_route(args)
+        or is_spice_route(args)
+        or worktree_spice_source(repo_root) is not None
+    ):
         return worktree_env
     return None
 

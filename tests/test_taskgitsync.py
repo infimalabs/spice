@@ -20,6 +20,7 @@ def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path)
     repo = _init_repo(tmp_path / "agent")
     _run(repo, "git", "remote", "add", "origin", str(remote))
     _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
 
     (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
     _run(repo, "git", "add", "agent.txt")
@@ -75,6 +76,7 @@ def test_integrate_and_publish_retries_non_fast_forward_publish_race(
     repo = _init_repo(tmp_path / "agent")
     _run(repo, "git", "remote", "add", "origin", str(remote))
     _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
 
     (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
     _run(repo, "git", "add", "agent.txt")
@@ -132,6 +134,7 @@ def test_integrate_and_publish_reports_local_head_ref_lock_race(tmp_path, monkey
     repo = _init_repo(tmp_path / "agent")
     _run(repo, "git", "remote", "add", "origin", str(remote))
     _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
     upstream_head = _git(repo, "rev-parse", "HEAD")
 
     (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
@@ -253,6 +256,7 @@ def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
     repo = _init_repo(tmp_path / "agent")
     _run(repo, "git", "remote", "add", "origin", str(remote))
     _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
 
     (repo / "README.md").write_text("agent work\n", encoding="utf-8")
     _run(repo, "git", "add", "README.md")
@@ -311,6 +315,7 @@ def test_integrate_and_publish_treats_missing_merge_head_abort_as_cleared(
     repo = _init_repo(tmp_path / "agent")
     _run(repo, "git", "remote", "add", "origin", str(remote))
     _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
 
     (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
     _run(repo, "git", "add", "agent.txt")
@@ -378,6 +383,7 @@ def test_integrate_and_publish_hook_aborted_marker_state_guides_retry(
     repo = _init_repo(tmp_path / "agent")
     _run(repo, "git", "remote", "add", "origin", str(remote))
     _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
 
     (repo / "README.md").write_text("agent work\n", encoding="utf-8")
     _run(repo, "git", "add", "README.md")
@@ -517,6 +523,7 @@ def test_integrate_and_publish_refuses_committed_conflict_markers(tmp_path):
     repo = _init_repo(tmp_path / "agent")
     _run(repo, "git", "remote", "add", "origin", str(remote))
     _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
 
     (repo / "README.md").write_text("agent work\n", encoding="utf-8")
     _run(repo, "git", "add", "README.md")

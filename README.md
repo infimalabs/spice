@@ -12,7 +12,7 @@ a repository, and it provides a closed loop around the agents working there:
 supervision, coordination, conscience, and hygiene are derived mechanically
 from those two surfaces. The **`spice agent run` wrapper** makes that loop live
 at execution time: every agent shell command carries pending steering, context
-pressure, git-shadow routing, source routing, and local command wrappers before
+pressure, source routing, and local command wrappers before
 the requested command runs.
 
 ## Why
@@ -205,7 +205,7 @@ or first add the helper to this seam with tests and a stability note.
 
 | Surface | Command | What it does |
 | --- | --- | --- |
-| Command surface | `spice agent run -- <cmd>` | Runs shell commands with RTK rewrite routing, git-shadow env, configured wrapper groups, and steering injection on stderr. |
+| Command surface | `spice agent run -- <cmd>` | Runs shell commands with RTK rewrite routing, configured wrapper groups, and steering injection on stderr. |
 | Lifecycle | `spice agent ensure` / `supervise` | One worktree-bound agent per worktree, started under a neutral skill prompt, watched by a durable supervisor. |
 | Steering | filesystem inbox under `.spice/inbox/` | Durable operator messages; items retire only when the agent semantically ACKs their key in its transcript. |
 | Tasks | `spice task …` | Phase-native Taskwarrior board shared by all worktrees; `task next` is allocator-owned; git sync happens at task boundaries. |

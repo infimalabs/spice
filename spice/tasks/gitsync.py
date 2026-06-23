@@ -26,7 +26,6 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from spice.agent.gitshadow import scrub_agent_git_shadow_environment
 from spice.errors import SpiceError
 from spice.tasks import config
 
@@ -46,7 +45,6 @@ class SyncResult:
 
 
 def _run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    # Preserve caller env while removing agent-facing git shadow config.
     env = _control_plane_git_env()
     command = ["git", "-C", str(repo_root), *args]
     kwargs = {
@@ -72,7 +70,7 @@ def _run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _control_plane_git_env() -> dict[str, str]:
-    env = scrub_agent_git_shadow_environment(os.environ)
+    env = dict(os.environ)
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_SSH_COMMAND"] = TASK_GIT_SSH_COMMAND
     return env
@@ -110,17 +108,23 @@ def _resolve_target(repo_root: Path) -> tuple[str, str] | None:
 
 
 def branch_upstream_target(repo_root: Path) -> tuple[str, str] | None:
-    branch = _read(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD")
-    if not branch:
-        return None
-    remote = _read(repo_root, "config", "--get", f"branch.{branch}.remote")
-    merge = _read(repo_root, "config", "--get", f"branch.{branch}.merge")
-    prefix = "refs/heads/"
-    if not remote or not merge.startswith(prefix):
-        return None
+    # Lanes self-track (branch.<lane>.merge points at themselves), so branch
+    # config no longer names the integration upstream. The single source of
+    # truth is origin's default branch, recorded in the origin/HEAD symref and
+    # set at agent setup. With no origin remote the tree is local-only and the
+    # caller degrades to a safe no-op; an origin without origin/HEAD is a setup
+    # error that fails loud rather than guessing a default.
+    remote = "origin"
     if _run(repo_root, "remote", "get-url", remote).returncode != 0:
         return None
-    return remote, f"{remote}/{merge[len(prefix) :]}"
+    head_ref = _read(repo_root, "symbolic-ref", "refs/remotes/origin/HEAD")
+    prefix = "refs/remotes/"
+    if not head_ref.startswith(prefix):
+        raise SpiceError(
+            "origin/HEAD is unset; run `git remote set-head origin --auto` so "
+            "the task baseline can resolve origin's default branch"
+        )
+    return remote, head_ref[len(prefix) :]
 
 
 def _is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:

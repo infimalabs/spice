@@ -25,10 +25,7 @@ from spice.agent.driver import (
     playwright_mcp_args,
     write_playwright_mcp_config,
 )
-from spice.agent.gitshadow import (
-    append_git_config_pairs,
-    scrub_agent_git_shadow_environment,
-)
+from spice.agent.gitshadow import ensure_lane_self_tracking
 from spice.errors import SpiceError
 from spice.mail.inbox import compose_inbox_text, write_inbox_item
 from spice.sessions.meter import (
@@ -946,23 +943,33 @@ def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
     ]
 
 
-def test_gitshadow_scrub_preserves_non_shadow_pairs():
-    env = append_git_config_pairs(
-        {
-            "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": "user.name",
-            "GIT_CONFIG_VALUE_0": "Operator",
-        },
-        (("includeIf.gitdir:/repo/.git.path", "/repo/.git/agent.gitconfig"),),
+def test_ensure_lane_self_tracking_replaces_upstream_with_self(tmp_path):
+    repo = tmp_path / "lane"
+    subprocess.run(["git", "init", "-q", "-b", "main-d", str(repo)], check=True)
+    for key, value in (
+        ("extensions.worktreeConfig", "true"),
+        ("user.email", "t@t.t"),
+        ("user.name", "t"),
+        # Pre-existing upstream tracking that must be replaced, not appended.
+        ("branch.main-d.remote", "origin"),
+        ("branch.main-d.merge", "refs/heads/main"),
+    ):
+        subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
+
+    ensure_lane_self_tracking(repo)
+
+    merge = subprocess.run(
+        ["git", "-C", str(repo), "config", "--get-all", "branch.main-d.merge"],
+        capture_output=True,
+        text=True,
     )
-
-    scrubbed = scrub_agent_git_shadow_environment(env)
-
-    assert scrubbed == {
-        "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": "user.name",
-        "GIT_CONFIG_VALUE_0": "Operator",
-    }
+    remote = subprocess.run(
+        ["git", "-C", str(repo), "config", "--get-all", "branch.main-d.remote"],
+        capture_output=True,
+        text=True,
+    )
+    assert merge.stdout.split() == ["refs/heads/main-d"]
+    assert remote.stdout.split() == ["."]
 
 
 def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
