@@ -60,10 +60,12 @@ operator's actual ask is always recovered live from activation + session
 briefing + task board + inbox steering. Renewal never kills: a running agent is
 asked (by ordinary inbox steering) to reach a clean handoff; the successor starts on the next
 message with rehydration instructions pointing at the ancestor thread. The
-supervisor refuses to start with an ambient thread id set, and each agent's lane
-branch self-tracks (`branch.X.merge=refs/heads/X`, written to worktree config at
-setup) so upstream noise never reaches them — sync is not theirs to do. The
-control plane reads the real integration baseline from `origin/HEAD`.
+supervisor refuses to start with an ambient thread id set, and each agent's git
+sees a per-process self-tracking mask (`GIT_CONFIG_SYSTEM` supplies
+`branch.X.merge=refs/heads/X` first + a command-scope `branch.X.remote=.`) so
+upstream noise never reaches them — while the operator's own shell, without that
+env, still sees the real upstream. Sync is not theirs to do; the control plane
+reads the real integration baseline from `origin/HEAD`.
 
 ### 3. The conscience (maxims)
 
@@ -264,8 +266,9 @@ The one idea above isn't arbitrary; four theses generate it.
 - ACK grammar: standalone token, key shape, fillers,
   separators, `Z`-dropped aliases, `::directive{}` scrubbing, segment
   splitting with preamble.
-- Wrapper: proxy routing (`proxy` verb passthrough), plain worktree env for
-  direct `git` and nested harness calls, side-channel hello
+- Wrapper: proxy routing (`proxy` verb passthrough), per-process self-tracking
+  env for direct `git` and plain worktree env for nested harness calls,
+  side-channel hello
   protocol, context-meter cache (15s) and warning repeat (15m, persisted),
   pressure levels green/<75/yellow/85/orange/90/red with keep-working
   instructions that forbid finish-before-rollover behavior.
