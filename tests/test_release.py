@@ -206,31 +206,9 @@ def test_release_commit_for_target_resolves_explicit_commitish(monkeypatch):
     assert release.release_commit_for_target("0.9.0", "main") == "resolved-main"
 
 
-def test_release_commit_for_target_reports_missing_commitish(monkeypatch):
-    def fake_git(*args):
-        raise subprocess.CalledProcessError(128, ["git", *args])
-
-    monkeypatch.setattr(release, "git", fake_git)
-
-    with pytest.raises(SpiceError, match="release commit not found: nope"):
-        release.release_commit_for_target("0.9.0", "nope")
-
-
-def test_publish_release_rejects_non_head_release_commit(monkeypatch):
-    def fake_git(*args):
-        if args == ("rev-parse", "HEAD"):
-            return "head-commit"
-        raise AssertionError(args)
-
-    monkeypatch.setattr(release, "git", fake_git)
-
-    with pytest.raises(SpiceError, match="must resolve to HEAD"):
-        release.publish_release("0.9.0", release_commit="other-commit")
-
-
-def test_publish_mode_rejects_non_head_target_before_gates(tmp_path, monkeypatch):
+def test_publish_mode_with_head_target_runs_gates_before_publish(tmp_path, monkeypatch):
     parser = build_release_parser()
-    args = parser.parse_args(["publish", "--release-commit", "old"])
+    args = parser.parse_args(["publish", "--release-commit", "HEAD"])
     calls = []
 
     monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
@@ -239,12 +217,12 @@ def test_publish_mode_rejects_non_head_target_before_gates(tmp_path, monkeypatch
     monkeypatch.setattr(
         release,
         "release_commit_for_target",
-        lambda version, target: "old-commit",
+        lambda version, target: calls.append(("target", version, target)) or "head",
     )
     monkeypatch.setattr(
         release,
         "ensure_publish_release_commit_is_head",
-        lambda commit: (_ for _ in ()).throw(SpiceError("not head")),
+        lambda commit: calls.append(("head", commit)),
     )
     monkeypatch.setattr(
         release, "run_constitution_gate", lambda: calls.append("constitution")
@@ -252,11 +230,82 @@ def test_publish_mode_rejects_non_head_target_before_gates(tmp_path, monkeypatch
     monkeypatch.setattr(
         release, "run_artifact_gate", lambda version: calls.append(version)
     )
+    monkeypatch.setattr(
+        release,
+        "publish_release",
+        lambda version, notes_file, *, release_commit=None: calls.append(
+            ("publish", version, notes_file, release_commit)
+        ),
+    )
 
-    with pytest.raises(SpiceError, match="not head"):
-        release._handle_release_from_root(args, tmp_path)
+    result = release._handle_release_from_root(args, tmp_path)
 
-    assert calls == []
+    assert result == 0
+    assert calls == [
+        ("target", "0.9.0", "HEAD"),
+        ("head", "head"),
+        "constitution",
+        "0.9.0",
+        ("publish", "0.9.0", None, "head"),
+    ]
+
+
+def test_publish_release_with_head_commit_uses_current_artifacts(monkeypatch):
+    calls = []
+
+    def fake_git(*args):
+        calls.append(("git", args))
+        if args == ("rev-parse", "HEAD"):
+            return "head-commit"
+        raise AssertionError(args)
+
+    def fake_run(command, **kwargs):
+        calls.append(("run", command, "UV_PUBLISH_TOKEN" in kwargs.get("env", {})))
+
+    monkeypatch.setattr(release, "git", fake_git)
+    monkeypatch.setattr(release, "run", fake_run)
+    monkeypatch.setattr(release, "read_pypi_token", lambda: "pypi-token")
+    monkeypatch.setattr(
+        release, "wait_for_pypi", lambda version: calls.append(("pypi", version))
+    )
+    monkeypatch.setattr(
+        release,
+        "publish_github_release",
+        lambda version, notes_file, *, release_commit=None: calls.append(
+            ("github", version, notes_file, release_commit)
+        ),
+    )
+
+    release.publish_release("0.9.0", release_commit="head-commit")
+
+    assert calls == [
+        ("git", ("rev-parse", "HEAD")),
+        ("run", ["git", "push", "origin", "HEAD:main"], False),
+        (
+            "run",
+            [
+                "uv",
+                "publish",
+                "--dry-run",
+                "dist/spice_harness-0.9.0.tar.gz",
+                "dist/spice_harness-0.9.0-py3-none-any.whl",
+            ],
+            True,
+        ),
+        (
+            "run",
+            [
+                "uv",
+                "publish",
+                "dist/spice_harness-0.9.0.tar.gz",
+                "dist/spice_harness-0.9.0-py3-none-any.whl",
+            ],
+            True,
+        ),
+        ("pypi", "0.9.0"),
+        ("github", "0.9.0", None, "head-commit"),
+        ("run", ["git", "status", "--short", "--branch"], False),
+    ]
 
 
 def test_publish_github_release_uses_explicit_release_commit(monkeypatch):
