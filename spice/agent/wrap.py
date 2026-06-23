@@ -339,18 +339,13 @@ def build_agent_run_environment(
     repo_root: Path | None = None,
 ) -> dict[str, str] | None:
     args = normalize_agent_run_args(raw_args)
-    worktree_env = agent_run_child_worktree_environment(args, repo_root=repo_root)
     # The git shadow is exported once by the supervisor (lifecycle.agent_env) and
-    # inherited through worktree_env; the wrapper does not re-inject it per
-    # command. git sees the shadow (upstream=self); the control plane reads the
-    # real integration branch via `git config --get`, where the command-scope
-    # true merge wins over the system-scope self merge.
-    if (
-        is_direct_git_route(args)
-        or is_spice_route(args)
-        or worktree_spice_source(repo_root) is not None
-    ):
-        return worktree_env
+    # inherited by direct git commands when Popen gets no explicit env. git sees
+    # the shadow (upstream=self); the control plane reads the real integration
+    # branch via `git config --get`, where the command-scope true merge wins over
+    # the system-scope self merge.
+    if is_spice_route(args) or worktree_spice_source(repo_root) is not None:
+        return agent_run_child_worktree_environment(args, repo_root=repo_root)
     return None
 
 
@@ -366,10 +361,6 @@ def agent_run_child_worktree_environment(
         env[ZDOTDIR_ENV] = str(static_hook_dir)
         env[BASH_ENV_ENV] = str(static_hook_dir / BASH_HOOK_NAME)
     return env
-
-
-def is_direct_git_route(args: Sequence[str]) -> bool:
-    return args[:1] == ["git"]
 
 
 def is_spice_route(args: Sequence[str]) -> bool:
