@@ -33,8 +33,8 @@ from threading import Thread
 from typing import Any, Iterator, Sequence, cast
 
 from spice.agent.driver import driver_for
-from spice.agent.selftracking import (
-    agent_self_tracking_environment,
+from spice.agent.shadow import (
+    shadow_environment,
     ensure_origin_head,
 )
 from spice.agent.identity import ambient_thread, ambient_thread_id, canonical_thread_id
@@ -856,9 +856,7 @@ def agent_environment(repo_root: Path | None = None) -> dict[str, str]:
     # Mask the agent's upstream to its own lane (per-process, env-only) so its
     # status never moves when origin advances; the operator's own shell has no
     # such env and sees the real upstream.
-    env = agent_self_tracking_environment(
-        repo_root, base_env=worktree_spice_environment(repo_root)
-    )
+    env = shadow_environment(repo_root, base_env=worktree_spice_environment(repo_root))
     if repo_root is not None:
         env = apply_shell_steering_environment(
             repo_root,

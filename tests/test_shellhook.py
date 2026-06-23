@@ -22,9 +22,9 @@ SHELL_HOOK_FAILURE_EXIT_CODE = 127
 
 
 def test_wrapper_git_and_spice_routes_use_plain_worktree_env(tmp_path, monkeypatch):
-    # Lane self-tracking lives in the worktree git config, so the agent-run
-    # wrapper no longer injects or scrubs a git shadow; every routed command
-    # shares the same plain worktree environment.
+    # The git route runs in the shadow env and the spice route in the plain
+    # worktree env; with no lane branch in this tmp_path the shadow is a no-op,
+    # so both resolve to the worktree environment builder's output.
     monkeypatch.setattr(
         wrap,
         "agent_run_child_worktree_environment",
