@@ -478,6 +478,26 @@ def test_init_repo_generates_state_gitignore(tmp_path):
     assert _git(repo, "status", "--short").stdout == ""
 
 
+def test_init_repo_keeps_bare_common_linked_worktree_non_bare(tmp_path):
+    seed = _git_init(tmp_path / "seed")
+    _commit(seed, "README.md", "seed\n", "seed")
+    source = tmp_path / "source.git"
+    _run(["git", "clone", "--bare", str(seed), str(source)])
+    lane = tmp_path / "lane"
+    _git(source, "worktree", "add", str(lane), "main")
+
+    rows = init_repo(lane)
+    status = _git(lane, "status", "--short")
+
+    assert "core.hooksPath=.spice/hooks" in rows
+    assert _git(lane, "config", "--worktree", "--get", "core.bare").stdout.strip() == (
+        "false"
+    )
+    assert _git(lane, "rev-parse", "--is-bare-repository").stdout.strip() == "false"
+    assert _git(lane, "rev-parse", "--is-inside-work-tree").stdout.strip() == "true"
+    assert status.returncode == 0
+
+
 def test_install_hooks_writes_ambient_spice_shims_for_spice_checkout(tmp_path):
     repo = _git_init(tmp_path / "repo")
     _write_spice_product_shape(repo)

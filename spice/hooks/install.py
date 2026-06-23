@@ -83,7 +83,9 @@ def materialize_state_gitignore(repo_root: Path) -> bool:
 
 def _enable_worktree_config(repo_root: Path) -> None:
     # `git config --worktree` requires extensions.worktreeConfig in multi-
-    # worktree repos; setting it in the common config is idempotent.
+    # worktree repos; setting it in the common config is idempotent. The
+    # worktree-local non-bare override keeps linked checkouts usable when their
+    # common git dir is intentionally bare.
     import subprocess
 
     subprocess.run(
@@ -92,6 +94,7 @@ def _enable_worktree_config(repo_root: Path) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    git_worktree_config_set(repo_root, "core.bare", "false")
 
 
 def init_repo(repo_root: Path) -> list[str]:
