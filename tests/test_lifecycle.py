@@ -26,7 +26,7 @@ from spice.agent.driver import (
     playwright_mcp_args,
     write_playwright_mcp_config,
 )
-from spice.agent.gitshadow import agent_self_tracking_environment
+from spice.agent.selftracking import agent_self_tracking_environment
 from spice.errors import SpiceError
 from spice.mail.inbox import compose_inbox_text, write_inbox_item
 from spice.sessions.meter import (
