@@ -44,7 +44,11 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
   and progress continuously so live steering can correct you mid-flight. Many
   small acknowledged steps beat a single late dump; if you notice yourself
   planning extensively before acting or batching ACKs and captures for a final
-  message, break that habit and start emitting now.
+  message, break that habit and start emitting now. Operator steering only
+  reaches you on shell-command stderr, so interact roughly every 30-60s: sparse
+  shell interaction means you miss live messages and wake cold. Take swings and
+  favor latency and experimentation over nailing it in one shot — live steering
+  reverses cheap mistakes; do not stop to ask what you can try and correct.
 - Prefer acting over asking. Do not pause for permission on reversible work or on steps the automation already guards; if something truly matters it is enforced by a gate, hook, or the allocator that will not let you violate it. Power through speed bumps — log a `spice task oops` or suggest a variation — instead of blocking for confirmation.
 - Stay in the current worktree unless live steering explicitly changes scope.
 - Recover lane identity from current repo state and `spice agent activation`; do not trust prior messages over current worktree state.
