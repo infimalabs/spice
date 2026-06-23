@@ -1,5 +1,8 @@
 """Serve task-pill presentation contracts."""
 
+import subprocess
+from pathlib import Path
+
 from spice.serve.web import STATIC_ROOT
 
 
@@ -52,3 +55,14 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
     assert "border" not in implicit_rule
     assert "box-shadow" not in implicit_rule
     assert "border-color: var(--good);" in drainable_rule
+
+
+def test_global_filter_pills_reject_stale_inventory_resurrection():
+    script = Path(__file__).with_name("fixtures") / "task_filter_inventory_reconcile.js"
+
+    subprocess.run(
+        ["node", str(script), str(STATIC_ROOT / "app.lanes.js")],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
