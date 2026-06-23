@@ -800,7 +800,8 @@ button.primary:hover {
   stroke: var(--lane-metric-series-color, var(--accent-strong));
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 2;
+  stroke-width: 1.1;
+  vector-effect: non-scaling-stroke;
 }
 .lane-metric-series-dot {
   fill: var(--lane-metric-series-color, var(--final-accent));

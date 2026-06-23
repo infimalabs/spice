@@ -924,7 +924,7 @@ function laneMetricSeriesSvg(points) {
       const dot = createSvgElement("circle");
       dot.setAttribute("cx", x.toFixed(1));
       dot.setAttribute("cy", y.toFixed(1));
-      dot.setAttribute("r", "1.8");
+      dot.setAttribute("r", "0.65");
       dot.setAttribute("class", "lane-metric-series-dot");
       if (point.agentId) dot.setAttribute("data-agent-id", String(point.agentId));
       groupEl.append(dot);
