@@ -14,6 +14,7 @@ import pytest
 
 from spice.agent import sidechannel, sidechannelnotify, wrap
 from spice.agent.shadow import shadow_environment
+from spice.mail.acks import archive_ackd_inbox_items
 from spice.mail.inbox import compose_inbox_text, write_inbox_item
 from spice.sessions.meter import (
     ActiveContextSnapshot,
@@ -408,6 +409,29 @@ def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
     assert "TASK title=... | project=<stem.child> | acceptance=..." in output
     assert "ACK prose first and then the TASK line on its own line" in output
     assert "same task-add batch format" in output
+
+
+def test_inbox_injector_surfaces_clear_after_ack_removes_last_pending(tmp_path):
+    key = "20260101T000000000001Z"
+    write_inbox_item(
+        tmp_path,
+        f"{key}.txt",
+        compose_inbox_text(body="operator steering", priority=None, stop=False),
+    )
+    stderr = io.StringIO()
+    injector = wrap.AgentInboxInjector(
+        tmp_path,
+        stderr=stderr,
+        repeat_interval_seconds=15.0,
+        time_factory=lambda: 0.0,
+    )
+
+    injector.inject(force=False)
+    archived = archive_ackd_inbox_items(tmp_path, [key])
+    injector.inject(force=False)
+
+    assert archived == [key]
+    assert stderr.getvalue().endswith("Inbox Steering\n  pending=none\n")
 
 
 def test_inbox_injector_repeats_already_shown_item_after_new_key(tmp_path):
