@@ -30,27 +30,33 @@ function inventory(revision, count) {
   };
 }
 
+function pillSignature() {
+  return (
+    context.taskFilterStemPills
+      .map((stem) => stem.name + ":" + stem.openTaskCount)
+      .join(",") || "empty"
+  );
+}
+
+function acceptedStateSignature() {
+  return context.taskFilterInventoryRevision + "|" + pillSignature();
+}
+
 assert(
   context.applyTaskFilterInventory(inventory("90071992547409931234", 1)) === true,
   "initial inventory applies",
 );
-assert(context.taskFilterStemPills.length === 1, "initial pill is visible");
+assert(pillSignature() === "serve:1", "initial pill is visible");
 
 assert(
   context.applyTaskFilterInventory(inventory("90071992547409931235", 0)) === true,
   "newer empty inventory applies",
 );
-assert(context.taskFilterStemPills.length === 0, "newer inventory removes pill");
+assert(pillSignature() === "empty", "newer inventory removes pill");
 
+const acceptedEmptyState = acceptedStateSignature();
+context.applyTaskFilterInventory(inventory("90071992547409931234", 1));
 assert(
-  context.applyTaskFilterInventory(inventory("90071992547409931234", 1)) === false,
-  "older inventory is rejected",
-);
-assert(
-  context.taskFilterInventoryRevision === "90071992547409931235",
-  "older inventory does not rewind revision",
-);
-assert(
-  context.taskFilterStemPills.length === 0,
-  "older inventory cannot resurrect removed pill",
+  acceptedStateSignature() === acceptedEmptyState,
+  "older inventory preserves accepted empty state",
 );

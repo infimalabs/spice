@@ -36,20 +36,30 @@ def test_release_parser_accepts_prepare_notes_publish_and_one_pass():
     assert one_pass.bump == "minor"
 
 
-def test_release_docs_do_not_use_patch_as_example():
+def test_release_docs_show_lane_release_workflow():
     readme = Path("README.md").read_text(encoding="utf-8")
     release_section = readme.split("## Release", 1)[1].split("## Status", 1)[0]
     help_text = build_release_parser().format_help()
     normalized_help = " ".join(help_text.split())
+    normalized_section = " ".join(release_section.split())
+    release_commands = (
+        release_section.split("```sh", 1)[1].split("```", 1)[0].strip().splitlines()
+    )
 
     assert "{minor,patch,prepare,notes,publish,github}" in help_text
     assert "clean synchronized worktree" in normalized_help
-    assert "clean `main` worktree" not in release_section
-    assert "Lane branches are allowed" in release_section
-    assert "spice release prepare patch" not in release_section
-    assert "spice release patch" not in release_section
-    assert "spice release prepare minor" in release_section
-    assert "spice release minor" in release_section
+    assert normalized_section.startswith(
+        "Releases are cut from a clean synchronized worktree with this "
+        "repository's mounted `spice release` command. Lane branches are "
+        "allowed; the release command pushes the prepared release commit to "
+        "`origin/main`."
+    )
+    assert release_commands == [
+        "spice release prepare minor   # bump, validate, commit, stop before publish",
+        "spice release notes > /tmp/spice-release-notes.md",
+        "spice release publish --notes-file /tmp/spice-release-notes.md",
+        "spice release minor           # one-pass bump, validate, commit, publish",
+    ]
     assert release_section.index("Use a minor release") < release_section.index(
         "Use a patch release"
     )
@@ -110,9 +120,11 @@ def test_hermetic_wheel_env_drops_source_shadowing_entries(monkeypatch):
 
     env = release.hermetic_wheel_env()
 
-    assert "PYTHONPATH" not in env
-    assert "VIRTUAL_ENV" not in env
-    assert env["PATH"] == "/usr/bin"
+    assert {name: env.get(name) for name in ("PATH", "PYTHONPATH", "VIRTUAL_ENV")} == {
+        "PATH": "/usr/bin",
+        "PYTHONPATH": None,
+        "VIRTUAL_ENV": None,
+    }
 
 
 def test_release_highlight_rewrites_commit_subjects_into_sentences():
@@ -167,25 +179,37 @@ def test_release_notes_group_edited_highlights_by_project():
         ],
     )
 
-    assert "### Serve" in notes
-    assert (
-        "- Fixed speech excerpts for final ACK messages. (`1111111`, `3333333`)"
-        in notes
+    assert notes == (
+        "## Highlights\n"
+        "\n"
+        "### Serve\n"
+        "\n"
+        "- Fixed speech excerpts for final ACK messages. (`1111111`, `3333333`)\n"
+        "\n"
+        "### CLI\n"
+        "\n"
+        "- Added release tooling as spice command. (`2222222`)\n"
+        "\n"
+        "### Serve UI\n"
+        "\n"
+        "- Fixed narration media session retention. (`4444444`)\n"
+        "\n"
+        "### Task CLI\n"
+        "\n"
+        "- Implement dynamic agent shell-hook surfaces. (`5555555`)\n"
+        "\n"
+        "### General\n"
+        "\n"
+        "- Show agent stem in active header pills. (`6666666`)\n"
+        "\n"
+        "## Package Notes\n"
+        "\n"
+        "- PyPI release: `spice-harness==0.3.0`\n"
+        "- Release commit: `abcdef1`\n"
+        "- Commit range: `v0.2.1..abcdef1`\n"
+        "- Commit source: first-parent history grouped by `Task-Project` metadata\n"
+        "- Release tag: `v0.3.0`\n"
     )
-    assert "### CLI" in notes
-    assert "- Added release tooling as spice command. (`2222222`)" in notes
-    assert "### Serve UI" in notes
-    assert "- Fixed narration media session retention. (`4444444`)" in notes
-    assert "### Task CLI" in notes
-    assert "- Implement dynamic agent shell-hook surfaces. (`5555555`)" in notes
-    assert "### General" in notes
-    assert "- Show agent stem in active header pills. (`6666666`)" in notes
-    assert "- PyPI release: `spice-harness==0.3.0`" in notes
-    assert "- Commit range: `v0.2.1..abcdef1`" in notes
-    assert "- fix speech excerpts" not in notes
-    assert "Serve.Ui" not in notes
-    assert "Task.Cli" not in notes
-    assert "Agent." not in notes
 
 
 def _git(repo: Path, *args: str) -> None:

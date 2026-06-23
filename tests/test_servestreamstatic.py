@@ -165,10 +165,26 @@ def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
     )
     assert "countEl.textContent = String(count);" in app_panes
     assert "button.append(countEl);" in app_panes
-    assert "flex: 0 1 10rem;" not in chip_rule
-    assert "justify-content: space-between;" not in chip_rule
-    assert "gap: 4px;" in chip_rule
-    assert "padding: 3px 10px 3px 12px;" in chip_rule
+    assert chip_rule == (
+        ".lane-filter-chip {\n"
+        "  align-items: center;\n"
+        "  background: color-mix(in srgb, var(--accent) 8%, var(--control));\n"
+        "  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));\n"
+        "  border-radius: var(--pill-radius);\n"
+        "  color: var(--fg);\n"
+        "  cursor: pointer;\n"
+        "  display: inline-flex;\n"
+        "  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;\n"
+        "  font-size: 12px;\n"
+        "  gap: 4px;\n"
+        "  line-height: 1.1;\n"
+        "  max-width: 100%;\n"
+        "  min-height: 30px;\n"
+        "  overflow: hidden;\n"
+        "  padding: 3px 10px 3px 12px;\n"
+        "  text-overflow: ellipsis;\n"
+        "  white-space: nowrap;\n"
+    )
     assert chip_count_rule == (
         ".lane-filter-chip-count {\n"
         "  background: var(--accent);\n"
