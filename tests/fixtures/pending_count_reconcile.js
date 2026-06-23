@@ -5,9 +5,15 @@ const streamPath = process.argv[2];
 const renderPath = process.argv[3];
 const currentPendingVersion = 20;
 const newerPendingVersion = 30;
+let placeholderSyncs = 0;
 const context = {
   console,
   WebSocket: { OPEN: 1, CONNECTING: 0 },
+  laneGroupHost: (lane) => lane,
+  renderLaneViewShell: () => {},
+  syncComposerPlaceholders: () => {
+    placeholderSyncs += 1;
+  },
   window: { location: { protocol: "http:", host: "localhost" } },
 };
 
@@ -192,4 +198,20 @@ assert(
 assert(
   versioned.backendPendingInboxVersion === newerPendingVersion,
   "newer pending snapshot replaces backend version",
+);
+
+const optimisticSubmission = lane({
+  backendPendingInboxCount: 1,
+  optimisticPendingInboxCount: 1,
+  optimisticSubmittedInboxKeys: new Set(),
+  optimisticPendingInboxFloor: 0,
+});
+context.beginLanePendingSubmission(optimisticSubmission);
+assert(
+  context.lanePendingDisplayCount(optimisticSubmission) === 2,
+  "pending submission immediately increments composer pending count",
+);
+assert(
+  placeholderSyncs === 1,
+  "pending submission immediately syncs composer placeholder",
 );

@@ -665,8 +665,6 @@ class AgentInboxInjector:
             inbox_key
             for inbox_key, _row_signature in _signature_rows(displayed_signature)
         }
-        if previous_pending_keys and not displayed_pending_keys:
-            self._emit_pending_clear()
         self.signature = displayed_signature
         self._record_displayed_keys(displayed_signature, displayed_keys, now=now)
         self._prune_display_state(displayed_pending_keys)
@@ -683,10 +681,6 @@ class AgentInboxInjector:
             "(recently shown; full readout on repeat or run "
             "`spice session briefing`)\n"
         )
-        self.stderr.flush()
-
-    def _emit_pending_clear(self) -> None:
-        self.stderr.write("Inbox Steering\n  pending=none\n")
         self.stderr.flush()
 
     def _suppressed_keys(self, signature: InboxSignature, *, now: float) -> set[str]:
