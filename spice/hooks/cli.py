@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.paths import require_repo_root
+from spice.paths import repo_root_from_cwd, require_repo_root
 
 
 def configure_dev_parser(subparsers: Any) -> None:
@@ -89,10 +90,46 @@ def configure_dev_parser(subparsers: Any) -> None:
 def handle_init(args: argparse.Namespace) -> int:
     from spice.hooks.install import init_repo
 
-    repo_root = require_repo_root()
+    repo_root = init_repo_root()
     for row in init_repo(repo_root):
         print(row)
     return 0
+
+
+def init_repo_root(cwd: Path | None = None) -> Path:
+    root = repo_root_from_cwd(cwd)
+    if root is not None:
+        return root
+    marker_root = _linked_worktree_marker_root(cwd or Path.cwd())
+    if marker_root is not None:
+        from spice.hooks.install import enable_worktree_config
+
+        enable_worktree_config(marker_root)
+        root = repo_root_from_cwd(marker_root)
+        if root is not None:
+            return root
+    return require_repo_root(cwd)
+
+
+def _linked_worktree_marker_root(cwd: Path) -> Path | None:
+    try:
+        start = cwd.expanduser().resolve()
+    except (OSError, RuntimeError):
+        start = cwd.expanduser().absolute()
+    if start.is_file():
+        start = start.parent
+    for candidate in (start, *start.parents):
+        marker = candidate / ".git"
+        if not marker.exists():
+            continue
+        if not marker.is_file():
+            return None
+        try:
+            content = marker.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        return candidate if content.startswith("gitdir:") else None
+    return None
 
 
 def handle_dev(args: argparse.Namespace) -> int:
