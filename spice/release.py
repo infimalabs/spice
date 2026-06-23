@@ -222,6 +222,11 @@ def bump_version(bump: str) -> str:
 
 
 def release_commit_for_version(version: str) -> str:
+    tag = f"v{version}"
+    if git("tag", "--list", tag):
+        return git("rev-list", "-n", "1", tag)
+    if version == current_version():
+        return git("rev-parse", "HEAD")
     commit = git(
         "log", "--format=%H", "--grep", f"^release: bump to {version}$", "-n", "1"
     )
