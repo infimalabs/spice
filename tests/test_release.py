@@ -40,8 +40,12 @@ def test_release_docs_do_not_use_patch_as_example():
     readme = Path("README.md").read_text(encoding="utf-8")
     release_section = readme.split("## Release", 1)[1].split("## Status", 1)[0]
     help_text = build_release_parser().format_help()
+    normalized_help = " ".join(help_text.split())
 
     assert "{minor,patch,prepare,notes,publish,github}" in help_text
+    assert "clean synchronized worktree" in normalized_help
+    assert "clean `main` worktree" not in release_section
+    assert "Lane branches are allowed" in release_section
     assert "spice release prepare patch" not in release_section
     assert "spice release patch" not in release_section
     assert "spice release prepare minor" in release_section

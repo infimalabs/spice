@@ -41,7 +41,8 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
     parser = argparse.ArgumentParser(
         prog=prog,
         description=(
-            "Prepare, publish, and summarize spice releases from a clean main worktree."
+            "Prepare, publish, and summarize spice releases from a clean "
+            "synchronized worktree."
         ),
     )
     actions = parser.add_subparsers(dest="release_action", required=True)
