@@ -20,8 +20,13 @@ def test_release_parser_accepts_prepare_notes_publish_and_one_pass():
     parser = build_release_parser()
 
     prepare = parser.parse_args(["prepare", "minor"])
-    notes = parser.parse_args(["notes", "0.3.0", "--output", "notes.md"])
-    publish = parser.parse_args(["publish", "--notes-file", "curated.md"])
+    notes = parser.parse_args(
+        ["notes", "0.3.0", "--output", "notes.md", "--release-commit", "HEAD"]
+    )
+    publish = parser.parse_args(
+        ["publish", "--notes-file", "curated.md", "--release-commit", "HEAD"]
+    )
+    github = parser.parse_args(["github", "0.3.0", "--release-commit", "HEAD"])
     one_pass = parser.parse_args(["minor"])
 
     assert prepare.release_mode == "prepare"
@@ -30,8 +35,13 @@ def test_release_parser_accepts_prepare_notes_publish_and_one_pass():
     assert notes.release_mode == "notes"
     assert notes.version == "0.3.0"
     assert notes.output == Path("notes.md")
+    assert notes.release_commit == "HEAD"
     assert publish.release_mode == "publish"
     assert publish.notes_file == Path("curated.md")
+    assert publish.release_commit == "HEAD"
+    assert github.release_mode == "github"
+    assert github.version == "0.3.0"
+    assert github.release_commit == "HEAD"
     assert one_pass.release_mode == "release"
     assert one_pass.bump == "minor"
 
@@ -113,6 +123,42 @@ def test_release_notes_mode_writes_output_without_release_sync(tmp_path, monkeyp
     )
 
 
+def test_release_notes_mode_uses_explicit_release_commit_target(tmp_path, monkeypatch):
+    parser = build_release_parser()
+    notes_path = tmp_path / "notes.md"
+    args = parser.parse_args(
+        [
+            "notes",
+            "0.3.0",
+            "--release-commit",
+            "main",
+            "--output",
+            str(notes_path),
+        ]
+    )
+
+    seen = []
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        release,
+        "release_commit_for_target",
+        lambda version, target: seen.append((version, target)) or "resolved-main",
+    )
+    monkeypatch.setattr(
+        release,
+        "release_notes_for_version",
+        lambda version, commit: f"notes for {version} at {commit}\n",
+    )
+
+    result = release.handle_release(args)
+
+    assert result == 0
+    assert seen == [("0.3.0", "main")]
+    assert notes_path.read_text(encoding="utf-8") == (
+        "notes for 0.3.0 at resolved-main\n"
+    )
+
+
 def test_release_commit_for_tagged_version_uses_tagged_commit(monkeypatch):
     def fake_git(*args):
         if args == ("tag", "--list", "v0.9.0"):
@@ -147,6 +193,98 @@ def test_release_commit_for_current_unreleased_version_uses_head(monkeypatch):
     monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
 
     assert release.release_commit_for_version("0.9.0") == "current-head"
+
+
+def test_release_commit_for_target_resolves_explicit_commitish(monkeypatch):
+    def fake_git(*args):
+        if args == ("rev-parse", "--verify", "main^{commit}"):
+            return "resolved-main"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release, "git", fake_git)
+
+    assert release.release_commit_for_target("0.9.0", "main") == "resolved-main"
+
+
+def test_release_commit_for_target_reports_missing_commitish(monkeypatch):
+    def fake_git(*args):
+        raise subprocess.CalledProcessError(128, ["git", *args])
+
+    monkeypatch.setattr(release, "git", fake_git)
+
+    with pytest.raises(SpiceError, match="release commit not found: nope"):
+        release.release_commit_for_target("0.9.0", "nope")
+
+
+def test_publish_release_rejects_non_head_release_commit(monkeypatch):
+    def fake_git(*args):
+        if args == ("rev-parse", "HEAD"):
+            return "head-commit"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release, "git", fake_git)
+
+    with pytest.raises(SpiceError, match="must resolve to HEAD"):
+        release.publish_release("0.9.0", release_commit="other-commit")
+
+
+def test_publish_mode_rejects_non_head_target_before_gates(tmp_path, monkeypatch):
+    parser = build_release_parser()
+    args = parser.parse_args(["publish", "--release-commit", "old"])
+    calls = []
+
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(release, "ensure_release_worktree", lambda root: None)
+    monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
+    monkeypatch.setattr(
+        release,
+        "release_commit_for_target",
+        lambda version, target: "old-commit",
+    )
+    monkeypatch.setattr(
+        release,
+        "ensure_publish_release_commit_is_head",
+        lambda commit: (_ for _ in ()).throw(SpiceError("not head")),
+    )
+    monkeypatch.setattr(
+        release, "run_constitution_gate", lambda: calls.append("constitution")
+    )
+    monkeypatch.setattr(
+        release, "run_artifact_gate", lambda version: calls.append(version)
+    )
+
+    with pytest.raises(SpiceError, match="not head"):
+        release._handle_release_from_root(args, tmp_path)
+
+    assert calls == []
+
+
+def test_publish_github_release_uses_explicit_release_commit(monkeypatch):
+    git_calls = []
+    run_calls = []
+
+    def fake_git(*args):
+        git_calls.append(args)
+        if args == ("tag", "--list", "v0.9.0"):
+            return ""
+        raise AssertionError(args)
+
+    def fake_run(command, **_kwargs):
+        run_calls.append(command)
+
+    monkeypatch.setattr(release, "git", fake_git)
+    monkeypatch.setattr(release, "run", fake_run)
+    monkeypatch.setattr(
+        release, "github_release_url", lambda tag: f"https://example.test/{tag}"
+    )
+
+    release.publish_github_release("0.9.0", release_commit="target-commit")
+
+    assert git_calls == [("tag", "--list", "v0.9.0")]
+    assert run_calls == [
+        ["git", "tag", "-a", "v0.9.0", "target-commit", "-m", "release: v0.9.0"],
+        ["git", "push", "origin", "v0.9.0"],
+    ]
 
 
 def test_hermetic_wheel_env_drops_source_shadowing_entries(monkeypatch):
