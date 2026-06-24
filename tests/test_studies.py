@@ -375,6 +375,27 @@ def test_symbol_reachability_excludes_production_used_local_helpers(tmp_path):
     assert "shared_method" not in symbol_output
 
 
+def test_symbol_reachability_allowlist_exempts_qualified_symbol(tmp_path):
+    _write_symbol_reachability_repo(tmp_path)
+
+    findings = scan_symbol_reachability(
+        tmp_path, allowlist=["spice.live.planted_dead_function_abc"]
+    )
+    output = "\n".join(render_symbol_reachability_board(findings))
+
+    assert "symbol-reachability: 1 test-only symbol(s)" in output
+    assert "planted_dead_function_abc" not in output
+    assert "spice/live.py:LiveThing.planted_dead_method_abc" in output
+
+
+def test_symbol_reachability_allowlist_exempts_whole_module(tmp_path):
+    _write_symbol_reachability_repo(tmp_path)
+
+    findings = scan_symbol_reachability(tmp_path, allowlist=["spice.live"])
+
+    assert findings == []
+
+
 def test_study_symbol_reachability_cli_reports_test_only_symbol(
     tmp_path, monkeypatch, capsys
 ):
