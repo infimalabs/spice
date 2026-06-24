@@ -66,6 +66,11 @@ def configure_study_parser(subparsers: Any) -> None:
         default=[],
         help="Dotted module path to allow even if test-only (repeatable).",
     )
+    reach.add_argument(
+        "--create-tasks",
+        action="store_true",
+        help="Create a task for each test-only module (wire-in or delete-both).",
+    )
 
 
 def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
@@ -187,7 +192,26 @@ def _study_env_policy(args: argparse.Namespace, root: Path) -> int:
 def _study_reachability(args: argparse.Namespace, root: Path) -> int:
     findings = reachability.scan_reachability(root, allowlist=args.allowlist)
     print("\n".join(reachability.render_reachability_board(findings)))
+    if findings and getattr(args, "create_tasks", False):
+        _create_exhaust_tasks(findings)
     return 1 if findings else 0
+
+
+def _create_exhaust_tasks(findings: list[reachability.ReachabilityFinding]) -> None:
+    from spice.tasks import create
+
+    for f in findings:
+        handle = create.add(
+            f"Exhaust: wire in or delete-both {f.module_path}",
+            project="tests.exhaust",
+            tags=["exhaust"],
+            acceptance=[
+                f"Module {f.module} is either wired into a production entry point "
+                f"or deleted along with every test that imports it. "
+                f"Imported only by: {', '.join(f.only_test_imports) or 'unknown'}."
+            ],
+        )
+        print(f"  task created: {handle}")
 
 
 _STUDY_ACTIONS = {
