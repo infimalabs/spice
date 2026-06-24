@@ -22,6 +22,7 @@ from spice.mail.inbox import (
     inbox_item_is_automated_guidance,
     inbox_item_key,
     inbox_request_priority,
+    pending_operator_inbox_count,
 )
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve.markdown import render_message_html
@@ -179,10 +180,13 @@ def ensure_agent_for_pending_inbox(
     """
     if pending_count <= 0:
         return None
-    # Automated guidance (maxim) is synthesized, not operator-sent: it must never
-    # resurrect an idle agent on its own, or a down/out-of-credits lane restarts
-    # in a loop driven by its own automated messages. Only genuine operator
-    # steering brings a lane up.
+    # Automated guidance must never resurrect an idle agent — only genuine
+    # operator steering brings a lane up. pending_operator_inbox_count() is the
+    # single source of truth for this rule.
+    operator_count = pending_operator_inbox_count(target.repo_root)
+    if operator_count <= 0:
+        return None
+    # At least one operator item exists; load inbox to find the trigger key.
     operator_items = [
         item
         for item in collect_inbox_items(target.repo_root)
