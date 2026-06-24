@@ -2,18 +2,59 @@
 
 **Simultaneous Production, Integration, and Control Environment.**
 
-spice is an installed agent harness: wrap, steer, supervise, coordinate, and
-audit coding agents across the repos they work on. Install it once, point it at
-a repository, and it provides a closed loop around the agents working there:
+spice has two axioms: the agent's transcript is the single source of truth, and
+the repo's filesystem is the single channel of steering. Everything else —
+supervision, coordination, conscience, hygiene, task routing, and git pressure —
+is derived mechanically from those two surfaces. The operator does not
+hand-write a spec; they steer the loop until observed behavior and evolving
+intent converge.
 
-- the agent's **transcript is the single source of truth**, and
-- the repo's **filesystem is the single channel of steering**.
+![Live steering and semantic ACK loop](docs/screenshots/spice-live-review-steering.png)
 
-supervision, coordination, conscience, and hygiene are derived mechanically
-from those two surfaces. The **`spice agent run` wrapper** makes that loop live
-at execution time: every agent shell command carries pending steering, context
-pressure, source routing, and local command wrappers before
-the requested command runs.
+<sub>Operator steering arrives in the live stream; an assistant ACK retires the
+exact inbox key from the durable filesystem queue.</sub>
+
+## Three surprising ideas
+
+### Semantic ACK
+
+Reading steering is not delivery. An inbox item retires only when the agent says
+`ACK <key>: ...` in assistant prose, so the transcript itself records what was
+understood, what changed, and which durable steering item closed.
+
+### Cheap-wrong conscience
+
+Cheap implementation also makes precisely-wrong work cheap. spice turns its
+style and workflow opinions into a conscience: maxims judge assistant prose as
+it streams, violations become ordinary inbox steering, and the loop corrects
+drift while the agent is still working.
+
+### Git shadow
+
+Agents work inside a per-process git shadow that routes their upstream view
+through the local worktree while leaving the operator's own git config alone.
+Sync belongs to task boundaries, so the agent mostly sees content conflicts and
+the operator keeps normal repository semantics.
+
+## Command table
+
+| Surface | Command | What it does |
+| --- | --- | --- |
+| Install | `spice init` / `spice dev doctor` | Writes local hooks, materializes the worktree skill, prepares state, and verifies drivers, backends, and policy. |
+| Command surface | `spice agent run -- <cmd>` | Runs shell commands with RTK rewrite routing, configured wrapper groups, and steering injection on stderr. |
+| Lifecycle | `spice agent ensure` / `supervise` | Maintains one supervised, worktree-bound agent per worktree under a neutral skill prompt. |
+| Steering | filesystem inbox + `ACK <key>: ...` | Delivers durable operator steering and retires it only through semantic transcript acknowledgment. |
+| Tasks | `spice task ...` | Shares a phase-native Taskwarrior board across worktrees; `task next` owns allocation and git sync happens at task boundaries. |
+| Sessions | `spice session briefing` | Rehydrates current context from transcript forensics instead of chat memory. |
+| Interface | `spice serve` | Exposes lanes, live transcripts, steering, teams, task routing, and browser-visible diagnostics. |
+| Conscience | `spice maxim ...` | Judges assistant prose against repo maxims and routes violations back as steering. |
+| Constitution | git pre-commit hook / `spice study ...` | Enforces repo-shape, file-shape, complexity, magic-number, env-literal, and commit-message policy. |
+
+Session analysis is intentionally tiered. The current tier includes
+`spice session phases` for contiguous working-phase spans and
+`spice session messages` for message-level side/phase/flavor filtering.
+Deeper report families that depend on richer topic/bucket modeling belong in
+a separate analytics tier after the basic phase/message surfaces harden.
 
 ## Why
 
@@ -200,25 +241,6 @@ explicit contract update. Underscored names remain private.
 Everything else is an internal implementation detail unless this section names
 it. A repo tool that needs an unlisted module should either vendor that helper
 or first add the helper to this seam with tests and a stability note.
-
-## The loop
-
-| Surface | Command | What it does |
-| --- | --- | --- |
-| Command surface | `spice agent run -- <cmd>` | Runs shell commands with RTK rewrite routing, configured wrapper groups, and steering injection on stderr. |
-| Lifecycle | `spice agent ensure` / `supervise` | One worktree-bound agent per worktree, started under a neutral skill prompt, watched by a durable supervisor. |
-| Steering | filesystem inbox under `.spice/inbox/` | Durable operator messages; items retire only when the agent semantically ACKs their key in its transcript. |
-| Tasks | `spice task …` | Phase-native Taskwarrior board shared by all worktrees; `task next` is allocator-owned; git sync happens at task boundaries. |
-| Sessions | `spice session briefing` | Transcript forensics: the briefing is the primary rehydration product, with keep-working guidance from context metering. |
-| Interface | `spice serve` | Localhost web UI: lanes over worktrees, live transcript streams, lifetime control (Renew / Steer / Drive), task-filter routing, fused lane groups backed by server-side teams; `spice serve teams` and `spice serve browser-artifact-path <file>` expose operator diagnostics for smoke runs. |
-| Conscience | `spice maxim …` | Builtin maxims judged against assistant prose by a local model; violations come back as inbox steering. |
-| Constitution | git pre-commit hook / `spice study …` | Namespace packages, path shape, LOC/byte/complexity flex+sticky gates, magic-number ratchet, env-literal inventory, commit-message policy. |
-
-Session analysis is intentionally tiered. The current tier includes
-`spice session phases` for contiguous working-phase spans and
-`spice session messages` for message-level side/phase/flavor filtering.
-Deeper report families that depend on richer topic/bucket modeling belong in
-a separate analytics tier after the basic phase/message surfaces harden.
 
 ## Interface
 
