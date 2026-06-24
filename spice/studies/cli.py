@@ -141,6 +141,11 @@ def configure_study_parser(subparsers: Any) -> None:
         "assertion-free-tests",
         "Test functions that do not appear to assert behavior.",
     )
+    _add_study_action(
+        actions,
+        "private-internals",
+        "Tests coupled to private imports or internal assertion structures.",
+    )
 
 
 def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
@@ -308,6 +313,14 @@ def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_private_internals(args: argparse.Namespace, root: Path) -> int:
+    findings = testquality.scan_private_internal_coupling(
+        testquality.test_paths(root), root=root
+    )
+    print(testquality.render_private_internal_board(findings))
+    return 1 if findings else 0
+
+
 def _create_exhaust_tasks(findings: list[reachability.ReachabilityFinding]) -> None:
     from spice.tasks import create
 
@@ -343,5 +356,6 @@ _STUDY_ACTIONS = {
     "env-policy": _study_env_policy,
     "reachability": _study_reachability,
     "assertion-free-tests": _study_assertion_free_tests,
+    "private-internals": _study_private_internals,
     "subsumption": _study_subsumption,
 }
