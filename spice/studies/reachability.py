@@ -35,6 +35,14 @@ REACHABILITY_ALLOWLIST: tuple[str, ...] = (
     "spice.release",  # mounted command from [tool.spice.commands]
 )
 
+# Allowlist for production symbols that look test-only to static analysis but
+# are reached dynamically in production (getattr/registry/string-key dispatch),
+# which the AST scanner cannot see. Entries are either a dotted module path
+# (exempts every symbol in that module) or a fully-qualified ``module.symbol``
+# (exempts one function/class/``Class.method``). Empty by default: the clean
+# repo scans to zero, so any entry is a declared, reviewed exception.
+SYMBOL_REACHABILITY_ALLOWLIST: tuple[str, ...] = ()
+
 
 @dataclass(frozen=True)
 class ReachabilityFinding:
@@ -111,6 +119,7 @@ def scan_symbol_reachability(
     *,
     package: str = "spice",
     test_root: str = "tests",
+    allowlist: Sequence[str] = SYMBOL_REACHABILITY_ALLOWLIST,
 ) -> list[SymbolReachabilityFinding]:
     """Return production-module symbols reachable from tests but not production."""
     pkg_root = repo_root / package
@@ -134,12 +143,15 @@ def scan_symbol_reachability(
         test_paths, definitions, pkg_root=pkg_root, package=package
     )
 
+    allowset = {*SYMBOL_REACHABILITY_ALLOWLIST, *allowlist}
     findings: list[SymbolReachabilityFinding] = []
     for ref in sorted(
         test_refs - prod_refs, key=lambda item: (item.module, item.symbol)
     ):
         definition = definitions.get(ref)
         if definition is None:
+            continue
+        if _symbol_is_allowed(ref, allowset):
             continue
         findings.append(
             SymbolReachabilityFinding(
@@ -151,6 +163,13 @@ def scan_symbol_reachability(
             )
         )
     return findings
+
+
+def _symbol_is_allowed(ref: _SymbolRef, allowset: set[str]) -> bool:
+    """A symbol is exempt if its module or its qualified name is allowlisted."""
+    if ref.module in allowset:
+        return True
+    return f"{ref.module}.{ref.symbol}" in allowset
 
 
 def render_reachability_board(
