@@ -479,9 +479,9 @@ def _read_window(
         scan_end = file_size if end_offset is None else min(end_offset, file_size)
         start = max(0, scan_end - TAIL_SCAN_MAX_BYTES)
         newest: list[AssistantMessage] = []
-        latest_presence: AssistantMessage | None = None
+        presence: list[AssistantMessage] = []
         while True:
-            newest, latest_presence = _scan_span(
+            newest, presence = _scan_span(
                 transcript_path,
                 start=start,
                 end=scan_end,
@@ -493,8 +493,8 @@ def _read_window(
                 break
             start = max(0, start - TAIL_SCAN_MAX_BYTES)
         kept = list(newest)
-        if latest_presence is not None and end_offset is None:
-            kept.append(latest_presence)
+        if end_offset is None:
+            kept.extend(presence)
         kept.sort(key=lambda message: message.index)
         kept = _collapse_view_image_pairs(kept)
         if end_offset is not None and _line_has_tool_output_image(
@@ -521,9 +521,9 @@ def _scan_span(
     limit: int,
     worktree_id: str | None,
     driver: AgentDriver,
-) -> tuple[list[AssistantMessage], AssistantMessage | None]:
+) -> tuple[list[AssistantMessage], list[AssistantMessage]]:
     visible: list[AssistantMessage] = []
-    latest_presence: AssistantMessage | None = None
+    presence: list[AssistantMessage] = []
     with transcript_path.open(encoding="utf-8", errors="replace") as handle:
         handle.seek(start)
         if start:
@@ -541,10 +541,10 @@ def _scan_span(
             if message is None:
                 continue
             if message.kind.startswith("presence:"):
-                latest_presence = message
+                presence.append(message)
                 continue
             visible.append(message)
-    return visible[-limit:], latest_presence
+    return visible[-limit:], _kept_presence_messages(presence)
 
 
 def _collapse_view_image_pairs(
@@ -602,14 +602,9 @@ def _line_has_tool_output_image(
 def _trim_chronological(
     messages: list[AssistantMessage], limit: int
 ) -> list[AssistantMessage]:
-    """Keep the newest visible records plus one newest presence record."""
-    latest_presence = next(
-        (
-            message
-            for message in reversed(messages)
-            if message.kind.startswith("presence:")
-        ),
-        None,
+    """Keep newest visible records plus retained presence records."""
+    kept_presence = _kept_presence_messages(
+        [message for message in messages if message.kind.startswith("presence:")]
     )
     kept: list[AssistantMessage] = []
     visible = 0
@@ -620,11 +615,40 @@ def _trim_chronological(
             continue
         kept.append(message)
         visible += 1
+    kept.extend(kept_presence)
+    return sorted(
+        {message.key: message for message in kept}.values(),
+        key=lambda message: message.index,
+    )
+
+
+def _kept_presence_messages(messages: list[AssistantMessage]) -> list[AssistantMessage]:
+    feedback = [
+        message for message in messages if _is_supervisor_feedback_presence(message)
+    ]
+    latest_presence = next(
+        (
+            message
+            for message in reversed(messages)
+            if not _is_supervisor_feedback_presence(message)
+        ),
+        None,
+    )
+    kept = [*feedback]
     if latest_presence is not None:
         kept.append(latest_presence)
     return sorted(
         {message.key: message for message in kept}.values(),
         key=lambda message: message.index,
+    )
+
+
+def _is_supervisor_feedback_presence(message: AssistantMessage) -> bool:
+    return (
+        message.kind.startswith("presence:")
+        and message.source_kind in _SUPERVISOR_FEEDBACK_OUTPUT_TYPES
+        and bool(message.preview)
+        and message.preview != "tool output"
     )
 
 
@@ -765,7 +789,7 @@ def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
                 items.append(
                     {
                         "kind": _ACK_ALREADY_ACKED_KIND,
-                        "label": "ACK already consumed",
+                        "label": "Already acknowledged",
                         "detail": ", ".join(keys),
                         "keys": keys,
                     }

@@ -306,6 +306,82 @@ def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monke
     assert line["latestMessagePreview"] == ""
 
 
+def test_ack_feedback_distinguishes_first_and_duplicate_attempts(tmp_path, monkeypatch):
+    first = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
+    duplicate = _stamp(datetime(2026, 6, 10, 12, 1, tzinfo=UTC))
+    key = "20260610T120000000000Z"
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text(
+        "\n".join(
+            json.dumps(
+                {"timestamp": timestamp, "type": "response_item", "payload": payload},
+                separators=(",", ":"),
+            )
+            for timestamp, payload in (
+                (
+                    first,
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call-ack-first",
+                        "output": (
+                            "Output:\n"
+                            "Supervisor Feedback\n"
+                            f"  {supervisor_feedback_line('ack.archived', keys=[key])}\n"
+                        ),
+                    },
+                ),
+                (
+                    duplicate,
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call-ack-duplicate",
+                        "output": (
+                            "Output:\n"
+                            "Supervisor Feedback\n"
+                            f"  {supervisor_feedback_line('ack.already-acked', keys=[key])}\n"
+                        ),
+                    },
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        lane,
+        "agent_status",
+        lambda _repo: _Status(running=True, started_at="", process_status="running"),
+    )
+    monkeypatch.setattr(
+        lane,
+        "pending_inbox_identity_payload",
+        lambda _repo: _pending_identity(),
+    )
+
+    items = message_reader.read_assistant_messages(transcript, limit=5)
+    item_payloads = [item.to_payload() for item in items]
+    line = lane.status_line_payload(
+        _State(), _Target(id="wt", repo_root=tmp_path), items=items, error=None
+    )
+
+    assert [item["preview"] for item in item_payloads] == [
+        f"Already acknowledged: {key}",
+        f"Acknowledged: {key}",
+    ]
+    assert [item.preview for item in reversed(items)] == [
+        f"Acknowledged: {key}",
+        f"Already acknowledged: {key}",
+    ]
+    assert [item.kind for item in items] == [
+        "presence:function_call_output",
+        "presence:function_call_output",
+    ]
+    assert items[0].preview == f"Already acknowledged: {key}"
+    assert line["preview"] == f"Already acknowledged: {key}"
+    assert line["latestActivityPreview"] == f"Already acknowledged: {key}"
+    assert line["latestMessagePreview"] == ""
+
+
 def test_inline_task_supervisor_error_updates_presence_preview(tmp_path):
     latest = _stamp(datetime(2026, 6, 10, 12, 1, tzinfo=UTC))
     transcript = tmp_path / "rollout.jsonl"
