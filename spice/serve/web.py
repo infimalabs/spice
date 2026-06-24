@@ -13,11 +13,14 @@ from typing import Any
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
 DEFAULT_BRAND = "spice"
+DEFAULT_LIFETIME = "Drive"
+VALID_LIFETIMES = ("Steer", "Drive", "Drain")
 
 
 @dataclass(frozen=True)
 class ServeBranding:
     name: str
+    default_lifetime: str = DEFAULT_LIFETIME
 
 
 _INDEX_HTML_TEMPLATE = """<!doctype html>
@@ -73,7 +76,11 @@ def serve_branding(repo_root: Path | None = None) -> ServeBranding:
     serve = _table(tool_spice, "serve")
     project = _table(data, "project")
     name = _string(serve.get("brand")) or _string(project.get("name")) or DEFAULT_BRAND
-    return ServeBranding(name=name)
+    raw_lifetime = _string(serve.get("default_lifetime"))
+    default_lifetime = (
+        raw_lifetime if raw_lifetime in VALID_LIFETIMES else DEFAULT_LIFETIME
+    )
+    return ServeBranding(name=name, default_lifetime=default_lifetime)
 
 
 def render_index_html(
@@ -82,9 +89,10 @@ def render_index_html(
     resolved = branding or serve_branding(repo_root)
     brand_html = html.escape(resolved.name)
     brand_attr = html.escape(resolved.name, quote=True)
-    brand_json = json.dumps({"name": resolved.name}, ensure_ascii=False).replace(
-        "</", "<\\/"
-    )
+    brand_json = json.dumps(
+        {"name": resolved.name, "defaultLifetime": resolved.default_lifetime},
+        ensure_ascii=False,
+    ).replace("</", "<\\/")
     return _INDEX_HTML_TEMPLATE.format(
         brand_html=brand_html,
         brand_attr=brand_attr,
