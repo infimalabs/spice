@@ -66,6 +66,11 @@ REACHABILITY_TEST_ONLY_LIMIT = 0
 # with an assert, pytest.raises/pytest.warns, pytest.fail, or assert* helper.
 ASSERTION_FREE_TEST_LIMIT = 0
 
+# Private-internal coupling: tests importing underscored production names or
+# asserting on private attributes. This baseline is the reviewed advisory set;
+# the gate refuses any new coupling above it.
+PRIVATE_INTERNAL_COUPLING_LIMIT = 16
+
 # --- magic numbers -------------------------------------------------------------
 # Staged scans diff against this ref; only regressions fail.
 MAGIC_BASELINE_REF = "HEAD"
