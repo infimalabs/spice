@@ -28,12 +28,11 @@ from spice.agent.maxims import (
     evaluate_maxim_any_violation,
     triggered_maxims,
 )
-from spice.agent.sidechannelnotify import publish_side_channel_notice
+from spice.agent.sidechannelnotify import publish_side_channel_feedback
 from spice.mail.acks import (
     extract_task_batch_lines_from_text,
     summarize_ack_archival,
 )
-from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import (
     discard_inbox_items,
     notify_inbox_changed,
@@ -235,7 +234,7 @@ def publish_supervisor_feedback(
     repo_root: Path, log_handle: TextIO, kind: str, **fields: object
 ) -> None:
     try:
-        publish_side_channel_notice(repo_root, supervisor_feedback_line(kind, **fields))
+        publish_side_channel_feedback(repo_root, kind, **fields)
     except Exception as exc:  # pragma: no cover - best-effort stderr feedback
         log_handle.write(f"spice side-channel feedback error: {exc}\n")
         log_handle.flush()
