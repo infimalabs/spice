@@ -146,7 +146,7 @@ def _walk_test_body(node: ast.AST):
 
 def _node_is_assertion(node: ast.AST) -> bool:
     if isinstance(node, ast.Assert):
-        return True
+        return not _expr_is_static_truth(node.test)
     if isinstance(node, ast.With | ast.AsyncWith):
         return any(_context_expr_is_assertion(item.context_expr) for item in node.items)
     if isinstance(node, ast.Call):
@@ -164,7 +164,70 @@ def _context_expr_is_assertion(expr: ast.AST) -> bool:
 def _call_is_assertion(node: ast.Call) -> bool:
     name = _call_name(node)
     leaf = name.rsplit(".", 1)[-1]
-    return leaf.startswith("assert") or name == "pytest.fail"
+    if _call_is_static_truth_assertion(node, leaf):
+        return False
+    return leaf.startswith("assert") or name in {
+        "pytest.fail",
+        "pytest.raises",
+        "pytest.warns",
+    }
+
+
+def _expr_is_static_truth(node: ast.AST) -> bool:
+    return _expr_static_bool(node) is True
+
+
+def _expr_static_bool(node: ast.AST) -> bool | None:
+    literal_truth = _literal_truth(node)
+    if literal_truth is not None:
+        return literal_truth
+    if not isinstance(node, ast.Compare) or len(node.ops) != 1:
+        return None
+    if len(node.comparators) != 1:
+        return None
+    left = _literal_value(node.left)
+    right = _literal_value(node.comparators[0])
+    if left is _UNKNOWN_LITERAL or right is _UNKNOWN_LITERAL:
+        return None
+    op = node.ops[0]
+    try:
+        if isinstance(op, ast.Eq):
+            return left == right
+        if isinstance(op, ast.NotEq):
+            return left != right
+        if isinstance(op, ast.Is):
+            return left is right
+        if isinstance(op, ast.IsNot):
+            return left is not right
+    except TypeError:
+        return None
+    return None
+
+
+def _call_is_static_truth_assertion(node: ast.Call, leaf: str) -> bool:
+    if not node.args:
+        return False
+    truth = _expr_static_bool(node.args[0])
+    return (leaf == "assertTrue" and truth is True) or (
+        leaf == "assertFalse" and truth is False
+    )
+
+
+_UNKNOWN_LITERAL = object()
+
+
+def _literal_truth(node: ast.AST) -> bool | None:
+    value = _literal_value(node)
+    if value is _UNKNOWN_LITERAL:
+        return None
+    return bool(value)
+
+
+def _literal_value(node: ast.AST):
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, SyntaxError):
+        return _UNKNOWN_LITERAL
 
 
 def _call_name(node: ast.Call) -> str:
