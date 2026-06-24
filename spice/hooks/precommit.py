@@ -34,6 +34,7 @@ from spice.errors import SpiceError
 from spice.paths import find_tool
 from spice.policy import (
     ASSERTION_FREE_TEST_LIMIT,
+    PRIVATE_INTERNAL_COUPLING_LIMIT,
     REACHABILITY_TEST_ONLY_LIMIT,
     REPO_TRUTH_DOC_LIMIT,
     REPO_TRUTH_DOCS,
@@ -196,6 +197,11 @@ def _builtin_pre_commit_steps(
             "assertion-free-tests",
             "assertion-free tests",
             lambda: _run_assertion_free_test_guard(repo_root),
+        ),
+        PreCommitStep(
+            "private-internals",
+            "private internals",
+            lambda: _run_private_internal_coupling_guard(repo_root),
         ),
     ]
 
@@ -623,6 +629,21 @@ def _run_assertion_free_test_guard(repo_root: Path) -> None:
             f"assertion-free-tests: {count} test(s) exceed"
             f" ASSERTION_FREE_TEST_LIMIT={ASSERTION_FREE_TEST_LIMIT};"
             " add assertions or lower the constant after cleanup"
+        )
+
+
+def _run_private_internal_coupling_guard(repo_root: Path) -> None:
+    findings = testquality.scan_private_internal_coupling(
+        testquality.test_paths(repo_root), root=repo_root
+    )
+    count = len(findings)
+    if count > PRIVATE_INTERNAL_COUPLING_LIMIT:
+        board = testquality.render_private_internal_board(findings)
+        raise SpiceError(
+            f"{board}\n"
+            f"private-internals: {count} coupling(s) exceed"
+            f" PRIVATE_INTERNAL_COUPLING_LIMIT={PRIVATE_INTERNAL_COUPLING_LIMIT};"
+            " use public seams or lower the constant after cleanup"
         )
 
 

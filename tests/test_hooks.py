@@ -40,6 +40,7 @@ BUILTIN_PRE_COMMIT_LABELS = [
     "magic numbers",
     "reachability",
     "assertion-free tests",
+    "private internals",
 ]
 
 
@@ -119,6 +120,7 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
         "custom magic",
         "reachability",
         "assertion-free tests",
+        "private internals",
     ]
 
 
@@ -193,6 +195,55 @@ def test_assertion_free_test_guard_allows_grandfathered_baseline(tmp_path, monke
 
     precommit._run_assertion_free_test_guard(tmp_path)
     findings = precommit.testquality.scan_assertion_free_tests(
+        precommit.testquality.test_paths(tmp_path), root=tmp_path
+    )
+    assert len(findings) == 1
+
+
+def test_private_internal_gate_fails_above_limit(tmp_path, monkeypatch):
+    test_dir = tmp_path / "tests"
+    package_dir = tmp_path / "spice" / "worker"
+    test_dir.mkdir()
+    package_dir.mkdir(parents=True)
+    (package_dir / "public.py").write_text("_VALUE = 1\n", encoding="utf-8")
+    (test_dir / "test_private.py").write_text(
+        "from spice.worker.public import _VALUE\n"
+        "\n"
+        "def test_private_import():\n"
+        "    assert _VALUE == 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(precommit, "PRIVATE_INTERNAL_COUPLING_LIMIT", 0)
+    _patch_pre_commit_builtin_noops_except_private_internals(monkeypatch)
+
+    with pytest.raises(SpiceError) as exc_info:
+        precommit.handle_pre_commit(tmp_path)
+
+    message = str(exc_info.value)
+    assert "[private internals]" in message
+    assert "private-internals: 1 coupling(s)" in message
+    assert "private import spice.worker.public._VALUE" in message
+    assert "PRIVATE_INTERNAL_COUPLING_LIMIT=0" in message
+
+
+def test_private_internal_gate_allows_grandfathered_baseline(tmp_path, monkeypatch):
+    test_dir = tmp_path / "tests"
+    package_dir = tmp_path / "spice" / "worker"
+    test_dir.mkdir()
+    package_dir.mkdir(parents=True)
+    (package_dir / "public.py").write_text("_VALUE = 1\n", encoding="utf-8")
+    (test_dir / "test_private.py").write_text(
+        "from spice.worker.public import _VALUE\n"
+        "\n"
+        "def test_private_import():\n"
+        "    assert _VALUE == 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(precommit, "PRIVATE_INTERNAL_COUPLING_LIMIT", 1)
+    _patch_pre_commit_builtin_noops_except_private_internals(monkeypatch)
+
+    assert precommit.handle_pre_commit(tmp_path) == 0
+    findings = precommit.testquality.scan_private_internal_coupling(
         precommit.testquality.test_paths(tmp_path), root=tmp_path
     )
     assert len(findings) == 1
@@ -419,6 +470,9 @@ def test_policy_exclude_filters_path_based_builtin_gate_steps(tmp_path, monkeypa
     monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None
+    )
+    monkeypatch.setattr(
+        precommit, "_run_private_internal_coupling_guard", lambda repo_root: None
     )
     monkeypatch.setattr(
         precommit, "clear_successful_sticky_state", lambda repo_root: None
@@ -813,6 +867,11 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
         "_run_assertion_free_test_guard",
         lambda repo_root: record("assertion-free tests"),
     )
+    monkeypatch.setattr(
+        precommit,
+        "_run_private_internal_coupling_guard",
+        lambda repo_root: record("private internals"),
+    )
     return events
 
 
@@ -831,6 +890,42 @@ def _patch_pre_commit_builtin_noops_except_local_paths(tmp_path, monkeypatch) ->
     )
     monkeypatch.setattr(
         precommit, "_run_serve_web_typecheck_guard", lambda repo_root: None
+    )
+    monkeypatch.setattr(
+        precommit, "_run_env_policy_guard", lambda repo_root, paths: None
+    )
+    monkeypatch.setattr(precommit, "_run_file_loc_guard", lambda repo_root, paths: None)
+    monkeypatch.setattr(
+        precommit, "_run_complexity_guard", lambda repo_root, paths: None
+    )
+    monkeypatch.setattr(
+        precommit, "_run_magic_numbers_guard", lambda repo_root, paths: None
+    )
+    monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit, "_run_assertion_free_test_guard", lambda repo_root: None
+    )
+    monkeypatch.setattr(
+        precommit, "_run_private_internal_coupling_guard", lambda repo_root: None
+    )
+
+
+def _patch_pre_commit_builtin_noops_except_private_internals(monkeypatch) -> None:
+    monkeypatch.setattr(precommit, "staged_paths", lambda repo_root: [])
+    monkeypatch.setattr(
+        precommit, "clear_successful_sticky_state", lambda repo_root: None
+    )
+    monkeypatch.setattr(precommit, "_run_shape_guards", lambda repo_root: None)
+    monkeypatch.setattr(precommit, "_run_staging_guard", lambda repo_root: None)
+    monkeypatch.setattr(precommit, "_run_repo_truth_doc_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit, "_run_python_format_guard", lambda repo_root, paths: None
+    )
+    monkeypatch.setattr(
+        precommit, "_run_serve_web_typecheck_guard", lambda repo_root: None
+    )
+    monkeypatch.setattr(
+        precommit, "_run_local_path_guard", lambda repo_root, paths: None
     )
     monkeypatch.setattr(
         precommit, "_run_env_policy_guard", lambda repo_root, paths: None
@@ -876,6 +971,9 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
     monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None
+    )
+    monkeypatch.setattr(
+        precommit, "_run_private_internal_coupling_guard", lambda repo_root: None
     )
 
 
