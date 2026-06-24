@@ -41,7 +41,7 @@ def test_shipped_agent_defaults_are_current_high_effort():
     assert CODEX_DRIVER.default_model == "gpt-5.5"
     assert CODEX_DRIVER.default_reasoning_effort == "xhigh"
     assert CODEX_DRIVER.default_service_tier == "fast"
-    assert CLAUDE_DRIVER.default_model == "claude-sonnet-4-6"
+    assert CLAUDE_DRIVER.default_model == "sonnet"
     assert CLAUDE_DRIVER.default_reasoning_effort == "xhigh"
 
 
@@ -197,7 +197,7 @@ def test_ensure_agent_dry_run_uses_relative_skill_prompt_for_claude(
     assert result.command[-1] == result.prompt
 
 
-def test_ensure_agent_resolves_configured_claude_sonnet_family(tmp_path, monkeypatch):
+def test_ensure_agent_uses_configured_claude_sonnet_family(tmp_path, monkeypatch):
     monkeypatch.setattr(
         lifecycle,
         "agent_status",
@@ -210,7 +210,7 @@ def test_ensure_agent_resolves_configured_claude_sonnet_family(tmp_path, monkeyp
 
     result = lifecycle.ensure_agent(tmp_path, dry_run=True)
 
-    assert result.command[result.command.index("--model") + 1] == "claude-sonnet-4-6"
+    assert result.command[result.command.index("--model") + 1] == "sonnet"
 
 
 def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(

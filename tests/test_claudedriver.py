@@ -107,18 +107,29 @@ def test_claude_command_uses_shipped_sonnet_xhigh_defaults(tmp_path):
         prompt="follow the skill",
     )
 
-    assert command[command.index("--model") + 1] == "claude-sonnet-4-6"
+    assert command[command.index("--model") + 1] == "sonnet"
     assert command[command.index("--effort") + 1] == "xhigh"
 
 
-def test_claude_command_resolves_sonnet_family_to_current_model(tmp_path):
+def test_claude_command_passes_sonnet_family_alias(tmp_path):
     command = CLAUDE_DRIVER.build_exec_command(
         repo_root=tmp_path,
         prompt="follow the skill",
         model="sonnet",
     )
 
-    assert resolve_claude_model("sonnet") == "claude-sonnet-4-6"
+    assert resolve_claude_model("sonnet") == "sonnet"
+    assert command[command.index("--model") + 1] == "sonnet"
+
+
+def test_claude_command_preserves_explicit_full_model(tmp_path):
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path,
+        prompt="follow the skill",
+        model="claude-sonnet-4-6",
+    )
+
+    assert resolve_claude_model("claude-sonnet-4-6") == "claude-sonnet-4-6"
     assert command[command.index("--model") + 1] == "claude-sonnet-4-6"
 
 
