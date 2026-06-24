@@ -17,6 +17,7 @@ from spice.policy import (
     MAGIC_EXAMINE_VALUE_THRESHOLD,
 )
 from spice.studies import (
+    assertfree,
     complexity,
     envpolicy,
     fileloc,
@@ -135,6 +136,12 @@ def configure_study_parser(subparsers: Any) -> None:
         help="Only consider source files under this package prefix.",
     )
     sub_parser.set_defaults(func=handle_study, study_action="subsumption")
+
+    _add_study_action(
+        actions,
+        "assertion-freeness",
+        "Test functions with no assertions or only trivially-true assertions.",
+    )
 
 
 def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
@@ -320,6 +327,12 @@ def _study_subsumption(args: argparse.Namespace, root: Path) -> int:
     return 1 if report.findings else 0
 
 
+def _study_assertfree(args: argparse.Namespace, root: Path) -> int:
+    findings = assertfree.scan_assertfree(_target_paths(args, root), root=root)
+    print(assertfree.render_assertfree_board(findings))
+    return 1 if findings else 0
+
+
 _STUDY_ACTIONS = {
     "shape": _study_shape,
     "file-loc": _study_file_loc,
@@ -329,4 +342,5 @@ _STUDY_ACTIONS = {
     "env-policy": _study_env_policy,
     "reachability": _study_reachability,
     "subsumption": _study_subsumption,
+    "assertion-freeness": _study_assertfree,
 }
