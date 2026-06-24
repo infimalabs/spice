@@ -1,13 +1,16 @@
 """Coverage subsumption detector: find tests whose coverage is fully subsumed.
 
-A test T is subsumed by T' if every source line T covers is also covered by T'.
-Subsumed tests add zero unique behavioral constraint — they are candidates for
-removal or consolidation unless they serve as belt-and-suspenders on a critical
-path (which the study flags, not decides).
+A test T is subsumed by T' if every source line (and branch arc) T covers is
+also covered by T'.  Subsumed tests add zero unique behavioral constraint —
+they are candidates for removal or consolidation unless they serve as
+belt-and-suspenders on a critical path (which the study flags, not decides).
 
 Requires a .coverage file recorded with per-test context. Generate one with:
 
-    pytest --cov=<package> --cov-context=test
+    pytest --cov=<package> --cov-context=test --cov-branch
+
+The --cov-branch flag records arc (branch) coverage so that two tests covering
+the same lines but distinct branches are not incorrectly flagged as subsumed.
 
 Library seam: public dataclasses and scan/render helpers are importable by
 target-repo tools; underscored names remain private.
@@ -43,13 +46,17 @@ def scan_subsumption(
     if not coverage_path.is_file():
         raise FileNotFoundError(
             f"coverage file not found: {coverage_path}; "
-            "generate with: pytest --cov=<package> --cov-context=test"
+            "generate with: pytest --cov=<package> --cov-context=test --cov-branch"
         )
 
-    test_coverage = _load_per_test_coverage(
-        coverage_path, package_prefix=package_prefix
-    )
-    findings = _find_subsumed(test_coverage)
+    con = sqlite3.connect(coverage_path)
+    try:
+        test_coverage = _read_coverage_db(con, package_prefix=package_prefix)
+        test_arcs = _load_per_test_arcs(con, package_prefix=package_prefix)
+    finally:
+        con.close()
+
+    findings = _find_subsumed(test_coverage, test_arcs)
     all_files: set[str] = set()
     for covered in test_coverage.values():
         all_files.update(covered.keys())
@@ -78,17 +85,34 @@ def render_subsumption_board(report: SubsumptionReport) -> list[str]:
     return rows
 
 
-def _load_per_test_coverage(
-    path: Path,
+def _load_per_test_arcs(
+    con: sqlite3.Connection,
     *,
     package_prefix: str | None,
-) -> dict[str, dict[str, frozenset[int]]]:
-    """Return {test_id: {file: frozenset(line_numbers)}}."""
-    con = sqlite3.connect(path)
-    try:
-        return _read_coverage_db(con, package_prefix=package_prefix)
-    finally:
-        con.close()
+) -> dict[str, frozenset[tuple[str, int, int]]]:
+    """Return {test_id: frozenset((file, fromno, tono))} if arc table exists."""
+    tables = {
+        r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "arc" not in tables:
+        return {}
+    result: dict[str, list[tuple[str, int, int]]] = {}
+    rows = con.execute(
+        "SELECT f.path, c.context, a.fromno, a.tono "
+        "FROM arc a "
+        "JOIN file f ON a.file_id = f.id "
+        "JOIN context c ON a.context_id = c.id "
+        "WHERE c.context != ''"
+    ).fetchall()
+    for file_path, context, fromno, tono in rows:
+        if package_prefix and package_prefix not in file_path:
+            continue
+        test_id = _normalize_context(context)
+        if not test_id:
+            continue
+        result.setdefault(test_id, [])
+        result[test_id].append((file_path, fromno, tono))
+    return {k: frozenset(v) for k, v in result.items()}
 
 
 def _read_coverage_db(
@@ -164,29 +188,38 @@ def _read_v6_schema(
 
 def _find_subsumed(
     test_coverage: dict[str, dict[str, frozenset[int]]],
+    test_arcs: dict[str, frozenset[tuple[str, int, int]]] | None = None,
 ) -> list[SubsumptionFinding]:
-    total_covered: dict[str, frozenset[tuple[str, int]]] = {}
+    # Build per-test feature sets: line points + arc points for subsumption check.
+    # Including arcs prevents false positives when two tests cover the same lines
+    # but distinct branches.
+    feature_sets: dict[str, frozenset] = {}
+    line_counts: dict[str, int] = {}
     for test_id, file_map in test_coverage.items():
-        merged: set[tuple[str, int]] = set()
+        line_pts: set[tuple] = set()
         for file_path, lines in file_map.items():
-            merged.update((file_path, ln) for ln in lines)
-        total_covered[test_id] = frozenset(merged)
+            line_pts.update(("l", file_path, ln) for ln in lines)
+        line_counts[test_id] = len(line_pts)
+        features: set[tuple] = set(line_pts)
+        if test_arcs:
+            for arc in test_arcs.get(test_id, frozenset()):
+                features.add(("a",) + arc)
+        feature_sets[test_id] = frozenset(features)
 
     findings: list[SubsumptionFinding] = []
-    test_ids = sorted(total_covered)
-    for i, test_a in enumerate(test_ids):
-        lines_a = total_covered[test_a]
-        if not lines_a:
+    test_ids = sorted(feature_sets)
+    for test_a in test_ids:
+        features_a = feature_sets[test_a]
+        if not features_a:
             continue
         for test_b in test_ids:
             if test_b == test_a:
                 continue
-            lines_b = total_covered[test_b]
-            if lines_a <= lines_b:
+            if features_a <= feature_sets[test_b]:
                 findings.append(
                     SubsumptionFinding(
                         test=test_a,
-                        covered_lines=len(lines_a),
+                        covered_lines=line_counts[test_a],
                         subsumed_by=test_b,
                     )
                 )
