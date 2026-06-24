@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 
 from spice.serve.messages import AssistantMessage
+from spice.mail.feedback import supervisor_feedback_line
 from spice.serve import messages as message_reader
 from spice.serve.payload import lane
 from spice.serve.payload.lane import (
@@ -257,10 +258,21 @@ def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monke
                 "Chunk ID: 123\n"
                 "Output:\n"
                 "Supervisor Feedback\n"
-                "  ack_archived=20260610T120000000000Z\n"
+                "  "
+                + supervisor_feedback_line(
+                    "ack.archived", keys=["20260610T120000000000Z"]
+                )
+                + "\n"
                 "Supervisor Feedback\n"
-                "  inline_task_created=FILTERS-20260610T120000000001Z "
-                "UI-20260610T120000000002Z\n"
+                "  "
+                + supervisor_feedback_line(
+                    "task.created",
+                    handles=[
+                        "FILTERS-20260610T120000000001Z",
+                        "UI-20260610T120000000002Z",
+                    ],
+                )
+                + "\n"
                 "next task:\n"
             ),
         },
@@ -305,7 +317,12 @@ def test_inline_task_supervisor_error_updates_presence_preview(tmp_path):
             "output": (
                 "Output:\n"
                 "Supervisor Feedback\n"
-                "  inline_task_error=batch add rejected: line 2 project depth\n"
+                "  "
+                + supervisor_feedback_line(
+                    "task.error",
+                    error="batch add rejected: line 2 project depth",
+                )
+                + "\n"
             ),
         },
     )

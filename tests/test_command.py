@@ -14,6 +14,7 @@ import pytest
 
 from spice.agent import sidechannel, sidechannelnotify, wrap
 from spice.agent.shadow import shadow_environment
+from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import compose_inbox_text, write_inbox_item
 from spice.sessions.meter import (
     ActiveContextSnapshot,
@@ -586,14 +587,17 @@ def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch)
 
 
 def test_side_channel_notice_queue_consumes_once(tmp_path):
-    sidechannelnotify.publish_side_channel_notice(
-        tmp_path, "inline_task_created=ACKS-20260101T000000000001Z"
+    notice = supervisor_feedback_line(
+        "task.created", handles=["ACKS-20260101T000000000001Z"]
+    )
+    sidechannelnotify.publish_side_channel_feedback(
+        tmp_path, "task.created", handles=["ACKS-20260101T000000000001Z"]
     )
 
     first = sidechannelnotify.consume_side_channel_notices(tmp_path)
     second = sidechannelnotify.consume_side_channel_notices(tmp_path)
 
-    assert first == ["inline_task_created=ACKS-20260101T000000000001Z"]
+    assert first == [notice]
     assert second == []
 
 
@@ -602,8 +606,11 @@ def test_side_channel_watch_streams_queued_notice_after_initial_payload(
 ):
     stderr = io.StringIO()
     monkeypatch.chdir(tmp_path)
-    sidechannelnotify.publish_side_channel_notice(
-        tmp_path, "inline_task_created=ACKS-20260101T000000000002Z"
+    notice = supervisor_feedback_line(
+        "task.created", handles=["ACKS-20260101T000000000002Z"]
+    )
+    sidechannelnotify.publish_side_channel_feedback(
+        tmp_path, "task.created", handles=["ACKS-20260101T000000000002Z"]
     )
 
     with sidechannel.AgentSideChannelServer(tmp_path):
@@ -621,7 +628,7 @@ def test_side_channel_watch_streams_queued_notice_after_initial_payload(
 
     thread.join(timeout=1.0)
     assert "Supervisor Feedback" in output
-    assert "inline_task_created=ACKS-20260101T000000000002Z" in output
+    assert notice in output
     assert output.count("000000000002Z") == 1
     assert not thread.is_alive()
 
@@ -640,14 +647,15 @@ def test_side_channel_watch_streams_later_notice_to_stderr(tmp_path, monkeypatch
             },
         )
         thread.start()
-        sidechannelnotify.publish_side_channel_notice(
-            tmp_path, "inline_task_error=batch add rejected"
+        notice = supervisor_feedback_line("task.error", error="batch add rejected")
+        sidechannelnotify.publish_side_channel_feedback(
+            tmp_path, "task.error", error="batch add rejected"
         )
         output = _eventually(lambda: stderr.getvalue(), contains="batch add rejected")
 
     thread.join(timeout=1.0)
     assert "Supervisor Feedback" in output
-    assert "inline_task_error=batch add rejected" in output
+    assert notice in output
     assert output.count("batch add rejected") == 1
     assert not thread.is_alive()
 
