@@ -56,6 +56,19 @@ The harness is exercised against **27,267 lines of Python tests against 34,602
 lines of Python source** — about 0.79 test lines per source line, counted from
 tracked `tests/*.py` and `spice/*.py` files with `wc -l`.
 
+## Honest feedback
+
+One principle runs through the design: **never let a thing fail silently, in either direction.** When something succeeds, confirm it explicitly; when something fails, surface the failure rather than hiding it.
+
+This shows up repeatedly:
+
+- **Unmatched ACKs as no-ops**: When an agent ACKs a key that doesn't exist, the system reports "retired nothing" rather than silently dropping the attempt. The operator learns immediately that the agent misread or the key was stale.
+- **Conscience reinforcing when wrong**: When a maxim fires incorrectly (a false positive), the resulting steering still reinforces good practice rather than derailing the agent — the cost of being wrong approaches zero, so the conscience can nudge aggressively without risk.
+- **Resend under fresh key**: If an agent ignores steering, resending the same item under a new key means it can't keep ignoring — the fresh key proves this instance wasn't handled, even if a similar one was.
+- **Explicit "this did nothing" feedback**: Operations that complete without effect (like retiring a nonexistent inbox key) say so explicitly in the transcript, rather than succeeding silently and leaving the operator guessing.
+
+The pattern is visible vs. silent, in both directions. A confirmation you can't miss is as valuable as an error you can't miss — both let you trust that silence means "nothing happened," not "something happened and nobody told you."
+
 Session analysis is intentionally tiered. The current tier includes
 `spice session phases` for contiguous working-phase spans and
 `spice session messages` for message-level side/phase/flavor filtering.
