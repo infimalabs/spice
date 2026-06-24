@@ -141,6 +141,47 @@ BUILTIN_MAXIM_BAGS: dict[str, MaximBag] = {
             "delete it and update to the latest thinking."
         ),
     ),
+    "test-internals": MaximBag(
+        name="test-internals",
+        words=frozenset({"internal", "internals"}),
+        message=(
+            "DO NOT make tests assert on internals; exercise the public seam so "
+            "the test constrains observable behavior rather than implementation "
+            "shape."
+        ),
+    ),
+    "test-only-symbol": MaximBag(
+        name="test-only-symbol",
+        words=frozenset(
+            {
+                "delete both",
+                "only reference",
+                "test only",
+                "test only symbol",
+                "wire in",
+            }
+        ),
+        message=(
+            "DO NOT leave code whose only reference is a test; wire it into "
+            "production or delete both the symbol and its test."
+        ),
+    ),
+    "assertion-free-tests": MaximBag(
+        name="assertion-free-tests",
+        words=frozenset(
+            {
+                "assert free",
+                "assertion",
+                "assertion free",
+                "assertions",
+                "no assertions",
+            }
+        ),
+        message=(
+            "DO NOT add tests without assertions; name the behavior constrained "
+            "and assert it explicitly."
+        ),
+    ),
 }
 
 BUILTIN_MAXIMS: dict[frozenset[str], str] = {

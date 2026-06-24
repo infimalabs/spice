@@ -16,7 +16,15 @@ from spice.policy import (
     MAGIC_BASELINE_REF,
     MAGIC_EXAMINE_VALUE_THRESHOLD,
 )
-from spice.studies import complexity, envpolicy, fileloc, magicnums, mutations, shape
+from spice.studies import (
+    complexity,
+    envpolicy,
+    fileloc,
+    magicnums,
+    mutations,
+    reachability,
+    shape,
+)
 from spice.studies.walk import staged_paths, tracked_paths
 
 
@@ -93,6 +101,19 @@ def configure_study_parser(subparsers: Any) -> None:
         actions, "env-policy", "Undeclared environment-variable literals."
     )
     _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
+    reach = _add_study_action(
+        actions,
+        "reachability",
+        "Test-only modules: code reachable from tests but not from production roots.",
+    )
+    reach.add_argument(
+        "--allow",
+        metavar="MODULE",
+        action="append",
+        dest="allowlist",
+        default=[],
+        help="Dotted module path to allow even if test-only (repeatable).",
+    )
 
 
 def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
@@ -244,6 +265,12 @@ def _study_env_policy(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_reachability(args: argparse.Namespace, root: Path) -> int:
+    findings = reachability.scan_reachability(root, allowlist=args.allowlist)
+    print("\n".join(reachability.render_reachability_board(findings)))
+    return 1 if findings else 0
+
+
 _STUDY_ACTIONS = {
     "shape": _study_shape,
     "file-loc": _study_file_loc,
@@ -251,4 +278,5 @@ _STUDY_ACTIONS = {
     "magic-numbers": _study_magic_numbers,
     "mutations": _study_mutations,
     "env-policy": _study_env_policy,
+    "reachability": _study_reachability,
 }

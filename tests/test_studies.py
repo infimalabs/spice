@@ -24,8 +24,9 @@ from spice.policy import (
 from spice.studies import cli as studies_cli
 from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
-from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies import mutations
+from spice.studies.reachability import scan_reachability
+from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies.shape import (
     configured_package_roots,
     name_cluster_error,
@@ -117,6 +118,54 @@ def test_study_explicit_directory_reports_file_path_requirement(tmp_path, monkey
 
     with pytest.raises(SpiceError, match="file paths.*spice/serve"):
         args.func(args)
+
+
+def test_reachability_scans_test_files_outside_package_root(tmp_path):
+    _write_reachability_repo(tmp_path, "import spice.onlytest\n")
+
+    findings = scan_reachability(tmp_path)
+
+    assert [(f.module, f.module_path, f.only_test_imports) for f in findings] == [
+        ("spice.onlytest", "spice/onlytest.py", ["test_only.py"])
+    ]
+
+
+def test_reachability_expands_from_imported_submodule(tmp_path):
+    _write_reachability_repo(tmp_path, "from spice import onlytest\n")
+
+    findings = scan_reachability(tmp_path)
+
+    assert [(f.module, f.module_path, f.only_test_imports) for f in findings] == [
+        ("spice.onlytest", "spice/onlytest.py", ["test_only.py"])
+    ]
+
+
+def test_study_reachability_cli_reports_test_only_module(tmp_path, monkeypatch, capsys):
+    _write_reachability_repo(tmp_path, "from spice import onlytest\n")
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    args = build_parser().parse_args(["study", "reachability"])
+
+    assert args.func(args) == 1
+    output = capsys.readouterr().out
+    assert "reachability: 1 test-only module(s)" in output
+    assert "spice/onlytest.py" in output
+    assert "module: spice.onlytest" in output
+
+
+def test_reachability_merges_default_allowlist(tmp_path):
+    _write_reachability_repo(tmp_path, "import spice.release\n", module_name="release")
+
+    assert scan_reachability(tmp_path) == []
+
+
+def _write_reachability_repo(
+    root: Path, test_import: str, *, module_name: str = "onlytest"
+) -> None:
+    (root / "spice" / "cli").mkdir(parents=True)
+    (root / "tests").mkdir()
+    (root / "spice" / "cli" / "entry.py").write_text("", encoding="utf-8")
+    (root / "spice" / f"{module_name}.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "tests" / "test_only.py").write_text(test_import, encoding="utf-8")
 
 
 def test_generated_lockfiles_are_pruned_from_file_shape_sticky_state(

@@ -56,6 +56,11 @@ The harness is exercised against **27,267 lines of Python tests against 34,602
 lines of Python source** — about 0.79 test lines per source line, counted from
 tracked `tests/*.py` and `spice/*.py` files with `wc -l`.
 
+A separate hardware stressor is kept deliberately narrow: spice has been
+battle-tested against real hardware workflows, including an agent-driven Meta
+Quest test rig. The public hardware demo waits until it can be reproduced with
+owned assets, public tooling, and no private user or platform data.
+
 The constitution applies to itself. The largest production file in the repo
 (`spice/serve/team/metrics.py`, 1,307 lines) sits under the project's own 1,500-line
 flex ceiling. The gate that prevents any file from silently growing past that ceiling
