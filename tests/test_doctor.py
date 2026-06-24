@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from spice import config
 from spice.hooks import doctor
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
 
@@ -227,3 +228,22 @@ def test_doctor_treats_npm_as_optional_without_serve_web_sources(tmp_path, monke
 
     assert npm.status == "warn"
     assert "no serve web checkJs sources" in npm.detail
+
+
+def test_doctor_uses_configured_external_speech_backend(tmp_path, monkeypatch):
+    config.update_section(
+        tmp_path,
+        config.SAY_KEY,
+        {
+            config.SAY_BACKEND_KEY: "external",
+            config.SAY_COMMAND_KEY: "tts-engine --wav",
+        },
+    )
+    monkeypatch.setattr(doctor, "find_tool", lambda name: f"/tools/{name}")
+
+    checks = doctor._binary_checks(tmp_path)
+    tts = next(check for check in checks if check.name == "tool.tts")
+
+    assert tts.status == "ok"
+    assert "tts-engine -> /tools/tts-engine" in tts.detail
+    assert "optional external speech backend" in tts.detail

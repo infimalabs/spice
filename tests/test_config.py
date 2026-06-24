@@ -2,8 +2,11 @@
 
 import argparse
 
+import pytest
+
 from spice import config
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
+from spice.errors import SpiceError
 from spice.configcli import handle_config
 
 
@@ -181,3 +184,65 @@ def test_config_agent_writes_driver_scope(tmp_path, monkeypatch, capsys):
         "agent worktree driver=claude model=- effort=-\n"
         "agent effective driver=claude model=claude-sonnet-4-5 effort=xhigh\n"
     )
+
+
+def test_config_say_writes_macos_say_settings(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    result = handle_config(
+        argparse.Namespace(
+            config_action="say",
+            clear=False,
+            backend=None,
+            command=None,
+            content_type=None,
+            voice="Samantha",
+            words_per_minute=190,
+        )
+    )
+
+    assert result == 0
+    assert config.configured_say_backend(tmp_path) == "say"
+    assert config.say_command_args(tmp_path) == ["say", "-v", "Samantha", "-r", "190"]
+    assert capsys.readouterr().out == ("say backend=say argv=say -v Samantha -r 190\n")
+
+
+def test_config_say_writes_external_backend(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    result = handle_config(
+        argparse.Namespace(
+            config_action="say",
+            clear=False,
+            backend="external",
+            command="tts-engine --wav",
+            content_type="audio/wav",
+            voice=None,
+            words_per_minute=None,
+        )
+    )
+
+    assert result == 0
+    assert config.configured_say_backend(tmp_path) == "external"
+    assert config.configured_say_command(tmp_path) == "tts-engine --wav"
+    assert config.configured_say_content_type(tmp_path) == "audio/wav"
+    assert capsys.readouterr().out == (
+        "say backend=external command=tts-engine --wav content_type=audio/wav\n"
+    )
+
+
+def test_config_say_rejects_external_backend_without_command(tmp_path, monkeypatch):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    with pytest.raises(SpiceError, match="requires --command"):
+        handle_config(
+            argparse.Namespace(
+                config_action="say",
+                clear=False,
+                backend="external",
+                command=None,
+                content_type=None,
+                voice=None,
+                words_per_minute=None,
+            )
+        )

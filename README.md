@@ -207,6 +207,29 @@ project config, then the driver defaults. `spice config agent` keeps project
 and worktree rows explicit-only, while the effective row includes driver
 defaults so unconfigured repos still show what will launch.
 
+### Speech backend
+
+Serve can read messages aloud through a configurable speech backend:
+
+```sh
+spice config say --voice Samantha --words-per-minute 190
+```
+
+The default backend is macOS `say`, which honors the configured voice and rate.
+Linux or other non-Mac worktrees should configure an external backend command
+instead:
+
+```sh
+spice config say --backend external \
+  --command "/path/to/tts-wrapper" \
+  --content-type audio/wav
+```
+
+The external command receives prepared UTF-8 text on stdin and must write
+browser-playable audio bytes on stdout. Use a tiny wrapper around engines such
+as `piper` or `espeak-ng` when their native flags, model paths, or output-file
+behavior need adaptation. The content type should match the emitted audio.
+
 ### Repo command mounts
 
 A repo can also mount its own tooling into the `spice` namespace:

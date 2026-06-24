@@ -19,7 +19,20 @@ def configure_config_parser(subparsers: Any) -> None:
     show = actions.add_parser("show", help="Print the current configuration.")
     show.set_defaults(func=handle_config)
 
-    say = actions.add_parser("say", help="Configure speech voice and rate.")
+    say = actions.add_parser("say", help="Configure speech playback.")
+    say.add_argument(
+        "--backend",
+        choices=config.SAY_BACKEND_CHOICES,
+        help="Speech backend: macOS say or an external stdin/stdout command.",
+    )
+    say.add_argument(
+        "--command",
+        help="External speech command that reads text on stdin and writes audio to stdout.",
+    )
+    say.add_argument(
+        "--content-type",
+        help="Content-Type for external backend audio, such as audio/wav.",
+    )
     say.add_argument("--voice", help="macOS `say` voice name.")
     say.add_argument("--words-per-minute", type=int)
     say.add_argument("--clear", action="store_true")
@@ -82,14 +95,23 @@ def _handle_say(args: argparse.Namespace, repo_root: Path) -> int:
         print("say config cleared")
         return 0
     values: dict[str, Any] = {}
+    if args.backend:
+        values[config.SAY_BACKEND_KEY] = args.backend
+    if args.command and args.command.strip():
+        values[config.SAY_COMMAND_KEY] = args.command.strip()
+        values.setdefault(config.SAY_BACKEND_KEY, "external")
+    if args.content_type and args.content_type.strip():
+        values[config.SAY_CONTENT_TYPE_KEY] = args.content_type.strip()
     if args.voice and args.voice.strip():
         values[config.SAY_VOICE_KEY] = args.voice.strip()
     if args.words_per_minute and args.words_per_minute > 0:
         values[config.SAY_WORDS_PER_MINUTE_KEY] = args.words_per_minute
     if not values:
-        raise SpiceError("config say requires --voice or --words-per-minute")
+        print(_say_config_summary(repo_root))
+        return 0
+    _validate_say_config(repo_root, values)
     config.update_section(repo_root, config.SAY_KEY, values)
-    print(f"say={' '.join(config.say_command_args(repo_root))}")
+    print(_say_config_summary(repo_root))
     return 0
 
 
@@ -169,6 +191,28 @@ def _agent_config_summary(repo_root: Path) -> str:
             _agent_scope_line("effective", effective),
         ]
     )
+
+
+def _validate_say_config(repo_root: Path, values: dict[str, Any]) -> None:
+    state = config.read_config_state(repo_root)
+    section = state.get(config.SAY_KEY)
+    candidate = dict(section) if isinstance(section, dict) else {}
+    candidate.update(values)
+    backend = str(
+        candidate.get(config.SAY_BACKEND_KEY) or config.DEFAULT_SAY_BACKEND
+    ).strip()
+    command = str(candidate.get(config.SAY_COMMAND_KEY) or "").strip()
+    if backend == "external" and not command:
+        raise SpiceError("config say --backend external requires --command")
+
+
+def _say_config_summary(repo_root: Path) -> str:
+    backend = config.configured_say_backend(repo_root)
+    if backend == "external":
+        command = config.configured_say_command(repo_root) or "-"
+        content_type = config.configured_say_content_type(repo_root)
+        return f"say backend=external command={command} content_type={content_type}"
+    return f"say backend=say argv={' '.join(config.say_command_args(repo_root))}"
 
 
 def _agent_scope_line(scope: str, values: dict[str, str]) -> str:
