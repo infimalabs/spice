@@ -13,7 +13,8 @@ from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
 COMMIT_MESSAGE_COMMENT_PREFIX = "#"
 COMMIT_MESSAGE_SCISSORS_MARKER = ">8"
 COMMIT_MESSAGE_LIST_MARKER_RE = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s+")
-COMMIT_MESSAGE_TRAILER_RE = re.compile(r"^[A-Za-z0-9-]+: .+")
+COMMIT_MESSAGE_TRAILER_RE = re.compile(r"^(?P<key>[A-Za-z0-9-]+): .+")
+FORBIDDEN_COMMIT_MESSAGE_TRAILER_KEYS = {"co-authored-by"}
 
 
 def _commit_message_policy_lines(message_text: str) -> list[tuple[int, str]]:
@@ -35,10 +36,15 @@ def _line_exempt_from_wrap(line: str, *, is_subject: bool) -> bool:
         not stripped
         or stripped.startswith("http://")
         or stripped.startswith("https://")
-        or (
-            not is_subject and COMMIT_MESSAGE_TRAILER_RE.fullmatch(stripped) is not None
-        )
+        or (not is_subject and _commit_message_trailer_key(stripped) is not None)
     )
+
+
+def _commit_message_trailer_key(line: str) -> str | None:
+    match = COMMIT_MESSAGE_TRAILER_RE.fullmatch(line.strip())
+    if match is None:
+        return None
+    return match.group("key").lower()
 
 
 def validate_commit_message_text(
@@ -56,6 +62,14 @@ def validate_commit_message_text(
         failures.append(
             "literal '\\n' found; write real newlines with `git commit -F <file>`"
         )
+
+    for line_number, line in lines[1:]:
+        key = _commit_message_trailer_key(line)
+        if key in FORBIDDEN_COMMIT_MESSAGE_TRAILER_KEYS:
+            failures.append(
+                f"line {line_number} uses forbidden trailer Co-Authored-By; "
+                "commit messages must not add co-authors"
+            )
 
     subject_line_number, subject = lines[0]
     if len(subject) > wrap_limit:
