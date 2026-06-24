@@ -101,7 +101,6 @@ def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
     assert ensure_calls == [
         {
             "target": target,
-            "pending": 0,
             "attempt_cache": state.pending_agent_ensure_attempts,
             "force_new": True,
         }
@@ -233,9 +232,9 @@ def _patch_payload_dependencies(
         started_at="",
     )
 
-    def fake_ensure(target, pending, **kwargs):
+    def fake_ensure(target, **kwargs):
         if ensure_calls is not None:
-            ensure_calls.append({"target": target, "pending": pending, **kwargs})
+            ensure_calls.append({"target": target, **kwargs})
         return None
 
     monkeypatch.setattr(identity, "agent_status", lambda _repo: status)

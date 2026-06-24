@@ -256,6 +256,77 @@ def test_work_tree_send_deadletters_message_after_generic_ensure_failure(
     assert inbox_request_body(deadletters[0].text) == "inspect this failure"
 
 
+def test_pending_inbox_ensure_ignores_automated_guidance(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    write_inbox_item(
+        repo,
+        "20260102T000000000001Z.txt",
+        compose_inbox_text(body="automated maxim", priority="maxim", stop=False),
+    )
+    ensure_calls = 0
+
+    def fake_ensure(ensured_target, **kwargs):
+        nonlocal ensure_calls
+        ensure_calls += 1
+        assert ensured_target == target
+        return {"ok": True, "threadId": THREAD_A}, HTTPStatus.OK
+
+    monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+
+    payload = agentapi.ensure_agent_for_pending_inbox(
+        target,
+        attempt_cache={},
+        retry_seconds=0.0,
+    )
+
+    assert payload is None
+    assert ensure_calls == 0
+    assert pending_inbox_count(repo) == 1
+
+
+def test_pending_inbox_ensure_uses_first_operator_item_as_trigger(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    _patch_agent_status(monkeypatch, thread_id=THREAD_A, running=False)
+    write_inbox_item(
+        repo,
+        "20260102T000000000001Z.txt",
+        compose_inbox_text(body="automated maxim", priority="maxim", stop=False),
+    )
+    write_inbox_item(
+        repo,
+        "20260102T000000000002Z.txt",
+        compose_inbox_text(body="operator steering", priority=None, stop=False),
+    )
+
+    def fake_ensure(ensured_target, **kwargs):
+        assert ensured_target == target
+        return {
+            "ok": False,
+            "error": "Could not ensure agent: invalid config",
+        }, HTTPStatus.INTERNAL_SERVER_ERROR
+
+    monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+
+    payload = agentapi.ensure_agent_for_pending_inbox(
+        target,
+        attempt_cache={},
+        retry_seconds=0.0,
+    )
+
+    assert payload["deadletteredInboxKey"] == "20260102T000000000002Z"
+    assert [item.name for item in collect_inbox_items(repo)] == [
+        "20260102T000000000001Z.txt"
+    ]
+    assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
+        "20260102T000000000002Z.txt"
+    ]
+
+
 def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkeypatch):
     repo = _repo(tmp_path)
     target = _target(repo)
