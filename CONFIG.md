@@ -117,8 +117,4 @@ days for H/M/L.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `brand` | `[project].name` or `spice` | Header and browser-title brand for `spice serve`. |
-
-Lane lifetime defaults are currently code-defined, not tracked config:
-`Steer`, `Drive`, `Drain` with `Drive` as the default. `Steer` uses manual
-filters, `Drive` auto-subscribes to projects the team creates or claims, and
-`Drain` dissolves the task boundary so all assignable work is visible.
+| `default_lifetime` | `Drive` | Initial serve lane lifetime: `Steer` uses manual filters, `Drive` auto-subscribes to projects the team creates or claims, and `Drain` dissolves the task boundary so all assignable work is visible. |
