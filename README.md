@@ -56,6 +56,12 @@ The harness is exercised against **27,267 lines of Python tests against 34,602
 lines of Python source** — about 0.79 test lines per source line, counted from
 tracked `tests/*.py` and `spice/*.py` files with `wc -l`.
 
+The constitution applies to itself. The largest production file in the repo
+(`spice/serve/team/metrics.py`, 1,307 lines) sits under the project's own 1,500-line
+flex ceiling. The gate that prevents any file from silently growing past that ceiling
+is the same gate that guards every other repo spice is installed in. A constitution
+its own author exempts himself from is theater; this one isn't.
+
 ## Honest feedback
 
 One principle runs through the design: **never let a thing fail silently, in either direction.** When something succeeds, confirm it explicitly; when something fails, surface the failure rather than hiding it.
