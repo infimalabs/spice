@@ -25,7 +25,11 @@ from spice.studies import cli as studies_cli
 from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies import mutations
-from spice.studies.reachability import ReachabilityFinding, scan_reachability
+from spice.studies.reachability import (
+    ReachabilityFinding,
+    scan_reachability,
+    scan_symbol_reachability,
+)
 from spice.studies.subsumption import scan_subsumption
 from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies.shape import (
@@ -351,6 +355,47 @@ def test_reachability_expands_from_imported_submodule(tmp_path):
     assert [(f.module, f.module_path, f.only_test_imports) for f in findings] == [
         ("spice.onlytest", "spice/onlytest.py", ["test_only.py"])
     ]
+
+
+def test_symbol_reachability_finds_test_only_symbols_in_live_module(tmp_path):
+    _write_symbol_reachability_repo(tmp_path)
+
+    module_findings = scan_reachability(tmp_path)
+    symbol_findings = scan_symbol_reachability(tmp_path)
+
+    assert [(f.module, f.module_path) for f in module_findings] == [
+        ("spice.orphan_module_xyz", "spice/orphan_module_xyz.py")
+    ]
+    assert [
+        (f.module, f.symbol, f.kind, f.only_test_imports) for f in symbol_findings
+    ] == [
+        (
+            "spice.live",
+            "LiveThing.planted_dead_method_abc",
+            "method",
+            ["test_symbols.py"],
+        ),
+        (
+            "spice.live",
+            "planted_dead_function_abc",
+            "function",
+            ["test_symbols.py"],
+        ),
+    ]
+
+
+def test_study_symbol_reachability_cli_reports_test_only_symbol(
+    tmp_path, monkeypatch, capsys
+):
+    _write_symbol_reachability_repo(tmp_path)
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    args = build_parser().parse_args(["study", "symbol-reachability"])
+
+    assert args.func(args) == 1
+    output = capsys.readouterr().out
+    assert "symbol-reachability: 2 test-only symbol(s)" in output
+    assert "spice/live.py:planted_dead_function_abc" in output
+    assert "spice.live.planted_dead_function_abc (function)" in output
 
 
 def test_study_reachability_cli_reports_test_only_module(tmp_path, monkeypatch, capsys):
@@ -721,6 +766,40 @@ def _write_reachability_repo(
     (root / "spice" / "cli" / "entry.py").write_text("", encoding="utf-8")
     (root / "spice" / f"{module_name}.py").write_text("VALUE = 1\n", encoding="utf-8")
     (root / "tests" / "test_only.py").write_text(test_import, encoding="utf-8")
+
+
+def _write_symbol_reachability_repo(root: Path) -> None:
+    (root / "spice" / "cli").mkdir(parents=True)
+    (root / "tests").mkdir()
+    (root / "spice" / "cli" / "entry.py").write_text(
+        "from ..live import production_function, LiveThing\n"
+        "production_function()\n"
+        "LiveThing().production_method()\n",
+        encoding="utf-8",
+    )
+    (root / "spice" / "live.py").write_text(
+        "def production_function():\n"
+        "    return 1\n\n"
+        "def planted_dead_function_abc():\n"
+        "    return 2\n\n"
+        "class LiveThing:\n"
+        "    def production_method(self):\n"
+        "        return 3\n\n"
+        "    def planted_dead_method_abc(self):\n"
+        "        return 4\n",
+        encoding="utf-8",
+    )
+    (root / "spice" / "orphan_module_xyz.py").write_text(
+        "def only_tests_call():\n    return 5\n", encoding="utf-8"
+    )
+    (root / "tests" / "test_symbols.py").write_text(
+        "from spice.live import LiveThing, planted_dead_function_abc\n"
+        "import spice.orphan_module_xyz\n\n"
+        "def test_symbols():\n"
+        "    planted_dead_function_abc()\n"
+        "    LiveThing().planted_dead_method_abc()\n",
+        encoding="utf-8",
+    )
 
 
 def test_generated_lockfiles_are_pruned_from_file_shape_sticky_state(
