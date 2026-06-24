@@ -59,6 +59,27 @@ def configure_study_parser(subparsers: Any) -> None:
     magic.add_argument("--baseline-ref", default=MAGIC_BASELINE_REF)
     magic.add_argument("--threshold", type=int, default=MAGIC_EXAMINE_VALUE_THRESHOLD)
 
+    _configure_mutation_parser(actions)
+
+    _add_study_action(
+        actions, "env-policy", "Undeclared environment-variable literals."
+    )
+    _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
+    _configure_reachability_parser(actions)
+    _configure_subsumption_parser(actions)
+    _add_study_action(
+        actions,
+        "assertion-free-tests",
+        "Test functions that do not appear to assert behavior.",
+    )
+    _add_study_action(
+        actions,
+        "private-internals",
+        "Tests coupled to private imports or internal assertion structures.",
+    )
+
+
+def _configure_mutation_parser(actions: Any) -> None:
     mutation = _add_study_action(
         actions,
         "mutations",
@@ -99,10 +120,8 @@ def configure_study_parser(subparsers: Any) -> None:
         help="Write current scores to a mutation ratchet JSON file.",
     )
 
-    _add_study_action(
-        actions, "env-policy", "Undeclared environment-variable literals."
-    )
-    _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
+
+def _configure_reachability_parser(actions: Any) -> None:
     reach = _add_study_action(
         actions,
         "reachability",
@@ -116,7 +135,14 @@ def configure_study_parser(subparsers: Any) -> None:
         default=[],
         help="Dotted module path to allow even if test-only (repeatable).",
     )
+    reach.add_argument(
+        "--create-tasks",
+        action="store_true",
+        help="Create tagged decision tasks for each test-only module.",
+    )
 
+
+def _configure_subsumption_parser(actions: Any) -> None:
     sub_parser = actions.add_parser(
         "subsumption",
         help=(
@@ -136,16 +162,6 @@ def configure_study_parser(subparsers: Any) -> None:
         help="Only consider source files under this package prefix.",
     )
     sub_parser.set_defaults(func=handle_study, study_action="subsumption")
-    _add_study_action(
-        actions,
-        "assertion-free-tests",
-        "Test functions that do not appear to assert behavior.",
-    )
-    _add_study_action(
-        actions,
-        "private-internals",
-        "Tests coupled to private imports or internal assertion structures.",
-    )
 
 
 def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
@@ -326,13 +342,15 @@ def _create_exhaust_tasks(findings: list[reachability.ReachabilityFinding]) -> N
 
     for f in findings:
         handle = create.add(
-            f"Exhaust: wire in or delete-both {f.module_path}",
+            f"Exhaust decision: wire-in/delete-both {f.module_path}",
             project="tests.exhaust",
-            tags=["exhaust"],
+            tags=["exhaust", "decision", "wire_in_delete_both"],
             acceptance=[
-                f"Module {f.module} is either wired into a production entry point "
-                f"or deleted along with every test that imports it. "
-                f"Imported only by: {', '.join(f.only_test_imports) or 'unknown'}."
+                f"Resolve {f.module} by either wiring it into a production entry "
+                f"point or deleting {f.module_path} along with every test that "
+                "imports it.",
+                f"Current test-only importers: "
+                f"{', '.join(f.only_test_imports) or 'unknown'}.",
             ],
         )
         print(f"  task created: {handle}")
