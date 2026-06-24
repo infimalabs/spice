@@ -567,17 +567,23 @@ def _write_coverage_db_v7(
         )
     for fid, fpath in enumerate(files, 1):
         con.execute(f"INSERT INTO file VALUES ({fid}, '{fpath}')")
-    for cid, (ctx_name, file_lines) in enumerate(contexts.items(), 1):
+    # Collect all context names; arc-only contexts may not appear in line coverage.
+    all_ctx_names = list(contexts.keys())
+    if arcs is not None:
+        for name in arcs:
+            if name not in contexts:
+                all_ctx_names.append(name)
+    for cid, ctx_name in enumerate(all_ctx_names, 1):
         con.execute(f"INSERT INTO context VALUES ({cid}, '{ctx_name}')")
-        for file_index, lines in file_lines.items():
-            numbits = _nums_to_numbits(lines)
-            con.execute(
-                "INSERT INTO line_bits VALUES (?, ?, ?)",
-                (file_index + 1, cid, numbits),
-            )
+        if ctx_name in contexts:
+            for file_index, lines in contexts[ctx_name].items():
+                numbits = _nums_to_numbits(lines)
+                con.execute(
+                    "INSERT INTO line_bits VALUES (?, ?, ?)",
+                    (file_index + 1, cid, numbits),
+                )
         if arcs is not None:
-            file_arcs = arcs.get(ctx_name, {})
-            for file_index, arc_list in file_arcs.items():
+            for file_index, arc_list in arcs.get(ctx_name, {}).items():
                 for fromno, tono in arc_list:
                     con.execute(
                         "INSERT INTO arc VALUES (?, ?, ?, ?)",
@@ -664,6 +670,46 @@ def test_subsumption_same_lines_same_arcs_is_subsumed(tmp_path):
 
     assert len(report.findings) == 1
     assert report.findings[0].test == "test_a"
+
+
+def test_subsumption_arc_only_database_counts_tests_and_files(tmp_path):
+    # Database with arc table but no line_bits rows (branch-only coverage fixture).
+    db = _write_coverage_db_v7(
+        tmp_path,
+        files=["spice/foo.py"],
+        contexts={},  # no line_bits rows
+        arcs={
+            "test_true_branch": {0: [(1, 2)]},
+            "test_false_branch": {0: [(1, -1)]},
+        },
+    )
+
+    report = scan_subsumption(db)
+
+    assert report.tests_scanned == 2
+    assert report.source_files_scanned == 1
+    assert report.findings == ()  # distinct arcs → not subsumed
+
+
+def test_subsumption_arc_only_detects_subsumed_test(tmp_path):
+    # Arc-only database where test_a's arcs are a strict subset of test_b's.
+    db = _write_coverage_db_v7(
+        tmp_path,
+        files=["spice/foo.py"],
+        contexts={},
+        arcs={
+            "test_a": {0: [(1, 2)]},
+            "test_b": {0: [(1, 2), (2, 3)]},
+        },
+    )
+
+    report = scan_subsumption(db)
+
+    assert report.tests_scanned == 2
+    assert len(report.findings) == 1
+    assert report.findings[0].test == "test_a"
+    assert report.findings[0].subsumed_by == "test_b"
+    assert report.findings[0].covered_lines == 0  # no line coverage, only arcs
 
 
 def _write_reachability_repo(

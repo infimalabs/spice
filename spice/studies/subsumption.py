@@ -57,13 +57,19 @@ def scan_subsumption(
         con.close()
 
     findings = _find_subsumed(test_coverage, test_arcs)
+
+    # Both test_coverage and test_arcs are already package-prefix filtered.
     all_files: set[str] = set()
     for covered in test_coverage.values():
         all_files.update(covered.keys())
+    for arc_set in test_arcs.values():
+        all_files.update(file_path for file_path, _from, _to in arc_set)
+
+    all_test_ids = set(test_coverage.keys()) | test_arcs.keys()
 
     return SubsumptionReport(
         findings=tuple(findings),
-        tests_scanned=len(test_coverage),
+        tests_scanned=len(all_test_ids),
         source_files_scanned=len(all_files),
     )
 
@@ -192,10 +198,15 @@ def _find_subsumed(
 ) -> list[SubsumptionFinding]:
     # Build per-test feature sets: line points + arc points for subsumption check.
     # Including arcs prevents false positives when two tests cover the same lines
-    # but distinct branches.
+    # but distinct branches.  Arc-only tests (present in test_arcs but not in
+    # test_coverage) are fully included so branch-only databases are handled.
     feature_sets: dict[str, frozenset] = {}
     line_counts: dict[str, int] = {}
-    for test_id, file_map in test_coverage.items():
+    all_ids = set(test_coverage.keys())
+    if test_arcs:
+        all_ids |= test_arcs.keys()
+    for test_id in all_ids:
+        file_map = test_coverage.get(test_id, {})
         line_pts: set[tuple] = set()
         for file_path, lines in file_map.items():
             line_pts.update(("l", file_path, ln) for ln in lines)
