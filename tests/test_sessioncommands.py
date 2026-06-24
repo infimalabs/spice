@@ -5,7 +5,7 @@ import json
 
 from spice.cli.parser import build_parser
 from spice.sessions import commandaudit, commandrecords
-from spice.sessions.cli import _print_commands
+from spice.sessions.cli import handle_session
 
 
 def test_command_records_pair_function_calls_with_exit_outputs(tmp_path):
@@ -130,7 +130,7 @@ def test_session_commands_summary_reports_wrapper_and_pipeline_pressure(
 ):
     transcript = _command_fixture(tmp_path)
 
-    _print_commands(_command_args(summary=True), [transcript])
+    handle_session(_command_args(transcript, summary=True))
 
     output = capsys.readouterr().out
     assert "Commands\n" in output
@@ -144,7 +144,7 @@ def test_session_commands_filtered_summary_names_population_and_filter(
 ):
     transcript = _command_fixture(tmp_path)
 
-    _print_commands(_command_args(summary=True, failed=True), [transcript])
+    handle_session(_command_args(transcript, summary=True, failed=True))
 
     output = capsys.readouterr().out
     assert "Commands\n" in output
@@ -157,9 +157,8 @@ def test_session_commands_filters_since_compaction_and_noncanonical_pipelines(
 ):
     transcript = _command_fixture(tmp_path)
 
-    _print_commands(
-        _command_args(since_compaction=True, noncanonical_pipelines=True),
-        [transcript],
+    handle_session(
+        _command_args(transcript, since_compaction=True, noncanonical_pipelines=True)
     )
 
     output = capsys.readouterr().out
@@ -220,8 +219,9 @@ def _command_fixture(tmp_path):
     return transcript
 
 
-def _command_args(**overrides):
+def _command_args(transcript, **overrides):
     values = {
+        "session_action": "commands",
         "failed": False,
         "pipelines": False,
         "noncanonical_pipelines": False,
@@ -232,6 +232,7 @@ def _command_args(**overrides):
         "max_text": 220,
     }
     values.update(overrides)
+    values["files"] = [str(transcript)]
     return argparse.Namespace(**values)
 
 

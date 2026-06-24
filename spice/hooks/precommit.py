@@ -34,6 +34,7 @@ from spice.errors import SpiceError
 from spice.paths import find_tool
 from spice.policy import (
     ASSERTION_FREE_TEST_LIMIT,
+    LEGITIMATE_INTERNAL_COUPLINGS,
     REACHABILITY_TEST_ONLY_LIMIT,
     REPO_TRUTH_DOC_LIMIT,
     REPO_TRUTH_DOCS,
@@ -201,6 +202,11 @@ def _builtin_pre_commit_steps(
             "assertion-free-tests",
             "assertion-free tests",
             lambda: _run_assertion_free_test_guard(repo_root),
+        ),
+        PreCommitStep(
+            "private-internals",
+            "private internals",
+            lambda: _run_private_internal_coupling_guard(repo_root),
         ),
     ]
 
@@ -497,8 +503,13 @@ def repo_truth_docs(repo_root: Path) -> list[str]:
     return declared or list(REPO_TRUTH_DOCS)
 
 
-def _run_repo_truth_doc_guard(repo_root: Path) -> None:
-    """Doctrine docs ride in every agent's context; cap them hard."""
+def repo_truth_doc_violations(repo_root: Path) -> list[str]:
+    """Return one ``name: count characters (cap N)`` line per over-cap doc.
+
+    Public seam: doctrine docs ride in every agent's context, so the cap is a
+    real product rule worth asserting on directly; the guard below is the thin
+    raising wrapper.
+    """
     over: list[str] = []
     for name in repo_truth_docs(repo_root):
         path = repo_root / name
@@ -507,6 +518,12 @@ def _run_repo_truth_doc_guard(repo_root: Path) -> None:
         count = len(path.read_text(encoding="utf-8", errors="replace"))
         if count > REPO_TRUTH_DOC_LIMIT:
             over.append(f"  {name}: {count} characters (cap {REPO_TRUTH_DOC_LIMIT})")
+    return over
+
+
+def _run_repo_truth_doc_guard(repo_root: Path) -> None:
+    """Doctrine docs ride in every agent's context; cap them hard."""
+    over = repo_truth_doc_violations(repo_root)
     if over:
         raise SpiceError(
             "repo-truth docs exceed the character cap; tighten the doctrine:\n"
@@ -639,6 +656,36 @@ def _run_assertion_free_test_guard(repo_root: Path) -> None:
             f"assertion-free-tests: {count} test(s) exceed"
             f" ASSERTION_FREE_TEST_LIMIT={ASSERTION_FREE_TEST_LIMIT};"
             " add assertions or lower the constant after cleanup"
+        )
+
+
+def _coupling_key(
+    finding: testquality.PrivateInternalCouplingFinding,
+) -> tuple[str, str, str]:
+    return (finding.path, finding.test_name, finding.target)
+
+
+def _run_private_internal_coupling_guard(repo_root: Path) -> None:
+    """Fail on any test/production-internal coupling that is not named in the
+    LEGITIMATE_INTERNAL_COUPLINGS allowlist. The allowlist is a set of justified
+    entries, never a tolerated count; a coupling not listed must be replaced
+    with a public seam. (Stale allowlist entries are caught by a dedicated
+    real-repo test, not here, so this guard stays correct for any repo subset.)
+    """
+    findings = testquality.scan_private_internal_coupling(
+        testquality.test_paths(repo_root), root=repo_root
+    )
+    offenders = [
+        f for f in findings if _coupling_key(f) not in LEGITIMATE_INTERNAL_COUPLINGS
+    ]
+    if offenders:
+        board = testquality.render_private_internal_board(offenders)
+        raise SpiceError(
+            f"{board}\n"
+            f"private-internals: {len(offenders)} coupling(s) are not allowlisted;"
+            " add a public seam and switch the test to it, or — only if the test"
+            " genuinely must observe an internal — add a justified entry to"
+            " LEGITIMATE_INTERNAL_COUPLINGS in spice/policy.py"
         )
 
 

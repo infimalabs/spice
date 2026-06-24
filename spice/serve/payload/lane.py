@@ -243,7 +243,7 @@ def lane_metrics_payload(
         "acked": summary.acked,
         "sends": summary.sends,
         "toolCalls": summary.tool_calls,
-        "uptimeSeconds": _agent_uptime_seconds(status, items),
+        "uptimeSeconds": agent_uptime_seconds(status, items),
         "sparkline": list(summary.sparkline),
     }
 
@@ -268,7 +268,7 @@ def _drained_task_count(thread_id: str) -> int:
     )
 
 
-def _agent_uptime_seconds(
+def agent_uptime_seconds(
     status: Any, items: list[message_reader.AssistantMessage]
 ) -> int:
     if not status.running or not status.started_at:

@@ -815,11 +815,11 @@ class _ServeHandler(BaseHTTPRequestHandler):
         self._send_bytes(data, content_type)
 
     def _send_work_tree_path(self, parsed: Any) -> None:
-        worktree, target = _work_tree_proxy_target_from_request(self.state, parsed)
+        worktree, target = work_tree_proxy_target_from_request(self.state, parsed)
         if target is None:
             self.send_error(HTTPStatus.BAD_REQUEST, "target is required")
             return
-        path = _resolve_work_tree_link_path(self.state, target, worktree)
+        path = resolve_work_tree_link_path(self.state, target, worktree)
         if path is None:
             self.send_error(HTTPStatus.NOT_FOUND, "work tree path not found")
             return
@@ -1022,7 +1022,7 @@ def _team_metrics_api_route(path: str) -> str | None:
     return unquote(team_id)
 
 
-def _work_tree_proxy_target_from_request(
+def work_tree_proxy_target_from_request(
     state: ServeState,
     parsed: Any,
 ) -> tuple[WorktreeTarget | None, str | None]:
@@ -1047,7 +1047,7 @@ def _work_tree_path_target_from_request(parsed: Any) -> str | None:
     return None
 
 
-def _resolve_work_tree_link_path(
+def resolve_work_tree_link_path(
     state: ServeState,
     target: str,
     worktree: WorktreeTarget | None,

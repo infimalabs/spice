@@ -66,7 +66,7 @@ def watch_for_ack(
     ACK is detected — pass an inline `say` for one-shot use, or a queue
     enqueue for multi-key drivers.
     """
-    state = _AckWatchState(
+    state = AckWatchState(
         inbox_key=inbox_key,
         original_text=original_text,
         target_repo_root=target_repo_root,
@@ -88,7 +88,7 @@ def watch_for_ack(
     return state.outcome()
 
 
-class _AckWatchState:
+class AckWatchState:
     def __init__(
         self,
         *,

@@ -7,8 +7,8 @@ from urllib.parse import urlparse
 from spice.paths import shared_attachment_root
 from spice.serve.app import (
     ServeState,
-    _resolve_work_tree_link_path,
-    _work_tree_proxy_target_from_request,
+    resolve_work_tree_link_path,
+    work_tree_proxy_target_from_request,
 )
 from spice.serve.markdown import render_message_html
 from spice.serve.worktree.target import WorktreeTarget
@@ -143,8 +143,8 @@ def test_work_tree_proxy_route_resolves_lane_worktree_file(tmp_path):
     ]
 
     parsed = urlparse(f"/work/tree/lane-id/{target}")
-    selected, route_target = _work_tree_proxy_target_from_request(state, parsed)
-    resolved = _resolve_work_tree_link_path(state, route_target or "", selected)
+    selected, route_target = work_tree_proxy_target_from_request(state, parsed)
+    resolved = resolve_work_tree_link_path(state, route_target or "", selected)
 
     assert selected is not None
     assert selected.id == "lane-id"
@@ -173,8 +173,8 @@ def test_work_tree_proxy_route_resolves_rendered_shared_attachment_link(tmp_path
     )
     href = _first_href(html)
     parsed = urlparse(href)
-    selected, route_target = _work_tree_proxy_target_from_request(state, parsed)
-    resolved = _resolve_work_tree_link_path(state, route_target or "", selected)
+    selected, route_target = work_tree_proxy_target_from_request(state, parsed)
+    resolved = resolve_work_tree_link_path(state, route_target or "", selected)
 
     assert selected is not None
     assert selected.id == "lane-id"
@@ -202,8 +202,8 @@ def test_work_tree_proxy_route_rejects_absolute_file_outside_allowed_roots(tmp_p
     )
     href = _first_href(html)
     parsed = urlparse(href)
-    selected, route_target = _work_tree_proxy_target_from_request(state, parsed)
-    resolved = _resolve_work_tree_link_path(state, route_target or "", selected)
+    selected, route_target = work_tree_proxy_target_from_request(state, parsed)
+    resolved = resolve_work_tree_link_path(state, route_target or "", selected)
 
     assert selected is not None
     assert selected.id == "lane-id"

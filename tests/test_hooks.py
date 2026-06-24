@@ -12,7 +12,7 @@ import pytest
 from spice.errors import SpiceError
 from spice.hooks import commitmsg, precommit
 from spice.hooks.install import hooks_dir, init_repo, install_hooks_for_repo
-from spice.hooks.precommit import _run_repo_truth_doc_guard, repo_truth_docs
+from spice.hooks.precommit import repo_truth_doc_violations, repo_truth_docs
 from spice.policy import REPO_TRUTH_DOC_LIMIT, REPO_TRUTH_DOCS
 from spice.studies.localpaths import (
     render_local_path_board,
@@ -41,6 +41,7 @@ BUILTIN_PRE_COMMIT_LABELS = [
     "reachability",
     "symbol reachability",
     "assertion-free tests",
+    "private internals",
 ]
 
 # Meta-ratchet: the exact, ordered set of built-in pre-commit guard keys. This
@@ -63,6 +64,7 @@ EXPECTED_BUILTIN_PRE_COMMIT_KEYS = [
     "reachability",
     "symbol-reachability",
     "assertion-free-tests",
+    "private-internals",
 ]
 
 
@@ -78,6 +80,31 @@ def test_builtin_pre_commit_guard_registry_is_exactly_expected(tmp_path):
     )
 
 
+def test_private_internal_coupling_allowlist_is_exact_for_this_repo():
+    """Against the real tree: every coupling the detector finds must be named in
+    LEGITIMATE_INTERNAL_COUPLINGS (no un-justified coupling), and every allowlist
+    entry must correspond to a coupling that still exists (no stale exception).
+    The allowlist is a set of specific justified entries, never a frozen count.
+    """
+    from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
+    from spice.studies import testquality
+
+    findings = testquality.scan_private_internal_coupling(
+        testquality.test_paths(PROJECT_ROOT), root=PROJECT_ROOT
+    )
+    present = {(f.path, f.test_name, f.target) for f in findings}
+    unallowlisted = sorted(present - LEGITIMATE_INTERNAL_COUPLINGS)
+    stale = sorted(LEGITIMATE_INTERNAL_COUPLINGS - present)
+    assert not unallowlisted, (
+        "coupling(s) not in LEGITIMATE_INTERNAL_COUPLINGS (add a public seam or a "
+        f"justified allowlist entry): {unallowlisted}"
+    )
+    assert not stale, (
+        "stale LEGITIMATE_INTERNAL_COUPLINGS entr(ies) no longer present; delete "
+        f"them so the allowlist stays a set of real exceptions: {stale}"
+    )
+
+
 def test_default_repo_truth_docs_apply_without_configuration(tmp_path):
     assert repo_truth_docs(tmp_path) == list(REPO_TRUTH_DOCS)
 
@@ -90,18 +117,19 @@ def test_declared_repo_truth_docs_override_the_default(tmp_path):
     assert repo_truth_docs(tmp_path) == ["AGENTS.md", "TESTING.md"]
 
 
-def test_doc_within_cap_passes(tmp_path):
+def test_doc_within_cap_reports_no_violations(tmp_path):
     (tmp_path / "AGENTS.md").write_text("short doctrine\n", encoding="utf-8")
-    _run_repo_truth_doc_guard(tmp_path)
-    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "short doctrine\n"
+    assert repo_truth_doc_violations(tmp_path) == []
 
 
-def test_doc_over_cap_fails_loudly(tmp_path):
+def test_doc_over_cap_is_reported_as_a_violation(tmp_path):
     (tmp_path / "AGENTS.md").write_text(
         "x" * (REPO_TRUTH_DOC_LIMIT + 1), encoding="utf-8"
     )
-    with pytest.raises(SpiceError, match="character cap"):
-        _run_repo_truth_doc_guard(tmp_path)
+    violations = repo_truth_doc_violations(tmp_path)
+    assert len(violations) == 1
+    assert "AGENTS.md" in violations[0]
+    assert f"cap {REPO_TRUTH_DOC_LIMIT}" in violations[0]
 
 
 def test_policy_pre_commit_extensions_run_after_builtin_steps(tmp_path, monkeypatch):
@@ -155,6 +183,7 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
         "reachability",
         "symbol reachability",
         "assertion-free tests",
+        "private internals",
     ]
 
 
@@ -893,6 +922,11 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
         precommit,
         "_run_assertion_free_test_guard",
         lambda repo_root: record("assertion-free tests"),
+    )
+    monkeypatch.setattr(
+        precommit,
+        "_run_private_internal_coupling_guard",
+        lambda repo_root: record("private internals"),
     )
     return events
 

@@ -5,7 +5,7 @@ import json
 
 from spice.cli.parser import build_parser
 from spice.sessions import records
-from spice.sessions.cli import _print_slices
+from spice.sessions.cli import handle_session
 from spice.sessions.slices import build_compaction_slices
 
 PARSER_MAX_TEXT = 40
@@ -32,7 +32,7 @@ def test_compaction_slice_ids_are_derived_across_boundaries(tmp_path):
 def test_session_slices_summary_honors_limit_and_slice_id(tmp_path, capsys):
     transcript = _slice_fixture(tmp_path)
 
-    _print_slices(_slice_args(limit=1), [transcript])
+    handle_session(_slice_args(transcript, limit=1))
 
     limited = capsys.readouterr().out
     assert limited.startswith(
@@ -40,7 +40,7 @@ def test_session_slices_summary_honors_limit_and_slice_id(tmp_path, capsys):
     )
     assert "slice=compaction-1" not in limited
 
-    _print_slices(_slice_args(slice_id=["compaction-1"]), [transcript])
+    handle_session(_slice_args(transcript, slice_id=["compaction-1"]))
 
     selected = capsys.readouterr().out
     assert "slice=compaction-1" in selected
@@ -50,7 +50,7 @@ def test_session_slices_summary_honors_limit_and_slice_id(tmp_path, capsys):
 def test_session_slices_full_view_prints_boundary_messages(tmp_path, capsys):
     transcript = _slice_fixture(tmp_path)
 
-    _print_slices(_slice_args(slice_id=["compaction-2"], view="full"), [transcript])
+    handle_session(_slice_args(transcript, slice_id=["compaction-2"], view="full"))
 
     output = capsys.readouterr().out
     assert "  messages=\n" in output
@@ -123,9 +123,16 @@ def _slice_fixture(tmp_path):
     return transcript
 
 
-def _slice_args(**overrides):
-    values = {"limit": 25, "slice_id": [], "view": "summary", "max_text": 180}
+def _slice_args(transcript, **overrides):
+    values = {
+        "session_action": "slices",
+        "limit": 25,
+        "slice_id": [],
+        "view": "summary",
+        "max_text": 180,
+    }
     values.update(overrides)
+    values["files"] = [str(transcript)]
     return argparse.Namespace(**values)
 
 
