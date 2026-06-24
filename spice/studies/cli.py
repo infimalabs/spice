@@ -66,6 +66,11 @@ def configure_study_parser(subparsers: Any) -> None:
     )
     _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
     _configure_reachability_parser(actions)
+    _add_study_action(
+        actions,
+        "symbol-reachability",
+        "Test-only symbols inside production-reachable modules.",
+    )
     _configure_subsumption_parser(actions)
     _add_study_action(
         actions,
@@ -321,6 +326,12 @@ def _study_reachability(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_symbol_reachability(args: argparse.Namespace, root: Path) -> int:
+    findings = reachability.scan_symbol_reachability(root)
+    print("\n".join(reachability.render_symbol_reachability_board(findings)))
+    return 1 if findings else 0
+
+
 def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
     findings = testquality.scan_assertion_free_tests(
         testquality.test_paths(root), root=root
@@ -373,6 +384,7 @@ _STUDY_ACTIONS = {
     "mutations": _study_mutations,
     "env-policy": _study_env_policy,
     "reachability": _study_reachability,
+    "symbol-reachability": _study_symbol_reachability,
     "assertion-free-tests": _study_assertion_free_tests,
     "private-internals": _study_private_internals,
     "subsumption": _study_subsumption,

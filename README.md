@@ -420,13 +420,21 @@ formatters = false
 
 Built-in pre-commit keys are `repo-shape`, `staging`, `repo-docs`,
 `formatters`, `local-paths`, `serve-web-typecheck`, `python-typecheck`,
-`env-policy`, `file-shape`, `complexity`, and `magic-numbers`
-(`serve-web-typecheck` no-ops in repos without the serve static sources it
-gates). They run before
+`env-policy`, `file-shape`, `complexity`, `magic-numbers`, `reachability`,
+and `assertion-free-tests`. The `serve-web-typecheck` key no-ops in repos
+without the serve static sources it gates. They run before
 extension steps unless an individual built-in is disabled or replaced in
 tracked policy. `pre_commit_success` uses the same command shape as
 `pre_commit`, but runs only after the whole gate has passed, alongside sticky
 state cleanup.
+
+Reachability has two lanes. The pre-commit `reachability` key gates whole
+modules that tests can import but production roots cannot. The explicit
+`spice study symbol-reachability` command is the finer-grained study for
+functions, classes, and methods inside production-reachable modules. This repo
+does not use a
+grandfathered symbol limit: symbol findings are a burn-down backlog, and the
+gate should be added only when the study reports zero.
 
 Mutation testing is available as an explicit study, not a default pre-commit
 cost:
