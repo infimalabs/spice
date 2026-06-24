@@ -51,7 +51,10 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert '<span class="spice-menu-icon" aria-hidden="true">' in html
     assert '<span class="spice-menu-pepper">🌶️</span>' in html
     assert '<span class="spice-menu-label">spice</span>' in html
-    assert 'const spiceServeBranding = {"name": "spice"};' in html
+    assert (
+        'const spiceServeBranding = {"name": "spice", "defaultLifetime": "Drive"};'
+        in html
+    )
     assert "const serveBrandName = String(spiceServeBranding.name" in app_js
     assert "function serveBrandMenuTitle()" in app_js
     assert 'querySelector("#global-status")' not in app_js
@@ -213,12 +216,17 @@ def test_index_branding_defaults_to_project_name_and_allows_explicit_override(
     assert 'title="Open mission-control menu"' in project_html
     assert 'aria-label="Open mission-control menu"' in project_html
     assert '<span class="spice-menu-label">mission-control</span>' in project_html
-    assert 'const spiceServeBranding = {"name": "mission-control"};' in project_html
+    assert (
+        'const spiceServeBranding = {"name": "mission-control", "defaultLifetime": "Drive"};'
+        in project_html
+    )
 
     pyproject.write_text(
         (
             '[project]\nname = "mission-control"\n\n'
-            '[tool.spice.serve]\nbrand = "Ops Console"\n'
+            "[tool.spice.serve]\n"
+            'brand = "Ops Console"\n'
+            'default_lifetime = "Steer"\n'
         ),
         encoding="utf-8",
     )
@@ -229,7 +237,10 @@ def test_index_branding_defaults_to_project_name_and_allows_explicit_override(
     assert 'title="Open Ops Console menu"' in override_html
     assert 'aria-label="Open Ops Console menu"' in override_html
     assert '<span class="spice-menu-label">Ops Console</span>' in override_html
-    assert 'const spiceServeBranding = {"name": "Ops Console"};' in override_html
+    assert (
+        'const spiceServeBranding = {"name": "Ops Console", "defaultLifetime": "Steer"};'
+        in override_html
+    )
 
 
 def test_static_branding_config_feeds_fast_mode_and_audio_titles():

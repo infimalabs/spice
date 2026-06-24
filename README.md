@@ -426,6 +426,22 @@ tracked policy. `pre_commit_success` uses the same command shape as
 `pre_commit`, but runs only after the whole gate has passed, alongside sticky
 state cleanup.
 
+Mutation testing is available as an explicit study, not a default pre-commit
+cost:
+
+```sh
+spice study mutations --staged --test tests/test_messagepayload.py --max-mutants 12
+spice study mutations spice/serve/payload/message.py \
+  --test tests/test_messagepayload.py \
+  --ratchet .spice/mutation-ratchet.json
+```
+
+The mutation study targets changed Python source files by default, or the files
+passed explicitly. It runs a bounded AST-mutant sample per module, reports
+per-module mutation scores, lists tests that killed no selected mutant, and can
+compare scores against a JSON ratchet with `--ratchet` or refresh one with
+`--write-ratchet`.
+
 Extension steps run from the repo root and receive the staged paths,
 newline-separated, in the `SPICE_STAGED_PATHS` environment variable. A step
 with `when` globs runs only when a staged path matches (fnmatch against the
