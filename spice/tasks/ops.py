@@ -14,6 +14,7 @@ from typing import Any, Sequence
 
 from spice.agent.identity import ambient_thread_id
 from spice.errors import SpiceError
+from spice.paths import repo_root_from_cwd
 from spice.tasks import alloc, config, gitsync, identity, tw
 
 
@@ -268,9 +269,13 @@ def rtk_usage_nudge() -> str | None:
     the reminder is self-correcting and silent when this tree is already feeding
     rtk well, when there is too little signal, or when rtk is not installed.
     """
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        return None
     try:
         completed = subprocess.run(
             ["rtk", "gain", "--project", "-f", "json"],
+            cwd=repo_root,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
