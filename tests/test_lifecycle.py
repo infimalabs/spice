@@ -217,14 +217,10 @@ def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(
         cwd=repo,
         check=True,
     )
-    common_agent_root = (
-        repo / ".git" / "spice" / "agents" / DRIVER.state_dirname
-    ).resolve()
-    primary_worktree_dir = (
-        repo / ".git" / "spice" / "agents" / DRIVER.state_dirname
-    ).resolve()
+    common_agent_root = (repo / ".git" / "spice" / "agents").resolve()
+    primary_worktree_dir = (repo / ".git" / "spice" / "agents").resolve()
     linked_git_dir = repo / ".git" / "worktrees" / linked.name / "spice" / "agents"
-    linked_worktree_dir = (linked_git_dir / DRIVER.state_dirname).resolve()
+    linked_worktree_dir = (linked_git_dir).resolve()
     thread_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     linked_thread_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     primary_thread_dir = common_agent_root / thread_id
@@ -342,14 +338,7 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
     )
     state = lifecycle.read_agent_state(tmp_path)
     final_log_path = (
-        tmp_path
-        / ".git"
-        / "spice"
-        / "agents"
-        / DRIVER.state_dirname
-        / thread_id
-        / "logs"
-        / log_path.name
+        tmp_path / ".git" / "spice" / "agents" / thread_id / "logs" / log_path.name
     ).resolve()
 
     assert returned == final_log_path
@@ -497,14 +486,7 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     exit_code = lifecycle.run_agent_supervisor(args)
     state = lifecycle.read_agent_state(tmp_path)
     final_log_path = (
-        tmp_path
-        / ".git"
-        / "spice"
-        / "agents"
-        / DRIVER.state_dirname
-        / thread_id
-        / "logs"
-        / log_path.name
+        tmp_path / ".git" / "spice" / "agents" / thread_id / "logs" / log_path.name
     ).resolve()
 
     assert exit_code == 5

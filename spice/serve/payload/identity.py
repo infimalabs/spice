@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from spice.agent.driver import ALL_DRIVERS
 from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import agent_status
 from spice.config import configured_say_voice, effective_agent_config
@@ -433,20 +432,11 @@ def _actual_launch_identity(status: Any) -> dict[str, str]:
 
 
 def _actual_driver_identity(status: Any, actual_launch: dict[str, str]) -> str:
+    # The driver is recorded in the agent state record (lifecycle state is no
+    # longer namespaced by driver directory).
     if not actual_launch.get("source"):
         return ""
-    state_path = getattr(status, "state_path", None)
-    if state_path is None:
-        return ""
-    parts = list(state_path.parts)
-    for index, part in enumerate(parts[:-1]):
-        if part != "agents":
-            continue
-        dirname = parts[index + 1]
-        for driver in ALL_DRIVERS:
-            if driver.state_dirname == dirname:
-                return driver.name
-    return ""
+    return getattr(status, "driver", "") or ""
 
 
 def _serve_renewal_identity(

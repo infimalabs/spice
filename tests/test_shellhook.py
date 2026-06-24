@@ -368,7 +368,6 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
     base_env.pop(shellhook.BASH_ENV_ENV, None)
     ambient_env = shellhook.apply_shell_steering_environment(
         tmp_path,
-        driver_state_dirname=DRIVER.state_dirname,
         base_env=base_env,
     )
     ambient_env[shellhook.SHELL_HOOK_PYTHON_ENV] = str(fake_python)
@@ -1096,7 +1095,6 @@ def test_agent_shell_environment_routes_reexeced_shell_to_static_stage(tmp_path)
     }
     env = shellhook.apply_shell_steering_environment(
         tmp_path,
-        driver_state_dirname=DRIVER.state_dirname,
         base_env=base_env,
     )
     env[shellhook.SHELL_HOOK_PYTHON_ENV] = str(fake_python)
