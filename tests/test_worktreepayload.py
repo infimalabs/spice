@@ -170,7 +170,8 @@ def _identity_status(
         reasoning_effort=effort,
         service_tier=service_tier,
         started_at=started_at,
-        state_path=repo / ".git" / "spice" / "agents" / driver / "state.json",
+        driver=driver,
+        state_path=repo / ".git" / "spice" / "agents" / "state.json",
     )
 
 

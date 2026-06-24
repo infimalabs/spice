@@ -51,7 +51,6 @@ SHELL_FUNCTION_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 def apply_shell_steering_environment(
     repo_root: Path,
     *,
-    driver_state_dirname: str,
     base_env: Mapping[str, str],
 ) -> dict[str, str]:
     env = dict(base_env)

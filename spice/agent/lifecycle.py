@@ -105,6 +105,7 @@ class AgentStatus:
     pid: int | None
     process_group_id: int | None
     thread_id: str
+    driver: str
     model: str
     reasoning_effort: str
     service_tier: str
@@ -148,6 +149,7 @@ def agent_status(repo_root: Path) -> AgentStatus:
         pid=pid,
         process_group_id=pgid,
         thread_id=thread_id,
+        driver=str(agent_state.get("driver") or ""),
         model=str(agent_state.get("model") or ""),
         reasoning_effort=str(agent_state.get("reasoning_effort") or ""),
         service_tier=str(agent_state.get("service_tier") or ""),
@@ -307,6 +309,7 @@ def start_agent(
             process=process,
             action=action,
             command=command,
+            driver=driver_for(repo_root).name,
             model=model,
             reasoning_effort=reasoning_effort,
             service_tier=service_tier,
@@ -325,6 +328,7 @@ def build_agent_state(
     process: subprocess.Popen[str],
     action: str,
     command: list[str],
+    driver: str,
     model: str,
     reasoning_effort: str,
     service_tier: str,
@@ -339,6 +343,7 @@ def build_agent_state(
         "started_at": utc_now(),
         "mode": action,
         "command": command,
+        "driver": driver,
         "model": model,
         "reasoning_effort": reasoning_effort,
         "service_tier": service_tier,
@@ -480,6 +485,7 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
             process=process,
             action=str(args.action),
             command=command,
+            driver=driver_for(repo_root).name,
             model=str(args.model),
             reasoning_effort=str(args.reasoning_effort),
             service_tier=str(args.service_tier or ""),
@@ -852,17 +858,12 @@ def agent_environment(repo_root: Path | None = None) -> dict[str, str]:
             f"unset {driver.thread_id_env} before starting spice serve or "
             "agent ensure"
         )
-    driver = driver_for(repo_root)
     # Mask the agent's upstream to its own lane (per-process, env-only) so its
     # status never moves when origin advances; the operator's own shell has no
     # such env and keeps native branch config untouched.
     env = shadow_environment(repo_root, base_env=worktree_spice_environment(repo_root))
     if repo_root is not None:
-        env = apply_shell_steering_environment(
-            repo_root,
-            driver_state_dirname=driver.state_dirname,
-            base_env=env,
-        )
+        env = apply_shell_steering_environment(repo_root, base_env=env)
     return env
 
 
@@ -893,6 +894,7 @@ def bind_ambient_agent_activation(repo_root: Path) -> AgentStatus:
             "started_at": utc_now(),
             "mode": "activation",
             "command": [],
+            "driver": driver_for(repo_root).name,
             "model": "",
             "reasoning_effort": "",
             "service_tier": "",
