@@ -43,6 +43,40 @@ BUILTIN_PRE_COMMIT_LABELS = [
     "assertion-free tests",
 ]
 
+# Meta-ratchet: the exact, ordered set of built-in pre-commit guard keys. This
+# is the authoritative gate registry. Removing, renaming, or dropping any guard
+# breaks the assertion below and names the diff; adding a guard requires
+# updating this list in the same commit that registers it. A gate may never be
+# quietly deleted to make a task pass.
+EXPECTED_BUILTIN_PRE_COMMIT_KEYS = [
+    "repo-shape",
+    "staging",
+    "repo-docs",
+    "formatters",
+    "local-paths",
+    "serve-web-typecheck",
+    "python-typecheck",
+    "env-policy",
+    "file-shape",
+    "complexity",
+    "magic-numbers",
+    "reachability",
+    "symbol-reachability",
+    "assertion-free-tests",
+]
+
+
+def test_builtin_pre_commit_guard_registry_is_exactly_expected(tmp_path):
+    actual = [step.key for step in precommit._builtin_pre_commit_steps(tmp_path, [])]
+    missing = [key for key in EXPECTED_BUILTIN_PRE_COMMIT_KEYS if key not in actual]
+    unexpected = [key for key in actual if key not in EXPECTED_BUILTIN_PRE_COMMIT_KEYS]
+    assert actual == EXPECTED_BUILTIN_PRE_COMMIT_KEYS, (
+        f"pre-commit guard registry drifted; missing guard(s): {missing or 'none'}; "
+        f"unexpected guard(s): {unexpected or 'none'}. A gate may not be removed, "
+        "renamed, or added without updating EXPECTED_BUILTIN_PRE_COMMIT_KEYS in the "
+        "same commit."
+    )
+
 
 def test_default_repo_truth_docs_apply_without_configuration(tmp_path):
     assert repo_truth_docs(tmp_path) == list(REPO_TRUTH_DOCS)
