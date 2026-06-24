@@ -42,6 +42,12 @@ rules apply to the agents working here.
 - Git sync belongs to task boundaries (claim fast-forwards, done publishes);
   do not pull/push as ordinary development behavior.
 
+## Commit hygiene
+
+- Never add `Co-Authored-By` trailers to commit messages. The commit-msg hook
+  rejects them; no commit that includes one will land. Write commits without
+  attribution trailers.
+
 ## Code health
 
 - The pre-commit gate is the constitution; never bypass it. Fix exactly what
