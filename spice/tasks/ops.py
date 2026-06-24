@@ -14,6 +14,7 @@ from typing import Any, Sequence
 
 from spice.agent.identity import ambient_thread_id
 from spice.errors import SpiceError
+from spice.hooks import precommit
 from spice.paths import repo_root_from_cwd
 from spice.tasks import alloc, config, gitsync, identity, tw
 
@@ -649,6 +650,7 @@ def done(
     _require_pending(row, "complete")
     actor = tw.current_actor()
     _require_owner(row, actor, "complete")
+    _require_bound_quality_gates_clean(row)
     uuid = identity.uuid_of(row)
     # Integrate and publish this agent's work before any task state changes; a
     # real conflict raises here, leaving the task claimed for the agent to fix.
@@ -674,6 +676,31 @@ def done(
     if result.endswith(" -> review"):
         next_line = next_task_drain_line(review_assignment=True)
     return f"{result}\n{next_line}"
+
+
+def _require_bound_quality_gates_clean(row: dict[str, Any]) -> None:
+    """A task tagged ``gate:<key>`` cannot complete while that gate is dirty.
+
+    Completion is bound to the live check, not the prose validation: the metric
+    is read by running the gate, so a 'drive to zero' task fails here whenever
+    its detector is still nonzero.
+    """
+    tags = row.get("tags") or []
+    if not any(tag.startswith(precommit.GATE_TAG_PREFIX) for tag in tags):
+        return
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        raise SpiceError(
+            "task is bound to a quality gate but no repo root was found from cwd"
+        )
+    failures = precommit.quality_gate_failures_for_tags(repo_root, list(tags))
+    if failures:
+        joined = "\n\n".join(failures)
+        raise SpiceError(
+            "cannot complete: this task is bound to a quality gate that is not "
+            "clean; drive the metric to zero before completing (validation is the "
+            f"live check, not a prose claim):\n\n{joined}"
+        )
 
 
 # ---- review -------------------------------------------------------------

@@ -689,6 +689,46 @@ def _run_private_internal_coupling_guard(repo_root: Path) -> None:
         )
 
 
+# Quality gates a task can bind its completion to. A task tagged ``gate:<key>``
+# cannot be marked done while the matching gate is not clean — the metric is
+# read live, never asserted in prose. Keys are stable; the guards are the same
+# ones the pre-commit gate runs.
+QUALITY_GATE_GUARDS: dict[str, Callable[[Path], None]] = {
+    "coupling": _run_private_internal_coupling_guard,
+    "reachability": _run_reachability_guard,
+    "symbol-reachability": _run_symbol_reachability_guard,
+    "assertion-free": _run_assertion_free_test_guard,
+}
+
+GATE_TAG_PREFIX = "gate:"
+
+
+def quality_gate_failure(repo_root: Path, key: str) -> str | None:
+    """Run one named quality gate; return its failure text, or None if clean."""
+    guard = QUALITY_GATE_GUARDS.get(key)
+    if guard is None:
+        known = ", ".join(sorted(QUALITY_GATE_GUARDS))
+        raise SpiceError(f"unknown quality gate {key!r}; known gates: {known}")
+    try:
+        guard(repo_root)
+    except SpiceError as exc:
+        return str(exc)
+    return None
+
+
+def quality_gate_failures_for_tags(repo_root: Path, tags: list[str]) -> list[str]:
+    """Return a failure block per ``gate:<key>`` tag whose gate is not clean."""
+    failures: list[str] = []
+    for tag in tags:
+        if not tag.startswith(GATE_TAG_PREFIX):
+            continue
+        key = tag[len(GATE_TAG_PREFIX) :]
+        message = quality_gate_failure(repo_root, key)
+        if message:
+            failures.append(f"[{tag}]\n{message}")
+    return failures
+
+
 def clear_successful_sticky_state(repo_root: Path) -> None:
     fileloc.clear_file_loc_sticky_state(root=repo_root)
     complexity.clear_complexity_sticky_state(root=repo_root)

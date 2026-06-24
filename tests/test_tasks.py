@@ -1256,6 +1256,34 @@ def _review_claim(task_repo: Path, monkeypatch) -> str:
     return handle
 
 
+def test_bound_quality_gate_blocks_completion_while_metric_nonzero(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    (repo / "spice").mkdir(parents=True)
+    (repo / "tests").mkdir()
+    (repo / "spice" / "foo.py").write_text("_secret = 1\n", encoding="utf-8")
+    (repo / "tests" / "test_foo.py").write_text(
+        "from spice.foo import _secret\n\n"
+        "def test_secret():\n    assert _secret == 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("spice.tasks.ops.repo_root_from_cwd", lambda: repo)
+
+    # A task bound to the coupling gate cannot complete while the gate is dirty.
+    with pytest.raises(SpiceError, match="bound to a quality gate"):
+        ops._require_bound_quality_gates_clean({"tags": ["gate:coupling"]})
+
+    # An untagged task is unaffected even when the same repo is dirty.
+    ops._require_bound_quality_gates_clean({"tags": ["plain"]})
+
+    # Once the coupling is gone, the bound gate passes.
+    (repo / "tests" / "test_foo.py").write_text(
+        "def test_nothing():\n    assert True\n", encoding="utf-8"
+    )
+    ops._require_bound_quality_gates_clean({"tags": ["gate:coupling"]})
+
+
 def _git(repo: Path, *args: str) -> str:
     return _run(repo, "git", *args).stdout.strip()
 
