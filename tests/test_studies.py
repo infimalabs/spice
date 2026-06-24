@@ -26,13 +26,16 @@ from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies import mutations
 from spice.studies.reachability import scan_reachability
-from spice.studies.assertfree import scan_assertfree
 from spice.studies.subsumption import scan_subsumption
 from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies.shape import (
     configured_package_roots,
     name_cluster_error,
     name_cluster_errors,
+)
+from spice.studies.testquality import (
+    render_assertion_free_board,
+    scan_assertion_free_tests,
 )
 from spice.studies.typecheck import (
     PYRIGHT_ARGS,
@@ -120,6 +123,64 @@ def test_study_explicit_directory_reports_file_path_requirement(tmp_path, monkey
 
     with pytest.raises(SpiceError, match="file paths.*spice/serve"):
         args.func(args)
+
+
+def test_assertion_free_scanner_counts_tests_without_assertions(tmp_path):
+    path = tmp_path / "tests" / "test_quality.py"
+    path.parent.mkdir()
+    path.write_text(
+        "\n".join(
+            [
+                "import pytest",
+                "",
+                "def test_without_assertion():",
+                "    value = 1",
+                "",
+                "def test_with_assert():",
+                "    assert 1 == 1",
+                "",
+                "def test_with_pytest_raises():",
+                "    with pytest.raises(ValueError):",
+                "        raise ValueError('x')",
+                "",
+                "def helper_without_assertion():",
+                "    value = 2",
+                "",
+                "def test_nested_assertion_does_not_count():",
+                "    def helper():",
+                "        assert True",
+                "    helper()",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    findings = scan_assertion_free_tests([Path("tests/test_quality.py")], root=tmp_path)
+
+    assert [(f.path, f.line, f.test_name) for f in findings] == [
+        ("tests/test_quality.py", 3, "test_without_assertion"),
+        ("tests/test_quality.py", 16, "test_nested_assertion_does_not_count"),
+    ]
+
+
+def test_study_assertion_free_cli_reports_findings(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "tests" / "test_quality.py"
+    path.parent.mkdir()
+    path.write_text("def test_without_assertion():\n    value = 1\n", encoding="utf-8")
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    args = build_parser().parse_args(["study", "assertion-free-tests"])
+
+    assert args.func(args) == 1
+    output = capsys.readouterr().out
+    assert "assertion-free-tests: 1 test(s)" in output
+    assert "tests/test_quality.py:1 test_without_assertion" in output
+
+
+def test_assertion_free_board_reports_clean_baseline():
+    assert render_assertion_free_board([]) == (
+        "assertion-free-tests: no assertion-free tests found"
+    )
 
 
 def test_reachability_scans_test_files_outside_package_root(tmp_path):
@@ -229,48 +290,6 @@ def _write_coverage_db(
     con.commit()
     con.close()
     return path
-
-
-def test_assertfree_flags_test_with_no_assertions(tmp_path):
-    test_file = tmp_path / "test_example.py"
-    test_file.write_text("def test_no_assert():\n    x = 1 + 1\n", encoding="utf-8")
-
-    findings = scan_assertfree([test_file], root=tmp_path)
-
-    assert len(findings) == 1
-    assert findings[0].function == "test_no_assert"
-    assert "did not raise" in findings[0].reason
-
-
-def test_assertfree_flags_test_with_only_trivial_assertions(tmp_path):
-    test_file = tmp_path / "test_example.py"
-    test_file.write_text(
-        "def test_trivial():\n    assert True\n    assert 1 == 1\n",
-        encoding="utf-8",
-    )
-
-    findings = scan_assertfree([test_file], root=tmp_path)
-
-    assert len(findings) == 1
-    assert findings[0].function == "test_trivial"
-    assert "trivially true" in findings[0].reason
-
-
-def test_assertfree_passes_test_with_real_assertion(tmp_path):
-    test_file = tmp_path / "test_example.py"
-    test_file.write_text(
-        "def test_real():\n    x = 1 + 1\n    assert x == 2\n",
-        encoding="utf-8",
-    )
-
-    assert scan_assertfree([test_file], root=tmp_path) == []
-
-
-def test_assertfree_skips_non_test_files(tmp_path):
-    helper_file = tmp_path / "helper.py"
-    helper_file.write_text("def test_helper():\n    pass\n", encoding="utf-8")
-
-    assert scan_assertfree([helper_file], root=tmp_path) == []
 
 
 def _write_reachability_repo(

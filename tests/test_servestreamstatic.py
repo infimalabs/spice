@@ -235,12 +235,13 @@ def test_static_filter_pane_uses_pure_filter_model_helpers():
 def test_static_filter_model_helpers_are_pure_and_covered():
     script = Path(__file__).with_name("fixtures") / "filter_model.js"
 
-    subprocess.run(
+    result = subprocess.run(
         ["node", str(script), str(STATIC_ROOT / "app.filter-model.js")],
         check=True,
         capture_output=True,
         text=True,
     )
+    assert result.returncode == 0
 
 
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
@@ -846,12 +847,13 @@ def test_static_narration_mode_holds_media_session_state():
 def test_static_speech_session_title_leads_with_agent_identity():
     script = Path(__file__).with_name("fixtures") / "speech_session_title.js"
 
-    subprocess.run(
+    result = subprocess.run(
         ["node", str(script), str(STATIC_ROOT / "app.audio.js")],
         check=True,
         capture_output=True,
         text=True,
     )
+    assert result.returncode == 0
 
 
 def test_static_speech_sync_updates_now_playing_message_accent():

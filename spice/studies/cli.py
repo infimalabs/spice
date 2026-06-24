@@ -17,7 +17,6 @@ from spice.policy import (
     MAGIC_EXAMINE_VALUE_THRESHOLD,
 )
 from spice.studies import (
-    assertfree,
     complexity,
     envpolicy,
     fileloc,
@@ -26,6 +25,7 @@ from spice.studies import (
     reachability,
     shape,
     subsumption,
+    testquality,
 )
 from spice.studies.walk import staged_paths, tracked_paths
 
@@ -136,11 +136,10 @@ def configure_study_parser(subparsers: Any) -> None:
         help="Only consider source files under this package prefix.",
     )
     sub_parser.set_defaults(func=handle_study, study_action="subsumption")
-
     _add_study_action(
         actions,
-        "assertion-freeness",
-        "Test functions with no assertions or only trivially-true assertions.",
+        "assertion-free-tests",
+        "Test functions that do not appear to assert behavior.",
     )
 
 
@@ -301,6 +300,14 @@ def _study_reachability(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
+    findings = testquality.scan_assertion_free_tests(
+        testquality.test_paths(root), root=root
+    )
+    print(testquality.render_assertion_free_board(findings))
+    return 1 if findings else 0
+
+
 def _create_exhaust_tasks(findings: list[reachability.ReachabilityFinding]) -> None:
     from spice.tasks import create
 
@@ -327,12 +334,6 @@ def _study_subsumption(args: argparse.Namespace, root: Path) -> int:
     return 1 if report.findings else 0
 
 
-def _study_assertfree(args: argparse.Namespace, root: Path) -> int:
-    findings = assertfree.scan_assertfree(_target_paths(args, root), root=root)
-    print(assertfree.render_assertfree_board(findings))
-    return 1 if findings else 0
-
-
 _STUDY_ACTIONS = {
     "shape": _study_shape,
     "file-loc": _study_file_loc,
@@ -341,6 +342,6 @@ _STUDY_ACTIONS = {
     "mutations": _study_mutations,
     "env-policy": _study_env_policy,
     "reachability": _study_reachability,
+    "assertion-free-tests": _study_assertion_free_tests,
     "subsumption": _study_subsumption,
-    "assertion-freeness": _study_assertfree,
 }

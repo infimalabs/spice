@@ -718,10 +718,11 @@ def test_static_spice_menu_drag_manages_team_membership():
 
 def test_spice_menu_new_team_drop_keeps_created_team_near_drop_zone():
     script = Path(__file__).with_name("fixtures") / "spice_menu_new_team_order.js"
-    subprocess.run(
+    result = subprocess.run(
         ["node", str(script), str(STATIC_ROOT / "app.menu.js")],
         check=True,
     )
+    assert result.returncode == 0
 
 
 def test_static_empty_teams_reconcile_and_close_from_team_snapshot():

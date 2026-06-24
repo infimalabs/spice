@@ -110,11 +110,10 @@ into groups (drag-to-gutter) backed by server-side **teams** (SQLite,
 revisioned, optimistic concurrency; create/close/split/merge/move/config
 commands). Lane metrics are a projection over current membership — per-agent
 counters are the single source of truth and work follows the agent, not the
-team (see `docs/studies/serve-team-metric-attribution.md`). Each lane carries a
-**lifetime** intent on a slider: **Steer** (manual filters), **Drive** (auto-subscribe
-to projects this team creates or claims), **Drain** (task boundary dissolved; see
-all assignable work). Renewal remains the separate graceful agent-succession
-action described in the lifecycle plane, not a lifetime value.
+team (see `docs/studies/serve-team-metric-attribution.md`). Every message send
+carries a **lifetime** intent on a slider:
+**Renew** (graceful succession), **Steer** (default), **Drive** (drain the
+task queue through structured control metadata, honor task filters).
 Task filters route board stems to lanes; pills show per-stem open counts and
 drainability. Messages stream live from the transcript (kqueue on macOS,
 watchfiles elsewhere) as envelopes: ACK segments laid out quote-then-response
@@ -298,7 +297,7 @@ The one idea above isn't arbitrary; four theses generate it.
   presence records excluded from visible budget but one newest kept,
   paired view-image collapse, activity active/active-ish/inactive at 60s/5m,
   Drive drain suffix on explicit steering, ordinary empty-message rejection,
-  team revisions monotonic, lifetime vocabulary `Steer|Drive|Drain`.
+  team revisions monotonic, lifetime vocabulary `Renew|Steer|Drive`.
 - Narration speaks edges, not essays: explicit ACK utterances win;
   the fallback reads only the first and last paragraphs of the body
   (final-answer bodies narrate even in speak mode); image markdown is

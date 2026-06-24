@@ -62,6 +62,10 @@ BOUNDARY_UNDERSCORE_PATTERN = r"^_*[0-9a-z]+_*$"
 # the gate refuses any new addition above the tolerance.
 REACHABILITY_TEST_ONLY_LIMIT = 0
 
+# Assertion-free tests: test functions that do not appear to constrain behavior
+# with an assert, pytest.raises/pytest.warns, pytest.fail, or assert* helper.
+ASSERTION_FREE_TEST_LIMIT = 0
+
 # --- magic numbers -------------------------------------------------------------
 # Staged scans diff against this ref; only regressions fail.
 MAGIC_BASELINE_REF = "HEAD"

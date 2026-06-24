@@ -38,6 +38,8 @@ BUILTIN_PRE_COMMIT_LABELS = [
     "file shape",
     "complexity",
     "magic numbers",
+    "reachability",
+    "assertion-free tests",
 ]
 
 
@@ -56,6 +58,7 @@ def test_declared_repo_truth_docs_override_the_default(tmp_path):
 def test_doc_within_cap_passes(tmp_path):
     (tmp_path / "AGENTS.md").write_text("short doctrine\n", encoding="utf-8")
     _run_repo_truth_doc_guard(tmp_path)
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "short doctrine\n"
 
 
 def test_doc_over_cap_fails_loudly(tmp_path):
@@ -114,6 +117,8 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
         "file shape",
         "complexity",
         "custom magic",
+        "reachability",
+        "assertion-free tests",
     ]
 
 
@@ -159,6 +164,38 @@ def test_policy_pre_commit_success_extensions_run_after_gate_passes(
         "assets",
         "success",
     ]
+
+
+def test_assertion_free_test_guard_fails_above_limit(tmp_path, monkeypatch):
+    test_dir = tmp_path / "tests"
+    test_dir.mkdir()
+    (test_dir / "test_empty.py").write_text(
+        "def test_empty():\n    value = 1\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(precommit, "ASSERTION_FREE_TEST_LIMIT", 0)
+
+    with pytest.raises(SpiceError) as exc_info:
+        precommit._run_assertion_free_test_guard(tmp_path)
+
+    message = str(exc_info.value)
+    assert "assertion-free-tests: 1 test(s)" in message
+    assert "test_empty.py:1 test_empty" in message
+    assert "ASSERTION_FREE_TEST_LIMIT=0" in message
+
+
+def test_assertion_free_test_guard_allows_grandfathered_baseline(tmp_path, monkeypatch):
+    test_dir = tmp_path / "tests"
+    test_dir.mkdir()
+    (test_dir / "test_empty.py").write_text(
+        "def test_empty():\n    value = 1\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(precommit, "ASSERTION_FREE_TEST_LIMIT", 1)
+
+    precommit._run_assertion_free_test_guard(tmp_path)
+    findings = precommit.testquality.scan_assertion_free_tests(
+        precommit.testquality.test_paths(tmp_path), root=tmp_path
+    )
+    assert len(findings) == 1
 
 
 def test_policy_pre_commit_success_extensions_wait_for_clean_gate(
@@ -379,6 +416,10 @@ def test_policy_exclude_filters_path_based_builtin_gate_steps(tmp_path, monkeypa
     monkeypatch.setattr(precommit, "_run_file_loc_guard", record("file shape"))
     monkeypatch.setattr(precommit, "_run_complexity_guard", record("complexity"))
     monkeypatch.setattr(precommit, "_run_magic_numbers_guard", record("magic numbers"))
+    monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit, "_run_assertion_free_test_guard", lambda repo_root: None
+    )
     monkeypatch.setattr(
         precommit, "clear_successful_sticky_state", lambda repo_root: None
     )
@@ -762,6 +803,16 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
         "_run_magic_numbers_guard",
         lambda repo_root, paths: record("magic numbers"),
     )
+    monkeypatch.setattr(
+        precommit,
+        "_run_reachability_guard",
+        lambda repo_root: record("reachability"),
+    )
+    monkeypatch.setattr(
+        precommit,
+        "_run_assertion_free_test_guard",
+        lambda repo_root: record("assertion-free tests"),
+    )
     return events
 
 
@@ -791,6 +842,10 @@ def _patch_pre_commit_builtin_noops_except_local_paths(tmp_path, monkeypatch) ->
     monkeypatch.setattr(
         precommit, "_run_magic_numbers_guard", lambda repo_root, paths: None
     )
+    monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit, "_run_assertion_free_test_guard", lambda repo_root: None
+    )
 
 
 def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
@@ -817,6 +872,10 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         precommit, "_run_magic_numbers_guard", lambda repo_root, paths: None
+    )
+    monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit, "_run_assertion_free_test_guard", lambda repo_root: None
     )
 
 

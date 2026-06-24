@@ -773,6 +773,13 @@ def test_fresh_team_store_has_no_legacy_team_metric_tables(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
 
     _assert_legacy_team_metric_tables_absent(store)
+    with store.connect() as connection:
+        row = connection.execute(
+            "SELECT COUNT(*) AS count FROM sqlite_master "
+            "WHERE type = 'table' AND name IN (?, ?, ?)",
+            LEGACY_TEAM_METRIC_TABLES,
+        ).fetchone()
+    assert int(row["count"]) == 0
 
 
 def test_team_metric_single_basis_invariant_survives_random_lifecycle_sequence(

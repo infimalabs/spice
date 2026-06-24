@@ -59,9 +59,10 @@ def test_global_filter_pills_use_fill_not_extra_border_for_drain_scope():
 def test_global_filter_pills_reject_stale_inventory_resurrection():
     script = Path(__file__).with_name("fixtures") / "task_filter_inventory_reconcile.js"
 
-    subprocess.run(
+    result = subprocess.run(
         ["node", str(script), str(STATIC_ROOT / "app.lanes.js")],
         check=True,
         capture_output=True,
         text=True,
     )
+    assert result.returncode == 0
