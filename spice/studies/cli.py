@@ -24,6 +24,7 @@ from spice.studies import (
     mutations,
     reachability,
     shape,
+    subsumption,
 )
 from spice.studies.walk import staged_paths, tracked_paths
 
@@ -114,6 +115,26 @@ def configure_study_parser(subparsers: Any) -> None:
         default=[],
         help="Dotted module path to allow even if test-only (repeatable).",
     )
+
+    sub_parser = actions.add_parser(
+        "subsumption",
+        help=(
+            "Subsumed tests: tests covering no unique line vs. another test."
+            " Requires a .coverage file recorded with --cov-context=test."
+        ),
+    )
+    sub_parser.add_argument(
+        "coverage_file",
+        type=Path,
+        help=".coverage SQLite file; generate with: pytest --cov=<pkg> --cov-context=test",
+    )
+    sub_parser.add_argument(
+        "--package",
+        metavar="PREFIX",
+        default=None,
+        help="Only consider source files under this package prefix.",
+    )
+    sub_parser.set_defaults(func=handle_study, study_action="subsumption")
 
 
 def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
@@ -268,7 +289,35 @@ def _study_env_policy(args: argparse.Namespace, root: Path) -> int:
 def _study_reachability(args: argparse.Namespace, root: Path) -> int:
     findings = reachability.scan_reachability(root, allowlist=args.allowlist)
     print("\n".join(reachability.render_reachability_board(findings)))
+    if findings and getattr(args, "create_tasks", False):
+        _create_exhaust_tasks(findings)
     return 1 if findings else 0
+
+
+def _create_exhaust_tasks(findings: list[reachability.ReachabilityFinding]) -> None:
+    from spice.tasks import create
+
+    for f in findings:
+        handle = create.add(
+            f"Exhaust: wire in or delete-both {f.module_path}",
+            project="tests.exhaust",
+            tags=["exhaust"],
+            acceptance=[
+                f"Module {f.module} is either wired into a production entry point "
+                f"or deleted along with every test that imports it. "
+                f"Imported only by: {', '.join(f.only_test_imports) or 'unknown'}."
+            ],
+        )
+        print(f"  task created: {handle}")
+
+
+def _study_subsumption(args: argparse.Namespace, root: Path) -> int:
+    report = subsumption.scan_subsumption(
+        args.coverage_file,
+        package_prefix=args.package,
+    )
+    print("\n".join(subsumption.render_subsumption_board(report)))
+    return 1 if report.findings else 0
 
 
 _STUDY_ACTIONS = {
@@ -279,4 +328,5 @@ _STUDY_ACTIONS = {
     "mutations": _study_mutations,
     "env-policy": _study_env_policy,
     "reachability": _study_reachability,
+    "subsumption": _study_subsumption,
 }

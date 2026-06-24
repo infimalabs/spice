@@ -26,6 +26,7 @@ from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies import mutations
 from spice.studies.reachability import scan_reachability
+from spice.studies.subsumption import scan_subsumption
 from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies.shape import (
     configured_package_roots,
@@ -156,6 +157,77 @@ def test_reachability_merges_default_allowlist(tmp_path):
     _write_reachability_repo(tmp_path, "import spice.release\n", module_name="release")
 
     assert scan_reachability(tmp_path) == []
+
+
+def test_subsumption_identifies_fully_subsumed_test(tmp_path):
+    db = _write_coverage_db(
+        tmp_path,
+        files=["spice/foo.py"],
+        contexts={
+            "test_a": {0: [1, 2, 3]},
+            "test_b": {0: [1, 2, 3, 4]},
+        },
+    )
+
+    report = scan_subsumption(db)
+
+    assert report.tests_scanned == 2
+    assert len(report.findings) == 1
+    assert report.findings[0].test == "test_a"
+    assert report.findings[0].subsumed_by == "test_b"
+    assert report.findings[0].covered_lines == 3
+
+
+def test_subsumption_no_findings_when_tests_are_disjoint(tmp_path):
+    db = _write_coverage_db(
+        tmp_path,
+        files=["spice/foo.py"],
+        contexts={
+            "test_a": {0: [1, 2]},
+            "test_b": {0: [3, 4]},
+        },
+    )
+
+    report = scan_subsumption(db)
+
+    assert report.findings == ()
+
+
+def test_subsumption_raises_on_missing_coverage_file(tmp_path):
+    with pytest.raises(FileNotFoundError, match="coverage file not found"):
+        scan_subsumption(tmp_path / ".coverage")
+
+
+def _write_coverage_db(
+    root: Path,
+    *,
+    files: list[str],
+    contexts: dict[str, dict[int, list[int]]],
+) -> Path:
+    import sqlite3
+
+    path = root / ".coverage"
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE file (id INTEGER PRIMARY KEY, path TEXT)")
+    con.execute("CREATE TABLE context (id INTEGER PRIMARY KEY, context TEXT)")
+    con.execute(
+        "CREATE TABLE lines "
+        "(id INTEGER PRIMARY KEY, file_id INTEGER, context_id INTEGER, lineno INTEGER)"
+    )
+    for fid, fpath in enumerate(files, 1):
+        con.execute(f"INSERT INTO file VALUES ({fid}, '{fpath}')")
+    line_id = 1
+    for cid, (ctx_name, file_lines) in enumerate(contexts.items(), 1):
+        con.execute(f"INSERT INTO context VALUES ({cid}, '{ctx_name}')")
+        for file_index, lines in file_lines.items():
+            for lineno in lines:
+                con.execute(
+                    f"INSERT INTO lines VALUES ({line_id},{file_index + 1},{cid},{lineno})"
+                )
+                line_id += 1
+    con.commit()
+    con.close()
+    return path
 
 
 def _write_reachability_repo(
