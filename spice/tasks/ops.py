@@ -255,7 +255,7 @@ def claim_drive_line(handle: str) -> str:
     )
 
 
-# Nudge only with enough signal and genuinely poor compaction, so it stays
+# Nudge only with enough local signal and genuinely poor compaction, so it stays
 # occasional and silent once the agent feeds rtk well (or rtk is absent).
 RTK_NUDGE_MIN_COMMANDS = 6
 RTK_NUDGE_SAVINGS_FLOOR_PCT = 12.0
@@ -264,13 +264,13 @@ RTK_NUDGE_SAVINGS_FLOOR_PCT = 12.0
 def rtk_usage_nudge() -> str | None:
     """One-line rtk-feeding reminder, emitted only when rtk savings are poor.
 
-    Reads rtk's own gain summary (`rtk gain -f json`) so the reminder is
-    self-correcting and silent when the agent is already feeding rtk well,
-    when there is too little signal, or when rtk is not installed.
+    Reads rtk's current-project gain summary (`rtk gain --project -f json`) so
+    the reminder is self-correcting and silent when this tree is already feeding
+    rtk well, when there is too little signal, or when rtk is not installed.
     """
     try:
         completed = subprocess.run(
-            ["rtk", "gain", "-f", "json"],
+            ["rtk", "gain", "--project", "-f", "json"],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
