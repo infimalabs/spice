@@ -31,7 +31,9 @@ PRODUCTION_ROOTS = (
 # Allowlist for modules that are only test-reachable but are legitimately
 # dead-tested (e.g., backwards-compat stubs, dynamic dispatch via string keys).
 # Entries are dotted module paths within the spice package.
-REACHABILITY_ALLOWLIST: tuple[str, ...] = ()
+REACHABILITY_ALLOWLIST: tuple[str, ...] = (
+    "spice.release",  # mounted command from [tool.spice.commands]
+)
 
 
 @dataclass(frozen=True)
@@ -57,10 +59,12 @@ def scan_reachability(
     root_paths = [repo_root / r for r in PRODUCTION_ROOTS if (repo_root / r).is_file()]
     prod_reachable = _walk_imports(root_paths, pkg_root, package)
 
-    test_paths = list(test_dir.glob("*.py"))
-    test_reachable = _walk_imports(test_paths, pkg_root, package)
+    test_paths = list(test_dir.rglob("*.py"))
+    test_reachable = _walk_imports(
+        test_paths, pkg_root, package, include_root_modules=False
+    )
 
-    allowset = set(allowlist)
+    allowset = {*REACHABILITY_ALLOWLIST, *allowlist}
     findings: list[ReachabilityFinding] = []
     for module in sorted(test_reachable - prod_reachable):
         if module in allowset:
@@ -68,7 +72,7 @@ def scan_reachability(
         mod_path = _module_to_path(module, pkg_root, package)
         if mod_path is None:
             continue
-        importers = _find_importers(module, test_paths, package)
+        importers = _find_importers(module, test_paths, pkg_root, package)
         findings.append(
             ReachabilityFinding(
                 module=module,
@@ -102,19 +106,27 @@ def render_reachability_board(
     return rows
 
 
-def _walk_imports(roots: list[Path], pkg_root: Path, package: str) -> set[str]:
+def _walk_imports(
+    roots: list[Path],
+    pkg_root: Path,
+    package: str,
+    *,
+    include_root_modules: bool = True,
+) -> set[str]:
     """BFS import-graph walk; returns dotted package module names reachable."""
     visited: set[str] = set()
     queue: list[Path] = []
     for path in roots:
         mod = _path_to_module(path, pkg_root, package)
-        if mod and mod not in visited:
+        if mod and include_root_modules and mod not in visited:
             visited.add(mod)
+            queue.append(path)
+        elif mod or not include_root_modules:
             queue.append(path)
 
     while queue:
         path = queue.pop()
-        for imp in _direct_imports(path, package):
+        for imp in _direct_imports(path, pkg_root, package):
             if imp in visited:
                 continue
             visited.add(imp)
@@ -124,7 +136,7 @@ def _walk_imports(roots: list[Path], pkg_root: Path, package: str) -> set[str]:
     return visited
 
 
-def _direct_imports(path: Path, package: str) -> list[str]:
+def _direct_imports(path: Path, pkg_root: Path, package: str) -> list[str]:
     """Extract dotted module names imported directly by path that are in package."""
     try:
         tree = ast.parse(path.read_bytes())
@@ -137,11 +149,15 @@ def _direct_imports(path: Path, package: str) -> list[str]:
                 if alias.name == package or alias.name.startswith(f"{package}."):
                     results.append(alias.name)
         elif isinstance(node, ast.ImportFrom):
-            if node.module is None:
-                continue
-            mod = _resolve_relative(path, node.module, node.level, package)
+            mod = _resolve_relative(path, node.module or "", node.level, package)
             if mod and (mod == package or mod.startswith(f"{package}.")):
                 results.append(mod)
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    candidate = f"{mod}.{alias.name}"
+                    if _module_to_path(candidate, pkg_root, package):
+                        results.append(candidate)
     return results
 
 
@@ -199,11 +215,13 @@ def _module_to_path(module: str, pkg_root: Path, package: str) -> Path | None:
     return None
 
 
-def _find_importers(module: str, test_paths: list[Path], package: str) -> list[str]:
+def _find_importers(
+    module: str, test_paths: list[Path], pkg_root: Path, package: str
+) -> list[str]:
     """Return test file names that directly import module."""
     importers: list[str] = []
     for path in test_paths:
-        imps = _direct_imports(path, package)
+        imps = _direct_imports(path, pkg_root, package)
         if module in imps or any(imp.startswith(f"{module}.") for imp in imps):
             importers.append(path.name)
     return importers
