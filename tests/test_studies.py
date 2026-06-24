@@ -156,6 +156,35 @@ def test_reachability_merges_default_allowlist(tmp_path):
     assert scan_reachability(tmp_path) == []
 
 
+def test_study_reachability_create_tasks_calls_add_per_finding(
+    tmp_path, monkeypatch, capsys
+):
+    _write_reachability_repo(tmp_path, "import spice.onlytest\n")
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    created: list[dict] = []
+
+    def fake_add(title, *, project, tags, acceptance):
+        created.append({"title": title, "project": project, "tags": tags})
+        return "EXHAUST-FAKE"
+
+    import spice.studies.cli as _cli_mod
+
+    monkeypatch.setattr(
+        _cli_mod,
+        "_create_exhaust_tasks",
+        lambda findings: [
+            created.append({"module_path": f.module_path}) for f in findings
+        ],
+    )
+    args = build_parser().parse_args(["study", "reachability", "--create-tasks"])
+
+    result = args.func(args)
+
+    assert result == 1
+    assert len(created) == 1
+    assert "onlytest.py" in created[0]["module_path"]
+
+
 def _write_reachability_repo(
     root: Path, test_import: str, *, module_name: str = "onlytest"
 ) -> None:
