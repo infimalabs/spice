@@ -128,10 +128,10 @@ def scan_symbol_reachability(
     ]
     test_paths = list(test_dir.rglob("*.py"))
     prod_refs, _prod_importers = _collect_symbol_refs(
-        prod_paths, definitions, package=package
+        prod_paths, definitions, pkg_root=pkg_root, package=package
     )
     test_refs, test_importers = _collect_symbol_refs(
-        test_paths, definitions, package=package
+        test_paths, definitions, pkg_root=pkg_root, package=package
     )
 
     findings: list[SymbolReachabilityFinding] = []
@@ -352,6 +352,7 @@ def _collect_symbol_refs(
     paths: list[Path],
     definitions: dict[_SymbolRef, _SymbolDefinition],
     *,
+    pkg_root: Path,
     package: str,
 ) -> tuple[set[_SymbolRef], dict[_SymbolRef, set[str]]]:
     refs: set[_SymbolRef] = set()
@@ -368,8 +369,15 @@ def _collect_symbol_refs(
             tree = ast.parse(path.read_bytes())
         except (SyntaxError, OSError):
             continue
+        current_module = _path_to_module(path, pkg_root, package)
         path_refs = _symbol_refs_for_tree(
-            tree, definitions, by_module, class_symbols, path, package
+            tree,
+            definitions,
+            by_module,
+            class_symbols,
+            path,
+            package,
+            current_module,
         )
         refs.update(path_refs)
         display = path.name
@@ -385,49 +393,178 @@ def _symbol_refs_for_tree(
     class_symbols: set[tuple[str, str]],
     path: Path,
     package: str,
+    current_module: str | None,
 ) -> set[_SymbolRef]:
     refs: set[_SymbolRef] = set()
     symbol_aliases: dict[str, _SymbolRef] = {}
     module_aliases: dict[str, str] = {}
     class_aliases: dict[str, tuple[str, str]] = {}
     instance_aliases: dict[str, tuple[str, str]] = {}
+    external_base_aliases: set[str] = set()
 
+    _seed_local_symbol_aliases(
+        current_module,
+        definitions,
+        by_module,
+        class_symbols,
+        symbol_aliases,
+        class_aliases,
+    )
+    _collect_import_symbol_refs(
+        tree,
+        definitions,
+        by_module,
+        class_symbols,
+        path,
+        package,
+        refs,
+        symbol_aliases,
+        module_aliases,
+        class_aliases,
+        external_base_aliases,
+    )
+    _collect_usage_symbol_refs(
+        tree,
+        definitions,
+        by_module,
+        refs,
+        symbol_aliases,
+        module_aliases,
+        class_aliases,
+        instance_aliases,
+    )
+    if current_module is not None:
+        refs.update(_refs_from_local_class_methods(tree, definitions, current_module))
+        refs.update(
+            _refs_from_external_override_methods(
+                tree, definitions, current_module, external_base_aliases
+            )
+        )
+    return refs
+
+
+def _seed_local_symbol_aliases(
+    current_module: str | None,
+    definitions: dict[_SymbolRef, _SymbolDefinition],
+    by_module: dict[str, set[str]],
+    class_symbols: set[tuple[str, str]],
+    symbol_aliases: dict[str, _SymbolRef],
+    class_aliases: dict[str, tuple[str, str]],
+) -> None:
+    if current_module is None:
+        return
+    for symbol in by_module.get(current_module, set()):
+        if "." in symbol:
+            continue
+        ref = _SymbolRef(current_module, symbol)
+        if ref not in definitions:
+            continue
+        symbol_aliases[symbol] = ref
+        if (current_module, symbol) in class_symbols:
+            class_aliases[symbol] = (current_module, symbol)
+
+
+def _collect_import_symbol_refs(
+    tree: ast.AST,
+    definitions: dict[_SymbolRef, _SymbolDefinition],
+    by_module: dict[str, set[str]],
+    class_symbols: set[tuple[str, str]],
+    path: Path,
+    package: str,
+    refs: set[_SymbolRef],
+    symbol_aliases: dict[str, _SymbolRef],
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+    external_base_aliases: set[str],
+) -> None:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in by_module:
-                    module_aliases[alias.asname or alias.name.split(".")[0]] = (
-                        alias.name
-                    )
+            _collect_import_aliases(
+                node, by_module, package, module_aliases, external_base_aliases
+            )
         elif isinstance(node, ast.ImportFrom):
-            module = _resolve_relative(path, node.module or "", node.level, package)
-            if not module:
-                continue
-            for alias in node.names:
-                if alias.name == "*":
-                    continue
-                asname = alias.asname or alias.name
-                candidate_module = f"{module}.{alias.name}"
-                if candidate_module in by_module:
-                    module_aliases[asname] = candidate_module
-                    continue
-                ref = _SymbolRef(module, alias.name)
-                if ref in definitions:
-                    refs.add(ref)
-                    symbol_aliases[asname] = ref
-                    if (ref.module, ref.symbol) in class_symbols:
-                        class_aliases[asname] = (ref.module, ref.symbol)
+            _collect_import_from_aliases(
+                node,
+                definitions,
+                by_module,
+                class_symbols,
+                path,
+                package,
+                refs,
+                symbol_aliases,
+                module_aliases,
+                class_aliases,
+                external_base_aliases,
+            )
 
+
+def _collect_import_aliases(
+    node: ast.Import,
+    by_module: dict[str, set[str]],
+    package: str,
+    module_aliases: dict[str, str],
+    external_base_aliases: set[str],
+) -> None:
+    for alias in node.names:
+        asname = alias.asname or alias.name.split(".")[0]
+        if alias.name in by_module:
+            module_aliases[asname] = alias.name
+        elif not alias.name.startswith(f"{package}."):
+            external_base_aliases.add(asname)
+
+
+def _collect_import_from_aliases(
+    node: ast.ImportFrom,
+    definitions: dict[_SymbolRef, _SymbolDefinition],
+    by_module: dict[str, set[str]],
+    class_symbols: set[tuple[str, str]],
+    path: Path,
+    package: str,
+    refs: set[_SymbolRef],
+    symbol_aliases: dict[str, _SymbolRef],
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+    external_base_aliases: set[str],
+) -> None:
+    module = _resolve_relative(path, node.module or "", node.level, package)
+    if not module:
+        return
+    for alias in node.names:
+        if alias.name == "*":
+            continue
+        asname = alias.asname or alias.name
+        candidate_module = f"{module}.{alias.name}"
+        if candidate_module in by_module:
+            module_aliases[asname] = candidate_module
+            continue
+        ref = _SymbolRef(module, alias.name)
+        if ref in definitions:
+            refs.add(ref)
+            symbol_aliases[asname] = ref
+            if (ref.module, ref.symbol) in class_symbols:
+                class_aliases[asname] = (ref.module, ref.symbol)
+            continue
+        if not (module == package or module.startswith(f"{package}.")):
+            external_base_aliases.add(asname)
+
+
+def _collect_usage_symbol_refs(
+    tree: ast.AST,
+    definitions: dict[_SymbolRef, _SymbolDefinition],
+    by_module: dict[str, set[str]],
+    refs: set[_SymbolRef],
+    symbol_aliases: dict[str, _SymbolRef],
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+    instance_aliases: dict[str, tuple[str, str]],
+) -> None:
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
-            class_ref = _class_ref_from_expr(node.value, module_aliases, class_aliases)
-            if class_ref is not None:
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        instance_aliases[target.id] = class_ref
-        elif isinstance(node, ast.Name):
-            if node.id in symbol_aliases:
-                refs.add(symbol_aliases[node.id])
+            _collect_assignment_aliases(
+                node, module_aliases, class_aliases, instance_aliases
+            )
+        elif isinstance(node, ast.Name) and node.id in symbol_aliases:
+            refs.add(symbol_aliases[node.id])
         elif isinstance(node, ast.Attribute):
             refs.update(
                 _refs_from_attribute(
@@ -439,7 +576,89 @@ def _symbol_refs_for_tree(
                     instance_aliases,
                 )
             )
+
+
+def _collect_assignment_aliases(
+    node: ast.Assign,
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+    instance_aliases: dict[str, tuple[str, str]],
+) -> None:
+    class_ref = _class_ref_from_expr(node.value, module_aliases, class_aliases)
+    if class_ref is None:
+        return
+    for target in node.targets:
+        if isinstance(target, ast.Name):
+            instance_aliases[target.id] = class_ref
+
+
+def _refs_from_local_class_methods(
+    tree: ast.AST,
+    definitions: dict[_SymbolRef, _SymbolDefinition],
+    current_module: str,
+) -> set[_SymbolRef]:
+    refs: set[_SymbolRef] = set()
+    if not isinstance(tree, ast.Module):
+        return refs
+    for class_node in tree.body:
+        if not isinstance(class_node, ast.ClassDef):
+            continue
+        class_ref = _SymbolRef(current_module, class_node.name)
+        if class_ref not in definitions:
+            continue
+        for child in class_node.body:
+            if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            receiver_names = _method_receiver_names(child)
+            if not receiver_names:
+                continue
+            for node in ast.walk(child):
+                if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                    if node.value.id not in receiver_names:
+                        continue
+                    ref = _SymbolRef(current_module, f"{class_node.name}.{node.attr}")
+                    if ref in definitions:
+                        refs.add(ref)
     return refs
+
+
+def _refs_from_external_override_methods(
+    tree: ast.AST,
+    definitions: dict[_SymbolRef, _SymbolDefinition],
+    current_module: str,
+    external_base_aliases: set[str],
+) -> set[_SymbolRef]:
+    override_refs: set[_SymbolRef] = set()
+    if not isinstance(tree, ast.Module):
+        return override_refs
+    for class_node in tree.body:
+        if not isinstance(class_node, ast.ClassDef):
+            continue
+        if not _class_uses_external_base(class_node, external_base_aliases):
+            continue
+        for child in class_node.body:
+            if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            method_ref = _SymbolRef(current_module, f"{class_node.name}.{child.name}")
+            if method_ref in definitions:
+                override_refs.add(method_ref)
+    return override_refs
+
+
+def _class_uses_external_base(
+    node: ast.ClassDef, external_base_aliases: set[str]
+) -> bool:
+    for base in node.bases:
+        if isinstance(base, ast.Name) and base.id in external_base_aliases:
+            return True
+    return False
+
+
+def _method_receiver_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    positional = [*node.args.posonlyargs, *node.args.args]
+    if not positional:
+        return set()
+    return {positional[0].arg}
 
 
 def _refs_from_attribute(

@@ -85,13 +85,6 @@ def is_oops(row: dict[str, Any]) -> bool:
     return "oops" in (row.get("tags") or [])
 
 
-def ready_rows() -> list[dict[str, Any]]:
-    """Available work: READY, not already claimed (claimed rows are +ACTIVE),
-    and not oops."""
-    rows = tw.export(["status:pending", "+READY", "-ACTIVE"])
-    return [r for r in rows if not is_oops(r) and not str(r.get("claim_by") or "")]
-
-
 def oops_rows() -> list[dict[str, Any]]:
     """Deferred oops items carry a far-future wait, so they are `waiting`."""
     return [
@@ -136,10 +129,6 @@ def _route_includes_origin(route: dict[str, Any] | None) -> bool:
     if route is None:
         return True
     return str(route.get("lifetime") or "") in ("Drive", "Drain")
-
-
-def effective_filter_args(actor: str, lane_filter: list[str] | None) -> list[str]:
-    return _scope_filter(actor, lane_filter)
 
 
 def effective_route_filter_args(actor: str, route: dict[str, Any] | None) -> list[str]:

@@ -295,19 +295,3 @@ def _message_timestamps(
         for item in items
         if (parsed := message_reader.parse_timestamp(item.timestamp)) is not None
     ]
-
-
-def _message_sparkline(items: list[message_reader.AssistantMessage]) -> list[int]:
-    values = [0] * LANE_METRIC_SPARKLINE_BUCKETS
-    timestamps = _message_timestamps(items)
-    if not timestamps:
-        return values
-    start = max(timestamps).timestamp() - (
-        (LANE_METRIC_SPARKLINE_BUCKETS - 1) * LANE_METRIC_SPARKLINE_BUCKET_SECONDS
-    )
-    for timestamp in timestamps:
-        index = int(
-            (timestamp.timestamp() - start) // LANE_METRIC_SPARKLINE_BUCKET_SECONDS
-        )
-        values[max(0, min(index, LANE_METRIC_SPARKLINE_BUCKETS - 1))] += 1
-    return values

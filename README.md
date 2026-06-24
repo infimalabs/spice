@@ -433,8 +433,8 @@ modules that tests can import but production roots cannot. The explicit
 `spice study symbol-reachability` command is the finer-grained study for
 functions, classes, and methods inside production-reachable modules. This repo
 does not use a
-grandfathered symbol limit: symbol findings are a burn-down backlog, and the
-gate should be added only when the study reports zero.
+grandfathered symbol limit: symbol findings are a zero-tolerance pre-commit
+failure, so new exhaust must be wired into production or deleted with its tests.
 
 Mutation testing is available as an explicit study, not a default pre-commit
 cost:

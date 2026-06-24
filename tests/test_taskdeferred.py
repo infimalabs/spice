@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import DRIVER
-from spice.tasks import alloc, config, create, identity, ops
+from spice.tasks import config, create, identity, ops, tw
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -40,14 +40,14 @@ def test_deferred_creation_is_hidden_from_allocator_until_woken(task_repo):
     row = identity.resolve(handle)
 
     assert str(row.get("wait") or "").startswith("2099")
-    assert handle not in {identity.render_handle(row) for row in alloc.ready_rows()}
+    assert handle not in _ready_handles()
 
     output = ops.wake([handle])
     woken = identity.resolve(handle)
 
     assert f"woke {handle}: wait:" in output
     assert not str(woken.get("wait") or "")
-    assert handle in {identity.render_handle(row) for row in alloc.ready_rows()}
+    assert handle in _ready_handles()
 
 
 def _init_repo(path: Path) -> Path:
@@ -59,6 +59,15 @@ def _init_repo(path: Path) -> Path:
     _run(path, "git", "add", "README.md")
     _run(path, "git", "commit", "-m", "initial")
     return path
+
+
+def _ready_handles() -> set[str]:
+    rows = tw.export(["status:pending", "+READY", "-ACTIVE"])
+    return {
+        identity.render_handle(row)
+        for row in rows
+        if "oops" not in (row.get("tags") or []) and not str(row.get("claim_by") or "")
+    }
 
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:

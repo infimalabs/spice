@@ -75,6 +75,15 @@ def _make_orphan_commit(
     return _git(repo, "rev-parse", "HEAD")
 
 
+def _ready_handles() -> set[str]:
+    rows = tw.export(["status:pending", "+READY", "-ACTIVE"])
+    return {
+        identity.render_handle(row)
+        for row in rows
+        if "oops" not in (row.get("tags") or []) and not str(row.get("claim_by") or "")
+    }
+
+
 def test_task_edit_changes_priority_in_place(task_repo):
     handle = create.add("Bump me", project="task.unit", priority="low")
     assert identity.resolve(handle)["priority"] == "L"
@@ -111,18 +120,16 @@ def test_task_wake_clears_multiple_waits_and_makes_tasks_current(task_repo):
     delayed = [identity.resolve(handle) for handle in handles]
 
     assert all(row.get("wait") for row in delayed)
-    ready_before = {identity.render_handle(row) for row in alloc.ready_rows()}
-    assert not set(handles) & ready_before
+    assert not set(handles) & _ready_handles()
 
     output = ops.wake(handles)
     rows = [identity.resolve(handle) for handle in handles]
-    ready_after = {identity.render_handle(row) for row in alloc.ready_rows()}
 
     for handle in handles:
         assert f"woke {handle}: wait:" in output
     assert "next: spice task next" in output
     assert all(not str(row.get("wait") or "") for row in rows)
-    assert set(handles) <= ready_after
+    assert set(handles) <= _ready_handles()
     assert all(not str(row.get("claim_by") or "") for row in rows)
     assert all(not row.get("start") for row in rows)
 
@@ -141,7 +148,7 @@ def test_task_wake_rejects_batch_without_partial_clear(task_repo):
 
     row = identity.resolve(delayed)
     assert row.get("wait")
-    assert delayed not in {identity.render_handle(row) for row in alloc.ready_rows()}
+    assert delayed not in _ready_handles()
     assert not str(row.get("claim_by") or "")
     assert not row.get("start")
 
@@ -946,7 +953,6 @@ def test_lifetime_filter_args_use_single_visibility_contract(task_repo):
         ")",
     ]
     assert lanes.filter_args({"filter": [], "lifetime": "Steer"}) == []
-    assert alloc.effective_filter_args(ACTOR_A, []) == [private]
     assert alloc.effective_route_filter_args(ACTOR_A, None) == [
         "(",
         private,
@@ -957,20 +963,6 @@ def test_lifetime_filter_args_use_single_visibility_contract(task_repo):
     assert alloc.effective_route_filter_args(
         ACTOR_A, {"filter": [], "lifetime": "Steer"}
     ) == [private]
-    assert alloc.effective_filter_args(
-        ACTOR_A,
-        lanes.filter_args({"filter": stored, "lifetime": "Drain"}),
-    ) == [
-        "(",
-        private,
-        "or",
-        "(",
-        "project:serve",
-        "or",
-        "project:task",
-        ")",
-        ")",
-    ]
     assert alloc.effective_route_filter_args(
         ACTOR_A, {"filter": stored, "lifetime": "Drain"}
     ) == [

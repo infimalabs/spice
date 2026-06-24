@@ -27,6 +27,8 @@ from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violation
 from spice.studies import mutations
 from spice.studies.reachability import (
     ReachabilityFinding,
+    render_reachability_board,
+    render_symbol_reachability_board,
     scan_reachability,
     scan_symbol_reachability,
 )
@@ -355,31 +357,22 @@ def test_reachability_expands_from_imported_submodule(tmp_path):
     ]
 
 
-def test_symbol_reachability_finds_test_only_symbols_in_live_module(tmp_path):
+def test_symbol_reachability_excludes_production_used_local_helpers(tmp_path):
     _write_symbol_reachability_repo(tmp_path)
 
     module_findings = scan_reachability(tmp_path)
     symbol_findings = scan_symbol_reachability(tmp_path)
+    module_output = "\n".join(render_reachability_board(module_findings))
+    symbol_output = "\n".join(render_symbol_reachability_board(symbol_findings))
 
-    assert [(f.module, f.module_path) for f in module_findings] == [
-        ("spice.orphan_module_xyz", "spice/orphan_module_xyz.py")
-    ]
-    assert [
-        (f.module, f.symbol, f.kind, f.only_test_imports) for f in symbol_findings
-    ] == [
-        (
-            "spice.live",
-            "LiveThing.planted_dead_method_abc",
-            "method",
-            ["test_symbols.py"],
-        ),
-        (
-            "spice.live",
-            "planted_dead_function_abc",
-            "function",
-            ["test_symbols.py"],
-        ),
-    ]
+    assert "reachability: 1 test-only module(s)" in module_output
+    assert "spice/orphan_module_xyz.py" in module_output
+    assert "symbol-reachability: 2 test-only symbol(s)" in symbol_output
+    assert "spice/live.py:LiveThing.planted_dead_method_abc" in symbol_output
+    assert "spice/live.py:planted_dead_function_abc" in symbol_output
+    assert "handle_one_request" not in symbol_output
+    assert "shared_helper" not in symbol_output
+    assert "shared_method" not in symbol_output
 
 
 def test_study_symbol_reachability_cli_reports_test_only_symbol(
@@ -770,31 +763,44 @@ def _write_symbol_reachability_repo(root: Path) -> None:
     (root / "spice" / "cli").mkdir(parents=True)
     (root / "tests").mkdir()
     (root / "spice" / "cli" / "entry.py").write_text(
-        "from ..live import production_function, LiveThing\n"
+        "from ..live import production_function, LiveHandler, LiveThing\n"
         "production_function()\n"
-        "LiveThing().production_method()\n",
+        "LiveThing().production_method()\n"
+        "LiveHandler\n",
         encoding="utf-8",
     )
     (root / "spice" / "live.py").write_text(
+        "from http.server import BaseHTTPRequestHandler\n\n"
         "def production_function():\n"
+        "    return shared_helper()\n\n"
+        "def shared_helper():\n"
         "    return 1\n\n"
         "def planted_dead_function_abc():\n"
         "    return 2\n\n"
         "class LiveThing:\n"
         "    def production_method(self):\n"
+        "        return self.shared_method()\n\n"
+        "    def shared_method(self):\n"
         "        return 3\n\n"
         "    def planted_dead_method_abc(self):\n"
-        "        return 4\n",
+        "        return 4\n"
+        "\n"
+        "class LiveHandler(BaseHTTPRequestHandler):\n"
+        "    def handle_one_request(self):\n"
+        "        return None\n",
         encoding="utf-8",
     )
     (root / "spice" / "orphan_module_xyz.py").write_text(
         "def only_tests_call():\n    return 5\n", encoding="utf-8"
     )
     (root / "tests" / "test_symbols.py").write_text(
-        "from spice.live import LiveThing, planted_dead_function_abc\n"
+        "from spice.live import LiveHandler, LiveThing, planted_dead_function_abc, shared_helper\n"
         "import spice.orphan_module_xyz\n\n"
         "def test_symbols():\n"
+        "    shared_helper()\n"
         "    planted_dead_function_abc()\n"
+        "    LiveHandler.handle_one_request\n"
+        "    LiveThing().shared_method()\n"
         "    LiveThing().planted_dead_method_abc()\n",
         encoding="utf-8",
     )

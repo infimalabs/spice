@@ -708,56 +708,6 @@ def _raw_timestamp(line: str) -> str | None:
     return line[_TS_PREFIX_LEN:end]
 
 
-def collect_unique_ack_keys(
-    files: Iterable[Path],
-    *,
-    start_ts: str | None = None,
-    end_ts: str | None = None,
-    turn_ids: Iterable[str] | None = None,
-    repo_root: str | Path | None = None,
-) -> list[str]:
-    """Return ACK'd keys in source order, each one at most once."""
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for key in iter_assistant_ack_keys(
-        files,
-        start_ts=start_ts,
-        end_ts=end_ts,
-        turn_ids=turn_ids,
-        repo_root=repo_root,
-    ):
-        if key in seen:
-            continue
-        seen.add(key)
-        ordered.append(key)
-    return ordered
-
-
-def collect_ack_segments(
-    files: Iterable[Path],
-    *,
-    start_ts: str | None = None,
-    end_ts: str | None = None,
-    turn_ids: Iterable[str] | None = None,
-    repo_root: str | Path | None = None,
-) -> list[AckSegment]:
-    """Return every ACK segment across `files` in source order.
-
-    Each segment pairs the keys an ACK named with the cleaned content
-    attributed to it. Use :func:`ack_content_by_key` to collapse it into a
-    key -> content map.
-    """
-    return list(
-        iter_assistant_ack_segments(
-            files,
-            start_ts=start_ts,
-            end_ts=end_ts,
-            turn_ids=turn_ids,
-            repo_root=repo_root,
-        )
-    )
-
-
 def _line_might_carry_ack(line: str, *, turn_filter: set[str] | None) -> bool:
     if "ACK" in line:
         return True

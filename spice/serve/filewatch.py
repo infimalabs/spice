@@ -2,30 +2,13 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
-from dataclasses import dataclass
 from http.server import ThreadingHTTPServer
 from importlib import import_module
 from pathlib import Path
-import stat
 from threading import Event, Thread
 from typing import Any, Callable, cast
 
 from spice.errors import SpiceError
-
-
-@dataclass(frozen=True)
-class FileWatchSnapshot:
-    exists: bool
-    is_file: bool
-    size: int | None
-    modified_ns: int | None
-    metadata_changed_ns: int | None
-    mode: int | None
-    device: int | None
-    inode: int | None
-    owner: int | None
-    group: int | None
-    stat_error: str | None
 
 
 def start_exit_file_watch(
@@ -109,53 +92,3 @@ def _changes_include_path(changes: Iterable[tuple[object, str]], target: Path) -
 
 def _include_change(_change: object, path: str, *, target: Path) -> bool:
     return _normalized_watch_path(Path(path)) == target
-
-
-def snapshot_file_watch_path(path: Path) -> FileWatchSnapshot:
-    try:
-        stat_result = path.stat()
-    except FileNotFoundError:
-        return FileWatchSnapshot(
-            exists=False,
-            is_file=False,
-            size=None,
-            modified_ns=None,
-            metadata_changed_ns=None,
-            mode=None,
-            device=None,
-            inode=None,
-            owner=None,
-            group=None,
-            stat_error=None,
-        )
-    except OSError as exc:
-        return FileWatchSnapshot(
-            exists=False,
-            is_file=False,
-            size=None,
-            modified_ns=None,
-            metadata_changed_ns=None,
-            mode=None,
-            device=None,
-            inode=None,
-            owner=None,
-            group=None,
-            stat_error=f"{type(exc).__name__}:{exc.errno}",
-        )
-    return FileWatchSnapshot(
-        exists=True,
-        is_file=stat.S_ISREG(stat_result.st_mode),
-        size=stat_result.st_size,
-        modified_ns=stat_result.st_mtime_ns,
-        metadata_changed_ns=stat_result.st_ctime_ns,
-        mode=stat_result.st_mode,
-        device=getattr(stat_result, "st_dev", None),
-        inode=getattr(stat_result, "st_ino", None),
-        owner=getattr(stat_result, "st_uid", None),
-        group=getattr(stat_result, "st_gid", None),
-        stat_error=None,
-    )
-
-
-def file_watch_path_changed(path: Path, baseline: FileWatchSnapshot) -> bool:
-    return snapshot_file_watch_path(path) != baseline

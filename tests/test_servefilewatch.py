@@ -8,11 +8,7 @@ import threading
 from spice.serve import app as serve_app
 from spice.serve import filewatch as serve_filewatch
 from spice.serve.app import run_serve
-from spice.serve.filewatch import (
-    file_watch_path_changed,
-    snapshot_file_watch_path,
-    start_exit_file_watch,
-)
+from spice.serve.filewatch import start_exit_file_watch
 
 
 class FakeServer:
@@ -32,16 +28,6 @@ class FakeServer:
 
     def server_close(self) -> None:
         self.closed = True
-
-
-def test_file_watch_snapshot_detects_modified_file(tmp_path: Path) -> None:
-    watched_path = tmp_path / "serve.stop"
-    watched_path.write_text("initial\n", encoding="utf-8")
-    baseline = snapshot_file_watch_path(watched_path)
-
-    watched_path.write_text("initial\nchanged\n", encoding="utf-8")
-
-    assert file_watch_path_changed(watched_path, baseline) is True
 
 
 def test_start_exit_file_watch_uses_exact_existing_path(

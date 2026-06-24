@@ -3,14 +3,10 @@
 import json
 import sqlite3
 import subprocess
-from types import SimpleNamespace
 
-from spice.agent.driver import DRIVER
 from spice.mail.acks import (
     ack_content_by_key,
     archive_ackd_inbox_items,
-    collect_ack_segments,
-    collect_unique_ack_keys,
     extract_ack_keys_from_text,
     extract_ack_segments_from_text,
     extract_task_batch_lines_from_text,
@@ -34,7 +30,6 @@ from spice.mail.watch import (
     AckWatchOutcome,
     _AckWatchState,
     extract_owned_ack_utterance,
-    resolve_target_thread_id,
 )
 
 KEY_A = "20260513T184251491561Z"
@@ -298,54 +293,6 @@ def test_ack_state_supplies_archive_context_without_archive_files(tmp_path):
     ]
 
 
-def test_collect_ack_keys_uses_ack_state_when_repo_root_is_authoritative(tmp_path):
-    _init_repo(tmp_path)
-    missing_transcript = tmp_path / "missing.jsonl"
-    record_acked_inbox_items(
-        tmp_path,
-        [
-            AckStateWrite(
-                key=KEY_A,
-                inbox_name=f"{KEY_A}.txt",
-                text=compose_inbox_text(body="first", priority=None, stop=False),
-            ),
-            AckStateWrite(
-                key=KEY_B,
-                inbox_name=f"{KEY_B}.txt",
-                text=compose_inbox_text(body="second", priority=None, stop=False),
-            ),
-        ],
-        now=200.0,
-    )
-
-    keys = collect_unique_ack_keys([missing_transcript], repo_root=tmp_path)
-
-    assert keys == [KEY_A, KEY_B]
-
-
-def test_collect_ack_segments_uses_ack_state_content_when_authoritative(tmp_path):
-    _init_repo(tmp_path)
-    missing_transcript = tmp_path / "missing.jsonl"
-    record_acked_inbox_items(
-        tmp_path,
-        [
-            AckStateWrite(
-                key=KEY_A,
-                inbox_name=f"{KEY_A}.txt",
-                text=compose_inbox_text(body="first", priority=None, stop=False),
-                ack_content="first handled",
-            )
-        ],
-        now=200.0,
-    )
-
-    segments = collect_ack_segments([missing_transcript], repo_root=tmp_path)
-
-    assert [(segment.keys, segment.content) for segment in segments] == [
-        ((KEY_A,), "first handled")
-    ]
-
-
 def test_content_by_key_latest_ack_wins():
     early = extract_ack_segments_from_text(f"ACK {KEY_A}: early answer.")
     late = extract_ack_segments_from_text(f"ACK {KEY_A}: revised answer.")
@@ -369,60 +316,6 @@ def test_inline_multi_ack_splitting_keeps_each_body_with_its_key():
     assert [segment.content for segment in segments] == [
         "first handled.",
         "second handled.",
-    ]
-
-
-def test_collect_ack_keys_respects_time_window_short_circuit(tmp_path):
-    transcript = tmp_path / "rollout.jsonl"
-    _write_jsonl(
-        transcript,
-        [
-            _assistant("2026-01-01T00:00:00.000Z", f"ACK {KEY_A}: before."),
-            _assistant("2026-01-01T00:00:01.000Z", f"ACK {KEY_B}: inside."),
-            _assistant("2026-01-01T00:00:02.000Z", f"ACK {KEY_C}: after."),
-            _assistant("2026-01-01T00:00:01.500Z", f"ACK {KEY_D}: out of order."),
-        ],
-    )
-
-    keys = collect_unique_ack_keys(
-        [transcript],
-        start_ts="2026-01-01T00:00:01.000Z",
-        end_ts="2026-01-01T00:00:01.999Z",
-    )
-
-    assert keys == [KEY_B]
-
-
-def test_collect_ack_segments_filters_to_active_turn_id(tmp_path):
-    transcript = tmp_path / "rollout.jsonl"
-    _write_jsonl(
-        transcript,
-        [
-            _event(
-                "2026-01-01T00:00:00.000Z",
-                "event_msg",
-                {"type": "task_started", "turn_id": "turn-a"},
-            ),
-            _assistant("2026-01-01T00:00:01.000Z", f"ACK {KEY_A}: turn a."),
-            _event(
-                "2026-01-01T00:00:02.000Z",
-                "event_msg",
-                {"type": "task_complete"},
-            ),
-            _assistant("2026-01-01T00:00:03.000Z", f"ACK {KEY_B}: outside."),
-            _event(
-                "2026-01-01T00:00:04.000Z",
-                "event_msg",
-                {"type": "task_started", "turn_id": "turn-b"},
-            ),
-            _assistant("2026-01-01T00:00:05.000Z", f"ACK {KEY_C}: turn b."),
-        ],
-    )
-
-    segments = collect_ack_segments([transcript], turn_ids=["turn-b"])
-
-    assert [(segment.keys, segment.content) for segment in segments] == [
-        ((KEY_C,), "turn b.")
     ]
 
 
@@ -482,48 +375,14 @@ def test_ack_watch_resends_after_budget_and_escalates_stop_payload(
     assert observed_acks == [(ack_text, "20260101T000000000102Z")]
 
 
-def test_resolve_target_thread_id_prefers_explicit_then_state_then_ambient(
-    tmp_path, monkeypatch
-):
-    explicit = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"
-    state_thread = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    ambient = "cccccccccccccccccccccccccccccccc"
-    monkeypatch.setenv(DRIVER.thread_id_env, ambient)
-    monkeypatch.setattr(
-        "spice.agent.lifecycle.agent_status",
-        lambda repo_root: SimpleNamespace(thread_id=state_thread),
-    )
-
-    assert (
-        resolve_target_thread_id(tmp_path, explicit_thread_id=explicit)
-        == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    )
-    assert resolve_target_thread_id(tmp_path, explicit_thread_id=None) == state_thread
-    assert resolve_target_thread_id(None, explicit_thread_id=None) == ambient
-
-
-def _event(timestamp: str, record_type: str, payload: dict):
-    return {"timestamp": timestamp, "type": record_type, "payload": payload}
-
-
-def _assistant(timestamp: str, text: str):
-    return _event(
-        timestamp,
-        "response_item",
-        {
+def _assistant_line(text: str) -> str:
+    event = {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "response_item",
+        "payload": {
             "type": "message",
             "role": "assistant",
             "content": [{"type": "output_text", "text": text}],
         },
-    )
-
-
-def _assistant_line(text: str) -> str:
-    return f"{json.dumps(_assistant('2026-01-01T00:00:00.000Z', text), separators=(',', ':'))}\n"
-
-
-def _write_jsonl(path, events):
-    path.write_text(
-        "".join(f"{json.dumps(event, separators=(',', ':'))}\n" for event in events),
-        encoding="utf-8",
-    )
+    }
+    return f"{json.dumps(event, separators=(',', ':'))}\n"

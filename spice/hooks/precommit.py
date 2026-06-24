@@ -193,6 +193,11 @@ def _builtin_pre_commit_steps(
             lambda: _run_reachability_guard(repo_root),
         ),
         PreCommitStep(
+            "symbol-reachability",
+            "symbol reachability",
+            lambda: _run_symbol_reachability_guard(repo_root),
+        ),
+        PreCommitStep(
             "assertion-free-tests",
             "assertion-free tests",
             lambda: _run_assertion_free_test_guard(repo_root),
@@ -608,6 +613,17 @@ def _run_reachability_guard(repo_root: Path) -> None:
             f"reachability: {count} test-only module(s) exceed"
             f" REACHABILITY_TEST_ONLY_LIMIT={REACHABILITY_TEST_ONLY_LIMIT};"
             " wire in or delete-both, then lower the constant"
+        )
+
+
+def _run_symbol_reachability_guard(repo_root: Path) -> None:
+    findings = reachability.scan_symbol_reachability(repo_root)
+    if findings:
+        board = "\n".join(reachability.render_symbol_reachability_board(findings))
+        raise SpiceError(
+            f"{board}\n"
+            "symbol-reachability: zero test-only symbols are allowed; "
+            "wire in or delete-both"
         )
 
 
