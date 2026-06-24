@@ -291,8 +291,7 @@ class CodexDriver(AgentDriver):
 # Claude Code's `--effort` vocabulary. The configured spice effort value is
 # Codex-shaped; Claude uses the same set, except for `max`, which we ignore.
 CLAUDE_EFFORT_CHOICES = frozenset({"low", "medium", "high", "xhigh"})
-CLAUDE_SONNET_MODEL = "claude-sonnet-4-6"
-CLAUDE_MODEL_FAMILIES = {"sonnet": CLAUDE_SONNET_MODEL}
+CLAUDE_DEFAULT_MODEL = "sonnet"
 CLAUDE_ATTRIBUTION_DISABLED_SETTINGS = {
     "attribution": {"commit": "", "sessionUrl": False},
 }
@@ -312,9 +311,7 @@ def claude_effort(value: str) -> str:
 
 def resolve_claude_model(value: str = "") -> str:
     model = (value or "").strip()
-    if not model:
-        return CLAUDE_SONNET_MODEL
-    return CLAUDE_MODEL_FAMILIES.get(model.lower(), model)
+    return model or CLAUDE_DEFAULT_MODEL
 
 
 def claude_settings_json() -> str:
@@ -734,7 +731,7 @@ CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
     default_bin="claude",
     bin_env="SPICE_AGENT_BIN",  # env-policy: allow
     thread_id_env="CLAUDE_CODE_SESSION_ID",  # env-policy: allow
-    default_model=CLAUDE_SONNET_MODEL,
+    default_model=CLAUDE_DEFAULT_MODEL,
     default_reasoning_effort="xhigh",
     default_service_tier="",
     stdout_assistant_marker="",
