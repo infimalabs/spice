@@ -293,6 +293,9 @@ class CodexDriver(AgentDriver):
 CLAUDE_EFFORT_CHOICES = frozenset({"low", "medium", "high", "xhigh"})
 CLAUDE_SONNET_MODEL = "claude-sonnet-4-6"
 CLAUDE_MODEL_FAMILIES = {"sonnet": CLAUDE_SONNET_MODEL}
+CLAUDE_ATTRIBUTION_DISABLED_SETTINGS = {
+    "attribution": {"commit": "", "sessionUrl": False},
+}
 OUT_OF_CREDITS_PATTERNS = (
     re.compile(r"\busage limit\b", re.IGNORECASE),
     re.compile(r"\b(?:out of|insufficient)\s+credits?\b", re.IGNORECASE),
@@ -312,6 +315,12 @@ def resolve_claude_model(value: str = "") -> str:
     if not model:
         return CLAUDE_SONNET_MODEL
     return CLAUDE_MODEL_FAMILIES.get(model.lower(), model)
+
+
+def claude_settings_json() -> str:
+    return json.dumps(
+        CLAUDE_ATTRIBUTION_DISABLED_SETTINGS, separators=(",", ":"), sort_keys=True
+    )
 
 
 def dashed_uuid(value: str) -> str:
@@ -408,6 +417,8 @@ class ClaudeDriver(AgentDriver):
             "bypassPermissions",
             "--mcp-config",
             claude_mcp_config_json(repo_root),
+            "--settings",
+            claude_settings_json(),
             # Claude reads CLAUDE.md but not skill files on its own, so pin the
             # spice skill into the system prompt on every launch. The trailing
             # prompt is the same skill relpath link (operator prose rides the
