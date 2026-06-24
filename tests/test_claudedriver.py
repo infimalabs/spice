@@ -22,6 +22,7 @@ from spice.agent.driver import (
     SPICE_AGENT_DRIVER_ENV,
     driver_for,
     playwright_mcp_args,
+    resolve_claude_model,
     select_driver,
 )
 
@@ -95,8 +96,19 @@ def test_claude_command_uses_shipped_sonnet_xhigh_defaults(tmp_path):
         prompt="follow the skill",
     )
 
-    assert command[command.index("--model") + 1] == "claude-sonnet-4-5"
+    assert command[command.index("--model") + 1] == "claude-sonnet-4-6"
     assert command[command.index("--effort") + 1] == "xhigh"
+
+
+def test_claude_command_resolves_sonnet_family_to_current_model(tmp_path):
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path,
+        prompt="follow the skill",
+        model="sonnet",
+    )
+
+    assert resolve_claude_model("sonnet") == "claude-sonnet-4-6"
+    assert command[command.index("--model") + 1] == "claude-sonnet-4-6"
 
 
 def test_claude_command_appends_skill_to_system_prompt(tmp_path):

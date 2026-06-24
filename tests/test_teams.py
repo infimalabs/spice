@@ -725,7 +725,7 @@ def test_team_store_records_repeated_agent_identity_updates(tmp_path):
         target_id="wt-a",
         thread_id="agent-a",
         actual_driver="claude",
-        actual_model="claude-sonnet-4-5",
+        actual_model="claude-sonnet-4-6",
         actual_effort="medium",
         actual_service_tier="fast",
         desired_driver="codex",
@@ -744,7 +744,7 @@ def test_team_store_records_repeated_agent_identity_updates(tmp_path):
     assert stored == updated
     assert updated.updated_at >= first.updated_at
     assert stored.actual_driver == "claude"
-    assert stored.actual_model == "claude-sonnet-4-5"
+    assert stored.actual_model == "claude-sonnet-4-6"
     assert stored.actual_service_tier == "fast"
     assert stored.desired_model == "gpt-5.5"
     assert stored.renewal_revision == IDENTITY_RENEWAL_REVISION

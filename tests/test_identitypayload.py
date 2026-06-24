@@ -195,7 +195,7 @@ def test_target_identity_payload_reports_configured_driver(tmp_path, monkeypatch
     update_section(
         repo,
         "agent",
-        {"driver": "claude", "model": "claude-sonnet-4-5", "effort": "medium"},
+        {"driver": "claude", "model": "claude-sonnet-4-6", "effort": "medium"},
     )
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
 
@@ -207,7 +207,7 @@ def test_target_identity_payload_reports_configured_driver(tmp_path, monkeypatch
 
     assert payload["driver"] == {
         "name": "claude",
-        "model": "claude-sonnet-4-5",
+        "model": "claude-sonnet-4-6",
         "effort": "medium",
     }
     target = _Target(id="wt", repo_root=repo)
@@ -221,7 +221,7 @@ def test_target_identity_payload_reports_configured_driver(tmp_path, monkeypatch
         for row in lane._lane_info_payload(target, serve_identity)["summaryRows"]
     }
     assert rows["driver"] == "claude"
-    assert rows["model"] == "claude-sonnet-4-5"
+    assert rows["model"] == "claude-sonnet-4-6"
     assert rows["effort"] == "medium"
 
 

@@ -62,6 +62,9 @@ class AgentDriver:
     def binary(self) -> str:
         return os.environ.get(self.bin_env, self.default_bin)
 
+    def resolve_model(self, model: str = "") -> str:
+        return model or self.default_model
+
     def home(self) -> Path:
         raise NotImplementedError
 
@@ -266,7 +269,7 @@ class CodexDriver(AgentDriver):
             "--cd",
             str(repo_root),
             "--model",
-            model or self.default_model,
+            self.resolve_model(model),
         ]
         for override in config_overrides:
             command.extend(["--config", override])
@@ -288,6 +291,8 @@ class CodexDriver(AgentDriver):
 # Claude Code's `--effort` vocabulary. The configured spice effort value is
 # Codex-shaped; Claude uses the same set, except for `max`, which we ignore.
 CLAUDE_EFFORT_CHOICES = frozenset({"low", "medium", "high", "xhigh"})
+CLAUDE_SONNET_MODEL = "claude-sonnet-4-6"
+CLAUDE_MODEL_FAMILIES = {"sonnet": CLAUDE_SONNET_MODEL}
 OUT_OF_CREDITS_PATTERNS = (
     re.compile(r"\busage limit\b", re.IGNORECASE),
     re.compile(r"\b(?:out of|insufficient)\s+credits?\b", re.IGNORECASE),
@@ -300,6 +305,13 @@ OUT_OF_CREDITS_PATTERNS = (
 def claude_effort(value: str) -> str:
     effort = (value or "").strip().lower()
     return effort if effort in CLAUDE_EFFORT_CHOICES else ""
+
+
+def resolve_claude_model(value: str = "") -> str:
+    model = (value or "").strip()
+    if not model:
+        return CLAUDE_SONNET_MODEL
+    return CLAUDE_MODEL_FAMILIES.get(model.lower(), model)
 
 
 def dashed_uuid(value: str) -> str:
@@ -332,6 +344,9 @@ class ClaudeDriver(AgentDriver):
 
     def projects_root(self) -> Path:
         return self.home() / "projects"
+
+    def resolve_model(self, model: str = "") -> str:
+        return resolve_claude_model(model)
 
     def owns_transcript(self, path: Path) -> bool:
         return self.projects_root() in path.parents
@@ -388,7 +403,7 @@ class ClaudeDriver(AgentDriver):
             # still processes the complete assistant event.
             "--include-partial-messages",
             "--model",
-            model or self.default_model,
+            self.resolve_model(model),
             "--permission-mode",
             "bypassPermissions",
             "--mcp-config",
@@ -708,7 +723,7 @@ CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
     default_bin="claude",
     bin_env="SPICE_AGENT_BIN",  # env-policy: allow
     thread_id_env="CLAUDE_CODE_SESSION_ID",  # env-policy: allow
-    default_model="claude-sonnet-4-5",
+    default_model=CLAUDE_SONNET_MODEL,
     default_reasoning_effort="xhigh",
     default_service_tier="",
     stdout_assistant_marker="",
