@@ -33,7 +33,8 @@ FLEX_NUMERATOR = 3
 FLEX_DENOMINATOR = 2
 
 # --- commit messages ----------------------------------------------------------
-# Subject must fit; body prose is auto-folded; URLs and trailers are exempt.
+# Subject must fit; body prose is auto-folded; URLs and allowed trailers are
+# exempt. Co-Authored-By is rejected.
 COMMIT_MESSAGE_WRAP_LIMIT = 100
 
 # --- repo-truth docs ------------------------------------------------------------
