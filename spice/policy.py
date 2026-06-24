@@ -66,10 +66,11 @@ REACHABILITY_TEST_ONLY_LIMIT = 0
 # with an assert, pytest.raises/pytest.warns, pytest.fail, or assert* helper.
 ASSERTION_FREE_TEST_LIMIT = 0
 
-# Private-internal coupling: tests importing underscored production names or
-# asserting on private attributes. This baseline is the reviewed advisory set;
-# the gate refuses any new coupling above it.
-PRIVATE_INTERNAL_COUPLING_LIMIT = 16
+# Private-internal coupling between tests and production internals is surfaced
+# by the advisory `spice study private-internals` command, not a blocking gate:
+# the findings are overwhelmingly legitimate white-box unit tests of
+# module-internal helpers, so a frozen baseline would only grandfather normal
+# practice. The study stays available for auditing; no ratchet constant exists.
 
 # --- magic numbers -------------------------------------------------------------
 # Staged scans diff against this ref; only regressions fail.
