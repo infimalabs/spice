@@ -185,6 +185,55 @@ def test_assertion_free_board_reports_clean_baseline():
     )
 
 
+def test_assertion_free_scanner_detects_suffix_named_files(tmp_path):
+    path = tmp_path / "tests" / "quality_test.py"
+    path.parent.mkdir()
+    path.write_text(
+        "def test_without_assertion():\n    value = 1\n",
+        encoding="utf-8",
+    )
+
+    findings = scan_assertion_free_tests([Path("tests/quality_test.py")], root=tmp_path)
+
+    assert len(findings) == 1
+    assert findings[0].test_name == "test_without_assertion"
+    assert findings[0].path == "tests/quality_test.py"
+
+
+def test_assertion_free_scanner_detects_class_methods(tmp_path):
+    path = tmp_path / "tests" / "test_class.py"
+    path.parent.mkdir()
+    path.write_text(
+        "\n".join(
+            [
+                "import pytest",
+                "",
+                "class TestSuite:",
+                "    def test_without_assertion(self):",
+                "        value = 1",
+                "",
+                "    def test_with_assert(self):",
+                "        assert 1 == 1",
+                "",
+                "    def helper_not_a_test(self):",
+                "        pass",
+                "",
+                "class NotATestClass:",
+                "    def test_ignored(self):",
+                "        value = 2",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    findings = scan_assertion_free_tests([Path("tests/test_class.py")], root=tmp_path)
+
+    assert [(f.test_name, f.line) for f in findings] == [
+        ("TestSuite.test_without_assertion", 4),
+    ]
+
+
 def test_private_internal_scanner_flags_imports_and_internal_assertions(tmp_path):
     path = tmp_path / "tests" / "test_private.py"
     path.parent.mkdir()

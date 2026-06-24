@@ -29,7 +29,10 @@ def test_paths(repo_root: Path, test_root: str = "tests") -> list[Path]:
     root = repo_root / test_root
     if not root.is_dir():
         return []
-    return sorted(path.relative_to(repo_root) for path in root.rglob("test*.py"))
+    found: set[Path] = set()
+    found.update(root.rglob("test*.py"))
+    found.update(root.rglob("*_test.py"))
+    return sorted(path.relative_to(repo_root) for path in found)
 
 
 def scan_assertion_free_tests(
@@ -45,20 +48,35 @@ def scan_assertion_free_tests(
             tree = ast.parse(path.read_bytes())
         except (SyntaxError, OSError):
             continue
+        display_path = str(path.relative_to(root))
         for node in tree.body:
-            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                continue
-            if not node.name.startswith("test_"):
-                continue
-            if _function_has_assertion(node):
-                continue
-            findings.append(
-                AssertionFreeTestFinding(
-                    path=str(path.relative_to(root)),
-                    test_name=node.name,
-                    line=node.lineno,
+            if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+                for method in node.body:
+                    if not isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef):
+                        continue
+                    if not method.name.startswith("test_"):
+                        continue
+                    if _function_has_assertion(method):
+                        continue
+                    findings.append(
+                        AssertionFreeTestFinding(
+                            path=display_path,
+                            test_name=f"{node.name}.{method.name}",
+                            line=method.lineno,
+                        )
+                    )
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                if not node.name.startswith("test_"):
+                    continue
+                if _function_has_assertion(node):
+                    continue
+                findings.append(
+                    AssertionFreeTestFinding(
+                        path=display_path,
+                        test_name=node.name,
+                        line=node.lineno,
+                    )
                 )
-            )
     return findings
 
 
@@ -82,11 +100,17 @@ def scan_private_internal_coupling(
         display_path = str(path.relative_to(root))
         findings.extend(_private_import_findings(tree, display_path, package_set))
         for node in tree.body:
-            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                continue
-            if not node.name.startswith("test_"):
-                continue
-            findings.extend(_private_assertion_findings(node, display_path))
+            if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+                for method in node.body:
+                    if not isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef):
+                        continue
+                    if not method.name.startswith("test_"):
+                        continue
+                    findings.extend(_private_assertion_findings(method, display_path))
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                if not node.name.startswith("test_"):
+                    continue
+                findings.extend(_private_assertion_findings(node, display_path))
     return findings
 
 
@@ -126,7 +150,9 @@ def render_private_internal_board(
 
 
 def _is_test_file(path: Path) -> bool:
-    return path.suffix == ".py" and path.name.startswith("test")
+    return path.suffix == ".py" and (
+        path.stem.startswith("test") or path.stem.endswith("_test")
+    )
 
 
 def _function_has_assertion(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
