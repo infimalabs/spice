@@ -375,6 +375,52 @@ def test_symbol_reachability_excludes_production_used_local_helpers(tmp_path):
     assert "shared_method" not in symbol_output
 
 
+def test_symbol_reachability_resolves_registry_literal_dispatch(tmp_path):
+    """A symbol reached only through a registry dict/list literal in a
+    production module is a real production reference: the scanner sees the
+    symbol named as a literal value, so registry-dispatched handlers are not
+    false-flagged as test-only the way getattr-by-constructed-string would be.
+    """
+    (tmp_path / "spice" / "cli").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "spice" / "cli" / "entry.py").write_text(
+        "from ..registry import DISPATCH, ORDERED\n"
+        "def main(key):\n"
+        "    DISPATCH[key]()\n"
+        "    return ORDERED[0]()\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "spice" / "registry.py").write_text(
+        "from .handlers import handle_dict_only, handle_list_only\n"
+        "DISPATCH = {'one': handle_dict_only}\n"
+        "ORDERED = [handle_list_only]\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "spice" / "handlers.py").write_text(
+        "def handle_dict_only():\n    return 1\n\n"
+        "def handle_list_only():\n    return 2\n\n"
+        "def handle_orphan():\n    return 3\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_handlers.py").write_text(
+        "from spice.handlers import (\n"
+        "    handle_dict_only,\n"
+        "    handle_list_only,\n"
+        "    handle_orphan,\n"
+        ")\n"
+        "def test_handlers():\n"
+        "    assert handle_dict_only() == 1\n"
+        "    assert handle_list_only() == 2\n"
+        "    assert handle_orphan() == 3\n",
+        encoding="utf-8",
+    )
+
+    findings = scan_symbol_reachability(tmp_path)
+
+    flagged = {f.symbol for f in findings}
+    assert flagged == {"handle_orphan"}
+
+
 def test_symbol_reachability_allowlist_exempts_qualified_symbol(tmp_path):
     _write_symbol_reachability_repo(tmp_path)
 
