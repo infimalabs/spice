@@ -157,7 +157,7 @@ def test_task_claim_outputs_drive_to_completion_guidance(task_repo):
 def _gain_runner(
     total_commands: float,
     avg_savings_pct: float,
-    calls: list[list[str]] | None = None,
+    calls: list[tuple[list[str], Path | None]] | None = None,
 ):
     import json as _json
 
@@ -172,13 +172,14 @@ def _gain_runner(
 
     def runner(cmd, **kwargs):
         if calls is not None:
-            calls.append(list(cmd))
+            calls.append((list(cmd), kwargs.get("cwd")))
         return subprocess.CompletedProcess(cmd, 0, stdout=payload, stderr="")
 
     return runner
 
 
 def test_rtk_usage_nudge_fires_when_savings_are_poor(monkeypatch):
+    monkeypatch.setattr(ops, "repo_root_from_cwd", lambda: Path("/repo/root"))
     monkeypatch.setattr(
         ops.subprocess, "run", _gain_runner(ops.RTK_NUDGE_MIN_COMMANDS + 4, 2.0)
     )
@@ -191,7 +192,9 @@ def test_rtk_usage_nudge_fires_when_savings_are_poor(monkeypatch):
 
 
 def test_rtk_usage_nudge_reads_current_project_gain(monkeypatch):
-    calls: list[list[str]] = []
+    repo_root = Path("/repo/root")
+    calls: list[tuple[list[str], Path | None]] = []
+    monkeypatch.setattr(ops, "repo_root_from_cwd", lambda: repo_root)
     monkeypatch.setattr(
         ops.subprocess,
         "run",
@@ -200,10 +203,11 @@ def test_rtk_usage_nudge_reads_current_project_gain(monkeypatch):
 
     ops.rtk_usage_nudge()
 
-    assert calls == [["rtk", "gain", "--project", "-f", "json"]]
+    assert calls == [(["rtk", "gain", "--project", "-f", "json"], repo_root)]
 
 
 def test_rtk_usage_nudge_stays_silent_when_feeding_rtk_well(monkeypatch):
+    monkeypatch.setattr(ops, "repo_root_from_cwd", lambda: Path("/repo/root"))
     monkeypatch.setattr(
         ops.subprocess,
         "run",
