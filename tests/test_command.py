@@ -419,6 +419,8 @@ def test_shadow_environment_masks_upstream_to_self(tmp_path):
 def test_shadow_environment_reinjection_is_idempotent(tmp_path):
     repo = tmp_path / "lane"
     subprocess.run(["git", "init", "-q", "-b", "main-d", str(repo)], check=True)
+    for key, value in (("user.email", "t@t.t"), ("user.name", "t")):
+        subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
     subprocess.run(
         ["git", "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "c0"],
         check=True,
