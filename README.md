@@ -228,6 +228,25 @@ project config, then the driver defaults. `spice config agent` keeps project
 and worktree rows explicit-only, while the effective row includes driver
 defaults so unconfigured repos still show what will launch.
 
+### Serve UI defaults
+
+The serve UI opens each lane in **Drive** mode by default — agents auto-subscribe
+to task projects they create or claim. This is a deliberate choice, not a hidden
+constant. Set `default_lifetime` in `[tool.spice.serve]` to change it per repo:
+
+```toml
+[tool.spice.serve]
+default_lifetime = "Steer"  # "Steer" | "Drive" | "Drain"; default: "Drive"
+```
+
+- **Steer** — manual filter assignment only; no auto-subscribe. Use when you want operators to configure lanes explicitly before agents start pulling work.
+- **Drive** — auto-subscribe to projects the team creates or claims. The right default for most repos: agents work their own work without needing the operator to configure lane filters first.
+- **Drain** — boundary dissolved; lane sees all assignable work. Use for dedicated drain/review lanes that need full visibility.
+
+Autonomy-on-startup should be a stated choice. A repo that wants conservative
+defaults (operator configures before agents run) should set `Steer`. A repo
+that trusts the allocator can leave `Drive` or switch to `Drain`.
+
 ### Speech backend
 
 Serve can read messages aloud through a configurable speech backend:

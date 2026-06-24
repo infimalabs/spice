@@ -33,9 +33,15 @@ const speechModes = ["quiet", "speak", "narrate"];
 const defaultSpeechMode = "speak";
 const maximPriority = "maxim";
 const agentLifetimeLabels = ["Steer", "Drive", "Drain"];
-const defaultAgentLifetimeIndex = 1;
-const defaultAgentLifetime = agentLifetimeLabels[defaultAgentLifetimeIndex];
 const serveBrandName = String(spiceServeBranding.name || "spice").trim() || "spice";
+// Default startup lifetime from [tool.spice.serve] default_lifetime; falls back to
+// "Drive" so autonomy-on-startup is a stated config choice, not a hidden constant.
+const defaultAgentLifetime = agentLifetimeLabels.includes(
+  spiceServeBranding.defaultLifetime,
+)
+  ? spiceServeBranding.defaultLifetime
+  : "Drive";
+const defaultAgentLifetimeIndex = agentLifetimeLabels.indexOf(defaultAgentLifetime);
 const agentLifetimeHelp = {
   Steer: "Manual filters only",
   Drive: "Auto-subscribe to projects this team creates or claims",
