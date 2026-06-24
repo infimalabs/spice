@@ -50,6 +50,12 @@ the operator keeps normal repository semantics.
 | Conscience | `spice maxim ...` | Judges assistant prose against repo maxims and routes violations back as steering. |
 | Constitution | git pre-commit hook / `spice study ...` | Enforces repo-shape, file-shape, complexity, magic-number, env-literal, and commit-message policy. |
 
+## Credibility signal
+
+The harness is exercised against **27,267 lines of Python tests against 34,602
+lines of Python source** — about 0.79 test lines per source line, counted from
+tracked `tests/*.py` and `spice/*.py` files with `wc -l`.
+
 Session analysis is intentionally tiered. The current tier includes
 `spice session phases` for contiguous working-phase spans and
 `spice session messages` for message-level side/phase/flavor filtering.
