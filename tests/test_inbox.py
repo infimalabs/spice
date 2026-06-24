@@ -27,7 +27,7 @@ from spice.mail.inbox import (
     inbox_payload_rows,
     parse_inbox_payload,
     pending_inbox_count,
-    pending_operator_inbox_count,
+    pending_operator_inbox_items,
     requeue_deadlettered_inbox_item,
     write_inbox_item,
 )
@@ -316,7 +316,7 @@ def test_pending_operator_count_excludes_automated_guidance(tmp_path):
     # Both items are pending, but only the genuine operator steering should be
     # able to resurrect an idle agent; the maxim is informational at launch.
     assert pending_inbox_count(str(tmp_path)) == 2
-    assert pending_operator_inbox_count(str(tmp_path)) == 1
+    assert len(pending_operator_inbox_items(str(tmp_path))) == 1
 
 
 def test_pending_operator_count_zero_for_only_automated_guidance(tmp_path):
@@ -329,7 +329,7 @@ def test_pending_operator_count_zero_for_only_automated_guidance(tmp_path):
     )
 
     assert pending_inbox_count(str(tmp_path)) == 1
-    assert pending_operator_inbox_count(str(tmp_path)) == 0
+    assert len(pending_operator_inbox_items(str(tmp_path))) == 0
 
 
 def test_deadletter_excludes_item_from_pending_and_can_requeue(tmp_path):
@@ -351,7 +351,7 @@ def test_deadletter_excludes_item_from_pending_and_can_requeue(tmp_path):
         name
     )
     assert pending_inbox_count(tmp_path) == 0
-    assert pending_operator_inbox_count(tmp_path) == 0
+    assert len(pending_operator_inbox_items(tmp_path)) == 0
     assert collect_inbox_items(tmp_path) == []
     deadletters = collect_deadlettered_inbox_items(tmp_path)
     assert [item.name for item in deadletters] == [name]
@@ -370,7 +370,7 @@ def test_deadletter_excludes_item_from_pending_and_can_requeue(tmp_path):
     assert requeued is not None
     assert not deadletter_attachment_dir.exists()
     assert pending_inbox_count(tmp_path) == 1
-    assert pending_operator_inbox_count(tmp_path) == 1
+    assert len(pending_operator_inbox_items(tmp_path)) == 1
     assert collect_deadlettered_inbox_items(tmp_path) == []
     item = collect_inbox_items(tmp_path)[0]
     assert item.text == composed

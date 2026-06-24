@@ -39,6 +39,7 @@ BUILTIN_PRE_COMMIT_LABELS = [
     "complexity",
     "magic numbers",
     "reachability",
+    "symbol reachability",
     "assertion-free tests",
     "private internals",
 ]
@@ -119,6 +120,7 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
         "complexity",
         "custom magic",
         "reachability",
+        "symbol reachability",
         "assertion-free tests",
         "private internals",
     ]
@@ -198,6 +200,43 @@ def test_assertion_free_test_guard_allows_grandfathered_baseline(tmp_path, monke
         precommit.testquality.test_paths(tmp_path), root=tmp_path
     )
     assert len(findings) == 1
+
+
+def test_symbol_reachability_guard_fails_on_any_finding(tmp_path):
+    (tmp_path / "spice" / "cli").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "spice" / "cli" / "entry.py").write_text(
+        "import spice.live\n", encoding="utf-8"
+    )
+    (tmp_path / "spice" / "live.py").write_text(
+        "def planted_dead_function_abc():\n    return 1\n", encoding="utf-8"
+    )
+    (tmp_path / "tests" / "test_symbol.py").write_text(
+        "from spice.live import planted_dead_function_abc\n", encoding="utf-8"
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        precommit._run_symbol_reachability_guard(tmp_path)
+
+    message = str(exc_info.value)
+    assert "symbol-reachability: 1 test-only symbol(s)" in message
+    assert "spice/live.py:planted_dead_function_abc" in message
+    assert "zero test-only symbols are allowed" in message
+
+
+def test_symbol_reachability_guard_allows_clean_repo(tmp_path):
+    (tmp_path / "spice" / "cli").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "spice" / "cli" / "entry.py").write_text(
+        "from spice.live import production_function\nproduction_function()\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "spice" / "live.py").write_text(
+        "def production_function():\n    return 1\n", encoding="utf-8"
+    )
+
+    precommit._run_symbol_reachability_guard(tmp_path)
+    assert precommit.reachability.scan_symbol_reachability(tmp_path) == []
 
 
 def test_private_internal_gate_fails_above_limit(tmp_path, monkeypatch):
@@ -468,6 +507,9 @@ def test_policy_exclude_filters_path_based_builtin_gate_steps(tmp_path, monkeypa
     monkeypatch.setattr(precommit, "_run_complexity_guard", record("complexity"))
     monkeypatch.setattr(precommit, "_run_magic_numbers_guard", record("magic numbers"))
     monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit, "_run_symbol_reachability_guard", lambda repo_root: None
+    )
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None
     )
@@ -864,6 +906,11 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         precommit,
+        "_run_symbol_reachability_guard",
+        lambda repo_root: record("symbol reachability"),
+    )
+    monkeypatch.setattr(
+        precommit,
         "_run_assertion_free_test_guard",
         lambda repo_root: record("assertion-free tests"),
     )
@@ -902,6 +949,9 @@ def _patch_pre_commit_builtin_noops_except_local_paths(tmp_path, monkeypatch) ->
         precommit, "_run_magic_numbers_guard", lambda repo_root, paths: None
     )
     monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit, "_run_symbol_reachability_guard", lambda repo_root: None
+    )
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None
     )
@@ -969,6 +1019,9 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
         precommit, "_run_magic_numbers_guard", lambda repo_root, paths: None
     )
     monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit, "_run_symbol_reachability_guard", lambda repo_root: None
+    )
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None
     )

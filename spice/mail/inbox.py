@@ -232,20 +232,23 @@ def pending_operator_inbox_items(repo_root: str | Path | None) -> list[InboxItem
     ]
 
 
-def pending_operator_inbox_count(repo_root: str | Path | None) -> int:
-    return len(pending_operator_inbox_items(repo_root))
-
-
-def inbox_payload_rows(items: Sequence[InboxItem]) -> list[str]:
+def inbox_payload_rows(
+    items: Sequence[InboxItem],
+    *,
+    include_steering_row: bool = True,
+    include_persistence_row: bool = False,
+) -> list[str]:
     if not items:
         return []
-    rows: list[str] = [INBOX_STEERING_ROW]
+    rows: list[str] = [INBOX_STEERING_ROW] if include_steering_row else []
     for item in items:
         rows.extend(inbox_item_readout_rows(item))
     rows.append(INBOX_RESPONSE_ROW)
     rows.append(inbox_ack_format_hint_row(items))
     if inbox_items_need_task_hint(items):
         rows.append(INBOX_TASK_HINT_ROW)
+    if include_persistence_row:
+        rows.append(INBOX_PEEK_PERSISTENCE_ROW)
     return rows
 
 

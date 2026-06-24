@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from spice.agent.driver import AgentDriver, driver_for
-from spice.agent.identity import canonical_thread_id
 from spice.mail.acks import extract_ack_segments_from_text
 from spice.mail.inbox import inbox_dir, resend_inbox_item
 from spice.sessions.util import first_text
@@ -46,33 +45,6 @@ class AckWatchOutcome:
     acked: bool
     assistant_messages_seen: int
     resends: int
-
-
-def resolve_target_thread_id(
-    target_repo_root: Path | None,
-    *,
-    explicit_thread_id: str | None,
-    allow_ambient: bool = True,
-) -> str | None:
-    """Pick the receiving agent's thread id.
-
-    Priority: explicit flag > target worktree agent state > the ambient
-    thread id only when no target worktree is involved.
-    """
-    from spice.agent.identity import ambient_thread_id
-    from spice.agent.lifecycle import agent_status
-
-    if explicit_thread_id and explicit_thread_id.strip():
-        return canonical_thread_id(explicit_thread_id)
-    if target_repo_root is not None:
-        state_thread_id = canonical_thread_id(agent_status(target_repo_root).thread_id)
-        if state_thread_id:
-            return state_thread_id
-    if not allow_ambient:
-        return None
-    if target_repo_root is not None:
-        return None
-    return ambient_thread_id() or None
 
 
 def watch_for_ack(

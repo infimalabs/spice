@@ -55,6 +55,12 @@ def print_inbox_readout(
     if not items:
         print("  pending=none", file=out)
         return shown_full
+    if displayed_keys is None:
+        for line in inbox.inbox_payload_rows(
+            items, include_steering_row=False, include_persistence_row=True
+        ):
+            print(f"  {line}", file=out)
+        return shown_full
     for item in items:
         if _is_summary(item):
             print(f"  {inbox.inbox_item_summary_row(item)}", file=out)

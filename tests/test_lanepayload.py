@@ -13,10 +13,7 @@ from spice.mail.feedback import supervisor_feedback_line
 from spice.serve import messages as message_reader
 from spice.serve.payload import lane
 from spice.serve.payload.lane import (
-    LANE_METRIC_SPARKLINE_BUCKET_SECONDS,
-    LANE_METRIC_SPARKLINE_BUCKETS,
     _agent_uptime_seconds,
-    _message_sparkline,
     lane_metrics_payload,
     task_filter_inventory,
 )
@@ -182,30 +179,6 @@ def _identity_status(
         driver=driver,
         state_path=repo / ".git" / "spice" / "agents" / "state.json",
     )
-
-
-def test_sparkline_buckets_messages_by_minute():
-    latest = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
-    one_bucket_ago = latest - timedelta(seconds=LANE_METRIC_SPARKLINE_BUCKET_SECONDS)
-    items = [_message(_stamp(latest)), _message(_stamp(one_bucket_ago))]
-    sparkline = _message_sparkline(items)
-    assert len(sparkline) == LANE_METRIC_SPARKLINE_BUCKETS
-    assert sparkline[-1] == 1
-    assert sparkline[-2] == 1
-    assert sum(sparkline) == len(items)
-
-
-def test_sparkline_clamps_old_messages_into_first_bucket():
-    latest = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
-    ancient = latest - timedelta(hours=2)
-    sparkline = _message_sparkline(
-        [_message(_stamp(latest)), _message(_stamp(ancient))]
-    )
-    assert sparkline[0] == 1
-    assert sparkline[-1] == 1
-
-
-FIVE_MINUTES_SECONDS = 300
 
 
 def test_uptime_measures_started_at_to_latest_message():
