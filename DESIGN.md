@@ -325,6 +325,7 @@ editor-versus-framework split has no bin for it.
 
 Runtime: `watchfiles`, `ruff`, `lizard`. Optional binaries, degrade loudly: `task`
 (Taskwarrior), `rtk` (proxy; absent = passthrough), `afm-cli` (judge;
-configurable), `say` (TTS; non-Darwin no-op), the agent CLI itself.
+configurable), `say` by default or a configured external speech backend
+(TTS; Linux can wrap `piper` or `espeak-ng`), the agent CLI itself.
 Dev: `pytest`, `ruff`, `lizard` (the complexity gate requires it and fails
 loudly when missing — no degraded counting path).

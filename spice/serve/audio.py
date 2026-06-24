@@ -1,14 +1,17 @@
-"""TTS rendering for the UI: macOS `say` output as browser-playable M4A."""
+"""TTS rendering for the UI through configurable speech backends."""
 
 from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
-from spice.config import say_command_args
+from spice import config
 
 SAY_AUDIO_CONTENT_TYPE = "audio/mp4"
 SAY_AUDIO_SUFFIX = ".m4a"
@@ -27,6 +30,74 @@ _SAY_UTC_DATETIME_RE = re.compile(
 _SAY_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")
 _SAY_MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)\s]+\)")
 _SAY_IDENTIFIER_SPOKEN_LENGTH = 8
+
+
+@dataclass(frozen=True)
+class SpeechAudio:
+    data: bytes
+    content_type: str
+
+
+class SpeechBackend(Protocol):
+    def render(
+        self,
+        text: str,
+        *,
+        rate_multiplier: float = DEFAULT_SAY_RATE_MULTIPLIER,
+    ) -> SpeechAudio:
+        """Render text into browser-playable audio bytes."""
+        ...
+
+
+@dataclass(frozen=True)
+class MacOSSayBackend:
+    repo_root: Path | None = None
+
+    def render(
+        self,
+        text: str,
+        *,
+        rate_multiplier: float = DEFAULT_SAY_RATE_MULTIPLIER,
+    ) -> SpeechAudio:
+        return SpeechAudio(
+            data=_render_macos_say_audio(
+                text,
+                repo_root=self.repo_root,
+                rate_multiplier=rate_multiplier,
+            ),
+            content_type=SAY_AUDIO_CONTENT_TYPE,
+        )
+
+
+@dataclass(frozen=True)
+class ExternalCommandSpeechBackend:
+    command: tuple[str, ...]
+    content_type: str = config.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
+
+    def render(
+        self,
+        text: str,
+        *,
+        rate_multiplier: float = DEFAULT_SAY_RATE_MULTIPLIER,
+    ) -> SpeechAudio:
+        if not self.command:
+            raise RuntimeError("external speech backend requires a command")
+        result = subprocess.run(
+            list(self.command),
+            input=prepare_say_text(text).encode("utf-8"),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.decode("utf-8", "replace").strip()
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(
+                f"external speech backend exited {result.returncode}{suffix}"
+            )
+        if not result.stdout:
+            raise RuntimeError("external speech backend produced no audio")
+        return SpeechAudio(result.stdout, self.content_type)
 
 
 def prepare_say_text(text: str) -> str:
@@ -79,6 +150,54 @@ def render_say_audio(
     repo_root: Path | None = None,
     rate_multiplier: float = DEFAULT_SAY_RATE_MULTIPLIER,
 ) -> bytes:
+    """Render configured speech audio bytes, preserving the historical API."""
+    return render_speech_audio(
+        text,
+        repo_root=repo_root,
+        rate_multiplier=rate_multiplier,
+    ).data
+
+
+def render_speech_audio(
+    text: str,
+    *,
+    repo_root: Path | None = None,
+    rate_multiplier: float = DEFAULT_SAY_RATE_MULTIPLIER,
+) -> SpeechAudio:
+    backend = speech_backend(repo_root)
+    return backend.render(text, rate_multiplier=rate_multiplier)
+
+
+def speech_backend(repo_root: Path | None = None) -> SpeechBackend:
+    backend = config.configured_say_backend(repo_root)
+    if backend == "external":
+        command = _external_speech_command(repo_root)
+        return ExternalCommandSpeechBackend(
+            command=command,
+            content_type=config.configured_say_content_type(repo_root),
+        )
+    return MacOSSayBackend(repo_root)
+
+
+def _external_speech_command(repo_root: Path | None) -> tuple[str, ...]:
+    raw = config.configured_say_command(repo_root)
+    if not raw:
+        raise RuntimeError("external speech backend requires a configured command")
+    try:
+        command = tuple(shlex.split(raw))
+    except ValueError as exc:
+        raise RuntimeError(f"invalid external speech command: {exc}") from exc
+    if not command:
+        raise RuntimeError("external speech backend requires a configured command")
+    return command
+
+
+def _render_macos_say_audio(
+    text: str,
+    *,
+    repo_root: Path | None = None,
+    rate_multiplier: float = DEFAULT_SAY_RATE_MULTIPLIER,
+) -> bytes:
     """Render macOS `say` output into browser-playable M4A bytes."""
     handle, raw_path = tempfile.mkstemp(prefix="spice-say-", suffix=SAY_AUDIO_SUFFIX)
     audio_path = Path(raw_path)
@@ -86,7 +205,7 @@ def render_say_audio(
         os.close(handle)
         subprocess.run(
             [
-                *say_command_args(
+                *config.say_command_args(
                     repo_root,
                     rate_multiplier=normalize_say_rate_multiplier(rate_multiplier),
                 ),

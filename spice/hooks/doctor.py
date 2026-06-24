@@ -12,7 +12,12 @@ from typing import Callable
 
 from spice.agent.driver import DRIVER
 from spice.agent.lifecycle import packaged_skill_path
-from spice.config import configured_judge_bin, git_worktree_config_get
+from spice.config import (
+    configured_judge_bin,
+    configured_say_backend,
+    configured_say_command,
+    git_worktree_config_get,
+)
 from spice.errors import SpiceError
 from spice.hooks.install import HOOK_ARGS, hook_shim_content, hooks_dir
 from spice.paths import (
@@ -112,12 +117,13 @@ def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
         if serve_web_present
         else "optional; this repo has no serve web checkJs sources"
     )
+    tts_binary, tts_note = _tts_binary_check_config(repo_root)
     for label, binary, required, note in (
         ("tool.git", "git", True, "required for repository checks"),
         ("tool.agent-driver", DRIVER.binary(), True, f"driver={DRIVER.name}"),
         ("tool.taskwarrior", "task", True, "required for the task control plane"),
         ("tool.judge", configured_judge_bin(repo_root), True, "maxim judging"),
-        ("tool.tts", "say", False, "optional macOS speech"),
+        ("tool.tts", tts_binary, False, tts_note),
         ("tool.ruff", "ruff", True, "pre-commit formatter/linter"),
         ("tool.lizard", "lizard", True, "complexity scan backend"),
         ("tool.npm", "npm", serve_web_present, npm_note),
@@ -132,6 +138,19 @@ def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
         else:
             checks.append(_warn(label, f"{binary} missing; {note}", "spice dev doctor"))
     return checks
+
+
+def _tts_binary_check_config(repo_root: Path) -> tuple[str, str]:
+    backend = configured_say_backend(repo_root)
+    if backend == "external":
+        command = configured_say_command(repo_root)
+        try:
+            argv = shlex.split(command) if command else []
+        except ValueError:
+            argv = []
+        binary = argv[0] if argv else "external-speech-command"
+        return binary, "optional external speech backend"
+    return "say", "optional macOS speech; use external backend on Linux"
 
 
 def _runtime_resolution_check(repo_root: Path) -> DoctorCheck:

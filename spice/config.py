@@ -22,6 +22,12 @@ CONFIG_RELATIVE_PATH = Path("config") / "state.json"
 CONFIG_SCHEMA_VERSION = 1
 
 SAY_KEY = "say"
+SAY_BACKEND_KEY = "backend"
+SAY_BACKEND_CHOICES = ("say", "external")
+DEFAULT_SAY_BACKEND = "say"
+SAY_COMMAND_KEY = "command"
+SAY_CONTENT_TYPE_KEY = "content_type"
+DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = "audio/wav"
 SAY_VOICE_KEY = "voice"
 SAY_WORDS_PER_MINUTE_KEY = "words_per_minute"
 DEFAULT_SAY_WORDS_PER_MINUTE = 175
@@ -96,6 +102,29 @@ def configured_say_voice(repo_root: Path | None = None) -> str | None:
         return None
     raw = _section(root, SAY_KEY).get(SAY_VOICE_KEY)
     return str(raw).strip() or None if raw else None
+
+
+def configured_say_backend(repo_root: Path | None = None) -> str:
+    root = _root_or_current(repo_root)
+    if root is None:
+        return DEFAULT_SAY_BACKEND
+    raw = str(_section(root, SAY_KEY).get(SAY_BACKEND_KEY) or "").strip()
+    return raw if raw in SAY_BACKEND_CHOICES else DEFAULT_SAY_BACKEND
+
+
+def configured_say_command(repo_root: Path | None = None) -> str:
+    root = _root_or_current(repo_root)
+    if root is None:
+        return ""
+    return str(_section(root, SAY_KEY).get(SAY_COMMAND_KEY) or "").strip()
+
+
+def configured_say_content_type(repo_root: Path | None = None) -> str:
+    root = _root_or_current(repo_root)
+    if root is None:
+        return DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
+    raw = str(_section(root, SAY_KEY).get(SAY_CONTENT_TYPE_KEY) or "").strip()
+    return raw or DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
 
 
 def configured_say_words_per_minute(repo_root: Path | None = None) -> int | None:

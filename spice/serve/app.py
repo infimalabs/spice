@@ -35,9 +35,8 @@ from spice.serve.agentapi import (
     agent_status_payload,
 )
 from spice.serve.audio import (
-    SAY_AUDIO_CONTENT_TYPE,
     normalize_say_rate_multiplier,
-    render_say_audio,
+    render_speech_audio,
 )
 from spice.serve.filewatch import start_exit_file_watch
 from spice.serve.images import rollout_image_from_offset
@@ -867,7 +866,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
             return
         rate = normalize_say_rate_multiplier(payload.get("rate"))
         try:
-            audio = render_say_audio(
+            audio = render_speech_audio(
                 text, repo_root=target.repo_root, rate_multiplier=rate
             )
         except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
@@ -876,7 +875,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
                 HTTPStatus.INTERNAL_SERVER_ERROR,
             )
             return
-        self._send_bytes(audio, SAY_AUDIO_CONTENT_TYPE)
+        self._send_bytes(audio.data, audio.content_type)
 
     # ---- live bus --------------------------------------------------------
 
