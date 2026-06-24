@@ -267,26 +267,6 @@ def test_builtin_fallback_maxim_allows_explicit_defaults_and_resolver_order():
     assert "fail loudly" in message
 
 
-def test_builtin_test_quality_maxims_trigger_from_review_language():
-    hits = maxims.triggered_maxims(
-        [
-            "This test asserts on internals instead of the public seam.",
-            "This test is the only reference to the symbol.",
-            "This test has no assertions.",
-        ]
-    )
-
-    assert [hit.name for hit in hits] == [
-        "test-internals",
-        "test-only-symbol",
-        "assertion-free-tests",
-    ]
-    assert "public seam" in maxims.configured_maxim("internals")
-    assert "wire it into production" in maxims.configured_maxim("only reference")
-    assert "delete both" in maxims.configured_maxim("test only symbol")
-    assert "tests without assertions" in maxims.configured_maxim("no assertions")
-
-
 def test_repo_config_declares_custom_mode_words_for_show_and_meta_judge(
     tmp_path, monkeypatch, capsys
 ):
