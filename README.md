@@ -63,7 +63,12 @@ One principle runs through the design: **never let a thing fail silently, in eit
 This shows up repeatedly:
 
 - **Unmatched ACKs as no-ops**: When an agent ACKs a key that doesn't exist, the system reports "retired nothing" rather than silently dropping the attempt. The operator learns immediately that the agent misread or the key was stale.
-- **Conscience reinforcing when wrong**: When a maxim fires incorrectly (a false positive), the resulting steering still reinforces good practice rather than derailing the agent — the cost of being wrong approaches zero, so the conscience can nudge aggressively without risk.
+- **Curated conscience reinforcement**: Properly curated maxims are
+  near-universal operator preferences, not claims that can never be wrong. When
+  one fires incorrectly (a false positive), the resulting steering should still
+  reinforce good practice rather than derail the agent; that low cost of being
+  wrong is what lets the conscience nudge aggressively. This depends on keeping
+  the maxim set narrow, curated, and worth hearing even when imperfect.
 - **Resend under fresh key**: If an agent ignores steering, resending the same item under a new key means it can't keep ignoring — the fresh key proves this instance wasn't handled, even if a similar one was.
 - **Explicit "this did nothing" feedback**: Operations that complete without effect (like retiring a nonexistent inbox key) say so explicitly in the transcript, rather than succeeding silently and leaving the operator guessing.
 

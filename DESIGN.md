@@ -82,7 +82,10 @@ polling", "no backwards compatibility"), and routes hits to a local LLM
 judge — two parallel judges, shuffled four-line IFF YES/NO prompt, retry on
 ambiguity, any-violation fails. Violations come back as `[MAXIM]` inbox steering,
 gated once per compaction epoch, self-echo suppressed. The repo's opinions
-police the agent in real time.
+police the agent in real time. That works only while the maxim set stays
+curated around near-universal preferences: a false positive should still
+reinforce the practice behind the maxim, and a maxim too contextual to meet
+that bar does not belong in the bag.
 
 ### 4. The coordination plane (tasks + teams + serve)
 
