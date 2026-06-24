@@ -248,7 +248,24 @@ explicit contract update. Underscored names remain private.
 - `spice.flexstate`: flex-limit sticky-state persistence and rename helpers.
 - `spice.locking`: cross-platform advisory file locks.
 - `spice.paths`: repo-root, state-dir, atomic write, and tool-resolution helpers.
-- `spice.procs`: process-group spawn, liveness, and termination helpers.
+- `spice.procs`: **process-group spawn, liveness, and termination helpers** — cross-platform POSIX and Windows support for spawning process groups, checking liveness, and clean termination. Public functions:
+  - `popen_new_process_group_kwargs()` — returns platform-appropriate kwargs for `subprocess.Popen` to spawn a new process group
+  - `terminate_process_group(process, *, signum=None, timeout_seconds=2.0)` — gracefully terminates a process group with fallback to force-kill after timeout
+  - `terminate_process_group_id(pgid, *, signum=None)` — terminates a process group by ID
+  - `process_group_is_running(pgid)` — checks if a process group is still alive
+  - `process_id_is_running(pid)` — checks if a process ID is still running
+
+  Example usage:
+  ```python
+  from spice.procs import popen_new_process_group_kwargs, terminate_process_group
+
+  proc = subprocess.Popen(
+      ["long-running-server"],
+      **popen_new_process_group_kwargs(),
+  )
+  # ... later ...
+  terminate_process_group(proc, timeout_seconds=5.0)
+  ```
 - `spice.repocfg`: tracked `[tool.spice]` table readers.
 - `spice.studies.walk`: tracked/staged path walkers, repo policy exclusions,
   staged renames, and git blob reads.
