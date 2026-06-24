@@ -1,5 +1,6 @@
 """Session forensics: context metering and identity primitives."""
 
+import argparse
 import json
 import os
 import sqlite3
@@ -18,7 +19,7 @@ from spice.mail.inbox import (
 )
 from spice.sessions import briefing as briefing_module
 from spice.sessions.briefing import render_briefing
-from spice.sessions.cli import _print_timeline, render_thread_summary
+from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions.meter import (
     ActiveContextSnapshot,
     active_context_percent,
@@ -141,16 +142,7 @@ def test_session_timeline_prints_turn_and_compaction(tmp_path, capsys):
         "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
     )
 
-    _print_timeline(
-        [transcript],
-        start=None,
-        end=None,
-        contains=None,
-        turn_ids=None,
-        tools=None,
-        limit=10,
-        max_text=80,
-    )
+    handle_session(_timeline_args(transcript, limit=10, max_text=80))
 
     output = capsys.readouterr().out
     assert "turn=turn-a" in output
@@ -197,20 +189,27 @@ def test_session_timeline_contains_keeps_turn_when_match_is_not_latest(
         "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
     )
 
-    _print_timeline(
-        [transcript],
-        start=None,
-        end=None,
-        contains="needle",
-        turn_ids=None,
-        tools=None,
-        limit=10,
-        max_text=80,
-    )
+    handle_session(_timeline_args(transcript, contains="needle", limit=10, max_text=80))
 
     output = capsys.readouterr().out
     assert "turn=turn-a" in output
     assert "user=later request" in output
+
+
+def _timeline_args(transcript, **overrides):
+    values = {
+        "session_action": "timeline",
+        "start": None,
+        "end": None,
+        "contains": None,
+        "turn_ids": None,
+        "tools": None,
+        "limit": 10,
+        "max_text": 80,
+    }
+    values.update(overrides)
+    values["files"] = [str(transcript)]
+    return argparse.Namespace(**values)
 
 
 def test_session_thread_resolves_state_db_and_summarizes_activity(

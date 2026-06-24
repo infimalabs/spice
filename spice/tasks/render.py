@@ -243,7 +243,7 @@ def _visible_count(actor: str, filters: list[str]) -> int:
     return len(alloc.visible_rows(actor, filters))
 
 
-def _public_task_project_depth_label() -> str:
+def public_task_project_depth_label() -> str:
     min_depth, max_depth = config.project_depth_bounds()
     return f"public task project depth {min_depth}..{max_depth} dotted segments"
 
@@ -285,7 +285,7 @@ def render_status() -> str:
     else:
         lane_filter_label = f"project:{config.private_project(actor)}"
     lines.insert(2, f"filter {lane_filter_label}")
-    lines.insert(3, _public_task_project_depth_label())
+    lines.insert(3, public_task_project_depth_label())
     return "\n".join(lines)
 
 
@@ -365,7 +365,7 @@ def render_doctor() -> str:
         f"stale claims {len(alloc.stale_rows())}",
         f"reports {' '.join(config.REPORTS)}",
         f"analytics {' '.join(config.ANALYTICS_COMMANDS)}",
-        _public_task_project_depth_label(),
+        public_task_project_depth_label(),
         f"assignable stems {' '.join(config.assignable_stems())}",
         f"internal stems {' '.join(config.INTERNAL_STEMS)}",
         f"approved phases {' '.join(config.APPROVED_PHASES)}",

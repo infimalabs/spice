@@ -28,7 +28,7 @@ from spice.mail.inbox import (
 from spice.mail.inbox import write_inbox_item
 from spice.mail.watch import (
     AckWatchOutcome,
-    _AckWatchState,
+    AckWatchState,
     extract_owned_ack_utterance,
 )
 
@@ -336,7 +336,7 @@ def test_ack_watch_resends_after_budget_and_escalates_stop_payload(
     stamps = iter(["20260101T000000000101Z", "20260101T000000000102Z"])
     observed_acks: list[tuple[str, str]] = []
     monkeypatch.setattr("spice.mail.inbox.inbox_timestamp", lambda: next(stamps))
-    state = _AckWatchState(
+    state = AckWatchState(
         inbox_key=original_key,
         original_text=original_text,
         target_repo_root=tmp_path,

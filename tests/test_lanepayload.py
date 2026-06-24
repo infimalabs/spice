@@ -13,7 +13,7 @@ from spice.mail.feedback import supervisor_feedback_line
 from spice.serve import messages as message_reader
 from spice.serve.payload import lane
 from spice.serve.payload.lane import (
-    _agent_uptime_seconds,
+    agent_uptime_seconds,
     lane_metrics_payload,
     task_filter_inventory,
 )
@@ -185,13 +185,13 @@ def test_uptime_measures_started_at_to_latest_message():
     started = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
     latest = started + timedelta(minutes=5)
     status = _Status(running=True, started_at=_stamp(started))
-    uptime = _agent_uptime_seconds(status, [_message(_stamp(latest))])
+    uptime = agent_uptime_seconds(status, [_message(_stamp(latest))])
     assert uptime == FIVE_MINUTES_SECONDS
 
 
 def test_uptime_reads_zero_while_agent_is_off():
     status = _Status(running=False, started_at="2026-06-10T12:00:00.000000Z")
-    assert _agent_uptime_seconds(status, []) == 0
+    assert agent_uptime_seconds(status, []) == 0
 
 
 def test_status_line_pairs_activity_preview_with_activity_timestamp(

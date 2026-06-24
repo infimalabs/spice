@@ -134,7 +134,7 @@ def test_manual_project_depth_uses_repo_config_overrides(tmp_path, monkeypatch):
 
     assert config.project_depth_bounds() == (3, 4)
     assert (
-        render._public_task_project_depth_label()
+        render.public_task_project_depth_label()
         == "public task project depth 3..4 dotted segments"
     )
     assert config.validate_assignable_project("task.unit.child") == "task.unit.child"
