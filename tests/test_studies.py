@@ -25,7 +25,7 @@ from spice.studies import cli as studies_cli
 from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies import mutations
-from spice.studies.reachability import scan_reachability
+from spice.studies.reachability import ReachabilityFinding, scan_reachability
 from spice.studies.subsumption import scan_subsumption
 from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies.shape import (
@@ -283,6 +283,96 @@ def test_study_reachability_cli_reports_test_only_module(tmp_path, monkeypatch, 
     assert "reachability: 1 test-only module(s)" in output
     assert "spice/onlytest.py" in output
     assert "module: spice.onlytest" in output
+
+
+def test_study_reachability_cli_create_tasks_passes_findings(
+    tmp_path, monkeypatch, capsys
+):
+    _write_reachability_repo(tmp_path, "from spice import onlytest\n")
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    created_paths: list[str] = []
+    monkeypatch.setattr(
+        studies_cli,
+        "_create_exhaust_tasks",
+        lambda findings: created_paths.extend(f.module_path for f in findings),
+    )
+    args = build_parser().parse_args(["study", "reachability", "--create-tasks"])
+
+    assert args.func(args) == 1
+
+    output = capsys.readouterr().out
+    assert "reachability: 1 test-only module(s)" in output
+    assert created_paths == ["spice/onlytest.py"]
+
+
+def test_create_exhaust_tasks_adds_decision_metadata_for_each_finding(
+    monkeypatch, capsys
+):
+    from spice.tasks import create
+
+    created: list[dict[str, object]] = []
+
+    def fake_add(
+        title: str,
+        *,
+        project: str,
+        tags: list[str],
+        acceptance: list[str],
+    ) -> str:
+        created.append(
+            {
+                "title": title,
+                "project": project,
+                "tags": tags,
+                "acceptance": acceptance,
+            }
+        )
+        return f"EXHAUST-{len(created)}"
+
+    monkeypatch.setattr(create, "add", fake_add)
+
+    studies_cli._create_exhaust_tasks(
+        [
+            ReachabilityFinding(
+                module="spice.onlytest",
+                module_path="spice/onlytest.py",
+                only_test_imports=["tests/test_only.py"],
+            ),
+            ReachabilityFinding(
+                module="spice.empty",
+                module_path="spice/empty.py",
+                only_test_imports=[],
+            ),
+        ]
+    )
+
+    assert created == [
+        {
+            "title": "Exhaust decision: wire-in/delete-both spice/onlytest.py",
+            "project": "tests.exhaust",
+            "tags": ["exhaust", "decision", "wire_in_delete_both"],
+            "acceptance": [
+                "Resolve spice.onlytest by either wiring it into a production "
+                "entry point or deleting spice/onlytest.py along with every "
+                "test that imports it.",
+                "Current test-only importers: tests/test_only.py.",
+            ],
+        },
+        {
+            "title": "Exhaust decision: wire-in/delete-both spice/empty.py",
+            "project": "tests.exhaust",
+            "tags": ["exhaust", "decision", "wire_in_delete_both"],
+            "acceptance": [
+                "Resolve spice.empty by either wiring it into a production "
+                "entry point or deleting spice/empty.py along with every test "
+                "that imports it.",
+                "Current test-only importers: unknown.",
+            ],
+        },
+    ]
+    assert capsys.readouterr().out == (
+        "  task created: EXHAUST-1\n  task created: EXHAUST-2\n"
+    )
 
 
 def test_reachability_merges_default_allowlist(tmp_path):
