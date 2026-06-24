@@ -105,6 +105,47 @@ def test_private_internal_coupling_allowlist_is_exact_for_this_repo():
     )
 
 
+def _write_coupling_repo(root):
+    (root / "spice").mkdir()
+    (root / "tests").mkdir()
+    (root / "spice" / "foo.py").write_text("_secret = 1\n", encoding="utf-8")
+    (root / "tests" / "test_foo.py").write_text(
+        "from spice.foo import _secret\n\n"
+        "def test_secret():\n    assert _secret == 1\n",
+        encoding="utf-8",
+    )
+
+
+def test_quality_gate_failure_reports_dirty_gate_and_none_when_clean(tmp_path):
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    (clean / "spice").mkdir()
+    (clean / "tests").mkdir()
+    assert precommit.quality_gate_failure(clean, "coupling") is None
+
+    dirty = tmp_path / "dirty"
+    dirty.mkdir()
+    _write_coupling_repo(dirty)
+    message = precommit.quality_gate_failure(dirty, "coupling")
+    assert message is not None
+    assert "spice.foo._secret" in message
+
+
+def test_quality_gate_failure_rejects_unknown_gate(tmp_path):
+    with pytest.raises(SpiceError, match="unknown quality gate"):
+        precommit.quality_gate_failure(tmp_path, "bogus")
+
+
+def test_quality_gate_failures_for_tags_only_runs_gate_tags(tmp_path):
+    _write_coupling_repo(tmp_path)
+    assert precommit.quality_gate_failures_for_tags(tmp_path, ["unrelated"]) == []
+    failures = precommit.quality_gate_failures_for_tags(
+        tmp_path, ["gate:coupling", "other"]
+    )
+    assert len(failures) == 1
+    assert failures[0].startswith("[gate:coupling]")
+
+
 def test_default_repo_truth_docs_apply_without_configuration(tmp_path):
     assert repo_truth_docs(tmp_path) == list(REPO_TRUTH_DOCS)
 
