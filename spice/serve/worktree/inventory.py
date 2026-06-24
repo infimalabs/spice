@@ -104,8 +104,6 @@ def _work_tree_payload(
 def _ensure_work_tree_agent(
     state: Any, target: WorktreeTarget, thread_id: str, *, fast_mode: bool | None = None
 ) -> tuple[str, str, bool, dict[str, Any] | None]:
-    pending_identity = pending_inbox_identity_payload(target.repo_root)
-    pending = int(pending_identity["pendingInboxCount"])
     predecessor_actor = team_actor_for_target(state.team_store, target, thread_id)
     renew_intent = bool(
         thread_id
@@ -125,7 +123,7 @@ def _ensure_work_tree_agent(
     }
     if fast_mode is not None:
         ensure_kwargs["fast_mode"] = fast_mode
-    agent_ensure = ensure_agent_for_pending_inbox(target, pending, **ensure_kwargs)
+    agent_ensure = ensure_agent_for_pending_inbox(target, **ensure_kwargs)
     ensured_thread_id = record_started_renewal_from_ensure(
         state.team_store,
         predecessor_agent_id=predecessor_actor,

@@ -214,7 +214,7 @@ def pending_inbox_count(repo_root: str | Path | None) -> int:
     )
 
 
-def pending_operator_inbox_count(repo_root: str | Path | None) -> int:
+def pending_operator_inbox_items(repo_root: str | Path | None) -> list[InboxItem]:
     """Pending items that justify resurrecting an idle agent.
 
     Automated guidance (maxim and friends) is fully synthesized — it does not
@@ -224,12 +224,16 @@ def pending_operator_inbox_count(repo_root: str | Path | None) -> int:
     restart storm on an agent that is out of credits or otherwise down.
     """
     if not repo_root:
-        return 0
-    return sum(
-        1
+        return []
+    return [
+        item
         for item in collect_inbox_items(repo_root)
         if not inbox_item_is_automated_guidance(item)
-    )
+    ]
+
+
+def pending_operator_inbox_count(repo_root: str | Path | None) -> int:
+    return len(pending_operator_inbox_items(repo_root))
 
 
 def inbox_payload_rows(items: Sequence[InboxItem]) -> list[str]:

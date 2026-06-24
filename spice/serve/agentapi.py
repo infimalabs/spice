@@ -17,12 +17,10 @@ from spice.agent.lifecycle import (
 )
 from spice.mail.inbox import (
     INBOX_CREDIT_FAILURE_DEADLETTER_THRESHOLD,
-    collect_inbox_items,
     deadletter_inbox_item,
-    inbox_item_is_automated_guidance,
     inbox_item_key,
     inbox_request_priority,
-    pending_operator_inbox_count,
+    pending_operator_inbox_items,
 )
 from spice.serve.attachments import inbox_attachment_payloads
 from spice.serve.markdown import render_message_html
@@ -143,11 +141,8 @@ def sent_steering_response_payload(
 ) -> dict[str, Any]:
     if target is None:
         return sent_steering_payload(sent, target=None)
-    pending_identity = pending_inbox_identity_payload(target.repo_root)
-    pending = int(pending_identity["pendingInboxCount"])
     agent_ensure = ensure_agent_for_pending_inbox(
         target,
-        pending,
         attempt_cache=state.pending_agent_ensure_attempts,
         retry_seconds=0.0,
         fast_mode=fast_mode,
@@ -166,7 +161,6 @@ def sent_steering_response_payload(
 
 def ensure_agent_for_pending_inbox(
     target: WorktreeTarget,
-    pending_count: int,
     *,
     attempt_cache: dict[str, float] | None = None,
     retry_seconds: float = PENDING_AGENT_ENSURE_RETRY_SECONDS,
@@ -178,21 +172,9 @@ def ensure_agent_for_pending_inbox(
     Inbox steering must never sit unheard: a send to an off lane brings the lane's
     agent up (or its renewed successor, under `force_new`).
     """
+    operator_items = pending_operator_inbox_items(target.repo_root)
+    pending_count = len(operator_items)
     if pending_count <= 0:
-        return None
-    # Automated guidance must never resurrect an idle agent — only genuine
-    # operator steering brings a lane up. pending_operator_inbox_count() is the
-    # single source of truth for this rule.
-    operator_count = pending_operator_inbox_count(target.repo_root)
-    if operator_count <= 0:
-        return None
-    # At least one operator item exists; load inbox to find the trigger key.
-    operator_items = [
-        item
-        for item in collect_inbox_items(target.repo_root)
-        if not inbox_item_is_automated_guidance(item)
-    ]
-    if not operator_items:
         return None
     status = agent_status(target.repo_root)
     if status.running:
