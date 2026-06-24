@@ -362,6 +362,141 @@ def _write_coverage_db(
     return path
 
 
+def _nums_to_numbits(nums: list[int]) -> bytes:
+    """Encode a list of 1-based line numbers into a coverage.py v7 numbits blob."""
+    buf = bytearray()
+    for num in nums:
+        n = num - 1  # 0-based bit index
+        byte_idx = n // 8
+        bit_idx = n % 8
+        while byte_idx >= len(buf):
+            buf.append(0)
+        buf[byte_idx] |= 1 << bit_idx
+    return bytes(buf)
+
+
+def _write_coverage_db_v7(
+    root: Path,
+    *,
+    files: list[str],
+    contexts: dict[str, dict[int, list[int]]],
+    arcs: dict[str, dict[int, list[tuple[int, int]]]] | None = None,
+) -> Path:
+    import sqlite3
+
+    path = root / ".coverage"
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE file (id INTEGER PRIMARY KEY, path TEXT)")
+    con.execute("CREATE TABLE context (id INTEGER PRIMARY KEY, context TEXT)")
+    con.execute(
+        "CREATE TABLE line_bits (file_id INTEGER, context_id INTEGER, numbits BLOB)"
+    )
+    if arcs is not None:
+        con.execute(
+            "CREATE TABLE arc "
+            "(file_id INTEGER, context_id INTEGER, fromno INTEGER, tono INTEGER)"
+        )
+    for fid, fpath in enumerate(files, 1):
+        con.execute(f"INSERT INTO file VALUES ({fid}, '{fpath}')")
+    for cid, (ctx_name, file_lines) in enumerate(contexts.items(), 1):
+        con.execute(f"INSERT INTO context VALUES ({cid}, '{ctx_name}')")
+        for file_index, lines in file_lines.items():
+            numbits = _nums_to_numbits(lines)
+            con.execute(
+                "INSERT INTO line_bits VALUES (?, ?, ?)",
+                (file_index + 1, cid, numbits),
+            )
+        if arcs is not None:
+            file_arcs = arcs.get(ctx_name, {})
+            for file_index, arc_list in file_arcs.items():
+                for fromno, tono in arc_list:
+                    con.execute(
+                        "INSERT INTO arc VALUES (?, ?, ?, ?)",
+                        (file_index + 1, cid, fromno, tono),
+                    )
+    con.commit()
+    con.close()
+    return path
+
+
+def test_subsumption_v7_identifies_subsumed_test(tmp_path):
+    db = _write_coverage_db_v7(
+        tmp_path,
+        files=["spice/foo.py"],
+        contexts={
+            "test_a": {0: [1, 2, 3]},
+            "test_b": {0: [1, 2, 3, 4]},
+        },
+    )
+
+    report = scan_subsumption(db)
+
+    assert report.tests_scanned == 2
+    assert len(report.findings) == 1
+    assert report.findings[0].test == "test_a"
+    assert report.findings[0].subsumed_by == "test_b"
+    assert report.findings[0].covered_lines == 3
+
+
+def test_subsumption_v7_edge_line_numbers(tmp_path):
+    # Line 1 (byte 0 bit 0), line 8 (byte 0 bit 7), line 9 (byte 1 bit 0)
+    db = _write_coverage_db_v7(
+        tmp_path,
+        files=["spice/foo.py"],
+        contexts={
+            "test_edge": {0: [1, 8, 9]},
+            "test_super": {0: [1, 8, 9, 16]},
+        },
+    )
+
+    report = scan_subsumption(db)
+
+    assert len(report.findings) == 1
+    assert report.findings[0].test == "test_edge"
+    assert report.findings[0].covered_lines == 3
+
+
+def test_subsumption_same_lines_distinct_arcs_not_subsumed(tmp_path):
+    # Two tests covering identical lines but different branch arcs — NOT subsumed.
+    db = _write_coverage_db_v7(
+        tmp_path,
+        files=["spice/foo.py"],
+        contexts={
+            "test_true_branch": {0: [1, 2]},
+            "test_false_branch": {0: [1, 2]},
+        },
+        arcs={
+            "test_true_branch": {0: [(1, 2)]},  # true branch: 1→2
+            "test_false_branch": {0: [(1, -1)]},  # false branch: 1→exit
+        },
+    )
+
+    report = scan_subsumption(db)
+
+    assert report.findings == ()
+
+
+def test_subsumption_same_lines_same_arcs_is_subsumed(tmp_path):
+    # Two tests with identical lines and identical arcs — IS subsumed.
+    db = _write_coverage_db_v7(
+        tmp_path,
+        files=["spice/foo.py"],
+        contexts={
+            "test_a": {0: [1, 2]},
+            "test_b": {0: [1, 2, 3]},
+        },
+        arcs={
+            "test_a": {0: [(1, 2)]},
+            "test_b": {0: [(1, 2), (2, 3)]},
+        },
+    )
+
+    report = scan_subsumption(db)
+
+    assert len(report.findings) == 1
+    assert report.findings[0].test == "test_a"
+
+
 def _write_reachability_repo(
     root: Path, test_import: str, *, module_name: str = "onlytest"
 ) -> None:
