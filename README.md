@@ -331,6 +331,7 @@ explicit contract update. Underscored names remain private.
 
   Example usage:
   ```python
+  import subprocess
   from spice.procs import popen_new_process_group_kwargs, terminate_process_group
 
   proc = subprocess.Popen(
