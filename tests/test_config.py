@@ -179,5 +179,5 @@ def test_config_agent_writes_driver_scope(tmp_path, monkeypatch, capsys):
     assert (
         capsys.readouterr().out == "agent project driver=- model=- effort=-\n"
         "agent worktree driver=claude model=- effort=-\n"
-        "agent effective driver=claude model=claude-opus-4-8 effort=high\n"
+        "agent effective driver=claude model=claude-sonnet-4-5 effort=xhigh\n"
     )

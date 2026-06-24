@@ -89,6 +89,16 @@ def test_claude_command_starts_headless_stream_json_with_effort(tmp_path):
     assert command[-1] == "follow the skill"
 
 
+def test_claude_command_uses_shipped_sonnet_xhigh_defaults(tmp_path):
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path,
+        prompt="follow the skill",
+    )
+
+    assert command[command.index("--model") + 1] == "claude-sonnet-4-5"
+    assert command[command.index("--effort") + 1] == "xhigh"
+
+
 def test_claude_command_appends_skill_to_system_prompt(tmp_path):
     skill_link = "[$spice](.agents/skills/spice/SKILL.md)"
     command = CLAUDE_DRIVER.build_exec_command(
