@@ -731,7 +731,7 @@ def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
             if handles:
                 items.append(
                     {
-                        "kind": "task_created",
+                        "kind": _TASK_CREATED_KIND,
                         "label": "Task captured"
                         if len(handles) == 1
                         else "Tasks captured",
@@ -742,7 +742,7 @@ def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
         elif feedback.kind == _TASK_ERROR_KIND:
             items.append(
                 {
-                    "kind": "task_error",
+                    "kind": _TASK_ERROR_KIND,
                     "label": "Task capture failed",
                     "detail": str(feedback.fields.get("error") or "").strip()
                     or "unknown error",
@@ -753,7 +753,7 @@ def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
             if keys:
                 items.append(
                     {
-                        "kind": "ack_archived",
+                        "kind": _ACK_ARCHIVED_KIND,
                         "label": "Acknowledged",
                         "detail": ", ".join(keys),
                         "keys": keys,
@@ -764,7 +764,7 @@ def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
             if keys:
                 items.append(
                     {
-                        "kind": "ack_already_acked",
+                        "kind": _ACK_ALREADY_ACKED_KIND,
                         "label": "ACK already consumed",
                         "detail": ", ".join(keys),
                         "keys": keys,
@@ -775,7 +775,7 @@ def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
             if keys:
                 items.append(
                     {
-                        "kind": "ack_unmatched",
+                        "kind": _ACK_UNMATCHED_KIND,
                         "label": "Acknowledged (no pending match)",
                         "detail": ", ".join(keys),
                         "keys": keys,
