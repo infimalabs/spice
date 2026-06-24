@@ -16,7 +16,7 @@ from spice.policy import (
     MAGIC_BASELINE_REF,
     MAGIC_EXAMINE_VALUE_THRESHOLD,
 )
-from spice.studies import complexity, envpolicy, fileloc, magicnums, shape
+from spice.studies import complexity, envpolicy, fileloc, magicnums, mutations, shape
 from spice.studies.walk import staged_paths, tracked_paths
 
 
@@ -49,6 +49,46 @@ def configure_study_parser(subparsers: Any) -> None:
     magic.add_argument("--baseline-ref", default=MAGIC_BASELINE_REF)
     magic.add_argument("--threshold", type=int, default=MAGIC_EXAMINE_VALUE_THRESHOLD)
 
+    mutation = _add_study_action(
+        actions,
+        "mutations",
+        "Incremental Python mutation testing for test effectiveness.",
+    )
+    mutation.add_argument(
+        "--baseline-ref",
+        default="HEAD",
+        help="Git ref for default changed-file selection.",
+    )
+    mutation.add_argument(
+        "--max-mutants",
+        type=int,
+        default=mutations.DEFAULT_MAX_MUTANTS_PER_MODULE,
+        help="Maximum mutants to run per selected module.",
+    )
+    mutation.add_argument(
+        "--timeout",
+        type=int,
+        default=mutations.DEFAULT_MUTATION_TIMEOUT_SECONDS,
+        help="Per-mutant pytest timeout in seconds.",
+    )
+    mutation.add_argument(
+        "--test",
+        action="append",
+        type=Path,
+        default=[],
+        help="Test file/path to run. Repeat for multiple test targets.",
+    )
+    mutation.add_argument(
+        "--ratchet",
+        type=Path,
+        help="Compare scores against a mutation ratchet JSON file.",
+    )
+    mutation.add_argument(
+        "--write-ratchet",
+        type=Path,
+        help="Write current scores to a mutation ratchet JSON file.",
+    )
+
     _add_study_action(
         actions, "env-policy", "Undeclared environment-variable literals."
     )
@@ -73,6 +113,16 @@ def _target_paths(args: argparse.Namespace, root: Path) -> list[Path]:
     return tracked_paths(root)
 
 
+def _mutation_target_paths(args: argparse.Namespace, root: Path) -> list[Path]:
+    if args.staged and args.paths:
+        raise SpiceError("pass --staged or explicit paths, not both")
+    if args.paths:
+        return [_explicit_target_path(path, root) for path in args.paths]
+    if args.staged:
+        return staged_paths(root, "*.py")
+    return mutations.changed_python_paths(root, baseline_ref=args.baseline_ref)
+
+
 def _explicit_target_path(path: Path, root: Path) -> Path:
     rel_path = path if not path.is_absolute() else path.relative_to(root)
     if (root / rel_path).is_dir():
@@ -81,6 +131,10 @@ def _explicit_target_path(path: Path, root: Path) -> Path:
             f"got directory: {rel_path.as_posix()}"
         )
     return rel_path
+
+
+def _test_target_path(path: Path, root: Path) -> Path:
+    return path if not path.is_absolute() else path.relative_to(root)
 
 
 def handle_study(args: argparse.Namespace) -> int:
@@ -165,6 +219,25 @@ def _study_magic_numbers(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_mutations(args: argparse.Namespace, root: Path) -> int:
+    test_paths = [_test_target_path(path, root) for path in args.test] or [
+        Path("tests")
+    ]
+    ratchet_path = root / args.ratchet if args.ratchet else None
+    study = mutations.run_mutation_study(
+        _mutation_target_paths(args, root),
+        root=root,
+        test_paths=test_paths,
+        max_mutants_per_module=args.max_mutants,
+        timeout_seconds=args.timeout,
+        ratchet_path=ratchet_path,
+    )
+    if args.write_ratchet:
+        mutations.write_ratchet(root / args.write_ratchet, study.reports)
+    print(mutations.render_mutation_board(study))
+    return 1 if study.ratchet_regressions else 0
+
+
 def _study_env_policy(args: argparse.Namespace, root: Path) -> int:
     findings = envpolicy.scan_env_policy(_target_paths(args, root), root=root)
     print(envpolicy.render_env_policy_board(findings))
@@ -176,5 +249,6 @@ _STUDY_ACTIONS = {
     "file-loc": _study_file_loc,
     "complexity": _study_complexity,
     "magic-numbers": _study_magic_numbers,
+    "mutations": _study_mutations,
     "env-policy": _study_env_policy,
 }

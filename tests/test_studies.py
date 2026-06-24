@@ -1,5 +1,6 @@
 """Constitution mechanics: flex ratio, sticky state, magic-number verdicts."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,7 @@ from spice.studies import cli as studies_cli
 from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies.magicnums import scan_text_magic_numbers
+from spice.studies import mutations
 from spice.studies.shape import (
     configured_package_roots,
     name_cluster_error,
@@ -218,6 +220,127 @@ def test_c_grammar_family_covers_other_languages():
     )
     assert [(f.line, f.literal) for f in go_findings] == [(1, "75")]
     assert [(f.line, f.literal) for f in rust_findings] == [(1, "75")]
+
+
+def test_mutation_points_and_mutated_text_flip_operator():
+    text = "def add(a, b):\n    return a + b\n"
+
+    points = mutations.mutation_points_for_text(text)
+    mutated = mutations.mutated_text(text, points[0].index)
+
+    assert points[0].description == "replace + with -"
+    assert "return a - b" in mutated
+
+
+def test_mutation_study_scores_module_and_records_killing_tests(tmp_path, monkeypatch):
+    source = tmp_path / "pkg" / "sample.py"
+    source.parent.mkdir()
+    source.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    test_path = Path("tests/test_sample.py")
+
+    def fake_run(command, **kwargs):
+        if "--collect-only" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="tests/test_sample.py::test_add\n",
+                stderr="",
+            )
+        if "pytest" in command:
+            if "return a - b" in source.read_text(encoding="utf-8"):
+                return subprocess.CompletedProcess(
+                    command,
+                    1,
+                    stdout="FAILED tests/test_sample.py::test_add - AssertionError\n",
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(mutations.subprocess, "run", fake_run)
+
+    study = mutations.run_mutation_study(
+        [Path("pkg/sample.py")],
+        root=tmp_path,
+        test_paths=[test_path],
+        max_mutants_per_module=1,
+        timeout_seconds=5,
+    )
+
+    report = study.reports[0]
+    assert report.path == "pkg/sample.py"
+    assert report.killed == 1
+    assert report.survived == 0
+    assert report.score == 1.0
+    assert report.zero_constraint_tests == ()
+    assert source.read_text(encoding="utf-8") == "def add(a, b):\n    return a + b\n"
+
+
+def test_mutation_board_flags_zero_constraint_tests():
+    point = mutations.MutationPoint(index=0, line=1, description="flip")
+    study = mutations.MutationStudy(
+        reports=(
+            mutations.ModuleMutationReport(
+                path="pkg/sample.py",
+                mutants=1,
+                killed=0,
+                survived=1,
+                timed_out=0,
+                results=(mutations.MutationResult(point=point, status="survived"),),
+                zero_constraint_tests=("tests/test_sample.py::test_add",),
+            ),
+        ),
+        ratchet_regressions=(
+            mutations.RatchetRegression(
+                path="pkg/sample.py",
+                baseline_score=1.0,
+                current_score=0.0,
+            ),
+        ),
+    )
+
+    board = mutations.render_mutation_board(study)
+
+    assert "pkg/sample.py | 0/1 | 1 | 0 | 0%" in board
+    assert "- pkg/sample.py: tests/test_sample.py::test_add" in board
+    assert "- pkg/sample.py: 0% < 100%" in board
+
+
+def test_mutation_cli_resolves_ratchet_paths_from_repo_root(tmp_path, monkeypatch):
+    calls = {}
+
+    def fake_run_mutation_study(paths, **kwargs):
+        calls["paths"] = paths
+        calls["ratchet_path"] = kwargs["ratchet_path"]
+        return mutations.MutationStudy(reports=())
+
+    def fake_write_ratchet(path, reports):
+        calls["write_ratchet_path"] = path
+        calls["written_reports"] = reports
+        return path
+
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        studies_cli.mutations, "run_mutation_study", fake_run_mutation_study
+    )
+    monkeypatch.setattr(studies_cli.mutations, "write_ratchet", fake_write_ratchet)
+    args = build_parser().parse_args(
+        [
+            "study",
+            "mutations",
+            "pkg/sample.py",
+            "--ratchet",
+            ".spice/mutation-ratchet.json",
+            "--write-ratchet",
+            ".spice/mutation-ratchet.json",
+        ]
+    )
+
+    assert args.func(args) == 0
+    assert calls["paths"] == [Path("pkg/sample.py")]
+    assert calls["ratchet_path"] == tmp_path / ".spice/mutation-ratchet.json"
+    assert calls["write_ratchet_path"] == tmp_path / ".spice/mutation-ratchet.json"
+    assert calls["written_reports"] == ()
 
 
 def test_c_grammar_comments_pass():
