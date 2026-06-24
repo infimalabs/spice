@@ -204,12 +204,13 @@ class AckArchivalSummary:
     """Disposition of the ACK keys named by one assistant message.
 
     `archived` are the inbox keys whose pending item this message retired.
-    `unmatched` are keys the message ACK'd that retired nothing — already
-    archived, stale, or never delivered — surfaced so the agent learns the ACK
-    was a no-op instead of the key being dropped without a word.
+    `already_acked` are keys that matched durable ACK state but had no pending
+    item left to retire. `unmatched` are keys the message ACK'd that retired
+    nothing and have no prior ACK record.
     """
 
     archived: list[str]
+    already_acked: list[str]
     unmatched: list[str]
 
 
@@ -219,12 +220,13 @@ def summarize_ack_archival(
     """Archive inbox items ACK'd by one assistant message, reporting disposition.
 
     Mirrors inline-task creation feedback: every key the message ACK'd is
-    accounted for, split into the items actually retired and the keys that
-    matched no pending item, so the supervisor can tell the agent exactly which
-    acknowledgments landed.
+    accounted for, split into the items actually retired, the keys already
+    consumed by an earlier ACK, and the keys that matched no known item, so the
+    supervisor can tell the agent exactly which acknowledgments landed.
     """
     segments = extract_ack_segments_from_text(message_text)
     requested = list(dict.fromkeys(key for segment in segments for key in segment.keys))
+    already_acked_aliases = _acked_state_aliases(repo_root)
     archived = archive_ackd_inbox_items(
         repo_root,
         requested,
@@ -234,10 +236,36 @@ def summarize_ack_archival(
     archived_aliases: set[str] = set()
     for key in archived:
         archived_aliases |= inbox_item_key_aliases(key)
-    unmatched = [
-        key for key in requested if not (inbox_item_key_aliases(key) & archived_aliases)
+    already_acked = [
+        key
+        for key in requested
+        if not (inbox_item_key_aliases(key) & archived_aliases)
+        and (inbox_item_key_aliases(key) & already_acked_aliases)
     ]
-    return AckArchivalSummary(archived=archived, unmatched=unmatched)
+    already_acked_request_aliases: set[str] = set()
+    for key in already_acked:
+        already_acked_request_aliases |= inbox_item_key_aliases(key)
+    unmatched = [
+        key
+        for key in requested
+        if not (inbox_item_key_aliases(key) & archived_aliases)
+        and not (inbox_item_key_aliases(key) & already_acked_request_aliases)
+    ]
+    return AckArchivalSummary(
+        archived=archived,
+        already_acked=already_acked,
+        unmatched=unmatched,
+    )
+
+
+def _acked_state_aliases(repo_root: str | Path | None) -> set[str]:
+    if repo_root is None:
+        return set()
+    aliases: set[str] = set()
+    for record in ack_state_records(repo_root):
+        aliases |= inbox_item_key_aliases(record.key)
+        aliases |= inbox_item_key_aliases(record.inbox_name)
+    return aliases
 
 
 def _ack_state_attachments(item: Any) -> tuple[dict[str, Any], ...]:

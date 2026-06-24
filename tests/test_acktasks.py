@@ -12,6 +12,7 @@ import pytest
 
 from spice.agent import sidechannelnotify, watchdog
 from spice.agent.driver import CLAUDE_DRIVER, DRIVER
+from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import (
     collect_acked_inbox_items,
     collect_inbox_items,
@@ -35,8 +36,29 @@ ACTOR_MEMBER = thread_actor_id(ACTOR)
 INBOX_KEY = "20260104T000000000004Z"
 
 
-def _allowed_project_stems_feedback() -> str:
-    return "allowed_project_stems=" + ",".join(config.assignable_stems())
+def _allowed_project_stems() -> list[str]:
+    return list(config.assignable_stems())
+
+
+def _ack_feedback(kind: str, *keys: str) -> str:
+    return supervisor_feedback_line(kind, keys=list(keys))
+
+
+def _task_created_feedback(handle: str, project: str, route_feedback: str) -> str:
+    return supervisor_feedback_line(
+        "task.created",
+        handles=[handle],
+        projects=[project],
+        routes=[route_feedback],
+        **{"allowed-project-stems": _allowed_project_stems()},
+    )
+
+
+def _task_backlog_note_feedback() -> str:
+    return supervisor_feedback_line(
+        "task.backlog-note",
+        message=watchdog.INLINE_TASK_BACKLOG_NOTE,
+    )
 
 
 @pytest.fixture
@@ -100,10 +122,13 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert "route_filter=skipped:task.unit:no_team" in log.getvalue()
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert feedback == [
-        f"ack_archived={INBOX_KEY}",
-        f"inline_task_created={handle}("
-        f"route_filter=skipped:task.unit:no_team;{_allowed_project_stems_feedback()})",
-        watchdog.INLINE_TASK_BACKLOG_NOTE,
+        _ack_feedback("ack.archived", INBOX_KEY),
+        _task_created_feedback(
+            handle,
+            "task.unit",
+            "route_filter=skipped:task.unit:no_team",
+        ),
+        _task_backlog_note_feedback(),
     ]
     assigned = alloc.next_task()
 
@@ -165,10 +190,13 @@ def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(
     handle = identity.render_handle(rows[0])
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert feedback == [
-        f"ack_archived={INBOX_KEY}",
-        f"inline_task_created={handle}("
-        f"route_filter=skipped:task.unit:no_team;{_allowed_project_stems_feedback()})",
-        watchdog.INLINE_TASK_BACKLOG_NOTE,
+        _ack_feedback("ack.archived", INBOX_KEY),
+        _task_created_feedback(
+            handle,
+            "task.unit",
+            "route_filter=skipped:task.unit:no_team",
+        ),
+        _task_backlog_note_feedback(),
     ]
 
 
@@ -185,7 +213,33 @@ def test_supervised_ack_reports_unmatched_keys(task_repo, quiet_supervisor):
 
     assert collect_acked_inbox_items(task_repo) == []
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
-    assert feedback == [f"ack_unmatched={missing_key}"]
+    assert feedback == [_ack_feedback("ack.unmatched", missing_key)]
+
+
+def test_supervised_ack_reports_already_acked_keys(task_repo, quiet_supervisor):
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(body="capture this", priority=None, stop=False),
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        f"ACK {INBOX_KEY}: first.",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+    sidechannelnotify.consume_side_channel_notices(task_repo)
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        f"ACK {INBOX_KEY}: repeated.",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
+    assert feedback == [_ack_feedback("ack.already-acked", INBOX_KEY)]
 
 
 def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supervisor):
@@ -223,9 +277,12 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
     assert identity.render_handle(assigned or {}) == handle
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert feedback == [
-        f"inline_task_created={handle}("
-        f"route_filter=added:task.unit:auto:create;{_allowed_project_stems_feedback()})",
-        watchdog.INLINE_TASK_BACKLOG_NOTE,
+        _task_created_feedback(
+            handle,
+            "task.unit",
+            "route_filter=added:task.unit:auto:create",
+        ),
+        _task_backlog_note_feedback(),
     ]
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
@@ -249,8 +306,14 @@ def test_supervised_standalone_task_batch_rejects_without_partial_creation(
     assert "spice inline task supervisor error: batch add rejected" in log.getvalue()
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert len(feedback) == 1
-    assert "inline_task_error=batch add rejected" in feedback[0]
-    assert _allowed_project_stems_feedback() in feedback[0]
+    assert feedback[0] == supervisor_feedback_line(
+        "task.error",
+        error=(
+            "batch add rejected: line 2: project 'task' has depth 1; public task "
+            "projects require at least 2 dotted segments, such as task.example"
+        ),
+        **{"allowed-project-stems": _allowed_project_stems()},
+    )
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
 

@@ -255,10 +255,25 @@ def test_summarize_ack_archival_records_ack_content_in_ack_state(tmp_path):
 
     records = ack_state_records(tmp_path)
     assert summary.archived == [KEY_A]
+    assert summary.already_acked == []
     assert summary.unmatched == []
     assert [
         (record.key, record.ack_text, record.ack_content) for record in records
     ] == [(KEY_A, f"ACK {KEY_A[:-1]}: handled fully.", "handled fully.")]
+
+
+def test_summarize_ack_archival_reports_already_acked_key(tmp_path):
+    _init_repo(tmp_path)
+    name = f"{KEY_A}.txt"
+    text = compose_inbox_text(body="already acked", priority=None, stop=False)
+    write_inbox_item(tmp_path, name, text)
+    assert archive_ackd_inbox_items(tmp_path, [KEY_A]) == [KEY_A]
+
+    summary = summarize_ack_archival(tmp_path, f"ACK {KEY_A[:-1]}: repeated.")
+
+    assert summary.archived == []
+    assert summary.already_acked == [KEY_A[:-1]]
+    assert summary.unmatched == []
 
 
 def test_ack_state_supplies_archive_context_without_archive_files(tmp_path):

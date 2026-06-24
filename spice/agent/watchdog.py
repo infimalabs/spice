@@ -33,6 +33,7 @@ from spice.mail.acks import (
     extract_task_batch_lines_from_text,
     summarize_ack_archival,
 )
+from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import (
     discard_inbox_items,
     notify_inbox_changed,
@@ -170,31 +171,51 @@ def process_supervised_assistant_message(
     if ack_summary.archived:
         publish_supervisor_feedback(
             repo_root,
-            "ack_archived=" + " ".join(ack_summary.archived),
             log_handle,
+            "ack.archived",
+            keys=ack_summary.archived,
+        )
+    if ack_summary.already_acked:
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "ack.already-acked",
+            keys=ack_summary.already_acked,
         )
     if ack_summary.unmatched:
         publish_supervisor_feedback(
             repo_root,
-            "ack_unmatched=" + " ".join(ack_summary.unmatched),
             log_handle,
+            "ack.unmatched",
+            keys=ack_summary.unmatched,
         )
     try:
         results = create_inline_tasks(repo_root, message_text, log_handle)
         if results:
             publish_supervisor_feedback(
                 repo_root,
-                "inline_task_created=" + _inline_task_result_text(results),
                 log_handle,
+                "task.created",
+                handles=[result.handle for result in results],
+                projects=[result.project for result in results],
+                routes=[result.route_feedback for result in results],
+                **{"allowed-project-stems": task_config.assignable_stems()},
             )
-            publish_supervisor_feedback(repo_root, INLINE_TASK_BACKLOG_NOTE, log_handle)
+            publish_supervisor_feedback(
+                repo_root,
+                log_handle,
+                "task.backlog-note",
+                message=INLINE_TASK_BACKLOG_NOTE,
+            )
     except Exception as exc:  # pragma: no cover - supervisor-visible task failure
         log_handle.write(f"spice inline task supervisor error: {exc}\n")
         log_handle.flush()
         publish_supervisor_feedback(
             repo_root,
-            f"inline_task_error={exc}; {_allowed_project_stems_feedback()}",
             log_handle,
+            "task.error",
+            error=str(exc),
+            **{"allowed-project-stems": task_config.assignable_stems()},
         )
     try:
         record_supervised_lane_metrics(repo_root)
@@ -211,18 +232,17 @@ def process_supervised_assistant_message(
 
 
 def publish_supervisor_feedback(
-    repo_root: Path, message: str, log_handle: TextIO
+    repo_root: Path, log_handle: TextIO, kind: str, **fields: object
 ) -> None:
     try:
-        publish_side_channel_notice(repo_root, message)
+        publish_side_channel_notice(repo_root, supervisor_feedback_line(kind, **fields))
     except Exception as exc:  # pragma: no cover - best-effort stderr feedback
         log_handle.write(f"spice side-channel feedback error: {exc}\n")
         log_handle.flush()
 
 
-# Keyless (no `=`) so the serve notice parser ignores it while the agent still
-# reads it: an inline-created task lands on the backlog and is not the creator's
-# to work — phrased "unless" (not "until") so agents drop it rather than wait.
+# An inline-created task lands on the backlog and is not the creator's to work.
+# Phrased "unless" (not "until") so agents drop it rather than wait.
 INLINE_TASK_BACKLOG_NOTE = (
     "inline tasks above are on the backlog, not yours — move on "
     "unless the allocator assigns one back via spice task next"
@@ -257,14 +277,14 @@ def _supervised_inline_task_actor(repo_root: Path) -> str:
 
 
 def _inline_task_result_text(results: list[TaskAddResult]) -> str:
-    stems = _allowed_project_stems_feedback()
+    stems = _allowed_project_stems_text()
     return " ".join(
         f"{result.handle}({result.route_feedback};{stems})" for result in results
     )
 
 
-def _allowed_project_stems_feedback() -> str:
-    return "allowed_project_stems=" + ",".join(task_config.assignable_stems())
+def _allowed_project_stems_text() -> str:
+    return "allowed-project-stems=" + ",".join(task_config.assignable_stems())
 
 
 def record_supervised_lane_metrics(repo_root: Path) -> None:

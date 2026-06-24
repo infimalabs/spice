@@ -11,6 +11,7 @@ from threading import Lock
 
 from spice.agent.paths import agent_worktree_state_dir
 from spice.errors import SpiceError
+from spice.mail.feedback import supervisor_feedback_line
 
 SIDE_CHANNEL_NOTIFY_EVENT = "notify"
 SIDE_CHANNEL_INBOX_EVENT = "inbox"
@@ -90,6 +91,15 @@ def publish_side_channel_notice(repo_root: Path | None, text: str) -> str | None
         _NOTICES_BY_REPO_ROOT.setdefault(key, []).append(clean)
     notify_agent_side_channel(repo_root, event=SIDE_CHANNEL_NOTICE_EVENT)
     return clean
+
+
+def publish_side_channel_feedback(
+    repo_root: Path | None, kind: str, **fields: object
+) -> str | None:
+    return publish_side_channel_notice(
+        repo_root,
+        supervisor_feedback_line(kind, **fields),
+    )
 
 
 def consume_side_channel_notices(repo_root: Path | None) -> list[str]:

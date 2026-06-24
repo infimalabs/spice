@@ -25,6 +25,7 @@ from spice.agent.driver import (
     driver_for_transcript,
 )
 from spice.agent.identity import canonical_thread_id
+from spice.mail.feedback import SupervisorFeedback, parse_supervisor_feedback_line
 from spice.mail.acks import split_ack_message
 from spice.mail.watch import (
     extract_assistant_text,
@@ -69,10 +70,11 @@ _SUPERVISOR_FEEDBACK_OUTPUT_TYPES = frozenset(
     {"function_call_output", "custom_tool_call_output"}
 )
 _SUPERVISOR_FEEDBACK_HEADING = "Supervisor Feedback"
-_INLINE_TASK_CREATED_NOTICE = "inline_task_created"
-_INLINE_TASK_ERROR_NOTICE = "inline_task_error"
-_ACK_ARCHIVED_NOTICE = "ack_archived"
-_ACK_UNMATCHED_NOTICE = "ack_unmatched"
+_ACK_ALREADY_ACKED_KIND = "ack.already-acked"
+_ACK_ARCHIVED_KIND = "ack.archived"
+_ACK_UNMATCHED_KIND = "ack.unmatched"
+_TASK_CREATED_KIND = "task.created"
+_TASK_ERROR_KIND = "task.error"
 
 
 @dataclass(frozen=True)
@@ -723,9 +725,9 @@ def _payload_output_text(payload: dict[str, Any]) -> str:
 
 def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for key, value in _supervisor_feedback_notice_pairs(output):
-        if key == _INLINE_TASK_CREATED_NOTICE:
-            handles = [handle for handle in value.split() if handle]
+    for feedback in _supervisor_feedback_notices(output):
+        if feedback.kind == _TASK_CREATED_KIND:
+            handles = _feedback_string_list(feedback.fields.get("handles"))
             if handles:
                 items.append(
                     {
@@ -737,16 +739,17 @@ def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
                         "handles": handles,
                     }
                 )
-        elif key == _INLINE_TASK_ERROR_NOTICE:
+        elif feedback.kind == _TASK_ERROR_KIND:
             items.append(
                 {
                     "kind": "task_error",
                     "label": "Task capture failed",
-                    "detail": value.strip() or "unknown error",
+                    "detail": str(feedback.fields.get("error") or "").strip()
+                    or "unknown error",
                 }
             )
-        elif key == _ACK_ARCHIVED_NOTICE:
-            keys = [acked for acked in value.split() if acked]
+        elif feedback.kind == _ACK_ARCHIVED_KIND:
+            keys = _feedback_string_list(feedback.fields.get("keys"))
             if keys:
                 items.append(
                     {
@@ -756,8 +759,19 @@ def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
                         "keys": keys,
                     }
                 )
-        elif key == _ACK_UNMATCHED_NOTICE:
-            keys = [acked for acked in value.split() if acked]
+        elif feedback.kind == _ACK_ALREADY_ACKED_KIND:
+            keys = _feedback_string_list(feedback.fields.get("keys"))
+            if keys:
+                items.append(
+                    {
+                        "kind": "ack_already_acked",
+                        "label": "ACK already consumed",
+                        "detail": ", ".join(keys),
+                        "keys": keys,
+                    }
+                )
+        elif feedback.kind == _ACK_UNMATCHED_KIND:
+            keys = _feedback_string_list(feedback.fields.get("keys"))
             if keys:
                 items.append(
                     {
@@ -779,8 +793,8 @@ def _supervisor_feedback_preview(payload: dict[str, Any]) -> str:
     )
 
 
-def _supervisor_feedback_notice_pairs(output: str) -> list[tuple[str, str]]:
-    pairs: list[tuple[str, str]] = []
+def _supervisor_feedback_notices(output: str) -> list[SupervisorFeedback]:
+    notices: list[SupervisorFeedback] = []
     lines = output.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     index = 0
     while index < len(lines):
@@ -798,11 +812,19 @@ def _supervisor_feedback_notice_pairs(output: str) -> list[tuple[str, str]]:
                 break
             if line == stripped:
                 break
-            if "=" in stripped:
-                key, value = stripped.split("=", 1)
-                pairs.append((key.strip(), value.strip()))
+            feedback = parse_supervisor_feedback_line(stripped)
+            if feedback is not None:
+                notices.append(feedback)
             index += 1
-    return pairs
+    return notices
+
+
+def _feedback_string_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return []
 
 
 def task_card_message(
