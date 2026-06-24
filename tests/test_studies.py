@@ -236,8 +236,6 @@ def test_assertion_free_scanner_detects_class_methods(tmp_path):
     path.write_text(
         "\n".join(
             [
-                "import pytest",
-                "",
                 "class TestSuite:",
                 "    def test_without_assertion(self):",
                 "        value = 1",
@@ -261,7 +259,7 @@ def test_assertion_free_scanner_detects_class_methods(tmp_path):
     findings = scan_assertion_free_tests([Path("tests/test_class.py")], root=tmp_path)
 
     assert [(f.test_name, f.line) for f in findings] == [
-        ("TestSuite.test_without_assertion", 4),
+        ("TestSuite.test_without_assertion", 2),
     ]
 
 
