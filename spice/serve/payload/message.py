@@ -80,10 +80,6 @@ def _merge_task_card_messages(
     after: str | None = None,
     before: str | None = None,
 ) -> list[message_reader.AssistantMessage]:
-    if after is not None:
-        # After-cursor reads are live append windows. Task cards are a synthetic
-        # history projection and would displace real recent transcript messages.
-        return items
     card_after = after
     if card_after is None and before is None and items:
         visible_items = [

@@ -531,8 +531,12 @@ def test_messages_payload_after_cursor_preserves_transcript_delta(
     )
 
     assert seen["reader_kwargs"]["after"] == boundary_key
-    assert [item["display_text"] for item in payload["messages"]] == ["hello"]
+    assert [item["display_text"] for item in payload["messages"]] == [
+        "hello",
+        "Task capture: Later CLI follow-up (serve.ui)",
+    ]
     assert payload["messages"][0]["timestamp"] == "2026-06-10T12:00:03.000000Z"
+    assert payload["messages"][1]["source_kind"] == "cli_task_created"
 
 
 def test_cli_review_followup_row_renders_standalone_task_card(monkeypatch):
@@ -610,7 +614,10 @@ def test_task_card_cursor_keeps_append_window_to_transcript_items(monkeypatch):
         after=boundary_key,
     )
 
-    assert [item.display_text for item in merged] == ["hello"]
+    assert [item.display_text for item in merged] == [
+        "hello",
+        "Task capture: Later CLI follow-up (serve.ui)",
+    ]
     boundary = message_reader.parse_timestamp("2026-06-10T12:00:01.000001Z")
     assert boundary is not None
     assert all(
