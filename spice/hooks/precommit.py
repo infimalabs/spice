@@ -32,9 +32,21 @@ from typing import Any, Callable
 from spice.cli.mounts import mount_command_path, mounted_commands
 from spice.errors import SpiceError
 from spice.paths import find_tool
-from spice.policy import REPO_TRUTH_DOC_LIMIT, REPO_TRUTH_DOCS
+from spice.policy import (
+    REACHABILITY_TEST_ONLY_LIMIT,
+    REPO_TRUTH_DOC_LIMIT,
+    REPO_TRUTH_DOCS,
+)
 from spice.repocfg import policy_table, string_list
-from spice.studies import complexity, envpolicy, fileloc, localpaths, magicnums, shape
+from spice.studies import (
+    complexity,
+    envpolicy,
+    fileloc,
+    localpaths,
+    magicnums,
+    reachability,
+    shape,
+)
 from spice.studies.walk import partially_staged_paths, staged_paths
 
 STAGED_PATHS_ENV = "SPICE_STAGED_PATHS"  # env-policy: allow
@@ -172,6 +184,11 @@ def _builtin_pre_commit_steps(
             "magic-numbers",
             "magic numbers",
             lambda: _run_magic_numbers_guard(repo_root, paths),
+        ),
+        PreCommitStep(
+            "reachability",
+            "reachability",
+            lambda: _run_reachability_guard(repo_root),
         ),
     ]
 
@@ -572,6 +589,19 @@ def _run_magic_numbers_guard(repo_root: Path, paths: list[Path]) -> None:
     findings = magicnums.detect_magic_regressions(paths, root=repo_root)
     if findings:
         raise SpiceError(magicnums.render_magic_board(findings))
+
+
+def _run_reachability_guard(repo_root: Path) -> None:
+    findings = reachability.scan_reachability(repo_root)
+    count = len(findings)
+    if count > REACHABILITY_TEST_ONLY_LIMIT:
+        board = "\n".join(reachability.render_reachability_board(findings))
+        raise SpiceError(
+            f"{board}\n"
+            f"reachability: {count} test-only module(s) exceed"
+            f" REACHABILITY_TEST_ONLY_LIMIT={REACHABILITY_TEST_ONLY_LIMIT};"
+            " wire in or delete-both, then lower the constant"
+        )
 
 
 def clear_successful_sticky_state(repo_root: Path) -> None:
