@@ -35,7 +35,9 @@ from spice.studies.shape import (
 )
 from spice.studies.testquality import (
     render_assertion_free_board,
+    render_private_internal_board,
     scan_assertion_free_tests,
+    scan_private_internal_coupling,
 )
 from spice.studies.typecheck import (
     PYRIGHT_ARGS,
@@ -180,6 +182,74 @@ def test_study_assertion_free_cli_reports_findings(tmp_path, monkeypatch, capsys
 def test_assertion_free_board_reports_clean_baseline():
     assert render_assertion_free_board([]) == (
         "assertion-free-tests: no assertion-free tests found"
+    )
+
+
+def test_private_internal_scanner_flags_imports_and_internal_assertions(tmp_path):
+    path = tmp_path / "tests" / "test_private.py"
+    path.parent.mkdir()
+    path.write_text(
+        "\n".join(
+            [
+                "from spice.worker import _private_helper",
+                "from spice._secret import public_helper",
+                "",
+                "def test_public_contract_stays_clean():",
+                "    assert {'public': 1}['public'] == 1",
+                "",
+                "def test_private_key_assertion():",
+                "    assert {'_state': 1}['_state'] == 1",
+                "",
+                "def test_private_shape_assertion(result):",
+                "    assert result == {'_phase': 'claimed'}",
+                "",
+                "def test_private_attr_assertion(result):",
+                "    assert result._state == 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    findings = scan_private_internal_coupling(
+        [Path("tests/test_private.py")], root=tmp_path
+    )
+
+    assert [(f.line, f.test_name, f.kind, f.target) for f in findings] == [
+        (1, "<module>", "private import", "spice.worker._private_helper"),
+        (2, "<module>", "private import", "spice._secret"),
+        (8, "test_private_key_assertion", "private key assertion", "_state"),
+        (11, "test_private_shape_assertion", "private key assertion", "_phase"),
+        (
+            14,
+            "test_private_attr_assertion",
+            "private attribute assertion",
+            "_state",
+        ),
+    ]
+
+
+def test_study_private_internals_cli_reports_findings(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "tests" / "test_private.py"
+    path.parent.mkdir()
+    path.write_text(
+        "from spice.worker import _private_helper\n"
+        "def test_public_contract():\n"
+        "    assert 1 == 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    args = build_parser().parse_args(["study", "private-internals"])
+
+    assert args.func(args) == 1
+    output = capsys.readouterr().out
+    assert "private-internals: 1 coupling(s)" in output
+    assert "private import spice.worker._private_helper" in output
+
+
+def test_private_internal_board_reports_clean_baseline():
+    assert render_private_internal_board([]) == (
+        "private-internals: no private test coupling found"
     )
 
 
