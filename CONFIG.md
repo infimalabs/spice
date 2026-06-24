@@ -27,8 +27,9 @@ with `[tool.spice.agent] wrappers = [...]`.
 | `wrapper = ["cmd1", "cmd2"]` | Create wrapper function `wrapper` and route each listed command selector through it. |
 | `selector = { argv = ["tool", "subcommand"] }` | Create a direct wrapper function named `selector` that runs the configured argv plus caller arguments. |
 
-The built-in `common` group routes read-heavy commands through RTK rewrite when
-available. Repo groups should wrap stable repo-owned tools.
+The built-in `common` group is intentionally empty. RTK rewrite routing happens
+inside `spice agent run` — it is not a per-command wrapper. Repo groups should
+wrap stable repo-owned tools (see `docs/cli/wrapper-commands.md`).
 
 ## `[tool.spice.commands]`
 
