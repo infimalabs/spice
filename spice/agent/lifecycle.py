@@ -220,7 +220,7 @@ def ensure_agent(
         service_tier = driver.default_service_tier if fast_mode else ""
         # Resolution order: explicit argument > worktree-local config >
         # tracked project config > the driver's shipped default.
-        model = model or configured_agent_model(resolved_root) or driver.default_model
+        model = driver.resolve_model(model or configured_agent_model(resolved_root))
         reasoning_effort = (
             reasoning_effort
             or configured_agent_effort(resolved_root)

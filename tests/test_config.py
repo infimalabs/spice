@@ -182,8 +182,24 @@ def test_config_agent_writes_driver_scope(tmp_path, monkeypatch, capsys):
     assert (
         capsys.readouterr().out == "agent project driver=- model=- effort=-\n"
         "agent worktree driver=claude model=- effort=-\n"
-        "agent effective driver=claude model=claude-sonnet-4-5 effort=xhigh\n"
+        "agent effective driver=claude model=claude-sonnet-4-6 effort=xhigh\n"
     )
+
+
+def test_effective_agent_config_resolves_claude_sonnet_family(tmp_path, monkeypatch):
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    config.update_section(
+        tmp_path,
+        config.AGENT_KEY,
+        {"driver": "claude", "model": "sonnet"},
+    )
+
+    assert config.configured_agent_model(tmp_path) == "sonnet"
+    assert config.effective_agent_config(tmp_path) == {
+        "driver": "claude",
+        "model": "claude-sonnet-4-6",
+        "effort": "xhigh",
+    }
 
 
 def test_config_say_writes_macos_say_settings(tmp_path, monkeypatch, capsys):

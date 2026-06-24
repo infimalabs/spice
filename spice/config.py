@@ -212,7 +212,7 @@ def effective_agent_config(repo_root: Path) -> dict[str, str]:
     driver = driver_for(repo_root)
     return {
         AGENT_DRIVER_KEY: driver.name,
-        AGENT_MODEL_KEY: configured_agent_model(repo_root) or driver.default_model,
+        AGENT_MODEL_KEY: driver.resolve_model(configured_agent_model(repo_root)),
         AGENT_EFFORT_KEY: (
             configured_agent_effort(repo_root) or driver.default_reasoning_effort
         ),
