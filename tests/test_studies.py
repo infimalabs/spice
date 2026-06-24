@@ -1,5 +1,6 @@
 """Constitution mechanics: flex ratio, sticky state, magic-number verdicts."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -23,8 +24,10 @@ from spice.policy import (
 from spice.studies import cli as studies_cli
 from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
-from spice.studies.magicnums import scan_text_magic_numbers
+from spice.studies import mutations
 from spice.studies.reachability import scan_reachability
+from spice.studies.subsumption import scan_subsumption
+from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies.shape import (
     configured_package_roots,
     name_cluster_error,
@@ -218,33 +221,75 @@ def test_reachability_merges_default_allowlist(tmp_path):
     assert scan_reachability(tmp_path) == []
 
 
-def test_study_reachability_create_tasks_calls_add_per_finding(
-    tmp_path, monkeypatch, capsys
-):
-    _write_reachability_repo(tmp_path, "import spice.onlytest\n")
-    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
-    created: list[dict] = []
-
-    def fake_add(title, *, project, tags, acceptance):
-        created.append({"title": title, "project": project, "tags": tags})
-        return "EXHAUST-FAKE"
-
-    import spice.studies.cli as _cli_mod
-
-    monkeypatch.setattr(
-        _cli_mod,
-        "_create_exhaust_tasks",
-        lambda findings: [
-            created.append({"module_path": f.module_path}) for f in findings
-        ],
+def test_subsumption_identifies_fully_subsumed_test(tmp_path):
+    db = _write_coverage_db(
+        tmp_path,
+        files=["spice/foo.py"],
+        contexts={
+            "test_a": {0: [1, 2, 3]},
+            "test_b": {0: [1, 2, 3, 4]},
+        },
     )
-    args = build_parser().parse_args(["study", "reachability", "--create-tasks"])
 
-    result = args.func(args)
+    report = scan_subsumption(db)
 
-    assert result == 1
-    assert len(created) == 1
-    assert "onlytest.py" in created[0]["module_path"]
+    assert report.tests_scanned == 2
+    assert len(report.findings) == 1
+    assert report.findings[0].test == "test_a"
+    assert report.findings[0].subsumed_by == "test_b"
+    assert report.findings[0].covered_lines == 3
+
+
+def test_subsumption_no_findings_when_tests_are_disjoint(tmp_path):
+    db = _write_coverage_db(
+        tmp_path,
+        files=["spice/foo.py"],
+        contexts={
+            "test_a": {0: [1, 2]},
+            "test_b": {0: [3, 4]},
+        },
+    )
+
+    report = scan_subsumption(db)
+
+    assert report.findings == ()
+
+
+def test_subsumption_raises_on_missing_coverage_file(tmp_path):
+    with pytest.raises(FileNotFoundError, match="coverage file not found"):
+        scan_subsumption(tmp_path / ".coverage")
+
+
+def _write_coverage_db(
+    root: Path,
+    *,
+    files: list[str],
+    contexts: dict[str, dict[int, list[int]]],
+) -> Path:
+    import sqlite3
+
+    path = root / ".coverage"
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE file (id INTEGER PRIMARY KEY, path TEXT)")
+    con.execute("CREATE TABLE context (id INTEGER PRIMARY KEY, context TEXT)")
+    con.execute(
+        "CREATE TABLE lines "
+        "(id INTEGER PRIMARY KEY, file_id INTEGER, context_id INTEGER, lineno INTEGER)"
+    )
+    for fid, fpath in enumerate(files, 1):
+        con.execute(f"INSERT INTO file VALUES ({fid}, '{fpath}')")
+    line_id = 1
+    for cid, (ctx_name, file_lines) in enumerate(contexts.items(), 1):
+        con.execute(f"INSERT INTO context VALUES ({cid}, '{ctx_name}')")
+        for file_index, lines in file_lines.items():
+            for lineno in lines:
+                con.execute(
+                    f"INSERT INTO lines VALUES ({line_id},{file_index + 1},{cid},{lineno})"
+                )
+                line_id += 1
+    con.commit()
+    con.close()
+    return path
 
 
 def _write_reachability_repo(
@@ -358,6 +403,127 @@ def test_c_grammar_family_covers_other_languages():
     )
     assert [(f.line, f.literal) for f in go_findings] == [(1, "75")]
     assert [(f.line, f.literal) for f in rust_findings] == [(1, "75")]
+
+
+def test_mutation_points_and_mutated_text_flip_operator():
+    text = "def add(a, b):\n    return a + b\n"
+
+    points = mutations.mutation_points_for_text(text)
+    mutated = mutations.mutated_text(text, points[0].index)
+
+    assert points[0].description == "replace + with -"
+    assert "return a - b" in mutated
+
+
+def test_mutation_study_scores_module_and_records_killing_tests(tmp_path, monkeypatch):
+    source = tmp_path / "pkg" / "sample.py"
+    source.parent.mkdir()
+    source.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    test_path = Path("tests/test_sample.py")
+
+    def fake_run(command, **kwargs):
+        if "--collect-only" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="tests/test_sample.py::test_add\n",
+                stderr="",
+            )
+        if "pytest" in command:
+            if "return a - b" in source.read_text(encoding="utf-8"):
+                return subprocess.CompletedProcess(
+                    command,
+                    1,
+                    stdout="FAILED tests/test_sample.py::test_add - AssertionError\n",
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(mutations.subprocess, "run", fake_run)
+
+    study = mutations.run_mutation_study(
+        [Path("pkg/sample.py")],
+        root=tmp_path,
+        test_paths=[test_path],
+        max_mutants_per_module=1,
+        timeout_seconds=5,
+    )
+
+    report = study.reports[0]
+    assert report.path == "pkg/sample.py"
+    assert report.killed == 1
+    assert report.survived == 0
+    assert report.score == 1.0
+    assert report.zero_constraint_tests == ()
+    assert source.read_text(encoding="utf-8") == "def add(a, b):\n    return a + b\n"
+
+
+def test_mutation_board_flags_zero_constraint_tests():
+    point = mutations.MutationPoint(index=0, line=1, description="flip")
+    study = mutations.MutationStudy(
+        reports=(
+            mutations.ModuleMutationReport(
+                path="pkg/sample.py",
+                mutants=1,
+                killed=0,
+                survived=1,
+                timed_out=0,
+                results=(mutations.MutationResult(point=point, status="survived"),),
+                zero_constraint_tests=("tests/test_sample.py::test_add",),
+            ),
+        ),
+        ratchet_regressions=(
+            mutations.RatchetRegression(
+                path="pkg/sample.py",
+                baseline_score=1.0,
+                current_score=0.0,
+            ),
+        ),
+    )
+
+    board = mutations.render_mutation_board(study)
+
+    assert "pkg/sample.py | 0/1 | 1 | 0 | 0%" in board
+    assert "- pkg/sample.py: tests/test_sample.py::test_add" in board
+    assert "- pkg/sample.py: 0% < 100%" in board
+
+
+def test_mutation_cli_resolves_ratchet_paths_from_repo_root(tmp_path, monkeypatch):
+    calls = {}
+
+    def fake_run_mutation_study(paths, **kwargs):
+        calls["paths"] = paths
+        calls["ratchet_path"] = kwargs["ratchet_path"]
+        return mutations.MutationStudy(reports=())
+
+    def fake_write_ratchet(path, reports):
+        calls["write_ratchet_path"] = path
+        calls["written_reports"] = reports
+        return path
+
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        studies_cli.mutations, "run_mutation_study", fake_run_mutation_study
+    )
+    monkeypatch.setattr(studies_cli.mutations, "write_ratchet", fake_write_ratchet)
+    args = build_parser().parse_args(
+        [
+            "study",
+            "mutations",
+            "pkg/sample.py",
+            "--ratchet",
+            ".spice/mutation-ratchet.json",
+            "--write-ratchet",
+            ".spice/mutation-ratchet.json",
+        ]
+    )
+
+    assert args.func(args) == 0
+    assert calls["paths"] == [Path("pkg/sample.py")]
+    assert calls["ratchet_path"] == tmp_path / ".spice/mutation-ratchet.json"
+    assert calls["write_ratchet_path"] == tmp_path / ".spice/mutation-ratchet.json"
+    assert calls["written_reports"] == ()
 
 
 def test_c_grammar_comments_pass():

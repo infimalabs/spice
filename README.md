@@ -169,13 +169,14 @@ spice is built to work without requiring its optional companions — RTK, the lo
 
 **RTK (context compaction)**: When `rtk` is not installed or not on `PATH`, the agent wrapper skips telemetry rewrite and passes command output through uncompacted. The loop still works; context just grows faster from verbose tool output.
 
-**Local judge (conscience)**: The default judge binary is `afm-cli` (Apple Foundation Models CLI, macOS only). When unavailable, configure an alternative via `tool.spice.maxims.judge_bin` in `pyproject.toml` — the judge interface is a simple stdin/stdout contract. Without a working judge, the conscience is silent; maxim enforcement stops, but all other surfaces (steering, tasks, constitution) remain functional.
+**Local judge (conscience)**: The default judge binary is `afm-cli` (Apple Foundation Models CLI, macOS only). When unavailable, configure an alternative with `spice config judge --bin /path/to/judge`; the judge interface is a simple stdin/stdout contract. Without a working judge, the conscience is silent; maxim enforcement stops, but all other surfaces (steering, tasks, constitution) remain functional.
 
-**TTS (speech synthesis)**: Text-to-speech defaults to macOS `say`. When unavailable, speech commands and the serve UI's narration mode degrade silently — the transcript remains the authoritative record; audio is best-effort ear candy and never blocks message flow.
+**TTS (speech synthesis)**: Text-to-speech defaults to macOS `say`. When unavailable, speech commands and the serve UI's narration mode report the speech failure while leaving the transcript authoritative; audio is best-effort ear candy and never blocks message flow.
 
 **Non-Mac paths**:
-- **Judge**: Any local model supporting the conscience's prompt-response contract works. Ollama + a small instruct model, AWS Bedrock, or a custom binary that reads JSON from stdin and writes findings to stdout.
-- **TTS**: Linux alternatives like `piper` or `espeak-ng` can be configured once spice exposes a pluggable speech backend (currently hard-wired to macOS `say` — see [issue tracker](https://github.com/YOURORG/spice/issues) for status).
+- **Judge**: Any local model supporting the conscience's prompt-response contract works. Ollama + a small instruct model, AWS Bedrock, or a custom binary that reads the prompt from stdin and writes the verdict to stdout.
+- **TTS**: Linux alternatives like `piper` or `espeak-ng` can be wired through the external backend:
+  `spice config say --backend external --command "/path/to/tts-wrapper" --content-type audio/wav`.
 
 The design principle: everything gracefully degrades, nothing hard-requires macOS-specific tools in a way that breaks the loop.
 
@@ -331,6 +332,7 @@ explicit contract update. Underscored names remain private.
 
   Example usage:
   ```python
+  import subprocess
   from spice.procs import popen_new_process_group_kwargs, terminate_process_group
 
   proc = subprocess.Popen(
@@ -425,6 +427,22 @@ extension steps unless an individual built-in is disabled or replaced in
 tracked policy. `pre_commit_success` uses the same command shape as
 `pre_commit`, but runs only after the whole gate has passed, alongside sticky
 state cleanup.
+
+Mutation testing is available as an explicit study, not a default pre-commit
+cost:
+
+```sh
+spice study mutations --staged --test tests/test_messagepayload.py --max-mutants 12
+spice study mutations spice/serve/payload/message.py \
+  --test tests/test_messagepayload.py \
+  --ratchet .spice/mutation-ratchet.json
+```
+
+The mutation study targets changed Python source files by default, or the files
+passed explicitly. It runs a bounded AST-mutant sample per module, reports
+per-module mutation scores, lists tests that killed no selected mutant, and can
+compare scores against a JSON ratchet with `--ratchet` or refresh one with
+`--write-ratchet`.
 
 Extension steps run from the repo root and receive the staged paths,
 newline-separated, in the `SPICE_STAGED_PATHS` environment variable. A step
