@@ -10,17 +10,24 @@ without wiring it into any production path.
 granularity inside production-reachable modules. Static analysis resolves
 *named* references; a symbol reached only through ``getattr(obj, name)`` with a
 runtime-built ``name`` has no syntactic reference, so it would false-flag as
-test-only. The convention that avoids this is the magic-string registry: route
-dynamic dispatch through a dict or list literal that names the symbols —
+test-only. There are exactly two supported ways to keep a dynamically-reached
+production symbol from being flagged, and the first is strongly preferred:
 
-    DISPATCH = {"sync": handle_sync, "drain": handle_drain}
+(a) **Registry convention (preferred, self-documenting).** Reference the symbol
+    as a bare ``Name`` in a dict or list literal — a magic-string registry —
+    in any production-reachable module:
 
-— in any production-reachable module. The scanner counts each literal value as
-a production reference (they are plain ``Name`` nodes), so registry-dispatched
-handlers stay live without an allowlist entry, and the registry doubles as the
-single source of truth for which string keys exist. ``getattr`` paths that
-genuinely cannot become a registry declare the exception via
-``SYMBOL_REACHABILITY_ALLOWLIST`` (or the ``allowlist`` argument).
+        DISPATCH = {"sync": handle_sync, "drain": handle_drain}
+
+    The scanner counts each literal value as a production reference (they are
+    plain ``Name`` nodes), so registry-dispatched handlers stay live with no
+    allowlist entry, and the registry doubles as the single source of truth for
+    which string keys exist. Reach for this first.
+
+(b) **Allowlist (escape hatch).** Only when a symbol is reached purely via
+    ``getattr``/string and genuinely cannot be expressed as a registry, declare
+    the exception in ``SYMBOL_REACHABILITY_ALLOWLIST`` (or the ``allowlist``
+    argument). Prefer (a) wherever it is possible.
 
 Library seam: public dataclasses and scan/render helpers are importable by
 target-repo tools; underscored names remain private.
