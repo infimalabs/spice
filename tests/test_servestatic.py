@@ -807,10 +807,11 @@ def test_static_pending_count_clears_stale_submitted_predictions_after_drain():
     app_render = STATIC_ROOT / "app.render.js"
     script = Path(__file__).with_name("fixtures") / "pending_count_reconcile.js"
 
-    subprocess.run(
+    result = subprocess.run(
         ["node", str(script), str(app_stream), str(app_render)],
         check=True,
     )
+    assert result.returncode == 0
 
 
 def test_static_lane_differential_frames_update_pending_and_messages():
@@ -818,10 +819,11 @@ def test_static_lane_differential_frames_update_pending_and_messages():
     app_stream = STATIC_ROOT / "app.stream.js"
     script = Path(__file__).with_name("fixtures") / "lane_diff_frames.js"
 
-    subprocess.run(
+    result = subprocess.run(
         ["node", str(script), str(app_render), str(app_stream)],
         check=True,
     )
+    assert result.returncode == 0
 
 
 def test_static_lifetime_slider_uses_steer_drive_drain_without_renew_send_flag():
@@ -898,6 +900,7 @@ def test_static_lifetime_slider_tracks_pending_state_in_controls():
             'lane.submitEl.title = "Send with " + lifetime + ": " + lifetimeHelp;',
         ),
     )
+    assert app_controls.count("pendingLifetimeCommit") >= 4
 
 
 def test_static_lifetime_slider_syncs_server_state_sources():
@@ -945,6 +948,7 @@ def test_static_lifetime_slider_syncs_server_state_sources():
             "restoreLaneLifetimeRuntimeState(",
         ),
     )
+    assert "pendingLifetimeRequestId" in app_stream
 
 
 def test_lifetime_slider_pending_commit_ignores_stale_server_lifetimes():

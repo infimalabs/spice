@@ -536,6 +536,7 @@ def test_require_supervisor_started_accepts_thread_settled_log_path(
     process = _FakeProcess(pid=SUPERVISOR_PID, returncode=None)
 
     lifecycle.require_supervisor_started(process, repo_root=tmp_path, log_path=log_path)
+    assert process.wait_calls == 0
 
 
 def test_require_started_process_distinguishes_codex_credit_failure(

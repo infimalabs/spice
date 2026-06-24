@@ -33,6 +33,7 @@ from spice.cli.mounts import mount_command_path, mounted_commands
 from spice.errors import SpiceError
 from spice.paths import find_tool
 from spice.policy import (
+    ASSERTION_FREE_TEST_LIMIT,
     REACHABILITY_TEST_ONLY_LIMIT,
     REPO_TRUTH_DOC_LIMIT,
     REPO_TRUTH_DOCS,
@@ -46,6 +47,7 @@ from spice.studies import (
     magicnums,
     reachability,
     shape,
+    testquality,
 )
 from spice.studies.walk import partially_staged_paths, staged_paths
 
@@ -189,6 +191,11 @@ def _builtin_pre_commit_steps(
             "reachability",
             "reachability",
             lambda: _run_reachability_guard(repo_root),
+        ),
+        PreCommitStep(
+            "assertion-free-tests",
+            "assertion-free tests",
+            lambda: _run_assertion_free_test_guard(repo_root),
         ),
     ]
 
@@ -601,6 +608,21 @@ def _run_reachability_guard(repo_root: Path) -> None:
             f"reachability: {count} test-only module(s) exceed"
             f" REACHABILITY_TEST_ONLY_LIMIT={REACHABILITY_TEST_ONLY_LIMIT};"
             " wire in or delete-both, then lower the constant"
+        )
+
+
+def _run_assertion_free_test_guard(repo_root: Path) -> None:
+    findings = testquality.scan_assertion_free_tests(
+        testquality.test_paths(repo_root), root=repo_root
+    )
+    count = len(findings)
+    if count > ASSERTION_FREE_TEST_LIMIT:
+        board = testquality.render_assertion_free_board(findings)
+        raise SpiceError(
+            f"{board}\n"
+            f"assertion-free-tests: {count} test(s) exceed"
+            f" ASSERTION_FREE_TEST_LIMIT={ASSERTION_FREE_TEST_LIMIT};"
+            " add assertions or lower the constant after cleanup"
         )
 
 

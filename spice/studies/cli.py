@@ -16,7 +16,15 @@ from spice.policy import (
     MAGIC_BASELINE_REF,
     MAGIC_EXAMINE_VALUE_THRESHOLD,
 )
-from spice.studies import complexity, envpolicy, fileloc, magicnums, reachability, shape
+from spice.studies import (
+    complexity,
+    envpolicy,
+    fileloc,
+    magicnums,
+    reachability,
+    shape,
+    testquality,
+)
 from spice.studies.walk import staged_paths, tracked_paths
 
 
@@ -70,6 +78,11 @@ def configure_study_parser(subparsers: Any) -> None:
         "--create-tasks",
         action="store_true",
         help="Create a task for each test-only module (wire-in or delete-both).",
+    )
+    _add_study_action(
+        actions,
+        "assertion-free-tests",
+        "Test functions that do not appear to assert behavior.",
     )
 
 
@@ -197,6 +210,14 @@ def _study_reachability(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
+    findings = testquality.scan_assertion_free_tests(
+        testquality.test_paths(root), root=root
+    )
+    print(testquality.render_assertion_free_board(findings))
+    return 1 if findings else 0
+
+
 def _create_exhaust_tasks(findings: list[reachability.ReachabilityFinding]) -> None:
     from spice.tasks import create
 
@@ -221,4 +242,5 @@ _STUDY_ACTIONS = {
     "magic-numbers": _study_magic_numbers,
     "env-policy": _study_env_policy,
     "reachability": _study_reachability,
+    "assertion-free-tests": _study_assertion_free_tests,
 }

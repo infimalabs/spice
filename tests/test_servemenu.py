@@ -51,7 +51,10 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
     assert '<span class="spice-menu-icon" aria-hidden="true">' in html
     assert '<span class="spice-menu-pepper">🌶️</span>' in html
     assert '<span class="spice-menu-label">spice</span>' in html
-    assert 'const spiceServeBranding = {"name": "spice"};' in html
+    assert (
+        'const spiceServeBranding = {"name": "spice", '
+        '"defaultLifetime": "Drive"};' in html
+    )
     assert "const serveBrandName = String(spiceServeBranding.name" in app_js
     assert "function serveBrandMenuTitle()" in app_js
     assert 'querySelector("#global-status")' not in app_js
@@ -213,7 +216,10 @@ def test_index_branding_defaults_to_project_name_and_allows_explicit_override(
     assert 'title="Open mission-control menu"' in project_html
     assert 'aria-label="Open mission-control menu"' in project_html
     assert '<span class="spice-menu-label">mission-control</span>' in project_html
-    assert 'const spiceServeBranding = {"name": "mission-control"};' in project_html
+    assert (
+        'const spiceServeBranding = {"name": "mission-control", '
+        '"defaultLifetime": "Drive"};' in project_html
+    )
 
     pyproject.write_text(
         (
@@ -229,7 +235,10 @@ def test_index_branding_defaults_to_project_name_and_allows_explicit_override(
     assert 'title="Open Ops Console menu"' in override_html
     assert 'aria-label="Open Ops Console menu"' in override_html
     assert '<span class="spice-menu-label">Ops Console</span>' in override_html
-    assert 'const spiceServeBranding = {"name": "Ops Console"};' in override_html
+    assert (
+        'const spiceServeBranding = {"name": "Ops Console", '
+        '"defaultLifetime": "Drive"};' in override_html
+    )
 
 
 def test_static_branding_config_feeds_fast_mode_and_audio_titles():
@@ -707,10 +716,11 @@ def test_static_spice_menu_drag_manages_team_membership():
 
 def test_spice_menu_new_team_drop_keeps_created_team_near_drop_zone():
     script = Path(__file__).with_name("fixtures") / "spice_menu_new_team_order.js"
-    subprocess.run(
+    result = subprocess.run(
         ["node", str(script), str(STATIC_ROOT / "app.menu.js")],
         check=True,
     )
+    assert result.returncode == 0
 
 
 def test_static_empty_teams_reconcile_and_close_from_team_snapshot():

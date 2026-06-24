@@ -30,6 +30,10 @@ from spice.studies.shape import (
     name_cluster_error,
     name_cluster_errors,
 )
+from spice.studies.testquality import (
+    render_assertion_free_board,
+    scan_assertion_free_tests,
+)
 from spice.studies.typecheck import (
     PYRIGHT_ARGS,
     python_typecheck_argv,
@@ -116,6 +120,64 @@ def test_study_explicit_directory_reports_file_path_requirement(tmp_path, monkey
 
     with pytest.raises(SpiceError, match="file paths.*spice/serve"):
         args.func(args)
+
+
+def test_assertion_free_scanner_counts_tests_without_assertions(tmp_path):
+    path = tmp_path / "tests" / "test_quality.py"
+    path.parent.mkdir()
+    path.write_text(
+        "\n".join(
+            [
+                "import pytest",
+                "",
+                "def test_without_assertion():",
+                "    value = 1",
+                "",
+                "def test_with_assert():",
+                "    assert 1 == 1",
+                "",
+                "def test_with_pytest_raises():",
+                "    with pytest.raises(ValueError):",
+                "        raise ValueError('x')",
+                "",
+                "def helper_without_assertion():",
+                "    value = 2",
+                "",
+                "def test_nested_assertion_does_not_count():",
+                "    def helper():",
+                "        assert True",
+                "    helper()",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    findings = scan_assertion_free_tests([Path("tests/test_quality.py")], root=tmp_path)
+
+    assert [(f.path, f.line, f.test_name) for f in findings] == [
+        ("tests/test_quality.py", 3, "test_without_assertion"),
+        ("tests/test_quality.py", 16, "test_nested_assertion_does_not_count"),
+    ]
+
+
+def test_study_assertion_free_cli_reports_findings(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "tests" / "test_quality.py"
+    path.parent.mkdir()
+    path.write_text("def test_without_assertion():\n    value = 1\n", encoding="utf-8")
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    args = build_parser().parse_args(["study", "assertion-free-tests"])
+
+    assert args.func(args) == 1
+    output = capsys.readouterr().out
+    assert "assertion-free-tests: 1 test(s)" in output
+    assert "tests/test_quality.py:1 test_without_assertion" in output
+
+
+def test_assertion_free_board_reports_clean_baseline():
+    assert render_assertion_free_board([]) == (
+        "assertion-free-tests: no assertion-free tests found"
+    )
 
 
 def test_reachability_scans_test_files_outside_package_root(tmp_path):
