@@ -12,7 +12,7 @@ The spice UI is frameworkless by design — no build step means it cannot rot fr
 - **Orphaned playback cleanup**: A late-resolving `play()` that discovers its generation is stale calls `stopOrphanedPlayback(audio)` to terminate itself.
 
 **Enforcement**: `spice/serve/static/app.audio.js:543-586`  
-**Test coverage**: Frameworkless JS tests in `tests/test_serveplaywright.py`
+**Test coverage**: `tests/test_servestatic.py:test_audio_playback_enforces_single_owner`, `tests/test_speechprep.py:test_speech_burst_never_overlaps_audio`
 
 ### Speech queue and epoch abandonment
 **One global sequential queue across all lanes.** Speak/narrate/manual-play all feed the same `speechQueue`.
