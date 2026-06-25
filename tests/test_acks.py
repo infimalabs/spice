@@ -140,6 +140,21 @@ def test_split_preserves_preamble_and_segment_order():
     assert segments[1].content == "second answer."
 
 
+def test_ack_and_nack_segments_stop_at_next_keyed_marker():
+    nack_then_ack = f"NACK {KEY_A}: cannot comply.\nACK {KEY_B}: done."
+    ack_then_nack = f"ACK {KEY_A}: completed.\nNACK {KEY_B}: cannot comply."
+
+    nack_segments = extract_nack_segments_from_text(nack_then_ack)
+    ack_segments = extract_ack_segments_from_text(nack_then_ack)
+    assert [segment.content for segment in nack_segments] == ["cannot comply."]
+    assert [segment.content for segment in ack_segments] == ["done."]
+
+    ack_segments = extract_ack_segments_from_text(ack_then_nack)
+    nack_segments = extract_nack_segments_from_text(ack_then_nack)
+    assert [segment.content for segment in ack_segments] == ["completed."]
+    assert [segment.content for segment in nack_segments] == ["cannot comply."]
+
+
 def test_segment_content_drops_app_directive_lines():
     text = f'ACK {KEY_A}: shipped.\n::git-commit{{"sha":"abc"}}\ntrailing prose.'
     segments = extract_ack_segments_from_text(text)
@@ -347,6 +362,23 @@ def test_reasonless_nack_does_not_retire_pending_item(tmp_path):
     assert summary.refused == []
     assert summary.reasonless == [KEY_B]
     assert pending_inbox_count(tmp_path) == 1
+    assert [item.name for item in collect_inbox_items(tmp_path)] == [name]
+    assert collect_refused_inbox_items(tmp_path) == []
+
+
+def test_reasonless_nack_before_ack_does_not_refuse(tmp_path):
+    _init_repo(tmp_path)
+    name = f"{KEY_A}.txt"
+    write_inbox_item(
+        tmp_path,
+        name,
+        compose_inbox_text(body="needs a reasoned refusal", priority=None, stop=False),
+    )
+
+    summary = summarize_nack_archival(tmp_path, f"NACK {KEY_A}\nACK {KEY_B}: done.")
+
+    assert summary.refused == []
+    assert summary.reasonless == [KEY_A]
     assert [item.name for item in collect_inbox_items(tmp_path)] == [name]
     assert collect_refused_inbox_items(tmp_path) == []
 
