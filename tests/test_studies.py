@@ -421,6 +421,50 @@ def test_symbol_reachability_resolves_registry_literal_dispatch(tmp_path):
     assert flagged == {"handle_orphan"}
 
 
+def test_symbol_reachability_resolves_typed_parameter_method_calls(tmp_path):
+    (tmp_path / "spice" / "cli").mkdir(parents=True)
+    (tmp_path / "spice" / "serve" / "team").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "spice" / "cli" / "entry.py").write_text(
+        "from spice.helper import create_default_team\n"
+        "from spice.serve.team.store import ServeTeamStore\n"
+        "def main():\n"
+        "    return create_default_team(ServeTeamStore())\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "spice" / "helper.py").write_text(
+        "from spice.serve.team.store import ServeTeamStore\n"
+        "def create_default_team(team_store: ServeTeamStore):\n"
+        "    team_store.create_team()\n"
+        "    cached_store: ServeTeamStore = team_store\n"
+        "    return cached_store.rename_team()\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "spice" / "serve" / "team" / "store.py").write_text(
+        "class ServeTeamStore:\n"
+        "    def create_team(self):\n"
+        "        return 'created'\n\n"
+        "    def rename_team(self):\n"
+        "        return 'renamed'\n\n"
+        "    def test_only_method(self):\n"
+        "        return 'test-only'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_store.py").write_text(
+        "from spice.serve.team.store import ServeTeamStore\n"
+        "def test_store_methods():\n"
+        "    assert ServeTeamStore().create_team() == 'created'\n"
+        "    assert ServeTeamStore().rename_team() == 'renamed'\n"
+        "    assert ServeTeamStore().test_only_method() == 'test-only'\n",
+        encoding="utf-8",
+    )
+
+    findings = scan_symbol_reachability(tmp_path)
+
+    flagged = {f.symbol for f in findings}
+    assert flagged == {"ServeTeamStore.test_only_method"}
+
+
 def test_symbol_reachability_allowlist_exempts_qualified_symbol(tmp_path):
     _write_symbol_reachability_repo(tmp_path)
 

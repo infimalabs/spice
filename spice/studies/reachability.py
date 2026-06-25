@@ -89,6 +89,7 @@ class _SymbolDefinition:
     module_path: Path
     symbol: str
     kind: str
+    return_class: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -160,10 +161,18 @@ def scan_symbol_reachability(
     ]
     test_paths = list(test_dir.rglob("*.py"))
     prod_refs, _prod_importers = _collect_symbol_refs(
-        prod_paths, definitions, pkg_root=pkg_root, package=package
+        prod_paths,
+        definitions,
+        pkg_root=pkg_root,
+        package=package,
+        enhanced_aliases=True,
     )
     test_refs, test_importers = _collect_symbol_refs(
-        test_paths, definitions, pkg_root=pkg_root, package=package
+        test_paths,
+        definitions,
+        pkg_root=pkg_root,
+        package=package,
+        enhanced_aliases=False,
     )
 
     allowset = {*SYMBOL_REACHABILITY_ALLOWLIST, *allowlist}
@@ -371,11 +380,18 @@ def _collect_symbol_definitions(
             tree = ast.parse(path.read_bytes())
         except (SyntaxError, OSError):
             continue
+        local_classes = {
+            node.name for node in tree.body if isinstance(node, ast.ClassDef)
+        }
         for node in tree.body:
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 ref = _SymbolRef(module, node.name)
                 definitions[ref] = _SymbolDefinition(
-                    module, path, node.name, "function"
+                    module,
+                    path,
+                    node.name,
+                    "function",
+                    _local_return_class(node.returns, module, local_classes),
                 )
             elif isinstance(node, ast.ClassDef):
                 ref = _SymbolRef(module, node.name)
@@ -390,12 +406,21 @@ def _collect_symbol_definitions(
     return definitions
 
 
+def _local_return_class(
+    annotation: ast.AST | None, module: str, local_classes: set[str]
+) -> tuple[str, str] | None:
+    if isinstance(annotation, ast.Name) and annotation.id in local_classes:
+        return (module, annotation.id)
+    return None
+
+
 def _collect_symbol_refs(
     paths: list[Path],
     definitions: dict[_SymbolRef, _SymbolDefinition],
     *,
     pkg_root: Path,
     package: str,
+    enhanced_aliases: bool,
 ) -> tuple[set[_SymbolRef], dict[_SymbolRef, set[str]]]:
     refs: set[_SymbolRef] = set()
     importers: dict[_SymbolRef, set[str]] = {}
@@ -420,6 +445,7 @@ def _collect_symbol_refs(
             path,
             package,
             current_module,
+            enhanced_aliases=enhanced_aliases,
         )
         refs.update(path_refs)
         display = path.name
@@ -436,12 +462,15 @@ def _symbol_refs_for_tree(
     path: Path,
     package: str,
     current_module: str | None,
+    *,
+    enhanced_aliases: bool,
 ) -> set[_SymbolRef]:
     refs: set[_SymbolRef] = set()
     symbol_aliases: dict[str, _SymbolRef] = {}
     module_aliases: dict[str, str] = {}
     class_aliases: dict[str, tuple[str, str]] = {}
     instance_aliases: dict[str, tuple[str, str]] = {}
+    call_result_aliases: dict[str, tuple[str, str]] = {}
     external_base_aliases: set[str] = set()
 
     _seed_local_symbol_aliases(
@@ -451,6 +480,7 @@ def _symbol_refs_for_tree(
         class_symbols,
         symbol_aliases,
         class_aliases,
+        call_result_aliases,
     )
     _collect_import_symbol_refs(
         tree,
@@ -463,6 +493,7 @@ def _symbol_refs_for_tree(
         symbol_aliases,
         module_aliases,
         class_aliases,
+        call_result_aliases,
         external_base_aliases,
     )
     _collect_usage_symbol_refs(
@@ -474,6 +505,8 @@ def _symbol_refs_for_tree(
         module_aliases,
         class_aliases,
         instance_aliases,
+        call_result_aliases,
+        enhanced_aliases=enhanced_aliases,
     )
     if current_module is not None:
         refs.update(_refs_from_local_class_methods(tree, definitions, current_module))
@@ -492,6 +525,7 @@ def _seed_local_symbol_aliases(
     class_symbols: set[tuple[str, str]],
     symbol_aliases: dict[str, _SymbolRef],
     class_aliases: dict[str, tuple[str, str]],
+    call_result_aliases: dict[str, tuple[str, str]],
 ) -> None:
     if current_module is None:
         return
@@ -501,7 +535,10 @@ def _seed_local_symbol_aliases(
         ref = _SymbolRef(current_module, symbol)
         if ref not in definitions:
             continue
+        definition = definitions[ref]
         symbol_aliases[symbol] = ref
+        if definition.return_class is not None:
+            call_result_aliases[symbol] = definition.return_class
         if (current_module, symbol) in class_symbols:
             class_aliases[symbol] = (current_module, symbol)
 
@@ -517,6 +554,7 @@ def _collect_import_symbol_refs(
     symbol_aliases: dict[str, _SymbolRef],
     module_aliases: dict[str, str],
     class_aliases: dict[str, tuple[str, str]],
+    call_result_aliases: dict[str, tuple[str, str]],
     external_base_aliases: set[str],
 ) -> None:
     for node in ast.walk(tree):
@@ -536,6 +574,7 @@ def _collect_import_symbol_refs(
                 symbol_aliases,
                 module_aliases,
                 class_aliases,
+                call_result_aliases,
                 external_base_aliases,
             )
 
@@ -566,6 +605,7 @@ def _collect_import_from_aliases(
     symbol_aliases: dict[str, _SymbolRef],
     module_aliases: dict[str, str],
     class_aliases: dict[str, tuple[str, str]],
+    call_result_aliases: dict[str, tuple[str, str]],
     external_base_aliases: set[str],
 ) -> None:
     module = _resolve_relative(path, node.module or "", node.level, package)
@@ -580,9 +620,12 @@ def _collect_import_from_aliases(
             module_aliases[asname] = candidate_module
             continue
         ref = _SymbolRef(module, alias.name)
-        if ref in definitions:
+        definition = definitions.get(ref)
+        if definition is not None:
             refs.add(ref)
             symbol_aliases[asname] = ref
+            if definition.return_class is not None:
+                call_result_aliases[asname] = definition.return_class
             if (ref.module, ref.symbol) in class_symbols:
                 class_aliases[asname] = (ref.module, ref.symbol)
             continue
@@ -599,13 +642,20 @@ def _collect_usage_symbol_refs(
     module_aliases: dict[str, str],
     class_aliases: dict[str, tuple[str, str]],
     instance_aliases: dict[str, tuple[str, str]],
+    call_result_aliases: dict[str, tuple[str, str]],
+    *,
+    enhanced_aliases: bool,
 ) -> None:
+    _collect_usage_aliases(
+        tree,
+        module_aliases,
+        class_aliases,
+        instance_aliases,
+        call_result_aliases,
+        enhanced_aliases=enhanced_aliases,
+    )
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            _collect_assignment_aliases(
-                node, module_aliases, class_aliases, instance_aliases
-            )
-        elif isinstance(node, ast.Name) and node.id in symbol_aliases:
+        if isinstance(node, ast.Name) and node.id in symbol_aliases:
             refs.add(symbol_aliases[node.id])
         elif isinstance(node, ast.Attribute):
             refs.update(
@@ -616,8 +666,75 @@ def _collect_usage_symbol_refs(
                     module_aliases,
                     class_aliases,
                     instance_aliases,
+                    call_result_aliases,
                 )
             )
+
+
+def _collect_usage_aliases(
+    tree: ast.AST,
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+    instance_aliases: dict[str, tuple[str, str]],
+    call_result_aliases: dict[str, tuple[str, str]],
+    *,
+    enhanced_aliases: bool,
+) -> None:
+    if not enhanced_aliases:
+        _collect_legacy_assignment_aliases(
+            tree, module_aliases, class_aliases, instance_aliases
+        )
+        return
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                changed = (
+                    _collect_assignment_aliases(
+                        node,
+                        module_aliases,
+                        class_aliases,
+                        instance_aliases,
+                        call_result_aliases,
+                    )
+                    or changed
+                )
+            elif isinstance(node, ast.AnnAssign):
+                changed = (
+                    _collect_annotated_assignment_alias(
+                        node,
+                        module_aliases,
+                        class_aliases,
+                        instance_aliases,
+                        call_result_aliases,
+                    )
+                    or changed
+                )
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                changed = (
+                    _collect_parameter_annotation_aliases(
+                        node, module_aliases, class_aliases, instance_aliases
+                    )
+                    or changed
+                )
+
+
+def _collect_legacy_assignment_aliases(
+    tree: ast.AST,
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+    instance_aliases: dict[str, tuple[str, str]],
+) -> None:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        class_ref = _class_ref_from_expr(node.value, module_aliases, class_aliases)
+        if class_ref is None:
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                instance_aliases[target.id] = class_ref
 
 
 def _collect_assignment_aliases(
@@ -625,13 +742,87 @@ def _collect_assignment_aliases(
     module_aliases: dict[str, str],
     class_aliases: dict[str, tuple[str, str]],
     instance_aliases: dict[str, tuple[str, str]],
-) -> None:
-    class_ref = _class_ref_from_expr(node.value, module_aliases, class_aliases)
+    call_result_aliases: dict[str, tuple[str, str]],
+) -> bool:
+    class_ref = _class_ref_from_assignment_value(
+        node.value, module_aliases, class_aliases, instance_aliases, call_result_aliases
+    )
     if class_ref is None:
-        return
+        return False
+    changed = False
     for target in node.targets:
-        if isinstance(target, ast.Name):
-            instance_aliases[target.id] = class_ref
+        if alias_key := _instance_alias_key(target):
+            changed = (
+                _set_instance_alias(instance_aliases, alias_key, class_ref) or changed
+            )
+    return changed
+
+
+def _collect_annotated_assignment_alias(
+    node: ast.AnnAssign,
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+    instance_aliases: dict[str, tuple[str, str]],
+    call_result_aliases: dict[str, tuple[str, str]],
+) -> bool:
+    alias_key = _instance_alias_key(node.target)
+    if alias_key is None:
+        return False
+    class_ref = _class_ref_from_annotation(
+        node.annotation, module_aliases, class_aliases
+    )
+    if class_ref is None and node.value is not None:
+        class_ref = _class_ref_from_assignment_value(
+            node.value,
+            module_aliases,
+            class_aliases,
+            instance_aliases,
+            call_result_aliases,
+        )
+    if class_ref is not None:
+        return _set_instance_alias(instance_aliases, alias_key, class_ref)
+    return False
+
+
+def _collect_parameter_annotation_aliases(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+    instance_aliases: dict[str, tuple[str, str]],
+) -> bool:
+    changed = False
+    args = [
+        *node.args.posonlyargs,
+        *node.args.args,
+        *node.args.kwonlyargs,
+    ]
+    if node.args.vararg is not None:
+        args.append(node.args.vararg)
+    if node.args.kwarg is not None:
+        args.append(node.args.kwarg)
+    for arg in args:
+        if arg.annotation is None:
+            continue
+        class_ref = _class_ref_from_annotation(
+            arg.annotation, module_aliases, class_aliases
+        )
+        if class_ref is not None:
+            changed = (
+                _set_instance_alias(instance_aliases, arg.arg, class_ref) or changed
+            )
+    return changed
+
+
+def _set_instance_alias(
+    instance_aliases: dict[str, tuple[str, str]],
+    alias_key: str,
+    class_ref: tuple[str, str],
+) -> bool:
+    existing = instance_aliases.get(alias_key)
+    if existing is not None:
+        return False
+    instance_aliases[alias_key] = class_ref
+    return True
 
 
 def _refs_from_local_class_methods(
@@ -710,6 +901,7 @@ def _refs_from_attribute(
     module_aliases: dict[str, str],
     class_aliases: dict[str, tuple[str, str]],
     instance_aliases: dict[str, tuple[str, str]],
+    call_result_aliases: dict[str, tuple[str, str]],
 ) -> set[_SymbolRef]:
     refs: set[_SymbolRef] = set()
     if isinstance(node.value, ast.Name):
@@ -718,15 +910,23 @@ def _refs_from_attribute(
             ref = _SymbolRef(module, node.attr)
             if ref in definitions:
                 refs.add(ref)
-        class_ref = class_aliases.get(node.value.id) or instance_aliases.get(
-            node.value.id
-        )
+        class_ref = class_aliases.get(node.value.id)
+        if class_ref is None:
+            class_ref = _class_ref_from_instance_expr(node.value, instance_aliases)
+        if class_ref is not None:
+            ref = _SymbolRef(class_ref[0], f"{class_ref[1]}.{node.attr}")
+            if ref in definitions:
+                refs.add(ref)
+    elif isinstance(node.value, ast.Attribute):
+        class_ref = _class_ref_from_instance_expr(node.value, instance_aliases)
         if class_ref is not None:
             ref = _SymbolRef(class_ref[0], f"{class_ref[1]}.{node.attr}")
             if ref in definitions:
                 refs.add(ref)
     elif isinstance(node.value, ast.Call):
-        class_ref = _class_ref_from_expr(node.value.func, module_aliases, class_aliases)
+        class_ref = _class_ref_from_call(
+            node.value, module_aliases, class_aliases, call_result_aliases
+        )
         if class_ref is not None:
             ref = _SymbolRef(class_ref[0], f"{class_ref[1]}.{node.attr}")
             if ref in definitions:
@@ -736,6 +936,50 @@ def _refs_from_attribute(
     if chain:
         refs.update(_refs_from_chain(chain, definitions, by_module, module_aliases))
     return refs
+
+
+def _class_ref_from_assignment_value(
+    node: ast.AST,
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+    instance_aliases: dict[str, tuple[str, str]],
+    call_result_aliases: dict[str, tuple[str, str]],
+) -> tuple[str, str] | None:
+    if isinstance(node, ast.Call):
+        return _class_ref_from_call(
+            node, module_aliases, class_aliases, call_result_aliases
+        )
+    class_ref = _class_ref_from_expr(node, module_aliases, class_aliases)
+    if class_ref is not None:
+        return class_ref
+    return _class_ref_from_instance_expr(node, instance_aliases)
+
+
+def _class_ref_from_call(
+    node: ast.Call,
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+    call_result_aliases: dict[str, tuple[str, str]],
+) -> tuple[str, str] | None:
+    return _class_ref_from_expr(
+        node.func, module_aliases, class_aliases
+    ) or _class_ref_from_call_result(node.func, call_result_aliases)
+
+
+def _class_ref_from_call_result(
+    node: ast.AST, call_result_aliases: dict[str, tuple[str, str]]
+) -> tuple[str, str] | None:
+    if alias_key := _instance_alias_key(node):
+        return call_result_aliases.get(alias_key)
+    return None
+
+
+def _class_ref_from_instance_expr(
+    node: ast.AST, instance_aliases: dict[str, tuple[str, str]]
+) -> tuple[str, str] | None:
+    if alias_key := _instance_alias_key(node):
+        return instance_aliases.get(alias_key)
+    return None
 
 
 def _refs_from_chain(
@@ -783,6 +1027,57 @@ def _class_ref_from_expr(
     return None
 
 
+def _class_ref_from_annotation(
+    node: ast.AST,
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+) -> tuple[str, str] | None:
+    if class_ref := _class_ref_from_expr(node, module_aliases, class_aliases):
+        return class_ref
+    if isinstance(node, ast.Subscript):
+        wrapper = _annotation_wrapper_name(node.value)
+        if wrapper in {"Optional", "Annotated"}:
+            return _class_ref_from_annotation(node.slice, module_aliases, class_aliases)
+        if wrapper == "Union":
+            return _class_ref_from_union_members(
+                node.slice, module_aliases, class_aliases
+            )
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _class_ref_from_annotation(
+            node.left, module_aliases, class_aliases
+        ) or _class_ref_from_annotation(node.right, module_aliases, class_aliases)
+    if isinstance(node, ast.Tuple):
+        for item in node.elts:
+            if class_ref := _class_ref_from_annotation(
+                item, module_aliases, class_aliases
+            ):
+                return class_ref
+    return None
+
+
+def _class_ref_from_union_members(
+    node: ast.AST,
+    module_aliases: dict[str, str],
+    class_aliases: dict[str, tuple[str, str]],
+) -> tuple[str, str] | None:
+    if isinstance(node, ast.Tuple):
+        for item in node.elts:
+            if class_ref := _class_ref_from_annotation(
+                item, module_aliases, class_aliases
+            ):
+                return class_ref
+        return None
+    return _class_ref_from_annotation(node, module_aliases, class_aliases)
+
+
+def _annotation_wrapper_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    chain = _attribute_chain(node)
+    return chain[-1] if chain else ""
+
+
 def _attribute_chain(node: ast.AST) -> list[str] | None:
     parts: list[str] = []
     current = node
@@ -793,3 +1088,10 @@ def _attribute_chain(node: ast.AST) -> list[str] | None:
         parts.append(current.id)
         return list(reversed(parts))
     return None
+
+
+def _instance_alias_key(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    chain = _attribute_chain(node)
+    return ".".join(chain) if chain else None
