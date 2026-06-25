@@ -52,9 +52,16 @@ the operator keeps normal repository semantics.
 
 ## Credibility signal
 
-The harness is exercised against **27,267 lines of Python tests against 34,602
-lines of Python source** — about 0.79 test lines per source line, counted from
-tracked `tests/*.py` and `spice/*.py` files with `wc -l`.
+The strongest signal is not the line ratio. spice's own gate demands assertion
+density, rejects assertion-free tests, runs integration paths against real
+binaries such as Git and Taskwarrior, and treats module and symbol reachability
+as zero-tolerance production wiring checks. The same self-passing constitution
+that keeps this repository honest is what `spice init` installs elsewhere.
+
+As a trailing scale check, the tracked tree is roughly **29k lines of Python
+tests against 38k lines of Python source**, about **0.8 test lines per source
+line**. The repo-doc gate recomputes those rounded `tests/*.py` and `spice/*.py`
+figures and fails when the README drifts beyond tolerance.
 
 A separate hardware stressor is kept deliberately narrow: spice has been
 battle-tested against real hardware workflows, including an agent-driven Meta
@@ -142,8 +149,8 @@ agent driver (today: Codex or Claude Code).
 
 It will fight you if your craft lives in the text, you want a tool that bends
 to your opinions instead of supplying its own, you're on an unsupported agent
-driver, or you need something stable and supported today. That isn't a defect —
-it's the tool selecting its operator.
+driver, or you need something stable and supported today. That isn't a defect;
+it is the cost of a narrow workflow with load-bearing opinions.
 
 ## Install
 
