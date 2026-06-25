@@ -86,6 +86,11 @@
 }
 .message-body p { margin: 0 0 6px; }
 .message-body p:last-child { margin-bottom: 0; }
+.message-body hr {
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  margin: 10px 0;
+}
 .message-body a {
   color: color-mix(in srgb, var(--accent-strong) 82%, var(--fg));
   font-weight: 600;
