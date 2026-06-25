@@ -469,12 +469,12 @@ def publish_release(
     wheel = Path("dist") / f"spice_harness-{version}-py3-none-any.whl"
     token = read_pypi_token()
 
-    # Push the release commit (made on a synchronized lane) to origin/main by
-    # ref, so the local branch name does not have to be `main`.
-    run(["git", "push", "origin", "HEAD:main"])
     env = dict(os.environ)
     env["UV_PUBLISH_TOKEN"] = token
     run(["uv", "publish", "--dry-run", str(sdist), str(wheel)], env=env)
+    # Push the release commit (made on a synchronized lane) to origin/main by
+    # ref, so the local branch name does not have to be `main`.
+    run(["git", "push", "origin", "HEAD:main"])
     run(["uv", "publish", str(sdist), str(wheel)], env=env)
     wait_for_pypi(version)
     publish_github_release(version, notes_file, release_commit=release_commit)

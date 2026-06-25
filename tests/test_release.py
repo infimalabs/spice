@@ -280,7 +280,6 @@ def test_publish_release_with_head_commit_uses_current_artifacts(monkeypatch):
 
     assert calls == [
         ("git", ("rev-parse", "HEAD")),
-        ("run", ["git", "push", "origin", "HEAD:main"], False),
         (
             "run",
             [
@@ -292,6 +291,7 @@ def test_publish_release_with_head_commit_uses_current_artifacts(monkeypatch):
             ],
             True,
         ),
+        ("run", ["git", "push", "origin", "HEAD:main"], False),
         (
             "run",
             [
