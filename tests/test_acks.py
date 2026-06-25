@@ -75,6 +75,35 @@ def test_keys_only_extracted_from_valid_headers():
     assert list(extract_ack_keys_from_text(text)) == [KEY_B]
 
 
+def test_negated_ack_mentions_do_not_extract_keys():
+    guarded = [
+        f"I will not ACK {KEY_A}: this steering conflicts.",
+        f"I will-not ACK {KEY_A}: this steering conflicts.",
+        f"I refuse to ACK {KEY_A}: this steering conflicts.",
+        f"I cannot ACK {KEY_A}: this steering conflicts.",
+        f"Use the alternative instead of ACK {KEY_A}: this steering conflicts.",
+        f"Use the alternative instead-of ACK {KEY_A}: this steering conflicts.",
+    ]
+
+    for text in guarded:
+        assert list(extract_ack_keys_from_text(text)) == []
+        assert extract_ack_segments_from_text(text) == []
+
+
+def test_hypothetical_and_narrated_ack_mentions_do_not_extract_keys():
+    guarded = [
+        f"If I ACK {KEY_A}: the key would be retired.",
+        f"Hypothetically ACK {KEY_A}: would retire the key.",
+        f'The instruction says "ACK {KEY_A}: done" as an example.',
+        f"The instruction says 'ACK {KEY_A}: done' as an example.",
+        f"To acknowledge, write `ACK {KEY_A}: done` near the start.",
+    ]
+
+    for text in guarded:
+        assert list(extract_ack_keys_from_text(text)) == []
+        assert extract_ack_segments_from_text(text) == []
+
+
 def test_split_preserves_preamble_and_segment_order():
     text = (
         "Some leading prose about the work.\n"
