@@ -5,7 +5,10 @@ from __future__ import annotations
 import io
 import subprocess
 from argparse import Namespace
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 
 import pytest
 
@@ -19,6 +22,97 @@ from spice.mail.inbox import (
     compose_inbox_text,
     inbox_item_key,
     write_inbox_item,
+)
+
+MAXIM_CORPUS_RECALL_FLOOR = 1.0
+MAXIM_CORPUS_FALSE_POSITIVE_RATE_CEILING = 0.0
+
+
+@dataclass(frozen=True)
+class _MaximCorpusCase:
+    maxim_name: str
+    statement: str
+    violates: bool
+
+
+@dataclass(frozen=True)
+class _MaximCorpusScore:
+    violating: int
+    detected: int
+    compliant: int
+    false_positives: int
+    judge_calls: int
+
+    @property
+    def recall(self) -> float:
+        return self.detected / self.violating
+
+    @property
+    def false_positive_rate(self) -> float:
+        return self.false_positives / self.compliant
+
+
+_LABELED_MAXIM_CORPUS = (
+    _MaximCorpusCase(
+        "polling",
+        "I will add a retry loop that sleeps until the file appears.",
+        True,
+    ),
+    _MaximCorpusCase(
+        "polling",
+        "I will react to the file watcher event and remove the wait.",
+        False,
+    ),
+    _MaximCorpusCase(
+        "fallbacks",
+        "I will fall back to a quiet default if the contract is unclear.",
+        True,
+    ),
+    _MaximCorpusCase(
+        "fallbacks",
+        "I will require the configured path and fail loudly when it is missing.",
+        False,
+    ),
+    _MaximCorpusCase(
+        "backwards-compat",
+        "I will preserve backwards compatibility by keeping the old caller path.",
+        True,
+    ),
+    _MaximCorpusCase(
+        "backwards-compat",
+        "I will update every caller to the new contract and remove the old path.",
+        False,
+    ),
+    _MaximCorpusCase(
+        "shims",
+        "I will add a shim between the old response shape and the new one.",
+        True,
+    ),
+    _MaximCorpusCase(
+        "shims",
+        "I will replace the old response shape directly and update every caller.",
+        False,
+    ),
+    _MaximCorpusCase(
+        "aliases",
+        "I will add an alias so both command names work.",
+        True,
+    ),
+    _MaximCorpusCase(
+        "aliases",
+        "I will rename the command in place and update every reference.",
+        False,
+    ),
+    _MaximCorpusCase(
+        "legacy",
+        "I will keep the legacy branch around as commented history.",
+        True,
+    ),
+    _MaximCorpusCase(
+        "legacy",
+        "I will delete the obsolete branch and use the current path.",
+        False,
+    ),
 )
 
 
@@ -267,6 +361,16 @@ def test_builtin_fallback_maxim_allows_explicit_defaults_and_resolver_order():
     assert "fail loudly" in message
 
 
+def test_dual_judge_maxim_corpus_recall_and_false_positive_rate():
+    score = _score_labeled_maxim_corpus(_LABELED_MAXIM_CORPUS)
+
+    assert score.recall >= MAXIM_CORPUS_RECALL_FLOOR
+    assert score.false_positive_rate <= MAXIM_CORPUS_FALSE_POSITIVE_RATE_CEILING
+    assert (
+        score.judge_calls == len(_LABELED_MAXIM_CORPUS) * maxims.PARALLEL_MAXIM_JUDGES
+    )
+
+
 def test_repo_config_declares_custom_mode_words_for_show_and_meta_judge(
     tmp_path, monkeypatch, capsys
 ):
@@ -361,6 +465,74 @@ def _make_every_maxim_violate(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(watchdog, "evaluate_maxim_any_violation", judge_violation)
+
+
+def _score_labeled_maxim_corpus(
+    corpus: Sequence[_MaximCorpusCase],
+) -> _MaximCorpusScore:
+    backend, judge_calls = _labeled_corpus_backend(corpus)
+    detected = 0
+    false_positives = 0
+    violating = 0
+    compliant = 0
+    for case in corpus:
+        verdict = maxims.evaluate_maxim_any_violation(
+            maxims.builtin_maxim(case.maxim_name),
+            case.statement,
+            backend=backend,
+            max_attempts=1,
+        )
+        predicted_violation = not verdict.agrees
+        if case.violates:
+            violating += 1
+            if predicted_violation:
+                detected += 1
+        else:
+            compliant += 1
+            if predicted_violation:
+                false_positives += 1
+    return _MaximCorpusScore(
+        violating=violating,
+        detected=detected,
+        compliant=compliant,
+        false_positives=false_positives,
+        judge_calls=judge_calls(),
+    )
+
+
+def _labeled_corpus_backend(
+    corpus: Sequence[_MaximCorpusCase],
+) -> tuple[maxims.JudgeBackend, Callable[[], int]]:
+    lock = Lock()
+    calls_by_statement: dict[str, int] = {}
+    corpus_by_statement = {
+        maxims.normalize_field(case.statement): case for case in corpus
+    }
+
+    def backend(prompt: str) -> str:
+        statement = _prompt_corpus_statement(prompt, corpus_by_statement)
+        case = corpus_by_statement[statement]
+        with lock:
+            call_index = calls_by_statement.get(statement, 0)
+            calls_by_statement[statement] = call_index + 1
+        if not case.violates:
+            return "YES"
+        return "YES" if call_index == 0 else "NO"
+
+    def judge_calls() -> int:
+        with lock:
+            return sum(calls_by_statement.values())
+
+    return backend, judge_calls
+
+
+def _prompt_corpus_statement(
+    prompt: str, corpus_by_statement: dict[str, _MaximCorpusCase]
+) -> str:
+    for statement in corpus_by_statement:
+        if f'"{statement}"' in prompt:
+            return statement
+    raise AssertionError(f"prompt did not contain a labeled corpus statement: {prompt}")
 
 
 class _FakeProcess:
