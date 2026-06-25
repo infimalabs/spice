@@ -28,6 +28,7 @@ WEBSOCKET_TEXT_OPCODE = 0x1
 WEBSOCKET_CLOSE_OPCODE = 0x8
 WEBSOCKET_PING_OPCODE = 0x9
 WEBSOCKET_PONG_OPCODE = 0xA
+ORIGIN_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 class WebSocketDisconnect(Exception):
@@ -197,14 +198,20 @@ def websocket_origin_allowed(handler: Any) -> bool:
     origin = handler.headers.get("Origin")
     if not origin:
         return False
-    origin_parts = _authority_parts(urlsplit(origin).netloc.lower())
+    parsed_origin = urlsplit(origin)
+    origin_parts = _authority_parts(
+        parsed_origin.netloc.lower(),
+        default_port=ORIGIN_DEFAULT_PORTS.get(parsed_origin.scheme.lower()),
+    )
     if origin_parts is None:
         return False
     origin_authority = _format_authority(origin_parts[0], origin_parts[1])
     return origin_authority in websocket_request_authorities(handler)
 
 
-def _authority_parts(authority: str) -> tuple[str, int] | None:
+def _authority_parts(
+    authority: str, *, default_port: int | None = None
+) -> tuple[str, int] | None:
     if not authority:
         return None
     parsed = urlsplit(f"//{authority}")
@@ -216,7 +223,9 @@ def _authority_parts(authority: str) -> tuple[str, int] | None:
     except ValueError:
         return None
     if port is None:
-        return None
+        if default_port is None:
+            return None
+        port = default_port
     return host, port
 
 

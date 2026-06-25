@@ -66,6 +66,57 @@ def test_same_origin_upgrade_is_accepted():
     assert handler.errors == []
 
 
+def test_portless_default_http_origin_uses_port_80():
+    handler = _FakeHandler(
+        {
+            "Host": "127.0.0.1:80",
+            "Origin": "http://127.0.0.1",
+            "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+        },
+        bind=("127.0.0.1", 80),
+    )
+
+    connection = accept_websocket(handler)
+
+    assert isinstance(connection, WebSocketConnection)
+    assert handler.responses == [HTTPStatus.SWITCHING_PROTOCOLS]
+    assert handler.errors == []
+
+
+def test_portless_default_https_origin_uses_port_443():
+    handler = _FakeHandler(
+        {
+            "Host": "127.0.0.1:443",
+            "Origin": "https://127.0.0.1",
+            "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+        },
+        bind=("127.0.0.1", 443),
+    )
+
+    connection = accept_websocket(handler)
+
+    assert isinstance(connection, WebSocketConnection)
+    assert handler.responses == [HTTPStatus.SWITCHING_PROTOCOLS]
+    assert handler.errors == []
+
+
+def test_portless_default_http_origin_still_rejects_cross_site():
+    handler = _FakeHandler(
+        {
+            "Host": "127.0.0.1:80",
+            "Origin": "http://evil.example",
+            "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+        },
+        bind=("127.0.0.1", 80),
+    )
+
+    connection = accept_websocket(handler)
+
+    assert connection is None
+    assert handler.errors == [(HTTPStatus.FORBIDDEN, "cross-origin WebSocket rejected")]
+    assert handler.responses == []
+
+
 def test_loopback_host_alias_upgrade_is_accepted():
     handler = _FakeHandler(
         {
