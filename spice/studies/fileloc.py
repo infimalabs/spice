@@ -106,8 +106,18 @@ def scan_staged_loc_violations(
     flex_limit_value: int | None = None,
     byte_limit: int = FILE_BYTE_LIMIT,
     byte_flex_limit_value: int | None = None,
+    persist: bool = False,
 ) -> list[LocFinding]:
-    """Scan staged paths, updating sticky state with new flex breaches."""
+    """Scan staged paths against the flex+sticky line/byte limits.
+
+    New flex breaches are folded into the sticky set used to compute this
+    call's findings. Persisting that set to the git dir is the committing
+    gate's job and is **opt-in**: pass ``persist=True`` (the gate does). A
+    reporting or study caller leaves it ``False`` so the scan is a pure query
+    that never advances shared sticky state. The gate must pair a
+    ``persist=True`` scan with ``clear_file_loc_sticky_state`` on success — the
+    scan ratchets the set up; the clear prunes it down once the tree passes.
+    """
     line_flex = flex_limit_value if flex_limit_value is not None else flex_limit(limit)
     byte_flex = (
         byte_flex_limit_value
@@ -133,10 +143,11 @@ def scan_staged_loc_violations(
         flex=byte_flex,
         measure=count_file_bytes,
     )
-    if updated_line_sticky != loaded_line_sticky:
-        _save_sticky(updated_line_sticky, root, FILE_LOC_STICKY_STATE_GIT_PATH)
-    if updated_byte_sticky != loaded_byte_sticky:
-        _save_sticky(updated_byte_sticky, root, FILE_BYTE_STICKY_STATE_GIT_PATH)
+    if persist:
+        if updated_line_sticky != loaded_line_sticky:
+            _save_sticky(updated_line_sticky, root, FILE_LOC_STICKY_STATE_GIT_PATH)
+        if updated_byte_sticky != loaded_byte_sticky:
+            _save_sticky(updated_byte_sticky, root, FILE_BYTE_STICKY_STATE_GIT_PATH)
     return scan_loc_violations(
         paths,
         root=root,

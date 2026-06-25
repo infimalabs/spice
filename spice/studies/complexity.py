@@ -174,7 +174,18 @@ def scan_staged_complexity_violations(
     max_length: int = COMPLEXITY_MAX_LENGTH,
     ccn_flex_limit_value: int | None = None,
     length_flex_limit_value: int | None = None,
+    persist: bool = False,
 ) -> list[ComplexityFinding]:
+    """Scan staged routines against the flex+sticky CCN/length limits.
+
+    New flex breaches are folded into the sticky set used to compute this
+    call's findings. Persisting that set to the git dir is **opt-in**: pass
+    ``persist=True`` (the committing gate does); a reporting or study caller
+    leaves it ``False`` so the scan is a pure query that never advances shared
+    sticky state. A ``persist=True`` scan must be paired with
+    ``clear_complexity_sticky_state`` on gate success — scan ratchets up, clear
+    prunes down once the tree passes.
+    """
     records = collect_complexity_records(paths, root=root)
     renames = staged_renames(root)
     ccn_sticky = sticky_function_keys_after_renames(
@@ -205,10 +216,11 @@ def scan_staged_complexity_violations(
         key_for_item=lambda record: record.key,
         is_breach=lambda record: record.length > length_flex,
     )
-    if updated_ccn_sticky != ccn_sticky:
-        _save_sticky(updated_ccn_sticky, root, COMPLEXITY_CCN_STICKY_GIT_PATH)
-    if updated_length_sticky != length_sticky:
-        _save_sticky(updated_length_sticky, root, COMPLEXITY_LENGTH_STICKY_GIT_PATH)
+    if persist:
+        if updated_ccn_sticky != ccn_sticky:
+            _save_sticky(updated_ccn_sticky, root, COMPLEXITY_CCN_STICKY_GIT_PATH)
+        if updated_length_sticky != length_sticky:
+            _save_sticky(updated_length_sticky, root, COMPLEXITY_LENGTH_STICKY_GIT_PATH)
     findings: list[ComplexityFinding] = []
     for record in records:
         ccn_limit = max_ccn if record.key in updated_ccn_sticky else ccn_flex

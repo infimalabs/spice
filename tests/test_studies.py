@@ -905,6 +905,7 @@ def test_generated_lockfiles_are_pruned_from_file_shape_sticky_state(
         flex_limit_value=10,
         byte_limit=100,
         byte_flex_limit_value=100,
+        persist=True,
     )
 
     assert findings == []

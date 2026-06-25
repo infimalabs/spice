@@ -355,7 +355,15 @@ explicit contract update. Underscored names remain private.
 - `spice.studies.fileloc`, `spice.studies.complexity`,
   `spice.studies.magicnums`, and `spice.studies.envpolicy`: finding
   dataclasses plus `scan_*`, `detect_*`, and `render_*_board` helpers for
-  project-specific studies.
+  project-specific studies. The flex+sticky scans
+  (`scan_staged_loc_violations`, `scan_staged_complexity_violations`) are pure
+  queries by default; only a committing gate passes `persist=True` to advance
+  the sticky floor, and it must pair that with the matching
+  `clear_file_loc_sticky_state` / `clear_complexity_sticky_state` on gate
+  success. The scan ratchets the sticky set up (a flex breach holds the file to
+  the base limit); the success-clear prunes it down (a file back under base is
+  released). Run one half without the other and you get permanent ratcheting or
+  no release at all.
 
 Everything else is an internal implementation detail unless this section names
 it. A repo tool that needs an unlisted module should either vendor that helper
