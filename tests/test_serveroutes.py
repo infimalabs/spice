@@ -23,7 +23,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
     write_inbox_item,
 )
-from spice.serve import agentapi
+from spice.serve import agentapi, web as serve_web
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import (
     team_command_response_payload,
@@ -701,3 +701,24 @@ def test_index_links_and_serves_packaged_favicon():
     assert handler.headers["Content-Length"] == str(favicon.stat().st_size)
     assert "icon" in handler.headers["Content-Type"]
     assert handler.body.getvalue().startswith(b"\x00\x00\x01\x00")
+
+
+def test_static_asset_rejects_shared_prefix_sibling_paths(tmp_path, monkeypatch):
+    static_root = tmp_path / "static"
+    static_root.mkdir()
+    static_xyz = tmp_path / "staticXYZ"
+    static_xyz.mkdir()
+    (static_xyz / "secret").write_text("secret", encoding="utf-8")
+    static_backup = tmp_path / "static-backup"
+    static_backup.mkdir()
+    (static_backup / "x").write_text("backup", encoding="utf-8")
+    monkeypatch.setattr(serve_web, "STATIC_ROOT", static_root)
+
+    for name in ("../staticXYZ/secret", "../static-backup/x"):
+        handler = _StaticHandler()
+
+        send_static_asset(handler, name)
+
+        assert handler.status == HTTPStatus.NOT_FOUND
+        assert handler.headers == {}
+        assert handler.body.getvalue() == b""
