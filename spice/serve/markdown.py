@@ -23,6 +23,7 @@ _IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 _BULLET_RE = re.compile(r"^[-*+]\s+")
 _ORDERED_RE = re.compile(r"^\d+[.)]\s+")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+")
+_THEMATIC_BREAK_RE = re.compile(r"^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$")
 _TABLE_DELIMITER_CELL_RE = re.compile(r"^:?-+:?$")
 _GITHUB_LINE_SUFFIX_RE = re.compile(r"^(?P<path>.+):(?P<start>\d+)(?:-(?P<end>\d+))?$")
 _LINE_ANCHOR_RE = re.compile(r"^L\d+(?:-L\d+)?$")
@@ -80,7 +81,10 @@ def _render_text_lines(lines: list[str], worktree_id: str | None) -> str:
     while index < len(lines):
         line = lines[index]
         stripped = line.strip()
-        if line.lstrip().startswith(">"):
+        if _is_thematic_break(line):
+            rendered.append("<hr>")
+            index += 1
+        elif line.lstrip().startswith(">"):
             end = _run_end(lines, index, lambda value: value.lstrip().startswith(">"))
             rendered.append(_render_text_run("quote", lines[index:end], worktree_id))
             index = end
@@ -114,12 +118,18 @@ def _starts_block(lines: list[str], index: int) -> bool:
     """True when line `index` opens a non-paragraph block, ending any run."""
     value = lines[index]
     return bool(
-        value.lstrip().startswith(">")
+        _is_thematic_break(value)
+        or value.lstrip().startswith(">")
         or _BULLET_RE.match(value.strip())
         or _ORDERED_RE.match(value.strip())
         or _HEADING_RE.match(value)
         or _is_table_start(lines, index)
     )
+
+
+def _is_thematic_break(line: str) -> bool:
+    """A line of three or more matching -, *, or _ marks is a horizontal rule."""
+    return bool(_THEMATIC_BREAK_RE.match(line))
 
 
 def _run_end(lines: list[str], start: int, predicate: Callable[[str], object]) -> int:

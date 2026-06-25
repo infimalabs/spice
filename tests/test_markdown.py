@@ -75,6 +75,46 @@ def test_markdown_renders_mixed_headings_ordered_lists_and_quotes():
     )
 
 
+def test_markdown_renders_thematic_breaks_as_horizontal_rules():
+    html = render_message_html(
+        "Above the line.\n\n---\n\nBelow the line.\n\n***\n\n___"
+    )
+
+    assert "<p>Above the line.</p>" in html
+    assert html.count("<hr>") == 3
+    assert "<p>Below the line.</p>" in html
+    # The marker characters must not leak through as paragraph text.
+    assert "<p>---</p>" not in html
+    assert "<p>***</p>" not in html
+    assert "<p>___</p>" not in html
+
+
+def test_markdown_thematic_break_ends_a_preceding_paragraph():
+    html = render_message_html("First paragraph.\n---\nSecond paragraph.")
+
+    assert html == "<p>First paragraph.</p><hr><p>Second paragraph.</p>"
+
+
+def test_markdown_spaced_thematic_break_is_a_horizontal_rule():
+    html = render_message_html("- - -")
+
+    assert html == "<hr>"
+
+
+def test_markdown_two_dashes_are_not_a_thematic_break():
+    html = render_message_html("--")
+
+    assert "<hr>" not in html
+    assert "--" in html
+
+
+def test_markdown_table_delimiter_is_not_a_thematic_break():
+    html = render_message_html("| A | B |\n| --- | --- |\n| 1 | 2 |")
+
+    assert "<hr>" not in html
+    assert "<table>" in html
+
+
 def test_markdown_preserves_three_nested_quote_levels():
     html = render_message_html("> outer\n> > middle\n> > > inner")
 
