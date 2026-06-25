@@ -6,7 +6,11 @@ import os
 import subprocess
 from pathlib import Path
 
-from spice.agent.shadow import shadow_environment
+from spice.agent.shadow import (
+    append_git_config_pair,
+    shadow_environment,
+    write_shadow_config,
+)
 
 
 def test_shadow_environment_exports_native_merge_as_command_backstop(tmp_path):
@@ -52,6 +56,41 @@ def test_shadow_environment_derives_true_merge_from_origin_head(tmp_path):
     )
     assert _git_stdout(repo, "config", "--get", "branch.main-d.merge", env=env) == (
         "refs/heads/trunk"
+    )
+
+
+def test_duplicate_branch_merge_precedence_is_a_tested_git_assumption(tmp_path):
+    # LOAD-BEARING, VERSION-DEPENDENT ASSUMPTION (not a git guarantee):
+    # the entire shadow (spice/agent/shadow.py) rests on git resolving a
+    # *duplicated* branch.<name>.merge differently for its two readers —
+    # `@{upstream}` consumes the FIRST occurrence (the system-scope self-merge)
+    # while `git config --get` returns the LAST (the command-scope true merge).
+    # The `--get`-last half is documented; the `@{upstream}`-first half is
+    # observed, not promised. This test pins both halves against the installed
+    # git with distinct sentinel values so a future git that changes duplicate
+    # resolution fails here, loudly, at the assumption itself.
+    repo = _init_lane(tmp_path)
+    _git(repo, "branch", "integration")  # integration at c0
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "c1")  # main-d advances past it
+    self_rev = _git_stdout(repo, "rev-parse", "main-d", env={})
+    integration_rev = _git_stdout(repo, "rev-parse", "integration", env={})
+    assert self_rev != integration_rev
+
+    config_path = write_shadow_config(repo, "main-d")  # system scope: merge=self
+    assert config_path is not None
+    env = {"PATH": os.environ["PATH"], "GIT_CONFIG_SYSTEM": str(config_path)}
+    env = append_git_config_pair(env, "branch.main-d.remote", ".")
+    # command scope: a *second* branch.main-d.merge, the true integration branch.
+    env = append_git_config_pair(env, "branch.main-d.merge", "refs/heads/integration")
+
+    # @{upstream} takes the FIRST duplicate -> the self-merge -> main-d itself.
+    assert _git_stdout(repo, "rev-parse", "main-d@{upstream}", env=env) == self_rev
+    assert (
+        _git_stdout(repo, "rev-parse", "main-d@{upstream}", env=env) != integration_rev
+    )
+    # `config --get` takes the LAST duplicate -> the command-scope true merge.
+    assert _git_stdout(repo, "config", "--get", "branch.main-d.merge", env=env) == (
+        "refs/heads/integration"
     )
 
 
