@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import errno
+import hmac
+import ipaddress
 import json
 import math
 import mimetypes
 import os
 import subprocess
 import time
+from http.cookies import CookieError, SimpleCookie
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BufferedReader
@@ -70,6 +73,7 @@ DEFAULT_SERVE_HOST = "127.0.0.1"
 DEFAULT_SERVE_PORT = 8765
 STATIC_ASSET_ROUTE_PREFIX = "/static/"
 SERVE_UNTIL_WATCHER_JOIN_SECONDS = 1.0
+SERVE_AUTH_COOKIE_NAME = "spice_serve_auth"
 METRICS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 MAX_HTTP_REQUEST_LINE_BYTES = 65536
 HTTP_REQUEST_LINE_READ_LIMIT = MAX_HTTP_REQUEST_LINE_BYTES + 1
@@ -102,8 +106,9 @@ class ServeState:
     # serve was pointed at. Nothing may branch on it being (or containing) a
     # repo; lane content, skills, and link roots come from each lane's own
     # worktree, never from where the serve process happens to live.
-    def __init__(self, *, anchor_root: Path) -> None:
+    def __init__(self, *, anchor_root: Path, auth_token: str | None = None) -> None:
         self.anchor_root = anchor_root
+        self.auth_token = auth_token
         self.cache_lock = Lock()
         self.cached_thread_ids: dict[str, str] = {}
         self.cached_targets: list[WorktreeTarget] | None = None
@@ -162,13 +167,23 @@ def run_serve(args: argparse.Namespace) -> int:
                 "spice serve --task-backend requires an absolute scratch path"
             )
         task_config.set_backend(str(path))
+    auth_token = _serve_auth_token(args)
+    _guard_exposed_bind(
+        args.host,
+        args.port,
+        allow_insecure=bool(getattr(args, "allow_insecure_bind", False)),
+        auth_token=auth_token,
+    )
     anchor_root = repo_root_from_cwd() or Path.cwd()
-    state = ServeState(anchor_root=anchor_root)
+    state = ServeState(anchor_root=anchor_root, auth_token=auth_token)
     server = _ServeHttpServer((args.host, args.port), _ServeHandler, state)
     watch_stop = Event()
     watch_thread = start_exit_file_watch(server, args, stop_event=watch_stop)
-    host, port = server.server_address[:2]
+    bound_host, bound_port = server.server_address[:2]
+    host = str(bound_host)
+    port = int(bound_port)
     print(f"spice serve: http://{host}:{port}")
+    _warn_exposed_bind(host, port, auth_token=auth_token)
     print(f"spice serve: anchor={anchor_root}")
     try:
         server.serve_forever()
@@ -180,6 +195,89 @@ def run_serve(args: argparse.Namespace) -> int:
         if watch_thread is not None:
             watch_thread.join(timeout=SERVE_UNTIL_WATCHER_JOIN_SECONDS)
     return 0
+
+
+def _serve_auth_token(args: argparse.Namespace) -> str | None:
+    raw_token = getattr(args, "auth_token", None)
+    if raw_token is None:
+        return None
+    token = str(raw_token).strip()
+    if not token:
+        raise SpiceError("spice serve --auth-token requires a non-empty token")
+    return token
+
+
+def _guard_exposed_bind(
+    host: str,
+    port: int,
+    *,
+    allow_insecure: bool,
+    auth_token: str | None,
+) -> None:
+    if not _is_exposed_bind_host(host):
+        return
+    if allow_insecure or auth_token:
+        return
+    address = _serve_address(host, port)
+    raise SpiceError(
+        "spice serve refuses to bind the no-auth control surface to exposed "
+        f"address {address}; use --allow-insecure-bind to expose it deliberately "
+        "or --auth-token TOKEN to require a token"
+    )
+
+
+def _warn_exposed_bind(host: str, port: int, *, auth_token: str | None) -> None:
+    if not _is_exposed_bind_host(host):
+        return
+    address = _serve_address(host, port)
+    if auth_token:
+        print(f"WARNING: spice serve is exposed on {address} with token auth enabled")
+        return
+    print(
+        "WARNING: spice serve is exposing a no-auth control surface on "
+        f"{address} because --allow-insecure-bind was supplied"
+    )
+
+
+def _is_exposed_bind_host(host: str) -> bool:
+    candidate = (host or "").strip()
+    if not candidate:
+        return True
+    if candidate.lower() == "localhost":
+        return False
+    try:
+        return not ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return True
+
+
+def _serve_address(host: str, port: int) -> str:
+    display_host = host or "0.0.0.0"
+    try:
+        address = ipaddress.ip_address(display_host)
+    except ValueError:
+        address = None
+    if address is not None and address.version == 6:
+        display_host = f"[{display_host}]"
+    return f"http://{display_host}:{port}"
+
+
+def _token_matches(candidate: str | None, expected: str) -> bool:
+    return candidate is not None and hmac.compare_digest(
+        candidate.encode("utf-8"), expected.encode("utf-8")
+    )
+
+
+def _send_auth_cookie_if_needed(handler: Any) -> None:
+    token = getattr(handler, "_serve_auth_cookie_token", None)
+    if not token:
+        return
+    cookie = SimpleCookie()
+    cookie[SERVE_AUTH_COOKIE_NAME] = token
+    cookie[SERVE_AUTH_COOKIE_NAME]["path"] = "/"
+    cookie[SERVE_AUTH_COOKIE_NAME]["httponly"] = True
+    cookie[SERVE_AUTH_COOKIE_NAME]["samesite"] = "Strict"
+    handler.send_header("Set-Cookie", cookie.output(header="").strip())
 
 
 class _ServeHttpServer(ThreadingHTTPServer):
@@ -635,6 +733,8 @@ class _ServeHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         parsed = urlparse(self.path)
         self.state.record_http_request("GET", parsed.path)
+        if not self._authorize_request(parsed):
+            return
         if parsed.path == "/api/live/bus":
             self._serve_live_bus()
             return
@@ -678,6 +778,8 @@ class _ServeHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         parsed = urlparse(self.path)
         self.state.record_http_request("POST", parsed.path)
+        if not self._authorize_request(parsed):
+            return
         if parsed.path == "/api/teams/command":
             payload, status = team_command_response_payload(
                 self.state, self._read_payload()
@@ -936,6 +1038,52 @@ class _ServeHandler(BaseHTTPRequestHandler):
 
     # ---- plumbing --------------------------------------------------------
 
+    def _authorize_request(self, parsed: Any) -> bool:
+        required_token = self.state.auth_token
+        if required_token is None:
+            return True
+        query_token = _query_str(parse_qs(parsed.query), "token")
+        if _token_matches(query_token, required_token):
+            self._serve_auth_cookie_token = required_token
+            return True
+        if _token_matches(self._bearer_auth_token(), required_token):
+            return True
+        if _token_matches(self.headers.get("X-Spice-Serve-Token"), required_token):
+            return True
+        if _token_matches(self._cookie_auth_token(), required_token):
+            return True
+        self._send_auth_required()
+        return False
+
+    def _bearer_auth_token(self) -> str | None:
+        authorization = self.headers.get("Authorization") or ""
+        scheme, separator, value = authorization.partition(" ")
+        if separator and scheme.lower() == "bearer":
+            return value.strip()
+        return None
+
+    def _cookie_auth_token(self) -> str | None:
+        raw_cookie = self.headers.get("Cookie") or ""
+        if not raw_cookie:
+            return None
+        cookie = SimpleCookie()
+        try:
+            cookie.load(raw_cookie)
+        except CookieError:
+            return None
+        morsel = cookie.get(SERVE_AUTH_COOKIE_NAME)
+        return morsel.value if morsel is not None else None
+
+    def _send_auth_required(self) -> None:
+        body = b"spice serve auth token required\n"
+        self.send_response(HTTPStatus.UNAUTHORIZED)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("WWW-Authenticate", 'Bearer realm="spice serve"')
+        self.end_headers()
+        self.wfile.write(body)
+
     def _read_payload(self) -> dict[str, Any]:
         try:
             length = int(self.headers.get("Content-Length") or "0")
@@ -957,6 +1105,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        _send_auth_cookie_if_needed(self)
         self.end_headers()
         self.wfile.write(body)
 
@@ -967,6 +1116,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        _send_auth_cookie_if_needed(self)
         self.end_headers()
         self.wfile.write(body)
 
@@ -987,6 +1137,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        _send_auth_cookie_if_needed(self)
         self.end_headers()
         self.wfile.write(body)
 
@@ -994,6 +1145,7 @@ class _ServeHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        _send_auth_cookie_if_needed(self)
         self.end_headers()
         self.wfile.write(data)
 

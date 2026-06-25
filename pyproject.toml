@@ -55,10 +55,12 @@ namespaces = true
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1",
     "pytest>=8.0",
 ]
 
 [tool.pyright]
+include = ["spice"]
 typeCheckingMode = "standard"
 pythonVersion = "3.12"
 

@@ -71,6 +71,53 @@ _ACK_KEY_CLOSER_CHARS = "`\"'])*_"
 _ACK_BODY_SPACE_CHARS = " \t\r\n"
 _ACK_HEADER_SEPARATOR_CHARS = ":—–.-,;!?"
 _TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
+_ACK_CONTEXT_BREAK_CHARS = "\r\n.!?;"
+_ACK_CONTEXT_WORD_EXTRA_CHARS = frozenset({"'", "-"})
+_ACK_CONTEXT_WINDOW = 6
+_ACK_NEGATION_WORDS = frozenset(
+    {
+        "can't",
+        "cannot",
+        "cant",
+        "not",
+        "refuse",
+        "refused",
+        "refuses",
+        "refusing",
+        "will-not",
+        "won't",
+        "wont",
+    }
+)
+_ACK_NEGATION_PHRASES = (
+    ("instead", "of"),
+    ("instead-of",),
+    ("refuse", "to"),
+    ("refused", "to"),
+    ("refuses", "to"),
+    ("refusing", "to"),
+)
+_ACK_HYPOTHETICAL_WORDS = frozenset(
+    {"could", "hypothetically", "if", "should", "whether", "would"}
+)
+_ACK_NARRATION_WORDS = frozenset(
+    {
+        "example",
+        "form",
+        "literal",
+        "mention",
+        "mentioned",
+        "mentions",
+        "narrated",
+        "phrase",
+        "say",
+        "saying",
+        "string",
+        "token",
+        "write",
+        "writing",
+    }
+)
 # Key grammar: 8 date digits, a "T", then 6+ alphanumerics.
 _KEY_DATE_DIGITS = 8
 _KEY_TIME_SEPARATOR_INDEX = 8
@@ -481,8 +528,11 @@ def _iter_header_tokens(text: str, token: str) -> Iterator[int]:
         if index == -1:
             return
         start = index + len(token)
-        if _is_standalone_word(text, index, start):
-            yield index
+        if not _is_standalone_word(text, index, start):
+            continue
+        if token == ACK_TOKEN and _has_guarded_ack_context(text, index):
+            continue
+        yield index
 
 
 def _is_standalone_word(text: str, start: int, end: int) -> bool:
@@ -493,6 +543,66 @@ def _is_standalone_word(text: str, start: int, end: int) -> bool:
 
 def _is_word_char(char: str) -> bool:
     return bool(char) and char.isalnum()
+
+
+def _has_guarded_ack_context(text: str, ack_pos: int) -> bool:
+    """True when surrounding prose is talking about an ACK, not making one."""
+    if _ack_token_is_quoted(text, ack_pos):
+        return True
+    words = _ack_prefix_words(text, ack_pos)
+    if not words:
+        return False
+    recent = words[-_ACK_CONTEXT_WINDOW:]
+    return (
+        bool(_ACK_NEGATION_WORDS & set(recent))
+        or _contains_phrase(recent, _ACK_NEGATION_PHRASES)
+        or bool(_ACK_HYPOTHETICAL_WORDS & set(recent))
+        or bool(_ACK_NARRATION_WORDS & set(recent))
+    )
+
+
+def _ack_token_is_quoted(text: str, ack_pos: int) -> bool:
+    cursor = ack_pos - 1
+    while cursor >= 0 and text[cursor] in " \t":
+        cursor -= 1
+    if cursor >= 0 and text[cursor] in "`\"'":
+        return True
+    line_start = text.rfind("\n", 0, ack_pos) + 1
+    return text[line_start:ack_pos].count("`") % 2 == 1
+
+
+def _ack_prefix_words(text: str, ack_pos: int) -> tuple[str, ...]:
+    start = ack_pos
+    while start > 0 and text[start - 1] not in _ACK_CONTEXT_BREAK_CHARS:
+        start -= 1
+    words: list[str] = []
+    cursor = start
+    while cursor < ack_pos:
+        char = text[cursor]
+        if char.isalnum():
+            word_start = cursor
+            cursor += 1
+            while cursor < ack_pos and (
+                text[cursor].isalnum() or text[cursor] in _ACK_CONTEXT_WORD_EXTRA_CHARS
+            ):
+                cursor += 1
+            words.append(text[word_start:cursor].lower())
+            continue
+        cursor += 1
+    return tuple(words)
+
+
+def _contains_phrase(
+    words: tuple[str, ...], phrases: tuple[tuple[str, ...], ...]
+) -> bool:
+    for phrase in phrases:
+        size = len(phrase)
+        if size > len(words):
+            continue
+        for index in range(0, len(words) - size + 1):
+            if words[index : index + size] == phrase:
+                return True
+    return False
 
 
 def _parse_ack_header(text: str, ack_pos: int) -> tuple[int, tuple[str, ...]] | None:

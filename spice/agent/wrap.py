@@ -156,7 +156,7 @@ def emit_initial_side_channel_payload(
 
     try:
         payload = render_side_channel_payload(repo_root)
-    except Exception as exc:  # pragma: no cover - conflicted worktree recovery
+    except Exception as exc:  # side-channel render failure is non-fatal
         stderr.write(f"spice side-channel unavailable: {exc}\n")
         stderr.flush()
         return
