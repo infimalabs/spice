@@ -13,6 +13,7 @@ from spice.errors import SpiceError
 from spice.mail.inbox import (
     collect_acked_inbox_items,
     collect_inbox_items,
+    collect_refused_inbox_items,
     inbox_item_key_aliases,
     inbox_request_body,
     inbox_request_priority,
@@ -493,8 +494,11 @@ def ack_context_payload_for_worktree(
     acked = collect_acked_inbox_items(
         str(target.repo_root), limit=ACK_CONTEXT_ARCHIVE_LIMIT
     )
+    refused = collect_refused_inbox_items(
+        str(target.repo_root), limit=ACK_CONTEXT_ARCHIVE_LIMIT
+    )
     pending = collect_inbox_items(str(target.repo_root))
-    for item in (*acked, *pending):
+    for item in (*acked, *refused, *pending):
         item_aliases = inbox_item_key_aliases(item.name)
         matching_keys = [
             key
@@ -517,6 +521,7 @@ def ack_context_payload_for_worktree(
                     "text": body,
                     "html": html,
                     "priority": priority,
+                    "disposition": item.disposition,
                     "attachments": attachments,
                 }
     acks = [by_key.get(key, {"key": key, "found": False}) for key in wanted]

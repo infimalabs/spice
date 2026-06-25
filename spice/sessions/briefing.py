@@ -21,7 +21,9 @@ from spice.mail.inbox import (
     INBOX_RESPONSE_ROW,
     collect_deadlettered_inbox_items,
     collect_inbox_items,
+    collect_refused_inbox_items,
     format_relative_seconds,
+    inbox_ack_state_context_rows,
     inbox_deadletter_context_rows,
     inbox_item_key,
     relative_time_for_path,
@@ -844,6 +846,7 @@ def _inbox_lines() -> list[str]:
         return []
     items = collect_inbox_items(str(repo_root))
     deadletters = collect_deadlettered_inbox_items(str(repo_root))
+    refused = collect_refused_inbox_items(str(repo_root))
     lines = ["Inbox", f"  pending={len(items)}"]
     for item in items:
         lines.append(
@@ -855,6 +858,9 @@ def _inbox_lines() -> list[str]:
     if deadletters:
         lines.append(f"  deadlettered={len(deadletters)}")
         lines.extend(f"  {line}" for line in inbox_deadletter_context_rows(deadletters))
+    if refused:
+        lines.append(f"  refused={len(refused)}")
+        lines.extend(f"  {line}" for line in inbox_ack_state_context_rows(refused))
     return lines
 
 

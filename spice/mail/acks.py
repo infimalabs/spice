@@ -35,6 +35,8 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
 from spice.mail.ackstate import (
+    ACK_DISPOSITION_ACKED,
+    ACK_DISPOSITION_REFUSED,
     AckStateWrite,
     ack_state_records,
     record_acked_inbox_items,
@@ -50,6 +52,7 @@ from spice.mail.inbox import (
 from spice.sessions.util import first_text, normalize_timestamp
 
 ACK_TOKEN = "ACK"
+NACK_TOKEN = "NACK"
 TASK_DIRECTIVE_TOKEN = "TASK"
 
 # Transcript lines start with `{"timestamp":"<iso>",...` — the timestamp can
@@ -89,10 +92,10 @@ def extract_ack_keys_from_text(text: str) -> Iterator[str]:
 
 @dataclass(frozen=True)
 class AckSegment:
-    """One acknowledgment: the keys it names and the content attributed to it.
+    """One keyed response: the keys it names and the content attributed to it.
 
-    `keys` are the inbox keys read from the ACK header. `content` is the
-    cleaned message body that runs from this ACK to the next valid ACK.
+    `keys` are the inbox keys read from the ACK/NACK header. `content` is the
+    cleaned message body that runs from this marker to the next valid marker.
     """
 
     keys: tuple[str, ...]
@@ -111,6 +114,23 @@ def split_ack_message(
     uppercase `ACK` token opening a recognizable header.
     """
     bounds = _ack_marker_bounds(text)
+    return _split_keyed_message(text, bounds, drop_task_directives=drop_task_directives)
+
+
+def split_nack_message(
+    text: str, *, drop_task_directives: bool = True
+) -> tuple[str, list[AckSegment]]:
+    """Split `text` into its leading prose and ordered reason-bearing NACKs."""
+    bounds = _nack_marker_bounds(text)
+    return _split_keyed_message(text, bounds, drop_task_directives=drop_task_directives)
+
+
+def _split_keyed_message(
+    text: str,
+    bounds: list[tuple[int, int, tuple[str, ...]]],
+    *,
+    drop_task_directives: bool,
+) -> tuple[str, list[AckSegment]]:
     if not bounds:
         return _clean_segment_content(
             text, drop_task_directives=drop_task_directives
@@ -136,6 +156,11 @@ def split_ack_message(
 def extract_ack_segments_from_text(text: str) -> list[AckSegment]:
     """Return just the ACK segments of `text` (see :func:`split_ack_message`)."""
     return split_ack_message(text)[1]
+
+
+def extract_nack_segments_from_text(text: str) -> list[AckSegment]:
+    """Return just the NACK segments of `text` (see :func:`split_nack_message`)."""
+    return split_nack_message(text)[1]
 
 
 def extract_task_batch_lines_from_text(text: str) -> list[str]:
@@ -190,6 +215,7 @@ def archive_ackd_inbox_items(
                 attachments=_ack_state_attachments(item),
                 ack_text=ack_text,
                 ack_content=_ack_content_for_item(item.name, ack_content_by_key),
+                disposition=ACK_DISPOSITION_ACKED,
             )
             for item in to_retire
         ],
@@ -197,6 +223,49 @@ def archive_ackd_inbox_items(
     discard_inbox_items(inbox_payload_items(to_retire))
     notify_inbox_changed(root)
     return [inbox_item_key(item.name) for item in to_retire]
+
+
+def archive_nackd_inbox_items(
+    repo_root: str | Path | None,
+    nack_keys: Iterable[str],
+    *,
+    nack_text: str = "",
+    nack_content_by_key: Mapping[str, str] | None = None,
+) -> list[str]:
+    """Refuse pending inbox items whose key appears in reason-bearing NACK text."""
+    if repo_root is None:
+        return []
+    root = Path(repo_root)
+    nacked_aliases: set[str] = set()
+    for key in nack_keys:
+        if key:
+            nacked_aliases |= inbox_item_key_aliases(key)
+    if not nacked_aliases:
+        return []
+    pending = collect_inbox_items(str(root))
+    to_refuse = [
+        item for item in pending if inbox_item_key_aliases(item.name) & nacked_aliases
+    ]
+    if not to_refuse:
+        return []
+    record_acked_inbox_items(
+        repo_root,
+        [
+            AckStateWrite(
+                key=inbox_item_key(item.name),
+                inbox_name=item.name,
+                text=item.text,
+                attachments=_ack_state_attachments(item),
+                ack_text=nack_text,
+                ack_content=_ack_content_for_item(item.name, nack_content_by_key),
+                disposition=ACK_DISPOSITION_REFUSED,
+            )
+            for item in to_refuse
+        ],
+    )
+    discard_inbox_items(inbox_payload_items(to_refuse))
+    notify_inbox_changed(root)
+    return [inbox_item_key(item.name) for item in to_refuse]
 
 
 @dataclass(frozen=True)
@@ -214,6 +283,17 @@ class AckArchivalSummary:
     unmatched: list[str]
 
 
+@dataclass(frozen=True)
+class NackArchivalSummary:
+    """Disposition of the NACK keys named by one assistant message."""
+
+    refused: list[str]
+    already_refused: list[str]
+    already_acked: list[str]
+    unmatched: list[str]
+    reasonless: list[str]
+
+
 def summarize_ack_archival(
     repo_root: str | Path | None, message_text: str
 ) -> AckArchivalSummary:
@@ -226,7 +306,9 @@ def summarize_ack_archival(
     """
     segments = extract_ack_segments_from_text(message_text)
     requested = list(dict.fromkeys(key for segment in segments for key in segment.keys))
-    already_acked_aliases = _acked_state_aliases(repo_root)
+    already_acked_aliases = _consumed_state_aliases(
+        repo_root, disposition=ACK_DISPOSITION_ACKED
+    )
     archived = archive_ackd_inbox_items(
         repo_root,
         requested,
@@ -258,11 +340,82 @@ def summarize_ack_archival(
     )
 
 
-def _acked_state_aliases(repo_root: str | Path | None) -> set[str]:
+def summarize_nack_archival(
+    repo_root: str | Path | None, message_text: str
+) -> NackArchivalSummary:
+    """Archive inbox items NACK'd by one assistant message as refused."""
+    segments = extract_nack_segments_from_text(message_text)
+    reasonless = list(
+        dict.fromkeys(
+            key
+            for segment in segments
+            if not segment.content.strip()
+            for key in segment.keys
+        )
+    )
+    reasoned_segments = [segment for segment in segments if segment.content.strip()]
+    requested = list(
+        dict.fromkeys(key for segment in reasoned_segments for key in segment.keys)
+    )
+    already_refused_aliases = _consumed_state_aliases(
+        repo_root, disposition=ACK_DISPOSITION_REFUSED
+    )
+    already_acked_aliases = _consumed_state_aliases(
+        repo_root, disposition=ACK_DISPOSITION_ACKED
+    )
+    refused = archive_nackd_inbox_items(
+        repo_root,
+        requested,
+        nack_text=message_text,
+        nack_content_by_key=ack_content_by_key(reasoned_segments),
+    )
+    refused_aliases: set[str] = set()
+    for key in refused:
+        refused_aliases |= inbox_item_key_aliases(key)
+    already_refused = [
+        key
+        for key in requested
+        if not (inbox_item_key_aliases(key) & refused_aliases)
+        and (inbox_item_key_aliases(key) & already_refused_aliases)
+    ]
+    already_refused_request_aliases: set[str] = set()
+    for key in already_refused:
+        already_refused_request_aliases |= inbox_item_key_aliases(key)
+    already_acked = [
+        key
+        for key in requested
+        if not (inbox_item_key_aliases(key) & refused_aliases)
+        and not (inbox_item_key_aliases(key) & already_refused_request_aliases)
+        and (inbox_item_key_aliases(key) & already_acked_aliases)
+    ]
+    already_acked_request_aliases: set[str] = set()
+    for key in already_acked:
+        already_acked_request_aliases |= inbox_item_key_aliases(key)
+    unmatched = [
+        key
+        for key in requested
+        if not (inbox_item_key_aliases(key) & refused_aliases)
+        and not (inbox_item_key_aliases(key) & already_refused_request_aliases)
+        and not (inbox_item_key_aliases(key) & already_acked_request_aliases)
+    ]
+    return NackArchivalSummary(
+        refused=refused,
+        already_refused=already_refused,
+        already_acked=already_acked,
+        unmatched=unmatched,
+        reasonless=reasonless,
+    )
+
+
+def _consumed_state_aliases(
+    repo_root: str | Path | None, *, disposition: str | None = None
+) -> set[str]:
     if repo_root is None:
         return set()
     aliases: set[str] = set()
     for record in ack_state_records(repo_root):
+        if disposition is not None and record.disposition != disposition:
+            continue
         aliases |= inbox_item_key_aliases(record.key)
         aliases |= inbox_item_key_aliases(record.inbox_name)
     return aliases
@@ -302,13 +455,32 @@ def _ack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...]]]:
     return bounds
 
 
+def _nack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...]]]:
+    """Return `(nack_pos, header_end, keys)` for each valid NACK marker."""
+    bounds: list[tuple[int, int, tuple[str, ...]]] = []
+    for nack_pos in _iter_nack_tokens(text):
+        parsed = _parse_nack_header(text, nack_pos)
+        if parsed is not None:
+            header_end, keys = parsed
+            bounds.append((nack_pos, header_end, keys))
+    return bounds
+
+
 def _iter_ack_tokens(text: str) -> Iterator[int]:
+    yield from _iter_header_tokens(text, ACK_TOKEN)
+
+
+def _iter_nack_tokens(text: str) -> Iterator[int]:
+    yield from _iter_header_tokens(text, NACK_TOKEN)
+
+
+def _iter_header_tokens(text: str, token: str) -> Iterator[int]:
     start = 0
     while True:
-        index = text.find(ACK_TOKEN, start)
+        index = text.find(token, start)
         if index == -1:
             return
-        start = index + len(ACK_TOKEN)
+        start = index + len(token)
         if _is_standalone_word(text, index, start):
             yield index
 
@@ -325,8 +497,19 @@ def _is_word_char(char: str) -> bool:
 
 def _parse_ack_header(text: str, ack_pos: int) -> tuple[int, tuple[str, ...]] | None:
     """Validate an ACK header at `ack_pos`; return `(header_end, keys)` or None."""
+    return _parse_keyed_header(text, ack_pos, ACK_TOKEN)
+
+
+def _parse_nack_header(text: str, nack_pos: int) -> tuple[int, tuple[str, ...]] | None:
+    """Validate a NACK header at `nack_pos`; return `(header_end, keys)` or None."""
+    return _parse_keyed_header(text, nack_pos, NACK_TOKEN)
+
+
+def _parse_keyed_header(
+    text: str, token_pos: int, token: str
+) -> tuple[int, tuple[str, ...]] | None:
     limit = len(text)
-    cursor = ack_pos + len(ACK_TOKEN)
+    cursor = token_pos + len(token)
     first_key = _next_header_key(text, cursor, limit, allow_filler_words=True)
     if first_key is None:
         return None
@@ -548,6 +731,8 @@ def iter_ack_state_keys(repo_root: str | Path | None) -> Iterator[str]:
     if repo_root is None:
         return
     for record in _ack_state_records_in_archive_order(repo_root):
+        if record.disposition != ACK_DISPOSITION_ACKED:
+            continue
         if record.key:
             yield record.key
 
@@ -557,6 +742,8 @@ def iter_ack_state_segments(repo_root: str | Path | None) -> Iterator[AckSegment
     if repo_root is None:
         return
     for record in _ack_state_records_in_archive_order(repo_root):
+        if record.disposition != ACK_DISPOSITION_ACKED:
+            continue
         if record.key:
             yield AckSegment(keys=(record.key,), content=record.ack_content)
 

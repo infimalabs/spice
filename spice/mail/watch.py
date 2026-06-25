@@ -22,7 +22,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from spice.agent.driver import AgentDriver, driver_for
-from spice.mail.acks import extract_ack_segments_from_text
+from spice.mail.acks import (
+    extract_ack_segments_from_text,
+    extract_nack_segments_from_text,
+)
 from spice.mail.inbox import inbox_dir, resend_inbox_item
 from spice.sessions.util import first_text
 
@@ -45,6 +48,7 @@ class AckWatchOutcome:
     acked: bool
     assistant_messages_seen: int
     resends: int
+    refused: bool = False
 
 
 def watch_for_ack(
@@ -76,7 +80,7 @@ def watch_for_ack(
     try:
         with transcript_path.open() as handle:
             handle.seek(0, os.SEEK_END)
-            while not state.acked:
+            while not state.done:
                 state.check_archive()
                 line = handle.readline()
                 if not line:
@@ -107,10 +111,17 @@ class AckWatchState:
         self.total_messages = 0
         self.resends = 0
         self.acked = False
+        self.refused = False
         self._archived_keys: set[str] = set()
         self.on_ack = on_ack
 
+    @property
+    def done(self) -> bool:
+        return self.acked or self.refused
+
     def process_line(self, line: str) -> None:
+        if self.done:
+            return
         text = extract_assistant_text(line, driver_for(self.target_repo_root))
         if text is None:
             return
@@ -125,6 +136,13 @@ class AckWatchState:
             if self.on_ack is not None:
                 self.on_ack(text, self.current_key)
             return
+        if self._text_contains_our_nack(text):
+            self.refused = True
+            self._log(
+                f"NACK observed in assistant message #{self.total_messages} "
+                f"(key={self.current_key}); escalation halted"
+            )
+            return
         self._log(
             f"assistant message #{self.total_messages} without ACK "
             f"({self.messages_since_resend}/{MESSAGE_BUDGET})"
@@ -135,6 +153,9 @@ class AckWatchState:
 
     def _text_contains_our_ack(self, text: str) -> bool:
         return extract_owned_ack_utterance(text, self.current_key) is not None
+
+    def _text_contains_our_nack(self, text: str) -> bool:
+        return extract_owned_nack_utterance(text, self.current_key) is not None
 
     def check_archive(self) -> None:
         """Note when the current pending entry has left the inbox.
@@ -185,6 +206,7 @@ class AckWatchState:
             acked=self.acked,
             assistant_messages_seen=self.total_messages,
             resends=self.resends,
+            refused=self.refused,
         )
 
 
@@ -250,6 +272,16 @@ def extract_owned_ack_utterance(message_text: str, inbox_key: str) -> str | None
     for segment in extract_ack_segments_from_text(message_text):
         if any(_key_stem(key) == stem for key in segment.keys):
             return segment.content or _ACK_FALLBACK_UTTERANCE
+    return None
+
+
+def extract_owned_nack_utterance(message_text: str, inbox_key: str) -> str | None:
+    """Return the reason for OUR key's NACK in `message_text`, or None."""
+    stem = _key_stem(inbox_key)
+    for segment in extract_nack_segments_from_text(message_text):
+        if any(_key_stem(key) == stem for key in segment.keys):
+            reason = segment.content.strip()
+            return reason or None
     return None
 
 

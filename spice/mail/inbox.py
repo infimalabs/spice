@@ -20,7 +20,12 @@ from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import quote
 
-from spice.mail.ackstate import ack_state_database_path, ack_state_records
+from spice.mail.ackstate import (
+    ACK_DISPOSITION_ACKED,
+    ACK_DISPOSITION_REFUSED,
+    ack_state_database_path,
+    ack_state_records,
+)
 from spice.mail.attachments import (
     InboxAttachment,
     InboxAttachmentInput,
@@ -100,6 +105,7 @@ class InboxItem:
     name: str
     text: str
     attachments: tuple[InboxAttachment, ...] = ()
+    disposition: str = ""
 
 
 def inbox_dir(repo_root: Path | str) -> Path:
@@ -139,20 +145,43 @@ def collect_acked_inbox_items(
     repo_root: str | Path | None, *, limit: int = INBOX_ARCHIVE_DEFAULT_LIMIT
 ) -> list[InboxItem]:
     """Return consumed operator steering from ACK state, not archive files."""
+    return _collect_ack_state_inbox_items(
+        repo_root, limit=limit, disposition=ACK_DISPOSITION_ACKED
+    )
+
+
+def collect_refused_inbox_items(
+    repo_root: str | Path | None, *, limit: int = INBOX_ARCHIVE_DEFAULT_LIMIT
+) -> list[InboxItem]:
+    """Return refused operator steering from ACK state, not archive files."""
+    return _collect_ack_state_inbox_items(
+        repo_root, limit=limit, disposition=ACK_DISPOSITION_REFUSED
+    )
+
+
+def _collect_ack_state_inbox_items(
+    repo_root: str | Path | None,
+    *,
+    limit: int,
+    disposition: str | None,
+) -> list[InboxItem]:
     if not repo_root:
         return []
     prune_stale_inbox_artifacts(repo_root)
     state_path = ack_state_database_path(repo_root)
-    return [
+    items = [
         InboxItem(
             source_path=state_path,
             archive_path=state_path,
             name=record.inbox_name,
             text=record.text,
             attachments=_ack_state_record_attachments(record),
+            disposition=record.disposition,
         )
-        for record in ack_state_records(repo_root)[: max(0, limit)]
+        for record in ack_state_records(repo_root)
+        if disposition is None or record.disposition == disposition
     ]
+    return items[: max(0, limit)]
 
 
 def collect_deadlettered_inbox_items(
@@ -368,8 +397,13 @@ def inbox_ack_state_context_rows(items: Sequence[InboxItem]) -> list[str]:
         attachments = (
             f" attachments={len(item.attachments)}" if item.attachments else ""
         )
+        label = (
+            "refused_inbox"
+            if item.disposition == ACK_DISPOSITION_REFUSED
+            else "acked_inbox"
+        )
         rows.append(
-            f"acked_inbox key={inbox_item_key(item.name)} "
+            f"{label} key={inbox_item_key(item.name)} "
             f"age={relative_time_for_path(item.source_path)}{priority}"
             f"{attachments} text={text or '-'}"
         )
