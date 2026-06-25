@@ -259,6 +259,22 @@ def test_wrapper_non_shell_commands_inherit_ambient_shell_hook_environment(
     assert env is None
 
 
+def test_wrapper_exports_agent_scoped_rtk_db_for_ambient_agent_commands(
+    tmp_path, monkeypatch
+):
+    _init_git_repo(tmp_path)
+    monkeypatch.setenv(DRIVER.thread_id_env, "thread-a")
+    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
+
+    env = wrap.build_agent_run_environment(["true"], repo_root=tmp_path)
+
+    assert env is not None
+    assert Path(env[wrap.RTK_DB_PATH_ENV]) == (
+        tmp_path / ".git" / "spice" / "agents" / "thread-a" / "rtk" / "history.db"
+    )
+    assert Path(env[wrap.RTK_DB_PATH_ENV]).parent.is_dir()
+
+
 def test_wrapper_route_environment_uses_static_hook_stage_for_shell_execution(
     tmp_path, monkeypatch
 ):
@@ -1227,6 +1243,17 @@ def _write_spice_product_shape(repo: Path) -> None:
         path = repo / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# test spice product shape\n", encoding="utf-8")
+
+
+def _init_git_repo(repo: Path) -> None:
+    subprocess.run(
+        ["git", "init"],
+        cwd=repo,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
 
 def _write_agent_wrapper_config(

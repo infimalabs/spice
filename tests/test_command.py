@@ -31,6 +31,8 @@ def _git_worktree_tmp_path(request, tmp_path):
 
 
 def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
+    monkeypatch.delenv(agent_driver.DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
     monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
@@ -88,6 +90,8 @@ def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
 
 
 def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monkeypatch):
+    monkeypatch.delenv(agent_driver.DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
     calls: list[tuple[str, ...]] = []
     events: list[tuple[str, object, object | None]] = []
     stderr = io.StringIO()
@@ -274,6 +278,8 @@ def test_shell_word_end_tracks_quotes_and_escapes():
 
 
 def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
+    monkeypatch.delenv(agent_driver.DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
     monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
@@ -333,6 +339,8 @@ def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
 def test_agent_run_direct_git_inherits_ambient_shadow_environment(
     tmp_path, monkeypatch
 ):
+    monkeypatch.delenv(agent_driver.DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", "shadow-system")
     monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
     events: list[tuple[str, object, object | None]] = []
