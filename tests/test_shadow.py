@@ -6,6 +6,9 @@ import os
 import subprocess
 from pathlib import Path
 
+import io
+
+from spice.agent import shadow
 from spice.agent.shadow import (
     append_git_config_pair,
     shadow_environment,
@@ -92,6 +95,54 @@ def test_duplicate_branch_merge_precedence_is_a_tested_git_assumption(tmp_path):
     assert _git_stdout(repo, "config", "--get", "branch.main-d.merge", env=env) == (
         "refs/heads/integration"
     )
+
+
+def test_write_shadow_config_writes_atomically(tmp_path, monkeypatch):
+    repo = _init_lane(tmp_path)
+    used: list[Path] = []
+    real = shadow.atomic_write_text
+
+    def spy(path, text):
+        used.append(path)
+        return real(path, text)
+
+    monkeypatch.setattr(shadow, "atomic_write_text", spy)
+
+    config_path = write_shadow_config(repo, "main-d")
+
+    assert config_path is not None
+    assert used == [config_path]  # routed through the atomic helper
+    assert "merge = refs/heads/main-d" in config_path.read_text(encoding="utf-8")
+    # No torn-write temp file is left behind beside the config.
+    assert list(config_path.parent.glob(f"{config_path.name}.*.tmp")) == []
+
+
+def test_shadow_environment_notes_detached_head_instead_of_silent_passthrough(
+    tmp_path,
+):
+    repo = _init_lane(tmp_path)
+    head = _git_stdout(repo, "rev-parse", "HEAD", env={})
+    _git(repo, "checkout", "-q", "--detach", head)
+    stderr = io.StringIO()
+
+    env = shadow_environment(repo, base_env={"PATH": os.environ["PATH"]}, stderr=stderr)
+
+    assert "GIT_CONFIG_SYSTEM" not in env
+    assert "detached HEAD" in stderr.getvalue()
+
+
+def test_system_config_discovery_failure_is_logged_and_falls_back(
+    tmp_path, monkeypatch
+):
+    repo = _init_lane(tmp_path)
+    monkeypatch.setattr(shadow, "real_system_config_path", lambda _repo: None)
+    stderr = io.StringIO()
+
+    config_path = write_shadow_config(repo, "main-d", stderr=stderr)
+
+    assert config_path is not None
+    assert "path = /etc/gitconfig" in config_path.read_text(encoding="utf-8")
+    assert "could not resolve git's system config path" in stderr.getvalue()
 
 
 def _init_lane(tmp_path: Path) -> Path:
