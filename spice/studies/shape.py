@@ -6,9 +6,9 @@ when present). Repos without a declaration skip them — the opinions are
 Python-package-specific; the rest of the constitution still applies.
 
 The name-cluster guard flags a run of sibling modules sharing a long prefix or
-suffix — a package hiding behind an affix. `name_cluster_error` computes it;
-wiring it into a gate is a separate, deliberate step so a codebase can be
-brought in line before the blocker is turned on.
+suffix — a package hiding behind an affix. `name_cluster_error` computes it and
+is enforced as a blocking gate: `precommit._run_shape_guards` raises on any
+offender alongside the namespace and path-shape guards.
 """
 
 from __future__ import annotations
