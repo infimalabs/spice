@@ -85,8 +85,8 @@ def test_stage_two_shell_snapshot_exports_static_hook_paths(
             shell,
             "-c",
             (
-                'case "$ZDOTDIR" in */shellhooks2) ;; *) exit 43;; esac; '
-                'case "$BASH_ENV" in */shellhooks2/bash_env) ;; *) exit 44;; esac; '
+                'case "$ZDOTDIR" in */staticshellhooks) ;; *) exit 43;; esac; '
+                'case "$BASH_ENV" in */staticshellhooks/bash_env) ;; *) exit 44;; esac; '
                 'printf \'%s\\n%s\\n\' "$ZDOTDIR" "$BASH_ENV"'
             ),
         ],
