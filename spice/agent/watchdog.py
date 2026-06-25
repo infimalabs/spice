@@ -206,7 +206,7 @@ def process_supervised_assistant_message(
                 "task.backlog-note",
                 message=INLINE_TASK_BACKLOG_NOTE,
             )
-    except Exception as exc:  # pragma: no cover - supervisor-visible task failure
+    except Exception as exc:  # supervisor-visible task failure
         log_handle.write(f"spice inline task supervisor error: {exc}\n")
         log_handle.flush()
         publish_supervisor_feedback(
@@ -218,14 +218,14 @@ def process_supervised_assistant_message(
         )
     try:
         record_supervised_lane_metrics(repo_root)
-    except Exception as exc:  # pragma: no cover - supervisor-visible metric failure
+    except Exception as exc:  # supervisor-visible metric failure
         log_handle.write(f"spice metrics supervisor error: {exc}\n")
         log_handle.flush()
     try:
         publish_maxim_hits_as_inbox(
             repo_root, message_text, reminder_gate=reminder_gate
         )
-    except Exception as exc:  # pragma: no cover - defensive supervisor logging
+    except Exception as exc:  # defensive supervisor logging
         log_handle.write(f"spice maxim supervisor error: {exc}\n")
         log_handle.flush()
 
@@ -235,7 +235,7 @@ def publish_supervisor_feedback(
 ) -> None:
     try:
         publish_side_channel_feedback(repo_root, kind, **fields)
-    except Exception as exc:  # pragma: no cover - best-effort stderr feedback
+    except Exception as exc:  # best-effort stderr feedback
         log_handle.write(f"spice side-channel feedback error: {exc}\n")
         log_handle.flush()
 
