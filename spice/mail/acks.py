@@ -161,7 +161,12 @@ def split_ack_message(
     uppercase `ACK` token opening a recognizable header.
     """
     bounds = _ack_marker_bounds(text)
-    return _split_keyed_message(text, bounds, drop_task_directives=drop_task_directives)
+    return _split_keyed_message(
+        text,
+        bounds,
+        all_bounds=_keyed_marker_bounds(text),
+        drop_task_directives=drop_task_directives,
+    )
 
 
 def split_nack_message(
@@ -169,13 +174,19 @@ def split_nack_message(
 ) -> tuple[str, list[AckSegment]]:
     """Split `text` into its leading prose and ordered reason-bearing NACKs."""
     bounds = _nack_marker_bounds(text)
-    return _split_keyed_message(text, bounds, drop_task_directives=drop_task_directives)
+    return _split_keyed_message(
+        text,
+        bounds,
+        all_bounds=_keyed_marker_bounds(text),
+        drop_task_directives=drop_task_directives,
+    )
 
 
 def _split_keyed_message(
     text: str,
     bounds: list[tuple[int, int, tuple[str, ...]]],
     *,
+    all_bounds: list[tuple[int, int, tuple[str, ...]]] | None = None,
     drop_task_directives: bool,
 ) -> tuple[str, list[AckSegment]]:
     if not bounds:
@@ -186,8 +197,9 @@ def _split_keyed_message(
         text[: bounds[0][0]], drop_task_directives=drop_task_directives
     )
     segments: list[AckSegment] = []
-    for index, (_ack_pos, header_end, keys) in enumerate(bounds):
-        body_end = bounds[index + 1][0] if index + 1 < len(bounds) else len(text)
+    split_bounds = all_bounds if all_bounds is not None else bounds
+    for _index, (marker_pos, header_end, keys) in enumerate(bounds):
+        body_end = _next_keyed_marker_pos(split_bounds, marker_pos, default=len(text))
         segments.append(
             AckSegment(
                 keys=keys,
@@ -198,6 +210,15 @@ def _split_keyed_message(
             )
         )
     return preamble, segments
+
+
+def _next_keyed_marker_pos(
+    bounds: list[tuple[int, int, tuple[str, ...]]], marker_pos: int, *, default: int
+) -> int:
+    for next_pos, _header_end, _keys in bounds:
+        if next_pos > marker_pos:
+            return next_pos
+    return default
 
 
 def extract_ack_segments_from_text(text: str) -> list[AckSegment]:
@@ -511,6 +532,11 @@ def _nack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...]]]:
             header_end, keys = parsed
             bounds.append((nack_pos, header_end, keys))
     return bounds
+
+
+def _keyed_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...]]]:
+    """Return every valid ACK/NACK marker bound in source order."""
+    return sorted((*_ack_marker_bounds(text), *_nack_marker_bounds(text)))
 
 
 def _iter_ack_tokens(text: str) -> Iterator[int]:
