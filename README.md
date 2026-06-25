@@ -371,6 +371,13 @@ needed to steer or audit a running session.
 The serve header and browser title default to `[project].name` from
 `pyproject.toml`; set `[tool.spice.serve] brand = "Name"` to override them.
 
+Binding `spice serve` to `0.0.0.0` or another wildcard address intentionally
+degrades the WebSocket Origin guard: any Host on the bound port is compatible,
+so the check becomes Origin-equals-Host rather than the rebinding-resistant
+authority match used for loopback or explicit binds. Use `--auth-token`; on
+wildcard binds the supplied token, not the Origin authority match, is the
+operative defense.
+
 | Compose and route | Parallel lanes |
 | --- | --- |
 | <img src="docs/screenshots/spice-compose-team-drive.png" alt="Composed Drive lane with three agents"> | <img src="docs/screenshots/spice-three-agent-drive-controls.png" alt="Three Drive lanes across active worktrees"> |

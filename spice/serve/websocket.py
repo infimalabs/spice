@@ -163,6 +163,11 @@ def websocket_request_authorities(handler: Any) -> set[str]:
     bind host, or any host on an intentional wildcard bind. This keeps a DNS
     rebinding page from making Origin and Host match on an arbitrary domain
     while the socket actually reaches the loopback-bound server.
+
+    On a wildcard bind, that last rule intentionally degrades the Origin guard
+    to Origin-equals-Host for any host on the bound port. It is not the
+    rebinding-resistant authority match used for loopback or explicit binds;
+    the serve auth token is the operative defense on that path.
     """
     authorities: set[str] = set()
     server = getattr(handler, "server", None)

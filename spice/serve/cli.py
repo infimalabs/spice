@@ -37,15 +37,19 @@ def configure_serve_parser(subparsers: Any) -> None:
         action="store_true",
         help=(
             "Allow the no-auth serve control surface to bind to a non-loopback "
-            "address. Prints a warning naming the exposed address."
+            "address. On wildcard binds, WebSocket Origin checks degrade to "
+            "Origin-equals-Host instead of the rebinding-resistant authority "
+            "match."
         ),
     )
     parser.add_argument(
         "--auth-token",
         metavar="TOKEN",
         help=(
-            "Require TOKEN for serve HTTP and WebSocket requests; this is an "
-            "explicit opt-in for non-loopback binds."
+            "Require TOKEN for serve HTTP and WebSocket requests; on wildcard "
+            "binds the supplied token, not the rebinding-resistant authority "
+            "match, is the operative defense after Origin checks degrade to "
+            "Origin-equals-Host."
         ),
     )
     parser.add_argument(

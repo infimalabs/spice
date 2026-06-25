@@ -56,6 +56,10 @@ def test_serve_parser_exposes_until_path_help(capsys):
     assert "--until PATH" in help_text
     assert "--allow-insecure-bind" in help_text
     assert "--auth-token TOKEN" in help_text
+    assert "Origin-equals-Host" in flat_help
+    assert "rebinding-resistant authority match" in flat_help
+    assert "supplied token" in flat_help
+    assert "is the operative defense" in flat_help
     assert expected_until_help in flat_help
 
 
@@ -118,6 +122,40 @@ def test_serve_auth_token_protects_http_requests(tmp_path):
         response.read()
         conn.close()
         assert response.status == HTTPStatus.OK
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_wildcard_bind_websocket_upgrade_requires_auth_token(tmp_path):
+    state = app.ServeState(anchor_root=tmp_path, auth_token="secret")
+    server = app._ServeHttpServer(("0.0.0.0", 0), app._ServeHandler, state)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    _host, port = server.server_address[:2]
+    authority = f"evil.example:{port}"
+
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        conn.request(
+            "GET",
+            "/api/live/bus",
+            headers={
+                "Host": authority,
+                "Origin": f"http://{authority}",
+                "Connection": "Upgrade",
+                "Upgrade": "websocket",
+                "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+                "Sec-WebSocket-Version": "13",
+            },
+        )
+        response = conn.getresponse()
+        body = response.read().decode("utf-8")
+        conn.close()
+
+        assert response.status == HTTPStatus.UNAUTHORIZED
+        assert "spice serve auth token required" in body
     finally:
         server.shutdown()
         server.server_close()
