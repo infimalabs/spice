@@ -8,6 +8,8 @@ import subprocess
 from spice.agent import sidechannelnotify, watchdog
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.acks import (
+    AckArchivalSummary,
+    NackArchivalSummary,
     ack_content_by_key,
     archive_ackd_inbox_items,
     extract_ack_keys_from_text,
@@ -432,6 +434,24 @@ def test_summarize_ack_archival_reports_already_acked_key(tmp_path):
     assert summary.archived == []
     assert summary.already_acked == [KEY_A[:-1]]
     assert summary.unmatched == []
+
+
+def test_archival_summaries_degrade_outside_git_worktree(tmp_path):
+    outside_worktree = tmp_path / "outside"
+    outside_worktree.mkdir()
+
+    assert summarize_ack_archival(
+        outside_worktree, f"ACK {KEY_A}: handled outside a worktree."
+    ) == AckArchivalSummary(archived=[], already_acked=[], unmatched=[])
+    assert summarize_nack_archival(
+        outside_worktree, f"NACK {KEY_B}: refusing outside a worktree."
+    ) == NackArchivalSummary(
+        refused=[],
+        already_refused=[],
+        already_acked=[],
+        unmatched=[],
+        reasonless=[],
+    )
 
 
 def test_ack_state_supplies_archive_context_without_archive_files(tmp_path):
