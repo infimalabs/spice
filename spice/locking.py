@@ -1,5 +1,21 @@
 """Cross-platform advisory file locks (flock on POSIX, msvcrt on Windows).
 
+Blocking semantics differ by platform, and the difference is intrinsic to the
+underlying primitive, not a spice choice:
+
+* ``blocking=True``
+    * POSIX: ``flock(LOCK_EX)`` waits **indefinitely** until the lock is free.
+    * Windows: ``msvcrt.locking(LK_LOCK)`` retries internally for ~10 seconds
+      and then raises ``OSError`` if the lock is still contended — a **bounded**
+      wait, not an indefinite one. The timeout error is not ``EACCES``/``EAGAIN``
+      so it surfaces as a raw ``OSError``, not ``FileLockUnavailable``.
+* ``blocking=False`` (both platforms): attempt once and, if the lock is held,
+    raise ``FileLockUnavailable`` immediately.
+
+POSIX is the load-bearing platform; Windows is aspirational. Callers that need a
+bounded wait on POSIX must pass ``blocking=False`` and retry themselves rather
+than assume ``blocking=True`` ever times out.
+
 Library seam: target-repo tools may import `exclusive_lock`,
 `lock_fd_exclusive`, `unlock_fd`, and `FileLockUnavailable`; underscored names
 remain private.
@@ -38,7 +54,13 @@ def unlock_fd(fd: int) -> None:
 
 @contextmanager
 def exclusive_lock(path: Path, *, blocking: bool = True) -> Iterator[None]:
-    """Hold an exclusive lock on `path` (created if missing) for the block."""
+    """Hold an exclusive lock on `path` (created if missing) for the block.
+
+    With ``blocking=True`` this waits indefinitely on POSIX but only ~10s on
+    Windows before raising ``OSError``; with ``blocking=False`` it raises
+    ``FileLockUnavailable`` at once if the lock is held. See the module
+    docstring for the full platform contract.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+")
     try:
