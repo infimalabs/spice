@@ -96,11 +96,21 @@ def test_negated_ack_mentions_do_not_extract_keys():
         f"I cannot ACK {KEY_A}: this steering conflicts.",
         f"Use the alternative instead of ACK {KEY_A}: this steering conflicts.",
         f"Use the alternative instead-of ACK {KEY_A}: this steering conflicts.",
+        f"I could not reproduce it, so I still refuse to ACK {KEY_A}: no.",
+        f"I could not reproduce it, but I will not ACK {KEY_A}: no.",
     ]
 
     for text in guarded:
         assert list(extract_ack_keys_from_text(text)) == []
         assert extract_ack_segments_from_text(text) == []
+
+
+def test_turning_connectives_reset_ack_negation_context():
+    for turn in ("so", "therefore", "thus", "hence", "but"):
+        text = f"I could not reproduce it, {turn} ACK {KEY_A}: handled."
+
+        assert list(extract_ack_keys_from_text(text)) == [KEY_A]
+        assert extract_ack_segments_from_text(text)[0].content == "handled."
 
 
 def test_hypothetical_and_narrated_ack_mentions_do_not_extract_keys():

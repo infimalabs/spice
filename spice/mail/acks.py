@@ -100,6 +100,7 @@ _ACK_NEGATION_PHRASES = (
 _ACK_HYPOTHETICAL_WORDS = frozenset(
     {"could", "hypothetically", "if", "should", "whether", "would"}
 )
+_ACK_TURNING_WORDS = frozenset({"but", "hence", "so", "therefore", "thus"})
 _ACK_NARRATION_WORDS = frozenset(
     {
         "example",
@@ -578,7 +579,8 @@ def _has_guarded_ack_context(text: str, ack_pos: int) -> bool:
     words = _ack_prefix_words(text, ack_pos)
     if not words:
         return False
-    recent = words[-_ACK_CONTEXT_WINDOW:]
+    context = _words_after_last_turn(words)
+    recent = context[-_ACK_CONTEXT_WINDOW:]
     return (
         bool(_ACK_NEGATION_WORDS & set(recent))
         or _contains_phrase(recent, _ACK_NEGATION_PHRASES)
@@ -616,6 +618,13 @@ def _ack_prefix_words(text: str, ack_pos: int) -> tuple[str, ...]:
             continue
         cursor += 1
     return tuple(words)
+
+
+def _words_after_last_turn(words: tuple[str, ...]) -> tuple[str, ...]:
+    for index in range(len(words) - 1, -1, -1):
+        if words[index] in _ACK_TURNING_WORDS:
+            return words[index + 1 :]
+    return words
 
 
 def _contains_phrase(
