@@ -40,13 +40,14 @@ from spice.agent.sidechannelnotify import (
     side_channel_marker_path as side_channel_marker_path,
 )
 from spice.agent.identity import ambient_thread_id
-from spice.agent.paths import agent_state_dir
+from spice.agent.paths import agent_state_dir, agent_thread_state_dir
 from spice.agent.shellhook import (
     BASH_ENV_ENV,
     BASH_HOOK_NAME,
     ZDOTDIR_ENV,
     packaged_shell_steering_static_hook_dir,
 )
+from spice.errors import SpiceError
 from spice.paths import (
     STATE_DIRNAME,
     worktree_spice_environment,
@@ -70,6 +71,7 @@ SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
 RTK_REWRITE_COMMAND = ("rtk", "rewrite")
 # RTK prints a rewritten command and returns 3 from the hook path on this lane.
 RTK_REWRITE_MATCH_EXIT_CODES = frozenset((0, 3))
+RTK_DB_PATH_ENV = "RTK_DB_PATH"  # env-policy: allow
 PYTHON_ROUTE_FAILURE = (
     "import sys;"
     "sys.stderr.write("
@@ -283,9 +285,34 @@ def build_agent_run_environment(
     # the shadow (upstream=self); the control plane reads the real integration
     # branch via `git config --get`, where the command-scope true merge wins over
     # the system-scope self merge.
+    env = None
     if is_spice_route(args) or worktree_spice_source(repo_root) is not None:
-        return agent_run_child_worktree_environment(args, repo_root=repo_root)
-    return None
+        env = agent_run_child_worktree_environment(args, repo_root=repo_root)
+    return apply_scoped_rtk_history_environment(repo_root, env)
+
+
+def apply_scoped_rtk_history_environment(
+    repo_root: Path | None, env: dict[str, str] | None
+) -> dict[str, str] | None:
+    path = scoped_rtk_history_db_path(repo_root)
+    if path is None:
+        return env
+    path.parent.mkdir(parents=True, exist_ok=True)
+    result = dict(os.environ if env is None else env)
+    result[RTK_DB_PATH_ENV] = str(path)
+    return result
+
+
+def scoped_rtk_history_db_path(repo_root: Path | None) -> Path | None:
+    if repo_root is None:
+        return None
+    thread_id = ambient_thread_id()
+    if not thread_id:
+        return None
+    try:
+        return agent_thread_state_dir(repo_root, thread_id) / "rtk" / "history.db"
+    except SpiceError:
+        return None
 
 
 def agent_run_child_worktree_environment(
