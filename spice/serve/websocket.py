@@ -8,6 +8,7 @@ from http import HTTPStatus
 import struct
 from threading import Lock
 from typing import Any
+from urllib.parse import urlsplit
 
 WEBSOCKET_ACCEPT_SUFFIX = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_TEXT_FRAME_BYTES = 1024 * 1024
@@ -152,7 +153,46 @@ def is_websocket_request(handler: Any) -> bool:
     return upgrade == "websocket" and "upgrade" in connection
 
 
+def websocket_request_authorities(handler: Any) -> set[str]:
+    """The host:port authorities a same-origin WebSocket may carry.
+
+    The Host header is what the browser actually connected to; the server bind
+    address is added as belt-and-suspenders. Both are lowercased so the Origin
+    comparison is case-insensitive on the host.
+    """
+    authorities: set[str] = set()
+    host_header = (handler.headers.get("Host") or "").strip().lower()
+    if host_header:
+        authorities.add(host_header)
+    server = getattr(handler, "server", None)
+    server_address = getattr(server, "server_address", None)
+    if isinstance(server_address, tuple) and len(server_address) >= 2:
+        authorities.add(f"{server_address[0]}:{server_address[1]}".lower())
+    return authorities
+
+
+def websocket_origin_allowed(handler: Any) -> bool:
+    """Reject cross-site WebSocket hijacking on the upgrade.
+
+    A browser always sends ``Origin`` on a WebSocket handshake and cannot
+    forge it, so an ``Origin`` whose authority does not match the request
+    target is a cross-site page (a malicious tab in the operator's browser)
+    driving the live bus — refuse it. A missing ``Origin`` is a non-browser
+    client, which is not a confused-deputy vector, so it is allowed.
+    """
+    origin = handler.headers.get("Origin")
+    if not origin:
+        return True
+    origin_authority = urlsplit(origin).netloc.lower()
+    if not origin_authority:
+        return False
+    return origin_authority in websocket_request_authorities(handler)
+
+
 def accept_websocket(handler: Any) -> WebSocketConnection | None:
+    if not websocket_origin_allowed(handler):
+        handler.send_error(HTTPStatus.FORBIDDEN, "cross-origin WebSocket rejected")
+        return None
     key = handler.headers.get("Sec-WebSocket-Key") or ""
     if not key:
         handler.send_error(HTTPStatus.BAD_REQUEST, "missing WebSocket key")
