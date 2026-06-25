@@ -2,10 +2,11 @@
 
 spice supervises an agent CLI (the "driver") without caring which one beyond
 this module. A driver knows: its binary and launch argv, the env var carrying
-the ambient thread id, where its transcripts (rollouts) live and how to map a
-thread id to one, the stdout section markers its `exec` mode prints (for the
-watchdog scanner), how to read the session id from startup output, and how to
-phrase the neutral skill-invocation launch prompt.
+the ambient thread id, how to read any per-turn id, where its transcripts
+(rollouts) live and how to map a thread id to one, the stdout section markers
+its `exec` mode prints (for the watchdog scanner), how to read the session id
+from startup output, how to rewrite any driver-specific tool command envelope,
+and how to phrase the neutral skill-invocation launch prompt.
 
 Two drivers ship: OpenAI Codex (the default) and Anthropic Claude Code.
 Current-process commands resolve `DRIVER` once from their own environment and
@@ -22,15 +23,18 @@ import json
 import os
 import re
 import sqlite3
+import shlex
 import subprocess
 import sys
 import uuid
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, overload
+from typing import Any, Callable, Mapping, overload
 
 from spice.paths import atomic_write_json, state_dir
+
+CommandTextRewriter = Callable[[str], str | None]
 
 
 @dataclass(frozen=True)
@@ -61,6 +65,17 @@ class AgentDriver:
 
     def binary(self) -> str:
         return os.environ.get(self.bin_env, self.default_bin)
+
+    def current_turn_id(self, env: Mapping[str, str]) -> str | None:
+        """Return this driver's current per-turn id from `env`, if it has one."""
+        return None
+
+    def rewrite_tool_command(
+        self, command_text: str, rewrite_command: CommandTextRewriter
+    ) -> str | None:
+        """Rewrite a driver-specific tool command envelope, if one applies."""
+        del command_text, rewrite_command
+        return None
 
     def resolve_model(self, model: str = "") -> str:
         return model or self.default_model
@@ -183,9 +198,15 @@ ROLLOUT_THREAD_ID_RE = re.compile(
     r")\.jsonl$",
     re.IGNORECASE,
 )
+CODEX_TURN_ID_ENV = "CODEX_TURN_ID"
+CODEX_SESSION_TURN_ID_ENV = "CODEX_SESSION_TURN_ID"
 
 
 class CodexDriver(AgentDriver):
+    def current_turn_id(self, env: Mapping[str, str]) -> str | None:
+        value = env.get(CODEX_TURN_ID_ENV) or env.get(CODEX_SESSION_TURN_ID_ENV) or ""
+        return value.strip() or None
+
     def home(self) -> Path:
         return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
 
@@ -302,6 +323,10 @@ OUT_OF_CREDITS_PATTERNS = (
         r"\bcredit balance\b.*\b(?:low|exhausted|insufficient)\b", re.IGNORECASE
     ),
 )
+# Claude Code wraps each shell tool command as
+# `... && eval '<command>' ...`; this anchors the embedded eval whose quoted
+# argument carries the real command that rtk should see.
+CLAUDE_EVAL_MARKER_RE = re.compile(r"&&\s+eval\s+")
 
 
 def claude_effort(value: str) -> str:
@@ -353,6 +378,11 @@ class ClaudeDriver(AgentDriver):
 
     def resolve_model(self, model: str = "") -> str:
         return resolve_claude_model(model)
+
+    def rewrite_tool_command(
+        self, command_text: str, rewrite_command: CommandTextRewriter
+    ) -> str | None:
+        return rewrite_claude_eval_envelope_command(command_text, rewrite_command)
 
     def owns_transcript(self, path: Path) -> bool:
         return self.projects_root() in path.parents
@@ -633,6 +663,72 @@ def _claude_is_compaction(raw: dict[str, Any]) -> bool:
     if raw.get("type") == "summary":
         return True
     return raw.get("type") == "system" and raw.get("subtype") == "compact_boundary"
+
+
+def rewrite_claude_eval_envelope_command(
+    command_text: str, rewrite_command: CommandTextRewriter
+) -> str | None:
+    """Rewrite the command Claude Code embeds in its `eval` execution envelope.
+
+    Claude Code's Bash tool runs every command as
+    `source <snapshot> ... && eval '<command>' < /dev/null && pwd -P >| <file>`.
+    Locate the eval's single quoted argument, rewrite it, and splice the
+    rewrite back so the snapshot prelude and cwd-capture suffix stay verbatim.
+    """
+    marker = CLAUDE_EVAL_MARKER_RE.search(command_text)
+    if marker is None:
+        return None
+    start = marker.end()
+    end = shell_word_end(command_text, start)
+    if end <= start:
+        return None
+    try:
+        words = shlex.split(command_text[start:end])
+    except ValueError:
+        return None
+    if len(words) != 1:
+        return None
+    rewritten = rewrite_command(words[0])
+    if rewritten is None:
+        return None
+    return command_text[:start] + shlex.quote(rewritten) + command_text[end:]
+
+
+def shell_word_end(text: str, start: int) -> int:
+    """Return the index past the first POSIX shell word beginning at ``start``.
+
+    Tracks single quotes (literal contents), double quotes (backslash escapes),
+    and unquoted backslash escapes, stopping at the first unquoted whitespace.
+    """
+    quote: str | None = None
+    index = start
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if quote == "'":
+            if char == "'":
+                quote = None
+            index += 1
+        elif quote == '"':
+            if char == "\\" and index + 1 < length:
+                index += 2
+            else:
+                if char == '"':
+                    quote = None
+                index += 1
+        elif char.isspace():
+            break
+        elif char == "'":
+            quote = "'"
+            index += 1
+        elif char == '"':
+            quote = '"'
+            index += 1
+        elif char == "\\" and index + 1 < length:
+            index += 2
+        else:
+            index += 1
+    return index
 
 
 def playwright_mcp_config_overrides(repo_root: Path) -> list[str]:

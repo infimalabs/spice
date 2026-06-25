@@ -3,6 +3,8 @@
 import argparse
 import json
 import os
+from pathlib import Path
+import re
 import subprocess
 from types import SimpleNamespace
 
@@ -23,6 +25,7 @@ from spice.agent.driver import (
     write_playwright_mcp_config,
 )
 from spice.errors import SpiceError
+from spice.tasks import ops
 
 DIRECT_AGENT_PID = 2222
 SUPERVISOR_PID = 3333
@@ -43,6 +46,69 @@ def test_shipped_agent_defaults_are_current_high_effort():
     assert CODEX_DRIVER.default_service_tier == "fast"
     assert CLAUDE_DRIVER.default_model == "sonnet"
     assert CLAUDE_DRIVER.default_reasoning_effort == "xhigh"
+
+
+def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
+    tmp_path, monkeypatch
+):
+    class ThirdDriver(agent_driver.AgentDriver):
+        def home(self) -> Path:
+            return tmp_path / "third-home"
+
+        def thread_transcript_path(
+            self, thread_id: str, *, must_exist: bool = True
+        ) -> Path:
+            del must_exist
+            return tmp_path / f"{thread_id}.jsonl"
+
+        def current_turn_id(self, env):
+            return env.get("THIRD_TURN_ID")
+
+        def rewrite_tool_command(self, command_text, rewrite_command):
+            if not command_text.startswith("third:"):
+                return None
+            rewritten = rewrite_command(command_text.removeprefix("third:"))
+            return f"third:{rewritten}" if rewritten else None
+
+    third_driver = ThirdDriver(
+        name="third",
+        default_bin="third",
+        bin_env="THIRD_BIN",
+        thread_id_env="THIRD_THREAD_ID",
+        default_model="third-model",
+        default_reasoning_effort="",
+        default_service_tier="",
+        stdout_assistant_marker="third",
+        stdout_section_markers=frozenset(),
+        stdout_compaction_marker="",
+        session_id_pattern=re.compile(r"^third-session$"),
+    )
+    monkeypatch.setenv("THIRD_TURN_ID", "turn-third")
+    monkeypatch.setattr(ops, "ambient_thread", lambda: ("thread-third", third_driver))
+    monkeypatch.setattr(ops.config, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(ops.tw, "current_branch", lambda: "main")
+    monkeypatch.setattr(ops.tw, "claim_head", lambda: "head-third")
+
+    claim = ops.claim_meta("actor-third")
+
+    assert "claim_thread:thread-third" in claim
+    assert "claim_context_turn:turn-third" in claim
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_rewrite(*args: str) -> str | None:
+        calls.append(args)
+        return "rtk third inner" if args == ("third inner",) else None
+
+    monkeypatch.setattr(wrap, "driver_for", lambda _repo_root: third_driver)
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
+
+    command = wrap.build_agent_run_command(
+        ["zsh", "-c", "third:third inner"], repo_root=tmp_path, rewrite_rtk=True
+    )
+
+    assert command == ["zsh", "-c", "third:rtk third inner"]
+    assert calls == [("third:third inner",), ("third inner",)]
 
 
 def test_codex_driver_command_pins_fast_service_tier_and_playwright_mcp(

@@ -12,7 +12,7 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 from typing import Any, Sequence
 
-from spice.agent.identity import ambient_thread_id
+from spice.agent.identity import ambient_thread
 from spice.errors import SpiceError
 from spice.hooks import precommit
 from spice.paths import repo_root_from_cwd
@@ -82,20 +82,16 @@ def claim_meta(actor: str) -> list[str]:
     until = _iso(at_dt + timedelta(seconds=config.CLAIM_TTL_SECONDS))
     start = _iso(at_dt - timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
     end = _iso(at_dt + timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
-    thread = ambient_thread_id()
-    if not thread:
+    ambient = ambient_thread()
+    if ambient is None:
         thread = tw.canonical_actor(config.SENTINEL_ACTOR)
-    # Per-turn granularity here is Codex-only by design. Codex sets
-    # CODEX_TURN_ID/CODEX_SESSION_TURN_ID in the agent env, so a claim can stamp
-    # the exact turn. Claude Code exposes no per-turn env (only
-    # CLAUDE_CODE_SESSION_ID); its per-turn id lives in the transcript as
-    # `promptId`, which the claim path cannot see. For Claude this intentionally
-    # resolves to the thread id, so claim_context_turn equals claim_thread.
-    turn = (
-        os.environ.get("CODEX_TURN_ID")
-        or os.environ.get("CODEX_SESSION_TURN_ID")
-        or thread
-    ).strip()
+        turn = thread
+    else:
+        thread, driver = ambient
+        # Per-turn granularity is a driver capability. Drivers that cannot see
+        # turn ids from the command environment intentionally fall back to the
+        # thread id, so claim_context_turn equals claim_thread for them.
+        turn = (driver.current_turn_id(os.environ) or thread).strip()
     link = f"spice-session://{thread}?start={start}&end={end}"
     return [
         f"claim_by:{actor}",

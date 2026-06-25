@@ -12,6 +12,7 @@ from threading import Thread
 
 import pytest
 
+from spice.agent import driver as agent_driver
 from spice.agent import sidechannel, sidechannelnotify, wrap
 from spice.agent.shadow import shadow_environment
 from spice.mail.feedback import supervisor_feedback_line
@@ -210,6 +211,9 @@ def test_wrapper_rewrites_claude_eval_envelope_inner_command(monkeypatch):
         return "rtk git show HEAD" if args == ("git show HEAD",) else None
 
     monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
+    monkeypatch.setattr(
+        wrap, "driver_for", lambda _repo_root: agent_driver.CLAUDE_DRIVER
+    )
 
     rewritten = wrap.build_agent_run_command(
         ["zsh", "-c", CLAUDE_EVAL_ENVELOPE], rewrite_rtk=True
@@ -237,24 +241,36 @@ def test_wrapper_eval_envelope_preserves_embedded_single_quotes(monkeypatch):
 
     monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
 
-    assert wrap.rtk_rewrite_eval_envelope_command(envelope) is None
+    assert (
+        agent_driver.CLAUDE_DRIVER.rewrite_tool_command(envelope, fake_rewrite) is None
+    )
     assert seen == [("echo 'hi there'",)]
 
 
 def test_wrapper_leaves_non_eval_commands_native(monkeypatch):
-    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
-    assert wrap.rtk_rewrite_eval_envelope_command("git status --short") is None
-    assert wrap.rtk_rewrite_eval_envelope_command("exec bash -lc 'git show'") is None
+    def rewrite(*args: str) -> str | None:
+        return None
+
+    assert (
+        agent_driver.CLAUDE_DRIVER.rewrite_tool_command("git status --short", rewrite)
+        is None
+    )
+    assert (
+        agent_driver.CLAUDE_DRIVER.rewrite_tool_command(
+            "exec bash -lc 'git show'", rewrite
+        )
+        is None
+    )
 
 
 def test_shell_word_end_tracks_quotes_and_escapes():
     text = "eval 'a b'\\''c' rest"
     start = len("eval ")
-    end = wrap.shell_word_end(text, start)
+    end = agent_driver.shell_word_end(text, start)
     assert text[start:end] == "'a b'\\''c'"
     double = 'eval "a \\" b" rest'
     dstart = len("eval ")
-    assert double[dstart : wrap.shell_word_end(double, dstart)] == '"a \\" b"'
+    assert double[dstart : agent_driver.shell_word_end(double, dstart)] == '"a \\" b"'
 
 
 def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
