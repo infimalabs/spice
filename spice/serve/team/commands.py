@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,66 +27,100 @@ class TeamCommandService:
 
     def apply(self, payload: dict[str, Any]) -> TeamCommandResult:
         command = str(payload.get("command") or "")
-        # Stale client: commands apply against current state anyway when they
-        # remain valid; an invalid one raises with detail from its handler.
         handler = self._COMMANDS.get(command)
         if handler is None:
             raise SpiceError(f"unknown team command {command!r}")
-        handler(self, payload)
-        snapshot = self.store.team_snapshot()
+        expected_revision = _expected_revision(payload)
+        snapshot = self.store.apply_team_command(
+            expected_revision=expected_revision,
+            command=lambda connection: handler(self, payload, connection),
+        )
         return TeamCommandResult(revision=snapshot.global_revision, snapshot=snapshot)
 
-    def _cmd_create_team(self, payload: dict[str, Any]) -> None:
+    def _cmd_create_team(
+        self, payload: dict[str, Any], connection: sqlite3.Connection
+    ) -> None:
         config = _config_from_payload(payload.get("config"))
         members = [str(item) for item in payload.get("members") or [] if item]
-        self.store.create_team(config=config, members=members)
+        self.store._create_team_locked(connection, None, config, members)
 
-    def _cmd_close_team(self, payload: dict[str, Any]) -> None:
-        self.store.close_team(_required(payload, "teamId"))
+    def _cmd_close_team(
+        self, payload: dict[str, Any], connection: sqlite3.Connection
+    ) -> None:
+        self.store._close_team_locked(connection, _required(payload, "teamId"))
 
-    def _cmd_assign_agent(self, payload: dict[str, Any]) -> None:
-        self.store.assign_agent(
+    def _cmd_assign_agent(
+        self, payload: dict[str, Any], connection: sqlite3.Connection
+    ) -> None:
+        self.store._assign_agent_locked(
+            connection,
             _required(payload, "teamId"),
             _required(payload, "agentId"),
             aliases=_aliases(payload),
         )
 
-    def _cmd_remove_agent(self, payload: dict[str, Any]) -> None:
-        self.store.remove_agent(
+    def _cmd_remove_agent(
+        self, payload: dict[str, Any], connection: sqlite3.Connection
+    ) -> None:
+        self.store._remove_agent_locked(
+            connection,
             _required(payload, "teamId"),
             _required(payload, "agentId"),
             aliases=_aliases(payload),
         )
 
-    def _cmd_split_team(self, payload: dict[str, Any]) -> None:
+    def _cmd_split_team(
+        self, payload: dict[str, Any], connection: sqlite3.Connection
+    ) -> None:
         agent_ids = [str(item) for item in payload.get("agentIds") or [] if item]
-        self.store.split_team(_required(payload, "sourceTeamId"), agent_ids=agent_ids)
+        self.store._split_team_locked(
+            connection,
+            _required(payload, "sourceTeamId"),
+            agent_ids=agent_ids,
+        )
 
-    def _cmd_split_team_back(self, payload: dict[str, Any]) -> None:
-        self.store.split_team_back(_required(payload, "sourceTeamId"))
+    def _cmd_split_team_back(
+        self, payload: dict[str, Any], connection: sqlite3.Connection
+    ) -> None:
+        self.store._split_team_back_locked(
+            connection, _required(payload, "sourceTeamId")
+        )
 
-    def _cmd_merge_teams(self, payload: dict[str, Any]) -> None:
-        self.store.merge_teams(
+    def _cmd_merge_teams(
+        self, payload: dict[str, Any], connection: sqlite3.Connection
+    ) -> None:
+        self.store._merge_teams_locked(
+            connection,
             _required(payload, "sourceTeamId"),
             _required(payload, "destinationTeamId"),
         )
 
-    def _cmd_reorder_team_agents(self, payload: dict[str, Any]) -> None:
+    def _cmd_reorder_team_agents(
+        self, payload: dict[str, Any], connection: sqlite3.Connection
+    ) -> None:
         agent_ids = [str(item) for item in payload.get("agentIds") or [] if item]
-        self.store.reorder_team_agents(_required(payload, "teamId"), agent_ids)
+        self.store._reorder_team_agents_locked(
+            connection, _required(payload, "teamId"), agent_ids
+        )
 
-    def _cmd_update_team_config(self, payload: dict[str, Any]) -> None:
+    def _cmd_update_team_config(
+        self, payload: dict[str, Any], connection: sqlite3.Connection
+    ) -> None:
         team_id = _required(payload, "teamId")
-        current = self.store.team_config(team_id)
+        current = _team_config_locked(self.store, connection, team_id)
         patch = payload.get("configPatch") or {}
-        self.store.update_team_config(
+        self.store._update_team_config_locked(
+            connection,
             team_id,
             _patched_config(current, patch),
             replace_task_filters="taskFilters" in patch,
         )
 
-    def _cmd_set_agent_renewal_intent(self, payload: dict[str, Any]) -> None:
-        self.store.set_agent_renewal_request(
+    def _cmd_set_agent_renewal_intent(
+        self, payload: dict[str, Any], connection: sqlite3.Connection
+    ) -> None:
+        self.store._set_agent_renewal_request_locked(
+            connection,
             _required(payload, "agentId"),
             requested=bool(payload.get("requested")),
         )
@@ -113,6 +148,31 @@ def _required(payload: dict[str, Any], key: str) -> str:
 
 def _aliases(payload: dict[str, Any]) -> list[str]:
     return [str(item) for item in payload.get("agentAliases") or [] if item]
+
+
+def _expected_revision(payload: dict[str, Any]) -> int | None:
+    if "expectedRevision" not in payload:
+        return None
+    raw_revision = payload.get("expectedRevision")
+    if raw_revision is None:
+        raise SpiceError("expectedRevision must be a non-negative integer")
+    try:
+        revision = int(raw_revision)
+    except (TypeError, ValueError) as exc:
+        raise SpiceError("expectedRevision must be a non-negative integer") from exc
+    if revision < 0:
+        raise SpiceError("expectedRevision must be a non-negative integer")
+    return revision
+
+
+def _team_config_locked(
+    store: Any, connection: sqlite3.Connection, team_id: str
+) -> Any:
+    from spice.serve.team.filters import config_from_row
+
+    row = store._require_team(connection, team_id)
+    entries = store._task_filter_entries_locked(connection, team_id)
+    return config_from_row(row, entries)
 
 
 def _config_from_payload(raw: Any) -> Any:

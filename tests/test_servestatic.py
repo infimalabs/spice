@@ -46,6 +46,22 @@ def test_static_initial_bootstrap_waits_for_server_topology():
     ) in app
 
 
+def test_static_team_command_failure_forces_snapshot_refresh():
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    body = _between(
+        app_lanes,
+        "async function requestTeamCommand(payload) {",
+        "\n}\n\nfunction teamCommandPayload",
+    )
+
+    assert (
+        "if (result.ok === false) {\n"
+        "    await refreshTeamSnapshot({ force: true });\n"
+        '    throw new Error(result.error || "team command failed");\n'
+        "  }"
+    ) in body
+
+
 def test_static_send_route_applies_fresh_start_identity_before_refresh():
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     send_start = app_stream.index("function applyLaneSendResult(")
