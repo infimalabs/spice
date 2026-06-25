@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
+from spice.errors import SpiceError
 from spice.mail.ackstate import (
     ACK_DISPOSITION_ACKED,
     ACK_DISPOSITION_REFUSED,
@@ -54,6 +55,7 @@ from spice.sessions.util import first_text, normalize_timestamp
 ACK_TOKEN = "ACK"
 NACK_TOKEN = "NACK"
 TASK_DIRECTIVE_TOKEN = "TASK"
+_MISSING_GIT_WORKTREE_ERROR = "not inside a git worktree"
 
 # Transcript lines start with `{"timestamp":"<iso>",...` — the timestamp can
 # be sliced out without JSON parsing for cheap window pre-filtering.
@@ -375,15 +377,20 @@ def summarize_ack_archival(
     """
     segments = extract_ack_segments_from_text(message_text)
     requested = list(dict.fromkeys(key for segment in segments for key in segment.keys))
-    already_acked_aliases = _consumed_state_aliases(
-        repo_root, disposition=ACK_DISPOSITION_ACKED
-    )
-    archived = archive_ackd_inbox_items(
-        repo_root,
-        requested,
-        ack_text=message_text,
-        ack_content_by_key=ack_content_by_key(segments),
-    )
+    try:
+        already_acked_aliases = _consumed_state_aliases(
+            repo_root, disposition=ACK_DISPOSITION_ACKED
+        )
+        archived = archive_ackd_inbox_items(
+            repo_root,
+            requested,
+            ack_text=message_text,
+            ack_content_by_key=ack_content_by_key(segments),
+        )
+    except SpiceError as exc:
+        if _is_missing_git_worktree_error(exc):
+            return _empty_ack_archival_summary()
+        raise
     archived_aliases: set[str] = set()
     for key in archived:
         archived_aliases |= inbox_item_key_aliases(key)
@@ -426,18 +433,23 @@ def summarize_nack_archival(
     requested = list(
         dict.fromkeys(key for segment in reasoned_segments for key in segment.keys)
     )
-    already_refused_aliases = _consumed_state_aliases(
-        repo_root, disposition=ACK_DISPOSITION_REFUSED
-    )
-    already_acked_aliases = _consumed_state_aliases(
-        repo_root, disposition=ACK_DISPOSITION_ACKED
-    )
-    refused = archive_nackd_inbox_items(
-        repo_root,
-        requested,
-        nack_text=message_text,
-        nack_content_by_key=ack_content_by_key(reasoned_segments),
-    )
+    try:
+        already_refused_aliases = _consumed_state_aliases(
+            repo_root, disposition=ACK_DISPOSITION_REFUSED
+        )
+        already_acked_aliases = _consumed_state_aliases(
+            repo_root, disposition=ACK_DISPOSITION_ACKED
+        )
+        refused = archive_nackd_inbox_items(
+            repo_root,
+            requested,
+            nack_text=message_text,
+            nack_content_by_key=ack_content_by_key(reasoned_segments),
+        )
+    except SpiceError as exc:
+        if _is_missing_git_worktree_error(exc):
+            return _empty_nack_archival_summary()
+        raise
     refused_aliases: set[str] = set()
     for key in refused:
         refused_aliases |= inbox_item_key_aliases(key)
@@ -474,6 +486,24 @@ def summarize_nack_archival(
         unmatched=unmatched,
         reasonless=reasonless,
     )
+
+
+def _empty_ack_archival_summary() -> AckArchivalSummary:
+    return AckArchivalSummary(archived=[], already_acked=[], unmatched=[])
+
+
+def _empty_nack_archival_summary() -> NackArchivalSummary:
+    return NackArchivalSummary(
+        refused=[],
+        already_refused=[],
+        already_acked=[],
+        unmatched=[],
+        reasonless=[],
+    )
+
+
+def _is_missing_git_worktree_error(exc: SpiceError) -> bool:
+    return str(exc) == _MISSING_GIT_WORKTREE_ERROR
 
 
 def _consumed_state_aliases(
