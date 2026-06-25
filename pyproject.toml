@@ -37,11 +37,11 @@ namespaces = true
     "shellhooks/.zshrc",
     "shellhooks/.zlogin",
     "shellhooks/bash_env",
-    "shellhooks2/.zshenv",
-    "shellhooks2/.zprofile",
-    "shellhooks2/.zshrc",
-    "shellhooks2/.zlogin",
-    "shellhooks2/bash_env",
+    "staticshellhooks/.zshenv",
+    "staticshellhooks/.zprofile",
+    "staticshellhooks/.zshrc",
+    "staticshellhooks/.zlogin",
+    "staticshellhooks/bash_env",
 ]
 "spice.serve.static" = [
     "*.css",

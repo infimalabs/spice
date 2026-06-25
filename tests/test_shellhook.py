@@ -401,6 +401,8 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
     monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
     monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(shellhook.ZDOTDIR_ENV, raising=False)
+    monkeypatch.delenv(shellhook.BASH_ENV_ENV, raising=False)
 
     env = lifecycle.agent_environment(tmp_path)
 
@@ -623,7 +625,7 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
         assert shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV in text
         if filename in dynamic_surfaces:
             assert "spice agent run --" in text
-        assert "shellhooks2" in text
+        assert "staticshellhooks" in text
         assert "--preserve-shell-hook-env" not in text
         if filename == shellhook.BASH_HOOK_NAME:
             assert shellhook.SHELL_HOOK_ORIGINAL_HISTFILE_ENV not in text
@@ -641,7 +643,7 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
         "tool"
     ]["setuptools"]["package-data"]["spice.agent"]
     assert "shellhooks/.zshrc" in package_data
-    assert "shellhooks2/.zshrc" in package_data
+    assert "staticshellhooks/.zshrc" in package_data
 
 
 def test_agent_wrapper_lines_adds_ordered_agent_wrapper_functions(tmp_path):
