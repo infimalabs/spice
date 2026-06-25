@@ -66,7 +66,39 @@ def test_same_origin_upgrade_is_accepted():
     assert handler.errors == []
 
 
-def test_missing_origin_non_browser_client_is_accepted():
+def test_loopback_host_alias_upgrade_is_accepted():
+    handler = _FakeHandler(
+        {
+            "Host": "localhost:8765",
+            "Origin": "http://localhost:8765",
+            "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+        }
+    )
+
+    connection = accept_websocket(handler)
+
+    assert isinstance(connection, WebSocketConnection)
+    assert handler.responses == [HTTPStatus.SWITCHING_PROTOCOLS]
+    assert handler.errors == []
+
+
+def test_origin_matching_arbitrary_host_is_refused_on_loopback_bind():
+    handler = _FakeHandler(
+        {
+            "Host": "evil.example:8765",
+            "Origin": "http://evil.example:8765",
+            "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+        }
+    )
+
+    connection = accept_websocket(handler)
+
+    assert connection is None
+    assert handler.errors == [(HTTPStatus.FORBIDDEN, "cross-origin WebSocket rejected")]
+    assert handler.responses == []
+
+
+def test_missing_origin_upgrade_is_refused():
     handler = _FakeHandler(
         {
             "Host": "127.0.0.1:8765",
@@ -76,8 +108,9 @@ def test_missing_origin_non_browser_client_is_accepted():
 
     connection = accept_websocket(handler)
 
-    assert isinstance(connection, WebSocketConnection)
-    assert handler.errors == []
+    assert connection is None
+    assert handler.errors == [(HTTPStatus.FORBIDDEN, "cross-origin WebSocket rejected")]
+    assert handler.responses == []
 
 
 def test_origin_matching_server_bind_is_accepted_when_host_header_absent():

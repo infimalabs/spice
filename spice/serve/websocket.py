@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 from dataclasses import dataclass, field
 from http import HTTPStatus
@@ -156,37 +157,107 @@ def is_websocket_request(handler: Any) -> bool:
 def websocket_request_authorities(handler: Any) -> set[str]:
     """The host:port authorities a same-origin WebSocket may carry.
 
-    The Host header is what the browser actually connected to; the server bind
-    address is added as belt-and-suspenders. Both are lowercased so the Origin
-    comparison is case-insensitive on the host.
+    The server bind address is always allowed. The Host header is allowed only
+    when it is itself compatible with that bind: loopback, the same explicit
+    bind host, or any host on an intentional wildcard bind. This keeps a DNS
+    rebinding page from making Origin and Host match on an arbitrary domain
+    while the socket actually reaches the loopback-bound server.
     """
     authorities: set[str] = set()
-    host_header = (handler.headers.get("Host") or "").strip().lower()
-    if host_header:
-        authorities.add(host_header)
     server = getattr(handler, "server", None)
     server_address = getattr(server, "server_address", None)
+    bind_host: str | None = None
+    bind_port: int | None = None
     if isinstance(server_address, tuple) and len(server_address) >= 2:
-        authorities.add(f"{server_address[0]}:{server_address[1]}".lower())
+        bind_host = str(server_address[0]).strip().lower()
+        try:
+            bind_port = int(server_address[1])
+        except (TypeError, ValueError):
+            bind_port = None
+    if bind_host and bind_port is not None:
+        authorities.add(_format_authority(bind_host, bind_port))
+    host_header = (handler.headers.get("Host") or "").strip().lower()
+    host_parts = _authority_parts(host_header)
+    if host_parts is not None and _host_authority_allowed(
+        host_parts[0], host_parts[1], bind_host=bind_host, bind_port=bind_port
+    ):
+        authorities.add(_format_authority(host_parts[0], host_parts[1]))
     return authorities
 
 
 def websocket_origin_allowed(handler: Any) -> bool:
     """Reject cross-site WebSocket hijacking on the upgrade.
 
-    A browser always sends ``Origin`` on a WebSocket handshake and cannot
-    forge it, so an ``Origin`` whose authority does not match the request
-    target is a cross-site page (a malicious tab in the operator's browser)
-    driving the live bus — refuse it. A missing ``Origin`` is a non-browser
-    client, which is not a confused-deputy vector, so it is allowed.
+    Browsers always send ``Origin`` on a WebSocket handshake and cannot forge
+    it, so an ``Origin`` whose authority does not match an allowed bind or
+    loopback target is a cross-site page driving the live bus. Missing
+    ``Origin`` is refused too; the live bus is a browser UI surface, not a
+    compatibility API for raw WebSocket clients.
     """
     origin = handler.headers.get("Origin")
     if not origin:
-        return True
-    origin_authority = urlsplit(origin).netloc.lower()
-    if not origin_authority:
         return False
+    origin_parts = _authority_parts(urlsplit(origin).netloc.lower())
+    if origin_parts is None:
+        return False
+    origin_authority = _format_authority(origin_parts[0], origin_parts[1])
     return origin_authority in websocket_request_authorities(handler)
+
+
+def _authority_parts(authority: str) -> tuple[str, int] | None:
+    if not authority:
+        return None
+    parsed = urlsplit(f"//{authority}")
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is None:
+        return None
+    return host, port
+
+
+def _host_authority_allowed(
+    host: str,
+    port: int,
+    *,
+    bind_host: str | None,
+    bind_port: int | None,
+) -> bool:
+    if bind_port is None or port != bind_port:
+        return False
+    if _host_is_loopback(host):
+        return True
+    if bind_host is None:
+        return False
+    if _host_is_wildcard_bind(bind_host):
+        return True
+    return host == bind_host
+
+
+def _host_is_loopback(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _host_is_wildcard_bind(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_unspecified
+    except ValueError:
+        return host == ""
+
+
+def _format_authority(host: str, port: int) -> str:
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
 
 
 def accept_websocket(handler: Any) -> WebSocketConnection | None:
