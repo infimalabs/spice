@@ -125,8 +125,9 @@ def _string(value: Any) -> str:
 
 
 def send_static_asset(handler: Any, name: str) -> None:
+    static_root = STATIC_ROOT.resolve()
     candidate = (STATIC_ROOT / name).resolve()
-    if not str(candidate).startswith(str(STATIC_ROOT)) or not candidate.is_file():
+    if not candidate.is_relative_to(static_root) or not candidate.is_file():
         handler.send_error(HTTPStatus.NOT_FOUND)
         return
     body = candidate.read_bytes()
