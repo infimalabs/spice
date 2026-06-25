@@ -33,6 +33,22 @@ def configure_serve_parser(subparsers: Any) -> None:
         help=f"Bind port. Default: {DEFAULT_SERVE_PORT}.",
     )
     parser.add_argument(
+        "--allow-insecure-bind",
+        action="store_true",
+        help=(
+            "Allow the no-auth serve control surface to bind to a non-loopback "
+            "address. Prints a warning naming the exposed address."
+        ),
+    )
+    parser.add_argument(
+        "--auth-token",
+        metavar="TOKEN",
+        help=(
+            "Require TOKEN for serve HTTP and WebSocket requests; this is an "
+            "explicit opt-in for non-loopback binds."
+        ),
+    )
+    parser.add_argument(
         "--until",
         type=Path,
         metavar="PATH",

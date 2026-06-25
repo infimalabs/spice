@@ -5,6 +5,9 @@ import os
 from pathlib import Path
 import threading
 
+import pytest
+
+from spice.errors import SpiceError
 from spice.serve import app as serve_app
 from spice.serve import filewatch as serve_filewatch
 from spice.serve.app import run_serve
@@ -135,6 +138,89 @@ def test_serve_creates_missing_until_path_before_serving(monkeypatch, tmp_path: 
     assert exists_at_watch == [True]
     assert fake_server.shutdown_count == 1
     assert fake_server.closed is True
+
+
+def test_serve_refuses_non_loopback_bind_without_opt_in(monkeypatch) -> None:
+    def fail_server(*_args: object) -> FakeServer:
+        raise AssertionError("server should not bind before opt-in guard passes")
+
+    monkeypatch.setattr(serve_app, "_ServeHttpServer", fail_server)
+
+    with pytest.raises(SpiceError) as exc_info:
+        run_serve(
+            Namespace(
+                host="0.0.0.0",
+                port=8765,
+                until=None,
+                task_backend=None,
+                allow_insecure_bind=False,
+                auth_token=None,
+            )
+        )
+
+    message = str(exc_info.value)
+    assert "refuses to bind" in message
+    assert "http://0.0.0.0:8765" in message
+    assert "--allow-insecure-bind" in message
+    assert "--auth-token TOKEN" in message
+
+
+def test_serve_warns_when_insecure_non_loopback_bind_allowed(
+    monkeypatch, capsys
+) -> None:
+    fake_server = FakeServer()
+    fake_server.server_address = ("0.0.0.0", 9999)
+    fake_server.shutdown_event.set()
+    monkeypatch.setattr(serve_app, "_ServeHttpServer", lambda *_args: fake_server)
+    monkeypatch.setattr(
+        serve_app, "start_exit_file_watch", lambda *_args, **_kwargs: None
+    )
+
+    result = run_serve(
+        Namespace(
+            host="0.0.0.0",
+            port=9999,
+            until=None,
+            task_backend=None,
+            allow_insecure_bind=True,
+            auth_token=None,
+        )
+    )
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "WARNING:" in output
+    assert "http://0.0.0.0:9999" in output
+    assert "--allow-insecure-bind" in output
+
+
+def test_serve_warns_when_token_protected_non_loopback_bind_allowed(
+    monkeypatch, capsys
+) -> None:
+    fake_server = FakeServer()
+    fake_server.server_address = ("0.0.0.0", 9999)
+    fake_server.shutdown_event.set()
+    monkeypatch.setattr(serve_app, "_ServeHttpServer", lambda *_args: fake_server)
+    monkeypatch.setattr(
+        serve_app, "start_exit_file_watch", lambda *_args, **_kwargs: None
+    )
+
+    result = run_serve(
+        Namespace(
+            host="0.0.0.0",
+            port=9999,
+            until=None,
+            task_backend=None,
+            allow_insecure_bind=False,
+            auth_token="secret",
+        )
+    )
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "WARNING:" in output
+    assert "http://0.0.0.0:9999" in output
+    assert "token auth enabled" in output
 
 
 def test_serve_exits_after_watched_file_changes(monkeypatch, tmp_path: Path) -> None:

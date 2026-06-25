@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import hashlib
 import socket
+import threading
 from http import HTTPStatus
 from pathlib import Path
 
@@ -52,6 +54,8 @@ def test_serve_parser_exposes_until_path_help(capsys):
         "Watch PATH and stop the server after it is touched or changed."
     )
     assert "--until PATH" in help_text
+    assert "--allow-insecure-bind" in help_text
+    assert "--auth-token TOKEN" in help_text
     assert expected_until_help in flat_help
 
 
@@ -62,6 +66,62 @@ def test_serve_parser_accepts_until_path(tmp_path):
 
     assert args.command == "serve"
     assert args.until == stop_path
+
+
+def test_serve_parser_accepts_bind_guard_options():
+    args = build_parser().parse_args(
+        [
+            "serve",
+            "--host",
+            "0.0.0.0",
+            "--allow-insecure-bind",
+            "--auth-token",
+            "secret",
+        ]
+    )
+
+    assert args.command == "serve"
+    assert args.host == "0.0.0.0"
+    assert args.allow_insecure_bind is True
+    assert args.auth_token == "secret"
+
+
+def test_serve_auth_token_protects_http_requests(tmp_path):
+    state = app.ServeState(anchor_root=tmp_path, auth_token="secret")
+    server = app._ServeHttpServer(("127.0.0.1", 0), app._ServeHandler, state)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address[:2]
+
+    try:
+        conn = http.client.HTTPConnection(host, port, timeout=2)
+        conn.request("GET", "/")
+        response = conn.getresponse()
+        body = response.read().decode("utf-8")
+        conn.close()
+        assert response.status == HTTPStatus.UNAUTHORIZED
+        assert "spice serve auth token required" in body
+
+        conn = http.client.HTTPConnection(host, port, timeout=2)
+        conn.request("GET", "/?token=secret")
+        response = conn.getresponse()
+        html = response.read().decode("utf-8")
+        cookie = response.getheader("Set-Cookie") or ""
+        conn.close()
+        assert response.status == HTTPStatus.OK
+        assert "<!doctype html>" in html
+        assert app.SERVE_AUTH_COOKIE_NAME in cookie
+
+        conn = http.client.HTTPConnection(host, port, timeout=2)
+        conn.request("GET", "/", headers={"Cookie": cookie.split(";", 1)[0]})
+        response = conn.getresponse()
+        response.read()
+        conn.close()
+        assert response.status == HTTPStatus.OK
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_serve_handler_closes_socket_reader_after_request_line_timeout():
