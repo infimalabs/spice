@@ -167,64 +167,12 @@ def process_supervised_assistant_message(
     log_handle: TextIO,
     reminder_gate: MaximReminderGate,
 ) -> None:
-    nack_summary = summarize_nack_archival(repo_root, message_text)
-    if nack_summary.refused:
-        publish_supervisor_feedback(
-            repo_root,
-            log_handle,
-            "nack.refused",
-            keys=nack_summary.refused,
-        )
-    if nack_summary.already_refused:
-        publish_supervisor_feedback(
-            repo_root,
-            log_handle,
-            "nack.already-refused",
-            keys=nack_summary.already_refused,
-        )
-    if nack_summary.already_acked:
-        publish_supervisor_feedback(
-            repo_root,
-            log_handle,
-            "nack.already-acked",
-            keys=nack_summary.already_acked,
-        )
-    if nack_summary.unmatched:
-        publish_supervisor_feedback(
-            repo_root,
-            log_handle,
-            "nack.unmatched",
-            keys=nack_summary.unmatched,
-        )
-    if nack_summary.reasonless:
-        publish_supervisor_feedback(
-            repo_root,
-            log_handle,
-            "nack.reason-required",
-            keys=nack_summary.reasonless,
-        )
-    ack_summary = summarize_ack_archival(repo_root, message_text)
-    if ack_summary.archived:
-        publish_supervisor_feedback(
-            repo_root,
-            log_handle,
-            "ack.archived",
-            keys=ack_summary.archived,
-        )
-    if ack_summary.already_acked:
-        publish_supervisor_feedback(
-            repo_root,
-            log_handle,
-            "ack.already-acked",
-            keys=ack_summary.already_acked,
-        )
-    if ack_summary.unmatched:
-        publish_supervisor_feedback(
-            repo_root,
-            log_handle,
-            "ack.unmatched",
-            keys=ack_summary.unmatched,
-        )
+    # Archival hits the ack-store (SQLite + git common dir). In production
+    # repo_root is a real worktree, but a locked or corrupt store or a full
+    # disk must not crash supervised-message processing — so each archival pass
+    # runs inside the same surface-and-survive guard as the blocks below.
+    _publish_nack_feedback(repo_root, message_text, log_handle)
+    _publish_ack_feedback(repo_root, message_text, log_handle)
     try:
         results = create_inline_tasks(repo_root, message_text, log_handle)
         if results:
@@ -265,6 +213,44 @@ def process_supervised_assistant_message(
     except Exception as exc:  # defensive supervisor logging
         log_handle.write(f"spice maxim supervisor error: {exc}\n")
         log_handle.flush()
+
+
+def _publish_nack_feedback(
+    repo_root: Path, message_text: str, log_handle: TextIO
+) -> None:
+    try:
+        nack_summary = summarize_nack_archival(repo_root, message_text)
+    except Exception as exc:  # surface-and-survive: archival must not crash the loop
+        log_handle.write(f"spice nack archival supervisor error: {exc}\n")
+        log_handle.flush()
+        return
+    for kind, keys in (
+        ("nack.refused", nack_summary.refused),
+        ("nack.already-refused", nack_summary.already_refused),
+        ("nack.already-acked", nack_summary.already_acked),
+        ("nack.unmatched", nack_summary.unmatched),
+        ("nack.reason-required", nack_summary.reasonless),
+    ):
+        if keys:
+            publish_supervisor_feedback(repo_root, log_handle, kind, keys=keys)
+
+
+def _publish_ack_feedback(
+    repo_root: Path, message_text: str, log_handle: TextIO
+) -> None:
+    try:
+        ack_summary = summarize_ack_archival(repo_root, message_text)
+    except Exception as exc:  # surface-and-survive: archival must not crash the loop
+        log_handle.write(f"spice ack archival supervisor error: {exc}\n")
+        log_handle.flush()
+        return
+    for kind, keys in (
+        ("ack.archived", ack_summary.archived),
+        ("ack.already-acked", ack_summary.already_acked),
+        ("ack.unmatched", ack_summary.unmatched),
+    ):
+        if keys:
+            publish_supervisor_feedback(repo_root, log_handle, kind, keys=keys)
 
 
 def publish_supervisor_feedback(

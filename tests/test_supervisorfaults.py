@@ -21,6 +21,17 @@ from spice.agent import sidechannel, watchdog, wrap
 def empty_ack_summary(monkeypatch):
     monkeypatch.setattr(
         watchdog,
+        "summarize_nack_archival",
+        lambda _repo, _text: SimpleNamespace(
+            refused=[],
+            already_refused=[],
+            already_acked=[],
+            unmatched=[],
+            reasonless=[],
+        ),
+    )
+    monkeypatch.setattr(
+        watchdog,
         "summarize_ack_archival",
         lambda _repo, _text: SimpleNamespace(
             archived=[], already_acked=[], unmatched=[]
@@ -94,6 +105,67 @@ def test_maxim_failure_is_surfaced_and_supervisor_survives(
     )
 
     assert "spice maxim supervisor error: maxim-boom" in log.getvalue()
+
+
+def test_nack_archival_failure_is_surfaced_and_supervisor_survives(
+    tmp_path, monkeypatch
+):
+    def boom(_repo, _text):
+        raise RuntimeError("nack-boom")
+
+    monkeypatch.setattr(watchdog, "summarize_nack_archival", boom)
+    monkeypatch.setattr(
+        watchdog,
+        "summarize_ack_archival",
+        lambda _repo, _text: SimpleNamespace(
+            archived=[], already_acked=[], unmatched=[]
+        ),
+    )
+    monkeypatch.setattr(watchdog, "create_inline_tasks", lambda _repo, _text, _log: [])
+    monkeypatch.setattr(watchdog, "record_supervised_lane_metrics", lambda _repo: None)
+    monkeypatch.setattr(
+        watchdog, "publish_maxim_hits_as_inbox", lambda _repo, _text, **_kw: []
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        tmp_path, "plain message", log, watchdog.MaximReminderGate()
+    )
+
+    assert "spice nack archival supervisor error: nack-boom" in log.getvalue()
+
+
+def test_ack_archival_failure_is_surfaced_and_supervisor_survives(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        watchdog,
+        "summarize_nack_archival",
+        lambda _repo, _text: SimpleNamespace(
+            refused=[],
+            already_refused=[],
+            already_acked=[],
+            unmatched=[],
+            reasonless=[],
+        ),
+    )
+
+    def boom(_repo, _text):
+        raise RuntimeError("ack-boom")
+
+    monkeypatch.setattr(watchdog, "summarize_ack_archival", boom)
+    monkeypatch.setattr(watchdog, "create_inline_tasks", lambda _repo, _text, _log: [])
+    monkeypatch.setattr(watchdog, "record_supervised_lane_metrics", lambda _repo: None)
+    monkeypatch.setattr(
+        watchdog, "publish_maxim_hits_as_inbox", lambda _repo, _text, **_kw: []
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        tmp_path, "plain message", log, watchdog.MaximReminderGate()
+    )
+
+    assert "spice ack archival supervisor error: ack-boom" in log.getvalue()
 
 
 def test_side_channel_feedback_failure_is_swallowed(tmp_path, monkeypatch):
