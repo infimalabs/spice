@@ -437,7 +437,10 @@ def test_symbol_reachability_resolves_typed_parameter_method_calls(tmp_path):
         "def create_default_team(team_store: ServeTeamStore):\n"
         "    team_store.create_team()\n"
         "    cached_store: ServeTeamStore = team_store\n"
-        "    return cached_store.rename_team()\n",
+        "    return cached_store.rename_team()\n"
+        "def create_from_constructor_assignment():\n"
+        "    assigned_store = ServeTeamStore()\n"
+        "    return assigned_store.constructor_only_method()\n",
         encoding="utf-8",
     )
     (tmp_path / "spice" / "serve" / "team" / "store.py").write_text(
@@ -446,6 +449,8 @@ def test_symbol_reachability_resolves_typed_parameter_method_calls(tmp_path):
         "        return 'created'\n\n"
         "    def rename_team(self):\n"
         "        return 'renamed'\n\n"
+        "    def constructor_only_method(self):\n"
+        "        return 'assigned'\n\n"
         "    def test_only_method(self):\n"
         "        return 'test-only'\n",
         encoding="utf-8",
@@ -455,6 +460,7 @@ def test_symbol_reachability_resolves_typed_parameter_method_calls(tmp_path):
         "def test_store_methods():\n"
         "    assert ServeTeamStore().create_team() == 'created'\n"
         "    assert ServeTeamStore().rename_team() == 'renamed'\n"
+        "    assert ServeTeamStore().constructor_only_method() == 'assigned'\n"
         "    assert ServeTeamStore().test_only_method() == 'test-only'\n",
         encoding="utf-8",
     )
