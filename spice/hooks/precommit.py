@@ -686,13 +686,15 @@ def _run_local_path_guard(repo_root: Path, paths: list[Path]) -> None:
 
 
 def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
-    findings = fileloc.scan_staged_loc_violations(paths, root=repo_root)
+    findings = fileloc.scan_staged_loc_violations(paths, root=repo_root, persist=True)
     if findings:
         raise SpiceError(fileloc.render_loc_board(findings))
 
 
 def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
-    findings = complexity.scan_staged_complexity_violations(paths, root=repo_root)
+    findings = complexity.scan_staged_complexity_violations(
+        paths, root=repo_root, persist=True
+    )
     if findings:
         raise SpiceError(complexity.render_complexity_board(findings))
 
