@@ -20,7 +20,7 @@ import uuid as uuidlib
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock
-from typing import Any, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator
 
 from spice.errors import SpiceError
 from spice.serve.team.filters import (
@@ -184,6 +184,30 @@ class ServeTeamStore(
         with self.connect() as connection:
             return self._current_revision_locked(connection)
 
+    def apply_team_command(
+        self,
+        *,
+        expected_revision: int | None,
+        command: Callable[[sqlite3.Connection], None],
+    ) -> TeamSnapshot:
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._require_expected_revision_locked(connection, expected_revision)
+            command(connection)
+            return self._team_snapshot_locked(connection)
+
+    def _require_expected_revision_locked(
+        self, connection: sqlite3.Connection, expected_revision: int | None
+    ) -> None:
+        if expected_revision is None:
+            return
+        current_revision = self._current_revision_locked(connection)
+        if expected_revision != current_revision:
+            raise SpiceError(
+                "stale team command: expected revision "
+                f"{expected_revision}, current revision {current_revision}"
+            )
+
     def prune_zero_activity_closed_teams(self) -> tuple[str, ...]:
         with self.connect() as connection:
             return self._prune_zero_activity_closed_teams_locked(connection)
@@ -323,24 +347,38 @@ class ServeTeamStore(
 
     def close_team(self, team_id: str) -> int:
         with self.connect() as connection:
-            self._require_team(connection, team_id)
-            connection.execute(
-                "UPDATE teams SET status = 'closed' WHERE team_id = ?", (team_id,)
-            )
-            connection.execute("DELETE FROM memberships WHERE team_id = ?", (team_id,))
-            revision = self._record_event(connection, "closeTeam", team_id, {})
-            replacement = self._ensure_open_team_locked(connection)
-            return replacement.revision if replacement else revision
+            return self._close_team_locked(connection, team_id)
+
+    def _close_team_locked(self, connection: sqlite3.Connection, team_id: str) -> int:
+        self._require_team(connection, team_id)
+        connection.execute(
+            "UPDATE teams SET status = 'closed' WHERE team_id = ?", (team_id,)
+        )
+        connection.execute("DELETE FROM memberships WHERE team_id = ?", (team_id,))
+        revision = self._record_event(connection, "closeTeam", team_id, {})
+        replacement = self._ensure_open_team_locked(connection)
+        return replacement.revision if replacement else revision
 
     def assign_agent(
         self, team_id: str, agent_id: str, aliases: Iterable[str] = ()
     ) -> int:
         with self.connect() as connection:
-            self._require_team(connection, team_id)
-            self._assign_locked(connection, team_id, agent_id, aliases=aliases)
-            return self._record_event(
-                connection, "assignAgent", team_id, {"agentId": agent_id}
+            return self._assign_agent_locked(
+                connection, team_id, agent_id, aliases=aliases
             )
+
+    def _assign_agent_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_id: str,
+        agent_id: str,
+        aliases: Iterable[str] = (),
+    ) -> int:
+        self._require_team(connection, team_id)
+        self._assign_locked(connection, team_id, agent_id, aliases=aliases)
+        return self._record_event(
+            connection, "assignAgent", team_id, {"agentId": agent_id}
+        )
 
     def _assign_locked(
         self,
@@ -431,31 +469,40 @@ class ServeTeamStore(
     def remove_agent(
         self, team_id: str, agent_id: str, aliases: Iterable[str] = ()
     ) -> int:
-        alias_ids = _agent_alias_ids(agent_id, aliases)
         with self.connect() as connection:
-            row = None
-            for alias_id in alias_ids:
-                row = connection.execute(
-                    "SELECT team_id FROM memberships WHERE agent_id = ?",
-                    (alias_id,),
-                ).fetchone()
-                if row is not None:
-                    break
-            if row is None or row["team_id"] != team_id:
-                raise SpiceError(f"agent {agent_id} is not assigned to team {team_id}")
-            for alias_id in alias_ids:
-                connection.execute(
-                    "DELETE FROM memberships WHERE agent_id = ?", (alias_id,)
-                )
-                connection.execute(
-                    "DELETE FROM renewals WHERE agent_id = ?", (alias_id,)
-                )
-            self._close_empty_teams_locked(connection, [team_id])
-            revision = self._record_event(
-                connection, "removeAgent", team_id, {"agentId": agent_id}
+            return self._remove_agent_locked(
+                connection, team_id, agent_id, aliases=aliases
             )
-            replacement = self._ensure_open_team_locked(connection)
-            return replacement.revision if replacement else revision
+
+    def _remove_agent_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_id: str,
+        agent_id: str,
+        aliases: Iterable[str] = (),
+    ) -> int:
+        alias_ids = _agent_alias_ids(agent_id, aliases)
+        row = None
+        for alias_id in alias_ids:
+            row = connection.execute(
+                "SELECT team_id FROM memberships WHERE agent_id = ?",
+                (alias_id,),
+            ).fetchone()
+            if row is not None:
+                break
+        if row is None or row["team_id"] != team_id:
+            raise SpiceError(f"agent {agent_id} is not assigned to team {team_id}")
+        for alias_id in alias_ids:
+            connection.execute(
+                "DELETE FROM memberships WHERE agent_id = ?", (alias_id,)
+            )
+            connection.execute("DELETE FROM renewals WHERE agent_id = ?", (alias_id,))
+        self._close_empty_teams_locked(connection, [team_id])
+        revision = self._record_event(
+            connection, "removeAgent", team_id, {"agentId": agent_id}
+        )
+        replacement = self._ensure_open_team_locked(connection)
+        return replacement.revision if replacement else revision
 
     def split_team(
         self,
@@ -465,131 +512,172 @@ class ServeTeamStore(
         new_team_id: str | None = None,
         config: TeamConfig | None = None,
     ) -> TeamState:
+        with self.connect() as connection:
+            return self._split_team_locked(
+                connection,
+                source_team_id,
+                agent_ids=agent_ids,
+                new_team_id=new_team_id,
+                config=config,
+            )
+
+    def _split_team_locked(
+        self,
+        connection: sqlite3.Connection,
+        source_team_id: str,
+        *,
+        agent_ids: Iterable[str],
+        new_team_id: str | None = None,
+        config: TeamConfig | None = None,
+    ) -> TeamState:
         agent_list = [_normalized_id(agent, "agent_id") for agent in agent_ids]
         if not agent_list:
             raise SpiceError("split requires at least one agent id")
-        source_config = self.team_config(source_team_id)
-        created = self.create_team(
-            team_id=new_team_id, config=config or source_config, members=()
+        source_row = self._require_team(connection, source_team_id)
+        source_config = config_from_row(
+            source_row, self._task_filter_entries_locked(connection, source_team_id)
         )
-        with self.connect() as connection:
-            for agent_id in agent_list:
-                row = connection.execute(
-                    "SELECT team_id FROM memberships WHERE agent_id = ?", (agent_id,)
-                ).fetchone()
-                if row is None or row["team_id"] != source_team_id:
-                    raise SpiceError(
-                        f"agent {agent_id} is not assigned to team {source_team_id}"
-                    )
-                self._assign_locked(connection, created.team_id, agent_id)
-            self._record_event(
-                connection,
-                "splitTeam",
-                source_team_id,
-                {"newTeamId": created.team_id, "agents": agent_list},
-            )
-            return self._team_state_locked(connection, created.team_id)
+        created = self._create_team_locked(
+            connection, new_team_id, config or source_config, ()
+        )
+        for agent_id in agent_list:
+            row = connection.execute(
+                "SELECT team_id FROM memberships WHERE agent_id = ?", (agent_id,)
+            ).fetchone()
+            if row is None or row["team_id"] != source_team_id:
+                raise SpiceError(
+                    f"agent {agent_id} is not assigned to team {source_team_id}"
+                )
+            self._assign_locked(connection, created.team_id, agent_id)
+        self._record_event(
+            connection,
+            "splitTeam",
+            source_team_id,
+            {"newTeamId": created.team_id, "agents": agent_list},
+        )
+        return self._team_state_locked(connection, created.team_id)
 
     def split_team_back(self, source_team_id: str) -> TeamState:
         with self.connect() as connection:
-            self._require_team(connection, source_team_id)
-            subgroup = self._latest_restorable_subgroup_locked(
-                connection, source_team_id
+            return self._split_team_back_locked(connection, source_team_id)
+
+    def _split_team_back_locked(
+        self, connection: sqlite3.Connection, source_team_id: str
+    ) -> TeamState:
+        self._require_team(connection, source_team_id)
+        subgroup = self._latest_restorable_subgroup_locked(connection, source_team_id)
+        if subgroup is None:
+            raise SpiceError(
+                f"team {source_team_id} has no preserved subgroup to split"
             )
-            if subgroup is None:
-                raise SpiceError(
-                    f"team {source_team_id} has no preserved subgroup to split"
-                )
-            row, agent_ids = subgroup
-            child_team_id = str(row["child_team_id"])
-            self._require_team(connection, child_team_id)
-            connection.execute(
-                "UPDATE teams SET status = 'open' WHERE team_id = ?",
-                (child_team_id,),
-            )
-            for agent_id in agent_ids:
-                self._assign_locked(connection, child_team_id, agent_id)
-            revision = self._record_event(
-                connection,
-                "splitTeamBack",
+        row, agent_ids = subgroup
+        child_team_id = str(row["child_team_id"])
+        self._require_team(connection, child_team_id)
+        connection.execute(
+            "UPDATE teams SET status = 'open' WHERE team_id = ?",
+            (child_team_id,),
+        )
+        for agent_id in agent_ids:
+            self._assign_locked(connection, child_team_id, agent_id)
+        revision = self._record_event(
+            connection,
+            "splitTeamBack",
+            source_team_id,
+            {"restoredTeamId": child_team_id, "agents": list(agent_ids)},
+        )
+        connection.execute(
+            "UPDATE teams SET revision = ? WHERE team_id = ?",
+            (revision, child_team_id),
+        )
+        connection.execute(
+            "UPDATE team_merge_subgroups SET restored_revision = ? "
+            "WHERE parent_team_id = ? AND child_team_id = ? "
+            "AND merged_revision = ?",
+            (
+                revision,
                 source_team_id,
-                {"restoredTeamId": child_team_id, "agents": list(agent_ids)},
-            )
-            connection.execute(
-                "UPDATE teams SET revision = ? WHERE team_id = ?",
-                (revision, child_team_id),
-            )
-            connection.execute(
-                "UPDATE team_merge_subgroups SET restored_revision = ? "
-                "WHERE parent_team_id = ? AND child_team_id = ? "
-                "AND merged_revision = ?",
-                (
-                    revision,
-                    source_team_id,
-                    child_team_id,
-                    int(row["merged_revision"]),
-                ),
-            )
-            return self._team_state_locked(connection, child_team_id)
+                child_team_id,
+                int(row["merged_revision"]),
+            ),
+        )
+        return self._team_state_locked(connection, child_team_id)
 
     def merge_teams(self, source_team_id: str, destination_team_id: str) -> int:
+        with self.connect() as connection:
+            return self._merge_teams_locked(
+                connection, source_team_id, destination_team_id
+            )
+
+    def _merge_teams_locked(
+        self,
+        connection: sqlite3.Connection,
+        source_team_id: str,
+        destination_team_id: str,
+    ) -> int:
         if source_team_id == destination_team_id:
             raise SpiceError("merge requires two distinct teams")
-        with self.connect() as connection:
-            self._require_team(connection, source_team_id)
-            self._require_team(connection, destination_team_id)
-            rows = connection.execute(
-                "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY position",
-                (source_team_id,),
-            ).fetchall()
-            agent_ids = [str(row["agent_id"]) for row in rows]
-            for agent_id in agent_ids:
-                self._assign_locked(connection, destination_team_id, agent_id)
-            connection.execute(
-                "UPDATE teams SET status = 'closed' WHERE team_id = ?",
-                (source_team_id,),
-            )
-            revision = self._record_event(
+        self._require_team(connection, source_team_id)
+        self._require_team(connection, destination_team_id)
+        rows = connection.execute(
+            "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY position",
+            (source_team_id,),
+        ).fetchall()
+        agent_ids = [str(row["agent_id"]) for row in rows]
+        for agent_id in agent_ids:
+            self._assign_locked(connection, destination_team_id, agent_id)
+        connection.execute(
+            "UPDATE teams SET status = 'closed' WHERE team_id = ?",
+            (source_team_id,),
+        )
+        revision = self._record_event(
+            connection,
+            "mergeTeams",
+            destination_team_id,
+            {"sourceTeamId": source_team_id, "agents": agent_ids},
+        )
+        if agent_ids:
+            self._record_merge_subgroup_locked(
                 connection,
-                "mergeTeams",
-                destination_team_id,
-                {"sourceTeamId": source_team_id, "agents": agent_ids},
+                parent_team_id=destination_team_id,
+                child_team_id=source_team_id,
+                merged_revision=revision,
+                agent_ids=agent_ids,
             )
-            if agent_ids:
-                self._record_merge_subgroup_locked(
-                    connection,
-                    parent_team_id=destination_team_id,
-                    child_team_id=source_team_id,
-                    merged_revision=revision,
-                    agent_ids=agent_ids,
-                )
-            return revision
+        return revision
 
     def reorder_team_agents(self, team_id: str, agent_ids: Iterable[str]) -> int:
+        with self.connect() as connection:
+            return self._reorder_team_agents_locked(connection, team_id, agent_ids)
+
+    def _reorder_team_agents_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_id: str,
+        agent_ids: Iterable[str],
+    ) -> int:
         ordered_agent_ids = [_normalized_id(agent, "agent_id") for agent in agent_ids]
         if len(set(ordered_agent_ids)) != len(ordered_agent_ids):
             raise SpiceError("reorder requires unique agent ids")
-        with self.connect() as connection:
-            self._require_team(connection, team_id)
-            rows = connection.execute(
-                "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY position",
-                (team_id,),
-            ).fetchall()
-            current_agent_ids = [str(row["agent_id"]) for row in rows]
-            if set(ordered_agent_ids) != set(current_agent_ids):
-                raise SpiceError("reorder requires exactly the current team members")
-            for index, agent_id in enumerate(ordered_agent_ids):
-                connection.execute(
-                    "UPDATE memberships SET position = ? "
-                    "WHERE team_id = ? AND agent_id = ?",
-                    (index, team_id, agent_id),
-                )
-            return self._record_event(
-                connection,
-                "reorderTeamAgents",
-                team_id,
-                {"agentIds": ordered_agent_ids},
+        self._require_team(connection, team_id)
+        rows = connection.execute(
+            "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY position",
+            (team_id,),
+        ).fetchall()
+        current_agent_ids = [str(row["agent_id"]) for row in rows]
+        if set(ordered_agent_ids) != set(current_agent_ids):
+            raise SpiceError("reorder requires exactly the current team members")
+        for index, agent_id in enumerate(ordered_agent_ids):
+            connection.execute(
+                "UPDATE memberships SET position = ? "
+                "WHERE team_id = ? AND agent_id = ?",
+                (index, team_id, agent_id),
             )
+        return self._record_event(
+            connection,
+            "reorderTeamAgents",
+            team_id,
+            {"agentIds": ordered_agent_ids},
+        )
 
     def _team_member_ids_locked(
         self, connection: sqlite3.Connection, team_id: str
@@ -621,19 +709,22 @@ class ServeTeamStore(
 
     def team_snapshot(self, *, since_revision: int | None = None) -> TeamSnapshot:
         with self.connect() as connection:
-            self._prune_zero_activity_closed_teams_locked(connection)
-            self._prune_metric_history_locked(connection, now=time.time())
-            self._ensure_open_team_locked(connection)
-            revision_row = connection.execute(
-                "SELECT MAX(revision) AS r FROM events"
-            ).fetchone()
-            global_revision = int(revision_row["r"] or 0)
-            rows = connection.execute(
-                "SELECT * FROM teams WHERE status = 'open' ORDER BY created_at"
-            ).fetchall()
-            teams = tuple(
-                self._team_state_locked(connection, row["team_id"]) for row in rows
-            )
+            return self._team_snapshot_locked(connection)
+
+    def _team_snapshot_locked(self, connection: sqlite3.Connection) -> TeamSnapshot:
+        self._prune_zero_activity_closed_teams_locked(connection)
+        self._prune_metric_history_locked(connection, now=time.time())
+        self._ensure_open_team_locked(connection)
+        revision_row = connection.execute(
+            "SELECT MAX(revision) AS r FROM events"
+        ).fetchone()
+        global_revision = int(revision_row["r"] or 0)
+        rows = connection.execute(
+            "SELECT * FROM teams WHERE status = 'open' ORDER BY created_at"
+        ).fetchall()
+        teams = tuple(
+            self._team_state_locked(connection, row["team_id"]) for row in rows
+        )
         return TeamSnapshot(global_revision=global_revision, teams=teams)
 
     def _ensure_open_team_locked(

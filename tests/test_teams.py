@@ -565,21 +565,21 @@ def test_team_command_service_keeps_revisioned_config_history(tmp_path):
             "expectedRevision": created.revision,
         }
     )
-    stale_but_valid = service.apply(
-        {
-            "command": "updateTeamConfig",
-            "teamId": team.team_id,
-            "configPatch": {"selectedView": "metrics"},
-            "expectedRevision": created.revision,
-        }
-    )
+    with pytest.raises(SpiceError, match="stale team command"):
+        service.apply(
+            {
+                "command": "updateTeamConfig",
+                "teamId": team.team_id,
+                "configPatch": {"selectedView": "metrics"},
+                "expectedRevision": created.revision,
+            }
+        )
     state = store.team_state(team.team_id)
 
     assert first_update.revision > created.revision
-    assert stale_but_valid.revision > first_update.revision
-    assert state.config_revision == 2
+    assert state.config_revision == 1
     assert state.config.lifetime == "Drive"
-    assert state.config.selected_view == "metrics"
+    assert state.config.selected_view == "compose"
 
 
 def test_team_task_filter_api_tracks_sources_and_projection(tmp_path):

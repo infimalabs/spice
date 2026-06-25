@@ -270,7 +270,7 @@ def test_task_drain_replaces_filters_and_creates_route_team(tmp_path, monkeypatc
     assert payload["route"]["memberAgents"] == [ACTOR_A]
 
 
-def test_team_command_payloads_report_revisions_and_stale_valid_command_applies(
+def test_team_command_payloads_reject_stale_expected_revision(
     tmp_path,
 ):
     state = _serve_state(tmp_path, _target(_repo(tmp_path)))
@@ -307,13 +307,17 @@ def test_team_command_payloads_report_revisions_and_stale_valid_command_applies(
     )
 
     assert create_status == HTTPStatus.OK
-    assert stale_status == HTTPStatus.OK
-    assert stale["revision"] > advanced["revision"]
-    assert stale["snapshot"]["teams"][0]["config"]["lifetime"] == "Drive"
-    assert stale["snapshot"]["teams"][0]["config"]["selectedView"] == "metrics"
-    assert fresh_snapshot["changed"] is True
-    assert fresh_snapshot["revision"] == stale["revision"]
-    unchanged = team_snapshot_response_payload(state, since_revision=stale["revision"])
+    assert stale_status == HTTPStatus.CONFLICT
+    assert stale["ok"] is False
+    assert "stale team command" in stale["error"]
+    assert fresh_snapshot["changed"] is False
+    assert fresh_snapshot["revision"] == advanced["revision"]
+    current = team_snapshot_response_payload(state, since_revision=None)
+    assert current["snapshot"]["teams"][0]["config"]["lifetime"] == "Drive"
+    assert current["snapshot"]["teams"][0]["config"]["selectedView"] == "compose"
+    unchanged = team_snapshot_response_payload(
+        state, since_revision=advanced["revision"]
+    )
     assert unchanged["changed"] is False
 
 

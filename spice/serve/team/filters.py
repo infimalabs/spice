@@ -50,6 +50,15 @@ class _TeamFilterStore(Protocol):
         self, connection: sqlite3.Connection, team_id: str
     ) -> tuple[str, ...]: ...
 
+    def _update_team_config_locked(
+        self,
+        connection: sqlite3.Connection,
+        team_id: str,
+        config: TeamConfig,
+        *,
+        replace_task_filters: bool = False,
+    ) -> int: ...
+
 
 class TeamFilterStoreMixin:
     def _task_filter_entries_locked(
@@ -125,30 +134,43 @@ class TeamFilterStoreMixin:
         replace_task_filters: bool = False,
     ) -> int:
         with self.connect() as connection:
-            self._require_team(connection, team_id)
-            connection.execute(
-                "UPDATE teams SET lifetime = ?, speech_mode = ?, selected_view = ?, "
-                "shell_settings = ?, "
-                "config_revision = config_revision + 1 WHERE team_id = ?",
-                (
-                    config.lifetime,
-                    config.speech_mode,
-                    config.selected_view,
-                    json.dumps(config.shell_settings),
-                    team_id,
-                ),
-            )
-            if replace_task_filters:
-                self._replace_task_filters_locked(
-                    connection, team_id, config.task_filters
-                )
-            task_filters = self._task_filter_projects_locked(connection, team_id)
-            return self._record_event(
+            return self._update_team_config_locked(
                 connection,
-                "updateTeamConfig",
                 team_id,
-                {"lifetime": config.lifetime, "taskFilters": list(task_filters)},
+                config,
+                replace_task_filters=replace_task_filters,
             )
+
+    def _update_team_config_locked(
+        self: _TeamFilterStore,
+        connection: sqlite3.Connection,
+        team_id: str,
+        config: TeamConfig,
+        *,
+        replace_task_filters: bool = False,
+    ) -> int:
+        self._require_team(connection, team_id)
+        connection.execute(
+            "UPDATE teams SET lifetime = ?, speech_mode = ?, selected_view = ?, "
+            "shell_settings = ?, "
+            "config_revision = config_revision + 1 WHERE team_id = ?",
+            (
+                config.lifetime,
+                config.speech_mode,
+                config.selected_view,
+                json.dumps(config.shell_settings),
+                team_id,
+            ),
+        )
+        if replace_task_filters:
+            self._replace_task_filters_locked(connection, team_id, config.task_filters)
+        task_filters = self._task_filter_projects_locked(connection, team_id)
+        return self._record_event(
+            connection,
+            "updateTeamConfig",
+            team_id,
+            {"lifetime": config.lifetime, "taskFilters": list(task_filters)},
+        )
 
     def add_task_filter(
         self: _TeamFilterStore,

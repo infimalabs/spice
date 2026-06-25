@@ -32,6 +32,10 @@ class _TeamRenewalStore(Protocol):
 
     def open_team_for_agent(self, agent_id: str) -> str: ...
 
+    def _open_team_for_agent_locked(
+        self, connection: sqlite3.Connection, agent_id: str
+    ) -> str: ...
+
     def _record_event(
         self,
         connection: sqlite3.Connection,
@@ -95,6 +99,14 @@ class _TeamRenewalStore(Protocol):
 
     def _renewal_state_locked(
         self, connection: sqlite3.Connection, agent_id: str
+    ) -> TeamRenewalState | None: ...
+
+    def _set_agent_renewal_request_locked(
+        self,
+        connection: sqlite3.Connection,
+        agent_id: str,
+        *,
+        requested: bool,
     ) -> TeamRenewalState | None: ...
 
     def _replace_team_slot_locked(
@@ -240,74 +252,92 @@ class TeamRenewalStoreMixin:
         self: _TeamRenewalStore, agent_id: str, *, requested: bool
     ) -> TeamRenewalState | None:
         agent_id = _normalized_id(agent_id, "agent_id")
-        team_id = self.open_team_for_agent(agent_id)
         with self.connect() as connection:
-            current = self._renewal_state_locked(connection, agent_id)
-            if requested:
-                if current is not None:
-                    return current
-                team_slot = self._team_slot_for_agent_locked(
-                    connection, team_id, agent_id
-                )
-                predecessor_identity = self._renewal_predecessor_identity_locked(
-                    connection, agent_id
-                )
-                successor_identity = self._renewal_successor_identity(
-                    predecessor_identity
-                )
-                revision = self._record_event(
-                    connection,
-                    "renewalRequested",
-                    team_id,
-                    {"agentId": agent_id, "teamSlot": team_slot},
-                )
-                connection.execute(
-                    "INSERT OR REPLACE INTO renewals (agent_id, team_id, state, "
-                    "ancestor_thread_id, successor_agent_id, successor_thread_id, "
-                    "team_slot, predecessor_identity, successor_identity, revision) "
-                    "VALUES (?, ?, ?, '', '', '', ?, ?, ?, ?)",
-                    (
-                        agent_id,
-                        team_id,
-                        RENEWAL_STATE_REQUESTED,
-                        team_slot,
-                        _renewal_identity_json(predecessor_identity),
-                        _renewal_identity_json(successor_identity),
-                        revision,
-                    ),
-                )
-                self._update_agent_identity_renewal_locked(
-                    connection,
-                    actor_id=agent_id,
-                    state=RENEWAL_STATE_REQUESTED,
-                    revision=revision,
-                )
-                return TeamRenewalState(
-                    agent_id=agent_id,
-                    team_id=team_id,
-                    state=RENEWAL_STATE_REQUESTED,
-                    ancestor_thread_id="",
-                    successor_agent_id="",
-                    successor_thread_id="",
-                    team_slot=team_slot,
-                    predecessor_identity=predecessor_identity,
-                    successor_identity=successor_identity,
-                    revision=revision,
-                )
-            if current is None or current.state != RENEWAL_STATE_REQUESTED:
+            return self._set_agent_renewal_request_locked(
+                connection, agent_id, requested=requested
+            )
+
+    def _set_agent_renewal_request_locked(
+        self: _TeamRenewalStore,
+        connection: sqlite3.Connection,
+        agent_id: str,
+        *,
+        requested: bool,
+    ) -> TeamRenewalState | None:
+        agent_id = _normalized_id(agent_id, "agent_id")
+        team_id = self._open_team_for_agent_locked(connection, agent_id)
+        current = self._renewal_state_locked(connection, agent_id)
+        if requested:
+            if current is not None:
                 return current
-            self._record_event(
+            team_slot = self._team_slot_for_agent_locked(connection, team_id, agent_id)
+            predecessor_identity = self._renewal_predecessor_identity_locked(
+                connection, agent_id
+            )
+            successor_identity = self._renewal_successor_identity(predecessor_identity)
+            revision = self._record_event(
                 connection,
-                "renewalRequestCleared",
-                current.team_id,
-                {"agentId": agent_id},
+                "renewalRequested",
+                team_id,
+                {"agentId": agent_id, "teamSlot": team_slot},
             )
             connection.execute(
-                "DELETE FROM renewals WHERE agent_id = ? AND state = ?",
-                (agent_id, RENEWAL_STATE_REQUESTED),
+                "INSERT OR REPLACE INTO renewals (agent_id, team_id, state, "
+                "ancestor_thread_id, successor_agent_id, successor_thread_id, "
+                "team_slot, predecessor_identity, successor_identity, revision) "
+                "VALUES (?, ?, ?, '', '', '', ?, ?, ?, ?)",
+                (
+                    agent_id,
+                    team_id,
+                    RENEWAL_STATE_REQUESTED,
+                    team_slot,
+                    _renewal_identity_json(predecessor_identity),
+                    _renewal_identity_json(successor_identity),
+                    revision,
+                ),
             )
-            self._update_agent_identity_renewal_locked(connection, actor_id=agent_id)
-            return None
+            self._update_agent_identity_renewal_locked(
+                connection,
+                actor_id=agent_id,
+                state=RENEWAL_STATE_REQUESTED,
+                revision=revision,
+            )
+            return TeamRenewalState(
+                agent_id=agent_id,
+                team_id=team_id,
+                state=RENEWAL_STATE_REQUESTED,
+                ancestor_thread_id="",
+                successor_agent_id="",
+                successor_thread_id="",
+                team_slot=team_slot,
+                predecessor_identity=predecessor_identity,
+                successor_identity=successor_identity,
+                revision=revision,
+            )
+        if current is None or current.state != RENEWAL_STATE_REQUESTED:
+            return current
+        self._record_event(
+            connection,
+            "renewalRequestCleared",
+            current.team_id,
+            {"agentId": agent_id},
+        )
+        connection.execute(
+            "DELETE FROM renewals WHERE agent_id = ? AND state = ?",
+            (agent_id, RENEWAL_STATE_REQUESTED),
+        )
+        self._update_agent_identity_renewal_locked(connection, actor_id=agent_id)
+        return None
+
+    def _open_team_for_agent_locked(
+        self: _TeamRenewalStore, connection: sqlite3.Connection, agent_id: str
+    ) -> str:
+        row = connection.execute(
+            "SELECT team_id FROM memberships WHERE agent_id = ?", (agent_id,)
+        ).fetchone()
+        if row is None:
+            raise SpiceError(f"agent {agent_id} is not assigned to any team")
+        return str(row["team_id"])
 
     def agent_renewal_requested(self: _TeamRenewalStore, agent_id: str) -> bool:
         renewal = self.renewal_state_for_agent(agent_id)

@@ -229,8 +229,10 @@ async function requestTeamCommand(payload) {
       { revision: result.revision, changed: true, snapshot: result.snapshot },
       { force: true },
     );
-  if (result.ok === false)
+  if (result.ok === false) {
+    await refreshTeamSnapshot({ force: true });
     throw new Error(result.error || "team command failed");
+  }
   return result;
 }
 

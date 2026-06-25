@@ -14,7 +14,7 @@ from spice.serve.agentapi import sent_steering_payload, sent_steering_response_p
 from spice.serve.drive import drive_drain_queue_controls
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.steering import steering_submit_error_status, submit_steering_message
-from spice.serve.team.store import TeamConfig
+from spice.serve.team.store import ServeTeamStore, TeamConfig
 from spice.serve.worktree.target import WorktreeTarget, match_serve_worktree
 
 LIFETIME_LABELS = ("Steer", "Drive", "Drain")
@@ -297,6 +297,13 @@ def _apply_lifetime_to_team(
     )
 
 
+def _team_for_task_drain_actor(team_store: ServeTeamStore, actor: str) -> str:
+    team_id = team_store.current_team_for_agent(actor)
+    if team_id is not None:
+        return team_id
+    return ServeTeamStore.create_team(team_store, members=[actor]).team_id
+
+
 def work_tree_task_drain_response_payload(
     state: Any,
     target: WorktreeTarget,
@@ -312,10 +319,7 @@ def work_tree_task_drain_response_payload(
                 {"ok": False, "error": "task drain requires a bound agent"},
                 HTTPStatus.CONFLICT,
             )
-        team_id = state.team_store.current_team_for_agent(actor)
-        if team_id is None:
-            created = state.team_store.create_team(members=[actor])
-            team_id = created.team_id
+        team_id = _team_for_task_drain_actor(state.team_store, actor)
         current = state.team_store.team_config(team_id)
         from spice.tasks import config as task_config
 
