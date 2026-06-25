@@ -32,6 +32,7 @@ from spice.agent.sidechannelnotify import publish_side_channel_feedback
 from spice.mail.acks import (
     extract_task_batch_lines_from_text,
     summarize_ack_archival,
+    summarize_nack_archival,
 )
 from spice.mail.inbox import (
     discard_inbox_items,
@@ -166,6 +167,42 @@ def process_supervised_assistant_message(
     log_handle: TextIO,
     reminder_gate: MaximReminderGate,
 ) -> None:
+    nack_summary = summarize_nack_archival(repo_root, message_text)
+    if nack_summary.refused:
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "nack.refused",
+            keys=nack_summary.refused,
+        )
+    if nack_summary.already_refused:
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "nack.already-refused",
+            keys=nack_summary.already_refused,
+        )
+    if nack_summary.already_acked:
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "nack.already-acked",
+            keys=nack_summary.already_acked,
+        )
+    if nack_summary.unmatched:
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "nack.unmatched",
+            keys=nack_summary.unmatched,
+        )
+    if nack_summary.reasonless:
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "nack.reason-required",
+            keys=nack_summary.reasonless,
+        )
     ack_summary = summarize_ack_archival(repo_root, message_text)
     if ack_summary.archived:
         publish_supervisor_feedback(
