@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from spice.agent.lifecycle import agent_status
 from spice.errors import SpiceError
 from spice.mail.inbox import (
     compose_inbox_text,
@@ -101,7 +100,7 @@ def _resolve_active_author_target(review_author: str) -> _TargetResolution:
         if record.bare or not record.path.exists():
             continue
         try:
-            status = agent_status(record.path)
+            status = _agent_status(record.path)
         except SpiceError:
             continue
         if not status.running:
@@ -124,6 +123,12 @@ def _resolve_active_author_target(review_author: str) -> _TargetResolution:
         "multiple active targets for review_author: "
         + ", ".join(path.as_posix() for path in unique),
     )
+
+
+def _agent_status(repo_root: Path) -> Any:
+    from spice.agent.lifecycle import agent_status
+
+    return agent_status(repo_root)
 
 
 def _actor_keys(value: str) -> set[str]:

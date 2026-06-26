@@ -45,7 +45,7 @@ def _patch_targets(
     monkeypatch.setattr(reviewfeedback, "list_worktrees", lambda cwd: records)
     monkeypatch.setattr(
         reviewfeedback,
-        "agent_status",
+        "_agent_status",
         lambda path: status_by_path[Path(path).resolve()],
     )
     monkeypatch.setattr(reviewfeedback.tw, "run", lambda args: calls.append(args))
