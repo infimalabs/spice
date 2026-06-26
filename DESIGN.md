@@ -205,17 +205,19 @@ The one idea above isn't arbitrary; four theses generate it.
 
 ## Design principles
 
-0. **Standalone product, not a repo organ.** spice is installed once
-   (`uv tool install spice-harness`) and operates on any repo from outside. A target
-   repo contains only what spice writes into it: runtime state under `.spice/`,
-   generated `.spice/hooks` shims, and the worktree skill under
-   `.agents/skills/spice`. The worktree skill ships as package data (per-repo
-   override honored); every operator- and agent-facing command string is
-   `spice …`. The supervisor's internal runtime load path is worktree-true:
-   when the target repo is the spice source checkout, the checkout wins over
-   any installed editable copy by being first on `PYTHONPATH`; ordinary target
-   repos continue to use the installed product. The spice repo itself is just
-   another target of its own constitution.
+0. **Standalone product, not a repo organ.** spice is installed once, normally
+   as a uv tool (`uv tool install spice-harness`), and operates on any repo from
+   outside. Operators deploying from source use
+   `uv tool install -e /path/to/spice-main`; that editable main tree is the
+   server deployment. A target repo contains only what spice writes into it:
+   runtime state under `.spice/`, generated `.spice/hooks` shims, and the
+   worktree skill under `.agents/skills/spice`. Worker worktrees are operated
+   trees: tasks, branches, and files live there, but the running code remains
+   the installed tool. The common-dir layout remains an opt-in install shape
+   for operators who deliberately set uv's tool directories before installing.
+   The worktree skill ships as package data (per-repo override honored); every
+   operator- and agent-facing command string is `spice …`. The spice repo itself
+   is just another target of its own constitution.
 1. **The driver seam.** Agent-CLI specifics (binary/argv, thread-id
    environment, rollout location and grammar, stdout section markers,
    session-id parsing) live in concrete `AgentDriver` values in
