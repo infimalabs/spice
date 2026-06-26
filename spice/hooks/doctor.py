@@ -25,7 +25,6 @@ from spice.paths import (
     git_common_dir,
     runtime_spice_source,
     state_dir,
-    worktree_spice_source,
 )
 from spice.policy import (
     COMPLEXITY_MAX_CCN,
@@ -69,6 +68,13 @@ class DoctorReport:
                 f"(cmd: {check.command})"
             )
         return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class InstalledSpiceRuntime:
+    entrypoint: Path
+    python: Path
+    source: Path
 
 
 def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
@@ -163,41 +169,40 @@ def _runtime_resolution_check(repo_root: Path) -> DoctorCheck:
 
 
 def _installed_spice_source_check(repo_root: Path) -> DoctorCheck:
-    worktree = worktree_spice_source(repo_root)
-    installed = _installed_spice_package_source()
+    del repo_root
+    installed = _installed_spice_runtime()
     if installed is None:
         return _warn(
             "runtime.installed-spice",
             "installed spice package source is unavailable",
             "python -m pip show spice",
         )
-    if worktree is None:
-        return _ok(
-            "runtime.installed-spice",
-            f"installed spice source -> {installed}",
-            "python -m pip show spice",
-        )
-    if installed.resolve() == worktree.resolve():
-        return _ok(
-            "runtime.installed-spice",
-            f"installed spice package matches worktree -> {installed}",
-            "python -m pip show spice",
-        )
-    return _warn(
+    return _ok(
         "runtime.installed-spice",
-        f"installed spice package is {installed}; worktree source is {worktree}",
-        "spice dev doctor",
+        (
+            f"installed spice tool -> {installed.entrypoint}; "
+            f"interpreter -> {installed.python}; package -> {installed.source}"
+        ),
+        "python -m pip show spice",
     )
 
 
-def _installed_spice_package_source() -> Path | None:
+def _installed_spice_runtime() -> InstalledSpiceRuntime | None:
     entrypoint = shutil.which("spice")
     if entrypoint is None:
         return None
-    python = _python_from_script_shebang(Path(entrypoint))
+    entrypoint_path = Path(entrypoint).expanduser()
+    python = _python_from_script_shebang(entrypoint_path)
     if python is None:
         return None
-    return _spice_package_source_for_python(python)
+    source = _spice_package_source_for_python(python)
+    if source is None:
+        return None
+    return InstalledSpiceRuntime(
+        entrypoint=entrypoint_path,
+        python=python,
+        source=source,
+    )
 
 
 def _spice_package_source_for_python(python: Path) -> Path | None:
