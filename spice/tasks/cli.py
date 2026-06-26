@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.tasks import alloc, artifacts, config, create, identity, ops, render
+from spice.tasks import alloc, artifacts, config, create, identity, ops, render, sizing
 
 _TASK_LIST_STATUSES = ("pending", "waiting", "completed", "deleted")
 _TASK_LIST_NEWEST_FIELDS = ("end", "modified", "entry", "incepted", "claim_at")
@@ -91,6 +91,19 @@ def _configure_task_read_parsers(actions: Any) -> None:
     show.set_defaults(func=handle)
 
     _configure_artifact_parser(actions)
+
+    sizing_parser = actions.add_parser(
+        "sizing",
+        help="Report completed task size signals.",
+        recovery_examples=("spice task sizing --limit 20",),
+    )
+    sizing_parser.add_argument(
+        "--limit",
+        type=_positive_int,
+        metavar="N",
+        help="Show at most N completed tasks, newest first.",
+    )
+    sizing_parser.set_defaults(func=handle)
 
 
 def _configure_artifact_parser(actions: Any) -> None:
@@ -629,6 +642,7 @@ _DISPATCH = {
     "list": _list,
     "show": lambda a: render.render_show(a.handle),
     "artifact": lambda a: _artifact(a),
+    "sizing": lambda a: sizing.render_sizing_report(limit=a.limit),
     "done": lambda a: ops.done(
         a.handle,
         validation=list(a.validation),
