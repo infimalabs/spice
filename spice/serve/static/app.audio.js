@@ -50,6 +50,7 @@ function queueSpeechForMessages(lane, messages) {
     if (isPresenceMessage(item)) continue;
     if (lane.spokenMessageKeys.has(item.key)) continue;
     const timestamp = automaticSpeechMessageTimestamp(item);
+    if (messageIsBeforeLaneMaterialization(lane, timestamp)) continue;
     if (messageIsBehindAutomaticSpeechCursor(host, item, timestamp)) continue;
     const texts = automaticSpeechUtterances(host, item);
     if (!texts.length) continue;
@@ -62,6 +63,15 @@ function queueSpeechForMessages(lane, messages) {
 function automaticSpeechMessageTimestamp(item) {
   const timestamp = Date.parse(item.timestamp || "");
   return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+// Narration is a pure UI concern: a lane records its own materialization
+// instant (speechPrimeStartedAt) the moment the UI builds it. Nothing older
+// than that ever auto-plays — server-side lane/team lifetimes can predate this
+// browser session, but the operator only wants to hear what arrives after they
+// are looking at the lane.
+function messageIsBeforeLaneMaterialization(lane, timestamp) {
+  return timestamp !== null && timestamp < lane.speechPrimeStartedAt;
 }
 
 function messageIsBehindAutomaticSpeechCursor(lane, item, timestamp) {
