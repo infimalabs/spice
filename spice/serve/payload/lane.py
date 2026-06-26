@@ -352,13 +352,22 @@ def _review_pressure_summary(pressure: dict[str, Any]) -> str:
         return "-"
     first = items[0]
     reviewed = str(first.get("reviewedTask") or "task")
-    finding = str(first.get("finding") or "review")
+    severity = str(first.get("findingSeverity") or first.get("finding") or "review")
+    reviewer = str(first.get("reviewer") or "").strip()
+    source = str(first.get("source") or "").strip()
+    origin = ""
+    if reviewer and source:
+        origin = f" by {reviewer} via {source}"
+    elif reviewer:
+        origin = f" by {reviewer}"
+    elif source:
+        origin = f" via {source}"
     followups = int(first.get("followupCount") or 0)
     suffix = f"; {followups} follow-up" + ("" if followups == 1 else "s")
     more = int(pressure.get("count") or 0) - 1
     if more > 0:
         suffix += f"; +{more} more"
-    return f"{finding} on {reviewed}{suffix}"
+    return f"{severity} on {reviewed}{origin}{suffix}"
 
 
 def lane_metrics_payload(
