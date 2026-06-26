@@ -28,26 +28,12 @@ def test_wrapper_git_route_inherits_ambient_supervisor_environment(tmp_path):
     assert source == "ambient"
 
 
-def test_wrapper_spice_routes_use_plain_worktree_env(tmp_path, monkeypatch):
-    # The supervisor exports the git shadow once; the wrapper just inherits the
-    # worktree env for spice routes instead of re-injecting per command.
+def test_wrapper_spice_routes_inherit_ambient_env(tmp_path, monkeypatch):
     monkeypatch.setattr(
         wrap,
         "agent_run_child_worktree_environment",
-        lambda args, *, repo_root=None, base_env=None: {
-            "route": "worktree",
-            "repo": str(repo_root),
-            "ZDOTDIR": "hook",
-            "BASH_ENV": "hook",
-        },
+        lambda *_args, **_kwargs: pytest.fail("spice route env should not be built"),
     )
-
-    expected = {
-        "route": "worktree",
-        "repo": str(tmp_path),
-        "ZDOTDIR": "hook",
-        "BASH_ENV": "hook",
-    }
     spice_env = wrap.build_agent_run_environment(
         ["spice", "task", "status"], repo_root=tmp_path
     )
@@ -55,13 +41,11 @@ def test_wrapper_spice_routes_use_plain_worktree_env(tmp_path, monkeypatch):
         ["uv", "run", "spice", "task", "status"], repo_root=tmp_path
     )
 
-    assert spice_env == expected
-    assert uv_spice_env == expected
+    assert spice_env is None
+    assert uv_spice_env is None
 
 
-def test_wrapper_routes_worktree_spice_commands_through_python_module(
-    tmp_path, monkeypatch
-):
+def test_wrapper_leaves_spice_commands_on_installed_runtime(tmp_path):
     _write_spice_product_shape(tmp_path)
 
     spice_command = wrap.build_agent_run_command(
@@ -71,8 +55,8 @@ def test_wrapper_routes_worktree_spice_commands_through_python_module(
         ["uv", "run", "spice", "task", "status"], repo_root=tmp_path
     )
 
-    assert spice_command == [sys.executable, "-m", "spice", "task", "status"]
-    assert uv_spice_command == [sys.executable, "-m", "spice", "task", "status"]
+    assert spice_command == ["spice", "task", "status"]
+    assert uv_spice_command == ["uv", "run", "spice", "task", "status"]
 
 
 def test_wrapper_rewrites_stage_one_shell_command_before_stage_two(monkeypatch):
@@ -290,7 +274,7 @@ def test_wrapper_route_environment_uses_static_hook_stage_for_shell_execution(
     assert env["BASH_ENV"] == str(static_hook_dir / shellhook.BASH_HOOK_NAME)
 
 
-def test_wrapper_does_not_install_shell_hook_environment_for_direct_shell_commands(
+def test_wrapper_installs_shell_hook_environment_for_direct_shell_commands(
     tmp_path, monkeypatch
 ):
     monkeypatch.delenv("ZDOTDIR", raising=False)
@@ -298,7 +282,10 @@ def test_wrapper_does_not_install_shell_hook_environment_for_direct_shell_comman
 
     env = wrap.build_agent_run_environment(["zsh", "-c", "true"], repo_root=tmp_path)
 
-    assert env is None
+    assert env is not None
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
+    assert env["ZDOTDIR"] == str(static_hook_dir)
+    assert env["BASH_ENV"] == str(static_hook_dir / shellhook.BASH_HOOK_NAME)
 
 
 def test_agent_environment_redirects_zsh_compdump_outside_shellhooks_dir(

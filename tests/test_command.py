@@ -109,7 +109,10 @@ def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monke
             return 0
 
     def fake_popen(command: list[str], env=None) -> FakeProcess:
-        events.append(("popen", command, env))
+        env_snapshot = (
+            None if env is None else (env.get("ZDOTDIR"), env.get("BASH_ENV"))
+        )
+        events.append(("popen", command, env_snapshot))
         return FakeProcess()
 
     def fake_watch(repo_root, *, parent_pid, stderr, initial_payload_already_rendered):
@@ -138,8 +141,13 @@ def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monke
 
     assert exit_code == 0
     assert calls == [("git status --short",)]
+    static_hook_dir = wrap.packaged_shell_steering_static_hook_dir()
     assert events == [
-        ("popen", ["zsh", "-c", "rtk git status --short"], None),
+        (
+            "popen",
+            ["zsh", "-c", "rtk git status --short"],
+            (str(static_hook_dir), str(static_hook_dir / wrap.BASH_HOOK_NAME)),
+        ),
         ("watch", tmp_path, (321, stderr, True)),
         ("wait", None, None),
         ("join", watch_thread, None),
