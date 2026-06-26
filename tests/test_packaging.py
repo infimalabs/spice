@@ -18,8 +18,12 @@ SERVE_STATIC_DIR = PROJECT_ROOT / "spice" / "serve" / "static"
 STATIC_REF_RE = re.compile(r"/static/([A-Za-z0-9_./-]+)")
 
 
+def _pyproject_data():
+    return tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+
 def _serve_static_globs() -> list[str]:
-    data = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    data = _pyproject_data()
     return data["tool"]["setuptools"]["package-data"]["spice.serve.static"]
 
 
@@ -59,3 +63,25 @@ def test_referenced_static_assets_are_declared_in_package_data():
             f"/static/{asset} is referenced but no spice.serve.static "
             f"package-data glob ships it: {globs}"
         )
+
+
+def test_uv_tool_install_contract_declares_spice_console_script():
+    data = _pyproject_data()
+
+    assert data["project"]["name"] == "spice-harness"
+    assert data["project"]["scripts"]["spice"] == "spice.cli.entry:main"
+
+
+def test_readme_documents_uv_tool_default_and_common_dir_opt_in():
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    install_section = readme.split("## Install", maxsplit=1)[1].split(
+        "### Graceful degradation", maxsplit=1
+    )[0]
+
+    assert "uv tool install -e /path/to/spice-main" in install_section
+    assert "uv tool install spice-harness" in install_section
+    assert "pip install spice-harness" not in install_section
+    assert "UV_TOOL_DIR" in install_section
+    assert "UV_TOOL_BIN_DIR" in install_section
+    assert "common-dir layout is opt-in" in install_section
+    assert "worktree-true" not in install_section

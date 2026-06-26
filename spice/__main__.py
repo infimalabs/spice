@@ -1,8 +1,8 @@
-"""`python -m spice` — the installation-independent entrypoint.
+"""`python -m spice` — module entrypoint for the loaded spice package.
 
-The agent supervisor respawns through this module so a detached process finds
-the same interpreter. Worktree source checkouts are put first on PYTHONPATH;
-ordinary target repos use the installed package.
+The uv tool console script points at ``spice.cli.entry:main``; this module keeps
+``python -m spice`` equivalent inside whichever installed environment launched
+it.
 """
 
 from spice.cli.entry import main
