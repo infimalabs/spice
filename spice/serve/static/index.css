@@ -945,6 +945,16 @@ button.primary:hover {
   font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
   text-transform: uppercase;
 }
+.spice-menu-version {
+  color: var(--muted);
+  font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-top: auto;
+  padding-top: 8px;
+  text-align: right;
+}
+.spice-menu-version:empty {
+  display: none;
+}
 .spice-menu-actions {
   align-content: start;
   display: grid;

@@ -80,7 +80,26 @@ function renderSpiceMenu() {
   spiceMenuEl.replaceChildren(
     renderSpiceMenuActions(),
     renderSpiceMenuTargets(),
+    renderSpiceMenuVersion(),
   );
+}
+
+function spiceMenuRuntimeVersion() {
+  return (
+    (typeof spiceServeBranding === "object" &&
+      spiceServeBranding &&
+      typeof spiceServeBranding.version === "string" &&
+      spiceServeBranding.version.trim()) ||
+    ""
+  );
+}
+
+function renderSpiceMenuVersion() {
+  const footer = document.createElement("div");
+  footer.className = "spice-menu-version";
+  const version = spiceMenuRuntimeVersion();
+  footer.textContent = version ? "v" + version : "";
+  return footer;
 }
 
 function flushPendingSpiceMenuRender() {

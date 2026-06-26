@@ -133,6 +133,7 @@
  * @typedef {Object} ServeBranding
  * @property {string=} name
  * @property {string=} defaultLifetime
+ * @property {string=} version
  */
 
 /** @type {ServeBranding} */
