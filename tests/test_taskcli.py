@@ -13,7 +13,15 @@ import pytest
 from spice.cli.parser import build_parser
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
-from spice.tasks import cli as task_cli, config, create, identity, render
+from spice.tasks import (
+    artifacts,
+    cli as task_cli,
+    config,
+    create,
+    identity,
+    ops,
+    render,
+)
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -630,6 +638,177 @@ def test_task_show_omits_merge_aware_diff_command_for_task_head(monkeypatch):
     assert "review_commit agent-head (task head)" in output
     assert "review_diff_command" not in output
     assert "plain git show" not in output
+
+
+def test_task_artifact_cli_stores_text_and_binary_sidecars(task_repo, capsys):
+    handle = create.add(
+        "Capture task artifacts",
+        project="task.unit",
+        priority="medium",
+        acceptance=["artifact CLI stores text and binary evidence"],
+    )
+    notes = task_repo / "notes.md"
+    image = task_repo / "screen.png"
+    notes.write_text("raw notes\n", encoding="utf-8")
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    add_notes = _with_backend(
+        build_parser().parse_args(
+            [
+                "task",
+                "artifact",
+                "add",
+                handle,
+                str(notes),
+                "--name",
+                "research-notes.md",
+                "--type",
+                "text/markdown",
+                "--retention",
+                "prunable",
+            ]
+        )
+    )
+    assert add_notes.func(add_notes) == 0
+    add_notes_out = capsys.readouterr().out
+
+    add_image = _with_backend(
+        build_parser().parse_args(
+            [
+                "task",
+                "artifact",
+                "add",
+                handle,
+                str(image),
+                "--type",
+                "image/png",
+            ]
+        )
+    )
+    assert add_image.func(add_image) == 0
+    add_image_out = capsys.readouterr().out
+
+    root = artifacts.artifact_root()
+    assert root == task_repo / ".git" / "spice" / "artifacts" / "tasks"
+    assert (root / handle / artifacts.MANIFEST_NAME).is_file()
+    assert "added A1 research-notes.md text/markdown" in add_notes_out
+    assert "retention prunable" in add_notes_out
+    assert "added A2 screen.png image/png" in add_image_out
+
+    list_args = _with_backend(
+        build_parser().parse_args(["task", "artifact", "list", handle])
+    )
+    assert list_args.func(list_args) == 0
+    listed = capsys.readouterr().out
+    assert "A1 research-notes.md text/markdown 10 B prunable" in listed
+    assert "A2 screen.png image/png 8 B permanent" in listed
+
+    show_text = _with_backend(
+        build_parser().parse_args(["task", "artifact", "show", handle, "A1"])
+    )
+    assert show_text.func(show_text) == 0
+    assert "raw notes\n" in capsys.readouterr().out
+
+    show_binary = _with_backend(
+        build_parser().parse_args(["task", "artifact", "show", handle, "A2"])
+    )
+    assert show_binary.func(show_binary) == 0
+    binary_output = capsys.readouterr().out.strip()
+    assert binary_output.startswith("path ")
+    assert (
+        Path(binary_output.removeprefix("path ")).read_bytes() == b"\x89PNG\r\n\x1a\n"
+    )
+
+    shown = render.render_show(handle)
+    assert "artifacts:" in shown
+    assert "A1 research-notes.md text/markdown 10 B prunable" in shown
+    assert f"spice task artifact show {handle} A1" in shown
+
+
+def test_task_artifact_prune_is_dry_run_until_apply(task_repo, tmp_path, capsys):
+    handle = create.add(
+        "Prune completed artifact",
+        project="task.unit",
+        priority="medium",
+        flow=["todo"],
+        acceptance=["prunable artifacts are removed only with --apply"],
+        claim=True,
+    )
+    artifact_path = tmp_path / "prune-me.txt"
+    artifact_path.write_text("temporary evidence\n", encoding="utf-8")
+    add_args = _with_backend(
+        build_parser().parse_args(
+            [
+                "task",
+                "artifact",
+                "add",
+                handle,
+                str(artifact_path),
+                "--type",
+                "text/plain",
+                "--retention",
+                "prunable",
+            ]
+        )
+    )
+    assert add_args.func(add_args) == 0
+    capsys.readouterr()
+    ops.done(handle, validation=["single-phase task completed for prune"])
+
+    dry_run = _with_backend(build_parser().parse_args(["task", "artifact", "prune"]))
+    assert dry_run.func(dry_run) == 0
+    dry_output = capsys.readouterr().out
+    assert f"would prune {handle} A1 prune-me.txt" in dry_output
+    assert "dry_run true; pass --apply to remove" in dry_output
+    assert "A1 prune-me.txt" in artifacts.list_artifacts(handle)
+
+    apply = _with_backend(
+        build_parser().parse_args(["task", "artifact", "prune", "--apply"])
+    )
+    assert apply.func(apply) == 0
+    apply_output = capsys.readouterr().out
+    assert f"pruned {handle} A1 prune-me.txt" in apply_output
+    assert artifacts.list_artifacts(handle) == f"no artifacts for {handle}"
+
+
+def test_task_show_surfaces_review_note_artifact_citation(monkeypatch):
+    row = _row(
+        "Review citation",
+        project="task.render",
+        incepted="20260612T065825463453Z",
+        status="completed",
+        phase="review",
+    )
+    row.update(
+        {
+            "task_description": "",
+            "phase_i": "1",
+            "urgency": "9.2",
+            "review_by": "actor-a",
+            "review_finding": "changes",
+            "review_note": "See artifact A1 on TASK-test for the raw log.",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(
+        render.artifacts,
+        "render_artifact_lines",
+        lambda _handle: ["artifacts:", "  A1 raw.log text/plain 12 B permanent"],
+    )
+
+    output = render.render_show("TASK-test")
+
+    assert "review_finding changes" in output
+    assert "review_note See artifact A1 on TASK-test for the raw log." in output
+    assert "artifacts:\n  A1 raw.log text/plain 12 B permanent" in output
+
+
+def _with_backend(args: argparse.Namespace) -> argparse.Namespace:
+    args.backend = str(config.backend_root())
+    return args
 
 
 def _row(
