@@ -124,6 +124,20 @@ def test_serve_pending_badge_smoke_asserts_differential_ack() -> None:
     assert "lane.pending ack triggered an unexpected refresh" in smoke
 
 
+def test_serve_task_card_live_smoke_asserts_task_add_without_reload() -> None:
+    smoke = (ROOT / "browser" / "serve_task_card_live_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert "SPICE_" + "TASK_BACKEND" in smoke
+    assert "CODEX_" + "THREAD_ID" in smoke
+    assert "Task capture: " in smoke
+    assert "framenavigated" in smoke
+    assert "task card appeared after page navigation/reload" in smoke
+
+
 def test_serve_composer_reorder_smoke_asserts_swap_contract() -> None:
     smoke = (ROOT / "browser" / "serve_composer_reorder_smoke.js").read_text(
         encoding="utf-8"
