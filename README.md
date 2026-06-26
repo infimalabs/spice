@@ -14,13 +14,16 @@ intent converge.
 <sub>Operator steering arrives in the live stream; an assistant ACK retires the
 exact inbox key from the durable filesystem queue.</sub>
 
-## Three surprising ideas
+## Three ideas
 
 ### Semantic ACK
 
-Reading steering is not delivery. An inbox item retires only when the agent says
-`ACK <key>: ...` in assistant prose, so the transcript itself records what was
-understood, what changed, and which durable steering item closed.
+Reading steering is not delivery. An inbox item retires only when the agent
+acknowledges it by key in assistant prose — an `ACK` to accept and record what
+changed, or a `NACK` to refuse with a reason — so the transcript records what was
+understood and which durable steering item closed. These keyed markers are cheap,
+tool-call-like jump points in the stream, and the vocabulary is meant to grow as
+more such keywords prove useful.
 
 ### Cheap-wrong conscience
 
@@ -68,11 +71,11 @@ battle-tested against real hardware workflows, including an agent-driven Meta
 Quest test rig. The public hardware demo waits until it can be reproduced with
 owned assets, public tooling, and no private user or platform data.
 
-The constitution applies to itself. The largest production file in the repo
-(`spice/serve/team/metrics.py`, 1,307 lines) sits under the project's own 1,500-line
-flex ceiling. The gate that prevents any file from silently growing past that ceiling
-is the same gate that guards every other repo spice is installed in. A constitution
-its own author exempts himself from is theater; this one isn't.
+The constitution applies to itself. The repo's own largest production file sits
+under the project's 1,500-line flex ceiling, and the gate that prevents any file
+from silently growing past that ceiling is the same gate that guards every other
+repo spice is installed in. A constitution its own author exempts himself from is
+theater; this one isn't.
 
 ## Honest feedback
 
@@ -139,7 +142,7 @@ kept on course by intent.
 spice is opinionated on purpose, and the opinions are load-bearing: you can't
 drive a loop to a fixed point with minimal human input without encoding taste
 firmly enough for the machine to apply it for you. That makes spice a poor
-neutral tool and a sharp fit for one kind of operator.
+neutral tool and a sharp fit for a particular way of working.
 
 It fits if you'd rather **operate a fleet than hand-write code**, you locate
 the craft in the **structure** rather than the keystrokes, you share its code
