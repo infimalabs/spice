@@ -90,12 +90,10 @@ def state_dir(repo_root: Path) -> Path:
 
 
 def worktree_spice_source(repo_root: Path | None) -> Path | None:
-    """Return the local spice package when a worktree provides the product.
+    """Return the local spice package when a worktree has the product shape.
 
-    Entrypoint precedence is deliberately worktree-true: a repository that
-    contains spice's own source tree runs that checkout first by putting the
-    worktree root on PYTHONPATH. Ordinary target repositories do not satisfy
-    this product-shape check, so they continue to use the installed spice.
+    This is product-shape detection for diagnostics and remaining environment
+    plumbing; it does not choose the ``spice`` executable's runtime.
     """
     if repo_root is None:
         return None

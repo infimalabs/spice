@@ -155,20 +155,39 @@ it is the cost of a narrow workflow with load-bearing opinions.
 ## Install
 
 ```sh
-pip install spice-harness    # or: uv tool install spice-harness
+uv tool install -e /path/to/spice-main
+# or, for the released package:
+uv tool install spice-harness
+
 cd /path/to/your/repo
-spice init               # hooks, skill copy, state scaffolding
-spice dev doctor         # verify drivers, backends, and policy
+spice init        # hooks, skill copy, state scaffolding
+spice dev doctor  # verify runtime, drivers, backends, and policy
+```
+
+The default install is a uv tool. Operators who deploy from a main tree should
+use the editable form so the installed `spice` command resolves to that tree;
+other worktrees remain operated trees and do not supply their own runtime.
+
+The common-dir layout is opt-in. Set uv's tool directories before installing if
+you deliberately want the tool environment and executable under a repository's
+shared git directory:
+
+```sh
+repo=/path/to/your/repo
+common_dir=$(cd "$repo" && git rev-parse --path-format=absolute --git-common-dir)
+UV_TOOL_DIR="$common_dir/spice/tools" \
+UV_TOOL_BIN_DIR="$common_dir/spice/bin" \
+uv tool install -e /path/to/spice-main
+export PATH="$common_dir/spice/bin:$PATH"
 ```
 
 `spice init` writes machine-local git hook shims under `.spice/` (ignored via a
 generated `.spice/.gitignore`), materializes the worktree skill copy, and prepares state
 scaffolding. Repo-tracked policy lives in your `pyproject.toml` under
 `[tool.spice.*]` tables. The command surface is always `spice …`. Entrypoint
-resolution is worktree-true under the hood: generated git hooks invoke ambient
-`spice` directly, while supervisor children load the spice source checkout first
-on `PYTHONPATH` when operating on that checkout; ordinary target repos use the
-installed product.
+resolution is installed-tool first: generated git hooks invoke ambient `spice`
+directly, and `spice dev doctor` reports the active package source so a worker
+checkout cannot silently become its own runtime.
 
 ### Graceful degradation
 
