@@ -55,16 +55,12 @@ the operator keeps normal repository semantics.
 
 ## Credibility signal
 
-The strongest signal is not the line ratio. spice's own gate demands assertion
-density, rejects assertion-free tests, runs integration paths against real
-binaries such as Git and Taskwarrior, and treats module and symbol reachability
-as zero-tolerance production wiring checks. The same self-passing constitution
-that keeps this repository honest is what `spice init` installs elsewhere.
-
-As a trailing scale check, the tracked tree is roughly **29k lines of Python
-tests against 38k lines of Python source**, about **0.8 test lines per source
-line**. The repo-doc gate recomputes those rounded `tests/*.py` and `spice/*.py`
-figures and fails when the README drifts beyond tolerance.
+The strongest signal is not size or a test-to-source ratio. spice's own gate
+demands assertion density, rejects assertion-free tests, runs integration paths
+against real binaries such as Git and Taskwarrior, and treats module and symbol
+reachability as zero-tolerance production wiring checks. The same self-passing
+constitution that keeps this repository honest is what `spice init` installs
+elsewhere.
 
 A separate hardware stressor is kept deliberately narrow: spice has been
 battle-tested against real hardware workflows, including an agent-driven Meta
