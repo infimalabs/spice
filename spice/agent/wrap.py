@@ -50,7 +50,6 @@ from spice.agent.shellhook import (
 from spice.errors import SpiceError
 from spice.paths import (
     STATE_DIRNAME,
-    worktree_spice_environment,
     worktree_spice_source,
 )
 from spice.sessions.meter import (
@@ -320,7 +319,7 @@ def agent_run_child_worktree_environment(
     repo_root: Path | None,
     base_env: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    env = worktree_spice_environment(repo_root, base_env=base_env)
+    env = dict(os.environ if base_env is None else base_env)
     if shell_execution_command_index(args) is not None:
         static_hook_dir = packaged_shell_steering_static_hook_dir()
         env[ZDOTDIR_ENV] = str(static_hook_dir)

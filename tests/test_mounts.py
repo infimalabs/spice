@@ -92,8 +92,7 @@ def test_run_mounted_command_exports_visible_spice_identity(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ):
     captured: dict[str, object] = {}
-    (tmp_path / ".venv" / "bin").mkdir(parents=True)
-    monkeypatch.setenv("PATH", "")
+    monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("VIRTUAL_ENV", "/tmp/foreign-venv")
 
     def fake_run(argv, *, cwd, env, check):
@@ -120,8 +119,8 @@ def test_run_mounted_command_exports_visible_spice_identity(
         "argv": ("project-tool", "report", "inspect", "--limit", "20"),
         "cwd": tmp_path,
         "env": {
-            "VIRTUAL_ENV": str(tmp_path / ".venv"),
-            "PATH": str(tmp_path / ".venv" / "bin"),
+            "VIRTUAL_ENV": "/tmp/foreign-venv",
+            "PATH": "/usr/bin",
             MOUNTED_COMMAND_ENV: "1",
             VISIBLE_PROG_ENV: "spice report inspect",
         },

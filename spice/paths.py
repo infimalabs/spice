@@ -13,7 +13,6 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -108,30 +107,6 @@ def worktree_spice_source(repo_root: Path | None) -> Path | None:
 
 def runtime_spice_source() -> Path:
     return Path(__file__).resolve().parent
-
-
-def worktree_spice_environment(
-    repo_root: Path | None, *, base_env: Mapping[str, str] | None = None
-) -> dict[str, str]:
-    env = dict(os.environ if base_env is None else base_env)
-    if repo_root is not None:
-        venv = Path(repo_root) / ".venv"
-        if venv.is_dir():
-            env["VIRTUAL_ENV"] = str(venv)
-            venv_bin = str(venv / "bin")
-            existing_path = env.get("PATH", "")
-            path_parts = [
-                p for p in existing_path.split(os.pathsep) if p and p != venv_bin
-            ]
-            env["PATH"] = os.pathsep.join([venv_bin, *path_parts])
-    source = worktree_spice_source(repo_root)
-    if source is None:
-        return env
-    root = str(source.parent)
-    existing = env.get("PYTHONPATH", "")
-    parts = [part for part in existing.split(os.pathsep) if part and part != root]
-    env["PYTHONPATH"] = os.pathsep.join([root, *parts])
-    return env
 
 
 def find_tool(name: str) -> str | None:

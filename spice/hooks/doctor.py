@@ -201,8 +201,6 @@ def _installed_spice_package_source() -> Path | None:
 
 
 def _spice_package_source_for_python(python: Path) -> Path | None:
-    env = dict(os.environ)
-    env.pop("PYTHONPATH", None)
     result = subprocess.run(
         [
             str(python),
@@ -216,7 +214,6 @@ def _spice_package_source_for_python(python: Path) -> Path | None:
         capture_output=True,
         check=False,
         cwd=Path("/"),
-        env=env,
         text=True,
     )
     if result.returncode != 0:

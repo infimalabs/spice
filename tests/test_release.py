@@ -336,7 +336,7 @@ def test_publish_github_release_uses_explicit_release_commit(monkeypatch):
     ]
 
 
-def test_hermetic_wheel_env_drops_source_shadowing_entries(monkeypatch):
+def test_hermetic_wheel_env_preserves_process_environment(monkeypatch):
     monkeypatch.setenv("PYTHONPATH", "/some/worktree")
     monkeypatch.setenv("VIRTUAL_ENV", "/some/venv")
     monkeypatch.setenv("PATH", "/usr/bin")
@@ -345,8 +345,8 @@ def test_hermetic_wheel_env_drops_source_shadowing_entries(monkeypatch):
 
     assert {name: env.get(name) for name in ("PATH", "PYTHONPATH", "VIRTUAL_ENV")} == {
         "PATH": "/usr/bin",
-        "PYTHONPATH": None,
-        "VIRTUAL_ENV": None,
+        "PYTHONPATH": "/some/worktree",
+        "VIRTUAL_ENV": "/some/venv",
     }
 
 

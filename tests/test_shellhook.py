@@ -229,13 +229,16 @@ def test_wrapper_refuses_target_repo_python_without_repo_venv(tmp_path, monkeypa
     assert command[3:] == ["--version"]
 
 
-def test_wrapper_plain_commands_inherit_worktree_spice_pythonpath(tmp_path):
+def test_wrapper_plain_commands_do_not_inject_worktree_spice_pythonpath(
+    tmp_path, monkeypatch
+):
     _write_spice_product_shape(tmp_path)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
 
     env = wrap.build_agent_run_environment(["pytest"], repo_root=tmp_path)
 
     assert env is not None
-    assert env["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path.resolve())
+    assert "PYTHONPATH" not in env
 
 
 def test_static_shell_hook_paths_count_as_generated():
@@ -401,14 +404,17 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
     assert "wrap:grep needle /dev/null" in lines
 
 
-def test_agent_environment_inherits_worktree_spice_pythonpath(tmp_path, monkeypatch):
+def test_agent_environment_does_not_inject_worktree_spice_pythonpath(
+    tmp_path, monkeypatch
+):
     _write_spice_product_shape(tmp_path)
     monkeypatch.delenv(DRIVER.thread_id_env, raising=False)
     monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
 
     env = lifecycle.agent_environment(tmp_path)
 
-    assert env["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path.resolve())
+    assert "PYTHONPATH" not in env
 
 
 def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
