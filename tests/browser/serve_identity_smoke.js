@@ -47,7 +47,26 @@ function mismatchPayload(targetId) {
         { key: "effort desired", value: "xhigh" },
         { key: "thread", value: "thread-b", span: true },
         { key: "session", value: "claude" },
+        {
+          key: "review pressure",
+          value: "changes on REVIEW-20260102T000000000001Z; 2 follow-ups",
+          span: true,
+        },
       ],
+      reviewPressure: {
+        count: 1,
+        openFollowupCount: 2,
+        items: [
+          {
+            reviewedTask: "REVIEW-20260102T000000000001Z",
+            finding: "changes",
+            findingSeverity: "changes",
+            reviewer: "agent-b",
+            source: "task-review",
+            followupCount: 2,
+          },
+        ],
+      },
     },
     taskFilters: [],
     laneFilterVersion: "",
@@ -84,6 +103,7 @@ function assertIdentityResult(result) {
     "model actualclaude-opus",
     "model desiredgpt-5.5",
     "sessionclaude",
+    "review pressurechanges on REVIEW-20260102T000000000001Z; 2 follow-ups",
   ]) {
     if (!result.infoText.includes(text))
       throw new Error("lane info missing " + text + ": " + result.infoText);

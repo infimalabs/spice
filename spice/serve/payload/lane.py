@@ -14,7 +14,9 @@ from spice.serve.payload.identity import (
 )
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.worktree.target import WorktreeTarget
+from spice.tasks import identity as task_identity
 from spice.tasks import config as task_config
+from spice.tasks import tw
 
 LANE_METRIC_SPARKLINE_BUCKETS = 12
 
@@ -23,6 +25,7 @@ LANE_METRIC_SPARKLINE_BUCKET_SECONDS = 60
 
 
 TASK_ACTOR_FIELDS = ("claim_by", "claim_thread", "review_author", "review_by")
+REVIEW_PRESSURE_LIMIT = 3
 
 
 def task_filter_inventory() -> dict[str, Any]:
@@ -205,7 +208,16 @@ def _lane_info_payload(
         {"key": "thread", "value": thread_id or "-", "span": True},
         {"key": "session", "value": session_owner or "-", "span": False},
     ]
-    return {"summaryRows": rows, "members": []}
+    review_pressure = review_pressure_payload(serve_identity)
+    if review_pressure["count"]:
+        rows.append(
+            {
+                "key": "review pressure",
+                "value": _review_pressure_summary(review_pressure),
+                "span": True,
+            }
+        )
+    return {"summaryRows": rows, "members": [], "reviewPressure": review_pressure}
 
 
 def _identity_value_rows(
@@ -221,6 +233,132 @@ def _identity_value_rows(
             {"key": f"{key} desired", "value": desired, "span": False},
         ]
     return [{"key": key, "value": desired or actual or "-", "span": False}]
+
+
+def review_pressure_payload(serve_identity: dict[str, Any]) -> dict[str, Any]:
+    """Recent non-clean task reviews for the lane actor."""
+    actors = _review_pressure_actor_keys(serve_identity)
+    if not actors:
+        return _empty_review_pressure()
+    from spice.errors import SpiceError
+
+    try:
+        completed = tw.export(["status:completed"])
+        open_rows = tw.export(["(", "status:pending", "or", "status:waiting", ")"])
+    except SpiceError:
+        return _empty_review_pressure()
+    followups_by_reviewed = _review_followup_counts(open_rows)
+    reviewed_rows = [
+        row
+        for row in completed
+        if str(row.get("review_author") or "") in actors
+        and _review_finding_is_pressure(row.get("review_finding"))
+    ]
+    reviewed_rows.sort(key=_review_pressure_sort_key, reverse=True)
+    items = [
+        _review_pressure_item(row, followups_by_reviewed)
+        for row in reviewed_rows[:REVIEW_PRESSURE_LIMIT]
+    ]
+    return {
+        "count": len(reviewed_rows),
+        "openFollowupCount": sum(
+            followups_by_reviewed.get(str(row.get("uuid") or ""), 0)
+            for row in reviewed_rows
+        ),
+        "items": items,
+    }
+
+
+def _empty_review_pressure() -> dict[str, Any]:
+    return {"count": 0, "openFollowupCount": 0, "items": []}
+
+
+def _review_pressure_actor_keys(serve_identity: dict[str, Any]) -> set[str]:
+    thread = serve_identity.get("thread") or {}
+    values = [
+        serve_identity.get("actorId"),
+        thread.get("threadId"),
+    ]
+    keys: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        keys.add(text)
+        if text.startswith("thread:") or text.startswith("target:"):
+            keys.add(text.split(":", 1)[1])
+    return {key for key in keys if key}
+
+
+def _review_finding_is_pressure(value: Any) -> bool:
+    finding = str(value or "").strip().casefold()
+    return bool(finding and finding != "clean")
+
+
+def _review_followup_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        for dep in _task_dependencies(row):
+            counts[dep] = counts.get(dep, 0) + 1
+    return counts
+
+
+def _task_dependencies(row: dict[str, Any]) -> set[str]:
+    value = row.get("depends") or []
+    if isinstance(value, str):
+        return {item.strip() for item in value.split(",") if item.strip()}
+    if isinstance(value, list):
+        return {str(item).strip() for item in value if str(item).strip()}
+    return set()
+
+
+def _review_pressure_sort_key(row: dict[str, Any]) -> str:
+    return str(
+        row.get("review_at")
+        or row.get("end")
+        or row.get("modified")
+        or row.get("entry")
+        or ""
+    )
+
+
+def _review_pressure_item(
+    row: dict[str, Any],
+    followups_by_reviewed: dict[str, int],
+) -> dict[str, Any]:
+    finding = str(row.get("review_finding") or "").strip()
+    uuid = str(row.get("uuid") or "")
+    return {
+        "reviewedTask": task_identity.render_handle(row),
+        "finding": finding,
+        "findingSeverity": _review_finding_severity(finding),
+        "reviewer": str(row.get("review_by") or ""),
+        "source": "task-review",
+        "followupCount": followups_by_reviewed.get(uuid, 0),
+        "reviewedAt": str(row.get("review_at") or ""),
+    }
+
+
+def _review_finding_severity(finding: str) -> str:
+    value = finding.strip().casefold()
+    if value in {"changes", "blocked"}:
+        return value
+    return "attention"
+
+
+def _review_pressure_summary(pressure: dict[str, Any]) -> str:
+    items = pressure.get("items") or []
+    if not items:
+        return "-"
+    first = items[0]
+    reviewed = str(first.get("reviewedTask") or "task")
+    finding = str(first.get("finding") or "review")
+    followups = int(first.get("followupCount") or 0)
+    suffix = f"; {followups} follow-up" + ("" if followups == 1 else "s")
+    more = int(pressure.get("count") or 0) - 1
+    if more > 0:
+        suffix += f"; +{more} more"
+    return f"{finding} on {reviewed}{suffix}"
 
 
 def lane_metrics_payload(

@@ -25,6 +25,20 @@
  * @property {number=} pendingInboxVersion
  * @property {StatusLine=} statusLine
  *
+ * @typedef {Object} ReviewPressure
+ * @property {number} count
+ * @property {number} openFollowupCount
+ * @property {ReviewPressureItem[]} items
+ *
+ * @typedef {Object} ReviewPressureItem
+ * @property {string} reviewedTask
+ * @property {string} finding
+ * @property {string} findingSeverity
+ * @property {string} reviewer
+ * @property {string} source
+ * @property {number} followupCount
+ * @property {string=} reviewedAt
+ *
  * @typedef {Object} TargetIdentity
  * @property {string} targetId
  * @property {string} worktreeName
@@ -94,10 +108,12 @@
  * @typedef {Object} LaneInfo
  * @property {LaneInfoRow[]=} summaryRows
  * @property {LaneInfoMember[]=} members
+ * @property {ReviewPressure=} reviewPressure
  *
  * @typedef {Object} LaneInfoRow
  * @property {string} key
  * @property {string} value
+ * @property {boolean=} span
  *
  * @typedef {Object} LaneInfoMember
  * @property {string} targetId

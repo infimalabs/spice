@@ -527,6 +527,88 @@ def test_lane_metrics_payload_reads_durable_agent_metrics(tmp_path):
     assert sum(metrics["sparkline"]) == len(items)
 
 
+def test_lane_info_payload_reports_review_pressure(monkeypatch):
+    seen: list[list[str]] = []
+
+    def fake_export(args: list[str]) -> list[dict[str, object]]:
+        seen.append(args)
+        if args == ["status:completed"]:
+            return [
+                {
+                    "uuid": "reviewed-uuid",
+                    "incepted": "20260102T000000000001Z",
+                    "project": "task.review",
+                    "description": "Fix reviewed issue",
+                    "review_author": "agent-a",
+                    "review_by": "agent-b",
+                    "review_finding": "changes",
+                    "review_at": "2026-01-02T00:00:00Z",
+                },
+                {
+                    "uuid": "clean-uuid",
+                    "incepted": "20260102T000000000002Z",
+                    "project": "task.review",
+                    "description": "Clean review",
+                    "review_author": "agent-a",
+                    "review_by": "agent-c",
+                    "review_finding": "clean",
+                    "review_at": "2026-01-03T00:00:00Z",
+                },
+                {
+                    "uuid": "other-uuid",
+                    "incepted": "20260102T000000000003Z",
+                    "project": "task.review",
+                    "description": "Other actor review",
+                    "review_author": "agent-z",
+                    "review_by": "agent-b",
+                    "review_finding": "changes",
+                    "review_at": "2026-01-04T00:00:00Z",
+                },
+            ]
+        if args == ["(", "status:pending", "or", "status:waiting", ")"]:
+            return [
+                {"uuid": "followup-a", "depends": ["reviewed-uuid"]},
+                {"uuid": "followup-b", "depends": "reviewed-uuid"},
+                {"uuid": "unrelated", "depends": ["other-uuid"]},
+            ]
+        raise AssertionError(f"unexpected export args: {args}")
+
+    monkeypatch.setattr(tw, "export", fake_export)
+    serve_identity = {
+        "actorId": "thread:agent-a",
+        "thread": {"threadId": "agent-a"},
+        "driver": {},
+        "launch": {"desired": {}, "actual": {}},
+    }
+
+    payload = lane._lane_info_payload(_Target(id="wt"), serve_identity)
+    pressure = payload["reviewPressure"]
+    rows = {row["key"]: row for row in payload["summaryRows"]}
+
+    assert seen == [
+        ["status:completed"],
+        ["(", "status:pending", "or", "status:waiting", ")"],
+    ]
+    assert pressure["count"] == 1
+    assert pressure["openFollowupCount"] == 2
+    assert pressure["items"] == [
+        {
+            "reviewedTask": "REVIEW-20260102T000000000001Z",
+            "finding": "changes",
+            "findingSeverity": "changes",
+            "reviewer": "agent-b",
+            "source": "task-review",
+            "followupCount": 2,
+            "reviewedAt": "2026-01-02T00:00:00Z",
+        }
+    ]
+    assert rows["review pressure"] == {
+        "key": "review pressure",
+        "value": "changes on REVIEW-20260102T000000000001Z; 2 follow-ups",
+        "span": True,
+    }
+
+
 def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
     seen: dict[str, list[str]] = {}
 
