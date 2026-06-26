@@ -71,7 +71,7 @@ def _run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _control_plane_git_env() -> dict[str, str]:
-    env = dict(os.environ)
+    env = dict(os.environ)  # env-policy: allow
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_SSH_COMMAND"] = TASK_GIT_SSH_COMMAND
     return env

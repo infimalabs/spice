@@ -284,7 +284,7 @@ def apply_scoped_rtk_history_environment(
     if path is None:
         return env
     path.parent.mkdir(parents=True, exist_ok=True)
-    result = dict(os.environ if env is None else env)
+    result = dict(os.environ if env is None else env)  # env-policy: allow
     result[RTK_DB_PATH_ENV] = str(path)
     return result
 
@@ -307,7 +307,7 @@ def agent_run_child_worktree_environment(
     repo_root: Path | None,
     base_env: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    env = dict(os.environ if base_env is None else base_env)
+    env = dict(os.environ if base_env is None else base_env)  # env-policy: allow
     if shell_execution_command_index(args) is not None:
         static_hook_dir = packaged_shell_steering_static_hook_dir()
         env[ZDOTDIR_ENV] = str(static_hook_dir)

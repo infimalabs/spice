@@ -91,7 +91,9 @@ def claim_meta(actor: str) -> list[str]:
         # Per-turn granularity is a driver capability. Drivers that cannot see
         # turn ids from the command environment intentionally fall back to the
         # thread id, so claim_context_turn equals claim_thread for them.
-        turn = (driver.current_turn_id(os.environ) or thread).strip()
+        turn = (
+            driver.current_turn_id(os.environ) or thread
+        ).strip()  # env-policy: allow
     link = f"spice-session://{thread}?start={start}&end={end}"
     return [
         f"claim_by:{actor}",

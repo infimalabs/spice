@@ -547,7 +547,7 @@ def _transcript_resolution(thread_id: str, path: Path) -> TranscriptResolution:
 
 
 def _write_inbox_item_from_subprocess(repo: Path) -> None:
-    env = os.environ.copy()
+    env = os.environ.copy()  # env-policy: allow
     env["PYTHONPATH"] = os.pathsep.join(
         entry for entry in (str(PROJECT_ROOT), env.get("PYTHONPATH", "")) if entry
     )

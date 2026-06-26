@@ -1101,7 +1101,7 @@ def _write_staged_paths_recorder(tmp_path):
         "import os\n"
         "from pathlib import Path\n"
         "import sys\n"
-        f"paths = os.environ[{staged_paths_env!r}].splitlines()\n"
+        f"paths = os.environ[{staged_paths_env!r}].splitlines()\n"  # env-policy: allow
         "with Path(sys.argv[0]).with_name('staged-paths.txt').open("
         "'a', encoding='utf-8') as handle:\n"
         "    handle.write(sys.argv[1] + ':' + '|'.join(paths) + '\\n')\n",
@@ -1116,7 +1116,7 @@ def _write_staged_formatter(tmp_path, replacement: str):
     formatter.write_text(
         "import os\n"
         "from pathlib import Path\n"
-        f"for raw in os.environ[{staged_paths_env!r}].splitlines():\n"
+        f"for raw in os.environ[{staged_paths_env!r}].splitlines():\n"  # env-policy: allow
         f"    Path(raw).write_text({replacement!r}, encoding='utf-8')\n",
         encoding="utf-8",
     )
@@ -1177,7 +1177,7 @@ def _git(
 def _run(
     args: list[str], *, check: bool = True, cwd: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
+    env = os.environ.copy()  # env-policy: allow
     env["PYTHONPATH"] = os.pathsep.join(
         entry for entry in (str(PROJECT_ROOT), env.get("PYTHONPATH", "")) if entry
     )

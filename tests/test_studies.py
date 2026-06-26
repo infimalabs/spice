@@ -809,7 +809,9 @@ def test_env_policy_defaults_still_apply(tmp_path):
     ]
     path = tmp_path / "sample.py"
     path.write_text(
-        "\n".join(f'VALUE = os.environ["{name}"]' for name in names),
+        "\n".join(
+            f'VALUE = os.environ["{name}"]' for name in names
+        ),  # env-policy: allow
         encoding="utf-8",
     )
 
@@ -899,7 +901,9 @@ def test_env_policy_wrapped_statement_marker_waives_wrapped_literal(tmp_path):
 
 def test_env_presence_gate_off_by_default_ignores_env_access(tmp_path):
     path = tmp_path / "sample.py"
-    path.write_text('value = os.getenv("HOME")\n', encoding="utf-8")
+    path.write_text(
+        'value = os.getenv("HOME")\n', encoding="utf-8"
+    )  # env-policy: allow
 
     # With no env_presence_gate flag, a non-watchlisted env read is invisible.
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
@@ -911,7 +915,7 @@ def test_env_presence_gate_flags_unwaived_and_dynamic_env_access(tmp_path):
     )
     path = tmp_path / "sample.py"
     path.write_text(
-        'literal = os.getenv("HOME")\ndynamic = os.environ[chosen_key]\n',
+        'literal = os.getenv("HOME")\ndynamic = os.environ[chosen_key]\n',  # env-policy: allow
         encoding="utf-8",
     )
 
@@ -942,7 +946,9 @@ def test_env_presence_gate_rejects_non_boolean_flag(tmp_path):
         '[tool.spice.policy]\nenv_presence_gate = "yes"\n', encoding="utf-8"
     )
     path = tmp_path / "sample.py"
-    path.write_text('value = os.getenv("HOME")\n', encoding="utf-8")
+    path.write_text(
+        'value = os.getenv("HOME")\n', encoding="utf-8"
+    )  # env-policy: allow
 
     with pytest.raises(SpiceError, match="env_presence_gate must be a boolean"):
         scan_env_policy([Path("sample.py")], root=tmp_path)

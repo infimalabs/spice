@@ -21,7 +21,9 @@ def test_shadow_environment_exports_native_merge_as_command_backstop(tmp_path):
     _git(repo, "config", "branch.main-d.remote", "origin")
     _git(repo, "config", "branch.main-d.merge", "refs/heads/main")
 
-    env = shadow_environment(repo, base_env={"PATH": os.environ["PATH"]})
+    env = shadow_environment(
+        repo, base_env={"PATH": os.environ["PATH"]}
+    )  # env-policy: allow
 
     assert _config_values(env, "branch.main-d.merge") == ["refs/heads/main"]
     assert (
@@ -44,7 +46,9 @@ def test_shadow_environment_derives_true_merge_from_origin_head(tmp_path):
     _git(repo, "remote", "add", "origin", str(tmp_path / "origin.git"))
     _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
-    env = shadow_environment(repo, base_env={"PATH": os.environ["PATH"]})
+    env = shadow_environment(
+        repo, base_env={"PATH": os.environ["PATH"]}
+    )  # env-policy: allow
 
     assert _config_values(env, "branch.main-d.merge") == ["refs/heads/trunk"]
     assert (
@@ -81,7 +85,10 @@ def test_duplicate_branch_merge_precedence_is_a_tested_git_assumption(tmp_path):
 
     config_path = write_shadow_config(repo, "main-d")  # system scope: merge=self
     assert config_path is not None
-    env = {"PATH": os.environ["PATH"], "GIT_CONFIG_SYSTEM": str(config_path)}
+    env = {
+        "PATH": os.environ["PATH"],
+        "GIT_CONFIG_SYSTEM": str(config_path),
+    }  # env-policy: allow
     env = append_git_config_pair(env, "branch.main-d.remote", ".")
     # command scope: a *second* branch.main-d.merge, the true integration branch.
     env = append_git_config_pair(env, "branch.main-d.merge", "refs/heads/integration")
@@ -125,7 +132,9 @@ def test_shadow_environment_notes_detached_head_instead_of_silent_passthrough(
     _git(repo, "checkout", "-q", "--detach", head)
     stderr = io.StringIO()
 
-    env = shadow_environment(repo, base_env={"PATH": os.environ["PATH"]}, stderr=stderr)
+    env = shadow_environment(
+        repo, base_env={"PATH": os.environ["PATH"]}, stderr=stderr
+    )  # env-policy: allow
 
     assert "GIT_CONFIG_SYSTEM" not in env
     assert "detached HEAD" in stderr.getvalue()
@@ -163,7 +172,9 @@ def _config_values(env: dict[str, str], key: str) -> list[str]:
 
 
 def _git_stdout(repo: Path, *args: str, env: dict[str, str]) -> str:
-    return _git(repo, *args, env={**os.environ, **env}).stdout.strip()
+    return _git(
+        repo, *args, env={**os.environ, **env}
+    ).stdout.strip()  # env-policy: allow
 
 
 def _git(

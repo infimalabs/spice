@@ -16,4 +16,4 @@ os.environ["SPICE_AGENT_DRIVER"] = "codex"  # env-policy: allow
 # Scrub every GIT_* var so tests build and read their own repos hermetically and
 # never inherit a lane's self-tracking shadow.
 for _name in [_n for _n in os.environ if _n.startswith("GIT_")]:  # env-policy: allow
-    del os.environ[_name]
+    del os.environ[_name]  # env-policy: allow

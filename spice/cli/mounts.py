@@ -97,7 +97,7 @@ def find_mounted_command(argv: list[str]) -> tuple[MountedCommand, list[str]] | 
 
 
 def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
-    env = dict(os.environ)
+    env = dict(os.environ)  # env-policy: allow
     env[MOUNTED_COMMAND_ENV] = "1"
     env[VISIBLE_PROG_ENV] = mount.visible_prog
     result = subprocess.run(

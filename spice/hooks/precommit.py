@@ -407,7 +407,7 @@ def _formatter_from_table(raw: dict[str, Any], *, context: str) -> bool:
 
 
 def _run_policy_command_step(command: CommandStep) -> None:
-    env = os.environ.copy()
+    env = os.environ.copy()  # env-policy: allow
     env[STAGED_PATHS_ENV] = "\n".join(path.as_posix() for path in command.staged_paths)
     result = subprocess.run(
         list(command.argv),

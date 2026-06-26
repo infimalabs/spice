@@ -38,7 +38,7 @@ def shadow_environment(
     base_env: Mapping[str, str] | None = None,
     stderr: TextIO = sys.stderr,
 ) -> dict[str, str]:
-    env = dict(os.environ if base_env is None else base_env)
+    env = dict(os.environ if base_env is None else base_env)  # env-policy: allow
     if repo_root is None:
         return env
     branch = current_git_branch(repo_root)
@@ -148,7 +148,7 @@ def true_branch_merge(
 
 
 def native_git_env(base_env: Mapping[str, str] | None = None) -> dict[str, str]:
-    env = dict(os.environ if base_env is None else base_env)
+    env = dict(os.environ if base_env is None else base_env)  # env-policy: allow
     env.pop("GIT_CONFIG_SYSTEM", None)
     env.pop("GIT_CONFIG_COUNT", None)
     for name in list(env):
@@ -177,7 +177,9 @@ def real_system_config_path(repo_root: Path) -> str | None:
     # file, so a no-op editor (echo) prints git's compile-time system path even
     # when that file is empty or absent — and does not modify it. Query with our
     # GIT_CONFIG_SYSTEM override removed so we get git's genuine default.
-    env = {k: v for k, v in os.environ.items() if k != "GIT_CONFIG_SYSTEM"}
+    env = {
+        k: v for k, v in os.environ.items() if k != "GIT_CONFIG_SYSTEM"
+    }  # env-policy: allow
     env["GIT_EDITOR"] = "echo"
     completed = _git(repo_root, "config", "--system", "--edit", env=env)
     if completed.returncode != 0:

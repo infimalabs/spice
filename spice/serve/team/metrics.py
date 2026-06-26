@@ -733,7 +733,9 @@ def _metric_history_retention_seconds_locked(connection: sqlite3.Connection) -> 
         )
         if configured is not None:
             return configured
-    env_value = os.environ.get(METRIC_HISTORY_RETENTION_DAYS_ENV, "").strip()
+    env_value = os.environ.get(
+        METRIC_HISTORY_RETENTION_DAYS_ENV, ""
+    ).strip()  # env-policy: allow
     if env_value:
         return _positive_days_seconds(env_value, METRIC_HISTORY_RETENTION_DAYS_ENV)
     return METRIC_HISTORY_RETENTION_SECONDS

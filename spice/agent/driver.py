@@ -64,7 +64,7 @@ class AgentDriver:
         return self.name
 
     def binary(self) -> str:
-        return os.environ.get(self.bin_env, self.default_bin)
+        return os.environ.get(self.bin_env, self.default_bin)  # env-policy: allow
 
     def current_turn_id(self, env: Mapping[str, str]) -> str | None:
         """Return this driver's current per-turn id from `env`, if it has one."""
@@ -208,7 +208,9 @@ class CodexDriver(AgentDriver):
         return value.strip() or None
 
     def home(self) -> Path:
-        return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+        return Path(
+            os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))
+        )  # env-policy: allow
 
     def state_db_path(self) -> Path:
         return self.home() / "state_5.sqlite"
@@ -371,7 +373,9 @@ class ClaudeDriver(AgentDriver):
 
     def home(self) -> Path:
         # env-policy: allow
-        return Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
+        return Path(
+            os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude"))
+        )  # env-policy: allow
 
     def projects_root(self) -> Path:
         return self.home() / "projects"
@@ -856,7 +860,9 @@ def select_driver(name: str = "") -> AgentDriver:
     the server uses for each lane) is `driver_for(repo_root)` — the driver is a
     per-worktree setting, never the server process's own location.
     """
-    chosen = (name or os.environ.get(SPICE_AGENT_DRIVER_ENV, "")).strip().lower()
+    chosen = (
+        (name or os.environ.get(SPICE_AGENT_DRIVER_ENV, "")).strip().lower()
+    )  # env-policy: allow
     if not chosen and not name:
         chosen = _configured_driver_name(None)
     return _driver_named(chosen, source="current process")
@@ -871,7 +877,9 @@ def driver_for(repo_root: Path | None) -> AgentDriver:
     target.repo_root, so one repo can run a different driver in every worktree
     regardless of where — or how — the server itself was launched.
     """
-    name = os.environ.get(SPICE_AGENT_DRIVER_ENV, "").strip().lower()
+    name = (
+        os.environ.get(SPICE_AGENT_DRIVER_ENV, "").strip().lower()
+    )  # env-policy: allow
     source = SPICE_AGENT_DRIVER_ENV
     if not name:
         name = _configured_driver_name(repo_root)

@@ -32,12 +32,13 @@ def ambient_thread() -> tuple[str, AgentDriver] | None:
     Worktree-local git config is a persistence of a past ambient identity and
     must not be consulted here — a stale config value does not make the
     current shell an agent. The single signal that a command is being driven
-    by an agent is a driver's live thread-id variable in os.environ — any
+    by an agent is a driver's live thread-id variable in the process
+    environment — any
     shipped driver's (Claude and Codex each define a driver-owned thread-id
     environment variable).
     """
     for driver in ALL_DRIVERS:
-        raw = os.environ.get(driver.thread_id_env)
+        raw = os.environ.get(driver.thread_id_env)  # env-policy: allow
         if raw:
             thread_id = canonical_thread_id(raw)
             return (thread_id, driver) if thread_id else None

@@ -367,8 +367,10 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
     wrap_bin.chmod(0o755)
     monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
-    base_env = dict(os.environ)
-    base_env["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+    base_env = dict(os.environ)  # env-policy: allow
+    base_env["PATH"] = (
+        str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+    )  # env-policy: allow
     base_env[SHELL_TRACE_ENV] = str(trace)
     base_env.pop(shellhook.ZDOTDIR_ENV, None)
     base_env.pop(shellhook.BASH_ENV_ENV, None)
@@ -807,7 +809,7 @@ def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
     )
     env = {
         "HOME": str(home),
-        "PATH": os.environ.get("PATH", ""),
+        "PATH": os.environ.get("PATH", ""),  # env-policy: allow
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
         **shellhook.shell_steering_runtime_environment(
@@ -841,7 +843,7 @@ def test_zsh_login_hook_reexec_restores_across_startup_files(tmp_path):
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     env = {
         "HOME": str(home),
-        "PATH": os.environ.get("PATH", ""),
+        "PATH": os.environ.get("PATH", ""),  # env-policy: allow
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
         **shellhook.shell_steering_runtime_environment(
@@ -889,7 +891,9 @@ def test_zshrc_hook_sources_real_interactive_zshrc_and_loads_wrappers(tmp_path):
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     env = {
         "HOME": str(home),
-        "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
+        "PATH": str(bin_dir)
+        + os.pathsep
+        + os.environ.get("PATH", ""),  # env-policy: allow
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
         shellhook.SHELL_HOOK_WRAPPERS_ENV: "\n".join(
@@ -949,7 +953,9 @@ def test_zshrc_hook_interactive_shell_loads_bare_pre_commit_wrapper(tmp_path):
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     env = {
         "HOME": str(home),
-        "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
+        "PATH": str(bin_dir)
+        + os.pathsep
+        + os.environ.get("PATH", ""),  # env-policy: allow
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
         shellhook.SHELL_HOOK_WRAPPERS_ENV: "\n".join(
@@ -987,7 +993,7 @@ def test_zsh_login_hook_reexec_does_not_loop_when_active_zdotdir_is_hook(tmp_pat
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     env = {
         "HOME": str(home),
-        "PATH": os.environ.get("PATH", ""),
+        "PATH": os.environ.get("PATH", ""),  # env-policy: allow
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
         **shellhook.shell_steering_runtime_environment(
@@ -1038,7 +1044,7 @@ def test_bash_env_hook_reexec_restores_for_nested_shells(tmp_path):
     )
     env = {
         "HOME": str(home),
-        "PATH": os.environ.get("PATH", ""),
+        "PATH": os.environ.get("PATH", ""),  # env-policy: allow
         shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
         SHELL_TRACE_ENV: str(trace),
         **shellhook.shell_steering_runtime_environment(
@@ -1070,7 +1076,7 @@ def test_zshenv_hook_execs_noninteractive_command_under_agent_run_once(tmp_path)
         "exit 7"
     )
     env = {
-        "PATH": os.environ.get("PATH", ""),
+        "PATH": os.environ.get("PATH", ""),  # env-policy: allow
         "SHELL": zsh,
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
@@ -1100,7 +1106,7 @@ def test_agent_shell_environment_routes_reexeced_shell_to_static_stage(tmp_path)
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
     static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     base_env = {
-        "PATH": os.environ.get("PATH", ""),
+        "PATH": os.environ.get("PATH", ""),  # env-policy: allow
         "SHELL": zsh,
         SHELL_TRACE_ENV: str(trace),
     }
@@ -1151,7 +1157,9 @@ def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
     wrap_bin.chmod(0o755)
     hook_dir = shellhook.packaged_shell_steering_hook_dir()
     env = {
-        "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
+        "PATH": str(bin_dir)
+        + os.pathsep
+        + os.environ.get("PATH", ""),  # env-policy: allow
         shellhook.ZDOTDIR_ENV: str(hook_dir),
         SHELL_TRACE_ENV: str(trace),
         shellhook.SHELL_HOOK_WRAPPERS_ENV: "\n".join(
@@ -1186,7 +1194,7 @@ def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_pat
         "exit 6"
     )
     env = {
-        "PATH": os.environ.get("PATH", ""),
+        "PATH": os.environ.get("PATH", ""),  # env-policy: allow
         shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
         SHELL_TRACE_ENV: str(trace),
         **shellhook.shell_steering_runtime_environment(
@@ -1214,7 +1222,7 @@ def test_bash_env_hook_fails_noninteractive_shell_without_execution_string(tmp_p
     script = tmp_path / "script.sh"
     script.write_text("exit 0\n", encoding="utf-8")
     env = {
-        "PATH": os.environ.get("PATH", ""),
+        "PATH": os.environ.get("PATH", ""),  # env-policy: allow
         shellhook.BASH_ENV_ENV: str(hook_dir / shellhook.BASH_HOOK_NAME),
         **shellhook.shell_steering_runtime_environment(base_env=base_env),
     }
