@@ -1,4 +1,4 @@
-"""Completed-task sizing report."""
+"""Completed-task sizing report signals."""
 
 from __future__ import annotations
 
@@ -6,98 +6,104 @@ from spice.cli.parser import build_parser
 from spice.tasks import sizing
 
 
-def test_completed_task_sizing_labels_small_and_xl_rows():
-    small = _completed_row(
-        title="Small docs fix",
-        project="docs.study",
-        claim_at="2026-06-26T06:00:00.000000Z",
-        validation_entry="20260626T060400Z",
-        validation="pytest; evaluated blocked/stale/oops states",
-        review_finding="clean",
-        acceptance="Requires browser full suite external validation.",
-        annotations=[
-            {
-                "description": "blocked/stale/oops words in a note are not signals",
-                "entry": "20260626T060200Z",
-            },
-        ],
+def test_task_sizing_cli_parser_accepts_limit_and_project():
+    args = build_parser().parse_args(
+        ["task", "sizing", "--project", "task.metrics", "--limit", "5"]
     )
-    xl = _completed_row(
-        title="Cross-surface implementation",
-        project="serve.ui",
-        tags=["BLOCKED"],
-        claim_at="2026-06-26T01:00:00.000000Z",
-        validation_entry="20260626T033000Z",
-        validation=[
-            "uv run pytest tests/test_a.py",
-            "spice dev pre-commit",
-            "playwright smoke",
-            "node tests/browser.js",
-        ],
-        review_finding="changes",
-        annotations=[
-            {
-                "description": "review: finding=changes; by=reviewer",
-                "entry": "20260626T034000Z",
-            },
-        ],
-        depends=["a", "b", "c"],
+
+    assert args.task_action == "sizing"
+    assert args.project == "task.metrics"
+    assert args.limit == 5
+
+
+def test_task_sizing_scores_elapsed_events_and_metadata_shape():
+    row = _completed_row(
+        title="Event sized task",
+        uuid="task-1",
         flow=("todo", "verify", "review"),
-        acceptance="Requires browser validation.",
+    )
+    events = (
+        sizing.TaskLifecycleEvent("claim", 0),
+        sizing.TaskLifecycleEvent("phaseAdvance", 1_200),
+        sizing.TaskLifecycleEvent("claim", 1_800),
+        sizing.TaskLifecycleEvent("review", 2_400),
     )
 
-    small_report = sizing.size_completed_task(small)
-    xl_report = sizing.size_completed_task(xl)
-    review_claim = sizing.size_completed_task(
-        _completed_row(
-            title="Review claim overwrote implementation claim",
-            project="task.metrics",
-            entry="20260626T060000Z",
-            claim_at="2026-06-26T06:10:00.000000Z",
-            validation_entry="20260626T060500Z",
-            validation="pytest",
+    report = sizing.size_completed_task(row, events=events)
+    components = _components(report)
+
+    assert report.label == "M"
+    assert report.score == 2
+    assert components["elapsed"] == sizing.SizingComponent(
+        "elapsed", 1, "task_events:1800s"
+    )
+    assert components["metadata"] == sizing.SizingComponent(
+        "metadata", 1, "phase:verify"
+    )
+
+
+def test_task_sizing_validation_uses_structured_signal_absence():
+    row = _completed_row(
+        title="Former validation prose false positive",
+        uuid="task-2",
+        validation="Full browser suite deliberately not run; focused unit only.",
+        acceptance="Do not require browser or full-suite validation here.",
+    )
+    events = (
+        sizing.TaskLifecycleEvent("claim", 0),
+        sizing.TaskLifecycleEvent("complete", 60),
+    )
+
+    report = sizing.size_completed_task(row, events=events)
+    components = _components(report)
+
+    assert report.label == "S"
+    assert report.score == 0
+    assert components["validation"] == sizing.SizingComponent(
+        "validation", 0, "no_structured_validation_signal"
+    )
+
+
+def test_task_sizing_rows_filter_and_render_raw_components():
+    row = _completed_row(
+        title="Rendered sizing task",
+        uuid="task-3",
+        incepted="20260626T061545678415Z",
+        project="task.metrics",
+        flow=("todo", "verify", "review"),
+    )
+    events = {
+        "task-3": (
+            sizing.TaskLifecycleEvent("claim", 0),
+            sizing.TaskLifecycleEvent("phaseAdvance", 1_200),
+            sizing.TaskLifecycleEvent("claim", 1_800),
+            sizing.TaskLifecycleEvent("review", 2_400),
         )
-    )
-
-    assert small_report.label == "S"
-    assert small_report.score == 0
-    assert _component(small_report, "blocked").points == 0
-    assert _component(small_report, "blocked").detail == "none"
-    assert _component(small_report, "metadata").detail == "deps=0"
-    assert _component(review_claim, "elapsed").detail == "5m"
-    assert xl_report.label == "XL"
-    assert xl_report.score >= 6
-    assert _component(xl_report, "validation").points == 2
-    assert _component(xl_report, "validation").detail == "records=4"
-    assert _component(xl_report, "blocked").points == 2
-    assert _component(xl_report, "blocked").detail == "tag:blocked"
-    assert {component.name for component in xl_report.components} == {
-        "elapsed",
-        "validation",
-        "review",
-        "blocked",
-        "metadata",
     }
+
+    reports = sizing.completed_task_sizing_rows(
+        project="task", rows=[row], events_by_task=events
+    )
+    output = sizing.render_task_sizing(reports[0])
+
+    assert len(reports) == 1
+    assert output.startswith(
+        "METRICS-20260626T061545678415Z size=M size_score=2 project=task.metrics "
+    )
+    assert "elapsed=+1(task_events:1800s)" in output
+    assert "validation=+0(no_structured_validation_signal)" in output
+    assert "metadata=+1(phase:verify)" in output
 
 
 def test_task_sizing_cli_renders_completed_rows(monkeypatch, capsys):
-    rows = [
-        _completed_row(
-            title="Newest task",
-            project="task.metrics",
-            incepted="20260626T060000000002Z",
-            end="20260626T061000Z",
-            validation="uv run pytest; spice dev pre-commit",
-        ),
-        _completed_row(
-            title="Other project",
-            project="serve.ui",
-            incepted="20260626T060000000001Z",
-            end="20260626T060900Z",
-            validation="pytest",
-        ),
-    ]
-    monkeypatch.setattr(sizing.tw, "export", lambda filters: rows)
+    row = _completed_row(
+        title="Newest task",
+        project="task.metrics",
+        incepted="20260626T060000000002Z",
+        end="20260626T061000Z",
+    )
+    monkeypatch.setattr(sizing.tw, "export", lambda filters: [row])
+    monkeypatch.setattr(sizing, "_events_by_task_id", lambda _ids: {})
 
     args = build_parser().parse_args(
         ["task", "sizing", "--project", "task", "--limit", "1"]
@@ -107,51 +113,37 @@ def test_task_sizing_cli_renders_completed_rows(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "METRICS-20260626T060000000002Z" in output
     assert "size_score=" in output
-    assert "validation=+" in output
-    assert "review=+" in output
-    assert "Other project" not in output
+    assert "validation=+0(no_structured_validation_signal)" in output
+
+
+def _components(report: sizing.TaskSizing) -> dict[str, sizing.SizingComponent]:
+    return {component.name: component for component in report.components}
 
 
 def _completed_row(
     *,
     title: str,
-    project: str,
-    incepted: str = "20260626T060000000000Z",
-    entry: str = "20260626T055900Z",
-    claim_at: str = "2026-06-26T06:00:00.000000Z",
-    validation_entry: str = "20260626T060500Z",
-    end: str = "20260626T061000Z",
-    validation: str | list[str] = "",
+    uuid: str | None = None,
+    project: str = "task.unit",
+    incepted: str = "20260626T061545678415Z",
+    entry: str = "20260626T060000Z",
+    end: str = "20260626T060100Z",
+    validation: str = "",
     review_finding: str = "clean",
-    annotations: list[dict[str, str]] | None = None,
     tags: list[str] | None = None,
     depends: list[str] | None = None,
     flow: tuple[str, ...] = ("todo", "review"),
     acceptance: str = "",
 ) -> dict[str, object]:
-    validation_items = [validation] if isinstance(validation, str) else validation
-    validation_items = [item for item in validation_items if item]
-    validation_field = " | ".join(validation_items)
-    all_annotations = [
-        {
-            "description": f"validation: {item}",
-            "entry": validation_entry,
-        }
-        for item in validation_items
-    ] + [
-        *(annotations or []),
-    ]
     row: dict[str, object] = {
-        "uuid": f"uuid-{incepted}",
+        "uuid": uuid or f"uuid-{incepted}",
         "incepted": incepted,
         "description": title,
         "project": project,
         "status": "completed",
         "entry": entry,
-        "claim_at": claim_at,
         "end": end,
-        "validation": validation_field,
-        "annotations": all_annotations,
+        "validation": validation,
         "review_finding": review_finding,
         "tags": tags or [],
         "depends": depends or [],
@@ -160,7 +152,3 @@ def _completed_row(
     for index, phase in enumerate(flow):
         row[f"phase_{index}"] = phase
     return row
-
-
-def _component(report: sizing.TaskSizing, name: str) -> sizing.SizingComponent:
-    return next(component for component in report.components if component.name == name)
