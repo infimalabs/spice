@@ -35,6 +35,12 @@ class SizingComponent:
 
 
 @dataclass(frozen=True)
+class _CommitSignal:
+    count: int
+    source: str
+
+
+@dataclass(frozen=True)
 class TaskSizing:
     handle: str
     label: str
@@ -204,23 +210,51 @@ def _elapsed_points(seconds: float) -> int:
 
 
 def _command_component(row: dict[str, Any]) -> SizingComponent:
-    count = _commit_count(row)
-    if count is None:
+    signal = _commit_signal(row)
+    if signal is None:
         return SizingComponent("commands", 0, "no_structured_command_signal")
+    count = signal.count
     if count <= 1:
         points = 0
     elif count <= COMMAND_MEDIUM_MAX:
         points = 1
     else:
         points = 2
-    return SizingComponent("commands", points, f"git_commits:{count}")
+    return SizingComponent("commands", points, f"git_commits:{count}:{signal.source}")
 
 
-def _commit_count(row: dict[str, Any]) -> int | None:
-    before = str(row.get("claim_head") or "")
-    after = str(row.get("done_head") or "")
+def _commit_signal(row: dict[str, Any]) -> _CommitSignal | None:
+    signal = _commit_signal_from(
+        row,
+        before_key="done_upstream_head",
+        after_key="done_head",
+        source="done_upstream_head..done_head",
+    )
+    if signal is None:
+        return None
+    if signal.count == 0 and _has_review_metadata(row):
+        return None
+    return signal
+
+
+def _commit_signal_from(
+    row: dict[str, Any],
+    *,
+    before_key: str,
+    after_key: str,
+    source: str,
+) -> _CommitSignal | None:
+    before = str(row.get(before_key) or "")
+    after = str(row.get(after_key) or "")
     if not before or not after:
         return None
+    count = _git_rev_count(before, after)
+    if count is None:
+        return None
+    return _CommitSignal(count=count, source=source)
+
+
+def _git_rev_count(before: str, after: str) -> int | None:
     result = subprocess.run(
         ["git", "rev-list", "--count", f"{before}..{after}"],
         capture_output=True,
@@ -233,6 +267,13 @@ def _commit_count(row: dict[str, Any]) -> int | None:
         return int(result.stdout.strip() or "0")
     except ValueError:
         return None
+
+
+def _has_review_metadata(row: dict[str, Any]) -> bool:
+    return any(
+        str(row.get(key) or "").strip()
+        for key in ("review_author", "review_by", "review_at", "review_finding")
+    )
 
 
 def _validation_component(row: dict[str, Any]) -> SizingComponent:
