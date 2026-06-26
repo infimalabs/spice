@@ -5,6 +5,13 @@ appear in source only in statements carrying, or immediately following a
 standalone, `env-policy: allow` waiver comment. The point is an auditable
 inventory: grep the waiver to see every place the environment shapes behavior.
 
+The watchlist only sees env reads whose literal name matches a declared
+pattern. A repo that wants the inventory to cover *every* env read — including
+reads under non-watchlisted or dynamic names — opts into the presence reverse-
+gate with `[tool.spice.policy] env_presence_gate = true`, which then requires a
+waiver on every `os.environ` / `os.getenv` access site too. It is off by
+default so installing into a target repo does not retroactively demand waivers.
+
 Library seam: target-repo tools may import the public finding dataclass,
 pattern/matcher helpers, scan helper, and `render_env_policy_board`;
 underscored names remain private.
@@ -30,6 +37,14 @@ SCANNED_SUFFIXES = ENV_SUFFIXES
 # This module necessarily names the patterns it polices; it is self-waived.
 SELF_PATH_SUFFIX = ENV_POLICY_SELF_PATH_SUFFIX
 
+# Presence reverse-gate: the name-pattern watchlist only sees env reads whose
+# literal name matches a declared pattern, so a read under any other name
+# (`os.getenv("HOME")`) or a dynamic name (`os.environ[var]`) escapes the
+# inventory entirely. When the gate is enabled, any env-access *site* must also
+# carry the waiver, making the audit cover every place the environment is read.
+ENV_ACCESS_RE = re.compile(r"\bos\.(?:environ|getenv)\b")
+ENV_ACCESS_FINDING_NAME = "os env access"
+
 
 @dataclass(frozen=True)
 class EnvPolicyFinding:
@@ -41,6 +56,7 @@ class EnvPolicyFinding:
 def scan_env_policy(paths: list[Path], *, root: Path) -> list[EnvPolicyFinding]:
     findings: list[EnvPolicyFinding] = []
     matchers = env_name_matchers(root)
+    presence_gate = env_presence_gate_enabled(root)
     for rel_path in paths:
         if rel_path.suffix not in SCANNED_SUFFIXES or is_excluded_path(
             rel_path, repo_root=root
@@ -56,15 +72,24 @@ def scan_env_policy(paths: list[Path], *, root: Path) -> list[EnvPolicyFinding]:
         for line_number, line in enumerate(text.splitlines(), start=1):
             if line_number in waived_lines:
                 continue
-            for matcher in matchers:
-                for match in matcher.finditer(line):
-                    findings.append(
-                        EnvPolicyFinding(
-                            path=rel_path.as_posix(),
-                            line=line_number,
-                            name=match.group("name"),
-                        )
+            line_findings = [
+                EnvPolicyFinding(
+                    path=rel_path.as_posix(),
+                    line=line_number,
+                    name=match.group("name"),
+                )
+                for matcher in matchers
+                for match in matcher.finditer(line)
+            ]
+            if not line_findings and presence_gate and ENV_ACCESS_RE.search(line):
+                line_findings.append(
+                    EnvPolicyFinding(
+                        path=rel_path.as_posix(),
+                        line=line_number,
+                        name=ENV_ACCESS_FINDING_NAME,
                     )
+                )
+            findings.extend(line_findings)
     return findings
 
 
@@ -163,6 +188,21 @@ def _delimiter_delta(line: str) -> int:
     return sum(1 for char in line if char in "([{") - sum(
         1 for char in line if char in ")]}"
     )
+
+
+def env_presence_gate_enabled(repo_root: Path) -> bool:
+    """Whether the env-access presence reverse-gate is on for this repo.
+
+    Off by default so a repo that `spice init` installs into is not suddenly
+    required to waive every `os.environ` read; a repo opts in with
+    `[tool.spice.policy] env_presence_gate = true`.
+    """
+    value = policy_table(repo_root).get("env_presence_gate", False)
+    if not isinstance(value, bool):
+        raise SpiceError(
+            "[tool.spice.policy] env_presence_gate must be a boolean (true/false)"
+        )
+    return value
 
 
 def env_name_patterns(repo_root: Path) -> list[str]:
