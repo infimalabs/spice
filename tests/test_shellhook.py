@@ -45,7 +45,13 @@ def test_wrapper_spice_routes_inherit_ambient_env(tmp_path, monkeypatch):
     assert uv_spice_env is None
 
 
-def test_wrapper_leaves_spice_commands_on_installed_runtime(tmp_path):
+def test_wrapper_does_not_reroute_spice_commands_under_single_install(
+    tmp_path,
+):
+    # Single-install model: spice is the installed tool, so the wrapper never
+    # rewrites a spice invocation to a per-worktree `python -m spice`. Even a
+    # worktree that contains spice's own source (product shape) must pass spice
+    # commands through unchanged to the installed runtime on PATH.
     _write_spice_product_shape(tmp_path)
 
     spice_command = wrap.build_agent_run_command(
