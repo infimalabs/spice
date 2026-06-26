@@ -12,8 +12,6 @@ let liveBusReconnectTimer = null;
 let liveBusReconnectAttempt = 0;
 let liveBusLastInboundAt = 0;
 let liveBusHasConnected = false;
-// Covers the short lane creation/subscription race without replaying old history.
-const initialSpeechStartupGraceMs = 5 * 1000;
 
 function liveBusUrl() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -262,9 +260,11 @@ async function refreshLane(lane) {
 async function applyLaneBusPayload(lane, payload, source) {
   const wasSpeechPrimed = lane.speechPrimed;
   const knownBefore = new Set(lane.knownMessageKeys);
-  const initialSpeechMessages = wasSpeechPrimed
-    ? []
-    : initialPayloadSpeechMessages(lane, payload.messages || []);
+  // Auto-narration is gated in queueSpeechForMessages against the lane's UI
+  // materialization instant, so the whole initial payload can flow through it:
+  // nothing older than this browser's lane ever plays, and primeSpeechBoundary
+  // still marks every known message so it is never reconsidered.
+  const initialSpeechMessages = wasSpeechPrimed ? [] : payload.messages || [];
   lane.serverReachable = true;
   const threadChanged = syncLaneThreadId(lane, payload);
   if (threadChanged) {
@@ -328,9 +328,7 @@ async function applyLaneAppendBusPayload(lane, payload) {
   const messages = laneAppendMessages(payload);
   const wasSpeechPrimed = lane.speechPrimed;
   const knownBefore = new Set(lane.knownMessageKeys);
-  const initialSpeechMessages = wasSpeechPrimed
-    ? []
-    : initialPayloadSpeechMessages(lane, messages);
+  const initialSpeechMessages = wasSpeechPrimed ? [] : messages;
   lane.serverReachable = true;
   removePayloadMessages(lane, payload);
   mergePayloadMessages(lane, { ...payload, messages });
@@ -349,18 +347,6 @@ function laneAppendMessages(payload) {
   if (!payload || !Array.isArray(payload.messages))
     throw new Error("lane.append messages are required");
   return payload.messages;
-}
-
-function initialPayloadSpeechMessages(lane, messages) {
-  return messages.filter((item) => messageIsFreshForInitialSpeech(lane, item));
-}
-
-function messageIsFreshForInitialSpeech(lane, item) {
-  const boundary =
-    (Number(lane.speechPrimeStartedAt) || Date.now()) -
-    initialSpeechStartupGraceMs;
-  const timestamp = Date.parse(item.timestamp || "");
-  return Number.isFinite(timestamp) && timestamp >= boundary;
 }
 
 function syncLaneThreadId(lane, payload) {

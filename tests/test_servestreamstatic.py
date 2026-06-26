@@ -776,19 +776,17 @@ def test_static_stream_queues_fresh_speech_for_all_post_prime_sources():
     assert "queueSpeechForMessages(lane, fresh);" in apply_body
 
 
-def test_static_stream_queues_fresh_initial_payload_before_silent_prime():
+def test_static_stream_queues_initial_payload_before_silent_prime():
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     apply_start = app_stream.index("async function applyLaneBusPayload")
     apply_body = app_stream[
         apply_start : app_stream.index(
-            "\n}\n\nfunction initialPayloadSpeechMessages", apply_start
+            "\n}\n\nfunction applyLanePendingBusPayload", apply_start
         )
     ]
 
     assert (
-        "const initialSpeechMessages = wasSpeechPrimed\n"
-        "    ? []\n"
-        "    : initialPayloadSpeechMessages(lane, payload.messages || []);"
+        "const initialSpeechMessages = wasSpeechPrimed ? [] : payload.messages || [];"
     ) in apply_body
     assert (
         "if (!lane.speechPrimed) {\n"
@@ -796,9 +794,13 @@ def test_static_stream_queues_fresh_initial_payload_before_silent_prime():
         "    primeSpeechBoundary(lane);\n"
         "  }"
     ) in apply_body
-    assert "function messageIsFreshForInitialSpeech" in app_stream
-    assert "const initialSpeechStartupGraceMs = 5 * 1000;" in app_stream
-    assert "timestamp >= boundary" in app_stream
+    # The grace-window pre-filter is retired; the single materialization gate
+    # lives in queueSpeechForMessages (app.audio.js).
+    assert "messageIsFreshForInitialSpeech" not in app_stream
+    assert "initialSpeechStartupGraceMs" not in app_stream
+    app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
+    assert "function messageIsBeforeLaneMaterialization" in app_audio
+    assert "timestamp < lane.speechPrimeStartedAt" in app_audio
 
 
 def test_static_manual_speech_playback_aborts_active_entry():
