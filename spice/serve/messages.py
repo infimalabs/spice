@@ -72,6 +72,7 @@ _SUPERVISOR_FEEDBACK_OUTPUT_TYPES = frozenset(
 _SUPERVISOR_FEEDBACK_HEADING = "Supervisor Feedback"
 _ACK_ALREADY_ACKED_KIND = "ack.already-acked"
 _ACK_ARCHIVED_KIND = "ack.archived"
+_ACK_NOOP_KIND = "ack.noop"
 _ACK_UNMATCHED_KIND = "ack.unmatched"
 _TASK_CREATED_KIND = "task.created"
 _TASK_ERROR_KIND = "task.error"
@@ -805,6 +806,15 @@ def _supervisor_feedback_items(output: str) -> list[dict[str, Any]]:
                         "keys": keys,
                     }
                 )
+        elif feedback.kind == _ACK_NOOP_KIND:
+            detail = str(feedback.fields.get("message") or "").strip()
+            items.append(
+                {
+                    "kind": _ACK_NOOP_KIND,
+                    "label": "ACK ignored",
+                    "detail": detail or "no inbox key found",
+                }
+            )
     return items
 
 

@@ -217,6 +217,22 @@ def test_supervised_ack_reports_unmatched_keys(task_repo, quiet_supervisor):
     assert feedback == [_ack_feedback("ack.unmatched", missing_key)]
 
 
+def test_supervised_ack_reports_noop_when_no_key_is_named(task_repo, quiet_supervisor):
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        "ACK: I saw it.",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
+    assert feedback == [
+        supervisor_feedback_line("ack.noop", message=watchdog.ACK_NOOP_MESSAGE)
+    ]
+
+
 def test_supervised_ack_reports_already_acked_keys(task_repo, quiet_supervisor):
     write_inbox_item(
         task_repo,

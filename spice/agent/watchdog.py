@@ -251,6 +251,13 @@ def _publish_ack_feedback(
     ):
         if keys:
             publish_supervisor_feedback(repo_root, log_handle, kind, keys=keys)
+    if ack_summary.noop:
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "ack.noop",
+            message=ACK_NOOP_MESSAGE,
+        )
 
 
 def publish_supervisor_feedback(
@@ -269,6 +276,7 @@ INLINE_TASK_BACKLOG_NOTE = (
     "inline tasks above are on the backlog, not yours — move on "
     "unless the allocator assigns one back via spice task next"
 )
+ACK_NOOP_MESSAGE = "ACK ignored: no inbox key found"
 
 
 def create_inline_tasks(
