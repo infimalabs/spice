@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.tasks import alloc, config, identity, lanes, ops, tw
+from spice.tasks import alloc, artifacts, config, identity, lanes, ops, tw
 
 
 SHOW_ANNOTATIONS_LIMIT = 6
@@ -87,6 +87,8 @@ def _base_show_lines(row: dict[str, Any], rendered: str, flow: str) -> list[str]
         f"validation {_f(row, 'validation')}",
         f"review_author {_f(row, 'review_author') or '-'}",
         f"review_by {_f(row, 'review_by') or '-'}",
+        f"review_finding {_f(row, 'review_finding') or '-'}",
+        f"review_note {_f(row, 'review_note')}",
         (
             f"timing wait={_f(row, 'wait') or '-'} "
             f"scheduled={_f(row, 'scheduled') or '-'} "
@@ -257,6 +259,7 @@ def render_show(handle: str) -> str:
     if deps:
         lines.append("depends:")
         lines.extend(deps)
+    lines.extend(artifacts.render_artifact_lines(rendered))
     annotations = row.get("annotations") or []
     if annotations:
         lines.append("annotations:")

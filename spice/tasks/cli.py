@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.tasks import alloc, config, create, identity, ops, render, sizing
+from spice.tasks import alloc, artifacts, config, create, identity, ops, render, sizing
 
 _TASK_LIST_STATUSES = ("pending", "waiting", "completed", "deleted")
 _TASK_LIST_NEWEST_FIELDS = ("end", "modified", "entry", "incepted", "claim_at")
@@ -111,6 +111,72 @@ def _configure_task_read_parsers(actions: Any) -> None:
     )
     show.add_argument("handle")
     show.set_defaults(func=handle)
+
+    _configure_artifact_parser(actions)
+
+
+def _configure_artifact_parser(actions: Any) -> None:
+    artifact = actions.add_parser(
+        "artifact",
+        help="Manage task-addressed sidecar artifacts.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  spice task artifact add TASK-20260609T203539640394Z notes.md "
+            "--type text/markdown\n"
+            "  spice task artifact list TASK-20260609T203539640394Z\n"
+            "  spice task artifact show TASK-20260609T203539640394Z A1\n"
+            "  spice task artifact prune --older-than 30d --apply"
+        ),
+        recovery_examples=(
+            "spice task artifact list TASK-20260609T203539640394Z",
+            "spice task artifact show TASK-20260609T203539640394Z A1",
+        ),
+    )
+    subactions = artifact.add_subparsers(dest="artifact_action", required=True)
+    add = subactions.add_parser(
+        "add",
+        help="Copy a file into the task sidecar artifact store.",
+        recovery_examples=(
+            "spice task artifact add TASK-20260609T203539640394Z notes.md",
+        ),
+    )
+    add.add_argument("handle")
+    add.add_argument("path")
+    add.add_argument("--name")
+    add.add_argument("--type", dest="content_type")
+    add.add_argument(
+        "--retention",
+        default=artifacts.DEFAULT_RETENTION,
+        choices=sorted(artifacts.RETENTIONS),
+    )
+    add.set_defaults(func=handle)
+
+    list_parser = subactions.add_parser(
+        "list",
+        help="List artifacts attached to a task.",
+        recovery_examples=("spice task artifact list TASK-20260609T203539640394Z",),
+    )
+    list_parser.add_argument("handle")
+    list_parser.set_defaults(func=handle)
+
+    show = subactions.add_parser(
+        "show",
+        help="Show a text artifact or print a binary artifact path.",
+        recovery_examples=("spice task artifact show TASK-20260609T203539640394Z A1",),
+    )
+    show.add_argument("handle")
+    show.add_argument("artifact_id")
+    show.set_defaults(func=handle)
+
+    prune = subactions.add_parser(
+        "prune",
+        help="Prune prunable artifacts for completed tasks.",
+        recovery_examples=("spice task artifact prune --older-than 30d",),
+    )
+    prune.add_argument("--older-than")
+    prune.add_argument("--apply", action="store_true")
+    prune.set_defaults(func=handle)
 
 
 def _configure_task_phase_parsers(actions: Any) -> None:
@@ -587,6 +653,7 @@ _DISPATCH = {
     ),
     "list": _list,
     "show": lambda a: render.render_show(a.handle),
+    "artifact": lambda a: _artifact(a),
     "done": lambda a: ops.done(
         a.handle,
         validation=list(a.validation),
@@ -648,6 +715,28 @@ def _canonicalize_cli_task_handles(args: argparse.Namespace) -> list[str]:
                 )
         args.after = canonical_after
     return notices
+
+
+def _artifact(args: argparse.Namespace) -> str:
+    action = args.artifact_action
+    if action == "add":
+        return artifacts.add_artifact(
+            args.handle,
+            args.path,
+            name=args.name,
+            content_type=args.content_type,
+            retention=args.retention,
+        )
+    if action == "list":
+        return artifacts.list_artifacts(args.handle)
+    if action == "show":
+        return artifacts.show_artifact(args.handle, args.artifact_id)
+    if action == "prune":
+        return artifacts.prune_artifacts(
+            older_than=args.older_than,
+            apply=args.apply,
+        )
+    raise SpiceError(f"unknown task artifact action {action!r}")
 
 
 def handle(args: argparse.Namespace) -> int:

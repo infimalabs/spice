@@ -34,7 +34,7 @@ def empty_ack_summary(monkeypatch):
         watchdog,
         "summarize_ack_archival",
         lambda _repo, _text: SimpleNamespace(
-            archived=[], already_acked=[], unmatched=[]
+            archived=[], already_acked=[], unmatched=[], noop=False
         ),
     )
 
@@ -118,7 +118,7 @@ def test_nack_archival_failure_is_surfaced_and_supervisor_survives(
         watchdog,
         "summarize_ack_archival",
         lambda _repo, _text: SimpleNamespace(
-            archived=[], already_acked=[], unmatched=[]
+            archived=[], already_acked=[], unmatched=[], noop=False
         ),
     )
     monkeypatch.setattr(watchdog, "create_inline_tasks", lambda _repo, _text, _log: [])
