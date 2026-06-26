@@ -70,14 +70,6 @@ RTK_REWRITE_COMMAND = ("rtk", "rewrite")
 # RTK prints a rewritten command and returns 3 from the hook path on this lane.
 RTK_REWRITE_MATCH_EXIT_CODES = frozenset((0, 3))
 RTK_DB_PATH_ENV = "RTK_DB_PATH"  # env-policy: allow
-PYTHON_ROUTE_FAILURE = (
-    "import sys;"
-    "sys.stderr.write("
-    "'spice agent run: refusing to run python from global PATH; expected "
-    "the venv interpreter at {venv_python} or an explicit interpreter path\\n'"
-    ");"
-    "raise SystemExit(127)"
-)
 
 AGENT_RUN_INBOX_REPEAT_SECONDS = 15.0
 AGENT_RUN_CONTEXT_METER_CACHE_SECONDS = 15.0
@@ -334,45 +326,14 @@ def is_spice_route(args: Sequence[str]) -> bool:
 def worktree_route_command(
     args: Sequence[str], *, repo_root: Path | None = None
 ) -> list[str]:
-    return worktree_python_route_command(
-        worktree_spice_route_command(args, repo_root=repo_root), repo_root=repo_root
-    )
-
-
-def worktree_spice_route_command(
-    args: Sequence[str], *, repo_root: Path | None = None
-) -> list[str]:
     del repo_root
-    return list(args)
+    return worktree_python_route_command(args)
 
 
-def worktree_python_route_command(
-    args: Sequence[str], *, repo_root: Path | None = None
-) -> list[str]:
+def worktree_python_route_command(args: Sequence[str]) -> list[str]:
     if args[:1] and args[0] in PYTHON_ROUTE_COMMANDS:
-        return [*python_route_command_prefix(repo_root), *args[1:]]
+        return [sys.executable, *args[1:]]
     return list(args)
-
-
-def python_route_command_prefix(repo_root: Path | None) -> list[str]:
-    if worktree_spice_source(repo_root) is not None:
-        return [sys.executable]
-    venv_python = default_venv_python(repo_root)
-    if venv_python.is_file() and os.access(venv_python, os.X_OK):
-        return [str(venv_python)]
-    return [
-        sys.executable,
-        "-c",
-        PYTHON_ROUTE_FAILURE.format(venv_python=str(venv_python)),
-    ]
-
-
-def default_venv_python(repo_root: Path | None) -> Path:
-    if "VIRTUAL_ENV" in os.environ:
-        return Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python"
-    if repo_root is None:
-        return Path(".venv") / "bin" / "python"
-    return repo_root / ".venv" / "bin" / "python"
 
 
 def normalize_agent_run_args(raw_args: Sequence[str]) -> list[str]:
