@@ -49,7 +49,8 @@ function mismatchPayload(targetId) {
         { key: "session", value: "claude" },
         {
           key: "review pressure",
-          value: "changes on REVIEW-20260102T000000000001Z; 2 follow-ups",
+          value:
+            "changes on REVIEW-20260102T000000000001Z by agent-b via task-review; 2 follow-ups",
           span: true,
         },
       ],
@@ -103,7 +104,7 @@ function assertIdentityResult(result) {
     "model actualclaude-opus",
     "model desiredgpt-5.5",
     "sessionclaude",
-    "review pressurechanges on REVIEW-20260102T000000000001Z; 2 follow-ups",
+    "review pressurechanges on REVIEW-20260102T000000000001Z by agent-b via task-review; 2 follow-ups",
   ]) {
     if (!result.infoText.includes(text))
       throw new Error("lane info missing " + text + ": " + result.infoText);
