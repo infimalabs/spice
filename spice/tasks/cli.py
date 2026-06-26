@@ -39,6 +39,28 @@ def _configure_task_read_parsers(actions: Any) -> None:
             recovery_examples=(f"spice task {name}",),
         ).set_defaults(func=handle)
 
+    sizing = actions.add_parser(
+        "sizing",
+        help="Report observational size labels for completed tasks.",
+        recovery_examples=(
+            "spice task sizing --limit 20",
+            "spice task sizing --project serve.ui",
+        ),
+    )
+    sizing.add_argument(
+        "--limit",
+        type=_positive_int,
+        metavar="N",
+        help="Show at most N completed tasks, newest first.",
+    )
+    sizing.add_argument(
+        "--project",
+        type=_project_filter,
+        metavar="PROJECT",
+        help="Filter by project stem or exact project.",
+    )
+    sizing.set_defaults(func=handle)
+
     ls = actions.add_parser(
         "list",
         help="List tasks.",
@@ -91,19 +113,6 @@ def _configure_task_read_parsers(actions: Any) -> None:
     show.set_defaults(func=handle)
 
     _configure_artifact_parser(actions)
-
-    sizing_parser = actions.add_parser(
-        "sizing",
-        help="Report completed task size signals.",
-        recovery_examples=("spice task sizing --limit 20",),
-    )
-    sizing_parser.add_argument(
-        "--limit",
-        type=_positive_int,
-        metavar="N",
-        help="Show at most N completed tasks, newest first.",
-    )
-    sizing_parser.set_defaults(func=handle)
 
 
 def _configure_artifact_parser(actions: Any) -> None:
@@ -639,10 +648,12 @@ _DISPATCH = {
     "next": lambda a: render.render_next(),
     "doctor": lambda a: render.render_doctor(),
     "stale": lambda a: render.render_list(alloc.stale_rows()),
+    "sizing": lambda a: sizing.completed_task_sizing_report(
+        limit=a.limit, project=a.project
+    ),
     "list": _list,
     "show": lambda a: render.render_show(a.handle),
     "artifact": lambda a: _artifact(a),
-    "sizing": lambda a: sizing.render_sizing_report(limit=a.limit),
     "done": lambda a: ops.done(
         a.handle,
         validation=list(a.validation),

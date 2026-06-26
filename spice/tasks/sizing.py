@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from spice.tasks import identity, ops, tw
+from spice.tasks import config, identity, ops, tw
 
 MINUTE_SECONDS = 60
 HOUR_SECONDS = 60 * MINUTE_SECONDS
@@ -35,76 +35,79 @@ class SizingComponent:
 
 
 @dataclass(frozen=True)
-class TaskSizeAssessment:
+class TaskSizing:
     handle: str
     label: str
     score: int
+    title: str
+    project: str
     components: tuple[SizingComponent, ...]
 
 
-def render_sizing_report(
+def completed_task_sizing_report(
+    *, limit: int | None = None, project: str | None = None
+) -> str:
+    rows = completed_task_sizing_rows(limit=limit, project=project)
+    if not rows:
+        return "no completed tasks"
+    return "\n".join(render_task_sizing(row) for row in rows)
+
+
+def completed_task_sizing_rows(
     *,
     limit: int | None = None,
+    project: str | None = None,
     rows: list[dict[str, Any]] | None = None,
     events_by_task: dict[str, tuple[TaskLifecycleEvent, ...]] | None = None,
-) -> str:
-    selected_rows = _completed_rows() if rows is None else rows
+) -> list[TaskSizing]:
+    selected_rows = tw.export(["status:completed"]) if rows is None else rows
+    if project:
+        selected_rows = [row for row in selected_rows if _project_matches(row, project)]
     selected_rows = sorted(selected_rows, key=_completed_sort_key, reverse=True)
     if limit is not None:
         selected_rows = selected_rows[:limit]
-    if not selected_rows:
-        return "no completed tasks"
     events = events_by_task
     if events is None:
         events = _events_by_task_id([_uuid(row) for row in selected_rows])
-    return "\n".join(
-        _render_assessment(assess_task_size(row, events.get(_uuid(row), ())))
+    return [
+        size_completed_task(row, events=events.get(_uuid(row), ()))
         for row in selected_rows
-    )
+    ]
 
 
-def assess_task_size(
+def size_completed_task(
     row: dict[str, Any],
+    *,
     events: tuple[TaskLifecycleEvent, ...] = (),
-) -> TaskSizeAssessment:
+) -> TaskSizing:
     components = (
         _elapsed_component(row, events),
         _command_component(row),
         _validation_component(row),
         _review_component(row),
         _blocked_component(row),
-        _flow_component(row),
+        _metadata_component(row),
     )
     score = sum(component.points for component in components)
-    return TaskSizeAssessment(
+    return TaskSizing(
         handle=identity.render_handle(row),
-        label=_label(score),
+        label=_size_label(score),
         score=score,
+        title=str(row.get("description") or ""),
+        project=str(row.get("project") or ""),
         components=components,
     )
 
 
-def _render_assessment(assessment: TaskSizeAssessment) -> str:
+def render_task_sizing(report: TaskSizing) -> str:
     components = " ".join(
         f"{component.name}=+{component.points}({component.detail})"
-        for component in assessment.components
+        for component in report.components
     )
     return (
-        f"{assessment.handle} size={assessment.label} score={assessment.score} "
-        f"{components}"
+        f"{report.handle} size={report.label} size_score={report.score} "
+        f"project={report.project or '-'} {components} title={report.title}"
     )
-
-
-def _completed_rows() -> list[dict[str, Any]]:
-    return tw.export(["status:completed"])
-
-
-def _completed_sort_key(row: dict[str, Any]) -> str:
-    return str(row.get("end") or row.get("modified") or row.get("entry") or "")
-
-
-def _uuid(row: dict[str, Any]) -> str:
-    return str(row.get("uuid") or "")
 
 
 def _events_by_task_id(
@@ -175,6 +178,8 @@ def _row_elapsed_seconds(row: dict[str, Any]) -> float | None:
 
 def _parse_task_time(raw: str) -> datetime | None:
     value = raw.strip()
+    if not value:
+        return None
     for fmt in (
         "%Y%m%dT%H%M%S%fZ",
         "%Y%m%dT%H%M%SZ",
@@ -182,7 +187,7 @@ def _parse_task_time(raw: str) -> datetime | None:
         "%Y-%m-%dT%H:%M:%SZ",
     ):
         try:
-            return datetime.strptime(value, fmt)
+            return datetime.strptime(value, fmt).replace(tzinfo=UTC)
         except ValueError:
             pass
     return None
@@ -246,15 +251,26 @@ def _review_component(row: dict[str, Any]) -> SizingComponent:
 
 
 def _blocked_component(row: dict[str, Any]) -> SizingComponent:
-    tags = {str(tag) for tag in row.get("tags") or []}
-    if "oops" in tags:
-        return SizingComponent("blocked", 2, "tags:oops")
-    if "BLOCKED" in tags:
-        return SizingComponent("blocked", 2, "tags:BLOCKED")
-    return SizingComponent("blocked", 0, "no_structured_blocker_signal")
+    tags = {str(tag).casefold() for tag in row.get("tags") or []}
+    signals: list[str] = []
+    for tag in ("blocked", "stale", "oops"):
+        if tag in tags:
+            signals.append(f"tag:{tag}")
+    status = str(row.get("status") or "").casefold()
+    if status in {"blocked", "stale", "waiting"}:
+        signals.append(f"status:{status}")
+    project = str(row.get("project") or "").casefold()
+    if project == config.OOPS_PROJECT or project.startswith(f"{config.OOPS_PROJECT}."):
+        signals.append(f"project:{config.OOPS_PROJECT}")
+    phase = str(row.get("phase") or "").casefold()
+    if phase == "oops":
+        signals.append("phase:oops")
+    if not signals:
+        return SizingComponent("blocked", 0, "no_structured_blocker_signal")
+    return SizingComponent("blocked", 2, ",".join(dict.fromkeys(signals)))
 
 
-def _flow_component(row: dict[str, Any]) -> SizingComponent:
+def _metadata_component(row: dict[str, Any]) -> SizingComponent:
     points = 0
     details: list[str] = []
     depends = row.get("depends") or []
@@ -267,10 +283,10 @@ def _flow_component(row: dict[str, Any]) -> SizingComponent:
         details.append("phase:verify")
     if not details:
         details.append("flow:default")
-    return SizingComponent("flow", points, ",".join(details))
+    return SizingComponent("metadata", points, ",".join(details))
 
 
-def _label(score: int) -> str:
+def _size_label(score: int) -> str:
     if score <= SCORE_SMALL_MAX:
         return "S"
     if score <= SCORE_MEDIUM_MAX:
@@ -278,3 +294,16 @@ def _label(score: int) -> str:
     if score <= SCORE_LARGE_MAX:
         return "L"
     return "XL"
+
+
+def _completed_sort_key(row: dict[str, Any]) -> str:
+    return str(row.get("end") or row.get("modified") or row.get("entry") or "")
+
+
+def _project_matches(row: dict[str, Any], project: str) -> bool:
+    row_project = str(row.get("project") or "")
+    return row_project == project or row_project.startswith(f"{project}.")
+
+
+def _uuid(row: dict[str, Any]) -> str:
+    return str(row.get("uuid") or "")

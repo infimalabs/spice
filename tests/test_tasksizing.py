@@ -6,20 +6,21 @@ from spice.cli.parser import build_parser
 from spice.tasks import sizing
 
 
-def test_task_sizing_cli_parser_accepts_limit():
-    args = build_parser().parse_args(["task", "sizing", "--limit", "5"])
+def test_task_sizing_cli_parser_accepts_limit_and_project():
+    args = build_parser().parse_args(
+        ["task", "sizing", "--project", "task.metrics", "--limit", "5"]
+    )
 
     assert args.task_action == "sizing"
+    assert args.project == "task.metrics"
     assert args.limit == 5
 
 
-def test_task_sizing_scores_elapsed_events_and_flow_shape():
-    row = _row(
-        "Event sized task",
+def test_task_sizing_scores_elapsed_events_and_metadata_shape():
+    row = _completed_row(
+        title="Event sized task",
         uuid="task-1",
-        phase_0="todo",
-        phase_1="verify",
-        phase_2="review",
+        flow=("todo", "verify", "review"),
     )
     events = (
         sizing.TaskLifecycleEvent("claim", 0),
@@ -28,20 +29,22 @@ def test_task_sizing_scores_elapsed_events_and_flow_shape():
         sizing.TaskLifecycleEvent("review", 2_400),
     )
 
-    assessment = sizing.assess_task_size(row, events)
-    components = _components(assessment)
+    report = sizing.size_completed_task(row, events=events)
+    components = _components(report)
 
-    assert assessment.label == "M"
-    assert assessment.score == 2
+    assert report.label == "M"
+    assert report.score == 2
     assert components["elapsed"] == sizing.SizingComponent(
         "elapsed", 1, "task_events:1800s"
     )
-    assert components["flow"] == sizing.SizingComponent("flow", 1, "phase:verify")
+    assert components["metadata"] == sizing.SizingComponent(
+        "metadata", 1, "phase:verify"
+    )
 
 
 def test_task_sizing_validation_uses_structured_signal_absence():
-    row = _row(
-        "Former validation prose false positive",
+    row = _completed_row(
+        title="Former validation prose false positive",
         uuid="task-2",
         validation="Full browser suite deliberately not run; focused unit only.",
         acceptance="Do not require browser or full-suite validation here.",
@@ -51,24 +54,23 @@ def test_task_sizing_validation_uses_structured_signal_absence():
         sizing.TaskLifecycleEvent("complete", 60),
     )
 
-    assessment = sizing.assess_task_size(row, events)
-    components = _components(assessment)
+    report = sizing.size_completed_task(row, events=events)
+    components = _components(report)
 
-    assert assessment.label == "S"
-    assert assessment.score == 0
+    assert report.label == "S"
+    assert report.score == 0
     assert components["validation"] == sizing.SizingComponent(
         "validation", 0, "no_structured_validation_signal"
     )
 
 
-def test_task_sizing_report_renders_raw_components():
-    row = _row(
-        "Rendered sizing task",
+def test_task_sizing_rows_filter_and_render_raw_components():
+    row = _completed_row(
+        title="Rendered sizing task",
         uuid="task-3",
         incepted="20260626T061545678415Z",
-        phase_0="todo",
-        phase_1="verify",
-        phase_2="review",
+        project="task.metrics",
+        flow=("todo", "verify", "review"),
     )
     events = {
         "task-3": (
@@ -79,46 +81,74 @@ def test_task_sizing_report_renders_raw_components():
         )
     }
 
-    report = sizing.render_sizing_report(rows=[row], events_by_task=events)
+    reports = sizing.completed_task_sizing_rows(
+        project="task", rows=[row], events_by_task=events
+    )
+    output = sizing.render_task_sizing(reports[0])
 
-    assert report.startswith("UNIT-20260626T061545678415Z size=M score=2 ")
-    assert "elapsed=+1(task_events:1800s)" in report
-    assert "validation=+0(no_structured_validation_signal)" in report
-    assert "flow=+1(phase:verify)" in report
+    assert len(reports) == 1
+    assert output.startswith(
+        "METRICS-20260626T061545678415Z size=M size_score=2 project=task.metrics "
+    )
+    assert "elapsed=+1(task_events:1800s)" in output
+    assert "validation=+0(no_structured_validation_signal)" in output
+    assert "metadata=+1(phase:verify)" in output
 
 
-def _components(
-    assessment: sizing.TaskSizeAssessment,
-) -> dict[str, sizing.SizingComponent]:
-    return {component.name: component for component in assessment.components}
+def test_task_sizing_cli_renders_completed_rows(monkeypatch, capsys):
+    row = _completed_row(
+        title="Newest task",
+        project="task.metrics",
+        incepted="20260626T060000000002Z",
+        end="20260626T061000Z",
+    )
+    monkeypatch.setattr(sizing.tw, "export", lambda filters: [row])
+    monkeypatch.setattr(sizing, "_events_by_task_id", lambda _ids: {})
+
+    args = build_parser().parse_args(
+        ["task", "sizing", "--project", "task", "--limit", "1"]
+    )
+
+    assert args.func(args) == 0
+    output = capsys.readouterr().out
+    assert "METRICS-20260626T060000000002Z" in output
+    assert "size_score=" in output
+    assert "validation=+0(no_structured_validation_signal)" in output
 
 
-def _row(
-    title: str,
+def _components(report: sizing.TaskSizing) -> dict[str, sizing.SizingComponent]:
+    return {component.name: component for component in report.components}
+
+
+def _completed_row(
     *,
-    uuid: str,
+    title: str,
+    uuid: str | None = None,
+    project: str = "task.unit",
     incepted: str = "20260626T061545678415Z",
+    entry: str = "20260626T060000Z",
+    end: str = "20260626T060100Z",
     validation: str = "",
+    review_finding: str = "clean",
+    tags: list[str] | None = None,
+    depends: list[str] | None = None,
+    flow: tuple[str, ...] = ("todo", "review"),
     acceptance: str = "",
-    phase_0: str = "todo",
-    phase_1: str = "",
-    phase_2: str = "",
 ) -> dict[str, object]:
-    return {
-        "uuid": uuid,
-        "description": title,
-        "project": "task.unit",
-        "status": "completed",
-        "phase": phase_2 or phase_1 or phase_0,
-        "phase_i": 0,
-        "phase_0": phase_0,
-        "phase_1": phase_1,
-        "phase_2": phase_2,
-        "priority": "M",
+    row: dict[str, object] = {
+        "uuid": uuid or f"uuid-{incepted}",
         "incepted": incepted,
-        "entry": "20260626T060000000000Z",
-        "end": "20260626T060100000000Z",
-        "review_finding": "clean",
+        "description": title,
+        "project": project,
+        "status": "completed",
+        "entry": entry,
+        "end": end,
         "validation": validation,
+        "review_finding": review_finding,
+        "tags": tags or [],
+        "depends": depends or [],
         "acceptance": acceptance,
     }
+    for index, phase in enumerate(flow):
+        row[f"phase_{index}"] = phase
+    return row
