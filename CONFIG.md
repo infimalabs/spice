@@ -5,6 +5,17 @@ Worktree-local operator preferences such as speech voice, judge binary, and
 local agent overrides live in `.spice/config/state.json` through `spice config`;
 they are not tracked project knobs.
 
+## Runtime Model
+
+Runtime is not a per-repo config surface. The `spice` executable is installed as
+a uv tool by default; operators deploying from source use
+`uv tool install -e /path/to/spice-main`, making that editable main tree the
+server deployment. Worker worktrees are operated trees: config can shape agent
+defaults and policy in those trees, but it does not choose a different spice
+source checkout, import path, or virtualenv for the running code. The common-dir
+layout is opt-in for operators who deliberately set uv's tool directories before
+installing.
+
 ## `[tool.spice.agent]`
 
 | Key | Default | Meaning |

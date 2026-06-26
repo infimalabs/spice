@@ -166,7 +166,8 @@ spice dev doctor  # verify runtime, drivers, backends, and policy
 
 The default install is a uv tool. Operators who deploy from a main tree should
 use the editable form so the installed `spice` command resolves to that tree;
-other worktrees remain operated trees and do not supply their own runtime.
+that editable main tree is the server deployment. Other worktrees remain
+operated trees and do not supply their own runtime.
 
 The common-dir layout is opt-in. Set uv's tool directories before installing if
 you deliberately want the tool environment and executable under a repository's
@@ -219,11 +220,11 @@ spice agent run -- <shell> -c "<original command>"
 That wrapper owns stderr before the command runs. It prints pending inbox
 steering and keep-working guidance, connects to the supervisor side
 channel, asks `rtk rewrite` for command telemetry routing when RTK is installed,
-routes git through the worktree shadow environment, routes `spice` and `python`
-to the correct source checkout or target virtualenv, and loads configured
-wrapper groups. Descendant shells keep the static hook environment without a
-second reexec, so steering is delivered at command boundaries without
-double-injecting nested shells.
+routes git through the worktree shadow environment, leaves `spice` on the
+installed tool, routes bare `python` and `python3` to the deployment
+interpreter, and loads configured wrapper groups. Descendant shells keep the
+static hook environment without a second reexec, so steering is delivered at
+command boundaries without double-injecting nested shells.
 
 Wrapper groups live in tracked config:
 
