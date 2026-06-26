@@ -19,12 +19,6 @@ from spice.worktrees import list_worktrees
 REVIEW_FEEDBACK_PRIORITY = "review"
 
 
-def agent_status(path: Path):
-    from spice.agent.lifecycle import agent_status as lifecycle_agent_status
-
-    return lifecycle_agent_status(path)
-
-
 @dataclass(frozen=True)
 class ReviewFeedbackResult:
     status: str
