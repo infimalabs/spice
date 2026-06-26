@@ -16,7 +16,7 @@ from spice.agent.identity import ambient_thread
 from spice.errors import SpiceError
 from spice.hooks import precommit
 from spice.paths import repo_root_from_cwd
-from spice.tasks import alloc, config, gitsync, identity, tw
+from spice.tasks import alloc, config, gitsync, identity, reviewfeedback, tw
 
 
 def annotate(target: str, text: str) -> None:
@@ -756,11 +756,21 @@ def review(
         meta=_publish_meta(row, actor, [note or ""]),
     )
     tw.run([uuid, "modify", *sync.uda_args])
+    feedback = reviewfeedback.emit_review_feedback(
+        row,
+        finding=finding,
+        note=note,
+        followups=[*spawned, *linked],
+        reviewer=actor,
+        reviewed_at=at,
+    )
     _record_task_lifecycle_event(uuid, "review", actor)
     result = _advance(identity.resolve(handle))
     lines = [f"reviewed {identity.render_handle(row)} {finding}; {result}"]
     lines += [f"spawned {h}" for h in spawned]
     lines += [f"linked {h}" for h in linked]
+    if feedback.status != "clean":
+        lines.append(feedback.output_line())
     lines.append(next_task_drain_line())
     return "\n".join(lines)
 

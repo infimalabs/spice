@@ -604,7 +604,10 @@ def test_lane_info_payload_reports_review_pressure(monkeypatch):
     ]
     assert rows["review pressure"] == {
         "key": "review pressure",
-        "value": "changes on REVIEW-20260102T000000000001Z; 2 follow-ups",
+        "value": (
+            "changes on REVIEW-20260102T000000000001Z "
+            "by agent-b via task-review; 2 follow-ups"
+        ),
         "span": True,
     }
 

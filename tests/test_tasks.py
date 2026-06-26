@@ -1177,6 +1177,60 @@ def test_unclean_review_spawns_dependent_followup(task_repo, monkeypatch):
     assert reviewed["review_finding"] == "changes"
 
 
+def test_unclean_review_passes_followups_to_feedback_bridge(task_repo, monkeypatch):
+    handle = _review_claim(task_repo, monkeypatch)
+    calls: list[dict[str, object]] = []
+
+    def fake_feedback(row, *, finding, note, followups, reviewer, reviewed_at):
+        calls.append(
+            {
+                "handle": identity.render_handle(row),
+                "finding": finding,
+                "note": note,
+                "followups": list(followups),
+                "reviewer": reviewer,
+                "reviewed_at": reviewed_at,
+            }
+        )
+        return ops.reviewfeedback.ReviewFeedbackResult(
+            "delivered",
+            "source=task-review",
+            key="20260102T000000000001Z",
+            target_repo_root=str(task_repo),
+        )
+
+    monkeypatch.setattr(ops.reviewfeedback, "emit_review_feedback", fake_feedback)
+
+    output = ops.review(
+        handle,
+        finding="changes",
+        note="needs coverage",
+        then=[
+            "title=Add review coverage | project=task.unit | "
+            "acceptance=Regression covers the requested review change"
+        ],
+    )
+    spawned = next(
+        line.split()[1] for line in output.splitlines() if line.startswith("spawned ")
+    )
+
+    assert calls == [
+        {
+            "handle": handle,
+            "finding": "changes",
+            "note": "needs coverage",
+            "followups": [spawned],
+            "reviewer": PEER_ACTOR,
+            "reviewed_at": calls[0]["reviewed_at"],
+        }
+    ]
+    assert str(calls[0]["reviewed_at"])
+    assert (
+        "review-feedback delivered; key=20260102T000000000001Z; "
+        f"target={task_repo}; source=task-review"
+    ) in output
+
+
 def test_unclean_review_links_existing_followup(task_repo, monkeypatch):
     handle = _review_claim(task_repo, monkeypatch)
     reviewed_uuid = identity.uuid_of(identity.resolve(handle))
