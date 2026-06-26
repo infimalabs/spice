@@ -226,32 +226,35 @@ def fast_forward_if_safe(repo_root: Path | None = None) -> SyncResult:
 
     Lenient sibling of :func:`prepare_for_claim` for activation: it applies
     the same rules (clean tree, zero commits ahead, fast-forward-only) but
-    never raises — any reason it cannot fast-forward (dirty, diverged, no
-    remote, unresolved target) is simply a silent no-op, so activation always
-    succeeds.
+    never raises, so activation always succeeds. Every outcome is reported as
+    a note rather than a silent no-op: ``current`` when already up to date,
+    or ``skipped:<dirty|ahead|diverged|no-remote>`` for each safe no-op, so a
+    non-advance is observable in the activation packet instead of invisible.
     """
     root = repo_root or config.repo_root()
     try:
         resolved = _resolve_target(root)
     except SpiceError:
-        return SyncResult()
+        return SyncResult(notes=["skipped:no-remote"])
     if resolved is None:
-        return SyncResult()
+        return SyncResult(notes=["skipped:no-remote"])
     remote, baseline = resolved
     if _worktree_dirty(root):
-        return SyncResult()
+        return SyncResult(notes=["skipped:dirty"])
     ahead = _read(root, "rev-list", "--count", f"{baseline}..HEAD")
     if ahead and ahead != "0":
-        return SyncResult()
+        return SyncResult(notes=["skipped:ahead"])
     before = _read(root, "rev-parse", "HEAD")
     _run(root, "fetch", remote)
     if not _read(root, "rev-parse", baseline):
-        return SyncResult()
+        return SyncResult(notes=["skipped:no-remote"])
     if _run(root, "merge", "--ff-only", baseline).returncode != 0:
-        return SyncResult()
+        return SyncResult(notes=["skipped:diverged"])
     after = _read(root, "rev-parse", "HEAD")
-    notes = ["updated working tree to the current baseline"] if after != before else []
-    return SyncResult(notes=notes)
+    note = (
+        "updated working tree to the current baseline" if after != before else "current"
+    )
+    return SyncResult(notes=[note])
 
 
 def integrate_and_publish(
