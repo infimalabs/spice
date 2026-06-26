@@ -115,34 +115,42 @@ def test_doctor_reports_installed_runtime_for_spice_checkout(tmp_path, monkeypat
     assert f"installed spice package -> {installed}" == check.detail
 
 
-def test_doctor_reports_installed_source_skew_for_spice_checkout(tmp_path, monkeypatch):
-    repo = tmp_path / "repo"
-    installed = tmp_path / "spice-z" / "spice"
-    repo.mkdir()
-    installed.mkdir(parents=True)
-    _write_spice_product_shape(repo)
-    monkeypatch.setattr(doctor, "_installed_spice_package_source", lambda: installed)
-
-    check = doctor._installed_spice_source_check(repo)
-
-    assert check.status == "warn"
-    assert str(installed) in check.detail
-    assert str(repo / "spice") in check.detail
-
-
-def test_doctor_reports_installed_source_match_for_spice_checkout(
+def test_doctor_reports_installed_tool_runtime_for_spice_checkout(
     tmp_path, monkeypatch
 ):
     repo = tmp_path / "repo"
+    entrypoint = tmp_path / "tool" / "bin" / "spice"
+    python = tmp_path / "tool" / "bin" / "python"
+    installed = tmp_path / "tool" / "spice"
     repo.mkdir()
+    entrypoint.parent.mkdir(parents=True)
+    installed.mkdir()
     _write_spice_product_shape(repo)
-    installed = repo / "spice"
-    monkeypatch.setattr(doctor, "_installed_spice_package_source", lambda: installed)
+    monkeypatch.setattr(
+        doctor,
+        "_installed_spice_runtime",
+        lambda: doctor.InstalledSpiceRuntime(entrypoint, python, installed),
+    )
 
     check = doctor._installed_spice_source_check(repo)
 
     assert check.status == "ok"
-    assert f"installed spice package matches worktree -> {installed}" == check.detail
+    assert (
+        f"installed spice tool -> {entrypoint}; "
+        f"interpreter -> {python}; package -> {installed}"
+    ) == check.detail
+
+
+def test_doctor_warns_when_installed_tool_runtime_is_unavailable(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_spice_product_shape(repo)
+    monkeypatch.setattr(doctor, "_installed_spice_runtime", lambda: None)
+
+    check = doctor._installed_spice_source_check(repo)
+
+    assert check.status == "warn"
+    assert "installed spice package source is unavailable" == check.detail
 
 
 def _patch_non_hook_checks(monkeypatch) -> None:
