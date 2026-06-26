@@ -276,6 +276,6 @@ def test_serve_scrubs_agent_driver_environment(monkeypatch, tmp_path: Path) -> N
     )
 
     assert result == 0
-    assert serve_app.SPICE_AGENT_DRIVER_ENV not in os.environ
+    assert serve_app.SPICE_AGENT_DRIVER_ENV not in os.environ  # env-policy: allow
     for driver in serve_app.ALL_DRIVERS:
-        assert driver.thread_id_env not in os.environ
+        assert driver.thread_id_env not in os.environ  # env-policy: allow

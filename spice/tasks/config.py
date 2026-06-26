@@ -258,7 +258,7 @@ def set_backend(selector: str | None) -> None:
 def _selector() -> str:
     if _backend_override is not None:
         return _backend_override
-    return os.environ.get(TASK_BACKEND_ENV, "").strip()
+    return os.environ.get(TASK_BACKEND_ENV, "").strip()  # env-policy: allow
 
 
 def repo_root() -> Path:

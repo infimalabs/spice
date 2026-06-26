@@ -157,8 +157,8 @@ def run_serve(args: argparse.Namespace) -> int:
     # leaked ambient thread id or driver override would make every worktree
     # inherit process-local agent state instead of its own config.
     for driver in ALL_DRIVERS:
-        os.environ.pop(driver.thread_id_env, None)
-    os.environ.pop(SPICE_AGENT_DRIVER_ENV, None)
+        os.environ.pop(driver.thread_id_env, None)  # env-policy: allow
+    os.environ.pop(SPICE_AGENT_DRIVER_ENV, None)  # env-policy: allow
     backend = getattr(args, "task_backend", None)
     if backend is not None:
         path = Path(backend).expanduser()

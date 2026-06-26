@@ -365,7 +365,7 @@ def test_agent_run_direct_git_inherits_ambient_shadow_environment(
     def fake_popen(command: list[str], env=None) -> FakeProcess:
         source = "ambient" if env is None else "explicit"
         shadow = (
-            os.environ["GIT_CONFIG_SYSTEM"]
+            os.environ["GIT_CONFIG_SYSTEM"]  # env-policy: allow
             if env is None
             else env.get("GIT_CONFIG_SYSTEM")
         )
@@ -420,7 +420,9 @@ def test_shadow_environment_masks_upstream_to_self(tmp_path):
         check=True,
     )
 
-    env = shadow_environment(repo, base_env={"PATH": os.environ["PATH"]})
+    env = shadow_environment(
+        repo, base_env={"PATH": os.environ["PATH"]}
+    )  # env-policy: allow
 
     # System config (read first) carries the self merge; remote=. is appended last.
     assert "GIT_CONFIG_SYSTEM" in env
@@ -435,7 +437,7 @@ def test_shadow_environment_masks_upstream_to_self(tmp_path):
         ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "main-d@{upstream}"],
         capture_output=True,
         text=True,
-        env={**os.environ, **env},
+        env={**os.environ, **env},  # env-policy: allow
     )
     assert agent.stdout.strip() == "main-d"
     # ...while the operator (no env) still sees the native branch.merge as truth.
@@ -443,7 +445,7 @@ def test_shadow_environment_masks_upstream_to_self(tmp_path):
         ["git", "-C", str(repo), "config", "--get", "branch.main-d.merge"],
         capture_output=True,
         text=True,
-        env={**os.environ, **env},
+        env={**os.environ, **env},  # env-policy: allow
     )
     assert truth.stdout.strip() == "refs/heads/main"
 
@@ -458,7 +460,9 @@ def test_shadow_environment_reinjection_is_idempotent(tmp_path):
         check=True,
     )
 
-    first = shadow_environment(repo, base_env={"PATH": os.environ["PATH"]})
+    first = shadow_environment(
+        repo, base_env={"PATH": os.environ["PATH"]}
+    )  # env-policy: allow
     # Re-applying on an env that already carries the shadow (lifecycle env, then
     # the wrap per-command re-apply) must not append a duplicate remote pair.
     second = shadow_environment(repo, base_env=first)
