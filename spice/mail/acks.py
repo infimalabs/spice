@@ -346,12 +346,14 @@ class AckArchivalSummary:
     `archived` are the inbox keys whose pending item this message retired.
     `already_acked` are keys that matched durable ACK state but had no pending
     item left to retire. `unmatched` are keys the message ACK'd that retired
-    nothing and have no prior ACK record.
+    nothing and have no prior ACK record. `noop` means the message used an ACK
+    marker but named no inbox key, so there was nothing to retire.
     """
 
     archived: list[str]
     already_acked: list[str]
     unmatched: list[str]
+    noop: bool = False
 
 
 @dataclass(frozen=True)
@@ -377,6 +379,13 @@ def summarize_ack_archival(
     """
     segments = extract_ack_segments_from_text(message_text)
     requested = list(dict.fromkeys(key for segment in segments for key in segment.keys))
+    if not requested and _has_noop_ack_marker(message_text):
+        return AckArchivalSummary(
+            archived=[],
+            already_acked=[],
+            unmatched=[],
+            noop=True,
+        )
     try:
         already_acked_aliases = _consumed_state_aliases(
             repo_root, disposition=ACK_DISPOSITION_ACKED
@@ -552,6 +561,16 @@ def _ack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...]]]:
             header_end, keys = parsed
             bounds.append((ack_pos, header_end, keys))
     return bounds
+
+
+def _has_noop_ack_marker(text: str) -> bool:
+    """True when the message says ACK but names no valid inbox key."""
+    if ACK_TOKEN not in text:
+        return False
+    for ack_pos in _iter_ack_tokens(text):
+        if _parse_ack_header(text, ack_pos) is None:
+            return True
+    return False
 
 
 def _nack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...]]]:

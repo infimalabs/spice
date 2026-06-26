@@ -444,6 +444,30 @@ def test_summarize_ack_archival_reports_already_acked_key(tmp_path):
     assert summary.archived == []
     assert summary.already_acked == [KEY_A[:-1]]
     assert summary.unmatched == []
+    assert not summary.noop
+
+
+def test_summarize_ack_archival_reports_noop_ack_without_key(tmp_path):
+    _init_repo(tmp_path)
+
+    summary = summarize_ack_archival(tmp_path, "ACK: moving on.")
+
+    assert summary.archived == []
+    assert summary.already_acked == []
+    assert summary.unmatched == []
+    assert summary.noop
+
+
+def test_summarize_ack_archival_ignores_narrated_noop_ack(tmp_path):
+    _init_repo(tmp_path)
+
+    summary = summarize_ack_archival(tmp_path, "To acknowledge, write ACK plainly.")
+
+    assert summary == AckArchivalSummary(
+        archived=[],
+        already_acked=[],
+        unmatched=[],
+    )
 
 
 def test_archival_summaries_degrade_outside_git_worktree(tmp_path):

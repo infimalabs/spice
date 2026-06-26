@@ -355,6 +355,35 @@ def test_ack_feedback_distinguishes_first_and_duplicate_attempts(tmp_path, monke
     assert line["latestMessagePreview"] == ""
 
 
+def test_ack_noop_feedback_updates_presence_preview(tmp_path):
+    timestamp = _stamp(datetime(2026, 6, 10, 12, 2, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        timestamp,
+        {
+            "type": "function_call_output",
+            "call_id": "call-ack-noop",
+            "output": (
+                "Output:\n"
+                "Supervisor Feedback\n"
+                "  "
+                + supervisor_feedback_line(
+                    "ack.noop",
+                    message="ACK ignored: no inbox key found",
+                )
+                + "\n"
+            ),
+        },
+    )
+
+    items = message_reader.read_assistant_messages(transcript, limit=5)
+
+    assert len(items) == 1
+    assert items[0].kind == "presence:function_call_output"
+    assert items[0].preview == "ACK ignored: ACK ignored: no inbox key found"
+
+
 def test_inline_task_supervisor_error_updates_presence_preview(tmp_path):
     latest = _stamp(datetime(2026, 6, 10, 12, 1, tzinfo=UTC))
     transcript = tmp_path / "rollout.jsonl"
