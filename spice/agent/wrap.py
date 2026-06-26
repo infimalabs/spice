@@ -48,10 +48,7 @@ from spice.agent.shellhook import (
     packaged_shell_steering_static_hook_dir,
 )
 from spice.errors import SpiceError
-from spice.paths import (
-    STATE_DIRNAME,
-    worktree_spice_source,
-)
+from spice.paths import STATE_DIRNAME
 from spice.sessions.meter import (
     ContextMeter,
     active_context_percent,
@@ -77,8 +74,6 @@ AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS = 15.0 * 60.0
 AGENT_RUN_SIDE_CHANNEL_READ_BYTES = 8192
 INTERRUPTED_EXIT_CODE = 130
 COMMAND_NOT_FOUND_EXIT_CODE = 127
-_UV_RUN_SPICE = ["uv", "run", "spice"]
-
 InboxSignature = tuple[tuple[str, int, int], ...]
 ContextWarningSignature = tuple[str, str, int]
 ContextWarningKey = tuple[str]
@@ -276,7 +271,7 @@ def build_agent_run_environment(
     # branch via `git config --get`, where the command-scope true merge wins over
     # the system-scope self merge.
     env = None
-    if is_spice_route(args) or worktree_spice_source(repo_root) is not None:
+    if shell_execution_command_index(args) is not None:
         env = agent_run_child_worktree_environment(args, repo_root=repo_root)
     return apply_scoped_rtk_history_environment(repo_root, env)
 
@@ -317,10 +312,6 @@ def agent_run_child_worktree_environment(
         env[ZDOTDIR_ENV] = str(static_hook_dir)
         env[BASH_ENV_ENV] = str(static_hook_dir / BASH_HOOK_NAME)
     return env
-
-
-def is_spice_route(args: Sequence[str]) -> bool:
-    return args[:1] == ["spice"] or args[: len(_UV_RUN_SPICE)] == _UV_RUN_SPICE
 
 
 def worktree_route_command(
