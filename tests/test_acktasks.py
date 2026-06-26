@@ -117,6 +117,7 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert rows[0]["project"] == "task.unit"
     assert rows[0]["acceptance"] == "Inline task exists"
     assert rows[0]["origin_thread"] == ACTOR
+    assert rows[0][config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
     handle = identity.render_handle(rows[0])
     assert handle in log.getvalue()
     assert "route_filter=skipped:task.unit:no_team" in log.getvalue()
@@ -265,6 +266,7 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
     assert rows[0]["description"] == "Standalone follow-up"
     assert rows[0]["project"] == "task.unit"
     assert rows[0]["acceptance"] == "Standalone task exists"
+    assert rows[0][config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
     handle = identity.render_handle(rows[0])
     assert handle in log.getvalue()
     assert "route_filter=added:task.unit:auto:create" in log.getvalue()

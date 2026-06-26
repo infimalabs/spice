@@ -283,7 +283,11 @@ def create_inline_tasks(
     actor = _supervised_inline_task_actor(repo_root)
     from spice.tasks import create
 
-    results = create.add_batch_results(batch_lines, actor_override=actor)
+    results = create.add_batch_results(
+        batch_lines,
+        actor_override=actor,
+        creation_surface=task_config.TASK_CREATION_SURFACE_CLI,
+    )
     if results:
         log_handle.write(
             "spice inline task created: " + _inline_task_result_text(results) + "\n"
