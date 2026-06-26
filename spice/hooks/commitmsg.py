@@ -15,6 +15,24 @@ COMMIT_MESSAGE_SCISSORS_MARKER = ">8"
 COMMIT_MESSAGE_LIST_MARKER_RE = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s+")
 COMMIT_MESSAGE_TRAILER_RE = re.compile(r"^(?P<key>[A-Za-z0-9-]+): .+")
 FORBIDDEN_COMMIT_MESSAGE_TRAILER_KEYS = {"co-authored-by"}
+PLACEHOLDER_COMMIT_MESSAGE_SUBJECTS = frozenset(
+    {
+        "changes",
+        "fixup",
+        "misc",
+        "squash",
+        "stuff",
+        "temp",
+        "temporary",
+        "tmp",
+        "todo",
+        "update",
+        "updates",
+        "wip",
+        "work in progress",
+    }
+)
+PLACEHOLDER_COMMIT_MESSAGE_SUBJECT_TRAILING_CHARS = " \t.,:;!?-_#"
 
 
 def _commit_message_policy_lines(message_text: str) -> list[tuple[int, str]]:
@@ -47,6 +65,11 @@ def _commit_message_trailer_key(line: str) -> str | None:
     return match.group("key").lower()
 
 
+def _placeholder_commit_message_subject(subject: str) -> str:
+    normalized = re.sub(r"\s+", " ", subject.strip().casefold())
+    return normalized.strip(PLACEHOLDER_COMMIT_MESSAGE_SUBJECT_TRAILING_CHARS)
+
+
 def validate_commit_message_text(
     message_text: str,
     *,
@@ -72,6 +95,12 @@ def validate_commit_message_text(
             )
 
     subject_line_number, subject = lines[0]
+    placeholder_subject = _placeholder_commit_message_subject(subject)
+    if placeholder_subject in PLACEHOLDER_COMMIT_MESSAGE_SUBJECTS:
+        failures.append(
+            f"line {subject_line_number} subject {subject.strip()!r} is a "
+            "placeholder; write a real subject describing the change"
+        )
     if len(subject) > wrap_limit:
         failures.append(
             f"line {subject_line_number} is {len(subject)} chars; "

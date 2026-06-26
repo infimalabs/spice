@@ -887,6 +887,23 @@ def test_commit_msg_rejects_co_authored_by_trailer(tmp_path):
     assert "commit messages must not add co-authors" in error
 
 
+def test_commit_msg_rejects_wip_subject_and_accepts_real_subject(tmp_path):
+    placeholder = tmp_path / "PLACEHOLDER_COMMIT_EDITMSG"
+    placeholder.write_text("wip\n", encoding="utf-8")
+
+    with pytest.raises(SpiceError) as exc_info:
+        commitmsg.handle_commit_msg(str(placeholder))
+
+    error = str(exc_info.value)
+    assert "subject 'wip' is a placeholder" in error
+    assert "write a real subject describing the change" in error
+
+    real = tmp_path / "REAL_COMMIT_EDITMSG"
+    real.write_text("Block placeholder commit subjects\n", encoding="utf-8")
+
+    assert commitmsg.handle_commit_msg(str(real)) == 0
+
+
 def test_serve_web_typecheck_skips_repo_without_sources(tmp_path, monkeypatch):
     from spice.serve import typecheck
 
