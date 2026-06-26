@@ -18,11 +18,6 @@ from typing import Any
 
 STATE_DIRNAME = ".spice"
 SHARED_ATTACHMENT_DIR = Path("spice") / "attachments"
-WORKTREE_SPICE_REQUIRED_PATHS = (
-    Path("spice") / "__main__.py",
-    Path("spice") / "cli" / "entry.py",
-    Path("spice") / "agent" / "wrap.py",
-)
 
 
 def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
@@ -87,20 +82,6 @@ def shared_attachment_root(repo_root: Path) -> Path:
 
 def state_dir(repo_root: Path) -> Path:
     return repo_root / STATE_DIRNAME
-
-
-def worktree_spice_source(repo_root: Path | None) -> Path | None:
-    """Return the local spice package when a worktree has the product shape.
-
-    This is product-shape detection for diagnostics and remaining environment
-    plumbing; it does not choose the ``spice`` executable's runtime.
-    """
-    if repo_root is None:
-        return None
-    root = repo_root.expanduser().resolve()
-    if all((root / path).is_file() for path in WORKTREE_SPICE_REQUIRED_PATHS):
-        return root / "spice"
-    return None
 
 
 def runtime_spice_source() -> Path:
