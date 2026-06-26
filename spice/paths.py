@@ -110,17 +110,6 @@ def runtime_spice_source() -> Path:
     return Path(__file__).resolve().parent
 
 
-def runtime_uses_worktree_spice(repo_root: Path | None) -> bool:
-    source = worktree_spice_source(repo_root)
-    if source is None:
-        return False
-    try:
-        runtime_spice_source().relative_to(source)
-    except ValueError:
-        return False
-    return True
-
-
 def worktree_spice_environment(
     repo_root: Path | None, *, base_env: Mapping[str, str] | None = None
 ) -> dict[str, str]:
@@ -143,14 +132,6 @@ def worktree_spice_environment(
     parts = [part for part in existing.split(os.pathsep) if part and part != root]
     env["PYTHONPATH"] = os.pathsep.join([root, *parts])
     return env
-
-
-def worktree_spice_python_command(
-    repo_root: Path | None, args: list[str], *, python: str | None = None
-) -> list[str] | None:
-    if worktree_spice_source(repo_root) is None:
-        return None
-    return [python or sys.executable, "-m", "spice", *args]
 
 
 def find_tool(name: str) -> str | None:

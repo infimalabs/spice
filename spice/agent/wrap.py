@@ -51,7 +51,6 @@ from spice.errors import SpiceError
 from spice.paths import (
     STATE_DIRNAME,
     worktree_spice_environment,
-    worktree_spice_python_command,
     worktree_spice_source,
 )
 from spice.sessions.meter import (
@@ -344,12 +343,7 @@ def worktree_route_command(
 def worktree_spice_route_command(
     args: Sequence[str], *, repo_root: Path | None = None
 ) -> list[str]:
-    if args[:1] == ["spice"]:
-        return worktree_spice_python_command(repo_root, list(args[1:])) or list(args)
-    if args[: len(_UV_RUN_SPICE)] == _UV_RUN_SPICE:
-        return worktree_spice_python_command(
-            repo_root, list(args[len(_UV_RUN_SPICE) :])
-        ) or list(args)
+    del repo_root
     return list(args)
 
 

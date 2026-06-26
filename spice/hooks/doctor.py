@@ -24,7 +24,6 @@ from spice.paths import (
     find_tool,
     git_common_dir,
     runtime_spice_source,
-    runtime_uses_worktree_spice,
     state_dir,
     worktree_spice_source,
 )
@@ -154,23 +153,11 @@ def _tts_binary_check_config(repo_root: Path) -> tuple[str, str]:
 
 
 def _runtime_resolution_check(repo_root: Path) -> DoctorCheck:
-    source = worktree_spice_source(repo_root)
+    del repo_root
     runtime = runtime_spice_source()
-    if source is None:
-        return _ok(
-            "runtime.spice",
-            f"installed spice package -> {runtime}",
-            "spice dev doctor",
-        )
-    if runtime_uses_worktree_spice(repo_root):
-        return _ok(
-            "runtime.spice",
-            f"worktree spice package -> {source}",
-            "spice dev doctor",
-        )
-    return _fail(
+    return _ok(
         "runtime.spice",
-        f"worktree spice package is {source}, but runtime loaded {runtime}",
+        f"installed spice package -> {runtime}",
         "spice dev doctor",
     )
 
@@ -195,12 +182,6 @@ def _installed_spice_source_check(repo_root: Path) -> DoctorCheck:
             "runtime.installed-spice",
             f"installed spice package matches worktree -> {installed}",
             "python -m pip show spice",
-        )
-    if runtime_uses_worktree_spice(repo_root):
-        return _ok(
-            "runtime.installed-spice",
-            f"installed spice package is {installed}; active runtime uses {worktree}",
-            "spice dev doctor",
         )
     return _warn(
         "runtime.installed-spice",

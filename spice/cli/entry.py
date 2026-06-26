@@ -8,13 +8,7 @@ import sys
 from pathlib import Path
 
 from spice.errors import SpiceError
-from spice.paths import (
-    repo_root_from_cwd,
-    runtime_uses_worktree_spice,
-    worktree_spice_environment,
-    worktree_spice_python_command,
-    worktree_spice_source,
-)
+from spice.paths import repo_root_from_cwd
 from spice.worktrees import resolve_worktree_target
 
 SIGINT_EXIT_CODE = 130
@@ -29,8 +23,6 @@ def main(argv: list[str] | None = None) -> int:
         except RuntimeError as exc:
             print(f"spice: {exc}", file=sys.stderr)
             return 2
-    _reexec_worktree_spice_if_needed(argv)
-
     try:
         return _dispatch(argv)
     except SpiceError as exc:
@@ -82,18 +74,6 @@ def _switch_worktree(target: str) -> None:
         return
     print(f"spice: worktree={current} -> {resolved}", file=sys.stderr)
     os.chdir(resolved)
-
-
-def _reexec_worktree_spice_if_needed(argv: list[str]) -> None:
-    repo_root = repo_root_from_cwd()
-    if worktree_spice_source(repo_root) is None:
-        return
-    if runtime_uses_worktree_spice(repo_root):
-        return
-    command = worktree_spice_python_command(repo_root, argv)
-    if command is None:
-        return
-    os.execvpe(command[0], command, worktree_spice_environment(repo_root))
 
 
 if __name__ == "__main__":
