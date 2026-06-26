@@ -86,7 +86,7 @@ INBOX_CONTROL_READOUT_ROWS = {
         "control=drive-drain-queue: DRAIN QUEUE ASAP: spice task next"
     ),
 }
-AUTOMATED_GUIDANCE_PRIORITIES = frozenset({"maxim"})
+AUTOMATED_GUIDANCE_PRIORITIES = frozenset({"maxim", "review"})
 
 PRIORITY_RANK = {
     "reminder": 0,
@@ -95,6 +95,7 @@ PRIORITY_RANK = {
     "urgent": 3,
     "critical": 4,
     "maxim": 5,
+    "review": 5,
 }
 
 

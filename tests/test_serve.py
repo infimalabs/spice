@@ -363,6 +363,13 @@ def test_pending_inbox_ensure_ignores_automated_guidance(tmp_path, monkeypatch):
         "20260102T000000000001Z.txt",
         compose_inbox_text(body="automated maxim", priority="maxim", stop=False),
     )
+    write_inbox_item(
+        repo,
+        "20260102T000000000002Z.txt",
+        compose_inbox_text(
+            body="automated review feedback", priority="review", stop=False
+        ),
+    )
     ensure_calls = 0
 
     def fake_ensure(ensured_target, **kwargs):
@@ -381,7 +388,7 @@ def test_pending_inbox_ensure_ignores_automated_guidance(tmp_path, monkeypatch):
 
     assert payload is None
     assert ensure_calls == 0
-    assert pending_inbox_count(repo) == 1
+    assert pending_inbox_count(repo) == 2
 
 
 def test_pending_inbox_ensure_uses_first_operator_item_as_trigger(
@@ -398,6 +405,13 @@ def test_pending_inbox_ensure_uses_first_operator_item_as_trigger(
     write_inbox_item(
         repo,
         "20260102T000000000002Z.txt",
+        compose_inbox_text(
+            body="automated review feedback", priority="review", stop=False
+        ),
+    )
+    write_inbox_item(
+        repo,
+        "20260102T000000000003Z.txt",
         compose_inbox_text(body="operator steering", priority=None, stop=False),
     )
 
@@ -416,12 +430,13 @@ def test_pending_inbox_ensure_uses_first_operator_item_as_trigger(
         retry_seconds=0.0,
     )
 
-    assert payload["deadletteredInboxKey"] == "20260102T000000000002Z"
+    assert payload["deadletteredInboxKey"] == "20260102T000000000003Z"
     assert [item.name for item in collect_inbox_items(repo)] == [
-        "20260102T000000000001Z.txt"
+        "20260102T000000000001Z.txt",
+        "20260102T000000000002Z.txt",
     ]
     assert [item.name for item in collect_deadlettered_inbox_items(repo)] == [
-        "20260102T000000000002Z.txt"
+        "20260102T000000000003Z.txt"
     ]
 
 

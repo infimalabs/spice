@@ -111,6 +111,19 @@ def test_compose_parse_round_trip_with_priority_and_stop():
     assert INBOX_GRACEFUL_NOTE in composed
 
 
+def test_compose_parse_round_trip_with_review_priority():
+    composed = compose_inbox_text(
+        body="peer review found follow-up work",
+        priority="review",
+        stop=False,
+    )
+    parsed = parse_inbox_payload(composed)
+    assert "Priority: review" in composed
+    assert parsed.priority == "review"
+    assert parsed.body == "peer review found follow-up work"
+    assert parsed.is_stop is False
+
+
 def test_compose_normal_priority_stays_implicit():
     composed = compose_inbox_text(body="keep going", priority=None, stop=False)
     assert composed == f"keep going\nNote: {INBOX_CONTINUE_NOTE}\n"
@@ -312,10 +325,17 @@ def test_pending_operator_count_excludes_automated_guidance(tmp_path):
             body="automated maxim guidance", priority="maxim", stop=False
         ),
     )
+    write_inbox_item(
+        tmp_path,
+        "20260103T000000000012Z.txt",
+        compose_inbox_text(
+            body="automated review guidance", priority="review", stop=False
+        ),
+    )
 
     # Both items are pending, but only the genuine operator steering should be
-    # able to resurrect an idle agent; the maxim is informational at launch.
-    assert pending_inbox_count(str(tmp_path)) == 2
+    # able to resurrect an idle agent; automated guidance is informational at launch.
+    assert pending_inbox_count(str(tmp_path)) == 3
     assert len(pending_operator_inbox_items(str(tmp_path))) == 1
 
 
@@ -327,8 +347,15 @@ def test_pending_operator_count_zero_for_only_automated_guidance(tmp_path):
             body="automated maxim guidance", priority="maxim", stop=False
         ),
     )
+    write_inbox_item(
+        tmp_path,
+        "20260103T000000000013Z.txt",
+        compose_inbox_text(
+            body="automated review guidance", priority="review", stop=False
+        ),
+    )
 
-    assert pending_inbox_count(str(tmp_path)) == 1
+    assert pending_inbox_count(str(tmp_path)) == 2
     assert len(pending_operator_inbox_items(str(tmp_path))) == 0
 
 
@@ -377,18 +404,28 @@ def test_deadletter_excludes_item_from_pending_and_can_requeue(tmp_path):
     assert item.attachments[0].path.read_bytes() == b"image-bytes"
 
 
-def test_inbox_payload_rows_suppress_task_offload_for_maxim_guidance(tmp_path):
-    composed = compose_inbox_text(
+def test_inbox_payload_rows_suppress_task_offload_for_automated_guidance(tmp_path):
+    maxim = compose_inbox_text(
         body="No separate task is needed for the maxim itself.",
         priority="maxim",
         stop=False,
     )
-    write_inbox_item(tmp_path, "20260103T000000000005Z.txt", composed)
+    review = compose_inbox_text(
+        body="Peer review feedback already links follow-up tasks.",
+        priority="review",
+        stop=False,
+    )
+    write_inbox_item(tmp_path, "20260103T000000000005Z.txt", maxim)
+    write_inbox_item(tmp_path, "20260103T000000000006Z.txt", review)
     rows = inbox_payload_rows(collect_inbox_items(str(tmp_path)))
 
     assert "  priority=maxim" in rows
+    assert "  priority=review" in rows
     assert any(
         "No separate task is needed for the maxim itself." in row for row in rows
+    )
+    assert any(
+        "Peer review feedback already links follow-up tasks." in row for row in rows
     )
     assert INBOX_TASK_HINT_ROW not in rows
 
@@ -400,8 +437,14 @@ def test_inbox_payload_rows_keep_task_offload_for_mixed_user_steering(tmp_path):
         stop=False,
     )
     user = compose_inbox_text(body="new scope", priority=None, stop=False)
+    review = compose_inbox_text(
+        body="Peer review feedback already links follow-up tasks.",
+        priority="review",
+        stop=False,
+    )
     write_inbox_item(tmp_path, "20260103T000000000006Z.txt", maxim)
-    write_inbox_item(tmp_path, "20260103T000000000007Z.txt", user)
+    write_inbox_item(tmp_path, "20260103T000000000007Z.txt", review)
+    write_inbox_item(tmp_path, "20260103T000000000008Z.txt", user)
     rows = inbox_payload_rows(collect_inbox_items(str(tmp_path)))
 
     assert INBOX_TASK_HINT_ROW in rows
