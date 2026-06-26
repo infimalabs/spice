@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import io
+from pathlib import Path
 
 from spice.agent import wrap
 from spice.cli import entry
@@ -39,6 +40,36 @@ def test_agent_run_dispatch_bypasses_full_parser_and_inbox_import(
     assert seen == {"repo_root": tmp_path, "raw_args": ["--", "git", "status"]}
 
 
+def test_main_does_not_reexec_from_spice_source_worktree(tmp_path, monkeypatch):
+    _write_spice_product_shape(tmp_path)
+    seen: dict[str, list[str]] = {}
+
+    def fake_dispatch(argv: list[str]) -> int:
+        seen["argv"] = argv
+        return FAKE_AGENT_RUN_EXIT_CODE
+
+    def fail_exec(*_args, **_kwargs):
+        raise AssertionError("spice entry unexpectedly re-execed")
+
+    monkeypatch.setattr(entry, "repo_root_from_cwd", lambda: tmp_path)
+    monkeypatch.setattr(entry, "_dispatch", fake_dispatch)
+    monkeypatch.setattr(entry.os, "execvpe", fail_exec)
+
+    assert entry.main(["task", "status"]) == FAKE_AGENT_RUN_EXIT_CODE
+    assert seen == {"argv": ["task", "status"]}
+
+
+def test_worktree_route_leaves_spice_invocations_on_installed_runtime(tmp_path):
+    _write_spice_product_shape(tmp_path)
+
+    assert wrap.worktree_route_command(
+        ["spice", "task", "status"], repo_root=tmp_path
+    ) == ["spice", "task", "status"]
+    assert wrap.worktree_route_command(
+        ["uv", "run", "spice", "task", "status"], repo_root=tmp_path
+    ) == ["uv", "run", "spice", "task", "status"]
+
+
 def test_agent_run_inbox_injection_degrades_when_readout_import_fails(
     tmp_path, monkeypatch
 ):
@@ -59,3 +90,14 @@ def test_agent_run_inbox_injection_degrades_when_readout_import_fails(
 
     assert "Inbox Steering" in stderr.getvalue()
     assert "unavailable=conflicted inbox readout" in stderr.getvalue()
+
+
+def _write_spice_product_shape(repo_root: Path) -> None:
+    for relative in (
+        "spice/__main__.py",
+        "spice/cli/entry.py",
+        "spice/agent/wrap.py",
+    ):
+        path = repo_root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# test spice product shape\n", encoding="utf-8")

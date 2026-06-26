@@ -101,17 +101,18 @@ def test_dev_doctor_parser_exposes_fix_flag():
     assert args.fix
 
 
-def test_doctor_reports_worktree_runtime_for_spice_checkout(tmp_path, monkeypatch):
+def test_doctor_reports_installed_runtime_for_spice_checkout(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
+    installed = tmp_path / "installed" / "spice"
     repo.mkdir()
+    installed.mkdir(parents=True)
     _write_spice_product_shape(repo)
-    monkeypatch.setattr(doctor, "runtime_spice_source", lambda: repo / "spice")
-    monkeypatch.setattr(doctor, "runtime_uses_worktree_spice", lambda _repo: True)
+    monkeypatch.setattr(doctor, "runtime_spice_source", lambda: installed)
 
     check = doctor._runtime_resolution_check(repo)
 
     assert check.status == "ok"
-    assert f"worktree spice package -> {repo / 'spice'}" == check.detail
+    assert f"installed spice package -> {installed}" == check.detail
 
 
 def test_doctor_reports_installed_source_skew_for_spice_checkout(tmp_path, monkeypatch):
@@ -129,22 +130,19 @@ def test_doctor_reports_installed_source_skew_for_spice_checkout(tmp_path, monke
     assert str(repo / "spice") in check.detail
 
 
-def test_doctor_accepts_installed_source_skew_when_worktree_runtime_active(
+def test_doctor_reports_installed_source_match_for_spice_checkout(
     tmp_path, monkeypatch
 ):
     repo = tmp_path / "repo"
-    installed = tmp_path / "spice-z" / "spice"
     repo.mkdir()
-    installed.mkdir(parents=True)
     _write_spice_product_shape(repo)
+    installed = repo / "spice"
     monkeypatch.setattr(doctor, "_installed_spice_package_source", lambda: installed)
-    monkeypatch.setattr(doctor, "runtime_uses_worktree_spice", lambda _repo: True)
 
     check = doctor._installed_spice_source_check(repo)
 
     assert check.status == "ok"
-    assert str(installed) in check.detail
-    assert f"active runtime uses {repo / 'spice'}" in check.detail
+    assert f"installed spice package matches worktree -> {installed}" == check.detail
 
 
 def _patch_non_hook_checks(monkeypatch) -> None:
