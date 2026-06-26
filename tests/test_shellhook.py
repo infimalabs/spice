@@ -157,7 +157,7 @@ def test_wrapper_does_not_special_case_proxy_argv(monkeypatch):
     assert calls == [("proxy", "git", "status")]
 
 
-def test_wrapper_routes_worktree_python_commands_through_active_interpreter(
+def test_wrapper_routes_python_commands_through_deployment_interpreter(
     tmp_path, monkeypatch
 ):
     _write_spice_product_shape(tmp_path)
@@ -184,9 +184,7 @@ def test_wrapper_does_not_python_route_proxy_argv(tmp_path):
     ) == ["proxy", "python", "-m", "pip", "--version"]
 
 
-def test_wrapper_routes_target_repo_python_commands_through_virtualenv_default(
-    tmp_path, monkeypatch
-):
+def test_wrapper_ignores_active_virtualenv_for_python_route(tmp_path, monkeypatch):
     venv_python = tmp_path / "active-env" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -196,14 +194,12 @@ def test_wrapper_routes_target_repo_python_commands_through_virtualenv_default(
     assert wrap.build_agent_run_command(
         ["python", "--version"], repo_root=tmp_path
     ) == [
-        str(venv_python),
+        sys.executable,
         "--version",
     ]
 
 
-def test_wrapper_routes_target_repo_python_commands_through_repo_venv(
-    tmp_path, monkeypatch
-):
+def test_wrapper_ignores_repo_venv_for_python_route(tmp_path, monkeypatch):
     venv_python = tmp_path / ".venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -213,20 +209,19 @@ def test_wrapper_routes_target_repo_python_commands_through_repo_venv(
     assert wrap.build_agent_run_command(
         ["python", "--version"], repo_root=tmp_path
     ) == [
-        str(venv_python),
+        sys.executable,
         "--version",
     ]
 
 
-def test_wrapper_refuses_target_repo_python_without_repo_venv(tmp_path, monkeypatch):
+def test_wrapper_routes_python_without_repo_venv_to_deployment_interpreter(
+    tmp_path, monkeypatch
+):
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
     command = wrap.build_agent_run_command(["python", "--version"], repo_root=tmp_path)
 
-    assert command[:2] == [sys.executable, "-c"]
-    assert "refusing to run python from global PATH" in command[2]
-    assert str(tmp_path / ".venv" / "bin" / "python") in command[2]
-    assert command[3:] == ["--version"]
+    assert command == [sys.executable, "--version"]
 
 
 def test_wrapper_plain_commands_do_not_inject_worktree_spice_pythonpath(
