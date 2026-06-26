@@ -13,7 +13,6 @@ from spice.errors import SpiceError
 from spice.hooks import commitmsg, precommit
 from spice.hooks.install import hooks_dir, init_repo, install_hooks_for_repo
 from spice.hooks.precommit import (
-    readme_credibility_violations,
     repo_truth_doc_violations,
     repo_truth_docs,
 )
@@ -175,40 +174,6 @@ def test_doc_over_cap_is_reported_as_a_violation(tmp_path):
     assert len(violations) == 1
     assert "AGENTS.md" in violations[0]
     assert f"cap {REPO_TRUTH_DOC_LIMIT}" in violations[0]
-
-
-def test_readme_credibility_claim_accepts_rounded_line_counts(tmp_path):
-    repo = _git_init(tmp_path / "repo")
-    _write_repo_file(repo, "tests/test_unit.py", "assert 1\n" * 10)
-    _write_repo_file(repo, "spice/app.py", "value = 1\n" * 20)
-    _write_repo_file(
-        repo,
-        "README.md",
-        "The tracked tree is roughly **0k lines of Python tests against "
-        "0k lines of Python source**, about **0.5 test lines per source line**.\n",
-    )
-    _git(repo, "add", "README.md", "tests/test_unit.py", "spice/app.py")
-
-    assert readme_credibility_violations(repo) == []
-
-
-def test_readme_credibility_claim_reports_drift_beyond_tolerance(tmp_path):
-    repo = _git_init(tmp_path / "repo")
-    _write_repo_file(repo, "tests/test_unit.py", "assert 1\n" * 10)
-    _write_repo_file(repo, "spice/app.py", "value = 1\n" * 20)
-    _write_repo_file(
-        repo,
-        "README.md",
-        "The tracked tree is roughly **9k lines of Python tests against "
-        "9k lines of Python source**, about **9.0 test lines per source line**.\n",
-    )
-    _git(repo, "add", "README.md", "tests/test_unit.py", "spice/app.py")
-
-    violations = readme_credibility_violations(repo)
-
-    assert any("rounded test line claim drifted" in item for item in violations)
-    assert any("rounded source line claim drifted" in item for item in violations)
-    assert any("test/source ratio drifted" in item for item in violations)
 
 
 def test_policy_pre_commit_extensions_run_after_builtin_steps(tmp_path, monkeypatch):

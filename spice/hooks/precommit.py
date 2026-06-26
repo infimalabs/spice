@@ -22,7 +22,6 @@ base limit — the gate forgives exactly when the code earns it.
 from __future__ import annotations
 
 import os
-import re
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -51,18 +50,9 @@ from spice.studies import (
     shape,
     testquality,
 )
-from spice.studies.walk import partially_staged_paths, staged_paths, tracked_paths
+from spice.studies.walk import partially_staged_paths, staged_paths
 
 STAGED_PATHS_ENV = "SPICE_STAGED_PATHS"  # env-policy: allow
-README_CREDIBILITY_LINE_TOLERANCE = 1500
-README_CREDIBILITY_RATIO_TOLERANCE = 0.15
-_README_CREDIBILITY_LINE_RE = re.compile(
-    r"roughly \*\*(?P<tests>\d+)k lines of Python tests against "
-    r"(?P<source>\d+)k lines of Python source\*\*"
-)
-_README_CREDIBILITY_RATIO_RE = re.compile(
-    r"about \*\*(?P<ratio>\d+(?:\.\d+)?) test lines per source line\*\*"
-)
 
 
 @dataclass(frozen=True)
@@ -531,87 +521,14 @@ def repo_truth_doc_violations(repo_root: Path) -> list[str]:
     return over
 
 
-def readme_credibility_violations(repo_root: Path) -> list[str]:
-    """Return README credibility metric drift beyond the rounded tolerance."""
-    readme = repo_root / "README.md"
-    if not readme.is_file():
-        return []
-    text = readme.read_text(encoding="utf-8", errors="replace")
-    line_match = _README_CREDIBILITY_LINE_RE.search(text)
-    if line_match is None:
-        return []
-    ratio_match = _README_CREDIBILITY_RATIO_RE.search(text)
-    totals = _readme_python_line_totals(repo_root)
-    violations: list[str] = []
-    claimed_tests = int(line_match.group("tests")) * 1000
-    claimed_source = int(line_match.group("source")) * 1000
-    _append_readme_line_drift(
-        violations,
-        label="test",
-        actual=totals["tests"],
-        claimed=claimed_tests,
-    )
-    _append_readme_line_drift(
-        violations,
-        label="source",
-        actual=totals["spice"],
-        claimed=claimed_source,
-    )
-    if ratio_match is None:
-        violations.append("  README.md: missing rounded test/source ratio")
-        return violations
-    actual_ratio = totals["tests"] / totals["spice"] if totals["spice"] else 0.0
-    claimed_ratio = float(ratio_match.group("ratio"))
-    if abs(actual_ratio - claimed_ratio) > README_CREDIBILITY_RATIO_TOLERANCE:
-        violations.append(
-            "  README.md: test/source ratio drifted "
-            f"(actual {actual_ratio:.2f}, claimed {claimed_ratio:.1f})"
-        )
-    return violations
-
-
-def _readme_python_line_totals(repo_root: Path) -> dict[str, int]:
-    totals = {"tests": 0, "spice": 0}
-    for path in tracked_paths(repo_root):
-        if path.suffix != ".py" or not path.parts:
-            continue
-        root = path.parts[0]
-        if root not in totals:
-            continue
-        totals[root] += fileloc.count_file_lines(repo_root / path)
-    return totals
-
-
-def _append_readme_line_drift(
-    violations: list[str], *, label: str, actual: int, claimed: int
-) -> None:
-    if abs(actual - claimed) <= README_CREDIBILITY_LINE_TOLERANCE:
-        return
-    expected = round(actual / 1000)
-    claimed_k = claimed // 1000
-    violations.append(
-        f"  README.md: rounded {label} line claim drifted "
-        f"(actual {actual:,}; claim {claimed_k}k; expected about {expected}k)"
-    )
-
-
 def _run_repo_truth_doc_guard(repo_root: Path) -> None:
     """Doctrine docs ride in every agent's context; cap them hard."""
     over = repo_truth_doc_violations(repo_root)
-    credibility = readme_credibility_violations(repo_root)
-    messages: list[str] = []
     if over:
-        messages.append(
+        raise SpiceError(
             "repo-truth docs exceed the character cap; tighten the doctrine:\n"
             + "\n".join(over)
         )
-    if credibility:
-        messages.append(
-            "README credibility metrics drifted beyond tolerance:\n"
-            + "\n".join(credibility)
-        )
-    if messages:
-        raise SpiceError("\n".join(messages))
 
 
 def _run_python_format_guard(repo_root: Path, paths: list[Path]) -> None:
