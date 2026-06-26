@@ -42,32 +42,22 @@ surfaces; the runtime is a deliberate, separately-managed deployment. Editing a
 worker is always safe. Updating the server is an explicit reinstall/redeploy
 step, not an accident of `cd`.
 
-## Per-Tree-Runtime Magic Being Removed
+## Per-Tree-Runtime Magic Removed
 
-The current code makes the active worktree win the runtime through several
-coupled mechanisms. The single-install battery removes all of them:
+The old code made the active worktree win the runtime through several coupled
+mechanisms. The single-install battery removed them:
 
 - **Worktree PYTHONPATH + venv injection** —
-  `worktree_spice_environment` (`spice/paths.py:124`) prepends the worktree root
-  to `PYTHONPATH` and prepends the worktree `.venv` to `PATH`/`VIRTUAL_ENV`,
-  selected by `worktree_spice_source` (`spice/paths.py:93`). This makes a
-  worktree's own checkout shadow the installed package.
+  agent, wrapper, and mounted-command environments no longer prepend the
+  operated worktree root to `PYTHONPATH` or promote that tree's `.venv`.
 - **The worktree-spice reexec** —
-  `_reexec_worktree_spice_if_needed` (`spice/cli/entry.py:87`) re-execs the
-  process into the active worktree checkout
-  (`worktree_spice_python_command`, `spice/paths.py:148`) whenever the current
-  runtime is not already that checkout. This is the mechanism that makes `spice`
-  "run from here" instead of from the install.
+  `spice` no longer re-execs into an active checkout; the installed console
+  script remains the runtime.
 - **`python` / `python3` worktree-venv routing** — agent shells route bare
-  `python` and `python3` (`PYTHON_ROUTE_COMMANDS`, `spice/agent/wrap.py:68`)
-  through `python_route_command_prefix` / `default_venv_python`
-  (`spice/agent/wrap.py:364`), pointing them at the worktree `.venv`.
-- **The now-dead strippers** — once injection is gone, the compensating code that
-  exists only to undo it becomes dead and should be removed too:
-  `hermetic_wheel_env` (`spice/release.py:229`) pops the injected `PYTHONPATH`
-  so release smokes test the wheel and not the worktree, and the doctor hook
-  pops `PYTHONPATH` (`spice/hooks/doctor.py:224`) for the same reason. With no
-  injection there is nothing to strip.
+  `python` and `python3` to the deployment interpreter, not the operated
+  worktree `.venv`.
+- **The now-dead strippers** — release and doctor no longer compensate for
+  worktree-injected `PYTHONPATH`, because the injection path is gone.
 
 ## Scope / This Battery
 

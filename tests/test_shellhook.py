@@ -232,8 +232,7 @@ def test_wrapper_plain_commands_do_not_inject_worktree_spice_pythonpath(
 
     env = wrap.build_agent_run_environment(["pytest"], repo_root=tmp_path)
 
-    assert env is not None
-    assert "PYTHONPATH" not in env
+    assert env is None
 
 
 def test_static_shell_hook_paths_count_as_generated():
