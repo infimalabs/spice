@@ -401,6 +401,96 @@ def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
     assert "--end 2026-06-12T07:03:25.463453Z" in output
 
 
+def test_task_show_requires_context_check_before_implementation(monkeypatch):
+    row = _row(
+        "Current context",
+        project="task.render",
+        incepted="20260612T065825463453Z",
+        status="pending",
+        phase="todo",
+    )
+    row.update(
+        {
+            "task_description": "Implement only if current",
+            "phase_i": "0",
+            "urgency": "9.2",
+            "origin_thread": "origin-thread",
+            "claim_thread": "claim-thread",
+            "claim_context_start": "2026-06-12T08:15:18.621994Z",
+            "claim_context_end": "2026-06-12T08:25:18.621994Z",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+
+    output = render.render_show("TASK-test")
+
+    assert "context_check:" in output
+    assert "Before editing, run the rehydrate command(s) above" in output
+    assert "assert the task description/acceptance still match" in output
+
+
+def test_task_show_context_check_names_stale_or_shifted_context(monkeypatch):
+    row = _row(
+        "No transcript context",
+        project="task.render",
+        incepted="not-a-context-window",
+        status="pending",
+        phase="verify",
+    )
+    row.update(
+        {
+            "task_description": "Verify only if still relevant",
+            "phase_i": "1",
+            "urgency": "9.2",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "verify"])
+
+    output = render.render_show("TASK-test")
+
+    assert "context_check:" in output
+    assert "no transcript rehydrate command is available" in output
+    assert "If context shifted or the task is stale" in output
+    assert "before changing files" in output
+
+
+def test_task_show_does_not_add_implementation_context_check_to_review(monkeypatch):
+    row = _row(
+        "Review context",
+        project="task.render",
+        incepted="20260612T065825463453Z",
+        status="pending",
+        phase="review",
+    )
+    row.update(
+        {
+            "task_description": "Review already asserts description currency",
+            "phase_i": "1",
+            "urgency": "9.2",
+            "claim_by": "actor-a",
+            "origin_thread": "origin-thread",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+
+    output = render.render_show("TASK-test")
+
+    assert "context_check:" not in output
+    assert (
+        "next: spice task review TASK-test --finding clean --note "
+        '"description current; ..."'
+    ) in output
+
+
 def test_task_show_keeps_creator_rehydrate_for_same_claim_thread(monkeypatch):
     row = _row(
         "Same thread context",

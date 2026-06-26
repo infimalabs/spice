@@ -180,6 +180,31 @@ def _rehydrate_lines(row: dict[str, Any]) -> list[str]:
     return ["rehydrate:", *lines]
 
 
+def _context_check_lines(
+    row: dict[str, Any], *, has_rehydrate_commands: bool
+) -> list[str]:
+    phase = _f(row, "phase")
+    if _f(row, "status") != "pending" or phase in ("review", "oops"):
+        return []
+    first = (
+        "  Before editing, run the rehydrate command(s) above and assert the "
+        "task description/acceptance still match current repo and operator state."
+        if has_rehydrate_commands
+        else (
+            "  Before editing, inspect the task description/acceptance and "
+            "current repo state; no transcript rehydrate command is available."
+        )
+    )
+    return [
+        "context_check:",
+        first,
+        (
+            "  If context shifted or the task is stale, stop and update, split, "
+            "or return it before changing files."
+        ),
+    ]
+
+
 def _review_commit_lines(row: dict[str, Any]) -> list[str]:
     review_ref = _f(row, "done_ref")
     if not review_ref:
@@ -225,7 +250,9 @@ def render_show(handle: str) -> str:
     rendered = identity.render_handle(row)
     lines = _base_show_lines(row, rendered, flow)
     lines.extend(_review_commit_lines(row))
-    lines.extend(_rehydrate_lines(row))
+    rehydrate = _rehydrate_lines(row)
+    lines.extend(rehydrate)
+    lines.extend(_context_check_lines(row, has_rehydrate_commands=bool(rehydrate)))
     deps = _deps_lines(row)
     if deps:
         lines.append("depends:")
