@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from spice.cli.parser import build_parser
 from spice.tasks import sizing
 
@@ -61,6 +63,63 @@ def test_task_sizing_validation_uses_structured_signal_absence():
     assert report.score == 0
     assert components["validation"] == sizing.SizingComponent(
         "validation", 0, "no_structured_validation_signal"
+    )
+
+
+def test_task_sizing_command_signal_uses_done_upstream_range(monkeypatch):
+    calls: list[str] = []
+
+    def fake_run(args, **_kwargs):
+        calls.append(args[-1])
+        if args[-1] == "impl-base..impl-done":
+            return SimpleNamespace(returncode=0, stdout="3\n")
+        if args[-1] == "review-claim..impl-done":
+            return SimpleNamespace(returncode=0, stdout="0\n")
+        return SimpleNamespace(returncode=1, stdout="")
+
+    monkeypatch.setattr(sizing.subprocess, "run", fake_run)
+    row = _completed_row(
+        title="Review claim overwrote implementation range",
+        uuid="task-commands",
+        claim_head="review-claim",
+        done_head="impl-done",
+        done_upstream_head="impl-base",
+        review_author="author-agent",
+    )
+
+    report = sizing.size_completed_task(row)
+    components = _components(report)
+
+    assert calls == ["impl-base..impl-done"]
+    assert components["commands"] == sizing.SizingComponent(
+        "commands", 1, "git_commits:3:done_upstream_head..done_head"
+    )
+
+
+def test_task_sizing_command_signal_suppresses_review_claim_zero(monkeypatch):
+    calls: list[str] = []
+
+    def fake_run(args, **_kwargs):
+        calls.append(args[-1])
+        return SimpleNamespace(returncode=0, stdout="0\n")
+
+    monkeypatch.setattr(sizing.subprocess, "run", fake_run)
+    row = _completed_row(
+        title="Ambiguous reviewed task",
+        uuid="task-review-zero",
+        claim_head="review-claim",
+        done_head="review-done",
+        done_upstream_head="review-base",
+        review_by="reviewer-agent",
+        review_finding="clean",
+    )
+
+    report = sizing.size_completed_task(row)
+    components = _components(report)
+
+    assert calls == ["review-base..review-done"]
+    assert components["commands"] == sizing.SizingComponent(
+        "commands", 0, "no_structured_command_signal"
     )
 
 
@@ -134,6 +193,11 @@ def _completed_row(
     depends: list[str] | None = None,
     flow: tuple[str, ...] = ("todo", "review"),
     acceptance: str = "",
+    claim_head: str = "",
+    done_head: str = "",
+    done_upstream_head: str = "",
+    review_author: str = "",
+    review_by: str = "",
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "uuid": uuid or f"uuid-{incepted}",
@@ -148,6 +212,11 @@ def _completed_row(
         "tags": tags or [],
         "depends": depends or [],
         "acceptance": acceptance,
+        "claim_head": claim_head,
+        "done_head": done_head,
+        "done_upstream_head": done_upstream_head,
+        "review_author": review_author,
+        "review_by": review_by,
     }
     for index, phase in enumerate(flow):
         row[f"phase_{index}"] = phase
