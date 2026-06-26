@@ -64,6 +64,7 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | Key | Default | Enforced opinion |
 | --- | --- | --- |
 | `package_roots` | `[]` | Python namespace-package roots. When set, `__init__.py` is forbidden under those roots and path names must match `^_*[0-9a-z]+_*$`. |
+| `name_cluster_threshold` | `4` | Number of sibling modules sharing a long alphabetic prefix or suffix before the name-cluster guard requires a namespace package. Configured values must be at least `3`. |
 | `exclude` | `[]` | Tracked paths or globs excluded from study walkers, useful for committed generated sources. Built-in exclusions already cover `.git`, `.spice`, caches, venvs, and `node_modules`. |
 | `repo_truth_docs` | `["AGENTS.md"]` | Doctrine docs capped at `5000` characters because they ride in agent context. |
 | `env_name_patterns` | `SPICE_*`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID` | Additional environment-variable literal patterns requiring `env-policy: allow` waivers. |

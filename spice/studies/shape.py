@@ -8,7 +8,9 @@ Python-package-specific; the rest of the constitution still applies.
 The name-cluster guard flags a run of sibling modules sharing a long prefix or
 suffix — a package hiding behind an affix. `name_cluster_error` computes it and
 is enforced as a blocking gate: `precommit._run_shape_guards` raises on any
-offender alongside the namespace and path-shape guards.
+offender alongside the namespace and path-shape guards. Repos can tune the
+number of sibling modules that trips this guard with
+`[tool.spice.policy].name_cluster_threshold`; unset repos use the default.
 """
 
 from __future__ import annotations
@@ -30,13 +32,14 @@ GENERIC_SPLIT_RES = (
     re.compile(r"\d+\.py$"),
 )
 ALLOWED_NON_SHAPE_FILES = frozenset({"__main__.py", "py.typed"})
-# Three or more sibling modules sharing a long prefix or suffix are a package
-# wearing an affix as a disguise. The limit is low and fixed — the third
-# sibling trips it — so the pressure stays toward a real namespace instead of
-# run-on names. No flex headroom: unlike file size, a name cluster is not a
-# throughput knob, so there is nothing to amortize.
-NAME_CLUSTER_THRESHOLD = 3
+# Four or more sibling modules sharing a long prefix or suffix are a package
+# wearing an affix as a disguise. Repos may tune the threshold, with 3 as the
+# minimum allowed value, but there is no flex headroom: unlike file size, a name
+# cluster is not a throughput knob, so there is nothing to amortize.
+MIN_NAME_CLUSTER_THRESHOLD = 3
+DEFAULT_NAME_CLUSTER_THRESHOLD = 4
 NAME_CLUSTER_MIN_AFFIX = 4
+NAME_CLUSTER_THRESHOLD_KEY = "name_cluster_threshold"
 
 
 def configured_package_roots(repo_root: Path) -> list[Path]:
@@ -47,6 +50,22 @@ def configured_package_roots(repo_root: Path) -> list[Path]:
     if not names:
         names = _derived_package_roots(repo_root)
     return [repo_root / name for name in names if (repo_root / name).is_dir()]
+
+
+def name_cluster_threshold(repo_root: Path) -> int:
+    raw = policy_table(repo_root).get(NAME_CLUSTER_THRESHOLD_KEY)
+    if raw is None:
+        return DEFAULT_NAME_CLUSTER_THRESHOLD
+    if (
+        isinstance(raw, bool)
+        or not isinstance(raw, int)
+        or raw < MIN_NAME_CLUSTER_THRESHOLD
+    ):
+        raise SpiceError(
+            "[tool.spice.policy].name_cluster_threshold must be an integer "
+            f">= {MIN_NAME_CLUSTER_THRESHOLD}"
+        )
+    return raw
 
 
 def _derived_package_roots(repo_root: Path) -> list[str]:
@@ -389,7 +408,7 @@ def _has_affix(stem: str, affix: str, *, suffix: bool) -> bool:
 
 
 def _name_cluster_candidates(
-    modules: tuple[Path, ...], *, suffix: bool
+    modules: tuple[Path, ...], *, suffix: bool, threshold: int
 ) -> list[tuple[str, tuple[Path, ...]]]:
     entries = [
         (_normalized_module_stem(path), path)
@@ -407,7 +426,7 @@ def _name_cluster_candidates(
         members = tuple(
             path for stem, path in entries if _has_affix(stem, affix, suffix=suffix)
         )
-        if len(members) >= NAME_CLUSTER_THRESHOLD:
+        if len(members) >= threshold:
             candidates.append((affix, members))
     # Keep the broadest cluster: a longer affix whose members are a subset of an
     # already-selected shorter one adds no new offender, only noise.
@@ -424,6 +443,7 @@ def _name_cluster_candidates(
 
 def name_cluster_errors(repo_root: Path) -> list[str]:
     offenders: list[str] = []
+    threshold = name_cluster_threshold(repo_root)
     for root in configured_package_roots(repo_root):
         modules_by_directory: dict[Path, list[Path]] = {}
         for path in sorted(root.rglob("*.py")):
@@ -437,7 +457,7 @@ def name_cluster_errors(repo_root: Path) -> list[str]:
         for directory, modules in sorted(modules_by_directory.items()):
             for suffix in (False, True):
                 for affix, members in _name_cluster_candidates(
-                    tuple(modules), suffix=suffix
+                    tuple(modules), suffix=suffix, threshold=threshold
                 ):
                     relative = directory.relative_to(repo_root).as_posix()
                     names = ", ".join(path.name for path in members)
