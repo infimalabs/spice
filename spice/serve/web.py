@@ -8,6 +8,7 @@ import mimetypes
 import tomllib
 from dataclasses import dataclass
 from http import HTTPStatus
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +71,19 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
 """
 
 
+def spice_runtime_version() -> str:
+    """Version of the installed spice runtime serving this UI.
+
+    Reads the active package metadata so the UI reports the running tool, not a
+    hard-coded or worktree-derived string. Empty when spice is run from a source
+    tree with no installed distribution.
+    """
+    try:
+        return metadata.version("spice-harness")
+    except metadata.PackageNotFoundError:
+        return ""
+
+
 def serve_branding(repo_root: Path | None = None) -> ServeBranding:
     data = _read_pyproject(repo_root) if repo_root else {}
     tool_spice = _table(data, "tool", "spice")
@@ -90,7 +104,11 @@ def render_index_html(
     brand_html = html.escape(resolved.name)
     brand_attr = html.escape(resolved.name, quote=True)
     brand_json = json.dumps(
-        {"name": resolved.name, "defaultLifetime": resolved.default_lifetime},
+        {
+            "name": resolved.name,
+            "defaultLifetime": resolved.default_lifetime,
+            "version": spice_runtime_version(),
+        },
         ensure_ascii=False,
     ).replace("</", "<\\/")
     return _INDEX_HTML_TEMPLATE.format(
