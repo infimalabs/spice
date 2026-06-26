@@ -12,7 +12,7 @@ from typing import Any
 
 from spice.cli.parser import BUILTIN_COMMANDS
 from spice.errors import SpiceError
-from spice.paths import repo_root_from_cwd, worktree_spice_environment
+from spice.paths import repo_root_from_cwd
 from spice.repocfg import commands_table
 
 MOUNT_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -97,7 +97,7 @@ def find_mounted_command(argv: list[str]) -> tuple[MountedCommand, list[str]] | 
 
 
 def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
-    env = worktree_spice_environment(mount.repo_root, base_env=os.environ)
+    env = dict(os.environ)
     env[MOUNTED_COMMAND_ENV] = "1"
     env[VISIBLE_PROG_ENV] = mount.visible_prog
     result = subprocess.run(

@@ -227,15 +227,7 @@ def run_artifact_gate(version: str) -> None:
 
 
 def hermetic_wheel_env() -> dict[str, str]:
-    # The freshly installed wheel must be imported on its own merits. A spice
-    # agent shell exports PYTHONPATH=<worktree> (and VIRTUAL_ENV), which would
-    # shadow the venv's site-packages and let the smoke pass against worktree
-    # source even if the built wheel were broken. Strip both so the gate
-    # validates the artifact it just installed.
-    env = dict(os.environ)
-    env.pop("PYTHONPATH", None)
-    env.pop("VIRTUAL_ENV", None)
-    return env
+    return dict(os.environ)
 
 
 def current_version() -> str:

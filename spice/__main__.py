@@ -2,7 +2,7 @@
 
 The uv tool console script points at ``spice.cli.entry:main``; this module keeps
 ``python -m spice`` equivalent inside whichever installed environment launched
-it.
+it, including detached supervisor respawns.
 """
 
 from spice.cli.entry import main
