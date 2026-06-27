@@ -159,9 +159,10 @@ authored-tree → study guards) and `dev commit-msg`. The opinions, exactly:
 - **Env policy** — literal env-var names in source require an
   `env-policy: allow` waiver comment on the literal line, as a standalone
   waiver comment directly above the statement, or anywhere inside the wrapped
-  statement that carries it. With the opt-in `env_presence_gate`, every
-  `os.environ`/`os.getenv` access site needs the same waiver too, so the audit
-  covers env reads under any or dynamic name, not just watchlisted literals.
+  statement that carries it. By default (`env_presence_gate`, opt out with
+  `false`) every `os.environ`/`os.getenv` access site needs the same waiver
+  too, so the audit covers env reads under any or dynamic name, not just
+  watchlisted literals.
 - **Fully-staged rule** — partially staged files fail the gate.
 - **No negative tests** — assert intended behavior, never absence or
   migration trails.

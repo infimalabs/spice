@@ -71,9 +71,6 @@ line-length = 88
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-[tool.spice.policy]
-env_presence_gate = true
-
 [tool.spice.agent]
 wrappers = ["common", "spice-dev"]
 
