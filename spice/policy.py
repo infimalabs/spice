@@ -144,6 +144,7 @@ ENV_ACCESS_FAMILY_SUFFIXES = {
 }
 ENV_ACCESS_DEFAULT_PATTERNS = {
     "python": (r"\bos\.(?:environ|getenv|putenv|unsetenv)\b",),  # env-policy: allow
+    "lua": (r"\bos\.getenv\b",),  # env-policy: allow
 }
 ENV_ACCESS_FINDING_NAMES = {
     "python": "os env access",
