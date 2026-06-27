@@ -140,6 +140,7 @@ ENV_ACCESS_FAMILY_SUFFIXES = {
     "csharp": (".cs",),
     "lua": (".lua",),
     "shell": (".bash", ".sh", ".zsh"),
+    "javascript": (".js", ".ts"),
 }
 SHELL_ENV_ACCESS_NAME_PATTERN = r"(?:[A-Za-z][A-Za-z0-9_]*|_[A-Za-z0-9_]+)"
 ENV_ACCESS_DEFAULT_PATTERNS = {
@@ -152,12 +153,16 @@ ENV_ACCESS_DEFAULT_PATTERNS = {
         rf"(?<!\\)\$(?:{SHELL_ENV_ACCESS_NAME_PATTERN}|\{{{SHELL_ENV_ACCESS_NAME_PATTERN}\}})",
         rf"\bexport\s+{SHELL_ENV_ACCESS_NAME_PATTERN}=",
     ),
+    # `\bprocess\.env\b` covers dot-access, bracket-access, bare reads, and
+    # destructuring (`const {X} = process.env`) in one idiom.
+    "javascript": (r"\bprocess\.env\b",),
 }
 ENV_ACCESS_FINDING_NAMES = {
     "python": "os env access",
     "csharp": "environment env access",
     "lua": "lua env access",
     "shell": "shell env access",
+    "javascript": "process.env access",
 }
 
 # --- language scope ------------------------------------------------------------
