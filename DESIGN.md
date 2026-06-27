@@ -155,11 +155,12 @@ authored-tree → study guards) and `dev commit-msg`. The opinions, exactly:
   regressions fail.
 - **Reachability** — test-only code is a provider-backed gate, not a
   Python-only hook concern. The built-in `python` provider uses the AST/import
-  graph for package modules; target repos wire C#, JavaScript, Lua, or other
-  language analyzers through `[tool.spice.policy].reachability_providers`.
+  graph for package modules and symbols; target repos wire C#, JavaScript, Lua,
+  or other language analyzers through `[tool.spice.policy].reachability_providers`.
   Providers emit normalized `kind` / `subject` / `path` / `imported_by`
-  findings, and spice owns the unified board plus `gate:reachability`
-  enforcement.
+  findings; the `kind` routes each finding by granularity — `module` to
+  `gate:reachability`, every other (symbol) kind to `gate:symbol-reachability` —
+  so both gates are polyglot through one seam and no finding is gated twice.
 - **Commit messages** — subject ≤ 100 chars; body auto-folded at 100;
   literal `\n` rejected; URLs and allowed trailers exempt; Co-Authored-By is
   rejected.

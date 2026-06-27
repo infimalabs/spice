@@ -79,6 +79,12 @@ PYTHON_PROVIDER = "python"
 REACHABILITY_PROVIDERS_KEY = "reachability_providers"
 STAGED_PATHS_ENV = "SPICE_STAGED_PATHS"  # env-policy: allow
 
+# Both reachability gates share one provider seam; a finding's ``kind`` routes it
+# to exactly one gate by granularity. ``module`` is the coarse, whole-file gate;
+# every other kind (function, class, method, ...) is a symbol and rides the
+# finer symbol-reachability gate. No finding is counted by both.
+MODULE_KIND = "module"
+
 
 @dataclass(frozen=True)
 class ReachabilityFinding:
@@ -86,7 +92,7 @@ class ReachabilityFinding:
     path: str
     only_test_imports: list[str]
     provider: str = PYTHON_PROVIDER
-    kind: str = "module"
+    kind: str = MODULE_KIND
 
 
 @dataclass(frozen=True)
@@ -96,6 +102,7 @@ class SymbolReachabilityFinding:
     symbol: str
     kind: str
     only_test_imports: list[str]
+    provider: str = PYTHON_PROVIDER
 
 
 @dataclass(frozen=True)
@@ -161,6 +168,7 @@ def scan_reachability(
         findings.extend(
             _provider_named_finding(provider_name, finding)
             for finding in provider.scan(request)
+            if finding.kind == MODULE_KIND
         )
     return sorted(findings, key=lambda f: (f.provider, f.path, f.kind, f.subject))
 
@@ -445,6 +453,68 @@ def scan_symbol_reachability(
     package: str = "spice",
     test_root: str = "tests",
     allowlist: Sequence[str] = SYMBOL_REACHABILITY_ALLOWLIST,
+    staged_paths: Sequence[Path] | None = None,
+    providers: Sequence[ReachabilityProvider] | None = None,
+) -> list[SymbolReachabilityFinding]:
+    """Return test-only symbols, polyglot through the shared provider seam.
+
+    The built-in Python AST scan supplies Python symbols; configured providers
+    contribute their symbol (non-``module``) findings via the same
+    ``reachability_providers`` registry the module gate uses. A provider's
+    ``module`` findings belong to the coarse reachability gate and are excluded
+    here, so no finding is gated twice.
+    """
+    findings = _scan_python_symbol_reachability(
+        repo_root, package=package, test_root=test_root, allowlist=allowlist
+    )
+    request = ReachabilityScanRequest(
+        repo_root=repo_root,
+        package=package,
+        test_root=test_root,
+        allowlist=tuple(allowlist),
+    )
+    active_providers = (
+        list(providers)
+        if providers is not None
+        else reachability_provider_registry(repo_root, staged_paths=staged_paths)
+    )
+    for provider in active_providers:
+        if provider.name == PYTHON_PROVIDER:
+            continue
+        provider_name = _provider_name(provider.name)
+        findings.extend(
+            _symbol_finding_from_reachability(provider_name, finding)
+            for finding in provider.scan(request)
+            if finding.kind != MODULE_KIND
+        )
+    return sorted(findings, key=lambda f: (f.provider, f.module, f.symbol, f.kind))
+
+
+def _symbol_finding_from_reachability(
+    provider_name: str, finding: ReachabilityFinding
+) -> SymbolReachabilityFinding:
+    """Normalize a provider's symbol finding onto the symbol-reachability board.
+
+    The fully-qualified ``subject`` (e.g. ``Game.Enemy.UnusedTick``) splits into
+    a module and a leaf symbol; a bare subject keeps an empty module.
+    """
+    module, _, symbol = finding.subject.rpartition(".")
+    return SymbolReachabilityFinding(
+        module=module,
+        module_path=finding.path,
+        symbol=symbol or finding.subject,
+        kind=finding.kind,
+        only_test_imports=list(finding.only_test_imports),
+        provider=provider_name,
+    )
+
+
+def _scan_python_symbol_reachability(
+    repo_root: Path,
+    *,
+    package: str,
+    test_root: str,
+    allowlist: Sequence[str],
 ) -> list[SymbolReachabilityFinding]:
     """Return production-module symbols reachable from tests but not production."""
     pkg_root = repo_root / package
@@ -547,6 +617,7 @@ def render_symbol_reachability_board(
     )
     for f in shown:
         rows.append(f"  {f.module_path}:{f.symbol}")
+        rows.append(f"    provider: {f.provider}")
         rows.append(f"    symbol: {f.module}.{f.symbol} ({f.kind})")
         if f.only_test_imports:
             rows.append(f"    imported by: {', '.join(f.only_test_imports)}")

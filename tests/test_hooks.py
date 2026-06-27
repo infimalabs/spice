@@ -330,13 +330,48 @@ def test_symbol_reachability_guard_fails_on_any_finding(tmp_path):
     assert "zero test-only symbols are allowed" in message
 
 
-def test_reachability_guard_fails_on_configured_provider_finding(tmp_path):
+def test_reachability_guard_fails_on_configured_module_provider_finding(tmp_path):
+    provider = tmp_path / "js_provider.py"
+    payload = json.dumps(
+        [
+            {
+                "kind": "module",
+                "subject": "web.dead_widget",
+                "path": "web/src/dead_widget.js",
+                "imported_by": ["web/test/dead_widget.test.js"],
+            }
+        ]
+    )
+    provider.write_text(f"print({payload!r})\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        "reachability_providers = [\n"
+        '  { name = "javascript", '
+        f"run = {json.dumps([sys.executable, str(provider)])}, "
+        'when = ["web/**/*.js"] },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        precommit._run_reachability_guard(tmp_path, [Path("web/src/dead_widget.js")])
+
+    message = str(exc_info.value)
+    assert "reachability: 1 test-only finding(s)" in message
+    assert "provider: javascript" in message
+    assert "subject: web.dead_widget" in message
+    assert "zero are allowed - wire each in or delete-both" in message
+
+
+def test_symbol_reachability_guard_fails_on_configured_symbol_provider_finding(
+    tmp_path,
+):
     provider = tmp_path / "js_provider.py"
     payload = json.dumps(
         [
             {
                 "kind": "function",
-                "subject": "unusedRender",
+                "subject": "render.unusedRender",
                 "path": "web/src/render.js",
                 "imported_by": ["web/test/render.test.js"],
             }
@@ -353,14 +388,15 @@ def test_reachability_guard_fails_on_configured_provider_finding(tmp_path):
         encoding="utf-8",
     )
 
+    # A symbol-kind provider finding routes to the finer symbol-reachability gate.
     with pytest.raises(SpiceError) as exc_info:
-        precommit._run_reachability_guard(tmp_path, [Path("web/src/render.js")])
+        precommit._run_symbol_reachability_guard(tmp_path, [Path("web/src/render.js")])
 
     message = str(exc_info.value)
-    assert "reachability: 1 test-only finding(s)" in message
+    assert "symbol-reachability: 1 test-only symbol(s)" in message
     assert "provider: javascript" in message
-    assert "subject: unusedRender" in message
-    assert "zero are allowed - wire each in or delete-both" in message
+    assert "web/src/render.js:unusedRender" in message
+    assert "zero test-only symbols are allowed" in message
 
 
 def test_symbol_reachability_guard_allows_clean_repo(tmp_path):
@@ -600,7 +636,7 @@ def test_policy_exclude_filters_path_based_builtin_gate_steps(tmp_path, monkeypa
         precommit, "_run_reachability_guard", lambda repo_root, paths=None: None
     )
     monkeypatch.setattr(
-        precommit, "_run_symbol_reachability_guard", lambda repo_root: None
+        precommit, "_run_symbol_reachability_guard", lambda repo_root, paths=None: None
     )
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None
@@ -1013,7 +1049,7 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
     monkeypatch.setattr(
         precommit,
         "_run_symbol_reachability_guard",
-        lambda repo_root: record("symbol reachability"),
+        lambda repo_root, paths=None: record("symbol reachability"),
     )
     monkeypatch.setattr(
         precommit,
@@ -1058,7 +1094,7 @@ def _patch_pre_commit_builtin_noops_except_local_paths(tmp_path, monkeypatch) ->
         precommit, "_run_reachability_guard", lambda repo_root, paths=None: None
     )
     monkeypatch.setattr(
-        precommit, "_run_symbol_reachability_guard", lambda repo_root: None
+        precommit, "_run_symbol_reachability_guard", lambda repo_root, paths=None: None
     )
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None
@@ -1094,7 +1130,7 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
         precommit, "_run_reachability_guard", lambda repo_root, paths=None: None
     )
     monkeypatch.setattr(
-        precommit, "_run_symbol_reachability_guard", lambda repo_root: None
+        precommit, "_run_symbol_reachability_guard", lambda repo_root, paths=None: None
     )
     monkeypatch.setattr(
         precommit, "_run_assertion_free_test_guard", lambda repo_root: None

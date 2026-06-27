@@ -469,14 +469,15 @@ disabled or replaced in tracked policy. `pre_commit_success` uses the same
 command shape as `pre_commit`, but runs only after the whole gate has passed,
 alongside sticky state cleanup.
 
-Reachability is provider-backed. The built-in `python` provider gates modules
-that tests can import but production roots cannot, while
-`[tool.spice.policy].reachability_providers` lets a repo wire C#, JavaScript,
-Lua, or other analyzers into the same board and `gate:reachability`. The
-explicit `spice study symbol-reachability` command is the finer-grained Python
-study for functions, classes, and methods inside production-reachable modules.
-Reachability findings are zero-tolerance pre-commit failures, so exhaust must
-be wired into production or deleted with its tests.
+Reachability is provider-backed across two granularities sharing one seam. The
+built-in `python` provider gates whole modules that tests can import but
+production roots cannot, and — at function/class/method granularity — symbols
+inside production-reachable modules. `[tool.spice.policy].reachability_providers`
+lets a repo wire C#, JavaScript, Lua, or other analyzers into the same boards: a
+finding's `kind` routes it to `gate:reachability` (`module`) or
+`gate:symbol-reachability` (any symbol kind), so both gates are polyglot and no
+finding is gated twice. Reachability findings are zero-tolerance pre-commit
+failures, so exhaust must be wired into production or deleted with its tests.
 
 Mutation testing is available as an explicit study, not a default pre-commit
 cost:

@@ -99,9 +99,15 @@ Reachability provider tables accept:
 
 | Key | Meaning |
 | --- | --- |
-| `name` | Provider name shown on the unified reachability board. Must not be `python`, which is the built-in AST/import-graph provider. |
+| `name` | Provider name shown on the reachability board. Must not be `python`, which is the built-in AST/import-graph provider. |
 | `run` | Non-empty argv list executed from the repo root. |
 | `when` | Optional non-empty glob list matched against staged paths by the pre-commit gate. If omitted, the provider runs whenever reachability runs. |
+
+The same provider seam feeds both reachability gates; a finding's `kind` routes
+it to exactly one gate by granularity. `module` is the coarse whole-file gate
+(`gate:reachability`); every other kind (`function`, `class`, `method`, …) is a
+symbol and rides the finer `gate:symbol-reachability`. A single provider may
+emit both kinds in one run; no finding is counted by both gates.
 
 ```toml
 [tool.spice.policy]
@@ -113,10 +119,17 @@ reachability_providers = [
 ```
 
 Provider commands write a JSON list to stdout. Each finding is normalized onto
-the reachability board and enforced by `gate:reachability`:
+the matching reachability board by its `kind` (`subject` is the fully-qualified
+name; for a symbol it splits into module and leaf):
 
 ```json
 [
+  {
+    "kind": "module",
+    "subject": "Game.DeadScene",
+    "path": "src/Game/DeadScene.cs",
+    "imported_by": ["tests/Game/DeadSceneTests.cs"]
+  },
   {
     "kind": "method",
     "subject": "Game.Enemy.UnusedTick",
