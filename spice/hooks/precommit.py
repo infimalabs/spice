@@ -11,7 +11,8 @@ attempt reports the whole picture:
 5. serve web typecheck — static browser JavaScript must pass TypeScript
    `checkJs`;
 6. python typecheck — the project's own package roots must pass `pyright`;
-7. env policy — undeclared environment literals;
+7. env policy — undeclared environment literals (and, when
+   `env_presence_gate` is on, undeclared env-access sites);
 8. shape pressure — file LOC/bytes, routine complexity, magic-number
    regressions, all against staged paths with flex + sticky semantics.
 
