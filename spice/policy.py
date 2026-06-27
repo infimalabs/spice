@@ -58,7 +58,8 @@ BOUNDARY_UNDERSCORE_PATTERN = r"^_*[0-9a-z]+_*$"
 # drains.
 #
 # Test-only findings: code reachable from tests but not from production roots.
-# The reachability provider board is clean, so this gate is zero-tolerance.
+# Held at zero: every test-only finding must be wired into production or deleted
+# with its tests; `spice study reachability --create-tasks` files that decision.
 REACHABILITY_TEST_ONLY_LIMIT = 0
 
 # Assertion-free tests: test functions that do not appear to constrain behavior
@@ -126,6 +127,29 @@ ENV_POLICY_DEFAULT_NAME_PATTERNS = (  # env-policy: allow
     r"CLAUDE_CODE_SESSION_ID",  # env-policy: allow
 )
 ENV_POLICY_SELF_PATH_SUFFIX = "studies/envpolicy.py"
+
+# Presence reverse-gate language families. The reverse-gate audits env *access
+# sites* (not just literal names), and the access idiom differs per language, so
+# matchers are scoped by suffix family: a shell `$VAR` pattern must never run
+# against `.cs`/`.js`. Built-in defaults below cover the standard idioms; a repo
+# registers its own or additional idioms per family with
+# `[tool.spice.policy] env_access_patterns` (e.g. a project's bespoke Lua
+# runtime accessors), never having to fork the study.
+ENV_ACCESS_FAMILY_SUFFIXES = {
+    "python": (".py",),
+    "csharp": (".cs",),
+    "lua": (".lua",),
+    "shell": (".bash", ".sh", ".zsh"),
+}
+ENV_ACCESS_DEFAULT_PATTERNS = {
+    "python": (r"\bos\.(?:environ|getenv|putenv|unsetenv)\b",),  # env-policy: allow
+}
+ENV_ACCESS_FINDING_NAMES = {
+    "python": "os env access",
+    "csharp": "environment env access",
+    "lua": "lua env access",
+    "shell": "shell env access",
+}
 
 # --- language scope ------------------------------------------------------------
 # spice gates repositories in any language; nothing here is Python-only.

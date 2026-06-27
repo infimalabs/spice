@@ -360,7 +360,7 @@ def test_reachability_guard_fails_on_configured_provider_finding(tmp_path):
     assert "reachability: 1 test-only finding(s)" in message
     assert "provider: javascript" in message
     assert "subject: unusedRender" in message
-    assert "zero test-only findings are allowed" in message
+    assert "zero are allowed - wire each in or delete-both" in message
 
 
 def test_symbol_reachability_guard_allows_clean_repo(tmp_path):
