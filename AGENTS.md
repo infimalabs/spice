@@ -51,7 +51,10 @@ rules apply to the agents working here.
 ## Code health
 
 - The pre-commit gate is the constitution; never bypass it. Fix exactly what
-  it reports.
+  it reports. Run it via `git commit` (which fires the hook) or
+  `spice dev pre-commit` for the staged gate — never `pre-commit` standalone or
+  `uv run pre-commit`; the standalone pre-commit framework is not installed and
+  is not how spice runs the gate.
 - Do not add negative tests or negative assertions.
 - Keep driving while progress is real; when outcomes oscillate, instrument
   instead of endlessly tuning.
