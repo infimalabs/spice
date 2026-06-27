@@ -899,13 +899,26 @@ def test_env_policy_wrapped_statement_marker_waives_wrapped_literal(tmp_path):
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
 
 
-def test_env_presence_gate_off_by_default_ignores_env_access(tmp_path):
+def test_env_presence_gate_on_by_default_flags_env_access(tmp_path):
     path = tmp_path / "sample.py"
-    path.write_text(
-        'value = os.getenv("HOME")\n', encoding="utf-8"
-    )  # env-policy: allow
+    # env-policy: allow
+    path.write_text('value = os.getenv("HOME")\n', encoding="utf-8")
 
-    # With no env_presence_gate flag, a non-watchlisted env read is invisible.
+    # With no config the presence gate is on: a non-watchlisted env read is
+    # flagged unless waived.
+    findings = scan_env_policy([Path("sample.py")], root=tmp_path)
+    assert [(f.line, f.name) for f in findings] == [(1, "os env access")]
+
+
+def test_env_presence_gate_opt_out_disables_access_findings(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\nenv_presence_gate = false\n", encoding="utf-8"
+    )
+    path = tmp_path / "sample.py"
+    # env-policy: allow
+    path.write_text('value = os.getenv("HOME")\n', encoding="utf-8")
+
+    # Opting out weakens the gate: the non-watchlisted read is no longer flagged.
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
 
 

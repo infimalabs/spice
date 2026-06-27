@@ -6,11 +6,11 @@ standalone, `env-policy: allow` waiver comment. The point is an auditable
 inventory: grep the waiver to see every place the environment shapes behavior.
 
 The watchlist only sees env reads whose literal name matches a declared
-pattern. A repo that wants the inventory to cover *every* env read — including
-reads under non-watchlisted or dynamic names — opts into the presence reverse-
-gate with `[tool.spice.policy] env_presence_gate = true`, which then requires a
-waiver on every `os.environ` / `os.getenv` access site too. It is off by
-default so installing into a target repo does not retroactively demand waivers.
+pattern. The presence reverse-gate closes that gap: the inventory covers
+*every* env read — including reads under non-watchlisted or dynamic names — by
+requiring a waiver on every `os.environ` / `os.getenv` access site too. It is
+on by default (the strongest audit with no configuration); a repo opts *out*
+with `[tool.spice.policy] env_presence_gate = false`.
 
 Library seam: target-repo tools may import the public finding dataclass,
 pattern/matcher helpers, scan helper, and `render_env_policy_board`;
@@ -193,11 +193,11 @@ def _delimiter_delta(line: str) -> int:
 def env_presence_gate_enabled(repo_root: Path) -> bool:
     """Whether the env-access presence reverse-gate is on for this repo.
 
-    Off by default so a repo that `spice init` installs into is not suddenly
-    required to waive every `os.environ` read; a repo opts in with
-    `[tool.spice.policy] env_presence_gate = true`.
+    On by default — the strongest audit is the default, with no configuration.
+    A repo opts *out* with `[tool.spice.policy] env_presence_gate = false` if it
+    is not ready to waive every `os.environ`/`os.getenv` access site.
     """
-    value = policy_table(repo_root).get("env_presence_gate", False)
+    value = policy_table(repo_root).get("env_presence_gate", True)
     if not isinstance(value, bool):
         raise SpiceError(
             "[tool.spice.policy] env_presence_gate must be a boolean (true/false)"
