@@ -462,20 +462,21 @@ formatters = false
 Built-in pre-commit keys are `repo-shape`, `staging`, `repo-docs`,
 `formatters`, `local-paths`, `serve-web-typecheck`, `python-typecheck`,
 `env-policy`, `file-shape`, `complexity`, `magic-numbers`, `reachability`,
-and `assertion-free-tests`. The `serve-web-typecheck` key no-ops in repos
-without the serve static sources it gates. They run before
-extension steps unless an individual built-in is disabled or replaced in
-tracked policy. `pre_commit_success` uses the same command shape as
-`pre_commit`, but runs only after the whole gate has passed, alongside sticky
-state cleanup.
+`symbol-reachability`, `assertion-free-tests`, and `private-internals`. The
+`serve-web-typecheck` key no-ops in repos without the serve static sources it
+gates. They run before extension steps unless an individual built-in is
+disabled or replaced in tracked policy. `pre_commit_success` uses the same
+command shape as `pre_commit`, but runs only after the whole gate has passed,
+alongside sticky state cleanup.
 
-Reachability has two lanes. The pre-commit `reachability` key gates whole
-modules that tests can import but production roots cannot. The explicit
-`spice study symbol-reachability` command is the finer-grained study for
-functions, classes, and methods inside production-reachable modules. This repo
-does not use a
-grandfathered symbol limit: symbol findings are a zero-tolerance pre-commit
-failure, so new exhaust must be wired into production or deleted with its tests.
+Reachability is provider-backed. The built-in `python` provider gates modules
+that tests can import but production roots cannot, while
+`[tool.spice.policy].reachability_providers` lets a repo wire C#, JavaScript,
+Lua, or other analyzers into the same board and `gate:reachability`. The
+explicit `spice study symbol-reachability` command is the finer-grained Python
+study for functions, classes, and methods inside production-reachable modules.
+Reachability findings are zero-tolerance pre-commit failures, so exhaust must
+be wired into production or deleted with its tests.
 
 Mutation testing is available as an explicit study, not a default pre-commit
 cost:
