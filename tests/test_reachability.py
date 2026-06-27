@@ -41,10 +41,10 @@ def test_reachability_registry_dispatches_explicit_provider(tmp_path):
         return [
             ReachabilityFinding(
                 provider="ignored",
-                kind="method",
-                subject="Game.Enemy.UnusedTick",
-                path="src/Game/Enemy.cs",
-                only_test_imports=["tests/Game/EnemyTests.cs"],
+                kind="module",
+                subject="Game.DeadScene",
+                path="src/Game/DeadScene.cs",
+                only_test_imports=["tests/Game/DeadSceneTests.cs"],
             )
         ]
 
@@ -54,26 +54,112 @@ def test_reachability_registry_dispatches_explicit_provider(tmp_path):
         providers=[ReachabilityProvider(name="csharp", scan=scan)],
     )
 
+    # The coarse reachability gate carries only module-kind provider findings.
     assert [
         (f.provider, f.kind, f.subject, f.path, f.only_test_imports) for f in findings
     ] == [
         (
             "csharp",
+            "module",
+            "Game.DeadScene",
+            "src/Game/DeadScene.cs",
+            ["tests/Game/DeadSceneTests.cs"],
+        )
+    ]
+
+
+def test_reachability_partitions_provider_kinds_by_gate(tmp_path):
+    """A provider's findings route to exactly one gate by granularity: module
+    kind to reachability, every other (symbol) kind to symbol-reachability."""
+
+    def scan(request):
+        return [
+            ReachabilityFinding(
+                provider="ignored",
+                kind="module",
+                subject="Game.DeadScene",
+                path="src/Game/DeadScene.cs",
+                only_test_imports=["tests/Game/DeadSceneTests.cs"],
+            ),
+            ReachabilityFinding(
+                provider="ignored",
+                kind="method",
+                subject="Game.Enemy.UnusedTick",
+                path="src/Game/Enemy.cs",
+                only_test_imports=["tests/Game/EnemyTests.cs"],
+            ),
+        ]
+
+    provider = ReachabilityProvider(name="csharp", scan=scan)
+
+    module_findings = scan_reachability(tmp_path, package="pkg", providers=[provider])
+    symbol_findings = scan_symbol_reachability(
+        tmp_path, package="pkg", providers=[provider]
+    )
+
+    assert [(f.kind, f.subject) for f in module_findings] == [
+        ("module", "Game.DeadScene")
+    ]
+    assert [
+        (f.provider, f.kind, f.module, f.symbol, f.module_path, f.only_test_imports)
+        for f in symbol_findings
+    ] == [
+        (
+            "csharp",
             "method",
-            "Game.Enemy.UnusedTick",
+            "Game.Enemy",
+            "UnusedTick",
             "src/Game/Enemy.cs",
             ["tests/Game/EnemyTests.cs"],
         )
     ]
 
 
-def test_reachability_config_provider_reports_findings(tmp_path):
+def test_reachability_config_provider_reports_module_finding(tmp_path):
+    provider = tmp_path / "lua_provider.py"
+    payload = json.dumps(
+        [
+            {
+                "kind": "module",
+                "subject": "player.dead_scene",
+                "path": "src/dead_scene.lua",
+                "imported_by": ["tests/dead_scene_spec.lua"],
+            }
+        ]
+    )
+    provider.write_text(f"print({payload!r})\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        "reachability_providers = [\n"
+        '  { name = "lua", '
+        f"run = {json.dumps([sys.executable, str(provider)])}, "
+        'when = ["src/*.lua"] },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+
+    findings = scan_reachability(tmp_path, staged_paths=[Path("src/dead_scene.lua")])
+
+    assert [
+        (f.provider, f.kind, f.subject, f.path, f.only_test_imports) for f in findings
+    ] == [
+        (
+            "lua",
+            "module",
+            "player.dead_scene",
+            "src/dead_scene.lua",
+            ["tests/dead_scene_spec.lua"],
+        )
+    ]
+
+
+def test_symbol_reachability_config_provider_reports_symbol_finding(tmp_path):
     provider = tmp_path / "lua_provider.py"
     payload = json.dumps(
         [
             {
                 "kind": "function",
-                "subject": "player_unused_update",
+                "subject": "player.player_unused_update",
                 "path": "src/player.lua",
                 "imported_by": ["tests/player_spec.lua"],
             }
@@ -90,14 +176,17 @@ def test_reachability_config_provider_reports_findings(tmp_path):
         encoding="utf-8",
     )
 
-    findings = scan_reachability(tmp_path, staged_paths=[Path("src/player.lua")])
+    findings = scan_symbol_reachability(tmp_path, staged_paths=[Path("src/player.lua")])
 
+    # A symbol-kind config provider routes to the finer symbol-reachability gate.
     assert [
-        (f.provider, f.kind, f.subject, f.path, f.only_test_imports) for f in findings
+        (f.provider, f.kind, f.module, f.symbol, f.module_path, f.only_test_imports)
+        for f in findings
     ] == [
         (
             "lua",
             "function",
+            "player",
             "player_unused_update",
             "src/player.lua",
             ["tests/player_spec.lua"],

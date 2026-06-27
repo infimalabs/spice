@@ -197,7 +197,7 @@ def _builtin_pre_commit_steps(
         PreCommitStep(
             "symbol-reachability",
             "symbol reachability",
-            lambda: _run_symbol_reachability_guard(repo_root),
+            lambda: _run_symbol_reachability_guard(repo_root, paths),
         ),
         PreCommitStep(
             "assertion-free-tests",
@@ -636,8 +636,10 @@ def _run_reachability_guard(repo_root: Path, paths: list[Path] | None = None) ->
         )
 
 
-def _run_symbol_reachability_guard(repo_root: Path) -> None:
-    findings = reachability.scan_symbol_reachability(repo_root)
+def _run_symbol_reachability_guard(
+    repo_root: Path, paths: list[Path] | None = None
+) -> None:
+    findings = reachability.scan_symbol_reachability(repo_root, staged_paths=paths)
     if findings:
         board = "\n".join(reachability.render_symbol_reachability_board(findings))
         raise SpiceError(
