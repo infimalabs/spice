@@ -146,6 +146,7 @@ ENV_ACCESS_DEFAULT_PATTERNS = {
     "csharp": (
         r"\b(?:System\.)?Environment\.(?:GetEnvironmentVariable|SetEnvironmentVariable)\b",
     ),
+    "lua": (r"\bos\.getenv\b",),  # env-policy: allow
 }
 ENV_ACCESS_FINDING_NAMES = {
     "python": "os env access",

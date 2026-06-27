@@ -1084,3 +1084,36 @@ def test_env_access_patterns_non_table_raises(tmp_path):
 
     with pytest.raises(SpiceError, match="env_access_patterns must be a table"):
         scan_env_policy([Path("sample.py")], root=tmp_path)
+
+
+def test_env_presence_gate_flags_lua_os_getenv_by_default(tmp_path):
+    path = tmp_path / "config.lua"
+    path.write_text(
+        "local home = os.getenv('HOME')\nlocal ok = os.getenv('OK')  -- env-policy: allow\n",
+        encoding="utf-8",
+    )
+
+    # The Lua stdlib idiom is audited with no config; the waived read clears.
+    findings = scan_env_policy([Path("config.lua")], root=tmp_path)
+    assert [(f.line, f.name) for f in findings] == [(1, "lua env access")]
+
+
+def test_env_access_patterns_registers_lua_colon_accessor(tmp_path):
+    # The consuming project's bespoke runtime accessor is method-style and not a
+    # universal idiom, so it is registered via config, scoped to Lua.
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy.env_access_patterns]\nlua = ['\\w+:GetEnv\\(']\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "runtime.lua").write_text(
+        "local v = engine:GetEnv('LEVEL')\n", encoding="utf-8"
+    )
+    # The very same accessor text in a non-Lua source must NOT be flagged: the
+    # registered pattern is scoped to Lua's suffixes only.
+    (tmp_path / "sample.py").write_text(
+        "v = engine:GetEnv('LEVEL')\n", encoding="utf-8"
+    )
+
+    lua_findings = scan_env_policy([Path("runtime.lua")], root=tmp_path)
+    assert [(f.line, f.name) for f in lua_findings] == [(1, "lua env access")]
+    assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
