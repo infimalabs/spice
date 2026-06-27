@@ -851,7 +851,10 @@ def test_zsh_login_hook_reexec_restores_across_startup_files(tmp_path):
         ),
     }
 
-    subprocess.run([zsh, "-lc", "sleep 0.1"], check=True, env=env, timeout=2)
+    # Edge-triggered on the login shell's own exit: the reexec `exec`s the real
+    # shell, so when the process returns the startup-file trace is complete.
+    # No timeout deadline (load-sensitive) and no in-shell sleep are needed.
+    subprocess.run([zsh, "-lc", ":"], check=True, env=env)
 
     lines = _trace_lines(trace, expected_prefix="real:")
     assert lines[0].startswith("fake:unset:unset:-m spice agent run --")
