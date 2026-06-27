@@ -141,12 +141,17 @@ ENV_ACCESS_FAMILY_SUFFIXES = {
     "lua": (".lua",),
     "shell": (".bash", ".sh", ".zsh"),
 }
+SHELL_ENV_ACCESS_NAME_PATTERN = r"(?:[A-Za-z][A-Za-z0-9_]*|_[A-Za-z0-9_]+)"
 ENV_ACCESS_DEFAULT_PATTERNS = {
     "python": (r"\bos\.(?:environ|getenv|putenv|unsetenv)\b",),  # env-policy: allow
     "csharp": (
         r"\b(?:System\.)?Environment\.(?:GetEnvironmentVariable|SetEnvironmentVariable)\b",
     ),
     "lua": (r"\bos\.getenv\b",),  # env-policy: allow
+    "shell": (
+        rf"(?<!\\)\$(?:{SHELL_ENV_ACCESS_NAME_PATTERN}|\{{{SHELL_ENV_ACCESS_NAME_PATTERN}\}})",
+        rf"\bexport\s+{SHELL_ENV_ACCESS_NAME_PATTERN}=",
+    ),
 }
 ENV_ACCESS_FINDING_NAMES = {
     "python": "os env access",

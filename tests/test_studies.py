@@ -1035,6 +1035,54 @@ def test_env_presence_gate_ignores_non_env_csharp_system_calls(tmp_path):
     assert scan_env_policy([Path("Sample.cs")], root=tmp_path) == []
 
 
+def test_env_presence_gate_flags_builtin_shell_env_accesses(tmp_path):
+    path = tmp_path / "run.sh"
+    path.write_text(
+        'echo "$HOME"\nprintf "%s\\n" "${CONFIG_DIR}"\nexport APP_MODE=debug\n',
+        encoding="utf-8",
+    )
+
+    findings = scan_env_policy([Path("run.sh")], root=tmp_path)
+
+    assert [(f.line, f.name) for f in findings] == [
+        (1, "shell env access"),
+        (2, "shell env access"),
+        (3, "shell env access"),
+    ]
+
+
+def test_env_presence_gate_builtin_shell_access_respects_waiver(tmp_path):
+    path = tmp_path / "run.zsh"
+    path.write_text(
+        'echo "$SPICE_TASK_ID" # env-policy: allow\n',
+        encoding="utf-8",
+    )
+
+    assert scan_env_policy([Path("run.zsh")], root=tmp_path) == []
+
+
+def test_env_presence_gate_shell_matchers_are_shell_scoped(tmp_path):
+    (tmp_path / "sample.js").write_text(
+        'const rendered = `${HOME}`;\nconst literal = "$APP_MODE";\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "run.bash").write_text('echo "$APP_MODE"\n', encoding="utf-8")
+
+    assert scan_env_policy([Path("sample.js")], root=tmp_path) == []
+    sh_findings = scan_env_policy([Path("run.bash")], root=tmp_path)
+    assert [(f.line, f.name) for f in sh_findings] == [(1, "shell env access")]
+
+
+def test_env_presence_gate_ignores_shell_special_parameters(tmp_path):
+    path = tmp_path / "run.sh"
+    path.write_text(
+        'echo "$? $$ $1 $@ $* $# $- $_ ${_}"\n',
+        encoding="utf-8",
+    )
+
+    assert scan_env_policy([Path("run.sh")], root=tmp_path) == []
+
+
 def test_env_access_matchers_are_family_scoped(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         "[tool.spice.policy.env_access_patterns]\nshell = ['\\$[A-Z_]+']\n",

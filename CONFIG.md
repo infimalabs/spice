@@ -68,12 +68,16 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `exclude` | `[]` | Tracked paths or globs excluded from study walkers, useful for committed generated sources. Built-in exclusions already cover `.git`, `.spice`, caches, venvs, and `node_modules`. |
 | `repo_truth_docs` | `["AGENTS.md"]` | Doctrine docs capped at `5000` characters because they ride in agent context. |
 | `env_name_patterns` | `SPICE_*`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID` | Additional environment-variable literal patterns requiring `env-policy: allow` waivers. |
-| `env_presence_gate` | `true` | Presence reverse-gate (on by default): every env *access site* (not just watchlisted name literals) must carry an `env-policy: allow` waiver, so the audit covers env reads under any or dynamic names. Access idioms are matched per language family (built-in Python `os.environ`/`getenv`/`putenv`/`unsetenv`; C# `Environment.GetEnvironmentVariable`/`SetEnvironmentVariable`, with optional `System.`; Lua `os.getenv`). Set `false` to opt out. |
+| `env_presence_gate` | `true` | Presence reverse-gate (on by default): every env *access site* (not just watchlisted name literals) must carry an `env-policy: allow` waiver, so the audit covers env reads under any or dynamic names. Access idioms are matched per language family (built-in Python `os.environ`/`getenv`/`putenv`/`unsetenv`; C# `Environment.GetEnvironmentVariable`/`SetEnvironmentVariable`, with optional `System.`; Lua `os.getenv`; shell `$VAR`, `${VAR}`, and `export VAR=`). Set `false` to opt out. |
 | `env_access_patterns` | `{}` | Table keyed by language family (`python`, `csharp`, `lua`, `shell`) of extra access-idiom regexes for the presence gate, scoped to that family's suffixes — register a repo's own idioms (e.g. bespoke Lua runtime accessors) without forking the study. |
 | `reachability_providers` | `[]` | Extra language-aware dead-code providers for `spice study reachability` and `gate:reachability`. |
 | `pre_commit` | `[]` | Extra command steps run after built-ins. Entries are mounted command names or command tables. |
 | `pre_commit_success` | `[]` | Command steps run only after the full gate passes. |
 | `pre_commit_builtins` | built-ins enabled | Per-built-in overrides for `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `serve-web-typecheck`, `python-typecheck`, `env-policy`, `file-shape`, `complexity`, `magic-numbers`, `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals`. |
+
+Shell env-access patterns intentionally cover name-like parameters, not shell
+special or positional parameters such as `$?`, `$$`, `$1`, `$@`, `$*`, `$#`,
+`$-`, or `$_`.
 
 Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 `1.5x` flex, routines CCN `20` / length `80` with the same flex/sticky model,
