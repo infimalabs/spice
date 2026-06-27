@@ -7,10 +7,10 @@ inventory: grep the waiver to see every place the environment shapes behavior.
 
 The watchlist only sees env reads whose literal name matches a declared
 pattern. The presence reverse-gate closes that gap: the inventory covers
-*every* env read — including reads under non-watchlisted or dynamic names — by
-requiring a waiver on every `os.environ` / `os.getenv` access site too. It is
-on by default (the strongest audit with no configuration); a repo opts *out*
-with `[tool.spice.policy] env_presence_gate = false`.
+*every* env access — including reads under non-watchlisted or dynamic names —
+by requiring a waiver on every known env-access site too. It is on by default
+(the strongest audit with no configuration); a repo opts *out* with
+`[tool.spice.policy] env_presence_gate = false`.
 
 Library seam: target-repo tools may import the public finding dataclass,
 pattern/matcher helpers, scan helper, and `render_env_policy_board`;
