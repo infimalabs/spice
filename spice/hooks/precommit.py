@@ -630,9 +630,9 @@ def _run_reachability_guard(repo_root: Path) -> None:
         board = "\n".join(reachability.render_reachability_board(findings))
         raise SpiceError(
             f"{board}\n"
-            f"reachability: {count} test-only module(s) exceed"
-            f" REACHABILITY_TEST_ONLY_LIMIT={REACHABILITY_TEST_ONLY_LIMIT};"
-            " wire in or delete-both, then lower the constant"
+            f"reachability: {count} test-only module(s) not reachable from"
+            " production roots; zero are allowed — wire each in or delete-both"
+            " (`spice study reachability --create-tasks` files the decision)"
         )
 
 

@@ -58,8 +58,9 @@ BOUNDARY_UNDERSCORE_PATTERN = r"^_*[0-9a-z]+_*$"
 # clean; the only allowed direction is down.
 #
 # Test-only modules: modules reachable from tests but not from production roots.
-# A non-zero baseline means that many modules are currently test-only exhaust;
-# the gate refuses any new addition above the tolerance.
+# Held at zero — every test-only module must be wired into production or deleted
+# with its tests; `spice study reachability --create-tasks` files that decision
+# per module.
 REACHABILITY_TEST_ONLY_LIMIT = 0
 
 # Assertion-free tests: test functions that do not appear to constrain behavior
