@@ -144,6 +144,9 @@ ENV_ACCESS_FAMILY_SUFFIXES = {
 }
 ENV_ACCESS_DEFAULT_PATTERNS = {
     "python": (r"\bos\.(?:environ|getenv|putenv|unsetenv)\b",),  # env-policy: allow
+    "csharp": (
+        r"\b(?:System\.)?Environment\.(?:GetEnvironmentVariable|SetEnvironmentVariable)\b",
+    ),
 }
 ENV_ACCESS_FINDING_NAMES = {
     "python": "os env access",
