@@ -123,7 +123,7 @@ def handle_release(args: argparse.Namespace) -> int:
 def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
     mode = str(args.release_mode)
     if mode != "notes":
-        ensure_release_worktree(root)
+        ensure_clean_worktree(root)
     if mode in {"release", "publish", "github"}:
         ensure_notes_file(getattr(args, "notes_file", None))
 
@@ -185,10 +185,10 @@ def repo_root() -> Path:
     return Path(result.stdout.strip()).resolve()
 
 
-def ensure_release_worktree(root: Path) -> None:
-    # Lane branches are kept synchronized with origin/main, so a release runs
-    # from whichever clean worktree we are in, regardless of the branch name —
-    # only a dirty tree blocks it.
+def ensure_clean_worktree(root: Path) -> None:
+    # A release runs from whatever clean worktree we happen to be in: there is
+    # no dedicated release tree and no local `main` branch. Only a dirty tree
+    # blocks it; publish pushes HEAD to origin/main by ref.
     status = git("status", "--porcelain")
     if status:
         raise SpiceError("refusing to release with a dirty worktree")

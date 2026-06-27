@@ -102,7 +102,7 @@ def test_release_notes_mode_writes_output_without_release_sync(tmp_path, monkeyp
 
     starting_cwd = Path.cwd()
     monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
-    monkeypatch.setattr(release, "ensure_release_worktree", fail_release_sync)
+    monkeypatch.setattr(release, "ensure_clean_worktree", fail_release_sync)
     monkeypatch.setattr(
         release,
         "release_commit_for_version",
@@ -212,7 +212,7 @@ def test_publish_mode_with_head_target_runs_gates_before_publish(tmp_path, monke
     calls = []
 
     monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
-    monkeypatch.setattr(release, "ensure_release_worktree", lambda root: None)
+    monkeypatch.setattr(release, "ensure_clean_worktree", lambda root: None)
     monkeypatch.setattr(release, "current_version", lambda: "0.9.0")
     monkeypatch.setattr(
         release,
@@ -439,7 +439,9 @@ def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
 
-def test_release_worktree_guard_allows_clean_lane_blocks_dirty(tmp_path, monkeypatch):
+def test_release_clean_worktree_guard_allows_any_branch_blocks_dirty(
+    tmp_path, monkeypatch
+):
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
     _git(repo, "config", "user.email", "r@example.test")
@@ -447,14 +449,14 @@ def test_release_worktree_guard_allows_clean_lane_blocks_dirty(tmp_path, monkeyp
     (repo / "f.txt").write_text("x\n", encoding="utf-8")
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "init")
-    # A lane branch whose name is not "main".
+    # Any branch name is fine — there is no dedicated release tree or local main.
     _git(repo, "checkout", "-qb", "main-d")
     monkeypatch.chdir(repo)
 
-    # Clean lane (non-main name) is accepted — synchronization is assumed.
-    release.ensure_release_worktree(repo)
+    # A clean worktree on any branch is accepted.
+    release.ensure_clean_worktree(repo)
 
     # A dirty tree still blocks the release.
     (repo / "g.txt").write_text("y\n", encoding="utf-8")
     with pytest.raises(SpiceError, match="dirty worktree"):
-        release.ensure_release_worktree(repo)
+        release.ensure_clean_worktree(repo)
