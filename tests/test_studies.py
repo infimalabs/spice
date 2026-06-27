@@ -984,19 +984,55 @@ def test_env_presence_gate_flags_python_putenv_and_unsetenv(tmp_path):
 
 def test_env_access_patterns_extends_a_family(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.env_access_patterns]\n"
-        'csharp = ["Environment.GetEnvironmentVariable"]\n',
+        '[tool.spice.policy.env_access_patterns]\ncsharp = ["ProjectEnv\\\\.Read"]\n',
         encoding="utf-8",
     )
     path = tmp_path / "Sample.cs"
     path.write_text(
-        'var v = Environment.GetEnvironmentVariable("HOME");\n',  # env-policy: allow
+        'var v = ProjectEnv.Read("HOME");\n',  # env-policy: allow
         encoding="utf-8",
     )
 
-    # A repo registers a C# idiom; the presence gate now audits .cs access sites.
+    # A repo registers its own C# idiom; the presence gate audits .cs access sites.
     findings = scan_env_policy([Path("Sample.cs")], root=tmp_path)
     assert [(f.line, f.name) for f in findings] == [(1, "environment env access")]
+
+
+def test_env_presence_gate_flags_builtin_csharp_env_accesses(tmp_path):
+    path = tmp_path / "Sample.cs"
+    path.write_text(
+        'var home = Environment.GetEnvironmentVariable("HOME");\n'
+        'System.Environment.SetEnvironmentVariable("GAME_MODE", mode);\n',
+        encoding="utf-8",
+    )
+
+    findings = scan_env_policy([Path("Sample.cs")], root=tmp_path)
+
+    assert [(f.line, f.name) for f in findings] == [
+        (1, "environment env access"),
+        (2, "environment env access"),
+    ]
+
+
+def test_env_presence_gate_builtin_csharp_access_respects_waiver(tmp_path):
+    path = tmp_path / "Sample.cs"
+    path.write_text(
+        'var home = System.Environment.GetEnvironmentVariable("HOME"); '
+        "// env-policy: allow\n",
+        encoding="utf-8",
+    )
+
+    assert scan_env_policy([Path("Sample.cs")], root=tmp_path) == []
+
+
+def test_env_presence_gate_ignores_non_env_csharp_system_calls(tmp_path):
+    path = tmp_path / "Sample.cs"
+    path.write_text(
+        'System.Console.WriteLine("HOME");\nEnvironment.Exit(0);\n',
+        encoding="utf-8",
+    )
+
+    assert scan_env_policy([Path("Sample.cs")], root=tmp_path) == []
 
 
 def test_env_access_matchers_are_family_scoped(tmp_path):
