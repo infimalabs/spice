@@ -965,3 +965,86 @@ def test_env_presence_gate_rejects_non_boolean_flag(tmp_path):
 
     with pytest.raises(SpiceError, match="env_presence_gate must be a boolean"):
         scan_env_policy([Path("sample.py")], root=tmp_path)
+
+
+def test_env_presence_gate_flags_python_putenv_and_unsetenv(tmp_path):
+    path = tmp_path / "sample.py"
+    path.write_text(
+        'os.putenv("X", "1")\nos.unsetenv("X")\n',  # env-policy: allow
+        encoding="utf-8",
+    )
+
+    # The Python default idiom now covers the mutating forms, not just reads.
+    findings = scan_env_policy([Path("sample.py")], root=tmp_path)
+    assert [(f.line, f.name) for f in findings] == [
+        (1, "os env access"),
+        (2, "os env access"),
+    ]
+
+
+def test_env_access_patterns_extends_a_family(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy.env_access_patterns]\n"
+        'csharp = ["Environment.GetEnvironmentVariable"]\n',
+        encoding="utf-8",
+    )
+    path = tmp_path / "Sample.cs"
+    path.write_text(
+        'var v = Environment.GetEnvironmentVariable("HOME");\n',  # env-policy: allow
+        encoding="utf-8",
+    )
+
+    # A repo registers a C# idiom; the presence gate now audits .cs access sites.
+    findings = scan_env_policy([Path("Sample.cs")], root=tmp_path)
+    assert [(f.line, f.name) for f in findings] == [(1, "environment env access")]
+
+
+def test_env_access_matchers_are_family_scoped(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy.env_access_patterns]\nshell = ['\\$[A-Z_]+']\n",
+        encoding="utf-8",
+    )
+    # `$FOO` is a shell idiom only: it must fire on .sh but never on .py.
+    (tmp_path / "sample.py").write_text("value = FOO\n", encoding="utf-8")
+    (tmp_path / "run.sh").write_text(
+        "echo $FOO\n", encoding="utf-8"
+    )  # env-policy: allow
+
+    assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
+    sh_findings = scan_env_policy([Path("run.sh")], root=tmp_path)
+    assert [(f.line, f.name) for f in sh_findings] == [(1, "shell env access")]
+
+
+def test_env_access_patterns_invalid_regex_raises(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy.env_access_patterns]\nlua = ['os.getenv(']\n",
+        encoding="utf-8",
+    )  # env-policy: allow
+    (tmp_path / "sample.lua").write_text(
+        "local v = os.getenv('X')\n", encoding="utf-8"
+    )  # env-policy: allow
+
+    with pytest.raises(SpiceError, match="env_access_patterns contains invalid regex"):
+        scan_env_policy([Path("sample.lua")], root=tmp_path)
+
+
+def test_env_access_patterns_unknown_family_raises(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy.env_access_patterns]\nrust = ["env::var"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+
+    with pytest.raises(SpiceError, match="unknown family"):
+        scan_env_policy([Path("sample.py")], root=tmp_path)
+
+
+def test_env_access_patterns_non_table_raises(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\nenv_access_patterns = ["nope"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+
+    with pytest.raises(SpiceError, match="env_access_patterns must be a table"):
+        scan_env_policy([Path("sample.py")], root=tmp_path)

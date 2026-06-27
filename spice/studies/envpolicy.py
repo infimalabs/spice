@@ -22,9 +22,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
 from spice.errors import SpiceError
 from spice.policy import (
+    ENV_ACCESS_DEFAULT_PATTERNS,
+    ENV_ACCESS_FAMILY_SUFFIXES,
+    ENV_ACCESS_FINDING_NAMES,
     ENV_POLICY_ALLOW_MARKER,
     ENV_POLICY_DEFAULT_NAME_PATTERNS,
     ENV_POLICY_SELF_PATH_SUFFIX,
@@ -42,8 +46,14 @@ SELF_PATH_SUFFIX = ENV_POLICY_SELF_PATH_SUFFIX
 # (`os.getenv("HOME")`) or a dynamic name (`os.environ[var]`) escapes the
 # inventory entirely. When the gate is enabled, any env-access *site* must also
 # carry the waiver, making the audit cover every place the environment is read.
-ENV_ACCESS_RE = re.compile(r"\bos\.(?:environ|getenv)\b")
-ENV_ACCESS_FINDING_NAME = "os env access"
+# Access idioms differ per language, so matchers are scoped by suffix family
+# (`env_access_matchers`); a shell `$VAR` pattern never runs against `.cs`.
+
+
+@dataclass(frozen=True)
+class EnvAccessMatcher:
+    pattern: re.Pattern[str]
+    name: str
 
 
 @dataclass(frozen=True)
@@ -57,6 +67,7 @@ def scan_env_policy(paths: list[Path], *, root: Path) -> list[EnvPolicyFinding]:
     findings: list[EnvPolicyFinding] = []
     matchers = env_name_matchers(root)
     presence_gate = env_presence_gate_enabled(root)
+    access_matchers = env_access_matchers(root) if presence_gate else {}
     for rel_path in paths:
         if rel_path.suffix not in SCANNED_SUFFIXES or is_excluded_path(
             rel_path, repo_root=root
@@ -67,6 +78,7 @@ def scan_env_policy(paths: list[Path], *, root: Path) -> list[EnvPolicyFinding]:
         abs_path = root / rel_path
         if not abs_path.exists():
             continue
+        access = access_matchers.get(rel_path.suffix, ())
         text = abs_path.read_text(encoding="utf-8", errors="replace")
         waived_lines = _waived_line_numbers(text)
         for line_number, line in enumerate(text.splitlines(), start=1):
@@ -81,14 +93,16 @@ def scan_env_policy(paths: list[Path], *, root: Path) -> list[EnvPolicyFinding]:
                 for matcher in matchers
                 for match in matcher.finditer(line)
             ]
-            if not line_findings and presence_gate and ENV_ACCESS_RE.search(line):
-                line_findings.append(
-                    EnvPolicyFinding(
-                        path=rel_path.as_posix(),
-                        line=line_number,
-                        name=ENV_ACCESS_FINDING_NAME,
+            if not line_findings:
+                access_name = _first_access_name(access, line)
+                if access_name is not None:
+                    line_findings.append(
+                        EnvPolicyFinding(
+                            path=rel_path.as_posix(),
+                            line=line_number,
+                            name=access_name,
+                        )
                     )
-                )
             findings.extend(line_findings)
     return findings
 
@@ -227,6 +241,85 @@ def env_name_matchers(repo_root: Path) -> list[re.Pattern[str]]:
 
 def _quoted_name_pattern(name_pattern: str) -> str:
     return rf"""["'](?P<name>{name_pattern})["']"""
+
+
+def env_access_patterns(repo_root: Path) -> dict[str, list[str]]:
+    """Per-family env-access idiom regexes: built-in defaults plus repo additions.
+
+    The defaults carry the standard idiom for each language family; a repo adds
+    its own or additional idioms via `[tool.spice.policy] env_access_patterns`,
+    a table keyed by family name (`python`, `csharp`, `lua`, `shell`).
+    """
+    patterns: dict[str, list[str]] = {
+        family: list(defaults)
+        for family, defaults in ENV_ACCESS_DEFAULT_PATTERNS.items()
+    }
+    for family, declared in _declared_env_access_patterns(repo_root).items():
+        family_patterns = patterns.setdefault(family, [])
+        family_patterns.extend(
+            pattern for pattern in declared if pattern not in family_patterns
+        )
+    return patterns
+
+
+def _declared_env_access_patterns(repo_root: Path) -> dict[str, list[str]]:
+    raw = policy_table(repo_root).get("env_access_patterns")
+    if raw is None:
+        return {}
+    known = ", ".join(sorted(ENV_ACCESS_FAMILY_SUFFIXES))
+    if not isinstance(raw, dict):
+        raise SpiceError(
+            "[tool.spice.policy] env_access_patterns must be a table mapping a "
+            f"language family to a list of access-idiom regexes; families: {known}"
+        )
+    declared: dict[str, list[str]] = {}
+    for family, value in raw.items():
+        if family not in ENV_ACCESS_FAMILY_SUFFIXES:
+            raise SpiceError(
+                f"[tool.spice.policy] env_access_patterns has unknown family "
+                f"{family!r}; families: {known}"
+            )
+        declared[family] = string_list(value)
+    return declared
+
+
+def env_access_matchers(repo_root: Path) -> dict[str, list[EnvAccessMatcher]]:
+    """Suffix -> compiled env-access matchers, scoped by language family.
+
+    A file is audited only by the matchers of its own family, so a shell `$VAR`
+    idiom never fires against a `.cs` or `.js` source.
+    """
+    by_suffix: dict[str, list[EnvAccessMatcher]] = {}
+    for family, patterns in env_access_patterns(repo_root).items():
+        name = ENV_ACCESS_FINDING_NAMES.get(family, f"{family} env access")
+        family_matchers = [
+            EnvAccessMatcher(
+                pattern=_compile_access_pattern(family, pattern), name=name
+            )
+            for pattern in patterns
+        ]
+        if not family_matchers:
+            continue
+        for suffix in ENV_ACCESS_FAMILY_SUFFIXES[family]:
+            by_suffix.setdefault(suffix, []).extend(family_matchers)
+    return by_suffix
+
+
+def _compile_access_pattern(family: str, pattern: str) -> re.Pattern[str]:
+    try:
+        return re.compile(pattern)
+    except re.error as exc:
+        raise SpiceError(
+            "[tool.spice.policy] env_access_patterns contains invalid regex for "
+            f"family {family!r}: {pattern!r}: {exc}"
+        ) from exc
+
+
+def _first_access_name(access: Iterable[EnvAccessMatcher], line: str) -> str | None:
+    for matcher in access:
+        if matcher.pattern.search(line):
+            return matcher.name
+    return None
 
 
 def render_env_policy_board(findings: list[EnvPolicyFinding]) -> str:
