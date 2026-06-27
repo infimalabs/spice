@@ -1165,3 +1165,30 @@ def test_env_access_patterns_registers_lua_colon_accessor(tmp_path):
     lua_findings = scan_env_policy([Path("runtime.lua")], root=tmp_path)
     assert [(f.line, f.name) for f in lua_findings] == [(1, "lua env access")]
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
+
+
+def test_env_presence_gate_flags_javascript_process_env_by_default(tmp_path):
+    path = tmp_path / "config.ts"
+    path.write_text(
+        "const home = process.env.HOME\n"
+        "const port = process.env['PORT']\n"
+        'const tls = process.env["TLS"]  // env-policy: allow\n',
+        encoding="utf-8",
+    )
+
+    # Dot- and bracket-access are both audited with no config; the waived line clears.
+    findings = scan_env_policy([Path("config.ts")], root=tmp_path)
+    assert [(f.line, f.name) for f in findings] == [
+        (1, "process.env access"),
+        (2, "process.env access"),
+    ]
+
+
+def test_env_presence_gate_javascript_matcher_is_scoped(tmp_path):
+    # `process.env` is a JS idiom only: the same text in a .py source is not flagged.
+    (tmp_path / "app.js").write_text("const k = process.env.KEY\n", encoding="utf-8")
+    (tmp_path / "sample.py").write_text("k = process.env.KEY\n", encoding="utf-8")
+
+    js_findings = scan_env_policy([Path("app.js")], root=tmp_path)
+    assert [(f.line, f.name) for f in js_findings] == [(1, "process.env access")]
+    assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
