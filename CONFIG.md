@@ -70,9 +70,10 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `env_name_patterns` | `SPICE_*`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID` | Additional environment-variable literal patterns requiring `env-policy: allow` waivers. |
 | `env_presence_gate` | `true` | Presence reverse-gate (on by default): every env *access site* (not just watchlisted name literals) must carry an `env-policy: allow` waiver, so the audit covers env reads under any or dynamic names. Access idioms are matched per language family (built-in Python `os.environ`/`getenv`/`putenv`/`unsetenv`; C# `Environment.GetEnvironmentVariable`/`SetEnvironmentVariable`, with optional `System.`). Set `false` to opt out. |
 | `env_access_patterns` | `{}` | Table keyed by language family (`python`, `csharp`, `lua`, `shell`) of extra access-idiom regexes for the presence gate, scoped to that family's suffixes — register a repo's own idioms (e.g. bespoke Lua runtime accessors) without forking the study. |
+| `reachability_providers` | `[]` | Extra language-aware dead-code providers for `spice study reachability` and `gate:reachability`. |
 | `pre_commit` | `[]` | Extra command steps run after built-ins. Entries are mounted command names or command tables. |
 | `pre_commit_success` | `[]` | Command steps run only after the full gate passes. |
-| `pre_commit_builtins` | built-ins enabled | Per-built-in overrides for `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `serve-web-typecheck`, `python-typecheck`, `env-policy`, `file-shape`, `complexity`, and `magic-numbers`. |
+| `pre_commit_builtins` | built-ins enabled | Per-built-in overrides for `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `serve-web-typecheck`, `python-typecheck`, `env-policy`, `file-shape`, `complexity`, `magic-numbers`, `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals`. |
 
 Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 `1.5x` flex, routines CCN `20` / length `80` with the same flex/sticky model,
@@ -89,6 +90,41 @@ Command-step tables accept:
 | `when` | Non-empty glob list matched against staged paths. |
 | `formatter` | `true` means restage matching paths after the command succeeds. |
 | `enabled` | For `pre_commit_builtins` only, `false` disables that built-in. |
+
+Reachability provider tables accept:
+
+| Key | Meaning |
+| --- | --- |
+| `name` | Provider name shown on the unified reachability board. Must not be `python`, which is the built-in AST/import-graph provider. |
+| `run` | Non-empty argv list executed from the repo root. |
+| `when` | Optional non-empty glob list matched against staged paths by the pre-commit gate. If omitted, the provider runs whenever reachability runs. |
+
+```toml
+[tool.spice.policy]
+reachability_providers = [
+  { name = "csharp", run = ["dotnet", "run", "--project", "tools/reachability-csharp"], when = ["src/**/*.cs", "tests/**/*.cs"] },
+  { name = "javascript", run = ["node", "tools/reachability-js.mjs"], when = ["web/**/*.js"] },
+  { name = "lua", run = ["lua", "tools/reachability.lua"], when = ["game/**/*.lua"] },
+]
+```
+
+Provider commands write a JSON list to stdout. Each finding is normalized onto
+the reachability board and enforced by `gate:reachability`:
+
+```json
+[
+  {
+    "kind": "method",
+    "subject": "Game.Enemy.UnusedTick",
+    "path": "src/Game/Enemy.cs",
+    "imported_by": ["tests/Game/EnemyTests.cs"]
+  }
+]
+```
+
+During pre-commit, matching staged paths are supplied as newline-delimited
+relative paths in `SPICE_STAGED_PATHS`. Outside a staged run, providers should
+scan their normal repo scope.
 
 ## `[tool.spice.policy.pre_commit_builtins]`
 
