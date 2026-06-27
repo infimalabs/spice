@@ -1,5 +1,6 @@
 """Pre-commit gate pieces: repo-truth doc caps and their configuration."""
 
+import json
 import os
 import stat
 import subprocess
@@ -329,6 +330,39 @@ def test_symbol_reachability_guard_fails_on_any_finding(tmp_path):
     assert "zero test-only symbols are allowed" in message
 
 
+def test_reachability_guard_fails_on_configured_provider_finding(tmp_path):
+    provider = tmp_path / "js_provider.py"
+    payload = json.dumps(
+        [
+            {
+                "kind": "function",
+                "subject": "unusedRender",
+                "path": "web/src/render.js",
+                "imported_by": ["web/test/render.test.js"],
+            }
+        ]
+    )
+    provider.write_text(f"print({payload!r})\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        "reachability_providers = [\n"
+        '  { name = "javascript", '
+        f"run = {json.dumps([sys.executable, str(provider)])}, "
+        'when = ["web/**/*.js"] },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        precommit._run_reachability_guard(tmp_path, [Path("web/src/render.js")])
+
+    message = str(exc_info.value)
+    assert "reachability: 1 test-only finding(s)" in message
+    assert "provider: javascript" in message
+    assert "subject: unusedRender" in message
+    assert "zero test-only findings are allowed" in message
+
+
 def test_symbol_reachability_guard_allows_clean_repo(tmp_path):
     (tmp_path / "spice" / "cli").mkdir(parents=True)
     (tmp_path / "tests").mkdir()
@@ -562,7 +596,9 @@ def test_policy_exclude_filters_path_based_builtin_gate_steps(tmp_path, monkeypa
     monkeypatch.setattr(precommit, "_run_file_loc_guard", record("file shape"))
     monkeypatch.setattr(precommit, "_run_complexity_guard", record("complexity"))
     monkeypatch.setattr(precommit, "_run_magic_numbers_guard", record("magic numbers"))
-    monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit, "_run_reachability_guard", lambda repo_root, paths=None: None
+    )
     monkeypatch.setattr(
         precommit, "_run_symbol_reachability_guard", lambda repo_root: None
     )
@@ -972,7 +1008,7 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
     monkeypatch.setattr(
         precommit,
         "_run_reachability_guard",
-        lambda repo_root: record("reachability"),
+        lambda repo_root, paths=None: record("reachability"),
     )
     monkeypatch.setattr(
         precommit,
@@ -1018,7 +1054,9 @@ def _patch_pre_commit_builtin_noops_except_local_paths(tmp_path, monkeypatch) ->
     monkeypatch.setattr(
         precommit, "_run_magic_numbers_guard", lambda repo_root, paths: None
     )
-    monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit, "_run_reachability_guard", lambda repo_root, paths=None: None
+    )
     monkeypatch.setattr(
         precommit, "_run_symbol_reachability_guard", lambda repo_root: None
     )
@@ -1052,7 +1090,9 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
     monkeypatch.setattr(
         precommit, "_run_magic_numbers_guard", lambda repo_root, paths: None
     )
-    monkeypatch.setattr(precommit, "_run_reachability_guard", lambda repo_root: None)
+    monkeypatch.setattr(
+        precommit, "_run_reachability_guard", lambda repo_root, paths=None: None
+    )
     monkeypatch.setattr(
         precommit, "_run_symbol_reachability_guard", lambda repo_root: None
     )

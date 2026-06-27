@@ -192,7 +192,7 @@ def _builtin_pre_commit_steps(
         PreCommitStep(
             "reachability",
             "reachability",
-            lambda: _run_reachability_guard(repo_root),
+            lambda: _run_reachability_guard(repo_root, paths),
         ),
         PreCommitStep(
             "symbol-reachability",
@@ -623,16 +623,16 @@ def _run_magic_numbers_guard(repo_root: Path, paths: list[Path]) -> None:
         raise SpiceError(magicnums.render_magic_board(findings))
 
 
-def _run_reachability_guard(repo_root: Path) -> None:
-    findings = reachability.scan_reachability(repo_root)
+def _run_reachability_guard(repo_root: Path, paths: list[Path] | None = None) -> None:
+    findings = reachability.scan_reachability(repo_root, staged_paths=paths)
     count = len(findings)
     if count > REACHABILITY_TEST_ONLY_LIMIT:
         board = "\n".join(reachability.render_reachability_board(findings))
         raise SpiceError(
             f"{board}\n"
-            f"reachability: {count} test-only module(s) exceed"
+            f"reachability: {count} test-only finding(s) exceed"
             f" REACHABILITY_TEST_ONLY_LIMIT={REACHABILITY_TEST_ONLY_LIMIT};"
-            " wire in or delete-both, then lower the constant"
+            " wire in or delete-both; zero test-only findings are allowed"
         )
 
 

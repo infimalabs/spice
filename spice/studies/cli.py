@@ -143,7 +143,7 @@ def _configure_reachability_parser(actions: Any) -> None:
     reach.add_argument(
         "--create-tasks",
         action="store_true",
-        help="Create tagged decision tasks for each test-only module.",
+        help="Create tagged decision tasks for each test-only reachability finding.",
     )
 
 
@@ -353,13 +353,13 @@ def _create_exhaust_tasks(findings: list[reachability.ReachabilityFinding]) -> N
 
     for f in findings:
         handle = create.add(
-            f"Exhaust decision: wire-in/delete-both {f.module_path}",
+            f"Exhaust decision: wire-in/delete-both {f.path}",
             project="tests.exhaust",
             tags=["exhaust", "decision", "wire_in_delete_both"],
             acceptance=[
-                f"Resolve {f.module} by either wiring it into a production entry "
-                f"point or deleting {f.module_path} along with every test that "
-                "imports it.",
+                f"Resolve {f.provider} {f.kind} {f.subject} by either wiring it "
+                f"into a production entry point or deleting {f.path} along with "
+                "every test that imports it.",
                 f"Current test-only importers: "
                 f"{', '.join(f.only_test_imports) or 'unknown'}.",
             ],

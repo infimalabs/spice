@@ -52,14 +52,13 @@ REPO_TRUTH_DOCS = ("AGENTS.md",)
 # Python package guards (the rest of the constitution still applies).
 BOUNDARY_UNDERSCORE_PATTERN = r"^_*[0-9a-z]+_*$"
 
-# --- test-quality ratchets -----------------------------------------------------
-# Grandfathered baselines: CI fails on any *new* violation. Lower the constant
-# once the corresponding cleanup drains. Zero means the codebase is currently
-# clean; the only allowed direction is down.
+# --- test-quality gates --------------------------------------------------------
+# Zero means the codebase is clean and any finding fails. Non-zero limits are
+# explicit cleanup debt; lower the constant once the corresponding cleanup
+# drains.
 #
-# Test-only modules: modules reachable from tests but not from production roots.
-# A non-zero baseline means that many modules are currently test-only exhaust;
-# the gate refuses any new addition above the tolerance.
+# Test-only findings: code reachable from tests but not from production roots.
+# The reachability provider board is clean, so this gate is zero-tolerance.
 REACHABILITY_TEST_ONLY_LIMIT = 0
 
 # Assertion-free tests: test functions that do not appear to constrain behavior

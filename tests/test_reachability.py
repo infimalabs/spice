@@ -1,9 +1,12 @@
+import json
+import sys
 from pathlib import Path
 
 from spice.cli.parser import build_parser
 from spice.studies import cli as studies_cli
 from spice.studies.reachability import (
     ReachabilityFinding,
+    ReachabilityProvider,
     render_reachability_board,
     render_symbol_reachability_board,
     scan_reachability,
@@ -16,7 +19,7 @@ def test_reachability_scans_test_files_outside_package_root(tmp_path):
 
     findings = scan_reachability(tmp_path)
 
-    assert [(f.module, f.module_path, f.only_test_imports) for f in findings] == [
+    assert [(f.subject, f.path, f.only_test_imports) for f in findings] == [
         ("spice.onlytest", "spice/onlytest.py", ["test_only.py"])
     ]
 
@@ -26,8 +29,79 @@ def test_reachability_expands_from_imported_submodule(tmp_path):
 
     findings = scan_reachability(tmp_path)
 
-    assert [(f.module, f.module_path, f.only_test_imports) for f in findings] == [
+    assert [(f.subject, f.path, f.only_test_imports) for f in findings] == [
         ("spice.onlytest", "spice/onlytest.py", ["test_only.py"])
+    ]
+
+
+def test_reachability_registry_dispatches_explicit_provider(tmp_path):
+    def scan(request):
+        assert request.repo_root == tmp_path
+        assert request.package == "pkg"
+        return [
+            ReachabilityFinding(
+                provider="ignored",
+                kind="method",
+                subject="Game.Enemy.UnusedTick",
+                path="src/Game/Enemy.cs",
+                only_test_imports=["tests/Game/EnemyTests.cs"],
+            )
+        ]
+
+    findings = scan_reachability(
+        tmp_path,
+        package="pkg",
+        providers=[ReachabilityProvider(name="csharp", scan=scan)],
+    )
+
+    assert [
+        (f.provider, f.kind, f.subject, f.path, f.only_test_imports) for f in findings
+    ] == [
+        (
+            "csharp",
+            "method",
+            "Game.Enemy.UnusedTick",
+            "src/Game/Enemy.cs",
+            ["tests/Game/EnemyTests.cs"],
+        )
+    ]
+
+
+def test_reachability_config_provider_reports_findings(tmp_path):
+    provider = tmp_path / "lua_provider.py"
+    payload = json.dumps(
+        [
+            {
+                "kind": "function",
+                "subject": "player_unused_update",
+                "path": "src/player.lua",
+                "imported_by": ["tests/player_spec.lua"],
+            }
+        ]
+    )
+    provider.write_text(f"print({payload!r})\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        "reachability_providers = [\n"
+        '  { name = "lua", '
+        f"run = {json.dumps([sys.executable, str(provider)])}, "
+        'when = ["src/*.lua"] },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+
+    findings = scan_reachability(tmp_path, staged_paths=[Path("src/player.lua")])
+
+    assert [
+        (f.provider, f.kind, f.subject, f.path, f.only_test_imports) for f in findings
+    ] == [
+        (
+            "lua",
+            "function",
+            "player_unused_update",
+            "src/player.lua",
+            ["tests/player_spec.lua"],
+        )
     ]
 
 
@@ -39,7 +113,7 @@ def test_symbol_reachability_excludes_production_used_local_helpers(tmp_path):
     module_output = "\n".join(render_reachability_board(module_findings))
     symbol_output = "\n".join(render_symbol_reachability_board(symbol_findings))
 
-    assert "reachability: 1 test-only module(s)" in module_output
+    assert "reachability: 1 test-only finding(s)" in module_output
     assert "spice/orphan_module_xyz.py" in module_output
     assert "symbol-reachability: 2 test-only symbol(s)" in symbol_output
     assert "spice/live.py:LiveThing.planted_dead_method_abc" in symbol_output
@@ -187,9 +261,9 @@ def test_study_reachability_cli_reports_test_only_module(tmp_path, monkeypatch, 
 
     assert args.func(args) == 1
     output = capsys.readouterr().out
-    assert "reachability: 1 test-only module(s)" in output
+    assert "reachability: 1 test-only finding(s)" in output
     assert "spice/onlytest.py" in output
-    assert "module: spice.onlytest" in output
+    assert "subject: spice.onlytest" in output
 
 
 def test_study_reachability_cli_create_tasks_passes_findings(
@@ -201,14 +275,14 @@ def test_study_reachability_cli_create_tasks_passes_findings(
     monkeypatch.setattr(
         studies_cli,
         "_create_exhaust_tasks",
-        lambda findings: created_paths.extend(f.module_path for f in findings),
+        lambda findings: created_paths.extend(f.path for f in findings),
     )
     args = build_parser().parse_args(["study", "reachability", "--create-tasks"])
 
     assert args.func(args) == 1
 
     output = capsys.readouterr().out
-    assert "reachability: 1 test-only module(s)" in output
+    assert "reachability: 1 test-only finding(s)" in output
     assert created_paths == ["spice/onlytest.py"]
 
 
@@ -241,13 +315,13 @@ def test_create_exhaust_tasks_adds_decision_metadata_for_each_finding(
     studies_cli._create_exhaust_tasks(
         [
             ReachabilityFinding(
-                module="spice.onlytest",
-                module_path="spice/onlytest.py",
+                subject="spice.onlytest",
+                path="spice/onlytest.py",
                 only_test_imports=["tests/test_only.py"],
             ),
             ReachabilityFinding(
-                module="spice.empty",
-                module_path="spice/empty.py",
+                subject="spice.empty",
+                path="spice/empty.py",
                 only_test_imports=[],
             ),
         ]
@@ -259,9 +333,9 @@ def test_create_exhaust_tasks_adds_decision_metadata_for_each_finding(
             "project": "tests.exhaust",
             "tags": ["exhaust", "decision", "wire_in_delete_both"],
             "acceptance": [
-                "Resolve spice.onlytest by either wiring it into a production "
-                "entry point or deleting spice/onlytest.py along with every "
-                "test that imports it.",
+                "Resolve python module spice.onlytest by either wiring it into "
+                "a production entry point or deleting spice/onlytest.py along "
+                "with every test that imports it.",
                 "Current test-only importers: tests/test_only.py.",
             ],
         },
@@ -270,9 +344,9 @@ def test_create_exhaust_tasks_adds_decision_metadata_for_each_finding(
             "project": "tests.exhaust",
             "tags": ["exhaust", "decision", "wire_in_delete_both"],
             "acceptance": [
-                "Resolve spice.empty by either wiring it into a production "
-                "entry point or deleting spice/empty.py along with every test "
-                "that imports it.",
+                "Resolve python module spice.empty by either wiring it into a "
+                "production entry point or deleting spice/empty.py along with "
+                "every test that imports it.",
                 "Current test-only importers: unknown.",
             ],
         },
