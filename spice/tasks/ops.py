@@ -166,6 +166,11 @@ def _active_claims_for(actor: str) -> list[dict[str, Any]]:
     ]
 
 
+def has_active_claim() -> bool:
+    """Whether the current actor holds an active task claim."""
+    return bool(_active_claims_for(tw.current_actor()))
+
+
 def _require_single_active_slot(
     actor: str, *, action: str, target: dict[str, Any] | None = None
 ) -> None:

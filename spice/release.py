@@ -128,6 +128,7 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
         ensure_notes_file(getattr(args, "notes_file", None))
 
     if mode in {"prepare", "release"}:
+        ensure_release_preconditions(root)
         run_constitution_gate()
         version = bump_version(str(args.bump))
         run_artifact_gate(version)
@@ -192,6 +193,27 @@ def ensure_clean_worktree(root: Path) -> None:
     status = git("status", "--porcelain")
     if status:
         raise SpiceError("refusing to release with a dirty worktree")
+
+
+def ensure_release_preconditions(root: Path) -> None:
+    # A bump-and-commit release demands everything a task claim demands, so a
+    # stray uncaptured commit can never be folded into the release bump: a task
+    # must be claimed, and there can be no local commits the task system has not
+    # yet recorded (the dirty-tree case is handled by ensure_clean_worktree).
+    from spice.tasks import gitsync, ops
+
+    if not ops.has_active_claim():
+        raise SpiceError(
+            "refusing to release with no task claimed; claim a release task "
+            "first (e.g. `spice task add --project lifecycle.release ...` then "
+            "`spice task claim <handle>`)"
+        )
+    ahead = gitsync.commits_ahead_of_baseline(root)
+    if ahead > 0:
+        raise SpiceError(
+            f"refusing to release with {ahead} local commit(s) not captured by a "
+            "completed task; complete or adopt them into a task before releasing"
+        )
 
 
 def ensure_notes_file(path: Path | None) -> None:
