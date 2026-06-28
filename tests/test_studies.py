@@ -22,7 +22,12 @@ from spice.policy import (
     flex_limit,
 )
 from spice.studies import cli as studies_cli
-from spice.studies.envpolicy import render_env_policy_board, scan_env_policy
+from spice.studies.envpolicy import (
+    render_env_name_ledger_board,
+    render_env_policy_board,
+    scan_env_name_ledger,
+    scan_env_policy,
+)
 from spice.studies.fileloc import scan_loc_violations, scan_staged_loc_violations
 from spice.studies import mutations
 from spice.studies.subsumption import scan_subsumption
@@ -1192,3 +1197,66 @@ def test_env_presence_gate_javascript_matcher_is_scoped(tmp_path):
     js_findings = scan_env_policy([Path("app.js")], root=tmp_path)
     assert [(f.line, f.name) for f in js_findings] == [(1, "process.env access")]
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
+
+
+def test_env_name_ledger_flags_unaccounted_literal_env_names(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\nenv_names = ["PORT"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "sample.py").write_text(
+        'home = os.getenv("HOME")\nport = os.environ["PORT"]\n',  # env-policy: allow
+        encoding="utf-8",
+    )
+
+    findings = scan_env_name_ledger([Path("sample.py")], root=tmp_path)
+
+    assert [(finding.kind, finding.name) for finding in findings] == [
+        ("unaccounted", "HOME")
+    ]
+    board = render_env_name_ledger_board(findings)
+    assert "unaccounted: HOME" in board
+    assert "used at sample.py:1" in board
+
+
+def test_env_name_ledger_flags_stale_declared_env_names(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\nenv_names = ["HOME", "OLD_ENV"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "sample.py").write_text(
+        'home = os.getenv("HOME")\n',  # env-policy: allow
+        encoding="utf-8",
+    )
+
+    findings = scan_env_name_ledger([Path("sample.py")], root=tmp_path)
+
+    assert [(finding.kind, finding.name) for finding in findings] == [
+        ("stale", "OLD_ENV")
+    ]
+
+
+def test_env_name_ledger_passes_clean_manifest_across_languages(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\nenv_names = ["APP_MODE", "HOME", "PORT", "TLS"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "sample.py").write_text(
+        'home = os.getenv("HOME")\n',  # env-policy: allow
+        encoding="utf-8",
+    )
+    (tmp_path / "config.ts").write_text(
+        'const port = process.env.PORT\nconst tls = process.env["TLS"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "run.sh").write_text(
+        "export APP_MODE=debug\n",
+        encoding="utf-8",
+    )
+
+    findings = scan_env_name_ledger(
+        [Path("sample.py"), Path("config.ts"), Path("run.sh")],
+        root=tmp_path,
+    )
+
+    assert render_env_name_ledger_board(findings) == "env-name-ledger: ok"

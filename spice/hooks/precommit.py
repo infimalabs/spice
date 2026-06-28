@@ -13,7 +13,8 @@ attempt reports the whole picture:
 6. python typecheck — the project's own package roots must pass `pyright`;
 7. env policy — undeclared environment literals (and, when
    `env_presence_gate` is on, undeclared env-access sites);
-8. shape pressure — file LOC/bytes, routine complexity, magic-number
+8. env name ledger — exact manifest accounting for literal env names;
+9. shape pressure — file LOC/bytes, routine complexity, magic-number
    regressions, all against staged paths with flex + sticky semantics.
 
 A fully passing gate prunes sticky state that no longer measures over the
@@ -173,6 +174,11 @@ def _builtin_pre_commit_steps(
             "env-policy",
             "env policy",
             lambda: _run_env_policy_guard(repo_root, paths),
+        ),
+        PreCommitStep(
+            "env-name-ledger",
+            "env name ledger",
+            lambda: _run_env_name_ledger_guard(repo_root),
         ),
         PreCommitStep(
             "file-shape",
@@ -595,6 +601,14 @@ def _run_env_policy_guard(repo_root: Path, paths: list[Path]) -> None:
     findings = envpolicy.scan_env_policy(paths, root=repo_root)
     if findings:
         raise SpiceError(envpolicy.render_env_policy_board(findings))
+
+
+def _run_env_name_ledger_guard(repo_root: Path) -> None:
+    from spice.studies.walk import tracked_paths
+
+    findings = envpolicy.scan_env_name_ledger(tracked_paths(repo_root), root=repo_root)
+    if findings:
+        raise SpiceError(envpolicy.render_env_name_ledger_board(findings))
 
 
 def _run_local_path_guard(repo_root: Path, paths: list[Path]) -> None:

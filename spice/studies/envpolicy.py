@@ -40,6 +40,57 @@ from spice.studies.walk import is_excluded_path
 SCANNED_SUFFIXES = ENV_SUFFIXES
 # This module necessarily names the patterns it polices; it is self-waived.
 SELF_PATH_SUFFIX = ENV_POLICY_SELF_PATH_SUFFIX
+ENV_NAME_LEDGER_UNACCOUNTED = "unaccounted"
+ENV_NAME_LEDGER_STALE = "stale"
+_ENV_NAME_LITERAL_PATTERN = r"[A-Z_][A-Z0-9_]*"
+_QUOTED_ENV_NAME_PATTERN = (
+    rf"(?P<quote>[\"'])(?P<name>{_ENV_NAME_LITERAL_PATTERN})(?P=quote)"
+)
+_PYTHON_ACCESS_NAME_PATTERNS = (
+    rf"\bos\.(?:getenv|putenv|unsetenv)\(\s*{_QUOTED_ENV_NAME_PATTERN}",
+    rf"\bos\.environ\s*\[\s*{_QUOTED_ENV_NAME_PATTERN}",
+    rf"\bos\.environ\.(?:get|pop|setdefault)\(\s*{_QUOTED_ENV_NAME_PATTERN}",
+)
+_ENV_DECLARATION_NAME_PATTERNS = (
+    rf"\b[A-Z][A-Z0-9_]*_ENV\s*=\s*(?:\(\s*)?{_QUOTED_ENV_NAME_PATTERN}",
+    rf"\b(?:bin_env|thread_id_env)\s*=\s*{_QUOTED_ENV_NAME_PATTERN}",
+)
+_CSHARP_ACCESS_NAME_PATTERNS = (
+    rf"\b(?:System\.)?Environment\."
+    rf"(?:GetEnvironmentVariable|SetEnvironmentVariable)\(\s*"
+    rf"{_QUOTED_ENV_NAME_PATTERN}",
+)
+_LUA_ACCESS_NAME_PATTERNS = (rf"\bos\.getenv\(\s*{_QUOTED_ENV_NAME_PATTERN}",)
+_JS_BRACKET_ENV_NAME_PATTERN = re.compile(
+    rf"\bprocess\.env\s*\[\s*{_QUOTED_ENV_NAME_PATTERN}\s*\]"
+)
+_JS_DOT_ENV_NAME_PATTERN = re.compile(
+    rf"\bprocess\.env\.(?P<name>{_ENV_NAME_LITERAL_PATTERN})\b"
+)
+_JS_DESTRUCTURED_ENV_PATTERN = re.compile(r"\{(?P<body>[^}]+)\}\s*=\s*process\.env\b")
+_ENV_CONTEXT_PATTERN = re.compile(
+    r"\bbase_env\b|\bos\.environ\b|\benviron\b|"
+    r"\b(?:setenv|delenv|putenv|unsetenv)\b|"
+    r"\benv\s*(?:\[|\.get\(|\.pop\(|\.setdefault\()|process\.env"
+)
+_ENV_CONTEXT_NAME_PATTERN = re.compile(_QUOTED_ENV_NAME_PATTERN)
+_COMPILED_ENV_DECLARATION_NAME_PATTERNS = tuple(
+    re.compile(pattern) for pattern in _ENV_DECLARATION_NAME_PATTERNS
+)
+_SHELL_EXPORT_ENV_NAME_PATTERN = re.compile(
+    rf"\bexport\s+(?P<name>{_ENV_NAME_LITERAL_PATTERN})="
+)
+_SHELL_BRACED_ENV_NAME_PATTERN = re.compile(
+    rf"(?<!\\)\$\{{(?P<name>{_ENV_NAME_LITERAL_PATTERN})(?::[^}}]*)?\}}"
+)
+_SHELL_BARE_ENV_NAME_PATTERN = re.compile(
+    rf"(?<!\\)\$(?P<name>{_ENV_NAME_LITERAL_PATTERN})\b"
+)
+_COMPILED_ACCESS_NAME_PATTERNS = {
+    "python": tuple(re.compile(pattern) for pattern in _PYTHON_ACCESS_NAME_PATTERNS),
+    "csharp": tuple(re.compile(pattern) for pattern in _CSHARP_ACCESS_NAME_PATTERNS),
+    "lua": tuple(re.compile(pattern) for pattern in _LUA_ACCESS_NAME_PATTERNS),
+}
 
 # Presence reverse-gate: the name-pattern watchlist only sees env reads whose
 # literal name matches a declared pattern, so a read under any other name
@@ -61,6 +112,20 @@ class EnvPolicyFinding:
     path: str
     line: int
     name: str
+
+
+@dataclass(frozen=True)
+class EnvNameReference:
+    path: str
+    line: int
+    name: str
+
+
+@dataclass(frozen=True)
+class EnvNameLedgerFinding:
+    kind: str
+    name: str
+    references: tuple[EnvNameReference, ...] = ()
 
 
 def scan_env_policy(paths: list[Path], *, root: Path) -> list[EnvPolicyFinding]:
@@ -105,6 +170,144 @@ def scan_env_policy(paths: list[Path], *, root: Path) -> list[EnvPolicyFinding]:
                     )
             findings.extend(line_findings)
     return findings
+
+
+def scan_env_name_ledger(
+    paths: list[Path], *, root: Path
+) -> list[EnvNameLedgerFinding]:
+    declared = set(env_names(root))
+    references = collect_env_name_references(paths, root=root)
+    by_name: dict[str, list[EnvNameReference]] = {}
+    for reference in references:
+        by_name.setdefault(reference.name, []).append(reference)
+
+    findings: list[EnvNameLedgerFinding] = []
+    for name in sorted(set(by_name) - declared):
+        findings.append(
+            EnvNameLedgerFinding(
+                kind=ENV_NAME_LEDGER_UNACCOUNTED,
+                name=name,
+                references=tuple(by_name[name]),
+            )
+        )
+    for name in sorted(declared - set(by_name)):
+        findings.append(EnvNameLedgerFinding(kind=ENV_NAME_LEDGER_STALE, name=name))
+    return findings
+
+
+def collect_env_name_references(
+    paths: list[Path], *, root: Path
+) -> list[EnvNameReference]:
+    references: dict[tuple[str, int, str], EnvNameReference] = {}
+    watchlist_matchers = env_name_matchers(root)
+    exact_matchers = env_name_exact_matchers(root)
+    for rel_path in paths:
+        if rel_path.suffix not in SCANNED_SUFFIXES or is_excluded_path(
+            rel_path, repo_root=root
+        ):
+            continue
+        if rel_path.as_posix().endswith(SELF_PATH_SUFFIX):
+            continue
+        abs_path = root / rel_path
+        if not abs_path.exists():
+            continue
+        language = _env_family_for_suffix(rel_path.suffix)
+        text = abs_path.read_text(encoding="utf-8", errors="replace")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            names = set(_literal_env_names_from_access_line(language, line))
+            names.update(_literal_env_names_from_declaration_line(line))
+            names.update(_literal_env_names_from_context_line(line))
+            for matcher in (*watchlist_matchers, *exact_matchers):
+                names.update(match.group("name") for match in matcher.finditer(line))
+            for name in sorted(name for name in names if _is_ledger_env_name(name)):
+                key = (rel_path.as_posix(), line_number, name)
+                references.setdefault(
+                    key,
+                    EnvNameReference(
+                        path=rel_path.as_posix(),
+                        line=line_number,
+                        name=name,
+                    ),
+                )
+    return sorted(references.values(), key=lambda ref: (ref.name, ref.path, ref.line))
+
+
+def _env_family_for_suffix(suffix: str) -> str | None:
+    for family, suffixes in ENV_ACCESS_FAMILY_SUFFIXES.items():
+        if suffix in suffixes:
+            return family
+    return None
+
+
+def _is_ledger_env_name(name: str) -> bool:
+    return bool(re.fullmatch(_ENV_NAME_LITERAL_PATTERN, name)) and not name.endswith(
+        "_"
+    )
+
+
+def _literal_env_names_from_access_line(family: str | None, line: str) -> set[str]:
+    if family in _COMPILED_ACCESS_NAME_PATTERNS:
+        return {
+            match.group("name")
+            for pattern in _COMPILED_ACCESS_NAME_PATTERNS[family]
+            for match in pattern.finditer(line)
+        }
+    if family == "javascript":
+        return _javascript_env_names_from_access_line(line)
+    if family == "shell":
+        return _shell_env_names_from_access_line(line)
+    return set()
+
+
+def _literal_env_names_from_context_line(line: str) -> set[str]:
+    if not (_ENV_CONTEXT_PATTERN.search(line) or ENV_POLICY_ALLOW_MARKER in line):
+        return set()
+    return {match.group("name") for match in _ENV_CONTEXT_NAME_PATTERN.finditer(line)}
+
+
+def _literal_env_names_from_declaration_line(line: str) -> set[str]:
+    return {
+        match.group("name")
+        for pattern in _COMPILED_ENV_DECLARATION_NAME_PATTERNS
+        for match in pattern.finditer(line)
+    }
+
+
+def _javascript_env_names_from_access_line(line: str) -> set[str]:
+    names = {
+        match.group("name") for match in _JS_BRACKET_ENV_NAME_PATTERN.finditer(line)
+    }
+    names.update(
+        match.group("name") for match in _JS_DOT_ENV_NAME_PATTERN.finditer(line)
+    )
+    for match in _JS_DESTRUCTURED_ENV_PATTERN.finditer(line):
+        names.update(_javascript_destructured_env_names(match.group("body")))
+    return names
+
+
+def _javascript_destructured_env_names(body: str) -> set[str]:
+    names: set[str] = set()
+    for raw_part in body.split(","):
+        part = raw_part.strip()
+        if not part or part.startswith("..."):
+            continue
+        name = part.split(":", maxsplit=1)[0].split("=", maxsplit=1)[0].strip()
+        if re.fullmatch(_ENV_NAME_LITERAL_PATTERN, name):
+            names.add(name)
+    return names
+
+
+def _shell_env_names_from_access_line(line: str) -> set[str]:
+    names = {
+        match.group("name") for match in _SHELL_EXPORT_ENV_NAME_PATTERN.finditer(line)
+    }
+    names.update(
+        match.group("name") for match in _SHELL_BRACED_ENV_NAME_PATTERN.finditer(line)
+    )
+    names.update(
+        match.group("name") for match in _SHELL_BARE_ENV_NAME_PATTERN.finditer(line)
+    )
+    return names
 
 
 def _waived_line_numbers(text: str) -> set[int]:
@@ -226,6 +429,10 @@ def env_name_patterns(repo_root: Path) -> list[str]:
     return patterns
 
 
+def env_names(repo_root: Path) -> list[str]:
+    return string_list(policy_table(repo_root).get("env_names"))
+
+
 def env_name_matchers(repo_root: Path) -> list[re.Pattern[str]]:
     matchers: list[re.Pattern[str]] = []
     for pattern in env_name_patterns(repo_root):
@@ -237,6 +444,13 @@ def env_name_matchers(repo_root: Path) -> list[re.Pattern[str]]:
                 f"{pattern!r}: {exc}"
             ) from exc
     return matchers
+
+
+def env_name_exact_matchers(repo_root: Path) -> list[re.Pattern[str]]:
+    return [
+        re.compile(_quoted_name_pattern(re.escape(name)))
+        for name in env_names(repo_root)
+    ]
 
 
 def _quoted_name_pattern(name_pattern: str) -> str:
@@ -332,4 +546,18 @@ def render_env_policy_board(findings: list[EnvPolicyFinding]) -> str:
     ]
     for finding in findings:
         lines.append(f"  FAIL  {finding.path}:{finding.line}: {finding.name}")
+    return "\n".join(lines)
+
+
+def render_env_name_ledger_board(findings: list[EnvNameLedgerFinding]) -> str:
+    if not findings:
+        return "env-name-ledger: ok"
+    lines = [
+        f"env-name-ledger: {len(findings)} manifest mismatch(es); "
+        "update `[tool.spice.policy] env_names`"
+    ]
+    for finding in findings:
+        lines.append(f"  FAIL  {finding.kind}: {finding.name}")
+        for reference in finding.references:
+            lines.append(f"        used at {reference.path}:{reference.line}")
     return "\n".join(lines)

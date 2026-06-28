@@ -64,6 +64,11 @@ def configure_study_parser(subparsers: Any) -> None:
     _add_study_action(
         actions, "env-policy", "Undeclared environment-variable literals."
     )
+    _add_study_action(
+        actions,
+        "env-name-ledger",
+        "Exact environment-variable name manifest accounting.",
+    )
     _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
     _configure_reachability_parser(actions)
     _add_study_action(
@@ -318,6 +323,12 @@ def _study_env_policy(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_env_name_ledger(args: argparse.Namespace, root: Path) -> int:
+    findings = envpolicy.scan_env_name_ledger(_target_paths(args, root), root=root)
+    print(envpolicy.render_env_name_ledger_board(findings))
+    return 1 if findings else 0
+
+
 def _study_reachability(args: argparse.Namespace, root: Path) -> int:
     findings = reachability.scan_reachability(root, allowlist=args.allowlist)
     print("\n".join(reachability.render_reachability_board(findings)))
@@ -383,6 +394,7 @@ _STUDY_ACTIONS = {
     "magic-numbers": _study_magic_numbers,
     "mutations": _study_mutations,
     "env-policy": _study_env_policy,
+    "env-name-ledger": _study_env_name_ledger,
     "reachability": _study_reachability,
     "symbol-reachability": _study_symbol_reachability,
     "assertion-free-tests": _study_assertion_free_tests,
