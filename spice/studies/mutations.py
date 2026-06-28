@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.studies.walk import is_excluded_path
+from spice.studies.walk import is_excluded_path, is_test_path
 
 MUTATION_RATCHET_VERSION = 1
 DEFAULT_MAX_MUTANTS_PER_MODULE = 20
@@ -324,7 +324,7 @@ def _ratchet_regressions(
 def _is_mutation_target(path: Path, *, root: Path) -> bool:
     return (
         path.suffix == ".py"
-        and path.parts[:1] != ("tests",)
+        and not is_test_path(path, repo_root=root)
         and not is_excluded_path(path, repo_root=root)
         and (root / path).is_file()
     )
