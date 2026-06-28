@@ -892,10 +892,12 @@ def test_static_lifetime_slider_tracks_pending_state_in_controls():
             "host.pendingLifetimeCommit = lifetime;",
             "host.pendingLifetimeRequestId = host.lifetimeRequestId;",
             "host.serverLifetime = laneServerLifetime(host);",
+            "function updateLaneTeamConfigForLane(lane, configPatch) {",
+            'return Promise.reject(new Error("team config update requires team id"));',
+            'teamCommandPayload("updateTeamConfig", {',
+            "configPatch,",
             "function updateLaneLifetimeForLane(lane) {",
-            "function updateEmptyTeamLifetimeForLane(host) {",
-            "if (host.emptyTeam && host.teamId) {",
-            "configPatch: { lifetime: requestedLifetime },",
+            "updateLaneTeamConfigForLane(host, { lifetime: requestedLifetime })",
             "function serverLifetimeSupersedesPending(host, options = {})",
             "if (options.supersedePending !== true) return false;",
             "function serverLifetimeSettlesPending(host, lifetime, options = {})",
@@ -917,6 +919,7 @@ def test_static_lifetime_slider_tracks_pending_state_in_controls():
         ),
     )
     assert app_controls.count("pendingLifetimeCommit") >= 4
+    assert "function updateEmptyTeamLifetimeForLane" not in app_controls
 
 
 def test_static_lifetime_slider_syncs_server_state_sources():
@@ -924,22 +927,27 @@ def test_static_lifetime_slider_syncs_server_state_sources():
     app_groups = (STATIC_ROOT / "app.groups.js").read_text(encoding="utf-8")
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
+    app_panes = (STATIC_ROOT / "app.panes.js").read_text(encoding="utf-8")
 
     _assert_contains_all(
-        app_stream,
+        app_controls,
         (
-            "const requestedLifetime = payload.lifetime;",
-            "const lifetimeRequestId = Math.max",
-            "const pendingLifetimeRequestId =",
-            "lifetimeRequestId,",
-            "settleLaneLifetimeCommit(",
-            "if (!requestedLifetimeRequestId) return;",
-            "if (options.lifetimeRequestId === undefined) return true;",
-            "taskDrainLifetimeResponseIsCurrent(lane, options)",
-            "requestId: options.lifetimeRequestId,",
-            "if (pendingLifetimeRequestId)",
-            "requestId: pendingLifetimeRequestId,",
-            "supersedePending: false,",
+            "function updateLaneTeamConfigForLane(lane, configPatch) {",
+            'teamCommandPayload("updateTeamConfig", {',
+            "teamId: host.teamId,",
+            "configPatch,",
+            "updateLaneTeamConfigForLane(host, { lifetime: requestedLifetime })",
+            'rollbackLaneLifetimeCommit(host, requestedLifetime, "", { requestId });',
+            'setLaneTransientStatus(host, "lifetime update failed");',
+        ),
+    )
+    _assert_contains_all(
+        app_panes,
+        (
+            "updateLaneTeamConfigForLane(host, {",
+            "taskFilters: uniqueStringList(updateFilters(laneAssignedTaskFilters(host)))",
+            'setLaneTransientStatus(host, "task filters update failed");',
         ),
     )
     _assert_contains_all(
@@ -964,7 +972,11 @@ def test_static_lifetime_slider_syncs_server_state_sources():
             "restoreLaneLifetimeRuntimeState(",
         ),
     )
-    assert "pendingLifetimeRequestId" in app_stream
+    assert "pendingLifetimeRequestId" in app_controls
+    assert "pendingLifetimeRequestId" not in app_stream
+    assert "function updateTaskDrainForLane" not in app_stream
+    assert "settleLaneLifetimeCommit(" not in app_stream
+    assert "replaceTaskFilters" not in app_panes
 
 
 def test_lifetime_slider_pending_commit_ignores_stale_server_lifetimes():

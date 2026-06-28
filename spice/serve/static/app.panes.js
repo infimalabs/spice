@@ -539,9 +539,10 @@ function laneFilterPickerFooterText(lane) {
 
 function mutateLaneTaskFilters(lane, updateFilters) {
   const host = laneGroupHost(lane);
-  updateTaskDrainForLane(host, {
+  updateLaneTeamConfigForLane(host, {
     taskFilters: uniqueStringList(updateFilters(laneAssignedTaskFilters(host))),
-    replaceTaskFilters: true,
+  }).catch(() => {
+    setLaneTransientStatus(host, "task filters update failed");
   });
 }
 

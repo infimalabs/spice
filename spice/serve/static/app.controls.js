@@ -88,24 +88,23 @@ function clearLaneLifetimeCommitState(host) {
   host.pendingLifetimeRequestId = 0;
 }
 
-function updateLaneLifetimeForLane(lane) {
+function updateLaneTeamConfigForLane(lane, configPatch) {
   const host = laneGroupHost(lane);
-  if (host.emptyTeam && host.teamId) {
-    updateEmptyTeamLifetimeForLane(host);
-    return;
-  }
-  updateTaskDrainForLane(host);
-}
-
-function updateEmptyTeamLifetimeForLane(host) {
-  const requestedLifetime = laneEffectiveLifetime(host);
-  const requestId = Math.max(0, Number(host.pendingLifetimeRequestId) || 0);
-  requestTeamCommand(
+  if (!host.teamId)
+    return Promise.reject(new Error("team config update requires team id"));
+  return requestTeamCommand(
     teamCommandPayload("updateTeamConfig", {
       teamId: host.teamId,
-      configPatch: { lifetime: requestedLifetime },
+      configPatch,
     }),
-  )
+  );
+}
+
+function updateLaneLifetimeForLane(lane) {
+  const host = laneGroupHost(lane);
+  const requestedLifetime = laneEffectiveLifetime(host);
+  const requestId = Math.max(0, Number(host.pendingLifetimeRequestId) || 0);
+  updateLaneTeamConfigForLane(host, { lifetime: requestedLifetime })
     .then(() => {
       if (!laneLifetimeCommitMatches(host, requestedLifetime, { requestId }))
         return;
