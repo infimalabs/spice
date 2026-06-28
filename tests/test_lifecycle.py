@@ -43,7 +43,7 @@ def _git_worktree_tmp_path(request, tmp_path):
 def test_shipped_agent_defaults_are_current_high_effort():
     assert CODEX_DRIVER.default_model == "gpt-5.5"
     assert CODEX_DRIVER.default_reasoning_effort == "xhigh"
-    assert CODEX_DRIVER.default_service_tier == "fast"
+    assert CODEX_DRIVER.default_service_tier == "default"
     assert CLAUDE_DRIVER.default_model == "sonnet"
     assert CLAUDE_DRIVER.default_reasoning_effort == "xhigh"
 
@@ -111,7 +111,7 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
     assert calls == [("third:third inner",), ("third inner",)]
 
 
-def test_codex_driver_command_pins_fast_service_tier_and_playwright_mcp(
+def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_mcp(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(agent_driver, "operator_color_scheme", lambda: "dark")
@@ -167,7 +167,9 @@ def test_ensure_agent_uses_shipped_codex_defaults_without_config(tmp_path, monke
     result = lifecycle.ensure_agent(tmp_path, dry_run=True)
 
     assert result.command[result.command.index("--model") + 1] == "gpt-5.5"
-    assert 'model_reasoning_effort="xhigh"' in _config_values(result.command)
+    configs = _config_values(result.command)
+    assert 'model_reasoning_effort="xhigh"' in configs
+    assert not any(config.startswith("service_tier=") for config in configs)
 
 
 def test_playwright_mcp_args_write_light_scheme_config(tmp_path, monkeypatch):
@@ -239,7 +241,7 @@ def test_ensure_agent_dry_run_covers_start_resume_and_renew(tmp_path, monkeypatc
     assert started.command[0] == "codex-test"
     assert 'model_reasoning_effort="high"' in _config_values(started.command)
     assert 'personality="friendly"' in _config_values(started.command)
-    assert 'service_tier="fast"' in _config_values(started.command)
+    assert 'service_tier="default"' in _config_values(started.command)
     assert resumed.action == "would-resume"
     assert resumed.command[-3:] == ["resume", "resume-thread", resumed.prompt]
     assert renewed.action == "would-renew"
