@@ -71,6 +71,7 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `env_presence_gate` | `true` | Presence reverse-gate (on by default): every env *access site* (not just watchlisted name literals) must carry an `env-policy: allow` waiver, so the audit covers env reads under any or dynamic names. Access idioms are matched per language family (built-in Python `os.environ`/`getenv`/`putenv`/`unsetenv`; C# `Environment.GetEnvironmentVariable`/`SetEnvironmentVariable`, with optional `System.`; Lua `os.getenv`; shell `$VAR`, `${VAR}`, and `export VAR=`; JavaScript/TypeScript `process.env`). Set `false` to opt out. |
 | `env_access_patterns` | `{}` | Table keyed by language family (`python`, `csharp`, `lua`, `shell`, `javascript`) of extra access-idiom regexes for the presence gate, scoped to that family's suffixes — register a repo's own idioms (e.g. bespoke Lua runtime accessors) without forking the study. |
 | `reachability_providers` | `[]` | Extra language-aware dead-code providers for `spice study reachability` and `gate:reachability`. |
+| `assertion_helpers` | `[]` | Callable names that count as assertions when called inside Python tests. Use leaf names such as `ensure_contract` or exact dotted calls such as `contracts.require_valid`; they extend the built-in `assert`, `pytest.raises`/`warns`/`fail`, and `assert*` recognition. |
 | `pre_commit` | `[]` | Extra command steps run after built-ins. Entries are mounted command names or command tables. |
 | `pre_commit_success` | `[]` | Command steps run only after the full gate passes. |
 | `pre_commit_builtins` | built-ins enabled | Per-built-in overrides for `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `serve-web-typecheck`, `python-typecheck`, `env-policy`, `file-shape`, `complexity`, `magic-numbers`, `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals`. |
@@ -108,6 +109,10 @@ it to exactly one gate by granularity. `module` is the coarse whole-file gate
 (`gate:reachability`); every other kind (`function`, `class`, `method`, …) is a
 symbol and rides the finer `gate:symbol-reachability`. A single provider may
 emit both kinds in one run; no finding is counted by both gates.
+
+Assertion helper entries are Python callable names. A leaf entry matches any
+call with that final attribute name; a dotted entry matches the full dotted call
+as written in the test.
 
 ```toml
 [tool.spice.policy]
