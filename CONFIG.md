@@ -88,8 +88,8 @@ special or positional parameters such as `$?`, `$$`, `$1`, `$@`, `$*`, `$#`,
 `env-name-ledger` accounts only for literal names it can extract from supported
 env access forms, watchlisted env-name patterns, or exact manifest names still
 present as literals in scanned sources. Dynamic/non-literal access sites such as
-`os.environ[name]` have no extractable exact name; they remain the
-the access gate's domain.
+`os.environ[name]` have no extractable exact name; they remain in the access
+gate's domain.
 
 The ledger scans tests on the same footing as production — tests are never
 exempt. A test that references an env name must therefore use either a real env
