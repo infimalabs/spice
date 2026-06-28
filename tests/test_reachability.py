@@ -115,6 +115,59 @@ def test_reachability_partitions_provider_kinds_by_gate(tmp_path):
     ]
 
 
+def test_reachability_uses_all_configured_test_roots_for_modules_and_symbols(
+    tmp_path,
+):
+    unity_tests = tmp_path / "Assets" / "Game" / "Tests"
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "spice" / "cli").mkdir(parents=True)
+    unity_tests.mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\ntest_paths = ["tests", "Assets/**/Tests"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "spice" / "cli" / "entry.py").write_text(
+        "from ..live import production_function\n"
+        "def main():\n"
+        "    return production_function()\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "spice" / "live.py").write_text(
+        "def production_function():\n    return 1\n\n"
+        "def second_root_only_function():\n    return 2\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "spice" / "onlytest.py").write_text(
+        "VALUE = 1\n",
+        encoding="utf-8",
+    )
+    (unity_tests / "test_game.py").write_text(
+        "import spice.onlytest\n"
+        "from spice.live import second_root_only_function\n"
+        "def test_game():\n"
+        "    assert second_root_only_function() == 2\n",
+        encoding="utf-8",
+    )
+
+    module_findings = scan_reachability(tmp_path)
+    symbol_findings = scan_symbol_reachability(tmp_path)
+
+    assert [(f.subject, f.path, f.only_test_imports) for f in module_findings] == [
+        ("spice.onlytest", "spice/onlytest.py", ["test_game.py"])
+    ]
+    assert [
+        (f.module, f.symbol, f.module_path, f.only_test_imports)
+        for f in symbol_findings
+    ] == [
+        (
+            "spice.live",
+            "second_root_only_function",
+            "spice/live.py",
+            ["test_game.py"],
+        )
+    ]
+
+
 def test_reachability_config_provider_reports_module_finding(tmp_path):
     provider = tmp_path / "lua_provider.py"
     payload = json.dumps(
