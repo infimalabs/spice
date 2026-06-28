@@ -90,6 +90,14 @@ present as literals in scanned sources. Dynamic/non-literal access sites such as
 `os.environ[name]` have no extractable exact name; they remain the
 `env_presence_gate` waiver gate's domain.
 
+The ledger scans tests on the same footing as production — tests are never
+exempt. A test that references an env name must therefore use either a real env
+name it meaningfully overwrites or asserts on (e.g. a hermeticity check that a
+leaked variable is scrubbed), or an obviously-fake name that no real system uses
+(this repo's fixtures use a `FAKEENV_*` prefix). Never reference an arbitrary
+real-looking name from a test, or it will masquerade as part of the real env
+surface in the manifest.
+
 Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 `1.5x` flex, routines CCN `20` / length `80` with the same flex/sticky model,
 commit text wrap `100`, magic-number threshold `10`, and magic baselines against

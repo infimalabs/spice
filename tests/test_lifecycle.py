@@ -62,7 +62,7 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
             return tmp_path / f"{thread_id}.jsonl"
 
         def current_turn_id(self, env):
-            return env.get("THIRD_TURN_ID")
+            return env.get("FAKEENV_THIRD_TURN_ID")
 
         def rewrite_tool_command(self, command_text, rewrite_command):
             if not command_text.startswith("third:"):
@@ -73,8 +73,8 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
     third_driver = ThirdDriver(
         name="third",
         default_bin="third",
-        bin_env="THIRD_BIN",
-        thread_id_env="THIRD_THREAD_ID",
+        bin_env="FAKEENV_THIRD_BIN",
+        thread_id_env="FAKEENV_THIRD_THREAD_ID",
         default_model="third-model",
         default_reasoning_effort="",
         default_service_tier="",
@@ -83,7 +83,7 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
         stdout_compaction_marker="",
         session_id_pattern=re.compile(r"^third-session$"),
     )
-    monkeypatch.setenv("THIRD_TURN_ID", "turn-third")
+    monkeypatch.setenv("FAKEENV_THIRD_TURN_ID", "turn-third")
     monkeypatch.setattr(ops, "ambient_thread", lambda: ("thread-third", third_driver))
     monkeypatch.setattr(ops.config, "repo_root", lambda: tmp_path)
     monkeypatch.setattr(ops.tw, "current_branch", lambda: "main")
