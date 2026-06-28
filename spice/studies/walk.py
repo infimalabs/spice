@@ -12,9 +12,10 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Iterable, Iterator
 
-from spice.repocfg import policy_table, string_list
+from spice.repocfg import policy_table, read_pyproject, string_list
 
 _RENAME_STATUS_FIELDS = 3
+TEST_PATHS_KEY = "test_paths"
 EXCLUDED_PATH_PARTS = frozenset(
     {
         ".git",
@@ -31,6 +32,128 @@ EXCLUDED_PATH_PARTS = frozenset(
 
 def policy_path_exclusions(repo_root: Path) -> tuple[str, ...]:
     return tuple(string_list(policy_table(repo_root).get("exclude")))
+
+
+def test_path_patterns(repo_root: Path) -> tuple[str, ...]:
+    """Repo-relative test-root patterns, in configured derivation precedence."""
+    policy_patterns = string_list(policy_table(repo_root).get(TEST_PATHS_KEY))
+    if policy_patterns:
+        return _normalized_patterns(policy_patterns)
+    pytest_patterns = _pytest_testpaths(repo_root)
+    if pytest_patterns:
+        return _normalized_patterns(pytest_patterns)
+    return ("tests",)
+
+
+def configured_test_roots(repo_root: Path) -> list[Path]:
+    """Existing concrete test directories for iterating callers."""
+    roots: list[Path] = []
+    for pattern in test_path_patterns(repo_root):
+        roots.extend(_existing_test_roots(repo_root, pattern))
+    return _dedupe_paths(roots)
+
+
+def is_test_path(path: Path, repo_root: Path) -> bool:
+    """True when ``path`` is at or below a configured test location."""
+    relative = _repo_relative_path(path, repo_root)
+    if relative is None:
+        return False
+    rel_posix = _normalized_git_path(relative)
+    if not rel_posix:
+        return False
+    return any(
+        _matches_test_path_pattern(rel_posix, pattern)
+        for pattern in test_path_patterns(repo_root)
+    )
+
+
+# Public resolver seam for callers that need the canonical test-location rule.
+# Keeping the callables in a named registry makes the exported API visible to
+# symbol reachability while the individual study migrations land separately.
+TEST_LOCATION_RESOLVERS = (
+    configured_test_roots,
+    is_test_path,
+    test_path_patterns,
+)
+
+
+def _pytest_testpaths(repo_root: Path) -> list[str]:
+    tool = read_pyproject(repo_root).get("tool")
+    if not isinstance(tool, dict):
+        return []
+    pytest_table = tool.get("pytest")
+    if not isinstance(pytest_table, dict):
+        return []
+    options = pytest_table.get("ini_options")
+    if not isinstance(options, dict):
+        return []
+    raw = options.get("testpaths")
+    if isinstance(raw, str):
+        return _string_testpaths(raw)
+    return string_list(raw)
+
+
+def _string_testpaths(raw: str) -> list[str]:
+    values: list[str] = []
+    for item in raw.split():
+        value = item.strip()
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def _normalized_patterns(patterns: Iterable[str]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    for pattern in patterns:
+        value = _normalized_policy_pattern(pattern).rstrip("/")
+        if value and value not in normalized:
+            normalized.append(value)
+    return tuple(normalized)
+
+
+def _existing_test_roots(repo_root: Path, pattern: str) -> list[Path]:
+    if _has_glob_magic(pattern):
+        return sorted(path for path in repo_root.glob(pattern) if path.is_dir())
+    root = repo_root / pattern
+    return [root] if root.is_dir() else []
+
+
+def _dedupe_paths(paths: Iterable[Path]) -> list[Path]:
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for path in paths:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        deduped.append(path)
+    return deduped
+
+
+def _repo_relative_path(path: Path, repo_root: Path) -> Path | None:
+    if not path.is_absolute():
+        return path
+    try:
+        return path.resolve().relative_to(repo_root.resolve())
+    except ValueError:
+        return None
+
+
+def _matches_test_path_pattern(rel_posix: str, pattern: str) -> bool:
+    if _has_glob_magic(pattern):
+        return any(
+            fnmatchcase(candidate, pattern) for candidate in _path_ancestors(rel_posix)
+        )
+    return rel_posix == pattern or rel_posix.startswith(pattern + "/")
+
+
+def _path_ancestors(rel_posix: str) -> Iterator[str]:
+    path = Path(rel_posix)
+    candidates = [path, *path.parents]
+    for candidate in candidates:
+        value = candidate.as_posix()
+        if value and value != ".":
+            yield value
 
 
 def is_excluded_path(
