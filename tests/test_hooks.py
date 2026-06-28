@@ -39,6 +39,7 @@ BUILTIN_PRE_COMMIT_LABELS = [
     "local paths",
     "serve web typecheck",
     "env policy",
+    "env name ledger",
     "file shape",
     "complexity",
     "magic numbers",
@@ -62,6 +63,7 @@ EXPECTED_BUILTIN_PRE_COMMIT_KEYS = [
     "serve-web-typecheck",
     "python-typecheck",
     "env-policy",
+    "env-name-ledger",
     "file-shape",
     "complexity",
     "magic-numbers",
@@ -291,6 +293,7 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
         "local paths",
         "serve web typecheck",
         "env policy",
+        "env name ledger",
         "file shape",
         "complexity",
         "custom magic",
@@ -698,6 +701,7 @@ def test_policy_exclude_filters_path_based_builtin_gate_steps(tmp_path, monkeypa
     )
     monkeypatch.setattr(precommit, "_run_local_path_guard", record("local paths"))
     monkeypatch.setattr(precommit, "_run_env_policy_guard", record("env policy"))
+    monkeypatch.setattr(precommit, "_run_env_name_ledger_guard", lambda repo_root: None)
     monkeypatch.setattr(precommit, "_run_file_loc_guard", record("file shape"))
     monkeypatch.setattr(precommit, "_run_complexity_guard", record("complexity"))
     monkeypatch.setattr(precommit, "_run_magic_numbers_guard", record("magic numbers"))
@@ -1097,6 +1101,11 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         precommit,
+        "_run_env_name_ledger_guard",
+        lambda repo_root: record("env name ledger"),
+    )
+    monkeypatch.setattr(
+        precommit,
         "_run_file_loc_guard",
         lambda repo_root, paths: record("file shape"),
     )
@@ -1152,6 +1161,7 @@ def _patch_pre_commit_builtin_noops_except_local_paths(tmp_path, monkeypatch) ->
     monkeypatch.setattr(
         precommit, "_run_env_policy_guard", lambda repo_root, paths: None
     )
+    monkeypatch.setattr(precommit, "_run_env_name_ledger_guard", lambda repo_root: None)
     monkeypatch.setattr(precommit, "_run_file_loc_guard", lambda repo_root, paths: None)
     monkeypatch.setattr(
         precommit, "_run_complexity_guard", lambda repo_root, paths: None
@@ -1188,6 +1198,7 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
     monkeypatch.setattr(
         precommit, "_run_env_policy_guard", lambda repo_root, paths: None
     )
+    monkeypatch.setattr(precommit, "_run_env_name_ledger_guard", lambda repo_root: None)
     monkeypatch.setattr(precommit, "_run_file_loc_guard", lambda repo_root, paths: None)
     monkeypatch.setattr(
         precommit, "_run_complexity_guard", lambda repo_root, paths: None

@@ -96,6 +96,7 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
         _complexity_check(repo_root, paths),
         _magic_numbers_check(repo_root, paths),
         _env_policy_check(repo_root, paths),
+        _env_name_ledger_check(repo_root, paths),
     ]
     return DoctorReport(repo_root=repo_root, checks=checks, fixes=fixes)
 
@@ -516,6 +517,17 @@ def _env_policy_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
             "spice study env-policy",
         )
     return _ok("env-policy", "ok", "spice study env-policy")
+
+
+def _env_name_ledger_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
+    findings = envpolicy.scan_env_name_ledger(paths, root=repo_root)
+    if findings:
+        return _fail(
+            "env-name-ledger",
+            f"{len(findings)} manifest mismatch(es)",
+            "spice study env-name-ledger",
+        )
+    return _ok("env-name-ledger", "ok", "spice study env-name-ledger")
 
 
 def _spice_error_check(

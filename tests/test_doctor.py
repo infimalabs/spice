@@ -175,6 +175,7 @@ def _patch_non_hook_checks(monkeypatch) -> None:
         ("complexity", "spice study complexity"),
         ("magic-numbers", "spice study magic-numbers"),
         ("env-policy", "spice study env-policy"),
+        ("env-name-ledger", "spice study env-name-ledger"),
     ):
         monkeypatch.setattr(
             doctor,

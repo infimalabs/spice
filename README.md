@@ -437,6 +437,10 @@ The pre-commit gate is the executable form of the project's opinions — see
   `[tool.spice.policy] env_name_patterns`; the waiver may live on the literal
   line, as a standalone waiver comment directly above the statement, or
   anywhere inside the wrapped statement carrying that literal;
+- env-name ledger accounting compares `[tool.spice.policy] env_names` exact
+  names with literal env names extracted from supported access forms; dynamic
+  access sites still belong to the presence waiver gate because they have no
+  exact name to ledger;
 - commit subjects fit in 100 columns; bodies are auto-folded.
 
 The gate applies to spice itself: this repository is its own first target.

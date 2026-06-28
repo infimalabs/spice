@@ -80,6 +80,55 @@ pre-commit = { argv = ["spice", "dev", "pre-commit"] }
 [tool.spice.tasks]
 stems = ["session", "mail", "hooks", "studies", "cli", "lifecycle", "tests"]
 
+[tool.spice.policy]
+env_names = [
+    "BASH_ENV",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "CODEX_SESSION_TURN_ID",
+    "CODEX_THREAD_ID",
+    "CODEX_TURN_ID",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_VALUE_0",
+    "GIT_EDITOR",
+    "GIT_SSH_COMMAND",
+    "GIT_TERMINAL_PROMPT",
+    "HISTFILE",
+    "HOME",
+    "OK",
+    "PATH",
+    "PORT",
+    "PYTHONPATH",
+    "RTK_DB_PATH",
+    "SPICE_AGENT_BIN",
+    "SPICE_AGENT_DRIVER",
+    "SPICE_METRIC_HISTORY_RETENTION_DAYS",
+    "SPICE_MOUNTED_COMMAND",
+    "SPICE_SERVE_BIN",
+    "SPICE_SHELL_HOOK_ORIGINAL_BASH_ENV",
+    "SPICE_SHELL_HOOK_ORIGINAL_HISTFILE",
+    "SPICE_SHELL_HOOK_ORIGINAL_ZDOTDIR",
+    "SPICE_SHELL_HOOK_PYTHON",
+    "SPICE_SHELL_HOOK_REPO_ROOT",
+    "SPICE_SHELL_HOOK_WRAPPERS",
+    "SPICE_STAGED_PATHS",
+    "SPICE_TASK_BACKEND",
+    "SPICE_TEST_TRACE",
+    "SPICE_VISIBLE_PROG",
+    "THIRD_BIN",
+    "THIRD_THREAD_ID",
+    "THIRD_TURN_ID",
+    "TLS",
+    "UV_PUBLISH_TOKEN",
+    "VIRTUAL_ENV",
+    "X",
+    "ZDOTDIR",
+    "ZSH_COMPDUMP",
+]
+
 [tool.spice.serve]
 brand = "spice"
 
