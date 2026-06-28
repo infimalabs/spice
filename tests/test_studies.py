@@ -743,6 +743,36 @@ def test_mutation_points_and_mutated_text_flip_operator():
     assert "return a - b" in mutated
 
 
+def test_changed_python_paths_skips_configured_test_roots(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\ntest_paths = ["tests", "Assets/**/Tests"]\n',
+        encoding="utf-8",
+    )
+    source = tmp_path / "pkg" / "sample.py"
+    default_test = tmp_path / "tests" / "test_sample.py"
+    unity_test = tmp_path / "Assets" / "Game" / "Tests" / "test_sample.py"
+    for path in (source, default_test, unity_test):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("VALUE = 1\n", encoding="utf-8")
+
+    def fake_run(command, **kwargs):
+        assert command[:2] == ["git", "diff"]
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(
+                "pkg/sample.py\n"
+                "tests/test_sample.py\n"
+                "Assets/Game/Tests/test_sample.py\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(mutations.subprocess, "run", fake_run)
+
+    assert mutations.changed_python_paths(tmp_path) == [Path("pkg/sample.py")]
+
+
 def test_mutation_study_scores_module_and_records_killing_tests(tmp_path, monkeypatch):
     source = tmp_path / "pkg" / "sample.py"
     source.parent.mkdir()
