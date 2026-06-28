@@ -469,6 +469,13 @@ disabled or replaced in tracked policy. `pre_commit_success` uses the same
 command shape as `pre_commit`, but runs only after the whole gate has passed,
 alongside sticky state cleanup.
 
+`python-typecheck` runs Pyright against the package roots resolved for the
+target repo and points Pyright at that repo's Python environment. The resolver
+uses a repo-local active `VIRTUAL_ENV`, then `.venv`, then the uv project
+interpreter. Non-standard layouts can set
+`[tool.spice.policy] python_typecheck_interpreter = "path/to/python"`; relative
+paths resolve from the repo root.
+
 Reachability is provider-backed across two granularities sharing one seam. The
 built-in `python` provider gates whole modules that tests can import but
 production roots cannot, and — at function/class/method granularity — symbols

@@ -1,9 +1,12 @@
+import subprocess
+import venv
 from pathlib import Path
 
 import pytest
 
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
+from spice.studies import typecheck
 from spice.studies import cli as studies_cli
 from spice.studies.shape import (
     configured_package_roots,
@@ -16,6 +19,7 @@ from spice.studies.shape import (
 from spice.studies.typecheck import (
     PYRIGHT_ARGS,
     python_typecheck_argv,
+    python_typecheck_interpreter,
     python_typecheck_targets,
     run_python_typecheck,
 )
@@ -174,11 +178,112 @@ def test_python_typecheck_targets_empty_without_a_package(tmp_path):
     assert python_typecheck_targets(tmp_path) == ()
 
 
-def test_python_typecheck_argv_appends_fixed_flags_and_targets():
-    argv = python_typecheck_argv(("app",))
+def test_python_typecheck_argv_appends_fixed_flags_and_targets(tmp_path, monkeypatch):
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+
+    argv = python_typecheck_argv(tmp_path, ("app",))
 
     assert argv[-len(PYRIGHT_ARGS) - 1 :] == (*PYRIGHT_ARGS, "app")
     assert "pyright" in " ".join(argv)
+    assert "--pythonpath" not in argv
+
+
+def test_python_typecheck_interpreter_uses_configured_override(tmp_path, monkeypatch):
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    python = _write_fake_python(tmp_path / "tools" / "python")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\npython_typecheck_interpreter = "tools/python"\n',
+        encoding="utf-8",
+    )
+
+    assert python_typecheck_interpreter(tmp_path) == python
+
+
+def test_python_typecheck_interpreter_rejects_missing_configured_override(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\npython_typecheck_interpreter = "missing/python"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError, match="does not exist"):
+        python_typecheck_interpreter(tmp_path)
+
+
+def test_python_typecheck_interpreter_prefers_repo_local_virtual_env(
+    tmp_path, monkeypatch
+):
+    active = _write_fake_python(tmp_path / "active-env" / "bin" / "python")
+    _write_fake_python(tmp_path / ".venv" / "bin" / "python")
+    monkeypatch.setenv("VIRTUAL_ENV", str(active.parents[1]))
+
+    assert python_typecheck_interpreter(tmp_path) == active
+
+
+def test_python_typecheck_interpreter_uses_dot_venv(tmp_path, monkeypatch):
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    python = _write_fake_python(tmp_path / ".venv" / "bin" / "python")
+
+    assert python_typecheck_interpreter(tmp_path) == python
+
+
+def test_python_typecheck_interpreter_ignores_foreign_virtual_env(
+    tmp_path, monkeypatch
+):
+    foreign = tmp_path.parent / "foreign-env"
+    _write_fake_python(foreign / "bin" / "python")
+    python = _write_fake_python(tmp_path / ".venv" / "bin" / "python")
+    monkeypatch.setenv("VIRTUAL_ENV", str(foreign))
+
+    assert python_typecheck_interpreter(tmp_path) == python
+
+
+def test_python_typecheck_interpreter_resolves_uv_project(tmp_path, monkeypatch):
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    python = _write_fake_python(tmp_path / "uv-env" / "bin" / "python")
+    (tmp_path / "uv.lock").write_text("", encoding="utf-8")
+    monkeypatch.setattr(typecheck, "find_tool", lambda name: "/usr/bin/uv")
+
+    def fake_run(argv, **kwargs):
+        assert argv[:6] == [
+            "/usr/bin/uv",
+            "run",
+            "--directory",
+            str(tmp_path),
+            "--project",
+            str(tmp_path),
+        ]
+        assert kwargs["cwd"] == tmp_path
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{python}\n", stderr="")
+
+    monkeypatch.setattr(typecheck.subprocess, "run", fake_run)
+
+    assert python_typecheck_interpreter(tmp_path) == python
+
+
+def test_python_typecheck_argv_uses_detected_interpreter(tmp_path, monkeypatch):
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    python = _write_fake_python(tmp_path / ".venv" / "bin" / "python")
+
+    argv = python_typecheck_argv(tmp_path, ("app",))
+
+    assert "--pythonpath" in argv
+    assert argv[argv.index("--pythonpath") + 1] == str(python)
+
+
+def test_run_python_typecheck_resolves_imports_from_repo_venv(tmp_path, monkeypatch):
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    _make_package(tmp_path, "app")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\npackage_roots = ["app"]\n',
+        encoding="utf-8",
+    )
+    _make_real_venv_with_package(tmp_path, "thirdparty")
+    (tmp_path / "app" / "mod.py").write_text(
+        "from thirdparty import VALUE\n\nvalue: int = VALUE\n",
+        encoding="utf-8",
+    )
+
+    assert run_python_typecheck(tmp_path) is None
 
 
 def test_run_python_typecheck_noops_without_targets(tmp_path):
@@ -187,6 +292,34 @@ def test_run_python_typecheck_noops_without_targets(tmp_path):
     )
 
     assert run_python_typecheck(tmp_path) is None
+
+
+def _write_fake_python(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def _make_real_venv_with_package(repo_root: Path, package_name: str) -> None:
+    builder = venv.EnvBuilder(with_pip=False)
+    builder.create(repo_root / ".venv")
+    python = python_typecheck_interpreter(repo_root)
+    assert python is not None
+    result = subprocess.run(
+        [
+            str(python),
+            "-c",
+            "import site; print(site.getsitepackages()[0])",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    site_packages = Path(result.stdout.strip())
+    package = site_packages / package_name
+    package.mkdir()
+    (package / "__init__.py").write_text("VALUE: int = 1\n", encoding="utf-8")
 
 
 def _name_cluster_repo(tmp_path: Path, names: list[str]) -> Path:
