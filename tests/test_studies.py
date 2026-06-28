@@ -184,6 +184,59 @@ def test_assertion_free_scanner_counts_tests_without_assertions(tmp_path):
     ]
 
 
+def test_assertion_free_scanner_counts_configured_assertion_helpers(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        'assertion_helpers = ["ensure_contract", "contracts.require_valid"]\n',
+        encoding="utf-8",
+    )
+    path = tmp_path / "tests" / "test_quality.py"
+    path.parent.mkdir()
+    path.write_text(
+        "\n".join(
+            [
+                "import contracts",
+                "",
+                "def test_registered_leaf_helper():",
+                "    ensure_contract({'ok': True})",
+                "",
+                "def test_registered_dotted_helper():",
+                "    contracts.require_valid({'ok': True})",
+                "",
+                "def test_unregistered_validator_call_still_flags():",
+                "    contracts.other_validator({'ok': True})",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    findings = scan_assertion_free_tests([Path("tests/test_quality.py")], root=tmp_path)
+
+    assert [(f.path, f.line, f.test_name) for f in findings] == [
+        (
+            "tests/test_quality.py",
+            9,
+            "test_unregistered_validator_call_still_flags",
+        )
+    ]
+
+
+def test_assertion_free_scanner_rejects_invalid_helper_config(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\nassertion_helpers = "ensure_contract"\n',
+        encoding="utf-8",
+    )
+    path = tmp_path / "tests" / "test_quality.py"
+    path.parent.mkdir()
+    path.write_text(
+        "def test_helper_call():\n    ensure_contract({})\n", encoding="utf-8"
+    )
+
+    with pytest.raises(SpiceError, match="assertion_helpers must be a list"):
+        scan_assertion_free_tests([Path("tests/test_quality.py")], root=tmp_path)
+
+
 def test_study_assertion_free_cli_reports_findings(tmp_path, monkeypatch, capsys):
     path = tmp_path / "tests" / "test_quality.py"
     path.parent.mkdir()
