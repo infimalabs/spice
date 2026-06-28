@@ -120,6 +120,75 @@ def _write_coupling_repo(root):
     )
 
 
+def _write_two_coupling_repo(root):
+    (root / "spice").mkdir()
+    (root / "tests").mkdir()
+    (root / "spice" / "foo.py").write_text(
+        "_secret = 1\n_other = 2\n", encoding="utf-8"
+    )
+    (root / "tests" / "test_foo.py").write_text(
+        "from spice.foo import _secret, _other\n\n"
+        "def test_secret():\n    assert (_secret, _other) == (1, 2)\n",
+        encoding="utf-8",
+    )
+
+
+def test_private_internal_guard_allows_configured_internal_coupling(tmp_path):
+    _write_coupling_repo(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        "internal_couplings = [\n"
+        '  { path = "tests/test_foo.py", test = "<module>", '
+        'target = "spice.foo._secret" },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+
+    assert precommit.quality_gate_failure(tmp_path, "coupling") is None
+
+
+def test_private_internal_guard_still_fails_unlisted_coupling(tmp_path):
+    _write_two_coupling_repo(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        "internal_couplings = [\n"
+        '  { path = "tests/test_foo.py", test = "<module>", '
+        'target = "spice.foo._secret" },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        precommit._run_private_internal_coupling_guard(tmp_path)
+
+    message = str(exc_info.value)
+    assert "private-internals: 1 coupling(s)" in message
+    assert "spice.foo._other" in message
+
+
+def test_private_internal_guard_reports_stale_configured_coupling(tmp_path):
+    (tmp_path / "spice").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_foo.py").write_text(
+        "def test_public():\n    assert 1 == 1\n", encoding="utf-8"
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        "internal_couplings = [\n"
+        '  { path = "tests/test_foo.py", test = "<module>", '
+        'target = "spice.foo._secret" },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        precommit._run_private_internal_coupling_guard(tmp_path)
+
+    message = str(exc_info.value)
+    assert "configured internal_couplings entr(ies) stale" in message
+    assert "tests/test_foo.py:<module>: spice.foo._secret" in message
+
+
 def test_quality_gate_failure_reports_dirty_gate_and_none_when_clean(tmp_path):
     clean = tmp_path / "clean"
     clean.mkdir()

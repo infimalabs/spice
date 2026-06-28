@@ -72,6 +72,7 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `env_access_patterns` | `{}` | Table keyed by language family (`python`, `csharp`, `lua`, `shell`, `javascript`) of extra access-idiom regexes for the presence gate, scoped to that family's suffixes — register a repo's own idioms (e.g. bespoke Lua runtime accessors) without forking the study. |
 | `reachability_providers` | `[]` | Extra language-aware dead-code providers for `spice study reachability` and `gate:reachability`. |
 | `assertion_helpers` | `[]` | Callable names that count as assertions when called inside Python tests. Use leaf names such as `ensure_contract` or exact dotted calls such as `contracts.require_valid`; they extend the built-in `assert`, `pytest.raises`/`warns`/`fail`, and `assert*` recognition. |
+| `internal_couplings` | `[]` | Exact private-internals exceptions as `{ path, test, target }` tables. These are named allowlist entries, never a tolerated count; stale entries fail the gate until removed. |
 | `pre_commit` | `[]` | Extra command steps run after built-ins. Entries are mounted command names or command tables. |
 | `pre_commit_success` | `[]` | Command steps run only after the full gate passes. |
 | `pre_commit_builtins` | built-ins enabled | Per-built-in overrides for `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `serve-web-typecheck`, `python-typecheck`, `env-policy`, `file-shape`, `complexity`, `magic-numbers`, `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals`. |
@@ -113,6 +114,17 @@ emit both kinds in one run; no finding is counted by both gates.
 Assertion helper entries are Python callable names. A leaf entry matches any
 call with that final attribute name; a dotted entry matches the full dotted call
 as written in the test.
+
+Internal coupling entries use the exact fields printed by the
+`private-internals` board: repo-relative test `path`, test function/method name
+or `<module>`, and private `target`.
+
+```toml
+[tool.spice.policy]
+internal_couplings = [
+  { path = "tests/test_worker.py", test = "<module>", target = "spice.worker._private_helper" },
+]
+```
 
 ```toml
 [tool.spice.policy]
