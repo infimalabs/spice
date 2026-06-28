@@ -131,6 +131,26 @@ Mounted commands can import the public repo-tool seam documented in the README.
 They should not rely on private spice modules unless the seam is deliberately
 expanded with tests and documentation.
 
+### Execution context: mount vs gate step
+
+The same repository command can run two ways, and the two contexts are
+deliberately distinct:
+
+- As a **mount** (`spice <name>`), the command runs with the mount environment:
+  `SPICE_MOUNTED_COMMAND=1` and `SPICE_VISIBLE_PROG` are exported so the tool can
+  present itself as a `spice` verb.
+- As a **`pre_commit` gate step**, the command runs argv-only with
+  `SPICE_STAGED_PATHS` (newline-delimited staged paths, narrowed by `when`). The
+  mount signals (`SPICE_MOUNTED_COMMAND`, `SPICE_VISIBLE_PROG`) are **not** set.
+
+This is intentional, not an oversight: a gate step is a focused check over
+staged paths, not a `spice`-fronted invocation. A repo tool therefore must not
+branch on detecting spice (e.g. on `SPICE_MOUNTED_COMMAND`) for behavior it also
+needs as a gate step — that signal is absent there by design. Keep the tool
+context-free and pass what it needs through argv (reading `SPICE_STAGED_PATHS`
+when it wants the staged set); a tool written this way behaves identically on
+both paths.
+
 ## Choosing A Surface
 
 Use `spice agent run -- <cmd>` for agent-owned execution where steering,
