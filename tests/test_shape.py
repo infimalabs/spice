@@ -10,6 +10,8 @@ from spice.studies.shape import (
     name_cluster_error,
     name_cluster_errors,
     name_cluster_threshold,
+    namespace_policy_error,
+    path_shape_errors,
 )
 from spice.studies.typecheck import (
     PYRIGHT_ARGS,
@@ -277,3 +279,71 @@ def test_study_shape_cli_fails_on_name_cluster(tmp_path, monkeypatch, capsys):
 
     assert args.func(args) == 1
     assert "name-cluster policy violation" in capsys.readouterr().out
+
+
+def _generated_shape_repo(root: Path, *, generated=None) -> None:
+    policy = '[tool.spice.policy]\npackage_roots = ["pkg"]\n'
+    if generated is not None:
+        listed = ", ".join(f'"{pattern}"' for pattern in generated)
+        policy += f"generated_paths = [{listed}]\n"
+    (root / "pyproject.toml").write_text(policy, encoding="utf-8")
+    proto = root / "pkg" / "proto"
+    proto.mkdir(parents=True)
+    (root / "pkg" / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    # `thing_pb2` has an internal underscore, so it fails the boundary naming law.
+    (proto / "thing_pb2.py").write_text("DESCRIPTOR = None\n", encoding="utf-8")
+
+
+def test_generated_pb2_fails_path_shape_without_exemption(tmp_path):
+    _generated_shape_repo(tmp_path)
+
+    errors = path_shape_errors(tmp_path)
+    assert any(
+        "thing_pb2.py" in error and "file name shape" in error for error in errors
+    )
+
+
+def test_generated_paths_directory_exempts_subtree_from_path_shape(tmp_path):
+    _generated_shape_repo(tmp_path, generated=["pkg/proto"])
+
+    assert path_shape_errors(tmp_path) == []
+
+
+def test_generated_paths_glob_exempts_pb2_from_path_shape(tmp_path):
+    _generated_shape_repo(tmp_path, generated=["**/*_pb2.py"])
+
+    assert path_shape_errors(tmp_path) == []
+
+
+def test_generated_paths_does_not_exempt_other_shape_violations(tmp_path):
+    _generated_shape_repo(tmp_path, generated=["pkg/proto"])
+    (tmp_path / "pkg" / "BadName.py").write_text("y = 1\n", encoding="utf-8")
+
+    errors = path_shape_errors(tmp_path)
+    assert any("BadName.py" in error for error in errors)
+    assert not any("thing_pb2.py" in error for error in errors)
+
+
+def test_generated_paths_exempts_namespace_init_but_not_others(tmp_path):
+    _generated_shape_repo(tmp_path, generated=["pkg/proto"])
+    (tmp_path / "pkg" / "proto" / "__init__.py").write_text("", encoding="utf-8")
+
+    assert namespace_policy_error(tmp_path) == ""
+
+    (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    error = namespace_policy_error(tmp_path)
+    assert "namespace-package policy violated" in error
+    assert "pkg/__init__.py" in error
+
+
+def test_generated_paths_exempts_name_cluster(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\npackage_roots = ["pkg"]\ngenerated_paths = ["pkg/gen"]\n',
+        encoding="utf-8",
+    )
+    gen = tmp_path / "pkg" / "gen"
+    gen.mkdir(parents=True)
+    for name in ("teamcommands", "teamfilters", "teammetrics", "teammailboxes"):
+        (gen / f"{name}.py").write_text("x = 1\n", encoding="utf-8")
+
+    assert name_cluster_errors(tmp_path) == []
