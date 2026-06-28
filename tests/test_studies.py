@@ -423,6 +423,33 @@ def test_study_private_internals_cli_reports_findings(tmp_path, monkeypatch, cap
     assert "private import spice.worker._private_helper" in output
 
 
+def test_study_private_internals_cli_honors_configured_couplings(
+    tmp_path, monkeypatch, capsys
+):
+    path = tmp_path / "tests" / "test_private.py"
+    path.parent.mkdir()
+    path.write_text(
+        "from spice.worker import _private_helper\n"
+        "def test_public_contract():\n"
+        "    assert 1 == 1\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        "internal_couplings = [\n"
+        '  { path = "tests/test_private.py", test = "<module>", '
+        'target = "spice.worker._private_helper" },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    args = build_parser().parse_args(["study", "private-internals"])
+
+    assert args.func(args) == 0
+    output = capsys.readouterr().out
+    assert "private-internals: no unmanaged private test coupling found" in output
+
+
 def test_private_internal_board_reports_clean_baseline():
     assert render_private_internal_board([]) == (
         "private-internals: no private test coupling found"

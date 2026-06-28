@@ -29,7 +29,7 @@ import subprocess
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
 from spice.cli.mounts import (
     MOUNTED_COMMAND_ENV,
@@ -58,8 +58,6 @@ from spice.studies import (
     testquality,
 )
 from spice.studies.walk import partially_staged_paths, staged_paths
-
-INTERNAL_COUPLINGS_KEY = "internal_couplings"
 
 STAGED_PATHS_ENV = "SPICE_STAGED_PATHS"  # env-policy: allow
 
@@ -704,41 +702,7 @@ def _run_assertion_free_test_guard(repo_root: Path) -> None:
 def _coupling_key(
     finding: testquality.PrivateInternalCouplingFinding,
 ) -> tuple[str, str, str]:
-    return (finding.path, finding.test_name, finding.target)
-
-
-def _configured_internal_couplings(repo_root: Path) -> frozenset[tuple[str, str, str]]:
-    raw = policy_table(repo_root).get(INTERNAL_COUPLINGS_KEY)
-    if raw is None:
-        return frozenset()
-    if not isinstance(raw, list):
-        raise SpiceError(
-            f"[tool.spice.policy] {INTERNAL_COUPLINGS_KEY} must be a list of "
-            "coupling tables"
-        )
-
-    couplings: list[tuple[str, str, str]] = []
-    for index, item in enumerate(raw, start=1):
-        context = f"{INTERNAL_COUPLINGS_KEY}[{index}]"
-        if not isinstance(item, dict):
-            raise SpiceError(f"[tool.spice.policy] {context} must be a table")
-        coupling = (
-            _internal_coupling_field(item, "path", context=context),
-            _internal_coupling_field(item, "test", context=context),
-            _internal_coupling_field(item, "target", context=context),
-        )
-        if coupling not in couplings:
-            couplings.append(coupling)
-    return frozenset(couplings)
-
-
-def _internal_coupling_field(item: dict[str, Any], field: str, *, context: str) -> str:
-    raw = item.get(field)
-    if not isinstance(raw, str) or not raw.strip():
-        raise SpiceError(
-            f"[tool.spice.policy] {context}.{field} must be a non-empty string"
-        )
-    return raw.strip()
+    return testquality.private_internal_coupling_key(finding)
 
 
 def _run_private_internal_coupling_guard(repo_root: Path) -> None:
@@ -749,11 +713,11 @@ def _run_private_internal_coupling_guard(repo_root: Path) -> None:
     findings = testquality.scan_private_internal_coupling(
         testquality.test_paths(repo_root), root=repo_root
     )
-    configured_couplings = _configured_internal_couplings(repo_root)
-    present = {_coupling_key(f) for f in findings}
-    allowed_couplings = LEGITIMATE_INTERNAL_COUPLINGS | configured_couplings
-    offenders = [f for f in findings if _coupling_key(f) not in allowed_couplings]
-    stale = sorted(configured_couplings - present)
+    offenders, stale = testquality.unmanaged_private_internal_couplings(
+        findings,
+        repo_root=repo_root,
+        built_in_couplings=LEGITIMATE_INTERNAL_COUPLINGS,
+    )
     if offenders or stale:
         details: list[str] = []
         if offenders:
@@ -765,20 +729,8 @@ def _run_private_internal_coupling_guard(repo_root: Path) -> None:
                 "justified entry to [tool.spice.policy].internal_couplings"
             )
         if stale:
-            details.append(_render_stale_internal_couplings(stale))
+            details.append(testquality.render_stale_internal_couplings(stale))
         raise SpiceError("\n".join(details))
-
-
-def _render_stale_internal_couplings(
-    stale: Sequence[tuple[str, str, str]],
-) -> str:
-    rows = [
-        f"private-internals: {len(stale)} configured internal_couplings "
-        "entr(ies) stale; delete entries whose coupling no longer exists"
-    ]
-    for path, test_name, target in stale:
-        rows.append(f"  {path}:{test_name}: {target}")
-    return "\n".join(rows)
 
 
 # Quality gates a task can bind its completion to. A task tagged ``gate:<key>``
