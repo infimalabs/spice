@@ -23,6 +23,7 @@ from pathlib import Path
 from spice.errors import SpiceError
 from spice.policy import BOUNDARY_UNDERSCORE_PATTERN
 from spice.repocfg import policy_table, read_pyproject, string_list
+from spice.studies.walk import configured_test_roots, is_test_path
 
 BOUNDARY_UNDERSCORE_RE = re.compile(BOUNDARY_UNDERSCORE_PATTERN)
 # Generic continuation shards: a split must name the seam, not number it.
@@ -339,10 +340,9 @@ def namespace_policy_error(repo_root: Path) -> str:
 def path_shape_errors(repo_root: Path) -> list[str]:
     patterns = generated_path_patterns(repo_root)
     offenders: list[str] = []
-    scan_roots = configured_package_roots(repo_root)
-    tests_root = repo_root / "tests"
-    if tests_root.is_dir():
-        scan_roots.append(tests_root)
+    scan_roots = _dedupe_scan_roots(
+        [*configured_package_roots(repo_root), *configured_test_roots(repo_root)]
+    )
     for root in scan_roots:
         for path in sorted(root.rglob("*")):
             if _is_residue_path(path):
@@ -358,7 +358,7 @@ def path_shape_errors(repo_root: Path) -> list[str]:
                 continue
             if path.name in ALLOWED_NON_SHAPE_FILES:
                 continue
-            if not _has_module_shape(path, tests_root):
+            if not _has_module_shape(path, repo_root):
                 offenders.append(f"{relative}: file name shape")
                 continue
             if any(pattern.search(path.name) for pattern in GENERIC_SPLIT_RES):
@@ -374,10 +374,22 @@ def path_shape_errors(repo_root: Path) -> list[str]:
     return offenders
 
 
-def _has_module_shape(path: Path, tests_root: Path) -> bool:
+def _dedupe_scan_roots(paths: Iterable[Path]) -> list[Path]:
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for path in paths:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        deduped.append(path)
+    return deduped
+
+
+def _has_module_shape(path: Path, repo_root: Path) -> bool:
     # Test modules carry the pytest-mandated `test_` prefix; the boundary
     # shape applies to what the module is actually named after it.
-    if tests_root in path.parents:
+    if is_test_path(path, repo_root):
         return path.stem.startswith("test_") and bool(
             BOUNDARY_UNDERSCORE_RE.fullmatch(path.stem.removeprefix("test_"))
         )
