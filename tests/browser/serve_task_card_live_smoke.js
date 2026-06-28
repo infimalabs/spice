@@ -106,7 +106,7 @@ async function taskCardDiagnostics(page, targetId) {
 }
 
 async function createTaskForLane(backendDir, threadId, title) {
-  const command = process.env.SPICE_SERVE_BIN || "spice";
+  const command = process.env.SPICE_SERVE_BIN || "spice"; // env-policy: allow
   const { stdout, stderr } = await execFileAsync(
     command,
     [
@@ -121,7 +121,7 @@ async function createTaskForLane(backendDir, threadId, title) {
     {
       cwd: repoRoot,
       env: {
-        ...process.env,
+        ...process.env, // env-policy: allow
         CODEX_THREAD_ID: threadId,
         SPICE_TASK_BACKEND: backendDir,
       },
