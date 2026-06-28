@@ -1058,7 +1058,7 @@ def test_env_presence_gate_rejects_non_boolean_flag(tmp_path):
 def test_env_presence_gate_flags_python_putenv_and_unsetenv(tmp_path):
     path = tmp_path / "sample.py"
     path.write_text(
-        'os.putenv("X", "1")\nos.unsetenv("X")\n',  # env-policy: allow
+        'os.putenv("FAKEENV_X", "1")\nos.unsetenv("FAKEENV_X")\n',  # env-policy: allow
         encoding="utf-8",
     )
 
@@ -1193,7 +1193,7 @@ def test_env_access_patterns_invalid_regex_raises(tmp_path):
         encoding="utf-8",
     )  # env-policy: allow
     (tmp_path / "sample.lua").write_text(
-        "local v = os.getenv('X')\n", encoding="utf-8"
+        "local v = os.getenv('FAKEENV_X')\n", encoding="utf-8"
     )  # env-policy: allow
 
     with pytest.raises(SpiceError, match="env_access_patterns contains invalid regex"):
@@ -1225,7 +1225,7 @@ def test_env_access_patterns_non_table_raises(tmp_path):
 def test_env_presence_gate_flags_lua_os_getenv_by_default(tmp_path):
     path = tmp_path / "config.lua"
     path.write_text(
-        "local home = os.getenv('HOME')\nlocal ok = os.getenv('OK')  -- env-policy: allow\n",
+        "local home = os.getenv('HOME')\nlocal ok = os.getenv('FAKEENV_OK')  -- env-policy: allow\n",
         encoding="utf-8",
     )
 
@@ -1259,8 +1259,8 @@ def test_env_presence_gate_flags_javascript_process_env_by_default(tmp_path):
     path = tmp_path / "config.ts"
     path.write_text(
         "const home = process.env.HOME\n"
-        "const port = process.env['PORT']\n"
-        'const tls = process.env["TLS"]  // env-policy: allow\n',
+        "const port = process.env['FAKEENV_PORT']\n"
+        'const tls = process.env["FAKEENV_TLS"]  // env-policy: allow\n',
         encoding="utf-8",
     )
 
@@ -1284,11 +1284,11 @@ def test_env_presence_gate_javascript_matcher_is_scoped(tmp_path):
 
 def test_env_name_ledger_flags_unaccounted_literal_env_names(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\nenv_names = ["PORT"]\n',
+        '[tool.spice.policy]\nenv_names = ["FAKEENV_PORT"]\n',
         encoding="utf-8",
     )
     (tmp_path / "sample.py").write_text(
-        'home = os.getenv("HOME")\nport = os.environ["PORT"]\n',  # env-policy: allow
+        'home = os.getenv("HOME")\nport = os.environ["FAKEENV_PORT"]\n',  # env-policy: allow
         encoding="utf-8",
     )
 
@@ -1321,7 +1321,7 @@ def test_env_name_ledger_flags_stale_declared_env_names(tmp_path):
 
 def test_env_name_ledger_passes_clean_manifest_across_languages(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\nenv_names = ["APP_MODE", "HOME", "PORT", "TLS"]\n',
+        '[tool.spice.policy]\nenv_names = ["APP_MODE", "HOME", "FAKEENV_PORT", "FAKEENV_TLS"]\n',
         encoding="utf-8",
     )
     (tmp_path / "sample.py").write_text(
@@ -1329,7 +1329,8 @@ def test_env_name_ledger_passes_clean_manifest_across_languages(tmp_path):
         encoding="utf-8",
     )
     (tmp_path / "config.ts").write_text(
-        'const port = process.env.PORT\nconst tls = process.env["TLS"]\n',
+        "const port = process.env.FAKEENV_PORT\n"
+        'const tls = process.env["FAKEENV_TLS"]\n',
         encoding="utf-8",
     )
     (tmp_path / "run.sh").write_text(
@@ -1343,3 +1344,21 @@ def test_env_name_ledger_passes_clean_manifest_across_languages(tmp_path):
     )
 
     assert render_env_name_ledger_board(findings) == "env-name-ledger: ok"
+
+
+def test_env_name_ledger_holds_test_files_to_the_same_standard(tmp_path):
+    # Tests are not exempt: an env name referenced only in a test file is still
+    # required in the manifest, exactly like production source.
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\nenv_names = []\n", encoding="utf-8"
+    )
+    test_dir = tmp_path / "tests"
+    test_dir.mkdir()
+    (test_dir / "test_env_usage.py").write_text(
+        'value = os.getenv("FAKEENV_X")\n',  # env-policy: allow
+        encoding="utf-8",
+    )
+
+    findings = scan_env_name_ledger([Path("tests/test_env_usage.py")], root=tmp_path)
+
+    assert [(f.kind, f.name) for f in findings] == [("unaccounted", "FAKEENV_X")]
