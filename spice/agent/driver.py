@@ -811,7 +811,7 @@ CODEX_DRIVER: AgentDriver = CodexDriver(
     thread_id_env="CODEX_THREAD_ID",  # env-policy: allow
     default_model="gpt-5.5",
     default_reasoning_effort="xhigh",
-    default_service_tier="default",
+    default_service_tier="",
     stdout_assistant_marker="codex",
     stdout_section_markers=frozenset(
         {"context compacted", "exec", "tokens used", "user"}

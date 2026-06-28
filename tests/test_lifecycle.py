@@ -43,7 +43,7 @@ def _git_worktree_tmp_path(request, tmp_path):
 def test_shipped_agent_defaults_are_current_high_effort():
     assert CODEX_DRIVER.default_model == "gpt-5.5"
     assert CODEX_DRIVER.default_reasoning_effort == "xhigh"
-    assert CODEX_DRIVER.default_service_tier == "default"
+    assert CODEX_DRIVER.default_service_tier == ""
     assert CLAUDE_DRIVER.default_model == "sonnet"
     assert CLAUDE_DRIVER.default_reasoning_effort == "xhigh"
 
@@ -241,7 +241,9 @@ def test_ensure_agent_dry_run_covers_start_resume_and_renew(tmp_path, monkeypatc
     assert started.command[0] == "codex-test"
     assert 'model_reasoning_effort="high"' in _config_values(started.command)
     assert 'personality="friendly"' in _config_values(started.command)
-    assert 'service_tier="default"' in _config_values(started.command)
+    assert not any(
+        config.startswith("service_tier=") for config in _config_values(started.command)
+    )
     assert resumed.action == "would-resume"
     assert resumed.command[-3:] == ["resume", "resume-thread", resumed.prompt]
     assert renewed.action == "would-renew"
