@@ -98,6 +98,13 @@ Command-step tables accept:
 | `formatter` | `true` means restage matching paths after the command succeeds. |
 | `enabled` | For `pre_commit_builtins` only, `false` disables that built-in. |
 
+A `pre_commit` command step runs argv-only with `SPICE_STAGED_PATHS` (the
+`when`-narrowed staged paths); it does **not** get the mount environment
+(`SPICE_MOUNTED_COMMAND`/`SPICE_VISIBLE_PROG`) that `spice <mount>` sets. The two
+contexts are intentionally distinct — a repo tool must not branch on
+spice-detection for behavior it also needs as a gate step. See
+`docs/cli/wrapper-commands.md` (Execution context: mount vs gate step).
+
 Reachability provider tables accept:
 
 | Key | Meaning |
