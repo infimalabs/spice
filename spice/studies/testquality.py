@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 import ast
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
+
+from spice.errors import SpiceError
+from spice.repocfg import policy_table
+
+ASSERTION_HELPERS_KEY = "assertion_helpers"
+_ASSERTION_HELPER_NAME_RE = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\Z"
+)
 
 
 @dataclass(frozen=True)
@@ -40,6 +49,7 @@ def scan_assertion_free_tests(
 ) -> list[AssertionFreeTestFinding]:
     """Return test functions that do not appear to constrain behavior."""
     findings: list[AssertionFreeTestFinding] = []
+    helpers = _configured_assertion_helpers(root)
     for rel_path in sorted(paths):
         path = rel_path if rel_path.is_absolute() else root / rel_path
         if not _is_test_file(path):
@@ -56,7 +66,7 @@ def scan_assertion_free_tests(
                         continue
                     if not method.name.startswith("test_"):
                         continue
-                    if _function_has_assertion(method):
+                    if _function_has_assertion(method, helpers):
                         continue
                     findings.append(
                         AssertionFreeTestFinding(
@@ -68,7 +78,7 @@ def scan_assertion_free_tests(
             elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 if not node.name.startswith("test_"):
                     continue
-                if _function_has_assertion(node):
+                if _function_has_assertion(node, helpers):
                     continue
                 findings.append(
                     AssertionFreeTestFinding(
@@ -155,8 +165,40 @@ def _is_test_file(path: Path) -> bool:
     )
 
 
-def _function_has_assertion(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    return any(_node_is_assertion(child) for child in _walk_test_body(node))
+def _configured_assertion_helpers(repo_root: Path) -> frozenset[str]:
+    raw = policy_table(repo_root).get(ASSERTION_HELPERS_KEY)
+    if raw is None:
+        return frozenset()
+    if not isinstance(raw, list):
+        raise SpiceError(
+            f"[tool.spice.policy] {ASSERTION_HELPERS_KEY} must be a list of "
+            "callable names"
+        )
+
+    helpers: list[str] = []
+    for index, item in enumerate(raw, start=1):
+        if not isinstance(item, str):
+            raise SpiceError(
+                f"[tool.spice.policy] {ASSERTION_HELPERS_KEY}[{index}] must be "
+                "a callable name string"
+            )
+        name = item.strip()
+        if not name or not _ASSERTION_HELPER_NAME_RE.fullmatch(name):
+            raise SpiceError(
+                f"[tool.spice.policy] {ASSERTION_HELPERS_KEY}[{index}] must be "
+                f"a leaf or dotted callable name: {item!r}"
+            )
+        if name not in helpers:
+            helpers.append(name)
+    return frozenset(helpers)
+
+
+def _function_has_assertion(
+    node: ast.FunctionDef | ast.AsyncFunctionDef, assertion_helpers: frozenset[str]
+) -> bool:
+    return any(
+        _node_is_assertion(child, assertion_helpers) for child in _walk_test_body(node)
+    )
 
 
 def _walk_test_body(node: ast.AST):
@@ -170,13 +212,13 @@ def _walk_test_body(node: ast.AST):
         yield from _walk_test_body(child)
 
 
-def _node_is_assertion(node: ast.AST) -> bool:
+def _node_is_assertion(node: ast.AST, assertion_helpers: frozenset[str]) -> bool:
     if isinstance(node, ast.Assert):
         return not _expr_is_static_truth(node.test)
     if isinstance(node, ast.With | ast.AsyncWith):
         return any(_context_expr_is_assertion(item.context_expr) for item in node.items)
     if isinstance(node, ast.Call):
-        return _call_is_assertion(node)
+        return _call_is_assertion(node, assertion_helpers)
     return False
 
 
@@ -187,16 +229,32 @@ def _context_expr_is_assertion(expr: ast.AST) -> bool:
     }
 
 
-def _call_is_assertion(node: ast.Call) -> bool:
+def _call_is_assertion(
+    node: ast.Call, assertion_helpers: frozenset[str] = frozenset()
+) -> bool:
     name = _call_name(node)
     leaf = name.rsplit(".", 1)[-1]
     if _call_is_static_truth_assertion(node, leaf):
         return False
-    return leaf.startswith("assert") or name in {
-        "pytest.fail",
-        "pytest.raises",
-        "pytest.warns",
-    }
+    return (
+        leaf.startswith("assert")
+        or name
+        in {
+            "pytest.fail",
+            "pytest.raises",
+            "pytest.warns",
+        }
+        or _call_matches_assertion_helper(name, leaf, assertion_helpers)
+    )
+
+
+def _call_matches_assertion_helper(
+    name: str, leaf: str, assertion_helpers: frozenset[str]
+) -> bool:
+    return any(
+        helper == name if "." in helper else helper == leaf
+        for helper in assertion_helpers
+    )
 
 
 def _expr_is_static_truth(node: ast.AST) -> bool:

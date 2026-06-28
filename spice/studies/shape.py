@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from fnmatch import fnmatch
+from fnmatch import fnmatch, fnmatchcase
 from pathlib import Path
 
 from spice.errors import SpiceError
@@ -40,6 +40,7 @@ MIN_NAME_CLUSTER_THRESHOLD = 3
 DEFAULT_NAME_CLUSTER_THRESHOLD = 4
 NAME_CLUSTER_MIN_AFFIX = 4
 NAME_CLUSTER_THRESHOLD_KEY = "name_cluster_threshold"
+GENERATED_PATHS_KEY = "generated_paths"
 
 
 def configured_package_roots(repo_root: Path) -> list[Path]:
@@ -50,6 +51,41 @@ def configured_package_roots(repo_root: Path) -> list[Path]:
     if not names:
         names = _derived_package_roots(repo_root)
     return [repo_root / name for name in names if (repo_root / name).is_dir()]
+
+
+def generated_path_patterns(repo_root: Path) -> tuple[str, ...]:
+    """Tracked globs whose matches are exempt from every repo-shape guard.
+
+    Generated sources (e.g. a protobuf ``*_pb2.py`` committed inside a package)
+    cannot satisfy the naming law, yet the rest of the tree should stay
+    enforced. Unlike study ``exclude``, this exemption reaches the shape guards
+    themselves, not just the study walk.
+    """
+    return tuple(string_list(policy_table(repo_root).get(GENERATED_PATHS_KEY)))
+
+
+def _has_glob_magic(pattern: str) -> bool:
+    return any(char in pattern for char in "*?[")
+
+
+def is_generated_path(rel_posix: str, patterns: tuple[str, ...]) -> bool:
+    """True when a repo-relative posix path is a declared generated path.
+
+    A glob pattern matches by ``fnmatch``; a plain pattern matches the path
+    itself or any path beneath it, so a directory entry exempts its subtree.
+    """
+    for raw in patterns:
+        pattern = raw.strip().replace("\\", "/").removeprefix("./")
+        if not pattern:
+            continue
+        if _has_glob_magic(pattern):
+            if fnmatchcase(rel_posix, pattern):
+                return True
+            continue
+        prefix = pattern.rstrip("/")
+        if rel_posix == prefix or rel_posix.startswith(prefix + "/"):
+            return True
+    return False
 
 
 def name_cluster_threshold(repo_root: Path) -> int:
@@ -280,14 +316,15 @@ def _is_find_package_root(
 
 
 def namespace_policy_error(repo_root: Path) -> str:
+    patterns = generated_path_patterns(repo_root)
     offenders: list[str] = []
     for root in configured_package_roots(repo_root):
-        offenders.extend(
-            sorted(
-                path.relative_to(repo_root).as_posix()
-                for path in root.rglob("__init__.py")
-            )
-        )
+        for path in root.rglob("__init__.py"):
+            relative = path.relative_to(repo_root).as_posix()
+            if is_generated_path(relative, patterns):
+                continue
+            offenders.append(relative)
+    offenders.sort()
     if not offenders:
         return ""
     return "\n".join(
@@ -300,6 +337,7 @@ def namespace_policy_error(repo_root: Path) -> str:
 
 
 def path_shape_errors(repo_root: Path) -> list[str]:
+    patterns = generated_path_patterns(repo_root)
     offenders: list[str] = []
     scan_roots = configured_package_roots(repo_root)
     tests_root = repo_root / "tests"
@@ -310,6 +348,8 @@ def path_shape_errors(repo_root: Path) -> list[str]:
             if _is_residue_path(path):
                 continue
             relative = path.relative_to(repo_root).as_posix()
+            if is_generated_path(relative, patterns):
+                continue
             if path.is_dir():
                 if not BOUNDARY_UNDERSCORE_RE.fullmatch(path.name):
                     offenders.append(f"{relative}: directory name shape")
@@ -442,6 +482,7 @@ def _name_cluster_candidates(
 
 
 def name_cluster_errors(repo_root: Path) -> list[str]:
+    patterns = generated_path_patterns(repo_root)
     offenders: list[str] = []
     threshold = name_cluster_threshold(repo_root)
     for root in configured_package_roots(repo_root):
@@ -450,6 +491,8 @@ def name_cluster_errors(repo_root: Path) -> list[str]:
             if _is_residue_path(path):
                 continue
             if path.name in ALLOWED_NON_SHAPE_FILES:
+                continue
+            if is_generated_path(path.relative_to(repo_root).as_posix(), patterns):
                 continue
             if not BOUNDARY_UNDERSCORE_RE.fullmatch(path.stem):
                 continue

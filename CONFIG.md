@@ -66,12 +66,15 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `package_roots` | `[]` | Python namespace-package roots. When set, `__init__.py` is forbidden under those roots and path names must match `^_*[0-9a-z]+_*$`. |
 | `name_cluster_threshold` | `4` | Number of sibling modules sharing a long alphabetic prefix or suffix before the name-cluster guard requires a namespace package. Configured values must be at least `3`. |
 | `exclude` | `[]` | Tracked paths or globs excluded from study walkers, useful for committed generated sources. Built-in exclusions already cover `.git`, `.spice`, caches, venvs, and `node_modules`. |
+| `generated_paths` | `[]` | Tracked paths or globs (e.g. `**/*_pb2.py`, or a directory like `pkg/proto`) exempt from every `repo-shape` guard — naming law, path shape, generic-split names, and the namespace `__init__.py` rule — so committed generated code inside a package passes without disabling the builtin. Unlike `exclude`, this reaches the shape guards, not just the study walk; the rest of the tree stays enforced. |
 | `repo_truth_docs` | `["AGENTS.md"]` | Doctrine docs capped at `5000` characters because they ride in agent context. |
 | `env_name_patterns` | `SPICE_*`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID` | Additional environment-variable literal patterns requiring `env-policy: allow` waivers. |
 | `env_presence_gate` | `true` | Presence reverse-gate (on by default): every env *access site* (not just watchlisted name literals) must carry an `env-policy: allow` waiver, so the audit covers env reads under any or dynamic names. Access idioms are matched per language family (built-in Python `os.environ`/`getenv`/`putenv`/`unsetenv`; C# `Environment.GetEnvironmentVariable`/`SetEnvironmentVariable`, with optional `System.`; Lua `os.getenv`; shell `$VAR`, `${VAR}`, and `export VAR=`; JavaScript/TypeScript `process.env`). Set `false` to opt out. |
 | `env_access_patterns` | `{}` | Table keyed by language family (`python`, `csharp`, `lua`, `shell`, `javascript`) of extra access-idiom regexes for the presence gate, scoped to that family's suffixes — register a repo's own idioms (e.g. bespoke Lua runtime accessors) without forking the study. |
 | `reachability_providers` | `[]` | Extra language-aware dead-code providers for `spice study reachability` and `gate:reachability`. |
 | `python_typecheck_interpreter` | auto | Optional Python interpreter path for `python-typecheck` in non-standard layouts. Relative paths resolve from the repo root. When omitted, spice resolves in order: repo-local `VIRTUAL_ENV`, `.venv`, then uv project interpreter. |
+| `assertion_helpers` | `[]` | Callable names that count as assertions when called inside Python tests. Use leaf names such as `ensure_contract` or exact dotted calls such as `contracts.require_valid`; they extend the built-in `assert`, `pytest.raises`/`warns`/`fail`, and `assert*` recognition. |
+| `internal_couplings` | `[]` | Exact private-internals exceptions as `{ path, test, target }` tables. These are named allowlist entries, never a tolerated count; stale entries fail the gate until removed. |
 | `pre_commit` | `[]` | Extra command steps run after built-ins. Entries are mounted command names or command tables. |
 | `pre_commit_success` | `[]` | Command steps run only after the full gate passes. |
 | `pre_commit_builtins` | built-ins enabled | Per-built-in overrides for `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `serve-web-typecheck`, `python-typecheck`, `env-policy`, `file-shape`, `complexity`, `magic-numbers`, `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals`. |
@@ -109,6 +112,21 @@ it to exactly one gate by granularity. `module` is the coarse whole-file gate
 (`gate:reachability`); every other kind (`function`, `class`, `method`, …) is a
 symbol and rides the finer `gate:symbol-reachability`. A single provider may
 emit both kinds in one run; no finding is counted by both gates.
+
+Assertion helper entries are Python callable names. A leaf entry matches any
+call with that final attribute name; a dotted entry matches the full dotted call
+as written in the test.
+
+Internal coupling entries use the exact fields printed by the
+`private-internals` board: repo-relative test `path`, test function/method name
+or `<module>`, and private `target`.
+
+```toml
+[tool.spice.policy]
+internal_couplings = [
+  { path = "tests/test_worker.py", test = "<module>", target = "spice.worker._private_helper" },
+]
+```
 
 ```toml
 [tool.spice.policy]
