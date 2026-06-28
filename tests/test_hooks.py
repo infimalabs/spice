@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from spice.cli.mounts import MOUNTED_COMMAND_ENV, VISIBLE_PROG_ENV
 from spice.errors import SpiceError
 from spice.hooks import commitmsg, precommit
 from spice.hooks.install import hooks_dir, init_repo, install_hooks_for_repo
@@ -571,6 +572,10 @@ def test_mounted_pre_commit_step_carries_mount_env_but_raw_does_not(
 ):
     repo = _git_init(tmp_path / "repo")
     recorder = _write_mount_env_recorder(tmp_path)
+    # Isolate from any ambient mount env (e.g. when the suite itself runs under
+    # `spice release`, a mount), so the raw step genuinely starts without it.
+    monkeypatch.delenv(MOUNTED_COMMAND_ENV, raising=False)
+    monkeypatch.delenv(VISIBLE_PROG_ENV, raising=False)
     _write_repo_file(
         repo,
         "pyproject.toml",
