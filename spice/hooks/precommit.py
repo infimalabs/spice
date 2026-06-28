@@ -12,7 +12,7 @@ attempt reports the whole picture:
    `checkJs`;
 6. python typecheck — the project's own package roots must pass `pyright`;
 7. env policy — undeclared environment literals (and, when
-   `env_presence_gate` is on, undeclared env-access sites);
+   `env_access_gate` is on, undeclared env-access sites);
 8. env name ledger — exact manifest accounting for literal env names;
 9. shape pressure — file LOC/bytes, routine complexity, magic-number
    regressions, all against staged paths with flex + sticky semantics.
