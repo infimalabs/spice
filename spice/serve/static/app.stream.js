@@ -992,96 +992,13 @@ function focusAfterComposerReset(element) {
   element.focus({ preventScroll: true });
 }
 
-// ---- task drain (lifetime + filter routing) -------------------------------------
-
-function updateTaskDrainForLane(lane, fields = {}) {
-  const host = laneGroupHost(lane);
-  const recipients = laneGroupMemberLanes(host);
-  if (!recipients.length) return;
-  const commandLane = recipients[0];
-  const payload = {
-    threadId: commandLane.targetThreadId || "",
-    lifetime: laneEffectiveLifetime(host),
-    teamId: commandLane.teamId || "",
-    teamRevision: commandLane.teamRevision || 0,
-    configRevision: commandLane.configRevision || 0,
-    laneFilterVersion: commandLane.laneFilterVersion || "",
-    ...fields,
-  };
-  const requestedLifetime = payload.lifetime;
-  const lifetimeRequestId = Math.max(0, Number(host.lifetimeRequestId) || 0);
-  const pendingLifetimeRequestId =
-    host.pendingLifetimeCommit === requestedLifetime
-      ? Math.max(0, Number(host.pendingLifetimeRequestId) || 0)
-      : 0;
-  liveBusRequest("lane.taskDrain", {
-    targetId: commandLane.targetId,
-    payload,
-  })
-    .then((response) => {
-      const result = response.result || {};
-      for (const recipient of recipients)
-        applyTaskDrainRouteConfig(recipient, result, {
-          supersedePending: false,
-          lifetimeRequestId,
-        });
-      settleLaneLifetimeCommit(
-        host,
-        requestedLifetime,
-        pendingLifetimeRequestId,
-        result,
-      );
-      if (result.ok === false) {
-        setLaneTransientStatus(host, result.error || "task drain update failed");
-      }
-    })
-    .catch(() => {
-      if (pendingLifetimeRequestId)
-        rollbackLaneLifetimeCommit(host, requestedLifetime, "", {
-          requestId: pendingLifetimeRequestId,
-        });
-      if (isLaneOpen(host))
-        setLaneTransientStatus(host, "task drain update failed");
-    });
-}
+// ---- route application -----------------------------------------------------------
 
 function taskDrainRouteConfig(result) {
   return result.ok === false ? result : result.route;
 }
 
-function settleLaneLifetimeCommit(
-  lane,
-  requestedLifetime,
-  requestedLifetimeRequestId,
-  result,
-) {
-  if (!requestedLifetimeRequestId) return;
-  const host = laneGroupHost(lane);
-  const requestOptions = { requestId: requestedLifetimeRequestId };
-  if (!laneLifetimeCommitMatches(host, requestedLifetime, requestOptions))
-    return;
-  const config = taskDrainRouteConfig(result) || {};
-  if (result.ok !== false && config.lifetime === requestedLifetime) {
-    clearLaneLifetimeCommit(host, requestedLifetime, requestOptions);
-    return;
-  }
-  rollbackLaneLifetimeCommit(
-    host,
-    requestedLifetime,
-    config.lifetime,
-    requestOptions,
-  );
-}
-
-function taskDrainLifetimeResponseIsCurrent(lane, options = {}) {
-  if (options.lifetimeRequestId === undefined) return true;
-  const requestId = Math.max(0, Number(options.lifetimeRequestId) || 0);
-  const host = laneGroupHost(lane);
-  const latestRequestId = Math.max(0, Number(host.lifetimeRequestId) || 0);
-  return requestId >= latestRequestId;
-}
-
-function applyTaskDrainRouteConfig(lane, result, options = {}) {
+function applyTaskDrainRouteConfig(lane, result) {
   const config = taskDrainRouteConfig(result);
   if (!config) return;
   applyRouteConfigToTargetInventory(lane, config);
@@ -1098,13 +1015,11 @@ function applyTaskDrainRouteConfig(lane, result, options = {}) {
     lane.teamRevision = teamIdentityRevision(config.teamIdentity);
     lane.configRevision = teamIdentityConfigRevision(config.teamIdentity);
   }
-  if (config.lifetime && taskDrainLifetimeResponseIsCurrent(lane, options))
+  if (config.lifetime)
     applyServerLaneLifetime(lane, config.lifetime, {
       configRevision: payloadHasField(config, "teamIdentity")
         ? teamIdentityConfigRevision(config.teamIdentity)
         : lane.configRevision,
-      requestId: options.lifetimeRequestId,
-      supersedePending: options.supersedePending,
     });
   renderLaneViewShell(laneGroupHost(lane));
   renderFilterPills();

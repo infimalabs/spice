@@ -17,13 +17,6 @@ const context = {
   renderFilterPills() {},
   renderLaneViewShell() {},
   syncNarrationMediaSession() {},
-  updateTaskDrainForLane(lane) {
-    lane.taskDrainCalls.push({
-      lifetime: context.laneEffectiveLifetime(lane),
-      requestId: lane.lifetimeRequestId,
-      pendingRequestId: lane.pendingLifetimeRequestId,
-    });
-  },
   requestTeamCommand(payload) {
     context.teamCommands.push(payload);
     return Promise.resolve({});
@@ -57,7 +50,7 @@ function lane() {
     pendingLifetimeConfigRevision: 0,
     pendingLifetimeRequestId: 0,
     lifetimeRequestId: 0,
-    taskDrainCalls: [],
+    teamId: "team-main",
   };
 }
 
@@ -122,11 +115,31 @@ context.rollbackLaneLifetimeCommit(rollback, "Drain", "Drive", {
 assert(rollback.lifetime === "Drive", "forced rollback can restore server state");
 assert(rollback.pendingLifetimeCommit === "", "forced rollback clears pending");
 
+context.teamCommands = [];
+const groupedTeam = lane();
+context.setLaneLifetime(groupedTeam, "Steer");
+assert(context.teamCommands.length === 1, "grouped team uses team command");
+assert(
+  context.teamCommands[0].teamId === "team-main",
+  "grouped team targets its team id",
+);
+assert(
+  context.teamCommands[0].configPatch.lifetime === "Steer",
+  "grouped team sends selected lifetime",
+);
+assert(
+  !Object.prototype.hasOwnProperty.call(
+    context.teamCommands[0].configPatch,
+    "taskFilters",
+  ),
+  "lifetime-only grouped update preserves filter provenance",
+);
+
+context.teamCommands = [];
 const emptyTeam = lane();
 emptyTeam.emptyTeam = true;
 emptyTeam.teamId = "team-empty";
 context.setLaneLifetime(emptyTeam, "Steer");
-assert(emptyTeam.taskDrainCalls.length === 0, "empty team skips task drain");
 assert(context.teamCommands.length === 1, "empty team uses team command");
 assert(
   context.teamCommands[0].command === "updateTeamConfig",
