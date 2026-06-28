@@ -457,6 +457,26 @@ def test_generated_paths_does_not_exempt_other_shape_violations(tmp_path):
     assert not any("thing_pb2.py" in error for error in errors)
 
 
+def test_path_shape_uses_configured_test_roots_for_test_module_rule(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        'package_roots = ["src"]\n'
+        'test_paths = ["tests", "Assets/**/Tests"]\n',
+        encoding="utf-8",
+    )
+    src = tmp_path / "src"
+    src.mkdir()
+    unity_tests = tmp_path / "Assets" / "Game" / "Tests"
+    unity_tests.mkdir(parents=True)
+    (src / "test_widget.py").write_text("x = 1\n", encoding="utf-8")
+    (unity_tests / "test_widget.py").write_text("x = 1\n", encoding="utf-8")
+
+    errors = path_shape_errors(tmp_path)
+
+    assert any("src/test_widget.py: file name shape" in error for error in errors)
+    assert not any("Assets/Game/Tests/test_widget.py" in error for error in errors)
+
+
 def test_generated_paths_exempts_namespace_init_but_not_others(tmp_path):
     _generated_shape_repo(tmp_path, generated=["pkg/proto"])
     (tmp_path / "pkg" / "proto" / "__init__.py").write_text("", encoding="utf-8")
