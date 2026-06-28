@@ -89,8 +89,9 @@ def test_builtin_pre_commit_guard_registry_is_exactly_expected(tmp_path):
 
 def test_private_internal_coupling_allowlist_is_exact_for_this_repo():
     """Against the real tree: every coupling the detector finds must be named in
-    LEGITIMATE_INTERNAL_COUPLINGS (no un-justified coupling), and every allowlist
-    entry must correspond to a coupling that still exists (no stale exception).
+    the built-in or tracked allowlist (no un-justified coupling), and every
+    tracked allowlist entry must correspond to a coupling that still exists (no
+    stale exception).
     The allowlist is a set of specific justified entries, never a frozen count.
     """
     from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
@@ -99,15 +100,17 @@ def test_private_internal_coupling_allowlist_is_exact_for_this_repo():
     findings = testquality.scan_private_internal_coupling(
         testquality.test_paths(PROJECT_ROOT), root=PROJECT_ROOT
     )
-    present = {(f.path, f.test_name, f.target) for f in findings}
-    unallowlisted = sorted(present - LEGITIMATE_INTERNAL_COUPLINGS)
-    stale = sorted(LEGITIMATE_INTERNAL_COUPLINGS - present)
+    present = {testquality.private_internal_coupling_key(f) for f in findings}
+    configured = testquality.configured_internal_couplings(PROJECT_ROOT)
+    allowed = LEGITIMATE_INTERNAL_COUPLINGS | configured
+    unallowlisted = sorted(present - allowed)
+    stale = sorted(configured - present)
     assert not unallowlisted, (
-        "coupling(s) not in LEGITIMATE_INTERNAL_COUPLINGS (add a public seam or a "
-        f"justified allowlist entry): {unallowlisted}"
+        "coupling(s) not in built-in or tracked internal_couplings (add a public "
+        f"seam or a justified allowlist entry): {unallowlisted}"
     )
     assert not stale, (
-        "stale LEGITIMATE_INTERNAL_COUPLINGS entr(ies) no longer present; delete "
+        "stale tracked internal_couplings entr(ies) no longer present; delete "
         f"them so the allowlist stays a set of real exceptions: {stale}"
     )
 

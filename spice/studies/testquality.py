@@ -13,6 +13,7 @@ from spice.repocfg import policy_table
 from spice.studies import walk
 
 ASSERTION_HELPERS_KEY = "assertion_helpers"
+INTERNAL_COUPLINGS_KEY = "internal_couplings"
 _ASSERTION_HELPER_NAME_RE = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\Z"
 )
@@ -32,6 +33,9 @@ class PrivateInternalCouplingFinding:
     line: int
     kind: str
     target: str
+
+
+InternalCouplingKey = tuple[str, str, str]
 
 
 def test_paths(repo_root: Path, test_root: str = "") -> list[Path]:
@@ -162,10 +166,93 @@ def render_private_internal_board(
     return "\n".join(rows)
 
 
+def private_internal_coupling_key(
+    finding: PrivateInternalCouplingFinding,
+) -> InternalCouplingKey:
+    return (finding.path, finding.test_name, finding.target)
+
+
+def configured_internal_couplings(repo_root: Path) -> frozenset[InternalCouplingKey]:
+    raw = policy_table(repo_root).get(INTERNAL_COUPLINGS_KEY)
+    if raw is None:
+        return frozenset()
+    if not isinstance(raw, list):
+        raise SpiceError(
+            f"[tool.spice.policy] {INTERNAL_COUPLINGS_KEY} must be a list of "
+            "coupling tables"
+        )
+
+    couplings: list[InternalCouplingKey] = []
+    for index, item in enumerate(raw, start=1):
+        context = f"{INTERNAL_COUPLINGS_KEY}[{index}]"
+        if not isinstance(item, dict):
+            raise SpiceError(f"[tool.spice.policy] {context} must be a table")
+        coupling = (
+            _internal_coupling_field(item, "path", context=context),
+            _internal_coupling_field(item, "test", context=context),
+            _internal_coupling_field(item, "target", context=context),
+        )
+        if coupling not in couplings:
+            couplings.append(coupling)
+    return frozenset(couplings)
+
+
+def unmanaged_private_internal_couplings(
+    findings: Sequence[PrivateInternalCouplingFinding],
+    *,
+    repo_root: Path,
+    built_in_couplings: frozenset[InternalCouplingKey] = frozenset(),
+) -> tuple[list[PrivateInternalCouplingFinding], list[InternalCouplingKey]]:
+    configured = configured_internal_couplings(repo_root)
+    present = {private_internal_coupling_key(finding) for finding in findings}
+    allowed = built_in_couplings | configured
+    offenders = [
+        finding
+        for finding in findings
+        if private_internal_coupling_key(finding) not in allowed
+    ]
+    return offenders, sorted(configured - present)
+
+
+def render_unmanaged_private_internal_board(
+    offenders: Sequence[PrivateInternalCouplingFinding],
+    stale: Sequence[InternalCouplingKey],
+) -> str:
+    if not offenders and not stale:
+        return "private-internals: no unmanaged private test coupling found"
+    rows: list[str] = []
+    if offenders:
+        rows.append(render_private_internal_board(offenders))
+    if stale:
+        rows.append(render_stale_internal_couplings(stale))
+    return "\n".join(rows)
+
+
+def render_stale_internal_couplings(stale: Sequence[InternalCouplingKey]) -> str:
+    rows = [
+        f"private-internals: {len(stale)} configured internal_couplings "
+        "entr(ies) stale; delete entries whose coupling no longer exists"
+    ]
+    for path, test_name, target in stale:
+        rows.append(f"  {path}:{test_name}: {target}")
+    return "\n".join(rows)
+
+
 def _is_test_file(path: Path) -> bool:
     return path.suffix == ".py" and (
         path.stem.startswith("test") or path.stem.endswith("_test")
     )
+
+
+def _internal_coupling_field(
+    item: dict[str, object], field: str, *, context: str
+) -> str:
+    raw = item.get(field)
+    if not isinstance(raw, str) or not raw.strip():
+        raise SpiceError(
+            f"[tool.spice.policy] {context}.{field} must be a non-empty string"
+        )
+    return raw.strip()
 
 
 def _configured_assertion_helpers(repo_root: Path) -> frozenset[str]:

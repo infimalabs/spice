@@ -352,11 +352,18 @@ def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
 
 
 def _study_private_internals(args: argparse.Namespace, root: Path) -> int:
+    from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
+
     findings = testquality.scan_private_internal_coupling(
         testquality.test_paths(root), root=root
     )
-    print(testquality.render_private_internal_board(findings))
-    return 1 if findings else 0
+    offenders, stale = testquality.unmanaged_private_internal_couplings(
+        findings,
+        repo_root=root,
+        built_in_couplings=LEGITIMATE_INTERNAL_COUPLINGS,
+    )
+    print(testquality.render_unmanaged_private_internal_board(offenders, stale))
+    return 1 if offenders or stale else 0
 
 
 def _create_exhaust_tasks(findings: list[reachability.ReachabilityFinding]) -> None:

@@ -66,49 +66,10 @@ REACHABILITY_TEST_ONLY_LIMIT = 0
 # with an assert, pytest.raises/pytest.warns, pytest.fail, or assert* helper.
 ASSERTION_FREE_TEST_LIMIT = 0
 
-# Private-internal coupling: the gate refuses any test that reaches into a
-# production internal UNLESS that exact coupling is named below. This is not a
-# grandfathered count — it is a set of specific (file, test, target) entries,
-# each justified inline. A coupling that is not listed fails the gate (fix it
-# with a public seam); a listed coupling that no longer exists also fails (a
-# stale exception must be deleted). The only way the number grows is by adding
-# a named, reasoned entry — never by bumping a tolerance.
-LEGITIMATE_INTERNAL_COUPLINGS: frozenset[tuple[str, str, str]] = frozenset(
-    {
-        # The agent-run fast path deliberately bypasses the full CLI dispatcher
-        # so it never imports the parser/inbox stack; asserting the bypass is
-        # inherently about internal control flow and has no public observable.
-        (
-            "tests/test_agentrun.py",
-            "test_agent_run_dispatch_bypasses_full_parser_and_inbox_import",
-            "_dispatch",
-        ),
-        # Mount-routing precedence (a dotted mount chosen before builtin parse)
-        # is a decision made inside the CLI dispatcher; the test exercises that
-        # internal routing branch directly.
-        (
-            "tests/test_mounts.py",
-            "test_dispatch_prefers_dotted_mount_before_builtin_parse",
-            "_dispatch",
-        ),
-        # _existing_watch_paths is the pre-registration filter to paths that
-        # exist on disk; the live bus exposes no public accessor for that
-        # intermediate set, so the unit observes it directly.
-        (
-            "tests/test_livebus.py",
-            "test_existing_watch_paths_returns_existing_input_paths",
-            "_existing_watch_paths",
-        ),
-        # _kqueue is the OS-level kevent handle; verifying it re-registers only
-        # when the watched-path set changes is inherently white-box — "the
-        # kqueue rearmed" has no public surface to assert against.
-        (
-            "tests/test_livebus.py",
-            "test_kqueue_watch_rearms_only_when_watched_paths_change",
-            "_kqueue",
-        ),
-    }
-)
+# Product-shipped private-internals exceptions. Repo-specific exceptions belong
+# in tracked `[tool.spice.policy].internal_couplings`, where they are visible to
+# every clone and stale entries fail the gate.
+LEGITIMATE_INTERNAL_COUPLINGS: frozenset[tuple[str, str, str]] = frozenset()
 
 # --- magic numbers -------------------------------------------------------------
 # Staged scans diff against this ref; only regressions fail.
