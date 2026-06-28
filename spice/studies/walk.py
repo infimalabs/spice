@@ -67,16 +67,6 @@ def is_test_path(path: Path, repo_root: Path) -> bool:
     )
 
 
-# Public resolver seam for callers that need the canonical test-location rule.
-# Keeping the callables in a named registry makes the exported API visible to
-# symbol reachability while the individual study migrations land separately.
-TEST_LOCATION_RESOLVERS = (
-    configured_test_roots,
-    is_test_path,
-    test_path_patterns,
-)
-
-
 def _pytest_testpaths(repo_root: Path) -> list[str]:
     tool = read_pyproject(repo_root).get("tool")
     if not isinstance(tool, dict):
