@@ -48,6 +48,7 @@ from typing import Any, Callable, Sequence
 
 from spice.errors import SpiceError
 from spice.repocfg import policy_table
+from spice.studies.walk import configured_test_roots
 
 
 PRODUCTION_ROOTS = (
@@ -109,7 +110,7 @@ class SymbolReachabilityFinding:
 class ReachabilityScanRequest:
     repo_root: Path
     package: str
-    test_root: str
+    test_roots: tuple[Path, ...]
     allowlist: tuple[str, ...]
 
 
@@ -145,7 +146,6 @@ def scan_reachability(
     repo_root: Path,
     *,
     package: str = "spice",
-    test_root: str = "tests",
     allowlist: Sequence[str] = REACHABILITY_ALLOWLIST,
     staged_paths: Sequence[Path] | None = None,
     providers: Sequence[ReachabilityProvider] | None = None,
@@ -154,7 +154,7 @@ def scan_reachability(
     request = ReachabilityScanRequest(
         repo_root=repo_root,
         package=package,
-        test_root=test_root,
+        test_roots=tuple(configured_test_roots(repo_root)),
         allowlist=tuple(allowlist),
     )
     active_providers = (
@@ -189,16 +189,15 @@ def _scan_python_reachability(
     """Return Python modules reachable from tests but not production roots."""
     repo_root = request.repo_root
     package = request.package
-    test_root = request.test_root
+    test_roots = request.test_roots
     pkg_root = repo_root / package
-    test_dir = repo_root / test_root
-    if not pkg_root.is_dir() or not test_dir.is_dir():
+    if not pkg_root.is_dir() or not test_roots:
         return []
 
     root_paths = [repo_root / r for r in PRODUCTION_ROOTS if (repo_root / r).is_file()]
     prod_reachable = _walk_imports(root_paths, pkg_root, package)
 
-    test_paths = list(test_dir.rglob("*.py"))
+    test_paths = _python_test_paths(test_roots)
     test_reachable = _walk_imports(
         test_paths, pkg_root, package, include_root_modules=False
     )
@@ -451,7 +450,6 @@ def scan_symbol_reachability(
     repo_root: Path,
     *,
     package: str = "spice",
-    test_root: str = "tests",
     allowlist: Sequence[str] = SYMBOL_REACHABILITY_ALLOWLIST,
     staged_paths: Sequence[Path] | None = None,
     providers: Sequence[ReachabilityProvider] | None = None,
@@ -465,12 +463,15 @@ def scan_symbol_reachability(
     here, so no finding is gated twice.
     """
     findings = _scan_python_symbol_reachability(
-        repo_root, package=package, test_root=test_root, allowlist=allowlist
+        repo_root,
+        package=package,
+        test_roots=tuple(configured_test_roots(repo_root)),
+        allowlist=allowlist,
     )
     request = ReachabilityScanRequest(
         repo_root=repo_root,
         package=package,
-        test_root=test_root,
+        test_roots=tuple(configured_test_roots(repo_root)),
         allowlist=tuple(allowlist),
     )
     active_providers = (
@@ -513,13 +514,12 @@ def _scan_python_symbol_reachability(
     repo_root: Path,
     *,
     package: str,
-    test_root: str,
+    test_roots: tuple[Path, ...],
     allowlist: Sequence[str],
 ) -> list[SymbolReachabilityFinding]:
     """Return production-module symbols reachable from tests but not production."""
     pkg_root = repo_root / package
-    test_dir = repo_root / test_root
-    if not pkg_root.is_dir() or not test_dir.is_dir():
+    if not pkg_root.is_dir() or not test_roots:
         return []
 
     root_paths = [repo_root / r for r in PRODUCTION_ROOTS if (repo_root / r).is_file()]
@@ -530,7 +530,7 @@ def _scan_python_symbol_reachability(
         for module in prod_reachable
         if (path := _module_to_path(module, pkg_root, package)) is not None
     ]
-    test_paths = list(test_dir.rglob("*.py"))
+    test_paths = _python_test_paths(test_roots)
     prod_refs, _prod_importers = _collect_symbol_refs(
         prod_paths,
         definitions,
@@ -566,6 +566,10 @@ def _scan_python_symbol_reachability(
             )
         )
     return findings
+
+
+def _python_test_paths(test_roots: tuple[Path, ...]) -> list[Path]:
+    return sorted(path for test_root in test_roots for path in test_root.rglob("*.py"))
 
 
 def _symbol_is_allowed(ref: _SymbolRef, allowset: set[str]) -> bool:
