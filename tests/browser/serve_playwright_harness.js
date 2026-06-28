@@ -49,7 +49,8 @@ async function createServeScratch() {
 function spawnServeProcess(options, scratch) {
   const stdout = [];
   const stderr = [];
-  const command = options.serveCommand || process.env.SPICE_SERVE_BIN || "spice";
+  const command =
+    options.serveCommand || process.env.SPICE_SERVE_BIN || "spice"; // env-policy: allow
   const args = [
     "serve",
     "--host",
@@ -63,7 +64,7 @@ function spawnServeProcess(options, scratch) {
   ];
   const child = spawn(command, args, {
     cwd: options.cwd || repoRoot,
-    env: { ...process.env, PYTHONUNBUFFERED: "1", ...(options.env || {}) },
+    env: { ...process.env, PYTHONUNBUFFERED: "1", ...(options.env || {}) }, // env-policy: allow
     stdio: ["ignore", "pipe", "pipe"],
   });
 
