@@ -38,13 +38,33 @@ PENDING_LANE_PAYLOAD_KEYS = (
     "pendingInboxVersion",
 )
 
-_HAVE_KQUEUE = hasattr(select, "kqueue")
+
+def _select_has_attrs(*names: str) -> bool:
+    return all(hasattr(select, name) for name in names)
+
+
+def _select_attr(name: str) -> Any:
+    return getattr(select, name)
+
+
+_HAVE_KQUEUE = _select_has_attrs(
+    "kqueue",
+    "kevent",
+    "KQ_FILTER_VNODE",
+    "KQ_EV_ADD",
+    "KQ_EV_CLEAR",
+    "KQ_NOTE_WRITE",
+    "KQ_NOTE_EXTEND",
+    "KQ_NOTE_DELETE",
+    "KQ_NOTE_RENAME",
+)
+_KQUEUE_VNODE_FFLAGS: Any = 0
 if _HAVE_KQUEUE:
     _KQUEUE_VNODE_FFLAGS = (
-        select.KQ_NOTE_WRITE
-        | select.KQ_NOTE_EXTEND
-        | select.KQ_NOTE_DELETE
-        | select.KQ_NOTE_RENAME
+        _select_attr("KQ_NOTE_WRITE")
+        | _select_attr("KQ_NOTE_EXTEND")
+        | _select_attr("KQ_NOTE_DELETE")
+        | _select_attr("KQ_NOTE_RENAME")
     )
 # kqueue blocks until a vnode event arrives; this bounds how long a cancelled
 # watcher waits before noticing its stop flag. It is a wakeup interval, not a
@@ -532,12 +552,12 @@ class _KqueueWatch:
         if not descriptors:
             return
         self._descriptors = descriptors
-        self._kqueue = select.kqueue()
+        self._kqueue = _select_attr("kqueue")()
         self._events = [
-            select.kevent(
+            _select_attr("kevent")(
                 descriptor,
-                filter=select.KQ_FILTER_VNODE,
-                flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+                filter=_select_attr("KQ_FILTER_VNODE"),
+                flags=_select_attr("KQ_EV_ADD") | _select_attr("KQ_EV_CLEAR"),
                 fflags=_KQUEUE_VNODE_FFLAGS,
             )
             for descriptor in descriptors
@@ -581,13 +601,13 @@ def _wait_for_change_kqueue(paths: tuple[Path, ...], stop: Event) -> bool:
         if not descriptors:
             stop.wait(LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S)
             return False
-        kqueue = select.kqueue()
+        kqueue = _select_attr("kqueue")()
         try:
             events = [
-                select.kevent(
+                _select_attr("kevent")(
                     descriptor,
-                    filter=select.KQ_FILTER_VNODE,
-                    flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+                    filter=_select_attr("KQ_FILTER_VNODE"),
+                    flags=_select_attr("KQ_EV_ADD") | _select_attr("KQ_EV_CLEAR"),
                     fflags=_KQUEUE_VNODE_FFLAGS,
                 )
                 for descriptor in descriptors
