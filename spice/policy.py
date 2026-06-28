@@ -128,8 +128,8 @@ ENV_POLICY_DEFAULT_NAME_PATTERNS = (  # env-policy: allow
 )
 ENV_POLICY_SELF_PATH_SUFFIX = "studies/envpolicy.py"
 
-# Presence reverse-gate language families. The reverse-gate audits env *access
-# sites* (not just literal names), and the access idiom differs per language, so
+# Access gate language families. The gate audits env *access sites* (not just
+# literal names), and the access idiom differs per language, so
 # matchers are scoped by suffix family: a shell `$VAR` pattern must never run
 # against `.cs`/`.js`. Built-in defaults below cover the standard idioms; a repo
 # registers its own or additional idioms per family with

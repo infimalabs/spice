@@ -71,8 +71,8 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `repo_truth_docs` | `["AGENTS.md"]` | Doctrine docs capped at `5000` characters because they ride in agent context. |
 | `env_name_patterns` | `SPICE_*`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID` | Additional environment-variable literal patterns requiring `env-policy: allow` waivers. |
 | `env_names` | `[]` | Exact tracked manifest for `spice study env-name-ledger`: every unique literal env-var name referenced by supported env access forms must appear here, and every name here must still be referenced. |
-| `env_presence_gate` | `true` | Presence reverse-gate (on by default): every env *access site* (not just watchlisted name literals) must carry an `env-policy: allow` waiver, so the audit covers env reads under any or dynamic names. Access idioms are matched per language family (built-in Python `os.environ`/`getenv`/`putenv`/`unsetenv`; C# `Environment.GetEnvironmentVariable`/`SetEnvironmentVariable`, with optional `System.`; Lua `os.getenv`; shell `$VAR`, `${VAR}`, and `export VAR=`; JavaScript/TypeScript `process.env`). Set `false` to opt out. |
-| `env_access_patterns` | `{}` | Table keyed by language family (`python`, `csharp`, `lua`, `shell`, `javascript`) of extra access-idiom regexes for the presence gate, scoped to that family's suffixes — register a repo's own idioms (e.g. bespoke Lua runtime accessors) without forking the study. |
+| `env_access_gate` | `true` | Access gate (on by default): every env *access site* (not just watchlisted name literals) must carry an `env-policy: allow` waiver, so the audit covers env reads under any or dynamic names. Access idioms are matched per language family (built-in Python `os.environ`/`getenv`/`putenv`/`unsetenv`; C# `Environment.GetEnvironmentVariable`/`SetEnvironmentVariable`, with optional `System.`; Lua `os.getenv`; shell `$VAR`, `${VAR}`, and `export VAR=`; JavaScript/TypeScript `process.env`). Set `false` to opt out. |
+| `env_access_patterns` | `{}` | Table keyed by language family (`python`, `csharp`, `lua`, `shell`, `javascript`) of extra access-idiom regexes for the access gate, scoped to that family's suffixes — register a repo's own idioms (e.g. bespoke Lua runtime accessors) without forking the study. |
 | `reachability_providers` | `[]` | Extra language-aware dead-code providers for `spice study reachability` and `gate:reachability`. |
 | `python_typecheck_interpreter` | auto | Optional Python interpreter path for `python-typecheck` in non-standard layouts. Relative paths resolve from the repo root. When omitted, spice resolves in order: repo-local `VIRTUAL_ENV`, `.venv`, then uv project interpreter. |
 | `assertion_helpers` | `[]` | Callable names that count as assertions when called inside Python tests. Use leaf names such as `ensure_contract` or exact dotted calls such as `contracts.require_valid`; they extend the built-in `assert`, `pytest.raises`/`warns`/`fail`, and `assert*` recognition. |
@@ -89,7 +89,7 @@ special or positional parameters such as `$?`, `$$`, `$1`, `$@`, `$*`, `$#`,
 env access forms, watchlisted env-name patterns, or exact manifest names still
 present as literals in scanned sources. Dynamic/non-literal access sites such as
 `os.environ[name]` have no extractable exact name; they remain the
-`env_presence_gate` waiver gate's domain.
+the access gate's domain.
 
 The ledger scans tests on the same footing as production — tests are never
 exempt. A test that references an env name must therefore use either a real env

@@ -6,11 +6,11 @@ standalone, `env-policy: allow` waiver comment. The point is an auditable
 inventory: grep the waiver to see every place the environment shapes behavior.
 
 The watchlist only sees env reads whose literal name matches a declared
-pattern. The presence reverse-gate closes that gap: the inventory covers
+pattern. The access gate closes that gap: the inventory covers
 *every* env access — including reads under non-watchlisted or dynamic names —
 by requiring a waiver on every known env-access site too. It is on by default
 (the strongest audit with no configuration); a repo opts *out* with
-`[tool.spice.policy] env_presence_gate = false`.
+`[tool.spice.policy] env_access_gate = false`.
 
 Library seam: target-repo tools may import the public finding dataclass,
 pattern/matcher helpers, scan helper, and `render_env_policy_board`;
@@ -92,7 +92,7 @@ _COMPILED_ACCESS_NAME_PATTERNS = {
     "lua": tuple(re.compile(pattern) for pattern in _LUA_ACCESS_NAME_PATTERNS),
 }
 
-# Presence reverse-gate: the name-pattern watchlist only sees env reads whose
+# Access gate: the name-pattern watchlist only sees env reads whose
 # literal name matches a declared pattern, so a read under any other name
 # (`os.getenv("HOME")`) or a dynamic name (`os.environ[var]`) escapes the
 # inventory entirely. When the gate is enabled, any env-access *site* must also
@@ -131,8 +131,8 @@ class EnvNameLedgerFinding:
 def scan_env_policy(paths: list[Path], *, root: Path) -> list[EnvPolicyFinding]:
     findings: list[EnvPolicyFinding] = []
     matchers = env_name_matchers(root)
-    presence_gate = env_presence_gate_enabled(root)
-    access_matchers = env_access_matchers(root) if presence_gate else {}
+    access_gate = env_access_gate_enabled(root)
+    access_matchers = env_access_matchers(root) if access_gate else {}
     for rel_path in paths:
         if rel_path.suffix not in SCANNED_SUFFIXES or is_excluded_path(
             rel_path, repo_root=root
@@ -407,17 +407,17 @@ def _delimiter_delta(line: str) -> int:
     )
 
 
-def env_presence_gate_enabled(repo_root: Path) -> bool:
-    """Whether the env-access presence reverse-gate is on for this repo.
+def env_access_gate_enabled(repo_root: Path) -> bool:
+    """Whether the env access gate is on for this repo.
 
     On by default — the strongest audit is the default, with no configuration.
-    A repo opts *out* with `[tool.spice.policy] env_presence_gate = false` if it
+    A repo opts *out* with `[tool.spice.policy] env_access_gate = false` if it
     is not ready to waive every `os.environ`/`os.getenv` access site.
     """
-    value = policy_table(repo_root).get("env_presence_gate", True)
+    value = policy_table(repo_root).get("env_access_gate", True)
     if not isinstance(value, bool):
         raise SpiceError(
-            "[tool.spice.policy] env_presence_gate must be a boolean (true/false)"
+            "[tool.spice.policy] env_access_gate must be a boolean (true/false)"
         )
     return value
 

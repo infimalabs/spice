@@ -1039,20 +1039,20 @@ def test_env_policy_wrapped_statement_marker_waives_wrapped_literal(tmp_path):
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
 
 
-def test_env_presence_gate_on_by_default_flags_env_access(tmp_path):
+def test_env_access_gate_on_by_default_flags_env_access(tmp_path):
     path = tmp_path / "sample.py"
     # env-policy: allow
     path.write_text('value = os.getenv("HOME")\n', encoding="utf-8")
 
-    # With no config the presence gate is on: a non-watchlisted env read is
+    # With no config the access gate is on: a non-watchlisted env read is
     # flagged unless waived.
     findings = scan_env_policy([Path("sample.py")], root=tmp_path)
     assert [(f.line, f.name) for f in findings] == [(1, "os env access")]
 
 
-def test_env_presence_gate_opt_out_disables_access_findings(tmp_path):
+def test_env_access_gate_opt_out_disables_access_findings(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\nenv_presence_gate = false\n", encoding="utf-8"
+        "[tool.spice.policy]\nenv_access_gate = false\n", encoding="utf-8"
     )
     path = tmp_path / "sample.py"
     # env-policy: allow
@@ -1062,9 +1062,9 @@ def test_env_presence_gate_opt_out_disables_access_findings(tmp_path):
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
 
 
-def test_env_presence_gate_flags_unwaived_and_dynamic_env_access(tmp_path):
+def test_env_access_gate_flags_unwaived_and_dynamic_env_access(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\nenv_presence_gate = true\n", encoding="utf-8"
+        "[tool.spice.policy]\nenv_access_gate = true\n", encoding="utf-8"
     )
     path = tmp_path / "sample.py"
     path.write_text(
@@ -1075,16 +1075,16 @@ def test_env_presence_gate_flags_unwaived_and_dynamic_env_access(tmp_path):
     findings = scan_env_policy([Path("sample.py")], root=tmp_path)
 
     # Both the non-watchlisted literal name and the dynamic name are caught by
-    # presence, not by the name watchlist.
+    # the access gate, not by the name watchlist.
     assert [(f.line, f.name) for f in findings] == [
         (1, "os env access"),
         (2, "os env access"),
     ]
 
 
-def test_env_presence_gate_respects_waiver(tmp_path):
+def test_env_access_gate_respects_waiver(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy]\nenv_presence_gate = true\n", encoding="utf-8"
+        "[tool.spice.policy]\nenv_access_gate = true\n", encoding="utf-8"
     )
     path = tmp_path / "sample.py"
     path.write_text(
@@ -1094,20 +1094,20 @@ def test_env_presence_gate_respects_waiver(tmp_path):
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
 
 
-def test_env_presence_gate_rejects_non_boolean_flag(tmp_path):
+def test_env_access_gate_rejects_non_boolean_flag(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.policy]\nenv_presence_gate = "yes"\n', encoding="utf-8"
+        '[tool.spice.policy]\nenv_access_gate = "yes"\n', encoding="utf-8"
     )
     path = tmp_path / "sample.py"
     path.write_text(
         'value = os.getenv("HOME")\n', encoding="utf-8"
     )  # env-policy: allow
 
-    with pytest.raises(SpiceError, match="env_presence_gate must be a boolean"):
+    with pytest.raises(SpiceError, match="env_access_gate must be a boolean"):
         scan_env_policy([Path("sample.py")], root=tmp_path)
 
 
-def test_env_presence_gate_flags_python_putenv_and_unsetenv(tmp_path):
+def test_env_access_gate_flags_python_putenv_and_unsetenv(tmp_path):
     path = tmp_path / "sample.py"
     path.write_text(
         'os.putenv("FAKEENV_X", "1")\nos.unsetenv("FAKEENV_X")\n',  # env-policy: allow
@@ -1133,12 +1133,12 @@ def test_env_access_patterns_extends_a_family(tmp_path):
         encoding="utf-8",
     )
 
-    # A repo registers its own C# idiom; the presence gate audits .cs access sites.
+    # A repo registers its own C# idiom; the access gate audits .cs access sites.
     findings = scan_env_policy([Path("Sample.cs")], root=tmp_path)
     assert [(f.line, f.name) for f in findings] == [(1, "environment env access")]
 
 
-def test_env_presence_gate_flags_builtin_csharp_env_accesses(tmp_path):
+def test_env_access_gate_flags_builtin_csharp_env_accesses(tmp_path):
     path = tmp_path / "Sample.cs"
     path.write_text(
         'var home = Environment.GetEnvironmentVariable("HOME");\n'
@@ -1154,7 +1154,7 @@ def test_env_presence_gate_flags_builtin_csharp_env_accesses(tmp_path):
     ]
 
 
-def test_env_presence_gate_builtin_csharp_access_respects_waiver(tmp_path):
+def test_env_access_gate_builtin_csharp_access_respects_waiver(tmp_path):
     path = tmp_path / "Sample.cs"
     path.write_text(
         'var home = System.Environment.GetEnvironmentVariable("HOME"); '
@@ -1165,7 +1165,7 @@ def test_env_presence_gate_builtin_csharp_access_respects_waiver(tmp_path):
     assert scan_env_policy([Path("Sample.cs")], root=tmp_path) == []
 
 
-def test_env_presence_gate_ignores_non_env_csharp_system_calls(tmp_path):
+def test_env_access_gate_ignores_non_env_csharp_system_calls(tmp_path):
     path = tmp_path / "Sample.cs"
     path.write_text(
         'System.Console.WriteLine("HOME");\nEnvironment.Exit(0);\n',
@@ -1175,7 +1175,7 @@ def test_env_presence_gate_ignores_non_env_csharp_system_calls(tmp_path):
     assert scan_env_policy([Path("Sample.cs")], root=tmp_path) == []
 
 
-def test_env_presence_gate_flags_builtin_shell_env_accesses(tmp_path):
+def test_env_access_gate_flags_builtin_shell_env_accesses(tmp_path):
     path = tmp_path / "run.sh"
     path.write_text(
         'echo "$HOME"\nprintf "%s\\n" "${CONFIG_DIR}"\nexport APP_MODE=debug\n',
@@ -1191,7 +1191,7 @@ def test_env_presence_gate_flags_builtin_shell_env_accesses(tmp_path):
     ]
 
 
-def test_env_presence_gate_builtin_shell_access_respects_waiver(tmp_path):
+def test_env_access_gate_builtin_shell_access_respects_waiver(tmp_path):
     path = tmp_path / "run.zsh"
     path.write_text(
         'echo "$SPICE_TASK_ID" # env-policy: allow\n',
@@ -1201,7 +1201,7 @@ def test_env_presence_gate_builtin_shell_access_respects_waiver(tmp_path):
     assert scan_env_policy([Path("run.zsh")], root=tmp_path) == []
 
 
-def test_env_presence_gate_shell_matchers_are_shell_scoped(tmp_path):
+def test_env_access_gate_shell_matchers_are_shell_scoped(tmp_path):
     (tmp_path / "sample.js").write_text(
         'const rendered = `${HOME}`;\nconst literal = "$APP_MODE";\n',
         encoding="utf-8",
@@ -1213,7 +1213,7 @@ def test_env_presence_gate_shell_matchers_are_shell_scoped(tmp_path):
     assert [(f.line, f.name) for f in sh_findings] == [(1, "shell env access")]
 
 
-def test_env_presence_gate_ignores_shell_special_parameters(tmp_path):
+def test_env_access_gate_ignores_shell_special_parameters(tmp_path):
     path = tmp_path / "run.sh"
     path.write_text(
         'echo "$? $$ $1 $@ $* $# $- $_ ${_}"\n',
@@ -1274,7 +1274,7 @@ def test_env_access_patterns_non_table_raises(tmp_path):
         scan_env_policy([Path("sample.py")], root=tmp_path)
 
 
-def test_env_presence_gate_flags_lua_os_getenv_by_default(tmp_path):
+def test_env_access_gate_flags_lua_os_getenv_by_default(tmp_path):
     path = tmp_path / "config.lua"
     path.write_text(
         "local home = os.getenv('HOME')\nlocal ok = os.getenv('FAKEENV_OK')  -- env-policy: allow\n",
@@ -1307,7 +1307,7 @@ def test_env_access_patterns_registers_lua_colon_accessor(tmp_path):
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
 
 
-def test_env_presence_gate_flags_javascript_process_env_by_default(tmp_path):
+def test_env_access_gate_flags_javascript_process_env_by_default(tmp_path):
     path = tmp_path / "config.ts"
     path.write_text(
         "const home = process.env.HOME\n"
@@ -1324,7 +1324,7 @@ def test_env_presence_gate_flags_javascript_process_env_by_default(tmp_path):
     ]
 
 
-def test_env_presence_gate_javascript_matcher_is_scoped(tmp_path):
+def test_env_access_gate_javascript_matcher_is_scoped(tmp_path):
     # `process.env` is a JS idiom only: the same text in a .py source is not flagged.
     (tmp_path / "app.js").write_text("const k = process.env.KEY\n", encoding="utf-8")
     (tmp_path / "sample.py").write_text("k = process.env.KEY\n", encoding="utf-8")
