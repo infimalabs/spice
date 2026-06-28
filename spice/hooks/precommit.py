@@ -31,7 +31,12 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from spice.cli.mounts import mount_command_path, mounted_commands
+from spice.cli.mounts import (
+    MOUNTED_COMMAND_ENV,
+    VISIBLE_PROG_ENV,
+    mount_command_path,
+    mounted_commands,
+)
 from spice.errors import SpiceError
 from spice.paths import find_tool
 from spice.policy import (
@@ -79,6 +84,9 @@ class CommandStep:
     repo_root: Path
     staged_paths: tuple[Path, ...] = ()
     formatter: bool = False
+    # Set for steps that run a mounted command, so the gate step accurately
+    # presents as that spice mount (mount env) the same as `spice <name>` does.
+    visible_prog: str | None = None
 
 
 def handle_pre_commit(repo_root: Path) -> int:
@@ -331,6 +339,7 @@ def _configured_command_steps(
             repo_root=command.repo_root,
             staged_paths=paths,
             formatter=command.formatter,
+            visible_prog=command.visible_prog,
         )
         key = f"{key_prefix}-{index}"
         steps.append(_command_pre_commit_step(key, command))
@@ -349,13 +358,19 @@ def _mounted_command_step(repo_root: Path, name: str) -> CommandStep:
     label = name.strip()
     if not label:
         raise SpiceError("[tool.spice.policy] mounted pre-commit command is empty")
-    argv = mounted_commands(repo_root).get(mount_command_path(label))
+    path = mount_command_path(label)
+    argv = mounted_commands(repo_root).get(path)
     if argv is None:
         raise SpiceError(
             f"[tool.spice.policy] pre-commit command {label!r} is not declared "
             "in [tool.spice.commands]"
         )
-    return CommandStep(label=label, argv=argv, repo_root=repo_root)
+    return CommandStep(
+        label=label,
+        argv=argv,
+        repo_root=repo_root,
+        visible_prog="spice " + " ".join(path),
+    )
 
 
 def _command_step_from_table(
@@ -376,6 +391,7 @@ def _command_step_from_table(
             argv=command.argv,
             repo_root=repo_root,
             formatter=_formatter_from_table(raw, context=context),
+            visible_prog=command.visible_prog,
         )
 
     raw_argv = raw.get("run", raw.get("argv"))
@@ -418,6 +434,11 @@ def _formatter_from_table(raw: dict[str, Any], *, context: str) -> bool:
 def _run_policy_command_step(command: CommandStep) -> None:
     env = os.environ.copy()  # env-policy: allow
     env[STAGED_PATHS_ENV] = "\n".join(path.as_posix() for path in command.staged_paths)
+    if command.visible_prog is not None:
+        # A mounted command run as a gate step is still that spice mount, so it
+        # carries the same mount environment `spice <name>` exports.
+        env[MOUNTED_COMMAND_ENV] = "1"
+        env[VISIBLE_PROG_ENV] = command.visible_prog
     result = subprocess.run(
         list(command.argv),
         capture_output=True,

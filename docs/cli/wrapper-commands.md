@@ -133,23 +133,21 @@ expanded with tests and documentation.
 
 ### Execution context: mount vs gate step
 
-The same repository command can run two ways, and the two contexts are
-deliberately distinct:
+The environment a command receives reflects *what it actually is*, consistently
+across both surfaces:
 
-- As a **mount** (`spice <name>`), the command runs with the mount environment:
-  `SPICE_MOUNTED_COMMAND=1` and `SPICE_VISIBLE_PROG` are exported so the tool can
-  present itself as a `spice` verb.
-- As a **`pre_commit` gate step**, the command runs argv-only with
-  `SPICE_STAGED_PATHS` (newline-delimited staged paths, narrowed by `when`). The
-  mount signals (`SPICE_MOUNTED_COMMAND`, `SPICE_VISIBLE_PROG`) are **not** set.
+- A **mounted command** carries the mount environment — `SPICE_MOUNTED_COMMAND=1`
+  and `SPICE_VISIBLE_PROG` — whether it is run as `spice <name>` or as a
+  `pre_commit`/`pre_commit_success` step that names it via `mount` (or a bare
+  mounted-command name). A mount run by the gate is still that mount under spice,
+  so it presents identically on both paths.
+- A **raw `run`/`argv` gate step** is not a mounted command, so it does **not**
+  get the mount signals; it runs with its argv as written.
 
-This is intentional, not an oversight: a gate step is a focused check over
-staged paths, not a `spice`-fronted invocation. A repo tool therefore must not
-branch on detecting spice (e.g. on `SPICE_MOUNTED_COMMAND`) for behavior it also
-needs as a gate step — that signal is absent there by design. Keep the tool
-context-free and pass what it needs through argv (reading `SPICE_STAGED_PATHS`
-when it wants the staged set); a tool written this way behaves identically on
-both paths.
+Every `pre_commit` command step — mount or raw — additionally gets
+`SPICE_STAGED_PATHS` (newline-delimited staged paths, narrowed by `when`). The
+guarantee is representational: the env says what the command is (a mount, or
+not) rather than where it was triggered from.
 
 ## Choosing A Surface
 

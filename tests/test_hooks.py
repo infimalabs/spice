@@ -545,6 +545,59 @@ def test_policy_pre_commit_extensions_receive_filtered_staged_paths(
     ]
 
 
+def _write_mount_env_recorder(tmp_path):
+    recorder = tmp_path / "record_mount_env.py"
+    mounted_env = "SPICE_" + "MOUNTED_COMMAND"
+    prog_env = "SPICE_" + "VISIBLE_PROG"
+    recorder.write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        "import sys\n"
+        f"mounted = os.environ.get({mounted_env!r})\n"  # env-policy: allow
+        f"prog = os.environ.get({prog_env!r})\n"  # env-policy: allow
+        "with Path(sys.argv[0]).with_name('mount-env.txt').open("
+        "'a', encoding='utf-8') as handle:\n"
+        "    handle.write(\n"
+        "        sys.argv[1] + ':mounted=' + repr(mounted)"
+        " + ':prog=' + repr(prog) + '\\n'\n"
+        "    )\n",
+        encoding="utf-8",
+    )
+    return recorder
+
+
+def test_mounted_pre_commit_step_carries_mount_env_but_raw_does_not(
+    tmp_path, monkeypatch
+):
+    repo = _git_init(tmp_path / "repo")
+    recorder = _write_mount_env_recorder(tmp_path)
+    _write_repo_file(
+        repo,
+        "pyproject.toml",
+        "[tool.spice.commands]\n"
+        f"checkit = {_argv_toml(sys.executable, str(recorder), 'mountarg')}\n"
+        "\n"
+        "[tool.spice.policy]\n"
+        "pre_commit = [\n"
+        '  "checkit",\n'
+        '  { label = "raw", '
+        f"run = {_argv_toml(sys.executable, str(recorder), 'rawarg')} }},\n"
+        "]\n",
+    )
+    _write_repo_file(repo, "docs/readme.md", "docs\n")
+    _git(repo, "add", ".")
+    _patch_pre_commit_builtin_noops(monkeypatch)
+
+    assert precommit.handle_pre_commit(repo) == 0
+
+    rows = sorted((tmp_path / "mount-env.txt").read_text(encoding="utf-8").splitlines())
+    # The mounted step presents as the spice mount; the raw run step does not.
+    assert rows == [
+        "mountarg:mounted='1':prog='spice checkit'",
+        "rawarg:mounted=None:prog=None",
+    ]
+
+
 def test_policy_formatter_extensions_restage_rewritten_staged_paths(
     tmp_path, monkeypatch
 ):
