@@ -31,7 +31,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from threading import Thread
-from typing import Any, TextIO
+from typing import Any, Protocol, TextIO
 
 from spice.agent.driver import driver_for
 from spice.agent.sidechannelnotify import (
@@ -78,6 +78,26 @@ COMMAND_NOT_FOUND_EXIT_CODE = 127
 InboxSignature = tuple[tuple[str, int, int], ...]
 ContextWarningSignature = tuple[str, str, int]
 ContextWarningKey = tuple[str]
+
+
+class _KqueueHandle(Protocol):
+    def fileno(self) -> int: ...
+
+    def close(self) -> None: ...
+
+    def control(
+        self, changelist: Any, max_events: int, timeout: float | None = None
+    ) -> Any: ...
+
+
+def _select_has_attrs(*names: str) -> bool:
+    return all(hasattr(select, name) for name in names)
+
+
+def _select_attr(name: str) -> Any:
+    return getattr(select, name)
+
+
 ProcessFactory = Callable[..., Any]
 TimeFactory = Callable[[], float]
 ContextMeterFactory = Callable[[Path | None], ContextMeter | None]
@@ -445,7 +465,7 @@ def write_side_channel_chunk(stderr: TextIO, chunk: bytes) -> None:
 
 
 class _ParentExitWatcher:
-    def __init__(self, handle: int | select.kqueue):
+    def __init__(self, handle: int | _KqueueHandle):
         self.handle = handle
 
     def fileno(self) -> int:
@@ -470,21 +490,34 @@ def _parent_exit_watcher(parent_pid: int) -> _ParentExitWatcher | None:
             return _ParentExitWatcher(pidfd_open(parent_pid))
         except OSError:
             return None
-    if hasattr(select, "kqueue") and hasattr(select, "KQ_FILTER_PROC"):
-        kqueue: select.kqueue | None = None
+    if _select_has_attrs(
+        "kqueue",
+        "kevent",
+        "KQ_FILTER_PROC",
+        "KQ_EV_ADD",
+        "KQ_EV_ENABLE",
+        "KQ_EV_ONESHOT",
+        "KQ_NOTE_EXIT",
+    ):
         try:
-            kqueue = select.kqueue()
-            event = select.kevent(
+            kqueue: _KqueueHandle = _select_attr("kqueue")()
+        except OSError:
+            return None
+        try:
+            event = _select_attr("kevent")(
                 parent_pid,
-                filter=select.KQ_FILTER_PROC,
-                flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE | select.KQ_EV_ONESHOT,
-                fflags=select.KQ_NOTE_EXIT,
+                filter=_select_attr("KQ_FILTER_PROC"),
+                flags=(
+                    _select_attr("KQ_EV_ADD")
+                    | _select_attr("KQ_EV_ENABLE")
+                    | _select_attr("KQ_EV_ONESHOT")
+                ),
+                fflags=_select_attr("KQ_NOTE_EXIT"),
             )
             kqueue.control([event], 0, 0)
             return _ParentExitWatcher(kqueue)
         except OSError:
-            if kqueue is not None:
-                kqueue.close()
+            kqueue.close()
             return None
     return None
 
