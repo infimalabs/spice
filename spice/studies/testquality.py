@@ -10,6 +10,7 @@ from typing import Sequence
 
 from spice.errors import SpiceError
 from spice.repocfg import policy_table
+from spice.studies import walk
 
 ASSERTION_HELPERS_KEY = "assertion_helpers"
 _ASSERTION_HELPER_NAME_RE = re.compile(
@@ -33,14 +34,16 @@ class PrivateInternalCouplingFinding:
     target: str
 
 
-def test_paths(repo_root: Path, test_root: str = "tests") -> list[Path]:
-    """Return repo-relative Python test files under ``test_root``."""
-    root = repo_root / test_root
-    if not root.is_dir():
-        return []
+def test_paths(repo_root: Path, test_root: str = "") -> list[Path]:
+    """Return repo-relative Python test files under configured test roots."""
+    roots = (
+        [repo_root / test_root] if test_root else walk.configured_test_roots(repo_root)
+    )
     found: set[Path] = set()
-    found.update(root.rglob("test*.py"))
-    found.update(root.rglob("*_test.py"))
+    for root in roots:
+        if not root.is_dir():
+            continue
+        found.update(path for path in root.rglob("*.py") if _is_test_file(path))
     return sorted(path.relative_to(repo_root) for path in found)
 
 

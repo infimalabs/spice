@@ -22,6 +22,7 @@ from spice.policy import (
     flex_limit,
 )
 from spice.studies import cli as studies_cli
+from spice.studies import testquality
 from spice.studies.envpolicy import (
     render_env_name_ledger_board,
     render_env_policy_board,
@@ -274,6 +275,57 @@ def test_assertion_free_scanner_detects_suffix_named_files(tmp_path):
     assert len(findings) == 1
     assert findings[0].test_name == "test_without_assertion"
     assert findings[0].path == "tests/quality_test.py"
+
+
+def test_testquality_discovers_configured_multi_root_test_paths(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy]\ntest_paths = ["tests", "Assets/**/Tests"]\n',
+        encoding="utf-8",
+    )
+    default_path = tmp_path / "tests" / "test_quality.py"
+    default_path.parent.mkdir()
+    default_path.write_text(
+        "def test_without_assertion():\n    value = 1\n", encoding="utf-8"
+    )
+    unity_root = tmp_path / "Assets" / "Game" / "Tests"
+    unity_root.mkdir(parents=True)
+    (unity_root / "test_quality.py").write_text(
+        "def test_without_assertion():\n    value = 2\n", encoding="utf-8"
+    )
+    (unity_root / "test_private.py").write_text(
+        "from spice.worker import _private_helper\n\n"
+        "def test_private_import():\n"
+        "    value = 1\n"
+        "    assert value == 1\n",
+        encoding="utf-8",
+    )
+    (unity_root / "helper.py").write_text(
+        "def test_helper_name_but_file_not_a_test():\n    pass\n", encoding="utf-8"
+    )
+    skipped = tmp_path / "Assets" / "Game" / "NotTests" / "test_skip.py"
+    skipped.parent.mkdir()
+    skipped.write_text("def test_skip():\n    pass\n", encoding="utf-8")
+
+    paths = testquality.test_paths(tmp_path)
+
+    assert [path.as_posix() for path in paths] == [
+        "Assets/Game/Tests/test_private.py",
+        "Assets/Game/Tests/test_quality.py",
+        "tests/test_quality.py",
+    ]
+    assertion_findings = scan_assertion_free_tests(paths, root=tmp_path)
+    assert [(f.path, f.test_name) for f in assertion_findings] == [
+        ("Assets/Game/Tests/test_quality.py", "test_without_assertion"),
+        ("tests/test_quality.py", "test_without_assertion"),
+    ]
+    private_findings = scan_private_internal_coupling(paths, root=tmp_path)
+    assert [(f.path, f.test_name, f.target) for f in private_findings] == [
+        (
+            "Assets/Game/Tests/test_private.py",
+            "<module>",
+            "spice.worker._private_helper",
+        )
+    ]
 
 
 def test_assertion_free_scanner_detects_class_methods(tmp_path):
