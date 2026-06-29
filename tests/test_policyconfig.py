@@ -8,6 +8,7 @@ from spice import policy
 from spice.errors import SpiceError
 from spice.policyconfig import resolve_policy
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CUSTOM_FILE_LOC_LIMIT = 10
 CUSTOM_FILE_BYTE_LIMIT = 100
 CUSTOM_COMMIT_MESSAGE_WRAP = 72
@@ -240,6 +241,81 @@ def test_policy_resolver_rejects_forbidden_commit_trailer_config(tmp_path):
         match=r"\[tool\.spice\.policy\.commit_message\] allowed_trailers",
     ):
         resolve_policy(tmp_path)
+
+
+def test_config_reference_mentions_tracked_policy_keys():
+    text = (PROJECT_ROOT / "docs" / "config" / "reference.md").read_text(
+        encoding="utf-8"
+    )
+    expected = [
+        "[tool.spice.policy]",
+        "package_roots",
+        "name_cluster_threshold",
+        "exclude",
+        "generated_paths",
+        "test_paths",
+        "repo_truth_docs",
+        "env_name_patterns",
+        "env_names",
+        "env_access_gate",
+        "reachability_providers",
+        "python_typecheck_interpreter",
+        "assertion_helpers",
+        "internal_couplings",
+        "pre_commit",
+        "pre_commit_success",
+        "pre_commit_builtins",
+        "[tool.spice.policy.limits]",
+        "file_loc",
+        "file_bytes",
+        "routine_ccn",
+        "routine_length",
+        "commit_message_wrap",
+        "repo_truth_doc_chars",
+        "[tool.spice.policy.flex]",
+        "ratio",
+        "[tool.spice.policy.complexity]",
+        "hotspot_limit",
+        "[tool.spice.policy.magic]",
+        "examine_threshold",
+        "baseline_ref",
+        "[tool.spice.policy.debt]",
+        "reachability_test_only",
+        "assertion_free_tests",
+        "[tool.spice.policy.commit_message]",
+        "allowed_trailers",
+        "[tool.spice.policy.languages]",
+        "c_grammar",
+        "[tool.spice.policy.lockfiles]",
+        "suffixes",
+        "names",
+        "[tool.spice.policy.env_access]",
+        "family_suffixes",
+        "default_patterns",
+        "[tool.spice.policy.markdown_depth_budget]",
+        "extensions",
+        "stem_pattern",
+        '[tool.spice.policy.scopes."<matcher>"]',
+        "multiplier",
+        "min",
+        "max",
+        "unlimited",
+        "magic",
+        "mount",
+        "run",
+        "argv",
+        "when",
+        "formatter",
+        "enabled",
+        "label",
+        "path",
+        "test",
+        "target",
+    ]
+
+    missing = [item for item in expected if item not in text]
+
+    assert missing == []
 
 
 def _write_pyproject(root: Path, text: str) -> None:
