@@ -285,7 +285,7 @@ function submitLaneForm(lane, event, targetId = "") {
       {
         text,
         lifetime,
-        fastMode: fastModeEnabled,
+        fastMode: currentFastModeEnabled(),
         threadId: member.targetThreadId || "",
         teamId: member.teamId || "",
         teamRevision: member.teamRevision || 0,

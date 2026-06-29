@@ -157,6 +157,7 @@ function spiceMenuMinimumLaneWidthPx() {
 }
 
 function renderSpiceMenuActions() {
+  const fastModeActive = currentFastModeEnabled();
   const section = document.createElement("section");
   section.className = "spice-menu-section";
   const heading = document.createElement("div");
@@ -167,9 +168,9 @@ function renderSpiceMenuActions() {
   actions.append(
     renderSpiceMenuAction({
       label: "Fast mode",
-      detail: fastModeEnabled ? "on" : "off",
-      pressed: fastModeEnabled,
-      onClick: () => setFastModeEnabled(!fastModeEnabled),
+      detail: fastModeActive ? "on" : "off",
+      pressed: fastModeActive,
+      onClick: () => setFastModeEnabled(!currentFastModeEnabled()),
     }),
   );
   section.append(heading, actions);
@@ -393,8 +394,9 @@ function setFastModeEnabled(enabled) {
 
 function syncFastModeButtonState() {
   if (typeof openLaneButton === "undefined" || !openLaneButton) return;
-  openLaneButton.classList.toggle("spice-menu-button--fast", fastModeEnabled);
-  openLaneButton.title = fastModeEnabled
+  const fastModeActive = currentFastModeEnabled();
+  openLaneButton.classList.toggle("spice-menu-button--fast", fastModeActive);
+  openLaneButton.title = fastModeActive
     ? serveBrandMenuTitle() + " - fast mode on"
     : serveBrandMenuTitle();
 }
