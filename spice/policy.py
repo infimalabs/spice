@@ -34,8 +34,10 @@ FLEX_DENOMINATOR = 2
 
 # --- commit messages ----------------------------------------------------------
 # Subject must fit; body prose is auto-folded; URLs and allowed trailers are
-# exempt. Co-Authored-By is rejected.
+# exempt. ``None`` keeps the legacy policy: any Git trailer is allowed except
+# Co-Authored-By. Repos may configure a finite allowed-trailer set.
 COMMIT_MESSAGE_WRAP_LIMIT = 100
+COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS: tuple[str, ...] | None = None
 
 # --- repo-truth docs ------------------------------------------------------------
 # Doctrine documents ride in every agent's context, so they are capped hard.

@@ -43,7 +43,6 @@ from spice.policy import (
     ASSERTION_FREE_TEST_LIMIT,
     LEGITIMATE_INTERNAL_COUPLINGS,
     REACHABILITY_TEST_ONLY_LIMIT,
-    REPO_TRUTH_DOC_LIMIT,
     REPO_TRUTH_DOCS,
 )
 from spice.policyconfig import resolve_policy
@@ -540,13 +539,14 @@ def repo_truth_doc_violations(repo_root: Path) -> list[str]:
     raising wrapper.
     """
     over: list[str] = []
+    limit = resolve_policy(repo_root).limits.repo_truth_doc_chars
     for name in repo_truth_docs(repo_root):
         path = repo_root / name
         if not path.is_file():
             continue
         count = len(path.read_text(encoding="utf-8", errors="replace"))
-        if count > REPO_TRUTH_DOC_LIMIT:
-            over.append(f"  {name}: {count} characters (cap {REPO_TRUTH_DOC_LIMIT})")
+        if count > limit:
+            over.append(f"  {name}: {count} characters (cap {limit})")
     return over
 
 
