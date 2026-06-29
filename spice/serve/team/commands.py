@@ -128,11 +128,10 @@ class TeamCommandService:
     def _cmd_set_global_fast_mode(
         self, payload: dict[str, Any], connection: sqlite3.Connection
     ) -> None:
-        if "fastMode" not in payload:
-            raise SpiceError("fastMode is required")
-        self.store._set_global_fast_mode_enabled_locked(
-            connection, bool(payload.get("fastMode"))
-        )
+        raw_fast_mode = payload.get("fastMode")
+        if not isinstance(raw_fast_mode, bool):
+            raise SpiceError("fastMode must be a boolean")
+        self.store._set_global_fast_mode_enabled_locked(connection, raw_fast_mode)
 
     _COMMANDS = {
         "createTeam": _cmd_create_team,
