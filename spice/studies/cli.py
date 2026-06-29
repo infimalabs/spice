@@ -133,8 +133,14 @@ def configure_study_parser(subparsers: Any) -> None:
 
     _configure_mutation_parser(actions)
 
-    _add_study_action(
+    env_policy = _add_study_action(
         actions, "env-policy", "Undeclared environment-variable literals."
+    )
+    env_policy.add_argument(
+        "--write-baseline",
+        type=Path,
+        default=None,
+        help="Write current env-policy findings to a JSON baseline file.",
     )
     _add_study_action(
         actions,
@@ -588,9 +594,31 @@ def _study_mutations(args: argparse.Namespace, root: Path) -> int:
 
 def _study_env_policy(args: argparse.Namespace, root: Path) -> int:
     resolved = resolve_policy(root)
+    paths = _target_paths(args, root)
     findings = envpolicy.scan_env_policy(
-        _target_paths(args, root), root=root, suffixes=resolved.languages.env
+        paths,
+        root=root,
+        suffixes=resolved.languages.env,
+        apply_baseline=args.write_baseline is None,
     )
+    if args.write_baseline is not None:
+        baseline_path = root / args.write_baseline
+        envpolicy.write_env_policy_baseline(baseline_path, findings)
+        if args.emit_json:
+            _print_study_json(
+                args.study_action,
+                baselinePath=args.write_baseline.as_posix(),
+                findingCount=len(findings),
+                findings=findings,
+            )
+        else:
+            print(
+                "env-policy: wrote "
+                f"{len(findings)} baseline entr"
+                f"{'y' if len(findings) == 1 else 'ies'} to "
+                f"{args.write_baseline.as_posix()}"
+            )
+        return 0
     if args.emit_json:
         _print_study_json(args.study_action, findings=findings)
         return 1 if findings else 0

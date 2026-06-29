@@ -19,6 +19,7 @@ underscored names remain private.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -109,6 +110,7 @@ class EnvPolicyFinding:
     path: str
     line: int
     name: str
+    source: str
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,7 @@ def scan_env_policy(
     *,
     root: Path,
     suffixes: tuple[str, ...] | None = None,
+    apply_baseline: bool = True,
 ) -> list[EnvPolicyFinding]:
     findings: list[EnvPolicyFinding] = []
     resolved = resolve_policy(root)
@@ -166,6 +169,7 @@ def scan_env_policy(
                     path=rel_path.as_posix(),
                     line=line_number,
                     name=match.group("name"),
+                    source=line,
                 )
                 for matcher in matchers
                 for match in matcher.finditer(line)
@@ -178,10 +182,94 @@ def scan_env_policy(
                             path=rel_path.as_posix(),
                             line=line_number,
                             name=access_name,
+                            source=line,
                         )
                     )
             findings.extend(line_findings)
-    return findings
+    if not apply_baseline:
+        return findings
+    return _without_env_policy_baseline(root, findings, resolved.env_access.baseline)
+
+
+def write_env_policy_baseline(path: Path, findings: list[EnvPolicyFinding]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = [
+        {
+            "line": finding.line,
+            "name": finding.name,
+            "path": finding.path,
+            "source": finding.source,
+        }
+        for finding in sorted(findings, key=_finding_key)
+    ]
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _without_env_policy_baseline(
+    root: Path, findings: list[EnvPolicyFinding], baseline: str | None
+) -> list[EnvPolicyFinding]:
+    if baseline is None:
+        return findings
+    baseline_keys = _load_env_policy_baseline(root, baseline)
+    return [
+        finding for finding in findings if _finding_key(finding) not in baseline_keys
+    ]
+
+
+def _load_env_policy_baseline(
+    root: Path, baseline: str
+) -> set[tuple[str, int, str, str]]:
+    path = root / baseline
+    if not path.is_file():
+        raise SpiceError(
+            "[tool.spice.policy.env_access] baseline file not found: "
+            f"{baseline}; run `spice study env-policy --write-baseline {baseline}` "
+            "or remove the baseline setting"
+        )
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SpiceError(
+            f"[tool.spice.policy.env_access] baseline {baseline} is not valid JSON: "
+            f"{exc.msg}"
+        ) from exc
+    if not isinstance(raw, list):
+        raise SpiceError(
+            f"[tool.spice.policy.env_access] baseline {baseline} must be a JSON array"
+        )
+    entries: set[tuple[str, int, str, str]] = set()
+    for index, item in enumerate(raw):
+        entries.add(_env_policy_baseline_entry(item, baseline, index))
+    return entries
+
+
+def _env_policy_baseline_entry(
+    item: object, baseline: str, index: int
+) -> tuple[str, int, str, str]:
+    context = f"[tool.spice.policy.env_access] baseline {baseline}[{index}]"
+    if not isinstance(item, dict):
+        raise SpiceError(f"{context} must be an object")
+    path = item.get("path")
+    line = item.get("line")
+    name = item.get("name")
+    source = item.get("source")
+    if not isinstance(path, str) or not path.strip():
+        raise SpiceError(f"{context}.path must be a non-empty string")
+    normalized_path = path.strip().replace("\\", "/")
+    parsed_path = Path(normalized_path)
+    if parsed_path.is_absolute() or ".." in parsed_path.parts:
+        raise SpiceError(f"{context}.path must be repo-relative")
+    if isinstance(line, bool) or not isinstance(line, int) or line <= 0:
+        raise SpiceError(f"{context}.line must be a positive integer")
+    if not isinstance(name, str) or not name.strip():
+        raise SpiceError(f"{context}.name must be a non-empty string")
+    if not isinstance(source, str) or not source.strip():
+        raise SpiceError(f"{context}.source must be a non-empty string")
+    return (parsed_path.as_posix(), line, name.strip(), source)
+
+
+def _finding_key(finding: EnvPolicyFinding) -> tuple[str, int, str, str]:
+    return (finding.path, finding.line, finding.name, finding.source)
 
 
 def scan_env_name_ledger(

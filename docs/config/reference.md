@@ -70,7 +70,7 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `repo_truth_docs` | `["AGENTS.md"]` | Explicit doctrine docs checked by the repo-doc guard because they ride in agent context. |
 | `env_name_patterns` | `SPICE_*`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID` | Additional environment-variable literal patterns requiring `env-policy: allow` waivers. |
 | `env_names` | `[]` | Exact tracked manifest for `spice study env-name-ledger`: every unique literal env-var name referenced by supported env access forms must appear here, and every name here must still be referenced. |
-| `env_access_gate` | `true` | Access gate: every env access site, not just watchlisted name literals, must carry an `env-policy: allow` waiver. Set `false` to opt out. |
+| `env_access_gate` | `true` | Access gate: every env access site, not just watchlisted name literals, must carry an `env-policy: allow` waiver. Existing findings can be seeded into `[tool.spice.policy.env_access] baseline` for ratcheted adoption; set `false` only to opt out wholesale. |
 | `reachability_providers` | `[]` | Extra language-aware dead-code providers for `spice study reachability` and `gate:reachability`. |
 | `python_typecheck_interpreter` | auto | Optional Python interpreter path for `python-typecheck` in non-standard layouts. Relative paths resolve from the repo root. When omitted, spice resolves repo-local `VIRTUAL_ENV`, `.venv`, then uv project interpreter. |
 | `assertion_helpers` | `[]` | Callable names that count as assertions when called inside Python tests. Leaf names match any final attribute; dotted names match exact dotted calls. |
@@ -116,6 +116,7 @@ special or positional parameters such as `$?`, `$$`, `$1`, `$@`, `$*`, `$#`,
 | --- | --- | --- |
 | `family_suffixes` | Built-in Python, C#, Lua, shell, JavaScript/TypeScript suffix families | Table mapping env-access language family names to file suffixes. |
 | `default_patterns` | Built-in env-access idioms per family | Table mapping env-access language family names to regexes. A custom family in `default_patterns` must also appear in `family_suffixes`. |
+| `baseline` | unset | Repo-relative JSON baseline of existing `env-policy` findings to grandfather while new unwaived findings still fail. Seed with `spice study env-policy --write-baseline .spice/env-policy-baseline.json`, then set `baseline = ".spice/env-policy-baseline.json"`. |
 
 `env-name-ledger` accounts only for literal names it can extract from supported
 env access forms, watchlisted env-name patterns, or exact manifest names still
