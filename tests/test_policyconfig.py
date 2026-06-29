@@ -182,5 +182,21 @@ def test_policy_resolver_names_invalid_config_key(tmp_path, body, expected):
         resolve_policy(tmp_path)
 
 
+def test_policy_resolver_names_invalid_debt_key(tmp_path):
+    _write_pyproject(
+        tmp_path,
+        """
+        [tool.spice.policy.debt]
+        reachability_test_only = -1
+        """,
+    )
+
+    with pytest.raises(
+        SpiceError,
+        match=r"\[tool\.spice\.policy\.debt\] reachability_test_only",
+    ):
+        resolve_policy(tmp_path)
+
+
 def _write_pyproject(root: Path, text: str) -> None:
     (root / "pyproject.toml").write_text(text, encoding="utf-8")
