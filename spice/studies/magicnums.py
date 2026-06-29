@@ -25,6 +25,7 @@ from spice.policy import (
     MAGIC_EXAMINE_VALUE_THRESHOLD,
     MAGIC_SUFFIXES,
 )
+from spice.studies import treesitter
 from spice.studies.walk import git_blob_text, is_excluded_path
 
 EXAMINE_PARENT_KINDS = frozenset({"default_arg", "compare", "slice"})
@@ -39,6 +40,10 @@ _C_COMPARE_RE = re.compile(
     r"(?:(?<![=<>!])(?:<=|>=|===|!==|==|!=|<|>)\s*(" + _C_NUMBER + r")(?![\w.])"
     r"|(?<![\w.])(" + _C_NUMBER + r")\s*(?:<=|>=|===|!==|==|!=|<(?![<=])|>(?![>=])))"
 )
+_TREE_SITTER_LITERAL_QUERY_BY_LANGUAGE = {
+    "csharp": "(integer_literal) @literal",
+    "javascript": "(number) @literal",
+}
 
 
 @dataclass(frozen=True)
@@ -78,7 +83,17 @@ def scan_text_magic_numbers(
 ) -> list[MagicFinding]:
     if rel_path.suffix == ".py":
         return _scan_python(rel_path, text, examine_threshold=examine_threshold)
+    _parse_tree_sitter_magic_source(rel_path, text)
     return _scan_c_grammar(rel_path, text, examine_threshold=examine_threshold)
+
+
+def _parse_tree_sitter_magic_source(rel_path: Path, text: str) -> None:
+    parsed = treesitter.parse_source(rel_path, text)
+    if parsed is None:
+        return
+    treesitter.query_for_suffix(
+        parsed.suffix, _TREE_SITTER_LITERAL_QUERY_BY_LANGUAGE[parsed.language]
+    )
 
 
 def _examine_value(value: float, *, threshold: int) -> bool:
