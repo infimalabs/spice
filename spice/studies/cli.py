@@ -8,6 +8,7 @@ from typing import Any
 
 from spice.errors import SpiceError
 from spice.paths import require_repo_root
+from spice.policyconfig import resolve_policy
 from spice.policy import (
     COMPLEXITY_MAX_CCN,
     COMPLEXITY_MAX_LENGTH,
@@ -55,6 +56,18 @@ def configure_study_parser(subparsers: Any) -> None:
     )
     complexity_parser.add_argument("--ccn-flex-limit", type=int, default=None)
     complexity_parser.add_argument("--length-flex-limit", type=int, default=None)
+
+    hotspots = _add_study_action(
+        actions,
+        "complexity-hotspots",
+        "Top routine complexity hotspots over existing lizard data.",
+    )
+    hotspots.add_argument(
+        "--limit",
+        type=_positive_int_arg,
+        default=None,
+        help="Number of worst routines to show; defaults to tracked policy config.",
+    )
 
     csharp_members = _add_study_action(
         actions, "csharp-members", "Rank C# class members by parsed source length."
@@ -335,6 +348,15 @@ def _study_complexity(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_complexity_hotspots(args: argparse.Namespace, root: Path) -> int:
+    limit = args.limit or resolve_policy(root).complexity.hotspot_limit
+    records = complexity.collect_complexity_records(
+        _target_paths(args, root), root=root
+    )
+    print(complexity.render_complexity_hotspots(records, limit=limit))
+    return 0
+
+
 def _study_csharp_members(args: argparse.Namespace, root: Path) -> int:
     records = csharpmembers.collect_csharp_class_records(
         _target_paths(args, root), root=root, class_name=args.class_name
@@ -478,6 +500,7 @@ _STUDY_ACTIONS = {
     "shape": _study_shape,
     "file-loc": _study_file_loc,
     "complexity": _study_complexity,
+    "complexity-hotspots": _study_complexity_hotspots,
     "csharp-members": _study_csharp_members,
     "csharp-unused-candidates": _study_csharp_unused_candidates,
     "magic-numbers": _study_magic_numbers,

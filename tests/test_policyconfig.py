@@ -12,6 +12,7 @@ CUSTOM_FILE_LOC_LIMIT = 10
 CUSTOM_FILE_BYTE_LIMIT = 100
 CUSTOM_COMMIT_MESSAGE_WRAP = 72
 CUSTOM_REPO_TRUTH_DOC_CHARS = 6000
+CUSTOM_HOTSPOT_LIMIT = 7
 CUSTOM_FILE_LOC_FLEX = 15
 CUSTOM_FILE_BYTE_FLEX = 150
 CUSTOM_MAGIC_THRESHOLD = 12
@@ -36,6 +37,7 @@ def test_policy_resolver_defaults_match_policy_constants(tmp_path):
     assert resolved.flex.routine_length == policy.flex_limit(
         policy.COMPLEXITY_MAX_LENGTH
     )
+    assert resolved.complexity.hotspot_limit == policy.COMPLEXITY_HOTSPOT_LIMIT
     assert resolved.magic.examine_threshold == policy.MAGIC_EXAMINE_VALUE_THRESHOLD
     assert resolved.magic.baseline_ref == policy.MAGIC_BASELINE_REF
     assert resolved.debt.reachability_test_only == policy.REACHABILITY_TEST_ONLY_LIMIT
@@ -68,6 +70,9 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
         file_bytes = 150
         routine_ccn = 7
         routine_length = 9
+
+        [tool.spice.policy.complexity]
+        hotspot_limit = 7
 
         [tool.spice.policy.magic]
         examine_threshold = 12
@@ -108,6 +113,7 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
     assert resolved.file_shape.byte_flex_limit == CUSTOM_FILE_BYTE_FLEX
     assert resolved.complexity.ccn_flex_limit == 7
     assert resolved.complexity.length_flex_limit == 9
+    assert resolved.complexity.hotspot_limit == CUSTOM_HOTSPOT_LIMIT
     assert resolved.magic.examine_threshold == CUSTOM_MAGIC_THRESHOLD
     assert resolved.magic.baseline_ref == "origin/main"
     assert resolved.debt.reachability_test_only == 2
@@ -169,6 +175,13 @@ def test_policy_resolver_uses_ratio_fallback_for_unset_flex(tmp_path):
             baseline_ref = ""
             """,
             r"\[tool\.spice\.policy\.magic\] baseline_ref",
+        ),
+        (
+            """
+            [tool.spice.policy.complexity]
+            hotspot_limit = 0
+            """,
+            r"\[tool\.spice\.policy\.complexity\] hotspot_limit",
         ),
     ],
 )

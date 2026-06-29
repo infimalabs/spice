@@ -82,12 +82,14 @@ class ComplexityPolicy:
     ccn_flex_limit: int
     max_length: int
     length_flex_limit: int
+    hotspot_limit: int
 
 
 @dataclass(frozen=True)
 class ResolvedPolicy:
     limits: PolicyLimits
     flex: PolicyFlex
+    complexity_hotspot_limit: int
     magic: PolicyMagic
     debt: PolicyDebt
     languages: PolicyLanguages
@@ -110,6 +112,7 @@ class ResolvedPolicy:
             ccn_flex_limit=self.flex.routine_ccn,
             max_length=self.limits.routine_length,
             length_flex_limit=self.flex.routine_length,
+            hotspot_limit=self.complexity_hotspot_limit,
         )
 
 
@@ -155,6 +158,7 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
         ),
     )
     flex_table = _subtable(raw_policy, "flex")
+    complexity_table = _subtable(raw_policy, "complexity")
     ratio = _ratio(flex_table)
     flex = PolicyFlex(
         ratio=ratio,
@@ -170,6 +174,12 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
     return ResolvedPolicy(
         limits=limits,
         flex=flex,
+        complexity_hotspot_limit=_positive_int(
+            complexity_table,
+            "hotspot_limit",
+            policy.COMPLEXITY_HOTSPOT_LIMIT,
+            "[tool.spice.policy.complexity]",
+        ),
         magic=PolicyMagic(
             examine_threshold=_positive_int(
                 magic_table,

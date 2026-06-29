@@ -99,6 +99,12 @@ Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 `1.5x` flex, routines CCN `20` / length `80`, commit text wrap `100`,
 magic-number threshold `10`, and magic baselines against `HEAD`.
 
+### `[tool.spice.policy.complexity]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `hotspot_limit` | `20` | Default number of rows shown by `spice study complexity-hotspots` when `--limit` is omitted. |
+
 ### `[tool.spice.policy.magic]`
 
 | Key | Default | Meaning |
