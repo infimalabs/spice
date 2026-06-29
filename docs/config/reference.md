@@ -67,7 +67,7 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `exclude` | `[]` | Tracked paths or globs excluded from study walkers, useful for committed generated sources. Built-in exclusions already cover `.git`, `.spice`, caches, venvs, and `node_modules`. |
 | `generated_paths` | `[]` | Tracked paths or globs (e.g. `**/*_pb2.py`, or a directory like `pkg/proto`) exempt from every `repo-shape` guard: naming law, path shape, generic-split names, and namespace `__init__.py`. Unlike `exclude`, this reaches shape guards, not just study walking. |
 | `test_paths` | pytest `testpaths`, else `tests/` | Tracked test-root override for studies that need to distinguish test code from production code. Entries are repo-relative dirs or globs, and may declare multiple roots such as `["tests", "Assets/**/Tests"]`. |
-| `repo_truth_docs` | `["AGENTS.md"]` | Doctrine docs capped at `5000` characters because they ride in agent context. |
+| `repo_truth_docs` | `["AGENTS.md"]` | Explicit doctrine docs checked by the repo-doc guard because they ride in agent context. |
 | `env_name_patterns` | `SPICE_*`, `CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID` | Additional environment-variable literal patterns requiring `env-policy: allow` waivers. |
 | `env_names` | `[]` | Exact tracked manifest for `spice study env-name-ledger`: every unique literal env-var name referenced by supported env access forms must appear here, and every name here must still be referenced. |
 | `env_access_gate` | `true` | Access gate: every env access site, not just watchlisted name literals, must carry an `env-policy: allow` waiver. Set `false` to opt out. |
@@ -119,13 +119,39 @@ system uses.
 
 Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 `1.5x` flex, routines CCN `20` / length `80`, commit text wrap `100`,
-magic-number threshold `10`, and magic baselines against `HEAD`.
+repo-root markdown `5000` chars plus `5000` per nested directory until
+`15000`, magic-number threshold `10`, and magic baselines against `HEAD`.
 
 ### `[tool.spice.policy.complexity]`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `hotspot_limit` | `20` | Default number of rows shown by `spice study complexity-hotspots` when `--limit` is omitted. |
+
+### `[tool.spice.policy.markdown_depth_budget]`
+
+Tracked markdown is checked by default through generated
+`repo_truth_doc_chars` scopes:
+
+| Depth | Budget |
+| --- | --- |
+| repo root | `5000` chars |
+| one nested directory | `10000` chars |
+| two nested directories | `15000` chars |
+| deeper than two nested directories | unlimited |
+
+```toml
+[tool.spice.policy.markdown_depth_budget]
+extensions = [".md"]
+stem_pattern = "README|[A-Z_]+"
+```
+
+`extensions` defaults to `[".md"]`; set it to `[]` to remove the generated
+markdown scopes and replace them with explicit `[tool.spice.policy.scopes]`
+entries. `stem_pattern` is optional and full-matches the file stem only after
+the suffix is in the doc-extension set. Single-letter stems are never selected
+by the generated markdown scopes. Binary files are skipped by the repo-doc
+guard.
 
 ### `[tool.spice.policy.debt]`
 
@@ -143,7 +169,10 @@ removed.
 
 Scopes adjust numeric policy bounds for matching repo-relative paths. The table
 key is the matcher. Glob keys such as `**/*.cs` work as per-language knobs;
-non-glob keys match that path or subtree.
+non-glob keys match that path or subtree. Generated markdown-depth scopes are
+lower priority than tracked scopes, so a matching explicit
+`repo_truth_doc_chars` scope replaces the generated markdown budget for that
+path.
 
 ```toml
 [tool.spice.policy.scopes."docs/**"]

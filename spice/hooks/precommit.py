@@ -39,12 +39,9 @@ from spice.cli.mounts import (
 )
 from spice.errors import SpiceError
 from spice.paths import find_tool
-from spice.policy import (
-    LEGITIMATE_INTERNAL_COUPLINGS,
-    REPO_TRUTH_DOCS,
-)
+from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
 from spice.policyconfig import resolve_policy
-from spice.repocfg import policy_table, string_list
+from spice.repocfg import policy_table
 from spice.studies import (
     complexity,
     envpolicy,
@@ -55,7 +52,14 @@ from spice.studies import (
     shape,
     testquality,
 )
-from spice.studies.walk import partially_staged_paths, staged_paths
+from spice.studies.repodocs import (
+    clear_repo_truth_doc_sticky_state,
+    repo_truth_doc_violations,
+)
+from spice.studies.walk import (
+    partially_staged_paths,
+    staged_paths,
+)
 
 STAGED_PATHS_ENV = "SPICE_STAGED_PATHS"  # env-policy: allow
 
@@ -524,38 +528,9 @@ def _run_staging_guard(repo_root: Path) -> None:
         )
 
 
-def repo_truth_docs(repo_root: Path) -> list[str]:
-    declared = string_list(policy_table(repo_root).get("repo_truth_docs"))
-    return declared or list(REPO_TRUTH_DOCS)
-
-
-def repo_truth_doc_violations(repo_root: Path) -> list[str]:
-    """Return one ``name: count characters (cap N)`` line per over-cap doc.
-
-    Public seam: doctrine docs ride in every agent's context, so the cap is a
-    real product rule worth asserting on directly; the guard below is the thin
-    raising wrapper.
-    """
-    over: list[str] = []
-    resolved = resolve_policy(repo_root)
-    base_limit = resolved.limits.repo_truth_doc_chars
-    for name in repo_truth_docs(repo_root):
-        path = repo_root / name
-        if not path.is_file():
-            continue
-        bound = resolved.bound_for_path("repo_truth_doc_chars", base_limit, Path(name))
-        if bound.unlimited:
-            continue
-        limit = bound.limit
-        count = len(path.read_text(encoding="utf-8", errors="replace"))
-        if count > limit:
-            over.append(f"  {name}: {count} characters (cap {limit})")
-    return over
-
-
 def _run_repo_truth_doc_guard(repo_root: Path) -> None:
     """Doctrine docs ride in every agent's context; cap them hard."""
-    over = repo_truth_doc_violations(repo_root)
+    over = repo_truth_doc_violations(repo_root, persist=True)
     if over:
         raise SpiceError(
             "repo-truth docs exceed the character cap; tighten the doctrine:\n"
@@ -844,6 +819,7 @@ def clear_successful_sticky_state(repo_root: Path) -> None:
     resolved = resolve_policy(repo_root)
     file_shape = resolved.file_shape
     routine = resolved.complexity
+    clear_repo_truth_doc_sticky_state(repo_root, resolved=resolved)
     fileloc.clear_file_loc_sticky_state(
         root=repo_root,
         limit=file_shape.line_limit,

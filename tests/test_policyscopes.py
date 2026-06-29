@@ -35,6 +35,11 @@ SCOPED_LOC_BASE_LIMIT = 4
 UNLIMITED_FILE_LINES = 20
 SCOPED_CCN_BREACH = 6
 SCOPED_CCN_BASE_LIMIT = 4
+MARKDOWN_ROOT_BUDGET = 5000
+MARKDOWN_NESTED_BUDGET = 10000
+MARKDOWN_DEEP_BUDGET = 15000
+MARKDOWN_ROOT_FLEX = 7500
+CUSTOM_SCOPE_DOC_BUDGET = 7000
 
 
 def test_policy_scopes_apply_flat_settings_to_all_numeric_bounds(tmp_path):
@@ -233,6 +238,106 @@ def test_policy_scopes_invalid_config_names_the_scope(tmp_path):
         SpiceError, match=r'\[tool\.spice\.policy\.scopes\."src/\*\*"\] flex'
     ):
         resolve_policy(tmp_path)
+
+
+def test_markdown_depth_budget_generates_default_repo_doc_scopes(tmp_path):
+    resolved = resolve_policy(tmp_path)
+
+    root = resolved.bound_for_path(
+        "repo_truth_doc_chars",
+        resolved.limits.repo_truth_doc_chars,
+        Path("README.md"),
+    )
+    nested = resolved.bound_for_path(
+        "repo_truth_doc_chars",
+        resolved.limits.repo_truth_doc_chars,
+        Path("docs/guide.md"),
+    )
+    deep = resolved.bound_for_path(
+        "repo_truth_doc_chars",
+        resolved.limits.repo_truth_doc_chars,
+        Path("docs/reference/guide.md"),
+    )
+    unbounded = resolved.bound_for_path(
+        "repo_truth_doc_chars",
+        resolved.limits.repo_truth_doc_chars,
+        Path("docs/reference/generated/guide.md"),
+    )
+
+    assert root.limit == MARKDOWN_ROOT_BUDGET
+    assert root.flex_limit == MARKDOWN_ROOT_FLEX
+    assert nested.limit == MARKDOWN_NESTED_BUDGET
+    assert deep.limit == MARKDOWN_DEEP_BUDGET
+    assert unbounded.unlimited
+
+
+def test_markdown_depth_budget_selector_gates_extension_regex_and_short_stems(
+    tmp_path,
+):
+    _write_pyproject(
+        tmp_path,
+        """
+        [tool.spice.policy.limits]
+        repo_truth_doc_chars = 1000
+
+        [tool.spice.policy.markdown_depth_budget]
+        extensions = [".mdoc"]
+        stem_pattern = "[A-Z_]+"
+        """,
+    )
+    resolved = resolve_policy(tmp_path)
+
+    scoped = resolved.bound_for_path(
+        "repo_truth_doc_chars",
+        resolved.limits.repo_truth_doc_chars,
+        Path("DOCS_MAIN.mdoc"),
+    )
+    wrong_extension = resolved.bound_for_path(
+        "repo_truth_doc_chars",
+        resolved.limits.repo_truth_doc_chars,
+        Path("DOCS_MAIN.md"),
+    )
+    wrong_stem = resolved.bound_for_path(
+        "repo_truth_doc_chars",
+        resolved.limits.repo_truth_doc_chars,
+        Path("guide.mdoc"),
+    )
+    single_letter = resolved.bound_for_path(
+        "repo_truth_doc_chars",
+        resolved.limits.repo_truth_doc_chars,
+        Path("A.mdoc"),
+    )
+
+    assert scoped.limit == MARKDOWN_ROOT_BUDGET
+    assert wrong_extension.limit == BASE_REPO_DOC_CHARS
+    assert wrong_stem.limit == BASE_REPO_DOC_CHARS
+    assert single_letter.limit == BASE_REPO_DOC_CHARS
+
+
+def test_markdown_depth_budget_explicit_scope_replaces_default_for_subtree(
+    tmp_path,
+):
+    _write_pyproject(
+        tmp_path,
+        f"""
+        [tool.spice.policy.limits]
+        repo_truth_doc_chars = {BASE_REPO_DOC_CHARS}
+
+        [tool.spice.policy.scopes."docs/**".repo_truth_doc_chars]
+        min = {CUSTOM_SCOPE_DOC_BUDGET}
+        max = {CUSTOM_SCOPE_DOC_BUDGET}
+        flex = 1.0
+        """,
+    )
+    resolved = resolve_policy(tmp_path)
+    scoped = resolved.bound_for_path(
+        "repo_truth_doc_chars",
+        resolved.limits.repo_truth_doc_chars,
+        Path("docs/reference/guide.md"),
+    )
+
+    assert scoped.limit == CUSTOM_SCOPE_DOC_BUDGET
+    assert scoped.flex_limit == CUSTOM_SCOPE_DOC_BUDGET
 
 
 def test_file_shape_guard_applies_scoped_bounds_and_sticky(tmp_path):
