@@ -201,13 +201,17 @@ def test_env_access_default_patterns_configures_a_family(tmp_path):
     )
     path = tmp_path / "Sample.cs"
     path.write_text(
-        'var v = ProjectEnv.Read("HOME");\n',  # env-policy: allow
+        'var home = Environment.GetEnvironmentVariable("HOME");\n'
+        'var v = ProjectEnv.Read("HOME");\n',
         encoding="utf-8",
     )
 
-    # A repo registers its own C# idiom; the access gate audits .cs access sites.
+    # A repo adds its own C# idiom without replacing the built-in C# accessors.
     findings = scan_env_policy([Path("Sample.cs")], root=tmp_path)
-    assert [(f.line, f.name) for f in findings] == [(1, "environment env access")]
+    assert [(f.line, f.name) for f in findings] == [
+        (1, "environment env access"),
+        (2, "environment env access"),
+    ]
 
 
 def test_env_access_config_adds_custom_family(tmp_path):

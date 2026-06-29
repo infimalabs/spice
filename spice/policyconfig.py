@@ -953,5 +953,9 @@ def _string_tuple_map(
 ) -> Mapping[str, tuple[str, ...]]:
     resolved = dict(default)
     for key in table:
-        resolved[key] = _string_tuple(table, key, (), context, suffixes=suffixes)
+        values = list(resolved.get(key, ()))
+        for value in _string_tuple(table, key, (), context, suffixes=suffixes):
+            if value not in values:
+                values.append(value)
+        resolved[key] = tuple(values)
     return resolved

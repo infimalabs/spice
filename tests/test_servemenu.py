@@ -419,6 +419,29 @@ def test_static_composer_band_menu_matches_large_team_action_sizing():
     assert ".composer-band--menu-open .composer-band-menu-action {" not in css
 
 
+def test_static_spice_menu_fast_mode_uses_persisted_ui_state():
+    app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    app_menu = (STATIC_ROOT / "app.menu.js").read_text(encoding="utf-8")
+    app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+
+    assert 'const fastModeStorageKey = "spice.serve.fastMode";' in app_js
+    assert "let fastModeEnabled = storedFastModeEnabled();" in app_js
+    assert "function readStoredFastModeEnabled()" in app_js
+    assert 'storage.getItem(fastModeStorageKey) === "true"' in app_js
+    assert "function currentFastModeEnabled()" in app_js
+    assert "function syncFastModeFromStorage()" in app_js
+    assert 'window.addEventListener("storage", (event) => {' in app_js
+    assert "syncFastModeFromStorage();" in app_js
+    assert "function setFastModeEnabled(enabled)" in app_menu
+    assert "persistFastModeEnabled(fastModeEnabled);" in app_menu
+    assert "const fastModeActive = currentFastModeEnabled();" in app_menu
+    assert "function syncFastModeButtonState()" in app_menu
+    assert "spice-menu-button--fast" in app_menu
+    assert "fastMode: currentFastModeEnabled()," in app_controls
+    assert "fastMode: currentFastModeEnabled()," in app_stream
+
+
 def test_static_spice_menu_replaces_picker_lane():
     css = _serve_css_text()
     app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
@@ -430,16 +453,6 @@ def test_static_spice_menu_replaces_picker_lane():
     assert "let spiceMenuEl = null;" in app_js
     assert 'let spiceMenuDragTargetId = "";' in app_js
     assert "let spiceMenuRenderPending = false;" in app_js
-    assert 'const fastModeStorageKey = "spice.serve.fastMode";' in app_js
-    assert "let fastModeEnabled = storedFastModeEnabled();" in app_js
-    assert "function storedFastModeEnabled()" in app_js
-    assert 'storage.getItem(fastModeStorageKey) === "true"' in app_js
-    assert "function persistFastModeEnabled(enabled)" in app_js
-    assert 'storage.setItem(fastModeStorageKey, enabled ? "true" : "false");' in app_js
-    assert (
-        'if (typeof syncFastModeButtonState === "function") syncFastModeButtonState();'
-        in app_js
-    )
     assert "function openSpiceMenu()" in app_menu
     assert "function renderSpiceMenuIfAvailable()" in app_lanes
     assert 'if (typeof renderSpiceMenu === "function") renderSpiceMenu();' in app_lanes
@@ -455,13 +468,6 @@ def test_static_spice_menu_replaces_picker_lane():
         in app_lanes
     )
     assert "if (laneStates.size) closeSpiceMenu();" not in app_static
-    assert "function setFastModeEnabled(enabled)" in app_menu
-    assert "persistFastModeEnabled(fastModeEnabled);" in app_menu
-    assert "function syncFastModeButtonState()" in app_menu
-    assert (
-        'if (typeof openLaneButton === "undefined" || !openLaneButton) return;'
-        in app_menu
-    )
     assert "function createEmptyTeamFromMenu()" not in app_menu
     assert "const spiceMenuNewTeamDropId" in app_menu
     assert "function spiceMenuTeamGroups(choices)" in app_menu
@@ -480,6 +486,16 @@ def test_static_spice_menu_replaces_picker_lane():
         "function moveTargetToMenuTeam(teamId, targetId, sourceTarget = null)"
         in app_menu
     )
+    assert 'className = "lane picker"' not in app_static
+    assert "openPickerLane" not in app_static
+    assert "renderPickerChoices" not in app_shell
+    assert ".spice-context-menu" in css
+    assert ".picker" not in css
+
+
+def test_static_spice_menu_positions_from_button():
+    app_menu = (STATIC_ROOT / "app.menu.js").read_text(encoding="utf-8")
+
     assert "const buttonRect = openLaneButton.getBoundingClientRect();" in app_menu
     assert "const top = Math.max(margin, buttonRect.bottom + margin);" in app_menu
     assert (
@@ -502,6 +518,20 @@ def test_static_spice_menu_replaces_picker_lane():
     )
     assert "const rightAlignedLeft = buttonRect.right - width;" in app_menu
     assert "Math.min(rightAlignedLeft, viewportWidth - width - margin)" in app_menu
+    assert "function spiceMenuUsesViewportWidth(viewportWidth)" in app_menu
+    assert "return viewportWidth < spiceMenuMinimumLaneWidthPx() + 20;" in app_menu
+    assert (
+        "if (spiceMenuUsesViewportWidth(viewportWidth)) return viewportWidth;"
+        in app_menu
+    )
+    assert "if (spiceMenuUsesViewportWidth(viewportWidth)) return 0;" in app_menu
+    assert 'spiceMenuEl.style.height = "";' in app_menu
+    assert 'spiceMenuEl.style.maxHeight = height + "px";' in app_menu
+
+
+def test_static_spice_menu_team_sorting_is_stable():
+    app_menu = (STATIC_ROOT / "app.menu.js").read_text(encoding="utf-8")
+
     team_groups_start = app_menu.index("function spiceMenuTeamGroups(choices)")
     team_groups_end = app_menu.index(
         "function renderSpiceMenuTeamGroup(group)", team_groups_start
@@ -521,20 +551,6 @@ def test_static_spice_menu_replaces_picker_lane():
     assert "spiceMenuTeamSortKey(left)" in compare_groups_block
     assert "spiceMenuTeamSortKey(right)" in compare_groups_block
     assert "return compareTargetChoices(left, right);" in compare_groups_block
-    assert "function spiceMenuUsesViewportWidth(viewportWidth)" in app_menu
-    assert "return viewportWidth < spiceMenuMinimumLaneWidthPx() + 20;" in app_menu
-    assert (
-        "if (spiceMenuUsesViewportWidth(viewportWidth)) return viewportWidth;"
-        in app_menu
-    )
-    assert "if (spiceMenuUsesViewportWidth(viewportWidth)) return 0;" in app_menu
-    assert 'spiceMenuEl.style.height = "";' in app_menu
-    assert 'spiceMenuEl.style.maxHeight = height + "px";' in app_menu
-    assert 'className = "lane picker"' not in app_static
-    assert "openPickerLane" not in app_static
-    assert "renderPickerChoices" not in app_shell
-    assert ".spice-context-menu" in css
-    assert ".picker" not in css
 
 
 def test_static_spice_menu_team_groups_and_actions():

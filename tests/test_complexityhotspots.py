@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from spice.cli.parser import build_parser
 from spice.studies import cli as studies_cli
 from spice.studies.complexity import (
@@ -30,7 +32,7 @@ def test_complexity_hotspots_cli_uses_configured_default_limit(
     monkeypatch.setattr(
         studies_cli.complexity,
         "collect_complexity_records",
-        lambda paths, *, root: [
+        lambda paths, *, root, suffixes: [
             _record("first", ccn=9, length=10, nloc=10),
             _record("second", ccn=8, length=100, nloc=100),
         ],
@@ -53,7 +55,7 @@ def test_complexity_hotspots_cli_limit_overrides_config(tmp_path, monkeypatch, c
     monkeypatch.setattr(
         studies_cli.complexity,
         "collect_complexity_records",
-        lambda paths, *, root: [
+        lambda paths, *, root, suffixes: [
             _record("first", ccn=9, length=10, nloc=10),
             _record("second", ccn=8, length=100, nloc=100),
         ],
@@ -67,6 +69,38 @@ def test_complexity_hotspots_cli_limit_overrides_config(tmp_path, monkeypatch, c
     assert "complexity-hotspots: top 2 of 2 routine(s)" in output
     assert "src/first.py:first" in output
     assert "src/second.py:second" in output
+
+
+def test_complexity_hotspots_cli_uses_configured_complexity_suffixes(
+    tmp_path, monkeypatch, capsys
+):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy.languages]\ncomplexity = [".wat"]\n',
+        encoding="utf-8",
+    )
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+
+    def collect(paths, *, root, suffixes):
+        seen["paths"] = paths
+        seen["root"] = root
+        seen["suffixes"] = suffixes
+        return [_record("first", ccn=9, length=10, nloc=10)]
+
+    monkeypatch.setattr(
+        studies_cli.complexity,
+        "collect_complexity_records",
+        collect,
+    )
+    args = build_parser().parse_args(["study", "complexity-hotspots", "src/app.wat"])
+
+    assert args.func(args) == 0
+    assert seen == {
+        "paths": [Path("src/app.wat")],
+        "root": tmp_path,
+        "suffixes": (".wat",),
+    }
+    assert "complexity-hotspots: top 1 of 1 routine(s)" in capsys.readouterr().out
 
 
 def _record(name: str, *, ccn: int, length: int, nloc: int) -> ComplexityRecord:
