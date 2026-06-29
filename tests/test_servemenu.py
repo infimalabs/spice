@@ -419,27 +419,30 @@ def test_static_composer_band_menu_matches_large_team_action_sizing():
     assert ".composer-band--menu-open .composer-band-menu-action {" not in css
 
 
-def test_static_spice_menu_fast_mode_uses_persisted_ui_state():
+def test_static_spice_menu_fast_mode_uses_server_global_state():
     app_js = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     app_menu = (STATIC_ROOT / "app.menu.js").read_text(encoding="utf-8")
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
 
-    assert 'const fastModeStorageKey = "spice.serve.fastMode";' in app_js
-    assert "let fastModeEnabled = storedFastModeEnabled();" in app_js
-    assert "function readStoredFastModeEnabled()" in app_js
-    assert 'storage.getItem(fastModeStorageKey) === "true"' in app_js
+    assert "let fastModeEnabled = false;" in app_js
     assert "function currentFastModeEnabled()" in app_js
-    assert "function syncFastModeFromStorage()" in app_js
-    assert 'window.addEventListener("storage", (event) => {' in app_js
-    assert "syncFastModeFromStorage();" in app_js
+    assert "function applyGlobalSettingsPayload(settings)" in app_js
+    assert 'throw new Error("team snapshot missing global fast mode");' in app_js
     assert "function setFastModeEnabled(enabled)" in app_menu
-    assert "persistFastModeEnabled(fastModeEnabled);" in app_menu
+    assert '"setGlobalFastMode", { fastMode: next }' in app_menu
     assert "const fastModeActive = currentFastModeEnabled();" in app_menu
     assert "function syncFastModeButtonState()" in app_menu
     assert "spice-menu-button--fast" in app_menu
-    assert "fastMode: currentFastModeEnabled()," in app_controls
-    assert "fastMode: currentFastModeEnabled()," in app_stream
+    assert "applyGlobalSettingsPayload((payload.snapshot || {}).globalSettings);" in (
+        app_lanes
+    )
+    assert "fastMode: currentFastModeEnabled()," not in app_controls
+    assert "fastMode: currentFastModeEnabled()," not in app_stream
+    assert "fastModeStorageKey" not in app_js
+    assert "storedFastModeEnabled" not in app_js
+    assert "persistFastModeEnabled" not in app_menu
 
 
 def test_static_spice_menu_replaces_picker_lane():

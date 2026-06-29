@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS events (
     team_id TEXT NOT NULL,
     payload TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS global_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS teams (
     team_id TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'open',

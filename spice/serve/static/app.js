@@ -28,7 +28,6 @@ const liveBusReconnectBaseMs = 500;
 const liveBusReconnectMaxMs = 10 * 1000;
 const relativeTimeTickMs = 1000;
 const laneStorageKey = "spice.serve.laneConfigs";
-const fastModeStorageKey = "spice.serve.fastMode";
 const speechModes = ["quiet", "speak", "narrate"];
 const defaultSpeechMode = "speak";
 const maximPriority = "maxim";
@@ -89,7 +88,7 @@ let spiceMenuDragTargetId = "";
 let spiceMenuTargetDragState = null;
 let spiceMenuRenderPending = false;
 let spiceMenuNewTeamPlacementHints = [];
-let fastModeEnabled = storedFastModeEnabled();
+let fastModeEnabled = false;
 let teamSnapshotRevision = 0;
 let sessionOpenTargetIds = new Set();
 
@@ -182,33 +181,15 @@ function browserStorage() {
   }
 }
 
-function readStoredFastModeEnabled() {
-  const storage = browserStorage();
-  if (!storage) return null;
-  return storage.getItem(fastModeStorageKey) === "true";
-}
-
-function storedFastModeEnabled() {
-  return readStoredFastModeEnabled() === true;
-}
-
-function persistFastModeEnabled(enabled) {
-  const storage = browserStorage();
-  if (!storage) return;
-  storage.setItem(fastModeStorageKey, enabled ? "true" : "false");
-}
-
 function currentFastModeEnabled() {
-  // Keep the UI-global flag behind localStorage so sibling tabs and reloads
-  // cannot leave send/subscribe payloads on a stale fast-mode value.
-  const stored = readStoredFastModeEnabled();
-  if (stored !== null) fastModeEnabled = stored;
   return fastModeEnabled;
 }
 
-function syncFastModeFromStorage() {
+function applyGlobalSettingsPayload(settings) {
+  if (!settings || typeof settings.fastMode !== "boolean")
+    throw new Error("team snapshot missing global fast mode");
   const previous = fastModeEnabled;
-  currentFastModeEnabled();
+  fastModeEnabled = settings.fastMode;
   if (fastModeEnabled === previous) return;
   if (typeof syncFastModeButtonState === "function") syncFastModeButtonState();
   if (typeof renderSpiceMenu === "function") renderSpiceMenu();
@@ -232,10 +213,6 @@ window.addEventListener("beforeunload", (event) => {
   event.preventDefault();
   event.returnValue = unsafeDraftWarningText();
   return event.returnValue;
-});
-window.addEventListener("storage", (event) => {
-  if (event.key !== fastModeStorageKey && event.key !== null) return;
-  syncFastModeFromStorage();
 });
 openLaneButton.addEventListener("click", (event) => {
   event.preventDefault();

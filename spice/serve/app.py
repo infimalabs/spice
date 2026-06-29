@@ -952,10 +952,10 @@ class _ServeHandler(BaseHTTPRequestHandler):
             self._send_json(payload, status)
             return
         if action == "agent/ensure":
-            request_payload = self._read_payload()
+            self._read_payload()
             payload, status = agent_ensure_response_payload(
                 target,
-                fast_mode=bool(request_payload.get("fastMode")),
+                fast_mode=bool(self.state.team_store.global_fast_mode_enabled()),
             )
             self._send_json(payload, status)
             return
@@ -1037,7 +1037,6 @@ class _ServeHandler(BaseHTTPRequestHandler):
                         state,
                         target,
                         limit=DEFAULT_MESSAGE_LIMIT,
-                        fast_mode=bool(payload.get("fastMode")),
                     )
                 ),
             ),

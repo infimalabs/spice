@@ -79,6 +79,10 @@ function resetGlobals() {
   context.teamActorThreadId = teamActorThreadId;
   context.teamActorMatchesThread = teamActorMatchesThread;
   context.normalizeTeamActorId = normalizeTeamActorId;
+  context.applyGlobalSettingsPayload = (settings) => {
+    if (!settings || typeof settings.fastMode !== "boolean")
+      throw new Error("missing fixture global fast mode");
+  };
   context.reconcileLaneGroups = (runs) => {
     context.reconciledGroupRuns = runs;
   };
@@ -135,7 +139,7 @@ function applySnapshot(team) {
     {
       revision: 2,
       changed: true,
-      snapshot: { teams: [team] },
+      snapshot: { globalSettings: { fastMode: false }, teams: [team] },
     },
     { force: true },
   );
