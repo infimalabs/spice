@@ -26,6 +26,7 @@ FILE_SHAPE_GENERATED_LOCKFILE_NAMES = (
 # --- routine complexity ------------------------------------------------------
 COMPLEXITY_MAX_CCN = 20
 COMPLEXITY_MAX_LENGTH = 80
+COMPLEXITY_HOTSPOT_LIMIT = 20
 
 # --- flex --------------------------------------------------------------------
 # flex limit = base * FLEX_NUMERATOR // FLEX_DENOMINATOR (1000 -> 1500).

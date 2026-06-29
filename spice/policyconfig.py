@@ -122,6 +122,7 @@ class ComplexityPolicy:
     ccn_flex_limit: int
     max_length: int
     length_flex_limit: int
+    hotspot_limit: int
     ccn_unlimited: bool = False
     length_unlimited: bool = False
 
@@ -134,6 +135,7 @@ class ComplexityPolicy:
 class ResolvedPolicy:
     limits: PolicyLimits
     flex: PolicyFlex
+    complexity_hotspot_limit: int
     magic: PolicyMagic
     debt: PolicyDebt
     languages: PolicyLanguages
@@ -158,6 +160,7 @@ class ResolvedPolicy:
             ccn_flex_limit=self.flex.routine_ccn,
             max_length=self.limits.routine_length,
             length_flex_limit=self.flex.routine_length,
+            hotspot_limit=self.complexity_hotspot_limit,
         )
 
     def bound_for_path(self, bound: str, base: int, path: Path) -> ScopedBound:
@@ -201,6 +204,7 @@ class ResolvedPolicy:
             ccn_flex_limit=ccn.flex_limit,
             max_length=length.limit,
             length_flex_limit=length.flex_limit,
+            hotspot_limit=self.complexity_hotspot_limit,
             ccn_unlimited=ccn.unlimited,
             length_unlimited=length.unlimited,
         )
@@ -258,6 +262,7 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
         ),
     )
     flex_table = _subtable(raw_policy, "flex")
+    complexity_table = _subtable(raw_policy, "complexity")
     ratio = _ratio(flex_table)
     flex = PolicyFlex(
         ratio=ratio,
@@ -273,6 +278,12 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
     return ResolvedPolicy(
         limits=limits,
         flex=flex,
+        complexity_hotspot_limit=_positive_int(
+            complexity_table,
+            "hotspot_limit",
+            policy.COMPLEXITY_HOTSPOT_LIMIT,
+            "[tool.spice.policy.complexity]",
+        ),
         magic=PolicyMagic(
             examine_threshold=_positive_int(
                 magic_table,

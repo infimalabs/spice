@@ -30,6 +30,7 @@ from spice.flexstate import (
     sticky_items_after_flex_breaches,
 )
 from spice.policy import (
+    COMPLEXITY_HOTSPOT_LIMIT,
     COMPLEXITY_MAX_CCN,
     COMPLEXITY_MAX_LENGTH,
     COMPLEXITY_SUFFIXES,
@@ -71,6 +72,40 @@ class ComplexityFinding:
     over_length: bool
     ccn_limit: int
     length_limit: int
+
+
+def complexity_hotspot_rows(
+    records: list[ComplexityRecord], *, limit: int = COMPLEXITY_HOTSPOT_LIMIT
+) -> list[ComplexityRecord]:
+    return sorted(
+        records,
+        key=lambda record: (
+            record.ccn,
+            record.length,
+            record.nloc,
+            record.path,
+            record.function_name,
+        ),
+        reverse=True,
+    )[:limit]
+
+
+def render_complexity_hotspots(
+    records: list[ComplexityRecord], *, limit: int = COMPLEXITY_HOTSPOT_LIMIT
+) -> str:
+    hotspots = complexity_hotspot_rows(records, limit=limit)
+    if not hotspots:
+        return "complexity-hotspots: no routines found"
+    lines = [
+        f"complexity-hotspots: top {len(hotspots)} of {len(records)} routine(s)",
+        "ccn  len  nloc  location",
+    ]
+    for record in hotspots:
+        lines.append(
+            f"{record.ccn:>3}  {record.length:>3}  {record.nloc:>4}  "
+            f"{record.path}:{record.function_name}"
+        )
+    return "\n".join(lines)
 
 
 class ComplexityBounds(Protocol):
