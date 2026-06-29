@@ -85,6 +85,8 @@ def test_serve_menu_smoke_uses_harness_for_interaction() -> None:
     assert ".spice-context-menu .spice-menu-action" in smoke
     assert "Fast mode" in smoke
     assert "fastModeDetail" in smoke
+    assert "fastModePersistedDetail" in smoke
+    assert "Fast mode did not survive reload" in smoke
     assert "New team" not in smoke
 
 
