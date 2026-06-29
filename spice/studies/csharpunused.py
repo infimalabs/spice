@@ -16,6 +16,13 @@ STATUS_RETAINED = "retained"
 STATUS_USED = "used"
 
 PRIVATE_BLOCKING_MODIFIERS = frozenset({"public", "protected", "internal"})
+TYPE_CONTEXT_DECLARATIONS = frozenset(
+    {
+        "class_declaration",
+        "interface_declaration",
+        "struct_declaration",
+    }
+)
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -146,6 +153,18 @@ def _first_identifier(source: bytes, node: Any) -> str | None:
     return None
 
 
+def _method_identifier(source: bytes, node: Any) -> str | None:
+    before_parameters = []
+    for child in node.children:
+        if child.type == "parameter_list":
+            break
+        before_parameters.append(child)
+    for child in reversed(before_parameters):
+        if child.type == "identifier":
+            return _node_text(source, child)
+    return _first_identifier(source, node)
+
+
 def _identifier_counts(source: bytes, root: Any) -> Counter[str]:
     counts: Counter[str] = Counter()
     for node in _walk(root):
@@ -164,6 +183,9 @@ def _member_is_private(source: bytes, node: Any) -> bool:
     modifiers = _modifier_tokens(source, node)
     if "private" in modifiers:
         return True
+    type_context = _nearest_type_context(node)
+    if type_context is not None and type_context.type == "interface_declaration":
+        return False
     return not bool(modifiers & PRIVATE_BLOCKING_MODIFIERS)
 
 
@@ -174,7 +196,7 @@ def _has_attribute(node: Any) -> bool:
 def _nearest_type_context(node: Any) -> Any | None:
     current = node.parent
     while current is not None:
-        if current.type in {"class_declaration", "struct_declaration"}:
+        if current.type in TYPE_CONTEXT_DECLARATIONS:
             return current
         current = current.parent
     return None
@@ -213,7 +235,7 @@ def _method_entry(
 ) -> CSharpUnusedEntry | None:
     if not _member_is_private(source, node):
         return None
-    name = _first_identifier(source, node)
+    name = _method_identifier(source, node)
     if not name:
         return None
     reference_count = identifier_counts[name]

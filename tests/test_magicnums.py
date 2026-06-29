@@ -29,6 +29,7 @@ def test_magic_numbers_guard_uses_default_policy_when_unconfigured(
         root: Path,
         baseline_ref: str,
         examine_threshold: int,
+        examine_threshold_for_path,
         suffixes: tuple[str, ...],
         c_grammar_suffixes: tuple[str, ...],
     ):
@@ -36,6 +37,7 @@ def test_magic_numbers_guard_uses_default_policy_when_unconfigured(
         seen["root"] = root
         seen["baseline_ref"] = baseline_ref
         seen["examine_threshold"] = examine_threshold
+        seen["examine_threshold_for_path"] = examine_threshold_for_path
         seen["suffixes"] = suffixes
         seen["c_grammar_suffixes"] = c_grammar_suffixes
         return []
@@ -44,6 +46,11 @@ def test_magic_numbers_guard_uses_default_policy_when_unconfigured(
 
     precommit._run_magic_numbers_guard(tmp_path, [Path("src/app.py")])
 
+    examine_threshold_for_path = seen.pop("examine_threshold_for_path")
+    assert callable(examine_threshold_for_path)
+    assert (
+        examine_threshold_for_path(Path("src/app.py")) == MAGIC_EXAMINE_VALUE_THRESHOLD
+    )
     assert seen == {
         "paths": [Path("src/app.py")],
         "root": tmp_path,
@@ -75,6 +82,43 @@ def test_magic_numbers_guard_reads_configured_threshold(tmp_path):
         examine_threshold=100,
     )
     assert findings == []
+
+
+def test_magic_numbers_guard_applies_scoped_threshold_and_global_fallback(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    scoped_path = Path("src/high/app.py")
+    default_path = Path("src/default/app.py")
+    _write_repo_file(
+        repo, scoped_path.as_posix(), "def run(value):\n    return value > 1\n"
+    )
+    _write_repo_file(
+        repo, default_path.as_posix(), "def run(value):\n    return value > 1\n"
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "base")
+    _write_repo_file(
+        repo,
+        "pyproject.toml",
+        "[tool.spice.policy.magic]\n"
+        "examine_threshold = 10\n"
+        "\n"
+        '[tool.spice.policy.scopes."src/high/**"]\n'
+        "magic.examine_threshold = 100\n",
+    )
+    _write_repo_file(
+        repo, scoped_path.as_posix(), "def run(value):\n    return value > 75\n"
+    )
+    _write_repo_file(
+        repo, default_path.as_posix(), "def run(value):\n    return value > 75\n"
+    )
+    _git(repo, "add", ".")
+
+    with pytest.raises(SpiceError) as exc_info:
+        precommit._run_magic_numbers_guard(repo, [scoped_path, default_path])
+
+    message = str(exc_info.value)
+    assert "src/default/app.py:2: 75" in message
+    assert "src/high/app.py" not in message
 
 
 def test_magic_numbers_guard_reads_configured_baseline_ref(tmp_path):

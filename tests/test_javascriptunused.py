@@ -1,4 +1,7 @@
+import subprocess
+import sys
 from pathlib import Path
+from textwrap import dedent
 
 from spice.cli.parser import build_parser
 from spice.studies import cli as studies_cli
@@ -17,6 +20,51 @@ def _write(path: Path, text: str) -> None:
 
 def _entries_by_name(entries):
     return {entry.name: entry for entry in entries}
+
+
+def test_javascript_unused_module_keeps_tree_sitter_packages_lazy() -> None:
+    script = """
+        import sys
+
+        import spice.studies.javascriptunused
+
+        loaded = sorted(
+            name
+            for name in sys.modules
+            if name == "spice.studies.treesitter" or name.startswith("tree_sitter")
+        )
+        print("\\n".join(loaded), end="")
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", dedent(script)],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout == ""
+
+
+def test_top_level_parser_keeps_tree_sitter_seam_lazy() -> None:
+    script = """
+        import sys
+
+        from spice.cli.parser import build_parser
+
+        build_parser()
+        state = "loaded" if "spice.studies.treesitter" in sys.modules else "lazy"
+        print(state)
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", dedent(script)],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout == "lazy\n"
 
 
 def test_collect_javascript_unused_symbols_counts_used_and_retained_exports(

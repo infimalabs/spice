@@ -153,6 +153,18 @@ the suffix is in the doc-extension set. Single-letter stems are never selected
 by the generated markdown scopes. Binary files are skipped by the repo-doc
 guard.
 
+### `[tool.spice.policy.debt]`
+
+Debt counters are allowed-finding counts, not hard size or sensitivity limits.
+The default `0` means the gate is clean and any finding fails. A non-zero value
+records explicit, drainable cleanup debt that should be lowered as findings are
+removed.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `reachability_test_only` | `0` | Allowed test-only reachability findings before the reachability gate fails. |
+| `assertion_free_tests` | `0` | Allowed assertion-free test findings before the assertion-free-tests gate fails. |
+
 ### `[tool.spice.policy.scopes."<matcher>"]`
 
 Scopes adjust numeric policy bounds for matching repo-relative paths. The table

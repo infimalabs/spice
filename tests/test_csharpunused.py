@@ -87,6 +87,61 @@ namespace Demo
     )
 
 
+def test_custom_return_type_method_reports_method_identifier(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "src" / "Sample.cs",
+        """
+namespace Demo
+{
+    class Widget {}
+
+    class Sample
+    {
+        private Widget CandidateHelper()
+        {
+            return null;
+        }
+    }
+}
+""",
+    )
+
+    entries = collect_csharp_unused_entries([Path("src/Sample.cs")], root=tmp_path)
+    by_key = _entries_by_key(entries)
+
+    assert by_key[("private_method", "CandidateHelper")].status == (
+        STATUS_CANDIDATE_UNUSED
+    )
+
+
+def test_interface_members_are_not_private_unused_candidates(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "src" / "Sample.cs",
+        """
+namespace Demo
+{
+    interface ISample
+    {
+        private void HiddenHelper() {}
+        void Run();
+    }
+
+    class Sample
+    {
+        private void CandidateHelper() {}
+    }
+}
+""",
+    )
+
+    entries = collect_csharp_unused_entries([Path("src/Sample.cs")], root=tmp_path)
+    private_method_names = sorted(
+        entry.name for entry in entries if entry.kind == "private_method"
+    )
+
+    assert private_method_names == ["CandidateHelper", "HiddenHelper"]
+
+
 def test_study_csharp_unused_candidates_cli_reports_candidates(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
