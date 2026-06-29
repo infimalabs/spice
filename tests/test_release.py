@@ -13,6 +13,7 @@ from spice.release import (
     build_release_parser,
     edited_release_highlight,
     render_release_notes,
+    render_release_range,
 )
 
 
@@ -27,6 +28,9 @@ def test_release_parser_accepts_prepare_notes_publish_and_one_pass():
         ["publish", "--notes-file", "curated.md", "--release-commit", "HEAD"]
     )
     github = parser.parse_args(["github", "0.3.0", "--release-commit", "HEAD"])
+    preview = parser.parse_args(
+        ["range", "0.3.0", "--release-commit", "refs/remotes/origin/main"]
+    )
     one_pass = parser.parse_args(["minor"])
 
     assert prepare.release_mode == "prepare"
@@ -42,6 +46,9 @@ def test_release_parser_accepts_prepare_notes_publish_and_one_pass():
     assert github.release_mode == "github"
     assert github.version == "0.3.0"
     assert github.release_commit == "HEAD"
+    assert preview.release_mode == "range"
+    assert preview.version == "0.3.0"
+    assert preview.release_commit == "refs/remotes/origin/main"
     assert one_pass.release_mode == "release"
     assert one_pass.bump == "minor"
 
@@ -56,7 +63,7 @@ def test_release_docs_show_lane_release_workflow():
         release_section.split("```sh", 1)[1].split("```", 1)[0].strip().splitlines()
     )
 
-    assert "{minor,patch,prepare,notes,publish,github}" in help_text
+    assert "{minor,patch,prepare,notes,range,publish,github}" in help_text
     assert "clean synchronized worktree" in normalized_help
     assert normalized_section.startswith(
         "Releases are cut from a clean synchronized worktree with this "
@@ -65,6 +72,7 @@ def test_release_docs_show_lane_release_workflow():
         "`origin/main`."
     )
     assert release_commands == [
+        "spice release range           # preview the prior-tag..release-commit landed tasks",
         "spice release prepare minor   # bump, validate, commit, stop before publish",
         "spice release notes > /tmp/spice-release-notes.md",
         "spice release publish --notes-file /tmp/spice-release-notes.md",
@@ -491,3 +499,92 @@ def test_release_preconditions_pass_when_claimed_and_baseline_clean(
     monkeypatch.setattr(gitsync, "commits_ahead_of_baseline", lambda root: 0)
 
     assert release.ensure_release_preconditions(tmp_path) is None
+
+
+def test_release_range_mode_is_read_only_and_prints_listing(
+    tmp_path, monkeypatch, capsys
+):
+    parser = build_release_parser()
+    args = parser.parse_args(["range", "0.3.0", "--release-commit", "main"])
+
+    def fail_release_sync(_root):
+        raise AssertionError("range preview is read-only")
+
+    seen = []
+    starting_cwd = Path.cwd()
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(release, "ensure_clean_worktree", fail_release_sync)
+    monkeypatch.setattr(
+        release,
+        "release_commit_for_target",
+        lambda version, target: seen.append((version, target)) or "resolved-main",
+    )
+    monkeypatch.setattr(
+        release,
+        "release_range_for_version",
+        lambda version, commit: f"range for {version} at {commit}\n",
+    )
+
+    result = release.handle_release(args)
+
+    assert result == 0
+    assert Path.cwd() == starting_cwd
+    assert seen == [("0.3.0", "main")]
+    assert capsys.readouterr().out == "range for 0.3.0 at resolved-main\n"
+
+
+def test_commit_records_addresses_previous_tag_by_full_ref(monkeypatch):
+    seen = []
+
+    class FakeResult:
+        stdout = ""
+
+    def fake_run(command, **_kwargs):
+        seen.append(command)
+        return FakeResult()
+
+    monkeypatch.setattr(release, "run", fake_run)
+
+    release.commit_records("v0.2.1", "release-commit-sha")
+
+    assert seen == [
+        [
+            "git",
+            "log",
+            "--first-parent",
+            "--reverse",
+            "--format=%H%x1f%s%x1f%(trailers:key=Task-Project,valueonly)%x1e",
+            "refs/tags/v0.2.1..release-commit-sha",
+        ]
+    ]
+
+
+def test_render_release_range_lists_commits_with_project_and_subject():
+    output = render_release_range(
+        version="0.3.0",
+        release_short="abcdef1",
+        current_tag="v0.3.0",
+        previous_tag="v0.2.1",
+        records=[
+            ReleaseRecord(
+                commit="1111111aaaa",
+                subject="Fix speech excerpts for final ACK messages",
+                project="serve",
+            ),
+            ReleaseRecord(
+                commit="2222222bbbb",
+                subject="Expose release tooling as spice command",
+                project="agent.019ec753620c7cf2b18c06707ac93cbb.task",
+            ),
+        ],
+    )
+
+    assert output == (
+        "Release range for 0.3.0\n"
+        "Range: refs/tags/v0.2.1..abcdef1\n"
+        "Release tag: v0.3.0\n"
+        "Landed commits: 2\n"
+        "\n"
+        "1111111  serve    Fix speech excerpts for final ACK messages\n"
+        "2222222  general  Expose release tooling as spice command\n"
+    )

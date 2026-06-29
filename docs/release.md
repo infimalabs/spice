@@ -5,6 +5,7 @@ mounted `spice release` command. Lane branches are allowed; the release command
 pushes the prepared release commit to `origin/main`.
 
 ```sh
+spice release range           # preview the prior-tag..release-commit landed tasks
 spice release prepare minor   # bump, validate, commit, stop before publish
 spice release notes > /tmp/spice-release-notes.md
 spice release publish --notes-file /tmp/spice-release-notes.md

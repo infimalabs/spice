@@ -69,6 +69,20 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
     )
     notes.set_defaults(func=handle_release, release_mode="notes")
 
+    preview = actions.add_parser(
+        "range",
+        help="Preview the prior-tag..release-commit landed-task range.",
+    )
+    preview.add_argument("version", nargs="?")
+    preview.add_argument(
+        "--release-commit",
+        help=(
+            "Commit-ish for the range end instead of the default; accepts full "
+            "refs like refs/remotes/origin/main."
+        ),
+    )
+    preview.set_defaults(func=handle_release, release_mode="range")
+
     publish = actions.add_parser(
         "publish", help="Validate the prepared version, then push and publish."
     )
@@ -122,7 +136,7 @@ def handle_release(args: argparse.Namespace) -> int:
 
 def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
     mode = str(args.release_mode)
-    if mode != "notes":
+    if mode not in {"notes", "range"}:
         ensure_clean_worktree(root)
     if mode in {"release", "publish", "github"}:
         ensure_notes_file(getattr(args, "notes_file", None))
@@ -153,6 +167,15 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
             print(f"wrote release notes draft for {version} to {notes_output}")
         else:
             print(output, end="" if output.endswith("\n") else "\n")
+        return 0
+
+    if mode == "range":
+        version = str(args.version or current_version())
+        release_commit = release_commit_for_target(
+            version, getattr(args, "release_commit", None)
+        )
+        output = release_range_for_version(version, release_commit)
+        print(output, end="" if output.endswith("\n") else "\n")
         return 0
 
     if mode == "publish":
@@ -316,6 +339,57 @@ def release_notes_for_version(version: str, release_commit: str) -> str:
     )
 
 
+def tag_ref(tag: str) -> str:
+    # Address the tag by its full ref so a same-named branch or shadow ref can
+    # never mask the real tag when computing a release range.
+    return f"refs/tags/{tag}"
+
+
+def release_range_for_version(version: str, release_commit: str) -> str:
+    current_tag = f"v{version}"
+    previous_tag = previous_release_tag(current_tag)
+    records = commit_records(previous_tag, release_commit)
+    return render_release_range(
+        version=version,
+        release_short=short_commit(release_commit),
+        current_tag=current_tag,
+        previous_tag=previous_tag,
+        records=records,
+    )
+
+
+def render_release_range(
+    *,
+    version: str,
+    release_short: str,
+    current_tag: str,
+    previous_tag: str,
+    records: list[ReleaseRecord],
+) -> str:
+    if previous_tag:
+        span = f"{tag_ref(previous_tag)}..{release_short}"
+    else:
+        span = f"latest first-parent commits ending at {release_short}"
+    lines = [
+        f"Release range for {version}",
+        f"Range: {span}",
+        f"Release tag: {current_tag}",
+        f"Landed commits: {len(records)}",
+        "",
+    ]
+    if records:
+        width = max(len(release_project_key(record.project)) for record in records)
+        for record in records:
+            key = release_project_key(record.project)
+            lines.append(
+                f"{shortish_commit(record.commit)}  {key.ljust(width)}  {record.subject}"
+            )
+    else:
+        lines.append("No non-release commits found.")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def commit_records(previous_tag: str, release_commit: str) -> list[ReleaseRecord]:
     format_arg = "--format=%H%x1f%s%x1f%(trailers:key=Task-Project,valueonly)%x1e"
     if previous_tag:
@@ -324,7 +398,7 @@ def commit_records(previous_tag: str, release_commit: str) -> list[ReleaseRecord
             "--first-parent",
             "--reverse",
             format_arg,
-            f"{previous_tag}..{release_commit}",
+            f"{tag_ref(previous_tag)}..{release_commit}",
         ]
     else:
         args = [
