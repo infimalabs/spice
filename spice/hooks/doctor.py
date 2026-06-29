@@ -26,13 +26,7 @@ from spice.paths import (
     runtime_spice_source,
     state_dir,
 )
-from spice.policy import (
-    COMPLEXITY_MAX_CCN,
-    COMPLEXITY_MAX_LENGTH,
-    FILE_BYTE_LIMIT,
-    FILE_LOC_LIMIT,
-    MAGIC_BASELINE_REF,
-)
+from spice.policyconfig import resolve_policy
 from spice.studies import complexity, envpolicy, fileloc, magicnums, shape
 from spice.studies.walk import tracked_paths
 
@@ -447,69 +441,94 @@ def _shape_check(repo_root: Path) -> DoctorCheck:
 
 
 def _file_loc_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
-    findings = fileloc.scan_loc_violations(paths, root=repo_root)
-    line_flex = _flex(FILE_LOC_LIMIT)
-    byte_flex = _flex(FILE_BYTE_LIMIT)
+    resolved = resolve_policy(repo_root)
+    file_shape = resolved.file_shape
+    findings = fileloc.scan_loc_violations(
+        paths,
+        root=repo_root,
+        limit=file_shape.line_limit,
+        flex_limit_value=file_shape.line_flex_limit,
+        byte_limit=file_shape.byte_limit,
+        byte_flex_limit_value=file_shape.byte_flex_limit,
+        lockfile_suffixes=resolved.lockfiles.suffixes,
+        lockfile_names=resolved.lockfiles.names,
+    )
     if findings:
         return _fail(
             "file-loc",
-            f"{len(findings)} violation(s); line_limit {FILE_LOC_LIMIT} "
-            f"flex {line_flex} byte_limit {FILE_BYTE_LIMIT} byte_flex {byte_flex}",
+            f"{len(findings)} violation(s); line_limit {file_shape.line_limit} "
+            f"flex {file_shape.line_flex_limit} byte_limit {file_shape.byte_limit} "
+            f"byte_flex {file_shape.byte_flex_limit}",
             "spice study file-loc",
         )
     return _ok(
         "file-loc",
-        f"ok; line_limit {FILE_LOC_LIMIT} flex {line_flex} "
-        f"byte_limit {FILE_BYTE_LIMIT} byte_flex {byte_flex}",
+        f"ok; line_limit {file_shape.line_limit} "
+        f"flex {file_shape.line_flex_limit} byte_limit {file_shape.byte_limit} "
+        f"byte_flex {file_shape.byte_flex_limit}",
         "spice study file-loc",
     )
 
 
 def _complexity_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
+    resolved = resolve_policy(repo_root)
+    bounds = resolved.complexity
     try:
-        records = complexity.collect_complexity_records(paths, root=repo_root)
+        records = complexity.collect_complexity_records(
+            paths, root=repo_root, suffixes=resolved.languages.complexity
+        )
     except SpiceError as exc:
         return _fail("complexity", str(exc), "spice study complexity")
-    ccn_flex = _flex(COMPLEXITY_MAX_CCN)
-    length_flex = _flex(COMPLEXITY_MAX_LENGTH)
     findings = [
         record
         for record in records
-        if record.ccn > ccn_flex or record.length > length_flex
+        if record.ccn > bounds.ccn_flex_limit
+        or record.length > bounds.length_flex_limit
     ]
     if findings:
         return _fail(
             "complexity",
-            f"{len(findings)} violation(s); ccn_limit {COMPLEXITY_MAX_CCN} "
-            f"flex {ccn_flex} length_limit {COMPLEXITY_MAX_LENGTH} "
-            f"length_flex {length_flex}",
+            f"{len(findings)} violation(s); ccn_limit {bounds.max_ccn} "
+            f"flex {bounds.ccn_flex_limit} length_limit {bounds.max_length} "
+            f"length_flex {bounds.length_flex_limit}",
             "spice study complexity",
         )
     return _ok(
         "complexity",
-        f"ok; ccn_limit {COMPLEXITY_MAX_CCN} flex {ccn_flex} "
-        f"length_limit {COMPLEXITY_MAX_LENGTH} length_flex {length_flex}",
+        f"ok; ccn_limit {bounds.max_ccn} flex {bounds.ccn_flex_limit} "
+        f"length_limit {bounds.max_length} length_flex {bounds.length_flex_limit}",
         "spice study complexity",
     )
 
 
 def _magic_numbers_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
-    findings = magicnums.detect_magic_regressions(paths, root=repo_root)
+    resolved = resolve_policy(repo_root)
+    findings = magicnums.detect_magic_regressions(
+        paths,
+        root=repo_root,
+        baseline_ref=resolved.magic.baseline_ref,
+        examine_threshold=resolved.magic.examine_threshold,
+        suffixes=resolved.languages.magic,
+        c_grammar_suffixes=resolved.languages.c_grammar,
+    )
     if findings:
         return _fail(
             "magic-numbers",
-            f"{len(findings)} regression(s) vs {MAGIC_BASELINE_REF}",
+            f"{len(findings)} regression(s) vs {resolved.magic.baseline_ref}",
             "spice study magic-numbers",
         )
     return _ok(
         "magic-numbers",
-        f"ok vs {MAGIC_BASELINE_REF}",
+        f"ok vs {resolved.magic.baseline_ref}",
         "spice study magic-numbers",
     )
 
 
 def _env_policy_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
-    findings = envpolicy.scan_env_policy(paths, root=repo_root)
+    resolved = resolve_policy(repo_root)
+    findings = envpolicy.scan_env_policy(
+        paths, root=repo_root, suffixes=resolved.languages.env
+    )
     if findings:
         return _fail(
             "env-policy",
@@ -520,7 +539,10 @@ def _env_policy_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
 
 
 def _env_name_ledger_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
-    findings = envpolicy.scan_env_name_ledger(paths, root=repo_root)
+    resolved = resolve_policy(repo_root)
+    findings = envpolicy.scan_env_name_ledger(
+        paths, root=repo_root, suffixes=resolved.languages.env
+    )
     if findings:
         return _fail(
             "env-name-ledger",
@@ -566,9 +588,3 @@ def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def _command_problem(result: subprocess.CompletedProcess[str]) -> str:
     text = (result.stderr or result.stdout).strip()
     return text or f"command exited {result.returncode}"
-
-
-def _flex(value: int) -> int:
-    from spice.flexstate import flex_limit
-
-    return flex_limit(value)

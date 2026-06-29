@@ -38,7 +38,6 @@ from spice.studies.walk import is_excluded_path, staged_renames
 COMPLEXITY_VERSION = 1
 COMPLEXITY_CCN_STICKY_GIT_PATH = "spice/complexity-ccn-sticky.json"
 COMPLEXITY_LENGTH_STICKY_GIT_PATH = "spice/complexity-length-sticky.json"
-LIZARD_SUFFIXES = COMPLEXITY_SUFFIXES
 
 # lizard --csv columns: nloc, ccn, token_count, param_count, length,
 # location, path, function_name, ...
@@ -84,12 +83,12 @@ def require_lizard() -> str:
 
 
 def collect_complexity_records(
-    paths: list[Path], *, root: Path
+    paths: list[Path], *, root: Path, suffixes: tuple[str, ...] = COMPLEXITY_SUFFIXES
 ) -> list[ComplexityRecord]:
     targets = [
         path
         for path in paths
-        if path.suffix in LIZARD_SUFFIXES
+        if path.suffix in suffixes
         and not is_excluded_path(path, repo_root=root)
         and (root / path).exists()
     ]
@@ -174,6 +173,7 @@ def scan_staged_complexity_violations(
     max_length: int = COMPLEXITY_MAX_LENGTH,
     ccn_flex_limit_value: int | None = None,
     length_flex_limit_value: int | None = None,
+    suffixes: tuple[str, ...] = COMPLEXITY_SUFFIXES,
     persist: bool = False,
 ) -> list[ComplexityFinding]:
     """Scan staged routines against the flex+sticky CCN/length limits.
@@ -186,7 +186,7 @@ def scan_staged_complexity_violations(
     ``clear_complexity_sticky_state`` on gate success — scan ratchets up, clear
     prunes down once the tree passes.
     """
-    records = collect_complexity_records(paths, root=root)
+    records = collect_complexity_records(paths, root=root, suffixes=suffixes)
     renames = staged_renames(root)
     ccn_sticky = sticky_function_keys_after_renames(
         _load_sticky(root, COMPLEXITY_CCN_STICKY_GIT_PATH), renames
@@ -247,6 +247,7 @@ def clear_complexity_sticky_state(
     root: Path,
     max_ccn: int = COMPLEXITY_MAX_CCN,
     max_length: int = COMPLEXITY_MAX_LENGTH,
+    suffixes: tuple[str, ...] = COMPLEXITY_SUFFIXES,
 ) -> None:
     for git_path, attribute, limit in (
         (COMPLEXITY_CCN_STICKY_GIT_PATH, "ccn", max_ccn),
@@ -257,7 +258,7 @@ def clear_complexity_sticky_state(
             continue
         sticky = _load_sticky(root, git_path)
         live_paths = sorted({Path(path) for path, _name in sticky})
-        records = collect_complexity_records(live_paths, root=root)
+        records = collect_complexity_records(live_paths, root=root, suffixes=suffixes)
         by_key = {record.key: record for record in records}
         retained = {
             key

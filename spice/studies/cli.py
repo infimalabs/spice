@@ -13,12 +13,12 @@ from spice.policy import (
     COMPLEXITY_MAX_LENGTH,
     FILE_BYTE_LIMIT,
     FILE_LOC_LIMIT,
-    MAGIC_BASELINE_REF,
-    MAGIC_EXAMINE_VALUE_THRESHOLD,
 )
+from spice.policyconfig import resolve_policy
 from spice.studies import (
     complexity,
     csharpmembers,
+    csharpunused,
     envpolicy,
     fileloc,
     javascriptunused,
@@ -70,11 +70,18 @@ def configure_study_parser(subparsers: Any) -> None:
     )
     csharp_members.add_argument("--json", action="store_true", dest="emit_json")
 
+    csharp_unused = _add_study_action(
+        actions,
+        "csharp-unused-candidates",
+        "Report C# private member and using-alias unused candidates.",
+    )
+    csharp_unused.add_argument("--json", action="store_true", dest="emit_json")
+
     magic = _add_study_action(
         actions, "magic-numbers", "Magic-number regressions vs a git baseline."
     )
-    magic.add_argument("--baseline-ref", default=MAGIC_BASELINE_REF)
-    magic.add_argument("--threshold", type=int, default=MAGIC_EXAMINE_VALUE_THRESHOLD)
+    magic.add_argument("--baseline-ref", default=None)
+    magic.add_argument("--threshold", type=int, default=None)
 
     javascript = _add_study_action(
         actions,
@@ -282,6 +289,7 @@ def _study_shape(args: argparse.Namespace, root: Path) -> int:
 
 
 def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
+    resolved = resolve_policy(root)
     paths = _target_paths(args, root)
     scan = (
         fileloc.scan_staged_loc_violations
@@ -295,6 +303,8 @@ def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
         flex_limit_value=args.flex_limit,
         byte_limit=args.byte_limit,
         byte_flex_limit_value=args.byte_flex_limit,
+        lockfile_suffixes=resolved.lockfiles.suffixes,
+        lockfile_names=resolved.lockfiles.names,
     )
     print(
         fileloc.render_loc_board(
@@ -309,6 +319,7 @@ def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
 
 
 def _study_complexity(args: argparse.Namespace, root: Path) -> int:
+    resolved = resolve_policy(root)
     findings = complexity.scan_staged_complexity_violations(
         _target_paths(args, root),
         root=root,
@@ -316,6 +327,7 @@ def _study_complexity(args: argparse.Namespace, root: Path) -> int:
         max_length=args.max_length,
         ccn_flex_limit_value=args.ccn_flex_limit,
         length_flex_limit_value=args.length_flex_limit,
+        suffixes=resolved.languages.complexity,
     )
     print(
         complexity.render_complexity_board(
@@ -338,14 +350,34 @@ def _study_csharp_members(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _study_csharp_unused_candidates(args: argparse.Namespace, root: Path) -> int:
+    entries = csharpunused.collect_csharp_unused_entries(
+        _target_paths(args, root), root=root
+    )
+    if args.emit_json:
+        print(csharpunused.render_csharp_unused_json(entries))
+    else:
+        print(csharpunused.render_csharp_unused_board(entries))
+    return 0
+
+
 def _study_magic_numbers(args: argparse.Namespace, root: Path) -> int:
+    resolved = resolve_policy(root)
+    baseline_ref = args.baseline_ref or resolved.magic.baseline_ref
+    threshold = (
+        args.threshold
+        if args.threshold is not None
+        else resolved.magic.examine_threshold
+    )
     findings = magicnums.detect_magic_regressions(
         _target_paths(args, root),
         root=root,
-        baseline_ref=args.baseline_ref,
-        examine_threshold=args.threshold,
+        baseline_ref=baseline_ref,
+        examine_threshold=threshold,
+        suffixes=resolved.languages.magic,
+        c_grammar_suffixes=resolved.languages.c_grammar,
     )
-    print(magicnums.render_magic_board(findings, baseline_ref=args.baseline_ref))
+    print(magicnums.render_magic_board(findings, baseline_ref=baseline_ref))
     return 1 if findings else 0
 
 
@@ -379,13 +411,19 @@ def _study_mutations(args: argparse.Namespace, root: Path) -> int:
 
 
 def _study_env_policy(args: argparse.Namespace, root: Path) -> int:
-    findings = envpolicy.scan_env_policy(_target_paths(args, root), root=root)
+    resolved = resolve_policy(root)
+    findings = envpolicy.scan_env_policy(
+        _target_paths(args, root), root=root, suffixes=resolved.languages.env
+    )
     print(envpolicy.render_env_policy_board(findings))
     return 1 if findings else 0
 
 
 def _study_env_name_ledger(args: argparse.Namespace, root: Path) -> int:
-    findings = envpolicy.scan_env_name_ledger(_target_paths(args, root), root=root)
+    resolved = resolve_policy(root)
+    findings = envpolicy.scan_env_name_ledger(
+        _target_paths(args, root), root=root, suffixes=resolved.languages.env
+    )
     print(envpolicy.render_env_name_ledger_board(findings))
     return 1 if findings else 0
 
@@ -460,6 +498,7 @@ _STUDY_ACTIONS = {
     "file-loc": _study_file_loc,
     "complexity": _study_complexity,
     "csharp-members": _study_csharp_members,
+    "csharp-unused-candidates": _study_csharp_unused_candidates,
     "magic-numbers": _study_magic_numbers,
     "javascript-unused": _study_javascript_unused,
     "mutations": _study_mutations,
