@@ -369,11 +369,17 @@ def _study_magic_numbers(args: argparse.Namespace, root: Path) -> int:
         if args.threshold is not None
         else resolved.magic.examine_threshold
     )
+    threshold_for_path = (
+        None
+        if args.threshold is not None
+        else resolved.magic_examine_threshold_for_path
+    )
     findings = magicnums.detect_magic_regressions(
         _target_paths(args, root),
         root=root,
         baseline_ref=baseline_ref,
         examine_threshold=threshold,
+        examine_threshold_for_path=threshold_for_path,
         suffixes=resolved.languages.magic,
         c_grammar_suffixes=resolved.languages.c_grammar,
     )
