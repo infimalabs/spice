@@ -688,9 +688,17 @@ def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
 
 
 def _run_magic_numbers_guard(repo_root: Path, paths: list[Path]) -> None:
-    findings = magicnums.detect_magic_regressions(paths, root=repo_root)
+    magic = resolve_policy(repo_root).magic
+    findings = magicnums.detect_magic_regressions(
+        paths,
+        root=repo_root,
+        baseline_ref=magic.baseline_ref,
+        examine_threshold=magic.examine_threshold,
+    )
     if findings:
-        raise SpiceError(magicnums.render_magic_board(findings))
+        raise SpiceError(
+            magicnums.render_magic_board(findings, baseline_ref=magic.baseline_ref)
+        )
 
 
 def _run_reachability_guard(repo_root: Path, paths: list[Path] | None = None) -> None:

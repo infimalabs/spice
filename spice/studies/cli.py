@@ -18,8 +18,11 @@ from spice.policy import (
 )
 from spice.studies import (
     complexity,
+    csharpmembers,
+    csharpunused,
     envpolicy,
     fileloc,
+    javascriptunused,
     magicnums,
     mutations,
     reachability,
@@ -53,11 +56,46 @@ def configure_study_parser(subparsers: Any) -> None:
     complexity_parser.add_argument("--ccn-flex-limit", type=int, default=None)
     complexity_parser.add_argument("--length-flex-limit", type=int, default=None)
 
+    csharp_members = _add_study_action(
+        actions, "csharp-members", "Rank C# class members by parsed source length."
+    )
+    csharp_members.add_argument(
+        "--class-name",
+        help="Optional exact class name to isolate when a file contains multiple classes.",
+    )
+    csharp_members.add_argument(
+        "--limit",
+        type=_positive_int_arg,
+        default=csharpmembers.DEFAULT_MEMBER_LIMIT,
+        help="Number of longest/tail members to show per class.",
+    )
+    csharp_members.add_argument("--json", action="store_true", dest="emit_json")
+
+    csharp_unused = _add_study_action(
+        actions,
+        "csharp-unused-candidates",
+        "Report C# private member and using-alias unused candidates.",
+    )
+    csharp_unused.add_argument("--json", action="store_true", dest="emit_json")
+
     magic = _add_study_action(
         actions, "magic-numbers", "Magic-number regressions vs a git baseline."
     )
     magic.add_argument("--baseline-ref", default=MAGIC_BASELINE_REF)
     magic.add_argument("--threshold", type=int, default=MAGIC_EXAMINE_VALUE_THRESHOLD)
+
+    javascript = _add_study_action(
+        actions,
+        "javascript-unused",
+        "Unused top-level JavaScript symbols via tree-sitter.",
+    )
+    javascript.add_argument(
+        "--allow-symbol",
+        action="append",
+        dest="allow_symbols",
+        default=[],
+        help="Top-level JavaScript symbol to retain even without references.",
+    )
 
     _configure_mutation_parser(actions)
 
@@ -182,6 +220,16 @@ def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
     return sub
 
 
+def _positive_int_arg(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if value <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return value
+
+
 def _target_paths(args: argparse.Namespace, root: Path) -> list[Path]:
     if args.staged and args.paths:
         raise SpiceError("pass --staged or explicit paths, not both")
@@ -287,6 +335,28 @@ def _study_complexity(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_csharp_members(args: argparse.Namespace, root: Path) -> int:
+    records = csharpmembers.collect_csharp_class_records(
+        _target_paths(args, root), root=root, class_name=args.class_name
+    )
+    if args.emit_json:
+        print(csharpmembers.render_csharp_members_json(records))
+    else:
+        print(csharpmembers.render_csharp_members_board(records, limit=args.limit))
+    return 0
+
+
+def _study_csharp_unused_candidates(args: argparse.Namespace, root: Path) -> int:
+    entries = csharpunused.collect_csharp_unused_entries(
+        _target_paths(args, root), root=root
+    )
+    if args.emit_json:
+        print(csharpunused.render_csharp_unused_json(entries))
+    else:
+        print(csharpunused.render_csharp_unused_board(entries))
+    return 0
+
+
 def _study_magic_numbers(args: argparse.Namespace, root: Path) -> int:
     findings = magicnums.detect_magic_regressions(
         _target_paths(args, root),
@@ -296,6 +366,16 @@ def _study_magic_numbers(args: argparse.Namespace, root: Path) -> int:
     )
     print(magicnums.render_magic_board(findings, baseline_ref=args.baseline_ref))
     return 1 if findings else 0
+
+
+def _study_javascript_unused(args: argparse.Namespace, root: Path) -> int:
+    findings = javascriptunused.scan_javascript_unused_symbols(
+        _target_paths(args, root),
+        root=root,
+        allow_symbols=args.allow_symbols,
+    )
+    print(javascriptunused.render_javascript_unused_board(findings))
+    return 0
 
 
 def _study_mutations(args: argparse.Namespace, root: Path) -> int:
@@ -398,7 +478,10 @@ _STUDY_ACTIONS = {
     "shape": _study_shape,
     "file-loc": _study_file_loc,
     "complexity": _study_complexity,
+    "csharp-members": _study_csharp_members,
+    "csharp-unused-candidates": _study_csharp_unused_candidates,
     "magic-numbers": _study_magic_numbers,
+    "javascript-unused": _study_javascript_unused,
     "mutations": _study_mutations,
     "env-policy": _study_env_policy,
     "env-name-ledger": _study_env_name_ledger,

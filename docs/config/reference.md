@@ -130,6 +130,13 @@ Overlapping scopes are resolved by most-specific match, not TOML table order.
 Exact or prefix matchers outrank globs, then the matcher with more literal path
 text wins; ties use the matcher text for deterministic results.
 
+### `[tool.spice.policy.magic]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `examine_threshold` | `10` | Absolute numeric magnitude at or above which an unnamed comparison/default/slice literal is a magic-number candidate. |
+| `baseline_ref` | `HEAD` | Git ref used by the staged gate to decide whether a candidate literal is new debt. |
+
 Command-step tables accept:
 
 | Key | Meaning |
