@@ -6,6 +6,7 @@ This root file states the system contract. Detail lives deeper:
 
 - [Architecture](docs/design/architecture.md)
 - [Invariants](docs/design/invariants.md)
+- [Serve UI invariants](docs/serve/invariants.md)
 
 ## Core Thesis
 

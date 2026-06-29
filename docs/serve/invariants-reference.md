@@ -1,7 +1,7 @@
 # Serve UI Invariants Reference
 
-This file holds the durable implementation map for the root
-[UI_INVARIANTS.md](../../UI_INVARIANTS.md) contract.
+This file holds the durable implementation map for the
+[invariants.md](invariants.md) contract.
 
 ## Audio And Speech Playback
 
