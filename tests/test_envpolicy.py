@@ -1,9 +1,12 @@
+import json
 from pathlib import Path
 
 import pytest
 
+from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.policy import ENV_POLICY_ALLOW_MARKER
+from spice.studies import cli as studies_cli
 from spice.studies.envpolicy import (
     render_env_name_ledger_board,
     render_env_policy_board,
@@ -130,6 +133,118 @@ def test_env_access_gate_opt_out_disables_access_findings(tmp_path):
     path.write_text('value = os.getenv("HOME")\n', encoding="utf-8")
 
     # Opting out weakens the gate: the non-watchlisted read is no longer flagged.
+    assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
+
+
+def test_env_access_baseline_grandfathers_existing_findings_only(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy.env_access]\n"
+        'baseline = "tools/spice/env-policy-baseline.json"\n',
+        encoding="utf-8",
+    )
+    baseline = tmp_path / "tools" / "spice" / "env-policy-baseline.json"
+    baseline.parent.mkdir(parents=True)
+    baseline.write_text(
+        json.dumps(
+            [
+                {
+                    "line": 1,
+                    "name": "os env access",
+                    "path": "sample.py",
+                    "source": 'existing = os.getenv("HOME")',  # env-policy: allow
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    path = tmp_path / "sample.py"
+    path.write_text(
+        'existing = os.getenv("HOME")\nnew = os.getenv("FAKEENV_X")\n',  # env-policy: allow
+        encoding="utf-8",
+    )
+
+    findings = scan_env_policy([Path("sample.py")], root=tmp_path)
+
+    assert [(finding.line, finding.name) for finding in findings] == [
+        (2, "os env access")
+    ]
+
+    path.write_text(
+        'existing = os.getenv("PATH")\nnew = os.getenv("FAKEENV_X")\n',  # env-policy: allow
+        encoding="utf-8",
+    )
+    findings = scan_env_policy([Path("sample.py")], root=tmp_path)
+    assert [(finding.line, finding.name) for finding in findings] == [
+        (1, "os env access"),
+        (2, "os env access"),
+    ]
+
+
+def test_env_access_baseline_missing_file_raises(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy.env_access]\n"
+        'baseline = "tools/spice/missing-env-baseline.json"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "sample.py").write_text(
+        'value = os.getenv("HOME")\n',
+        encoding="utf-8",  # env-policy: allow
+    )
+
+    with pytest.raises(SpiceError, match="baseline file not found"):
+        scan_env_policy([Path("sample.py")], root=tmp_path)
+
+
+def test_env_access_baseline_path_must_be_repo_relative(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.policy.env_access]\nbaseline = "../outside.json"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "sample.py").write_text(
+        'value = os.getenv("HOME")\n',
+        encoding="utf-8",  # env-policy: allow
+    )
+
+    with pytest.raises(SpiceError, match="baseline must be a repo-relative path"):
+        scan_env_policy([Path("sample.py")], root=tmp_path)
+
+
+def test_env_policy_cli_writes_baseline_for_current_findings(
+    tmp_path, monkeypatch, capsys
+):
+    path = tmp_path / "sample.py"
+    path.write_text(
+        'value = os.getenv("HOME")\n',
+        encoding="utf-8",  # env-policy: allow
+    )
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    args = build_parser().parse_args(
+        [
+            "study",
+            "env-policy",
+            "--write-baseline",
+            "tools/spice/env-policy-baseline.json",
+            "sample.py",
+        ]
+    )
+
+    assert args.func(args) == 0
+    baseline = tmp_path / "tools" / "spice" / "env-policy-baseline.json"
+    assert json.loads(baseline.read_text(encoding="utf-8")) == [
+        {
+            "line": 1,
+            "name": "os env access",
+            "path": "sample.py",
+            "source": 'value = os.getenv("HOME")',  # env-policy: allow
+        }
+    ]
+    assert "wrote 1 baseline entry" in capsys.readouterr().out
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy.env_access]\n"
+        'baseline = "tools/spice/env-policy-baseline.json"\n',
+        encoding="utf-8",
+    )
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []
 
 

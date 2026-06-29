@@ -58,6 +58,7 @@ def test_policy_resolver_defaults_match_policy_constants(tmp_path):
     )
     assert resolved.env_access.family_suffixes == policy.ENV_ACCESS_FAMILY_SUFFIXES
     assert resolved.env_access.default_patterns == policy.ENV_ACCESS_DEFAULT_PATTERNS
+    assert resolved.env_access.baseline is None
     assert resolved.commit_message.wrap_limit == policy.COMMIT_MESSAGE_WRAP_LIMIT
     assert (
         resolved.commit_message.allowed_trailers
@@ -109,6 +110,9 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
         source_suffixes = [".tmpl"]
         generated_patterns = ["generated/**"]
 
+        [tool.spice.policy.env_access]
+        baseline = "tools/spice/env-policy-baseline.json"
+
         [tool.spice.policy.env_access.family_suffixes]
         python = [".py", ".pyi"]
 
@@ -151,6 +155,7 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
         *policy.ENV_ACCESS_DEFAULT_PATTERNS["python"],
         "Env\\.read",
     )
+    assert resolved.env_access.baseline == "tools/spice/env-policy-baseline.json"
     assert resolved.commit_message.wrap_limit == CUSTOM_COMMIT_MESSAGE_WRAP
     assert resolved.commit_message.allowed_trailers == frozenset(
         {"task", "reviewed-by"}

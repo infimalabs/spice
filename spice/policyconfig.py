@@ -83,6 +83,7 @@ class PolicyFileShapePaths:
 class PolicyEnvAccess:
     family_suffixes: Mapping[str, tuple[str, ...]]
     default_patterns: Mapping[str, tuple[str, ...]]
+    baseline: str | None = None
 
 
 @dataclass(frozen=True)
@@ -496,6 +497,11 @@ def _env_access(raw_policy: Mapping[str, object]) -> PolicyEnvAccess:
     return PolicyEnvAccess(
         family_suffixes=family_suffixes,
         default_patterns=default_patterns,
+        baseline=_optional_repo_relative_path(
+            table,
+            "baseline",
+            "[tool.spice.policy.env_access]",
+        ),
     )
 
 
@@ -903,6 +909,21 @@ def _non_empty_string(
     if not isinstance(raw, str) or not raw.strip():
         raise SpiceError(f"{context} {key} must be a non-empty string")
     return raw.strip()
+
+
+def _optional_repo_relative_path(
+    table: Mapping[str, object], key: str, context: str
+) -> str | None:
+    raw = table.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise SpiceError(f"{context} {key} must be a non-empty repo-relative path")
+    value = raw.strip().replace("\\", "/")
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts:
+        raise SpiceError(f"{context} {key} must be a repo-relative path")
+    return path.as_posix()
 
 
 def _optional_regex(

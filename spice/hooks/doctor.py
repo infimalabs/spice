@@ -28,6 +28,7 @@ from spice.paths import (
 )
 from spice.policyconfig import resolve_policy
 from spice.studies import complexity, envpolicy, fileloc, magicnums, repodocs, shape
+from spice.studies.walk import staged_paths as staged_gate_paths
 from spice.studies.walk import tracked_paths
 
 DoctorStatus = str
@@ -76,6 +77,7 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
     if fix:
         fixes.extend(_apply_safe_fixes(repo_root))
     paths = tracked_paths(repo_root)
+    staged_paths = staged_gate_paths(repo_root)
     checks = [
         *_binary_checks(repo_root),
         _runtime_resolution_check(repo_root),
@@ -86,10 +88,10 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
         _hooks_check(repo_root),
         _shadowed_hooks_check(repo_root),
         _shape_check(repo_root),
-        _file_loc_check(repo_root, paths),
-        _complexity_check(repo_root, paths),
+        _file_loc_check(repo_root, paths, staged_paths),
+        _complexity_check(repo_root, paths, staged_paths),
         _magic_numbers_check(repo_root, paths),
-        _env_policy_check(repo_root, paths),
+        _env_policy_check(repo_root, paths, staged_paths),
         _env_name_ledger_check(repo_root, paths),
     ]
     return DoctorReport(repo_root=repo_root, checks=checks, fixes=fixes)
@@ -440,73 +442,116 @@ def _shape_check(repo_root: Path) -> DoctorCheck:
     )
 
 
-def _file_loc_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
+def _file_loc_check(
+    repo_root: Path, paths: list[Path], staged_paths: list[Path]
+) -> DoctorCheck:
     resolved = resolve_policy(repo_root)
     file_shape = resolved.file_shape
     generated_patterns = (
         *resolved.file_shape_paths.generated_patterns,
         *shape.generated_path_patterns(repo_root),
     )
-    findings = fileloc.scan_loc_violations(
-        paths,
-        root=repo_root,
-        limit=file_shape.line_limit,
-        flex_limit_value=file_shape.line_flex_limit,
-        byte_limit=file_shape.byte_limit,
-        byte_flex_limit_value=file_shape.byte_flex_limit,
-        source_suffixes=resolved.file_shape_paths.source_suffixes,
-        generated_patterns=generated_patterns,
-        repo_doc_paths=set(
-            repodocs.repo_truth_doc_candidate_paths(repo_root, resolved)
-        ),
-        lockfile_suffixes=resolved.lockfiles.suffixes,
-        lockfile_names=resolved.lockfiles.names,
-        bounds_for_path=resolved.file_shape_for_path,
+    repo_doc_paths = set(repodocs.repo_truth_doc_candidate_paths(repo_root, resolved))
+
+    def scan(candidate_paths: list[Path]) -> list[fileloc.LocFinding]:
+        return fileloc.scan_staged_loc_violations(
+            candidate_paths,
+            root=repo_root,
+            limit=file_shape.line_limit,
+            flex_limit_value=file_shape.line_flex_limit,
+            byte_limit=file_shape.byte_limit,
+            byte_flex_limit_value=file_shape.byte_flex_limit,
+            bounds_for_path=resolved.file_shape_for_path,
+            source_suffixes=resolved.file_shape_paths.source_suffixes,
+            generated_patterns=generated_patterns,
+            repo_doc_paths=repo_doc_paths,
+            lockfile_suffixes=resolved.lockfiles.suffixes,
+            lockfile_names=resolved.lockfiles.names,
+            persist=False,
+        )
+
+    blockers = scan(staged_paths)
+    standing = scan(paths)
+    limits = (
+        f"default line_limit {file_shape.line_limit} "
+        f"flex {file_shape.line_flex_limit} "
+        f"byte_limit {file_shape.byte_limit} "
+        f"byte_flex {file_shape.byte_flex_limit}"
     )
-    if findings:
+    if blockers:
         return _fail(
             "file-loc",
-            f"{len(findings)} violation(s); line_limit {file_shape.line_limit} "
-            f"flex {file_shape.line_flex_limit} byte_limit {file_shape.byte_limit} "
-            f"byte_flex {file_shape.byte_flex_limit}",
+            f"commit-blocking {len(blockers)} violation(s); "
+            f"standing {len(standing)} informational violation(s); {limits}",
+            "spice study file-loc",
+        )
+    if standing:
+        return _info(
+            "file-loc",
+            f"commit-blocking ok; standing {len(standing)} informational "
+            f"violation(s); {limits}",
             "spice study file-loc",
         )
     return _ok(
         "file-loc",
-        f"ok; line_limit {file_shape.line_limit} "
-        f"flex {file_shape.line_flex_limit} byte_limit {file_shape.byte_limit} "
-        f"byte_flex {file_shape.byte_flex_limit}",
+        f"commit-blocking ok; standing ok; {limits}",
         "spice study file-loc",
     )
 
 
-def _complexity_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
+def _complexity_check(
+    repo_root: Path, paths: list[Path], staged_paths: list[Path]
+) -> DoctorCheck:
     resolved = resolve_policy(repo_root)
     bounds = resolved.complexity
     try:
-        records = complexity.collect_complexity_records(
-            paths, root=repo_root, suffixes=resolved.languages.complexity
+        blockers = complexity.scan_staged_complexity_violations(
+            staged_paths,
+            root=repo_root,
+            max_ccn=bounds.max_ccn,
+            max_length=bounds.max_length,
+            ccn_flex_limit_value=bounds.ccn_flex_limit,
+            length_flex_limit_value=bounds.length_flex_limit,
+            bounds_for_path=resolved.complexity_for_path,
+            suffixes=resolved.languages.complexity,
+            persist=False,
+        )
+        standing = complexity.scan_staged_complexity_violations(
+            paths,
+            root=repo_root,
+            max_ccn=bounds.max_ccn,
+            max_length=bounds.max_length,
+            ccn_flex_limit_value=bounds.ccn_flex_limit,
+            length_flex_limit_value=bounds.length_flex_limit,
+            bounds_for_path=resolved.complexity_for_path,
+            suffixes=resolved.languages.complexity,
+            persist=False,
         )
     except SpiceError as exc:
         return _fail("complexity", str(exc), "spice study complexity")
-    findings = [
-        record
-        for record in records
-        if record.ccn > bounds.ccn_flex_limit
-        or record.length > bounds.length_flex_limit
-    ]
-    if findings:
+    limits = (
+        f"default ccn_limit {bounds.max_ccn} "
+        f"flex {bounds.ccn_flex_limit} "
+        f"length_limit {bounds.max_length} "
+        f"length_flex {bounds.length_flex_limit}"
+    )
+    if blockers:
         return _fail(
             "complexity",
-            f"{len(findings)} violation(s); ccn_limit {bounds.max_ccn} "
-            f"flex {bounds.ccn_flex_limit} length_limit {bounds.max_length} "
-            f"length_flex {bounds.length_flex_limit}",
+            f"commit-blocking {len(blockers)} violation(s); "
+            f"standing {len(standing)} informational violation(s); {limits}",
+            "spice study complexity",
+        )
+    if standing:
+        return _info(
+            "complexity",
+            f"commit-blocking ok; standing {len(standing)} informational "
+            f"violation(s); {limits}",
             "spice study complexity",
         )
     return _ok(
         "complexity",
-        f"ok; ccn_limit {bounds.max_ccn} flex {bounds.ccn_flex_limit} "
-        f"length_limit {bounds.max_length} length_flex {bounds.length_flex_limit}",
+        f"commit-blocking ok; standing ok; {limits}",
         "spice study complexity",
     )
 
@@ -535,18 +580,36 @@ def _magic_numbers_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
     )
 
 
-def _env_policy_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
+def _env_policy_check(
+    repo_root: Path, paths: list[Path], staged_paths: list[Path]
+) -> DoctorCheck:
     resolved = resolve_policy(repo_root)
-    findings = envpolicy.scan_env_policy(
+    blockers = envpolicy.scan_env_policy(
+        staged_paths, root=repo_root, suffixes=resolved.languages.env
+    )
+    standing = envpolicy.scan_env_policy(
         paths, root=repo_root, suffixes=resolved.languages.env
     )
-    if findings:
+    if blockers:
         return _fail(
             "env-policy",
-            f"{len(findings)} undeclared environment literal(s)",
+            f"commit-blocking {len(blockers)} undeclared environment literal(s); "
+            f"standing {len(standing)} informational undeclared "
+            "environment literal(s)",
             "spice study env-policy",
         )
-    return _ok("env-policy", "ok", "spice study env-policy")
+    if standing:
+        return _info(
+            "env-policy",
+            f"commit-blocking ok; standing {len(standing)} informational "
+            "undeclared environment literal(s)",
+            "spice study env-policy",
+        )
+    return _ok(
+        "env-policy",
+        "commit-blocking ok; standing ok",
+        "spice study env-policy",
+    )
 
 
 def _env_name_ledger_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
@@ -581,6 +644,10 @@ def _ok(name: str, detail: str, command: str) -> DoctorCheck:
 
 def _warn(name: str, detail: str, command: str) -> DoctorCheck:
     return DoctorCheck(name=name, status="warn", detail=detail, command=command)
+
+
+def _info(name: str, detail: str, command: str) -> DoctorCheck:
+    return DoctorCheck(name=name, status="info", detail=detail, command=command)
 
 
 def _fail(name: str, detail: str, command: str) -> DoctorCheck:

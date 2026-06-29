@@ -8,6 +8,7 @@ from pathlib import Path
 from spice import config
 from spice.hooks import doctor
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
+from spice.studies.walk import staged_paths, tracked_paths
 
 
 def test_doctor_reports_missing_hooks_and_fix_installs_them(tmp_path, monkeypatch):
@@ -153,6 +154,121 @@ def test_doctor_warns_when_installed_tool_runtime_is_unavailable(tmp_path, monke
     assert "installed spice package source is unavailable" == check.detail
 
 
+def test_doctor_reports_file_loc_standing_debt_as_info_with_scopes_and_excludes(
+    tmp_path,
+):
+    repo = _repo(tmp_path)
+    (repo / "pyproject.toml").write_text(
+        """
+        [tool.spice.policy]
+        package_roots = ["pkg"]
+        exclude = ["generated/"]
+
+        [tool.spice.policy.limits]
+        file_loc = 20
+        file_bytes = 100000
+
+        [tool.spice.policy.flex]
+        ratio = 1.0
+
+        [tool.spice.policy.scopes."legacy/**".file_loc]
+        multiplier = 10.0
+        """,
+        encoding="utf-8",
+    )
+    (repo / "src").mkdir()
+    (repo / "legacy").mkdir()
+    (repo / "generated").mkdir()
+    (repo / "src" / "large.py").write_text("x = 1\n" * 21, encoding="utf-8")
+    (repo / "legacy" / "large.py").write_text("x = 1\n" * 30, encoding="utf-8")
+    (repo / "generated" / "large.py").write_text("x = 1\n" * 30, encoding="utf-8")
+    _run(repo, "git", "add", ".")
+    _run(repo, "git", "commit", "-m", "add standing file-loc debt")
+
+    check = doctor._file_loc_check(repo, tracked_paths(repo), staged_paths(repo))
+
+    assert check.status == "info"
+    assert "commit-blocking ok" in check.detail
+    assert "standing 1 informational violation(s)" in check.detail
+
+
+def test_doctor_reports_env_policy_standing_debt_as_info(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "pkg" / "env_access.py").write_text(
+        'import os\nVALUE = os.getenv("HOME")\n',  # env-policy: allow
+        encoding="utf-8",
+    )
+    _run(repo, "git", "add", ".")
+    _run(repo, "git", "commit", "-m", "add standing env-policy debt")
+
+    check = doctor._env_policy_check(repo, tracked_paths(repo), staged_paths(repo))
+
+    assert check.status == "info"
+    assert "commit-blocking ok" in check.detail
+    assert "standing 1 informational undeclared environment literal(s)" in check.detail
+
+
+def test_doctor_complexity_uses_staged_scan_with_scoped_bounds(
+    tmp_path,
+    monkeypatch,
+):
+    repo = _repo(tmp_path)
+    (repo / "pyproject.toml").write_text(
+        """
+        [tool.spice.policy]
+        package_roots = ["pkg"]
+
+        [tool.spice.policy.limits]
+        routine_ccn = 5
+        routine_length = 8
+
+        [tool.spice.policy.flex]
+        ratio = 1.0
+
+        [tool.spice.policy.scopes."legacy/**".routine_ccn]
+        multiplier = 2.0
+        """,
+        encoding="utf-8",
+    )
+    calls: list[tuple[tuple[Path, ...], int, bool]] = []
+    finding = doctor.complexity.ComplexityFinding(
+        record=doctor.complexity.ComplexityRecord(
+            path="src/app.py",
+            function_name="main",
+            ccn=7,
+            length=6,
+            nloc=6,
+        ),
+        over_ccn=True,
+        over_length=False,
+        ccn_limit=5,
+        length_limit=8,
+    )
+
+    def scan(
+        paths: list[Path],
+        *,
+        bounds_for_path,
+        persist: bool,
+        **_kwargs,
+    ) -> list[doctor.complexity.ComplexityFinding]:
+        legacy_ccn = bounds_for_path(Path("legacy/app.py")).max_ccn
+        calls.append((tuple(paths), legacy_ccn, persist))
+        return [finding] if Path("src/app.py") in paths else []
+
+    monkeypatch.setattr(
+        doctor.complexity,
+        "scan_staged_complexity_violations",
+        scan,
+    )
+
+    check = doctor._complexity_check(repo, [Path("src/app.py")], [])
+
+    assert check.status == "info"
+    assert "standing 1 informational violation(s)" in check.detail
+    assert calls == [((), 10, False), ((Path("src/app.py"),), 10, False)]
+
+
 def _patch_non_hook_checks(monkeypatch) -> None:
     monkeypatch.setattr(doctor, "_binary_checks", lambda _repo_root: [])
     monkeypatch.setattr(
@@ -180,8 +296,8 @@ def _patch_non_hook_checks(monkeypatch) -> None:
         monkeypatch.setattr(
             doctor,
             f"_{name.replace('-', '_')}_check",
-            lambda _repo_root, _paths=None, name=name, command=command: (
-                doctor.DoctorCheck(name, "ok", "ok", command)
+            lambda *_args, name=name, command=command: doctor.DoctorCheck(
+                name, "ok", "ok", command
             ),
         )
 
