@@ -233,6 +233,20 @@ def test_doc_over_cap_is_reported_as_a_violation(tmp_path):
     assert f"cap {REPO_TRUTH_DOC_LIMIT}" in violations[0]
 
 
+def test_doc_cap_reads_configured_limit(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy.limits]\nrepo_truth_doc_chars = 12\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "AGENTS.md").write_text("thirteen chars", encoding="utf-8")
+
+    violations = repo_truth_doc_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "AGENTS.md" in violations[0]
+    assert "cap 12" in violations[0]
+
+
 def test_policy_pre_commit_extensions_run_after_builtin_steps(tmp_path, monkeypatch):
     recorder = _write_recorder(tmp_path)
     (tmp_path / "pyproject.toml").write_text(

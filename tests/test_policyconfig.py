@@ -48,6 +48,11 @@ def test_policy_resolver_defaults_match_policy_constants(tmp_path):
     assert resolved.lockfiles.names == policy.FILE_SHAPE_GENERATED_LOCKFILE_NAMES
     assert resolved.env_access.family_suffixes == policy.ENV_ACCESS_FAMILY_SUFFIXES
     assert resolved.env_access.default_patterns == policy.ENV_ACCESS_DEFAULT_PATTERNS
+    assert resolved.commit_message.wrap_limit == policy.COMMIT_MESSAGE_WRAP_LIMIT
+    assert (
+        resolved.commit_message.allowed_trailers
+        == policy.COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS
+    )
 
 
 def test_policy_resolver_applies_each_bound_override(tmp_path):
@@ -92,6 +97,9 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
 
         [tool.spice.policy.env_access.default_patterns]
         python = ['Env\\.read']
+
+        [tool.spice.policy.commit_message]
+        allowed_trailers = ["Task", "Reviewed-By"]
         """,
     )
 
@@ -120,6 +128,10 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
     assert resolved.lockfiles.names == ("npm-lock.json",)
     assert resolved.env_access.family_suffixes["python"] == (".py", ".pyi")
     assert resolved.env_access.default_patterns["python"] == ("Env\\.read",)
+    assert resolved.commit_message.wrap_limit == CUSTOM_COMMIT_MESSAGE_WRAP
+    assert resolved.commit_message.allowed_trailers == frozenset(
+        {"task", "reviewed-by"}
+    )
 
 
 def test_policy_resolver_uses_ratio_fallback_for_unset_flex(tmp_path):
@@ -194,6 +206,22 @@ def test_policy_resolver_names_invalid_debt_key(tmp_path):
     with pytest.raises(
         SpiceError,
         match=r"\[tool\.spice\.policy\.debt\] reachability_test_only",
+    ):
+        resolve_policy(tmp_path)
+
+
+def test_policy_resolver_rejects_forbidden_commit_trailer_config(tmp_path):
+    _write_pyproject(
+        tmp_path,
+        """
+        [tool.spice.policy.commit_message]
+        allowed_trailers = ["Co-Authored-By"]
+        """,
+    )
+
+    with pytest.raises(
+        SpiceError,
+        match=r"\[tool\.spice\.policy\.commit_message\] allowed_trailers",
     ):
         resolve_policy(tmp_path)
 

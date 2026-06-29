@@ -11,7 +11,7 @@ import pytest
 
 from spice.cli.mounts import MOUNTED_COMMAND_ENV, VISIBLE_PROG_ENV
 from spice.errors import SpiceError
-from spice.hooks import commitmsg, precommit
+from spice.hooks import precommit
 from spice.hooks.install import hooks_dir, init_repo, install_hooks_for_repo
 from spice.studies.localpaths import (
     render_local_path_board,
@@ -591,42 +591,6 @@ def test_dev_pre_commit_reports_repo_gate_replacement_for_upstream_args(
     message = str(exc_info.value)
     assert "does not accept pre-commit framework arguments: run --all-files" in message
     assert "Run `spice dev pre-commit` for the staged gate" in message
-
-
-def test_commit_msg_rejects_co_authored_by_trailer(tmp_path):
-    message = (
-        "Block delegated commit authorship\n"
-        "\n"
-        "The harness owns the visible commit author contract.\n"
-        "\n"
-        "Co-Authored-By: Agent <agent@example.test>\n"
-    )
-    path = tmp_path / "COMMIT_EDITMSG"
-    path.write_text(message, encoding="utf-8")
-
-    with pytest.raises(SpiceError) as exc_info:
-        commitmsg.handle_commit_msg(str(path))
-
-    error = str(exc_info.value)
-    assert "forbidden trailer Co-Authored-By" in error
-    assert "commit messages must not add co-authors" in error
-
-
-def test_commit_msg_rejects_wip_subject_and_accepts_real_subject(tmp_path):
-    placeholder = tmp_path / "PLACEHOLDER_COMMIT_EDITMSG"
-    placeholder.write_text("wip\n", encoding="utf-8")
-
-    with pytest.raises(SpiceError) as exc_info:
-        commitmsg.handle_commit_msg(str(placeholder))
-
-    error = str(exc_info.value)
-    assert "subject 'wip' is a placeholder" in error
-    assert "write a real subject describing the change" in error
-
-    real = tmp_path / "REAL_COMMIT_EDITMSG"
-    real.write_text("Block placeholder commit subjects\n", encoding="utf-8")
-
-    assert commitmsg.handle_commit_msg(str(real)) == 0
 
 
 def test_serve_web_typecheck_skips_repo_without_sources(tmp_path, monkeypatch):

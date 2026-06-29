@@ -7,6 +7,7 @@ and malformed configuration fails loudly with the offending key.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,9 @@ from typing import cast
 from spice import policy
 from spice.errors import SpiceError
 from spice.repocfg import policy_table
+
+_COMMIT_TRAILER_KEY_RE = re.compile(r"^[A-Za-z0-9-]+$")
+_FORBIDDEN_COMMIT_TRAILER_KEYS = frozenset({"co-authored-by"})
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,12 @@ class PolicyEnvAccess:
 
 
 @dataclass(frozen=True)
+class PolicyCommitMessage:
+    wrap_limit: int
+    allowed_trailers: frozenset[str] | None
+
+
+@dataclass(frozen=True)
 class FileShapePolicy:
     line_limit: int
     line_flex_limit: int
@@ -93,6 +103,7 @@ class ResolvedPolicy:
     languages: PolicyLanguages
     lockfiles: PolicyLockfiles
     env_access: PolicyEnvAccess
+    commit_message: PolicyCommitMessage
 
     @property
     def file_shape(self) -> FileShapePolicy:
@@ -201,6 +212,22 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
         languages=_languages(raw_policy),
         lockfiles=_lockfiles(raw_policy),
         env_access=_env_access(raw_policy),
+        commit_message=_commit_message(raw_policy, limits),
+    )
+
+
+def _commit_message(
+    raw_policy: Mapping[str, object], limits: PolicyLimits
+) -> PolicyCommitMessage:
+    table = _subtable(raw_policy, "commit_message")
+    return PolicyCommitMessage(
+        wrap_limit=limits.commit_message_wrap,
+        allowed_trailers=_optional_trailer_key_set(
+            table,
+            "allowed_trailers",
+            policy.COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS,
+            "[tool.spice.policy.commit_message]",
+        ),
     )
 
 
@@ -356,6 +383,33 @@ def _non_empty_string(
     if not isinstance(raw, str) or not raw.strip():
         raise SpiceError(f"{context} {key} must be a non-empty string")
     return raw.strip()
+
+
+def _optional_trailer_key_set(
+    table: Mapping[str, object],
+    key: str,
+    default: tuple[str, ...] | None,
+    context: str,
+) -> frozenset[str] | None:
+    raw = table.get(key)
+    if raw is None:
+        if default is None:
+            return None
+        raw = list(default)
+    if not isinstance(raw, list):
+        raise SpiceError(f"{context} {key} must be a list of commit trailer keys")
+    values: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            raise SpiceError(f"{context} {key} must be a list of commit trailer keys")
+        value = item.strip().lower()
+        if _COMMIT_TRAILER_KEY_RE.fullmatch(value) is None:
+            raise SpiceError(f"{context} {key} entries must be commit trailer keys")
+        if value in _FORBIDDEN_COMMIT_TRAILER_KEYS:
+            raise SpiceError(f"{context} {key} must not include Co-Authored-By")
+        if value not in values:
+            values.append(value)
+    return frozenset(values)
 
 
 def _string_tuple(
