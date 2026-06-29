@@ -25,7 +25,6 @@ from spice.policy import (
     MAGIC_EXAMINE_VALUE_THRESHOLD,
     MAGIC_SUFFIXES,
 )
-from spice.studies import treesitter
 from spice.studies.walk import git_blob_text, is_excluded_path
 
 EXAMINE_PARENT_KINDS = frozenset({"default_arg", "compare", "slice"})
@@ -88,6 +87,8 @@ def scan_text_magic_numbers(
 
 
 def _parse_tree_sitter_magic_source(rel_path: Path, text: str) -> None:
+    from spice.studies import treesitter
+
     parsed = treesitter.parse_source(rel_path, text)
     if parsed is None:
         return
