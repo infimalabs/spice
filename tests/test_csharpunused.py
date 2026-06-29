@@ -6,10 +6,12 @@ from pathlib import Path
 from spice.cli.parser import build_parser
 from spice.studies import cli as studies_cli
 from spice.studies.csharpunused import (
+    CSharpUnusedEntry,
     STATUS_CANDIDATE_UNUSED,
     STATUS_RETAINED,
     STATUS_USED,
     collect_csharp_unused_entries,
+    render_csharp_unused_board,
 )
 
 
@@ -163,6 +165,27 @@ class Sample
     assert "Sample.cs:4 private_method CandidateHelper" in output
 
 
+def test_csharp_unused_board_limit_applies_to_candidate_rows() -> None:
+    entries = [
+        _entry("active", STATUS_USED, line=1),
+        _entry("candidateOne", STATUS_CANDIDATE_UNUSED, line=2),
+        _entry("candidateTwo", STATUS_CANDIDATE_UNUSED, line=3),
+        _entry("retained", STATUS_RETAINED, line=4),
+    ]
+
+    output = render_csharp_unused_board(entries, limit=1)
+
+    assert output.splitlines() == [
+        "csharp-unused-candidates: candidateUnused=2 used=1 retained=1 showing=1",
+        "Candidate Entries",
+        "  Sample.cs:2 private_method candidateOne refs=1 reason=test",
+        "Used Entries",
+        "  Sample.cs:1 private_method active refs=1 reason=test",
+        "Retained Entries",
+        "  Sample.cs:4 private_method retained refs=1 reason=test",
+    ]
+
+
 def test_study_csharp_unused_candidates_cli_json(tmp_path: Path, monkeypatch, capsys):
     _write(
         tmp_path / "Sample.cs",
@@ -183,3 +206,15 @@ class Sample
     assert payload["artifactKind"] == "spice.study.csharp-unused-candidates"
     assert payload["stats"]["candidateUnused"] == 1
     assert payload["entries"][0]["name"] == "CandidateHelper"
+
+
+def _entry(name: str, status: str, *, line: int) -> CSharpUnusedEntry:
+    return CSharpUnusedEntry(
+        path="Sample.cs",
+        line=line,
+        kind="private_method",
+        name=name,
+        status=status,
+        reason="test",
+        reference_count=1,
+    )

@@ -95,16 +95,22 @@ def render_csharp_unused_board(
 ) -> str:
     payload = csharp_unused_payload(entries)
     stats = payload["stats"]
-    shown = list(entries)[:limit] if limit is not None else list(entries)
-    suffix = f" showing={len(shown)}" if limit and len(entries) > len(shown) else ""
+    candidate_count = stats["candidateUnused"]
+    suffix = (
+        f" showing={limit}"
+        if limit and isinstance(candidate_count, int) and candidate_count > limit
+        else ""
+    )
     rows = [
         "csharp-unused-candidates: "
         f"candidateUnused={stats['candidateUnused']} "
         f"used={stats['used']} retained={stats['retained']}{suffix}"
     ]
-    rows.extend(_status_rows(shown, STATUS_CANDIDATE_UNUSED, "Candidate Entries"))
-    rows.extend(_status_rows(shown, STATUS_USED, "Used Entries"))
-    rows.extend(_status_rows(shown, STATUS_RETAINED, "Retained Entries"))
+    rows.extend(
+        _status_rows(entries, STATUS_CANDIDATE_UNUSED, "Candidate Entries", limit=limit)
+    )
+    rows.extend(_status_rows(entries, STATUS_USED, "Used Entries"))
+    rows.extend(_status_rows(entries, STATUS_RETAINED, "Retained Entries"))
     return "\n".join(rows)
 
 
@@ -338,14 +344,19 @@ def _retained_using(path: str, node: Any, name: str, reason: str) -> CSharpUnuse
 
 
 def _status_rows(
-    entries: Sequence[CSharpUnusedEntry], status: str, title: str
+    entries: Sequence[CSharpUnusedEntry],
+    status: str,
+    title: str,
+    *,
+    limit: int | None = None,
 ) -> list[str]:
     rows = [title]
     matching = [entry for entry in entries if entry.status == status]
-    if not matching:
+    shown = matching[:limit] if limit is not None else matching
+    if not shown:
         rows.append("  none")
         return rows
-    for entry in matching:
+    for entry in shown:
         rows.append(
             f"  {entry.path}:{entry.line} {entry.kind} {entry.name} "
             f"refs={entry.reference_count} reason={entry.reason}"
