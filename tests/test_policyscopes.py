@@ -14,6 +14,7 @@ BASE_FILE_BYTES = 100
 BASE_ROUTINE_CCN = 5
 BASE_ROUTINE_LENGTH = 8
 BASE_REPO_DOC_CHARS = 1000
+BASE_MAGIC_THRESHOLD = 10
 WIDE_FILE_LOC = 20
 WIDE_FILE_LOC_FLEX = 40
 WIDE_FILE_BYTES = 200
@@ -23,6 +24,7 @@ WIDE_ROUTINE_CCN_FLEX = 20
 WIDE_ROUTINE_LENGTH = 16
 WIDE_ROUTINE_LENGTH_FLEX = 32
 WIDE_REPO_DOC_CHARS = 2000
+SCOPED_MAGIC_THRESHOLD = 100
 CLAMPED_FILE_LOC = 25
 CLAMPED_FILE_LOC_FLEX = 37
 SCOPED_NEARBY_FILE_LOC = 20
@@ -175,6 +177,47 @@ def test_policy_scopes_double_star_matches_immediate_and_nested_children(tmp_pat
         resolved.file_shape_for_path(Path("Docs/guides/page.md")).line_limit
         == DOUBLE_STAR_FILE_LOC
     )
+
+
+def test_policy_scopes_apply_magic_threshold_by_path(tmp_path):
+    _write_pyproject(
+        tmp_path,
+        f"""
+        [tool.spice.policy.magic]
+        examine_threshold = {BASE_MAGIC_THRESHOLD}
+
+        [tool.spice.policy.scopes."**/*.cs"]
+        magic.examine_threshold = {SCOPED_MAGIC_THRESHOLD}
+        """,
+    )
+
+    resolved = resolve_policy(tmp_path)
+
+    assert (
+        resolved.magic_for_path(Path("src/Widget.cs")).examine_threshold
+        == SCOPED_MAGIC_THRESHOLD
+    )
+    assert (
+        resolved.magic_examine_threshold_for_path(Path("src/app.py"))
+        == BASE_MAGIC_THRESHOLD
+    )
+    assert resolved.magic.examine_threshold == BASE_MAGIC_THRESHOLD
+
+
+def test_policy_scopes_invalid_magic_threshold_names_the_scope(tmp_path):
+    _write_pyproject(
+        tmp_path,
+        """
+        [tool.spice.policy.scopes."**/*.cs".magic]
+        examine_threshold = 0
+        """,
+    )
+
+    with pytest.raises(
+        SpiceError,
+        match=r'\[tool\.spice\.policy\.scopes\."\*\*/\*\.cs"\] magic examine_threshold',
+    ):
+        resolve_policy(tmp_path)
 
 
 def test_policy_scopes_invalid_config_names_the_scope(tmp_path):

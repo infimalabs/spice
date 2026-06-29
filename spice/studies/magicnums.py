@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,6 +44,7 @@ _TREE_SITTER_LITERAL_QUERY_BY_LANGUAGE = {
     "csharp": "(integer_literal) @literal",
     "javascript": "(number) @literal",
 }
+MagicThresholdForPath = Callable[[Path], int]
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,7 @@ def scan_paths_magic_numbers(
     *,
     root: Path,
     examine_threshold: int = MAGIC_EXAMINE_VALUE_THRESHOLD,
+    examine_threshold_for_path: MagicThresholdForPath | None = None,
     suffixes: tuple[str, ...] = MAGIC_SUFFIXES,
     c_grammar_suffixes: tuple[str, ...] = C_GRAMMAR_SUFFIXES,
 ) -> list[MagicFinding]:
@@ -74,7 +77,11 @@ def scan_paths_magic_numbers(
             scan_text_magic_numbers(
                 rel_path,
                 text,
-                examine_threshold=examine_threshold,
+                examine_threshold=_threshold_for_path(
+                    rel_path,
+                    default=examine_threshold,
+                    resolver=examine_threshold_for_path,
+                ),
                 c_grammar_suffixes=c_grammar_suffixes,
             )
         )
@@ -241,6 +248,7 @@ def detect_magic_regressions(
     root: Path,
     baseline_ref: str = MAGIC_BASELINE_REF,
     examine_threshold: int = MAGIC_EXAMINE_VALUE_THRESHOLD,
+    examine_threshold_for_path: MagicThresholdForPath | None = None,
     suffixes: tuple[str, ...] = MAGIC_SUFFIXES,
     c_grammar_suffixes: tuple[str, ...] = C_GRAMMAR_SUFFIXES,
 ) -> list[MagicFinding]:
@@ -258,10 +266,13 @@ def detect_magic_regressions(
         abs_path = root / rel_path
         if not abs_path.exists():
             continue
+        path_threshold = _threshold_for_path(
+            rel_path, default=examine_threshold, resolver=examine_threshold_for_path
+        )
         current = scan_text_magic_numbers(
             rel_path,
             abs_path.read_text(encoding="utf-8", errors="replace"),
-            examine_threshold=examine_threshold,
+            examine_threshold=path_threshold,
             c_grammar_suffixes=c_grammar_suffixes,
         )
         if not current:
@@ -273,7 +284,7 @@ def detect_magic_regressions(
                 for finding in scan_text_magic_numbers(
                     rel_path,
                     baseline_text,
-                    examine_threshold=examine_threshold,
+                    examine_threshold=path_threshold,
                     c_grammar_suffixes=c_grammar_suffixes,
                 )
             }
@@ -284,6 +295,17 @@ def detect_magic_regressions(
             finding for finding in current if finding.literal not in baseline_literals
         )
     return regressions
+
+
+def _threshold_for_path(
+    rel_path: Path,
+    *,
+    default: int,
+    resolver: MagicThresholdForPath | None,
+) -> int:
+    if resolver is None:
+        return default
+    return resolver(rel_path)
 
 
 def render_magic_board(
