@@ -17,6 +17,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SERVE_STATIC_DIR = PROJECT_ROOT / "spice" / "serve" / "static"
 STATIC_REF_RE = re.compile(r"/static/([A-Za-z0-9_./-]+)")
 PRIMARY_RUNTIME_DOCS = ("README.md", "DESIGN.md", "CONFIG.md")
+BROWSER_VALIDATION_FILES = (
+    "package.json",
+    "package-lock.json",
+    "tests/browser/serve_composer_reorder_smoke.js",
+    "tests/browser/serve_identity_smoke.js",
+    "tests/browser/serve_lifetime_team_smoke.js",
+    "tests/browser/serve_menu_smoke.js",
+    "tests/browser/serve_pending_badge_smoke.js",
+    "tests/browser/serve_playwright_harness.js",
+    "tests/browser/serve_task_card_live_smoke.js",
+    "tests/browser/serve_team_metrics_smoke.js",
+)
 
 
 def _pyproject_data():
@@ -75,6 +87,19 @@ def test_uv_tool_install_contract_declares_spice_console_script():
 
     assert data["project"]["name"] == "spice-harness"
     assert data["project"]["scripts"]["spice"] == "spice.cli.entry:main"
+
+
+def test_sdist_includes_browser_validation_inputs():
+    manifest = (PROJECT_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+
+    assert "include package.json" in manifest
+    assert "include package-lock.json" in manifest
+    assert "recursive-include tests/browser *.js" in manifest
+    for relative in BROWSER_VALIDATION_FILES:
+        assert (PROJECT_ROOT / relative).is_file(), (
+            f"{relative} must ship in the sdist so extracted test runs keep "
+            "browser validation context"
+        )
 
 
 def test_readme_documents_single_install_runtime_model():
