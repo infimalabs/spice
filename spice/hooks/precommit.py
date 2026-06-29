@@ -653,6 +653,7 @@ def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
         flex_limit_value=bounds.line_flex_limit,
         byte_limit=bounds.byte_limit,
         byte_flex_limit_value=bounds.byte_flex_limit,
+        bounds_for_path=resolved.file_shape_for_path,
         lockfile_suffixes=resolved.lockfiles.suffixes,
         lockfile_names=resolved.lockfiles.names,
         persist=True,
@@ -679,6 +680,7 @@ def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
         max_length=bounds.max_length,
         ccn_flex_limit_value=bounds.ccn_flex_limit,
         length_flex_limit_value=bounds.length_flex_limit,
+        bounds_for_path=resolved.complexity_for_path,
         suffixes=resolved.languages.complexity,
         persist=True,
     )
@@ -840,6 +842,7 @@ def clear_successful_sticky_state(repo_root: Path) -> None:
         root=repo_root,
         limit=file_shape.line_limit,
         byte_limit=file_shape.byte_limit,
+        bounds_for_path=resolved.file_shape_for_path,
         lockfile_suffixes=resolved.lockfiles.suffixes,
         lockfile_names=resolved.lockfiles.names,
     )
@@ -847,5 +850,6 @@ def clear_successful_sticky_state(repo_root: Path) -> None:
         root=repo_root,
         max_ccn=routine.max_ccn,
         max_length=routine.max_length,
+        bounds_for_path=resolved.complexity_for_path,
         suffixes=resolved.languages.complexity,
     )

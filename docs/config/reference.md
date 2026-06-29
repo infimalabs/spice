@@ -121,6 +121,37 @@ Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 `1.5x` flex, routines CCN `20` / length `80`, commit text wrap `100`,
 magic-number threshold `10`, and magic baselines against `HEAD`.
 
+### `[tool.spice.policy.scopes."<matcher>"]`
+
+Scopes adjust numeric policy bounds for matching repo-relative paths. The table
+key is the matcher. Glob keys such as `**/*.cs` work as per-language knobs;
+non-glob keys match that path or subtree.
+
+```toml
+[tool.spice.policy.scopes."docs/**"]
+multiplier = 2.0
+flex = 1.25
+
+[tool.spice.policy.scopes."src/legacy/**".routine_ccn]
+multiplier = 1.5
+max = 40
+
+[tool.spice.policy.scopes."generated/**"]
+unlimited = true
+```
+
+Flat scope keys apply to every numeric bound. Named sub-tables target one bound:
+`file_loc`, `file_bytes`, `routine_ccn`, `routine_length`,
+`commit_message_wrap`, or `repo_truth_doc_chars`. Each scope setting accepts
+`multiplier` (default `1.0`), optional `min`/`max` clamps, `unlimited = true`,
+and optional `flex` ratio. The effective base is
+`clamp(global_base * multiplier, min, max)`; flex is derived from the scope
+ratio when present, otherwise from the global flex ratio.
+
+Overlapping scopes are resolved by most-specific match, not TOML table order.
+Exact or prefix matchers outrank globs, then the matcher with more literal path
+text wins; ties use the matcher text for deterministic results.
+
 ### `[tool.spice.policy.magic]`
 
 | Key | Default | Meaning |
