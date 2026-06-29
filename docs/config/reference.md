@@ -116,7 +116,7 @@ special or positional parameters such as `$?`, `$$`, `$1`, `$@`, `$*`, `$#`,
 | --- | --- | --- |
 | `family_suffixes` | Built-in Python, C#, Lua, shell, JavaScript/TypeScript suffix families | Table mapping env-access language family names to file suffixes. |
 | `default_patterns` | Built-in env-access idioms per family | Table mapping env-access language family names to regexes. A custom family in `default_patterns` must also appear in `family_suffixes`. |
-| `baseline` | unset | Repo-relative JSON baseline of existing `env-policy` findings to grandfather while new unwaived findings still fail. Seed with `spice study env-policy --write-baseline .spice/env-policy-baseline.json`, then set `baseline = ".spice/env-policy-baseline.json"`. |
+| `baseline` | unset | Repo-relative JSON baseline of existing `env-policy` findings to grandfather while new unwaived findings still fail. Seed a tracked path with `spice study env-policy --write-baseline tools/spice/env-policy-baseline.json`, then set `baseline = "tools/spice/env-policy-baseline.json"`. |
 
 `env-name-ledger` accounts only for literal names it can extract from supported
 env access forms, watchlisted env-name patterns, or exact manifest names still

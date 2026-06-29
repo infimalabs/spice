@@ -139,11 +139,11 @@ def test_env_access_gate_opt_out_disables_access_findings(tmp_path):
 def test_env_access_baseline_grandfathers_existing_findings_only(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         "[tool.spice.policy.env_access]\n"
-        'baseline = ".spice/env-policy-baseline.json"\n',
+        'baseline = "tools/spice/env-policy-baseline.json"\n',
         encoding="utf-8",
     )
-    baseline = tmp_path / ".spice" / "env-policy-baseline.json"
-    baseline.parent.mkdir()
+    baseline = tmp_path / "tools" / "spice" / "env-policy-baseline.json"
+    baseline.parent.mkdir(parents=True)
     baseline.write_text(
         json.dumps(
             [
@@ -183,7 +183,7 @@ def test_env_access_baseline_grandfathers_existing_findings_only(tmp_path):
 def test_env_access_baseline_missing_file_raises(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         "[tool.spice.policy.env_access]\n"
-        'baseline = ".spice/missing-env-baseline.json"\n',
+        'baseline = "tools/spice/missing-env-baseline.json"\n',
         encoding="utf-8",
     )
     (tmp_path / "sample.py").write_text(
@@ -223,13 +223,13 @@ def test_env_policy_cli_writes_baseline_for_current_findings(
             "study",
             "env-policy",
             "--write-baseline",
-            ".spice/env-policy-baseline.json",
+            "tools/spice/env-policy-baseline.json",
             "sample.py",
         ]
     )
 
     assert args.func(args) == 0
-    baseline = tmp_path / ".spice" / "env-policy-baseline.json"
+    baseline = tmp_path / "tools" / "spice" / "env-policy-baseline.json"
     assert json.loads(baseline.read_text(encoding="utf-8")) == [
         {
             "line": 1,
@@ -242,7 +242,7 @@ def test_env_policy_cli_writes_baseline_for_current_findings(
 
     (tmp_path / "pyproject.toml").write_text(
         "[tool.spice.policy.env_access]\n"
-        'baseline = ".spice/env-policy-baseline.json"\n',
+        'baseline = "tools/spice/env-policy-baseline.json"\n',
         encoding="utf-8",
     )
     assert scan_env_policy([Path("sample.py")], root=tmp_path) == []

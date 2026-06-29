@@ -100,7 +100,7 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
         names = ["npm-lock.json"]
 
         [tool.spice.policy.env_access]
-        baseline = ".spice/env-policy-baseline.json"
+        baseline = "tools/spice/env-policy-baseline.json"
 
         [tool.spice.policy.env_access.family_suffixes]
         python = [".py", ".pyi"]
@@ -142,7 +142,7 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
         *policy.ENV_ACCESS_DEFAULT_PATTERNS["python"],
         "Env\\.read",
     )
-    assert resolved.env_access.baseline == ".spice/env-policy-baseline.json"
+    assert resolved.env_access.baseline == "tools/spice/env-policy-baseline.json"
     assert resolved.commit_message.wrap_limit == CUSTOM_COMMIT_MESSAGE_WRAP
     assert resolved.commit_message.allowed_trailers == frozenset(
         {"task", "reviewed-by"}
