@@ -54,6 +54,12 @@ class PolicyDebt:
 
 
 @dataclass(frozen=True)
+class PolicyMarkdownDepthBudget:
+    extensions: tuple[str, ...]
+    stem_pattern: re.Pattern[str] | None = None
+
+
+@dataclass(frozen=True)
 class PolicyLanguages:
     complexity: tuple[str, ...]
     magic: tuple[str, ...]
@@ -86,7 +92,10 @@ class ScopeSettings:
 class PolicyScope:
     matcher: str
     settings_by_bound: Mapping[str, ScopeSettings]
-    specificity: tuple[int, int, int, int]
+    specificity: tuple[int, int, int, int, int]
+    extensions: tuple[str, ...] = ()
+    stem_pattern: re.Pattern[str] | None = None
+    skip_single_letter_stems: bool = False
 
 
 @dataclass(frozen=True)
@@ -138,6 +147,7 @@ class ResolvedPolicy:
     complexity_hotspot_limit: int
     magic: PolicyMagic
     debt: PolicyDebt
+    markdown_depth_budget: PolicyMarkdownDepthBudget
     languages: PolicyLanguages
     lockfiles: PolicyLockfiles
     env_access: PolicyEnvAccess
@@ -209,11 +219,14 @@ class ResolvedPolicy:
             length_unlimited=length.unlimited,
         )
 
+    def markdown_depth_budget_applies_to_path(self, path: Path) -> bool:
+        return _markdown_selector_matches(path, self.markdown_depth_budget)
+
     def _scope_for_bound(self, bound: str, path: Path) -> PolicyScope | None:
         matches = [
             scope
             for scope in self.scopes
-            if bound in scope.settings_by_bound and _scope_matches(scope.matcher, path)
+            if bound in scope.settings_by_bound and _scope_matches(scope, path)
         ]
         if not matches:
             return None
@@ -273,6 +286,7 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
             flex_table, "routine_length", limits.routine_length, ratio
         ),
     )
+    markdown_depth_budget = _markdown_depth_budget(raw_policy)
     magic_table = _subtable(raw_policy, "magic")
     debt_table = _subtable(raw_policy, "debt")
     return ResolvedPolicy(
@@ -312,11 +326,12 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
                 "[tool.spice.policy.debt]",
             ),
         ),
+        markdown_depth_budget=markdown_depth_budget,
         languages=_languages(raw_policy),
         lockfiles=_lockfiles(raw_policy),
         env_access=_env_access(raw_policy),
         commit_message=_commit_message(raw_policy, limits),
-        scopes=_scopes(raw_policy),
+        scopes=_scopes(raw_policy, markdown_depth_budget),
     )
 
 
@@ -344,6 +359,7 @@ SCOPED_BOUND_KEYS = (
     "repo_truth_doc_chars",
 )
 SCOPE_SETTING_KEYS = ("multiplier", "min", "max", "unlimited", "flex")
+MARKDOWN_DEPTH_BUDGET_KEYS = ("extensions", "stem_pattern")
 
 
 def _languages(raw_policy: Mapping[str, object]) -> PolicyLanguages:
@@ -426,9 +442,40 @@ def _env_access(raw_policy: Mapping[str, object]) -> PolicyEnvAccess:
     )
 
 
-def _scopes(raw_policy: Mapping[str, object]) -> tuple[PolicyScope, ...]:
+def _markdown_depth_budget(
+    raw_policy: Mapping[str, object],
+) -> PolicyMarkdownDepthBudget:
+    table = _subtable(raw_policy, "markdown_depth_budget")
+    unknown = sorted(key for key in table if key not in MARKDOWN_DEPTH_BUDGET_KEYS)
+    if unknown:
+        listed = ", ".join(unknown)
+        expected = ", ".join(MARKDOWN_DEPTH_BUDGET_KEYS)
+        raise SpiceError(
+            "[tool.spice.policy.markdown_depth_budget] unknown key(s): "
+            f"{listed}; expected {expected}"
+        )
+    return PolicyMarkdownDepthBudget(
+        extensions=_string_tuple(
+            table,
+            "extensions",
+            policy.MARKDOWN_DEPTH_DOC_EXTENSIONS,
+            "[tool.spice.policy.markdown_depth_budget]",
+            suffixes=True,
+        ),
+        stem_pattern=_optional_regex(
+            table,
+            "stem_pattern",
+            "[tool.spice.policy.markdown_depth_budget]",
+        ),
+    )
+
+
+def _scopes(
+    raw_policy: Mapping[str, object],
+    markdown_depth_budget: PolicyMarkdownDepthBudget,
+) -> tuple[PolicyScope, ...]:
     table = _subtable(raw_policy, "scopes")
-    scopes: list[PolicyScope] = []
+    scopes: list[PolicyScope] = list(_markdown_depth_scopes(markdown_depth_budget))
     for raw_matcher, raw_scope in table.items():
         matcher = str(raw_matcher).strip().replace("\\", "/").removeprefix("./")
         if not matcher:
@@ -443,10 +490,75 @@ def _scopes(raw_policy: Mapping[str, object]) -> tuple[PolicyScope, ...]:
             PolicyScope(
                 matcher=matcher,
                 settings_by_bound=settings_by_bound,
-                specificity=_scope_specificity(matcher),
+                specificity=_scope_specificity(matcher, priority=1),
             )
         )
     return tuple(scopes)
+
+
+def _markdown_depth_scopes(
+    selector: PolicyMarkdownDepthBudget,
+) -> tuple[PolicyScope, ...]:
+    scopes: list[PolicyScope] = []
+    if not selector.extensions:
+        return ()
+    bounded_depth_count = (
+        policy.MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET
+        // policy.MARKDOWN_DEPTH_BASE_CHAR_BUDGET
+    )
+    for extension in selector.extensions:
+        for depth in range(bounded_depth_count):
+            budget = policy.MARKDOWN_DEPTH_BASE_CHAR_BUDGET * (depth + 1)
+            matcher = _markdown_depth_matcher(depth, extension)
+            scopes.append(
+                _markdown_depth_scope(
+                    matcher,
+                    selector,
+                    _fixed_scope_settings(budget),
+                )
+            )
+        scopes.append(
+            _markdown_depth_scope(
+                _markdown_unbounded_depth_matcher(bounded_depth_count, extension),
+                selector,
+                ScopeSettings(unlimited=True),
+            )
+        )
+    return tuple(scopes)
+
+
+def _fixed_scope_settings(limit: int) -> ScopeSettings:
+    return ScopeSettings(
+        multiplier=1.0,
+        minimum=limit,
+        maximum=limit,
+    )
+
+
+def _markdown_depth_scope(
+    matcher: str,
+    selector: PolicyMarkdownDepthBudget,
+    settings: ScopeSettings,
+) -> PolicyScope:
+    return PolicyScope(
+        matcher=matcher,
+        settings_by_bound={"repo_truth_doc_chars": settings},
+        specificity=_scope_specificity(matcher, priority=0),
+        extensions=selector.extensions,
+        stem_pattern=selector.stem_pattern,
+        skip_single_letter_stems=True,
+    )
+
+
+def _markdown_depth_matcher(depth: int, extension: str) -> str:
+    name = f"*{extension}"
+    if depth == 0:
+        return name
+    return f"{'/'.join('*' for _ in range(depth))}/{name}"
+
+
+def _markdown_unbounded_depth_matcher(depth: int, extension: str) -> str:
+    return f"{'/'.join('*' for _ in range(depth))}/**/*{extension}"
 
 
 def _scope_settings_by_bound(
@@ -561,7 +673,13 @@ def _global_flex_for_bound(flex: PolicyFlex, bound: str, base: int) -> int:
             return int(base * flex.ratio)
 
 
-def _scope_matches(matcher: str, path: Path) -> bool:
+def _scope_matches(scope: PolicyScope, path: Path) -> bool:
+    return _matcher_matches(scope.matcher, path) and _scope_selector_matches(
+        scope, path
+    )
+
+
+def _matcher_matches(matcher: str, path: Path) -> bool:
     normalized_path = path.as_posix().replace("\\", "/").removeprefix("./")
     if _has_glob(matcher):
         return any(
@@ -569,6 +687,29 @@ def _scope_matches(matcher: str, path: Path) -> bool:
             for variant in _glob_zero_directory_variants(matcher)
         )
     return normalized_path == matcher or normalized_path.startswith(matcher + "/")
+
+
+def _scope_selector_matches(scope: PolicyScope, path: Path) -> bool:
+    if scope.extensions and path.suffix not in scope.extensions:
+        return False
+    if scope.skip_single_letter_stems and len(path.stem) <= 1:
+        return False
+    if (
+        scope.stem_pattern is not None
+        and scope.stem_pattern.fullmatch(path.stem) is None
+    ):
+        return False
+    return True
+
+
+def _markdown_selector_matches(path: Path, selector: PolicyMarkdownDepthBudget) -> bool:
+    if path.suffix not in selector.extensions:
+        return False
+    if len(path.stem) <= 1:
+        return False
+    if selector.stem_pattern is not None:
+        return selector.stem_pattern.fullmatch(path.stem) is not None
+    return True
 
 
 def _glob_zero_directory_variants(matcher: str) -> tuple[str, ...]:
@@ -586,11 +727,13 @@ def _glob_zero_directory_variants(matcher: str) -> tuple[str, ...]:
     return tuple(variants)
 
 
-def _scope_specificity(matcher: str) -> tuple[int, int, int, int]:
+def _scope_specificity(
+    matcher: str, *, priority: int
+) -> tuple[int, int, int, int, int]:
     exactish = 0 if _has_glob(matcher) else 1
     literal_chars = sum(1 for char in matcher if char not in "*?[]!")
     segments = len([segment for segment in matcher.split("/") if segment])
-    return (exactish, literal_chars, segments, len(matcher))
+    return (priority, exactish, literal_chars, segments, len(matcher))
 
 
 def _has_glob(value: str) -> bool:
@@ -673,6 +816,20 @@ def _non_empty_string(
     if not isinstance(raw, str) or not raw.strip():
         raise SpiceError(f"{context} {key} must be a non-empty string")
     return raw.strip()
+
+
+def _optional_regex(
+    table: Mapping[str, object], key: str, context: str
+) -> re.Pattern[str] | None:
+    raw = table.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise SpiceError(f"{context} {key} must be a non-empty regex string")
+    try:
+        return re.compile(raw.strip())
+    except re.error as exc:
+        raise SpiceError(f"{context} {key} is not a valid regex: {exc}") from exc
 
 
 def _optional_trailer_key_set(

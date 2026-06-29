@@ -10,11 +10,13 @@ import pytest
 
 from spice.errors import SpiceError
 from spice.hooks import precommit
-from spice.hooks.precommit import (
+from spice.studies.repodocs import (
+    repo_doc_char_sticky_state_path,
     repo_truth_doc_violations,
     repo_truth_docs,
 )
 from spice.policy import REPO_TRUTH_DOC_LIMIT, REPO_TRUTH_DOCS
+from spice.policyconfig import resolve_policy
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -225,7 +227,7 @@ def test_doc_within_cap_reports_no_violations(tmp_path):
 
 def test_doc_over_cap_is_reported_as_a_violation(tmp_path):
     (tmp_path / "AGENTS.md").write_text(
-        "x" * (REPO_TRUTH_DOC_LIMIT + 1), encoding="utf-8"
+        "x" * (REPO_TRUTH_DOC_LIMIT * 2), encoding="utf-8"
     )
     violations = repo_truth_doc_violations(tmp_path)
     assert len(violations) == 1
@@ -233,18 +235,80 @@ def test_doc_over_cap_is_reported_as_a_violation(tmp_path):
     assert f"cap {REPO_TRUTH_DOC_LIMIT}" in violations[0]
 
 
-def test_doc_cap_reads_configured_limit(tmp_path):
+def test_doc_cap_reads_configured_limit_when_markdown_default_is_replaced(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.spice.policy.limits]\nrepo_truth_doc_chars = 12\n",
+        "[tool.spice.policy.limits]\n"
+        "repo_truth_doc_chars = 12\n"
+        "\n"
+        "[tool.spice.policy.markdown_depth_budget]\n"
+        "extensions = []\n",
         encoding="utf-8",
     )
-    (tmp_path / "AGENTS.md").write_text("thirteen chars", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("x" * 19, encoding="utf-8")
 
     violations = repo_truth_doc_violations(tmp_path)
 
     assert len(violations) == 1
     assert "AGENTS.md" in violations[0]
     assert "cap 12" in violations[0]
+
+
+def test_repo_doc_guard_scans_tracked_markdown_with_depth_budget_and_sticky(
+    tmp_path,
+):
+    repo = _git_init(tmp_path / "repo")
+    _write_repo_file(repo, "README.md", "x" * 8000)
+    _write_repo_file(repo, "docs/guide.md", "x" * 9000)
+    _git(repo, "add", ".")
+
+    with pytest.raises(SpiceError) as first_exc:
+        precommit._run_repo_truth_doc_guard(repo)
+
+    first_message = str(first_exc.value)
+    assert "README.md" in first_message
+    assert "cap 5000" in first_message
+    state_path = repo_doc_char_sticky_state_path(repo)
+    assert state_path is not None
+    assert state_path.exists()
+
+    _write_repo_file(repo, "README.md", "x" * 6000)
+    _git(repo, "add", "README.md")
+
+    with pytest.raises(SpiceError) as sticky_exc:
+        precommit._run_repo_truth_doc_guard(repo)
+
+    sticky_message = str(sticky_exc.value)
+    assert "README.md" in sticky_message
+    assert "cap 5000" in sticky_message
+
+
+def test_repo_doc_guard_unbounds_markdown_past_depth_threshold(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    deep_path = Path("docs/reference/generated/guide.md")
+    _write_repo_file(repo, deep_path.as_posix(), "x" * 30000)
+    _git(repo, "add", ".")
+
+    bound = resolve_policy(repo).bound_for_path(
+        "repo_truth_doc_chars",
+        REPO_TRUTH_DOC_LIMIT,
+        deep_path,
+    )
+    assert bound.unlimited
+    precommit._run_repo_truth_doc_guard(repo)
+
+
+def test_repo_doc_guard_ignores_assets_and_binary_markdown_candidates(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    _write_repo_file(repo, "README.md", "x" * 8000)
+    _write_repo_file(repo, "docs/image.png", "x" * 30000)
+    binary_doc = repo / "docs" / "blob.md"
+    binary_doc.parent.mkdir(parents=True, exist_ok=True)
+    binary_doc.write_bytes(b"\0" + (b"x" * 30000))
+    _git(repo, "add", ".")
+
+    violations = repo_truth_doc_violations(repo)
+    assert len(violations) == 1
+    assert "README.md" in violations[0]
 
 
 def test_policy_pre_commit_extensions_run_after_builtin_steps(tmp_path, monkeypatch):
