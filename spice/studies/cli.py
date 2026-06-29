@@ -21,6 +21,7 @@ from spice.studies import (
     csharpmembers,
     envpolicy,
     fileloc,
+    javascriptunused,
     magicnums,
     mutations,
     reachability,
@@ -74,6 +75,19 @@ def configure_study_parser(subparsers: Any) -> None:
     )
     magic.add_argument("--baseline-ref", default=MAGIC_BASELINE_REF)
     magic.add_argument("--threshold", type=int, default=MAGIC_EXAMINE_VALUE_THRESHOLD)
+
+    javascript = _add_study_action(
+        actions,
+        "javascript-unused",
+        "Unused top-level JavaScript symbols via tree-sitter.",
+    )
+    javascript.add_argument(
+        "--allow-symbol",
+        action="append",
+        dest="allow_symbols",
+        default=[],
+        help="Top-level JavaScript symbol to retain even without references.",
+    )
 
     _configure_mutation_parser(actions)
 
@@ -335,6 +349,16 @@ def _study_magic_numbers(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_javascript_unused(args: argparse.Namespace, root: Path) -> int:
+    findings = javascriptunused.scan_javascript_unused_symbols(
+        _target_paths(args, root),
+        root=root,
+        allow_symbols=args.allow_symbols,
+    )
+    print(javascriptunused.render_javascript_unused_board(findings))
+    return 0
+
+
 def _study_mutations(args: argparse.Namespace, root: Path) -> int:
     test_paths = [_test_target_path(path, root) for path in args.test] or [
         Path("tests")
@@ -437,6 +461,7 @@ _STUDY_ACTIONS = {
     "complexity": _study_complexity,
     "csharp-members": _study_csharp_members,
     "magic-numbers": _study_magic_numbers,
+    "javascript-unused": _study_javascript_unused,
     "mutations": _study_mutations,
     "env-policy": _study_env_policy,
     "env-name-ledger": _study_env_name_ledger,
