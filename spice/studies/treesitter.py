@@ -9,7 +9,7 @@ from typing import Literal
 
 import tree_sitter_c_sharp as ts_csharp
 import tree_sitter_javascript as ts_javascript
-from tree_sitter import Language, Node, Parser, Query, Tree
+from tree_sitter import Language, Node, Parser, Query, QueryCursor, Tree
 
 TreeSitterLanguage = Literal["csharp", "javascript"]
 TreeSitterNode = Node
@@ -77,6 +77,15 @@ def query_for_suffix(suffix: str, source: str) -> Query | None:
     if language is None:
         return None
     return query_for_language(language, source)
+
+
+def query_captures_for_suffix(
+    suffix: str, source: str, node: Node
+) -> dict[str, list[Node]] | None:
+    query = query_for_suffix(suffix, source)
+    if query is None:
+        return None
+    return QueryCursor(query).captures(node)
 
 
 @lru_cache(maxsize=None)
