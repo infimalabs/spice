@@ -62,9 +62,6 @@ def emit_review_feedback(
         reviewed_row,
         finding=finding,
         note=note,
-        followups=followups,
-        reviewer=reviewer,
-        reviewed_at=reviewed_at,
     )
     path = write_inbox_item(
         Path(target.repo_root),
@@ -146,30 +143,21 @@ def _feedback_body(
     *,
     finding: str,
     note: str | None,
-    followups: Sequence[str],
-    reviewer: str,
-    reviewed_at: str,
 ) -> str:
     reviewed = identity.render_handle(reviewed_row)
-    followup_text = ", ".join(str(item) for item in followups if str(item)) or "-"
     note_text = (note or "-").strip() or "-"
     return "\n".join(
         [
             f"Peer review feedback for {reviewed}",
-            "source=task-review",
-            f"reviewed_task={reviewed}",
-            f"reviewed_at={reviewed_at or '-'}",
-            f"reviewer={reviewer or '-'}",
             f"finding={finding or '-'}",
-            f"followups={followup_text}",
             "",
             "Review note:",
             note_text,
             "",
             "Allocator note:",
             "Do not switch tasks solely because of this message. Keep the current "
-            "claim valid, and inspect linked follow-ups when the allocator assigns "
-            "them.",
+            "claim valid; allocator-selected follow-up work will arrive through "
+            "the task queue.",
         ]
     )
 

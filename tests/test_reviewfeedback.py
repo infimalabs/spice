@@ -85,10 +85,13 @@ def test_review_feedback_delivers_deduped_review_guidance(tmp_path, monkeypatch)
     assert pending_inbox_count(tmp_path / "repo-a") == 1
     assert payload.priority == "review"
     assert "Peer review feedback for REVIEW-20260102T000000000001Z" in body
-    assert "reviewer=agent-b" in body
     assert "finding=changes" in body
-    assert "followups=FOLLOW-1, FOLLOW-2" in body
     assert "needs coverage" in body
+    assert "FOLLOW-1" not in body
+    assert "FOLLOW-2" not in body
+    assert "reviewer=agent-b" not in body
+    assert "reviewed_at=2026-01-02T00:00:00Z" not in body
+    assert "source=task-review" not in body
     assert all(call[1] == "annotate" for call in calls)
     assert all("modify" not in call for call in calls)
 
