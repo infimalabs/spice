@@ -74,6 +74,12 @@ class PolicyLockfiles:
 
 
 @dataclass(frozen=True)
+class PolicyFileShapePaths:
+    source_suffixes: tuple[str, ...]
+    generated_patterns: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class PolicyEnvAccess:
     family_suffixes: Mapping[str, tuple[str, ...]]
     default_patterns: Mapping[str, tuple[str, ...]]
@@ -156,6 +162,7 @@ class ResolvedPolicy:
     markdown_depth_budget: PolicyMarkdownDepthBudget
     languages: PolicyLanguages
     lockfiles: PolicyLockfiles
+    file_shape_paths: PolicyFileShapePaths
     env_access: PolicyEnvAccess
     commit_message: PolicyCommitMessage
     scopes: tuple[PolicyScope, ...] = ()
@@ -357,6 +364,7 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
         markdown_depth_budget=markdown_depth_budget,
         languages=_languages(raw_policy),
         lockfiles=_lockfiles(raw_policy),
+        file_shape_paths=_file_shape_paths(raw_policy),
         env_access=_env_access(raw_policy),
         commit_message=_commit_message(raw_policy, limits),
         scopes=_scopes(raw_policy, markdown_depth_budget),
@@ -441,6 +449,25 @@ def _lockfiles(raw_policy: Mapping[str, object]) -> PolicyLockfiles:
             "names",
             policy.FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
             "[tool.spice.policy.lockfiles]",
+        ),
+    )
+
+
+def _file_shape_paths(raw_policy: Mapping[str, object]) -> PolicyFileShapePaths:
+    table = _subtable(raw_policy, "file_shape")
+    return PolicyFileShapePaths(
+        source_suffixes=_string_tuple(
+            table,
+            "source_suffixes",
+            policy.FILE_SHAPE_SOURCE_SUFFIXES,
+            "[tool.spice.policy.file_shape]",
+            suffixes=True,
+        ),
+        generated_patterns=_string_tuple(
+            table,
+            "generated_patterns",
+            policy.FILE_SHAPE_GENERATED_SOURCE_PATTERNS,
+            "[tool.spice.policy.file_shape]",
         ),
     )
 

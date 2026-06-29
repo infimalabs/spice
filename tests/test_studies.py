@@ -59,7 +59,7 @@ def test_sticky_paths_follow_renames():
     assert sticky == {Path("old.py"), Path("new.py")}
 
 
-def test_binary_assets_are_byte_gated_but_not_line_gated(tmp_path):
+def test_binary_assets_are_not_file_shape_candidates(tmp_path):
     rel_path = Path("screenshot.png")
     (tmp_path / rel_path).write_bytes(b"\x89PNG\r\n\x1a\n\0" + b"\n" * 2000)
 
@@ -72,10 +72,7 @@ def test_binary_assets_are_byte_gated_but_not_line_gated(tmp_path):
         byte_flex_limit_value=100,
     )
 
-    assert len(findings) == 1
-    assert findings[0].line_count == 0
-    assert not findings[0].over_line_limit
-    assert findings[0].over_byte_limit
+    assert findings == []
 
 
 def test_generated_lockfiles_do_not_trip_file_shape_pressure(tmp_path):
@@ -99,6 +96,56 @@ def test_generated_lockfiles_do_not_trip_file_shape_pressure(tmp_path):
         flex_limit_value=10,
         byte_limit=100,
         byte_flex_limit_value=100,
+    )
+
+    assert [finding.path for finding in findings] == [source_path.as_posix()]
+
+
+def test_asset_heavy_repo_scans_source_candidates_by_default(tmp_path):
+    asset_path = Path("textures") / "splash.png"
+    data_path = Path("meshes") / "scene.fbx"
+    generated_path = Path("dist") / "compiled.py"
+    root_generated_path = Path("schema_pb2.py")
+    minified_path = Path("bundle.min.css")
+    repo_doc_path = Path("docs") / "guide.md"
+    source_path = Path("src") / "large_source.py"
+    for path in (
+        asset_path,
+        data_path,
+        generated_path,
+        root_generated_path,
+        minified_path,
+        repo_doc_path,
+        source_path,
+    ):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / asset_path).write_bytes(b"\x89PNG\r\n\x1a\n\0" + b"x" * 200)
+    (tmp_path / data_path).write_text("vertex data\n" * 20, encoding="utf-8")
+    (tmp_path / generated_path).write_text("print('built')\n" * 20, encoding="utf-8")
+    (tmp_path / root_generated_path).write_text(
+        "DESCRIPTOR = object()\n" * 20,
+        encoding="utf-8",
+    )
+    (tmp_path / minified_path).write_text(".x{color:red}" * 20, encoding="utf-8")
+    (tmp_path / repo_doc_path).write_text("doctrine\n" * 20, encoding="utf-8")
+    (tmp_path / source_path).write_text("print('large')\n" * 20, encoding="utf-8")
+
+    findings = scan_loc_violations(
+        [
+            asset_path,
+            data_path,
+            generated_path,
+            root_generated_path,
+            minified_path,
+            repo_doc_path,
+            source_path,
+        ],
+        root=tmp_path,
+        limit=10,
+        flex_limit_value=10,
+        byte_limit=100,
+        byte_flex_limit_value=100,
+        repo_doc_paths={repo_doc_path},
     )
 
     assert [finding.path for finding in findings] == [source_path.as_posix()]

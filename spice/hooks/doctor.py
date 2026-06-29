@@ -27,7 +27,7 @@ from spice.paths import (
     state_dir,
 )
 from spice.policyconfig import resolve_policy
-from spice.studies import complexity, envpolicy, fileloc, magicnums, shape
+from spice.studies import complexity, envpolicy, fileloc, magicnums, repodocs, shape
 from spice.studies.walk import tracked_paths
 
 DoctorStatus = str
@@ -443,6 +443,10 @@ def _shape_check(repo_root: Path) -> DoctorCheck:
 def _file_loc_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
     resolved = resolve_policy(repo_root)
     file_shape = resolved.file_shape
+    generated_patterns = (
+        *resolved.file_shape_paths.generated_patterns,
+        *shape.generated_path_patterns(repo_root),
+    )
     findings = fileloc.scan_loc_violations(
         paths,
         root=repo_root,
@@ -450,8 +454,14 @@ def _file_loc_check(repo_root: Path, paths: list[Path]) -> DoctorCheck:
         flex_limit_value=file_shape.line_flex_limit,
         byte_limit=file_shape.byte_limit,
         byte_flex_limit_value=file_shape.byte_flex_limit,
+        source_suffixes=resolved.file_shape_paths.source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=set(
+            repodocs.repo_truth_doc_candidate_paths(repo_root, resolved)
+        ),
         lockfile_suffixes=resolved.lockfiles.suffixes,
         lockfile_names=resolved.lockfiles.names,
+        bounds_for_path=resolved.file_shape_for_path,
     )
     if findings:
         return _fail(

@@ -28,6 +28,7 @@ from spice.studies import (
     magicnums,
     mutations,
     reachability,
+    repodocs,
     shape,
     subsumption,
     testquality,
@@ -401,6 +402,10 @@ def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
         if args.staged
         else fileloc.scan_loc_violations
     )
+    generated_patterns = (
+        *resolved.file_shape_paths.generated_patterns,
+        *shape.generated_path_patterns(root),
+    )
     findings = scan(
         paths,
         root=root,
@@ -408,6 +413,9 @@ def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
         flex_limit_value=args.flex_limit,
         byte_limit=args.byte_limit,
         byte_flex_limit_value=args.byte_flex_limit,
+        source_suffixes=resolved.file_shape_paths.source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=set(repodocs.repo_truth_doc_candidate_paths(root, resolved)),
         lockfile_suffixes=resolved.lockfiles.suffixes,
         lockfile_names=resolved.lockfiles.names,
     )

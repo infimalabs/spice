@@ -135,11 +135,12 @@ ENV_ACCESS_FINDING_NAMES = {
 
 # --- language scope ------------------------------------------------------------
 # spice gates repositories in any language; nothing here is Python-only.
-# File shape pressure is suffix-free. These families scope the grammar-aware
-# studies: the C-grammar family shares `//` + `/* */` comments and C
-# comparison syntax, so the regex-backed magic-number scan holds across it
-# (Python rides its own ast scan). Complexity covers every language lizard
-# parses here. Env-literal inventory adds the shell family.
+# File shape pressure scans a broad source/text suffix set and then drops
+# binary/non-text assets. These families scope the grammar-aware studies: the
+# C-grammar family shares `//` + `/* */` comments and C comparison syntax, so
+# the regex-backed magic-number scan holds across it (Python rides its own ast
+# scan). Complexity covers every language lizard parses here. Env-literal
+# inventory adds the shell family.
 C_GRAMMAR_SUFFIXES = (
     ".c",
     ".cc",
@@ -161,6 +162,45 @@ C_GRAMMAR_SUFFIXES = (
 COMPLEXITY_SUFFIXES = (*C_GRAMMAR_SUFFIXES, ".lua", ".php", ".py", ".rb")
 MAGIC_SUFFIXES = (".py", *C_GRAMMAR_SUFFIXES)
 ENV_SUFFIXES = (*COMPLEXITY_SUFFIXES, ".bash", ".sh", ".zsh")
+FILE_SHAPE_SOURCE_SUFFIXES = (
+    *ENV_SUFFIXES,
+    ".astro",
+    ".cjs",
+    ".cts",
+    ".css",
+    ".html",
+    ".json",
+    ".jsx",
+    ".less",
+    ".md",
+    ".mjs",
+    ".mts",
+    ".pyi",
+    ".rst",
+    ".sass",
+    ".scss",
+    ".sql",
+    ".svelte",
+    ".toml",
+    ".tsx",
+    ".txt",
+    ".vue",
+    ".xml",
+    ".yaml",
+    ".yml",
+)
+FILE_SHAPE_GENERATED_SOURCE_PATTERNS = (
+    "**/*.generated.*",
+    "**/*_generated.*",
+    "**/*.g.*",
+    "**/*_pb2.py",
+    "**/*_pb2_grpc.py",
+    "**/*.min.css",
+    "**/*.min.js",
+    "build/**",
+    "coverage/**",
+    "dist/**",
+)
 
 
 def flex_limit(limit: int) -> int:

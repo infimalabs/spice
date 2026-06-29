@@ -30,7 +30,7 @@ def repo_truth_doc_violations(repo_root: Path, *, persist: bool = False) -> list
     """Return one ``name: count characters (cap N)`` line per over-cap doc."""
     over: list[str] = []
     resolved = resolve_policy(repo_root)
-    paths = _repo_truth_doc_candidate_paths(repo_root, resolved)
+    paths = repo_truth_doc_candidate_paths(repo_root, resolved)
     loaded_sticky = sticky_paths_after_renames(
         _load_repo_doc_char_sticky(repo_root),
         _staged_renames_or_empty(repo_root),
@@ -85,9 +85,10 @@ def repo_doc_char_sticky_state_path(repo_root: Path) -> Path | None:
         return None
 
 
-def _repo_truth_doc_candidate_paths(
+def repo_truth_doc_candidate_paths(
     repo_root: Path, resolved: ResolvedPolicy
 ) -> list[Path]:
+    """Return repo-relative docs governed by repo-doc character budgets."""
     paths = {Path(name) for name in repo_truth_docs(repo_root)}
     paths.update(
         path

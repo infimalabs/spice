@@ -311,6 +311,19 @@ def test_repo_doc_guard_ignores_assets_and_binary_markdown_candidates(tmp_path):
     assert "README.md" in violations[0]
 
 
+def test_file_shape_guard_leaves_tracked_markdown_to_repo_doc_budget(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    doc_path = Path("docs") / "guide.md"
+    _write_repo_file(repo, doc_path.as_posix(), "x" * 130_000)
+    _git(repo, "add", ".")
+
+    precommit._run_file_loc_guard(repo, [doc_path])
+    violations = repo_truth_doc_violations(repo)
+
+    assert len(violations) == 1
+    assert doc_path.as_posix() in violations[0]
+
+
 def test_doc_cap_reads_scoped_limit_and_unlimited_exemption(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         "[tool.spice.policy]\n"

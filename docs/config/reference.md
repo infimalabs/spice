@@ -86,6 +86,7 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `commit_message` | built-ins | Commit trailer allowlist policy. |
 | `languages` | built-ins | Suffix families scanned by grammar-aware studies. |
 | `lockfiles` | built-ins | Generated lockfiles exempt from file-shape pressure. |
+| `file_shape` | built-ins | Source suffixes scanned by file-shape pressure and generated source patterns exempt from it. |
 | `env_access` | built-ins | Env-access matcher families and regex patterns. |
 | `markdown_depth_budget` | `[".md"]` | Generated default markdown doc-character scopes. |
 | `scopes` | `{}` | Per-path overrides for numeric bounds and scoped magic thresholds. |
@@ -109,6 +110,13 @@ special or positional parameters such as `$?`, `$$`, `$1`, `$@`, `$*`, `$#`,
 | --- | --- | --- |
 | `suffixes` | `[".lock"]` | Generated lockfile suffixes exempt from file-shape pressure. |
 | `names` | `["bun.lockb", "package-lock.json", "pnpm-lock.yaml"]` | Generated lockfile names exempt from file-shape pressure. |
+
+### `[tool.spice.policy.file_shape]`
+
+| Key | Default | Enforced opinion |
+| --- | --- | --- |
+| `source_suffixes` | Built-in source/text suffix set | File suffixes eligible for file LOC/byte pressure. Non-text files, generated lockfiles, generated source patterns, excluded paths, and markdown governed by repo-doc budgets are skipped. |
+| `generated_patterns` | Built-in generated source globs | Repo-relative globs exempt from file-shape pressure, such as generated protobuf modules, minified web bundles, and build output directories. |
 
 ### `[tool.spice.policy.env_access]`
 

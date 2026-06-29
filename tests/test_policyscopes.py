@@ -352,18 +352,18 @@ def test_file_shape_guard_applies_scoped_bounds_and_sticky(tmp_path):
         "[tool.spice.policy.flex]\n"
         "ratio = 1.0\n"
         "\n"
-        '[tool.spice.policy.scopes."docs/**".file_loc]\n'
+        '[tool.spice.policy.scopes."src/**".file_loc]\n'
         "multiplier = 2.0\n"
         "flex = 1.25\n",
     )
-    _write_repo_file(repo, "docs/page.md", "line\n" * SCOPED_LOC_BREACH_LINES)
+    _write_repo_file(repo, "src/page.py", "line\n" * SCOPED_LOC_BREACH_LINES)
     _git(repo, "add", ".")
 
     with pytest.raises(
         SpiceError,
         match=f"{SCOPED_LOC_BREACH_LINES} lines > {SCOPED_LOC_BASE_LIMIT}",
     ):
-        precommit._run_file_loc_guard(repo, [Path("docs/page.md")])
+        precommit._run_file_loc_guard(repo, [Path("src/page.py")])
 
 
 def test_file_shape_scope_unlimited_exempts_generated_tree(tmp_path):
