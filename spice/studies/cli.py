@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
+from collections.abc import Mapping
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +32,7 @@ from spice.studies import (
     subsumption,
     testquality,
 )
-from spice.studies.walk import staged_paths, tracked_paths
+from spice.studies.walk import changed_paths, staged_paths, tracked_paths
 
 
 def configure_study_parser(subparsers: Any) -> None:
@@ -39,6 +42,11 @@ def configure_study_parser(subparsers: Any) -> None:
     actions = parser.add_subparsers(dest="study_action", required=True)
     file_loc = _add_study_action(
         actions, "file-loc", "File line/byte pressure with flex + sticky limits."
+    )
+    file_loc.add_argument(
+        "--baseline-ref",
+        default=None,
+        help="Scan files changed against this git ref instead of all tracked files.",
     )
     file_loc.add_argument("--limit", type=int, default=FILE_LOC_LIMIT)
     file_loc.add_argument("--flex-limit", type=int, default=None)
@@ -51,6 +59,11 @@ def configure_study_parser(subparsers: Any) -> None:
     complexity_parser.add_argument("--max-ccn", type=int, default=COMPLEXITY_MAX_CCN)
     complexity_parser.add_argument(
         "--max-length", type=int, default=COMPLEXITY_MAX_LENGTH
+    )
+    complexity_parser.add_argument(
+        "--baseline-ref",
+        default=None,
+        help="Scan files changed against this git ref instead of all tracked files.",
     )
     complexity_parser.add_argument("--ccn-flex-limit", type=int, default=None)
     complexity_parser.add_argument("--length-flex-limit", type=int, default=None)
@@ -80,14 +93,18 @@ def configure_study_parser(subparsers: Any) -> None:
         default=csharpmembers.DEFAULT_MEMBER_LIMIT,
         help="Number of longest/tail members to show per class.",
     )
-    csharp_members.add_argument("--json", action="store_true", dest="emit_json")
 
     csharp_unused = _add_study_action(
         actions,
         "csharp-unused-candidates",
         "Report C# private member and using-alias unused candidates.",
     )
-    csharp_unused.add_argument("--json", action="store_true", dest="emit_json")
+    csharp_unused.add_argument(
+        "--limit",
+        type=_positive_int_arg,
+        default=None,
+        help="Number of candidate rows to show.",
+    )
 
     magic = _add_study_action(
         actions, "magic-numbers", "Magic-number regressions vs a git baseline."
@@ -107,6 +124,12 @@ def configure_study_parser(subparsers: Any) -> None:
         default=[],
         help="Top-level JavaScript symbol to retain even without references.",
     )
+    javascript.add_argument(
+        "--limit",
+        type=_positive_int_arg,
+        default=None,
+        help="Number of candidate rows to show.",
+    )
 
     _configure_mutation_parser(actions)
 
@@ -120,22 +143,10 @@ def configure_study_parser(subparsers: Any) -> None:
     )
     _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
     _configure_reachability_parser(actions)
-    _add_study_action(
-        actions,
-        "symbol-reachability",
-        "Test-only symbols inside production-reachable modules.",
-    )
+    _configure_symbol_reachability_parser(actions)
     _configure_subsumption_parser(actions)
-    _add_study_action(
-        actions,
-        "assertion-free-tests",
-        "Test functions that do not appear to assert behavior.",
-    )
-    _add_study_action(
-        actions,
-        "private-internals",
-        "Tests coupled to private imports or internal assertion structures.",
-    )
+    _configure_assertion_free_parser(actions)
+    _configure_private_internals_parser(actions)
 
 
 def _configure_mutation_parser(actions: Any) -> None:
@@ -199,6 +210,69 @@ def _configure_reachability_parser(actions: Any) -> None:
         action="store_true",
         help="Create tagged decision tasks for each test-only reachability finding.",
     )
+    reach.add_argument(
+        "--limit",
+        type=_positive_int_arg,
+        default=None,
+        help="Number of findings to show.",
+    )
+
+
+def _configure_symbol_reachability_parser(actions: Any) -> None:
+    symbol = _add_study_action(
+        actions,
+        "symbol-reachability",
+        "Test-only symbols inside production-reachable modules.",
+    )
+    symbol.add_argument(
+        "--create-tasks",
+        action="store_true",
+        help="Create tagged decision tasks for each test-only symbol finding.",
+    )
+    symbol.add_argument(
+        "--limit",
+        type=_positive_int_arg,
+        default=None,
+        help="Number of findings to show.",
+    )
+
+
+def _configure_assertion_free_parser(actions: Any) -> None:
+    assertion = _add_study_action(
+        actions,
+        "assertion-free-tests",
+        "Test functions that do not appear to assert behavior.",
+    )
+    assertion.add_argument(
+        "--create-tasks",
+        action="store_true",
+        help="Create tagged decision tasks for each assertion-free test.",
+    )
+    assertion.add_argument(
+        "--limit",
+        type=_positive_int_arg,
+        default=None,
+        help="Number of findings to show.",
+    )
+
+
+def _configure_private_internals_parser(actions: Any) -> None:
+    private = _add_study_action(
+        actions,
+        "private-internals",
+        "Tests coupled to private imports or internal assertion structures.",
+    )
+    private.add_argument(
+        "--create-tasks",
+        action="store_true",
+        help="Create tagged decision tasks for unmanaged private/internal coupling.",
+    )
+    private.add_argument(
+        "--limit",
+        type=_positive_int_arg,
+        default=None,
+        help="Number of offender findings to show.",
+    )
 
 
 def _configure_subsumption_parser(actions: Any) -> None:
@@ -220,6 +294,7 @@ def _configure_subsumption_parser(actions: Any) -> None:
         default=None,
         help="Only consider source files under this package prefix.",
     )
+    sub_parser.add_argument("--json", action="store_true", dest="emit_json")
     sub_parser.set_defaults(func=handle_study, study_action="subsumption")
 
 
@@ -227,6 +302,7 @@ def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
     sub = actions.add_parser(name, help=helptext)
     sub.add_argument("paths", nargs="*", type=Path)
     sub.add_argument("--staged", action="store_true", help="Scan staged files only.")
+    sub.add_argument("--json", action="store_true", dest="emit_json")
     sub.set_defaults(func=handle_study)
     return sub
 
@@ -248,6 +324,20 @@ def _target_paths(args: argparse.Namespace, root: Path) -> list[Path]:
         return staged_paths(root)
     if args.paths:
         return [_explicit_target_path(path, root) for path in args.paths]
+    return tracked_paths(root)
+
+
+def _changed_or_tracked_paths(args: argparse.Namespace, root: Path) -> list[Path]:
+    baseline_ref = getattr(args, "baseline_ref", None)
+    selected = sum(bool(value) for value in (args.staged, args.paths, baseline_ref))
+    if selected > 1:
+        raise SpiceError("pass --staged, --baseline-ref, or explicit paths")
+    if args.staged:
+        return staged_paths(root)
+    if args.paths:
+        return [_explicit_target_path(path, root) for path in args.paths]
+    if baseline_ref:
+        return changed_paths(root, baseline_ref)
     return tracked_paths(root)
 
 
@@ -293,6 +383,9 @@ def _study_shape(args: argparse.Namespace, root: Path) -> int:
         )
         if error
     ]
+    if args.emit_json:
+        _print_study_json(args.study_action, errors=errors)
+        return 1 if errors else 0
     if errors:
         print("\n".join(errors))
         return 1
@@ -302,7 +395,7 @@ def _study_shape(args: argparse.Namespace, root: Path) -> int:
 
 def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
     resolved = resolve_policy(root)
-    paths = _target_paths(args, root)
+    paths = _changed_or_tracked_paths(args, root)
     scan = (
         fileloc.scan_staged_loc_violations
         if args.staged
@@ -318,6 +411,18 @@ def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
         lockfile_suffixes=resolved.lockfiles.suffixes,
         lockfile_names=resolved.lockfiles.names,
     )
+    if args.emit_json:
+        _print_study_json(
+            args.study_action,
+            findings=findings,
+            lineLimit=args.limit,
+            lineFlexLimit=args.flex_limit,
+            byteLimit=args.byte_limit,
+            byteFlexLimit=args.byte_flex_limit,
+            baselineRef=args.baseline_ref,
+            staged=args.staged,
+        )
+        return 1 if findings else 0
     print(
         fileloc.render_loc_board(
             findings,
@@ -333,7 +438,7 @@ def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
 def _study_complexity(args: argparse.Namespace, root: Path) -> int:
     resolved = resolve_policy(root)
     findings = complexity.scan_staged_complexity_violations(
-        _target_paths(args, root),
+        _changed_or_tracked_paths(args, root),
         root=root,
         max_ccn=args.max_ccn,
         max_length=args.max_length,
@@ -341,6 +446,18 @@ def _study_complexity(args: argparse.Namespace, root: Path) -> int:
         length_flex_limit_value=args.length_flex_limit,
         suffixes=resolved.languages.complexity,
     )
+    if args.emit_json:
+        _print_study_json(
+            args.study_action,
+            findings=findings,
+            maxCcn=args.max_ccn,
+            maxLength=args.max_length,
+            ccnFlexLimit=args.ccn_flex_limit,
+            lengthFlexLimit=args.length_flex_limit,
+            baselineRef=args.baseline_ref,
+            staged=args.staged,
+        )
+        return 1 if findings else 0
     print(
         complexity.render_complexity_board(
             findings,
@@ -357,6 +474,14 @@ def _study_complexity_hotspots(args: argparse.Namespace, root: Path) -> int:
     records = complexity.collect_complexity_records(
         _target_paths(args, root), root=root, suffixes=resolved.languages.complexity
     )
+    if args.emit_json:
+        _print_study_json(
+            args.study_action,
+            hotspots=complexity.complexity_hotspot_rows(records, limit=limit),
+            totalRecords=len(records),
+            limit=limit,
+        )
+        return 0
     print(complexity.render_complexity_hotspots(records, limit=limit))
     return 0
 
@@ -379,7 +504,7 @@ def _study_csharp_unused_candidates(args: argparse.Namespace, root: Path) -> int
     if args.emit_json:
         print(csharpunused.render_csharp_unused_json(entries))
     else:
-        print(csharpunused.render_csharp_unused_board(entries))
+        print(csharpunused.render_csharp_unused_board(entries, limit=args.limit))
     return 0
 
 
@@ -405,6 +530,14 @@ def _study_magic_numbers(args: argparse.Namespace, root: Path) -> int:
         suffixes=resolved.languages.magic,
         c_grammar_suffixes=resolved.languages.c_grammar,
     )
+    if args.emit_json:
+        _print_study_json(
+            args.study_action,
+            findings=findings,
+            baselineRef=baseline_ref,
+            threshold=threshold,
+        )
+        return 1 if findings else 0
     print(magicnums.render_magic_board(findings, baseline_ref=baseline_ref))
     return 1 if findings else 0
 
@@ -415,7 +548,15 @@ def _study_javascript_unused(args: argparse.Namespace, root: Path) -> int:
         root=root,
         allow_symbols=args.allow_symbols,
     )
-    print(javascriptunused.render_javascript_unused_board(findings))
+    if args.emit_json:
+        _print_study_json(
+            args.study_action,
+            findings=findings,
+            allowSymbols=args.allow_symbols,
+            limit=args.limit,
+        )
+        return 0
+    print(javascriptunused.render_javascript_unused_board(findings, limit=args.limit))
     return 0
 
 
@@ -434,6 +575,13 @@ def _study_mutations(args: argparse.Namespace, root: Path) -> int:
     )
     if args.write_ratchet:
         mutations.write_ratchet(root / args.write_ratchet, study.reports)
+    if args.emit_json:
+        _print_study_json(
+            args.study_action,
+            reports=_mutation_reports_payload(study.reports),
+            ratchetRegressions=study.ratchet_regressions,
+        )
+        return 1 if study.ratchet_regressions else 0
     print(mutations.render_mutation_board(study))
     return 1 if study.ratchet_regressions else 0
 
@@ -443,6 +591,9 @@ def _study_env_policy(args: argparse.Namespace, root: Path) -> int:
     findings = envpolicy.scan_env_policy(
         _target_paths(args, root), root=root, suffixes=resolved.languages.env
     )
+    if args.emit_json:
+        _print_study_json(args.study_action, findings=findings)
+        return 1 if findings else 0
     print(envpolicy.render_env_policy_board(findings))
     return 1 if findings else 0
 
@@ -452,21 +603,53 @@ def _study_env_name_ledger(args: argparse.Namespace, root: Path) -> int:
     findings = envpolicy.scan_env_name_ledger(
         _target_paths(args, root), root=root, suffixes=resolved.languages.env
     )
+    if args.emit_json:
+        _print_study_json(args.study_action, findings=findings)
+        return 1 if findings else 0
     print(envpolicy.render_env_name_ledger_board(findings))
     return 1 if findings else 0
 
 
 def _study_reachability(args: argparse.Namespace, root: Path) -> int:
     findings = reachability.scan_reachability(root, allowlist=args.allowlist)
-    print("\n".join(reachability.render_reachability_board(findings)))
+    created_tasks: list[str] = []
     if findings and getattr(args, "create_tasks", False):
-        _create_exhaust_tasks(findings)
+        created_tasks = _create_exhaust_tasks(
+            findings, print_created=not args.emit_json
+        )
+    if args.emit_json:
+        _print_study_json(
+            args.study_action,
+            findings=findings,
+            createdTasks=created_tasks,
+            allowlist=args.allowlist,
+            limit=args.limit,
+        )
+        return 1 if findings else 0
+    print("\n".join(reachability.render_reachability_board(findings, limit=args.limit)))
     return 1 if findings else 0
 
 
 def _study_symbol_reachability(args: argparse.Namespace, root: Path) -> int:
     findings = reachability.scan_symbol_reachability(root)
-    print("\n".join(reachability.render_symbol_reachability_board(findings)))
+    created_tasks: list[str] = []
+    if findings and getattr(args, "create_tasks", False):
+        created_tasks = _create_symbol_reachability_tasks(
+            findings, print_created=not args.emit_json
+        )
+    if args.emit_json:
+        _print_study_json(
+            args.study_action,
+            findings=findings,
+            createdTasks=created_tasks,
+            limit=args.limit,
+        )
+        return 1 if findings else 0
+    print(
+        "\n".join(
+            reachability.render_symbol_reachability_board(findings, limit=args.limit)
+        )
+    )
     return 1 if findings else 0
 
 
@@ -474,7 +657,20 @@ def _study_assertion_free_tests(args: argparse.Namespace, root: Path) -> int:
     findings = testquality.scan_assertion_free_tests(
         testquality.test_paths(root), root=root
     )
-    print(testquality.render_assertion_free_board(findings))
+    created_tasks: list[str] = []
+    if findings and getattr(args, "create_tasks", False):
+        created_tasks = _create_assertion_free_tasks(
+            findings, print_created=not args.emit_json
+        )
+    if args.emit_json:
+        _print_study_json(
+            args.study_action,
+            findings=findings,
+            createdTasks=created_tasks,
+            limit=args.limit,
+        )
+        return 1 if findings else 0
+    print(testquality.render_assertion_free_board(findings, limit=args.limit))
     return 1 if findings else 0
 
 
@@ -489,13 +685,37 @@ def _study_private_internals(args: argparse.Namespace, root: Path) -> int:
         repo_root=root,
         built_in_couplings=LEGITIMATE_INTERNAL_COUPLINGS,
     )
-    print(testquality.render_unmanaged_private_internal_board(offenders, stale))
+    created_tasks: list[str] = []
+    if (offenders or stale) and getattr(args, "create_tasks", False):
+        created_tasks = _create_private_internal_tasks(
+            offenders, stale, print_created=not args.emit_json
+        )
+    if args.emit_json:
+        _print_study_json(
+            args.study_action,
+            offenders=offenders,
+            stale=stale,
+            createdTasks=created_tasks,
+            limit=args.limit,
+        )
+        return 1 if offenders or stale else 0
+    print(
+        testquality.render_unmanaged_private_internal_board(
+            offenders[: args.limit] if args.limit is not None else offenders,
+            stale,
+        )
+    )
     return 1 if offenders or stale else 0
 
 
-def _create_exhaust_tasks(findings: list[reachability.ReachabilityFinding]) -> None:
+def _create_exhaust_tasks(
+    findings: list[reachability.ReachabilityFinding],
+    *,
+    print_created: bool = True,
+) -> list[str]:
     from spice.tasks import create
 
+    handles: list[str] = []
     for f in findings:
         handle = create.add(
             f"Exhaust decision: wire-in/delete-both {f.path}",
@@ -509,7 +729,104 @@ def _create_exhaust_tasks(findings: list[reachability.ReachabilityFinding]) -> N
                 f"{', '.join(f.only_test_imports) or 'unknown'}.",
             ],
         )
-        print(f"  task created: {handle}")
+        handles.append(handle)
+        if print_created:
+            print(f"  task created: {handle}")
+    return handles
+
+
+def _create_symbol_reachability_tasks(
+    findings: list[reachability.SymbolReachabilityFinding],
+    *,
+    print_created: bool = True,
+) -> list[str]:
+    from spice.tasks import create
+
+    handles: list[str] = []
+    for f in findings:
+        handle = create.add(
+            f"Symbol reachability decision: wire-in/delete {f.module}.{f.symbol}",
+            project="tests.exhaust",
+            tags=["exhaust", "symbol-reachability", "decision"],
+            acceptance=[
+                f"Resolve {f.provider} {f.kind} {f.module}.{f.symbol} by wiring it "
+                "into production reachability, deleting the symbol and tests that "
+                "only import it, or documenting a reviewed allowlist when dynamic "
+                "production reachability cannot be made explicit.",
+                "Current test-only importers: "
+                f"{', '.join(f.only_test_imports) or 'unknown'}.",
+            ],
+        )
+        handles.append(handle)
+        if print_created:
+            print(f"  task created: {handle}")
+    return handles
+
+
+def _create_assertion_free_tasks(
+    findings: list[testquality.AssertionFreeTestFinding],
+    *,
+    print_created: bool = True,
+) -> list[str]:
+    from spice.tasks import create
+
+    handles: list[str] = []
+    for f in findings:
+        handle = create.add(
+            f"Assertion decision: constrain/delete {f.path}:{f.test_name}",
+            project="tests.quality",
+            tags=["test-quality", "assertion-free", "decision"],
+            acceptance=[
+                f"Resolve assertion-free test {f.path}:{f.line} {f.test_name} by "
+                "adding an assertion that constrains behavior or deleting the test "
+                "if it carries no useful signal."
+            ],
+        )
+        handles.append(handle)
+        if print_created:
+            print(f"  task created: {handle}")
+    return handles
+
+
+def _create_private_internal_tasks(
+    offenders: list[testquality.PrivateInternalCouplingFinding],
+    stale: list[testquality.InternalCouplingKey],
+    *,
+    print_created: bool = True,
+) -> list[str]:
+    from spice.tasks import create
+
+    handles: list[str] = []
+    for f in offenders:
+        handle = create.add(
+            f"Private coupling decision: resolve {f.path}:{f.test_name}",
+            project="tests.quality",
+            tags=["test-quality", "private-internals", "decision"],
+            acceptance=[
+                f"Resolve private/internal coupling {f.kind} {f.target} in "
+                f"{f.path}:{f.line} {f.test_name} by asserting through public "
+                "behavior, moving the seam into production API, or documenting a "
+                "reviewed policy exception."
+            ],
+        )
+        handles.append(handle)
+        if print_created:
+            print(f"  task created: {handle}")
+    for path, test_name, target in stale:
+        handle = create.add(
+            f"Private coupling cleanup: remove stale exception {path}:{test_name}",
+            project="tests.quality",
+            tags=["test-quality", "private-internals", "cleanup"],
+            acceptance=[
+                f"Remove stale [tool.spice.policy] internal_couplings entry for "
+                f"{path} {test_name} {target}, or restore the reviewed coupling if "
+                "it is still required."
+            ],
+        )
+        handles.append(handle)
+        if print_created:
+            print(f"  task created: {handle}")
+    return handles
 
 
 def _study_subsumption(args: argparse.Namespace, root: Path) -> int:
@@ -517,8 +834,56 @@ def _study_subsumption(args: argparse.Namespace, root: Path) -> int:
         args.coverage_file,
         package_prefix=args.package,
     )
+    if args.emit_json:
+        _print_study_json(args.study_action, report=report)
+        return 1 if report.findings else 0
     print("\n".join(subsumption.render_subsumption_board(report)))
     return 1 if report.findings else 0
+
+
+def _mutation_reports_payload(
+    reports: tuple[mutations.ModuleMutationReport, ...],
+) -> list[Mapping[str, object]]:
+    payload: list[Mapping[str, object]] = []
+    for report in reports:
+        item = _json_ready(report)
+        if not isinstance(item, dict):
+            raise TypeError("mutation report payload must be a JSON object")
+        item["score"] = report.score
+        payload.append(item)
+    return payload
+
+
+def _print_study_json(study_action: str, **payload: object) -> None:
+    print(
+        json.dumps(
+            _json_ready(
+                {
+                    "artifactKind": f"spice.study.{study_action}",
+                    **payload,
+                }
+            ),
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
+def _json_ready(value: object) -> object:
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _json_ready(getattr(value, field.name))
+            for field in fields(value)
+        }
+    if isinstance(value, Path):
+        return value.as_posix()
+    if isinstance(value, Mapping):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_ready(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise TypeError(f"unsupported JSON payload value: {type(value).__name__}")
 
 
 _STUDY_ACTIONS = {

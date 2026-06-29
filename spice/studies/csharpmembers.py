@@ -182,6 +182,7 @@ def _end_line(node: "TreeSitterNode") -> int:
 
 def csharp_members_payload(records: list[CSharpClassRecord]) -> dict[str, Any]:
     return {
+        "artifactKind": "spice.study.csharp-members",
         "classCount": len(records),
         "classes": [
             {
