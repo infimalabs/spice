@@ -537,11 +537,16 @@ def repo_truth_doc_violations(repo_root: Path) -> list[str]:
     raising wrapper.
     """
     over: list[str] = []
-    limit = resolve_policy(repo_root).limits.repo_truth_doc_chars
+    resolved = resolve_policy(repo_root)
+    base_limit = resolved.limits.repo_truth_doc_chars
     for name in repo_truth_docs(repo_root):
         path = repo_root / name
         if not path.is_file():
             continue
+        bound = resolved.bound_for_path("repo_truth_doc_chars", base_limit, Path(name))
+        if bound.unlimited:
+            continue
+        limit = bound.limit
         count = len(path.read_text(encoding="utf-8", errors="replace"))
         if count > limit:
             over.append(f"  {name}: {count} characters (cap {limit})")

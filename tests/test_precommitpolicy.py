@@ -247,6 +247,37 @@ def test_doc_cap_reads_configured_limit(tmp_path):
     assert "cap 12" in violations[0]
 
 
+def test_doc_cap_reads_scoped_limit_and_unlimited_exemption(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        'repo_truth_docs = ["AGENTS.md", "docs/STRICT.md", "wide/WIDE.md", "skip/SKIP.md"]\n'
+        "\n"
+        "[tool.spice.policy.limits]\n"
+        "repo_truth_doc_chars = 20\n"
+        "\n"
+        '[tool.spice.policy.scopes."docs/**".repo_truth_doc_chars]\n'
+        "max = 5\n"
+        "\n"
+        '[tool.spice.policy.scopes."wide/**".repo_truth_doc_chars]\n'
+        "multiplier = 2.0\n"
+        "\n"
+        '[tool.spice.policy.scopes."skip/**"]\n'
+        "unlimited = true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "AGENTS.md").write_text("x" * 15, encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "STRICT.md").write_text("x" * 6, encoding="utf-8")
+    (tmp_path / "wide").mkdir()
+    (tmp_path / "wide" / "WIDE.md").write_text("x" * 30, encoding="utf-8")
+    (tmp_path / "skip").mkdir()
+    (tmp_path / "skip" / "SKIP.md").write_text("x" * 100, encoding="utf-8")
+
+    violations = repo_truth_doc_violations(tmp_path)
+
+    assert violations == ["  docs/STRICT.md: 6 characters (cap 5)"]
+
+
 def test_policy_pre_commit_extensions_run_after_builtin_steps(tmp_path, monkeypatch):
     recorder = _write_recorder(tmp_path)
     (tmp_path / "pyproject.toml").write_text(
