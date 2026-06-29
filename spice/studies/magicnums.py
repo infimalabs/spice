@@ -151,17 +151,14 @@ def _scan_tree_sitter(
 
 
 def _tree_sitter_literal_nodes(suffix: str, language: str, root: Any) -> list[Any]:
-    from tree_sitter import QueryCursor
-
     from spice.studies import treesitter
 
     query_source = _TREE_SITTER_LITERAL_QUERY_BY_LANGUAGE.get(language)
     if query_source is None:
         raise SpiceError(f"magic-numbers: unsupported tree-sitter language {language}")
-    query = treesitter.query_for_suffix(suffix, query_source)
-    if query is None:
+    captures = treesitter.query_captures_for_suffix(suffix, query_source, root)
+    if captures is None:
         raise SpiceError(f"magic-numbers: tree-sitter query unavailable for {suffix}")
-    captures = QueryCursor(query).captures(root)
     return sorted(captures.get("literal", ()), key=lambda node: node.start_byte)
 
 
