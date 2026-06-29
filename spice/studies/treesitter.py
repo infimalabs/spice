@@ -12,6 +12,7 @@ import tree_sitter_javascript as ts_javascript
 from tree_sitter import Language, Node, Parser, Query, Tree
 
 TreeSitterLanguage = Literal["csharp", "javascript"]
+TreeSitterNode = Node
 
 _LANGUAGE_BY_SUFFIX: dict[str, TreeSitterLanguage] = {
     ".cjs": "javascript",
