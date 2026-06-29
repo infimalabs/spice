@@ -133,7 +133,10 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
     assert resolved.lockfiles.suffixes == (".lockx",)
     assert resolved.lockfiles.names == ("npm-lock.json",)
     assert resolved.env_access.family_suffixes["python"] == (".py", ".pyi")
-    assert resolved.env_access.default_patterns["python"] == ("Env\\.read",)
+    assert resolved.env_access.default_patterns["python"] == (
+        *policy.ENV_ACCESS_DEFAULT_PATTERNS["python"],
+        "Env\\.read",
+    )
     assert resolved.commit_message.wrap_limit == CUSTOM_COMMIT_MESSAGE_WRAP
     assert resolved.commit_message.allowed_trailers == frozenset(
         {"task", "reviewed-by"}
