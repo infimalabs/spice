@@ -618,7 +618,10 @@ def _run_python_typecheck_guard(repo_root: Path) -> None:
 
 
 def _run_env_policy_guard(repo_root: Path, paths: list[Path]) -> None:
-    findings = envpolicy.scan_env_policy(paths, root=repo_root)
+    resolved = resolve_policy(repo_root)
+    findings = envpolicy.scan_env_policy(
+        paths, root=repo_root, suffixes=resolved.languages.env
+    )
     if findings:
         raise SpiceError(envpolicy.render_env_policy_board(findings))
 
@@ -626,7 +629,10 @@ def _run_env_policy_guard(repo_root: Path, paths: list[Path]) -> None:
 def _run_env_name_ledger_guard(repo_root: Path) -> None:
     from spice.studies.walk import tracked_paths
 
-    findings = envpolicy.scan_env_name_ledger(tracked_paths(repo_root), root=repo_root)
+    resolved = resolve_policy(repo_root)
+    findings = envpolicy.scan_env_name_ledger(
+        tracked_paths(repo_root), root=repo_root, suffixes=resolved.languages.env
+    )
     if findings:
         raise SpiceError(envpolicy.render_env_name_ledger_board(findings))
 
@@ -638,7 +644,8 @@ def _run_local_path_guard(repo_root: Path, paths: list[Path]) -> None:
 
 
 def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
-    bounds = resolve_policy(repo_root).file_shape
+    resolved = resolve_policy(repo_root)
+    bounds = resolved.file_shape
     findings = fileloc.scan_staged_loc_violations(
         paths,
         root=repo_root,
@@ -646,6 +653,8 @@ def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
         flex_limit_value=bounds.line_flex_limit,
         byte_limit=bounds.byte_limit,
         byte_flex_limit_value=bounds.byte_flex_limit,
+        lockfile_suffixes=resolved.lockfiles.suffixes,
+        lockfile_names=resolved.lockfiles.names,
         persist=True,
     )
     if findings:
@@ -661,7 +670,8 @@ def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
 
 
 def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
-    bounds = resolve_policy(repo_root).complexity
+    resolved = resolve_policy(repo_root)
+    bounds = resolved.complexity
     findings = complexity.scan_staged_complexity_violations(
         paths,
         root=repo_root,
@@ -669,6 +679,7 @@ def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
         max_length=bounds.max_length,
         ccn_flex_limit_value=bounds.ccn_flex_limit,
         length_flex_limit_value=bounds.length_flex_limit,
+        suffixes=resolved.languages.complexity,
         persist=True,
     )
     if findings:
@@ -682,16 +693,20 @@ def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
 
 
 def _run_magic_numbers_guard(repo_root: Path, paths: list[Path]) -> None:
-    magic = resolve_policy(repo_root).magic
+    resolved = resolve_policy(repo_root)
     findings = magicnums.detect_magic_regressions(
         paths,
         root=repo_root,
-        baseline_ref=magic.baseline_ref,
-        examine_threshold=magic.examine_threshold,
+        baseline_ref=resolved.magic.baseline_ref,
+        examine_threshold=resolved.magic.examine_threshold,
+        suffixes=resolved.languages.magic,
+        c_grammar_suffixes=resolved.languages.c_grammar,
     )
     if findings:
         raise SpiceError(
-            magicnums.render_magic_board(findings, baseline_ref=magic.baseline_ref)
+            magicnums.render_magic_board(
+                findings, baseline_ref=resolved.magic.baseline_ref
+            )
         )
 
 
@@ -818,16 +833,19 @@ def quality_gate_failures_for_tags(repo_root: Path, tags: list[str]) -> list[str
 
 
 def clear_successful_sticky_state(repo_root: Path) -> None:
-    bounds = resolve_policy(repo_root)
-    file_shape = bounds.file_shape
-    routine = bounds.complexity
+    resolved = resolve_policy(repo_root)
+    file_shape = resolved.file_shape
+    routine = resolved.complexity
     fileloc.clear_file_loc_sticky_state(
         root=repo_root,
         limit=file_shape.line_limit,
         byte_limit=file_shape.byte_limit,
+        lockfile_suffixes=resolved.lockfiles.suffixes,
+        lockfile_names=resolved.lockfiles.names,
     )
     complexity.clear_complexity_sticky_state(
         root=repo_root,
         max_ccn=routine.max_ccn,
         max_length=routine.max_length,
+        suffixes=resolved.languages.complexity,
     )

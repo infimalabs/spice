@@ -8,7 +8,12 @@ import pytest
 
 from spice.errors import SpiceError
 from spice.hooks import precommit
-from spice.policy import MAGIC_BASELINE_REF, MAGIC_EXAMINE_VALUE_THRESHOLD
+from spice.policy import (
+    C_GRAMMAR_SUFFIXES,
+    MAGIC_BASELINE_REF,
+    MAGIC_EXAMINE_VALUE_THRESHOLD,
+    MAGIC_SUFFIXES,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,11 +29,15 @@ def test_magic_numbers_guard_uses_default_policy_when_unconfigured(
         root: Path,
         baseline_ref: str,
         examine_threshold: int,
+        suffixes: tuple[str, ...],
+        c_grammar_suffixes: tuple[str, ...],
     ):
         seen["paths"] = paths
         seen["root"] = root
         seen["baseline_ref"] = baseline_ref
         seen["examine_threshold"] = examine_threshold
+        seen["suffixes"] = suffixes
+        seen["c_grammar_suffixes"] = c_grammar_suffixes
         return []
 
     monkeypatch.setattr(precommit.magicnums, "detect_magic_regressions", detect)
@@ -40,6 +49,8 @@ def test_magic_numbers_guard_uses_default_policy_when_unconfigured(
         "root": tmp_path,
         "baseline_ref": MAGIC_BASELINE_REF,
         "examine_threshold": MAGIC_EXAMINE_VALUE_THRESHOLD,
+        "suffixes": MAGIC_SUFFIXES,
+        "c_grammar_suffixes": C_GRAMMAR_SUFFIXES,
     }
 
 
