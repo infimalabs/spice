@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import ast
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from spice.errors import SpiceError
 from spice.policy import (
     C_GRAMMAR_SUFFIXES,
     MAGIC_BASELINE_REF,
@@ -40,6 +42,10 @@ _C_COMPARE_RE = re.compile(
     r"(?:(?<![=<>!])(?:<=|>=|===|!==|==|!=|<|>)\s*(" + _C_NUMBER + r")(?![\w.])"
     r"|(?<![\w.])(" + _C_NUMBER + r")\s*(?:<=|>=|===|!==|==|!=|<(?![<=])|>(?![>=])))"
 )
+_CS_COMPARISON_OPS = frozenset({"==", "!=", ">", "<", ">=", "<="})
+_CS_INT_SUFFIX_RE = re.compile(r"[uUlL]+$", re.ASCII)
+_JS_COMPARISON_OPS = frozenset({"==", "===", "!=", "!==", ">", "<", ">=", "<="})
+_JS_BIGINT_SUFFIX_RE = re.compile(r"n$", re.ASCII)
 _TREE_SITTER_LITERAL_QUERY_BY_LANGUAGE = {
     "csharp": "(integer_literal) @literal",
     "javascript": "(number) @literal",
@@ -97,21 +103,66 @@ def scan_text_magic_numbers(
 ) -> list[MagicFinding]:
     if rel_path.suffix == ".py":
         return _scan_python(rel_path, text, examine_threshold=examine_threshold)
+    from spice.studies import treesitter
+
+    if treesitter.language_for_path(rel_path) is not None:
+        return _scan_tree_sitter(
+            rel_path,
+            text,
+            examine_threshold=examine_threshold,
+        )
     if rel_path.suffix not in c_grammar_suffixes:
         return []
-    _parse_tree_sitter_magic_source(rel_path, text)
     return _scan_c_grammar(rel_path, text, examine_threshold=examine_threshold)
 
 
-def _parse_tree_sitter_magic_source(rel_path: Path, text: str) -> None:
+def _scan_tree_sitter(
+    rel_path: Path,
+    text: str,
+    *,
+    examine_threshold: int,
+) -> list[MagicFinding]:
     from spice.studies import treesitter
 
     parsed = treesitter.parse_source(rel_path, text)
     if parsed is None:
-        return
-    treesitter.query_for_suffix(
-        parsed.suffix, _TREE_SITTER_LITERAL_QUERY_BY_LANGUAGE[parsed.language]
+        raise SpiceError(f"magic-numbers: tree-sitter parse unavailable for {rel_path}")
+    literal_nodes = _tree_sitter_literal_nodes(
+        parsed.suffix, parsed.language, parsed.root
     )
+    if parsed.language == "csharp":
+        return _scan_csharp_tree(
+            rel_path,
+            parsed.root,
+            parsed.source,
+            literal_nodes,
+            examine_threshold=examine_threshold,
+        )
+    if parsed.language == "javascript":
+        return _scan_javascript_tree(
+            rel_path,
+            parsed.source,
+            literal_nodes,
+            examine_threshold=examine_threshold,
+        )
+    raise SpiceError(
+        f"magic-numbers: unsupported tree-sitter language {parsed.language}"
+    )
+
+
+def _tree_sitter_literal_nodes(suffix: str, language: str, root: Any) -> list[Any]:
+    from tree_sitter import QueryCursor
+
+    from spice.studies import treesitter
+
+    query_source = _TREE_SITTER_LITERAL_QUERY_BY_LANGUAGE.get(language)
+    if query_source is None:
+        raise SpiceError(f"magic-numbers: unsupported tree-sitter language {language}")
+    query = treesitter.query_for_suffix(suffix, query_source)
+    if query is None:
+        raise SpiceError(f"magic-numbers: tree-sitter query unavailable for {suffix}")
+    captures = QueryCursor(query).captures(root)
+    return sorted(captures.get("literal", ()), key=lambda node: node.start_byte)
 
 
 def _examine_value(value: float, *, threshold: int) -> bool:
@@ -194,6 +245,231 @@ def _python_exempt_constant_ids(tree: ast.Module) -> set[int]:
             if isinstance(node, ast.Constant):
                 exempt.add(id(node))
     return exempt
+
+
+# ---- C# and JavaScript: tree-sitter parent classification -------------------
+
+
+def _scan_csharp_tree(
+    rel_path: Path,
+    root: Any,
+    source: bytes,
+    literal_nodes: list[Any],
+    *,
+    examine_threshold: int,
+) -> list[MagicFinding]:
+    exempt_spans = _csharp_exempt_constant_spans(root, source)
+    findings: list[MagicFinding] = []
+    for node in literal_nodes:
+        finding = _csharp_literal_finding(
+            rel_path,
+            node,
+            source,
+            exempt_spans=exempt_spans,
+            examine_threshold=examine_threshold,
+        )
+        if finding is not None:
+            findings.append(finding)
+    return findings
+
+
+def _scan_javascript_tree(
+    rel_path: Path,
+    source: bytes,
+    literal_nodes: list[Any],
+    *,
+    examine_threshold: int,
+) -> list[MagicFinding]:
+    findings: list[MagicFinding] = []
+    for node in literal_nodes:
+        finding = _javascript_literal_finding(
+            rel_path,
+            node,
+            source,
+            examine_threshold=examine_threshold,
+        )
+        if finding is not None:
+            findings.append(finding)
+    return findings
+
+
+def _tree_sitter_walk(node: Any) -> Iterable[Any]:
+    yield node
+    for child in node.children:
+        yield from _tree_sitter_walk(child)
+
+
+def _tree_sitter_node_text(node: Any, source: bytes) -> str:
+    return source[node.start_byte : node.end_byte].decode("utf-8", "replace")
+
+
+def _csharp_exempt_constant_spans(root: Any, source: bytes) -> set[tuple[int, int]]:
+    exempt: set[tuple[int, int]] = set()
+    for node in _tree_sitter_walk(root):
+        if node.type not in {"field_declaration", "local_declaration_statement"}:
+            continue
+        if not any(
+            child.type == "modifier"
+            and _tree_sitter_node_text(child, source) == "const"
+            for child in node.children
+        ):
+            continue
+        for declarator in _tree_sitter_walk(node):
+            if declarator.type not in {
+                "variable_declarator",
+                "local_variable_declarator",
+            }:
+                continue
+            name = next(
+                (
+                    _tree_sitter_node_text(child, source)
+                    for child in declarator.children
+                    if child.type == "identifier"
+                ),
+                "",
+            )
+            if _ALL_CAPS_RE.fullmatch(name) is None:
+                continue
+            for literal in _tree_sitter_walk(declarator):
+                if literal.type == "integer_literal":
+                    exempt.add((literal.start_byte, literal.end_byte))
+    return exempt
+
+
+def _csharp_literal_finding(
+    rel_path: Path,
+    node: Any,
+    source: bytes,
+    *,
+    exempt_spans: set[tuple[int, int]],
+    examine_threshold: int,
+) -> MagicFinding | None:
+    if (node.start_byte, node.end_byte) in exempt_spans:
+        return None
+    value = _csharp_int_value(_tree_sitter_node_text(node, source))
+    if value is None:
+        return None
+    parent_kind, sign = _csharp_parent_kind_and_sign(node)
+    value *= sign
+    if parent_kind not in EXAMINE_PARENT_KINDS or not _examine_value(
+        value, threshold=examine_threshold
+    ):
+        return None
+    return MagicFinding(
+        path=rel_path.as_posix(), line=node.start_point[0] + 1, literal=str(value)
+    )
+
+
+def _csharp_int_value(text: str) -> int | None:
+    normalized = _CS_INT_SUFFIX_RE.sub("", text).replace("_", "")
+    try:
+        if normalized.startswith(("0x", "0X")):
+            return int(normalized, 16)
+        if normalized.startswith(("0b", "0B")):
+            return int(normalized, 2)
+        return int(normalized)
+    except ValueError:
+        return None
+
+
+def _csharp_parent_kind_and_sign(node: Any) -> tuple[str, int]:
+    parent = node.parent
+    if parent is None:
+        return "other", 1
+    if parent.type == "prefix_unary_expression":
+        sign = -1 if any(child.type == "-" for child in parent.children) else 1
+        grandparent = parent.parent
+        return (
+            _csharp_parent_kind(grandparent) if grandparent is not None else "other",
+            sign,
+        )
+    return _csharp_parent_kind(parent), 1
+
+
+def _csharp_parent_kind(parent: Any) -> str:
+    if parent.type == "parameter":
+        return "default_arg"
+    if parent.type == "binary_expression":
+        child_types = {child.type for child in parent.children}
+        return "compare" if child_types & _CS_COMPARISON_OPS else "binop"
+    if parent.type == "argument":
+        grandparent = parent.parent
+        if grandparent is not None and grandparent.type == "bracketed_argument_list":
+            return "subscript"
+        return "call_arg"
+    if parent.type == "range_expression":
+        return "slice"
+    if parent.type == "attribute_argument":
+        return "call_arg"
+    if parent.type == "constant_pattern":
+        return "compare"
+    if parent.type in {"variable_declarator", "local_variable_declarator"}:
+        return "assign"
+    return "other"
+
+
+def _javascript_literal_finding(
+    rel_path: Path,
+    node: Any,
+    source: bytes,
+    *,
+    examine_threshold: int,
+) -> MagicFinding | None:
+    value = _javascript_int_value(_tree_sitter_node_text(node, source))
+    if value is None:
+        return None
+    parent_kind, sign = _javascript_parent_kind_and_sign(node)
+    value *= sign
+    if parent_kind not in EXAMINE_PARENT_KINDS or not _examine_value(
+        value, threshold=examine_threshold
+    ):
+        return None
+    return MagicFinding(
+        path=rel_path.as_posix(), line=node.start_point[0] + 1, literal=str(value)
+    )
+
+
+def _javascript_int_value(text: str) -> int | None:
+    normalized = _JS_BIGINT_SUFFIX_RE.sub("", text).replace("_", "")
+    try:
+        if normalized.startswith(("0x", "0X")):
+            return int(normalized, 16)
+        if normalized.startswith(("0b", "0B")):
+            return int(normalized, 2)
+        if normalized.startswith(("0o", "0O")):
+            return int(normalized, 8)
+        if any(char in normalized for char in (".", "e", "E")):
+            return None
+        return int(normalized)
+    except ValueError:
+        return None
+
+
+def _javascript_parent_kind_and_sign(node: Any) -> tuple[str, int]:
+    parent = node.parent
+    if parent is None:
+        return "other", 1
+    if parent.type == "unary_expression":
+        sign = -1 if any(child.type == "-" for child in parent.children) else 1
+        grandparent = parent.parent
+        return (
+            _javascript_parent_kind(grandparent)
+            if grandparent is not None
+            else "other",
+            sign,
+        )
+    return _javascript_parent_kind(parent), 1
+
+
+def _javascript_parent_kind(parent: Any) -> str:
+    if parent.type == "binary_expression":
+        child_types = {child.type for child in parent.children}
+        return "compare" if child_types & _JS_COMPARISON_OPS else "binop"
+    if parent.type == "assignment_pattern":
+        grandparent = parent.parent
+        if grandparent is not None and grandparent.type == "formal_parameters":
+            return "default_arg"
+    return "other"
 
 
 # ---- C-grammar family: comparison-adjacent literals by regex ----------------

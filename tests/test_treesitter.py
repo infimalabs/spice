@@ -1,6 +1,8 @@
 from pathlib import Path
-from types import SimpleNamespace
 
+import pytest
+
+from spice.errors import SpiceError
 from spice.studies.magicnums import scan_text_magic_numbers
 from spice.studies import treesitter
 
@@ -47,23 +49,17 @@ def test_magic_number_scan_routes_supported_sources_through_tree_sitter_seam(
     monkeypatch,
 ):
     parsed_suffixes: list[str] = []
-    query_suffixes: list[str] = []
 
     def record_parse(path: Path | str, source: str | bytes):
         suffix = Path(path).suffix
         parsed_suffixes.append(suffix)
-        language = "csharp" if suffix == ".cs" else "javascript"
-        return SimpleNamespace(suffix=suffix, language=language)
-
-    def record_query(suffix: str, source: str):
-        query_suffixes.append(suffix)
         return None
 
     monkeypatch.setattr(treesitter, "parse_source", record_parse)
-    monkeypatch.setattr(treesitter, "query_for_suffix", record_query)
 
-    scan_text_magic_numbers(Path("sample.cs"), "if (value > 75) { }\n")
-    scan_text_magic_numbers(Path("sample.js"), "if (value > 75) { }\n")
+    with pytest.raises(SpiceError, match="tree-sitter parse unavailable"):
+        scan_text_magic_numbers(Path("sample.cs"), "if (value > 75) { }\n")
+    with pytest.raises(SpiceError, match="tree-sitter parse unavailable"):
+        scan_text_magic_numbers(Path("sample.js"), "if (value > 75) { }\n")
 
     assert parsed_suffixes == [".cs", ".js"]
-    assert query_suffixes == [".cs", ".js"]
