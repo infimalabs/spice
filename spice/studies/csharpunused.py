@@ -180,12 +180,12 @@ def _modifier_tokens(source: bytes, node: Any) -> set[str]:
 
 
 def _member_is_private(source: bytes, node: Any) -> bool:
-    type_context = _nearest_type_context(node)
-    if type_context is not None and type_context.type == "interface_declaration":
-        return False
     modifiers = _modifier_tokens(source, node)
     if "private" in modifiers:
         return True
+    type_context = _nearest_type_context(node)
+    if type_context is not None and type_context.type == "interface_declaration":
+        return False
     return not bool(modifiers & PRIVATE_BLOCKING_MODIFIERS)
 
 

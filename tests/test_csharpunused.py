@@ -122,6 +122,7 @@ namespace Demo
 {
     interface ISample
     {
+        private void HiddenHelper() {}
         void Run();
     }
 
@@ -138,7 +139,7 @@ namespace Demo
         entry.name for entry in entries if entry.kind == "private_method"
     )
 
-    assert private_method_names == ["CandidateHelper"]
+    assert private_method_names == ["CandidateHelper", "HiddenHelper"]
 
 
 def test_study_csharp_unused_candidates_cli_reports_candidates(
