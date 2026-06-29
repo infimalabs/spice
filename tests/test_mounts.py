@@ -159,17 +159,12 @@ def test_wrapper_command_contract_is_linked_from_readme():
     readme = Path("README.md").read_text(encoding="utf-8")
     contract = Path("docs/cli/wrapper-commands.md").read_text(encoding="utf-8")
 
-    assert "### Agent command wrapper" in readme
-    assert 'spice agent run -- <shell> -c "<original command>"' in readme
-    assert 'wrappers = ["common", "repo-tools"]' in readme
-    assert "[tool.spice.wrappers.common]" in readme
-    assert "[tool.spice.wrappers.repo-tools]" in readme
+    assert "spice agent run -- <cmd>" in readme
     assert "docs/cli/wrapper-commands.md" in readme
-    assert readme.index("### Agent command wrapper") < readme.index(
-        "### Repo command mounts"
-    )
     assert "spice agent run -- <cmd>" in contract
     assert "[tool.spice.commands]" in contract
     assert "RTK rewrite routing" in contract
+    assert 'spice agent run -- <shell> -c "<original command>"' in contract
     assert 'wrappers = ["common", "repo-tools"]' in contract
+    assert "[tool.spice.wrappers.common]" in contract
     assert "[tool.spice.wrappers.repo-tools]" in contract

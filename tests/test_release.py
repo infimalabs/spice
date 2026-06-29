@@ -47,8 +47,8 @@ def test_release_parser_accepts_prepare_notes_publish_and_one_pass():
 
 
 def test_release_docs_show_lane_release_workflow():
-    readme = Path("README.md").read_text(encoding="utf-8")
-    release_section = readme.split("## Release", 1)[1].split("## Status", 1)[0]
+    release_doc = Path("docs/release.md").read_text(encoding="utf-8")
+    release_section = release_doc.split("\n\n", 1)[1]
     help_text = build_release_parser().format_help()
     normalized_help = " ".join(help_text.split())
     normalized_section = " ".join(release_section.split())
