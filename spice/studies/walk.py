@@ -234,6 +234,34 @@ def staged_paths(
     ]
 
 
+def changed_paths(
+    repo_root: Path,
+    baseline_ref: str,
+    pattern: str | None = None,
+    *,
+    honor_policy: bool = True,
+) -> list[Path]:
+    exclusions = policy_path_exclusions(repo_root) if honor_policy else ()
+    command = [
+        "git",
+        "diff",
+        "--name-only",
+        "--diff-filter=ACMR",
+        baseline_ref,
+    ]
+    if pattern:
+        command.extend(["--", pattern])
+    result = subprocess.run(
+        command, capture_output=True, text=True, cwd=repo_root, check=True
+    )
+    return [
+        Path(line.strip())
+        for line in result.stdout.splitlines()
+        if line.strip()
+        and not is_excluded_path(Path(line.strip()), policy_exclusions=exclusions)
+    ]
+
+
 def staged_renames(repo_root: Path) -> dict[Path, Path]:
     exclusions = policy_path_exclusions(repo_root)
     result = subprocess.run(

@@ -90,17 +90,21 @@ def render_csharp_unused_json(entries: Sequence[CSharpUnusedEntry]) -> str:
     return json.dumps(csharp_unused_payload(entries), indent=2)
 
 
-def render_csharp_unused_board(entries: Sequence[CSharpUnusedEntry]) -> str:
+def render_csharp_unused_board(
+    entries: Sequence[CSharpUnusedEntry], *, limit: int | None = None
+) -> str:
     payload = csharp_unused_payload(entries)
     stats = payload["stats"]
+    shown = list(entries)[:limit] if limit is not None else list(entries)
+    suffix = f" showing={len(shown)}" if limit and len(entries) > len(shown) else ""
     rows = [
         "csharp-unused-candidates: "
         f"candidateUnused={stats['candidateUnused']} "
-        f"used={stats['used']} retained={stats['retained']}"
+        f"used={stats['used']} retained={stats['retained']}{suffix}"
     ]
-    rows.extend(_status_rows(entries, STATUS_CANDIDATE_UNUSED, "Candidate Entries"))
-    rows.extend(_status_rows(entries, STATUS_USED, "Used Entries"))
-    rows.extend(_status_rows(entries, STATUS_RETAINED, "Retained Entries"))
+    rows.extend(_status_rows(shown, STATUS_CANDIDATE_UNUSED, "Candidate Entries"))
+    rows.extend(_status_rows(shown, STATUS_USED, "Used Entries"))
+    rows.extend(_status_rows(shown, STATUS_RETAINED, "Retained Entries"))
     return "\n".join(rows)
 
 

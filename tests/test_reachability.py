@@ -414,10 +414,15 @@ def test_study_reachability_cli_create_tasks_passes_findings(
     _write_reachability_repo(tmp_path, "from spice import onlytest\n")
     monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
     created_paths: list[str] = []
+
+    def create_tasks(findings, **kwargs):
+        created_paths.extend(f.path for f in findings)
+        return ["created"]
+
     monkeypatch.setattr(
         studies_cli,
         "_create_exhaust_tasks",
-        lambda findings: created_paths.extend(f.path for f in findings),
+        create_tasks,
     )
     args = build_parser().parse_args(["study", "reachability", "--create-tasks"])
 

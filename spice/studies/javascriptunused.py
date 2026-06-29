@@ -96,13 +96,18 @@ def scan_javascript_unused_symbols(
 
 def render_javascript_unused_board(
     findings: Sequence[JavaScriptUnusedEntry],
+    *,
+    limit: int | None = None,
 ) -> str:
-    if not findings:
+    shown = list(findings)[:limit] if limit is not None else list(findings)
+    if not shown:
         return "javascript-unused: no unused top-level symbols found"
+    suffix = f" (showing {len(shown)})" if limit and len(findings) > len(shown) else ""
     rows = [
-        f"javascript-unused: {len(findings)} candidate-unused top-level symbol(s) found"
+        f"javascript-unused: {len(findings)} candidate-unused top-level symbol(s) "
+        f"found{suffix}"
     ]
-    for finding in findings:
+    for finding in shown:
         rows.append(
             f"  {finding.path}:{finding.line} {finding.kind} {finding.name} "
             f"refs={finding.reference_count} reason={finding.reason}"
