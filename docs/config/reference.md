@@ -78,6 +78,17 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `pre_commit` | `[]` | Extra command steps run after built-ins. Entries are mounted command names or command tables. |
 | `pre_commit_success` | `[]` | Command steps run only after the full gate passes. |
 | `pre_commit_builtins` | built-ins enabled | Per-built-in overrides for `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `serve-web-typecheck`, `python-typecheck`, `env-policy`, `env-name-ledger`, `file-shape`, `complexity`, `magic-numbers`, `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals`. |
+| `limits` | built-ins | Base numeric bounds for files, routines, commit text, and repo-truth docs. |
+| `flex` | `ratio = 1.5` | Temporary headroom before sticky base enforcement for shape-style bounds. |
+| `complexity` | built-ins | Routine-complexity study display defaults. |
+| `magic` | built-ins | Magic-number threshold and staged baseline ref. |
+| `debt` | `0` counters | Allowed cleanup-debt counts for quality gates. |
+| `commit_message` | built-ins | Commit trailer allowlist policy. |
+| `languages` | built-ins | Suffix families scanned by grammar-aware studies. |
+| `lockfiles` | built-ins | Generated lockfiles exempt from file-shape pressure. |
+| `env_access` | built-ins | Env-access matcher families and regex patterns. |
+| `markdown_depth_budget` | `[".md"]` | Generated default markdown doc-character scopes. |
+| `scopes` | `{}` | Per-path overrides for numeric bounds and scoped magic thresholds. |
 
 Shell env-access patterns intentionally cover name-like parameters, not shell
 special or positional parameters such as `$?`, `$$`, `$1`, `$@`, `$*`, `$#`,
@@ -121,6 +132,27 @@ Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 `1.5x` flex, routines CCN `20` / length `80`, commit text wrap `100`,
 repo-root markdown `5000` chars plus `5000` per nested directory until
 `15000`, magic-number threshold `10`, and magic baselines against `HEAD`.
+
+### `[tool.spice.policy.limits]`
+
+| Key | Default | Enforced opinion |
+| --- | --- | --- |
+| `file_loc` | `1000` | Base physical-line cap for file-shape pressure. |
+| `file_bytes` | `80000` | Base byte cap for file-shape pressure. |
+| `routine_ccn` | `20` | Base cyclomatic-complexity cap per routine. |
+| `routine_length` | `80` | Base non-comment routine length cap. |
+| `commit_message_wrap` | `100` | Subject/wrapped prose width for commit messages. |
+| `repo_truth_doc_chars` | `5000` | Base character cap used by repo-truth docs unless a scope, including generated markdown-depth scopes, replaces it. |
+
+### `[tool.spice.policy.flex]`
+
+| Key | Default | Enforced opinion |
+| --- | --- | --- |
+| `ratio` | `1.5` | Default flex multiplier. A file/routine/doc that breaches flex becomes sticky and must shrink under the base cap. |
+| `file_loc` | `1500` | Explicit line flex cap; must be at least `limits.file_loc`. |
+| `file_bytes` | `120000` | Explicit byte flex cap; must be at least `limits.file_bytes`. |
+| `routine_ccn` | `30` | Explicit CCN flex cap; must be at least `limits.routine_ccn`. |
+| `routine_length` | `120` | Explicit routine-length flex cap; must be at least `limits.routine_length`. |
 
 ### `[tool.spice.policy.complexity]`
 
@@ -195,6 +227,9 @@ and optional `flex` ratio. The effective base is
 `clamp(global_base * multiplier, min, max)`; flex is derived from the scope
 ratio when present, otherwise from the global flex ratio.
 
+Scopes may also include `[tool.spice.policy.scopes."<matcher>".magic]` with
+`examine_threshold` to override the magic-number threshold for matching paths.
+
 Overlapping scopes are resolved by most-specific match, not TOML table order.
 Exact or prefix matchers outrank globs, then the matcher with more literal path
 text wins; ties use the matcher text for deterministic results.
@@ -206,16 +241,22 @@ text wins; ties use the matcher text for deterministic results.
 | `examine_threshold` | `10` | Absolute numeric magnitude at or above which an unnamed comparison/default/slice literal is a magic-number candidate. |
 | `baseline_ref` | `HEAD` | Git ref used by the staged gate to decide whether a candidate literal is new debt. |
 
+### `[tool.spice.policy.commit_message]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `allowed_trailers` | any trailer except `Co-Authored-By` | Optional finite set of allowed Git trailer keys. Values are normalized to lowercase; `Co-Authored-By` is always rejected. |
+
 Command-step tables accept:
 
-| Key | Meaning |
-| --- | --- |
-| `label` | Human label for gate output. |
-| `mount` | Name from `[tool.spice.commands]`. |
-| `run` / `argv` | Command string or argv list. |
-| `when` | Non-empty glob list matched against staged paths. |
-| `formatter` | `true` means restage matching paths after the command succeeds. |
-| `enabled` | For `pre_commit_builtins` only, `false` disables that built-in. |
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `label` | mounted command name or built-in label | Human label for gate output. |
+| `mount` | none | Name from `[tool.spice.commands]`. |
+| `run` / `argv` | required for raw command tables | Command string or argv list. |
+| `when` | all staged paths | Non-empty glob list matched against staged paths. |
+| `formatter` | `false` | `true` means restage matching paths after the command succeeds. |
+| `enabled` | `true` | For `pre_commit_builtins` only, `false` disables that built-in. |
 
 Every `pre_commit` command step gets `SPICE_STAGED_PATHS` with the
 `when`-narrowed staged paths. A step that names a mount additionally carries
@@ -223,11 +264,15 @@ Every `pre_commit` command step gets `SPICE_STAGED_PATHS` with the
 
 Reachability provider tables accept:
 
-| Key | Meaning |
-| --- | --- |
-| `name` | Provider name shown on the reachability board. Must not be `python`, which is the built-in AST/import-graph provider. |
-| `run` | Non-empty argv list executed from the repo root. |
-| `when` | Optional non-empty glob list matched against staged paths by the pre-commit gate. If omitted, the provider runs whenever reachability runs. |
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `name` | required | Provider name shown on the reachability board. Must not be `python`, which is the built-in AST/import-graph provider. |
+| `run` | required | Non-empty argv list executed from the repo root. |
+| `when` | always | Optional non-empty glob list matched against staged paths by the pre-commit gate. |
+
+`internal_couplings` entries accept `path`, `test`, and `target`; all are
+required non-empty strings. `test` is the test function name or `<module>`, and
+`target` is the private production symbol the test imports or reaches.
 
 The same provider seam feeds both reachability gates; a finding's `kind` routes
 it to exactly one gate by granularity. `module` is the coarse whole-file gate;
