@@ -784,6 +784,21 @@ def test_js_comparison_pivot_is_flagged():
     assert [(finding.line, finding.literal) for finding in findings] == [(1, "75")]
 
 
+def test_js_default_arg_is_flagged_by_tree_sitter_scan():
+    text = "function run(count = 75) {\n  return count;\n}\n"
+    findings = scan_text_magic_numbers(Path("sample.js"), text)
+    assert [(finding.line, finding.literal) for finding in findings] == [(1, "75")]
+
+
+def test_tree_sitter_magic_scan_honors_threshold():
+    findings = scan_text_magic_numbers(
+        Path("sample.js"),
+        "if (delta > 75) {\n  grow();\n}\n",
+        examine_threshold=100,
+    )
+    assert findings == []
+
+
 def test_js_const_definitions_and_call_args_pass():
     text = "const messageLimit = 400;\nsetTimeout(tick, 600);\nx = y * 1000;\n"
     assert scan_text_magic_numbers(Path("sample.js"), text) == []
@@ -792,6 +807,28 @@ def test_js_const_definitions_and_call_args_pass():
 def test_js_arrow_and_shift_operators_pass():
     text = "const f = (x) => 500;\nconst y = bits >> 16;\n"
     assert scan_text_magic_numbers(Path("sample.js"), text) == []
+
+
+def test_csharp_tree_sitter_magic_positions_are_flagged():
+    text = (
+        "public class Demo {\n"
+        "  const int LIMIT = 75;\n"
+        "  void Run(int count = 75) {\n"
+        "    if (count > 75) {}\n"
+        "    if (count is 99) {}\n"
+        "    var part = items[10..20];\n"
+        "    Use(600);\n"
+        "  }\n"
+        "}\n"
+    )
+    findings = scan_text_magic_numbers(Path("sample.cs"), text)
+    assert [(finding.line, finding.literal) for finding in findings] == [
+        (3, "75"),
+        (4, "75"),
+        (5, "99"),
+        (6, "10"),
+        (6, "20"),
+    ]
 
 
 def test_c_grammar_family_covers_other_languages():
