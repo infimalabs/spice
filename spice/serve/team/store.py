@@ -933,9 +933,11 @@ def _settings_bool(value: object) -> bool:
         return False
     try:
         parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return False
-    return parsed is True
+    except json.JSONDecodeError as exc:
+        raise SpiceError("global fast mode setting is malformed") from exc
+    if not isinstance(parsed, bool):
+        raise SpiceError("global fast mode setting must be boolean")
+    return parsed
 
 
 from spice.serve.team.commands import (  # noqa: E402
