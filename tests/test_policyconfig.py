@@ -146,16 +146,55 @@ def test_policy_resolver_uses_ratio_fallback_for_unset_flex(tmp_path):
     assert resolved.complexity.length_flex_limit == RATIO_FALLBACK_LENGTH_FLEX
 
 
-def test_policy_resolver_names_invalid_config_key(tmp_path):
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (
+            """
+            [tool.spice.policy.limits]
+            file_loc = "large"
+            """,
+            r"\[tool\.spice\.policy\.limits\] file_loc",
+        ),
+        (
+            """
+            [tool.spice.policy.magic]
+            examine_threshold = 0
+            """,
+            r"\[tool\.spice\.policy\.magic\] examine_threshold",
+        ),
+        (
+            """
+            [tool.spice.policy.magic]
+            baseline_ref = ""
+            """,
+            r"\[tool\.spice\.policy\.magic\] baseline_ref",
+        ),
+    ],
+)
+def test_policy_resolver_names_invalid_config_key(tmp_path, body, expected):
+    _write_pyproject(
+        tmp_path,
+        body,
+    )
+
+    with pytest.raises(SpiceError, match=expected):
+        resolve_policy(tmp_path)
+
+
+def test_policy_resolver_names_invalid_debt_key(tmp_path):
     _write_pyproject(
         tmp_path,
         """
-        [tool.spice.policy.limits]
-        file_loc = "large"
+        [tool.spice.policy.debt]
+        reachability_test_only = -1
         """,
     )
 
-    with pytest.raises(SpiceError, match=r"\[tool\.spice\.policy\.limits\] file_loc"):
+    with pytest.raises(
+        SpiceError,
+        match=r"\[tool\.spice\.policy\.debt\] reachability_test_only",
+    ):
         resolve_policy(tmp_path)
 
 

@@ -121,6 +121,13 @@ Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 `1.5x` flex, routines CCN `20` / length `80`, commit text wrap `100`,
 magic-number threshold `10`, and magic baselines against `HEAD`.
 
+### `[tool.spice.policy.magic]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `examine_threshold` | `10` | Absolute numeric magnitude at or above which an unnamed comparison/default/slice literal is a magic-number candidate. |
+| `baseline_ref` | `HEAD` | Git ref used by the staged gate to decide whether a candidate literal is new debt. |
+
 Command-step tables accept:
 
 | Key | Meaning |
