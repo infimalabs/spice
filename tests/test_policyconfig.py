@@ -49,6 +49,13 @@ def test_policy_resolver_defaults_match_policy_constants(tmp_path):
     assert resolved.languages.c_grammar == policy.C_GRAMMAR_SUFFIXES
     assert resolved.lockfiles.suffixes == policy.FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES
     assert resolved.lockfiles.names == policy.FILE_SHAPE_GENERATED_LOCKFILE_NAMES
+    assert (
+        resolved.file_shape_paths.source_suffixes == policy.FILE_SHAPE_SOURCE_SUFFIXES
+    )
+    assert (
+        resolved.file_shape_paths.generated_patterns
+        == policy.FILE_SHAPE_GENERATED_SOURCE_PATTERNS
+    )
     assert resolved.env_access.family_suffixes == policy.ENV_ACCESS_FAMILY_SUFFIXES
     assert resolved.env_access.default_patterns == policy.ENV_ACCESS_DEFAULT_PATTERNS
     assert resolved.env_access.baseline is None
@@ -99,6 +106,10 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
         suffixes = [".lockx"]
         names = ["npm-lock.json"]
 
+        [tool.spice.policy.file_shape]
+        source_suffixes = [".tmpl"]
+        generated_patterns = ["generated/**"]
+
         [tool.spice.policy.env_access]
         baseline = "tools/spice/env-policy-baseline.json"
 
@@ -137,6 +148,8 @@ def test_policy_resolver_applies_each_bound_override(tmp_path):
     assert resolved.languages.c_grammar == (".c",)
     assert resolved.lockfiles.suffixes == (".lockx",)
     assert resolved.lockfiles.names == ("npm-lock.json",)
+    assert resolved.file_shape_paths.source_suffixes == (".tmpl",)
+    assert resolved.file_shape_paths.generated_patterns == ("generated/**",)
     assert resolved.env_access.family_suffixes["python"] == (".py", ".pyi")
     assert resolved.env_access.default_patterns["python"] == (
         *policy.ENV_ACCESS_DEFAULT_PATTERNS["python"],
@@ -294,6 +307,9 @@ def test_config_reference_mentions_tracked_policy_keys():
         "[tool.spice.policy.lockfiles]",
         "suffixes",
         "names",
+        "[tool.spice.policy.file_shape]",
+        "source_suffixes",
+        "generated_patterns",
         "[tool.spice.policy.env_access]",
         "family_suffixes",
         "default_patterns",

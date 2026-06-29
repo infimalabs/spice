@@ -54,6 +54,7 @@ from spice.studies import (
 )
 from spice.studies.repodocs import (
     clear_repo_truth_doc_sticky_state,
+    repo_truth_doc_candidate_paths,
     repo_truth_doc_violations,
 )
 from spice.studies.walk import (
@@ -626,6 +627,11 @@ def _run_local_path_guard(repo_root: Path, paths: list[Path]) -> None:
 def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
     resolved = resolve_policy(repo_root)
     bounds = resolved.file_shape
+    repo_doc_paths = set(repo_truth_doc_candidate_paths(repo_root, resolved))
+    generated_patterns = (
+        *resolved.file_shape_paths.generated_patterns,
+        *shape.generated_path_patterns(repo_root),
+    )
     findings = fileloc.scan_staged_loc_violations(
         paths,
         root=repo_root,
@@ -634,6 +640,9 @@ def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
         byte_limit=bounds.byte_limit,
         byte_flex_limit_value=bounds.byte_flex_limit,
         bounds_for_path=resolved.file_shape_for_path,
+        source_suffixes=resolved.file_shape_paths.source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=repo_doc_paths,
         lockfile_suffixes=resolved.lockfiles.suffixes,
         lockfile_names=resolved.lockfiles.names,
         persist=True,
@@ -819,12 +828,20 @@ def clear_successful_sticky_state(repo_root: Path) -> None:
     resolved = resolve_policy(repo_root)
     file_shape = resolved.file_shape
     routine = resolved.complexity
+    repo_doc_paths = set(repo_truth_doc_candidate_paths(repo_root, resolved))
+    generated_patterns = (
+        *resolved.file_shape_paths.generated_patterns,
+        *shape.generated_path_patterns(repo_root),
+    )
     clear_repo_truth_doc_sticky_state(repo_root, resolved=resolved)
     fileloc.clear_file_loc_sticky_state(
         root=repo_root,
         limit=file_shape.line_limit,
         byte_limit=file_shape.byte_limit,
         bounds_for_path=resolved.file_shape_for_path,
+        source_suffixes=resolved.file_shape_paths.source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=repo_doc_paths,
         lockfile_suffixes=resolved.lockfiles.suffixes,
         lockfile_names=resolved.lockfiles.names,
     )

@@ -48,7 +48,7 @@ from spice.sessions.records import (
     collect_turns,
     is_scaffolding_text,
 )
-from spice.studies import complexity, fileloc, magicnums
+from spice.studies import complexity, fileloc, magicnums, repodocs, shape
 from spice.studies.walk import is_excluded_path
 
 DEFAULT_RECENT_ASKS = 6
@@ -423,15 +423,27 @@ def _collect_dirty_pressure_findings(
     resolved = resolve_policy(repo_root)
     file_shape = resolved.file_shape
     complexity_bounds = resolved.complexity
+    generated_patterns = (
+        *resolved.file_shape_paths.generated_patterns,
+        *shape.generated_path_patterns(repo_root),
+    )
 
     try:
         file_loc_findings = fileloc.scan_loc_violations(
             relevant_paths,
             limit=file_shape.line_limit,
+            flex_limit_value=file_shape.line_flex_limit,
             byte_limit=file_shape.byte_limit,
+            byte_flex_limit_value=file_shape.byte_flex_limit,
             root=repo_root,
+            source_suffixes=resolved.file_shape_paths.source_suffixes,
+            generated_patterns=generated_patterns,
+            repo_doc_paths=set(
+                repodocs.repo_truth_doc_candidate_paths(repo_root, resolved)
+            ),
             lockfile_suffixes=resolved.lockfiles.suffixes,
             lockfile_names=resolved.lockfiles.names,
+            bounds_for_path=resolved.file_shape_for_path,
         )
     except (OSError, SpiceError) as exc:
         errors.append(_dirty_pressure_error("file-loc", exc))

@@ -14,6 +14,7 @@ private.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -28,8 +29,10 @@ from spice.flexstate import (
 from spice.policy import (
     FILE_BYTE_LIMIT,
     FILE_LOC_LIMIT,
+    FILE_SHAPE_GENERATED_SOURCE_PATTERNS,
     FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
     FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
+    FILE_SHAPE_SOURCE_SUFFIXES,
 )
 from spice.studies.walk import is_excluded_path, staged_renames
 
@@ -81,13 +84,19 @@ class _DefaultFileShapeBounds:
 
 def count_file_lines(path: Path) -> int:
     raw = path.read_bytes()
-    if _is_binary_blob(raw):
+    if not _is_text_blob(raw):
         return 0
     return len(raw.decode("utf-8", errors="replace").splitlines())
 
 
-def _is_binary_blob(raw: bytes) -> bool:
-    return b"\0" in raw
+def _is_text_blob(raw: bytes) -> bool:
+    if b"\0" in raw:
+        return False
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
 
 
 def count_file_bytes(path: Path) -> int:
@@ -126,17 +135,81 @@ def is_generated_lockfile_path(
     return path.suffix in lockfile_suffixes or path.name in lockfile_names
 
 
-def _drop_generated_lockfile_paths(
+def _repo_path(path: Path) -> Path:
+    normalized = Path(path.as_posix().strip().removeprefix("./"))
+    return normalized
+
+
+def _has_glob_magic(pattern: str) -> bool:
+    return any(char in pattern for char in "*?[")
+
+
+def _matches_generated_pattern(path: Path, generated_patterns: tuple[str, ...]) -> bool:
+    rel_posix = _repo_path(path).as_posix()
+    for raw_pattern in generated_patterns:
+        pattern = raw_pattern.strip().replace("\\", "/").removeprefix("./")
+        if not pattern:
+            continue
+        if not _has_glob_magic(pattern):
+            prefix = pattern.rstrip("/")
+            if rel_posix == prefix or rel_posix.startswith(prefix + "/"):
+                return True
+            continue
+        if fnmatchcase(rel_posix, pattern):
+            return True
+        if pattern.startswith("**/") and fnmatchcase(rel_posix, pattern[3:]):
+            return True
+    return False
+
+
+def _is_file_shape_candidate(
+    path: Path,
+    *,
+    root: Path,
+    source_suffixes: tuple[str, ...],
+    generated_patterns: tuple[str, ...],
+    repo_doc_paths: set[Path],
+    lockfile_suffixes: tuple[str, ...],
+    lockfile_names: tuple[str, ...],
+) -> bool:
+    rel_path = _repo_path(path)
+    if (
+        rel_path in repo_doc_paths
+        or rel_path.suffix not in source_suffixes
+        or is_generated_lockfile_path(
+            rel_path,
+            lockfile_suffixes=lockfile_suffixes,
+            lockfile_names=lockfile_names,
+        )
+        or _matches_generated_pattern(rel_path, generated_patterns)
+        or is_excluded_path(rel_path, repo_root=root)
+    ):
+        return False
+    abs_path = root / rel_path
+    if not abs_path.exists() or not abs_path.is_file():
+        return False
+    return _is_text_blob(abs_path.read_bytes())
+
+
+def _drop_unscanned_file_shape_paths(
     paths: set[Path],
     *,
+    root: Path,
+    source_suffixes: tuple[str, ...],
+    generated_patterns: tuple[str, ...],
+    repo_doc_paths: set[Path],
     lockfile_suffixes: tuple[str, ...],
     lockfile_names: tuple[str, ...],
 ) -> set[Path]:
     return {
-        path
+        _repo_path(path)
         for path in paths
-        if not is_generated_lockfile_path(
+        if _is_file_shape_candidate(
             path,
+            root=root,
+            source_suffixes=source_suffixes,
+            generated_patterns=generated_patterns,
+            repo_doc_paths=repo_doc_paths,
             lockfile_suffixes=lockfile_suffixes,
             lockfile_names=lockfile_names,
         )
@@ -152,6 +225,9 @@ def scan_staged_loc_violations(
     byte_limit: int = FILE_BYTE_LIMIT,
     byte_flex_limit_value: int | None = None,
     bounds_for_path: Callable[[Path], FileShapeBounds] | None = None,
+    source_suffixes: tuple[str, ...] = FILE_SHAPE_SOURCE_SUFFIXES,
+    generated_patterns: tuple[str, ...] = FILE_SHAPE_GENERATED_SOURCE_PATTERNS,
+    repo_doc_paths: set[Path] | frozenset[Path] | None = None,
     lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
     lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
     persist: bool = False,
@@ -179,6 +255,7 @@ def scan_staged_loc_violations(
         byte_flex_limit=byte_flex,
     )
     resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
+    repo_doc_path_set = {_repo_path(path) for path in repo_doc_paths or set()}
     renames = staged_renames(root)
     loaded_line_sticky = sticky_paths_after_renames(
         _load_sticky(root, FILE_LOC_STICKY_STATE_GIT_PATH), renames
@@ -186,13 +263,21 @@ def scan_staged_loc_violations(
     loaded_byte_sticky = sticky_paths_after_renames(
         _load_sticky(root, FILE_BYTE_STICKY_STATE_GIT_PATH), renames
     )
-    line_sticky = _drop_generated_lockfile_paths(
+    line_sticky = _drop_unscanned_file_shape_paths(
         loaded_line_sticky,
+        root=root,
+        source_suffixes=source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=repo_doc_path_set,
         lockfile_suffixes=lockfile_suffixes,
         lockfile_names=lockfile_names,
     )
-    byte_sticky = _drop_generated_lockfile_paths(
+    byte_sticky = _drop_unscanned_file_shape_paths(
         loaded_byte_sticky,
+        root=root,
+        source_suffixes=source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=repo_doc_path_set,
         lockfile_suffixes=lockfile_suffixes,
         lockfile_names=lockfile_names,
     )
@@ -204,6 +289,9 @@ def scan_staged_loc_violations(
         measure=count_file_lines,
         flex_for_path=lambda path: resolve_bounds(path).line_flex_limit,
         unlimited_for_path=lambda path: resolve_bounds(path).line_unlimited,
+        source_suffixes=source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=repo_doc_path_set,
         lockfile_suffixes=lockfile_suffixes,
         lockfile_names=lockfile_names,
     )
@@ -215,6 +303,9 @@ def scan_staged_loc_violations(
         measure=count_file_bytes,
         flex_for_path=lambda path: resolve_bounds(path).byte_flex_limit,
         unlimited_for_path=lambda path: resolve_bounds(path).byte_unlimited,
+        source_suffixes=source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=repo_doc_path_set,
         lockfile_suffixes=lockfile_suffixes,
         lockfile_names=lockfile_names,
     )
@@ -230,6 +321,9 @@ def scan_staged_loc_violations(
         flex_limit_value=line_flex,
         byte_limit=byte_limit,
         byte_flex_limit_value=byte_flex,
+        source_suffixes=source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=repo_doc_path_set,
         lockfile_suffixes=lockfile_suffixes,
         lockfile_names=lockfile_names,
         sticky_paths=updated_line_sticky,
@@ -247,15 +341,22 @@ def _after_breaches(
     measure: Callable[[Path], int],
     flex_for_path: Callable[[Path], int] | None = None,
     unlimited_for_path: Callable[[Path], bool] | None = None,
+    source_suffixes: tuple[str, ...] = FILE_SHAPE_SOURCE_SUFFIXES,
+    generated_patterns: tuple[str, ...] = FILE_SHAPE_GENERATED_SOURCE_PATTERNS,
+    repo_doc_paths: set[Path] | None = None,
     lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
     lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
 ) -> set[Path]:
     return sticky_items_after_flex_breaches(
         [
-            path
+            _repo_path(path)
             for path in paths
-            if not is_generated_lockfile_path(
+            if _is_file_shape_candidate(
                 path,
+                root=root,
+                source_suffixes=source_suffixes,
+                generated_patterns=generated_patterns,
+                repo_doc_paths=repo_doc_paths or set(),
                 lockfile_suffixes=lockfile_suffixes,
                 lockfile_names=lockfile_names,
             )
@@ -281,6 +382,9 @@ def scan_loc_violations(
     flex_limit_value: int | None = None,
     byte_limit: int = FILE_BYTE_LIMIT,
     byte_flex_limit_value: int | None = None,
+    source_suffixes: tuple[str, ...] = FILE_SHAPE_SOURCE_SUFFIXES,
+    generated_patterns: tuple[str, ...] = FILE_SHAPE_GENERATED_SOURCE_PATTERNS,
+    repo_doc_paths: set[Path] | frozenset[Path] | None = None,
     lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
     lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
     sticky_paths: set[Path] | None = None,
@@ -303,16 +407,20 @@ def scan_loc_violations(
     resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
     sticky_paths = sticky_paths or set()
     byte_sticky_paths = byte_sticky_paths or set()
+    repo_doc_path_set = {_repo_path(path) for path in repo_doc_paths or set()}
     for rel_path in paths:
-        if is_generated_lockfile_path(
+        rel_path = _repo_path(rel_path)
+        if not _is_file_shape_candidate(
             rel_path,
+            root=root,
+            source_suffixes=source_suffixes,
+            generated_patterns=generated_patterns,
+            repo_doc_paths=repo_doc_path_set,
             lockfile_suffixes=lockfile_suffixes,
             lockfile_names=lockfile_names,
-        ) or is_excluded_path(rel_path, repo_root=root):
+        ):
             continue
         abs_path = root / rel_path
-        if not abs_path.exists() or not abs_path.is_file():
-            continue
         bounds = resolve_bounds(rel_path)
         if bounds.line_unlimited and bounds.byte_unlimited:
             continue
@@ -350,9 +458,13 @@ def clear_file_loc_sticky_state(
     limit: int = FILE_LOC_LIMIT,
     byte_limit: int = FILE_BYTE_LIMIT,
     bounds_for_path: Callable[[Path], FileShapeBounds] | None = None,
+    source_suffixes: tuple[str, ...] = FILE_SHAPE_SOURCE_SUFFIXES,
+    generated_patterns: tuple[str, ...] = FILE_SHAPE_GENERATED_SOURCE_PATTERNS,
+    repo_doc_paths: set[Path] | frozenset[Path] | None = None,
     lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
     lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
 ) -> None:
+    repo_doc_path_set = {_repo_path(path) for path in repo_doc_paths or set()}
     _clear_sticky(
         root,
         FILE_LOC_STICKY_STATE_GIT_PATH,
@@ -368,6 +480,9 @@ def clear_file_loc_sticky_state(
             if bounds_for_path is not None
             else None
         ),
+        source_suffixes=source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=repo_doc_path_set,
         lockfile_suffixes=lockfile_suffixes,
         lockfile_names=lockfile_names,
     )
@@ -386,6 +501,9 @@ def clear_file_loc_sticky_state(
             if bounds_for_path is not None
             else None
         ),
+        source_suffixes=source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=repo_doc_path_set,
         lockfile_suffixes=lockfile_suffixes,
         lockfile_names=lockfile_names,
     )
@@ -399,6 +517,9 @@ def _clear_sticky(
     measure: Callable[[Path], int],
     limit_for_path: Callable[[Path], int] | None = None,
     unlimited_for_path: Callable[[Path], bool] | None = None,
+    source_suffixes: tuple[str, ...] = FILE_SHAPE_SOURCE_SUFFIXES,
+    generated_patterns: tuple[str, ...] = FILE_SHAPE_GENERATED_SOURCE_PATTERNS,
+    repo_doc_paths: set[Path] | None = None,
     lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
     lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
 ) -> None:
@@ -409,12 +530,15 @@ def _clear_sticky(
     retained = {
         rel_path
         for rel_path in sticky
-        if not is_generated_lockfile_path(
+        if _is_file_shape_candidate(
             rel_path,
+            root=root,
+            source_suffixes=source_suffixes,
+            generated_patterns=generated_patterns,
+            repo_doc_paths=repo_doc_paths or set(),
             lockfile_suffixes=lockfile_suffixes,
             lockfile_names=lockfile_names,
         )
-        and (root / rel_path).exists()
         and not (
             unlimited_for_path(rel_path) if unlimited_for_path is not None else False
         )
