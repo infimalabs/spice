@@ -1,0 +1,3 @@
+include package.json
+include package-lock.json
+recursive-include tests/browser *.js
