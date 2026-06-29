@@ -19,6 +19,7 @@ from spice.policy import (
 from spice.studies import (
     complexity,
     csharpmembers,
+    csharpunused,
     envpolicy,
     fileloc,
     javascriptunused,
@@ -69,6 +70,13 @@ def configure_study_parser(subparsers: Any) -> None:
         help="Number of longest/tail members to show per class.",
     )
     csharp_members.add_argument("--json", action="store_true", dest="emit_json")
+
+    csharp_unused = _add_study_action(
+        actions,
+        "csharp-unused-candidates",
+        "Report C# private member and using-alias unused candidates.",
+    )
+    csharp_unused.add_argument("--json", action="store_true", dest="emit_json")
 
     magic = _add_study_action(
         actions, "magic-numbers", "Magic-number regressions vs a git baseline."
@@ -338,6 +346,17 @@ def _study_csharp_members(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _study_csharp_unused_candidates(args: argparse.Namespace, root: Path) -> int:
+    entries = csharpunused.collect_csharp_unused_entries(
+        _target_paths(args, root), root=root
+    )
+    if args.emit_json:
+        print(csharpunused.render_csharp_unused_json(entries))
+    else:
+        print(csharpunused.render_csharp_unused_board(entries))
+    return 0
+
+
 def _study_magic_numbers(args: argparse.Namespace, root: Path) -> int:
     findings = magicnums.detect_magic_regressions(
         _target_paths(args, root),
@@ -460,6 +479,7 @@ _STUDY_ACTIONS = {
     "file-loc": _study_file_loc,
     "complexity": _study_complexity,
     "csharp-members": _study_csharp_members,
+    "csharp-unused-candidates": _study_csharp_unused_candidates,
     "magic-numbers": _study_magic_numbers,
     "javascript-unused": _study_javascript_unused,
     "mutations": _study_mutations,
