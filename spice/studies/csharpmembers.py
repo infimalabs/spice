@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 from spice.studies.walk import is_excluded_path
 
-if TYPE_CHECKING:
-    from tree_sitter import Node
-
 DEFAULT_MEMBER_LIMIT = 10
+
+if TYPE_CHECKING:
+    from spice.studies.treesitter import TreeSitterNode
 
 
 @dataclass(frozen=True)
@@ -96,12 +96,12 @@ def _collect_file_class_records(
     return records
 
 
-def _node_text(source: bytes, node: "Node") -> str:
+def _node_text(source: bytes, node: "TreeSitterNode") -> str:
     return source[node.start_byte : node.end_byte].decode("utf-8", "replace")
 
 
-def _iter_class_nodes(node: "Node") -> list["Node"]:
-    found: list[Node] = []
+def _iter_class_nodes(node: "TreeSitterNode") -> list["TreeSitterNode"]:
+    found: list[TreeSitterNode] = []
     stack = [node]
     while stack:
         current = stack.pop()
@@ -111,29 +111,29 @@ def _iter_class_nodes(node: "Node") -> list["Node"]:
     return found
 
 
-def _first_identifier_text(source: bytes, node: "Node") -> str | None:
+def _first_identifier_text(source: bytes, node: "TreeSitterNode") -> str | None:
     for child in node.children:
         if child.type == "identifier":
             return _node_text(source, child)
     return None
 
 
-def _class_name(source: bytes, node: "Node") -> str:
+def _class_name(source: bytes, node: "TreeSitterNode") -> str:
     return _first_identifier_text(source, node) or "<anonymous-class>"
 
 
-def _class_body(node: "Node") -> "Node | None":
+def _class_body(node: "TreeSitterNode") -> "TreeSitterNode | None":
     for child in node.children:
         if child.type == "declaration_list":
             return child
     return None
 
 
-def _is_member_declaration(node: "Node") -> bool:
+def _is_member_declaration(node: "TreeSitterNode") -> bool:
     return node.type == "field_declaration" or node.type.endswith("_declaration")
 
 
-def _field_name(source: bytes, node: "Node") -> str:
+def _field_name(source: bytes, node: "TreeSitterNode") -> str:
     for child in node.children:
         if child.type != "variable_declaration":
             continue
@@ -146,18 +146,18 @@ def _field_name(source: bytes, node: "Node") -> str:
     return "<field>"
 
 
-def _member_name(source: bytes, node: "Node") -> str:
+def _member_name(source: bytes, node: "TreeSitterNode") -> str:
     if node.type == "field_declaration":
         return _field_name(source, node)
     return _first_identifier_text(source, node) or f"<{node.type}>"
 
 
-def _member_signature(source: bytes, node: "Node") -> str:
+def _member_signature(source: bytes, node: "TreeSitterNode") -> str:
     text = _node_text(source, node).strip()
     return text.splitlines()[0].strip() if text else ""
 
 
-def _member_record(source: bytes, node: "Node") -> CSharpMemberRecord:
+def _member_record(source: bytes, node: "TreeSitterNode") -> CSharpMemberRecord:
     line_start = _start_line(node)
     line_end = _end_line(node)
     return CSharpMemberRecord(
@@ -170,12 +170,12 @@ def _member_record(source: bytes, node: "Node") -> CSharpMemberRecord:
     )
 
 
-def _start_line(node: "Node") -> int:
+def _start_line(node: "TreeSitterNode") -> int:
     point = node.start_point
     return point.row + 1
 
 
-def _end_line(node: "Node") -> int:
+def _end_line(node: "TreeSitterNode") -> int:
     point = node.end_point
     return point.row + 1
 

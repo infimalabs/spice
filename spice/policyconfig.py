@@ -83,9 +83,15 @@ class ScopeSettings:
 
 
 @dataclass(frozen=True)
+class ScopeMagic:
+    examine_threshold: int
+
+
+@dataclass(frozen=True)
 class PolicyScope:
     matcher: str
     settings_by_bound: Mapping[str, ScopeSettings]
+    magic: ScopeMagic | None
     specificity: tuple[int, int, int, int]
 
 
@@ -122,6 +128,7 @@ class ComplexityPolicy:
     ccn_flex_limit: int
     max_length: int
     length_flex_limit: int
+    hotspot_limit: int
     ccn_unlimited: bool = False
     length_unlimited: bool = False
 
@@ -134,6 +141,7 @@ class ComplexityPolicy:
 class ResolvedPolicy:
     limits: PolicyLimits
     flex: PolicyFlex
+    complexity_hotspot_limit: int
     magic: PolicyMagic
     debt: PolicyDebt
     languages: PolicyLanguages
@@ -158,6 +166,7 @@ class ResolvedPolicy:
             ccn_flex_limit=self.flex.routine_ccn,
             max_length=self.limits.routine_length,
             length_flex_limit=self.flex.routine_length,
+            hotspot_limit=self.complexity_hotspot_limit,
         )
 
     def bound_for_path(self, bound: str, base: int, path: Path) -> ScopedBound:
@@ -201,15 +210,38 @@ class ResolvedPolicy:
             ccn_flex_limit=ccn.flex_limit,
             max_length=length.limit,
             length_flex_limit=length.flex_limit,
+            hotspot_limit=self.complexity_hotspot_limit,
             ccn_unlimited=ccn.unlimited,
             length_unlimited=length.unlimited,
         )
+
+    def magic_for_path(self, path: Path) -> PolicyMagic:
+        scope = self._scope_for_magic(path)
+        if scope is None or scope.magic is None:
+            return self.magic
+        return PolicyMagic(
+            examine_threshold=scope.magic.examine_threshold,
+            baseline_ref=self.magic.baseline_ref,
+        )
+
+    def magic_examine_threshold_for_path(self, path: Path) -> int:
+        return self.magic_for_path(path).examine_threshold
 
     def _scope_for_bound(self, bound: str, path: Path) -> PolicyScope | None:
         matches = [
             scope
             for scope in self.scopes
             if bound in scope.settings_by_bound and _scope_matches(scope.matcher, path)
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda scope: (scope.specificity, scope.matcher))
+
+    def _scope_for_magic(self, path: Path) -> PolicyScope | None:
+        matches = [
+            scope
+            for scope in self.scopes
+            if scope.magic is not None and _scope_matches(scope.matcher, path)
         ]
         if not matches:
             return None
@@ -258,6 +290,7 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
         ),
     )
     flex_table = _subtable(raw_policy, "flex")
+    complexity_table = _subtable(raw_policy, "complexity")
     ratio = _ratio(flex_table)
     flex = PolicyFlex(
         ratio=ratio,
@@ -273,6 +306,12 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
     return ResolvedPolicy(
         limits=limits,
         flex=flex,
+        complexity_hotspot_limit=_positive_int(
+            complexity_table,
+            "hotspot_limit",
+            policy.COMPLEXITY_HOTSPOT_LIMIT,
+            "[tool.spice.policy.complexity]",
+        ),
         magic=PolicyMagic(
             examine_threshold=_positive_int(
                 magic_table,
@@ -333,6 +372,8 @@ SCOPED_BOUND_KEYS = (
     "repo_truth_doc_chars",
 )
 SCOPE_SETTING_KEYS = ("multiplier", "min", "max", "unlimited", "flex")
+SCOPE_NESTED_KEYS = ("magic",)
+SCOPE_MAGIC_KEYS = ("examine_threshold",)
 
 
 def _languages(raw_policy: Mapping[str, object]) -> PolicyLanguages:
@@ -425,13 +466,13 @@ def _scopes(raw_policy: Mapping[str, object]) -> tuple[PolicyScope, ...]:
         context = _scope_context(matcher)
         if not isinstance(raw_scope, dict):
             raise SpiceError(f"{context} must be a table")
-        settings_by_bound = _scope_settings_by_bound(
-            cast(Mapping[str, object], raw_scope), context
-        )
+        scope_table = cast(Mapping[str, object], raw_scope)
+        settings_by_bound = _scope_settings_by_bound(scope_table, context)
         scopes.append(
             PolicyScope(
                 matcher=matcher,
                 settings_by_bound=settings_by_bound,
+                magic=_scope_magic(scope_table, context),
                 specificity=_scope_specificity(matcher),
             )
         )
@@ -444,10 +485,14 @@ def _scope_settings_by_bound(
     unknown = sorted(
         key
         for key in table
-        if key not in SCOPE_SETTING_KEYS and key not in SCOPED_BOUND_KEYS
+        if key not in SCOPE_SETTING_KEYS
+        and key not in SCOPED_BOUND_KEYS
+        and key not in SCOPE_NESTED_KEYS
     )
     if unknown:
-        expected = ", ".join((*SCOPE_SETTING_KEYS, *SCOPED_BOUND_KEYS))
+        expected = ", ".join(
+            (*SCOPE_SETTING_KEYS, *SCOPED_BOUND_KEYS, *SCOPE_NESTED_KEYS)
+        )
         listed = ", ".join(unknown)
         raise SpiceError(f"{context} unknown key(s): {listed}; expected {expected}")
 
@@ -471,6 +516,28 @@ def _scope_settings_by_bound(
             cast(Mapping[str, object], raw), bound_context
         )
     return settings_by_bound
+
+
+def _scope_magic(table: Mapping[str, object], context: str) -> ScopeMagic | None:
+    raw = table.get("magic")
+    if raw is None:
+        return None
+    magic_context = f"{context} magic"
+    if not isinstance(raw, dict):
+        raise SpiceError(f"{magic_context} must be a table")
+    magic_table = cast(Mapping[str, object], raw)
+    unknown = sorted(key for key in magic_table if key not in SCOPE_MAGIC_KEYS)
+    if unknown:
+        listed = ", ".join(unknown)
+        expected = ", ".join(SCOPE_MAGIC_KEYS)
+        raise SpiceError(
+            f"{magic_context} unknown key(s): {listed}; expected {expected}"
+        )
+    return ScopeMagic(
+        examine_threshold=_required_positive_int(
+            magic_table, "examine_threshold", magic_context
+        )
+    )
 
 
 def _scope_settings(table: Mapping[str, object], context: str) -> ScopeSettings:
@@ -503,6 +570,10 @@ def _optional_positive_int(
     if raw <= 0:
         raise SpiceError(f"{context} {key} must be a positive integer")
     return raw
+
+
+def _required_positive_int(table: Mapping[str, object], key: str, context: str) -> int:
+    return _positive_int(table, key, 0, context)
 
 
 def _scope_multiplier(table: Mapping[str, object], context: str) -> float:

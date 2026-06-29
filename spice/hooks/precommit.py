@@ -701,6 +701,7 @@ def _run_magic_numbers_guard(repo_root: Path, paths: list[Path]) -> None:
         root=repo_root,
         baseline_ref=resolved.magic.baseline_ref,
         examine_threshold=resolved.magic.examine_threshold,
+        examine_threshold_for_path=resolved.magic_examine_threshold_for_path,
         suffixes=resolved.languages.magic,
         c_grammar_suffixes=resolved.languages.c_grammar,
     )
