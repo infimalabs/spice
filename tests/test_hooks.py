@@ -712,6 +712,56 @@ def test_file_shape_guard_excludes_generated_lockfiles_but_keeps_source_pressure
         precommit._run_file_loc_guard(repo, [Path("large_source.py")])
 
 
+def test_file_shape_guard_reads_configured_bounds(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    _write_repo_file(
+        repo,
+        "pyproject.toml",
+        "[tool.spice.policy.limits]\n"
+        "file_loc = 2\n"
+        "file_bytes = 100000\n"
+        "\n"
+        "[tool.spice.policy.flex]\n"
+        "ratio = 1.0\n",
+    )
+    _write_repo_file(repo, "src/app.py", "a = 1\nb = 2\nc = 3\n")
+    _git(repo, "add", ".")
+
+    with pytest.raises(SpiceError, match="3 lines > 2"):
+        precommit._run_file_loc_guard(repo, [Path("src/app.py")])
+
+
+def test_complexity_guard_reads_configured_bounds(tmp_path, monkeypatch):
+    repo = _git_init(tmp_path / "repo")
+    _write_repo_file(
+        repo,
+        "pyproject.toml",
+        "[tool.spice.policy.limits]\n"
+        "routine_ccn = 2\n"
+        "routine_length = 20\n"
+        "\n"
+        "[tool.spice.policy.flex]\n"
+        "ratio = 1.0\n",
+    )
+    _write_repo_file(repo, "src/app.py", "def run():\n    return 1\n")
+    _git(repo, "add", ".")
+    record = precommit.complexity.ComplexityRecord(
+        path="src/app.py",
+        function_name="run",
+        ccn=3,
+        length=10,
+        nloc=10,
+    )
+    monkeypatch.setattr(
+        precommit.complexity,
+        "collect_complexity_records",
+        lambda _paths, *, root: [record],
+    )
+
+    with pytest.raises(SpiceError, match="ccn 3 > 2"):
+        precommit._run_complexity_guard(repo, [Path("src/app.py")])
+
+
 def test_policy_exclude_filters_renames_but_not_partially_staged_guard(tmp_path):
     repo = _git_init(tmp_path / "repo")
     _write_repo_file(
