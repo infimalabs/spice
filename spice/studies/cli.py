@@ -352,9 +352,10 @@ def _study_complexity(args: argparse.Namespace, root: Path) -> int:
 
 
 def _study_complexity_hotspots(args: argparse.Namespace, root: Path) -> int:
-    limit = args.limit or resolve_policy(root).complexity.hotspot_limit
+    resolved = resolve_policy(root)
+    limit = args.limit or resolved.complexity.hotspot_limit
     records = complexity.collect_complexity_records(
-        _target_paths(args, root), root=root
+        _target_paths(args, root), root=root, suffixes=resolved.languages.complexity
     )
     print(complexity.render_complexity_hotspots(records, limit=limit))
     return 0
