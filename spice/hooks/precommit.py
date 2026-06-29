@@ -40,9 +40,7 @@ from spice.cli.mounts import (
 from spice.errors import SpiceError
 from spice.paths import find_tool
 from spice.policy import (
-    ASSERTION_FREE_TEST_LIMIT,
     LEGITIMATE_INTERNAL_COUPLINGS,
-    REACHABILITY_TEST_ONLY_LIMIT,
     REPO_TRUTH_DOC_LIMIT,
     REPO_TRUTH_DOCS,
 )
@@ -690,15 +688,19 @@ def _run_magic_numbers_guard(repo_root: Path, paths: list[Path]) -> None:
 
 
 def _run_reachability_guard(repo_root: Path, paths: list[Path] | None = None) -> None:
+    debt_limit = resolve_policy(repo_root).debt.reachability_test_only
     findings = reachability.scan_reachability(repo_root, staged_paths=paths)
     count = len(findings)
-    if count > REACHABILITY_TEST_ONLY_LIMIT:
+    if count > debt_limit:
         board = "\n".join(reachability.render_reachability_board(findings))
         raise SpiceError(
             f"{board}\n"
-            f"reachability: {count} test-only finding(s) not reachable from"
-            " production roots; zero are allowed - wire each in or delete-both"
-            " (`spice study reachability --create-tasks` files decisions)"
+            f"reachability: {count} test-only finding(s) exceed "
+            "[tool.spice.policy.debt] "
+            f"reachability_test_only={debt_limit}; 0 means clean, non-zero is "
+            "explicit drainable cleanup debt - findings are not reachable "
+            "from production roots, so wire each in or delete-both "
+            "(`spice study reachability --create-tasks` files decisions)"
         )
 
 
@@ -716,17 +718,20 @@ def _run_symbol_reachability_guard(
 
 
 def _run_assertion_free_test_guard(repo_root: Path) -> None:
+    debt_limit = resolve_policy(repo_root).debt.assertion_free_tests
     findings = testquality.scan_assertion_free_tests(
         testquality.test_paths(repo_root), root=repo_root
     )
     count = len(findings)
-    if count > ASSERTION_FREE_TEST_LIMIT:
+    if count > debt_limit:
         board = testquality.render_assertion_free_board(findings)
         raise SpiceError(
             f"{board}\n"
-            f"assertion-free-tests: {count} test(s) exceed"
-            f" ASSERTION_FREE_TEST_LIMIT={ASSERTION_FREE_TEST_LIMIT};"
-            " add assertions or lower the constant after cleanup"
+            f"assertion-free-tests: {count} test(s) exceed "
+            "[tool.spice.policy.debt] "
+            f"assertion_free_tests={debt_limit}; 0 means clean, non-zero is "
+            "explicit drainable cleanup debt - add assertions or lower "
+            "configured debt after cleanup"
         )
 
 
