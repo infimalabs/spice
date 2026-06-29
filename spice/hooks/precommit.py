@@ -46,6 +46,7 @@ from spice.policy import (
     REPO_TRUTH_DOC_LIMIT,
     REPO_TRUTH_DOCS,
 )
+from spice.policyconfig import resolve_policy
 from spice.repocfg import policy_table, string_list
 from spice.studies import (
     complexity,
@@ -639,17 +640,47 @@ def _run_local_path_guard(repo_root: Path, paths: list[Path]) -> None:
 
 
 def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
-    findings = fileloc.scan_staged_loc_violations(paths, root=repo_root, persist=True)
+    bounds = resolve_policy(repo_root).file_shape
+    findings = fileloc.scan_staged_loc_violations(
+        paths,
+        root=repo_root,
+        limit=bounds.line_limit,
+        flex_limit_value=bounds.line_flex_limit,
+        byte_limit=bounds.byte_limit,
+        byte_flex_limit_value=bounds.byte_flex_limit,
+        persist=True,
+    )
     if findings:
-        raise SpiceError(fileloc.render_loc_board(findings))
+        raise SpiceError(
+            fileloc.render_loc_board(
+                findings,
+                limit=bounds.line_limit,
+                flex_limit_value=bounds.line_flex_limit,
+                byte_limit=bounds.byte_limit,
+                byte_flex_limit_value=bounds.byte_flex_limit,
+            )
+        )
 
 
 def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
+    bounds = resolve_policy(repo_root).complexity
     findings = complexity.scan_staged_complexity_violations(
-        paths, root=repo_root, persist=True
+        paths,
+        root=repo_root,
+        max_ccn=bounds.max_ccn,
+        max_length=bounds.max_length,
+        ccn_flex_limit_value=bounds.ccn_flex_limit,
+        length_flex_limit_value=bounds.length_flex_limit,
+        persist=True,
     )
     if findings:
-        raise SpiceError(complexity.render_complexity_board(findings))
+        raise SpiceError(
+            complexity.render_complexity_board(
+                findings,
+                max_ccn=bounds.max_ccn,
+                max_length=bounds.max_length,
+            )
+        )
 
 
 def _run_magic_numbers_guard(repo_root: Path, paths: list[Path]) -> None:
@@ -774,5 +805,16 @@ def quality_gate_failures_for_tags(repo_root: Path, tags: list[str]) -> list[str
 
 
 def clear_successful_sticky_state(repo_root: Path) -> None:
-    fileloc.clear_file_loc_sticky_state(root=repo_root)
-    complexity.clear_complexity_sticky_state(root=repo_root)
+    bounds = resolve_policy(repo_root)
+    file_shape = bounds.file_shape
+    routine = bounds.complexity
+    fileloc.clear_file_loc_sticky_state(
+        root=repo_root,
+        limit=file_shape.line_limit,
+        byte_limit=file_shape.byte_limit,
+    )
+    complexity.clear_complexity_sticky_state(
+        root=repo_root,
+        max_ccn=routine.max_ccn,
+        max_length=routine.max_length,
+    )
