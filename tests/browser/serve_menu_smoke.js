@@ -2,6 +2,35 @@ const { withServePage } = require("./serve_playwright_harness");
 
 const headerRightTolerancePx = 16;
 const pillLeftTolerancePx = 24;
+const fastModeStorageKey = "spice.serve.fastMode";
+
+async function fastModeActionState(page) {
+  const actions = await page
+    .locator(".spice-context-menu .spice-menu-action")
+    .evaluateAll((buttons) =>
+      buttons.map((button) => ({
+        label: button.querySelector(".spice-menu-action-label").textContent,
+        detail: button.querySelector(".spice-menu-action-detail").textContent,
+        checked: button.getAttribute("aria-checked"),
+      })),
+    );
+  const action = actions.find((item) => item.label === "Fast mode");
+  if (!action)
+    throw new Error("Fast mode action missing: " + JSON.stringify(actions));
+  return action;
+}
+
+async function clickFastModeAction(page) {
+  await page.evaluate(() => {
+    const action = [...document.querySelectorAll(".spice-menu-action")].find(
+      (button) =>
+        button.querySelector(".spice-menu-action-label").textContent ===
+        "Fast mode",
+    );
+    if (!action) throw new Error("Fast mode action missing");
+    action.click();
+  });
+}
 
 async function run() {
   return withServePage(
@@ -47,28 +76,55 @@ async function run() {
       await page.waitForSelector(".spice-context-menu .spice-menu-action", {
         timeout: 5000,
       });
-      const actions = await page
+      const actionCount = await page
         .locator(".spice-context-menu .spice-menu-action")
-        .evaluateAll((buttons) =>
-          buttons.map((button) => ({
-            label: button.querySelector(".spice-menu-action-label").textContent,
-            detail: button.querySelector(".spice-menu-action-detail").textContent,
-            checked: button.getAttribute("aria-checked"),
-          })),
-        );
-      const fastModeAction = actions.find((action) => action.label === "Fast mode");
-      if (!fastModeAction)
-        throw new Error("Fast mode action missing: " + JSON.stringify(actions));
+        .count();
+      const fastModeAction = await fastModeActionState(page);
       if (fastModeAction.detail !== "off")
         throw new Error("Unexpected Fast mode detail: " + fastModeAction.detail);
       if (fastModeAction.checked !== "false")
         throw new Error(
           "Unexpected Fast mode checked state: " + fastModeAction.checked,
         );
+      await clickFastModeAction(page);
+      const enabledFastModeAction = await fastModeActionState(page);
+      if (enabledFastModeAction.detail !== "on")
+        throw new Error(
+          "Fast mode did not toggle on: " + enabledFastModeAction.detail,
+        );
+      if (enabledFastModeAction.checked !== "true")
+        throw new Error(
+          "Fast mode checked state did not toggle on: " +
+            enabledFastModeAction.checked,
+        );
+      const storedFastMode = await page.evaluate(
+        (key) => window.localStorage.getItem(key),
+        fastModeStorageKey,
+      );
+      if (storedFastMode !== "true")
+        throw new Error("Fast mode was not persisted: " + storedFastMode);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await menuButton.waitFor({ state: "visible", timeout: 10000 });
+      await menuButton.click();
+      await page.waitForSelector(".spice-context-menu .spice-menu-action", {
+        timeout: 5000,
+      });
+      const reloadedFastModeAction = await fastModeActionState(page);
+      if (reloadedFastModeAction.detail !== "on")
+        throw new Error(
+          "Fast mode did not survive reload: " + reloadedFastModeAction.detail,
+        );
+      if (reloadedFastModeAction.checked !== "true")
+        throw new Error(
+          "Fast mode checked state did not survive reload: " +
+            reloadedFastModeAction.checked,
+        );
       return {
-        actionCount: actions.length,
+        actionCount,
         fastModeDetail: fastModeAction.detail,
         fastModeChecked: fastModeAction.checked,
+        fastModePersistedDetail: reloadedFastModeAction.detail,
+        fastModePersistedChecked: reloadedFastModeAction.checked,
         headerLayout,
         url: server.url,
       };

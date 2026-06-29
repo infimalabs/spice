@@ -182,15 +182,37 @@ function browserStorage() {
   }
 }
 
-function storedFastModeEnabled() {
+function readStoredFastModeEnabled() {
   const storage = browserStorage();
-  return storage ? storage.getItem(fastModeStorageKey) === "true" : false;
+  if (!storage) return null;
+  return storage.getItem(fastModeStorageKey) === "true";
+}
+
+function storedFastModeEnabled() {
+  return readStoredFastModeEnabled() === true;
 }
 
 function persistFastModeEnabled(enabled) {
   const storage = browserStorage();
   if (!storage) return;
   storage.setItem(fastModeStorageKey, enabled ? "true" : "false");
+}
+
+function currentFastModeEnabled() {
+  // Keep the UI-global flag behind localStorage so sibling tabs and reloads
+  // cannot leave send/subscribe payloads on a stale fast-mode value.
+  const stored = readStoredFastModeEnabled();
+  if (stored !== null) fastModeEnabled = stored;
+  return fastModeEnabled;
+}
+
+function syncFastModeFromStorage() {
+  const previous = fastModeEnabled;
+  currentFastModeEnabled();
+  if (fastModeEnabled === previous) return;
+  if (typeof syncFastModeButtonState === "function") syncFastModeButtonState();
+  if (typeof renderSpiceMenu === "function") renderSpiceMenu();
+  if (typeof configureLiveBusLanes === "function") configureLiveBusLanes();
 }
 
 async function init() {
@@ -210,6 +232,10 @@ window.addEventListener("beforeunload", (event) => {
   event.preventDefault();
   event.returnValue = unsafeDraftWarningText();
   return event.returnValue;
+});
+window.addEventListener("storage", (event) => {
+  if (event.key !== fastModeStorageKey && event.key !== null) return;
+  syncFastModeFromStorage();
 });
 openLaneButton.addEventListener("click", (event) => {
   event.preventDefault();
