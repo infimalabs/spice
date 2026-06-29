@@ -167,7 +167,7 @@ def handle_dev(args: argparse.Namespace) -> int:
     if command == "commit-msg":
         from spice.hooks.commitmsg import handle_commit_msg
 
-        return handle_commit_msg(args.message_file)
+        return handle_commit_msg(args.message_file, repo_root)
     if command == "reference-transaction":
         from spice.hooks.refguard import handle_reference_transaction
 

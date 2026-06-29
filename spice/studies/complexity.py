@@ -17,6 +17,7 @@ import io
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Protocol
 
 from spice.errors import SpiceError
 from spice.paths import find_tool
@@ -39,7 +40,6 @@ from spice.studies.walk import is_excluded_path, staged_renames
 COMPLEXITY_VERSION = 1
 COMPLEXITY_CCN_STICKY_GIT_PATH = "spice/complexity-ccn-sticky.json"
 COMPLEXITY_LENGTH_STICKY_GIT_PATH = "spice/complexity-length-sticky.json"
-LIZARD_SUFFIXES = COMPLEXITY_SUFFIXES
 
 # lizard --csv columns: nloc, ccn, token_count, param_count, length,
 # location, path, function_name, ...
@@ -108,6 +108,36 @@ def render_complexity_hotspots(
     return "\n".join(lines)
 
 
+class ComplexityBounds(Protocol):
+    @property
+    def max_ccn(self) -> int: ...
+
+    @property
+    def ccn_flex_limit(self) -> int: ...
+
+    @property
+    def max_length(self) -> int: ...
+
+    @property
+    def length_flex_limit(self) -> int: ...
+
+    @property
+    def ccn_unlimited(self) -> bool: ...
+
+    @property
+    def length_unlimited(self) -> bool: ...
+
+
+@dataclass(frozen=True)
+class _DefaultComplexityBounds:
+    max_ccn: int
+    ccn_flex_limit: int
+    max_length: int
+    length_flex_limit: int
+    ccn_unlimited: bool = False
+    length_unlimited: bool = False
+
+
 def require_lizard() -> str:
     located = find_tool("lizard")
     if not located:
@@ -119,12 +149,12 @@ def require_lizard() -> str:
 
 
 def collect_complexity_records(
-    paths: list[Path], *, root: Path
+    paths: list[Path], *, root: Path, suffixes: tuple[str, ...] = COMPLEXITY_SUFFIXES
 ) -> list[ComplexityRecord]:
     targets = [
         path
         for path in paths
-        if path.suffix in LIZARD_SUFFIXES
+        if path.suffix in suffixes
         and not is_excluded_path(path, repo_root=root)
         and (root / path).exists()
     ]
@@ -209,6 +239,8 @@ def scan_staged_complexity_violations(
     max_length: int = COMPLEXITY_MAX_LENGTH,
     ccn_flex_limit_value: int | None = None,
     length_flex_limit_value: int | None = None,
+    bounds_for_path: Callable[[Path], ComplexityBounds] | None = None,
+    suffixes: tuple[str, ...] = COMPLEXITY_SUFFIXES,
     persist: bool = False,
 ) -> list[ComplexityFinding]:
     """Scan staged routines against the flex+sticky CCN/length limits.
@@ -221,7 +253,7 @@ def scan_staged_complexity_violations(
     ``clear_complexity_sticky_state`` on gate success — scan ratchets up, clear
     prunes down once the tree passes.
     """
-    records = collect_complexity_records(paths, root=root)
+    records = collect_complexity_records(paths, root=root, suffixes=suffixes)
     renames = staged_renames(root)
     ccn_sticky = sticky_function_keys_after_renames(
         _load_sticky(root, COMPLEXITY_CCN_STICKY_GIT_PATH), renames
@@ -239,17 +271,30 @@ def scan_staged_complexity_violations(
         if length_flex_limit_value is not None
         else flex_limit(max_length)
     )
+    default_bounds = _DefaultComplexityBounds(
+        max_ccn=max_ccn,
+        ccn_flex_limit=ccn_flex,
+        max_length=max_length,
+        length_flex_limit=length_flex,
+    )
+    resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
     updated_ccn_sticky = sticky_items_after_flex_breaches(
         records,
         ccn_sticky,
         key_for_item=lambda record: record.key,
-        is_breach=lambda record: record.ccn > ccn_flex,
+        is_breach=lambda record: (
+            not resolve_bounds(Path(record.path)).ccn_unlimited
+            and record.ccn > resolve_bounds(Path(record.path)).ccn_flex_limit
+        ),
     )
     updated_length_sticky = sticky_items_after_flex_breaches(
         records,
         length_sticky,
         key_for_item=lambda record: record.key,
-        is_breach=lambda record: record.length > length_flex,
+        is_breach=lambda record: (
+            not resolve_bounds(Path(record.path)).length_unlimited
+            and record.length > resolve_bounds(Path(record.path)).length_flex_limit
+        ),
     )
     if persist:
         if updated_ccn_sticky != ccn_sticky:
@@ -258,12 +303,21 @@ def scan_staged_complexity_violations(
             _save_sticky(updated_length_sticky, root, COMPLEXITY_LENGTH_STICKY_GIT_PATH)
     findings: list[ComplexityFinding] = []
     for record in records:
-        ccn_limit = max_ccn if record.key in updated_ccn_sticky else ccn_flex
-        length_limit = (
-            max_length if record.key in updated_length_sticky else length_flex
+        bounds = resolve_bounds(Path(record.path))
+        if bounds.ccn_unlimited and bounds.length_unlimited:
+            continue
+        ccn_limit = (
+            bounds.max_ccn
+            if record.key in updated_ccn_sticky
+            else bounds.ccn_flex_limit
         )
-        over_ccn = record.ccn > ccn_limit
-        over_length = record.length > length_limit
+        length_limit = (
+            bounds.max_length
+            if record.key in updated_length_sticky
+            else bounds.length_flex_limit
+        )
+        over_ccn = False if bounds.ccn_unlimited else record.ccn > ccn_limit
+        over_length = False if bounds.length_unlimited else record.length > length_limit
         if over_ccn or over_length:
             findings.append(
                 ComplexityFinding(
@@ -282,7 +336,16 @@ def clear_complexity_sticky_state(
     root: Path,
     max_ccn: int = COMPLEXITY_MAX_CCN,
     max_length: int = COMPLEXITY_MAX_LENGTH,
+    bounds_for_path: Callable[[Path], ComplexityBounds] | None = None,
+    suffixes: tuple[str, ...] = COMPLEXITY_SUFFIXES,
 ) -> None:
+    default_bounds = _DefaultComplexityBounds(
+        max_ccn=max_ccn,
+        ccn_flex_limit=flex_limit(max_ccn),
+        max_length=max_length,
+        length_flex_limit=flex_limit(max_length),
+    )
+    resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
     for git_path, attribute, limit in (
         (COMPLEXITY_CCN_STICKY_GIT_PATH, "ccn", max_ccn),
         (COMPLEXITY_LENGTH_STICKY_GIT_PATH, "length", max_length),
@@ -292,17 +355,37 @@ def clear_complexity_sticky_state(
             continue
         sticky = _load_sticky(root, git_path)
         live_paths = sorted({Path(path) for path, _name in sticky})
-        records = collect_complexity_records(live_paths, root=root)
+        records = collect_complexity_records(live_paths, root=root, suffixes=suffixes)
         by_key = {record.key: record for record in records}
         retained = {
             key
             for key in sticky
-            if key in by_key and getattr(by_key[key], attribute) > limit
+            if key in by_key
+            and _complexity_bound_is_retained(
+                by_key[key],
+                attribute=attribute,
+                fallback_limit=limit,
+                bounds=resolve_bounds(Path(by_key[key].path)),
+            )
         }
         if retained:
             _save_sticky(retained, root, git_path)
         else:
             state_path.unlink()
+
+
+def _complexity_bound_is_retained(
+    record: ComplexityRecord,
+    *,
+    attribute: str,
+    fallback_limit: int,
+    bounds: ComplexityBounds,
+) -> bool:
+    if attribute == "ccn":
+        return not bounds.ccn_unlimited and record.ccn > bounds.max_ccn
+    if attribute == "length":
+        return not bounds.length_unlimited and record.length > bounds.max_length
+    return getattr(record, attribute) > fallback_limit
 
 
 def render_complexity_board(

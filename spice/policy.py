@@ -35,8 +35,10 @@ FLEX_DENOMINATOR = 2
 
 # --- commit messages ----------------------------------------------------------
 # Subject must fit; body prose is auto-folded; URLs and allowed trailers are
-# exempt. Co-Authored-By is rejected.
+# exempt. ``None`` keeps the legacy policy: any Git trailer is allowed except
+# Co-Authored-By. Repos may configure a finite allowed-trailer set.
 COMMIT_MESSAGE_WRAP_LIMIT = 100
+COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS: tuple[str, ...] | None = None
 
 # --- repo-truth docs ------------------------------------------------------------
 # Doctrine documents ride in every agent's context, so they are capped hard.
@@ -94,9 +96,10 @@ ENV_POLICY_SELF_PATH_SUFFIX = "studies/envpolicy.py"
 # literal names), and the access idiom differs per language, so
 # matchers are scoped by suffix family: a shell `$VAR` pattern must never run
 # against `.cs`/`.js`. Built-in defaults below cover the standard idioms; a repo
-# registers its own or additional idioms per family with
-# `[tool.spice.policy] env_access_patterns` (e.g. a project's bespoke Lua
-# runtime accessors), never having to fork the study.
+# overrides or adds families through
+# `[tool.spice.policy.env_access.default_patterns]` and
+# `[tool.spice.policy.env_access.family_suffixes]`, never having to fork the
+# study.
 ENV_ACCESS_FAMILY_SUFFIXES = {
     "python": (".py",),
     "csharp": (".cs",),
