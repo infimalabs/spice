@@ -438,7 +438,7 @@ def test_briefing_dirty_git_posture_includes_policy_pressure_and_ages(
     monkeypatch.setattr(
         briefing_module,
         "_scan_dirty_complexity_pressure",
-        lambda paths, *, repo_root: [
+        lambda paths, *, repo_root, suffixes, ccn_threshold, length_threshold: [
             briefing_module.DirtyComplexityRegression(
                 path="oversize.py",
                 function_name="oversized",

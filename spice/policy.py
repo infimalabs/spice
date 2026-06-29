@@ -93,9 +93,10 @@ ENV_POLICY_SELF_PATH_SUFFIX = "studies/envpolicy.py"
 # literal names), and the access idiom differs per language, so
 # matchers are scoped by suffix family: a shell `$VAR` pattern must never run
 # against `.cs`/`.js`. Built-in defaults below cover the standard idioms; a repo
-# registers its own or additional idioms per family with
-# `[tool.spice.policy] env_access_patterns` (e.g. a project's bespoke Lua
-# runtime accessors), never having to fork the study.
+# overrides or adds families through
+# `[tool.spice.policy.env_access.default_patterns]` and
+# `[tool.spice.policy.env_access.family_suffixes]`, never having to fork the
+# study.
 ENV_ACCESS_FAMILY_SUFFIXES = {
     "python": (".py",),
     "csharp": (".cs",),

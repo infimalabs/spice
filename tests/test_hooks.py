@@ -755,11 +755,37 @@ def test_complexity_guard_reads_configured_bounds(tmp_path, monkeypatch):
     monkeypatch.setattr(
         precommit.complexity,
         "collect_complexity_records",
-        lambda _paths, *, root: [record],
+        lambda _paths, *, root, suffixes: [record],
     )
 
     with pytest.raises(SpiceError, match="ccn 3 > 2"):
         precommit._run_complexity_guard(repo, [Path("src/app.py")])
+
+
+def test_complexity_guard_reads_configured_language_scope(tmp_path, monkeypatch):
+    repo = _git_init(tmp_path / "repo")
+    _write_repo_file(
+        repo,
+        "pyproject.toml",
+        '[tool.spice.policy.languages]\ncomplexity = [".toy"]\n',
+    )
+    _write_repo_file(repo, "src/app.toy", "function run() {}\n")
+    _git(repo, "add", ".")
+    captured: dict[str, tuple[str, ...]] = {}
+
+    def collect_records(
+        _paths: list[Path], *, root: Path, suffixes: tuple[str, ...]
+    ) -> list[precommit.complexity.ComplexityRecord]:
+        captured["suffixes"] = suffixes
+        return []
+
+    monkeypatch.setattr(
+        precommit.complexity, "collect_complexity_records", collect_records
+    )
+
+    precommit._run_complexity_guard(repo, [Path("src/app.toy")])
+
+    assert captured == {"suffixes": (".toy",)}
 
 
 def test_policy_exclude_filters_renames_but_not_partially_staged_guard(tmp_path):

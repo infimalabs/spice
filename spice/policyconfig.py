@@ -259,22 +259,28 @@ def _lockfiles(raw_policy: Mapping[str, object]) -> PolicyLockfiles:
 
 def _env_access(raw_policy: Mapping[str, object]) -> PolicyEnvAccess:
     table = _subtable(raw_policy, "env_access")
+    family_suffixes = _string_tuple_map(
+        _nested_subtable(table, "family_suffixes", "[tool.spice.policy.env_access]"),
+        policy.ENV_ACCESS_FAMILY_SUFFIXES,
+        "[tool.spice.policy.env_access.family_suffixes]",
+        suffixes=True,
+    )
+    default_patterns = _string_tuple_map(
+        _nested_subtable(table, "default_patterns", "[tool.spice.policy.env_access]"),
+        policy.ENV_ACCESS_DEFAULT_PATTERNS,
+        "[tool.spice.policy.env_access.default_patterns]",
+    )
+    unknown_pattern_families = sorted(set(default_patterns) - set(family_suffixes))
+    if unknown_pattern_families:
+        listed = ", ".join(unknown_pattern_families)
+        raise SpiceError(
+            "[tool.spice.policy.env_access.default_patterns] unknown family "
+            f"{listed}; declare suffixes in "
+            "[tool.spice.policy.env_access.family_suffixes]"
+        )
     return PolicyEnvAccess(
-        family_suffixes=_string_tuple_map(
-            _nested_subtable(
-                table, "family_suffixes", "[tool.spice.policy.env_access]"
-            ),
-            policy.ENV_ACCESS_FAMILY_SUFFIXES,
-            "[tool.spice.policy.env_access.family_suffixes]",
-            suffixes=True,
-        ),
-        default_patterns=_string_tuple_map(
-            _nested_subtable(
-                table, "default_patterns", "[tool.spice.policy.env_access]"
-            ),
-            policy.ENV_ACCESS_DEFAULT_PATTERNS,
-            "[tool.spice.policy.env_access.default_patterns]",
-        ),
+        family_suffixes=family_suffixes,
+        default_patterns=default_patterns,
     )
 
 
