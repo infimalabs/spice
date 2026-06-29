@@ -271,7 +271,7 @@ def test_complexity_guard_applies_scoped_bounds_and_sticky(tmp_path, monkeypatch
     monkeypatch.setattr(
         precommit.complexity,
         "collect_complexity_records",
-        lambda _paths, *, root: [record],
+        lambda _paths, *, root, suffixes: [record],
     )
 
     with pytest.raises(

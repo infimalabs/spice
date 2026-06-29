@@ -9,6 +9,7 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
+from spice.policyconfig import resolve_policy
 
 COMMIT_MESSAGE_COMMENT_PREFIX = "#"
 COMMIT_MESSAGE_SCISSORS_MARKER = ">8"
@@ -74,6 +75,7 @@ def validate_commit_message_text(
     message_text: str,
     *,
     wrap_limit: int = COMMIT_MESSAGE_WRAP_LIMIT,
+    allowed_trailers: frozenset[str] | None = None,
 ) -> None:
     lines = _commit_message_policy_lines(message_text)
     if not lines or not lines[0][1].strip():
@@ -88,10 +90,19 @@ def validate_commit_message_text(
 
     for line_number, line in lines[1:]:
         key = _commit_message_trailer_key(line)
+        if key is None:
+            continue
         if key in FORBIDDEN_COMMIT_MESSAGE_TRAILER_KEYS:
             failures.append(
                 f"line {line_number} uses forbidden trailer Co-Authored-By; "
                 "commit messages must not add co-authors"
+            )
+            continue
+        if allowed_trailers is not None and key not in allowed_trailers:
+            allowed = ", ".join(sorted(allowed_trailers)) or "none"
+            failures.append(
+                f"line {line_number} uses disallowed trailer {key}; "
+                f"allowed trailers: {allowed}"
             )
 
     subject_line_number, subject = lines[0]
@@ -166,16 +177,21 @@ def _fold_body_line(line: str, *, wrap_limit: int) -> list[str]:
     return wrapped or [line]
 
 
-def handle_commit_msg(message_file: str) -> int:
+def handle_commit_msg(message_file: str, repo_root: Path) -> int:
+    policy = resolve_policy(repo_root).commit_message
     path = Path(message_file)
     message_text = path.read_text(encoding="utf-8")
-    folded_text = fold_commit_message_text(message_text)
+    folded_text = fold_commit_message_text(message_text, wrap_limit=policy.wrap_limit)
     if folded_text != message_text:
         path.write_text(folded_text, encoding="utf-8")
         print(
             "spice commit-msg: auto-folded commit message body lines; "
-            f"keep body prose wrapped at {COMMIT_MESSAGE_WRAP_LIMIT} chars",
+            f"keep body prose wrapped at {policy.wrap_limit} chars",
             file=sys.stderr,
         )
-    validate_commit_message_text(folded_text)
+    validate_commit_message_text(
+        folded_text,
+        wrap_limit=policy.wrap_limit,
+        allowed_trailers=policy.allowed_trailers,
+    )
     return 0

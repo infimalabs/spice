@@ -45,7 +45,9 @@ def test_complexity_reporting_scan_does_not_persist_sticky(tmp_path, monkeypatch
         path="big.py", function_name="f", ccn=1, length=20, nloc=20
     )
     monkeypatch.setattr(
-        complexity, "collect_complexity_records", lambda _paths, *, root: [record]
+        complexity,
+        "collect_complexity_records",
+        lambda _paths, *, root, suffixes: [record],
     )
 
     complexity.scan_staged_complexity_violations(
@@ -63,7 +65,9 @@ def test_complexity_gate_scan_persists_sticky(tmp_path, monkeypatch):
         path="big.py", function_name="f", ccn=1, length=20, nloc=20
     )
     monkeypatch.setattr(
-        complexity, "collect_complexity_records", lambda _paths, *, root: [record]
+        complexity,
+        "collect_complexity_records",
+        lambda _paths, *, root, suffixes: [record],
     )
 
     complexity.scan_staged_complexity_violations(

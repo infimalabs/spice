@@ -117,15 +117,30 @@ def _save_sticky(paths: set[Path], root: Path, git_path: str) -> None:
     )
 
 
-def is_generated_lockfile_path(path: Path) -> bool:
-    return (
-        path.suffix in FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES
-        or path.name in FILE_SHAPE_GENERATED_LOCKFILE_NAMES
-    )
+def is_generated_lockfile_path(
+    path: Path,
+    *,
+    lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
+    lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
+) -> bool:
+    return path.suffix in lockfile_suffixes or path.name in lockfile_names
 
 
-def _drop_generated_lockfile_paths(paths: set[Path]) -> set[Path]:
-    return {path for path in paths if not is_generated_lockfile_path(path)}
+def _drop_generated_lockfile_paths(
+    paths: set[Path],
+    *,
+    lockfile_suffixes: tuple[str, ...],
+    lockfile_names: tuple[str, ...],
+) -> set[Path]:
+    return {
+        path
+        for path in paths
+        if not is_generated_lockfile_path(
+            path,
+            lockfile_suffixes=lockfile_suffixes,
+            lockfile_names=lockfile_names,
+        )
+    }
 
 
 def scan_staged_loc_violations(
@@ -137,6 +152,8 @@ def scan_staged_loc_violations(
     byte_limit: int = FILE_BYTE_LIMIT,
     byte_flex_limit_value: int | None = None,
     bounds_for_path: Callable[[Path], FileShapeBounds] | None = None,
+    lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
+    lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
     persist: bool = False,
 ) -> list[LocFinding]:
     """Scan staged paths against the flex+sticky line/byte limits.
@@ -169,8 +186,16 @@ def scan_staged_loc_violations(
     loaded_byte_sticky = sticky_paths_after_renames(
         _load_sticky(root, FILE_BYTE_STICKY_STATE_GIT_PATH), renames
     )
-    line_sticky = _drop_generated_lockfile_paths(loaded_line_sticky)
-    byte_sticky = _drop_generated_lockfile_paths(loaded_byte_sticky)
+    line_sticky = _drop_generated_lockfile_paths(
+        loaded_line_sticky,
+        lockfile_suffixes=lockfile_suffixes,
+        lockfile_names=lockfile_names,
+    )
+    byte_sticky = _drop_generated_lockfile_paths(
+        loaded_byte_sticky,
+        lockfile_suffixes=lockfile_suffixes,
+        lockfile_names=lockfile_names,
+    )
     updated_line_sticky = _after_breaches(
         paths,
         line_sticky,
@@ -179,6 +204,8 @@ def scan_staged_loc_violations(
         measure=count_file_lines,
         flex_for_path=lambda path: resolve_bounds(path).line_flex_limit,
         unlimited_for_path=lambda path: resolve_bounds(path).line_unlimited,
+        lockfile_suffixes=lockfile_suffixes,
+        lockfile_names=lockfile_names,
     )
     updated_byte_sticky = _after_breaches(
         paths,
@@ -188,6 +215,8 @@ def scan_staged_loc_violations(
         measure=count_file_bytes,
         flex_for_path=lambda path: resolve_bounds(path).byte_flex_limit,
         unlimited_for_path=lambda path: resolve_bounds(path).byte_unlimited,
+        lockfile_suffixes=lockfile_suffixes,
+        lockfile_names=lockfile_names,
     )
     if persist:
         if updated_line_sticky != loaded_line_sticky:
@@ -201,6 +230,8 @@ def scan_staged_loc_violations(
         flex_limit_value=line_flex,
         byte_limit=byte_limit,
         byte_flex_limit_value=byte_flex,
+        lockfile_suffixes=lockfile_suffixes,
+        lockfile_names=lockfile_names,
         sticky_paths=updated_line_sticky,
         byte_sticky_paths=updated_byte_sticky,
         bounds_for_path=bounds_for_path,
@@ -216,9 +247,19 @@ def _after_breaches(
     measure: Callable[[Path], int],
     flex_for_path: Callable[[Path], int] | None = None,
     unlimited_for_path: Callable[[Path], bool] | None = None,
+    lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
+    lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
 ) -> set[Path]:
     return sticky_items_after_flex_breaches(
-        [path for path in paths if not is_generated_lockfile_path(path)],
+        [
+            path
+            for path in paths
+            if not is_generated_lockfile_path(
+                path,
+                lockfile_suffixes=lockfile_suffixes,
+                lockfile_names=lockfile_names,
+            )
+        ],
         sticky,
         key_for_item=lambda path: path,
         is_breach=lambda path: (
@@ -240,6 +281,8 @@ def scan_loc_violations(
     flex_limit_value: int | None = None,
     byte_limit: int = FILE_BYTE_LIMIT,
     byte_flex_limit_value: int | None = None,
+    lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
+    lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
     sticky_paths: set[Path] | None = None,
     byte_sticky_paths: set[Path] | None = None,
     bounds_for_path: Callable[[Path], FileShapeBounds] | None = None,
@@ -261,9 +304,11 @@ def scan_loc_violations(
     sticky_paths = sticky_paths or set()
     byte_sticky_paths = byte_sticky_paths or set()
     for rel_path in paths:
-        if is_generated_lockfile_path(rel_path) or is_excluded_path(
-            rel_path, repo_root=root
-        ):
+        if is_generated_lockfile_path(
+            rel_path,
+            lockfile_suffixes=lockfile_suffixes,
+            lockfile_names=lockfile_names,
+        ) or is_excluded_path(rel_path, repo_root=root):
             continue
         abs_path = root / rel_path
         if not abs_path.exists() or not abs_path.is_file():
@@ -305,6 +350,8 @@ def clear_file_loc_sticky_state(
     limit: int = FILE_LOC_LIMIT,
     byte_limit: int = FILE_BYTE_LIMIT,
     bounds_for_path: Callable[[Path], FileShapeBounds] | None = None,
+    lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
+    lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
 ) -> None:
     _clear_sticky(
         root,
@@ -321,6 +368,8 @@ def clear_file_loc_sticky_state(
             if bounds_for_path is not None
             else None
         ),
+        lockfile_suffixes=lockfile_suffixes,
+        lockfile_names=lockfile_names,
     )
     _clear_sticky(
         root,
@@ -337,6 +386,8 @@ def clear_file_loc_sticky_state(
             if bounds_for_path is not None
             else None
         ),
+        lockfile_suffixes=lockfile_suffixes,
+        lockfile_names=lockfile_names,
     )
 
 
@@ -348,6 +399,8 @@ def _clear_sticky(
     measure: Callable[[Path], int],
     limit_for_path: Callable[[Path], int] | None = None,
     unlimited_for_path: Callable[[Path], bool] | None = None,
+    lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
+    lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
 ) -> None:
     state_path = git_state_path(git_path, root=root)
     if not state_path.exists():
@@ -356,7 +409,11 @@ def _clear_sticky(
     retained = {
         rel_path
         for rel_path in sticky
-        if not is_generated_lockfile_path(rel_path)
+        if not is_generated_lockfile_path(
+            rel_path,
+            lockfile_suffixes=lockfile_suffixes,
+            lockfile_names=lockfile_names,
+        )
         and (root / rel_path).exists()
         and not (
             unlimited_for_path(rel_path) if unlimited_for_path is not None else False

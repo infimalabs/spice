@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spice.policy import (
+    C_GRAMMAR_SUFFIXES,
     MAGIC_BASELINE_REF,
     MAGIC_EXAMINE_VALUE_THRESHOLD,
     MAGIC_SUFFIXES,
@@ -28,7 +29,6 @@ from spice.policy import (
 from spice.studies.walk import git_blob_text, is_excluded_path
 
 EXAMINE_PARENT_KINDS = frozenset({"default_arg", "compare", "slice"})
-SCANNED_SUFFIXES = MAGIC_SUFFIXES
 
 _ALL_CAPS_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _C_COMMENT_RE = re.compile(r"//.*$|/\*.*?\*/", re.DOTALL)
@@ -57,10 +57,12 @@ def scan_paths_magic_numbers(
     *,
     root: Path,
     examine_threshold: int = MAGIC_EXAMINE_VALUE_THRESHOLD,
+    suffixes: tuple[str, ...] = MAGIC_SUFFIXES,
+    c_grammar_suffixes: tuple[str, ...] = C_GRAMMAR_SUFFIXES,
 ) -> list[MagicFinding]:
     findings: list[MagicFinding] = []
     for rel_path in paths:
-        if rel_path.suffix not in SCANNED_SUFFIXES or is_excluded_path(
+        if rel_path.suffix not in suffixes or is_excluded_path(
             rel_path, repo_root=root
         ):
             continue
@@ -69,7 +71,12 @@ def scan_paths_magic_numbers(
             continue
         text = abs_path.read_text(encoding="utf-8", errors="replace")
         findings.extend(
-            scan_text_magic_numbers(rel_path, text, examine_threshold=examine_threshold)
+            scan_text_magic_numbers(
+                rel_path,
+                text,
+                examine_threshold=examine_threshold,
+                c_grammar_suffixes=c_grammar_suffixes,
+            )
         )
     return findings
 
@@ -79,9 +86,12 @@ def scan_text_magic_numbers(
     text: str,
     *,
     examine_threshold: int = MAGIC_EXAMINE_VALUE_THRESHOLD,
+    c_grammar_suffixes: tuple[str, ...] = C_GRAMMAR_SUFFIXES,
 ) -> list[MagicFinding]:
     if rel_path.suffix == ".py":
         return _scan_python(rel_path, text, examine_threshold=examine_threshold)
+    if rel_path.suffix not in c_grammar_suffixes:
+        return []
     _parse_tree_sitter_magic_source(rel_path, text)
     return _scan_c_grammar(rel_path, text, examine_threshold=examine_threshold)
 
@@ -231,6 +241,8 @@ def detect_magic_regressions(
     root: Path,
     baseline_ref: str = MAGIC_BASELINE_REF,
     examine_threshold: int = MAGIC_EXAMINE_VALUE_THRESHOLD,
+    suffixes: tuple[str, ...] = MAGIC_SUFFIXES,
+    c_grammar_suffixes: tuple[str, ...] = C_GRAMMAR_SUFFIXES,
 ) -> list[MagicFinding]:
     """Findings in the working copies that are absent from the baseline blobs.
 
@@ -239,7 +251,7 @@ def detect_magic_regressions(
     """
     regressions: list[MagicFinding] = []
     for rel_path in paths:
-        if rel_path.suffix not in SCANNED_SUFFIXES or is_excluded_path(
+        if rel_path.suffix not in suffixes or is_excluded_path(
             rel_path, repo_root=root
         ):
             continue
@@ -250,6 +262,7 @@ def detect_magic_regressions(
             rel_path,
             abs_path.read_text(encoding="utf-8", errors="replace"),
             examine_threshold=examine_threshold,
+            c_grammar_suffixes=c_grammar_suffixes,
         )
         if not current:
             continue
@@ -261,6 +274,7 @@ def detect_magic_regressions(
                     rel_path,
                     baseline_text,
                     examine_threshold=examine_threshold,
+                    c_grammar_suffixes=c_grammar_suffixes,
                 )
             }
             if baseline_text is not None

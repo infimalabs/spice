@@ -30,13 +30,9 @@ from spice.mail.inbox import (
 )
 from spice.paths import repo_root_from_cwd
 from spice.policy import (
-    COMPLEXITY_MAX_CCN,
-    COMPLEXITY_MAX_LENGTH,
-    FILE_BYTE_LIMIT,
-    FILE_LOC_LIMIT,
     MAGIC_BASELINE_REF,
-    flex_limit,
 )
+from spice.policyconfig import resolve_policy
 from spice.sessions import records
 from spice.sessions.meter import (
     ContextMeter,
@@ -424,13 +420,18 @@ def _collect_dirty_pressure_findings(
     file_loc_findings: list[fileloc.LocFinding] = []
     complexity_regressions: list[DirtyComplexityRegression] = []
     magic_regressions: list[magicnums.MagicFinding] = []
+    resolved = resolve_policy(repo_root)
+    file_shape = resolved.file_shape
+    complexity_bounds = resolved.complexity
 
     try:
         file_loc_findings = fileloc.scan_loc_violations(
             relevant_paths,
-            limit=FILE_LOC_LIMIT,
-            byte_limit=FILE_BYTE_LIMIT,
+            limit=file_shape.line_limit,
+            byte_limit=file_shape.byte_limit,
             root=repo_root,
+            lockfile_suffixes=resolved.lockfiles.suffixes,
+            lockfile_names=resolved.lockfiles.names,
         )
     except (OSError, SpiceError) as exc:
         errors.append(_dirty_pressure_error("file-loc", exc))
@@ -439,6 +440,9 @@ def _collect_dirty_pressure_findings(
         complexity_regressions = _scan_dirty_complexity_pressure(
             relevant_paths,
             repo_root=repo_root,
+            suffixes=resolved.languages.complexity,
+            ccn_threshold=complexity_bounds.ccn_flex_limit,
+            length_threshold=complexity_bounds.length_flex_limit,
         )
     except (OSError, SpiceError) as exc:
         errors.append(_dirty_pressure_error("complexity", exc))
@@ -447,7 +451,10 @@ def _collect_dirty_pressure_findings(
         magic_regressions = magicnums.detect_magic_regressions(
             relevant_paths,
             root=repo_root,
-            baseline_ref=MAGIC_BASELINE_REF,
+            baseline_ref=resolved.magic.baseline_ref,
+            examine_threshold=resolved.magic.examine_threshold,
+            suffixes=resolved.languages.magic,
+            c_grammar_suffixes=resolved.languages.c_grammar,
         )
     except (OSError, SpiceError) as exc:
         errors.append(_dirty_pressure_error("magic-numbers", exc))
@@ -456,13 +463,18 @@ def _collect_dirty_pressure_findings(
 
 
 def _scan_dirty_complexity_pressure(
-    paths: list[Path], *, repo_root: Path
+    paths: list[Path],
+    *,
+    repo_root: Path,
+    suffixes: tuple[str, ...],
+    ccn_threshold: int,
+    length_threshold: int,
 ) -> list[DirtyComplexityRegression]:
     current_paths = [path for path in paths if (repo_root / path).exists()]
     if not current_paths:
         return []
     current_records = complexity.collect_complexity_records(
-        current_paths, root=repo_root
+        current_paths, root=repo_root, suffixes=suffixes
     )
     with tempfile.TemporaryDirectory(prefix="spice-complexity-baseline-") as temp_dir:
         temp_root = Path(temp_dir)
@@ -474,8 +486,14 @@ def _scan_dirty_complexity_pressure(
         baseline_records = complexity.collect_complexity_records(
             baseline_paths,
             root=temp_root,
+            suffixes=suffixes,
         )
-    return _detect_dirty_complexity_regressions(current_records, baseline_records)
+    return _detect_dirty_complexity_regressions(
+        current_records,
+        baseline_records,
+        ccn_threshold=ccn_threshold,
+        length_threshold=length_threshold,
+    )
 
 
 def _materialize_complexity_baseline_paths(
@@ -506,35 +524,38 @@ def _materialize_complexity_baseline_paths(
 def _detect_dirty_complexity_regressions(
     current_records: list[complexity.ComplexityRecord],
     baseline_records: list[complexity.ComplexityRecord],
+    *,
+    ccn_threshold: int,
+    length_threshold: int,
 ) -> list[DirtyComplexityRegression]:
     baseline_index = _complexity_record_index(baseline_records)
-    ccn_flex = flex_limit(COMPLEXITY_MAX_CCN)
-    length_flex = flex_limit(COMPLEXITY_MAX_LENGTH)
     regressions: list[DirtyComplexityRegression] = []
     for record in sorted(
         current_records,
         key=lambda item: (item.path, item.function_name),
     ):
         baseline = baseline_index.get(record.key)
-        if record.ccn > ccn_flex and (baseline is None or record.ccn > baseline.ccn):
+        if record.ccn > ccn_threshold and (
+            baseline is None or record.ccn > baseline.ccn
+        ):
             regressions.append(
                 DirtyComplexityRegression(
                     path=record.path,
                     function_name=record.function_name,
                     metric="ccn",
                     value=record.ccn,
-                    active_threshold=ccn_flex,
+                    active_threshold=ccn_threshold,
                     baseline_value=baseline.ccn if baseline is not None else None,
                 )
             )
-        if record.length > length_flex:
+        if record.length > length_threshold:
             regressions.append(
                 DirtyComplexityRegression(
                     path=record.path,
                     function_name=record.function_name,
                     metric="length",
                     value=record.length,
-                    active_threshold=length_flex,
+                    active_threshold=length_threshold,
                     baseline_value=baseline.length if baseline is not None else None,
                 )
             )
