@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from spice.studies import treesitter
 from spice.studies.walk import is_excluded_path
 
 STATUS_CANDIDATE_UNUSED = "candidate-unused"
@@ -116,6 +115,8 @@ def _parse_javascript_files(
     *,
     root: Path,
 ) -> list[_ParsedJavaScriptFile]:
+    from spice.studies import treesitter
+
     parsed_files: list[_ParsedJavaScriptFile] = []
     seen: set[Path] = set()
     for rel_path in sorted(paths):
