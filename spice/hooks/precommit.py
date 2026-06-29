@@ -640,7 +640,8 @@ def _run_local_path_guard(repo_root: Path, paths: list[Path]) -> None:
 
 
 def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
-    bounds = resolve_policy(repo_root).file_shape
+    policy = resolve_policy(repo_root)
+    bounds = policy.file_shape
     findings = fileloc.scan_staged_loc_violations(
         paths,
         root=repo_root,
@@ -648,6 +649,7 @@ def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
         flex_limit_value=bounds.line_flex_limit,
         byte_limit=bounds.byte_limit,
         byte_flex_limit_value=bounds.byte_flex_limit,
+        bounds_for_path=policy.file_shape_for_path,
         persist=True,
     )
     if findings:
@@ -663,7 +665,8 @@ def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
 
 
 def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
-    bounds = resolve_policy(repo_root).complexity
+    policy = resolve_policy(repo_root)
+    bounds = policy.complexity
     findings = complexity.scan_staged_complexity_violations(
         paths,
         root=repo_root,
@@ -671,6 +674,7 @@ def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
         max_length=bounds.max_length,
         ccn_flex_limit_value=bounds.ccn_flex_limit,
         length_flex_limit_value=bounds.length_flex_limit,
+        bounds_for_path=policy.complexity_for_path,
         persist=True,
     )
     if findings:
@@ -805,16 +809,18 @@ def quality_gate_failures_for_tags(repo_root: Path, tags: list[str]) -> list[str
 
 
 def clear_successful_sticky_state(repo_root: Path) -> None:
-    bounds = resolve_policy(repo_root)
-    file_shape = bounds.file_shape
-    routine = bounds.complexity
+    policy = resolve_policy(repo_root)
+    file_shape = policy.file_shape
+    routine = policy.complexity
     fileloc.clear_file_loc_sticky_state(
         root=repo_root,
         limit=file_shape.line_limit,
         byte_limit=file_shape.byte_limit,
+        bounds_for_path=policy.file_shape_for_path,
     )
     complexity.clear_complexity_sticky_state(
         root=repo_root,
         max_ccn=routine.max_ccn,
         max_length=routine.max_length,
+        bounds_for_path=policy.complexity_for_path,
     )

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import cast
 
@@ -69,11 +70,40 @@ class PolicyEnvAccess:
 
 
 @dataclass(frozen=True)
+class ScopeSettings:
+    multiplier: float = 1.0
+    minimum: int | None = None
+    maximum: int | None = None
+    unlimited: bool = False
+    flex_ratio: float | None = None
+
+
+@dataclass(frozen=True)
+class PolicyScope:
+    matcher: str
+    settings_by_bound: Mapping[str, ScopeSettings]
+    specificity: tuple[int, int, int, int]
+
+
+@dataclass(frozen=True)
+class ScopedBound:
+    limit: int
+    flex_limit: int
+    unlimited: bool = False
+
+
+@dataclass(frozen=True)
 class FileShapePolicy:
     line_limit: int
     line_flex_limit: int
     byte_limit: int
     byte_flex_limit: int
+    line_unlimited: bool = False
+    byte_unlimited: bool = False
+
+    @property
+    def unlimited(self) -> bool:
+        return self.line_unlimited and self.byte_unlimited
 
 
 @dataclass(frozen=True)
@@ -82,6 +112,12 @@ class ComplexityPolicy:
     ccn_flex_limit: int
     max_length: int
     length_flex_limit: int
+    ccn_unlimited: bool = False
+    length_unlimited: bool = False
+
+    @property
+    def unlimited(self) -> bool:
+        return self.ccn_unlimited and self.length_unlimited
 
 
 @dataclass(frozen=True)
@@ -93,6 +129,7 @@ class ResolvedPolicy:
     languages: PolicyLanguages
     lockfiles: PolicyLockfiles
     env_access: PolicyEnvAccess
+    scopes: tuple[PolicyScope, ...] = ()
 
     @property
     def file_shape(self) -> FileShapePolicy:
@@ -111,6 +148,61 @@ class ResolvedPolicy:
             max_length=self.limits.routine_length,
             length_flex_limit=self.flex.routine_length,
         )
+
+    def bound_for_path(self, bound: str, base: int, path: Path) -> ScopedBound:
+        scope = self._scope_for_bound(bound, path)
+        if scope is None:
+            return ScopedBound(
+                limit=base,
+                flex_limit=_global_flex_for_bound(self.flex, bound, base),
+            )
+        settings = scope.settings_by_bound[bound]
+        if settings.unlimited or settings.multiplier == 0:
+            return ScopedBound(limit=base, flex_limit=base, unlimited=True)
+        limit = max(1, int(base * settings.multiplier))
+        if settings.minimum is not None:
+            limit = max(limit, settings.minimum)
+        if settings.maximum is not None:
+            limit = min(limit, settings.maximum)
+        flex_ratio = (
+            settings.flex_ratio if settings.flex_ratio is not None else self.flex.ratio
+        )
+        flex_limit = max(limit, int(limit * flex_ratio))
+        return ScopedBound(limit=limit, flex_limit=flex_limit)
+
+    def file_shape_for_path(self, path: Path) -> FileShapePolicy:
+        line = self.bound_for_path("file_loc", self.limits.file_loc, path)
+        byte = self.bound_for_path("file_bytes", self.limits.file_bytes, path)
+        return FileShapePolicy(
+            line_limit=line.limit,
+            line_flex_limit=line.flex_limit,
+            byte_limit=byte.limit,
+            byte_flex_limit=byte.flex_limit,
+            line_unlimited=line.unlimited,
+            byte_unlimited=byte.unlimited,
+        )
+
+    def complexity_for_path(self, path: Path) -> ComplexityPolicy:
+        ccn = self.bound_for_path("routine_ccn", self.limits.routine_ccn, path)
+        length = self.bound_for_path("routine_length", self.limits.routine_length, path)
+        return ComplexityPolicy(
+            max_ccn=ccn.limit,
+            ccn_flex_limit=ccn.flex_limit,
+            max_length=length.limit,
+            length_flex_limit=length.flex_limit,
+            ccn_unlimited=ccn.unlimited,
+            length_unlimited=length.unlimited,
+        )
+
+    def _scope_for_bound(self, bound: str, path: Path) -> PolicyScope | None:
+        matches = [
+            scope
+            for scope in self.scopes
+            if bound in scope.settings_by_bound and _scope_matches(scope.matcher, path)
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda scope: (scope.specificity, scope.matcher))
 
 
 def resolve_policy(repo_root: Path) -> ResolvedPolicy:
@@ -201,7 +293,19 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
         languages=_languages(raw_policy),
         lockfiles=_lockfiles(raw_policy),
         env_access=_env_access(raw_policy),
+        scopes=_scopes(raw_policy),
     )
+
+
+SCOPED_BOUND_KEYS = (
+    "file_loc",
+    "file_bytes",
+    "routine_ccn",
+    "routine_length",
+    "commit_message_wrap",
+    "repo_truth_doc_chars",
+)
+SCOPE_SETTING_KEYS = ("multiplier", "min", "max", "unlimited", "flex")
 
 
 def _languages(raw_policy: Mapping[str, object]) -> PolicyLanguages:
@@ -276,6 +380,181 @@ def _env_access(raw_policy: Mapping[str, object]) -> PolicyEnvAccess:
             "[tool.spice.policy.env_access.default_patterns]",
         ),
     )
+
+
+def _scopes(raw_policy: Mapping[str, object]) -> tuple[PolicyScope, ...]:
+    table = _subtable(raw_policy, "scopes")
+    scopes: list[PolicyScope] = []
+    for raw_matcher, raw_scope in table.items():
+        matcher = str(raw_matcher).strip().replace("\\", "/").removeprefix("./")
+        if not matcher:
+            raise SpiceError("[tool.spice.policy.scopes] scope keys must be non-empty")
+        context = _scope_context(matcher)
+        if not isinstance(raw_scope, dict):
+            raise SpiceError(f"{context} must be a table")
+        settings_by_bound = _scope_settings_by_bound(
+            cast(Mapping[str, object], raw_scope), context
+        )
+        scopes.append(
+            PolicyScope(
+                matcher=matcher,
+                settings_by_bound=settings_by_bound,
+                specificity=_scope_specificity(matcher),
+            )
+        )
+    return tuple(scopes)
+
+
+def _scope_settings_by_bound(
+    table: Mapping[str, object], context: str
+) -> Mapping[str, ScopeSettings]:
+    unknown = sorted(
+        key
+        for key in table
+        if key not in SCOPE_SETTING_KEYS and key not in SCOPED_BOUND_KEYS
+    )
+    if unknown:
+        expected = ", ".join((*SCOPE_SETTING_KEYS, *SCOPED_BOUND_KEYS))
+        listed = ", ".join(unknown)
+        raise SpiceError(f"{context} unknown key(s): {listed}; expected {expected}")
+
+    settings_by_bound: dict[str, ScopeSettings] = {}
+    flat_keys_present = any(key in table for key in SCOPE_SETTING_KEYS)
+    if flat_keys_present:
+        flat_settings = _scope_settings(
+            {key: table[key] for key in SCOPE_SETTING_KEYS if key in table},
+            context,
+        )
+        settings_by_bound.update({bound: flat_settings for bound in SCOPED_BOUND_KEYS})
+
+    for bound in SCOPED_BOUND_KEYS:
+        raw = table.get(bound)
+        if raw is None:
+            continue
+        bound_context = f"{context} {bound}"
+        if not isinstance(raw, dict):
+            raise SpiceError(f"{bound_context} must be a table")
+        settings_by_bound[bound] = _scope_settings(
+            cast(Mapping[str, object], raw), bound_context
+        )
+    return settings_by_bound
+
+
+def _scope_settings(table: Mapping[str, object], context: str) -> ScopeSettings:
+    unknown = sorted(key for key in table if key not in SCOPE_SETTING_KEYS)
+    if unknown:
+        listed = ", ".join(unknown)
+        expected = ", ".join(SCOPE_SETTING_KEYS)
+        raise SpiceError(f"{context} unknown key(s): {listed}; expected {expected}")
+    minimum = _optional_positive_int(table, "min", context)
+    maximum = _optional_positive_int(table, "max", context)
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise SpiceError(f"{context} min must be <= max")
+    return ScopeSettings(
+        multiplier=_scope_multiplier(table, context),
+        minimum=minimum,
+        maximum=maximum,
+        unlimited=_scope_unlimited(table, context),
+        flex_ratio=_optional_ratio(table, "flex", context),
+    )
+
+
+def _optional_positive_int(
+    table: Mapping[str, object], key: str, context: str
+) -> int | None:
+    raw = table.get(key)
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise SpiceError(f"{context} {key} must be a positive integer")
+    if raw <= 0:
+        raise SpiceError(f"{context} {key} must be a positive integer")
+    return raw
+
+
+def _scope_multiplier(table: Mapping[str, object], context: str) -> float:
+    raw = table.get("multiplier", 1.0)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise SpiceError(f"{context} multiplier must be a number >= 0.0")
+    value = float(raw)
+    if value < 0.0:
+        raise SpiceError(f"{context} multiplier must be a number >= 0.0")
+    return value
+
+
+def _scope_unlimited(table: Mapping[str, object], context: str) -> bool:
+    raw = table.get("unlimited", False)
+    if not isinstance(raw, bool):
+        raise SpiceError(f"{context} unlimited must be true or false")
+    return raw
+
+
+def _optional_ratio(
+    table: Mapping[str, object], key: str, context: str
+) -> float | None:
+    raw = table.get(key)
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise SpiceError(f"{context} {key} must be a number >= 1.0")
+    value = float(raw)
+    if value < 1.0:
+        raise SpiceError(f"{context} {key} must be a number >= 1.0")
+    return value
+
+
+def _global_flex_for_bound(flex: PolicyFlex, bound: str, base: int) -> int:
+    match bound:
+        case "file_loc":
+            return flex.file_loc
+        case "file_bytes":
+            return flex.file_bytes
+        case "routine_ccn":
+            return flex.routine_ccn
+        case "routine_length":
+            return flex.routine_length
+        case _:
+            return int(base * flex.ratio)
+
+
+def _scope_matches(matcher: str, path: Path) -> bool:
+    normalized_path = path.as_posix().replace("\\", "/").removeprefix("./")
+    if _has_glob(matcher):
+        return any(
+            fnmatchcase(normalized_path, variant)
+            for variant in _glob_zero_directory_variants(matcher)
+        )
+    return normalized_path == matcher or normalized_path.startswith(matcher + "/")
+
+
+def _glob_zero_directory_variants(matcher: str) -> tuple[str, ...]:
+    variants = [matcher]
+    index = 0
+    while index < len(variants):
+        current = variants[index]
+        index += 1
+        marker = "/**/"
+        if marker not in current:
+            continue
+        shortened = current.replace(marker, "/", 1)
+        if shortened not in variants:
+            variants.append(shortened)
+    return tuple(variants)
+
+
+def _scope_specificity(matcher: str) -> tuple[int, int, int, int]:
+    exactish = 0 if _has_glob(matcher) else 1
+    literal_chars = sum(1 for char in matcher if char not in "*?[]!")
+    segments = len([segment for segment in matcher.split("/") if segment])
+    return (exactish, literal_chars, segments, len(matcher))
+
+
+def _has_glob(value: str) -> bool:
+    return any(char in value for char in "*?[")
+
+
+def _scope_context(matcher: str) -> str:
+    return f'[tool.spice.policy.scopes."{matcher}"]'
 
 
 def _subtable(raw_policy: Mapping[str, object], key: str) -> Mapping[str, object]:

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 
 from spice.flexstate import (
     flex_limit,
@@ -47,6 +47,36 @@ class LocFinding:
     over_byte_limit: bool
     line_limit: int
     byte_limit: int
+
+
+class FileShapeBounds(Protocol):
+    @property
+    def line_limit(self) -> int: ...
+
+    @property
+    def line_flex_limit(self) -> int: ...
+
+    @property
+    def byte_limit(self) -> int: ...
+
+    @property
+    def byte_flex_limit(self) -> int: ...
+
+    @property
+    def line_unlimited(self) -> bool: ...
+
+    @property
+    def byte_unlimited(self) -> bool: ...
+
+
+@dataclass(frozen=True)
+class _DefaultFileShapeBounds:
+    line_limit: int
+    line_flex_limit: int
+    byte_limit: int
+    byte_flex_limit: int
+    line_unlimited: bool = False
+    byte_unlimited: bool = False
 
 
 def count_file_lines(path: Path) -> int:
@@ -106,6 +136,7 @@ def scan_staged_loc_violations(
     flex_limit_value: int | None = None,
     byte_limit: int = FILE_BYTE_LIMIT,
     byte_flex_limit_value: int | None = None,
+    bounds_for_path: Callable[[Path], FileShapeBounds] | None = None,
     persist: bool = False,
 ) -> list[LocFinding]:
     """Scan staged paths against the flex+sticky line/byte limits.
@@ -124,6 +155,13 @@ def scan_staged_loc_violations(
         if byte_flex_limit_value is not None
         else flex_limit(byte_limit)
     )
+    default_bounds = _DefaultFileShapeBounds(
+        line_limit=limit,
+        line_flex_limit=line_flex,
+        byte_limit=byte_limit,
+        byte_flex_limit=byte_flex,
+    )
+    resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
     renames = staged_renames(root)
     loaded_line_sticky = sticky_paths_after_renames(
         _load_sticky(root, FILE_LOC_STICKY_STATE_GIT_PATH), renames
@@ -134,7 +172,13 @@ def scan_staged_loc_violations(
     line_sticky = _drop_generated_lockfile_paths(loaded_line_sticky)
     byte_sticky = _drop_generated_lockfile_paths(loaded_byte_sticky)
     updated_line_sticky = _after_breaches(
-        paths, line_sticky, root=root, flex=line_flex, measure=count_file_lines
+        paths,
+        line_sticky,
+        root=root,
+        flex=line_flex,
+        measure=count_file_lines,
+        flex_for_path=lambda path: resolve_bounds(path).line_flex_limit,
+        unlimited_for_path=lambda path: resolve_bounds(path).line_unlimited,
     )
     updated_byte_sticky = _after_breaches(
         paths,
@@ -142,6 +186,8 @@ def scan_staged_loc_violations(
         root=root,
         flex=byte_flex,
         measure=count_file_bytes,
+        flex_for_path=lambda path: resolve_bounds(path).byte_flex_limit,
+        unlimited_for_path=lambda path: resolve_bounds(path).byte_unlimited,
     )
     if persist:
         if updated_line_sticky != loaded_line_sticky:
@@ -157,6 +203,7 @@ def scan_staged_loc_violations(
         byte_flex_limit_value=byte_flex,
         sticky_paths=updated_line_sticky,
         byte_sticky_paths=updated_byte_sticky,
+        bounds_for_path=bounds_for_path,
     )
 
 
@@ -167,12 +214,21 @@ def _after_breaches(
     root: Path,
     flex: int,
     measure: Callable[[Path], int],
+    flex_for_path: Callable[[Path], int] | None = None,
+    unlimited_for_path: Callable[[Path], bool] | None = None,
 ) -> set[Path]:
     return sticky_items_after_flex_breaches(
         [path for path in paths if not is_generated_lockfile_path(path)],
         sticky,
         key_for_item=lambda path: path,
-        is_breach=lambda path: (root / path).exists() and measure(root / path) > flex,
+        is_breach=lambda path: (
+            (root / path).exists()
+            and not (
+                unlimited_for_path(path) if unlimited_for_path is not None else False
+            )
+            and measure(root / path)
+            > (flex_for_path(path) if flex_for_path is not None else flex)
+        ),
     )
 
 
@@ -186,6 +242,7 @@ def scan_loc_violations(
     byte_flex_limit_value: int | None = None,
     sticky_paths: set[Path] | None = None,
     byte_sticky_paths: set[Path] | None = None,
+    bounds_for_path: Callable[[Path], FileShapeBounds] | None = None,
 ) -> list[LocFinding]:
     findings: list[LocFinding] = []
     line_flex = flex_limit_value if flex_limit_value is not None else flex_limit(limit)
@@ -194,6 +251,13 @@ def scan_loc_violations(
         if byte_flex_limit_value is not None
         else flex_limit(byte_limit)
     )
+    default_bounds = _DefaultFileShapeBounds(
+        line_limit=limit,
+        line_flex_limit=line_flex,
+        byte_limit=byte_limit,
+        byte_flex_limit=byte_flex,
+    )
+    resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
     sticky_paths = sticky_paths or set()
     byte_sticky_paths = byte_sticky_paths or set()
     for rel_path in paths:
@@ -204,12 +268,21 @@ def scan_loc_violations(
         abs_path = root / rel_path
         if not abs_path.exists() or not abs_path.is_file():
             continue
-        active_line_limit = limit if rel_path in sticky_paths else line_flex
-        active_byte_limit = byte_limit if rel_path in byte_sticky_paths else byte_flex
+        bounds = resolve_bounds(rel_path)
+        if bounds.line_unlimited and bounds.byte_unlimited:
+            continue
+        active_line_limit = (
+            bounds.line_limit if rel_path in sticky_paths else bounds.line_flex_limit
+        )
+        active_byte_limit = (
+            bounds.byte_limit
+            if rel_path in byte_sticky_paths
+            else bounds.byte_flex_limit
+        )
         line_count = count_file_lines(abs_path)
         byte_count = count_file_bytes(abs_path)
-        over_lines = line_count > active_line_limit
-        over_bytes = byte_count > active_byte_limit
+        over_lines = False if bounds.line_unlimited else line_count > active_line_limit
+        over_bytes = False if bounds.byte_unlimited else byte_count > active_byte_limit
         if not (over_lines or over_bytes):
             continue
         findings.append(
@@ -227,21 +300,54 @@ def scan_loc_violations(
 
 
 def clear_file_loc_sticky_state(
-    *, root: Path, limit: int = FILE_LOC_LIMIT, byte_limit: int = FILE_BYTE_LIMIT
+    *,
+    root: Path,
+    limit: int = FILE_LOC_LIMIT,
+    byte_limit: int = FILE_BYTE_LIMIT,
+    bounds_for_path: Callable[[Path], FileShapeBounds] | None = None,
 ) -> None:
     _clear_sticky(
-        root, FILE_LOC_STICKY_STATE_GIT_PATH, limit=limit, measure=count_file_lines
+        root,
+        FILE_LOC_STICKY_STATE_GIT_PATH,
+        limit=limit,
+        measure=count_file_lines,
+        limit_for_path=(
+            (lambda path: bounds_for_path(path).line_limit)
+            if bounds_for_path is not None
+            else None
+        ),
+        unlimited_for_path=(
+            (lambda path: bounds_for_path(path).line_unlimited)
+            if bounds_for_path is not None
+            else None
+        ),
     )
     _clear_sticky(
         root,
         FILE_BYTE_STICKY_STATE_GIT_PATH,
         limit=byte_limit,
         measure=count_file_bytes,
+        limit_for_path=(
+            (lambda path: bounds_for_path(path).byte_limit)
+            if bounds_for_path is not None
+            else None
+        ),
+        unlimited_for_path=(
+            (lambda path: bounds_for_path(path).byte_unlimited)
+            if bounds_for_path is not None
+            else None
+        ),
     )
 
 
 def _clear_sticky(
-    root: Path, git_path: str, *, limit: int, measure: Callable[[Path], int]
+    root: Path,
+    git_path: str,
+    *,
+    limit: int,
+    measure: Callable[[Path], int],
+    limit_for_path: Callable[[Path], int] | None = None,
+    unlimited_for_path: Callable[[Path], bool] | None = None,
 ) -> None:
     state_path = git_state_path(git_path, root=root)
     if not state_path.exists():
@@ -252,7 +358,11 @@ def _clear_sticky(
         for rel_path in sticky
         if not is_generated_lockfile_path(rel_path)
         and (root / rel_path).exists()
-        and measure(root / rel_path) > limit
+        and not (
+            unlimited_for_path(rel_path) if unlimited_for_path is not None else False
+        )
+        and measure(root / rel_path)
+        > (limit_for_path(rel_path) if limit_for_path is not None else limit)
     }
     if retained:
         _save_sticky(retained, root, git_path)
