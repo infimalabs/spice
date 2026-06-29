@@ -2,8 +2,8 @@
 
 The `spice serve` UI is frameworkless by design: no build step, no generated
 client bundle, and no dependency on a healthy npm tree. These invariants are the
-root contract for keeping that UI maintainable. The implementation-level
-enforcement map lives in [docs/serve/ui-invariants.md](docs/serve/ui-invariants.md).
+foundational contract for keeping that UI maintainable. The implementation-level
+enforcement map lives in [invariants-reference.md](invariants-reference.md).
 
 ## Audio And Speech Playback
 
@@ -51,6 +51,6 @@ lane gaps.
 
 ## Operating Rule
 
-Root invariants should stay short enough to ride in context. Add detailed code
-locations, test names, or browser-race explanations to the serve reference; keep
+These invariants should stay short enough to ride in context. Add detailed code
+locations, test names, or browser-race explanations to the reference; keep
 this file focused on contracts a maintainer must preserve.
