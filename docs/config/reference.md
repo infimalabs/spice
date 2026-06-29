@@ -62,7 +62,7 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 
 | Key | Default | Enforced opinion |
 | --- | --- | --- |
-| `package_roots` | `[]` | Python namespace-package roots. When set, `__init__.py` is forbidden under those roots and path names must match `^_*[0-9a-z]+_*$`. |
+| `package_roots` | packaging metadata, else `[]` | Python namespace-package roots. When set or derived, `__init__.py` is forbidden under those roots and path names must match `^_*[0-9a-z]+_*$`. |
 | `name_cluster_threshold` | `4` | Number of sibling modules sharing a long alphabetic prefix or suffix before the name-cluster guard requires a namespace package. Configured values must be at least `3`. |
 | `exclude` | `[]` | Tracked paths or globs excluded from study walkers, useful for committed generated sources. Built-in exclusions already cover `.git`, `.spice`, caches, venvs, and `node_modules`. |
 | `generated_paths` | `[]` | Tracked paths or globs (e.g. `**/*_pb2.py`, or a directory like `pkg/proto`) exempt from every `repo-shape` guard: naming law, path shape, generic-split names, and namespace `__init__.py`. Unlike `exclude`, this reaches shape guards, not just study walking. |
