@@ -125,6 +125,15 @@ class TeamCommandService:
             requested=bool(payload.get("requested")),
         )
 
+    def _cmd_set_global_fast_mode(
+        self, payload: dict[str, Any], connection: sqlite3.Connection
+    ) -> None:
+        if "fastMode" not in payload:
+            raise SpiceError("fastMode is required")
+        self.store._set_global_fast_mode_enabled_locked(
+            connection, bool(payload.get("fastMode"))
+        )
+
     _COMMANDS = {
         "createTeam": _cmd_create_team,
         "closeTeam": _cmd_close_team,
@@ -137,6 +146,7 @@ class TeamCommandService:
         "reorderTeamAgents": _cmd_reorder_team_agents,
         "updateTeamConfig": _cmd_update_team_config,
         "setAgentRenewalIntent": _cmd_set_agent_renewal_intent,
+        "setGlobalFastMode": _cmd_set_global_fast_mode,
     }
 
 

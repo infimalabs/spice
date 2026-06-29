@@ -185,7 +185,6 @@ function laneMessageQuery(lane) {
     limit: lane.newestMessageKey ? lane.retainedMessageLimit : initialRequestLimit,
     after: lane.newestMessageKey || "",
     threadId: lane.targetThreadId || "",
-    fastMode: currentFastModeEnabled(),
   };
 }
 

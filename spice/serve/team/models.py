@@ -15,6 +15,14 @@ from spice.serve.team.schema import (
 
 
 @dataclass(frozen=True)
+class GlobalSettings:
+    fast_mode: bool = False
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"fastMode": self.fast_mode}
+
+
+@dataclass(frozen=True)
 class TeamTaskFilter:
     project: str
     source: str = TASK_FILTER_SOURCE_MANUAL
@@ -152,10 +160,12 @@ class TeamState:
 class TeamSnapshot:
     global_revision: int
     teams: tuple[TeamState, ...]
+    global_settings: GlobalSettings = field(default_factory=GlobalSettings)
 
     def to_payload(self) -> dict[str, Any]:
         return {
             "globalRevision": self.global_revision,
+            "globalSettings": self.global_settings.to_payload(),
             "teams": [team.to_payload() for team in self.teams],
         }
 

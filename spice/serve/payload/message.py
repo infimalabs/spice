@@ -306,12 +306,11 @@ def _resolve_messages_thread(
     target: WorktreeTarget,
     *,
     expected_thread_id: str | None,
-    fast_mode: bool,
 ) -> _ResolvedMessagesThread:
     explicit_thread_id = canonical_thread_id(expected_thread_id or "")
     thread_id = explicit_thread_id or resolve_thread_id_for_target(state, target) or ""
     thread_id, predecessor_actor, renew_intent, agent_ensure = _ensure_work_tree_agent(
-        state, target, thread_id, fast_mode=fast_mode
+        state, target, thread_id
     )
     pending_identity = pending_inbox_identity_payload(target.repo_root)
     pending = int(pending_identity["pendingInboxCount"])
@@ -377,11 +376,10 @@ def messages_payload_for_worktree(
     after: str | None = None,
     before: str | None = None,
     expected_thread_id: str | None = None,
-    fast_mode: bool = False,
     append_only: bool = False,
 ) -> dict[str, Any]:
     resolved = _resolve_messages_thread(
-        state, target, expected_thread_id=expected_thread_id, fast_mode=fast_mode
+        state, target, expected_thread_id=expected_thread_id
     )
     messages = _read_thread_messages(
         state,

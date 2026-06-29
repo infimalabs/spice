@@ -249,6 +249,7 @@ function applyTeamSnapshotPayload(payload, options = {}) {
   const changed = payload.changed !== false || options.force;
   teamSnapshotRevision = revision;
   if (!changed) return;
+  applyGlobalSettingsPayload((payload.snapshot || {}).globalSettings);
   const openBefore = laneStateTargetIds();
   const teams = (payload.snapshot || {}).teams || [];
   const canCloseEmptyTeam = teams.length > 1;

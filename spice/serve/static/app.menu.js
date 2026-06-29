@@ -170,7 +170,11 @@ function renderSpiceMenuActions() {
       label: "Fast mode",
       detail: fastModeActive ? "on" : "off",
       pressed: fastModeActive,
-      onClick: () => setFastModeEnabled(!currentFastModeEnabled()),
+      onClick: () => {
+        setFastModeEnabled(!currentFastModeEnabled()).catch(() => {
+          setGlobalTransientError("fast mode update failed");
+        });
+      },
     }),
   );
   section.append(heading, actions);
@@ -383,13 +387,10 @@ function spiceMenuTeamDetail(group) {
   return "open any member; " + count + " agents open together";
 }
 
-function setFastModeEnabled(enabled) {
-  fastModeEnabled = Boolean(enabled);
-  persistFastModeEnabled(fastModeEnabled);
-  syncFastModeButtonState();
-  renderSpiceMenu();
-  configureLiveBusLanes();
-  setGlobalTransientStatus(fastModeEnabled ? "fast mode on" : "fast mode off");
+async function setFastModeEnabled(enabled) {
+  const next = Boolean(enabled);
+  await requestTeamCommand(teamCommandPayload("setGlobalFastMode", { fastMode: next }));
+  setGlobalTransientStatus(next ? "fast mode on" : "fast mode off");
 }
 
 function syncFastModeButtonState() {

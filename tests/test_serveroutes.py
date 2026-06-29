@@ -36,6 +36,7 @@ from spice.serve.workroutes import (
     work_tree_send_accepted_response_payload,
     work_tree_task_drain_response_payload,
 )
+from spice.serve.worktree.target import WorktreeTarget
 from tests.test_servehelpers import (
     ACTOR_A,
     ACTOR_B,
@@ -102,7 +103,6 @@ def test_work_tree_send_accepted_response_does_not_ensure_synchronously(
         target,
         {
             "text": "> > quoted context\n> > with newline\n\nwake this lane",
-            "fastMode": True,
             "attachments": [
                 {
                     "name": "paste.png",
@@ -217,11 +217,12 @@ def test_stopped_requested_renewal_starts_successor_and_moves_team_membership(
         return {"ok": True, "threadId": THREAD_B}, HTTPStatus.OK
 
     monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+    state.team_store.set_global_fast_mode_enabled(True)
 
     payload, status = work_tree_send_response_payload(
         state,
         target,
-        {"text": "continue from handoff", "fastMode": True},
+        {"text": "continue from handoff"},
     )
 
     body = inbox_request_body(collect_inbox_items(repo)[0].text)
@@ -377,6 +378,63 @@ def test_messages_refresh_wakes_stopped_agent_for_cli_written_inbox(
     assert payload["agentEnsure"]["threadId"] == THREAD_A
     assert ensure_calls == [{"target": target, "fast_mode": False, "force_new": False}]
     assert state.pending_agent_ensure_attempts[target.id] > 0
+
+
+def test_global_fast_mode_command_drives_two_lane_agent_ensure(tmp_path, monkeypatch):
+    root_a = tmp_path / "lane-a"
+    root_b = tmp_path / "lane-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    repo_a = _repo(root_a)
+    repo_b = _repo(root_b)
+    target_a = WorktreeTarget(
+        id="target-a", repo_root=repo_a, name=repo_a.name, branch="main"
+    )
+    target_b = WorktreeTarget(
+        id="target-b", repo_root=repo_b, name=repo_b.name, branch="main"
+    )
+    state = _serve_state(tmp_path, target_a)
+    state.cached_targets = [target_a, target_b]
+    _patch_agent_status(monkeypatch, thread_id="", running=False)
+    write_inbox_item(
+        repo_a,
+        "20260101T000000000001Z.txt",
+        compose_inbox_text(body="lane a", priority=None, stop=False),
+    )
+    write_inbox_item(
+        repo_b,
+        "20260101T000000000002Z.txt",
+        compose_inbox_text(body="lane b", priority=None, stop=False),
+    )
+    ensure_calls: list[dict[str, object]] = []
+
+    def fake_ensure(ensured_target, **kwargs):
+        ensure_calls.append({"target": ensured_target.id, **kwargs})
+        thread_id = THREAD_A if ensured_target.id == target_a.id else THREAD_B
+        return {"ok": True, "threadId": thread_id}, HTTPStatus.OK
+
+    monkeypatch.setattr(agentapi, "agent_ensure_response_payload", fake_ensure)
+
+    command_payload, command_status = team_command_response_payload(
+        state,
+        {
+            "command": "setGlobalFastMode",
+            "expectedRevision": state.team_store.global_revision(),
+            "fastMode": True,
+        },
+    )
+    payload_a = message.messages_payload_for_worktree(state, target_a, limit=5)
+    payload_b = message.messages_payload_for_worktree(state, target_b, limit=5)
+
+    assert command_status == HTTPStatus.OK
+    assert command_payload["snapshot"]["globalSettings"] == {"fastMode": True}
+    assert state.team_store.global_fast_mode_enabled() is True
+    assert payload_a["agentEnsure"]["threadId"] == THREAD_A
+    assert payload_b["agentEnsure"]["threadId"] == THREAD_B
+    assert ensure_calls == [
+        {"target": target_a.id, "fast_mode": True, "force_new": False},
+        {"target": target_b.id, "fast_mode": True, "force_new": False},
+    ]
 
 
 def test_pending_inbox_deadletters_after_credit_failure(tmp_path, monkeypatch):

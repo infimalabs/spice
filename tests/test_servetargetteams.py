@@ -102,6 +102,7 @@ def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
         {
             "target": target,
             "attempt_cache": state.pending_agent_ensure_attempts,
+            "fast_mode": False,
             "force_new": True,
         }
     ]

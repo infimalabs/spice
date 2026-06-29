@@ -24,7 +24,6 @@ LIFETIME_LABELS = ("Steer", "Drive", "Drain")
 class _WorkTreeSendRequest:
     text: str
     drive_agent: bool
-    fast_mode: bool
     no_say: bool
     attachments: Any
 
@@ -52,7 +51,6 @@ def _validate_work_tree_send_request(
         _WorkTreeSendRequest(
             text=text,
             drive_agent=lifetime in {"Drive", "Drain"},
-            fast_mode=bool(payload.get("fastMode")),
             no_say=bool(payload.get("noSay")),
             attachments=payload.get("attachments"),
         ),
@@ -125,7 +123,6 @@ def _work_tree_send_response_payload(
         state,
         target,
         sent,
-        fast_mode=request.fast_mode,
         force_new=force_new,
         renew_intent=renew_intent,
         predecessor=predecessor,
@@ -176,7 +173,6 @@ def _work_tree_send_result_payload(
     target: WorktreeTarget,
     sent: Any,
     *,
-    fast_mode: bool,
     force_new: bool,
     renew_intent: bool,
     predecessor: str,
@@ -200,7 +196,7 @@ def _work_tree_send_result_payload(
         sent,
         state=state,
         target=target,
-        fast_mode=fast_mode,
+        fast_mode=bool(state.team_store.global_fast_mode_enabled()),
         force_new=force_new,
     )
     agent_ensure = response_payload.get("agentEnsure")

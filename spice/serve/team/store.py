@@ -51,6 +51,7 @@ from spice.serve.team.metrics import (
     TeamMetricStoreMixin,
 )
 from spice.serve.team.models import (
+    GlobalSettings,
     TeamAgentIdentity as TeamAgentIdentity,
     TeamConfig as TeamConfig,
     TeamMember,
@@ -89,6 +90,8 @@ ZERO_ACTIVITY_EVENT_KINDS = frozenset(
     }
 )
 PRUNE_EVENT_TEAM_ID = "__system__"
+GLOBAL_SETTINGS_EVENT_TEAM_ID = "__global_settings__"
+GLOBAL_FAST_MODE_KEY = "fast_mode"
 
 
 def team_database_path() -> Path:
@@ -174,6 +177,45 @@ class ServeTeamStore(
         # metric churn), so a real team event surfaces in the UI without waking
         # readers before the transaction is visible.
         self._task_event_wake_connection_ids.add(id(connection))
+        return revision
+
+    def global_fast_mode_enabled(self) -> bool:
+        with self.connect() as connection:
+            return self._global_settings_locked(connection).fast_mode
+
+    def set_global_fast_mode_enabled(self, enabled: bool) -> int:
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            return self._set_global_fast_mode_enabled_locked(connection, enabled)
+
+    def _global_settings_locked(self, connection: sqlite3.Connection) -> GlobalSettings:
+        row = connection.execute(
+            "SELECT value FROM global_settings WHERE key = ?",
+            (GLOBAL_FAST_MODE_KEY,),
+        ).fetchone()
+        value = row["value"] if row is not None else ""
+        return GlobalSettings(fast_mode=_settings_bool(value))
+
+    def _set_global_fast_mode_enabled_locked(
+        self, connection: sqlite3.Connection, enabled: bool
+    ) -> int:
+        current = self._global_settings_locked(connection)
+        if current.fast_mode == enabled:
+            return self._current_revision_locked(connection)
+        revision = self._record_event(
+            connection,
+            "setGlobalFastMode",
+            GLOBAL_SETTINGS_EVENT_TEAM_ID,
+            {"fastMode": enabled},
+        )
+        connection.execute(
+            "INSERT INTO global_settings (key, value, updated_at, revision) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET "
+            "value = excluded.value, updated_at = excluded.updated_at, "
+            "revision = excluded.revision",
+            (GLOBAL_FAST_MODE_KEY, json.dumps(enabled), time.time(), revision),
+        )
         return revision
 
     def _current_revision_locked(self, connection: sqlite3.Connection) -> int:
@@ -725,7 +767,11 @@ class ServeTeamStore(
         teams = tuple(
             self._team_state_locked(connection, row["team_id"]) for row in rows
         )
-        return TeamSnapshot(global_revision=global_revision, teams=teams)
+        return TeamSnapshot(
+            global_revision=global_revision,
+            teams=teams,
+            global_settings=self._global_settings_locked(connection),
+        )
 
     def _ensure_open_team_locked(
         self, connection: sqlite3.Connection
@@ -878,6 +924,18 @@ def _team_subgroup_agent_ids(raw: object) -> tuple[str, ...]:
 
 def _json_source(raw: object) -> str | bytes | bytearray:
     return raw if isinstance(raw, str | bytes | bytearray) else ""
+
+
+def _settings_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return False
+    return parsed is True
 
 
 from spice.serve.team.commands import (  # noqa: E402

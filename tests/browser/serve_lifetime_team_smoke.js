@@ -72,7 +72,10 @@ async function run() {
             {
               revision: 1,
               changed: true,
-              snapshot: { teams: [team("Drive", 1)] },
+              snapshot: {
+                globalSettings: { fastMode: false },
+                teams: [team("Drive", 1)],
+              },
             },
             { force: true },
           );

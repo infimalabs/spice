@@ -70,11 +70,12 @@ def test_stopped_pending_renewal_starts_successor_and_moves_team_membership(
     monkeypatch.setattr(
         state.team_store, "record_directive_sent", observe_directive_sent
     )
+    state.team_store.set_global_fast_mode_enabled(True)
 
     payload, status = work_tree_send_response_payload(
         state,
         target,
-        {"text": "continue from pending handoff", "fastMode": True},
+        {"text": "continue from pending handoff"},
     )
 
     body = inbox_request_body(collect_inbox_items(repo)[0].text)
