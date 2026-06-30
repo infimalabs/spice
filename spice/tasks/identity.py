@@ -1,6 +1,6 @@
 """Identity: the ``incepted`` stamp (sole stored id) and the rendered handle.
 
-A handle is ``KEY-INCEPTED``. ``incepted`` is a fixed-width 7-character base62
+A handle is ``KEY-INCEPTED``. ``incepted`` is a fixed-width 8-character base52
 encoding of the inception time in epoch milliseconds, minted via the
 order-preserving codec below — short, yet sortable as a plain string. It is the
 only stored identity. ``KEY`` is derived from the current project's rightmost
@@ -8,9 +8,10 @@ segment and is never stored, so re-homing changes the rendered handle for
 free. Resolution matches on ``incepted``. Human-readable inception time stays
 available from Taskwarrior's ``entry`` field.
 
-The base62 alphabet ``0-9A-Za-z`` is ASCII-monotonic, so a fixed-width,
-zero-padded stamp sorts lexicographically in the same order as the millisecond
-value it encodes.
+The base52 alphabet drops both-case vowels so a stamp can never spell a word.
+The remaining digits-then-consonants run stays ASCII-monotonic, so a
+fixed-width, zero-padded stamp sorts lexicographically in the same order as the
+millisecond value it encodes.
 """
 
 from __future__ import annotations
@@ -22,13 +23,17 @@ from typing import Any
 from spice.errors import SpiceError
 from spice.tasks import tw
 
-ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+# Vowels (both cases) are excluded so a stamp can never spell a word; the
+# remaining digits-then-consonants sequence stays ASCII-monotonic, so a
+# fixed-width zero-padded stamp still sorts chronologically. Base52 is smaller
+# than base62, so the stamp needs one more character to hold epoch ms.
+ALPHABET = "0123456789BCDFGHJKLMNPQRSTVWXYZbcdfghjklmnpqrstvwxyz"
 BASE = len(ALPHABET)
 ZERO = ALPHABET[0]
-STAMP_WIDTH = 7
+STAMP_WIDTH = 8
 MILLIS_PER_SECOND = 1000
 
-INCEPTED_RE = re.compile(rf"^[0-9A-Za-z]{{{STAMP_WIDTH}}}$")
+INCEPTED_RE = re.compile(rf"^[{ALPHABET}]{{{STAMP_WIDTH}}}$")
 _VALUES = {char: index for index, char in enumerate(ALPHABET)}
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
 _KEY_MAX = 7
