@@ -690,6 +690,10 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
             "requestId": "history-1",
         },
     ]
+    # The history read carries the connection's per-client cursor id; assert it
+    # is present, then compare the rest of the kwargs exactly.
+    history_kwargs = next(kw for kind, kw in calls if kind == "messages")
+    assert isinstance(history_kwargs.pop("client_id", None), str)
     assert calls == [
         ("send", {"text": "hello"}),
         ("taskDrain", {"replaceTaskFilters": True}),
