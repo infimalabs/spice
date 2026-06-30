@@ -107,7 +107,7 @@ def _configure_task_read_parsers(actions: Any) -> None:
     show = actions.add_parser(
         "show",
         help="Render a task execution packet.",
-        recovery_examples=("spice task show TASK-20260609T203539640394Z",),
+        recovery_examples=("spice task show TASK-1A2b3C4",),
     )
     show.add_argument("handle")
     show.set_defaults(func=handle)
@@ -122,24 +122,22 @@ def _configure_artifact_parser(actions: Any) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  spice task artifact add TASK-20260609T203539640394Z notes.md "
+            "  spice task artifact add TASK-1A2b3C4 notes.md "
             "--type text/markdown\n"
-            "  spice task artifact list TASK-20260609T203539640394Z\n"
-            "  spice task artifact show TASK-20260609T203539640394Z A1\n"
+            "  spice task artifact list TASK-1A2b3C4\n"
+            "  spice task artifact show TASK-1A2b3C4 A1\n"
             "  spice task artifact prune --older-than 30d --apply"
         ),
         recovery_examples=(
-            "spice task artifact list TASK-20260609T203539640394Z",
-            "spice task artifact show TASK-20260609T203539640394Z A1",
+            "spice task artifact list TASK-1A2b3C4",
+            "spice task artifact show TASK-1A2b3C4 A1",
         ),
     )
     subactions = artifact.add_subparsers(dest="artifact_action", required=True)
     add = subactions.add_parser(
         "add",
         help="Copy a file into the task sidecar artifact store.",
-        recovery_examples=(
-            "spice task artifact add TASK-20260609T203539640394Z notes.md",
-        ),
+        recovery_examples=("spice task artifact add TASK-1A2b3C4 notes.md",),
     )
     add.add_argument("handle")
     add.add_argument("path")
@@ -155,7 +153,7 @@ def _configure_artifact_parser(actions: Any) -> None:
     list_parser = subactions.add_parser(
         "list",
         help="List artifacts attached to a task.",
-        recovery_examples=("spice task artifact list TASK-20260609T203539640394Z",),
+        recovery_examples=("spice task artifact list TASK-1A2b3C4",),
     )
     list_parser.add_argument("handle")
     list_parser.set_defaults(func=handle)
@@ -163,7 +161,7 @@ def _configure_artifact_parser(actions: Any) -> None:
     show = subactions.add_parser(
         "show",
         help="Show a text artifact or print a binary artifact path.",
-        recovery_examples=("spice task artifact show TASK-20260609T203539640394Z A1",),
+        recovery_examples=("spice task artifact show TASK-1A2b3C4 A1",),
     )
     show.add_argument("handle")
     show.add_argument("artifact_id")
@@ -188,9 +186,7 @@ def _configure_task_phase_parsers(actions: Any) -> None:
             "cannot complete while that gate is dirty — the metric is read live, "
             "not asserted in prose."
         ),
-        recovery_examples=(
-            'spice task done TASK-20260609T203539640394Z --validation "tests passed"',
-        ),
+        recovery_examples=('spice task done TASK-1A2b3C4 --validation "tests passed"',),
     )
     done.add_argument("handle")
     done.add_argument("--validation", action="append", default=[])
@@ -211,18 +207,18 @@ def _configure_task_phase_parsers(actions: Any) -> None:
             "or --followup. Reviewers must verify the task description is "
             "current before recording a clean finding.\n\n"
             "Examples:\n"
-            "  spice task review CLI-20260609T203539640394Z "
+            "  spice task review CLI-1A2b3C4 "
             '--finding clean --note "looks good"\n'
-            "  spice task review CLI-20260609T203539640394Z "
+            "  spice task review CLI-1A2b3C4 "
             '--finding changes --then "title=Add coverage | project=task.cli '
             '| description=Why it matters | acceptance=Focused tests cover it"\n'
-            "  spice task review CLI-20260609T203539640394Z "
-            "--finding changes --followup TASK-20260609T203527316867Z"
+            "  spice task review CLI-1A2b3C4 "
+            "--finding changes --followup TASK-5d6E7f8"
         ),
         recovery_examples=(
-            'spice task review TASK-20260609T203539640394Z --finding clean --note "looks good"',
-            'spice task review TASK-20260609T203539640394Z --finding changes --then "title=Add coverage | project=task.cli | acceptance=Focused tests cover it"',
-            "spice task review TASK-20260609T203539640394Z --finding changes --followup TASK-20260609T203527316867Z",
+            'spice task review TASK-1A2b3C4 --finding clean --note "looks good"',
+            'spice task review TASK-1A2b3C4 --finding changes --then "title=Add coverage | project=task.cli | acceptance=Focused tests cover it"',
+            "spice task review TASK-1A2b3C4 --finding changes --followup TASK-5d6E7f8",
         ),
     )
     review.add_argument("handle")
@@ -269,9 +265,7 @@ def _configure_note_parser(actions: Any) -> None:
     note = actions.add_parser(
         "note",
         help="Append a note annotation.",
-        recovery_examples=(
-            'spice task note TASK-20260609T203539640394Z "observed in review"',
-        ),
+        recovery_examples=('spice task note TASK-1A2b3C4 "observed in review"',),
     )
     note.add_argument("handle")
     note.add_argument("text", nargs="?")
@@ -286,14 +280,8 @@ def _configure_depends_parser(actions: Any) -> None:
             "spice task depends [-h] <handle> --after <dependency> [<dependency> ...]"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Example:\n"
-            "  spice task depends CLI-20260609T203539640394Z "
-            "--after SERVE-20260609T203527316867Z"
-        ),
-        recovery_examples=(
-            "spice task depends TASK-20260609T203539640394Z --after SERVE-20260609T203527316867Z",
-        ),
+        epilog=("Example:\n  spice task depends CLI-1A2b3C4 --after SERVE-5d6E7f8"),
+        recovery_examples=("spice task depends TASK-1A2b3C4 --after SERVE-5d6E7f8",),
     )
     depends.add_argument(
         "handle",
@@ -315,8 +303,8 @@ def _configure_wake_parser(actions: Any) -> None:
         "wake",
         help="Make a waiting task current.",
         recovery_examples=(
-            "spice task wake TASK-20260609T203539640394Z",
-            "spice task wake TASK-20260609T203539640394Z TASK-20260609T203540123456Z",
+            "spice task wake TASK-1A2b3C4",
+            "spice task wake TASK-1A2b3C4 TASK-9g0H1j2",
         ),
     )
     wake.add_argument("handles", nargs="+", metavar="handle")
@@ -327,7 +315,7 @@ def _configure_claim_parser(actions: Any) -> None:
     claim = actions.add_parser(
         "claim",
         help="Claim a task for this actor.",
-        recovery_examples=("spice task claim TASK-20260609T203539640394Z --steal",),
+        recovery_examples=("spice task claim TASK-1A2b3C4 --steal",),
     )
     claim.add_argument("handle")
     claim.add_argument("--steal", action="store_true")
@@ -338,7 +326,7 @@ def _configure_unclaim_parser(actions: Any) -> None:
     unclaim = actions.add_parser(
         "unclaim",
         help="Release a claim.",
-        recovery_examples=("spice task unclaim TASK-20260609T203539640394Z",),
+        recovery_examples=("spice task unclaim TASK-1A2b3C4",),
     )
     unclaim.add_argument("handle")
     unclaim.set_defaults(func=handle)
@@ -348,9 +336,7 @@ def _configure_edit_parser(actions: Any) -> None:
     edit = actions.add_parser(
         "edit",
         help="Change a task's priority and/or project in place.",
-        recovery_examples=(
-            "spice task edit TASK-20260609T203539640394Z --priority high",
-        ),
+        recovery_examples=("spice task edit TASK-1A2b3C4 --priority high",),
     )
     edit.add_argument("handle")
     edit.add_argument("--priority", help="high/medium/low/none or H/M/L.")
@@ -362,9 +348,7 @@ def _configure_delete_parser(actions: Any) -> None:
     delete = actions.add_parser(
         "delete",
         help="Delete a task with a reason.",
-        recovery_examples=(
-            'spice task delete TASK-20260609T203539640394Z --reason "duplicate"',
-        ),
+        recovery_examples=('spice task delete TASK-1A2b3C4 --reason "duplicate"',),
     )
     delete.add_argument("handle")
     delete.add_argument("--reason", required=True)
@@ -389,11 +373,11 @@ def _configure_adopt_parser(actions: Any) -> None:
             "  spice task adopt\n"
             '  spice task adopt --project task.cli --title "Capture orphan fix"\n'
             '  spice task adopt --done --validation "tests passed"\n'
-            "  spice task adopt TASK-20260609T203539640394Z"
+            "  spice task adopt TASK-1A2b3C4"
         ),
         recovery_examples=(
             "spice task adopt",
-            "spice task adopt TASK-20260609T203539640394Z",
+            "spice task adopt TASK-1A2b3C4",
         ),
     )
     adopt.add_argument("handle", nargs="?")
@@ -606,8 +590,9 @@ def _list_newest_key(row: dict[str, Any]) -> tuple[int, str, str]:
 
 
 def _normalize_task_timestamp(raw: str) -> str:
+    if identity.INCEPTED_RE.match(raw):
+        return identity.incepted_datetime(raw).isoformat(timespec="microseconds")
     for fmt in (
-        "%Y%m%dT%H%M%S%fZ",
         "%Y%m%dT%H%M%SZ",
         "%Y-%m-%dT%H:%M:%S.%fZ",
         "%Y-%m-%dT%H:%M:%SZ",
@@ -693,30 +678,6 @@ _DISPATCH = {
 _RTK_NUDGE_ACTIONS = frozenset({"next", "claim"})
 
 
-def _canonicalize_cli_task_handles(args: argparse.Namespace) -> list[str]:
-    notices: list[str] = []
-    raw_handle = getattr(args, "handle", None)
-    if raw_handle:
-        canonical, added_z = identity.canonicalize_zulu_free_handle(str(raw_handle))
-        if added_z:
-            args.handle = canonical
-            notices.append(
-                f"task_handle_added_z original={raw_handle} canonical={canonical}"
-            )
-    raw_after = getattr(args, "after", None)
-    if isinstance(raw_after, list):
-        canonical_after: list[str] = []
-        for item in raw_after:
-            canonical, added_z = identity.canonicalize_zulu_free_handle(str(item))
-            canonical_after.append(canonical)
-            if added_z:
-                notices.append(
-                    f"task_handle_added_z original={item} canonical={canonical}"
-                )
-        args.after = canonical_after
-    return notices
-
-
 def _artifact(args: argparse.Namespace) -> str:
     action = args.artifact_action
     if action == "add":
@@ -747,8 +708,6 @@ def handle(args: argparse.Namespace) -> int:
     func = _DISPATCH.get(action)
     if func is None:
         raise SpiceError(f"unknown task action {action!r}")
-    for notice in _canonicalize_cli_task_handles(args):
-        print(notice)
     print(func(args))
     if action in _RTK_NUDGE_ACTIONS:
         nudge = ops.rtk_usage_nudge()
@@ -769,11 +728,8 @@ def _resolve_add_title(args: argparse.Namespace) -> str:
 
 
 def _handle_add(args: argparse.Namespace) -> int:
-    notices = _canonicalize_cli_task_handles(args)
     title = _resolve_add_title(args)
     if title:
-        for notice in notices:
-            print(notice)
         handle_text = create.add(
             title,
             project=None if getattr(args, "private", False) else args.project,

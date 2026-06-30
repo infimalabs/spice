@@ -34,10 +34,7 @@ def test_task_subcommand_parse_error_prints_command_examples(capsys):
     assert exc_info.value.code == PARSE_ERROR
     assert "Try `spice task done --help` for the exact contract." in error
     assert "Complete the current phase (advances or completes)." in error
-    assert (
-        'spice task done TASK-20260609T203539640394Z --validation "tests passed"'
-        in error
-    )
+    assert 'spice task done TASK-1A2b3C4 --validation "tests passed"' in error
 
 
 def test_session_subcommand_parse_error_prints_filter_examples(capsys):
