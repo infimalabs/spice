@@ -425,6 +425,11 @@ def test_lane_subscription_watch_requests_append_only_payload(tmp_path, monkeypa
         configured.set()
         session._teardown()
 
+    # Every payload read carries the session's stable per-connection client id
+    # so the rollout cursor is owned per client, not shared per thread.
+    client_ids = [kw.pop("client_id", None) for kw in payload_kwargs]
+    assert all(isinstance(cid, str) and cid for cid in client_ids)
+    assert len(set(client_ids)) == 1
     assert payload_kwargs[0] == {"limit": 5}
     assert payload_kwargs[1] == {
         "limit": 5,

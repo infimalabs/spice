@@ -112,7 +112,7 @@ class ServeState:
         self.cache_lock = Lock()
         self.cached_thread_ids: dict[str, str] = {}
         self.cached_targets: list[WorktreeTarget] | None = None
-        self.rollout_cursors: dict[str, RolloutCursor] = {}
+        self.rollout_cursors: dict[tuple[str, str], RolloutCursor] = {}
         self.pending_agent_ensure_attempts: dict[str, float] = {}
         self.http_request_counts: dict[tuple[str, str], int] = {}
         self.team_store = ServeTeamStore()
@@ -143,13 +143,25 @@ class ServeState:
         with self.cache_lock:
             return dict(self.http_request_counts)
 
-    def rollout_cursor(self, thread_id: str) -> RolloutCursor:
+    def rollout_cursor(self, client_id: str, thread_id: str) -> RolloutCursor:
+        # Cursors are per (client, thread): each connected client tracks its own
+        # stream position and removed-key delta. A single per-thread cursor let
+        # one tab/machine advance past messages another had not yet seen.
+        key = (client_id, thread_id)
         with self.cache_lock:
-            cursor = self.rollout_cursors.get(thread_id)
+            cursor = self.rollout_cursors.get(key)
             if cursor is None:
                 cursor = RolloutCursor()
-                self.rollout_cursors[thread_id] = cursor
+                self.rollout_cursors[key] = cursor
             return cursor
+
+    def drop_client_cursors(self, client_id: str) -> None:
+        # Release a disconnected client's cursors so the per-client store does
+        # not grow without bound across reconnects.
+        with self.cache_lock:
+            stale = [key for key in self.rollout_cursors if key[0] == client_id]
+            for key in stale:
+                del self.rollout_cursors[key]
 
 
 def run_serve(args: argparse.Namespace) -> int:
@@ -1038,6 +1050,9 @@ class _ServeHandler(BaseHTTPRequestHandler):
                         target,
                         limit=DEFAULT_MESSAGE_LIMIT,
                     )
+                ),
+                drop_client_cursors=lambda client_id: state.drop_client_cursors(
+                    client_id
                 ),
             ),
         )

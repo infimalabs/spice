@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import select
+import uuid
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
@@ -96,6 +97,7 @@ class LiveBusCallbacks:
     ]
     lane_signature: Callable[[Any, str | None, TranscriptResolution | None], Any]
     send_followup_payload: Callable[[Any, dict[str, Any]], dict[str, Any]] | None = None
+    drop_client_cursors: Callable[[str], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +123,9 @@ class LiveBusSession:
     ) -> None:
         self.connection = connection
         self.callbacks = callbacks
+        # Per-connection identity so each client owns its rollout cursor; a
+        # shared per-thread cursor let one tab/machine starve another's stream.
+        self.client_id = uuid.uuid4().hex
         self.subscriptions: dict[str, _LaneSubscription] = {}
         self.send_lock = Lock()
         # Metrics are read-only display data whose queries can be heavy; running
@@ -151,6 +156,8 @@ class LiveBusSession:
         for subscription in list(self.subscriptions.values()):
             self._stop_subscription(subscription)
         self.subscriptions.clear()
+        if self.callbacks.drop_client_cursors is not None:
+            self.callbacks.drop_client_cursors(self.client_id)
         if self._metrics_worker is not None:
             self._metrics_queue.put(None)
             self._metrics_worker.join(timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
@@ -237,7 +244,8 @@ class LiveBusSession:
     def _query_kwargs(self, message: dict[str, Any]) -> dict[str, Any]:
         query = message.get("query") or {}
         kwargs: dict[str, Any] = {
-            "limit": _bounded_int(query.get("limit"), DEFAULT_BUS_MESSAGE_LIMIT)
+            "limit": _bounded_int(query.get("limit"), DEFAULT_BUS_MESSAGE_LIMIT),
+            "client_id": self.client_id,
         }
         for source_key, kwarg in (
             ("after", "after"),
@@ -432,6 +440,7 @@ class LiveBusSession:
             kwargs: dict[str, Any] = {
                 "limit": _bounded_int(query.get("limit"), DEFAULT_BUS_MESSAGE_LIMIT),
                 "append_only": True,
+                "client_id": self.client_id,
             }
             after = str(query.get("after") or "")
             if after:

@@ -333,6 +333,7 @@ def _read_thread_messages(
     after: str | None,
     before: str | None,
     append_only: bool,
+    client_id: str | None = None,
 ) -> _ThreadMessages:
     if not thread_id:
         return _ThreadMessages(
@@ -341,7 +342,11 @@ def _read_thread_messages(
             transcript=None,
             removed_keys=[],
         )
-    cursor = state.rollout_cursor(thread_id) if not before else None
+    # The cursor is the per-client incremental cache; without a client id (e.g.
+    # a one-shot GET) read fresh rather than mutating a shared cursor.
+    cursor = (
+        state.rollout_cursor(client_id, thread_id) if client_id and not before else None
+    )
     read = message_reader.assistant_messages_for_thread_id(
         thread_id,
         limit=limit,
@@ -377,6 +382,7 @@ def messages_payload_for_worktree(
     before: str | None = None,
     expected_thread_id: str | None = None,
     append_only: bool = False,
+    client_id: str | None = None,
 ) -> dict[str, Any]:
     resolved = _resolve_messages_thread(
         state, target, expected_thread_id=expected_thread_id
@@ -389,6 +395,7 @@ def messages_payload_for_worktree(
         after=after,
         before=before,
         append_only=append_only,
+        client_id=client_id,
     )
     return _messages_worktree_payload(
         state,

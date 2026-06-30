@@ -173,3 +173,23 @@ def _patch_agent_status(monkeypatch, *, thread_id: str, running: bool) -> None:
     monkeypatch.setattr(message, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(workroutes, "agent_status", lambda *_args, **_kwargs: status)
     monkeypatch.setattr(inventory, "agent_status", lambda *_args, **_kwargs: status)
+
+
+def test_rollout_cursors_are_isolated_per_client_and_evicted(tmp_path):
+    state = ServeState(anchor_root=tmp_path)
+
+    first = state.rollout_cursor("client-1", "thread-x")
+    again = state.rollout_cursor("client-1", "thread-x")
+    other_client = state.rollout_cursor("client-2", "thread-x")
+    other_thread = state.rollout_cursor("client-1", "thread-y")
+
+    # A cursor is stable per (client, thread) and never shared across clients,
+    # so one tab/machine cannot advance another's stream position.
+    assert again is first
+    assert other_client is not first
+    assert other_thread is not first
+
+    # A disconnected client's cursors are released without disturbing others.
+    state.drop_client_cursors("client-1")
+    assert state.rollout_cursor("client-1", "thread-x") is not first
+    assert state.rollout_cursor("client-2", "thread-x") is other_client
