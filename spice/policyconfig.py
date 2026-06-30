@@ -122,6 +122,7 @@ class ScopedBound:
 class PolicyCommitMessage:
     wrap_limit: int
     allowed_trailers: frozenset[str] | None
+    blocked_trailers: frozenset[str] | None
 
 
 @dataclass(frozen=True)
@@ -383,6 +384,13 @@ def _commit_message(
             "allowed_trailers",
             policy.COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS,
             "[tool.spice.policy.commit_message]",
+        ),
+        blocked_trailers=_optional_trailer_key_set(
+            table,
+            "blocked_trailers",
+            policy.COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS,
+            "[tool.spice.policy.commit_message]",
+            permit_co_authored_by=True,
         ),
     )
 
@@ -945,6 +953,8 @@ def _optional_trailer_key_set(
     key: str,
     default: tuple[str, ...] | None,
     context: str,
+    *,
+    permit_co_authored_by: bool = False,
 ) -> frozenset[str] | None:
     raw = table.get(key)
     if raw is None:
@@ -960,7 +970,8 @@ def _optional_trailer_key_set(
         value = item.strip().lower()
         if _COMMIT_TRAILER_KEY_RE.fullmatch(value) is None:
             raise SpiceError(f"{context} {key} entries must be commit trailer keys")
-        if value in _FORBIDDEN_COMMIT_TRAILER_KEYS:
+        # Allowing Co-Authored-By is a footgun; blocking it is the point.
+        if not permit_co_authored_by and value in _FORBIDDEN_COMMIT_TRAILER_KEYS:
             raise SpiceError(f"{context} {key} must not include Co-Authored-By")
         if value not in values:
             values.append(value)

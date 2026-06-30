@@ -21,8 +21,24 @@ def test_commit_msg_rejects_co_authored_by_trailer(tmp_path):
         commitmsg.handle_commit_msg(str(path), tmp_path)
 
     error = str(exc_info.value)
-    assert "forbidden trailer Co-Authored-By" in error
-    assert "commit messages must not add co-authors" in error
+    assert "blocked trailer co-authored-by" in error
+    assert "blocked trailers: co-authored-by" in error
+
+
+def test_validate_blocks_only_configured_trailers():
+    # The block is configuration-driven, not baked in: a configured trailer is
+    # rejected, and with no blocked set even Co-Authored-By passes.
+    with pytest.raises(SpiceError) as exc_info:
+        commitmsg.validate_commit_message_text(
+            "Subject line\n\nX-Internal: secret\n",
+            blocked_trailers=frozenset({"x-internal"}),
+        )
+    assert "blocked trailer x-internal" in str(exc_info.value)
+
+    commitmsg.validate_commit_message_text(
+        "Subject line\n\nCo-Authored-By: A <a@example.test>\n",
+        blocked_trailers=None,
+    )
 
 
 def test_commit_msg_rejects_wip_subject_and_accepts_real_subject(tmp_path):

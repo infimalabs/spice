@@ -39,6 +39,9 @@ FLEX_DENOMINATOR = 2
 # Co-Authored-By. Repos may configure a finite allowed-trailer set.
 COMMIT_MESSAGE_WRAP_LIMIT = 100
 COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS: tuple[str, ...] | None = None
+# Blocked trailers are configurable rather than baked in; the default keeps
+# Co-Authored-By rejected so commits never add co-authors.
+COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = ("Co-Authored-By",)
 
 # --- repo-truth docs ------------------------------------------------------------
 # Doctrine documents ride in every agent's context, so they are capped hard.
