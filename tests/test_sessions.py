@@ -32,7 +32,9 @@ from spice.sessions import records
 from spice.sessions.util import first_text, normalize_timestamp
 from spice.errors import SpiceError
 from spice.tasks.identity import (
+    BASE,
     INCEPTED_RE,
+    STAMP_WIDTH,
     decode,
     encode,
     encode_width,
@@ -566,10 +568,14 @@ def test_sweep_and_timeline_parser_share_filter_flags():
 def test_mint_incepted_shape_and_collision_advance():
     first = mint_incepted(set())
     assert INCEPTED_RE.match(first) is not None
-    assert len(first) == 7
+    assert len(first) == STAMP_WIDTH
     # A collision on the freshly minted stamp forces a distinct later stamp.
     second = mint_incepted({first})
     assert second != first
+
+
+def test_incepted_alphabet_excludes_vowels():
+    assert not set("AEIOUaeiou") & set(mint_incepted(set()))
 
 
 def test_key_for_prefers_project_segment():
@@ -578,27 +584,28 @@ def test_key_for_prefers_project_segment():
 
 
 def test_render_handle_is_key_dash_incepted():
+    incepted = encode_width(1)
     row = {
-        "incepted": "0000001",
+        "incepted": incepted,
         "project": "task.alloc",
         "description": "allocate fairly",
     }
-    assert render_handle(row) == "ALLOC-0000001"
+    assert render_handle(row) == f"ALLOC-{incepted}"
 
 
-def test_base62_round_trips_and_pads_to_fixed_width():
-    for value in (0, 1, 61, 62, 1000, 1_700_000_000_000):
+def test_codec_round_trips_and_pads_to_fixed_width():
+    for value in (0, 1, BASE - 1, BASE, 1000, 1_700_000_000_000):
         assert decode(encode(value)) == value
         assert decode(encode_width(value)) == value
-        assert len(encode_width(value)) == 7
+        assert len(encode_width(value)) == STAMP_WIDTH
     assert encode(0) == "0"
-    assert encode(61) == "z"
-    assert encode(62) == "10"
-    assert encode_width(61) == "000000z"
+    assert encode(BASE - 1) == "z"
+    assert encode(BASE) == "10"
+    assert encode_width(BASE - 1) == "0" * (STAMP_WIDTH - 1) + "z"
 
 
-def test_base62_fixed_width_preserves_numeric_order():
-    values = [0, 1, 61, 62, 1000, 1_700_000_000_000, 62**7 - 1]
+def test_codec_fixed_width_preserves_numeric_order():
+    values = [0, 1, BASE - 1, BASE, 1000, 1_700_000_000_000, BASE**STAMP_WIDTH - 1]
     encoded = [encode_width(value) for value in values]
     assert encoded == sorted(encoded)
 
