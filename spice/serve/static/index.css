@@ -1,6 +1,6 @@
 :root {
   color-scheme: light dark;
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", emoji;
   --bg: #f7f8f4;
   --fg: #1f271f;
   --muted: #647064;

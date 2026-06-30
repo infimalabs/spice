@@ -125,6 +125,18 @@ def test_static_css_has_narrow_viewport_affordances():
     assert "height: 100dvh" in css
 
 
+def test_static_root_font_stack_includes_color_emoji_fallback():
+    # Emoji (e.g. the spice pepper U+1F336 U+FE0F) must render in color across
+    # the menu, message bodies, and composer, all of which inherit the :root
+    # font. The base stack therefore ends in explicit color-emoji families.
+    css = _serve_css_text()
+
+    assert (
+        "font-family: ui-sans-serif, system-ui, sans-serif, "
+        '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", emoji;'
+    ) in css
+
+
 def test_audio_playback_enforces_single_owner():
     app_audio = (STATIC_ROOT / "app.audio.js").read_text(encoding="utf-8")
 
