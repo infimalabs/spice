@@ -60,12 +60,12 @@ def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path)
     assert _git(repo, "status", "--porcelain") == ""
     message = _git(repo, "log", "-1", "--format=%B", merge_head)
     assert message == (
+        "[task.unit] TASK-1k98v0WX (todo)\n\n"
         "Publish task work\n\n"
         "Task-Key: 1k98v0WX\n"
         "Task-Phase: todo\n"
         "Task-Project: task.unit\n"
-        f"Task-Session: {ACTOR_A}\n"
-        "Task: [task.unit] TASK-1k98v0WX (todo)"
+        f"Task-Session: {ACTOR_A}"
     )
 
 
@@ -215,12 +215,12 @@ def test_merge_message_omits_task_description_body():
     )
 
     assert message == (
+        "[serve.ui] TASK-1k98xkpR (todo)\n\n"
         "Fix image labels\n\n"
         "Task-Key: 1k98xkpR\n"
         "Task-Phase: todo\n"
         "Task-Project: serve.ui\n"
-        f"Task-Session: {ACTOR_A}\n"
-        "Task: [serve.ui] TASK-1k98xkpR (todo)"
+        f"Task-Session: {ACTOR_A}"
     )
 
 
@@ -244,12 +244,11 @@ def test_merge_message_uses_fallback_subject_and_trailers_only():
     )
 
     assert message == (
-        "Integrate TASK-1k98PQrs\n\n"
+        "[task] TASK-1k98PQrs (todo)\n\n"
         "Task-Key: 1k98PQrs\n"
         "Task-Phase: todo\n"
         "Task-Project: task\n"
-        f"Task-Session: {ACTOR_A}\n"
-        "Task: [task] TASK-1k98PQrs (todo)"
+        f"Task-Session: {ACTOR_A}"
     )
 
 
