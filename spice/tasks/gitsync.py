@@ -753,16 +753,17 @@ def _capture(
 def _compose_message(label: str, meta: dict[str, str] | None) -> str:
     """Build a terse merge message from task facts.
 
-    The sorted ``Task-*`` trailers (git-trailer parseable) are the canonical
-    record, with ``Task-Key`` carrying the stable incepted key. The trailing
-    ``Task:`` line is a freeform, lossy, human-readable projection of those
-    trailers — never parsed for identity, free to evolve. The agent never reads
-    this; it lives on the shared baseline for review.
+    The subject is a freeform, lossy projection of the task — ``[<project>]
+    <handle> (<phase>)`` — and the task title becomes the body. The sorted
+    ``Task-*`` trailers (git-trailer parseable) are the canonical record, with
+    ``Task-Key`` carrying the stable incepted key. The agent never reads this;
+    it lives on the shared baseline for review.
     """
     meta = meta or {}
+    lines = [_task_projection(label, meta)]
     title = (meta.get("title") or "").strip()
-    subject = title if title else f"Integrate {label}"
-    lines = [subject]
+    if title:
+        lines += ["", title]
 
     try:
         incepted: str | None = identity.incepted_of_handle(label)
@@ -778,14 +779,14 @@ def _compose_message(label: str, meta: dict[str, str] | None) -> str:
         )
         if value
     ]
-    body = [f"{key}: {value}" for key, value in sorted(structured)]
-    body.append(f"Task: {_task_projection(label, meta)}")
-    lines += ["", *body]
+    trailers = [f"{key}: {value}" for key, value in sorted(structured)]
+    if trailers:
+        lines += ["", *trailers]
     return "\n".join(lines)
 
 
 def _task_projection(label: str, meta: dict[str, str]) -> str:
-    """A freeform, lossy human projection of the structured task trailers."""
+    """A freeform, lossy projection of the task: ``[<project>] <handle> (<phase>)``."""
     project = (meta.get("project") or "").strip()
     phase = (meta.get("phase") or "").strip()
     prefix = f"[{project}] " if project else ""
