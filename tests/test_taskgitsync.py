@@ -37,7 +37,7 @@ def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path)
     upstream_head = _git(peer, "rev-parse", "HEAD")
 
     result = gitsync.integrate_and_publish(
-        "TASK-20260101T000000000001Z",
+        "TASK-1k98v0WX",
         repo_root=repo,
         meta={
             "title": "Publish task work",
@@ -61,10 +61,11 @@ def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path)
     message = _git(repo, "log", "-1", "--format=%B", merge_head)
     assert message == (
         "Publish task work\n\n"
-        "Task: TASK-20260101T000000000001Z\n"
+        "Task-Key: 1k98v0WX\n"
         "Task-Phase: todo\n"
         "Task-Project: task.unit\n"
-        f"Task-Session: {ACTOR_A}"
+        f"Task-Session: {ACTOR_A}\n"
+        "Task: [task.unit] TASK-1k98v0WX (todo)"
     )
 
 
@@ -196,7 +197,7 @@ def test_integrate_and_publish_reports_local_head_ref_lock_race(tmp_path, monkey
 
 def test_merge_message_omits_task_description_body():
     message = gitsync._compose_message(
-        "TASK-20260101T000000000003Z",
+        "TASK-1k98xkpR",
         {
             "title": "Fix image labels",
             "description": (
@@ -215,16 +216,17 @@ def test_merge_message_omits_task_description_body():
 
     assert message == (
         "Fix image labels\n\n"
-        "Task: TASK-20260101T000000000003Z\n"
+        "Task-Key: 1k98xkpR\n"
         "Task-Phase: todo\n"
         "Task-Project: serve.ui\n"
-        f"Task-Session: {ACTOR_A}"
+        f"Task-Session: {ACTOR_A}\n"
+        "Task: [serve.ui] TASK-1k98xkpR (todo)"
     )
 
 
 def test_merge_message_uses_fallback_subject_and_trailers_only():
     message = gitsync._compose_message(
-        "TASK-20260101T000000000004Z",
+        "TASK-1k98PQrs",
         {
             "title": "",
             "description": (
@@ -242,11 +244,12 @@ def test_merge_message_uses_fallback_subject_and_trailers_only():
     )
 
     assert message == (
-        "Integrate TASK-20260101T000000000004Z\n\n"
-        "Task: TASK-20260101T000000000004Z\n"
+        "Integrate TASK-1k98PQrs\n\n"
+        "Task-Key: 1k98PQrs\n"
         "Task-Phase: todo\n"
         "Task-Project: task\n"
-        f"Task-Session: {ACTOR_A}"
+        f"Task-Session: {ACTOR_A}\n"
+        "Task: [task] TASK-1k98PQrs (todo)"
     )
 
 

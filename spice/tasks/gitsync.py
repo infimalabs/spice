@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from spice.errors import SpiceError
-from spice.tasks import config
+from spice.tasks import config, identity
 
 GIT_NETWORK_TIMEOUT_SECONDS = 30
 TASK_GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
@@ -753,8 +753,10 @@ def _capture(
 def _compose_message(label: str, meta: dict[str, str] | None) -> str:
     """Build a terse merge message from task facts.
 
-    Trailers are ``Key: value`` lines (git-trailer parseable) so the
-    integration record stays cheap to harvest later. The agent never reads
+    The sorted ``Task-*`` trailers (git-trailer parseable) are the canonical
+    record, with ``Task-Key`` carrying the stable incepted key. The trailing
+    ``Task:`` line is a freeform, lossy, human-readable projection of those
+    trailers — never parsed for identity, free to evolve. The agent never reads
     this; it lives on the shared baseline for review.
     """
     meta = meta or {}
@@ -762,16 +764,33 @@ def _compose_message(label: str, meta: dict[str, str] | None) -> str:
     subject = title if title else f"Integrate {label}"
     lines = [subject]
 
-    trailers = [("Task", label)]
-    for key, value in (
-        ("Task-Session", meta.get("actor")),
-        ("Task-Phase", meta.get("phase")),
-        ("Task-Project", meta.get("project")),
-    ):
-        if value:
-            trailers.append((key, value))
-    lines += ["", *(f"{key}: {value}" for key, value in sorted(trailers))]
+    try:
+        incepted: str | None = identity.incepted_of_handle(label)
+    except SpiceError:
+        incepted = None
+    structured = [
+        (key, value)
+        for key, value in (
+            ("Task-Key", incepted),
+            ("Task-Phase", meta.get("phase")),
+            ("Task-Project", meta.get("project")),
+            ("Task-Session", meta.get("actor")),
+        )
+        if value
+    ]
+    body = [f"{key}: {value}" for key, value in sorted(structured)]
+    body.append(f"Task: {_task_projection(label, meta)}")
+    lines += ["", *body]
     return "\n".join(lines)
+
+
+def _task_projection(label: str, meta: dict[str, str]) -> str:
+    """A freeform, lossy human projection of the structured task trailers."""
+    project = (meta.get("project") or "").strip()
+    phase = (meta.get("phase") or "").strip()
+    prefix = f"[{project}] " if project else ""
+    suffix = f" ({phase})" if phase else ""
+    return f"{prefix}{label}{suffix}"
 
 
 def _fail(action: str, completed: subprocess.CompletedProcess[str]) -> str:
