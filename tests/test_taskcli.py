@@ -379,7 +379,7 @@ def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
     row = _row(
         "Creator context",
         project="task.render",
-        incepted="20260612T065825463453Z",
+        incepted="VMJJ0ND",
         status="pending",
         phase="todo",
     )
@@ -405,15 +405,15 @@ def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
         "rehydrate:\n  creator context, run: spice session briefing origin-thread"
         in (output)
     )
-    assert "--start 2026-06-12T06:53:25.463453Z" in output
-    assert "--end 2026-06-12T07:03:25.463453Z" in output
+    assert "--start 2026-06-12T06:53:25.463000Z" in output
+    assert "--end 2026-06-12T07:03:25.463000Z" in output
 
 
 def test_task_show_requires_context_check_before_implementation(monkeypatch):
     row = _row(
         "Current context",
         project="task.render",
-        incepted="20260612T065825463453Z",
+        incepted="VMJJ0ND",
         status="pending",
         phase="todo",
     )
@@ -472,7 +472,7 @@ def test_task_show_does_not_add_implementation_context_check_to_review(monkeypat
     row = _row(
         "Review context",
         project="task.render",
-        incepted="20260612T065825463453Z",
+        incepted="VMJJ0ND",
         status="pending",
         phase="review",
     )
@@ -503,7 +503,7 @@ def test_task_show_keeps_creator_rehydrate_for_same_claim_thread(monkeypatch):
     row = _row(
         "Same thread context",
         project="task.render",
-        incepted="20260612T065825463453Z",
+        incepted="VMJJ0ND",
         status="pending",
         phase="todo",
     )
@@ -528,8 +528,8 @@ def test_task_show_keeps_creator_rehydrate_for_same_claim_thread(monkeypatch):
     output = render.render_show("TASK-test")
 
     assert "creator context, run: spice session briefing same-thread" in output
-    assert "--start 2026-06-12T06:53:25.463453Z" in output
-    assert "--end 2026-06-12T07:03:25.463453Z" in output
+    assert "--start 2026-06-12T06:53:25.463000Z" in output
+    assert "--end 2026-06-12T07:03:25.463000Z" in output
     assert "claim context, run: spice session briefing same-thread" in output
     assert "--start 2026-06-12T08:15:18.621994Z" in output
     assert "--end 2026-06-12T08:25:18.621994Z" in output
@@ -540,7 +540,7 @@ def test_task_show_replaces_sentinel_rehydrate_commands(monkeypatch):
     row = _row(
         "Sentinel task",
         project="task.render",
-        incepted="20260612T065825463453Z",
+        incepted="VMJJ0ND",
         status="pending",
         phase="todo",
     )
@@ -576,7 +576,7 @@ def test_task_show_prints_merge_aware_diff_command_for_task_merge(monkeypatch):
     row = _row(
         "Review merge",
         project="task.render",
-        incepted="20260612T065825463453Z",
+        incepted="VMJJ0ND",
         status="pending",
         phase="review",
     )
@@ -613,7 +613,7 @@ def test_task_show_omits_merge_aware_diff_command_for_task_head(monkeypatch):
     row = _row(
         "Review direct head",
         project="task.render",
-        incepted="20260612T065825463453Z",
+        incepted="VMJJ0ND",
         status="pending",
         phase="review",
     )
@@ -775,7 +775,7 @@ def test_task_show_surfaces_review_note_artifact_citation(monkeypatch):
     row = _row(
         "Review citation",
         project="task.render",
-        incepted="20260612T065825463453Z",
+        incepted="VMJJ0ND",
         status="completed",
         phase="review",
     )

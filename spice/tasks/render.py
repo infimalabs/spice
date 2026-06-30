@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shlex
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from spice.errors import SpiceError
@@ -128,7 +128,7 @@ def _incepted_context_window(row: dict[str, Any]) -> tuple[str, str] | None:
     raw = _f(row, "incepted")
     if not identity.INCEPTED_RE.match(raw):
         return None
-    instant = datetime.strptime(raw, "%Y%m%dT%H%M%S%fZ").replace(tzinfo=UTC)
+    instant = identity.incepted_datetime(raw)
     span = timedelta(seconds=config.CLAIM_CONTEXT_SECONDS)
     return _iso_for_render(instant - span), _iso_for_render(instant + span)
 

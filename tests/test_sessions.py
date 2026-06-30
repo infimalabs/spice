@@ -33,7 +33,10 @@ from spice.sessions.util import first_text, normalize_timestamp
 from spice.errors import SpiceError
 from spice.tasks.identity import (
     INCEPTED_RE,
-    canonicalize_zulu_free_handle,
+    decode,
+    encode,
+    encode_width,
+    epoch_millis,
     key_for,
     mint_incepted,
     render_handle,
@@ -561,9 +564,12 @@ def test_sweep_and_timeline_parser_share_filter_flags():
 
 
 def test_mint_incepted_shape_and_collision_advance():
-    existing = {"20260101T000000000001Z"}
-    stamp = mint_incepted(existing)
-    assert INCEPTED_RE.match(stamp) is not None
+    first = mint_incepted(set())
+    assert INCEPTED_RE.match(first) is not None
+    assert len(first) == 7
+    # A collision on the freshly minted stamp forces a distinct later stamp.
+    second = mint_incepted({first})
+    assert second != first
 
 
 def test_key_for_prefers_project_segment():
@@ -573,17 +579,34 @@ def test_key_for_prefers_project_segment():
 
 def test_render_handle_is_key_dash_incepted():
     row = {
-        "incepted": "20260101T000000000001Z",
+        "incepted": "0000001",
         "project": "task.alloc",
         "description": "allocate fairly",
     }
-    assert render_handle(row) == "ALLOC-20260101T000000000001Z"
+    assert render_handle(row) == "ALLOC-0000001"
 
 
-def test_zulu_free_handle_gains_z():
-    handle, added = canonicalize_zulu_free_handle("ALLOC-20260101T000000000001")
-    assert handle == "ALLOC-20260101T000000000001Z"
-    assert added is True
+def test_base62_round_trips_and_pads_to_fixed_width():
+    for value in (0, 1, 61, 62, 1000, 1_700_000_000_000):
+        assert decode(encode(value)) == value
+        assert decode(encode_width(value)) == value
+        assert len(encode_width(value)) == 7
+    assert encode(0) == "0"
+    assert encode(61) == "z"
+    assert encode(62) == "10"
+    assert encode_width(61) == "000000z"
+
+
+def test_base62_fixed_width_preserves_numeric_order():
+    values = [0, 1, 61, 62, 1000, 1_700_000_000_000, 62**7 - 1]
+    encoded = [encode_width(value) for value in values]
+    assert encoded == sorted(encoded)
+
+
+def test_epoch_millis_counts_whole_milliseconds():
+    from datetime import UTC, datetime
+
+    assert epoch_millis(datetime(1970, 1, 1, tzinfo=UTC)) == 0
 
 
 def _write_state_db(codex_home, thread_id, transcript) -> None:

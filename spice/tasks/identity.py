@@ -1,38 +1,99 @@
-"""Identity: the ``incepted`` timestamp (sole stored id) and the rendered handle.
+"""Identity: the ``incepted`` stamp (sole stored id) and the rendered handle.
 
-A handle is ``KEY-INCEPTED``. ``incepted`` is a compact microsecond UTC stamp
-(``YYYYMMDDThhmmssffffffZ``) — the same grammar as ACK/inbox keys — and is the
+A handle is ``KEY-INCEPTED``. ``incepted`` is a fixed-width 7-character base62
+encoding of the inception time in epoch milliseconds, minted via the
+order-preserving codec below — short, yet sortable as a plain string. It is the
 only stored identity. ``KEY`` is derived from the current project's rightmost
 segment and is never stored, so re-homing changes the rendered handle for
-free. Resolution matches on ``incepted``.
+free. Resolution matches on ``incepted``. Human-readable inception time stays
+available from Taskwarrior's ``entry`` field.
+
+The base62 alphabet ``0-9A-Za-z`` is ASCII-monotonic, so a fixed-width,
+zero-padded stamp sorts lexicographically in the same order as the millisecond
+value it encodes.
 """
 
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from spice.errors import SpiceError
 from spice.tasks import tw
 
-INCEPTED_RE = re.compile(r"^\d{8}T\d{12}Z$")
-ZULU_FREE_INCEPTED_RE = re.compile(r"^\d{8}T\d{12}$")
+ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+BASE = len(ALPHABET)
+ZERO = ALPHABET[0]
+STAMP_WIDTH = 7
+MILLIS_PER_SECOND = 1000
+
+INCEPTED_RE = re.compile(rf"^[0-9A-Za-z]{{{STAMP_WIDTH}}}$")
+_VALUES = {char: index for index, char in enumerate(ALPHABET)}
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
 _KEY_MAX = 7
 _KEY_ACRONYM_MIN_WORDS = 3
 
 
+def encode(value: int) -> str:
+    """Encode a non-negative integer as base62 (no padding)."""
+    if value < 0:
+        raise ValueError(f"base62 cannot encode a negative value: {value}")
+    if value == 0:
+        return ZERO
+    digits: list[str] = []
+    while value:
+        value, remainder = divmod(value, BASE)
+        digits.append(ALPHABET[remainder])
+    return "".join(reversed(digits))
+
+
+def decode(text: str) -> int:
+    """Decode a base62 string back to its integer value."""
+    if not text:
+        raise ValueError("base62 cannot decode an empty string")
+    value = 0
+    for char in text:
+        digit = _VALUES.get(char)
+        if digit is None:
+            raise ValueError(f"invalid base62 character: {char!r}")
+        value = value * BASE + digit
+    return value
+
+
+def encode_width(value: int, width: int = STAMP_WIDTH) -> str:
+    """Encode ``value`` as a fixed-width, zero-padded base62 string.
+
+    Fixed width is what keeps the encoding order-preserving under a string
+    sort; an oversized value is an error rather than a silent sort break.
+    """
+    encoded = encode(value)
+    if len(encoded) > width:
+        raise ValueError(f"value {value} does not fit in {width} base62 chars")
+    return encoded.rjust(width, ZERO)
+
+
+def epoch_millis(when: datetime | None = None) -> int:
+    """Whole milliseconds since the Unix epoch for ``when`` (default: now)."""
+    moment = when if when is not None else datetime.now(UTC)
+    return int(moment.timestamp() * MILLIS_PER_SECOND)
+
+
+def incepted_datetime(incepted: str) -> datetime:
+    """The aware UTC instant encoded by an ``incepted`` stamp."""
+    return datetime.fromtimestamp(decode(incepted) / MILLIS_PER_SECOND, UTC)
+
+
 def mint_incepted(existing: set[str] | None = None) -> str:
-    """Fresh ``incepted`` stamp, advanced 1µs past any collision."""
+    """Fresh ``incepted`` stamp, advanced 1ms past any collision."""
     if existing is None:
         existing = {str(r.get("incepted") or "") for r in tw.export()}
-    when = datetime.now(UTC)
+    millis = epoch_millis()
     while True:
-        stamp = when.strftime("%Y%m%dT%H%M%S%fZ")
+        stamp = encode_width(millis)
         if stamp not in existing:
             return stamp
-        when += timedelta(microseconds=1)
+        millis += 1
 
 
 def key_for(project: str | None, title: str) -> str:
@@ -58,20 +119,9 @@ def render_handle(row: dict[str, Any]) -> str:
     return f"{key}-{incepted}"
 
 
-def canonicalize_zulu_free_handle(handle: str) -> tuple[str, bool]:
-    value = handle.strip()
-    if ZULU_FREE_INCEPTED_RE.match(value):
-        return f"{value}Z", True
-    if "-" in value:
-        key, tail = value.split("-", 1)
-        if ZULU_FREE_INCEPTED_RE.match(tail):
-            return f"{key}-{tail}Z", True
-    return value, False
-
-
 def incepted_of_handle(handle: str) -> str:
     """Extract the ``incepted`` portion from a handle (or a bare stamp)."""
-    value, _added_z = canonicalize_zulu_free_handle(handle)
+    value = handle.strip()
     if INCEPTED_RE.match(value):
         return value
     if "-" in value:
