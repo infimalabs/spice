@@ -15,7 +15,6 @@ COMMIT_MESSAGE_COMMENT_PREFIX = "#"
 COMMIT_MESSAGE_SCISSORS_MARKER = ">8"
 COMMIT_MESSAGE_LIST_MARKER_RE = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s+")
 COMMIT_MESSAGE_TRAILER_RE = re.compile(r"^(?P<key>[A-Za-z0-9-]+): .+")
-FORBIDDEN_COMMIT_MESSAGE_TRAILER_KEYS = {"co-authored-by"}
 PLACEHOLDER_COMMIT_MESSAGE_SUBJECTS = frozenset(
     {
         "changes",
@@ -76,6 +75,7 @@ def validate_commit_message_text(
     *,
     wrap_limit: int = COMMIT_MESSAGE_WRAP_LIMIT,
     allowed_trailers: frozenset[str] | None = None,
+    blocked_trailers: frozenset[str] | None = None,
 ) -> None:
     lines = _commit_message_policy_lines(message_text)
     if not lines or not lines[0][1].strip():
@@ -92,10 +92,11 @@ def validate_commit_message_text(
         key = _commit_message_trailer_key(line)
         if key is None:
             continue
-        if key in FORBIDDEN_COMMIT_MESSAGE_TRAILER_KEYS:
+        if blocked_trailers is not None and key in blocked_trailers:
+            blocked = ", ".join(sorted(blocked_trailers))
             failures.append(
-                f"line {line_number} uses forbidden trailer Co-Authored-By; "
-                "commit messages must not add co-authors"
+                f"line {line_number} uses blocked trailer {key}; "
+                f"blocked trailers: {blocked}"
             )
             continue
         if allowed_trailers is not None and key not in allowed_trailers:
@@ -193,5 +194,6 @@ def handle_commit_msg(message_file: str, repo_root: Path) -> int:
         folded_text,
         wrap_limit=policy.wrap_limit,
         allowed_trailers=policy.allowed_trailers,
+        blocked_trailers=policy.blocked_trailers,
     )
     return 0
