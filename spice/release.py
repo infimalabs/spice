@@ -391,7 +391,10 @@ def render_release_range(
 
 
 def commit_records(previous_tag: str, release_commit: str) -> list[ReleaseRecord]:
-    format_arg = "--format=%H%x1f%s%x1f%(trailers:key=Task-Project,valueonly)%x1e"
+    format_arg = (
+        "--format=%H%x1f%s%x1f%(trailers:key=Task-Project,valueonly)"
+        "%x1f%(trailers:key=Task-Key,valueonly)%x1e"
+    )
     if previous_tag:
         args = [
             "log",
@@ -413,20 +416,31 @@ def commit_records(previous_tag: str, release_commit: str) -> list[ReleaseRecord
 
     raw = run(["git", *args], capture=True).stdout
     records: list[ReleaseRecord] = []
+    latest_index_by_task_key: dict[str, int] = {}
     for raw_record in raw.split("\x1e"):
         raw_record = raw_record.strip("\n")
         if not raw_record:
             continue
-        commit, subject, project = (raw_record.split("\x1f", 2) + ["", "", ""])[:3]
+        commit, subject, project, task_key = (
+            raw_record.split("\x1f", 3) + ["", "", "", ""]
+        )[:4]
         if subject.startswith("release: bump to "):
             continue
-        records.append(
-            ReleaseRecord(
-                commit=commit,
-                subject=subject,
-                project=project.strip() or "general",
-            )
+        record = ReleaseRecord(
+            commit=commit,
+            subject=subject,
+            project=project.strip() or "general",
         )
+        task_key = task_key.strip()
+        # A task's todo-phase and review-phase merges carry the same
+        # Task-Key; keep one highlight per task, at its first position, with
+        # the latest (most final) subject.
+        if task_key and task_key in latest_index_by_task_key:
+            records[latest_index_by_task_key[task_key]] = record
+            continue
+        if task_key:
+            latest_index_by_task_key[task_key] = len(records)
+        records.append(record)
     return records
 
 
