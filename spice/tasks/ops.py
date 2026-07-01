@@ -171,6 +171,14 @@ def has_active_claim() -> bool:
     return bool(_active_claims_for(tw.current_actor()))
 
 
+def active_claim_phase(actor: str) -> str:
+    """The phase of `actor`'s active task claim, or "" when none is held."""
+    if not actor:
+        return ""
+    claims = _active_claims_for(actor)
+    return str(claims[0].get("phase") or "") if claims else ""
+
+
 def _require_single_active_slot(
     actor: str, *, action: str, target: dict[str, Any] | None = None
 ) -> None:

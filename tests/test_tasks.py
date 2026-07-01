@@ -529,6 +529,20 @@ def test_task_next_repairs_active_claim_missing_owner(task_repo, monkeypatch):
     assert assigned["start"]
 
 
+def test_active_claim_phase_reports_claimed_task_phase(task_repo):
+    handle = create.add(
+        "Report phase of an active claim",
+        project="task.unit",
+        priority="medium",
+        acceptance=["active_claim_phase reflects the claimed task's phase"],
+    )
+    ops.claim(handle)
+
+    assert ops.active_claim_phase(ACTOR_A) == "todo"
+    assert ops.active_claim_phase(PEER_ACTOR) == ""
+    assert ops.active_claim_phase("") == ""
+
+
 def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
     task_repo, monkeypatch
 ):

@@ -189,6 +189,30 @@ def agent_command_cwd(command: Sequence[str]) -> Path | None:
     return None
 
 
+def _claimed_task_phase_launch(
+    repo_root: Path, driver_name: str, status: AgentStatus
+) -> dict[str, str]:
+    """Model/effort override from the phase of this worktree's claimed task.
+
+    {} when no task is claimed, the task backend is unavailable, or the
+    phase has no configured override — the caller falls through to its
+    ordinary launch config in every one of those cases.
+    """
+    if not status.thread_id:
+        return {}
+    try:
+        from spice.tasks.ops import active_claim_phase
+
+        phase = active_claim_phase(status.thread_id)
+    except SpiceError:
+        return {}
+    if not phase:
+        return {}
+    from spice.tasks.config import phase_launch_overrides
+
+    return phase_launch_overrides(repo_root, driver_name, phase)
+
+
 def ensure_agent(
     repo_root: Path,
     *,
@@ -217,11 +241,17 @@ def ensure_agent(
             )
         resume_thread_id = "" if force_new else status.thread_id
         service_tier = driver.default_service_tier if fast_mode else ""
-        # Resolution order: explicit argument > worktree-local config >
-        # tracked project config > the driver's shipped default.
-        model = driver.resolve_model(model or configured_agent_model(resolved_root))
+        phase_launch = _claimed_task_phase_launch(resolved_root, driver.name, status)
+        # Resolution order: explicit argument > the claimed task's phase
+        # mapping for this driver > worktree-local config > tracked project
+        # config > the driver's shipped default.
+        phase_model = phase_launch.get("model", "")
+        model = driver.resolve_model(
+            model or phase_model or configured_agent_model(resolved_root)
+        )
         reasoning_effort = (
             reasoning_effort
+            or phase_launch.get("effort", "")
             or configured_agent_effort(resolved_root)
             or driver.default_reasoning_effort
         )

@@ -283,6 +283,67 @@ def test_ensure_agent_uses_configured_claude_sonnet_family(tmp_path, monkeypatch
     assert result.command[result.command.index("--model") + 1] == "sonnet"
 
 
+def test_ensure_agent_applies_phase_model_for_claimed_task(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        lifecycle,
+        "agent_status",
+        lambda *_args, **_kwargs: _status(thread_id="claimed-thread"),
+    )
+    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
+    monkeypatch.setattr(
+        ops,
+        "active_claim_phase",
+        lambda actor: "plan" if actor == "claimed-thread" else "",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.spice.tasks.phase_models.claude.plan]\n"
+        'model = "claude-opus-4-8"\n'
+        'effort = "high"\n',
+        encoding="utf-8",
+    )
+
+    result = lifecycle.ensure_agent(tmp_path, dry_run=True)
+
+    assert result.command[result.command.index("--model") + 1] == "claude-opus-4-8"
+    assert result.command[result.command.index("--effort") + 1] == "high"
+
+
+def test_ensure_agent_falls_back_when_claimed_phase_is_unmapped(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        lifecycle,
+        "agent_status",
+        lambda *_args, **_kwargs: _status(thread_id="claimed-thread"),
+    )
+    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
+    monkeypatch.setattr(ops, "active_claim_phase", lambda actor: "todo")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.tasks.phase_models.claude.plan]\nmodel = "claude-opus-4-8"\n',
+        encoding="utf-8",
+    )
+
+    result = lifecycle.ensure_agent(tmp_path, dry_run=True)
+
+    assert result.command[result.command.index("--model") + 1] == "claude-sonnet-5"
+
+
+def test_ensure_agent_skips_phase_lookup_without_a_thread_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        lifecycle,
+        "agent_status",
+        lambda *_args, **_kwargs: _status(),
+    )
+    monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
+
+    def _unexpected_call(actor):
+        raise AssertionError("active_claim_phase should not run without a thread id")
+
+    monkeypatch.setattr(ops, "active_claim_phase", _unexpected_call)
+
+    result = lifecycle.ensure_agent(tmp_path, dry_run=True)
+
+    assert result.command[result.command.index("--model") + 1] == "claude-sonnet-5"
+
+
 def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(
     tmp_path, monkeypatch
 ):
