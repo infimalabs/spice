@@ -71,6 +71,24 @@ def test_builtin_pre_commit_guard_registry_is_exactly_expected(tmp_path):
     )
 
 
+def test_config_reference_documents_pre_commit_keys_and_taste_contract():
+    text = (PROJECT_ROOT / "docs" / "config" / "reference.md").read_text(
+        encoding="utf-8"
+    )
+    builtins_row = next(
+        line
+        for line in text.splitlines()
+        if line.startswith("| `pre_commit_builtins` ")
+    )
+    documented = [
+        key for key in EXPECTED_BUILTIN_PRE_COMMIT_KEYS if f"`{key}`" in builtins_row
+    ]
+
+    assert documented == EXPECTED_BUILTIN_PRE_COMMIT_KEYS
+    assert "### `[tool.spice.policy.taste.words]`" in text
+    assert "gate-only pre-commit built-in" in text
+
+
 def test_private_internal_coupling_allowlist_is_exact_for_this_repo():
     """Against the real tree: every coupling the detector finds must be named in
     the built-in or tracked allowlist (no un-justified coupling), and every
