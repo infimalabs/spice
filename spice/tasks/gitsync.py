@@ -753,17 +753,19 @@ def _capture(
 def _compose_message(label: str, meta: dict[str, str] | None) -> str:
     """Build a terse merge message from task facts.
 
-    The subject is a freeform, lossy projection of the task — ``[<project>]
-    <handle> (<phase>)`` — and the task title becomes the body. The sorted
-    ``Task-*`` trailers (git-trailer parseable) are the canonical record, with
-    ``Task-Key`` carrying the stable incepted key. The agent never reads this;
-    it lives on the shared baseline for review.
+    The subject is a freeform, lossy projection of the task — ``<phase>
+    (<project>): <title> <handle>`` — with an empty free-text body. The
+    sorted ``Task-*`` trailers (git-trailer parseable) are the canonical
+    record, with ``Task-Key`` carrying the stable incepted key. The agent
+    never reads this; it lives on the shared baseline for review.
     """
     meta = meta or {}
-    lines = [_task_projection(label, meta)]
+    project = (meta.get("project") or "").strip()
+    phase = (meta.get("phase") or "").strip()
     title = (meta.get("title") or "").strip()
-    if title:
-        lines += ["", title]
+    prefix = f"{phase}({project}): " if phase or project else ""
+    subject = " ".join(part for part in (title, label) if part)
+    lines = [f"{prefix}{subject}"]
 
     try:
         incepted: str | None = identity.incepted_of_handle(label)
@@ -773,8 +775,8 @@ def _compose_message(label: str, meta: dict[str, str] | None) -> str:
         (key, value)
         for key, value in (
             ("Task-Key", incepted),
-            ("Task-Phase", meta.get("phase")),
-            ("Task-Project", meta.get("project")),
+            ("Task-Phase", phase),
+            ("Task-Project", project),
             ("Task-Session", meta.get("actor")),
         )
         if value
@@ -783,15 +785,6 @@ def _compose_message(label: str, meta: dict[str, str] | None) -> str:
     if trailers:
         lines += ["", *trailers]
     return "\n".join(lines)
-
-
-def _task_projection(label: str, meta: dict[str, str]) -> str:
-    """A freeform, lossy projection of the task: ``[<project>] <handle> (<phase>)``."""
-    project = (meta.get("project") or "").strip()
-    phase = (meta.get("phase") or "").strip()
-    prefix = f"[{project}] " if project else ""
-    suffix = f" ({phase})" if phase else ""
-    return f"{prefix}{label}{suffix}"
 
 
 def _fail(action: str, completed: subprocess.CompletedProcess[str]) -> str:
