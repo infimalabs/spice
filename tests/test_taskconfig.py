@@ -171,6 +171,40 @@ def test_project_depth_rejects_invalid_config(tmp_path, monkeypatch):
         config.project_depth_bounds()
 
 
+def test_phase_launch_overrides_reads_per_driver_phase_table(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "pyproject.toml").write_text(
+        "[tool.spice.tasks.phase_models.claude.plan]\n"
+        'model = "claude-opus-4-8"\n'
+        'effort = "high"\n'
+        "\n"
+        "[tool.spice.tasks.phase_models.claude.todo]\n"
+        'model = "claude-sonnet-5"\n',
+        encoding="utf-8",
+    )
+
+    assert config.phase_launch_overrides(repo, "claude", "plan") == {
+        "model": "claude-opus-4-8",
+        "effort": "high",
+    }
+    assert config.phase_launch_overrides(repo, "claude", "todo") == {
+        "model": "claude-sonnet-5",
+    }
+
+
+def test_phase_launch_overrides_falls_back_for_unmapped_phase_or_driver(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "pyproject.toml").write_text(
+        '[tool.spice.tasks.phase_models.claude.plan]\nmodel = "claude-opus-4-8"\n',
+        encoding="utf-8",
+    )
+
+    assert config.phase_launch_overrides(repo, "claude", "verify") == {}
+    assert config.phase_launch_overrides(repo, "codex", "plan") == {}
+    assert config.phase_launch_overrides(repo, "claude", "") == {}
+    assert config.phase_launch_overrides(repo, "", "plan") == {}
+
+
 def test_study_phase_is_approved_and_catalogued(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
     monkeypatch.chdir(repo)

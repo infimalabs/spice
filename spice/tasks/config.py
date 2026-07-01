@@ -30,6 +30,7 @@ PROJECT_DELIMITER = "."
 SEGMENT_RE = re.compile(rf"^{PROJECT_SEGMENT_PATTERN}$")
 DEFAULT_PROJECT_MIN_DEPTH = 2
 DEFAULT_PROJECT_MAX_DEPTH = 3
+PHASE_MODELS_KEY = "phase_models"
 
 # Durable vocabulary. `task` and `serve` ship with the harness; `agent` is
 # reserved for automatic private task creation and `oops` for deferred
@@ -147,14 +148,39 @@ def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
     return flows
 
 
-def _tasks_config_table() -> dict[str, object]:
+def _tasks_config_table(repo_root: Path | None = None) -> dict[str, object]:
     from spice.paths import repo_root_from_cwd
     from spice.repocfg import tasks_table
 
-    root = repo_root_from_cwd()
+    root = repo_root or repo_root_from_cwd()
     if root is None:
         return {}
     return tasks_table(root)
+
+
+def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str, str]:
+    """Tracked per-driver, per-phase launch override.
+
+    Read from ``[tool.spice.tasks.phase_models.<driver>.<phase>]``; {} when
+    the driver or phase has no entry, so an unmapped phase falls back to the
+    driver's ordinary launch config.
+    """
+    if not driver or not phase:
+        return {}
+    table = _tasks_config_table(repo_root).get(PHASE_MODELS_KEY)
+    if not isinstance(table, dict):
+        return {}
+    driver_table = table.get(driver)
+    if not isinstance(driver_table, dict):
+        return {}
+    phase_table = driver_table.get(phase)
+    if not isinstance(phase_table, dict):
+        return {}
+    return {
+        key: str(phase_table[key]).strip()
+        for key in ("model", "effort")
+        if phase_table.get(key)
+    }
 
 
 def project_depth_bounds() -> tuple[int, int]:

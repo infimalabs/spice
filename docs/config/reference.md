@@ -363,6 +363,32 @@ Priority aliases are fixed: `critical/high -> H`, `medium -> M`, `low -> L`,
 and `none` clears priority. SLA due dates are one day, seven days, and thirty
 days for H/M/L.
 
+## `[tool.spice.tasks.phase_models.<driver>.<phase>]`
+
+Per-driver, per-phase agent launch overrides. Each driver has its own model
+space, so the table is keyed by driver name (`claude` or `codex`) and then by
+task phase (`study`, `plan`, `todo`, `verify`, `review`, `oops`).
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `model` | unset | Model to launch with while the worktree's claimed task sits in this phase. |
+| `effort` | unset | Reasoning effort to launch with for the same phase. |
+
+```toml
+[tool.spice.tasks.phase_models.claude.plan]
+model = "claude-opus-4-8"
+effort = "high"
+
+[tool.spice.tasks.phase_models.claude.todo]
+model = "claude-sonnet-5"
+```
+
+`spice agent ensure` reads the phase of the worktree's currently claimed task
+and looks it up in this table for the active driver. A phase with no entry
+(or no claimed task) falls back to the ordinary resolution order: an explicit
+`--model`/`--effort` flag, then worktree-local config, then `[tool.spice.agent]`,
+then the driver's shipped default.
+
 ## `[tool.spice.serve]`
 
 | Key | Default | Meaning |
