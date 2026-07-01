@@ -101,13 +101,13 @@ def test_claude_command_disables_commit_attribution(tmp_path):
     assert settings["attribution"]["sessionUrl"] is False
 
 
-def test_claude_command_uses_shipped_sonnet_xhigh_defaults(tmp_path):
+def test_claude_command_uses_shipped_claude_sonnet_5_xhigh_defaults(tmp_path):
     command = CLAUDE_DRIVER.build_exec_command(
         repo_root=tmp_path,
         prompt="follow the skill",
     )
 
-    assert command[command.index("--model") + 1] == "sonnet"
+    assert command[command.index("--model") + 1] == "claude-sonnet-5"
     assert command[command.index("--effort") + 1] == "xhigh"
 
 

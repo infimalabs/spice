@@ -314,7 +314,7 @@ class CodexDriver(AgentDriver):
 # Claude Code's `--effort` vocabulary. The configured spice effort value is
 # Codex-shaped; Claude uses the same set, except for `max`, which we ignore.
 CLAUDE_EFFORT_CHOICES = frozenset({"low", "medium", "high", "xhigh"})
-CLAUDE_DEFAULT_MODEL = "sonnet"
+CLAUDE_DEFAULT_MODEL = "claude-sonnet-5"
 CLAUDE_ATTRIBUTION_DISABLED_SETTINGS = {
     "attribution": {"commit": "", "sessionUrl": False},
 }
