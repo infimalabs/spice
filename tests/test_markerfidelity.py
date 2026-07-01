@@ -1,4 +1,4 @@
-"""Driver transcript fidelity for future assistant-output markers."""
+"""Driver transcript fidelity for future assistant-output marker aliases."""
 
 from __future__ import annotations
 
