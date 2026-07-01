@@ -113,6 +113,7 @@ def test_hidden_oops_project_is_addressable_but_not_publicly_assignable(
     repo = _init_repo(tmp_path / "repo")
     monkeypatch.chdir(repo)
 
+    assert config.hidden_stems() == ("oops",)
     assert config.validate_project(".oops") == ".oops"
     assert config.validate_project(".oops.triage") == ".oops.triage"
     assert config.project_stem(".oops.triage") == "oops"
@@ -131,6 +132,63 @@ def test_hidden_oops_project_is_addressable_but_not_publicly_assignable(
         config.validate_assignable_project(".oops")
     with pytest.raises(SpiceError, match="reserved for system task creation"):
         config.validate_manual_creation_project(".oops")
+
+
+def test_configured_hidden_project_stems_are_addressable_not_assignable(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+    pyproject = repo / "pyproject.toml"
+    pyproject.write_text(
+        '[tool.spice.tasks]\nhidden_stems = ["scratch", "audit", "oops"]\n',
+        encoding="utf-8",
+    )
+
+    assert config.hidden_stems() == ("oops", "scratch", "audit")
+    assert config.validate_project(".scratch") == ".scratch"
+    assert config.validate_project(".audit.triage") == ".audit.triage"
+    assert config.project_stem(".audit.triage") == "audit"
+    assert config.is_hidden_project(".scratch")
+    assert config.resolve_flow(None, ".scratch") == ["todo"]
+    assert "scratch" not in config.approved_stems()
+
+    catalog = config.task_project_validation_catalog()
+    assert catalog["hiddenStems"] == ["oops", "scratch", "audit"]
+
+    with pytest.raises(SpiceError, match="not lane-filter assignable"):
+        config.validate_assignable_project(".scratch")
+    with pytest.raises(SpiceError, match="reserved for system task creation"):
+        config.validate_manual_creation_project(".scratch")
+
+
+def test_configured_hidden_project_stems_reject_invalid_definitions(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+    pyproject = repo / "pyproject.toml"
+
+    pyproject.write_text(
+        '[tool.spice.tasks]\nhidden_stems = [".scratch"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(SpiceError, match="omit the leading"):
+        config.hidden_stems()
+
+    pyproject.write_text(
+        '[tool.spice.tasks]\nhidden_stems = ["bad-stem"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(SpiceError, match="lowercase letters, digits, and underscores"):
+        config.hidden_stems()
+
+    pyproject.write_text(
+        '[tool.spice.tasks]\nhidden_stems = ["task"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(SpiceError, match="conflicts with an approved public"):
+        config.hidden_stems()
 
 
 def test_manual_project_depth_uses_repo_config_overrides(tmp_path, monkeypatch):
