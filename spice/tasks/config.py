@@ -34,12 +34,12 @@ DEFAULT_PROJECT_MAX_DEPTH = 3
 # Durable vocabulary. `task` and `serve` ship with the harness; `agent` is
 # reserved for automatic private task creation. Hidden system stems such as
 # `.oops` are addressable but excluded from normal boards. A repo adds its own
-# public stems and
-# per-stem default flows through tracked `pyproject.toml` (`[tool.spice.tasks]`),
-# edited by a human — never invented by an agent.
+# public stems, hidden stems, and per-stem default flows through tracked
+# `pyproject.toml` (`[tool.spice.tasks]`), edited by a human — never invented by
+# an agent.
 BASE_APPROVED_STEMS = ("task", "serve", "agent")
 INTERNAL_STEMS = ("agent",)
-HIDDEN_STEMS = ("oops",)
+BASE_HIDDEN_STEMS = ("oops",)
 HIDDEN_PROJECT_PREFIX = "."
 APPROVED_PHASES = ("study", "plan", "todo", "verify", "review")
 PHASE_SLOT_COUNT = 7  # phase_0 .. phase_6
@@ -121,6 +121,33 @@ def _configured_extra_stems() -> tuple[str, ...]:
     return tuple(
         stem for stem in string_list(table.get("stems")) if SEGMENT_RE.match(stem)
     )
+
+
+def _configured_hidden_stems() -> tuple[str, ...]:
+    from spice.repocfg import string_list
+
+    table = _tasks_config_table()
+    configured: list[str] = []
+    approved = set(approved_stems())
+    for stem in string_list(table.get("hidden_stems")):
+        if stem.startswith(HIDDEN_PROJECT_PREFIX):
+            raise SpiceError(
+                "[tool.spice.tasks].hidden_stems values omit the leading '.'; "
+                f"use {stem[len(HIDDEN_PROJECT_PREFIX) :]!r} instead of {stem!r}"
+            )
+        if not SEGMENT_RE.match(stem):
+            raise SpiceError(
+                "[tool.spice.tasks].hidden_stems values must match "
+                f"{PROJECT_SEGMENT_RULE_LABEL}; got {stem!r}"
+            )
+        if stem in approved:
+            raise SpiceError(
+                f"hidden project stem {stem!r} conflicts with an approved public "
+                "project stem"
+            )
+        if stem not in configured:
+            configured.append(stem)
+    return tuple(configured)
 
 
 def per_stem_flows() -> dict[str, tuple[str, ...]]:
@@ -448,7 +475,11 @@ def project_stem(project: str) -> str:
 
 
 def hidden_stems() -> tuple[str, ...]:
-    return HIDDEN_STEMS
+    merged: list[str] = list(BASE_HIDDEN_STEMS)
+    for stem in _configured_hidden_stems():
+        if stem not in merged:
+            merged.append(stem)
+    return tuple(merged)
 
 
 def is_hidden_project(project: str) -> bool:
