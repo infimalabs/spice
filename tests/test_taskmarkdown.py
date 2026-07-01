@@ -158,6 +158,31 @@ def test_task_ledger_exports_dependency_closure(task_repo, capsys):
     assert nodes["child-node"].acceptance == ("child accepted",)
 
 
+def test_canonical_ingest_preserves_absent_priority(task_repo):
+    dag = markdown.MarkdownTaskDag(
+        root="root",
+        nodes=(
+            markdown.MarkdownTaskNode(
+                id="root",
+                title="No priority root",
+                project="task.unit",
+                flow=("todo", "review"),
+            ),
+        ),
+    )
+
+    output = markdown.create_task_dag(dag)
+    handle = next(
+        line.split()[1] for line in output.splitlines() if line.startswith("root ")
+    )
+    row = identity.resolve(handle)
+    exported = markdown.parse_markdown(markdown.render_ledger(handle))
+    exported_root = next(node for node in exported.nodes if node.id == "root")
+
+    assert str(row.get("priority") or "") == ""
+    assert exported_root.priority == ""
+
+
 def _init_repo(path: Path) -> Path:
     path.mkdir()
     _run(path, "git", "init", "-b", "main")
