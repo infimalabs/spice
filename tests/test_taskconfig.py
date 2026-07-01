@@ -171,6 +171,18 @@ def test_project_depth_rejects_invalid_config(tmp_path, monkeypatch):
         config.project_depth_bounds()
 
 
+def test_study_phase_is_approved_and_catalogued(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+
+    assert "study" in config.APPROVED_PHASES
+    assert config.resolve_flow(
+        ["study", "plan", "todo", "verify", "review"], "task.unit"
+    ) == ["study", "plan", "todo", "verify", "review"]
+    assert "study" in config.uda_schema()["phase"]["values"]
+    assert "study" in config.task_project_validation_catalog()["approvedPhases"]
+
+
 def _init_repo(path: Path) -> Path:
     path.mkdir()
     subprocess.run(
