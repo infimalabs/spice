@@ -18,8 +18,9 @@ Do not add `reflect`, `research`, `discovery`, `prototype`, `trial`, or
 high-end-review as first-class task phases.
 
 Keep the remaining task phase vocabulary delivery-oriented: `todo`, optional
-`verify`, `review`, and `oops`. Model other non-code work as artifact classes
-inside ordinary allocator-owned tasks:
+`verify`, and `review`. Model other non-code work as artifact classes inside
+ordinary allocator-owned tasks. Tooling-friction triage belongs to hidden system
+projects such as `.oops`, not to the public task phase vocabulary:
 
 - committed study records under `docs/studies/` for durable decisions;
 - task notes for small observations and handoff details;
@@ -39,8 +40,9 @@ Spice currently treats a task as the unit of allocation, claim ownership,
 validation, commit capture, and review. Each task has a bounded flow stored in
 phase slots (`phase_0` through `phase_6`), with default public flow
 `todo,review` and private scratch flow `todo`. The configured phase vocabulary
-is intentionally small: `study`, `plan`, `todo`, `verify`, `review`, and
-`oops`.
+is intentionally small: `study`, `plan`, `todo`, `verify`, and `review`.
+Hidden system projects such as `.oops` remain addressable while staying out of
+normal allocator views.
 
 That model has useful properties:
 

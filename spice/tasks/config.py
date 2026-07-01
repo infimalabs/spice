@@ -32,13 +32,16 @@ DEFAULT_PROJECT_MIN_DEPTH = 2
 DEFAULT_PROJECT_MAX_DEPTH = 3
 
 # Durable vocabulary. `task` and `serve` ship with the harness; `agent` is
-# reserved for automatic private task creation and `oops` for deferred
-# tool-friction triage. A repo adds its own stems and
+# reserved for automatic private task creation. Hidden system stems such as
+# `.oops` are addressable but excluded from normal boards. A repo adds its own
+# public stems and
 # per-stem default flows through tracked `pyproject.toml` (`[tool.spice.tasks]`),
 # edited by a human — never invented by an agent.
-BASE_APPROVED_STEMS = ("task", "serve", "agent", "oops")
-INTERNAL_STEMS = ("agent", "oops")
-APPROVED_PHASES = ("study", "plan", "todo", "verify", "review", "oops")
+BASE_APPROVED_STEMS = ("task", "serve", "agent")
+INTERNAL_STEMS = ("agent",)
+HIDDEN_STEMS = ("oops",)
+HIDDEN_PROJECT_PREFIX = "."
+APPROVED_PHASES = ("study", "plan", "todo", "verify", "review")
 PHASE_SLOT_COUNT = 7  # phase_0 .. phase_6
 TASK_EVENT_FILENAME = "events"
 DEFAULT_FLOW = ("todo", "review")
@@ -46,10 +49,12 @@ PRIVATE_DEFAULT_FLOW = ("todo",)
 PER_STEM_FLOWS: dict[str, tuple[str, ...]] = {}
 TASK_CREATION_SURFACE_UDA = "creation_surface"
 TASK_CREATION_SURFACE_CLI = "cli"
+PROJECT_HIDDEN_UDA = "project_hidden"
+HIDDEN_TASK_TAG = "hidden"
 
 SENTINEL_ACTOR = "00000000-0000-0000-0000-000000000000"
 OOPS_WAIT = "2099-01-01T00:00:00"
-OOPS_PROJECT = "oops"
+OOPS_PROJECT = ".oops"
 
 # Native Taskwarrior priorities (H/M/L, or unset). Word aliases map to them.
 DEFAULT_PRIORITY = "medium"
@@ -371,6 +376,7 @@ def uda_schema() -> dict[str, dict[str, str]]:
     schema["phase_i"] = {"type": "numeric", "label": "PhaseIndex"}
     for i in range(PHASE_SLOT_COUNT):
         schema[f"phase_{i}"] = {"type": _STRING, "label": f"Phase{i}", "values": enum}
+    schema[PROJECT_HIDDEN_UDA] = {"type": _STRING, "label": "ProjectHidden"}
     for name in (*_CLAIM, *_REVIEW, *_EVIDENCE):
         schema[name] = {"type": _STRING, "label": name}
     return schema
@@ -414,29 +420,73 @@ def bootstrap() -> Path:
     return taskrc_path()
 
 
-def validate_project(project: str) -> str:
+def _project_parts(project: str) -> tuple[bool, list[str]]:
     project = (project or "").strip()
     if not project:
         raise SpiceError("project must be non-empty")
-    segments = project.split(PROJECT_DELIMITER)
+    hidden = project.startswith(HIDDEN_PROJECT_PREFIX)
+    body = project[len(HIDDEN_PROJECT_PREFIX) :] if hidden else project
+    if not body:
+        raise SpiceError("hidden project must name a stem after '.'")
+    segments = body.split(PROJECT_DELIMITER)
     for seg in segments:
         if not SEGMENT_RE.match(seg):
             raise SpiceError(
                 f"project segment {seg!r} must match [0-9a-z_] (project {project!r})"
             )
+    return hidden, segments
+
+
+def _normalized_project(hidden: bool, segments: list[str]) -> str:
+    body = PROJECT_DELIMITER.join(segments)
+    return f"{HIDDEN_PROJECT_PREFIX}{body}" if hidden else body
+
+
+def project_stem(project: str) -> str:
+    _hidden, segments = _project_parts(project)
+    return segments[0]
+
+
+def hidden_stems() -> tuple[str, ...]:
+    return HIDDEN_STEMS
+
+
+def is_hidden_project(project: str) -> bool:
+    try:
+        hidden, segments = _project_parts(project)
+    except SpiceError:
+        return False
+    return hidden and segments[0] in hidden_stems()
+
+
+def validate_project(project: str) -> str:
+    hidden, segments = _project_parts(project)
+    if hidden:
+        stems = hidden_stems()
+        if segments[0] not in stems:
+            raise SpiceError(
+                f"hidden project stem {segments[0]!r} is not approved "
+                f"(hidden: {', '.join(stems)})"
+            )
+        return _normalized_project(hidden, segments)
     stems = approved_stems()
     if segments[0] not in stems:
         raise SpiceError(
             f"project stem {segments[0]!r} is not approved "
             f"(approved: {', '.join(stems)})"
         )
-    return project
+    return _normalized_project(hidden, segments)
 
 
 def validate_assignable_project(project: str) -> str:
     project = validate_project(project)
-    segments = project.split(PROJECT_DELIMITER)
+    hidden, segments = _project_parts(project)
     stem = segments[0]
+    if hidden:
+        raise SpiceError(
+            f"hidden project stem {stem!r} is not lane-filter assignable "
+            f"(assignable: {', '.join(assignable_stems())})"
+        )
     if stem not in assignable_stems():
         raise SpiceError(
             f"project stem {stem!r} is internal and cannot be lane-filter assigned "
@@ -447,8 +497,13 @@ def validate_assignable_project(project: str) -> str:
 
 def validate_manual_creation_project(project: str) -> str:
     project = validate_project(project)
-    segments = project.split(PROJECT_DELIMITER)
+    hidden, segments = _project_parts(project)
     stem = segments[0]
+    if hidden:
+        raise SpiceError(
+            f"hidden project stem {stem!r} is reserved for system task creation; "
+            f"use an assignable project such as {_project_example()}"
+        )
     if stem in INTERNAL_STEMS:
         if stem != "agent":
             raise SpiceError(
@@ -505,6 +560,10 @@ def is_internal_project_stem(stem: str) -> bool:
     return stem in INTERNAL_STEMS
 
 
+def is_internal_or_hidden_project(project: str) -> bool:
+    return is_hidden_project(project) or project_stem(project) in INTERNAL_STEMS
+
+
 def task_project_validation_catalog() -> dict[str, object]:
     """Return the lane-filter assignable task project vocabulary for serve."""
     stems = assignable_stems()
@@ -512,9 +571,11 @@ def task_project_validation_catalog() -> dict[str, object]:
     min_depth, max_depth = project_depth_bounds()
     return {
         "approvedStems": list(stems),
+        "hiddenStems": list(hidden_stems()),
         "approvedPhases": list(APPROVED_PHASES),
         "defaultFlow": list(DEFAULT_FLOW),
         "perStemFlows": {stem: list(flow) for stem, flow in sorted(flows.items())},
+        "hiddenProjectPrefix": HIDDEN_PROJECT_PREFIX,
         "projectDelimiter": PROJECT_DELIMITER,
         "projectMinDepth": min_depth,
         "projectMaxDepth": max_depth,
@@ -528,9 +589,11 @@ def task_project_validation_catalog() -> dict[str, object]:
 
 def resolve_flow(flow: list[str] | None, project: str | None) -> list[str]:
     phases: list[str]
-    stem = project.split(PROJECT_DELIMITER, 1)[0] if project else ""
+    stem = project_stem(project) if project else ""
     if flow:
         phases = [p.strip() for p in flow if p.strip()]
+    elif project and is_hidden_project(project):
+        phases = list(PRIVATE_DEFAULT_FLOW)
     elif stem in INTERNAL_STEMS:
         phases = list(PRIVATE_DEFAULT_FLOW)
     else:

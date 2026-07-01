@@ -80,7 +80,7 @@ def _ready_handles() -> set[str]:
     return {
         identity.render_handle(row)
         for row in rows
-        if "oops" not in (row.get("tags") or []) and not str(row.get("claim_by") or "")
+        if not alloc.is_hidden(row) and not str(row.get("claim_by") or "")
     }
 
 
@@ -928,6 +928,9 @@ def test_drive_oops_creation_skips_subscription(task_repo):
     row = identity.resolve(handle)
 
     assert row["project"] == config.OOPS_PROJECT
+    assert row["phase"] == "todo"
+    assert row[config.PROJECT_HIDDEN_UDA] == "1"
+    assert config.HIDDEN_TASK_TAG in row["tags"]
     assert store.global_revision() == before
     assert store.team_config(team.team_id).task_filters == ()
 

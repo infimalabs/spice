@@ -49,7 +49,8 @@ checklist.
   3600 seconds; claim context links cover the surrounding five minutes.
 - One actor has at most one active claim.
 - Same-author review is guarded unless the allocator explicitly assigns it.
-- The oops board is deferred by a far-future wait date.
+- The oops board is the hidden `.oops` project, backed by hidden metadata and
+  deferred by a far-future wait date.
 - Priority classes derive SLA due dates.
 - Git sync happens only at task boundaries.
 

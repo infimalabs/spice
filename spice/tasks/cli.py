@@ -542,12 +542,16 @@ def _list(args: argparse.Namespace) -> str:
     from spice.tasks import tw
 
     filters = _list_status_filters(args)
+    project = getattr(args, "project", None)
+    explicit_hidden = bool(project and config.is_hidden_project(project))
     if args.all:
         rows = tw.export(filters)
+    elif explicit_hidden:
+        rows = tw.export(filters or ["status:pending"])
     else:
         rows = alloc.visible_rows(tw.current_actor(), filters or ["status:pending"])
-        rows = [r for r in rows if not alloc.is_oops(r)]
-    rows = _apply_list_project_filter(rows, getattr(args, "project", None))
+        rows = [r for r in rows if not alloc.is_hidden(r)]
+    rows = _apply_list_project_filter(rows, project)
     rows = _apply_list_limit(rows, getattr(args, "limit", None))
     return render.render_list(rows)
 

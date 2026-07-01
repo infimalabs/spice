@@ -300,12 +300,18 @@ def _blocked_component(row: dict[str, Any]) -> SizingComponent:
     status = str(row.get("status") or "").casefold()
     if status in {"blocked", "stale", "waiting"}:
         signals.append(f"status:{status}")
-    project = str(row.get("project") or "").casefold()
-    if project == config.OOPS_PROJECT or project.startswith(f"{config.OOPS_PROJECT}."):
+    project = str(row.get("project") or "")
+    project_folded = project.casefold()
+    hidden_project = config.is_hidden_project(project)
+    legacy_oops_project = project_folded == config.OOPS_PROJECT.lstrip(
+        config.HIDDEN_PROJECT_PREFIX
+    )
+    if hidden_project or legacy_oops_project:
         signals.append(f"project:{config.OOPS_PROJECT}")
-    phase = str(row.get("phase") or "").casefold()
-    if phase == "oops":
-        signals.append("phase:oops")
+    if str(row.get(config.PROJECT_HIDDEN_UDA) or "") == "1":
+        signals.append(f"uda:{config.PROJECT_HIDDEN_UDA}")
+    if config.HIDDEN_TASK_TAG in tags:
+        signals.append(f"tag:{config.HIDDEN_TASK_TAG}")
     if not signals:
         return SizingComponent("blocked", 0, "no_structured_blocker_signal")
     return SizingComponent("blocked", 2, ",".join(dict.fromkeys(signals)))

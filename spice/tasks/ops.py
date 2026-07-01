@@ -365,9 +365,7 @@ def _subscribe_auto_project(
 
 
 def _project_is_subscription_excluded(project: str) -> bool:
-    return _project_is_internal(project) or _project_filter_covers_project(
-        config.OOPS_PROJECT, project
-    )
+    return _project_is_internal(project) or config.is_hidden_project(project)
 
 
 def _gc_empty_project_task_filters(project: str) -> None:
@@ -401,8 +399,7 @@ def _gc_empty_project_task_filters(project: str) -> None:
 
 
 def _project_is_internal(project: str) -> bool:
-    stem = project.split(config.PROJECT_DELIMITER, 1)[0]
-    return config.is_internal_project_stem(stem)
+    return config.is_internal_or_hidden_project(project)
 
 
 def _project_filter_covers_project(filter_project: str, project: str) -> bool:
@@ -912,7 +909,7 @@ def oops(
         description=description or None,
         project=config.OOPS_PROJECT,
         priority=config.SEVERITY_PRIORITY[severity],
-        flow=["oops"],
+        flow=None,
         tags=oops_tags,
         after=[],
         acceptance=[],

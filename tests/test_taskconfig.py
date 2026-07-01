@@ -107,6 +107,32 @@ def test_manual_project_depth_defaults_require_child_and_cap_three(
         config.validate_manual_creation_project("serve")
 
 
+def test_hidden_oops_project_is_addressable_but_not_publicly_assignable(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+
+    assert config.validate_project(".oops") == ".oops"
+    assert config.validate_project(".oops.triage") == ".oops.triage"
+    assert config.project_stem(".oops.triage") == "oops"
+    assert config.is_hidden_project(".oops.triage")
+    assert config.resolve_flow(None, ".oops") == ["todo"]
+    assert "oops" not in config.approved_stems()
+    assert "oops" not in config.APPROVED_PHASES
+
+    catalog = config.task_project_validation_catalog()
+    assert catalog["hiddenStems"] == ["oops"]
+    assert catalog["hiddenProjectPrefix"] == "."
+
+    with pytest.raises(SpiceError, match="hidden project stem 'scratch'"):
+        config.validate_project(".scratch")
+    with pytest.raises(SpiceError, match="not lane-filter assignable"):
+        config.validate_assignable_project(".oops")
+    with pytest.raises(SpiceError, match="reserved for system task creation"):
+        config.validate_manual_creation_project(".oops")
+
+
 def test_manual_project_depth_uses_repo_config_overrides(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
     monkeypatch.chdir(repo)

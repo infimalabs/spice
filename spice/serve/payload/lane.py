@@ -50,7 +50,14 @@ def task_filter_inventory() -> dict[str, Any]:
         project = str(row.get("project") or "")
         raw_tags = row.get("tags") or []
         tags = {raw_tags} if isinstance(raw_tags, str) else set(raw_tags)
-        is_oops = project == task_config.OOPS_PROJECT or "oops" in tags
+        is_oops = (
+            str(row.get(task_config.PROJECT_HIDDEN_UDA) or "") == "1"
+            or task_config.is_hidden_project(project)
+            or task_config.HIDDEN_TASK_TAG in tags
+            or "oops" in tags
+            or project
+            == task_config.OOPS_PROJECT.lstrip(task_config.HIDDEN_PROJECT_PREFIX)
+        )
         if is_oops:
             oops_count += 1
             continue
@@ -95,9 +102,11 @@ def task_filter_inventory() -> dict[str, Any]:
         "openTaskCount": sum(item["openTaskCount"] for item in filters),
         "catalog": {
             "approvedStems": catalog["approvedStems"],
+            "hiddenStems": catalog["hiddenStems"],
             "approvedPhases": catalog["approvedPhases"],
             "defaultFlow": catalog["defaultFlow"],
             "perStemFlows": catalog["perStemFlows"],
+            "hiddenProjectPrefix": catalog["hiddenProjectPrefix"],
             "filterDelimiter": catalog["projectDelimiter"],
             "segmentPattern": catalog["segmentPattern"],
             "segmentRuleLabel": catalog["segmentRuleLabel"],

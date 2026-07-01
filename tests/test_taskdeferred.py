@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import DRIVER
-from spice.tasks import config, create, identity, ops, tw
+from spice.tasks import alloc, config, create, identity, ops, tw
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -66,7 +66,7 @@ def _ready_handles() -> set[str]:
     return {
         identity.render_handle(row)
         for row in rows
-        if "oops" not in (row.get("tags") or []) and not str(row.get("claim_by") or "")
+        if not alloc.is_hidden(row) and not str(row.get("claim_by") or "")
     }
 
 

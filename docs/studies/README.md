@@ -15,9 +15,10 @@ recommends.
 `study` is the task phase for environment survey and deep repo-durable prose
 artifacts. A study-phase task may commit a reviewed record under
 `docs/studies/` when findings should become repository truth. That permission is
-phase-scoped: `plan`, `todo`, `verify`, `review`, and `oops` should keep
-non-code reasoning on the board unless their explicit task acceptance is
-maintaining the study convention itself.
+phase-scoped: `plan`, `todo`, `verify`, and `review` should keep non-code
+reasoning on the board unless their explicit task acceptance is maintaining the
+study convention itself. Hidden system projects such as `.oops` are not study
+artifact phases.
 
 Study does not bypass the control plane. The task still needs a claim,
 validation, review, and follow-up tasks for concrete code, config, UI, workflow,
