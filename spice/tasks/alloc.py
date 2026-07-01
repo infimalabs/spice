@@ -82,15 +82,41 @@ def order(
 
 
 def is_oops(row: dict[str, Any]) -> bool:
-    return "oops" in (row.get("tags") or [])
+    project = str(row.get("project") or "")
+    tags = row.get("tags") or []
+    return (
+        config.is_hidden_project(project)
+        or "oops" in tags
+        or project == config.OOPS_PROJECT.lstrip(config.HIDDEN_PROJECT_PREFIX)
+    )
+
+
+def is_hidden(row: dict[str, Any]) -> bool:
+    tags = row.get("tags") or []
+    return (
+        str(row.get(config.PROJECT_HIDDEN_UDA) or "") == "1"
+        or config.is_hidden_project(str(row.get("project") or ""))
+        or config.HIDDEN_TASK_TAG in tags
+        or is_oops(row)
+    )
 
 
 def oops_rows() -> list[dict[str, Any]]:
     """Deferred oops items carry a far-future wait, so they are `waiting`."""
     return [
         r
-        for r in tw.export(["+oops"])
-        if str(r.get("status")) in ("pending", "waiting")
+        for r in tw.export(
+            [
+                "(",
+                "+oops",
+                "or",
+                f"project:{config.OOPS_PROJECT}",
+                "or",
+                f"project:{config.OOPS_PROJECT.lstrip(config.HIDDEN_PROJECT_PREFIX)}",
+                ")",
+            ]
+        )
+        if str(r.get("status")) in ("pending", "waiting") and is_oops(r)
     ]
 
 
@@ -151,17 +177,17 @@ def visible_rows(actor: str, filters: list[str]) -> list[dict[str, Any]]:
 
 def visible_ready_rows(actor: str) -> list[dict[str, Any]]:
     rows = visible_rows(actor, ["status:pending", "+READY", "-ACTIVE"])
-    return [r for r in rows if not is_oops(r) and not str(r.get("claim_by") or "")]
+    return [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")]
 
 
 def visible_active_rows(actor: str) -> list[dict[str, Any]]:
     rows = visible_rows(actor, ["status:pending", "+ACTIVE"])
-    return [r for r in rows if not is_oops(r) and str(r.get("claim_by") or "")]
+    return [r for r in rows if not is_hidden(r) and str(r.get("claim_by") or "")]
 
 
 def visible_pending_rows(actor: str) -> list[dict[str, Any]]:
     rows = visible_rows(actor, ["status:pending"])
-    return [r for r in rows if not is_oops(r)]
+    return [r for r in rows if not is_hidden(r)]
 
 
 def _candidate_rows(
@@ -182,7 +208,7 @@ def _candidate_rows(
 
 
 def _unclaimed_actionable(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [r for r in rows if not is_oops(r) and not str(r.get("claim_by") or "")]
+    return [r for r in rows if not is_hidden(r) and not str(r.get("claim_by") or "")]
 
 
 def _claim_first(

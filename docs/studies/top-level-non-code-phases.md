@@ -4,12 +4,13 @@ Status: recommendation, 2026-06-26.
 
 ## Recommendation
 
-Do not add `plan`, `reflect`, `research`, `discovery`, `prototype`, `trial`, or
+Do not add `reflect`, `research`, `discovery`, `prototype`, `trial`, or
 high-end-review as first-class task phases yet.
 
-Keep the task phase vocabulary delivery-oriented: `todo`, optional `verify`,
-`review`, and `oops`. Model non-code work as artifact classes inside ordinary
-allocator-owned tasks:
+Keep the task phase vocabulary delivery-oriented: `plan`, `todo`, optional
+`verify`, and `review`. Model non-code work as artifact classes inside ordinary
+allocator-owned tasks. Tooling-friction triage belongs to hidden system projects
+such as `.oops`, not to the public task phase vocabulary:
 
 - committed study records under `docs/studies/` for durable decisions;
 - task notes for small observations and handoff details;
@@ -28,7 +29,9 @@ Spice currently treats a task as the unit of allocation, claim ownership,
 validation, commit capture, and review. Each task has a bounded flow stored in
 phase slots (`phase_0` through `phase_6`), with default public flow
 `todo,review` and private scratch flow `todo`. The configured phase vocabulary
-is intentionally small: `todo`, `verify`, `review`, and `oops`.
+is intentionally small: `plan`, `todo`, `verify`, and `review`. Hidden system
+projects such as `.oops` remain addressable while staying out of normal
+allocator views.
 
 That model has useful properties:
 
@@ -178,4 +181,3 @@ review. Those would weaken the control plane before the artifact model is clear.
   statuses, artifact expectations, and follow-up task rules for future studies.
 - Design a task-addressed sidecar artifact store for large no-worktree outputs,
   including task render integration, retention, limits, and review citations.
-

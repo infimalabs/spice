@@ -622,11 +622,11 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
             {"project": "serve.ui"},
             {"project": "task.review"},
             {"project": "agent.abc123.task"},
-            {"project": "oops"},
-            {"project": "oops", "start": "2026-06-16T23:00:00Z"},
+            {"project": ".oops"},
+            {"project": ".oops", "start": "2026-06-16T23:00:00Z"},
             {"project": "serve.ui", "status": "waiting", "wait": "2099-01-01"},
             {
-                "project": "oops",
+                "project": ".oops",
                 "status": "waiting",
                 "tags": ["oops"],
                 "wait": "2099-01-01",
@@ -634,7 +634,8 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
             {
                 "project": "serve.ui",
                 "status": "waiting",
-                "tags": "oops",
+                "tags": "hidden",
+                "project_hidden": "1",
                 "wait": "2099-01-01",
             },
         ]
@@ -655,6 +656,8 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
     assert "agent.abc123.task" not in filters
     assert "oops" not in filters
     assert "serve.example" in inventory["catalog"]["filterExamples"]
+    assert inventory["catalog"]["hiddenStems"] == ["oops"]
+    assert inventory["catalog"]["hiddenProjectPrefix"] == "."
     assert stems["serve"] == 2
     assert stems["task"] == 1
     assert stems["agent"] == 1

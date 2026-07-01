@@ -154,6 +154,23 @@ def test_task_sizing_rows_filter_and_render_raw_components():
     assert "metadata=+1(phase:verify)" in output
 
 
+def test_task_sizing_hidden_oops_uses_project_hidden_signal():
+    row = _completed_row(
+        title="Completed triage",
+        uuid="task-hidden-oops",
+        project=".oops",
+        tags=["oops", "hidden"],
+    )
+    row["project_hidden"] = "1"
+
+    report = sizing.size_completed_task(row)
+    components = _components(report)
+
+    assert components["blocked"] == sizing.SizingComponent(
+        "blocked", 2, "tag:oops,project:.oops,uda:project_hidden,tag:hidden"
+    )
+
+
 def test_task_sizing_cli_renders_completed_rows(monkeypatch, capsys):
     row = _completed_row(
         title="Newest task",

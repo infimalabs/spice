@@ -186,7 +186,7 @@ def _context_check_lines(
     row: dict[str, Any], *, has_rehydrate_commands: bool
 ) -> list[str]:
     phase = _f(row, "phase")
-    if _f(row, "status") != "pending" or phase in ("review", "oops"):
+    if _f(row, "status") != "pending" or phase == "review" or alloc.is_hidden(row):
         return []
     first = (
         "  Before editing, run the rehydrate command(s) above and assert the "
@@ -234,6 +234,8 @@ def _review_commit_lines(row: dict[str, Any]) -> list[str]:
 
 def _next_command_line(row: dict[str, Any], rendered: str) -> str:
     phase = _f(row, "phase")
+    if alloc.is_oops(row):
+        return f'next: spice task note {rendered} "triage: ..."'
     if phase == "review":
         if not _f(row, "claim_by"):
             return ops.next_task_drain_line(review_assignment=True)
@@ -241,8 +243,6 @@ def _next_command_line(row: dict[str, Any], rendered: str) -> str:
             f"next: spice task review {rendered} --finding clean "
             '--note "description current; ..."'
         )
-    if phase == "oops":
-        return f'next: spice task note {rendered} "triage: ..."'
     return f'next: spice task done {rendered} --validation "..."'
 
 
@@ -294,7 +294,9 @@ def render_status() -> str:
     non_review_ready_rows = [r for r in ready_rows if _f(r, "phase") != "review"]
     blocked_count = _visible_count(actor, ["status:pending", "+BLOCKED"])
     waiting_count = sum(
-        1 for r in alloc.visible_rows(actor, ["status:waiting"]) if not alloc.is_oops(r)
+        1
+        for r in alloc.visible_rows(actor, ["status:waiting"])
+        if not alloc.is_hidden(r)
     )
     stale_count = sum(1 for r in active_rows if _is_stale_claim(r, now))
     lines = [
@@ -398,6 +400,7 @@ def render_doctor() -> str:
         public_task_project_depth_label(),
         f"assignable stems {' '.join(config.assignable_stems())}",
         f"internal stems {' '.join(config.INTERNAL_STEMS)}",
+        f"hidden stems {' '.join(config.hidden_stems())}",
         f"approved phases {' '.join(config.APPROVED_PHASES)}",
     ]
     if problems:
