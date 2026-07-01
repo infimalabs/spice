@@ -77,10 +77,11 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `internal_couplings` | `[]` | Exact private-internals exceptions as `{ path, test, target }` tables. These are named allowlist entries; stale entries fail the gate until removed. |
 | `pre_commit` | `[]` | Extra command steps run after built-ins. Entries are mounted command names or command tables. |
 | `pre_commit_success` | `[]` | Command steps run only after the full gate passes. |
-| `pre_commit_builtins` | built-ins enabled | Per-built-in overrides for `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `serve-web-typecheck`, `python-typecheck`, `env-policy`, `env-name-ledger`, `file-shape`, `complexity`, `magic-numbers`, `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals`. |
+| `pre_commit_builtins` | built-ins enabled | Per-built-in overrides for `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `taste`, `serve-web-typecheck`, `python-typecheck`, `env-policy`, `env-name-ledger`, `file-shape`, `complexity`, `magic-numbers`, `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals`. |
 | `limits` | built-ins | Base numeric bounds for files, routines, commit text, and repo-truth docs. |
 | `flex` | `ratio = 1.5` | Temporary headroom before sticky base enforcement for shape-style bounds. |
 | `complexity` | built-ins | Routine-complexity study display defaults. |
+| `taste` | built-ins | Gate-only prose taste word suggestions used by the `taste` pre-commit built-in. |
 | `magic` | built-ins | Magic-number threshold and staged baseline ref. |
 | `debt` | `0` counters | Allowed cleanup-debt counts for quality gates. |
 | `commit_message` | built-ins | Commit trailer allowlist policy. |
@@ -168,6 +169,22 @@ repo-root markdown `5000` chars plus `5000` per nested directory until
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `hotspot_limit` | `20` | Default number of rows shown by `spice study complexity-hotspots` when `--limit` is omitted. |
+
+### `[tool.spice.policy.taste.words]`
+
+The `taste` guard is a gate-only pre-commit built-in, not a public
+`spice study` or `spice dev doctor` surface. It scans tracked prose files
+(`.md`, `.txt`, and `.rst`) selected for the gate. Keys are whole-word trigger
+phrases; values are preferred replacements. An empty value means remove or
+rephrase the word.
+
+Configured words merge over the built-in suggestions:
+
+```toml
+[tool.spice.policy.taste.words]
+verbose = "terse"
+filler = ""
+```
 
 ### `[tool.spice.policy.markdown_depth_budget]`
 
