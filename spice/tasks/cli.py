@@ -8,7 +8,17 @@ from datetime import datetime
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.tasks import alloc, artifacts, config, create, identity, ops, render, sizing
+from spice.tasks import (
+    alloc,
+    artifacts,
+    config,
+    create,
+    identity,
+    markdown,
+    ops,
+    render,
+    sizing,
+)
 
 _TASK_LIST_STATUSES = ("pending", "waiting", "completed", "deleted")
 _TASK_LIST_NEWEST_FIELDS = ("end", "modified", "entry", "incepted", "claim_at")
@@ -111,6 +121,14 @@ def _configure_task_read_parsers(actions: Any) -> None:
     )
     show.add_argument("handle")
     show.set_defaults(func=handle)
+
+    ledger = actions.add_parser(
+        "ledger",
+        help="Export a task dependency closure as canonical markdown.",
+        recovery_examples=("spice task ledger TASK-1k4Q5gJw",),
+    )
+    ledger.add_argument("handle")
+    ledger.set_defaults(func=handle)
 
     _configure_artifact_parser(actions)
 
@@ -252,6 +270,7 @@ def _configure_task_phase_parsers(actions: Any) -> None:
 
 
 def _configure_task_edit_parsers(actions: Any) -> None:
+    _configure_ingest_parser(actions)
     _configure_oops_parser(actions)
     _configure_note_parser(actions)
     _configure_depends_parser(actions)
@@ -261,6 +280,28 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     _configure_edit_parser(actions)
     _configure_delete_parser(actions)
     _configure_adopt_parser(actions)
+
+
+def _configure_ingest_parser(actions: Any) -> None:
+    ingest = actions.add_parser(
+        "ingest",
+        help="Import canonical or freeform markdown into task DAG rows.",
+        recovery_examples=("spice task ingest backlog.md --project task.plan",),
+    )
+    ingest.add_argument("path")
+    ingest.add_argument(
+        "--project",
+        help=(
+            "Default assignable project for nodes without project fields; "
+            "required for freeform markdown."
+        ),
+    )
+    ingest.add_argument(
+        "--priority",
+        default=config.DEFAULT_PRIORITY,
+        help="Default priority for nodes without priority fields.",
+    )
+    ingest.set_defaults(func=handle)
 
 
 def _configure_note_parser(actions: Any) -> None:
@@ -644,7 +685,14 @@ _DISPATCH = {
     ),
     "list": _list,
     "show": lambda a: render.render_show(a.handle),
+    "ledger": lambda a: markdown.render_ledger(a.handle),
     "artifact": lambda a: _artifact(a),
+    "ingest": lambda a: markdown.ingest_path(
+        a.path,
+        project=a.project,
+        priority=a.priority,
+        creation_surface=config.TASK_CREATION_SURFACE_CLI,
+    ),
     "done": lambda a: ops.done(
         a.handle,
         validation=list(a.validation),
