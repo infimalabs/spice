@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -390,10 +391,23 @@ def render_release_range(
     return "\n".join(lines)
 
 
+REVERT_TARGET_RE = re.compile(r"This reverts commit ([0-9a-f]{7,40})\b")
+
+
+def _is_ancestor(candidate: str, commit: str) -> bool:
+    """True iff `candidate` is an ancestor of (or equal to) `commit`."""
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", candidate, commit],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
 def commit_records(previous_tag: str, release_commit: str) -> list[ReleaseRecord]:
     format_arg = (
         "--format=%H%x1f%s%x1f%(trailers:key=Task-Project,valueonly)"
-        "%x1f%(trailers:key=Task-Key,valueonly)%x1e"
+        "%x1f%(trailers:key=Task-Key,valueonly)%x1f%b%x1e"
     )
     if previous_tag:
         args = [
@@ -415,23 +429,52 @@ def commit_records(previous_tag: str, release_commit: str) -> list[ReleaseRecord
         ]
 
     raw = run(["git", *args], capture=True).stdout
-    records: list[ReleaseRecord] = []
-    latest_index_by_task_key: dict[str, int] = {}
+    rows: list[tuple[str, str, str, str, str]] = []
     for raw_record in raw.split("\x1e"):
         raw_record = raw_record.strip("\n")
         if not raw_record:
             continue
-        commit, subject, project, task_key = (
-            raw_record.split("\x1f", 3) + ["", "", "", ""]
-        )[:4]
+        commit, subject, project, task_key, body = (
+            raw_record.split("\x1f", 4) + ["", "", "", "", ""]
+        )[:5]
         if subject.startswith("release: bump to "):
             continue
-        record = ReleaseRecord(
-            commit=commit,
-            subject=subject,
-            project=project.strip() or "general",
+        rows.append(
+            (commit, subject, project.strip() or "general", task_key.strip(), body)
         )
-        task_key = task_key.strip()
+
+    # A revert commit and the (first-parent) commit that introduced the work
+    # it reverts both landing in this same range is a net no-op for this
+    # release; suppress the pair rather than claim credit for shipping
+    # something that got undone before it shipped. The revert body names the
+    # raw commit it undoes, which usually merged in on a side branch, so find
+    # the first-parent commit whose history contains it instead of matching
+    # commit hashes directly.
+    suppressed_commits: set[str] = set()
+    for revert_commit, _subject, _project, _task_key, body in rows:
+        match = REVERT_TARGET_RE.search(body)
+        if not match:
+            continue
+        target = match.group(1)
+        introduced_by = next(
+            (
+                commit
+                for commit, *_rest in rows
+                if commit != revert_commit and _is_ancestor(target, commit)
+            ),
+            None,
+        )
+        if introduced_by is None:
+            continue
+        suppressed_commits.add(revert_commit)
+        suppressed_commits.add(introduced_by)
+
+    records: list[ReleaseRecord] = []
+    latest_index_by_task_key: dict[str, int] = {}
+    for commit, subject, project, task_key, _body in rows:
+        if commit in suppressed_commits:
+            continue
+        record = ReleaseRecord(commit=commit, subject=subject, project=project)
         # A task's todo-phase and review-phase merges carry the same
         # Task-Key; keep one highlight per task, at its first position, with
         # the latest (most final) subject.

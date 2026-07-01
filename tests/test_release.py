@@ -554,7 +554,7 @@ def test_commit_records_addresses_previous_tag_by_full_ref(monkeypatch):
             "--first-parent",
             "--reverse",
             "--format=%H%x1f%s%x1f%(trailers:key=Task-Project,valueonly)"
-            "%x1f%(trailers:key=Task-Key,valueonly)%x1e",
+            "%x1f%(trailers:key=Task-Key,valueonly)%x1f%b%x1e",
             "refs/tags/v0.2.1..release-commit-sha",
         ]
     ]
@@ -591,6 +591,76 @@ def test_commit_records_dedupes_todo_and_review_merges_by_task_key(monkeypatch):
             commit="3333333cccc",
             subject="Fix an unrelated one-off",
             project="serve.ui",
+        ),
+    ]
+
+
+def test_commit_records_suppresses_implement_and_revert_pair_in_same_range(
+    monkeypatch,
+):
+    rows = [
+        ("1111111aaaa", "Implement emoji control markers", "mail.acks", "", ""),
+        (
+            "2222222bbbb",
+            'Revert "Implement emoji control markers"',
+            "mail.acks",
+            "",
+            "This reverts commit 1111111aaaa.",
+        ),
+        ("3333333cccc", "Fix an unrelated one-off", "serve.ui", "", ""),
+    ]
+    stdout = "\x1e".join("\x1f".join(row) for row in rows) + "\x1e"
+
+    class FakeResult:
+        pass
+
+    result = FakeResult()
+    result.stdout = stdout
+    monkeypatch.setattr(release, "run", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(
+        release, "_is_ancestor", lambda candidate, commit: candidate == commit
+    )
+
+    records = release.commit_records("v0.2.1", "release-commit-sha")
+
+    assert records == [
+        ReleaseRecord(
+            commit="3333333cccc",
+            subject="Fix an unrelated one-off",
+            project="serve.ui",
+        ),
+    ]
+
+
+def test_commit_records_keeps_revert_whose_target_shipped_earlier(monkeypatch):
+    rows = [
+        (
+            "1111111aaaa",
+            'Revert "Old feature from a prior release"',
+            "mail.acks",
+            "",
+            "This reverts commit 9999999999999999999999999999999999999999.",
+        ),
+    ]
+    stdout = "\x1e".join("\x1f".join(row) for row in rows) + "\x1e"
+
+    class FakeResult:
+        pass
+
+    result = FakeResult()
+    result.stdout = stdout
+    monkeypatch.setattr(release, "run", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(
+        release, "_is_ancestor", lambda candidate, commit: candidate == commit
+    )
+
+    records = release.commit_records("v0.2.1", "release-commit-sha")
+
+    assert records == [
+        ReleaseRecord(
+            commit="1111111aaaa",
+            subject='Revert "Old feature from a prior release"',
+            project="mail.acks",
         ),
     ]
 
