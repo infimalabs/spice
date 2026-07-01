@@ -44,7 +44,7 @@ def test_shipped_agent_defaults_are_current_high_effort():
     assert CODEX_DRIVER.default_model == "gpt-5.5"
     assert CODEX_DRIVER.default_reasoning_effort == "xhigh"
     assert CODEX_DRIVER.default_service_tier == ""
-    assert CLAUDE_DRIVER.default_model == "sonnet"
+    assert CLAUDE_DRIVER.default_model == "claude-sonnet-5"
     assert CLAUDE_DRIVER.default_reasoning_effort == "xhigh"
 
 
