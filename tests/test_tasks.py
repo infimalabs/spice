@@ -406,6 +406,24 @@ def test_plan_phase_show_injects_board_generation_guidance(task_repo):
     assert f'spice task done {handle} --validation "..."' in shown
 
 
+def test_study_phase_show_injects_artifact_boundary_guidance(task_repo):
+    handle = create.add(
+        "Study a task arc",
+        project="task.unit",
+        flow=["study", "plan", "todo", "review"],
+        acceptance=["study surveys environment"],
+    )
+
+    shown = render.render_show(handle)
+
+    assert "phase_guidance:" in shown
+    assert "phase:study surveys the environment" in shown
+    assert "docs/studies/" in shown
+    assert "only phase that legitimizes committing study records" in shown
+    assert "plan and other phases keep non-code reasoning on the board" in shown
+    assert f'spice task done {handle} --validation "..."' in shown
+
+
 def test_plan_phase_done_requires_connected_child_board(task_repo):
     handle = create.add(
         "Plan needs children",

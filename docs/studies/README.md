@@ -10,6 +10,20 @@ Studies do not replace tasks. A study must be written under a claimed task, must
 be validated, and must spawn follow-up tasks for concrete implementation work it
 recommends.
 
+## Task Phase Contract
+
+`study` is the task phase for environment survey and deep repo-durable prose
+artifacts. A study-phase task may commit a reviewed record under
+`docs/studies/` when findings should become repository truth. That permission is
+phase-scoped: `plan`, `todo`, `verify`, `review`, and `oops` should keep
+non-code reasoning on the board unless their explicit task acceptance is
+maintaining the study convention itself.
+
+Study does not bypass the control plane. The task still needs a claim,
+validation, review, and follow-up tasks for concrete code, config, UI, workflow,
+or policy changes. If no durable artifact is warranted, record that rationale in
+task validation instead of creating a placeholder study file.
+
 ## Statuses
 
 Use one status line immediately below the title:

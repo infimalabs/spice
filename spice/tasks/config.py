@@ -38,7 +38,7 @@ DEFAULT_PROJECT_MAX_DEPTH = 3
 # edited by a human — never invented by an agent.
 BASE_APPROVED_STEMS = ("task", "serve", "agent", "oops")
 INTERNAL_STEMS = ("agent", "oops")
-APPROVED_PHASES = ("plan", "todo", "verify", "review", "oops")
+APPROVED_PHASES = ("study", "plan", "todo", "verify", "review", "oops")
 PHASE_SLOT_COUNT = 7  # phase_0 .. phase_6
 TASK_EVENT_FILENAME = "events"
 DEFAULT_FLOW = ("todo", "review")
