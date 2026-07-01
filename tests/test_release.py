@@ -553,9 +553,45 @@ def test_commit_records_addresses_previous_tag_by_full_ref(monkeypatch):
             "log",
             "--first-parent",
             "--reverse",
-            "--format=%H%x1f%s%x1f%(trailers:key=Task-Project,valueonly)%x1e",
+            "--format=%H%x1f%s%x1f%(trailers:key=Task-Project,valueonly)"
+            "%x1f%(trailers:key=Task-Key,valueonly)%x1e",
             "refs/tags/v0.2.1..release-commit-sha",
         ]
+    ]
+
+
+def test_commit_records_dedupes_todo_and_review_merges_by_task_key(monkeypatch):
+    stdout = (
+        "\x1e".join(
+            [
+                "1111111aaaa\x1ftodo(serve.ui): Fix menu MODEL-abc\x1fserve.ui\x1fabc",
+                "2222222bbbb\x1freview(serve.ui): Fix menu MODEL-abc\x1fserve.ui\x1fabc",
+                "3333333cccc\x1fFix an unrelated one-off\x1fserve.ui\x1f",
+            ]
+        )
+        + "\x1e"
+    )
+
+    class FakeResult:
+        pass
+
+    result = FakeResult()
+    result.stdout = stdout
+    monkeypatch.setattr(release, "run", lambda *_args, **_kwargs: result)
+
+    records = release.commit_records("v0.2.1", "release-commit-sha")
+
+    assert records == [
+        ReleaseRecord(
+            commit="2222222bbbb",
+            subject="review(serve.ui): Fix menu MODEL-abc",
+            project="serve.ui",
+        ),
+        ReleaseRecord(
+            commit="3333333cccc",
+            subject="Fix an unrelated one-off",
+            project="serve.ui",
+        ),
     ]
 
 
