@@ -233,6 +233,34 @@ def test_supervised_ack_reports_noop_when_no_key_is_named(task_repo, quiet_super
     ]
 
 
+def test_supervised_marker_examples_do_not_emit_feedback_or_tasks(
+    task_repo, quiet_supervisor
+):
+    missing_key = "20260104T000000000099Z"
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        (
+            "Example output:\n"
+            "```text\n"
+            f"ACK {missing_key}: fenced example.\n"
+            "ACK: no-key fenced example.\n"
+            "TASK title=Fenced | project=task.unit | acceptance=Should not create\n"
+            "```\n"
+            f"> ACK {missing_key}: quoted example.\n"
+            f"docs/studies/example.md:137:ACK {missing_key}: rendered source output.\n"
+            "    TASK title=Indented | project=task.unit | acceptance=Should not create"
+        ),
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    assert collect_acked_inbox_items(task_repo) == []
+    assert tw.export(["status:pending"]) == []
+    assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
+
+
 def test_supervised_ack_reports_already_acked_keys(task_repo, quiet_supervisor):
     write_inbox_item(
         task_repo,

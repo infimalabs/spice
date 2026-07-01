@@ -8,6 +8,7 @@ import subprocess
 from types import SimpleNamespace
 
 
+from spice.agent import watchdog
 from spice.serve.messages import AssistantMessage
 from spice.mail.feedback import supervisor_feedback_line
 from spice.serve import messages as message_reader
@@ -370,7 +371,7 @@ def test_ack_noop_feedback_updates_presence_preview(tmp_path):
                 "  "
                 + supervisor_feedback_line(
                     "ack.noop",
-                    message="ACK ignored: no inbox key found",
+                    message=watchdog.ACK_NOOP_MESSAGE,
                 )
                 + "\n"
             ),
@@ -381,7 +382,10 @@ def test_ack_noop_feedback_updates_presence_preview(tmp_path):
 
     assert len(items) == 1
     assert items[0].kind == "presence:function_call_output"
-    assert items[0].preview == "ACK ignored: ACK ignored: no inbox key found"
+    assert items[0].preview == (
+        'ACK ignored: Run spice task add --project <stem.child> --title "..." '
+        '--acceptance "..." to capture non-inbox work; ACK…'
+    )
 
 
 def test_inline_task_supervisor_error_updates_presence_preview(tmp_path):
