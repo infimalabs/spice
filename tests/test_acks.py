@@ -148,6 +148,35 @@ def test_ack_parser_ignores_markdown_examples_and_rendered_source_lines():
     ]
 
 
+def test_emoji_ack_marker_extracts_key_and_content():
+    text = f"🌶️✅ {KEY_A}: emoji marker handled."
+
+    assert list(extract_ack_keys_from_text(text)) == [KEY_A]
+    assert extract_ack_segments_from_text(text)[0].content == "emoji marker handled."
+
+
+def test_emoji_ack_marker_accepts_spice_without_variation_selector():
+    text = f"🌶✅ {KEY_A}: normalized marker handled."
+
+    assert list(extract_ack_keys_from_text(text)) == [KEY_A]
+
+
+def test_emoji_markers_do_not_fire_inside_examples():
+    text = (
+        "```text\n"
+        f"🌶️✅ {KEY_A}: fenced example.\n"
+        "🌶️📋 title=Fenced | project=task.unit | acceptance=No task\n"
+        "```\n"
+        f"> 🌶️✅ {KEY_B}: quoted example.\n"
+        f"docs/studies/example.md:137:🌶️✅ {KEY_C}: source output.\n"
+        f'"🌶️✅ {KEY_D}: quoted prose."'
+    )
+
+    assert list(extract_ack_keys_from_text(text)) == []
+    assert extract_ack_segments_from_text(text) == []
+    assert extract_task_batch_lines_from_text(text) == []
+
+
 def test_nack_token_is_isolated_from_ack_parser():
     text = f"NACK {KEY_A}: refusing because the request is unsafe."
     segments = extract_nack_segments_from_text(text)
@@ -233,6 +262,22 @@ def test_task_directives_ignore_markdown_examples():
 
     assert extract_task_batch_lines_from_text(text) == [
         "TASK title=Real | project=task.unit | acceptance=Should create"
+    ]
+
+
+def test_emoji_task_marker_extracts_batch_line():
+    text = "🌶️📋 title=Marker task | project=task.unit | acceptance=Captured"
+
+    assert extract_task_batch_lines_from_text(text) == [
+        "TASK title=Marker task | project=task.unit | acceptance=Captured"
+    ]
+
+
+def test_zwj_emoji_task_marker_extracts_batch_line():
+    text = "🌶️🧑‍💻 title=ZWJ task | project=task.unit | acceptance=Captured"
+
+    assert extract_task_batch_lines_from_text(text) == [
+        "TASK title=ZWJ task | project=task.unit | acceptance=Captured"
     ]
 
 

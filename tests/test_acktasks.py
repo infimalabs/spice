@@ -138,6 +138,48 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
 
+def test_supervised_emoji_markers_create_task_and_archive_inbox(
+    task_repo, quiet_supervisor
+):
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(body="capture emoji markers", priority=None, stop=False),
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        (
+            f"🌶️✅ {INBOX_KEY}: captured.\n"
+            "🌶️📋 title=Emoji follow-up | project=task.unit | "
+            "acceptance=Emoji task exists"
+        ),
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    rows = tw.export(["status:pending"])
+    assert [item.name for item in collect_acked_inbox_items(task_repo)] == [
+        f"{INBOX_KEY}.txt"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["description"] == "Emoji follow-up"
+    assert rows[0]["project"] == "task.unit"
+    assert rows[0]["acceptance"] == "Emoji task exists"
+    handle = identity.render_handle(rows[0])
+    feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
+    assert feedback == [
+        _ack_feedback("ack.archived", INBOX_KEY),
+        _task_created_feedback(
+            handle,
+            "task.unit",
+            "route_filter=skipped:task.unit:no_team",
+        ),
+        _task_backlog_note_feedback(),
+    ]
+
+
 def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(
     task_repo, quiet_supervisor
 ):
