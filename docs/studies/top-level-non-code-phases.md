@@ -133,7 +133,7 @@ Adding many first-class phase names would affect more than display text.
 - `spice task next` ranks by task rows, not by free-floating artifacts. Any new
   top-level surface must either create tasks or be invisible to the allocator.
 - The serve UI, metrics, and burndown logic treat task flow as a fact source.
-  More phases would need stable semantics, not just names.
+  More phases would need stable semantics, not only names.
 - A no-worktree artifact phase still needs ownership, validation, and review, or
   it becomes an untracked side conversation.
 

@@ -61,7 +61,7 @@ Heuristic contribution:
 - 1-3 hours: `+2`;
 - more than 3 hours: `+3`;
 - add `+1` when review phase takes more than 30 active minutes and records
-  substantive analysis rather than just queue wait.
+  substantive analysis rather than queue wait alone.
 
 ### Command And Test Volume
 

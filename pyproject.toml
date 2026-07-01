@@ -132,6 +132,12 @@ env_names = [
     "ZSH_COMPDUMP",
 ]
 
+# Low-value words this repo rejects, merged over the built-in defaults
+# (hallucinate). Empty value = "consider rephrasing".
+[tool.spice.policy.taste.words]
+smell = ""
+just = ""
+
 # The agent-run fast path deliberately bypasses the full CLI dispatcher so it
 # never imports the parser/inbox stack; asserting the bypass is inherently about
 # internal control flow and has no public observable.

@@ -126,6 +126,11 @@ class PolicyCommitMessage:
 
 
 @dataclass(frozen=True)
+class PolicyTaste:
+    words: Mapping[str, str]
+
+
+@dataclass(frozen=True)
 class FileShapePolicy:
     line_limit: int
     line_flex_limit: int
@@ -167,6 +172,7 @@ class ResolvedPolicy:
     file_shape_paths: PolicyFileShapePaths
     env_access: PolicyEnvAccess
     commit_message: PolicyCommitMessage
+    taste: PolicyTaste
     scopes: tuple[PolicyScope, ...] = ()
 
     @property
@@ -369,8 +375,25 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
         file_shape_paths=_file_shape_paths(raw_policy),
         env_access=_env_access(raw_policy),
         commit_message=_commit_message(raw_policy, limits),
+        taste=_taste(raw_policy),
         scopes=_scopes(raw_policy, markdown_depth_budget),
     )
+
+
+def _taste(raw_policy: Mapping[str, object]) -> PolicyTaste:
+    table = _subtable(raw_policy, "taste")
+    words = {key.lower(): value for key, value in policy.TASTE_WORD_SUGGESTIONS.items()}
+    raw_words = table.get("words")
+    if raw_words is not None:
+        if not isinstance(raw_words, Mapping):
+            raise SpiceError("[tool.spice.policy.taste] words must be a table")
+        for key, value in raw_words.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise SpiceError(
+                    "[tool.spice.policy.taste] words entries must be string -> string"
+                )
+            words[key.lower()] = value
+    return PolicyTaste(words=words)
 
 
 def _commit_message(

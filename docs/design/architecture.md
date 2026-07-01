@@ -69,7 +69,7 @@ The work board is Taskwarrior data in the git common dir, shared by every
 worktree. spice layers phase flows, TTL claims, context links, single-active
 claim enforcement, review separation, oops capture, urgency allocation, and
 baseline-first completion merges over that board. Git sync belongs to task
-boundaries; normal development is just building, validating, committing, and
+boundaries; normal development is building, validating, committing, and
 advancing phases.
 
 `spice serve` projects this into lanes. A lane is an operator-owned container

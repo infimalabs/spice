@@ -43,6 +43,11 @@ COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS: tuple[str, ...] | None = None
 # Co-Authored-By rejected so commits never add co-authors.
 COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = ("Co-Authored-By",)
 
+# --- taste ----------------------------------------------------------------------
+# Low-value or poor-taste words mapped to a suggestion (empty = rephrase). Repos
+# merge their own words over these defaults under [tool.spice.policy.taste].
+TASTE_WORD_SUGGESTIONS: dict[str, str] = {"hallucinate": "confabulate"}
+
 # --- repo-truth docs ------------------------------------------------------------
 # Doctrine documents ride in every agent's context, so they are capped hard.
 # A repo widens the set in tracked `[tool.spice.policy] repo_truth_docs`.

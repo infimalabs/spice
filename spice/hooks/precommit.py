@@ -631,7 +631,8 @@ def _run_local_path_guard(repo_root: Path, paths: list[Path]) -> None:
 
 
 def _run_taste_guard(repo_root: Path, paths: list[Path]) -> None:
-    findings = taste.scan_taste(paths, root=repo_root)
+    resolved = resolve_policy(repo_root)
+    findings = taste.scan_taste(paths, root=repo_root, words=dict(resolved.taste.words))
     if findings:
         raise SpiceError(taste.render_taste_board(findings))
 
