@@ -60,8 +60,7 @@ def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path)
     assert _git(repo, "status", "--porcelain") == ""
     message = _git(repo, "log", "-1", "--format=%B", merge_head)
     assert message == (
-        "[task.unit] TASK-1k98v0WX (todo)\n\n"
-        "Publish task work\n\n"
+        "todo(task.unit): Publish task work TASK-1k98v0WX\n\n"
         "Task-Key: 1k98v0WX\n"
         "Task-Phase: todo\n"
         "Task-Project: task.unit\n"
@@ -215,8 +214,7 @@ def test_merge_message_omits_task_description_body():
     )
 
     assert message == (
-        "[serve.ui] TASK-1k98xkpR (todo)\n\n"
-        "Fix image labels\n\n"
+        "todo(serve.ui): Fix image labels TASK-1k98xkpR\n\n"
         "Task-Key: 1k98xkpR\n"
         "Task-Phase: todo\n"
         "Task-Project: serve.ui\n"
@@ -244,7 +242,7 @@ def test_merge_message_uses_fallback_subject_and_trailers_only():
     )
 
     assert message == (
-        "[task] TASK-1k98PQrs (todo)\n\n"
+        "todo(task): TASK-1k98PQrs\n\n"
         "Task-Key: 1k98PQrs\n"
         "Task-Phase: todo\n"
         "Task-Project: task\n"
