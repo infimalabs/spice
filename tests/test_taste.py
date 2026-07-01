@@ -12,7 +12,9 @@ def test_scan_matches_whole_word_case_insensitively(tmp_path):
         encoding="utf-8",
     )
 
-    findings = taste.scan_taste([Path("notes.md")], root=tmp_path)
+    findings = taste.scan_taste(
+        [Path("notes.md")], root=tmp_path, words={"just": "", "smell": ""}
+    )
 
     hits = {(finding.word, finding.line) for finding in findings}
     assert ("just", 1) in hits
@@ -28,10 +30,10 @@ def test_suggestions_render_alternative_or_rephrase(tmp_path):
     findings = taste.scan_taste([Path("notes.md")], root=tmp_path)
 
     assert findings[0].suggestion == "confabulate"
-    assert "use 'confabulate'" in taste.render_taste_board(findings)
+    assert "consider 'confabulate'" in taste.render_taste_board(findings)
 
     empty = taste.TasteFinding(path="x.md", line=1, word="just", suggestion="")
-    assert "adds no value" in taste.render_taste_board([empty])
+    assert "consider rephrasing" in taste.render_taste_board([empty])
 
 
 def test_only_text_files_scanned_and_clean_passes(tmp_path):

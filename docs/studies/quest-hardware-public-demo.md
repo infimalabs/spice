@@ -98,7 +98,7 @@ Build a clean-room demo instead of narrating the proprietary one:
 - Show spice steering, task routing, agent recovery, and final validation.
 - Publish the transcript and a short video, not the whole device-control stack.
 - Explain the point: spice closes the loop on physical, stateful systems, not
-  just text files.
+  only text files.
 
 ## Answer
 

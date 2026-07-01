@@ -64,6 +64,24 @@ def test_policy_resolver_defaults_match_policy_constants(tmp_path):
         resolved.commit_message.allowed_trailers
         == policy.COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS
     )
+    assert resolved.taste.words == policy.TASTE_WORD_SUGGESTIONS
+
+
+def test_policy_resolver_merges_taste_words_over_defaults(tmp_path):
+    _write_pyproject(
+        tmp_path,
+        """
+        [tool.spice.policy.taste.words]
+        Smell = ""
+        just = "reword"
+        """,
+    )
+
+    resolved = resolve_policy(tmp_path)
+
+    assert resolved.taste.words["hallucinate"] == "confabulate"  # default kept
+    assert resolved.taste.words["smell"] == ""  # merged, lowercased
+    assert resolved.taste.words["just"] == "reword"
 
 
 def test_policy_resolver_applies_each_bound_override(tmp_path):

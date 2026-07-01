@@ -79,7 +79,7 @@ the study task. The follow-ups should carry enough context to be implemented
 without rereading the whole study, but they should link back to the study in
 their description.
 
-Follow-up acceptance should state observable completion criteria, not just
+Follow-up acceptance should state observable completion criteria, not only
 "implement the recommendation." If a recommendation is intentionally deferred,
 say so in `## Follow-Ups` and explain the condition that would reopen it.
 
@@ -125,5 +125,5 @@ Show concrete scenarios when they clarify the recommendation.
   and follow-up tasks.
 
 Older study records may use pre-template section names. Keep them readable, but
-do not churn them just to match this template unless a task is already updating
+do not churn them to match this template unless a task is already updating
 their substance.

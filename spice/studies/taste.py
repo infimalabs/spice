@@ -14,12 +14,9 @@ from pathlib import Path
 
 from spice.studies.walk import is_excluded_path
 
-# Seed map; extend as more tics surface. Keys are matched case-insensitively.
-DEFAULT_TASTE_WORDS: dict[str, str] = {
-    "smell": "",
-    "just": "",
-    "hallucinate": "confabulate",
-}
+# Fallback map when no config is passed; keys match case-insensitively. Repos
+# add their own words via [tool.spice.policy.taste]; this stays minimal.
+DEFAULT_TASTE_WORDS: dict[str, str] = {"hallucinate": "confabulate"}
 
 TEXT_SUFFIXES = frozenset({".md", ".txt", ".rst"})
 
@@ -75,8 +72,8 @@ def scan_taste(
 
 def _finding_hint(finding: TasteFinding) -> str:
     if finding.suggestion:
-        return f"use '{finding.suggestion}'"
-    return "remove or rephrase; adds no value"
+        return f"consider '{finding.suggestion}'"
+    return "consider rephrasing; it adds no value"
 
 
 def render_taste_board(findings: list[TasteFinding]) -> str:

@@ -182,7 +182,7 @@ homes. Per-actor home should stay out of scope.
 ## Decision Gate
 
 Adopt later only if operator feedback shows that the neutral landing lane is
-used as durable workspace identity, not just as a drop target. Evidence should
+used as durable workspace identity, not only as a drop target. Evidence should
 look like repeated confusion after closing the last lane, repeated reapplying
 of default team config, or requests to "go back to the same empty lane."
 
