@@ -44,6 +44,7 @@ EXPECTED_BUILTIN_PRE_COMMIT_KEYS = [
     "repo-docs",
     "formatters",
     "local-paths",
+    "taste",
     "serve-web-typecheck",
     "python-typecheck",
     "env-policy",

@@ -50,6 +50,7 @@ from spice.studies import (
     magicnums,
     reachability,
     shape,
+    taste,
     testquality,
 )
 from spice.studies.repodocs import (
@@ -170,6 +171,11 @@ def _builtin_pre_commit_steps(
             "local-paths",
             "local paths",
             lambda: _run_local_path_guard(repo_root, paths),
+        ),
+        PreCommitStep(
+            "taste",
+            "taste",
+            lambda: _run_taste_guard(repo_root, paths),
         ),
         PreCommitStep(
             "serve-web-typecheck",
@@ -622,6 +628,12 @@ def _run_local_path_guard(repo_root: Path, paths: list[Path]) -> None:
     findings = localpaths.scan_local_path_literals(paths, root=repo_root)
     if findings:
         raise SpiceError(localpaths.render_local_path_board(findings))
+
+
+def _run_taste_guard(repo_root: Path, paths: list[Path]) -> None:
+    findings = taste.scan_taste(paths, root=repo_root)
+    if findings:
+        raise SpiceError(taste.render_taste_board(findings))
 
 
 def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
