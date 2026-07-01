@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
@@ -56,6 +57,8 @@ from spice.sessions.util import first_text, normalize_timestamp
 ACK_TOKEN = "ACK"
 NACK_TOKEN = "NACK"
 TASK_DIRECTIVE_TOKEN = "TASK"
+EMOJI_MARKER_PREFIX = "🌶"
+_EMOJI_MARKER_PREFIX_JSON_ESCAPE = "\\ud83c\\udf36"
 _MISSING_GIT_WORKTREE_ERROR = "not inside a git worktree"
 
 # Transcript lines start with `{"timestamp":"<iso>",...` — the timestamp can
@@ -130,8 +133,23 @@ _KEY_MIN_LENGTH = 9
 _KEY_SUFFIX_MIN_LENGTH = 6
 
 
+@dataclass(frozen=True)
+class _ControlMarker:
+    marker: str
+    token: str
+    variants: tuple[str, ...] = ()
+
+
+_CONTROL_MARKERS = (
+    _ControlMarker("🌶️✅", ACK_TOKEN, variants=("🌶✅",)),
+    _ControlMarker("🌶️📋", TASK_DIRECTIVE_TOKEN, variants=("🌶📋",)),
+    _ControlMarker("🌶️🧑‍💻", TASK_DIRECTIVE_TOKEN, variants=("🌶🧑‍💻",)),
+)
+
+
 def extract_ack_keys_from_text(text: str) -> Iterator[str]:
     """Yield inbox keys from ACK headers in `text`."""
+    text = _expand_control_markers(text)
     if ACK_TOKEN not in text:
         return
     for ack_pos in _iter_ack_tokens(text):
@@ -165,6 +183,7 @@ def split_ack_message(
     runs from that marker to the next (or end of text). A marker is the
     uppercase `ACK` token opening a recognizable header.
     """
+    text = _expand_control_markers(text)
     bounds = _ack_marker_bounds(text)
     return _split_keyed_message(
         text,
@@ -178,6 +197,7 @@ def split_nack_message(
     text: str, *, drop_task_directives: bool = True
 ) -> tuple[str, list[AckSegment]]:
     """Split `text` into its leading prose and ordered reason-bearing NACKs."""
+    text = _expand_control_markers(text)
     bounds = _nack_marker_bounds(text)
     return _split_keyed_message(
         text,
@@ -238,6 +258,7 @@ def extract_nack_segments_from_text(text: str) -> list[AckSegment]:
 
 def extract_task_batch_lines_from_text(text: str) -> list[str]:
     """Return inline TASK batch payloads carried by an assistant message."""
+    text = _expand_control_markers(text)
     return _task_batch_lines(text)
 
 
@@ -379,9 +400,10 @@ def summarize_ack_archival(
     consumed by an earlier ACK, and the keys that matched no known item, so the
     supervisor can tell the agent exactly which acknowledgments landed.
     """
-    segments = extract_ack_segments_from_text(message_text)
+    control_text = _expand_control_markers(message_text)
+    segments = extract_ack_segments_from_text(control_text)
     requested = list(dict.fromkeys(key for segment in segments for key in segment.keys))
-    if not requested and _has_noop_ack_marker(message_text):
+    if not requested and _has_noop_ack_marker(control_text):
         return AckArchivalSummary(
             archived=[],
             already_acked=[],
@@ -431,7 +453,8 @@ def summarize_nack_archival(
     repo_root: str | Path | None, message_text: str
 ) -> NackArchivalSummary:
     """Archive inbox items NACK'd by one assistant message as refused."""
-    segments = extract_nack_segments_from_text(message_text)
+    control_text = _expand_control_markers(message_text)
+    segments = extract_nack_segments_from_text(control_text)
     reasonless = list(
         dict.fromkeys(
             key
@@ -899,6 +922,52 @@ def _task_batch_line_from_directive(line: str) -> str | None:
     return stripped
 
 
+def _expand_control_markers(text: str) -> str:
+    """Compile line-leading emoji markers into canonical text control verbs."""
+    if not _text_might_carry_control_marker(text):
+        return text
+    expanded: list[str] = []
+    for line, suppressed in _iter_control_lines(text):
+        if suppressed:
+            expanded.append(line)
+            continue
+        expanded.append(_expand_control_marker_line(line))
+    return "\n".join(expanded)
+
+
+def _text_might_carry_control_marker(text: str) -> bool:
+    return EMOJI_MARKER_PREFIX in text
+
+
+def _expand_control_marker_line(line: str) -> str:
+    leading_size = len(line) - len(line.lstrip(" \t"))
+    prefix = line[:leading_size]
+    body = line[leading_size:]
+    for marker, token in _control_marker_lookup_items():
+        if body.startswith(marker) and _control_marker_has_boundary(body, len(marker)):
+            return f"{prefix}{token}{body[len(marker) :]}"
+    return line
+
+
+def _control_marker_lookup_items() -> tuple[tuple[str, str], ...]:
+    markers: dict[str, str] = {}
+    for marker in _CONTROL_MARKERS:
+        markers[_normalize_control_marker(marker.marker)] = marker.token
+        for variant in marker.variants:
+            markers[_normalize_control_marker(variant)] = marker.token
+    return tuple(sorted(markers.items(), key=lambda item: len(item[0]), reverse=True))
+
+
+def _normalize_control_marker(marker: str) -> str:
+    return unicodedata.normalize("NFC", marker)
+
+
+def _control_marker_has_boundary(text: str, marker_end: int) -> bool:
+    if marker_end >= len(text):
+        return True
+    return text[marker_end].isspace() or text[marker_end] in _ACK_HEADER_SEPARATOR_CHARS
+
+
 def _suppressed_control_line_ranges(text: str) -> list[tuple[int, int]]:
     ranges: list[tuple[int, int]] = []
     for _line, suppressed, start, end in _iter_control_line_ranges(text):
@@ -1195,6 +1264,8 @@ def _raw_timestamp(line: str) -> str | None:
 
 def _line_might_carry_ack(line: str, *, turn_filter: set[str] | None) -> bool:
     if "ACK" in line:
+        return True
+    if EMOJI_MARKER_PREFIX in line or _EMOJI_MARKER_PREFIX_JSON_ESCAPE in line:
         return True
     if turn_filter is None:
         return False
