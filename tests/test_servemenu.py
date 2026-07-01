@@ -540,10 +540,13 @@ def test_static_spice_menu_team_sorting_is_stable():
         "function renderSpiceMenuTeamGroup(group)", team_groups_start
     )
     team_groups_block = app_menu[team_groups_start:team_groups_end]
-    assert ".sort(compareSpiceMenuTargetChoices);" in team_groups_block
-    assert "group.targets.sort(compareSpiceMenuTargetChoices);" in team_groups_block
-    assert "unassigned.sort(compareSpiceMenuTargetChoices);" in team_groups_block
-    assert "return compareTargetChoices(left, right);" in team_groups_block
+    assert "function compareStableSpiceMenuTargetChoices" in team_groups_block
+    assert "function stableSpiceMenuTargetSortKey" in team_groups_block
+    assert (
+        "group.targets.sort(compareStableSpiceMenuTargetChoices);" in team_groups_block
+    )
+    assert "unassigned.sort(compareStableSpiceMenuTargetChoices);" in team_groups_block
+    assert "return targetChoiceName(target);" in team_groups_block
     compare_groups_start = app_menu.index(
         "function compareSpiceMenuTeamGroups(left, right)"
     )

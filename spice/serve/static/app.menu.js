@@ -245,9 +245,10 @@ function spiceMenuTeamGroups(choices) {
     grouped.get(teamId).targets.push(target);
   }
   let groups = [...grouped.values()];
-  for (const group of groups) group.targets.sort(compareSpiceMenuTargetChoices);
+  for (const group of groups)
+    group.targets.sort(compareStableSpiceMenuTargetChoices);
   groups = placedSpiceMenuTeamGroups(groups);
-  unassigned.sort(compareSpiceMenuTargetChoices);
+  unassigned.sort(compareStableSpiceMenuTargetChoices);
   if (choices.length) {
     groups.push(spiceMenuNewTeamDropGroup());
     groups.push({
@@ -315,11 +316,23 @@ function compareSpiceMenuTeamGroups(left, right) {
 }
 
 function spiceMenuTeamSortKey(group) {
-  return group.targets.map(targetChoiceName).join("\n");
+  return group.targets.map(stableSpiceMenuTargetSortKey).join("\n");
 }
 
 function compareSpiceMenuTargetChoices(left, right) {
   return compareTargetChoices(left, right);
+}
+
+function compareStableSpiceMenuTargetChoices(left, right) {
+  const byName = stableSpiceMenuTargetSortKey(left).localeCompare(
+    stableSpiceMenuTargetSortKey(right),
+  );
+  if (byName) return byName;
+  return String(left.id || "").localeCompare(String(right.id || ""));
+}
+
+function stableSpiceMenuTargetSortKey(target) {
+  return targetChoiceName(target);
 }
 
 function renderSpiceMenuTeamGroup(group) {

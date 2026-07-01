@@ -9,6 +9,8 @@ const context = {
   targetById: new Map(),
   targets: [],
   compareTargetChoices(left, right) {
+    const byActivity = (left.activityRank || 0) - (right.activityRank || 0);
+    if (byActivity) return byActivity;
     return context.targetChoiceName(left).localeCompare(
       context.targetChoiceName(right),
     );
@@ -39,10 +41,11 @@ function assertOrder(actual, expected, message) {
   );
 }
 
-function target(id, branch, teamId = "") {
+function target(id, branch, teamId = "", activityRank = 0) {
   return {
     id,
     branch,
+    activityRank,
     targetIdentity: { branch },
     teamIdentity: { teamId },
   };
@@ -100,4 +103,36 @@ assertOrder(
 assert(
   context.spiceMenuNewTeamPlacementHints[0].teamId === "durable-created",
   "server-refreshed topology binds the placement hint to the durable team id",
+);
+
+setTargets([
+  target("alpha-lead", "alpha", "team-alpha", 9),
+  target("zulu-active", "zulu", "team-alpha", 0),
+  target("bravo", "bravo", "team-bravo", 3),
+]);
+assertOrder(
+  orderedMenuTeamIds(),
+  [
+    "team-alpha:alpha-lead+zulu-active",
+    "team-bravo:bravo",
+    "new-team-drop",
+    "unassigned",
+  ],
+  "activity ordering does not move a team ahead of stable team names",
+);
+
+setTargets([
+  target("alpha-lead", "alpha", "team-alpha", 0),
+  target("zulu-active", "zulu", "team-alpha", 9),
+  target("bravo", "bravo", "team-bravo", 3),
+]);
+assertOrder(
+  orderedMenuTeamIds(),
+  [
+    "team-alpha:alpha-lead+zulu-active",
+    "team-bravo:bravo",
+    "new-team-drop",
+    "unassigned",
+  ],
+  "activity changes do not reshuffle global menu team order",
 );
