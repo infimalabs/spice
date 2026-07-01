@@ -30,6 +30,7 @@ Hot path notes:
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
@@ -76,6 +77,7 @@ _TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
 _ACK_CONTEXT_BREAK_CHARS = "\r\n.!?;"
 _ACK_CONTEXT_WORD_EXTRA_CHARS = frozenset({"'", "-"})
 _ACK_CONTEXT_WINDOW = 6
+_SOURCE_CONTEXT_LINE_RE = re.compile(r"^\s*(?:[./\w-]+/)*[\w.-]+:\d+(?::\d+)?:")
 _ACK_NEGATION_WORDS = frozenset(
     {
         "can't",
@@ -568,7 +570,9 @@ def _has_noop_ack_marker(text: str) -> bool:
     if ACK_TOKEN not in text:
         return False
     for ack_pos in _iter_ack_tokens(text):
-        if _parse_ack_header(text, ack_pos) is None:
+        if _parse_ack_header(text, ack_pos) is None and _looks_noop_ack_marker(
+            text, ack_pos
+        ):
             return True
     return False
 
@@ -598,6 +602,7 @@ def _iter_nack_tokens(text: str) -> Iterator[int]:
 
 
 def _iter_header_tokens(text: str, token: str) -> Iterator[int]:
+    suppressed_ranges = _suppressed_control_line_ranges(text)
     start = 0
     while True:
         index = text.find(token, start)
@@ -605,6 +610,8 @@ def _iter_header_tokens(text: str, token: str) -> Iterator[int]:
             return
         start = index + len(token)
         if not _is_standalone_word(text, index, start):
+            continue
+        if _position_in_ranges(index, suppressed_ranges):
             continue
         if token == ACK_TOKEN and _has_guarded_ack_context(text, index):
             continue
@@ -636,6 +643,17 @@ def _has_guarded_ack_context(text: str, ack_pos: int) -> bool:
         or bool(_ACK_HYPOTHETICAL_WORDS & set(recent))
         or bool(_ACK_NARRATION_WORDS & set(recent))
     )
+
+
+def _looks_noop_ack_marker(text: str, ack_pos: int) -> bool:
+    """True when a keyless ACK token is shaped like a directive."""
+    line_start = text.rfind("\n", 0, ack_pos) + 1
+    if text[line_start:ack_pos].strip():
+        return False
+    cursor = ack_pos + len(ACK_TOKEN)
+    while cursor < len(text) and text[cursor] in " \t":
+        cursor += 1
+    return cursor >= len(text) or text[cursor] in _ACK_HEADER_SEPARATOR_CHARS + "\r\n"
 
 
 def _ack_token_is_quoted(text: str, ack_pos: int) -> bool:
@@ -856,7 +874,9 @@ def _is_app_directive_line(line: str) -> bool:
 
 def _task_batch_lines(text: str) -> list[str]:
     lines: list[str] = []
-    for line in text.splitlines():
+    for line, suppressed in _iter_control_lines(text):
+        if suppressed:
+            continue
         payload = _task_batch_line_from_directive(line)
         if payload is not None:
             lines.append(payload)
@@ -877,6 +897,90 @@ def _task_batch_line_from_directive(line: str) -> str | None:
     ):
         return None
     return stripped
+
+
+def _suppressed_control_line_ranges(text: str) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    for _line, suppressed, start, end in _iter_control_line_ranges(text):
+        if suppressed:
+            ranges.append((start, end))
+    return ranges
+
+
+def _position_in_ranges(position: int, ranges: list[tuple[int, int]]) -> bool:
+    return any(start <= position < end for start, end in ranges)
+
+
+def _iter_control_lines(text: str) -> Iterator[tuple[str, bool]]:
+    for line, suppressed, _start, _end in _iter_control_line_ranges(text):
+        yield line, suppressed
+
+
+def _iter_control_line_ranges(text: str) -> Iterator[tuple[str, bool, int, int]]:
+    in_fence = False
+    fence_char = ""
+    fence_size = 0
+    offset = 0
+    for raw_line in text.splitlines(keepends=True):
+        line = raw_line.rstrip("\r\n")
+        line_end = offset + len(raw_line)
+        fence = _markdown_fence(line)
+        suppressed = (
+            in_fence
+            or _is_markdown_quote_line(line)
+            or _is_indented_code_line(line)
+            or _is_rendered_source_context_line(line)
+        )
+        if fence is not None:
+            fence_candidate_char, fence_candidate_size = fence
+            suppressed = True
+            if not in_fence:
+                in_fence = True
+                fence_char = fence_candidate_char
+                fence_size = fence_candidate_size
+            elif (
+                fence_candidate_char == fence_char
+                and fence_candidate_size >= fence_size
+            ):
+                in_fence = False
+                fence_char = ""
+                fence_size = 0
+        yield line, suppressed, offset, line_end
+        offset = line_end
+    if text and (not text.endswith(("\n", "\r"))):
+        return
+
+
+def _markdown_fence(line: str) -> tuple[str, int] | None:
+    indent = len(line) - len(line.lstrip(" "))
+    if indent > 3:
+        return None
+    stripped = line[indent:]
+    if stripped.startswith("```"):
+        return "`", _opening_run_size(stripped, "`")
+    if stripped.startswith("~~~"):
+        return "~", _opening_run_size(stripped, "~")
+    return None
+
+
+def _opening_run_size(text: str, char: str) -> int:
+    size = 0
+    while size < len(text) and text[size] == char:
+        size += 1
+    return size
+
+
+def _is_markdown_quote_line(line: str) -> bool:
+    indent = len(line) - len(line.lstrip(" "))
+    return indent <= 3 and line[indent:].startswith(">")
+
+
+def _is_indented_code_line(line: str) -> bool:
+    return line.startswith("\t") or line.startswith("    ")
+
+
+def _is_rendered_source_context_line(line: str) -> bool:
+    return _SOURCE_CONTEXT_LINE_RE.match(line) is not None
 
 
 def iter_assistant_ack_keys(

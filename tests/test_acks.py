@@ -129,6 +129,25 @@ def test_hypothetical_and_narrated_ack_mentions_do_not_extract_keys():
         assert extract_ack_segments_from_text(text) == []
 
 
+def test_ack_parser_ignores_markdown_examples_and_rendered_source_lines():
+    real_key = "20260513T184255000000Z"
+    text = (
+        "Example output:\n"
+        "```text\n"
+        f"ACK {KEY_A}: fenced example.\n"
+        "```\n"
+        f"> ACK {KEY_B}: quoted example.\n"
+        f"docs/studies/example.md:137:ACK {KEY_C}: rendered source output.\n"
+        f"    ACK {KEY_D}: indented code output.\n"
+        f"ACK {real_key}: actual acknowledgment."
+    )
+
+    assert list(extract_ack_keys_from_text(text)) == [real_key]
+    assert [segment.keys for segment in extract_ack_segments_from_text(text)] == [
+        (real_key,)
+    ]
+
+
 def test_nack_token_is_isolated_from_ack_parser():
     text = f"NACK {KEY_A}: refusing because the request is unsafe."
     segments = extract_nack_segments_from_text(text)
@@ -200,6 +219,21 @@ def test_task_directives_are_extracted_from_any_message_line():
     ]
     assert preamble == ""
     assert segments[0].content == "captured."
+
+
+def test_task_directives_ignore_markdown_examples():
+    text = (
+        "```text\n"
+        "TASK title=Fenced | project=task.unit | acceptance=Should not create\n"
+        "```\n"
+        "> TASK title=Quoted | project=task.unit | acceptance=Should not create\n"
+        "    TASK title=Indented | project=task.unit | acceptance=Should not create\n"
+        "TASK title=Real | project=task.unit | acceptance=Should create"
+    )
+
+    assert extract_task_batch_lines_from_text(text) == [
+        "TASK title=Real | project=task.unit | acceptance=Should create"
+    ]
 
 
 def test_standalone_task_directive_is_stripped_from_display_text():
@@ -462,6 +496,18 @@ def test_summarize_ack_archival_ignores_narrated_noop_ack(tmp_path):
     _init_repo(tmp_path)
 
     summary = summarize_ack_archival(tmp_path, "To acknowledge, write ACK plainly.")
+
+    assert summary == AckArchivalSummary(
+        archived=[],
+        already_acked=[],
+        unmatched=[],
+    )
+
+
+def test_summarize_ack_archival_ignores_scanner_narration(tmp_path):
+    _init_repo(tmp_path)
+
+    summary = summarize_ack_archival(tmp_path, "I am checking the ACK scanner code.")
 
     assert summary == AckArchivalSummary(
         archived=[],

@@ -276,7 +276,10 @@ INLINE_TASK_BACKLOG_NOTE = (
     "inline tasks above are on the backlog, not yours — move on "
     "unless the allocator assigns one back via spice task next"
 )
-ACK_NOOP_MESSAGE = "ACK ignored: no inbox key found"
+ACK_NOOP_MESSAGE = (
+    'Run spice task add --project <stem.child> --title "..." '
+    '--acceptance "..." to capture non-inbox work; ACK ignored: no inbox key found'
+)
 
 
 def create_inline_tasks(
