@@ -263,20 +263,20 @@ def test_policy_resolver_names_invalid_debt_key(tmp_path):
         resolve_policy(tmp_path)
 
 
-def test_policy_resolver_rejects_forbidden_commit_trailer_config(tmp_path):
+def test_policy_resolver_allows_explicit_co_authored_by_trailer(tmp_path):
     _write_pyproject(
         tmp_path,
         """
         [tool.spice.policy.commit_message]
-        allowed_trailers = ["Co-Authored-By"]
+        allowed_trailers = ["Task", "Co-Authored-By"]
         """,
     )
 
-    with pytest.raises(
-        SpiceError,
-        match=r"\[tool\.spice\.policy\.commit_message\] allowed_trailers",
-    ):
-        resolve_policy(tmp_path)
+    resolved = resolve_policy(tmp_path)
+
+    assert resolved.commit_message.allowed_trailers == frozenset(
+        {"task", "co-authored-by"}
+    )
 
 
 def test_config_reference_mentions_tracked_policy_keys():
