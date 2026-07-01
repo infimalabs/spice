@@ -651,6 +651,7 @@ def done(
     actor = tw.current_actor()
     _require_owner(row, actor, "complete")
     _require_bound_quality_gates_clean(row)
+    _require_plan_phase_board_populated(row)
     uuid = identity.uuid_of(row)
     # Integrate and publish this agent's work before any task state changes; a
     # real conflict raises here, leaving the task claimed for the agent to fix.
@@ -952,6 +953,57 @@ def depends(handle: str, after: list[str]) -> str:
             ) from exc
         annotate(uuid, f"depends: {identity.render_handle(dep_row)}")
     return identity.render_handle(row)
+
+
+def _dependency_uuids(row: dict[str, Any]) -> list[str]:
+    raw = row.get("depends") or []
+    if isinstance(raw, str):
+        return [raw] if raw else []
+    return [str(item) for item in raw if str(item)]
+
+
+def _pending_plan_child_rows(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """Pending board rows connected to a plan task by native dependencies."""
+    plan_uuid = identity.uuid_of(row)
+    children: dict[str, dict[str, Any]] = {}
+    for dep_uuid in _dependency_uuids(row):
+        rows = tw.export([dep_uuid])
+        if rows and str(rows[0].get("status") or "") == "pending":
+            children[identity.uuid_of(rows[0])] = rows[0]
+    for candidate in tw.export(["status:pending"]):
+        candidate_uuid = identity.uuid_of(candidate)
+        if candidate_uuid == plan_uuid:
+            continue
+        if plan_uuid in _dependency_uuids(candidate):
+            children[candidate_uuid] = candidate
+    return list(children.values())
+
+
+def _require_plan_phase_board_populated(row: dict[str, Any]) -> None:
+    if str(row.get("phase") or "") != "plan":
+        return
+    handle = identity.render_handle(row)
+    if not str(row.get("acceptance") or "").strip():
+        raise SpiceError(
+            f"cannot advance plan phase for {handle}: add bookend acceptance "
+            "to the plan task"
+        )
+    children = _pending_plan_child_rows(row)
+    if not children:
+        raise SpiceError(
+            f"cannot advance plan phase for {handle}: populate the board with "
+            "at least one pending child task connected by native dependencies"
+        )
+    missing_acceptance = [
+        identity.render_handle(child)
+        for child in children
+        if not str(child.get("acceptance") or "").strip()
+    ]
+    if missing_acceptance:
+        raise SpiceError(
+            f"cannot advance plan phase for {handle}: child tasks missing "
+            f"acceptance: {', '.join(missing_acceptance)}"
+        )
 
 
 def delete(handle: str, reason: str) -> str:

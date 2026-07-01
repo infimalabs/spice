@@ -355,7 +355,7 @@ new curated near-universal preferences.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `stems` | `[]` plus built-ins `task`, `serve`, `agent` | Additional public project stems. Stems use lowercase letters, digits, and underscores. `agent` is internal and not allocator assignable. Hidden system stems are code-owned rather than repo-configured; `.oops` is reserved for system-created rows and excluded from normal boards. |
-| `flows` | `{}` | Per-stem phase lists. Approved phases are `plan`, `todo`, `verify`, and `review`; the default public flow is `todo -> review`. Hidden system projects use the private `todo` flow. |
+| `flows` | `{}` | Per-stem phase lists. Approved phases are `study`, `plan`, `todo`, `verify`, and `review`; the default public flow is `todo -> review`. Hidden system projects use the private `todo` flow. |
 | `project_min_depth` | `2` | Minimum dotted project depth for public tasks. |
 | `project_max_depth` | `3` | Maximum dotted project depth for public tasks. |
 

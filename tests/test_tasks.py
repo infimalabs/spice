@@ -390,6 +390,123 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     assert completed_row["review_note"] == "review passed"
 
 
+def test_plan_phase_show_injects_board_generation_guidance(task_repo):
+    handle = create.add(
+        "Plan a task arc",
+        project="task.unit",
+        flow=["plan", "todo", "review"],
+        acceptance=["plan bookend acceptance exists"],
+    )
+
+    shown = render.render_show(handle)
+
+    assert "phase_guidance:" in shown
+    assert "phase:plan decomposes the goal into connected child tasks" in shown
+    assert "Add bookend acceptance on this plan task" in shown
+    assert f'spice task done {handle} --validation "..."' in shown
+
+
+def test_study_phase_show_injects_artifact_boundary_guidance(task_repo):
+    handle = create.add(
+        "Study a task arc",
+        project="task.unit",
+        flow=["study", "plan", "todo", "review"],
+        acceptance=["study surveys environment"],
+    )
+
+    shown = render.render_show(handle)
+
+    assert "phase_guidance:" in shown
+    assert "phase:study surveys the environment" in shown
+    assert "docs/studies/" in shown
+    assert "only phase that legitimizes committing study records" in shown
+    assert "plan and other phases keep non-code reasoning on the board" in shown
+    assert f'spice task done {handle} --validation "..."' in shown
+
+
+def test_plan_phase_done_requires_connected_child_board(task_repo):
+    handle = create.add(
+        "Plan needs children",
+        project="task.unit",
+        flow=["plan", "todo", "review"],
+        acceptance=["parent bookend acceptance exists"],
+    )
+    ops.claim(handle)
+
+    with pytest.raises(SpiceError, match="populate the board"):
+        ops.done(handle, validation=["plan attempted without children"])
+
+    row = identity.resolve(handle)
+    assert row["phase"] == "plan"
+    assert not str(row.get("validation") or "")
+
+
+def test_plan_phase_done_requires_child_acceptance(task_repo):
+    handle = create.add(
+        "Plan needs accepted children",
+        project="task.unit",
+        flow=["plan", "todo", "review"],
+        acceptance=["parent bookend acceptance exists"],
+    )
+    child = create.add("Unaccepted child", project="task.unit")
+    ops.depends(handle, [child])
+    ops.claim(handle)
+
+    with pytest.raises(SpiceError, match="child tasks missing acceptance"):
+        ops.done(handle, validation=["plan attempted with incomplete child"])
+
+    row = identity.resolve(handle)
+    assert row["phase"] == "plan"
+    assert not str(row.get("validation") or "")
+
+
+def test_plan_phase_done_requires_bookend_acceptance(task_repo):
+    handle = create.add(
+        "Plan needs bookend acceptance",
+        project="task.unit",
+        flow=["plan", "todo", "review"],
+    )
+    child = create.add(
+        "Accepted child for unaccepted plan",
+        project="task.unit",
+        acceptance=["child node has acceptance"],
+    )
+    ops.depends(handle, [child])
+    ops.claim(handle)
+
+    with pytest.raises(SpiceError, match="bookend acceptance"):
+        ops.done(handle, validation=["plan attempted without bookend"])
+
+    row = identity.resolve(handle)
+    assert row["phase"] == "plan"
+    assert not str(row.get("validation") or "")
+
+
+def test_plan_phase_done_advances_after_board_population(task_repo):
+    handle = create.add(
+        "Plan has children",
+        project="task.unit",
+        flow=["plan", "todo", "review"],
+        acceptance=["parent bookend acceptance exists"],
+    )
+    child = create.add(
+        "Accepted child",
+        project="task.unit",
+        acceptance=["child node has acceptance"],
+    )
+    ops.depends(handle, [child])
+    ops.claim(handle)
+
+    output = ops.done(handle, validation=["plan board populated"])
+    row = identity.resolve(handle)
+
+    assert f"advanced {handle} -> todo" in output
+    assert row["phase"] == "todo"
+    assert str(row["phase_i"]) == "1"
+    assert row["validation"] == "plan board populated"
+    assert identity.uuid_of(identity.resolve(child)) in row["depends"]
+
+
 def test_task_next_repairs_active_claim_missing_owner(task_repo, monkeypatch):
     handle = create.add(
         "Repair partial active claim",

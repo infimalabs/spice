@@ -207,6 +207,47 @@ def _context_check_lines(
     ]
 
 
+def _phase_guidance_lines(row: dict[str, Any], rendered: str) -> list[str]:
+    phase = _f(row, "phase")
+    if phase == "study":
+        return [
+            "phase_guidance:",
+            (
+                "  phase:study surveys the environment and may commit a deep "
+                "repo-durable prose artifact under docs/studies/."
+            ),
+            (
+                "  Study is the only phase that legitimizes committing study "
+                "records; plan and other phases keep non-code reasoning on "
+                "the board."
+            ),
+            (
+                "  Spawn follow-up tasks for implementation work, then advance "
+                "with the study artifact or explicit no-artifact rationale: "
+                f'spice task done {rendered} --validation "..."'
+            ),
+        ]
+    if phase == "plan":
+        return [
+            "phase_guidance:",
+            (
+                "  phase:plan decomposes the goal into connected child tasks on "
+                "the board; it does not write repo docs."
+            ),
+            (
+                "  Add bookend acceptance on this plan task, create child tasks "
+                "with per-node acceptance, and connect them with native "
+                "dependencies."
+            ),
+            (
+                "  Record out-of-place discoveries as task notes; advance only "
+                "after the board is populated: "
+                f'spice task done {rendered} --validation "..."'
+            ),
+        ]
+    return []
+
+
 def _review_commit_lines(row: dict[str, Any]) -> list[str]:
     review_ref = _f(row, "done_ref")
     if not review_ref:
@@ -255,6 +296,7 @@ def render_show(handle: str) -> str:
     rehydrate = _rehydrate_lines(row)
     lines.extend(rehydrate)
     lines.extend(_context_check_lines(row, has_rehydrate_commands=bool(rehydrate)))
+    lines.extend(_phase_guidance_lines(row, rendered))
     deps = _deps_lines(row)
     if deps:
         lines.append("depends:")
