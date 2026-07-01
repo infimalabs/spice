@@ -139,7 +139,7 @@ def create_task_dag(
             node.title,
             project=project,
             description=node.description,
-            priority=node.priority or config.DEFAULT_PRIORITY,
+            priority=node.priority or "none",
             flow=list(node.flow) or None,
             after=after_handles,
             acceptance=list(node.acceptance),
