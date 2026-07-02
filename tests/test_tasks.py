@@ -416,7 +416,7 @@ def test_design_phase_show_injects_artifact_boundary_guidance(task_repo):
 
     assert "phase_guidance:" in shown
     assert "phase:design surveys the environment" in shown
-    assert "docs/design/" in shown
+    assert "docs/design/accepted/ or docs/design/experimental/" in shown
     assert "only phase that legitimizes committing design records" in shown
     assert "plan and other phases keep non-code reasoning on the board" in shown
     assert f'spice task done {handle} --validation "..."' in shown

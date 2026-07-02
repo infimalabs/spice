@@ -21,10 +21,10 @@ Artifacts belong to tasks; tasks remain the allocator and review unit.
 
 ## Context
 
-`docs/design/top-level-non-code-phases.md` identifies a missing artifact space:
-some useful outputs are too large for task notes but should not alter the
-worktree. Examples include raw research notes, trial logs, benchmark output,
-screenshots, rejected plans, review reports, and prototype evidence.
+`docs/design/experimental/top-level-non-code-phases.md` identifies a missing
+artifact space: some useful outputs are too large for task notes but should not
+alter the worktree. Examples include raw research notes, trial logs, benchmark
+output, screenshots, rejected plans, review reports, and prototype evidence.
 
 Spice already has a precedent for durable out-of-tree blobs through inbox
 attachments. Those live under the shared git common dir, are content-addressed,

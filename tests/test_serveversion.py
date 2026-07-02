@@ -3,7 +3,7 @@
 The version must come from the active installed distribution (the running
 tool), not a hard-coded or worktree-derived string, and reach the UI through the
 served page so the global menu can render it. See
-docs/design/single-install-runtime-model.md — the installed tool is the single
+docs/design/accepted/single-install-runtime-model.md — the installed tool is the single
 coherent running code.
 """
 

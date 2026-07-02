@@ -214,7 +214,8 @@ def _phase_guidance_lines(row: dict[str, Any], rendered: str) -> list[str]:
             "phase_guidance:",
             (
                 "  phase:design surveys the environment and may commit a deep "
-                "repo-durable prose artifact under docs/design/."
+                "repo-durable prose artifact under docs/design/accepted/ or "
+                "docs/design/experimental/."
             ),
             (
                 "  Design is higher-maturity than plan: it can create repository "

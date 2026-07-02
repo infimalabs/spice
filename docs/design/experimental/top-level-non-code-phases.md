@@ -10,7 +10,7 @@ This record is historical. Spice now admits exactly two non-code task phases:
 `design` and `plan`.
 
 - `design` surveys the environment and may commit a deep durable record under
-  `docs/design/`.
+  `docs/design/accepted/` or `docs/design/experimental/`.
 - `plan` enriches the board with connected child tasks and acceptance, and does
   not write repo docs.
 
@@ -22,7 +22,9 @@ Keep the remaining task phase vocabulary delivery-oriented: `todo`, optional
 ordinary allocator-owned tasks. Tooling-friction triage belongs to hidden system
 projects such as `.oops`, not to the public task phase vocabulary:
 
-- committed design records under `docs/design/` for durable decisions;
+- committed design records under `docs/design/accepted/` for durable decisions;
+- experimental design records under `docs/design/experimental/` for
+  recommendations, prototypes, superseded records, and thought-only work;
 - task notes for small observations and handoff details;
 - task follow-ups for concrete implementation work discovered by a design;
 - isolated prototype branches or files only when the task explicitly allows a
@@ -64,7 +66,7 @@ the first meaning would make the board more expressive but also less crisp.
 
 | Candidate | Useful artifact | Allowed side effects | Main risk |
 | --- | --- | --- | --- |
-| Design | Environment survey, source-backed findings, durable decision record | `docs/design/` artifact plus follow-up tasks | Can sprawl unless artifact scope and follow-ups are explicit |
+| Design | Environment survey, source-backed findings, durable decision record | `docs/design/accepted/` or `docs/design/experimental/` artifact plus follow-up tasks | Can sprawl unless artifact scope, maturity, and follow-ups are explicit |
 | Plan | Execution contract, sequence, acceptance refinement | Board enrichment only: child tasks, dependencies, task notes | Becomes stale if not tied to allocator state |
 | Reflect | Gap/deviation inventory | Task note or design record; no changes | Looks like review but has no closure semantics |
 | Revise | Updated plan, docs, backlog shape | May edit docs/tasks; code only if task says so | Blurs with ordinary implementation |
@@ -81,10 +83,10 @@ the rest need artifact rules, task notes, or follow-up tasks.
 
 ### Committed Design Records
 
-Use `docs/design/` from a `design` phase when the output should become
-repository truth: a decision, recommendation, prototype result, migration path,
-or durable rationale. This is appropriate for research and discovery that future
-tasks will cite.
+Use `docs/design/accepted/` from a `design` phase for decisions and implemented
+contracts. Use `docs/design/experimental/` for recommendations, prototype
+results, migration paths, rejected options, or durable rationale that future
+tasks should cite without treating as implemented truth.
 
 Constraints:
 
@@ -121,8 +123,9 @@ Constraints a sidecar design must satisfy:
 - artifacts cannot silently become source changes;
 - binary and large text artifacts have size/type limits.
 
-Until that exists, use a `design` phase task for durable repo truth; otherwise
-summarize into task notes and spawn follow-ups.
+Until that exists, use a `design` phase task for durable repo truth and place
+the record in `accepted/` or `experimental/` by maturity; otherwise summarize
+into task notes and spawn follow-ups.
 
 ### Scratch Prototypes
 
@@ -162,7 +165,9 @@ handling around the current task object.
 
 Create a `plan` phase task when the output is a connected board. If the research
 behind the migration is durable repo truth, use a preceding or sibling `design`
-phase task to write `docs/design/<topic>.md` and spawn implementation tasks.
+phase task to write `docs/design/experimental/<topic>.md` and spawn
+implementation tasks. Promote the record to `docs/design/accepted/` only after
+the decision is accepted or implemented.
 If the plan is only local execution detail, keep it on the board and in task
 notes.
 
@@ -196,7 +201,7 @@ model is clear.
 ## Follow-Ups
 
 - Keep `docs/design/README.md` as the template that defines required sections,
-  statuses, artifact expectations, phase contract, and follow-up task rules for
-  future design records.
+  directory maturity, statuses, artifact expectations, phase contract, and
+  follow-up task rules for future design records.
 - Design a task-addressed sidecar artifact store for large no-worktree outputs,
   including task render integration, retention, limits, and review citations.

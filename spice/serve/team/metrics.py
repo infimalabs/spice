@@ -349,7 +349,7 @@ class TeamMetricStoreMixin:
             # Derive the lane summary from CURRENT membership: the metric is the
             # aggregate of the team's current members' per-agent counters, so work
             # follows the agent across moves rather than staying bolted to a team.
-            # See docs/design/serve-team-metric-attribution.md (D3, D4).
+            # See docs/design/accepted/serve-team-metric-attribution.md (D3, D4).
             row = connection.execute(
                 "SELECT team_id FROM memberships WHERE agent_id = ?", (agent_id,)
             ).fetchone()
