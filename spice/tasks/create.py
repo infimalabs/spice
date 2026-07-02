@@ -74,10 +74,23 @@ def _resolved_wait(*, wait: str | None, deferred: bool, claim: bool) -> str | No
 
 def _resolve_add_project(actor: str, project: str | None, system_project: bool) -> str:
     if project is None:
+        _require_steer_lifetime(actor, action="creating a private task")
         return config.private_project(actor)
     if system_project:
         return config.validate_project(project)
     return config.validate_manual_creation_project(project)
+
+
+def _require_steer_lifetime(actor: str, *, action: str) -> None:
+    from spice.tasks import lanes
+
+    route = lanes.team_route_for_actor(actor)
+    lifetime = lanes.task_continuation_contract(route).lifetime
+    if lifetime != "Steer":
+        raise SpiceError(
+            f"{action} requires Steer lifetime (got {lifetime or 'unrouted'}); "
+            "pass --project outside Steer"
+        )
 
 
 def _build_add_args(

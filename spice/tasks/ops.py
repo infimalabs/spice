@@ -550,6 +550,12 @@ def adopt(
                 f"task already claimed by {owner}; unclaim it before adopting"
             )
     else:
+        if not project:
+            raise SpiceError(
+                "task adopt requires --project when minting a new task; adopted "
+                "work auto-claims regardless of lifetime, so there is no private "
+                "fallback here"
+            )
         from spice.tasks import create
 
         created = create.add_one(

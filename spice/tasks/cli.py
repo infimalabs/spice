@@ -410,16 +410,17 @@ def _configure_adopt_parser(actions: Any) -> None:
             "adopt wraps a task around the orphan instead of making you reset and "
             "redo it: it claims a task — newly minted, or the handle you pass — "
             "over the commit you already made, so you finish it through the normal "
-            "done/review flow. With no handle, the new task's title defaults to "
-            "the orphan commit's subject.\n\n"
+            "done/review flow. Minting a new task always requires --project: adopt "
+            "auto-claims regardless of lifetime, so there is no private fallback "
+            "here. With no --title, the new task's title defaults to the orphan "
+            "commit's subject.\n\n"
             "Examples:\n"
-            "  spice task adopt\n"
             '  spice task adopt --project task.cli --title "Capture orphan fix"\n'
-            '  spice task adopt --done --validation "tests passed"\n'
+            '  spice task adopt --project task.cli --done --validation "tests passed"\n'
             "  spice task adopt TASK-1k4Q5gJw"
         ),
         recovery_examples=(
-            "spice task adopt",
+            "spice task adopt --project task.example",
             "spice task adopt TASK-1k4Q5gJw",
         ),
     )
@@ -445,7 +446,8 @@ def _configure_add_parser(actions: Any) -> None:
         epilog=(
             "Private work:\n"
             "  Use --private, or omit --project, to create this agent's "
-            "private task.\n"
+            "private task. Only allowed in Steer lifetime; Drive and Drain "
+            "require --project.\n"
             "  Do not pass agent.*; agent stems are reserved for automatic "
             "private task creation.\n\n"
             "Examples:\n"

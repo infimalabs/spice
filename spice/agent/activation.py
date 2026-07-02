@@ -113,7 +113,7 @@ def activation_command_surface_lines() -> list[str]:
             "acceptance=... must start on its own line and uses the same "
             "task-add batch format, or use spice task add ... --project "
             "<stem.child>; omitting --project creates private agent scratch "
-            "work"
+            "work, allowed only in Steer lifetime"
         ),
         (
             "task_project_depth=public task project depth bounds are reported by "
