@@ -280,6 +280,82 @@ def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monke
     assert line["latestMessagePreview"] == ""
 
 
+def test_tool_output_preview_uses_matching_call_context(tmp_path, monkeypatch):
+    call_time = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
+    output_time = _stamp(datetime(2026, 6, 10, 12, 0, 1, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text(
+        "\n".join(
+            json.dumps(
+                {"timestamp": timestamp, "type": "response_item", "payload": payload},
+                separators=(",", ":"),
+            )
+            for timestamp, payload in (
+                (
+                    call_time,
+                    {
+                        "type": "function_call",
+                        "call_id": "call-status",
+                        "name": "exec_command",
+                        "arguments": json.dumps({"cmd": "git status --short"}),
+                    },
+                ),
+                (
+                    output_time,
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call-status",
+                        "output": "ok\n",
+                    },
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        lane,
+        "agent_status",
+        lambda _repo: _Status(running=True, started_at="", process_status="running"),
+    )
+    monkeypatch.setattr(
+        lane,
+        "pending_inbox_identity_payload",
+        lambda _repo: _pending_identity(),
+    )
+
+    items = message_reader.read_assistant_messages(transcript, limit=5)
+    line = lane.status_line_payload(
+        _State(), _Target(id="wt", repo_root=tmp_path), items=items, error=None
+    )
+
+    assert len(items) == 1
+    assert items[0].kind == "presence:function_call_output"
+    assert items[0].preview == "exec command: git status --short -> ok"
+    assert line["preview"] == items[0].preview
+    assert line["latestActivityPreview"] == items[0].preview
+
+
+def test_tool_output_preview_uses_output_text_without_call_context(tmp_path):
+    timestamp = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        timestamp,
+        {
+            "type": "function_call_output",
+            "call_id": "call-missing",
+            "output": "build passed\n",
+        },
+    )
+
+    items = message_reader.read_assistant_messages(transcript, limit=5)
+
+    assert len(items) == 1
+    assert items[0].kind == "presence:function_call_output"
+    assert items[0].preview == "Tool output: build passed"
+
+
 def test_ack_feedback_distinguishes_first_and_duplicate_attempts(tmp_path, monkeypatch):
     first = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
     duplicate = _stamp(datetime(2026, 6, 10, 12, 1, tzinfo=UTC))

@@ -76,6 +76,15 @@ _ACK_NOOP_KIND = "ack.noop"
 _ACK_UNMATCHED_KIND = "ack.unmatched"
 _TASK_CREATED_KIND = "task.created"
 _TASK_ERROR_KIND = "task.error"
+_SUPERVISOR_FEEDBACK_PREVIEW_PREFIXES = (
+    "ACK ignored:",
+    "Acknowledged:",
+    "Acknowledged (no pending match):",
+    "Already acknowledged:",
+    "Task capture failed:",
+    "Task captured:",
+    "Tasks captured:",
+)
 
 
 @dataclass(frozen=True)
@@ -258,6 +267,7 @@ def read_metric_messages_from_offset(
     file_size = transcript_path.stat().st_size
     if file_size < start_offset:
         start_offset = 0
+    call_previews: dict[str, str] = {}
     with transcript_path.open(encoding="utf-8", errors="replace") as handle:
         handle.seek(start_offset)
         while True:
@@ -266,7 +276,11 @@ def read_metric_messages_from_offset(
             if not line:
                 return messages, handle.tell()
             message = _build_message(
-                line_offset, line, driver=driver, worktree_id=worktree_id
+                line_offset,
+                line,
+                driver=driver,
+                worktree_id=worktree_id,
+                call_previews=call_previews,
             )
             if message is not None:
                 messages.append(message)
@@ -443,6 +457,7 @@ def _read_chronological_from_offset(
     if file_size < start_offset:
         start_offset = 0
     messages: list[AssistantMessage] = []
+    call_previews: dict[str, str] = {}
     with transcript_path.open(encoding="utf-8", errors="replace") as handle:
         handle.seek(start_offset)
         while True:
@@ -451,7 +466,11 @@ def _read_chronological_from_offset(
             if not line:
                 return messages, handle.tell()
             message = _build_message(
-                line_offset, line, driver=driver, worktree_id=worktree_id
+                line_offset,
+                line,
+                driver=driver,
+                worktree_id=worktree_id,
+                call_previews=call_previews,
             )
             if message is not None:
                 messages.append(message)
@@ -525,6 +544,7 @@ def _scan_span(
 ) -> tuple[list[AssistantMessage], list[AssistantMessage]]:
     visible: list[AssistantMessage] = []
     presence: list[AssistantMessage] = []
+    call_previews: dict[str, str] = {}
     with transcript_path.open(encoding="utf-8", errors="replace") as handle:
         handle.seek(start)
         if start:
@@ -537,7 +557,11 @@ def _scan_span(
             if not line:
                 break
             message = _build_message(
-                line_offset, line, driver=driver, worktree_id=worktree_id
+                line_offset,
+                line,
+                driver=driver,
+                worktree_id=worktree_id,
+                call_previews=call_previews,
             )
             if message is None:
                 continue
@@ -648,8 +672,7 @@ def _is_supervisor_feedback_presence(message: AssistantMessage) -> bool:
     return (
         message.kind.startswith("presence:")
         and message.source_kind in _SUPERVISOR_FEEDBACK_OUTPUT_TYPES
-        and bool(message.preview)
-        and message.preview != "tool output"
+        and message.preview.startswith(_SUPERVISOR_FEEDBACK_PREVIEW_PREFIXES)
     )
 
 
@@ -668,7 +691,12 @@ def activity_status(messages: list[AssistantMessage]) -> str:
 
 
 def _build_message(
-    offset: int, line: str, *, driver: AgentDriver, worktree_id: str | None = None
+    offset: int,
+    line: str,
+    *,
+    driver: AgentDriver,
+    worktree_id: str | None = None,
+    call_previews: dict[str, str] | None = None,
 ) -> AssistantMessage | None:
     loaded = _load_json_line(line)
     if loaded is None:
@@ -723,12 +751,16 @@ def _build_message(
         )
     payload_type = payload.get("type")
     if isinstance(payload_type, str) and payload_type in _PRESENCE_PAYLOAD_TYPES:
+        preview = _preview_for_presence(
+            payload, payload_type, call_previews=call_previews
+        )
+        _remember_call_preview(payload, payload_type, preview, call_previews)
         return _presence_message(
             key,
             offset,
             timestamp,
             kind=payload_type,
-            preview=_preview_for_presence(payload, payload_type),
+            preview=preview,
         )
     return None
 
@@ -1063,7 +1095,12 @@ def _preview_from_text(text: str) -> str:
     return flat
 
 
-def _preview_for_presence(payload: dict[str, Any], payload_type: str) -> str:
+def _preview_for_presence(
+    payload: dict[str, Any],
+    payload_type: str,
+    *,
+    call_previews: dict[str, str] | None = None,
+) -> str:
     supervisor_feedback = _supervisor_feedback_preview(payload)
     if supervisor_feedback:
         return supervisor_feedback
@@ -1072,10 +1109,49 @@ def _preview_for_presence(payload: dict[str, Any], payload_type: str) -> str:
     if payload_type in {"function_call", "custom_tool_call"}:
         return _preview_for_call(payload) or "tool call"
     if payload_type in {"function_call_output", "custom_tool_call_output"}:
-        return "tool output"
+        return _preview_for_tool_output(payload, call_previews=call_previews)
     if payload_type == "web_search_call":
         return _preview_for_web_search(payload) or "web search"
     return payload_type.replace("_", " ")
+
+
+def _remember_call_preview(
+    payload: dict[str, Any],
+    payload_type: str,
+    preview: str,
+    call_previews: dict[str, str] | None,
+) -> None:
+    if call_previews is None:
+        return
+    if payload_type not in {"function_call", "custom_tool_call"}:
+        return
+    call_id = _payload_call_id(payload)
+    if call_id and preview:
+        call_previews[call_id] = preview
+
+
+def _payload_call_id(payload: dict[str, Any]) -> str:
+    for key in ("call_id", "id"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _preview_for_tool_output(
+    payload: dict[str, Any], *, call_previews: dict[str, str] | None
+) -> str:
+    output_preview = _preview_from_text(_payload_output_text(payload))
+    call_preview = (
+        call_previews.get(_payload_call_id(payload), "") if call_previews else ""
+    )
+    if call_preview and output_preview:
+        return _preview_from_text(f"{call_preview} -> {output_preview}")
+    if call_preview:
+        return _preview_from_text(f"{call_preview} completed")
+    if output_preview:
+        return _preview_from_text(f"Tool output: {output_preview}")
+    return "tool output"
 
 
 def _reasoning_summary_text(payload: dict[str, Any]) -> str:
@@ -1092,7 +1168,7 @@ def _reasoning_summary_text(payload: dict[str, Any]) -> str:
     return ""
 
 
-_PREVIEW_ARG_KEYS = ("path", "query", "url", "input", "prompt", "text")
+_PREVIEW_ARG_KEYS = ("cmd", "path", "query", "url", "input", "prompt", "text")
 
 
 def _preview_for_call(payload: dict[str, Any]) -> str:
