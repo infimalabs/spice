@@ -21,15 +21,15 @@ Artifacts belong to tasks; tasks remain the allocator and review unit.
 
 ## Context
 
-`docs/studies/top-level-non-code-phases.md` identifies a missing artifact space:
+`docs/design/top-level-non-code-phases.md` identifies a missing artifact space:
 some useful outputs are too large for task notes but should not alter the
 worktree. Examples include raw research notes, trial logs, benchmark output,
 screenshots, rejected plans, review reports, and prototype evidence.
 
 Spice already has a precedent for durable out-of-tree blobs through inbox
 attachments. Those live under the shared git common dir, are content-addressed,
-and render back as links in steering readouts. Study sidecars should use the
-same broad storage principle but a different address: task handle first, content
+and render back as links in steering readouts. Task sidecars should use the same
+broad storage principle but a different address: task handle first, content
 digest second.
 
 ## Storage Layout
@@ -117,7 +117,7 @@ Retention should be explicit, not implicit cleanup of "old-looking" files.
 - Deleting a task should not delete artifacts automatically; deletion should
   mark the manifest orphaned so a later prune can report it.
 
-This is conservative. Study and review artifacts are often only useful much
+This is conservative. Design and review artifacts are often only useful much
 later, when someone asks why a decision was made.
 
 ## Size And Type Limits

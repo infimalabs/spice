@@ -39,7 +39,7 @@ Operator corrections on the task constrain the design:
 - ZWJ sequences remain allowed, but they are one marker shape among others;
 - text ACK/TASK forms remain canonical aliases;
 - implementation must solve deterministic Unicode matching and suppression;
-- this task is study-only, with no marker or hook implementation.
+- this task is design-only, with no marker or hook implementation.
 
 ## Findings
 
@@ -57,8 +57,8 @@ create a parallel ACK state machine.
 
 Current gap: the ACK guard is not a reusable markdown/block scanner. It has an
 inline quote/backtick guard, but a marker scanner will also need fenced-code and
-blockquote awareness so examples in studies, docs, or reviews cannot trigger
-control effects.
+blockquote awareness so examples in design records, docs, or reviews cannot
+trigger control effects.
 
 ### Driver Message Boundaries
 
@@ -118,7 +118,7 @@ sequence it maps to.
   messages after driver reconstruction.
 - Do not make a shell wrapper like `spice <emoji>` the primary surface. Wrappers
   are secondary affordances.
-- Do not implement this in the study task. Implementation belongs to follow-up
+- Do not implement this in the design task. Implementation belongs to follow-up
   tasks.
 
 ## Proposed Marker Shape

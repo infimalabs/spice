@@ -144,7 +144,7 @@ Task metadata gives useful priors but should not dominate the observed signals.
 
 Useful:
 
-- project stem is a good prior: docs/studies tasks are usually different from
+- project stem is a good prior: docs/design tasks are usually different from
   serve UI or lifecycle shellhook tasks;
 - priority is urgency, not size;
 - dependency count and flow shape indicate coordination cost;
@@ -161,7 +161,7 @@ Heuristic contribution:
 
 - dependency count above two: `+1`;
 - `verify` phase or explicit browser/full-suite/release validation: `+1`;
-- acceptance contains "study", "prototype", or "design": no automatic score
+- acceptance contains "research", "prototype", or "design": no automatic score
   change, but report as an artifact class.
 
 ## Initial Heuristic

@@ -373,7 +373,7 @@ new curated near-universal preferences.
 | --- | --- | --- |
 | `stems` | `[]` plus built-ins `task`, `serve`, `agent` | Additional public project stems. Stems use lowercase letters, digits, and underscores. `agent` is internal and not allocator assignable. |
 | `hidden_stems` | `[]` plus built-in `oops` | Additional hidden system project stems. Values omit the leading dot, so `scratch` defines addressable `.scratch` projects. Hidden projects use the private `todo` flow, are reserved for system-created rows, and are excluded from normal boards and lane assignment. |
-| `flows` | `{}` | Per-stem phase lists. Approved phases are `study`, `plan`, `todo`, `verify`, and `review`; the default public flow is `todo -> review`. Hidden system projects use the private `todo` flow. |
+| `flows` | `{}` | Per-stem phase lists. Approved phases are `design`, `plan`, `todo`, `verify`, and `review`; the default public flow is `todo -> review`. Hidden system projects use the private `todo` flow. |
 | `project_min_depth` | `2` | Minimum dotted project depth for public tasks. |
 | `project_max_depth` | `3` | Maximum dotted project depth for public tasks. |
 
@@ -385,7 +385,7 @@ days for H/M/L.
 
 Per-driver, per-phase agent launch overrides. Each driver has its own model
 space, so the table is keyed by driver name (`claude` or `codex`) and then by
-task phase (`study`, `plan`, `todo`, `verify`, `review`, `oops`).
+task phase (`design`, `plan`, `todo`, `verify`, `review`, `oops`).
 
 | Key | Default | Meaning |
 | --- | --- | --- |

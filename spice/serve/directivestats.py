@@ -10,7 +10,7 @@ different channel and the two could not be compared.
 The directive rows are the stable, append-only, graphable series; per
 (agent, team-at-capture) running totals are maintained incrementally so the
 lane pane reads an O(1) total instead of recomputing the world on every render.
-See docs/studies/serve-team-metric-attribution.md.
+See docs/design/serve-team-metric-attribution.md.
 """
 
 from __future__ import annotations

@@ -194,4 +194,4 @@ The battery is a dependency-ordered DAG rooted at this decision:
 
 Two tickets are independent of this decision and can proceed in parallel: the
 ingestion-cursor exactly-once fix (a correctness bug orthogonal to attribution)
-and the home-team UX study (D8).
+and the home-team UX design task (D8).

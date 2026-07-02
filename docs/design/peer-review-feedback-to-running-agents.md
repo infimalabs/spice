@@ -48,7 +48,7 @@ Spice already has the key pieces:
   `pending_operator_inbox_items()` excludes automated guidance, and
   `spice/serve/agentapi.py` starts idle agents only for pending operator
   steering.
-- `docs/studies/no-privileged-channel-multi-human.md` decides that every
+- `docs/design/no-privileged-channel-multi-human.md` decides that every
   agent-visible directive must materialize as a durable, attributed steering
   record in the same queue, with transcript-visible retirement.
 

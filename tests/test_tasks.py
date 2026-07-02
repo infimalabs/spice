@@ -404,20 +404,20 @@ def test_plan_phase_show_injects_board_generation_guidance(task_repo):
     assert f'spice task done {handle} --validation "..."' in shown
 
 
-def test_study_phase_show_injects_artifact_boundary_guidance(task_repo):
+def test_design_phase_show_injects_artifact_boundary_guidance(task_repo):
     handle = create.add(
-        "Study a task arc",
+        "Design a task arc",
         project="task.unit",
-        flow=["study", "plan", "todo", "review"],
-        acceptance=["study surveys environment"],
+        flow=["design", "plan", "todo", "review"],
+        acceptance=["design surveys environment"],
     )
 
     shown = render.render_show(handle)
 
     assert "phase_guidance:" in shown
-    assert "phase:study surveys the environment" in shown
-    assert "docs/studies/" in shown
-    assert "only phase that legitimizes committing study records" in shown
+    assert "phase:design surveys the environment" in shown
+    assert "docs/design/" in shown
+    assert "only phase that legitimizes committing design records" in shown
     assert "plan and other phases keep non-code reasoning on the board" in shown
     assert f'spice task done {handle} --validation "..."' in shown
 

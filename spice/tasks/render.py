@@ -209,21 +209,25 @@ def _context_check_lines(
 
 def _phase_guidance_lines(row: dict[str, Any], rendered: str) -> list[str]:
     phase = _f(row, "phase")
-    if phase == "study":
+    if phase == "design":
         return [
             "phase_guidance:",
             (
-                "  phase:study surveys the environment and may commit a deep "
-                "repo-durable prose artifact under docs/studies/."
+                "  phase:design surveys the environment and may commit a deep "
+                "repo-durable prose artifact under docs/design/."
             ),
             (
-                "  Study is the only phase that legitimizes committing study "
+                "  Design is higher-maturity than plan: it can create repository "
+                "truth; plan stays task-local."
+            ),
+            (
+                "  Design is the only phase that legitimizes committing design "
                 "records; plan and other phases keep non-code reasoning on "
                 "the board."
             ),
             (
                 "  Spawn follow-up tasks for implementation work, then advance "
-                "with the study artifact or explicit no-artifact rationale: "
+                "with the design artifact or explicit no-artifact rationale: "
                 f'spice task done {rendered} --validation "..."'
             ),
         ]

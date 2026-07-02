@@ -249,7 +249,7 @@ def test_supervised_marker_examples_do_not_emit_feedback_or_tasks(
             "TASK title=Fenced | project=task.unit | acceptance=Should not create\n"
             "```\n"
             f"> ACK {missing_key}: quoted example.\n"
-            f"docs/studies/example.md:137:ACK {missing_key}: rendered source output.\n"
+            f"docs/design/example.md:137:ACK {missing_key}: rendered source output.\n"
             "    TASK title=Indented | project=task.unit | acceptance=Should not create"
         ),
         log,
