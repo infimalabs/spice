@@ -75,9 +75,10 @@ BUILTIN_MAXIM_BAGS: dict[str, MaximBag] = {
             }
         ),
         message=(
-            "DO NOT add polling, busy-waits, or retry loops to paper over timing; "
-            "react to the real signal or restructure the flow so the wait is "
-            "unnecessary."
+            "😊 Respond to the real event, signal, or completion "
+            "notification through a blocking call, watcher, or callback, "
+            "or else restructure the flow so nothing remains to be "
+            "awaited at all!"
         ),
     ),
     "fallbacks": MaximBag(
@@ -95,19 +96,19 @@ BUILTIN_MAXIM_BAGS: dict[str, MaximBag] = {
             }
         ),
         message=(
-            "DO NOT hide uncertainty behind quiet defensive secondary paths; "
-            "intentional defaults and explicit resolver order are fine when the "
-            "contract calls for them. Otherwise commit to the one correct path "
-            "and let violated assumptions fail loudly."
+            "😊 Commit to a single deterministic path and let violated "
+            "assumptions fail loudly and immediately, reserving an "
+            "explicit default or documented resolver order strictly for "
+            "what the contract names outright!"
         ),
     ),
     "backwards-compat": MaximBag(
         name="backwards-compat",
         words=frozenset({"compatibilities", "compatibility", "compatible"}),
         message=(
-            "DO NOT preserve backwards compatibility; this is unreleased software, "
-            "so move to the latest thinking and update every caller instead of "
-            "carrying the old contract forward."
+            "😊 Migrate every caller directly to the current shape, "
+            "delete the prior one outright, and hold every new addition "
+            "to that same shape going forward!"
         ),
     ),
     "shims": MaximBag(
@@ -121,24 +122,27 @@ BUILTIN_MAXIM_BAGS: dict[str, MaximBag] = {
             }
         ),
         message=(
-            "DO NOT add shims, adapters, or bridges between an old shape and a new "
-            "one; replace the old shape outright and delete it."
+            "😊 Replace the old shape outright, delete it completely, "
+            "and route every caller straight to the new shape's real "
+            "interface!"
         ),
     ),
     "aliases": MaximBag(
         name="aliases",
         words=frozenset({"alias", "aliased", "aliases", "aliasing"}),
         message=(
-            "DO NOT add aliases that keep an old name alongside a new one; rename "
-            "in place and update every reference so only one name survives."
+            "😊 Rename in place, update every reference immediately, and "
+            "let the changeover happen in one clean move so exactly one "
+            "name survives!"
         ),
     ),
     "legacy": MaximBag(
         name="legacy",
         words=frozenset({"legacy", "legacies"}),
         message=(
-            "DO NOT retain legacy code, dead branches, or commented-out history; "
-            "delete it and update to the latest thinking."
+            "😊 Delete superseded code, dead branches, and commented-out "
+            "history outright, trust the current thinking as the "
+            "complete record, and bring everything forward to match it!"
         ),
     ),
 }
