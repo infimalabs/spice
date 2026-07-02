@@ -137,7 +137,7 @@ def test_ack_parser_ignores_markdown_examples_and_rendered_source_lines():
         f"ACK {KEY_A}: fenced example.\n"
         "```\n"
         f"> ACK {KEY_B}: quoted example.\n"
-        f"docs/studies/example.md:137:ACK {KEY_C}: rendered source output.\n"
+        f"docs/design/example.md:137:ACK {KEY_C}: rendered source output.\n"
         f"    ACK {KEY_D}: indented code output.\n"
         f"ACK {real_key}: actual acknowledgment."
     )

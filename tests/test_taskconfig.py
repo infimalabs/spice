@@ -289,16 +289,16 @@ def test_phase_launch_overrides_falls_back_for_unmapped_phase_or_driver(tmp_path
     assert config.phase_launch_overrides(repo, "", "plan") == {}
 
 
-def test_study_phase_is_approved_and_catalogued(tmp_path, monkeypatch):
+def test_design_phase_is_approved_and_catalogued(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
     monkeypatch.chdir(repo)
 
-    assert "study" in config.APPROVED_PHASES
+    assert "design" in config.APPROVED_PHASES
     assert config.resolve_flow(
-        ["study", "plan", "todo", "verify", "review"], "task.unit"
-    ) == ["study", "plan", "todo", "verify", "review"]
-    assert "study" in config.uda_schema()["phase"]["values"]
-    assert "study" in config.task_project_validation_catalog()["approvedPhases"]
+        ["design", "plan", "todo", "verify", "review"], "task.unit"
+    ) == ["design", "plan", "todo", "verify", "review"]
+    assert "design" in config.uda_schema()["phase"]["values"]
+    assert "design" in config.task_project_validation_catalog()["approvedPhases"]
 
 
 def _init_repo(path: Path) -> Path:

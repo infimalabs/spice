@@ -70,7 +70,7 @@ replacement team already provides that.
 
 ## Metric Boundary
 
-This study must not use metrics as a reason to adopt the home team.
+This design record must not use metrics as a reason to adopt the home team.
 
 Metrics now have their own durable agent and team storage paths. Merge and
 split explicitly move team metric rows when that history matters. The old fear

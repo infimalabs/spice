@@ -109,7 +109,7 @@ clean state seams.
 ## Pilot Result
 
 The first Lit island prototype is recorded in
-`docs/studies/serve-ui-lit-island-prototype.md`. The pilot was closed and
+`docs/design/serve-ui-lit-island-prototype.md`. The pilot was closed and
 decommissioned: it proved Lit could mount as a no-build Web Component island, but
 the metrics implementation still duplicated the same hand-built SVG chart. The
 serve UI keeps one metrics renderer, the vanilla `app.panes.js` path. A future
