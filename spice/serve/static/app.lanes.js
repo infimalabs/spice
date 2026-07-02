@@ -91,10 +91,42 @@ function targetPayloadShim(target) {
 }
 
 function applyTaskFilterInventory(inventory) {
-  if (!taskFilterInventoryIsFresh(inventory || {})) return false;
-  taskFilterInventoryRevision = taskFilterInventoryRevisionValue(inventory || {});
-  taskFilterStemPills = taskFilterStemPillsFromInventory(inventory || {});
+  const acceptedInventory = inventory || {};
+  if (!taskFilterInventoryIsFresh(acceptedInventory)) return false;
+  taskFilterInventoryRevision = taskFilterInventoryRevisionValue(acceptedInventory);
+  taskFilterStemPills = taskFilterStemPillsFromInventory(acceptedInventory);
+  syncTaskFilterInventoryState(acceptedInventory);
+  renderTaskFilterInventoryPanes();
   return true;
+}
+
+function syncTaskFilterInventoryState(inventory) {
+  if (typeof targets !== "undefined" && Array.isArray(targets)) {
+    for (const target of targets) target.taskFilterInventory = inventory;
+  }
+  if (typeof targetById !== "undefined" && targetById?.values) {
+    for (const target of targetById.values()) target.taskFilterInventory = inventory;
+  }
+  if (typeof laneStates === "undefined" || !laneStates?.values) return;
+  for (const lane of laneStates.values()) lane.taskFilterInventory = inventory;
+}
+
+function renderTaskFilterInventoryPanes() {
+  if (
+    typeof laneStates === "undefined" ||
+    !laneStates?.values ||
+    typeof laneGroupHost !== "function" ||
+    typeof renderLaneFiltersPane !== "function"
+  )
+    return;
+  const renderedHosts = new Set();
+  for (const lane of laneStates.values()) {
+    const host = laneGroupHost(lane);
+    const key = host.targetId || lane.targetId || "";
+    if (renderedHosts.has(key)) continue;
+    renderedHosts.add(key);
+    renderLaneFiltersPane(host);
+  }
 }
 
 function taskFilterInventoryIsFresh(inventory) {

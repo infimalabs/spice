@@ -100,15 +100,14 @@ def test_live_lane_payload_refreshes_global_task_filter_inventory():
 
     assert "function applyTaskFilterInventory(inventory)" in app_lanes
     assert "function taskFilterInventoryIsFresh(inventory)" in app_lanes
+    assert "function syncTaskFilterInventoryState(inventory)" in app_lanes
+    assert "function renderTaskFilterInventoryPanes()" in app_lanes
     assert "applyTaskFilterInventory(payload.taskFilterInventory || {});" in app_lanes
     assert (
-        "if (\n"
-        "    payload.taskFilterInventory &&\n"
-        "    applyTaskFilterInventory(payload.taskFilterInventory)\n"
-        "  ) {\n"
-        "    lane.taskFilterInventory = payload.taskFilterInventory;\n"
-        "  }" in app_render
+        "if (payload.taskFilterInventory)\n"
+        "    applyTaskFilterInventory(payload.taskFilterInventory);" in app_render
     )
+    assert "lane.taskFilterInventory = payload.taskFilterInventory;" not in app_render
 
 
 def test_static_filter_dropdown_skips_noop_rewrites_and_preserves_scroll():
