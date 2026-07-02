@@ -23,7 +23,8 @@ for non-code work:
 - `plan`: task-local decomposition. It may refine acceptance, dependencies,
   order, and validation, but the durable output is task state.
 - `design`: repository-durable recommendation. It may commit a record under
-  `docs/design/` because future tasks are expected to cite or trust the result.
+  `docs/design/accepted/` or `docs/design/experimental/` because future tasks
+  are expected to cite or trust the result at the maturity level it declares.
 - `decision` or `implemented contract`: higher-authority design statuses. They
   mean the record has moved beyond exploration into accepted behavior or
   already-implemented system truth.
@@ -34,11 +35,29 @@ when the system accepts or implements the result. This is the same shape as
 staged improvement processes: the stage name communicates how much authority the
 artifact carries and what kind of follow-up is still expected.
 
+## Directory Layout
+
+Use subdirectories to make artifact maturity visible at the path level:
+
+- `docs/design/accepted/`: accepted decisions and implemented contracts. These
+  records describe behavior the repository should treat as current truth.
+- `docs/design/experimental/`: draft, research, recommendation, prototype
+  result, superseded, or otherwise thought-only records. These are design-phase
+  artifacts, but they do not by themselves prove the system implements or has
+  accepted the idea.
+- `docs/design/`: convention files and high-level design area references, such
+  as this README, architecture, invariants, and current design-area indexes.
+
+The `experimental` directory is the path-level modifier for design records that
+are still exploratory. Promote a record into `accepted/` only when its status
+and reviewed content say the decision is accepted or implemented.
+
 ## Task Phase Contract
 
 `design` is the task phase for deep repo-durable prose artifacts. A design-phase
-task may commit a reviewed record under `docs/design/` when findings should
-become repository truth. That permission is phase-scoped: `plan`, `todo`,
+task may commit a reviewed record under `docs/design/accepted/` or
+`docs/design/experimental/` when findings should become repository truth at a
+declared maturity level. That permission is phase-scoped: `plan`, `todo`,
 `verify`, and `review` should keep non-code reasoning on the board unless their
 explicit task acceptance is maintaining the design-record convention itself.
 Hidden system projects such as `.oops` are not design artifact phases.
@@ -104,7 +123,8 @@ Rules:
 - Cite live sources or local files when the finding depends on them.
 - Name assumptions and uncertainties directly.
 - Keep prototype code, screenshots, logs, and generated data out of
-  `docs/design/` unless they are the reviewed artifact.
+  `docs/design/accepted/` and `docs/design/experimental/` unless they are the
+  reviewed artifact.
 - Do not smuggle implementation through a design record. Spawn follow-up tasks
   for code, config, UI, workflow, or policy changes.
 - If the record rejects a path, preserve the reason clearly enough that another
@@ -156,11 +176,11 @@ Show concrete scenarios when they clarify the recommendation.
 
 ## Current Conforming Examples
 
-- `single-install-runtime-model.md`: decision status, explicit decision, why,
-  removed mechanisms, scoped battery, and non-goals.
-- `top-level-non-code-phases.md`: recommendation status, candidate evaluation,
-  artifact expectations, allocator implications, examples, deferred changes, and
-  follow-up tasks.
+- `accepted/single-install-runtime-model.md`: decision status, explicit
+  decision, why, removed mechanisms, scoped battery, and non-goals.
+- `experimental/top-level-non-code-phases.md`: recommendation/superseded
+  record, candidate evaluation, artifact expectations, allocator implications,
+  examples, deferred changes, and follow-up tasks.
 
 Older design records may use pre-template section names. Keep them readable, but
 do not churn them to match this template unless a task is already updating their

@@ -6,7 +6,7 @@ work targets, never runtime providers — no serve path may re-derive an
 interpreter, venv, or import path from the tree it is operating. This guards
 that invariant at the source level so the single-install battery's removals
 (and any future drift) cannot quietly reintroduce a per-worktree runtime into
-serve. See docs/design/single-install-runtime-model.md.
+serve. See docs/design/accepted/single-install-runtime-model.md.
 """
 
 from __future__ import annotations
