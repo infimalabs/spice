@@ -1,6 +1,6 @@
 # Task Markdown DAG
 
-Status: initial contract, 2026-07-01.
+Status: implemented contract, 2026-07-01.
 
 The task board remains authoritative. Markdown is a projection: useful as an
 input dialect and as an export ledger, but never the source of truth after rows
