@@ -355,10 +355,11 @@ message = "DO NOT take the quiet route."
 def test_builtin_fallback_maxim_allows_explicit_defaults_and_resolver_order():
     message = maxims.builtin_maxim("fallback")
 
-    assert "quiet defensive secondary paths" in message
-    assert "intentional defaults" in message
-    assert "explicit resolver order" in message
+    assert "single deterministic path" in message
+    assert "explicit default" in message
+    assert "documented resolver order" in message
     assert "fail loudly" in message
+    assert "contract names outright" in message
 
 
 def test_dual_judge_maxim_corpus_recall_and_false_positive_rate():
