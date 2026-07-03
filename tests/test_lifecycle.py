@@ -316,6 +316,73 @@ def test_hook_delivered_steering_retires_from_assistant_ack(tmp_path, monkeypatc
     assert "hook-delivered ack target" not in command_stderr.getvalue()
 
 
+def test_post_tool_hook_steering_end_to_end_without_shell_readout(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(watchdog, "record_supervised_lane_metrics", lambda _repo: None)
+    monkeypatch.setattr(
+        watchdog,
+        "publish_maxim_hits_as_inbox",
+        lambda _repo, _text, **_kwargs: [],
+    )
+    key = "20260101T000000000008Z"
+    inbox_name = f"{key}.txt"
+    inbox_text = compose_inbox_text(
+        body="non-shell hook steering", priority=None, stop=False
+    )
+    write_inbox_item(tmp_path, inbox_name, inbox_text)
+
+    first = json.loads(agent_cli.render_post_tool_hook_response(tmp_path))
+    first_context = first["hookSpecificOutput"]["additionalContext"]
+    second = json.loads(agent_cli.render_post_tool_hook_response(tmp_path))
+    second_context = second["hookSpecificOutput"]["additionalContext"]
+
+    assert "key=20260101T000000000008Z: age=" in first_context
+    assert "non-shell hook steering" in first_context
+    assert "key=20260101T000000000008Z" not in second_context
+    assert "non-shell hook steering" not in second_context
+    assert second_context.splitlines() == [
+        "Inbox Steering",
+        "  pending=1 (recently shown; full readout on repeat or run "
+        "`spice session briefing`)",
+    ]
+
+    ack_text = f"ACK {key}: handled before another shell command"
+    watchdog.process_supervised_assistant_message(
+        tmp_path,
+        ack_text,
+        io.StringIO(),
+        watchdog.MaximReminderGate(),
+    )
+
+    assert collect_inbox_items(tmp_path) == []
+    records = ack_state_records(tmp_path)
+    assert [
+        (
+            record.key,
+            record.inbox_name,
+            record.text,
+            record.ack_text,
+            record.ack_content,
+            record.disposition,
+        )
+        for record in records
+    ] == [
+        (
+            key,
+            inbox_name,
+            inbox_text,
+            ack_text,
+            "handled before another shell command",
+            ACK_DISPOSITION_ACKED,
+        )
+    ]
+    assert agent_cli.render_post_tool_hook_response(tmp_path) == ""
+    command_stderr = io.StringIO()
+    wrap.AgentInboxInjector(tmp_path, stderr=command_stderr).inject(force=True)
+    assert command_stderr.getvalue() == ""
+
+
 def test_ensure_agent_uses_shipped_codex_defaults_without_config(tmp_path, monkeypatch):
     monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr(
