@@ -1,6 +1,4 @@
 import json
-import zipfile
-from importlib import metadata
 from pathlib import Path
 
 import pytest
@@ -11,9 +9,10 @@ from spice.errors import SpiceError
 from spice.studies import cli as studies_cli
 from spice.studies.javascriptunused import JavaScriptUnusedEntry
 from spice.studies.links import MarkdownLinkCaseFinding
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-EXTENSION_FIXTURE_ROOT = PROJECT_ROOT / "fixtures" / "spiceextensionfixture"
+from tests.test_extensionhelpers import (
+    FilteredExtensionDistribution,
+    build_fixture_distribution,
+)
 
 
 def test_general_purpose_study_flags_cover_reference_surface():
@@ -58,12 +57,17 @@ def test_general_purpose_study_flags_cover_reference_surface():
 def test_study_extension_command_from_fixture_wheel_runs_json_success(
     tmp_path, monkeypatch, capsys
 ):
-    wheel, distribution = _study_fixture_distribution(tmp_path)
+    wheel, distribution = build_fixture_distribution(tmp_path)
     monkeypatch.syspath_prepend(str(wheel))
     monkeypatch.setattr(
         extension_loader.metadata,
         "distributions",
-        lambda: [_FilteredStudyDistribution(distribution, {"toy-study"})],
+        lambda: [
+            FilteredExtensionDistribution(
+                distribution,
+                {extension_loader.SPICE_STUDY_ENTRY_POINT_GROUP: {"toy-study"}},
+            )
+        ],
     )
     monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
     parser = build_parser()
@@ -82,12 +86,22 @@ def test_study_extension_command_from_fixture_wheel_runs_json_success(
 
 
 def test_study_extension_shadow_fails_with_shared_loader_error(tmp_path, monkeypatch):
-    wheel, distribution = _study_fixture_distribution(tmp_path)
+    wheel, distribution = build_fixture_distribution(tmp_path)
     monkeypatch.syspath_prepend(str(wheel))
     monkeypatch.setattr(
         extension_loader.metadata,
         "distributions",
-        lambda: [distribution],
+        lambda: [
+            FilteredExtensionDistribution(
+                distribution,
+                {
+                    extension_loader.SPICE_STUDY_ENTRY_POINT_GROUP: {
+                        "file-loc",
+                        "toy-study",
+                    }
+                },
+            )
+        ],
     )
 
     with pytest.raises(SpiceError) as exc_info:
@@ -233,69 +247,3 @@ def test_assertion_free_cli_json_create_tasks(tmp_path, monkeypatch, capsys):
     assert payload["createdTasks"] == ["QUALITY-1"]
     assert payload["findings"][0]["test_name"] == "test_without_assertion"
     assert created[0]["project"] == "tests.quality"
-
-
-class _FilteredStudyDistribution:
-    def __init__(self, distribution: metadata.Distribution, names: set[str]) -> None:
-        self._distribution = distribution
-        self._names = names
-
-    @property
-    def metadata(self) -> metadata.PackageMetadata:
-        return self._distribution.metadata
-
-    @property
-    def entry_points(self) -> tuple[metadata.EntryPoint, ...]:
-        return tuple(
-            entry_point
-            for entry_point in self._distribution.entry_points
-            if entry_point.group != extension_loader.SPICE_STUDY_ENTRY_POINT_GROUP
-            or entry_point.name in self._names
-        )
-
-
-def _study_fixture_distribution(tmp_path: Path) -> tuple[Path, metadata.Distribution]:
-    wheel = _build_study_fixture_wheel(tmp_path)
-    distributions = list(metadata.distributions(path=[str(wheel)]))
-    assert len(distributions) == 1
-    return wheel, distributions[0]
-
-
-def _build_study_fixture_wheel(tmp_path: Path) -> Path:
-    dist_info = "spice_extension_fixture-0.1.0.dist-info"
-    wheel = tmp_path / "spice_extension_fixture-0.1.0-py3-none-any.whl"
-    with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.write(
-            EXTENSION_FIXTURE_ROOT / "src" / "spiceextensionstudy.py",
-            "spiceextensionstudy.py",
-        )
-        archive.writestr(
-            f"{dist_info}/METADATA",
-            "\n".join(
-                [
-                    "Metadata-Version: 2.3",
-                    "Name: spice-extension-fixture",
-                    "Version: 0.1.0",
-                    "Summary: Third-party spice extension fixture for entry-point tests.",
-                    "Requires-Python: >=3.12",
-                    "",
-                ]
-            ),
-        )
-        archive.writestr(
-            f"{dist_info}/WHEEL",
-            "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
-        )
-        archive.writestr(
-            f"{dist_info}/entry_points.txt",
-            "\n".join(
-                [
-                    f"[{extension_loader.SPICE_STUDY_ENTRY_POINT_GROUP}]",
-                    "toy-study = spiceextensionstudy:run_toy_study",
-                    "file-loc = spiceextensionstudy:shadow_file_loc_study",
-                    "",
-                ]
-            ),
-        )
-        archive.writestr(f"{dist_info}/RECORD", "")
-    return wheel
