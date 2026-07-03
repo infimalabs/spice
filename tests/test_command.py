@@ -16,7 +16,7 @@ from spice.agent import driver as agent_driver
 from spice.agent import sidechannel, sidechannelnotify, wrap
 from spice.agent.shadow import shadow_environment
 from spice.mail.feedback import supervisor_feedback_line
-from spice.mail.inbox import compose_inbox_text, write_inbox_item
+from spice.mail.inbox import InboxResendAttempt, compose_inbox_text, write_inbox_item
 from spice.sessions.meter import (
     ActiveContextSnapshot,
     ContextMeter,
@@ -500,6 +500,7 @@ def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
     # command never looks empty while steering waits.
     assert output.count("operator steering") == 2
     assert output.count("recently shown") == 1
+    assert "resend #" not in output
     assert "Task offload: capture in the moment" in output
     assert "standalone TASK line" in output
     assert "TASK title=... | project=<stem.child> | acceptance=..." in output
@@ -511,7 +512,23 @@ def test_inbox_injector_repeats_already_shown_item_after_new_key(tmp_path):
     write_inbox_item(
         tmp_path,
         "20260101T000000000001Z.txt",
-        compose_inbox_text(body="first steering", priority=None, stop=False),
+        compose_inbox_text(
+            body="first steering",
+            priority="critical",
+            stop=False,
+            resend_attempts=(
+                InboxResendAttempt(
+                    attempt=1,
+                    at="2026-01-01T00:00:00Z",
+                    messages_elapsed=3,
+                ),
+                InboxResendAttempt(
+                    attempt=2,
+                    at="2026-01-01T00:01:00Z",
+                    messages_elapsed=4,
+                ),
+            ),
+        ),
     )
     now = [0.0]
     stderr = io.StringIO()
@@ -544,6 +561,8 @@ def test_inbox_injector_repeats_already_shown_item_after_new_key(tmp_path):
     assert output.count("first steering") == 2
     assert output.count("second steering") == 1
     assert output.count("shown earlier; ACK to clear") == 2
+    assert "priority=critical resend #2 (shown earlier; ACK to clear)" in output
+    assert output.count("resend #2") == 3
 
 
 def test_inbox_injector_suppresses_task_offload_for_maxim_guidance(tmp_path):

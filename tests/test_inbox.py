@@ -165,6 +165,33 @@ def test_compose_parse_round_trip_with_resend_lineage():
     )
 
 
+def test_inbox_readout_labels_resend_lineage(tmp_path):
+    composed = compose_inbox_text(
+        body="keep going",
+        priority="critical",
+        stop=False,
+        resend_attempts=(
+            InboxResendAttempt(
+                attempt=1,
+                at="2026-01-01T00:00:00Z",
+                messages_elapsed=3,
+            ),
+            InboxResendAttempt(
+                attempt=2,
+                at="2026-01-01T00:01:00Z",
+                messages_elapsed=4,
+            ),
+        ),
+    )
+    write_inbox_item(tmp_path, "20260101T000000000002Z.txt", composed)
+
+    readout = "\n".join(inbox_payload_rows(collect_inbox_items(str(tmp_path))))
+
+    assert "key=20260101T000000000002Z: age=" in readout
+    assert "resend #2" in readout
+    assert "priority=critical" in readout
+
+
 def test_compose_normal_priority_stays_implicit():
     composed = compose_inbox_text(body="keep going", priority=None, stop=False)
     assert composed == f"keep going\nNote: {INBOX_CONTINUE_NOTE}\n"
@@ -190,6 +217,7 @@ def test_compose_parse_and_readout_keep_controls_out_of_body(tmp_path):
     assert parsed.body == "keep draining"
     assert parsed.controls == (INBOX_CONTROL_DRAIN_QUEUE,)
     assert any("control=drive-drain-queue: DRAIN QUEUE ASAP" in row for row in rows)
+    assert "resend #" not in "\n".join(rows)
 
 
 def test_inbox_readout_ack_guidance_leaves_response_wording_open(tmp_path):
