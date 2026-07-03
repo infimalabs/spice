@@ -116,6 +116,32 @@ def test_private_and_hidden_projects_are_origin_exempt(task_repo):
     assert not str(oops_row.get("origin") or "")
 
 
+def test_exempt_projects_capture_origin_opportunistically(task_repo):
+    """Private scratch and oops never REQUIRE an origin, but they link back
+    to the active claim automatically when one exists."""
+    from spice.serve.team.store import ServeTeamStore, TeamConfig
+
+    from tests.test_tasks import ACTOR_A_MEMBER
+
+    assert task_repo.is_dir()
+    ServeTeamStore().create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Steer")
+    )
+    root = _seed_task("Claimed work surfaces side captures")
+    ops.claim(root)
+
+    oops_line = ops.oops("Failure observed mid-claim", description="links back")
+    oops_handle = oops_line.split()[1]
+    private = create.add(
+        "Private scratch mid-claim",
+        priority="medium",
+        acceptance=["private scratch links back"],
+    )
+
+    assert identity.resolve(oops_handle)["origin"] == f"task:{root}"
+    assert identity.resolve(private)["origin"] == f"task:{root}"
+
+
 def test_origin_rejects_unresolvable_handles_and_malformed_keys(task_repo):
     assert task_repo.is_dir()
     with pytest.raises(SpiceError, match="task origin"):
