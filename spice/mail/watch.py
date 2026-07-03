@@ -5,8 +5,9 @@ to EOF of the receiving agent's transcript JSONL and counts *user-facing*
 assistant messages (each `response_item` with `payload.type=='message'` and
 `role=='assistant'` is one prose block in the operator's UI). After three such
 messages elapse without `ACK <our-key>: …` matching the canonical detector in
-`spice.mail.acks`, the watcher republishes the inbox item under a fresh key —
-the receiving agent sees it again on its next mailbox peek. The cycle repeats
+`spice.mail.acks`, the watcher records another resend attempt on the pending
+inbox item and escalates its priority — the receiving agent sees the same key
+again on its next mailbox peek with resend lineage attached. The cycle repeats
 until our key is ACK'd or the operator interrupts.
 """
 
@@ -60,11 +61,11 @@ def watch_for_ack(
     on_ack: Callable[[str, str], None] | None = None,
     quiet: bool,
 ) -> AckWatchOutcome:
-    """Block until `inbox_key` (or its latest resend) is ACK'd.
+    """Block until `inbox_key` is ACK'd.
 
     Reads from EOF of `transcript_path`; counts user-facing assistant
-    messages; re-issues the send (new timestamp key, escalated priority)
-    every `MESSAGE_BUDGET` messages until an ACK is observed.
+    messages; marks another resend attempt on the pending item every
+    `MESSAGE_BUDGET` messages until an ACK is observed.
 
     `on_ack` (when provided) is called as `on_ack(text, key)` the moment our
     ACK is detected — pass an inline `say` for one-shot use, or a queue
@@ -186,8 +187,8 @@ class AckWatchState:
         self.resends = attempt
         self.current_key = new_path.stem
         self._log(
-            f"resent as {new_path.name} (attempt {attempt}); "
-            f"now watching key={self.current_key}"
+            f"recorded resend attempt {attempt} on {new_path.name}; "
+            f"watching key={self.current_key}"
         )
 
     def _log(self, message: str) -> None:
