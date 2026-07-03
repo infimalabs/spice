@@ -1,13 +1,19 @@
 /* ---- messages ---- */
 .messages {
+  --message-card-max-width: 30rem;
+  --message-card-min-width: 20rem;
+  --message-card-grid-span: 3;
+  --message-image-tile-width: 156px;
   align-content: start;
+  align-items: stretch;
   direction: rtl;
   display: grid;
   flex: 1;
   gap: 9px;
+  grid-auto-flow: row dense;
   grid-template-columns: repeat(
     auto-fill,
-    minmax(156px, 1fr)
+    minmax(var(--message-image-tile-width), 1fr)
   );
   min-width: 0;
   overflow-x: auto;
@@ -23,17 +29,29 @@
   border-radius: var(--soft-radius);
   color: color-mix(in srgb, var(--fg) 90%, var(--muted));
   direction: ltr;
+  display: flex;
+  flex-direction: column;
   font-size: 15px;
-  grid-column: 1 / -1;
+  grid-column: span var(--message-card-grid-span);
+  justify-self: start;
   line-height: 1.38;
+  max-width: min(100%, var(--message-card-max-width));
   min-width: 0;
   padding: 9px;
   position: relative;
+  width: 100%;
 }
 .messages article.image-only {
   align-self: start;
+  display: block;
   grid-column: span 1;
+  justify-self: stretch;
+  max-width: var(--message-image-tile-width);
   padding: 7px;
+}
+.messages article:has(.task-directive-stack) {
+  grid-column: 1 / -1;
+  max-width: none;
 }
 .messages article.acked {
   --message-badge-surface: var(--ack-tint);
@@ -82,6 +100,7 @@
 }
 .message-body {
   --quote-accent: var(--message-occupant-accent, var(--accent));
+  flex: 1 1 auto;
   overflow-wrap: anywhere;
 }
 .message-body p { margin: 0 0 6px; }
@@ -137,19 +156,22 @@
   gap: 5px;
 }
 .message-body .task-directive-stack {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
+  align-items: stretch;
+  display: grid;
   gap: 6px;
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(100%, var(--message-card-min-width)), var(--message-card-max-width))
+  );
   justify-content: flex-start;
   margin: 6px 0;
   min-width: 0;
 }
 .message-body .task-directive-stack .task-directive-quote {
-  flex: 1 1 312px;
   margin: 0;
-  max-width: min(100%, 468px);
-  min-width: min(100%, 312px);
+  max-width: min(100%, var(--message-card-max-width));
+  min-width: 0;
+  width: 100%;
 }
 .message-body .task-directive-quote--hidden {
   --quote-accent: var(--muted);
@@ -331,6 +353,7 @@
   align-items: center;
   color: var(--muted);
   display: flex;
+  flex: 0 0 auto;
   font-size: 12px;
   gap: 8px;
   justify-content: space-between;
@@ -446,3 +469,15 @@
   height: 1px;
 }
 .dot-separator { color: var(--muted); }
+
+@media (max-width: 340px) {
+  .messages article {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    max-width: none;
+  }
+  .messages article.image-only {
+    grid-column: span 1;
+    max-width: var(--message-image-tile-width);
+  }
+}
