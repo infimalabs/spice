@@ -57,6 +57,10 @@ def _working_state_lines(text: str) -> list[str]:
     return lines
 
 
+def _working_state_event_counts(*texts: str) -> list[int]:
+    return [len(_working_state_lines(text)) for text in texts]
+
+
 class _CommandWorkingStateProcess:
     pid = COMMAND_WORKING_STATE_PROCESS_PID
 
@@ -112,6 +116,7 @@ def _configure_command_working_state(tmp_path: Path, monkeypatch) -> list[str]:
     monkeypatch.setenv(agent_driver.DRIVER.thread_id_env, COMMAND_WORKING_STATE_ACTOR)
     monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
     monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    monkeypatch.setattr(sidechannel, "agent_context_meter", lambda _repo: None)
     monkeypatch.setattr(wrap.time, "time", lambda: COMMAND_WORKING_STATE_NOW)
     monkeypatch.setattr(wrap.time, "monotonic", lambda: COMMAND_WORKING_STATE_MONOTONIC)
     monkeypatch.setattr(
@@ -293,7 +298,7 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
         maxim="fallbacks",
     )
 
-    assert _working_state_lines(_run_working_state_command(tmp_path)) == []
+    repeat = _run_working_state_command(tmp_path)
 
     write_inbox_item(
         tmp_path,
@@ -302,8 +307,9 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
             body="second pending command work", priority=None, stop=False
         ),
     )
+    second_pending = _run_working_state_command(tmp_path)
     _assert_command_working_state(
-        _run_working_state_command(tmp_path),
+        second_pending,
         pending=COMMAND_WORKING_STATE_TWO_PENDING,
         phase="todo",
         dirty=COMMAND_WORKING_STATE_ONE_DIRTY,
@@ -311,8 +317,9 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
     )
 
     claim_phase[0] = "verify"
+    phase_changed = _run_working_state_command(tmp_path)
     _assert_command_working_state(
-        _run_working_state_command(tmp_path),
+        phase_changed,
         pending=COMMAND_WORKING_STATE_TWO_PENDING,
         phase="verify",
         dirty=COMMAND_WORKING_STATE_ONE_DIRTY,
@@ -320,8 +327,9 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
     )
 
     (tmp_path / "dirty-two.txt").write_text("dirty\n", encoding="utf-8")
+    dirty_changed = _run_working_state_command(tmp_path)
     _assert_command_working_state(
-        _run_working_state_command(tmp_path),
+        dirty_changed,
         pending=COMMAND_WORKING_STATE_TWO_PENDING,
         phase="verify",
         dirty=COMMAND_WORKING_STATE_TWO_DIRTY,
@@ -329,13 +337,22 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
     )
 
     _record_command_working_state_maxim(tmp_path, "aliases")
+    maxim_changed = _run_working_state_command(tmp_path)
     _assert_command_working_state(
-        _run_working_state_command(tmp_path),
+        maxim_changed,
         pending=COMMAND_WORKING_STATE_TWO_PENDING,
         phase="verify",
         dirty=COMMAND_WORKING_STATE_TWO_DIRTY,
         maxim="aliases",
     )
+    assert _working_state_event_counts(
+        first,
+        repeat,
+        second_pending,
+        phase_changed,
+        dirty_changed,
+        maxim_changed,
+    ) == [1, 0, 1, 1, 1, 1]
 
 
 def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monkeypatch):
@@ -915,8 +932,7 @@ def test_side_channel_working_state_suppresses_repeats_and_post_tool_omits(
     post_tool = sidechannel.render_post_tool_hook_payload(tmp_path)
 
     assert first.splitlines() == ["🌶️ Working state: claim METER-00000002 todo for 5s."]
-    assert "🌶️ Working state:" not in second
-    assert "🌶️ Working state:" not in post_tool
+    assert _working_state_event_counts(first, second, post_tool) == [1, 0, 0]
 
     monkeypatch.setattr(
         wrap,
