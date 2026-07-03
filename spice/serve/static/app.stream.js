@@ -838,12 +838,14 @@ function packMessageStream(lane) {
   if (!Number.isFinite(rowStride) || rowStride <= 0) return;
   const columnCount = messagePackColumnCount(lane, host, style);
   const fusedHost = laneIsFusedHost(lane);
+  const naturalHeightMode = columnCount <= 1 || fusedHost;
+  setMessagePackColumnCount(host, columnCount);
   const bandRows = messagePackBandRows(style);
   const columnRows = new Array(Math.max(1, columnCount)).fill(0);
   let segmentKey = "top";
   for (const node of host.children) {
     if (!isMessagePackItem(node)) continue;
-    const height = messagePackItemHeight(node);
+    const height = messagePackItemHeight(node, naturalHeightMode);
     if (!Number.isFinite(height) || height <= 0) continue;
     const naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
     if (columnCount <= 1 || isMessagePackBarrier(node)) {
@@ -879,10 +881,21 @@ function packMessageStream(lane) {
 // its settled band cell otherwise — a fixed point either way.
 const messageCardBorderAllowancePx = 2;
 
-function messagePackItemHeight(node) {
+function messagePackItemHeight(node, naturalHeightMode = false) {
   const rectHeight = node.getBoundingClientRect().height;
   if (!node.matches("article[data-message-key]")) return rectHeight;
-  return Math.max(rectHeight, node.scrollHeight + messageCardBorderAllowancePx);
+  if (naturalHeightMode) return naturalMessagePackItemHeight(node);
+  const naturalHeight = node.scrollHeight + messageCardBorderAllowancePx;
+  return Math.max(rectHeight, naturalHeight);
+}
+
+function naturalMessagePackItemHeight(node) {
+  const previousSpan = node.style.getPropertyValue("--message-pack-row-span");
+  if (previousSpan) node.style.removeProperty("--message-pack-row-span");
+  const height = node.scrollHeight + messageCardBorderAllowancePx;
+  if (previousSpan)
+    node.style.setProperty("--message-pack-row-span", previousSpan);
+  return height;
 }
 
 // Segments are keyed by the identity of the barrier that opens them, never by
@@ -942,6 +955,12 @@ function fusedMessagePackColumn(node, columnCount) {
   const slot = Number.parseInt(node.dataset.accentSlot || "", 10);
   if (!Number.isFinite(slot) || slot < 0) return 0;
   return slot % Math.max(1, columnCount);
+}
+
+function setMessagePackColumnCount(host, columnCount) {
+  const value = String(Math.max(1, columnCount));
+  if (host.style.getPropertyValue("--message-pack-column-count") !== value)
+    host.style.setProperty("--message-pack-column-count", value);
 }
 
 function cssLengthValue(value, style) {
