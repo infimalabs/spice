@@ -36,6 +36,7 @@ async function installTaskStackSmokeHelpers(page) {
       taskStackSmokeMeasurement,
       taskStackSmokeHorizontalBounds,
       taskStackSmokeAnchorStability,
+      taskStackSmokeColumnStability,
       taskStackSmokeTaskHtml,
       taskStackSmokeImageHtml,
       taskStackSmokeImagesReady,
@@ -125,6 +126,11 @@ async function taskStackSmokeMeasurement(lane, host, taskArticle, imageArticle, 
     tallCard,
     backfilledCard,
   );
+  const columnStability = await taskStackSmokeColumnStability(
+    lane,
+    messageCardNodes,
+    messageCardNodes[0],
+  );
   const hostStyle = getComputedStyle(host);
   const hostRect = taskStackSmokeRect(host);
   const hostInlinePadding =
@@ -135,6 +141,7 @@ async function taskStackSmokeMeasurement(lane, host, taskArticle, imageArticle, 
     Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
   return {
     anchorStability,
+    columnStability,
     backfilledCardTop: backfilledCardRect.top,
     cardWidths: cards.map((card) => card.width),
     firstRowCount: cards.filter(
@@ -295,6 +302,25 @@ async function taskStackSmokeAnchorStability(lane, host, tallCard, anchorCard) {
   };
 }
 
+async function taskStackSmokeColumnStability(lane, cards, growCard) {
+  const columnsBefore = cards.map((card) => card.style.gridColumnStart);
+  const leftsBefore = cards.map((card) => taskStackSmokeRect(card).left);
+  const body = growCard.querySelector(".message-body");
+  const extra = document.createElement("p");
+  extra.textContent =
+    "Column stability growth: this card grows, and no card may switch columns.";
+  body.append(extra);
+  scheduleMessageStreamPack(lane);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  return {
+    columnsAfter: cards.map((card) => card.style.gridColumnStart),
+    columnsBefore,
+    leftsAfter: cards.map((card) => taskStackSmokeRect(card).left),
+    leftsBefore,
+  };
+}
+
 function taskStackSmokeTaskHtml() {
   const cards = ["First", "Second", "Third"]
     .map(
@@ -364,6 +390,22 @@ function assertTaskStackMeasurement(measurement, options) {
   assertTaskDirectiveCardWidths(measurement);
   assertMessageCardPacking(measurement, options);
   assertMessageAnchorStability(measurement, options);
+  assertMessageColumnStability(measurement, options);
+}
+
+function assertMessageColumnStability(measurement, options) {
+  const stability = measurement.columnStability;
+  if (!options.wraps) {
+    const pinned = stability.columnsBefore.every((column) => /^\d+$/.test(column));
+    if (!pinned)
+      throw new Error("wide message cards are not column-pinned: " + JSON.stringify(measurement));
+  }
+  for (let index = 0; index < stability.columnsBefore.length; index += 1) {
+    if (stability.columnsBefore[index] !== stability.columnsAfter[index])
+      throw new Error("card switched columns after mid-stream growth: " + JSON.stringify(measurement));
+    if (Math.abs(stability.leftsBefore[index] - stability.leftsAfter[index]) > 1)
+      throw new Error("card slid horizontally after mid-stream growth: " + JSON.stringify(measurement));
+  }
 }
 
 function assertBaseTaskStackLayout(measurement) {
