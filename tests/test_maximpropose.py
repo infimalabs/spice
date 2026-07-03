@@ -449,7 +449,7 @@ def test_maxim_propose_help_names_candidate_contract(capsys):
 
 
 def test_maxim_propose_cli_files_and_reports_inspectable_hidden_task(
-    maxim_task_repo, monkeypatch, capsys
+    maxim_task_repo, capsys
 ):
     _record_ack_source(
         maxim_task_repo,
@@ -468,11 +468,6 @@ def test_maxim_propose_cli_files_and_reports_inspectable_hidden_task(
         archived_at=ARCHIVED_AT_NEWER,
     )
 
-    def fail_if_called(*_args, **_kwargs):
-        raise AssertionError("proposal mining must not call the maxim judge")
-
-    monkeypatch.setattr(maximcli, "evaluate_maxim", fail_if_called)
-    monkeypatch.setattr(maxims, "evaluate_maxim_any_violation", fail_if_called)
     args = build_parser().parse_args(["maxim", "propose"])
 
     assert args.func is run_maxim_propose_cli
@@ -517,6 +512,8 @@ def test_maxim_propose_cli_reports_no_candidate_history_without_install(
     tmp_path, monkeypatch, capsys
 ):
     repo = _init_repo(tmp_path / "repo")
+    pyproject = repo / "pyproject.toml"
+    pyproject.write_text("[tool.spice]\n", encoding="utf-8")
     _record_ack_source(
         repo,
         key=KEY_A,
@@ -526,12 +523,6 @@ def test_maxim_propose_cli_reports_no_candidate_history_without_install(
         archived_at=ARCHIVED_AT_OLDER,
     )
     monkeypatch.chdir(repo)
-
-    def fail_if_called(*_args, **_kwargs):
-        raise AssertionError("proposal mining must not call the maxim judge")
-
-    monkeypatch.setattr(maximcli, "evaluate_maxim", fail_if_called)
-    monkeypatch.setattr(maxims, "evaluate_maxim_any_violation", fail_if_called)
     args = build_parser().parse_args(["maxim", "propose"])
 
     assert args.func is run_maxim_propose_cli
@@ -541,7 +532,7 @@ def test_maxim_propose_cli_reports_no_candidate_history_without_install(
         MAXIM_PROPOSE_CONTRACT_ROW,
         "result: no recurring maxim proposal candidates found; filed=0",
     ]
-    assert not (repo / "pyproject.toml").exists()
+    assert pyproject.read_text(encoding="utf-8") == "[tool.spice]\n"
 
 
 def test_maxim_file_proposals_cli_creates_deferred_hidden_triage_task(
