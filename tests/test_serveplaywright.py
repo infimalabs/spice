@@ -156,6 +156,8 @@ def test_serve_submit_latency_smoke_asserts_timing_buckets() -> None:
     assert "sendResultWaitMs" in smoke
     assert "responseHandlingMs" in smoke
     assert "totalMs" in smoke
+    assert "submit latency smoke used the real lane.send transport" in smoke
+    assert 'stubbed: type === "lane.send"' in smoke
 
 
 def test_serve_task_stack_smoke_asserts_card_widths() -> None:

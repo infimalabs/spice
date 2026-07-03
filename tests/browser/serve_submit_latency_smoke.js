@@ -17,9 +17,9 @@ async function run() {
         { timeout: 10000 },
       );
       await installSubmitLatencySmokeHelpers(page);
-      const sample = await page.evaluate(runSubmitLatencySmokePage);
-      assertSubmitLatencySample(sample);
-      return { sample, url: server.url };
+      const result = await page.evaluate(runSubmitLatencySmokePage);
+      assertSubmitLatencyResult(result);
+      return { ...result, url: server.url };
     },
   );
 }
@@ -30,6 +30,8 @@ async function installSubmitLatencySmokeHelpers(page) {
       runSubmitLatencySmokePage,
       submitLatencySmokeLane,
       submitLatencySmokeTextarea,
+      submitLatencySmokeLiveBusRequest,
+      cleanupSubmitLatencySmokePage,
     ]
       .map((helper) => helper.toString())
       .join("\n"),
@@ -39,27 +41,40 @@ async function installSubmitLatencySmokeHelpers(page) {
 async function runSubmitLatencySmokePage() {
   const lane = submitLatencySmokeLane();
   const textarea = submitLatencySmokeTextarea(lane);
+  const smoke = {
+    calls: [],
+    lane,
+    originalLiveBusRequest: liveBusRequest,
+  };
+  liveBusRequest = (type, fields = {}, timing = null) =>
+    submitLatencySmokeLiveBusRequest(smoke, type, fields, timing);
+  window.__spiceSubmitLatencySmoke = smoke;
   if (Array.isArray(window.__spiceSubmitLatencySamples))
     window.__spiceSubmitLatencySamples.length = 0;
-  textarea.value = "submit latency smoke " + Date.now();
-  textarea.dispatchEvent(new Event("input", { bubbles: true }));
-  submitLaneForm(lane, new Event("submit", { cancelable: true }), lane.targetId);
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    const samples = window.__spiceSubmitLatencySamples || [];
-    const sample = samples[samples.length - 1];
-    if (sample && sample.status === "accepted") return sample;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+  try {
+    textarea.value = "submit latency smoke " + Date.now();
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    submitLaneForm(lane, new Event("submit", { cancelable: true }), lane.targetId);
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      const samples = window.__spiceSubmitLatencySamples || [];
+      const sample = samples[samples.length - 1];
+      if (sample && sample.status === "accepted")
+        return { calls: smoke.calls, sample };
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(
+      "timed out waiting for submit latency sample: " +
+        JSON.stringify({
+          awaiting: lane.sendAwaitingBackendCount,
+          pending: lane.pendingSubmissionCount,
+          samples: window.__spiceSubmitLatencySamples || [],
+          text: textarea.value,
+        }),
+    );
+  } finally {
+    cleanupSubmitLatencySmokePage();
   }
-  throw new Error(
-    "timed out waiting for submit latency sample: " +
-      JSON.stringify({
-        awaiting: lane.sendAwaitingBackendCount,
-        pending: lane.pendingSubmissionCount,
-        samples: window.__spiceSubmitLatencySamples || [],
-        text: textarea.value,
-      }),
-  );
 }
 
 function submitLatencySmokeLane() {
@@ -80,7 +95,62 @@ function submitLatencySmokeTextarea(lane) {
   return textarea;
 }
 
-function assertSubmitLatencySample(sample) {
+function submitLatencySmokeLiveBusRequest(smoke, type, fields, timing) {
+  const payload = fields.payload || {};
+  const text = String(payload.text || "").trim();
+  const call = {
+    stubbed: type === "lane.send",
+    targetId: fields.targetId || "",
+    text,
+    type,
+  };
+  smoke.calls.push(call);
+  if (type !== "lane.send")
+    return smoke.originalLiveBusRequest(type, fields, timing);
+  const requestId = "submit-latency-smoke-" + smoke.calls.length;
+  if (timing) {
+    timing.requestId = requestId;
+    markLaneSubmitLatency(timing, "requestCreatedAt");
+    markLaneSubmitLatency(timing, "liveBusConnectStartAt");
+    markLaneSubmitLatency(timing, "liveBusConnectReadyAt");
+    markLaneSubmitLatency(timing, "liveBusFrameSentAt");
+  }
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      markLaneSubmitLatency(timing, "liveBusResponseReceivedAt");
+      resolve({
+        result: {
+          ok: true,
+          agentEnsure: { ok: true, threadId: smoke.lane.targetThreadId || "" },
+          key: "submit-latency-smoke-key",
+          pendingInboxCount: 0,
+          pendingInboxKeys: [],
+          pendingInboxRevision: "submit-latency-smoke",
+          pendingInboxVersion: Date.now(),
+          requestText: payload.text || "",
+        },
+      });
+    }, 5);
+  });
+}
+
+function cleanupSubmitLatencySmokePage() {
+  const smoke = window.__spiceSubmitLatencySmoke;
+  if (!smoke) return;
+  liveBusRequest = smoke.originalLiveBusRequest;
+  delete window.__spiceSubmitLatencySmoke;
+}
+
+function assertSubmitLatencyResult(result) {
+  const sample = result.sample || {};
+  const calls = result.calls || [];
+  const sendCalls = calls.filter((call) => call.type === "lane.send");
+  if (sendCalls.length !== 1)
+    throw new Error("expected one stubbed lane.send call");
+  if (!sendCalls[0].stubbed)
+    throw new Error("submit latency smoke used the real lane.send transport");
+  if (!sendCalls[0].text.includes("submit latency smoke"))
+    throw new Error("submit latency smoke did not submit the probe text");
   const durations = sample.durations || {};
   const marks = sample.marks || {};
   const requiredDurations = [
