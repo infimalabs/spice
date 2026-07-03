@@ -359,6 +359,16 @@ def test_phase_effort_usage_marks_missing_transcript_and_partial_window():
     assert usage[0].wall_seconds is None
 
 
+def test_phase_model_cost_rows_keep_tuning_comparisons_model_tagged():
+    rows = effort.phase_model_cost_rows(_phase_model_cost_usage_rows())
+
+    assert _phase_model_cost_row_tuples(rows) == _expected_phase_model_cost_rows()
+    assert _phase_model_cost_group_tuples(rows) == [
+        ("claude", "claude-sonnet", "medium", [("verify", 70)]),
+        ("codex", "gpt-5.5", "xhigh", [("todo", 150), ("verify", 200)]),
+    ]
+
+
 def _record_identity(
     store: ServeTeamStore,
     actor_id: str,
@@ -395,6 +405,205 @@ def _init_repo(path: Path) -> Path:
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
+
+
+def _phase_model_cost_usage_rows() -> tuple[effort.PhaseEffortUsage, ...]:
+    return (
+        _usage(
+            task_id="task-1",
+            phase="todo",
+            phase_index=0,
+            driver="codex",
+            model="gpt-5.5",
+            effort_value="xhigh",
+            total_tokens=100,
+            input_tokens=80,
+            wall_seconds=10.0,
+            turn_count=1,
+        ),
+        _usage(
+            task_id="task-2",
+            phase="todo",
+            phase_index=0,
+            driver="codex",
+            model="gpt-5.5",
+            effort_value="xhigh",
+            total_tokens=50,
+            input_tokens=40,
+            wall_seconds=5.0,
+            turn_count=1,
+            partial_markers=(effort.PARTIAL_MISSING_END,),
+        ),
+        _usage(
+            task_id="task-1",
+            phase="verify",
+            phase_index=1,
+            driver="codex",
+            model="gpt-5.5",
+            effort_value="xhigh",
+            total_tokens=200,
+            input_tokens=170,
+            wall_seconds=20.0,
+            turn_count=2,
+            renewal_count=1,
+        ),
+        _usage(
+            task_id="task-3",
+            phase="verify",
+            phase_index=1,
+            driver="claude",
+            model="claude-sonnet",
+            effort_value="medium",
+            total_tokens=70,
+            input_tokens=60,
+            wall_seconds=7.0,
+            turn_count=1,
+        ),
+        _usage(
+            task_id="task-4",
+            phase="todo",
+            phase_index=0,
+            driver="codex",
+            model="",
+            effort_value="xhigh",
+            total_tokens=999,
+            input_tokens=900,
+            wall_seconds=99.0,
+            turn_count=9,
+        ),
+    )
+
+
+def _phase_model_cost_row_tuples(
+    rows: tuple[effort.PhaseModelCostRow, ...],
+) -> list[tuple]:
+    return [
+        (
+            row.phase,
+            row.phase_index,
+            row.driver,
+            row.model,
+            row.effort,
+            row.task_count,
+            row.window_count,
+            row.total_tokens,
+            row.input_tokens,
+            row.turn_count,
+            row.renewal_count,
+            row.wall_seconds,
+            row.partial_count,
+            row.partial_markers,
+        )
+        for row in rows
+    ]
+
+
+def _expected_phase_model_cost_rows() -> list[tuple]:
+    return [
+        (
+            "verify",
+            1,
+            "claude",
+            "claude-sonnet",
+            "medium",
+            1,
+            1,
+            70,
+            60,
+            1,
+            0,
+            7.0,
+            0,
+            (),
+        ),
+        (
+            "todo",
+            0,
+            "codex",
+            "gpt-5.5",
+            "xhigh",
+            2,
+            2,
+            150,
+            120,
+            2,
+            0,
+            15.0,
+            1,
+            (effort.PARTIAL_MISSING_END,),
+        ),
+        (
+            "verify",
+            1,
+            "codex",
+            "gpt-5.5",
+            "xhigh",
+            1,
+            1,
+            200,
+            170,
+            2,
+            1,
+            20.0,
+            0,
+            (),
+        ),
+    ]
+
+
+def _phase_model_cost_group_tuples(
+    rows: tuple[effort.PhaseModelCostRow, ...],
+) -> list[tuple[str, str, str, list[tuple[str, int]]]]:
+    return [
+        (
+            group.driver,
+            group.model,
+            group.effort,
+            [(row.phase, row.total_tokens) for row in group.rows],
+        )
+        for group in effort.phase_model_cost_groups(rows)
+    ]
+
+
+def _usage(
+    *,
+    task_id: str,
+    phase: str,
+    phase_index: int,
+    driver: str,
+    model: str,
+    effort_value: str,
+    total_tokens: int,
+    input_tokens: int,
+    wall_seconds: float,
+    turn_count: int,
+    renewal_count: int = 0,
+    partial_markers: tuple[str, ...] = (),
+) -> effort.PhaseEffortUsage:
+    window = effort.PhaseEffortWindow(
+        task_id=task_id,
+        handle=task_id,
+        title=task_id,
+        phase=phase,
+        phase_index=phase_index,
+        actor_id=ACTOR_A_MEMBER,
+        thread_id=ACTOR_A,
+        team_id="team-a",
+        driver=driver,
+        model=model,
+        effort=effort_value,
+        started_at=0.0,
+        ended_at=wall_seconds,
+    )
+    return effort.PhaseEffortUsage(
+        window=window,
+        source_files=("thread.jsonl",),
+        input_tokens=input_tokens,
+        total_tokens=total_tokens,
+        turn_count=turn_count,
+        renewal_count=renewal_count,
+        partial_markers=partial_markers,
+    )
 
 
 def _write_usage_transcript(path: Path) -> None:

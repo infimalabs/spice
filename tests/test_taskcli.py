@@ -25,6 +25,9 @@ from spice.tasks import (
 )
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SHOW_DEFAULT_CACHED_INPUT_TOKENS = 10
+SHOW_DEFAULT_OUTPUT_TOKENS = 20
+SHOW_DEFAULT_REASONING_OUTPUT_TOKENS = 5
 
 
 @pytest.fixture
@@ -691,69 +694,14 @@ def test_task_show_renders_phase_effort_as_model_tagged_phase_rows(monkeypatch):
             "urgency": "9.2",
         }
     )
-    windows = (
-        effort.PhaseEffortWindow(
-            task_id="effort-task-uuid",
-            handle="TASK-test",
-            title="Render effort",
-            phase="todo",
-            phase_index=0,
-            actor_id="agent-a",
-            thread_id=ACTOR_A,
-            team_id="team-a",
-            driver="codex",
-            model="gpt-5.5",
-            effort="xhigh",
-            started_at=10.0,
-            ended_at=30.0,
-        ),
-        effort.PhaseEffortWindow(
-            task_id="effort-task-uuid",
-            handle="TASK-test",
-            title="Render effort",
-            phase="verify",
-            phase_index=1,
-            actor_id="agent-a",
-            thread_id=ACTOR_A,
-            team_id="team-a",
-            driver="codex",
-            model="gpt-5.5",
-            effort="xhigh",
-            started_at=45.0,
-            ended_at=120.0,
-        ),
-    )
-    usage_rows = (
-        effort.PhaseEffortUsage(
-            window=windows[0],
-            source_files=("thread-a.jsonl",),
-            input_tokens=100,
-            cached_input_tokens=10,
-            output_tokens=20,
-            reasoning_output_tokens=5,
-            total_tokens=135,
-            turn_count=1,
-            message_count=2,
-            renewal_count=0,
-        ),
-        effort.PhaseEffortUsage(
-            window=windows[1],
-            source_files=("thread-a.jsonl",),
-            input_tokens=207,
-            cached_input_tokens=20,
-            output_tokens=30,
-            reasoning_output_tokens=10,
-            total_tokens=267,
-            turn_count=1,
-            message_count=2,
-            renewal_count=1,
-            partial_markers=(effort.PARTIAL_MISSING_TRANSCRIPT,),
-        ),
-    )
+    windows = _phase_effort_show_windows()
+    usage_rows = _phase_effort_show_usage_rows(windows)
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "verify"])
+    monkeypatch.setattr(
+        render.ops, "phases_of", lambda _row: ["todo", "verify", "review"]
+    )
     monkeypatch.setattr(
         render.effort, "phase_effort_windows_for_tasks", lambda _rows: windows
     )
@@ -781,6 +729,11 @@ def test_task_show_renders_phase_effort_as_model_tagged_phase_rows(monkeypatch):
             "  verify[1] driver=codex model=gpt-5.5 effort=xhigh tokens=267 "
             "input=207 cached=20 output=30 reasoning=10 turns=1 msgs=2 "
             "renewals=1 wall=1m15s partial=missing_transcript"
+        ),
+        (
+            "  review[2] driver=codex model=- effort=xhigh "
+            "tokens=unattributed input=- cached=- output=- reasoning=- "
+            "turns=3 msgs=4 renewals=0 wall=30s partial=missing_end"
         ),
     ]
 
@@ -983,6 +936,96 @@ def _section_lines(output: str, header: str) -> list[str]:
             break
         section.append(line)
     return section
+
+
+def _phase_effort_show_windows() -> tuple[effort.PhaseEffortWindow, ...]:
+    return (
+        _phase_effort_show_window("todo", 0, model="gpt-5.5", start=10.0, end=30.0),
+        _phase_effort_show_window("verify", 1, model="gpt-5.5", start=45.0, end=120.0),
+        _phase_effort_show_window("review", 2, model="", start=125.0, end=155.0),
+    )
+
+
+def _phase_effort_show_window(
+    phase: str,
+    phase_index: int,
+    *,
+    model: str,
+    start: float,
+    end: float,
+) -> effort.PhaseEffortWindow:
+    return effort.PhaseEffortWindow(
+        task_id="effort-task-uuid",
+        handle="TASK-test",
+        title="Render effort",
+        phase=phase,
+        phase_index=phase_index,
+        actor_id=f"agent-{phase_index}",
+        thread_id=ACTOR_A,
+        team_id="team-a",
+        driver="codex",
+        model=model,
+        effort="xhigh",
+        started_at=start,
+        ended_at=end,
+    )
+
+
+def _phase_effort_show_usage_rows(
+    windows: tuple[effort.PhaseEffortWindow, ...],
+) -> tuple[effort.PhaseEffortUsage, ...]:
+    return (
+        _phase_effort_show_usage(windows[0], total=135, input_tokens=100),
+        _phase_effort_show_usage(
+            windows[1],
+            total=267,
+            input_tokens=207,
+            cached_input_tokens=20,
+            output_tokens=30,
+            reasoning_output_tokens=10,
+            renewal_count=1,
+            partial_markers=(effort.PARTIAL_MISSING_TRANSCRIPT,),
+        ),
+        _phase_effort_show_usage(
+            windows[2],
+            total=999,
+            input_tokens=900,
+            cached_input_tokens=800,
+            output_tokens=90,
+            reasoning_output_tokens=9,
+            turn_count=3,
+            message_count=4,
+            partial_markers=(effort.PARTIAL_MISSING_END,),
+        ),
+    )
+
+
+def _phase_effort_show_usage(
+    window: effort.PhaseEffortWindow,
+    *,
+    total: int,
+    input_tokens: int,
+    cached_input_tokens: int = SHOW_DEFAULT_CACHED_INPUT_TOKENS,
+    output_tokens: int = SHOW_DEFAULT_OUTPUT_TOKENS,
+    reasoning_output_tokens: int = SHOW_DEFAULT_REASONING_OUTPUT_TOKENS,
+    turn_count: int = 1,
+    message_count: int = 2,
+    renewal_count: int = 0,
+    partial_markers: tuple[str, ...] = (),
+) -> effort.PhaseEffortUsage:
+    return effort.PhaseEffortUsage(
+        window=window,
+        source_files=("thread-a.jsonl",),
+        input_tokens=input_tokens,
+        cached_input_tokens=cached_input_tokens,
+        output_tokens=output_tokens,
+        reasoning_output_tokens=reasoning_output_tokens,
+        total_tokens=total,
+        turn_count=turn_count,
+        message_count=message_count,
+        renewal_count=renewal_count,
+        partial_markers=partial_markers,
+    )
 
 
 def _init_repo(path: Path) -> Path:

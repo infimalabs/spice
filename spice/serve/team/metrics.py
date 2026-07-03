@@ -629,6 +629,41 @@ class TeamMetricStoreMixin:
             task_rows, transcript_files_by_thread, store=self
         )
 
+    def task_phase_model_cost_rows(
+        self: _TeamMetricStore,
+        task_rows: Iterable[dict],
+        transcript_files_by_thread: Mapping[str, Iterable[str | Path]],
+    ):
+        from spice.tasks.effort import (
+            phase_effort_usage_for_tasks,
+            phase_model_cost_rows,
+        )
+
+        return phase_model_cost_rows(
+            phase_effort_usage_for_tasks(
+                task_rows, transcript_files_by_thread, store=self
+            )
+        )
+
+    def task_phase_model_cost_groups(
+        self: _TeamMetricStore,
+        task_rows: Iterable[dict],
+        transcript_files_by_thread: Mapping[str, Iterable[str | Path]],
+    ):
+        from spice.tasks.effort import (
+            phase_effort_usage_for_tasks,
+            phase_model_cost_groups,
+            phase_model_cost_rows,
+        )
+
+        return phase_model_cost_groups(
+            phase_model_cost_rows(
+                phase_effort_usage_for_tasks(
+                    task_rows, transcript_files_by_thread, store=self
+                )
+            )
+        )
+
     def _prune_metric_history_locked(
         self: _TeamMetricStore, connection: sqlite3.Connection, *, now: float
     ) -> None:

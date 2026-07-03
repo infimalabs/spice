@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol
 
@@ -113,6 +113,44 @@ class PhaseEffortUsage:
         return bool(self.partial_markers)
 
 
+@dataclass(frozen=True, slots=True)
+class PhaseModelCostRow:
+    phase: str
+    phase_index: int
+    driver: str
+    model: str
+    effort: str
+    task_count: int = 0
+    window_count: int = 0
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_output_tokens: int = 0
+    total_tokens: int = 0
+    turn_count: int = 0
+    message_count: int = 0
+    renewal_count: int = 0
+    wall_seconds: float | None = None
+    partial_count: int = 0
+    partial_markers: tuple[str, ...] = ()
+
+    @property
+    def model_tag(self) -> tuple[str, str, str]:
+        return (self.driver, self.model, self.effort)
+
+
+@dataclass(frozen=True, slots=True)
+class PhaseModelCostGroup:
+    driver: str
+    model: str
+    effort: str
+    rows: tuple[PhaseModelCostRow, ...]
+
+    @property
+    def model_tag(self) -> tuple[str, str, str]:
+        return (self.driver, self.model, self.effort)
+
+
 class _EffortWindowStore(Protocol):
     def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
 
@@ -149,6 +187,71 @@ class _OpenWindow:
     shape: _TaskShape
     phase_index: int
     event: _TaskLifecycleEvent
+
+
+@dataclass(slots=True)
+class _PhaseModelCostAccumulator:
+    phase: str
+    phase_index: int
+    driver: str
+    model: str
+    effort: str
+    task_ids: set[str] = field(default_factory=set)
+    window_count: int = 0
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_output_tokens: int = 0
+    total_tokens: int = 0
+    turn_count: int = 0
+    message_count: int = 0
+    renewal_count: int = 0
+    wall_seconds: float = 0.0
+    has_wall_seconds: bool = False
+    partial_count: int = 0
+    partial_markers: list[str] = field(default_factory=list)
+
+    def add(self, usage: PhaseEffortUsage) -> None:
+        self.task_ids.add(usage.task_id)
+        self.window_count += 1
+        self.input_tokens += usage.input_tokens
+        self.cached_input_tokens += usage.cached_input_tokens
+        self.output_tokens += usage.output_tokens
+        self.reasoning_output_tokens += usage.reasoning_output_tokens
+        self.total_tokens += usage.total_tokens
+        self.turn_count += usage.turn_count
+        self.message_count += usage.message_count
+        self.renewal_count += usage.renewal_count
+        if usage.wall_seconds is not None:
+            self.wall_seconds += usage.wall_seconds
+            self.has_wall_seconds = True
+        if usage.partial_markers:
+            self.partial_count += 1
+            for marker in usage.partial_markers:
+                if marker not in self.partial_markers:
+                    self.partial_markers.append(marker)
+
+    def row(self) -> PhaseModelCostRow:
+        return PhaseModelCostRow(
+            phase=self.phase,
+            phase_index=self.phase_index,
+            driver=self.driver,
+            model=self.model,
+            effort=self.effort,
+            task_count=len(self.task_ids),
+            window_count=self.window_count,
+            input_tokens=self.input_tokens,
+            cached_input_tokens=self.cached_input_tokens,
+            output_tokens=self.output_tokens,
+            reasoning_output_tokens=self.reasoning_output_tokens,
+            total_tokens=self.total_tokens,
+            turn_count=self.turn_count,
+            message_count=self.message_count,
+            renewal_count=self.renewal_count,
+            wall_seconds=self.wall_seconds if self.has_wall_seconds else None,
+            partial_count=self.partial_count,
+            partial_markers=tuple(self.partial_markers),
+        )
 
 
 def phase_effort_windows_for_tasks(
@@ -222,6 +325,65 @@ def phase_effort_usage_for_windows(
             transcript_cache[window.thread_id] = usage
         rows.append(_phase_effort_usage(window, usage))
     return tuple(rows)
+
+
+def phase_model_cost_rows(
+    usage_rows: Iterable[PhaseEffortUsage],
+) -> tuple[PhaseModelCostRow, ...]:
+    """Aggregate phase spend only inside explicit driver/model/effort tags."""
+
+    buckets: dict[tuple[str, str, str, int, str], _PhaseModelCostAccumulator] = {}
+    for usage in usage_rows:
+        if not _usage_has_model_tags(usage):
+            continue
+        key = (
+            usage.driver,
+            usage.model,
+            usage.effort,
+            usage.phase_index,
+            usage.phase,
+        )
+        bucket = buckets.setdefault(
+            key,
+            _PhaseModelCostAccumulator(
+                phase=usage.phase,
+                phase_index=usage.phase_index,
+                driver=usage.driver,
+                model=usage.model,
+                effort=usage.effort,
+            ),
+        )
+        bucket.add(usage)
+    return tuple(bucket.row() for _key, bucket in sorted(buckets.items()))
+
+
+def phase_model_cost_groups(
+    rows: Iterable[PhaseModelCostRow],
+) -> tuple[PhaseModelCostGroup, ...]:
+    """Group already-tagged cost rows into safe same-model comparison sets."""
+
+    buckets: dict[tuple[str, str, str], list[PhaseModelCostRow]] = {}
+    for row in rows:
+        if not row.driver or not row.model or not row.effort:
+            continue
+        buckets.setdefault(row.model_tag, []).append(row)
+    return tuple(
+        PhaseModelCostGroup(
+            driver=driver,
+            model=model,
+            effort=effort_value,
+            rows=tuple(sorted(group_rows, key=_phase_model_cost_row_sort_key)),
+        )
+        for (driver, model, effort_value), group_rows in sorted(buckets.items())
+    )
+
+
+def _usage_has_model_tags(usage: PhaseEffortUsage) -> bool:
+    return bool(usage.driver and usage.model and usage.effort)
+
+
+def _phase_model_cost_row_sort_key(row: PhaseModelCostRow) -> tuple[int, str]:
+    return (row.phase_index, row.phase)
 
 
 def _task_shapes(task_rows: Iterable[Mapping[str, Any]]) -> dict[str, _TaskShape]:
