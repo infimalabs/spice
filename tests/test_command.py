@@ -89,6 +89,69 @@ def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
     ]
 
 
+def test_run_agent_command_initial_stderr_includes_working_state(tmp_path, monkeypatch):
+    monkeypatch.delenv(agent_driver.DRIVER.thread_id_env, raising=False)
+    monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    monkeypatch.setattr(
+        wrap,
+        "collect_working_state_snapshot",
+        lambda _repo: wrap.WorkingStateSnapshot(
+            claim_handle="METER-00000001",
+            claim_phase="todo",
+            claim_elapsed_seconds=90,
+        ),
+    )
+    events: list[tuple[str, object, object | None]] = []
+    stderr = io.StringIO()
+    watch_thread = object()
+
+    class FakeProcess:
+        pid = 123
+
+        def wait(self) -> int:
+            events.append(("wait", None, None))
+            return 0
+
+    def fake_popen(command: list[str], env=None) -> FakeProcess:
+        events.append(("popen", command, env))
+        return FakeProcess()
+
+    def fake_watch(repo_root, *, parent_pid, stderr, initial_payload_already_rendered):
+        events.append(
+            (
+                "watch",
+                repo_root,
+                (parent_pid, stderr, initial_payload_already_rendered),
+            )
+        )
+        return watch_thread
+
+    def fake_join(thread):
+        events.append(("join", thread, None))
+
+    monkeypatch.setattr(wrap, "start_agent_side_channel_watch", fake_watch)
+    monkeypatch.setattr(wrap, "join_agent_side_channel_watch", fake_join)
+
+    exit_code = wrap.run_agent_command(
+        tmp_path,
+        ["true"],
+        popen_factory=fake_popen,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0
+    assert stderr.getvalue().splitlines() == [
+        "🌶️ Working state: claim METER-00000001 todo for 90s."
+    ]
+    assert events == [
+        ("popen", ["true"], None),
+        ("watch", tmp_path, (123, stderr, True)),
+        ("wait", None, None),
+        ("join", watch_thread, None),
+    ]
+
+
 def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monkeypatch):
     monkeypatch.delenv(agent_driver.DRIVER.thread_id_env, raising=False)
     monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
@@ -614,6 +677,69 @@ def test_context_meter_injector_repeats_warning_after_interval(tmp_path):
     assert output.strip().splitlines() == [guidance, guidance]
 
 
+def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
+    tmp_path, monkeypatch
+):
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000007Z.txt",
+        compose_inbox_text(body="payload steering", priority=None, stop=False),
+    )
+    monkeypatch.setattr(
+        sidechannel,
+        "agent_context_meter",
+        lambda _repo: _context_meter(total_tokens=80_000, window=100_000),
+    )
+    monkeypatch.setattr(
+        wrap,
+        "collect_working_state_snapshot",
+        lambda _repo: wrap.WorkingStateSnapshot(
+            dirty_file_count=1,
+            last_maxim_bag="fallbacks",
+        ),
+    )
+
+    payload = sidechannel.render_side_channel_payload(tmp_path)
+
+    assert "Inbox Steering" in payload
+    assert "payload steering" in payload
+    assert context_meter_instruction("yellow") in payload
+    working_lines = [line for line in payload.splitlines() if line.startswith("🌶️ ")]
+    assert working_lines == ["🌶️ Working state: 1 dirty file; last maxim fallbacks."]
+    assert "\n" not in working_lines[0]
+    assert working_lines[0].count(".") == 1
+
+
+def test_side_channel_working_state_suppresses_repeats_and_post_tool_omits(
+    tmp_path, monkeypatch
+):
+    snapshot = wrap.WorkingStateSnapshot(
+        claim_handle="METER-00000002",
+        claim_phase="todo",
+        claim_elapsed_seconds=5,
+    )
+    monkeypatch.setattr(
+        wrap,
+        "collect_working_state_snapshot",
+        lambda _repo: snapshot,
+    )
+
+    first = sidechannel.render_side_channel_payload(tmp_path)
+    second = sidechannel.render_side_channel_payload(tmp_path)
+    post_tool = sidechannel.render_post_tool_hook_payload(tmp_path)
+
+    assert first.splitlines() == ["🌶️ Working state: claim METER-00000002 todo for 5s."]
+    assert "🌶️ Working state:" not in second
+    assert "🌶️ Working state:" not in post_tool
+
+    monkeypatch.setattr(
+        wrap,
+        "collect_working_state_snapshot",
+        lambda _repo: wrap.WorkingStateSnapshot(),
+    )
+    assert sidechannel.render_side_channel_payload(tmp_path) == ""
+
+
 def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch):
     stderr = io.StringIO()
     monkeypatch.chdir(tmp_path)
@@ -687,6 +813,41 @@ def test_side_channel_watch_streams_queued_notice_after_initial_payload(
     assert "Supervisor Feedback" in output
     assert notice in output
     assert output.count("000000000002Z") == 1
+    assert not thread.is_alive()
+
+
+def test_side_channel_watch_keeps_supervisor_feedback_and_working_state(
+    tmp_path, monkeypatch
+):
+    stderr = io.StringIO()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        wrap,
+        "collect_working_state_snapshot",
+        lambda _repo: wrap.WorkingStateSnapshot(last_maxim_bag="fallbacks"),
+    )
+    notice = supervisor_feedback_line("task.error", error="batch add rejected")
+    sidechannelnotify.publish_side_channel_feedback(
+        tmp_path, "task.error", error="batch add rejected"
+    )
+
+    with sidechannel.AgentSideChannelServer(tmp_path):
+        thread = Thread(
+            target=wrap.watch_agent_side_channel,
+            kwargs={
+                "repo_root": tmp_path,
+                "parent_pid": os.getpid(),
+                "stderr": stderr,
+            },
+        )
+        thread.start()
+        output = _eventually(lambda: stderr.getvalue(), contains="Working state")
+
+    thread.join(timeout=1.0)
+    assert "Supervisor Feedback" in output
+    assert notice in output
+    assert output.count("batch add rejected") == 1
+    assert output.count("🌶️ Working state: last maxim fallbacks.") == 1
     assert not thread.is_alive()
 
 
