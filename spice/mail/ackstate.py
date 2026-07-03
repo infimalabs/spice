@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS acked_inbox_items (
   inbox_name TEXT NOT NULL,
   text TEXT NOT NULL,
   attachments_json TEXT NOT NULL DEFAULT '[]',
+  lineage_json TEXT NOT NULL DEFAULT '{}',
   ack_text TEXT NOT NULL DEFAULT '',
   ack_content TEXT NOT NULL DEFAULT '',
   disposition TEXT NOT NULL DEFAULT 'acked',
@@ -55,6 +56,7 @@ class AckStateRecord:
     inbox_name: str
     text: str
     attachments: tuple[dict[str, Any], ...]
+    lineage: dict[str, Any]
     ack_text: str
     ack_content: str
     disposition: str
@@ -67,6 +69,7 @@ class AckStateWrite:
     inbox_name: str
     text: str
     attachments: tuple[dict[str, Any], ...] = ()
+    lineage: dict[str, Any] | None = None
     ack_text: str = ""
     ack_content: str = ""
     disposition: str = ACK_DISPOSITION_ACKED
@@ -86,6 +89,7 @@ def record_acked_inbox_items(
             item.inbox_name,
             item.text,
             json.dumps(list(item.attachments), sort_keys=True),
+            json.dumps(item.lineage or {}, sort_keys=True),
             item.ack_text,
             item.ack_content,
             _normalize_disposition(item.disposition),
@@ -102,13 +106,14 @@ def record_acked_inbox_items(
         connection.executemany(
             """
             INSERT INTO acked_inbox_items
-              (key, inbox_name, text, attachments_json, ack_text, ack_content,
-               disposition, archived_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              (key, inbox_name, text, attachments_json, lineage_json, ack_text,
+               ack_content, disposition, archived_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(key) DO UPDATE SET
               inbox_name=excluded.inbox_name,
               text=excluded.text,
               attachments_json=excluded.attachments_json,
+              lineage_json=excluded.lineage_json,
               ack_text=excluded.ack_text,
               ack_content=excluded.ack_content,
               disposition=excluded.disposition,
@@ -127,8 +132,8 @@ def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
         _ensure_schema(connection)
         rows = connection.execute(
             """
-            SELECT key, inbox_name, text, attachments_json, ack_text, ack_content,
-                   disposition, archived_at
+            SELECT key, inbox_name, text, attachments_json, lineage_json,
+                   ack_text, ack_content, disposition, archived_at
             FROM acked_inbox_items
             ORDER BY archived_at DESC, key DESC
             """
@@ -139,10 +144,11 @@ def ack_state_records(repo_root: str | Path) -> list[AckStateRecord]:
             inbox_name=row[1],
             text=row[2],
             attachments=_decode_attachments_json(row[3]),
-            ack_text=row[4],
-            ack_content=row[5],
-            disposition=_normalize_disposition(row[6]),
-            archived_at=row[7],
+            lineage=_decode_lineage_json(row[4]),
+            ack_text=row[5],
+            ack_content=row[6],
+            disposition=_normalize_disposition(row[7]),
+            archived_at=row[8],
         )
         for row in rows
     ]
@@ -166,6 +172,12 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
         "attachments_json",
         "ALTER TABLE acked_inbox_items "
         "ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'",
+    )
+    _ensure_column(
+        connection,
+        "lineage_json",
+        "ALTER TABLE acked_inbox_items "
+        "ADD COLUMN lineage_json TEXT NOT NULL DEFAULT '{}'",
     )
     _ensure_column(
         connection,
@@ -210,6 +222,14 @@ def _decode_attachments_json(raw: str) -> tuple[dict[str, Any], ...]:
         return ()
     attachments = [item for item in parsed if isinstance(item, dict)]
     return tuple(attachments)
+
+
+def _decode_lineage_json(raw: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _normalize_disposition(value: str) -> str:

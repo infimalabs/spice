@@ -50,6 +50,7 @@ from spice.mail.inbox import (
     inbox_item_key_aliases,
     inbox_payload_items,
     notify_inbox_changed,
+    parse_inbox_payload,
 )
 from spice.sessions.util import first_text, normalize_timestamp
 
@@ -286,6 +287,7 @@ def archive_ackd_inbox_items(
                 inbox_name=item.name,
                 text=item.text,
                 attachments=_ack_state_attachments(item),
+                lineage=_ack_state_lineage(item),
                 ack_text=ack_text,
                 ack_content=_ack_content_for_item(item.name, ack_content_by_key),
                 disposition=ACK_DISPOSITION_ACKED,
@@ -329,6 +331,7 @@ def archive_nackd_inbox_items(
                 inbox_name=item.name,
                 text=item.text,
                 attachments=_ack_state_attachments(item),
+                lineage=_ack_state_lineage(item),
                 ack_text=nack_text,
                 ack_content=_ack_content_for_item(item.name, nack_content_by_key),
                 disposition=ACK_DISPOSITION_REFUSED,
@@ -541,6 +544,24 @@ def _ack_state_attachments(item: Any) -> tuple[dict[str, Any], ...]:
         }
         for attachment in item.attachments
     )
+
+
+def _ack_state_lineage(item: Any) -> dict[str, Any]:
+    payload = parse_inbox_payload(item.text)
+    attempts = [
+        {
+            "attempt": attempt.attempt,
+            "at": attempt.at,
+            "messages_elapsed": attempt.messages_elapsed,
+        }
+        for attempt in payload.resend_attempts
+    ]
+    if payload.resend_count == 0 and not attempts:
+        return {}
+    return {
+        "resend_count": payload.resend_count,
+        "resend_attempts": attempts,
+    }
 
 
 def _ack_content_for_item(
