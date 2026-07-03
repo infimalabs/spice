@@ -314,11 +314,7 @@ def _phase_effort_row_line(usage: effort.PhaseEffortUsage) -> str:
         f"driver={_label(usage.driver)}",
         f"model={_label(usage.model)}",
         f"effort={_label(usage.effort)}",
-        f"tokens={usage.total_tokens}",
-        f"input={usage.input_tokens}",
-        f"cached={usage.cached_input_tokens}",
-        f"output={usage.output_tokens}",
-        f"reasoning={usage.reasoning_output_tokens}",
+        *_phase_effort_token_parts(usage),
         f"turns={usage.turn_count}",
         f"msgs={usage.message_count}",
         f"renewals={usage.renewal_count}",
@@ -327,6 +323,28 @@ def _phase_effort_row_line(usage: effort.PhaseEffortUsage) -> str:
     if usage.partial_markers:
         parts.append(f"partial={','.join(usage.partial_markers)}")
     return " ".join(parts)
+
+
+def _phase_effort_token_parts(usage: effort.PhaseEffortUsage) -> list[str]:
+    if not _phase_effort_has_model_tags(usage):
+        return [
+            "tokens=unattributed",
+            "input=-",
+            "cached=-",
+            "output=-",
+            "reasoning=-",
+        ]
+    return [
+        f"tokens={usage.total_tokens}",
+        f"input={usage.input_tokens}",
+        f"cached={usage.cached_input_tokens}",
+        f"output={usage.output_tokens}",
+        f"reasoning={usage.reasoning_output_tokens}",
+    ]
+
+
+def _phase_effort_has_model_tags(usage: effort.PhaseEffortUsage) -> bool:
+    return bool(usage.driver and usage.model and usage.effort)
 
 
 def _label(value: str) -> str:
