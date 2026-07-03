@@ -11,8 +11,9 @@ import pytest
 from spice.errors import SpiceError
 from spice.hooks import precommit
 from spice.studies.repodocs import (
+    render_repo_truth_doc_lines,
     repo_doc_char_sticky_state_path,
-    repo_truth_doc_violations,
+    repo_truth_doc_findings,
     repo_truth_docs,
 )
 from spice.policy import REPO_TRUTH_DOC_LIMIT, REPO_TRUTH_DOCS
@@ -57,6 +58,10 @@ EXPECTED_BUILTIN_PRE_COMMIT_KEYS = [
     "assertion-free-tests",
     "private-internals",
 ]
+
+
+def repo_truth_doc_violations(repo: Path) -> list[str]:
+    return render_repo_truth_doc_lines(repo_truth_doc_findings(repo))
 
 
 def test_builtin_pre_commit_guard_registry_is_exactly_expected(tmp_path):

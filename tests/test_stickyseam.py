@@ -21,7 +21,7 @@ from spice.flexstate import (
     load_flex_slice_claims,
     save_flex_slice_claims,
 )
-from spice.studies import complexity, fileloc
+from spice.studies import complexity, fileloc, repodocs
 
 
 def test_fileloc_reporting_scan_does_not_persist_sticky(tmp_path):
@@ -212,6 +212,285 @@ def test_flex_slice_claim_prune_follows_renames_and_existing_paths(tmp_path):
             "path": "new.py",
         },
     ]
+
+
+def test_fileloc_first_tripper_records_claim_and_gets_normal_guidance(tmp_path):
+    repo = _init_repo(tmp_path)
+    (repo / "big.py").write_text("x = 1\n" * 8, encoding="utf-8")
+
+    findings = fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+        flex_actor="actor-a",
+        flex_claim_now=100.0,
+    )
+
+    assert load_flex_slice_claims(root=repo, now=101.0) == (
+        FlexSliceClaim(
+            path=Path("big.py"),
+            actor="actor-a",
+            created_at=100.0,
+            expires_at=100.0 + FLEX_SLICE_CLAIM_TTL_SECONDS,
+        ),
+    )
+    assert fileloc.render_loc_board(
+        findings,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+    ) == "\n".join(
+        [
+            "file-loc: 1 violation(s)",
+            "  FAIL  big.py: 8 lines > 5",
+            "  a file that breached flex stays held to the base limit until it "
+            "shrinks back under it; split by naming the seam",
+        ]
+    )
+
+
+def test_fileloc_same_actor_refreshes_claim_and_gets_normal_guidance(tmp_path):
+    repo = _init_repo(tmp_path)
+    (repo / "big.py").write_text("x = 1\n" * 8, encoding="utf-8")
+    save_flex_slice_claims(
+        (
+            FlexSliceClaim(
+                path=Path("big.py"),
+                actor="actor-a",
+                created_at=100.0,
+                expires_at=200.0,
+            ),
+        ),
+        root=repo,
+    )
+
+    findings = fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+        flex_actor="actor-a",
+        flex_claim_now=150.0,
+    )
+
+    assert load_flex_slice_claims(root=repo, now=151.0) == (
+        FlexSliceClaim(
+            path=Path("big.py"),
+            actor="actor-a",
+            created_at=100.0,
+            expires_at=150.0 + FLEX_SLICE_CLAIM_TTL_SECONDS,
+        ),
+    )
+    assert fileloc.render_loc_board(
+        findings,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+    ) == "\n".join(
+        [
+            "file-loc: 1 violation(s)",
+            "  FAIL  big.py: 8 lines > 5",
+            "  a file that breached flex stays held to the base limit until it "
+            "shrinks back under it; split by naming the seam",
+        ]
+    )
+
+
+def test_fileloc_peer_actor_redirects_same_path_without_refactor_guidance(tmp_path):
+    repo = _init_repo(tmp_path)
+    (repo / "big.py").write_text("x = 1\n" * 8, encoding="utf-8")
+    peer_claim = FlexSliceClaim(
+        path=Path("big.py"),
+        actor="actor-a",
+        created_at=100.0,
+        expires_at=100.0 + FLEX_SLICE_CLAIM_TTL_SECONDS,
+    )
+    save_flex_slice_claims((peer_claim,), root=repo)
+
+    findings = fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+        flex_actor="actor-b",
+        flex_claim_now=200.0,
+    )
+
+    assert load_flex_slice_claims(root=repo, now=201.0) == (peer_claim,)
+    assert fileloc.render_loc_board(
+        findings,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+    ) == "\n".join(
+        [
+            "file-loc: 1 violation(s)",
+            "  FAIL  big.py: 8 lines > 5; live flex slice held by actor-a "
+            "until 1970-01-01T06:01:40Z; keep this change append-only or "
+            "move to another seam",
+            "  peer-held flex slices redirect duplicate refactors; keep changes "
+            "append-only or move to another seam",
+        ]
+    )
+
+
+def test_fileloc_unrelated_peer_claim_does_not_block_new_path(tmp_path):
+    repo = _init_repo(tmp_path)
+    (repo / "big.py").write_text("x = 1\n" * 8, encoding="utf-8")
+    (repo / "other.py").write_text("other = 1\n", encoding="utf-8")
+    other_claim = FlexSliceClaim(
+        path=Path("other.py"),
+        actor="actor-a",
+        created_at=100.0,
+        expires_at=100.0 + FLEX_SLICE_CLAIM_TTL_SECONDS,
+    )
+    new_claim = FlexSliceClaim(
+        path=Path("big.py"),
+        actor="actor-b",
+        created_at=200.0,
+        expires_at=200.0 + FLEX_SLICE_CLAIM_TTL_SECONDS,
+    )
+    save_flex_slice_claims((other_claim,), root=repo)
+
+    findings = fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+        flex_actor="actor-b",
+        flex_claim_now=200.0,
+    )
+
+    assert load_flex_slice_claims(root=repo, now=201.0) == (
+        new_claim,
+        other_claim,
+    )
+    assert fileloc.render_loc_board(
+        findings,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+    ) == "\n".join(
+        [
+            "file-loc: 1 violation(s)",
+            "  FAIL  big.py: 8 lines > 5",
+            "  a file that breached flex stays held to the base limit until it "
+            "shrinks back under it; split by naming the seam",
+        ]
+    )
+
+
+def test_complexity_peer_claim_redirects_routine_board(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    (repo / "big.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    save_flex_slice_claims(
+        (
+            FlexSliceClaim(
+                path=Path("big.py"),
+                actor="actor-a",
+                created_at=100.0,
+                expires_at=100.0 + FLEX_SLICE_CLAIM_TTL_SECONDS,
+            ),
+        ),
+        root=repo,
+    )
+    record = complexity.ComplexityRecord(
+        path="big.py", function_name="f", ccn=8, length=1, nloc=1
+    )
+    monkeypatch.setattr(
+        complexity,
+        "collect_complexity_records",
+        lambda _paths, *, root, suffixes: [record],
+    )
+
+    findings = complexity.scan_staged_complexity_violations(
+        [Path("big.py")],
+        root=repo,
+        max_ccn=5,
+        ccn_flex_limit_value=7,
+        max_length=100,
+        length_flex_limit_value=100,
+        persist=True,
+        flex_actor="actor-b",
+        flex_claim_now=200.0,
+    )
+
+    assert complexity.render_complexity_board(
+        findings, max_ccn=5, max_length=100
+    ) == "\n".join(
+        [
+            "complexity: 1 violation(s)",
+            "  FAIL  big.py:f: ccn 8 > 5; live flex slice held by actor-a "
+            "until 1970-01-01T06:01:40Z; keep this change append-only or "
+            "move to another seam",
+            "  peer-held flex slices redirect duplicate refactors; keep changes "
+            "append-only or move to another seam",
+        ]
+    )
+
+
+def test_repo_doc_peer_claim_redirects_guard_error(tmp_path):
+    repo = _init_repo(tmp_path)
+    (repo / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        'repo_truth_docs = ["AGENTS.md"]\n'
+        "\n"
+        "[tool.spice.policy.limits]\n"
+        "repo_truth_doc_chars = 5\n"
+        "\n"
+        "[tool.spice.policy.flex]\n"
+        "ratio = 1.5\n"
+        "\n"
+        "[tool.spice.policy.markdown_depth_budget]\n"
+        "extensions = []\n",
+        encoding="utf-8",
+    )
+    (repo / "AGENTS.md").write_text("x" * 8, encoding="utf-8")
+    save_flex_slice_claims(
+        (
+            FlexSliceClaim(
+                path=Path("AGENTS.md"),
+                actor="actor-a",
+                created_at=100.0,
+                expires_at=100.0 + FLEX_SLICE_CLAIM_TTL_SECONDS,
+            ),
+        ),
+        root=repo,
+    )
+
+    findings = repodocs.repo_truth_doc_findings(
+        repo,
+        persist=True,
+        flex_actor="actor-b",
+        flex_claim_now=200.0,
+    )
+
+    assert repodocs.render_repo_truth_doc_guard_error(findings) == "\n".join(
+        [
+            "repo-truth docs hit peer-held flex slices; keep this change "
+            "append-only or move to another seam:",
+            "  AGENTS.md: 8 characters (cap 5; live flex slice held by actor-a "
+            "until 1970-01-01T06:01:40Z; keep this change append-only or "
+            "move to another seam)",
+        ]
+    )
 
 
 def _flex_slice_claims_payload(repo: Path) -> dict:

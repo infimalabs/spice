@@ -14,8 +14,9 @@ from __future__ import annotations
 import json
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -26,6 +27,9 @@ Item = TypeVar("Item")
 FLEX_SLICE_CLAIM_TTL_SECONDS = 6 * 60 * 60
 FLEX_SLICE_CLAIMS_VERSION = 1
 FLEX_SLICE_CLAIMS_GIT_PATH = "spice/flex-slice-claims.json"
+FLEX_SLICE_CLAIMED = "claimed"
+FLEX_SLICE_OWNED = "owned"
+FLEX_SLICE_PEER_HELD = "peer-held"
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,18 @@ class FlexSliceClaim:
     actor: str
     created_at: float
     expires_at: float
+
+
+@dataclass(frozen=True)
+class FlexSliceClaimDecision:
+    path: Path
+    actor: str
+    claim: FlexSliceClaim
+    status: str
+
+    @property
+    def peer_held(self) -> bool:
+        return self.status == FLEX_SLICE_PEER_HELD
 
 
 def git_state_path(git_path: str, *, root: Path) -> Path:
@@ -167,6 +183,84 @@ def prune_flex_slice_claims(
     return active
 
 
+def claim_flex_slice_paths(
+    paths: Iterable[Path],
+    *,
+    root: Path,
+    actor: str,
+    state_path: Path | None = None,
+    git_path: str = FLEX_SLICE_CLAIMS_GIT_PATH,
+    renames: dict[Path, Path] | None = None,
+    now: float | None = None,
+) -> dict[Path, FlexSliceClaimDecision]:
+    claimant = actor.strip()
+    if not claimant:
+        return {}
+    timestamp = time.time() if now is None else float(now)
+    requested = _unique_flex_slice_paths(paths)
+    if not requested:
+        return {}
+    active = load_flex_slice_claims(
+        root=root,
+        state_path=state_path,
+        git_path=git_path,
+        renames=renames,
+        now=timestamp,
+    )
+    updated = list(active)
+    changed = False
+    decisions: dict[Path, FlexSliceClaimDecision] = {}
+    for path in requested:
+        owner = _owning_flex_slice_claim(active, path)
+        if owner is not None and owner.actor != claimant:
+            decisions[path] = FlexSliceClaimDecision(
+                path=path,
+                actor=claimant,
+                claim=owner,
+                status=FLEX_SLICE_PEER_HELD,
+            )
+            continue
+        claim = FlexSliceClaim(
+            path=path,
+            actor=claimant,
+            created_at=owner.created_at if owner is not None else timestamp,
+            expires_at=timestamp + FLEX_SLICE_CLAIM_TTL_SECONDS,
+        )
+        decisions[path] = FlexSliceClaimDecision(
+            path=path,
+            actor=claimant,
+            claim=claim,
+            status=FLEX_SLICE_OWNED if owner is not None else FLEX_SLICE_CLAIMED,
+        )
+        if owner != claim:
+            updated = [
+                existing
+                for existing in updated
+                if not (
+                    _state_repo_path(existing.path) == path
+                    and existing.actor == claimant
+                )
+            ]
+            updated.append(claim)
+            changed = True
+    if changed:
+        save_flex_slice_claims(
+            updated,
+            root=root,
+            state_path=state_path,
+            git_path=git_path,
+        )
+    return decisions
+
+
+def render_flex_slice_claim_redirect(claim: FlexSliceClaim) -> str:
+    return (
+        f"live flex slice held by {claim.actor} until "
+        f"{_format_claim_timestamp(claim.expires_at)}; keep this change "
+        "append-only or move to another seam"
+    )
+
+
 def _decode_flex_slice_claim(raw: Any) -> FlexSliceClaim | None:
     if not isinstance(raw, dict):
         return None
@@ -199,6 +293,32 @@ def _decode_claim_timestamp(raw: Any) -> float | None:
     if not isinstance(raw, int | float):
         return None
     return float(raw)
+
+
+def _unique_flex_slice_paths(paths: Iterable[Path]) -> tuple[Path, ...]:
+    return tuple(
+        sorted(
+            {
+                path
+                for raw_path in paths
+                if (path := _state_repo_path(raw_path)).as_posix() != "."
+            },
+            key=lambda path: path.as_posix(),
+        )
+    )
+
+
+def _owning_flex_slice_claim(
+    claims: tuple[FlexSliceClaim, ...], path: Path
+) -> FlexSliceClaim | None:
+    owners = [
+        claim
+        for claim in claims
+        if _state_repo_path(claim.path) == _state_repo_path(path)
+    ]
+    if not owners:
+        return None
+    return min(owners, key=lambda claim: (claim.created_at, claim.actor))
 
 
 def _active_flex_slice_claim(
@@ -262,6 +382,14 @@ def _state_repo_path(path: Path) -> Path:
     while normalized.startswith("./"):
         normalized = normalized[2:]
     return Path(normalized or ".")
+
+
+def _format_claim_timestamp(timestamp: float) -> str:
+    return (
+        datetime.fromtimestamp(timestamp, UTC)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def sticky_items_after_flex_breaches(

@@ -9,7 +9,10 @@ from spice.agent.paths import write_agent_thread_pointer
 from spice.errors import SpiceError
 from spice.hooks import precommit
 from spice.policyconfig import jittered_flex_limit, resolve_policy
-from spice.studies.repodocs import repo_truth_doc_violations
+from spice.studies.repodocs import (
+    render_repo_truth_doc_lines,
+    repo_truth_doc_findings,
+)
 
 BASE_FILE_LOC = 10
 BASE_FILE_BYTES = 100
@@ -46,6 +49,10 @@ JITTER_BASE_LIMIT = 100
 JITTER_STATIC_FLEX = 200
 JITTER_DOC_BASE_LIMIT = 100
 JITTER_DOC_STATIC_FLEX = 200
+
+
+def repo_truth_doc_violations(repo: Path) -> list[str]:
+    return render_repo_truth_doc_lines(repo_truth_doc_findings(repo))
 
 
 def test_policy_scopes_apply_flat_settings_to_all_numeric_bounds(tmp_path):

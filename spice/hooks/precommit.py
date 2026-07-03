@@ -55,8 +55,9 @@ from spice.studies import (
 )
 from spice.studies.repodocs import (
     clear_repo_truth_doc_sticky_state,
+    render_repo_truth_doc_guard_error,
     repo_truth_doc_candidate_paths,
-    repo_truth_doc_violations,
+    repo_truth_doc_findings,
 )
 from spice.studies.walk import (
     partially_staged_paths,
@@ -537,12 +538,14 @@ def _run_staging_guard(repo_root: Path) -> None:
 
 def _run_repo_truth_doc_guard(repo_root: Path) -> None:
     """Doctrine docs ride in every agent's context; cap them hard."""
-    over = repo_truth_doc_violations(repo_root, persist=True)
-    if over:
-        raise SpiceError(
-            "repo-truth docs exceed the character cap; tighten the doctrine:\n"
-            + "\n".join(over)
-        )
+    resolved = resolve_policy(repo_root)
+    findings = repo_truth_doc_findings(
+        repo_root,
+        persist=True,
+        flex_actor=resolved.flex_actor_id,
+    )
+    if findings:
+        raise SpiceError(render_repo_truth_doc_guard_error(findings))
 
 
 def _run_python_format_guard(repo_root: Path, paths: list[Path]) -> None:
@@ -659,6 +662,7 @@ def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
         lockfile_suffixes=resolved.lockfiles.suffixes,
         lockfile_names=resolved.lockfiles.names,
         persist=True,
+        flex_actor=resolved.flex_actor_id,
     )
     if findings:
         raise SpiceError(
@@ -685,6 +689,7 @@ def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
         bounds_for_path=resolved.jittered_complexity_for_path,
         suffixes=resolved.languages.complexity,
         persist=True,
+        flex_actor=resolved.flex_actor_id,
     )
     if findings:
         raise SpiceError(
