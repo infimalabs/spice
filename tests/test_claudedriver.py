@@ -444,6 +444,68 @@ def test_claude_json_stdout_scanner_captures_assistant_prose():
     assert len(compactions) == 1
 
 
+def test_claude_json_stdout_scanner_flags_text_starvation_once_per_streak():
+    from spice.agent.watchdog import TEXT_STARVATION_THRESHOLD, JsonStdoutScanner
+
+    captured: list[str] = []
+    starvations: list[int] = []
+    scanner = JsonStdoutScanner(
+        captured.append,
+        CLAUDE_DRIVER.normalize_transcript_line,
+        on_compaction=lambda: None,
+        on_text_starvation=starvations.append,
+    )
+    # Observed failure shape: long stretches of thinking-only and tool_use
+    # responses whose canonical assistant events carry no text block at all.
+    thinking_line = (
+        '{"type":"assistant","message":{"role":"assistant",'
+        '"content":[{"type":"thinking","thinking":"planning"}]}}'
+    )
+    tool_line = (
+        '{"type":"assistant","message":{"role":"assistant",'
+        '"content":[{"type":"tool_use","name":"Bash","input":{}}]}}'
+    )
+    for _ in range(TEXT_STARVATION_THRESHOLD - 1):
+        scanner.process_line(thinking_line)
+        scanner.process_line(tool_line)
+    assert starvations == []
+    scanner.process_line(tool_line)
+    assert starvations == [TEXT_STARVATION_THRESHOLD]
+    # The streak keeps growing but the callback stays fired-once.
+    scanner.process_line(tool_line)
+    assert starvations == [TEXT_STARVATION_THRESHOLD]
+    assert captured == []
+
+
+def test_claude_json_stdout_scanner_text_resets_starvation_streak():
+    from spice.agent.watchdog import TEXT_STARVATION_THRESHOLD, JsonStdoutScanner
+
+    starvations: list[int] = []
+    scanner = JsonStdoutScanner(
+        lambda _text: None,
+        CLAUDE_DRIVER.normalize_transcript_line,
+        on_compaction=lambda: None,
+        on_text_starvation=starvations.append,
+    )
+    tool_line = (
+        '{"type":"assistant","message":{"role":"assistant",'
+        '"content":[{"type":"tool_use","name":"Bash","input":{}}]}}'
+    )
+    text_line = (
+        '{"type":"assistant","message":{"role":"assistant",'
+        '"content":[{"type":"text","text":"ACK k: narrating"}]}}'
+    )
+    for _ in range(TEXT_STARVATION_THRESHOLD - 1):
+        scanner.process_line(tool_line)
+    scanner.process_line(text_line)
+    for _ in range(TEXT_STARVATION_THRESHOLD - 1):
+        scanner.process_line(tool_line)
+    assert starvations == []
+    # A fresh streak after the reset can fire again.
+    scanner.process_line(tool_line)
+    assert starvations == [TEXT_STARVATION_THRESHOLD]
+
+
 def test_claude_normalizes_compaction_and_skips_app_records():
     boundary = {"type": "system", "subtype": "compact_boundary", "timestamp": "t"}
     assert CLAUDE_DRIVER.normalize_transcript_line(boundary)["type"] == "compacted"
