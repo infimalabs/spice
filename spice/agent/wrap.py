@@ -111,6 +111,10 @@ def context_warning_state_path(repo_root: Path) -> Path:
     return agent_state_dir(repo_root) / "context-warning.json"
 
 
+def post_tool_hook_inbox_state_path(repo_root: Path) -> Path:
+    return agent_state_dir(repo_root) / "post-tool-hook-inbox.json"
+
+
 def run_agent_command(
     repo_root: Path | None,
     raw_args: Sequence[str],
@@ -537,8 +541,8 @@ class AgentInboxInjector:
 
     Each pending item re-displays every `repeat_interval_seconds`; an item
     whose bytes changed (new signature) or that is brand new shows
-    immediately. Display state is per-injector — the supervisor side-channel
-    builds one per payload, the wrapper keeps one per process.
+    immediately. Display state is per-injector unless `state_path` is supplied
+    for short-lived processes that need to share repeat-suppression state.
     """
 
     def __init__(
@@ -548,14 +552,26 @@ class AgentInboxInjector:
         stderr: TextIO,
         repeat_interval_seconds: float = AGENT_RUN_INBOX_REPEAT_SECONDS,
         time_factory: TimeFactory = time.monotonic,
+        state_path: Path | None = None,
     ) -> None:
         self.repo_root = repo_root
         self.stderr = stderr
         self.repeat_interval_seconds = max(0.0, repeat_interval_seconds)
         self.time_factory = time_factory
+        self.state_path = state_path
         self.displayed_at_by_key: dict[str, float] = {}
         self.displayed_signature_by_key: dict[str, tuple[int, int]] = {}
         self.signature: InboxSignature | None = None
+        self._load_display_state()
+
+    def _load_display_state(self) -> None:
+        if self.state_path is None:
+            return
+        (
+            self.displayed_at_by_key,
+            self.displayed_signature_by_key,
+            self.signature,
+        ) = read_inbox_display_state(self.state_path)
 
     def inject(self, *, force: bool) -> None:
         signature = inbox_pending_signature(self.repo_root)
@@ -604,6 +620,7 @@ class AgentInboxInjector:
         self.signature = displayed_signature
         self._record_displayed_keys(displayed_signature, displayed_keys, now=now)
         self._prune_display_state(displayed_pending_keys)
+        self._persist_display_state()
 
     def _emit_pending_summary(self, count: int) -> None:
         # Every pending item is inside its repeat-suppression window, so the full
@@ -627,7 +644,8 @@ class AgentInboxInjector:
             last_displayed_at = self.displayed_at_by_key.get(key)
             if last_displayed_at is None:
                 continue
-            if now - last_displayed_at < self.repeat_interval_seconds:
+            age = now - last_displayed_at
+            if 0 <= age < self.repeat_interval_seconds:
                 suppressed.add(key)
         return suppressed
 
@@ -647,6 +665,16 @@ class AgentInboxInjector:
             if key not in pending_keys:
                 self.displayed_at_by_key.pop(key, None)
                 self.displayed_signature_by_key.pop(key, None)
+
+    def _persist_display_state(self) -> None:
+        if self.state_path is None:
+            return
+        write_inbox_display_state(
+            self.state_path,
+            displayed_at_by_key=self.displayed_at_by_key,
+            displayed_signature_by_key=self.displayed_signature_by_key,
+            signature=self.signature or (),
+        )
 
 
 class AgentSideChannelNoticeInjector:
@@ -686,6 +714,86 @@ def inbox_pending_signature(repo_root: Path | None) -> InboxSignature:
     except OSError:
         return ()
     return tuple(sorted(rows))
+
+
+def read_inbox_display_state(
+    path: Path,
+) -> tuple[dict[str, float], dict[str, tuple[int, int]], InboxSignature | None]:
+    payload = read_context_meter_cache_payload(path)
+    raw_displayed_at = payload.get("displayedAtByKey")
+    displayed_at_by_key: dict[str, float] = {}
+    if isinstance(raw_displayed_at, dict):
+        for key, value in raw_displayed_at.items():
+            displayed_at = _float_payload_value(value)
+            if isinstance(key, str) and displayed_at is not None:
+                displayed_at_by_key[key] = displayed_at
+
+    raw_displayed_signature = payload.get("displayedSignatureByKey")
+    displayed_signature_by_key: dict[str, tuple[int, int]] = {}
+    if isinstance(raw_displayed_signature, dict):
+        for key, value in raw_displayed_signature.items():
+            row_signature = _inbox_row_signature_payload(value)
+            if isinstance(key, str) and row_signature is not None:
+                displayed_signature_by_key[key] = row_signature
+
+    signature = _inbox_signature_payload(payload.get("signature"))
+    return displayed_at_by_key, displayed_signature_by_key, signature
+
+
+def write_inbox_display_state(
+    path: Path,
+    *,
+    displayed_at_by_key: dict[str, float],
+    displayed_signature_by_key: dict[str, tuple[int, int]],
+    signature: InboxSignature,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(
+        json.dumps(
+            {
+                "displayedAtByKey": displayed_at_by_key,
+                "displayedSignatureByKey": {
+                    key: list(row_signature)
+                    for key, row_signature in displayed_signature_by_key.items()
+                },
+                "signature": [
+                    [name, mtime_ns, size] for name, mtime_ns, size in signature
+                ],
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    tmp.replace(path)
+
+
+def _inbox_signature_payload(value: Any) -> InboxSignature | None:
+    if not isinstance(value, list):
+        return None
+    rows: list[tuple[str, int, int]] = []
+    for row in value:
+        if not isinstance(row, list) or len(row) != 3:
+            return None
+        name, raw_mtime_ns, raw_size = row
+        mtime_ns = _int_payload_value(raw_mtime_ns)
+        size = _int_payload_value(raw_size)
+        if not isinstance(name, str) or mtime_ns is None or size is None:
+            return None
+        rows.append((name, mtime_ns, size))
+    return tuple(sorted(rows))
+
+
+def _inbox_row_signature_payload(value: Any) -> tuple[int, int] | None:
+    if not isinstance(value, list) or len(value) != 2:
+        return None
+    mtime_ns = _int_payload_value(value[0])
+    size = _int_payload_value(value[1])
+    if mtime_ns is None or size is None:
+        return None
+    return (mtime_ns, size)
 
 
 def _signature_rows(signature: InboxSignature) -> list[tuple[str, tuple[int, int]]]:
@@ -866,6 +974,10 @@ def write_cached_agent_context_meter(
 
 def _float_payload_value(value: Any) -> float | None:
     return float(value) if isinstance(value, int | float) else None
+
+
+def _int_payload_value(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def render_agent_context_warning(
