@@ -1,6 +1,7 @@
 """Agent lifecycle, wrapper routing, and supervisor contracts."""
 
 import argparse
+import io
 import json
 import os
 from pathlib import Path
@@ -13,7 +14,14 @@ import pytest
 from spice import config
 from spice.agent import driver as agent_driver
 from spice.agent import cli as agent_cli
-from spice.agent import lifecycle, renewal, sidechannel, sidechannelnotify, wrap
+from spice.agent import (
+    lifecycle,
+    renewal,
+    sidechannel,
+    sidechannelnotify,
+    watchdog,
+    wrap,
+)
 from spice.agent.driver import (
     CLAUDE_DRIVER,
     CODEX_DRIVER,
@@ -28,7 +36,8 @@ from spice.agent.driver import (
     write_playwright_mcp_config,
 )
 from spice.errors import SpiceError
-from spice.mail.inbox import compose_inbox_text, write_inbox_item
+from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ack_state_records
+from spice.mail.inbox import collect_inbox_items, compose_inbox_text, write_inbox_item
 from spice.tasks import ops
 
 DIRECT_AGENT_PID = 2222
@@ -248,6 +257,63 @@ def test_post_tool_hook_response_renders_new_pending_key_after_suppressed_key(
     assert "key=20260101T000000000005Z: age=" in context
     assert "(shown earlier; ACK to clear)" in context
     assert "second hook steering" in context
+
+
+def test_hook_delivered_steering_retires_from_assistant_ack(tmp_path, monkeypatch):
+    monkeypatch.setattr(watchdog, "record_supervised_lane_metrics", lambda _repo: None)
+    monkeypatch.setattr(
+        watchdog,
+        "publish_maxim_hits_as_inbox",
+        lambda _repo, _text, **_kwargs: [],
+    )
+    key = "20260101T000000000007Z"
+    inbox_name = f"{key}.txt"
+    inbox_text = compose_inbox_text(
+        body="hook-delivered ack target", priority=None, stop=False
+    )
+    write_inbox_item(tmp_path, inbox_name, inbox_text)
+
+    delivered = json.loads(agent_cli.render_post_tool_hook_response(tmp_path))
+    assert (
+        "hook-delivered ack target"
+        in delivered["hookSpecificOutput"]["additionalContext"]
+    )
+
+    ack_text = f"ACK {key}: processed hook steering"
+    watchdog.process_supervised_assistant_message(
+        tmp_path,
+        ack_text,
+        io.StringIO(),
+        watchdog.MaximReminderGate(),
+    )
+
+    assert collect_inbox_items(tmp_path) == []
+    records = ack_state_records(tmp_path)
+    assert [
+        (
+            record.key,
+            record.inbox_name,
+            record.text,
+            record.ack_text,
+            record.ack_content,
+            record.disposition,
+        )
+        for record in records
+    ] == [
+        (
+            key,
+            inbox_name,
+            inbox_text,
+            ack_text,
+            "processed hook steering",
+            ACK_DISPOSITION_ACKED,
+        )
+    ]
+    assert agent_cli.render_post_tool_hook_response(tmp_path) == ""
+    command_stderr = io.StringIO()
+    wrap.AgentInboxInjector(tmp_path, stderr=command_stderr).inject(force=True)
+    assert key not in command_stderr.getvalue()
+    assert "hook-delivered ack target" not in command_stderr.getvalue()
 
 
 def test_ensure_agent_uses_shipped_codex_defaults_without_config(tmp_path, monkeypatch):
