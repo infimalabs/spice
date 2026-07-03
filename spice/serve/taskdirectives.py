@@ -25,21 +25,39 @@ def _render_message_html_with_task_directives(
         return ""
     rendered: list[str] = []
     pending: list[str] = []
-    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        directive = _task_directive_from_line(line)
-        if directive is None:
-            pending.append(line)
-            continue
-        if pending:
-            rendered.append(
-                render_message_html("\n".join(pending), worktree_id=worktree_id)
-            )
-            pending = []
-        rendered.append(_task_directive_html(directive))
-    if pending:
+    directive_run: list[str] = []
+
+    def flush_pending() -> None:
+        nonlocal pending
+        if not pending:
+            return
         rendered.append(
             render_message_html("\n".join(pending), worktree_id=worktree_id)
         )
+        pending = []
+
+    def flush_directives() -> None:
+        nonlocal directive_run
+        if not directive_run:
+            return
+        if len(directive_run) == 1:
+            rendered.append(directive_run[0])
+        else:
+            rendered.append(
+                f'<div class="task-directive-stack">{"".join(directive_run)}</div>'
+            )
+        directive_run = []
+
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        directive = _task_directive_from_line(line)
+        if directive is None:
+            flush_directives()
+            pending.append(line)
+            continue
+        flush_pending()
+        directive_run.append(_task_directive_html(directive))
+    flush_directives()
+    flush_pending()
     return "".join(rendered)
 
 
