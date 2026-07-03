@@ -91,7 +91,10 @@ def test_active_claim_supplies_default_origin(task_repo):
     assert identity.resolve(spawned)["origin"] == f"task:{root}"
 
 
-def test_private_and_hidden_projects_are_origin_exempt(task_repo):
+def test_only_hidden_system_projects_are_origin_exempt(task_repo):
+    """Private scratch shares the origin contract (a claim-less private task
+    typically answers an ack and cites it); only hidden system surfaces like
+    oops stay infallible -- the error trap must never refuse capture."""
     from spice.serve.team.store import ServeTeamStore, TeamConfig
 
     from tests.test_tasks import ACTOR_A_MEMBER
@@ -100,10 +103,17 @@ def test_private_and_hidden_projects_are_origin_exempt(task_repo):
     ServeTeamStore().create_team(
         members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Steer")
     )
+    with pytest.raises(SpiceError, match="task creation requires an origin"):
+        create.add(
+            "Private scratch without provenance",
+            priority="medium",
+            acceptance=["refused"],
+        )
     private = create.add(
-        "Private scratch has no origin requirement",
+        "Private scratch citing its ack",
         priority="medium",
-        acceptance=["private exempt"],
+        acceptance=["private cites the ack"],
+        origin=f"ack:{ACK_KEY}",
     )
     oops_line = ops.oops("Automated triage capture", description="origin exempt")
     oops_handle = oops_line.split()[1]
@@ -112,7 +122,7 @@ def test_private_and_hidden_projects_are_origin_exempt(task_repo):
     oops_row = identity.resolve(oops_handle)
 
     assert private_row["project"] == config.private_project(ACTOR_A)
-    assert not str(private_row.get("origin") or "")
+    assert private_row["origin"] == f"ack:{ACK_KEY}"
     assert not str(oops_row.get("origin") or "")
 
 
