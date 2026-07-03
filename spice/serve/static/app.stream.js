@@ -796,6 +796,13 @@ function historySentinelForLane(lane) {
   return lane.historySentinelEl;
 }
 
+// Deterministic masonry: every card gets an explicit grid position. A card's
+// column is chosen once (shortest column at first placement) and pinned in its
+// dataset, so later height changes only slide columns vertically — a card can
+// never flip sides while the operator is reading. Full-width items (compaction
+// dividers, history sentinels, directive stacks) are barriers: both columns
+// restart on the same row after one, which resets skew and stops reflow from
+// propagating across it. Pins are scoped per barrier segment.
 function packMessageStream(lane) {
   const host = lane.messagesEl;
   if (!host) return;
@@ -805,13 +812,63 @@ function packMessageStream(lane) {
   const rowGap = cssPixelValue(style.rowGap) || 0;
   const rowStride = rowHeight + rowGap;
   if (!Number.isFinite(rowStride) || rowStride <= 0) return;
+  const columnCount = messagePackColumnCount(style);
+  const columnRows = new Array(Math.max(1, columnCount)).fill(0);
+  let segment = 0;
   for (const node of host.children) {
     if (!isMessagePackItem(node)) continue;
     const height = node.getBoundingClientRect().height;
     if (!Number.isFinite(height) || height <= 0) continue;
     const span = Math.max(1, Math.ceil((height + rowGap) / rowStride));
     setMessagePackRowSpan(node, span);
+    if (columnCount <= 1 || isMessagePackBarrier(node)) {
+      const start = Math.max(...columnRows);
+      setMessagePackPosition(node, "", start + 1);
+      columnRows.fill(start + span);
+      segment += 1;
+      continue;
+    }
+    const column = stickyMessagePackColumn(node, segment, columnRows);
+    setMessagePackPosition(node, String(column + 1), columnRows[column] + 1);
+    columnRows[column] += span;
   }
+}
+
+function messagePackColumnCount(style) {
+  return String(style.gridTemplateColumns || "")
+    .split(" ")
+    .filter(Boolean).length;
+}
+
+function isMessagePackBarrier(node) {
+  return node.matches(
+    ".compaction-divider, [data-history-sentinel], article:has(.task-directive-stack)",
+  );
+}
+
+function stickyMessagePackColumn(node, segment, columnRows) {
+  const pinned = Number(node.dataset.messagePackColumn);
+  if (
+    node.dataset.messagePackSegment === String(segment) &&
+    Number.isInteger(pinned) &&
+    pinned >= 0 &&
+    pinned < columnRows.length
+  )
+    return pinned;
+  let column = 0;
+  for (let index = 1; index < columnRows.length; index += 1) {
+    if (columnRows[index] < columnRows[column]) column = index;
+  }
+  node.dataset.messagePackSegment = String(segment);
+  node.dataset.messagePackColumn = String(column);
+  return column;
+}
+
+function setMessagePackPosition(node, columnStart, rowStart) {
+  if (node.style.gridColumnStart !== columnStart)
+    node.style.gridColumnStart = columnStart;
+  const rowValue = String(rowStart);
+  if (node.style.gridRowStart !== rowValue) node.style.gridRowStart = rowValue;
 }
 
 function scheduleMessageStreamPack(lane) {
