@@ -30,6 +30,7 @@ from spice.mail.ackstate import (
     record_acked_inbox_items,
 )
 from spice.mail.inbox import (
+    InboxResendAttempt,
     collect_acked_inbox_items,
     collect_inbox_items,
     collect_refused_inbox_items,
@@ -312,6 +313,7 @@ def test_ack_state_migrates_existing_rows_to_store_operator_text(tmp_path):
         "inbox_name",
         "text",
         "attachments_json",
+        "lineage_json",
         "ack_text",
         "ack_content",
         "disposition",
@@ -332,6 +334,7 @@ def test_ack_state_migrates_existing_rows_to_store_operator_text(tmp_path):
     assert records[0].attachments == (
         {"name": "attachment.png", "path": "/tmp/attachment.png"},
     )
+    assert records[0].lineage == {}
 
 
 def test_archive_ackd_inbox_items_records_durable_ack_state(tmp_path):
@@ -353,6 +356,69 @@ def test_archive_ackd_inbox_items_records_durable_ack_state(tmp_path):
         (record.key, record.inbox_name, record.text, record.disposition)
         for record in records
     ] == [(KEY_A, name, text, ACK_DISPOSITION_ACKED)]
+
+
+def test_summarize_ack_archival_retires_lineage_record_with_dropped_z_alias(
+    tmp_path,
+):
+    _init_repo(tmp_path)
+    name = f"{KEY_A}.txt"
+    text = compose_inbox_text(
+        body="lineage ack state",
+        priority="critical",
+        stop=False,
+        resend_attempts=(
+            InboxResendAttempt(
+                attempt=1,
+                at="2026-01-01T00:00:00Z",
+                messages_elapsed=3,
+            ),
+            InboxResendAttempt(
+                attempt=2,
+                at="2026-01-01T00:01:00Z",
+                messages_elapsed=4,
+            ),
+        ),
+    )
+    write_inbox_item(tmp_path, name, text)
+
+    summary = summarize_ack_archival(
+        tmp_path,
+        f"ACK {KEY_A[:-1]}: handled after retry.",
+    )
+
+    archived = collect_acked_inbox_items(tmp_path)
+    records = ack_state_records(tmp_path)
+    assert summary.archived == [KEY_A]
+    assert pending_inbox_count(tmp_path) == 0
+    assert [
+        (item.name, parse_inbox_payload(item.text).resend_count) for item in archived
+    ] == [(name, 2)]
+    assert [
+        (record.key, record.inbox_name, record.ack_content, record.lineage)
+        for record in records
+    ] == [
+        (
+            KEY_A,
+            name,
+            "handled after retry.",
+            {
+                "resend_count": 2,
+                "resend_attempts": [
+                    {
+                        "attempt": 1,
+                        "at": "2026-01-01T00:00:00Z",
+                        "messages_elapsed": 3,
+                    },
+                    {
+                        "attempt": 2,
+                        "at": "2026-01-01T00:01:00Z",
+                        "messages_elapsed": 4,
+                    },
+                ],
+            },
+        )
+    ]
 
 
 def test_summarize_nack_archival_records_refused_state(tmp_path):
@@ -392,6 +458,66 @@ def test_summarize_nack_archival_records_refused_state(tmp_path):
     ]
     assert "status=already_consumed_operator_steering" in rows[0]
     assert f"refused_inbox key={KEY_A}" in rows[1]
+
+
+def test_summarize_nack_archival_retires_lineage_record_with_stable_key(
+    tmp_path,
+):
+    _init_repo(tmp_path)
+    name = f"{KEY_B}.txt"
+    text = compose_inbox_text(
+        body="lineage refusal state",
+        priority="urgent",
+        stop=False,
+        resend_attempts=(
+            InboxResendAttempt(
+                attempt=1,
+                at="2026-01-01T00:00:00Z",
+                messages_elapsed=3,
+            ),
+        ),
+    )
+    write_inbox_item(tmp_path, name, text)
+
+    summary = summarize_nack_archival(
+        tmp_path,
+        f"NACK {KEY_B}: refusing after retry.",
+    )
+
+    refused = collect_refused_inbox_items(tmp_path)
+    records = ack_state_records(tmp_path)
+    assert summary.refused == [KEY_B]
+    assert pending_inbox_count(tmp_path) == 0
+    assert [
+        (item.name, parse_inbox_payload(item.text).resend_count) for item in refused
+    ] == [(name, 1)]
+    assert [
+        (
+            record.key,
+            record.inbox_name,
+            record.ack_content,
+            record.disposition,
+            record.lineage,
+        )
+        for record in records
+    ] == [
+        (
+            KEY_B,
+            name,
+            "refusing after retry.",
+            ACK_DISPOSITION_REFUSED,
+            {
+                "resend_count": 1,
+                "resend_attempts": [
+                    {
+                        "attempt": 1,
+                        "at": "2026-01-01T00:00:00Z",
+                        "messages_elapsed": 3,
+                    },
+                ],
+            },
+        )
+    ]
 
 
 def test_reasonless_nack_does_not_retire_pending_item(tmp_path):
