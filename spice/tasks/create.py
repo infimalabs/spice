@@ -129,10 +129,11 @@ def _validated_origin_task_handle(handle: str) -> str:
 def _origin_required(resolved_project: str) -> bool:
     # There is almost never truly no origination: a claim-less private task
     # is typically a Steer agent responding to an acknowledgment, and it
-    # cites that ack. Only hidden system surfaces are infallible -- oops is
-    # the error trap (it runs when something already failed, sometimes with
-    # no agent context), so a provenance precondition there would convert
-    # error capture into error loss.
+    # cites that ack. Hidden projects are exempt as a class per their
+    # charter (one kind of thing: oops triage, maxim proposals). oops in
+    # particular is always agent-filed, already ceremony-heavy, and usually
+    # mid-claim -- where opportunistic linkage records the origin anyway --
+    # so a hard requirement would add friction without closing a loop.
     return not config.is_hidden_project(resolved_project)
 
 
