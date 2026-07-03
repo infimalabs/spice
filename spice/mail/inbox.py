@@ -109,6 +109,13 @@ class InboxItem:
     disposition: str = ""
 
 
+@dataclass(frozen=True)
+class InboxResendAttempt:
+    attempt: int
+    at: str
+    messages_elapsed: int
+
+
 def inbox_dir(repo_root: Path | str) -> Path:
     return Path(repo_root) / STATE_DIRNAME / INBOX_DIRNAME
 
@@ -649,38 +656,53 @@ def resend_inbox_item(
     attempt: int,
     messages_elapsed: int,
 ) -> Path:
-    """Re-publish an unACK'd send as a fresh inbox item.
-
-    Resurrecting the original bytes under the original key lets an agent that
-    already ignored them keep ignoring them. Instead this re-parses the
-    previous payload, escalates the priority (`urgent` on the first resend,
-    `critical` thereafter), preserves the stop-signal note, and writes a
-    brand-new item with a fresh timestamp key.
-    """
-    del messages_elapsed
-    parsed = parse_inbox_payload(original_text)
+    """Record another resend attempt on the original pending inbox item."""
+    original_path = inbox_dir(repo_root) / f"{original_key}.txt"
+    try:
+        current_text = original_path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        current_text = original_text
+    parsed = parse_inbox_payload(current_text)
     new_priority = _escalate_resend_priority(parsed.priority, attempt=attempt)
+    attempts = (
+        *parsed.resend_attempts,
+        InboxResendAttempt(
+            attempt=max(0, int(attempt)),
+            at=_resend_attempt_timestamp(),
+            messages_elapsed=max(0, int(messages_elapsed)),
+        ),
+    )
     composed = compose_inbox_text(
         body=parsed.body,
         priority=new_priority,
         stop=parsed.is_stop,
         controls=parsed.controls,
+        resend_attempts=attempts,
     )
-    original_path = inbox_dir(repo_root) / f"{original_key}.txt"
-    original_attachments: list[InboxAttachmentInput] = []
-    for attachment in collect_inbox_attachments(original_path, repo_root=repo_root):
-        try:
-            data = attachment.path.read_bytes()
-        except OSError:
-            continue
-        original_attachments.append(
-            InboxAttachmentInput(
-                name=attachment.name,
-                content_type=attachment.content_type,
-                data=data,
-            )
-        )
-    return write_inbox_item(repo_root, None, composed, attachments=original_attachments)
+    return replace_inbox_item_text(repo_root, original_path.name, composed)
+
+
+def replace_inbox_item_text(repo_root: Path, name: str, text: str) -> Path:
+    """Atomically replace an existing inbox item's text, preserving its name."""
+    if not valid_inbox_name(name):
+        raise RuntimeError("Inbox item name must be a direct child name, not a path")
+    directory = inbox_dir(repo_root)
+    directory.mkdir(parents=True, exist_ok=True)
+    target_path = directory / name
+    tmp_path = directory / f"{name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    try:
+        with exclusive_lock(directory / INBOX_PUBLISH_LOCK_NAME):
+            with tmp_path.open("w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_path, target_path)
+            fsync_directory(directory)
+            notify_inbox_changed(repo_root)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            tmp_path.unlink()
+    return target_path
 
 
 @dataclass(frozen=True)
@@ -689,12 +711,21 @@ class InboxPayload:
     body: str
     is_stop: bool
     controls: tuple[str, ...] = ()
+    resend_count: int = 0
+    resend_attempts: tuple[InboxResendAttempt, ...] = ()
 
 
 _PRIORITY_PREFIX_RE = re.compile(r"^\[(?P<priority>[A-Z]+)\]\s+")
 _STOP_SUFFIX_RE = re.compile(r"\s+\((?P<note>[^()]+)\)\s*$")
 _PRIORITY_HEADER_RE = re.compile(r"^Priority:\s*(?P<priority>[A-Za-z]+)\s*$")
 _CONTROL_HEADER_RE = re.compile(r"^Control:\s*(?P<control>[A-Za-z0-9_.:-]+)\s*$")
+_RESEND_COUNT_HEADER_RE = re.compile(r"^Resend-Count:\s*(?P<count>\d+)\s*$")
+_RESEND_ATTEMPT_HEADER_RE = re.compile(
+    r"^Resend-Attempt:\s*"
+    r"(?P<attempt>\d+)\s+"
+    r"at=(?P<at>\S+)\s+"
+    r"messages_elapsed=(?P<messages_elapsed>\d+)\s*$"
+)
 _NOTE_TRAILER_RE = re.compile(r"^Note:\s*(?P<note>.+?)\s*$")
 
 
@@ -703,6 +734,8 @@ def parse_inbox_payload(text: str) -> InboxPayload:
     candidate = text.strip()
     priority: str | None = None
     controls: list[str] = []
+    resend_count = 0
+    resend_attempts: list[InboxResendAttempt] = []
     is_stop = False
     lines = candidate.splitlines()
     if lines:
@@ -723,14 +756,36 @@ def parse_inbox_payload(text: str) -> InboxPayload:
                 candidate = "\n".join(lines).strip()
     while lines:
         control_match = _CONTROL_HEADER_RE.match(lines[0].strip())
-        if not control_match:
-            break
-        control = control_match.group("control").strip()
-        if control not in INBOX_CONTROL_READOUT_ROWS:
-            break
-        controls.append(control)
-        lines = lines[1:]
-        candidate = "\n".join(lines).strip()
+        if control_match:
+            control = control_match.group("control").strip()
+            if control not in INBOX_CONTROL_READOUT_ROWS:
+                break
+            controls.append(control)
+            lines = lines[1:]
+            candidate = "\n".join(lines).strip()
+            continue
+        resend_count_match = _RESEND_COUNT_HEADER_RE.match(lines[0].strip())
+        if resend_count_match:
+            resend_count = max(0, int(resend_count_match.group("count")))
+            lines = lines[1:]
+            candidate = "\n".join(lines).strip()
+            continue
+        resend_attempt_match = _RESEND_ATTEMPT_HEADER_RE.match(lines[0].strip())
+        if resend_attempt_match:
+            resend_attempts.append(
+                InboxResendAttempt(
+                    attempt=max(0, int(resend_attempt_match.group("attempt"))),
+                    at=resend_attempt_match.group("at"),
+                    messages_elapsed=max(
+                        0,
+                        int(resend_attempt_match.group("messages_elapsed")),
+                    ),
+                )
+            )
+            lines = lines[1:]
+            candidate = "\n".join(lines).strip()
+            continue
+        break
     priority_match = _PRIORITY_PREFIX_RE.match(candidate)
     if priority is None and priority_match:
         parsed_priority = priority_match.group("priority").lower()
@@ -748,6 +803,8 @@ def parse_inbox_payload(text: str) -> InboxPayload:
         body=candidate.strip(),
         is_stop=is_stop,
         controls=tuple(controls),
+        resend_count=max(resend_count, len(resend_attempts)),
+        resend_attempts=tuple(resend_attempts),
     )
 
 
@@ -787,6 +844,10 @@ def _escalate_resend_priority(current: str | None, *, attempt: int) -> str:
     if current and PRIORITY_RANK.get(current, 0) > PRIORITY_RANK["urgent"]:
         return current
     return "urgent"
+
+
+def _resend_attempt_timestamp() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _atomic_publish_inbox_item(tmp_path: Path, target_path: Path) -> Path:
@@ -913,15 +974,18 @@ def compose_inbox_text(
     priority: str | None,
     stop: bool,
     controls: Sequence[str] = (),
+    resend_attempts: Sequence[InboxResendAttempt] = (),
 ) -> str:
     """Render the canonical inbox payload.
 
-    Shape: ``Priority: urgent\\nControl: control-name\\nbody\\nNote: stop-signal-note\\n``
+    Shape: ``Priority: urgent\\nControl: control-name\\nResend-Count: N\\nbody\\nNote: stop-signal-note\\n``
 
     * ``Priority:`` is emitted only when set and not ``normal``, so receivers
       see urgency at a glance without parsing.
     * ``Control:`` rows carry host/supervisor instructions outside the
       operator-authored body.
+    * ``Resend-Count:`` and ``Resend-Attempt:`` rows carry resend lineage
+      outside the operator-authored body.
     * The body keeps operator-authored internal line breaks so ACK quote
       context preserves its visible structure.
     * The trailing ``Note:`` line is always present — either
@@ -934,6 +998,16 @@ def compose_inbox_text(
         lines.append(f"Priority: {priority}")
     for control in normalize_inbox_controls(controls):
         lines.append(f"Control: {control}")
+    attempts = tuple(resend_attempts or ())
+    if attempts:
+        lines.append(f"Resend-Count: {len(attempts)}")
+        for resend in attempts:
+            lines.append(
+                "Resend-Attempt: "
+                f"{max(0, int(resend.attempt))} "
+                f"at={resend.at} "
+                f"messages_elapsed={max(0, int(resend.messages_elapsed))}"
+            )
     if request_body:
         lines.append(request_body)
     note = INBOX_GRACEFUL_NOTE if stop else INBOX_CONTINUE_NOTE
