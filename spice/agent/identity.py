@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 
-from spice.agent.driver import ALL_DRIVERS, AgentDriver
+from spice.agent.driver import AgentDriver, all_drivers
 
 DASHED_THREAD_ID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -37,7 +37,7 @@ def ambient_thread() -> tuple[str, AgentDriver] | None:
     shipped driver's (Claude and Codex each define a driver-owned thread-id
     environment variable).
     """
-    for driver in ALL_DRIVERS:
+    for driver in all_drivers():
         raw = os.environ.get(driver.thread_id_env)  # env-policy: allow
         if raw:
             thread_id = canonical_thread_id(raw)

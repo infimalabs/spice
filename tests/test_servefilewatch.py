@@ -262,7 +262,7 @@ def test_serve_scrubs_agent_driver_environment(monkeypatch, tmp_path: Path) -> N
     monkeypatch.setattr(
         serve_app, "start_exit_file_watch", lambda *_args, **_kwargs: None
     )
-    for driver in serve_app.ALL_DRIVERS:
+    for driver in serve_app.all_drivers():
         monkeypatch.setenv(driver.thread_id_env, "ambient-thread")
     monkeypatch.setenv(serve_app.SPICE_AGENT_DRIVER_ENV, "codex")
 
@@ -277,5 +277,5 @@ def test_serve_scrubs_agent_driver_environment(monkeypatch, tmp_path: Path) -> N
 
     assert result == 0
     assert serve_app.SPICE_AGENT_DRIVER_ENV not in os.environ  # env-policy: allow
-    for driver in serve_app.ALL_DRIVERS:
+    for driver in serve_app.all_drivers():
         assert driver.thread_id_env not in os.environ  # env-policy: allow

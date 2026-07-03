@@ -18,11 +18,11 @@ import subprocess
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from spice.agent.driver import ALL_DRIVERS
+from spice.agent.driver import driver_choices
 from spice.config import configured_judge_bin
 from spice.errors import SpiceError
 from spice.flexstate import load_sticky_items, save_sticky_items
@@ -38,7 +38,6 @@ TRAILING_NOISE = string.punctuation + string.whitespace
 ALL_MAXIM = "all"
 ANY_MAXIM = "any"
 META_MAXIMS = frozenset({ALL_MAXIM, ANY_MAXIM})
-DEFAULT_DRIVER_SCOPE = frozenset(driver.name for driver in ALL_DRIVERS)
 DISABLED_MAXIM_BAGS_GIT_PATH = "spice/disabled-maxim-bags.json"
 DISABLED_MAXIM_BAGS_KEY = "disabled_bags"
 MAXIM_PROPOSAL_MIN_RECURRENCE = 2
@@ -63,7 +62,7 @@ class MaximBag:
     name: str
     words: frozenset[str]
     message: str
-    drivers: frozenset[str] = DEFAULT_DRIVER_SCOPE
+    drivers: frozenset[str] = field(default_factory=lambda: frozenset(driver_choices()))
 
 
 @dataclass(frozen=True)
@@ -883,8 +882,8 @@ def _configured_message(
 
 def _configured_drivers(raw_config: Mapping[str, Any], name: str) -> frozenset[str]:
     if "drivers" not in raw_config:
-        return DEFAULT_DRIVER_SCOPE
-    known = DEFAULT_DRIVER_SCOPE
+        return _known_driver_names()
+    known = _known_driver_names()
     configured: list[str] = []
     for raw_driver in string_list(raw_config.get("drivers")):
         driver = raw_driver.casefold()
@@ -899,6 +898,10 @@ def _configured_drivers(raw_config: Mapping[str, Any], name: str) -> frozenset[s
     if not configured:
         raise SpiceError(f"[tool.spice.maxims.{name}] drivers must be non-empty")
     return frozenset(configured)
+
+
+def _known_driver_names() -> frozenset[str]:
+    return frozenset(driver_choices())
 
 
 def _resolved_lookup(
@@ -1160,8 +1163,9 @@ def _normalized_driver_scope_name(driver_name: str | None) -> str:
     driver = str(driver_name or "").strip().casefold()
     if not driver:
         return ""
-    if driver not in DEFAULT_DRIVER_SCOPE:
-        expected = ", ".join(sorted(DEFAULT_DRIVER_SCOPE))
+    known = _known_driver_names()
+    if driver not in known:
+        expected = ", ".join(sorted(known))
         raise SpiceError(
             f"maxim driver scope {driver_name!r} must be one of: {expected}"
         )

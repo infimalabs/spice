@@ -19,8 +19,8 @@ from threading import RLock
 from typing import Any
 
 from spice.agent.driver import (
-    ALL_DRIVERS,
     AgentDriver,
+    all_drivers,
     driver_for,
     driver_for_transcript,
 )
@@ -170,7 +170,7 @@ def resolve_thread_transcript(
     if not canonical:
         return None
     preferred = driver_for(repo_root)
-    ordered = [preferred, *(d for d in ALL_DRIVERS if d is not preferred)]
+    ordered = [preferred, *(d for d in all_drivers() if d.name != preferred.name)]
     for driver in ordered:
         try:
             return TranscriptResolution(
