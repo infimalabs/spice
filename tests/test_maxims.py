@@ -549,6 +549,76 @@ message = "DO NOT take the quiet route."
     ] == ["fallbacks"]
 
 
+def test_watchdog_scopes_and_worktree_disable_compose_for_operator_behavior(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_pyproject(
+        repo,
+        """
+[tool.spice.maxims.codexonly]
+words = ["codex route"]
+message = "CODEX scoped reminder."
+drivers = ["codex"]
+
+[tool.spice.maxims.claudeonly]
+words = ["claude route"]
+message = "CLAUDE scoped reminder."
+drivers = ["claude"]
+
+[tool.spice.maxims.shared]
+words = ["shared route"]
+message = "Shared reminder."
+""",
+    )
+    _commit_all(repo)
+    peer = tmp_path / "peer"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "-b", "peer", str(peer)],
+        cwd=repo,
+        check=True,
+    )
+    _make_every_maxim_violate(monkeypatch)
+    statement = "The codex route, claude route, and shared route all drift."
+
+    maxims.set_maxim_bag_disabled("shared", disabled=True, repo_root=repo)
+    monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "codex")
+    repo_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, statement, reminder_gate=watchdog.MaximReminderGate()
+    )
+    peer_codex_paths = watchdog.publish_maxim_hits_as_inbox(
+        peer, statement, reminder_gate=watchdog.MaximReminderGate()
+    )
+    peer_codex_items = collect_inbox_items(peer)
+
+    for item in peer_codex_items:
+        item.source_path.unlink()
+    monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "claude")
+    peer_claude_paths = watchdog.publish_maxim_hits_as_inbox(
+        peer, statement, reminder_gate=watchdog.MaximReminderGate()
+    )
+
+    assert len(repo_paths) == 1
+    assert [item.text for item in collect_inbox_items(repo)] == [
+        "[MAXIM] CODEX scoped reminder.\n"
+    ]
+    assert len(peer_codex_paths) == 1
+    assert [item.text for item in peer_codex_items] == [
+        "[MAXIM] CODEX scoped reminder. Shared reminder.\n"
+    ]
+    assert len(peer_claude_paths) == 1
+    assert [item.text for item in collect_inbox_items(peer)] == [
+        "[MAXIM] CLAUDE scoped reminder. Shared reminder.\n"
+    ]
+    subprocess.run(
+        ["git", "diff", "--exit-code", "--", "pyproject.toml"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+
+
 def test_worktree_maxim_disable_rejects_unknown_bag(tmp_path):
     repo = _init_repo(tmp_path / "repo")
 
