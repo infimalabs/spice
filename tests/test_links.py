@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 
+import pytest
+
+from spice.errors import SpiceError
+from spice.hooks import precommit
 from spice.studies.links import (
     MarkdownLinkCaseFinding,
     markdown_link_case_findings,
     render_markdown_link_case_board,
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_markdown_link_case_findings_compare_against_tracked_index_case(tmp_path):
@@ -106,6 +114,62 @@ def test_markdown_link_case_findings_apply_staged_renames_to_tracked_map(tmp_pat
     ]
 
 
+def test_markdown_links_gate_rejects_then_accepts_case_exact_targets(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    docs = repo / "docs" / "design"
+    images = docs / "images"
+    images.mkdir(parents=True)
+    (docs / "ARCHITECTURE.md").write_text("# Architecture\n", encoding="utf-8")
+    (images / "Diagram.PNG").write_bytes(b"image")
+    readme = repo / "README.md"
+    readme.write_text(_mixed_case_docs_readme("architecture.md", "diagram.png"))
+    _run(repo, "git", "add", ".")
+
+    dirty = _run_spice(repo, "study", "markdown-links", check=False)
+    findings = markdown_link_case_findings(repo)
+
+    assert dirty.returncode == 1
+    assert dirty.stdout == "\n".join(
+        [
+            "markdown-links: 2 case-mismatched tracked markdown link target(s)",
+            "  FAIL  README.md:1 docs/design/architecture.md#overview -> "
+            "docs/design/ARCHITECTURE.md",
+            "  FAIL  README.md:2 docs/design/images/diagram.png -> "
+            "docs/design/images/Diagram.PNG",
+            "",
+        ]
+    )
+    assert findings == [
+        MarkdownLinkCaseFinding(
+            source_path=Path("README.md"),
+            line=1,
+            raw_target="docs/design/architecture.md#overview",
+            resolved_path=Path("docs/design/architecture.md"),
+            expected_path=Path("docs/design/ARCHITECTURE.md"),
+        ),
+        MarkdownLinkCaseFinding(
+            source_path=Path("README.md"),
+            line=2,
+            raw_target="docs/design/images/diagram.png",
+            resolved_path=Path("docs/design/images/diagram.png"),
+            expected_path=Path("docs/design/images/Diagram.PNG"),
+        ),
+    ]
+    with pytest.raises(SpiceError) as exc_info:
+        precommit._run_markdown_links_guard(repo)
+    assert str(exc_info.value) == dirty.stdout.strip()
+
+    readme.write_text(_mixed_case_docs_readme("ARCHITECTURE.md", "Diagram.PNG"))
+    _run(repo, "git", "add", "README.md")
+
+    clean = _run_spice(repo, "study", "markdown-links", check=False)
+
+    assert clean.returncode == 0
+    assert clean.stdout == "markdown-links: ok\n"
+    assert markdown_link_case_findings(repo) == []
+    precommit._run_markdown_links_guard(repo)
+
+
 def _init_repo(path: Path) -> Path:
     path.mkdir()
     _run(path, "git", "init", "-q", "-b", "main")
@@ -116,3 +180,30 @@ def _init_repo(path: Path) -> Path:
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
+
+
+def _run_spice(cwd: Path, *args: str, check: bool) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()  # env-policy: allow
+    env["PYTHONPATH"] = os.pathsep.join(
+        entry for entry in (str(PROJECT_ROOT), env.get("PYTHONPATH", "")) if entry
+    )
+    return subprocess.run(
+        [sys.executable, "-m", "spice", *args],
+        cwd=cwd,
+        env=env,
+        check=check,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _mixed_case_docs_readme(architecture: str, diagram: str) -> str:
+    return "\n".join(
+        [
+            f"[Architecture](docs/design/{architecture}#overview)",
+            f"![Diagram](docs/design/images/{diagram})",
+            "[External](https://example.test/docs/design/architecture.md)",
+            "[Fragment](#architecture)",
+            "",
+        ]
+    )
