@@ -12,9 +12,11 @@ import pytest
 
 from spice.agent import sidechannelnotify, watchdog
 from spice.agent.driver import CLAUDE_DRIVER, DRIVER
+from spice.mail.ackstate import ACK_DISPOSITION_REFUSED, ack_state_records
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import (
     collect_acked_inbox_items,
+    collect_refused_inbox_items,
     collect_inbox_items,
     compose_inbox_text,
     write_inbox_item,
@@ -285,6 +287,41 @@ def test_supervised_ack_reports_already_acked_keys(task_repo, quiet_supervisor):
 
     feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
     assert feedback == [_ack_feedback("ack.already-acked", INBOX_KEY)]
+
+
+def test_supervised_nack_records_refused_ackstate(task_repo, quiet_supervisor):
+    inbox_name = f"{INBOX_KEY}.txt"
+    inbox_text = compose_inbox_text(
+        body="decline this steering", priority="urgent", stop=False
+    )
+    write_inbox_item(task_repo, inbox_name, inbox_text)
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        f"NACK {INBOX_KEY}: refusing because this conflicts with policy.",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    refused = collect_refused_inbox_items(task_repo)
+    records = ack_state_records(task_repo)
+    feedback = sidechannelnotify.consume_side_channel_notices(task_repo)
+    assert [(item.name, item.text, item.disposition) for item in refused] == [
+        (inbox_name, inbox_text, ACK_DISPOSITION_REFUSED)
+    ]
+    assert [
+        (record.key, record.inbox_name, record.ack_content, record.disposition)
+        for record in records
+    ] == [
+        (
+            INBOX_KEY,
+            inbox_name,
+            "refusing because this conflicts with policy.",
+            ACK_DISPOSITION_REFUSED,
+        )
+    ]
+    assert feedback == [_ack_feedback("nack.refused", INBOX_KEY)]
 
 
 def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supervisor):

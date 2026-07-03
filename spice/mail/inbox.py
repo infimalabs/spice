@@ -52,13 +52,16 @@ _PREVIEW_ELLIPSIS_CHARS = 3
 SECONDS_PER_MINUTE = 60
 INBOX_MAX_ITEM_AGE_SECONDS = 24 * 60 * 60
 INBOX_DIRECT_STEERING_ROW = "Direct operator steering: read before planning."
-INBOX_STEERING_ROW = "Inbox steering: read before planning; retire only after ACK."
+INBOX_STEERING_ROW = (
+    "Inbox steering: read before planning; retire only after ACK or reasoned NACK."
+)
 INBOX_RESPONSE_ROW = (
-    "Real-time ACK loop: put a plain-text ACK header near the start of each "
-    "working assistant message: "
+    "Real-time N/ACK loop: put a plain-text ACK or reasoned NACK header near "
+    "the start of each working assistant message: "
     "ACK <key> [<key> ...]: <what changed or was captured>; acknowledged "
-    "keys clear once processed. Do not bury ACKs mid-message or save them for "
-    "final response."
+    "keys clear once processed. NACK <key>: <why this cannot be done>; "
+    "refused keys clear once processed. Do not bury ACKs or NACKs mid-message "
+    "or save them for final response."
 )
 INBOX_ACK_REMINDER_SECONDS = 15
 INBOX_ACK_ESCALATED_SECONDS = 60
@@ -71,9 +74,9 @@ INBOX_TASK_HINT_ROW = (
     "allocator flow."
 )
 INBOX_PEEK_PERSISTENCE_ROW = (
-    "Persistence: acknowledged keys clear once processed; unACKed keys "
-    "redisplay after 15s; bare reads never clear. Do not bury ACKs mid-message "
-    "or save them for final response."
+    "Persistence: acknowledged or refused keys clear once processed; "
+    "unhandled keys redisplay after 15s; bare reads never clear. Do not bury "
+    "ACKs or NACKs mid-message or save them for final response."
 )
 
 # Trailing note that tells the receiver whether this message is routine
@@ -292,31 +295,34 @@ def inbox_item_is_automated_guidance(item: InboxItem) -> bool:
 
 def inbox_ack_format_hint_row(items: Sequence[InboxItem]) -> str:
     keys = " ".join(inbox_item_key(item.name) for item in items)
-    example = f"ACK {keys}: <what changed or was captured>"
+    ack_example = f"ACK {keys}: <what changed or was captured>"
+    nack_example = f"NACK {keys}: <why this cannot be done>"
     age_seconds = max((_inbox_item_age_seconds(item) for item in items), default=0.0)
     if age_seconds >= INBOX_ACK_OVERDUE_SECONDS:
         return (
             "ACK required now: "
             f"pending for {format_relative_seconds(age_seconds)}; include an ACK "
-            "header near the start of the next working assistant message, "
-            f"e.g. `{example}`."
+            "or reasoned NACK header near the start of the next working "
+            f"assistant message, e.g. `{ack_example}` or `{nack_example}`."
         )
     if age_seconds >= INBOX_ACK_ESCALATED_SECONDS:
         return (
             "ACK reminder: "
             f"pending for {format_relative_seconds(age_seconds)}; include an ACK "
-            "header near the start of your next working assistant message, "
-            f"e.g. `{example}`."
+            "or reasoned NACK header near the start of your next working "
+            f"assistant message, e.g. `{ack_example}` or `{nack_example}`."
         )
     if age_seconds >= INBOX_ACK_REMINDER_SECONDS:
         return (
             "ACK hint: "
             "this will keep redisplaying until an assistant message includes "
-            f"an ACK header near the start, like `{example}`."
+            "an ACK or reasoned NACK header near the start, like "
+            f"`{ack_example}` or `{nack_example}`."
         )
     return (
-        "ACK example: lead the next working assistant message with a concise "
-        f"ACK response, e.g. `{example}`."
+        "N/ACK example: lead the next working assistant message with a concise "
+        f"ACK response or reasoned NACK, e.g. `{ack_example}` or "
+        f"`{nack_example}`."
     )
 
 

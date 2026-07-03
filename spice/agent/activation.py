@@ -121,9 +121,11 @@ def activation_command_surface_lines() -> list[str]:
         ),
         (
             "ack_inline=spice is a real-time interactive loop; lead each "
-            "working assistant message with ACK <key> [<key> ...] for "
-            "currently-pending keys; acknowledged keys clear from pending; "
-            "do not bury ACKs mid-message or defer them to final response"
+            "working assistant message with ACK <key> [<key> ...] or "
+            "reasoned NACK <key>: <why this cannot be done> for "
+            "currently-pending keys; acknowledged/refused keys clear from "
+            "pending; do not bury ACKs or NACKs mid-message or defer them to "
+            "final response"
         ),
         (
             "pending_inbox_recovery=if spice session briefing only shows "

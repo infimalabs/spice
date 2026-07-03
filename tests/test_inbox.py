@@ -162,15 +162,17 @@ def test_inbox_readout_ack_guidance_leaves_response_wording_open(tmp_path):
     readout = "\n".join(rows)
 
     assert (
-        "Real-time ACK loop: put a plain-text ACK header near the start of each "
-        "working assistant message: "
-        "ACK <key> [<key> ...]: <what changed or was captured>"
+        "Real-time N/ACK loop: put a plain-text ACK or reasoned NACK header "
+        "near the start of each working assistant message"
     ) in readout
+    assert "ACK <key> [<key> ...]: <what changed or was captured>" in readout
     assert "acknowledged keys clear once processed" in readout
-    assert "Do not bury ACKs mid-message or save them for final response" in readout
+    assert "NACK <key>: <why this cannot be done>" in readout
+    assert "refused keys clear once processed" in readout
+    assert "Do not bury ACKs or NACKs mid-message" in readout
     assert (
-        "ACK example: lead the next working assistant message with a concise "
-        "ACK response"
+        "N/ACK example: lead the next working assistant message with a concise "
+        "ACK response or reasoned NACK"
     ) in readout
     assert "understood" not in readout
     assert "put this literal text" not in readout
@@ -188,9 +190,9 @@ def test_aged_inbox_ack_hint_avoids_literal_response_script(tmp_path):
 
     row = inbox_ack_format_hint_row(items)
 
-    assert (
-        "include an ACK header near the start of your next working assistant message"
-    ) in row
+    assert "include an ACK or reasoned NACK header near the start" in row
+    assert "NACK " in row
+    assert ": <why this cannot be done>" in row
     assert "put this literal text" not in row
     assert "understood" not in row
 

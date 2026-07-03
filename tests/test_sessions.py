@@ -374,12 +374,14 @@ def test_briefing_pending_inbox_ack_guidance_uses_open_response_copy(
 
     assert "Inbox\n  pending=1" in briefing
     assert (
-        "Real-time ACK loop: put a plain-text ACK header near the start of each "
-        "working assistant message: "
-        "ACK <key> [<key> ...]: <what changed or was captured>"
+        "Real-time N/ACK loop: put a plain-text ACK or reasoned NACK header "
+        "near the start of each working assistant message"
     ) in briefing
+    assert "ACK <key> [<key> ...]: <what changed or was captured>" in briefing
     assert "acknowledged keys clear once processed" in briefing
-    assert "Do not bury ACKs mid-message or save them for final response" in briefing
+    assert "NACK <key>: <why this cannot be done>" in briefing
+    assert "refused keys clear once processed" in briefing
+    assert "Do not bury ACKs or NACKs mid-message" in briefing
     assert "understood" not in briefing
 
 
