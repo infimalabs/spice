@@ -33,6 +33,7 @@ def test_general_purpose_study_flags_cover_reference_surface():
         ["study", "env-policy", "--json", "--staged"],
         ["study", "env-name-ledger", "--json", "--staged"],
         ["study", "shape", "--json"],
+        ["study", "markdown-links", "--json"],
         ["study", "subsumption", "coverage.db", "--json"],
     ]
 

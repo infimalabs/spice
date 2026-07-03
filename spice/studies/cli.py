@@ -25,6 +25,7 @@ from spice.studies import (
     envpolicy,
     fileloc,
     javascriptunused,
+    links,
     magicnums,
     mutations,
     reachability,
@@ -41,6 +42,23 @@ def configure_study_parser(subparsers: Any) -> None:
         "study", help="Code-health scans: file shape, complexity, magic numbers."
     )
     actions = parser.add_subparsers(dest="study_action", required=True)
+    _configure_file_loc_parser(actions)
+    _configure_complexity_parser(actions)
+    _configure_csharp_parser(actions)
+    _configure_magic_parser(actions)
+    _configure_javascript_parser(actions)
+    _configure_markdown_links_parser(actions)
+    _configure_mutation_parser(actions)
+    _configure_env_parser(actions)
+    _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
+    _configure_reachability_parser(actions)
+    _configure_symbol_reachability_parser(actions)
+    _configure_subsumption_parser(actions)
+    _configure_assertion_free_parser(actions)
+    _configure_private_internals_parser(actions)
+
+
+def _configure_file_loc_parser(actions: Any) -> None:
     file_loc = _add_study_action(
         actions, "file-loc", "File line/byte pressure with flex + sticky limits."
     )
@@ -54,6 +72,8 @@ def configure_study_parser(subparsers: Any) -> None:
     file_loc.add_argument("--byte-limit", type=int, default=FILE_BYTE_LIMIT)
     file_loc.add_argument("--byte-flex-limit", type=int, default=None)
 
+
+def _configure_complexity_parser(actions: Any) -> None:
     complexity_parser = _add_study_action(
         actions, "complexity", "Routine CCN/length pressure via lizard."
     )
@@ -81,6 +101,8 @@ def configure_study_parser(subparsers: Any) -> None:
         help="Number of worst routines to show; defaults to tracked policy config.",
     )
 
+
+def _configure_csharp_parser(actions: Any) -> None:
     csharp_members = _add_study_action(
         actions, "csharp-members", "Rank C# class members by parsed source length."
     )
@@ -107,12 +129,16 @@ def configure_study_parser(subparsers: Any) -> None:
         help="Number of candidate rows to show.",
     )
 
+
+def _configure_magic_parser(actions: Any) -> None:
     magic = _add_study_action(
         actions, "magic-numbers", "Magic-number regressions vs a git baseline."
     )
     magic.add_argument("--baseline-ref", default=None)
     magic.add_argument("--threshold", type=int, default=None)
 
+
+def _configure_javascript_parser(actions: Any) -> None:
     javascript = _add_study_action(
         actions,
         "javascript-unused",
@@ -132,8 +158,16 @@ def configure_study_parser(subparsers: Any) -> None:
         help="Number of candidate rows to show.",
     )
 
-    _configure_mutation_parser(actions)
 
+def _configure_markdown_links_parser(actions: Any) -> None:
+    _add_study_action(
+        actions,
+        "markdown-links",
+        "Relative markdown links whose target path case differs from git.",
+    )
+
+
+def _configure_env_parser(actions: Any) -> None:
     env_policy = _add_study_action(
         actions, "env-policy", "Undeclared environment-variable literals."
     )
@@ -148,12 +182,6 @@ def configure_study_parser(subparsers: Any) -> None:
         "env-name-ledger",
         "Exact environment-variable name manifest accounting.",
     )
-    _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
-    _configure_reachability_parser(actions)
-    _configure_symbol_reachability_parser(actions)
-    _configure_subsumption_parser(actions)
-    _configure_assertion_free_parser(actions)
-    _configure_private_internals_parser(actions)
 
 
 def _configure_mutation_parser(actions: Any) -> None:
@@ -577,6 +605,18 @@ def _study_javascript_unused(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _study_markdown_links(args: argparse.Namespace, root: Path) -> int:
+    findings = links.markdown_link_case_findings(
+        root,
+        paths=_target_paths(args, root),
+    )
+    if args.emit_json:
+        _print_study_json(args.study_action, findings=findings)
+        return 1 if findings else 0
+    print(links.render_markdown_link_case_board(findings))
+    return 1 if findings else 0
+
+
 def _study_mutations(args: argparse.Namespace, root: Path) -> int:
     test_paths = [_test_target_path(path, root) for path in args.test] or [
         Path("tests")
@@ -934,6 +974,7 @@ _STUDY_ACTIONS = {
     "csharp-unused-candidates": _study_csharp_unused_candidates,
     "magic-numbers": _study_magic_numbers,
     "javascript-unused": _study_javascript_unused,
+    "markdown-links": _study_markdown_links,
     "mutations": _study_mutations,
     "env-policy": _study_env_policy,
     "env-name-ledger": _study_env_name_ledger,
