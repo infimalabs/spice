@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from spice.agent.maximmetrics import (
+    MaximMetricCounts,
+    maxim_metric_counts,
+    maxim_metric_records,
+    maxim_recurrence_inputs,
+)
 from spice.agent.maxims import (
     ALL_MAXIM,
     DEFAULT_PROMPT_TEMPLATE,
@@ -17,6 +24,7 @@ from spice.agent.maxims import (
     triggered_maxims,
 )
 from spice.errors import SpiceError
+from spice.paths import repo_root_from_cwd
 
 CONDITION_MET_EXIT_CODE = 0
 CONDITION_UNMET_EXIT_CODE = 1
@@ -71,6 +79,12 @@ def configure_maxim_parser(subparsers: Any) -> None:
         help="Short name (e.g. fallback, alias). Omit to list every configured maxim.",
     )
     show.set_defaults(func=run_maxim_show_cli)
+
+    report = actions.add_parser(
+        "report",
+        help="Show durable maxim metric counts.",
+    )
+    report.set_defaults(func=run_maxim_report_cli)
 
 
 def _add_verdict_arguments(parser: argparse.ArgumentParser) -> None:
@@ -200,6 +214,14 @@ def run_maxim_show_cli(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_maxim_report_cli(_args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        raise SpiceError("not inside a git worktree")
+    print(_render_maxim_report(repo_root))
+    return 0
+
+
 def _render_maxim_listing() -> str:
     rows = [
         (
@@ -210,6 +232,57 @@ def _render_maxim_listing() -> str:
     ]
     width = max(len(name) for name, _ in rows)
     return "\n".join(f"{name.ljust(width)}  {text}" for name, text in rows)
+
+
+def _render_maxim_report(repo_root: Path) -> str:
+    counts = maxim_metric_counts(repo_root)
+    records = maxim_metric_records(repo_root)
+    recurrence_by_key = Counter(
+        (item.bag_name, item.driver_name) for item in maxim_recurrence_inputs(repo_root)
+    )
+    if not counts:
+        return "maxim metric events: 0"
+    rows = [
+        _maxim_report_row(count, recurrence_by_key[(count.bag_name, count.driver_name)])
+        for count in counts
+    ]
+    headers = (
+        "bag",
+        "driver",
+        "fire",
+        "confirmed",
+        "rejected",
+        "suppressed",
+        "published",
+        "recurrence",
+    )
+    widths = [
+        max(len(str(row[index])) for row in [headers, *rows])
+        for index in range(len(headers))
+    ]
+    rendered = [
+        " ".join(str(value).ljust(widths[index]) for index, value in enumerate(headers))
+    ]
+    rendered.extend(
+        " ".join(str(value).ljust(widths[index]) for index, value in enumerate(row))
+        for row in rows
+    )
+    return "\n".join([f"maxim metric events: {len(records)}", *rendered])
+
+
+def _maxim_report_row(
+    count: MaximMetricCounts, recurrence_inputs: int
+) -> tuple[str, str, int, int, int, int, int, int]:
+    return (
+        count.bag_name,
+        count.driver_name,
+        count.fire_count,
+        count.judged_confirmed_count,
+        count.judged_rejected_count,
+        count.gate_suppressed_count,
+        count.published_count,
+        recurrence_inputs,
+    )
 
 
 def _render_trigger_key(key: str) -> str:
