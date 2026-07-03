@@ -736,7 +736,7 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
     assert "agent.abc123.task" not in filters
     assert "oops" not in filters
     assert "serve.example" in inventory["catalog"]["filterExamples"]
-    assert inventory["catalog"]["hiddenStems"] == ["oops"]
+    assert inventory["catalog"]["hiddenStems"] == ["oops", "maxim_proposal"]
     assert inventory["catalog"]["hiddenProjectPrefix"] == "."
     assert stems["serve"] == 2
     assert stems["task"] == 1

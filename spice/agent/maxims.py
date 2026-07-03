@@ -10,6 +10,7 @@ the parsing or backend wiring.
 
 from __future__ import annotations
 
+import json
 import random
 import re
 import string
@@ -42,6 +43,9 @@ DISABLED_MAXIM_BAGS_GIT_PATH = "spice/disabled-maxim-bags.json"
 DISABLED_MAXIM_BAGS_KEY = "disabled_bags"
 MAXIM_PROPOSAL_MIN_RECURRENCE = 2
 MAXIM_PROPOSAL_DRAFT_MAX_WORDS = 8
+MAXIM_PROPOSAL_TASK_CREATION_SURFACE = "maxim_proposal"
+MAXIM_PROPOSAL_TASK_TAG = "maxim_proposal"
+_TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 DEFAULT_PROMPT_LINES = (
     'IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".',
     'IFF "{maxim}" DISAGREES WITH "{statement}": ANSWER ONLY "NO".',
@@ -107,6 +111,13 @@ class MaximProposalDraft:
     source_keys: tuple[str, ...]
     dispositions: tuple[MaximProposalDispositionCount, ...]
     evidence: tuple[MaximProposalEvidence, ...]
+
+
+@dataclass(frozen=True)
+class FiledMaximProposalTask:
+    handle: str
+    bag_name: str
+    project: str
 
 
 @dataclass(frozen=True)
@@ -191,6 +202,86 @@ def maxim_proposal_drafts(
             )
         )
     return tuple(drafts)
+
+
+def file_maxim_proposal_tasks(
+    drafts: Sequence[MaximProposalDraft],
+    *,
+    actor_override: str | None = None,
+) -> tuple[FiledMaximProposalTask, ...]:
+    """File draft maxims as deferred hidden triage tasks, never as config edits."""
+    from spice.tasks import config as task_config
+    from spice.tasks import create
+
+    filed: list[FiledMaximProposalTask] = []
+    existing_incepted: set[str] = set()
+    for draft in drafts:
+        handle = create.add_one(
+            title=_maxim_proposal_task_title(draft, limit=create.TASK_TITLE_LIMIT),
+            description=maxim_proposal_task_description(draft),
+            project=task_config.MAXIM_PROPOSAL_PROJECT,
+            priority="medium",
+            flow=None,
+            tags=[MAXIM_PROPOSAL_TASK_TAG],
+            after=[],
+            acceptance=[
+                (
+                    "Human triage decides whether to merge, revise, or reject "
+                    "this proposed maxim; filing this task must not modify "
+                    "pyproject.toml or install maxim config."
+                )
+            ],
+            wait=None,
+            claim=False,
+            deferred=True,
+            existing=existing_incepted,
+            system_project=True,
+            actor_override=actor_override,
+            creation_surface=MAXIM_PROPOSAL_TASK_CREATION_SURFACE,
+        )
+        filed.append(
+            FiledMaximProposalTask(
+                handle=handle,
+                bag_name=draft.bag_name,
+                project=task_config.MAXIM_PROPOSAL_PROJECT,
+            )
+        )
+    return tuple(filed)
+
+
+def maxim_proposal_task_description(draft: MaximProposalDraft) -> str:
+    evidence_rows = [
+        f"- {item.field}: {_compact_proposal_description_text(item.text)}"
+        for item in draft.evidence
+    ]
+    if not evidence_rows:
+        evidence_rows = ["- none"]
+    return "\n".join(
+        [
+            "Mergeable maxim stanza:",
+            "",
+            "```toml",
+            render_maxim_proposal_draft_stanza(draft),
+            "```",
+            "",
+            "Evidence:",
+            f"- theme: {draft.theme_name}",
+            f"- evidence_count: {draft.evidence_count}",
+            f"- source_keys: {', '.join(draft.source_keys) or '-'}",
+            f"- dispositions: {_format_proposal_dispositions(draft)}",
+            *evidence_rows,
+        ]
+    )
+
+
+def render_maxim_proposal_draft_stanza(draft: MaximProposalDraft) -> str:
+    return "\n".join(
+        [
+            f"[tool.spice.maxims.{_render_toml_key(draft.bag_name)}]",
+            f"words = {_render_toml_string_array(draft.words)}",
+            f"message = {_render_toml_string(draft.message)}",
+        ]
+    )
 
 
 def _maxim_proposal_source_record(
@@ -431,6 +522,33 @@ def _format_proposal_word_list(words: Sequence[str]) -> str:
     if len(words) == 2:
         return f"{words[0]} and {words[1]}"
     return ", ".join(words[:-1]) + f", and {words[-1]}"
+
+
+def _maxim_proposal_task_title(draft: MaximProposalDraft, *, limit: int) -> str:
+    title = f"Triage maxim proposal: {draft.bag_name}"
+    if len(title) <= limit:
+        return title
+    return title[:limit].rstrip()
+
+
+def _format_proposal_dispositions(draft: MaximProposalDraft) -> str:
+    return ",".join(f"{item.disposition}={item.count}" for item in draft.dispositions)
+
+
+def _compact_proposal_description_text(value: str) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _render_toml_key(key: str) -> str:
+    return key if _TOML_BARE_KEY_RE.fullmatch(key) else _render_toml_string(key)
+
+
+def _render_toml_string_array(values: tuple[str, ...]) -> str:
+    return "[" + ", ".join(_render_toml_string(value) for value in values) + "]"
+
+
+def _render_toml_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _maxim_proposal_clusters(

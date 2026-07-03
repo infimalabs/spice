@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
-import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,15 +19,18 @@ from spice.agent.maxims import (
     DEFAULT_PROMPT_TEMPLATE,
     META_MAXIMS,
     MaximBag,
+    FiledMaximProposalTask,
     MaximProposalDraft,
     MaximProposalSourceRecord,
     MaximProposalTheme,
     builtin_maxim,
     disabled_maxim_bag_names,
     evaluate_maxim,
+    file_maxim_proposal_tasks,
     maxim_proposal_drafts,
     maxim_proposal_source_records,
     maxim_proposal_themes,
+    render_maxim_proposal_draft_stanza,
     resolved_maxim_bags,
     resolve_maxim,
     set_maxim_bag_disabled,
@@ -47,7 +48,6 @@ SCOPE_DECISION_EVIDENCE_ROW = (
     "[tool.spice.maxims.<bag>].drivers or using maxim disable/enable."
 )
 MAXIM_PROPOSAL_EVIDENCE_COMMENT_LIMIT = 8
-_TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 @dataclass
@@ -140,6 +140,18 @@ def configure_maxim_parser(subparsers: Any) -> None:
         ),
     )
     proposals.set_defaults(func=run_maxim_proposals_cli)
+
+    file_proposals = actions.add_parser(
+        "file-proposals",
+        help="File TOML draft maxims as hidden deferred triage tasks.",
+        description=(
+            "Mine recurring ACK-ledger correction sources, draft mergeable "
+            "[tool.spice.maxims.<bag>] stanzas, and file each draft as a "
+            "hidden deferred task for human triage. This command does not edit "
+            "pyproject.toml, install a maxim bag, or call the maxim judge."
+        ),
+    )
+    file_proposals.set_defaults(func=run_maxim_file_proposals_cli)
 
     disable = actions.add_parser(
         "disable",
@@ -326,6 +338,19 @@ def run_maxim_proposals_cli(_args: argparse.Namespace) -> int:
             existing_bags=resolved_maxim_bags(repo_root),
         )
     )
+    return 0
+
+
+def run_maxim_file_proposals_cli(_args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        raise SpiceError("not inside a git worktree")
+    records = maxim_proposal_source_records(repo_root)
+    drafts = maxim_proposal_drafts(
+        maxim_proposal_themes(records),
+        existing_bags=resolved_maxim_bags(repo_root),
+    )
+    print(render_filed_maxim_proposal_tasks(file_maxim_proposal_tasks(drafts)))
     return 0
 
 
@@ -528,13 +553,7 @@ def _render_maxim_proposal_draft(draft: MaximProposalDraft) -> list[str]:
         f"# source_keys = {','.join(draft.source_keys)}",
     ]
     rows.extend(_render_proposal_evidence_comments(draft.evidence))
-    rows.extend(
-        [
-            f"[tool.spice.maxims.{_render_toml_key(draft.bag_name)}]",
-            f"words = {_render_toml_string_array(draft.words)}",
-            f"message = {_render_toml_string(draft.message)}",
-        ]
-    )
+    rows.extend(render_maxim_proposal_draft_stanza(draft).splitlines())
     return rows
 
 
@@ -561,16 +580,14 @@ def _render_proposal_dispositions(
     )
 
 
-def _render_toml_key(key: str) -> str:
-    return key if _TOML_BARE_KEY_RE.fullmatch(key) else _render_toml_string(key)
-
-
-def _render_toml_string_array(values: tuple[str, ...]) -> str:
-    return "[" + ", ".join(_render_toml_string(value) for value in values) + "]"
-
-
-def _render_toml_string(value: str) -> str:
-    return json.dumps(value, ensure_ascii=False)
+def render_filed_maxim_proposal_tasks(
+    filed: tuple[FiledMaximProposalTask, ...],
+) -> str:
+    if not filed:
+        return "filed maxim proposal tasks: 0"
+    rows = ["filed maxim proposal tasks: " + str(len(filed))]
+    rows.extend(f"{item.handle} {item.project} {item.bag_name}" for item in filed)
+    return "\n".join(rows)
 
 
 def _render_toml_comment(value: str) -> str:

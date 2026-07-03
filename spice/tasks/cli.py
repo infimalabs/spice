@@ -602,6 +602,8 @@ def _list(args: argparse.Namespace) -> str:
 def _list_status_filters(args: argparse.Namespace) -> list[str]:
     status = getattr(args, "status", None)
     if status:
+        if status == "waiting":
+            return ["+WAITING"]
         return [f"status:{status}"]
     if getattr(args, "all", False):
         return []

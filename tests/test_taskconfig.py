@@ -113,9 +113,11 @@ def test_hidden_oops_project_is_addressable_but_not_publicly_assignable(
     repo = _init_repo(tmp_path / "repo")
     monkeypatch.chdir(repo)
 
-    assert config.hidden_stems() == ("oops",)
+    assert config.hidden_stems() == ("oops", "maxim_proposal")
     assert config.validate_project(".oops") == ".oops"
     assert config.validate_project(".oops.triage") == ".oops.triage"
+    assert config.validate_project(config.MAXIM_PROPOSAL_PROJECT) == ".maxim_proposal"
+    assert config.is_hidden_project(config.MAXIM_PROPOSAL_PROJECT)
     assert config.project_stem(".oops.triage") == "oops"
     assert config.is_hidden_project(".oops.triage")
     assert config.resolve_flow(None, ".oops") == ["todo"]
@@ -123,7 +125,7 @@ def test_hidden_oops_project_is_addressable_but_not_publicly_assignable(
     assert "oops" not in config.APPROVED_PHASES
 
     catalog = config.task_project_validation_catalog()
-    assert catalog["hiddenStems"] == ["oops"]
+    assert catalog["hiddenStems"] == ["oops", "maxim_proposal"]
     assert catalog["hiddenProjectPrefix"] == "."
 
     with pytest.raises(SpiceError, match="hidden project stem 'scratch'"):
@@ -145,7 +147,7 @@ def test_configured_hidden_project_stems_are_addressable_not_assignable(
         encoding="utf-8",
     )
 
-    assert config.hidden_stems() == ("oops", "scratch", "audit")
+    assert config.hidden_stems() == ("oops", "maxim_proposal", "scratch", "audit")
     assert config.validate_project(".scratch") == ".scratch"
     assert config.validate_project(".audit.triage") == ".audit.triage"
     assert config.project_stem(".audit.triage") == "audit"
@@ -154,7 +156,7 @@ def test_configured_hidden_project_stems_are_addressable_not_assignable(
     assert "scratch" not in config.approved_stems()
 
     catalog = config.task_project_validation_catalog()
-    assert catalog["hiddenStems"] == ["oops", "scratch", "audit"]
+    assert catalog["hiddenStems"] == ["oops", "maxim_proposal", "scratch", "audit"]
 
     with pytest.raises(SpiceError, match="not lane-filter assignable"):
         config.validate_assignable_project(".scratch")

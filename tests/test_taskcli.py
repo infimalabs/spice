@@ -329,7 +329,7 @@ def test_task_list_status_filter_uses_visible_rows(monkeypatch):
         argparse.Namespace(all=False, status="waiting", project=None, limit=None)
     )
 
-    assert seen == {"actor": "actor-a", "filters": ["status:waiting"]}
+    assert seen == {"actor": "actor-a", "filters": ["+WAITING"]}
     assert "Waiting task" in output
 
 
