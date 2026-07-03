@@ -439,6 +439,22 @@
 .badge.maxim-badge {
   --message-badge-accent: var(--maxim-accent);
 }
+.time-rule {
+  align-items: center;
+  color: var(--muted);
+  display: grid;
+  font-size: 11px;
+  gap: 8px;
+  grid-column: 1 / -1;
+  grid-row-end: span var(--message-pack-row-span, 1);
+  grid-template-columns: auto minmax(16px, 1fr);
+}
+.time-rule::after {
+  background: var(--border);
+  content: "";
+  height: 1px;
+  opacity: 0.6;
+}
 .compaction-divider {
   align-items: center;
   color: var(--muted);

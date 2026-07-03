@@ -758,9 +758,13 @@ function messageStreamNodesWithHistorySentinels(lane, visibleItems, existingNode
     visibleItems,
   );
   const nodes = [];
+  let previousItem = null;
   for (const item of visibleItems) {
     const node = renderOrReuseMessageNode(lane, item, existingNodes);
     if (!node) continue;
+    const rule = timeRuleBetween(previousItem, item);
+    if (rule) nodes.push(rule);
+    previousItem = item;
     nodes.push(node);
     for (const member of sentinelMembersByMessageKey.get(item.key) || []) {
       nodes.push(historySentinelForLane(member));
@@ -768,6 +772,26 @@ function messageStreamNodesWithHistorySentinels(lane, visibleItems, existingNode
   }
   if (!nodes.length) nodes.push(historySentinelForLane(lane));
   return nodes;
+}
+
+// Absolute-time rules re-baseline the masonry: one rule per crossed hour
+// bucket run, labeled with the bucket start, so a multi-hour idle gap costs a
+// single line instead of whitespace. Compaction dividers already carry their
+// own timestamp, so a rule that would sit adjacent to one is suppressed.
+// Rules derive deterministically from the visible items, which keeps the
+// render fingerprint contract untouched.
+const timeRuleIntervalMs = 60 * 60 * 1000;
+
+function timeRuleBetween(previousItem, item) {
+  if (!previousItem) return null;
+  if (previousItem.kind === "compaction" || item.kind === "compaction")
+    return null;
+  const previousTs = Date.parse(previousItem.timestamp || "");
+  const currentTs = Date.parse(item.timestamp || "");
+  if (!Number.isFinite(previousTs) || !Number.isFinite(currentTs)) return null;
+  const bucket = Math.floor(currentTs / timeRuleIntervalMs);
+  if (Math.floor(previousTs / timeRuleIntervalMs) >= bucket) return null;
+  return renderTimeRule(bucket * timeRuleIntervalMs);
 }
 
 function historySentinelMembersByMessageKey(lane, visibleItems) {
@@ -875,7 +899,7 @@ function cssLengthValue(value, style) {
 
 function isMessagePackBarrier(node) {
   return node.matches(
-    ".compaction-divider, [data-history-sentinel], article:has(.task-directive-stack)",
+    ".compaction-divider, .time-rule, [data-history-sentinel], article:has(.task-directive-stack)",
   );
 }
 
@@ -946,7 +970,7 @@ function resetMessagePackObserver(lane) {
 function isMessagePackItem(node) {
   if (!node || typeof node.matches !== "function") return false;
   return node.matches(
-    "article[data-message-key], .compaction-divider, [data-history-sentinel]",
+    "article[data-message-key], .compaction-divider, .time-rule, [data-history-sentinel]",
   );
 }
 
