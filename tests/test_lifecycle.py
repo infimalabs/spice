@@ -53,12 +53,82 @@ SUPERVISED_AGENT_PID = 4444
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
 WORKING_STATE_ELAPSED_SECONDS = 90
+AGENT_COMMAND_MENTION_RE = re.compile(r"\bspice\s+agent\s+([a-z][a-z0-9-]*)\b")
+AGENT_COMMAND_AUDIT_ROOTS = (
+    "README.md",
+    "docs",
+    "spice",
+    "tests",
+)
+AGENT_COMMAND_AUDIT_OPTIONAL_ROOTS = (".agents/skills/spice/SKILL.md",)
+AGENT_COMMAND_AUDIT_TEXT_SUFFIXES = {
+    "",
+    ".css",
+    ".js",
+    ".md",
+    ".py",
+    ".sh",
+    ".toml",
+    ".txt",
+}
+AGENT_COMMAND_NON_COMMAND_WORDS = frozenset({"bootstrap", "from"})
 
 
 @pytest.fixture(autouse=True)
 def _git_worktree_tmp_path(request, tmp_path):
     if "tmp_path" in request.fixturenames:
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+
+
+def _agent_parser_verbs() -> set[str]:
+    parser = build_parser()
+    top_level = next(
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    agent_parser = top_level.choices["agent"]
+    agent_actions = next(
+        action
+        for action in agent_parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    return set(agent_actions.choices)
+
+
+def _agent_command_audit_paths(repo_root: Path) -> list[Path]:
+    paths: list[Path] = []
+    for relative in AGENT_COMMAND_AUDIT_ROOTS:
+        root = repo_root / relative
+        if root.is_file():
+            if _agent_command_audit_text_path(root):
+                paths.append(root)
+        elif root.is_dir():
+            paths.extend(
+                path
+                for path in root.rglob("*")
+                if path.is_file() and _agent_command_audit_text_path(path)
+            )
+    for relative in AGENT_COMMAND_AUDIT_OPTIONAL_ROOTS:
+        path = repo_root / relative
+        if path.is_file():
+            paths.append(path)
+    return sorted(set(paths))
+
+
+def _agent_command_audit_text_path(path: Path) -> bool:
+    return path.suffix in AGENT_COMMAND_AUDIT_TEXT_SUFFIXES
+
+
+def _agent_command_mentions(repo_root: Path):
+    for path in _agent_command_audit_paths(repo_root):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        relative = path.relative_to(repo_root).as_posix()
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            for match in AGENT_COMMAND_MENTION_RE.finditer(line):
+                verb = match.group(1)
+                if verb not in AGENT_COMMAND_NON_COMMAND_WORDS:
+                    yield relative, line_number, verb, line.strip()
 
 
 def test_agent_help_lists_show_and_status_commands():
@@ -136,6 +206,22 @@ def test_agent_show_and_status_render_same_bound_agent_state(
     assert show_output == expected
     assert status_output == expected
     assert calls == [tmp_path, tmp_path]
+
+
+def test_agent_command_mentions_match_parser_surface():
+    repo_root = Path(__file__).resolve().parents[1]
+    parser_verbs = _agent_parser_verbs()
+    assert "show" in parser_verbs
+    assert "run" in parser_verbs
+    assert "post-tool-hook" in parser_verbs
+
+    unsupported = [
+        f"{path}:{line_number}: unsupported spice agent {verb!r}: {line}"
+        for path, line_number, verb, line in _agent_command_mentions(repo_root)
+        if verb not in parser_verbs
+    ]
+
+    assert unsupported == []
 
 
 def test_shipped_agent_defaults_are_current_high_effort():
