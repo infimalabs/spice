@@ -341,10 +341,17 @@ def _inbox_item_age_seconds(item: InboxItem) -> float:
 
 
 def inbox_item_readout_rows(item: InboxItem) -> list[str]:
-    rows = [
-        f"key={inbox_item_key(item.name)}: age={relative_time_for_path(item.source_path)}"
-    ]
     payload = parse_inbox_payload(item.text)
+    resend_label = inbox_item_resend_label(payload)
+    header = (
+        f"key={inbox_item_key(item.name)}: "
+        f"age={relative_time_for_path(item.source_path)}"
+    )
+    if resend_label:
+        header = f"{header} {resend_label}"
+    rows = [
+        header,
+    ]
     if payload.priority:
         rows.append(f"  priority={payload.priority}")
     rows.extend(
@@ -375,11 +382,21 @@ def inbox_item_summary_row(item: InboxItem) -> str:
     item is still inside its repeat-suppression window: the key stays visible
     and ACKable without re-dumping its full body into the agent's context.
     """
+    payload = parse_inbox_payload(item.text)
+    priority = f" priority={payload.priority}" if payload.priority else ""
+    resend_label = inbox_item_resend_label(payload)
+    resend = f" {resend_label}" if resend_label else ""
     return (
         f"key={inbox_item_key(item.name)}: "
-        f"age={relative_time_for_path(item.source_path)} "
+        f"age={relative_time_for_path(item.source_path)}{priority}{resend} "
         "(shown earlier; ACK to clear)"
     )
+
+
+def inbox_item_resend_label(payload: InboxPayload) -> str:
+    if payload.resend_count <= 0:
+        return ""
+    return f"resend #{payload.resend_count}"
 
 
 def inbox_attachment_readout_path(item: InboxItem, attachment: InboxAttachment) -> Path:
