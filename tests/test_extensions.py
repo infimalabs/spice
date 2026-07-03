@@ -1,12 +1,5 @@
 from __future__ import annotations
 
-import csv
-import io
-import tomllib
-import zipfile
-from importlib import metadata
-from pathlib import Path
-
 import pytest
 
 from spice import config
@@ -26,15 +19,13 @@ from spice.extensions import (
     extension_entry_points,
     merge_builtin_and_extension_entry_points,
 )
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-FIXTURE_ROOT = PROJECT_ROOT / "fixtures" / "spiceextensionfixture"
+from tests.test_extensionhelpers import build_fixture_distribution, build_fixture_wheel
 
 
 def test_extension_entry_points_query_fixture_wheel_groups_without_importing(
     tmp_path,
 ):
-    distribution = _fixture_distribution(tmp_path)
+    _, distribution = build_fixture_distribution(tmp_path)
 
     discovered = {
         group: {
@@ -71,7 +62,7 @@ def test_extension_entry_points_query_fixture_wheel_groups_without_importing(
 def test_extension_entry_points_reject_builtin_shadow_names(
     tmp_path, group, built_in_name
 ):
-    distribution = _fixture_distribution(tmp_path)
+    _, distribution = build_fixture_distribution(tmp_path)
 
     with pytest.raises(SpiceError) as exc_info:
         extension_entry_points(
@@ -89,7 +80,7 @@ def test_extension_entry_points_reject_builtin_shadow_names(
 def test_extension_entry_points_reject_duplicate_extension_names_deterministically(
     tmp_path,
 ):
-    distribution = _fixture_distribution(tmp_path)
+    _, distribution = build_fixture_distribution(tmp_path)
 
     with pytest.raises(SpiceError) as exc_info:
         extension_entry_points(
@@ -106,7 +97,7 @@ def test_extension_entry_points_reject_duplicate_extension_names_deterministical
 
 
 def test_merge_builtin_and_extension_entry_points_keeps_builtins_first(tmp_path):
-    distribution = _fixture_distribution(tmp_path)
+    _, distribution = build_fixture_distribution(tmp_path)
 
     merged = merge_builtin_and_extension_entry_points(
         SPICE_DRIVER_ENTRY_POINT_GROUP,
@@ -120,7 +111,7 @@ def test_merge_builtin_and_extension_entry_points_keeps_builtins_first(tmp_path)
 def test_agent_driver_registry_loads_toy_driver_from_fixture_wheel(
     tmp_path, monkeypatch
 ):
-    wheel = _build_fixture_wheel(
+    wheel = build_fixture_wheel(
         tmp_path,
         entry_points={
             SPICE_DRIVER_ENTRY_POINT_GROUP: {
@@ -150,7 +141,7 @@ def test_agent_driver_registry_loads_toy_driver_from_fixture_wheel(
 def test_agent_driver_registry_rejects_builtin_shadow_from_fixture_wheel(
     tmp_path, monkeypatch
 ):
-    wheel = _build_fixture_wheel(tmp_path)
+    wheel = build_fixture_wheel(tmp_path)
     monkeypatch.syspath_prepend(str(wheel))
 
     with pytest.raises(SpiceError) as exc_info:
@@ -160,92 +151,3 @@ def test_agent_driver_registry_rejects_builtin_shadow_from_fixture_wheel(
     assert SPICE_DRIVER_ENTRY_POINT_GROUP in message
     assert "codex" in message
     assert "shadows built-in" in message
-
-
-def _fixture_distribution(tmp_path: Path) -> metadata.Distribution:
-    wheel = _build_fixture_wheel(tmp_path)
-    distributions = list(metadata.distributions(path=[str(wheel)]))
-    assert len(distributions) == 1
-    return distributions[0]
-
-
-def _build_fixture_wheel(
-    tmp_path: Path, *, entry_points: dict[str, dict[str, str]] | None = None
-) -> Path:
-    pyproject = tomllib.loads(
-        (FIXTURE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    )
-    project = pyproject["project"]
-    normalized_name = str(project["name"]).replace("-", "_")
-    version = str(project["version"])
-    dist_info = f"{normalized_name}-{version}.dist-info"
-    wheel = tmp_path / f"{normalized_name}-{version}-py3-none-any.whl"
-
-    records: list[str] = []
-    with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for source in sorted((FIXTURE_ROOT / "src").rglob("*")):
-            if source.is_file() and source.suffix == ".py":
-                _write_wheel_file(
-                    archive,
-                    records,
-                    source.relative_to(FIXTURE_ROOT / "src").as_posix(),
-                    source.read_bytes(),
-                )
-        _write_wheel_file(
-            archive,
-            records,
-            f"{dist_info}/METADATA",
-            _metadata_text(project).encode(),
-        )
-        _write_wheel_file(
-            archive,
-            records,
-            f"{dist_info}/WHEEL",
-            b"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
-        )
-        _write_wheel_file(
-            archive,
-            records,
-            f"{dist_info}/entry_points.txt",
-            _entry_points_text(entry_points or project["entry-points"]).encode(),
-        )
-        archive.writestr(f"{dist_info}/RECORD", _record_text(records))
-    return wheel
-
-
-def _write_wheel_file(
-    archive: zipfile.ZipFile, records: list[str], name: str, data: bytes
-) -> None:
-    archive.writestr(name, data)
-    records.append(name)
-
-
-def _metadata_text(project: dict[str, object]) -> str:
-    return "\n".join(
-        [
-            "Metadata-Version: 2.3",
-            f"Name: {project['name']}",
-            f"Version: {project['version']}",
-            f"Summary: {project['description']}",
-            f"Requires-Python: {project['requires-python']}",
-            "",
-        ]
-    )
-
-
-def _entry_points_text(groups: dict[str, dict[str, str]]) -> str:
-    lines: list[str] = []
-    for group_name, entries in groups.items():
-        lines.append(f"[{group_name}]")
-        lines.extend(f"{name} = {target}" for name, target in entries.items())
-        lines.append("")
-    return "\n".join(lines)
-
-
-def _record_text(records: list[str]) -> str:
-    output = io.StringIO()
-    writer = csv.writer(output, lineterminator="\n")
-    for name in records:
-        writer.writerow([name, "", ""])
-    writer.writerow([records[-1].rsplit("/", 1)[0] + "/RECORD", "", ""])
-    return output.getvalue()
