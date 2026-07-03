@@ -41,6 +41,7 @@ from spice.agent.maximmetrics import (
     MaximMetricEventWrite,
     record_maxim_metric_events,
 )
+from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ack_state_records
 from spice.mail.inbox import collect_inbox_items, compose_inbox_text, write_inbox_item
@@ -58,6 +59,83 @@ WORKING_STATE_ELAPSED_SECONDS = 90
 def _git_worktree_tmp_path(request, tmp_path):
     if "tmp_path" in request.fixturenames:
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+
+
+def test_agent_help_lists_show_and_status_commands():
+    parser = build_parser()
+    subparsers = next(
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    help_text = subparsers.choices["agent"].format_help()
+
+    assert "show" in help_text
+    assert "Show the bound agent's state." in help_text
+    assert "status" in help_text
+    assert "Compatibility alias for agent show." in help_text
+
+
+def test_agent_show_and_status_parse_to_agent_handler():
+    show = build_parser().parse_args(["agent", "show"])
+    status = build_parser().parse_args(["agent", "status"])
+
+    assert show.agent_action == "show"
+    assert show.func == agent_cli.handle_agent
+    assert status.agent_action == "status"
+    assert status.func == agent_cli.handle_agent
+
+
+def test_agent_show_and_status_render_same_bound_agent_state(
+    tmp_path, monkeypatch, capsys
+):
+    status = SimpleNamespace(
+        repo_root=tmp_path,
+        process_status="running",
+        pid=123,
+        process_group_id=456,
+        thread_id="thread-agent",
+        model="gpt-test",
+        reasoning_effort="high",
+        service_tier="fast",
+        started_at="2026-07-03T00:00:00Z",
+        prompt_skill_path=tmp_path / "skill.md",
+        log_path=tmp_path / "agent.log",
+    )
+    calls: list[Path] = []
+
+    def fake_agent_status(repo_root: Path):
+        calls.append(repo_root)
+        return status
+
+    monkeypatch.setattr(agent_cli, "require_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(lifecycle, "agent_status", fake_agent_status)
+
+    show_args = build_parser().parse_args(["agent", "show"])
+    assert agent_cli.handle_agent(show_args) == 0
+    show_output = capsys.readouterr().out
+
+    status_args = build_parser().parse_args(["agent", "status"])
+    assert agent_cli.handle_agent(status_args) == 0
+    status_output = capsys.readouterr().out
+
+    expected = "\n".join(
+        [
+            f"worktree={tmp_path}",
+            "status=running",
+            "pid=123",
+            "pgid=456",
+            "thread=thread-agent",
+            "model=gpt-test effort=high service_tier=fast",
+            "started_at=2026-07-03T00:00:00Z",
+            f"skill={tmp_path / 'skill.md'}",
+            f"log={tmp_path / 'agent.log'}",
+            "",
+        ]
+    )
+    assert show_output == expected
+    assert status_output == expected
+    assert calls == [tmp_path, tmp_path]
 
 
 def test_shipped_agent_defaults_are_current_high_effort():
