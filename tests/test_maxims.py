@@ -16,6 +16,7 @@ from spice.agent import maximcli, maxims, watchdog
 from spice.agent.driver import ALL_DRIVERS, SPICE_AGENT_DRIVER_ENV
 from spice.agent.maxims import MaximVerdict
 from spice.errors import SpiceError
+from spice.flexstate import git_state_path
 from spice.mail.acks import archive_ackd_inbox_items
 from spice.mail.inbox import (
     collect_inbox_items,
@@ -422,6 +423,102 @@ drivers = ["codex", "ghost"]
         maxims.resolved_maxim_bags(repo)
 
 
+def test_worktree_disabled_maxim_bag_stops_publish_without_silencing_enabled_bag(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_dual_maxim_config(repo)
+    _commit_all(repo)
+    _make_every_maxim_violate(monkeypatch)
+
+    disabled = maxims.set_maxim_bag_disabled("first", disabled=True, repo_root=repo)
+    paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta", reminder_gate=watchdog.MaximReminderGate()
+    )
+
+    state_path = git_state_path(maxims.DISABLED_MAXIM_BAGS_GIT_PATH, root=repo)
+    assert disabled == frozenset({"first"})
+    assert state_path.is_file()
+    assert repo / ".git" in state_path.parents
+    assert [bag.name for bag in maxims.resolved_maxim_bags(repo).values()] == [
+        "polling",
+        "fallbacks",
+        "backwards-compat",
+        "shims",
+        "aliases",
+        "legacy",
+        "second",
+    ]
+    assert len(paths) == 1
+    assert [item.text for item in collect_inbox_items(repo)] == [
+        "[MAXIM] SECOND reminder.\n"
+    ]
+    subprocess.run(
+        ["git", "diff", "--exit-code", "--", "pyproject.toml"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+
+
+def test_worktree_disabled_maxim_bag_is_local_to_one_linked_worktree(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    _write_pyproject(
+        repo,
+        """
+[tool.spice.maxims.routes]
+words = ["quiet route"]
+message = "DO NOT take the quiet route."
+""",
+    )
+    _commit_all(repo)
+    peer = tmp_path / "peer"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "-b", "peer", str(peer)],
+        cwd=repo,
+        check=True,
+    )
+
+    maxims.set_maxim_bag_disabled("routes", disabled=True, repo_root=repo)
+
+    assert maxims.disabled_maxim_bag_names(repo) == frozenset({"routes"})
+    assert maxims.disabled_maxim_bag_names(peer) == frozenset()
+    assert maxims.triggered_maxims(["This quiet route drifts."], repo_root=repo) == []
+    assert [
+        hit.name
+        for hit in maxims.triggered_maxims(["This quiet route drifts."], repo_root=peer)
+    ] == ["routes"]
+    assert [
+        hit.name
+        for hit in maxims.triggered_maxims(["This falls back quietly."], repo_root=repo)
+    ] == ["fallbacks"]
+
+
+def test_worktree_maxim_disable_rejects_unknown_bag(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+
+    with pytest.raises(SpiceError, match="unknown maxim bag 'ghost'"):
+        maxims.set_maxim_bag_disabled("ghost", disabled=True, repo_root=repo)
+
+
+def test_maxim_disable_enable_cli_updates_worktree_state(tmp_path, monkeypatch, capsys):
+    repo = _init_repo(tmp_path / "repo")
+    _write_dual_maxim_config(repo)
+    monkeypatch.chdir(repo)
+
+    disable_code = maximcli.run_maxim_disable_cli(Namespace(name="first"))
+    disable_output = capsys.readouterr().out
+    enable_code = maximcli.run_maxim_enable_cli(Namespace(name="first"))
+    enable_output = capsys.readouterr().out
+
+    assert disable_code == 0
+    assert "disabled maxim bags: first" in disable_output
+    assert maxims.disabled_maxim_bag_names(repo) == frozenset()
+    assert enable_code == 0
+    assert "disabled maxim bags: none" in enable_output
+
+
 def test_builtin_phrase_trigger_matches_whole_phrase_across_punctuation():
     hits = maxims.triggered_maxims(
         [
@@ -694,3 +791,22 @@ def _init_repo(path: Path) -> Path:
         text=True,
     )
     return path
+
+
+def _commit_all(repo: Path) -> None:
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Spice Test",
+            "-c",
+            "user.email=spice@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ],
+        cwd=repo,
+        check=True,
+    )
