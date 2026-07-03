@@ -326,10 +326,6 @@ def render_post_tool_hook_payload(repo_root: Path) -> str:
         repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
         meter_factory=agent_context_meter,
     ).inject(force=True)
-    AgentWorkingStateInjector(
-        repo_root,
-        stderr=stderr,
-    ).inject(force=True)
     return stderr.getvalue()
 
 
