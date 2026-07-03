@@ -503,3 +503,9 @@
     max-width: none;
   }
 }
+
+@media (max-width: 720px) {
+  .messages {
+    grid-template-columns: 1fr;
+  }
+}
