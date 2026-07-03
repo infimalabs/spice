@@ -116,6 +116,55 @@ def test_doctor_reports_installed_runtime_for_spice_checkout(tmp_path, monkeypat
     assert f"installed spice package -> {installed}" == check.detail
 
 
+def test_doctor_reports_single_spice_namespace_portion(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    checkout = tmp_path / "checkout"
+    package = checkout / "spice"
+    module = package / "hooks" / "doctor.py"
+    repo.mkdir()
+    module.parent.mkdir(parents=True)
+    portions = doctor._spice_namespace_portions_from(
+        [
+            package,
+            package,
+            "__editable__.spice_harness-0.16.0.finder.__path_hook__",
+        ],
+        [module],
+    )
+    monkeypatch.setattr(doctor, "_spice_namespace_portions", lambda: portions)
+
+    check = doctor._spice_namespace_portions_check(repo)
+
+    assert portions == [checkout.resolve()]
+    assert check.status == "ok"
+    assert f"single spice namespace portion -> {checkout.resolve()}" == check.detail
+
+
+def test_doctor_reports_mixed_spice_namespace_portions(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    repo.mkdir()
+    (first / "spice" / "hooks").mkdir(parents=True)
+    (second / "spice" / "cli").mkdir(parents=True)
+    portions = doctor._spice_namespace_portions_from(
+        [first / "spice", second / "spice"],
+        [
+            first / "spice" / "hooks" / "doctor.py",
+            second / "spice" / "cli" / "entry.py",
+        ],
+    )
+    monkeypatch.setattr(doctor, "_spice_namespace_portions", lambda: portions)
+
+    check = doctor._spice_namespace_portions_check(repo)
+
+    assert portions == [first.resolve(), second.resolve()]
+    assert check.status == "fail"
+    assert "conflicting spice namespace portions" in check.detail
+    assert str(first.resolve()) in check.detail
+    assert str(second.resolve()) in check.detail
+
+
 def test_doctor_reports_installed_tool_runtime_for_spice_checkout(
     tmp_path, monkeypatch
 ):
