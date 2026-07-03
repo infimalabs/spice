@@ -109,6 +109,9 @@ def _task_directive_summary(directive: dict[str, Any]) -> str:
 
 def _task_directive_html(directive: dict[str, Any]) -> str:
     fields = _ordered_task_directive_fields(directive.get("fields") or [])
+    classes = ["task-directive-quote", *_task_directive_extra_classes(directive)]
+    class_attr = " ".join(html.escape(class_name, quote=True) for class_name in classes)
+    kicker = html.escape(str(directive.get("kicker") or "Task capture"))
     rows = "".join(
         '<div class="task-directive-property">'
         f"<dt>{html.escape(label)}</dt>"
@@ -123,11 +126,23 @@ def _task_directive_html(directive: dict[str, Any]) -> str:
             "</div>"
         )
     return (
-        '<blockquote class="task-directive-quote">'
-        '<div class="task-directive-kicker">Task capture</div>'
+        f'<blockquote class="{class_attr}">'
+        f'<div class="task-directive-kicker">{kicker}</div>'
         f'<dl class="task-directive-properties">{rows}</dl>'
         "</blockquote>"
     )
+
+
+def _task_directive_extra_classes(directive: dict[str, Any]) -> list[str]:
+    raw_classes = directive.get("classes") or []
+    if not isinstance(raw_classes, list):
+        return []
+    result: list[str] = []
+    for raw_class in raw_classes:
+        class_name = str(raw_class).strip()
+        if class_name and all(char.isalnum() or char in "-_" for char in class_name):
+            result.append(class_name)
+    return result
 
 
 def _ordered_task_directive_fields(

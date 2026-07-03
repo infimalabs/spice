@@ -288,6 +288,9 @@ def test_static_task_directive_card_styles_are_present():
     css = (STATIC_ROOT / "messages.css").read_text(encoding="utf-8")
 
     assert ".message-body .task-directive-quote {" in css
+    assert ".message-body .task-directive-quote--hidden {" in css
+    assert ".message-body .task-directive-quote--oops {" in css
+    assert ".message-body .task-directive-quote--private {" in css
     assert ".task-directive-kicker {" in css
     assert ".task-directive-properties {" in css
     assert ".task-directive-property {" in css

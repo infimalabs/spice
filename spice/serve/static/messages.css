@@ -136,6 +136,19 @@
   display: grid;
   gap: 5px;
 }
+.message-body .task-directive-quote--hidden {
+  --quote-accent: var(--muted);
+  background: color-mix(in srgb, var(--quote-accent) 10%, transparent);
+  border-left-style: dashed;
+}
+.message-body .task-directive-quote--oops {
+  --quote-accent: var(--warn);
+  background: color-mix(in srgb, var(--quote-accent) 9%, transparent);
+}
+.message-body .task-directive-quote--private {
+  --quote-accent: var(--say-accent);
+  background: color-mix(in srgb, var(--quote-accent) 8%, transparent);
+}
 .task-directive-kicker {
   color: color-mix(in srgb, var(--quote-accent) 76%, var(--fg));
   font-size: 12px;
