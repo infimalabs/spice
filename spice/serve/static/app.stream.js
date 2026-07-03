@@ -812,7 +812,7 @@ function packMessageStream(lane) {
   const rowGap = cssPixelValue(style.rowGap) || 0;
   const rowStride = rowHeight + rowGap;
   if (!Number.isFinite(rowStride) || rowStride <= 0) return;
-  const columnCount = messagePackColumnCount(style);
+  const columnCount = messagePackColumnCount(host, style);
   const columnRows = new Array(Math.max(1, columnCount)).fill(0);
   let segment = 0;
   for (const node of host.children) {
@@ -834,10 +834,43 @@ function packMessageStream(lane) {
   }
 }
 
-function messagePackColumnCount(style) {
-  return String(style.gridTemplateColumns || "")
-    .split(" ")
-    .filter(Boolean).length;
+// Derive the track count from geometry, never from computed
+// grid-template-columns: the stream uses repeat(auto-fit, ...), which
+// collapses empty tracks — once every card sits in column 1, the computed
+// track list shrinks to one entry and a computed-style reading locks the
+// packer into a single ever-growing column. The auto-fit formula is
+// deterministic from the host width, so recompute it directly.
+function messagePackColumnCount(host, style) {
+  const inner =
+    host.clientWidth -
+    cssPixelValue(style.paddingLeft) -
+    cssPixelValue(style.paddingRight);
+  if (!Number.isFinite(inner) || inner <= 0) return 1;
+  const gap = cssPixelValue(style.columnGap);
+  const minWidth = cssLengthValue(
+    style.getPropertyValue("--message-card-min-width"),
+    style,
+  );
+  const trackMin = Math.min(inner, minWidth > 0 ? minWidth : inner);
+  if (trackMin <= 0) return 1;
+  return Math.max(1, Math.floor((inner + gap) / (trackMin + gap)));
+}
+
+function cssLengthValue(value, style) {
+  const text = String(value || "").trim();
+  const parsed = Number.parseFloat(text);
+  if (!Number.isFinite(parsed)) return 0;
+  if (text.endsWith("rem")) {
+    const rootSize = Number.parseFloat(
+      getComputedStyle(document.documentElement).fontSize,
+    );
+    return parsed * (Number.isFinite(rootSize) ? rootSize : 16);
+  }
+  if (text.endsWith("em") && !text.endsWith("rem")) {
+    const fontSize = cssPixelValue(style.fontSize) || 16;
+    return parsed * fontSize;
+  }
+  return parsed;
 }
 
 function isMessagePackBarrier(node) {
