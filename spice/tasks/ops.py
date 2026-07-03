@@ -1101,6 +1101,7 @@ def oops(
         acceptance=[],
         wait=config.OOPS_WAIT,
         claim=False,
+        origin=origin or None,
         system_project=True,
     )
     row = identity.resolve(handle)
@@ -1109,7 +1110,6 @@ def oops(
         ("surface", surface),
         ("command", command),
         ("workaround", workaround),
-        ("origin", origin),
     ):
         if value:
             annotate(uuid, f"{label}: {value}")

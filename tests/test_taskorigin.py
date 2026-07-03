@@ -91,10 +91,9 @@ def test_active_claim_supplies_default_origin(task_repo):
     assert identity.resolve(spawned)["origin"] == f"task:{root}"
 
 
-def test_only_hidden_system_projects_are_origin_exempt(task_repo):
-    """Private scratch shares the origin contract (a claim-less private task
-    typically answers an ack and cites it); only hidden system surfaces like
-    oops stay infallible -- the error trap must never refuse capture."""
+def test_origin_is_universal_across_private_and_hidden_projects(task_repo):
+    """Every single task carries an origin: private scratch and hidden triage
+    included. Claim-less creation without a citation is refused everywhere."""
     from spice.serve.team.store import ServeTeamStore, TeamConfig
 
     from tests.test_tasks import ACTOR_A_MEMBER
@@ -109,13 +108,19 @@ def test_only_hidden_system_projects_are_origin_exempt(task_repo):
             priority="medium",
             acceptance=["refused"],
         )
+    with pytest.raises(SpiceError, match="task creation requires an origin"):
+        ops.oops("Triage without provenance", description="refused")
     private = create.add(
         "Private scratch citing its ack",
         priority="medium",
         acceptance=["private cites the ack"],
         origin=f"ack:{ACK_KEY}",
     )
-    oops_line = ops.oops("Automated triage capture", description="origin exempt")
+    oops_line = ops.oops(
+        "Triage citing its ack",
+        description="origin recorded",
+        origin=f"ack:{ACK_KEY}",
+    )
     oops_handle = oops_line.split()[1]
 
     private_row = identity.resolve(private)
@@ -123,7 +128,11 @@ def test_only_hidden_system_projects_are_origin_exempt(task_repo):
 
     assert private_row["project"] == config.private_project(ACTOR_A)
     assert private_row["origin"] == f"ack:{ACK_KEY}"
-    assert not str(oops_row.get("origin") or "")
+    assert oops_row["origin"] == f"ack:{ACK_KEY}"
+    assert all(
+        not str(note.get("description") or "").startswith("origin:")
+        for note in oops_row.get("annotations") or []
+    )
 
 
 def test_exempt_projects_capture_origin_opportunistically(task_repo):
