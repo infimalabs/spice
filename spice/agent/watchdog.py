@@ -28,6 +28,15 @@ from spice.agent.maxims import (
     evaluate_maxim_any_violation,
     triggered_maxims,
 )
+from spice.agent.maximmetrics import (
+    MAXIM_EVENT_FIRE,
+    MAXIM_EVENT_GATE_SUPPRESSED,
+    MAXIM_EVENT_JUDGED_CONFIRMED,
+    MAXIM_EVENT_JUDGED_REJECTED,
+    MAXIM_EVENT_PUBLISHED,
+    MaximMetricEventWrite,
+    record_maxim_metric_events,
+)
 from spice.agent.sidechannelnotify import publish_side_channel_feedback
 from spice.mail.acks import (
     extract_task_batch_lines_from_text,
@@ -475,21 +484,85 @@ def publish_maxim_hits_as_inbox(
     hits = triggered_maxims([statement_text], repo_root=repo_root)
     if not hits:
         return []
-    reminder_key = _maxim_reminder_key(hits)
-    violations = [
-        hit
-        for hit in hits
-        if not evaluate_maxim_any_violation(hit.message, statement_text).agrees
-    ]
+    _record_maxim_metrics(
+        repo_root,
+        hits,
+        event_type=MAXIM_EVENT_FIRE,
+        statement=statement_text,
+    )
+    violations: list[MaximBag] = []
+    for hit in hits:
+        verdict = evaluate_maxim_any_violation(hit.message, statement_text)
+        if verdict.agrees:
+            _record_maxim_metrics(
+                repo_root,
+                [hit],
+                event_type=MAXIM_EVENT_JUDGED_REJECTED,
+                statement=statement_text,
+            )
+            continue
+        _record_maxim_metrics(
+            repo_root,
+            [hit],
+            event_type=MAXIM_EVENT_JUDGED_CONFIRMED,
+            statement=statement_text,
+        )
+        violations.append(hit)
     if not violations:
         return []
     body = _maxim_inbox_body(violations)
+    reminder_key = _maxim_reminder_key(hits)
     if not reminder_gate.should_publish(reminder_key):
+        _record_maxim_metrics(
+            repo_root,
+            violations,
+            event_type=MAXIM_EVENT_GATE_SUPPRESSED,
+            statement=statement_text,
+            reminder_body=body,
+        )
         return []
     path = write_inbox_item(repo_root, None, body)
     reminder_gate.mark_sent(reminder_key, path, body)
+    _record_maxim_metrics(
+        repo_root,
+        violations,
+        event_type=MAXIM_EVENT_PUBLISHED,
+        reminder_key=path.stem,
+        reminder_body=body,
+    )
     paths = [path]
     return paths
+
+
+def _record_maxim_metrics(
+    repo_root: Path,
+    hits: list[MaximBag],
+    *,
+    event_type: str,
+    statement: str = "",
+    reminder_key: str = "",
+    reminder_body: str = "",
+) -> None:
+    if not hits:
+        return
+    driver_name = driver_for(repo_root).name
+    thread_id = ambient_thread_id() or ""
+    record_maxim_metric_events(
+        repo_root,
+        [
+            MaximMetricEventWrite(
+                event_type=event_type,
+                bag_name=hit.name,
+                driver_name=driver_name,
+                thread_id=thread_id,
+                trigger_family=hit.name,
+                statement=statement,
+                reminder_key=reminder_key,
+                reminder_body=reminder_body,
+            )
+            for hit in hits
+        ],
+    )
 
 
 def discard_pending_maxim_reminders(
