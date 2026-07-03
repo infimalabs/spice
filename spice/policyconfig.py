@@ -7,6 +7,7 @@ and malformed configuration fails loudly with the offending key.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -19,6 +20,8 @@ from spice.errors import SpiceError
 from spice.repocfg import policy_table
 
 _COMMIT_TRAILER_KEY_RE = re.compile(r"^[A-Za-z0-9-]+$")
+FLEX_JITTER_PERCENT = 5
+FLEX_JITTER_BUCKETS = (FLEX_JITTER_PERCENT * 2) + 1
 
 
 @dataclass(frozen=True)
@@ -173,6 +176,7 @@ class ResolvedPolicy:
     commit_message: PolicyCommitMessage
     taste: PolicyTaste
     scopes: tuple[PolicyScope, ...] = ()
+    flex_actor_id: str = ""
 
     @property
     def file_shape(self) -> FileShapePolicy:
@@ -214,6 +218,20 @@ class ResolvedPolicy:
         flex_limit = max(limit, int(limit * flex_ratio))
         return ScopedBound(limit=limit, flex_limit=flex_limit)
 
+    def jittered_bound_for_path(self, bound: str, base: int, path: Path) -> ScopedBound:
+        scoped = self.bound_for_path(bound, base, path)
+        if scoped.unlimited:
+            return scoped
+        return ScopedBound(
+            limit=scoped.limit,
+            flex_limit=jittered_flex_limit(
+                scoped.limit,
+                scoped.flex_limit,
+                path,
+                self.flex_actor_id,
+            ),
+        )
+
     def file_shape_for_path(self, path: Path) -> FileShapePolicy:
         line = self.bound_for_path("file_loc", self.limits.file_loc, path)
         byte = self.bound_for_path("file_bytes", self.limits.file_bytes, path)
@@ -226,9 +244,36 @@ class ResolvedPolicy:
             byte_unlimited=byte.unlimited,
         )
 
+    def jittered_file_shape_for_path(self, path: Path) -> FileShapePolicy:
+        line = self.jittered_bound_for_path("file_loc", self.limits.file_loc, path)
+        byte = self.jittered_bound_for_path("file_bytes", self.limits.file_bytes, path)
+        return FileShapePolicy(
+            line_limit=line.limit,
+            line_flex_limit=line.flex_limit,
+            byte_limit=byte.limit,
+            byte_flex_limit=byte.flex_limit,
+            line_unlimited=line.unlimited,
+            byte_unlimited=byte.unlimited,
+        )
+
     def complexity_for_path(self, path: Path) -> ComplexityPolicy:
         ccn = self.bound_for_path("routine_ccn", self.limits.routine_ccn, path)
         length = self.bound_for_path("routine_length", self.limits.routine_length, path)
+        return ComplexityPolicy(
+            max_ccn=ccn.limit,
+            ccn_flex_limit=ccn.flex_limit,
+            max_length=length.limit,
+            length_flex_limit=length.flex_limit,
+            hotspot_limit=self.complexity_hotspot_limit,
+            ccn_unlimited=ccn.unlimited,
+            length_unlimited=length.unlimited,
+        )
+
+    def jittered_complexity_for_path(self, path: Path) -> ComplexityPolicy:
+        ccn = self.jittered_bound_for_path("routine_ccn", self.limits.routine_ccn, path)
+        length = self.jittered_bound_for_path(
+            "routine_length", self.limits.routine_length, path
+        )
         return ComplexityPolicy(
             max_ccn=ccn.limit,
             ccn_flex_limit=ccn.flex_limit,
@@ -376,7 +421,40 @@ def resolve_policy(repo_root: Path) -> ResolvedPolicy:
         commit_message=_commit_message(raw_policy, limits),
         taste=_taste(raw_policy),
         scopes=_scopes(raw_policy, markdown_depth_budget),
+        flex_actor_id=_worktree_flex_actor_id(repo_root),
     )
+
+
+def jittered_flex_limit(limit: int, flex_limit: int, path: Path, actor_id: str) -> int:
+    if flex_limit <= limit:
+        return flex_limit
+    headroom = flex_limit - limit
+    jitter = int(headroom * _flex_jitter_percent(path, actor_id) / 100)
+    return max(limit, flex_limit + jitter)
+
+
+def _flex_jitter_percent(path: Path, actor_id: str) -> int:
+    normalized_path = _normalized_flex_path(path)
+    key = f"{normalized_path}\0{actor_id.strip()}".encode("utf-8")
+    digest = hashlib.blake2b(key, digest_size=2).digest()
+    bucket = int.from_bytes(digest, "big") % FLEX_JITTER_BUCKETS
+    return bucket - FLEX_JITTER_PERCENT
+
+
+def _normalized_flex_path(path: Path) -> str:
+    normalized = path.as_posix().replace("\\", "/").strip()
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized or "."
+
+
+def _worktree_flex_actor_id(repo_root: Path) -> str:
+    from spice.agent.paths import current_agent_thread_id
+
+    try:
+        return current_agent_thread_id(repo_root)
+    except (OSError, SpiceError):
+        return ""
 
 
 def _taste(raw_policy: Mapping[str, object]) -> PolicyTaste:

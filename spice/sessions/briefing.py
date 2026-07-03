@@ -14,7 +14,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 from spice.errors import SpiceError
 from spice.mail.inbox import (
@@ -32,7 +32,7 @@ from spice.paths import repo_root_from_cwd
 from spice.policy import (
     MAGIC_BASELINE_REF,
 )
-from spice.policyconfig import resolve_policy
+from spice.policyconfig import ComplexityPolicy, resolve_policy
 from spice.sessions import records
 from spice.sessions.meter import (
     ContextMeter,
@@ -443,7 +443,7 @@ def _collect_dirty_pressure_findings(
             ),
             lockfile_suffixes=resolved.lockfiles.suffixes,
             lockfile_names=resolved.lockfiles.names,
-            bounds_for_path=resolved.file_shape_for_path,
+            bounds_for_path=resolved.jittered_file_shape_for_path,
         )
     except (OSError, SpiceError) as exc:
         errors.append(_dirty_pressure_error("file-loc", exc))
@@ -455,6 +455,7 @@ def _collect_dirty_pressure_findings(
             suffixes=resolved.languages.complexity,
             ccn_threshold=complexity_bounds.ccn_flex_limit,
             length_threshold=complexity_bounds.length_flex_limit,
+            bounds_for_path=resolved.jittered_complexity_for_path,
         )
     except (OSError, SpiceError) as exc:
         errors.append(_dirty_pressure_error("complexity", exc))
@@ -482,6 +483,7 @@ def _scan_dirty_complexity_pressure(
     suffixes: tuple[str, ...],
     ccn_threshold: int,
     length_threshold: int,
+    bounds_for_path: Callable[[Path], ComplexityPolicy] | None = None,
 ) -> list[DirtyComplexityRegression]:
     current_paths = [path for path in paths if (repo_root / path).exists()]
     if not current_paths:
@@ -506,6 +508,7 @@ def _scan_dirty_complexity_pressure(
         baseline_records,
         ccn_threshold=ccn_threshold,
         length_threshold=length_threshold,
+        bounds_for_path=bounds_for_path,
     )
 
 
@@ -540,6 +543,7 @@ def _detect_dirty_complexity_regressions(
     *,
     ccn_threshold: int,
     length_threshold: int,
+    bounds_for_path: Callable[[Path], ComplexityPolicy] | None = None,
 ) -> list[DirtyComplexityRegression]:
     baseline_index = _complexity_record_index(baseline_records)
     regressions: list[DirtyComplexityRegression] = []
@@ -548,8 +552,19 @@ def _detect_dirty_complexity_regressions(
         key=lambda item: (item.path, item.function_name),
     ):
         baseline = baseline_index.get(record.key)
-        if record.ccn > ccn_threshold and (
-            baseline is None or record.ccn > baseline.ccn
+        bounds = bounds_for_path(Path(record.path)) if bounds_for_path else None
+        active_ccn_threshold = (
+            bounds.ccn_flex_limit if bounds is not None else ccn_threshold
+        )
+        active_length_threshold = (
+            bounds.length_flex_limit if bounds is not None else length_threshold
+        )
+        ccn_unlimited = bounds.ccn_unlimited if bounds is not None else False
+        length_unlimited = bounds.length_unlimited if bounds is not None else False
+        if (
+            not ccn_unlimited
+            and record.ccn > active_ccn_threshold
+            and (baseline is None or record.ccn > baseline.ccn)
         ):
             regressions.append(
                 DirtyComplexityRegression(
@@ -557,18 +572,18 @@ def _detect_dirty_complexity_regressions(
                     function_name=record.function_name,
                     metric="ccn",
                     value=record.ccn,
-                    active_threshold=ccn_threshold,
+                    active_threshold=active_ccn_threshold,
                     baseline_value=baseline.ccn if baseline is not None else None,
                 )
             )
-        if record.length > length_threshold:
+        if not length_unlimited and record.length > active_length_threshold:
             regressions.append(
                 DirtyComplexityRegression(
                     path=record.path,
                     function_name=record.function_name,
                     metric="length",
                     value=record.length,
-                    active_threshold=length_threshold,
+                    active_threshold=active_length_threshold,
                     baseline_value=baseline.length if baseline is not None else None,
                 )
             )
