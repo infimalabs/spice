@@ -402,7 +402,18 @@ def _gc_empty_project_task_filters(project: str) -> None:
         for filter_project in store.open_task_filter_projects(source=source):
             if not _project_filter_covers_project(filter_project, project):
                 continue
-            if tw.export(["status:pending", f"project:{filter_project}"]):
+            # Waiting (deferred) tasks keep the subscription alive: they wake
+            # back into the project, so it is not empty yet.
+            if tw.export(
+                [
+                    "(",
+                    "status:pending",
+                    "or",
+                    "status:waiting",
+                    ")",
+                    f"project:{filter_project}",
+                ]
+            ):
                 continue
             for team_id in store.open_team_ids_with_task_filter(
                 filter_project, source=source
