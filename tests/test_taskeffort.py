@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,6 +23,7 @@ ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ACTOR_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 ACTOR_A_MEMBER = thread_actor_id(ACTOR_A)
 ACTOR_B_MEMBER = thread_actor_id(ACTOR_B)
+BASE_TS = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
 
 
 @pytest.fixture
@@ -223,6 +226,139 @@ def test_phase_effort_windows_mark_partial_lifecycle_segments(task_repo):
     ]
 
 
+def test_phase_effort_usage_aggregates_transcript_spend_by_window(tmp_path):
+    transcript = tmp_path / "thread-a.jsonl"
+    _write_usage_transcript(transcript)
+    windows = (
+        effort.PhaseEffortWindow(
+            task_id="task-1",
+            handle="EFFORT-00000001",
+            title="Aggregate effort",
+            phase="todo",
+            phase_index=0,
+            actor_id=ACTOR_A_MEMBER,
+            thread_id=ACTOR_A,
+            team_id="team-a",
+            driver="codex",
+            model="gpt-5.5",
+            effort="xhigh",
+            started_at=_epoch(0),
+            ended_at=_epoch(20),
+        ),
+        effort.PhaseEffortWindow(
+            task_id="task-1",
+            handle="EFFORT-00000001",
+            title="Aggregate effort",
+            phase="verify",
+            phase_index=1,
+            actor_id=ACTOR_A_MEMBER,
+            thread_id=ACTOR_A,
+            team_id="team-a",
+            driver="codex",
+            model="gpt-5.5",
+            effort="xhigh",
+            started_at=_epoch(20),
+            ended_at=_epoch(40),
+        ),
+    )
+
+    usage = effort.phase_effort_usage_for_windows(windows, {ACTOR_A: [transcript]})
+
+    assert [
+        (
+            row.handle,
+            row.phase,
+            row.phase_index,
+            row.driver,
+            row.model,
+            row.effort,
+            row.input_tokens,
+            row.cached_input_tokens,
+            row.output_tokens,
+            row.reasoning_output_tokens,
+            row.total_tokens,
+            row.turn_count,
+            row.message_count,
+            row.renewal_count,
+            row.wall_seconds,
+            row.source_files,
+            row.partial_markers,
+        )
+        for row in usage
+    ] == [
+        (
+            "EFFORT-00000001",
+            "todo",
+            0,
+            "codex",
+            "gpt-5.5",
+            "xhigh",
+            100,
+            10,
+            20,
+            5,
+            135,
+            1,
+            2,
+            0,
+            20.0,
+            (str(transcript),),
+            (),
+        ),
+        (
+            "EFFORT-00000001",
+            "verify",
+            1,
+            "codex",
+            "gpt-5.5",
+            "xhigh",
+            207,
+            20,
+            30,
+            10,
+            267,
+            1,
+            2,
+            1,
+            20.0,
+            (str(transcript),),
+            (),
+        ),
+    ]
+
+
+def test_phase_effort_usage_marks_missing_transcript_and_partial_window():
+    window = effort.PhaseEffortWindow(
+        task_id="task-2",
+        handle="EFFORT-00000002",
+        title="Missing transcript",
+        phase="todo",
+        phase_index=0,
+        actor_id=ACTOR_B_MEMBER,
+        thread_id=ACTOR_B,
+        team_id="team-a",
+        driver="claude",
+        model="claude-sonnet",
+        effort="medium",
+        started_at=None,
+        ended_at=_epoch(20),
+        partial_markers=(effort.PARTIAL_MISSING_START,),
+    )
+
+    usage = effort.phase_effort_usage_for_windows((window,), {})
+
+    assert len(usage) == 1
+    assert usage[0].partial
+    assert usage[0].partial_markers == (
+        effort.PARTIAL_MISSING_START,
+        effort.PARTIAL_MISSING_TRANSCRIPT,
+    )
+    assert usage[0].source_files == ()
+    assert usage[0].total_tokens == 0
+    assert usage[0].turn_count == 0
+    assert usage[0].wall_seconds is None
+
+
 def _record_identity(
     store: ServeTeamStore,
     actor_id: str,
@@ -259,3 +395,97 @@ def _init_repo(path: Path) -> Path:
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
+
+
+def _write_usage_transcript(path: Path) -> None:
+    events = [
+        _event(1, "event_msg", {"type": "task_started", "turn_id": "turn-todo"}),
+        _message(2, "user", "todo work"),
+        _message(3, "assistant", "todo done"),
+        _token_count(
+            4,
+            input_tokens=100,
+            cached_input_tokens=10,
+            output_tokens=20,
+            reasoning_output_tokens=5,
+            total_tokens=135,
+        ),
+        _event(5, "event_msg", {"type": "task_complete"}),
+        _token_count(
+            20,
+            input_tokens=7,
+            cached_input_tokens=0,
+            output_tokens=0,
+            reasoning_output_tokens=0,
+            total_tokens=7,
+        ),
+        _event(21, "event_msg", {"type": "task_started", "turn_id": "turn-verify"}),
+        _message(22, "user", "verify work"),
+        _message(23, "assistant", "verify done"),
+        _token_count(
+            24,
+            input_tokens=200,
+            cached_input_tokens=20,
+            output_tokens=30,
+            reasoning_output_tokens=10,
+            total_tokens=260,
+        ),
+        _event(25, "event_msg", {"type": "task_complete"}),
+        _event(30, "compacted", {}),
+    ]
+    path.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
+    )
+
+
+def _event(second: int, event_type: str, payload: dict) -> dict[str, object]:
+    return {"timestamp": _ts(second), "type": event_type, "payload": payload}
+
+
+def _message(second: int, role: str, text: str) -> dict[str, object]:
+    return _event(
+        second,
+        "response_item",
+        {
+            "type": "message",
+            "role": role,
+            "content": [{"type": "output_text", "text": text}],
+        },
+    )
+
+
+def _token_count(
+    second: int,
+    *,
+    input_tokens: int,
+    cached_input_tokens: int,
+    output_tokens: int,
+    reasoning_output_tokens: int,
+    total_tokens: int,
+) -> dict[str, object]:
+    return _event(
+        second,
+        "event_msg",
+        {
+            "type": "token_count",
+            "info": {
+                "last_token_usage": {
+                    "input_tokens": input_tokens,
+                    "cached_input_tokens": cached_input_tokens,
+                    "output_tokens": output_tokens,
+                    "reasoning_output_tokens": reasoning_output_tokens,
+                    "total_tokens": total_tokens,
+                },
+                "total_token_usage": {"total_tokens": total_tokens},
+                "model_context_window": 200_000,
+            },
+        },
+    )
+
+
+def _ts(second: int) -> str:
+    return f"2026-01-01T00:00:{second:02d}.000Z"
+
+
+def _epoch(second: int) -> float:
+    return BASE_TS + second
