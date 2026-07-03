@@ -4,8 +4,10 @@ import io
 import json
 import sqlite3
 import subprocess
+from pathlib import Path
 
 from spice.agent import sidechannelnotify, watchdog
+from spice.mail.attachments import prepare_inbox_attachments
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.acks import (
     AckArchivalSummary,
@@ -37,6 +39,7 @@ from spice.mail.inbox import (
     compose_inbox_text,
     inbox_ack_state_context_rows,
     inbox_dir,
+    inbox_payload_rows,
     parse_inbox_payload,
     pending_inbox_count,
 )
@@ -718,6 +721,124 @@ def test_owned_nack_utterance_requires_reason_for_matching_key():
     text = f"NACK {KEY_A}: other refusal. NACK {KEY_B[:-1]}: owned refusal."
     assert extract_owned_nack_utterance(text, KEY_B) == "owned refusal."
     assert extract_owned_nack_utterance(f"NACK {KEY_B}", KEY_B) is None
+
+
+def test_resend_lineage_end_to_end_contract(tmp_path):
+    _init_repo(tmp_path)
+    original_key = "20260101T000000000001Z"
+    name = f"{original_key}.txt"
+    original_text = compose_inbox_text(
+        body="verify the whole lineage",
+        priority=None,
+        stop=False,
+    )
+    attachments = prepare_inbox_attachments(
+        [
+            {
+                "name": "paste.png",
+                "contentType": "image/png",
+                "dataUrl": "data:image/png;base64,aW1hZ2UtYnl0ZXM=",
+            }
+        ]
+    )
+    write_inbox_item(tmp_path, name, original_text, attachments=attachments)
+    state = AckWatchState(
+        inbox_key=original_key,
+        original_text=original_text,
+        target_repo_root=tmp_path,
+        quiet=True,
+    )
+
+    for index in range(6):
+        state.process_line(_assistant_line(f"ordinary response {index}"))
+
+    pending = collect_inbox_items(tmp_path)
+    payload = parse_inbox_payload(pending[0].text)
+    readout = "\n".join(inbox_payload_rows(pending))
+    assert state.resends == 2
+    assert state.current_key == original_key
+    assert [item.name for item in pending] == [name]
+    assert pending_inbox_count(tmp_path) == 1
+    assert payload.priority == "critical"
+    assert payload.resend_count == 2
+    assert [attempt.messages_elapsed for attempt in payload.resend_attempts] == [
+        3,
+        3,
+    ]
+    assert pending[0].attachments[0].name == "paste.png"
+    assert "resend #2" in readout
+    assert "priority=critical" in readout
+
+    ack_message = f"ACK {original_key[:-1]}: handled the lineage once."
+    state.process_line(_assistant_line(ack_message))
+    summary = summarize_ack_archival(tmp_path, ack_message)
+
+    archived = collect_acked_inbox_items(tmp_path)
+    records = ack_state_records(tmp_path)
+    archived_attachment = archived[0].attachments[0]
+    assert state.outcome() == AckWatchOutcome(
+        acked=True,
+        assistant_messages_seen=7,
+        resends=2,
+    )
+    assert summary.archived == [original_key]
+    assert summary.unmatched == []
+    assert pending_inbox_count(tmp_path) == 0
+    assert collect_inbox_items(tmp_path) == []
+    assert archived_attachment.name == "paste.png"
+    assert archived_attachment.path.read_bytes() == b"image-bytes"
+    assert [
+        (
+            record.key,
+            record.inbox_name,
+            record.ack_content,
+            record.lineage,
+            record.attachments[0]["name"],
+        )
+        for record in records
+    ] == [
+        (
+            original_key,
+            name,
+            "handled the lineage once.",
+            {
+                "resend_count": 2,
+                "resend_attempts": [
+                    {
+                        "attempt": 1,
+                        "at": payload.resend_attempts[0].at,
+                        "messages_elapsed": 3,
+                    },
+                    {
+                        "attempt": 2,
+                        "at": payload.resend_attempts[1].at,
+                        "messages_elapsed": 3,
+                    },
+                ],
+            },
+            "paste.png",
+        )
+    ]
+
+    repo_root = Path(__file__).resolve().parents[1]
+    docs_text = "\n".join(
+        (
+            (
+                repo_root / "docs/design/accepted/semantic-ack-standalone-protocol.md"
+            ).read_text(encoding="utf-8"),
+            (repo_root / "docs/overview.md").read_text(encoding="utf-8"),
+        )
+    )
+    assert "resend #N" in docs_text
+    for stale in (
+        "fresh key",
+        "fresh-key",
+        "fresh closure",
+        "fresh-closure",
+        "under a fresh key",
+        "creating a fresh key",
+    ):
+        assert stale not in docs_text
 
 
 def test_ack_watch_nack_halts_resend_escalation(tmp_path):
