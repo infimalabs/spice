@@ -33,6 +33,7 @@ from spice.policy import (
     MAGIC_BASELINE_REF,
 )
 from spice.policyconfig import ComplexityPolicy, resolve_policy
+from spice.sessions import learnings as session_learnings
 from spice.sessions import records
 from spice.sessions.meter import (
     ContextMeter,
@@ -147,6 +148,7 @@ def render_briefing(
         lines.append("Filters")
         lines.extend(filter_lines)
     lines.extend(_guidance_lines(meter))
+    lines.extend(_learning_lines())
     lines.extend(_asks_lines(asks))
     lines.extend(_finals_lines(finals))
     lines.extend(_recovery_lines(compactions))
@@ -178,6 +180,50 @@ def _briefing_header_lines(files: list[Path], turns: list[TurnRecord]) -> list[s
 def _guidance_lines(meter: ContextMeter) -> list[str]:
     state = "available" if meter.latest_snapshot is not None else "unknown"
     return ["Guidance", f"  keep_working={context_meter_instruction(state)}"]
+
+
+def _learning_lines() -> list[str]:
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        return []
+    stem = _active_task_project_stem()
+    if stem is None:
+        return []
+    try:
+        records = session_learnings.top_learning_records(repo_root, stem)
+    except (OSError, RuntimeError, SpiceError, SystemExit):
+        return []
+    if not records:
+        return []
+    lines = ["Learnings", f"  stem={stem}"]
+    lines.extend(_learning_record_line(record) for record in records)
+    return lines
+
+
+def _active_task_project_stem() -> str | None:
+    try:
+        from spice.tasks import alloc, config, tw
+
+        actor = tw.current_actor()
+        active = [
+            row
+            for row in alloc.visible_active_rows(actor)
+            if str(row.get("claim_by") or "") == actor
+        ]
+        if not active:
+            return None
+        project = str(active[0].get("project") or "").strip()
+        return config.project_stem(project)
+    except (OSError, RuntimeError, SpiceError, SystemExit):
+        return None
+
+
+def _learning_record_line(record: session_learnings.LearningRecord) -> str:
+    source = record.source_task or "-"
+    return (
+        f"  - {clip(record.statement, COMMIT_PREVIEW_CHARS)} "
+        f"(confirmed={record.confirmation_count}, source={source})"
+    )
 
 
 def _asks_lines(asks: list[tuple[str, str]]) -> list[str]:
