@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 
 import pytest
 
@@ -13,6 +14,7 @@ from spice.sessions.learnings import (
     confirm_learning_candidates,
     claim_to_done_learning_slice,
     extract_learning_candidates_from_task_slice,
+    judge_filter_learning_candidates,
     learning_store_path,
     load_learning_records,
     top_learning_records,
@@ -310,6 +312,78 @@ def test_learning_extractor_is_bounded_deduped_and_side_effect_free(
     }
     assert all(candidate.source_turn_ids == ("turn-many",) for candidate in candidates)
     assert not (tmp_path / ".spice" / "learnings").exists()
+
+
+def test_learning_judge_filter_keeps_yes_and_skips_no_candidates():
+    durable = _candidate("Use spice dev pre-commit for the staged gate.")
+    status = _candidate("This task is currently waiting for review.")
+    answers = iter(("YES", "NO"))
+    prompts: list[str] = []
+
+    def backend(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(answers)
+
+    result = judge_filter_learning_candidates(
+        (durable, status),
+        backend=backend,
+        max_attempts=1,
+    )
+
+    assert result.kept == (durable,)
+    assert [(skip.candidate, skip.reason, skip.detail) for skip in result.skipped] == [
+        (status, learnings.LEARNING_SKIP_REJECTED, "judge returned NO")
+    ]
+    assert len(prompts) == 2
+    assert "durable, repo-general operational fact" in prompts[0]
+
+
+def test_learning_judge_filter_records_ambiguous_reply_as_skip():
+    candidate = _candidate("Use uv run python for repo test commands.")
+
+    result = judge_filter_learning_candidates(
+        (candidate,),
+        backend=lambda _prompt: "MAYBE",
+        max_attempts=1,
+    )
+
+    assert result.kept == ()
+    assert [(skip.candidate, skip.reason) for skip in result.skipped] == [
+        (candidate, learnings.LEARNING_SKIP_AMBIGUOUS)
+    ]
+    assert "single YES/NO" in result.skipped[0].detail
+
+
+def test_learning_judge_filter_records_unavailable_backend_as_skip():
+    candidate = _candidate("Use spice task next after task phase boundaries.")
+
+    def unavailable(_prompt: str) -> str:
+        raise SpiceError("could not launch 'afm-cli': missing")
+
+    result = judge_filter_learning_candidates((candidate,), backend=unavailable)
+
+    assert result.kept == ()
+    assert [(skip.candidate, skip.reason, skip.detail) for skip in result.skipped] == [
+        (
+            candidate,
+            learnings.LEARNING_SKIP_UNAVAILABLE,
+            "could not launch 'afm-cli': missing",
+        )
+    ]
+
+
+def test_learning_judge_filter_records_timeout_as_skip():
+    candidate = _candidate("Use blocking process waits for validation commands.")
+
+    def timeout(_prompt: str) -> str:
+        raise subprocess.TimeoutExpired("judge", 5)
+
+    result = judge_filter_learning_candidates((candidate,), backend=timeout)
+
+    assert result.kept == ()
+    assert [(skip.candidate, skip.reason) for skip in result.skipped] == [
+        (candidate, learnings.LEARNING_SKIP_TIMEOUT)
+    ]
 
 
 def _turn_events(

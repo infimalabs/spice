@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import re
 import string
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from spice.agent.maxims import JudgeBackend, evaluate_maxim, judge_cli_backend
 from spice.errors import SpiceError
 from spice.paths import atomic_write_text, state_dir
 from spice.sessions import slices as session_slices
@@ -24,6 +26,22 @@ MAX_EXTRACTED_LEARNING_CANDIDATES = 8
 MAX_LEARNING_SCAN_MESSAGES = 80
 MAX_LEARNING_EVIDENCE_CHARS = 240
 MIN_LEARNING_STATEMENT_WORDS = 4
+LEARNING_JUDGE_MAX_ATTEMPTS = 2
+LEARNING_JUDGE_CRITERION = (
+    "The candidate is a durable, repo-general operational fact worth carrying "
+    "to successor agents. It is reusable across future work in this repository "
+    "and is not task status, speculation, a secret, one-off implementation "
+    "trivia, or a statement without reusable operational value."
+)
+LEARNING_JUDGE_PROMPT_TEMPLATE = (
+    'IFF "{statement}" SATISFIES "{maxim}": ANSWER ONLY "YES".\n'
+    'IFF "{statement}" DOES NOT SATISFY "{maxim}": ANSWER ONLY "NO".\n'
+)
+LEARNING_SKIP_REJECTED = "rejected"
+LEARNING_SKIP_AMBIGUOUS = "ambiguous"
+LEARNING_SKIP_UNAVAILABLE = "unavailable"
+LEARNING_SKIP_TIMEOUT = "timeout"
+LEARNING_SKIP_JUDGE_ERROR = "judge_error"
 
 _PROJECT_STEM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _TRAILING_STATEMENT_NOISE = string.punctuation + string.whitespace
@@ -128,6 +146,19 @@ class ExtractedLearningCandidate:
             source_slice_id=self.source_slice_id,
             source_turn_ids=self.source_turn_ids,
         )
+
+
+@dataclass(frozen=True)
+class LearningJudgeSkip:
+    candidate: LearningCandidate
+    reason: str
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class LearningJudgeFilterResult:
+    kept: tuple[LearningCandidate, ...]
+    skipped: tuple[LearningJudgeSkip, ...]
 
 
 @dataclass(frozen=True)
@@ -321,6 +352,45 @@ def extract_learning_candidates_from_slice(
     return tuple(candidates)
 
 
+def judge_filter_learning_candidates(
+    candidates: Iterable[LearningCandidate],
+    *,
+    backend: JudgeBackend = judge_cli_backend,
+    max_attempts: int = LEARNING_JUDGE_MAX_ATTEMPTS,
+) -> LearningJudgeFilterResult:
+    kept: list[LearningCandidate] = []
+    skipped: list[LearningJudgeSkip] = []
+    for candidate in candidates:
+        try:
+            verdict = evaluate_maxim(
+                LEARNING_JUDGE_CRITERION,
+                _learning_judge_statement(candidate),
+                template=LEARNING_JUDGE_PROMPT_TEMPLATE,
+                backend=backend,
+                max_attempts=max_attempts,
+            )
+        except Exception as exc:  # judge failures are distillation skips.
+            skipped.append(
+                LearningJudgeSkip(
+                    candidate=candidate,
+                    reason=_learning_judge_error_reason(exc),
+                    detail=str(exc),
+                )
+            )
+            continue
+        if verdict.agrees:
+            kept.append(candidate)
+            continue
+        skipped.append(
+            LearningJudgeSkip(
+                candidate=candidate,
+                reason=LEARNING_SKIP_REJECTED,
+                detail="judge returned NO",
+            )
+        )
+    return LearningJudgeFilterResult(kept=tuple(kept), skipped=tuple(skipped))
+
+
 def normalize_learning_statement(statement: str) -> str:
     normalized = " ".join(str(statement or "").split()).rstrip(
         _TRAILING_STATEMENT_NOISE
@@ -328,6 +398,31 @@ def normalize_learning_statement(statement: str) -> str:
     if not normalized:
         raise SpiceError("learning statement must be non-empty")
     return normalized.casefold()
+
+
+def _learning_judge_statement(candidate: LearningCandidate) -> str:
+    fields = [
+        ("statement", candidate.statement),
+        ("evidence", candidate.evidence),
+        ("source_task", candidate.source_task),
+        ("project_stem", candidate.project_stem),
+    ]
+    return "; ".join(
+        f"{name}: {_compact_text(value)}"
+        for name, value in fields
+        if _compact_text(value)
+    )
+
+
+def _learning_judge_error_reason(exc: Exception) -> str:
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return LEARNING_SKIP_TIMEOUT
+    detail = str(exc).casefold()
+    if "single yes/no" in detail:
+        return LEARNING_SKIP_AMBIGUOUS
+    if "could not launch" in detail or "exited with code" in detail:
+        return LEARNING_SKIP_UNAVAILABLE
+    return LEARNING_SKIP_JUDGE_ERROR
 
 
 def _learning_messages(turns: Iterable[TurnRecord]) -> list[_LearningMessage]:
@@ -591,12 +686,15 @@ def _required_int(payload: dict[str, Any], field: str, path: Path, line: int) ->
 
 LEARNING_STORAGE_SURFACE = (
     ExtractedLearningCandidate,
+    LearningJudgeFilterResult,
+    LearningJudgeSkip,
     LearningCandidate,
     LearningRecord,
     claim_to_done_learning_slice,
     confirm_learning_candidates,
     extract_learning_candidates_from_slice,
     extract_learning_candidates_from_task_slice,
+    judge_filter_learning_candidates,
     learning_store_path,
     load_learning_records,
     top_learning_records,
