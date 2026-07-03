@@ -86,6 +86,7 @@ class MaximMetricRecord:
 class MaximMetricCounts:
     bag_name: str
     driver_name: str
+    thread_id: str
     fire_count: int
     judged_confirmed_count: int
     judged_rejected_count: int
@@ -184,6 +185,7 @@ def maxim_metric_counts(repo_root: str | Path) -> list[MaximMetricCounts]:
             SELECT
               bag_name,
               driver_name,
+              thread_id,
               SUM(CASE WHEN event_type = ? THEN 1 ELSE 0 END) AS fire_count,
               SUM(CASE WHEN event_type = ? THEN 1 ELSE 0 END)
                 AS judged_confirmed_count,
@@ -193,8 +195,8 @@ def maxim_metric_counts(repo_root: str | Path) -> list[MaximMetricCounts]:
                 AS gate_suppressed_count,
               SUM(CASE WHEN event_type = ? THEN 1 ELSE 0 END) AS published_count
             FROM maxim_metric_events
-            GROUP BY bag_name, driver_name
-            ORDER BY bag_name ASC, driver_name ASC
+            GROUP BY bag_name, driver_name, thread_id
+            ORDER BY bag_name ASC, driver_name ASC, thread_id ASC
             """,
             (
                 MAXIM_EVENT_FIRE,
@@ -208,11 +210,12 @@ def maxim_metric_counts(repo_root: str | Path) -> list[MaximMetricCounts]:
         MaximMetricCounts(
             bag_name=str(row[0]),
             driver_name=str(row[1]),
-            fire_count=int(row[2]),
-            judged_confirmed_count=int(row[3]),
-            judged_rejected_count=int(row[4]),
-            gate_suppressed_count=int(row[5]),
-            published_count=int(row[6]),
+            thread_id=str(row[2]),
+            fire_count=int(row[3]),
+            judged_confirmed_count=int(row[4]),
+            judged_rejected_count=int(row[5]),
+            gate_suppressed_count=int(row[6]),
+            published_count=int(row[7]),
         )
         for row in rows
     ]
