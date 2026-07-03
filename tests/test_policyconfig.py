@@ -6,7 +6,7 @@ import pytest
 
 from spice import policy
 from spice.errors import SpiceError
-from spice.policyconfig import resolve_policy
+from spice.policyconfig import jittered_flex_limit, resolve_policy
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CUSTOM_FILE_LOC_LIMIT = 10
@@ -21,6 +21,8 @@ RATIO_FALLBACK_FILE_LOC_FLEX = 20
 RATIO_FALLBACK_FILE_BYTE_FLEX = 200
 RATIO_FALLBACK_CCN_FLEX = 10
 RATIO_FALLBACK_LENGTH_FLEX = 20
+JITTER_BASE_LIMIT = 100
+JITTER_STATIC_FLEX = 200
 
 
 def test_policy_resolver_defaults_match_policy_constants(tmp_path):
@@ -65,6 +67,40 @@ def test_policy_resolver_defaults_match_policy_constants(tmp_path):
         == policy.COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS
     )
     assert resolved.taste.words == policy.TASTE_WORD_SUGGESTIONS
+
+
+def test_jittered_flex_limit_is_stable_bounded_and_actor_scoped():
+    path = Path("./src\\app.py")
+    normalized_path = Path("src/app.py")
+
+    first = jittered_flex_limit(JITTER_BASE_LIMIT, JITTER_STATIC_FLEX, path, "actor-a")
+    second = jittered_flex_limit(JITTER_BASE_LIMIT, JITTER_STATIC_FLEX, path, "actor-a")
+    normalized = jittered_flex_limit(
+        JITTER_BASE_LIMIT, JITTER_STATIC_FLEX, normalized_path, "actor-a"
+    )
+    actor_values = {
+        jittered_flex_limit(
+            JITTER_BASE_LIMIT,
+            JITTER_STATIC_FLEX,
+            normalized_path,
+            f"actor-{index}",
+        )
+        for index in range(24)
+    }
+
+    assert first == second
+    assert first == normalized
+    assert JITTER_STATIC_FLEX - 5 <= first <= JITTER_STATIC_FLEX + 5
+    assert len(actor_values) > 1
+    assert (
+        jittered_flex_limit(
+            JITTER_BASE_LIMIT,
+            JITTER_BASE_LIMIT,
+            normalized_path,
+            "actor-a",
+        )
+        == JITTER_BASE_LIMIT
+    )
 
 
 def test_policy_resolver_merges_taste_words_over_defaults(tmp_path):

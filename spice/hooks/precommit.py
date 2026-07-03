@@ -652,7 +652,7 @@ def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
         flex_limit_value=bounds.line_flex_limit,
         byte_limit=bounds.byte_limit,
         byte_flex_limit_value=bounds.byte_flex_limit,
-        bounds_for_path=resolved.file_shape_for_path,
+        bounds_for_path=resolved.jittered_file_shape_for_path,
         source_suffixes=resolved.file_shape_paths.source_suffixes,
         generated_patterns=generated_patterns,
         repo_doc_paths=repo_doc_paths,
@@ -682,7 +682,7 @@ def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
         max_length=bounds.max_length,
         ccn_flex_limit_value=bounds.ccn_flex_limit,
         length_flex_limit_value=bounds.length_flex_limit,
-        bounds_for_path=resolved.complexity_for_path,
+        bounds_for_path=resolved.jittered_complexity_for_path,
         suffixes=resolved.languages.complexity,
         persist=True,
     )

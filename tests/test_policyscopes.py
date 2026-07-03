@@ -5,9 +5,11 @@ import subprocess
 
 import pytest
 
+from spice.agent.paths import write_agent_thread_pointer
 from spice.errors import SpiceError
 from spice.hooks import precommit
-from spice.policyconfig import resolve_policy
+from spice.policyconfig import jittered_flex_limit, resolve_policy
+from spice.studies.repodocs import repo_truth_doc_violations
 
 BASE_FILE_LOC = 10
 BASE_FILE_BYTES = 100
@@ -40,6 +42,10 @@ MARKDOWN_NESTED_BUDGET = 10000
 MARKDOWN_DEEP_BUDGET = 15000
 MARKDOWN_ROOT_FLEX = 7500
 CUSTOM_SCOPE_DOC_BUDGET = 7000
+JITTER_BASE_LIMIT = 100
+JITTER_STATIC_FLEX = 200
+JITTER_DOC_BASE_LIMIT = 100
+JITTER_DOC_STATIC_FLEX = 200
 
 
 def test_policy_scopes_apply_flat_settings_to_all_numeric_bounds(tmp_path):
@@ -426,6 +432,114 @@ def test_complexity_guard_applies_scoped_bounds_and_sticky(tmp_path, monkeypatch
         SpiceError, match=f"ccn {SCOPED_CCN_BREACH} > {SCOPED_CCN_BASE_LIMIT}"
     ):
         precommit._run_complexity_guard(repo, [Path("src/legacy/app.py")])
+
+
+def test_file_shape_guard_uses_actor_path_jittered_flex_ceiling(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    rel_path = Path("src/jitter.py")
+    actor, jittered = _actor_with_lower_jittered_flex(
+        rel_path, JITTER_BASE_LIMIT, JITTER_STATIC_FLEX
+    )
+    line_count = jittered + 1
+    _write_repo_file(
+        repo,
+        "pyproject.toml",
+        "[tool.spice.policy.limits]\n"
+        f"file_loc = {JITTER_BASE_LIMIT}\n"
+        "file_bytes = 100000\n"
+        "\n"
+        "[tool.spice.policy.flex]\n"
+        "ratio = 2.0\n",
+    )
+    _write_repo_file(repo, rel_path.as_posix(), "line\n" * line_count)
+    write_agent_thread_pointer(repo, actor)
+    _git(repo, "add", ".")
+
+    assert line_count <= JITTER_STATIC_FLEX
+    with pytest.raises(SpiceError, match=f"{line_count} lines > {JITTER_BASE_LIMIT}"):
+        precommit._run_file_loc_guard(repo, [rel_path])
+
+
+def test_complexity_guard_uses_actor_path_jittered_flex_ceiling(tmp_path, monkeypatch):
+    repo = _git_init(tmp_path / "repo")
+    rel_path = Path("src/jitter.py")
+    actor, jittered = _actor_with_lower_jittered_flex(
+        rel_path, JITTER_BASE_LIMIT, JITTER_STATIC_FLEX
+    )
+    ccn = jittered + 1
+    _write_repo_file(
+        repo,
+        "pyproject.toml",
+        "[tool.spice.policy.limits]\n"
+        f"routine_ccn = {JITTER_BASE_LIMIT}\n"
+        "routine_length = 1000\n"
+        "\n"
+        "[tool.spice.policy.flex]\n"
+        "ratio = 2.0\n",
+    )
+    _write_repo_file(repo, rel_path.as_posix(), "def run():\n    return 1\n")
+    write_agent_thread_pointer(repo, actor)
+    _git(repo, "add", ".")
+    record = precommit.complexity.ComplexityRecord(
+        path=rel_path.as_posix(),
+        function_name="run",
+        ccn=ccn,
+        length=1,
+        nloc=1,
+    )
+    monkeypatch.setattr(
+        precommit.complexity,
+        "collect_complexity_records",
+        lambda _paths, *, root, suffixes: [record],
+    )
+
+    assert ccn <= JITTER_STATIC_FLEX
+    with pytest.raises(SpiceError, match=f"ccn {ccn} > {JITTER_BASE_LIMIT}"):
+        precommit._run_complexity_guard(repo, [rel_path])
+
+
+def test_repo_doc_guard_uses_actor_path_jittered_flex_ceiling(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    rel_path = Path("AGENTS.md")
+    actor, jittered = _actor_with_lower_jittered_flex(
+        rel_path, JITTER_DOC_BASE_LIMIT, JITTER_DOC_STATIC_FLEX
+    )
+    char_count = jittered + 1
+    _write_repo_file(
+        repo,
+        "pyproject.toml",
+        "[tool.spice.policy]\n"
+        'repo_truth_docs = ["AGENTS.md"]\n'
+        "\n"
+        "[tool.spice.policy.limits]\n"
+        f"repo_truth_doc_chars = {JITTER_DOC_BASE_LIMIT}\n"
+        "\n"
+        "[tool.spice.policy.flex]\n"
+        "ratio = 2.0\n"
+        "\n"
+        "[tool.spice.policy.markdown_depth_budget]\n"
+        "extensions = []\n",
+    )
+    _write_repo_file(repo, rel_path.as_posix(), "x" * char_count)
+    write_agent_thread_pointer(repo, actor)
+    _git(repo, "add", ".")
+
+    assert char_count <= JITTER_DOC_STATIC_FLEX
+    assert repo_truth_doc_violations(repo) == [
+        f"  {rel_path.as_posix()}: {char_count} characters "
+        f"(cap {JITTER_DOC_BASE_LIMIT})"
+    ]
+
+
+def _actor_with_lower_jittered_flex(
+    path: Path, base_limit: int, static_flex: int
+) -> tuple[str, int]:
+    for index in range(64):
+        actor = f"actor-{index}"
+        jittered = jittered_flex_limit(base_limit, static_flex, path, actor)
+        if jittered < static_flex:
+            return actor, jittered
+    raise AssertionError("expected at least one actor to lower the flex ceiling")
 
 
 def _write_pyproject(root: Path, text: str) -> None:

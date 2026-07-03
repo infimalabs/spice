@@ -44,7 +44,7 @@ def repo_truth_doc_violations(repo_root: Path, *, persist: bool = False) -> list
         count = _doc_char_count(repo_root / rel_path)
         if count is None:
             continue
-        scoped = resolved.bound_for_path(
+        scoped = resolved.jittered_bound_for_path(
             "repo_truth_doc_chars",
             resolved.limits.repo_truth_doc_chars,
             rel_path,
@@ -173,7 +173,7 @@ def _repo_doc_path_breaches_flex(
     count = _doc_char_count(repo_root / path)
     if count is None:
         return False
-    scoped = resolved.bound_for_path(
+    scoped = resolved.jittered_bound_for_path(
         "repo_truth_doc_chars",
         resolved.limits.repo_truth_doc_chars,
         path,

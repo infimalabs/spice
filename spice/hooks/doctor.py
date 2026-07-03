@@ -461,7 +461,7 @@ def _file_loc_check(
             flex_limit_value=file_shape.line_flex_limit,
             byte_limit=file_shape.byte_limit,
             byte_flex_limit_value=file_shape.byte_flex_limit,
-            bounds_for_path=resolved.file_shape_for_path,
+            bounds_for_path=resolved.jittered_file_shape_for_path,
             source_suffixes=resolved.file_shape_paths.source_suffixes,
             generated_patterns=generated_patterns,
             repo_doc_paths=repo_doc_paths,
@@ -512,7 +512,7 @@ def _complexity_check(
             max_length=bounds.max_length,
             ccn_flex_limit_value=bounds.ccn_flex_limit,
             length_flex_limit_value=bounds.length_flex_limit,
-            bounds_for_path=resolved.complexity_for_path,
+            bounds_for_path=resolved.jittered_complexity_for_path,
             suffixes=resolved.languages.complexity,
             persist=False,
         )
@@ -523,7 +523,7 @@ def _complexity_check(
             max_length=bounds.max_length,
             ccn_flex_limit_value=bounds.ccn_flex_limit,
             length_flex_limit_value=bounds.length_flex_limit,
-            bounds_for_path=resolved.complexity_for_path,
+            bounds_for_path=resolved.jittered_complexity_for_path,
             suffixes=resolved.languages.complexity,
             persist=False,
         )
