@@ -454,6 +454,78 @@ def test_working_state_snapshot_collects_live_fields(tmp_path, monkeypatch):
     assert snapshot.has_fields()
 
 
+def test_working_state_injector_omits_empty_snapshot(tmp_path):
+    stderr = io.StringIO()
+    injector = wrap.AgentWorkingStateInjector(
+        tmp_path,
+        stderr=stderr,
+        snapshot_factory=lambda _repo: wrap.WorkingStateSnapshot(),
+    )
+
+    injector.inject(force=True)
+
+    assert stderr.getvalue() == ""
+
+
+def test_working_state_injector_renders_and_suppresses_one_line_sentence(tmp_path):
+    now = [0.0]
+    snapshot = [
+        wrap.WorkingStateSnapshot(
+            pending_inbox_count=1,
+            claim_handle="METER-00000001",
+            claim_phase="todo",
+            claim_elapsed_seconds=90,
+            dirty_file_count=2,
+            last_maxim_bag="fallbacks",
+        )
+    ]
+    stderr = io.StringIO()
+
+    first = wrap.AgentWorkingStateInjector(
+        tmp_path,
+        stderr=stderr,
+        repeat_interval_seconds=15.0,
+        time_factory=lambda: now[0],
+        snapshot_factory=lambda _repo: snapshot[0],
+    )
+    first.inject(force=True)
+    now[0] = 5.0
+    second = wrap.AgentWorkingStateInjector(
+        tmp_path,
+        stderr=stderr,
+        repeat_interval_seconds=15.0,
+        time_factory=lambda: now[0],
+        snapshot_factory=lambda _repo: snapshot[0],
+    )
+    second.inject(force=True)
+    now[0] = 6.0
+    snapshot[0] = wrap.WorkingStateSnapshot(
+        pending_inbox_count=1,
+        claim_handle="METER-00000001",
+        claim_phase="todo",
+        claim_elapsed_seconds=96,
+        dirty_file_count=3,
+        last_maxim_bag="fallbacks",
+    )
+    second.inject(force=True)
+
+    lines = stderr.getvalue().splitlines()
+    assert lines == [
+        (
+            "🌶️ Working state: 1 pending inbox; claim METER-00000001 todo "
+            "for 90s; 2 dirty files; last maxim fallbacks."
+        ),
+        (
+            "🌶️ Working state: 1 pending inbox; claim METER-00000001 todo "
+            "for 96s; 3 dirty files; last maxim fallbacks."
+        ),
+    ]
+    for line in lines:
+        assert line.startswith("🌶️ ")
+        assert "\n" not in line
+        assert line.count(".") == 1
+
+
 def test_ensure_agent_uses_shipped_codex_defaults_without_config(tmp_path, monkeypatch):
     monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr(

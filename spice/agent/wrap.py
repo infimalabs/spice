@@ -80,6 +80,7 @@ COMMAND_NOT_FOUND_EXIT_CODE = 127
 InboxSignature = tuple[tuple[str, int, int], ...]
 ContextWarningSignature = tuple[str, str, int]
 ContextWarningKey = tuple[str]
+WorkingStateKey = tuple[int, str, str, int, str]
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,10 @@ def context_meter_cache_path(repo_root: Path) -> Path:
 
 def context_warning_state_path(repo_root: Path) -> Path:
     return agent_state_dir(repo_root) / "context-warning.json"
+
+
+def working_state_state_path(repo_root: Path) -> Path:
+    return agent_state_dir(repo_root) / "working-state.json"
 
 
 def post_tool_hook_inbox_state_path(repo_root: Path) -> Path:
@@ -724,19 +729,65 @@ class AgentWorkingStateInjector:
         repo_root: Path | None,
         *,
         stderr: TextIO,
+        repeat_interval_seconds: float = AGENT_RUN_INBOX_REPEAT_SECONDS,
+        time_factory: TimeFactory = time.monotonic,
         snapshot_factory: Callable[[Path | None], WorkingStateSnapshot] | None = None,
     ) -> None:
         self.repo_root = repo_root
         self.stderr = stderr
+        self.repeat_interval_seconds = max(0.0, repeat_interval_seconds)
+        self.time_factory = time_factory
         self.snapshot_factory = snapshot_factory or collect_working_state_snapshot
+        self.displayed_at: float | None = None
+        self.displayed_key: WorkingStateKey | None = None
 
     def inject(self, *, force: bool) -> None:
         del force
-        snapshot = self.snapshot_factory(self.repo_root)
+        try:
+            snapshot = self.snapshot_factory(self.repo_root)
+        except Exception:
+            return
         if not snapshot.has_fields():
             return
-        # The renderer/suppression child owns visible output.
-        return
+        key = working_state_key(snapshot)
+        now = self.time_factory()
+        if self._should_suppress(key, now=now):
+            return
+        text = render_working_state_snapshot(snapshot)
+        if not text:
+            return
+        self.stderr.write(text)
+        self.stderr.write("\n")
+        self.stderr.flush()
+        self._record_displayed(key, now=now)
+
+    def _should_suppress(self, key: WorkingStateKey, *, now: float) -> bool:
+        if self._is_recent_match(self.displayed_key, self.displayed_at, key, now=now):
+            return True
+        stored_key, stored_at = read_working_state_state(self.repo_root)
+        if self._is_recent_match(stored_key, stored_at, key, now=now):
+            self.displayed_key = stored_key
+            self.displayed_at = stored_at
+            return True
+        return False
+
+    def _record_displayed(self, key: WorkingStateKey, *, now: float) -> None:
+        self.displayed_key = key
+        self.displayed_at = now
+        write_working_state_state(self.repo_root, key, now=now)
+
+    def _is_recent_match(
+        self,
+        displayed_key: WorkingStateKey | None,
+        displayed_at: float | None,
+        key: WorkingStateKey,
+        *,
+        now: float,
+    ) -> bool:
+        if displayed_key != key or displayed_at is None:
+            return False
+        age = now - displayed_at
+        return 0 <= age < self.repeat_interval_seconds
 
 
 def inbox_pending_signature(repo_root: Path | None) -> InboxSignature:
@@ -871,6 +922,99 @@ def collect_working_state_snapshot(
 
 def _working_state_pending_count(repo_root: Path) -> int:
     return len(inbox_pending_signature(repo_root))
+
+
+def render_working_state_snapshot(snapshot: WorkingStateSnapshot) -> str:
+    if not snapshot.has_fields():
+        return ""
+    parts: list[str] = []
+    if snapshot.pending_inbox_count:
+        inbox_label = (
+            "pending inbox" if snapshot.pending_inbox_count == 1 else "pending inboxes"
+        )
+        parts.append(f"{snapshot.pending_inbox_count} {inbox_label}")
+    if snapshot.claim_handle:
+        claim = f"claim {_working_state_clean_text(snapshot.claim_handle)}"
+        if snapshot.claim_phase:
+            claim += f" {_working_state_clean_text(snapshot.claim_phase)}"
+        if snapshot.claim_elapsed_seconds is not None:
+            claim += f" for {_working_state_duration(snapshot.claim_elapsed_seconds)}"
+        parts.append(claim)
+    if snapshot.dirty_file_count:
+        dirty_label = "dirty file" if snapshot.dirty_file_count == 1 else "dirty files"
+        parts.append(f"{snapshot.dirty_file_count} {dirty_label}")
+    if snapshot.last_maxim_bag:
+        parts.append(f"last maxim {_working_state_clean_text(snapshot.last_maxim_bag)}")
+    if not parts:
+        return ""
+    return f"🌶️ Working state: {'; '.join(parts)}."
+
+
+def working_state_key(snapshot: WorkingStateSnapshot) -> WorkingStateKey:
+    return (
+        max(0, int(snapshot.pending_inbox_count)),
+        _working_state_clean_text(snapshot.claim_handle),
+        _working_state_clean_text(snapshot.claim_phase),
+        max(0, int(snapshot.dirty_file_count)),
+        _working_state_clean_text(snapshot.last_maxim_bag),
+    )
+
+
+def read_working_state_state(
+    repo_root: Path | None,
+) -> tuple[WorkingStateKey | None, float | None]:
+    if repo_root is None:
+        return None, None
+    payload = read_context_meter_cache_payload(working_state_state_path(repo_root))
+    key = _working_state_key_payload(payload.get("key"))
+    displayed_at = _float_payload_value(payload.get("displayedAt"))
+    if key is None or displayed_at is None:
+        return None, None
+    return key, displayed_at
+
+
+def write_working_state_state(
+    repo_root: Path | None, key: WorkingStateKey, *, now: float
+) -> None:
+    if repo_root is None:
+        return
+    path = working_state_state_path(repo_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(
+        json.dumps({"displayedAt": now, "key": list(key)}, separators=(",", ":"))
+        + "\n",
+        encoding="utf-8",
+    )
+    tmp.replace(path)
+
+
+def _working_state_key_payload(value: Any) -> WorkingStateKey | None:
+    if not isinstance(value, list) or len(value) != 5:
+        return None
+    pending = _int_payload_value(value[0])
+    claim_handle = value[1]
+    claim_phase = value[2]
+    dirty = _int_payload_value(value[3])
+    last_maxim = value[4]
+    if (
+        pending is None
+        or not isinstance(claim_handle, str)
+        or not isinstance(claim_phase, str)
+        or dirty is None
+        or not isinstance(last_maxim, str)
+    ):
+        return None
+    return (pending, claim_handle, claim_phase, dirty, last_maxim)
+
+
+def _working_state_duration(seconds: int) -> str:
+    value = max(0, int(seconds))
+    return f"{value}s"
+
+
+def _working_state_clean_text(value: object) -> str:
+    return " ".join(str(value or "").split())
 
 
 def _working_state_claim(
