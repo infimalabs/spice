@@ -14,6 +14,7 @@ const masonryFixturePlan = {
   baseIso: "2026-07-03T10:04:00.000Z",
   epilogueMinute: 320,
   finalCardStep: 17,
+  imageEpilogueOffsetMinutes: 2,
   segmentCardCount: 12,
 };
 // The fixture crosses 11:00 right after the compaction divider (rule
@@ -72,6 +73,9 @@ async function installMasonrySmokeHelpers(page) {
       masonrySmokeSegmentFanOut,
       masonrySmokeBackfillAudit,
       masonrySmokeColumnRecovery,
+      masonrySmokeRepackAudit,
+      masonrySmokeImageHtml,
+      masonrySmokeImagesReady,
       masonrySmokeRect,
     ]
       .map((helper) => helper.toString())
@@ -114,6 +118,7 @@ async function renderMasonryFixture(config) {
     nodes.push(node);
   }
   host.append(...nodes);
+  await masonrySmokeImagesReady(host);
   packMessageStream(lane);
   await new Promise((resolve) => requestAnimationFrame(resolve));
   await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -189,7 +194,40 @@ function masonrySmokeItems(config) {
     display_text: "masonry epilogue card",
     text: "masonry epilogue card",
   });
+  push("assistant", plan.epilogueMinute + plan.imageEpilogueOffsetMinutes, {
+    display_html: masonrySmokeImageHtml(),
+    display_text: "masonry image card",
+    image_only: true,
+    text: "masonry image card",
+  });
   return items;
+}
+
+function masonrySmokeImageHtml() {
+  const svg = encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="156" height="96">' +
+      '<rect width="156" height="96" fill="#4f8abf"/>' +
+      "</svg>",
+  );
+  return (
+    '<p class="message-image-stack"><a class="message-image" href="#">' +
+    '<img alt="masonry image control" src="data:image/svg+xml,' +
+    svg +
+    '"></a></p>'
+  );
+}
+
+function masonrySmokeImagesReady(host) {
+  const images = Array.from(host.querySelectorAll("article img"));
+  return Promise.all(
+    images.map((image) => {
+      if (image.complete) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        image.addEventListener("load", resolve, { once: true });
+        image.addEventListener("error", reject, { once: true });
+      });
+    }),
+  );
 }
 
 function masonrySmokeBodyHtml(shape, step) {
@@ -215,10 +253,13 @@ async function masonrySmokeMeasurement(lane, host, config) {
   );
   const divider = host.querySelector('[data-masonry-smoke="divider"]');
   if (!divider) throw new Error("masonry fixture divider missing");
+  const repackAudit = await masonrySmokeRepackAudit(lane, host);
   const dividerRect = masonrySmokeRect(divider);
   const dividerIndex = Number(divider.dataset.masonrySmokeIndex);
   const cardRects = cards.map((card) => ({
+    alignSelf: getComputedStyle(card).alignSelf,
     column: card.style.gridColumnStart,
+    imageOnly: card.classList.contains("image-only"),
     index: Number(card.dataset.masonrySmokeIndex),
     left: masonrySmokeRect(card).left,
     rect: masonrySmokeRect(card),
@@ -267,8 +308,25 @@ async function masonrySmokeMeasurement(lane, host, config) {
   const columnRecovery = await masonrySmokeColumnRecovery(lane, cards);
   return {
     backfillAudit,
+    bandAudit: {
+      bandRows: Number.parseInt(
+        hostStyle.getPropertyValue("--message-pack-band"),
+        10,
+      ),
+      cards: cardRects.map((card) => ({
+        alignSelf: card.alignSelf,
+        height: card.rect.height,
+        imageOnly: card.imageOnly,
+        span: card.span,
+      })),
+      rowGapPx: Number.parseFloat(hostStyle.rowGap),
+      rowStridePx:
+        Number.parseFloat(hostStyle.gridAutoRows) +
+        Number.parseFloat(hostStyle.rowGap),
+    },
     columnAudit,
     columnRecovery,
+    repackAudit,
     segmentFanOut,
     dividerIndex,
     dividerRect,
@@ -391,6 +449,22 @@ async function masonrySmokeBackfillAudit(lane, host, config) {
   };
 }
 
+// Packing the same content twice must be a fixed point: spans, columns, and
+// rows all identical, or stretch-fill and measurement are feeding back.
+async function masonrySmokeRepackAudit(lane, host) {
+  const items = Array.from(host.querySelectorAll("[data-masonry-smoke]"));
+  const capture = () =>
+    items.map((node) => [
+      node.style.getPropertyValue("--message-pack-row-span"),
+      node.style.gridColumnStart,
+      node.style.gridRowStart,
+    ]);
+  const before = capture();
+  packMessageStream(lane);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  return { stable: JSON.stringify(before) === JSON.stringify(capture()) };
+}
+
 // Regression guard for the auto-fit collapse (f63d310): force every card into
 // column 1, repack, and demand redistribution from geometry-derived counting.
 async function masonrySmokeColumnRecovery(lane, cards) {
@@ -420,74 +494,100 @@ function masonrySmokeRect(element) {
 
 function assertMasonryMeasurement(measurement) {
   const label = " at " + measurement.viewportWidth + "px: ";
-  if (measurement.hostDisplay !== "grid")
-    throw new Error("message host is not grid" + label + JSON.stringify(measurement));
+  const fail = (reason) => {
+    throw new Error(reason + label + JSON.stringify(measurement));
+  };
+  assertMasonryBaseLayout(measurement, fail);
+  assertMasonryBands(measurement, fail);
+  assertMasonryDividerBarrier(measurement, fail);
+  assertMasonryTimeRules(measurement, fail);
+  assertMasonryDistribution(measurement, fail);
+}
+
+function assertMasonryBaseLayout(measurement, fail) {
+  if (measurement.hostDisplay !== "grid") fail("message host is not grid");
   if (!measurement.spans.every((span) => span > 0))
-    throw new Error("cards missing row spans" + label + JSON.stringify(measurement));
+    fail("cards missing row spans");
   if (measurement.missingTimestampStamps > 0)
-    throw new Error("pack items missing data-message-ts" + label + JSON.stringify(measurement));
+    fail("pack items missing data-message-ts");
+  if (!measurement.repackAudit.stable) fail("pack is not idempotent");
+  if (!measurement.columnAudit.chronological)
+    fail("column order is not chronological");
+}
+
+function assertMasonryBands(measurement, fail) {
+  const band = measurement.bandAudit;
+  for (const card of band.cards) {
+    const cellHeight = card.span * band.rowStridePx - band.rowGapPx;
+    if (card.imageOnly) {
+      if (card.alignSelf !== "start")
+        fail("image-only card lost start alignment");
+      if (cellHeight - card.height >= band.rowStridePx)
+        fail("image-only card span was band-inflated");
+      continue;
+    }
+    if (card.alignSelf !== "stretch") fail("card is not stretch-aligned");
+    if (measurement.expectedColumns <= 1) continue;
+    if (card.span % band.bandRows !== 0)
+      fail("card span is not a whole band multiple");
+    if (Math.abs(cellHeight - card.height) > 1)
+      fail("card box does not fill its band cell");
+  }
+}
+
+function assertMasonryDividerBarrier(measurement, fail) {
   if (measurement.dividerFillRatio < 0.98)
-    throw new Error("compaction divider is not full width" + label + JSON.stringify(measurement));
+    fail("compaction divider is not full width");
   const dividerTop = measurement.dividerRect.top;
   const dividerBottom = dividerTop + measurement.dividerRect.height;
   if (!measurement.cardsAboveDivider.every((bottom) => bottom <= dividerTop + 1))
-    throw new Error("pre-compaction card crossed the barrier" + label + JSON.stringify(measurement));
+    fail("pre-compaction card crossed the barrier");
   if (!measurement.cardsBelowDivider.every((top) => top >= dividerBottom - 1))
-    throw new Error("post-compaction card floated above the barrier" + label + JSON.stringify(measurement));
-  if (!measurement.columnAudit.chronological)
-    throw new Error("column order is not chronological" + label + JSON.stringify(measurement));
+    fail("post-compaction card floated above the barrier");
+}
+
+function assertMasonryTimeRules(measurement, fail) {
   const ruleIsos = measurement.ruleAudits.map((rule) => rule.iso);
   if (JSON.stringify(ruleIsos) !== JSON.stringify(measurement.expectedRuleIsos))
-    throw new Error(
+    fail(
       "time rules mismatch (suppression or collapse broken): " +
-        JSON.stringify(ruleIsos) +
-        label +
-        JSON.stringify(measurement),
+        JSON.stringify(ruleIsos),
     );
   for (const rule of measurement.ruleAudits) {
-    if (rule.fillRatio < 0.98)
-      throw new Error("time rule is not full width" + label + JSON.stringify(measurement));
+    if (rule.fillRatio < 0.98) fail("time rule is not full width");
     if (rule.maxCardBottomAbove > rule.top + 1)
-      throw new Error("card crossed a time-rule barrier from above" + label + JSON.stringify(measurement));
+      fail("card crossed a time-rule barrier from above");
     if (rule.minCardTopBelow < rule.bottom - 1)
-      throw new Error("card floated above a time-rule barrier" + label + JSON.stringify(measurement));
+      fail("card floated above a time-rule barrier");
   }
+}
+
+function assertMasonryDistribution(measurement, fail) {
   const expectedColumns = measurement.expectedColumns;
   if (expectedColumns > 1) {
     for (const fan of measurement.segmentFanOut) {
       const orderedColumns = fan.map((column, position) => String(position + 1));
       if (JSON.stringify(fan) !== JSON.stringify(orderedColumns))
-        throw new Error(
-          "segment does not fan out left-to-right: " +
-            JSON.stringify(fan) +
-            label +
-            JSON.stringify(measurement),
-        );
+        fail("segment does not fan out left-to-right: " + JSON.stringify(fan));
     }
   }
   if (!measurement.backfillAudit.stable)
-    throw new Error("history backfill re-pinned downstream cards" + label + JSON.stringify(measurement));
+    fail("history backfill re-pinned downstream cards");
   if (measurement.distinctColumnLefts < expectedColumns)
-    throw new Error(
+    fail(
       "cards under-distributed (" +
         measurement.distinctColumnLefts +
         " columns, expected at least " +
         expectedColumns +
-        ")" +
-        label +
-        JSON.stringify(measurement),
+        ")",
     );
   if (expectedColumns === 1 && measurement.distinctColumnLefts !== 1)
-    throw new Error("narrow viewport did not collapse to one column" + label + JSON.stringify(measurement));
+    fail("narrow viewport did not collapse to one column");
   if (
     expectedColumns > 1 &&
     measurement.columnRecovery.distinctColumns < expectedColumns
   )
-    throw new Error(
-      "packer did not redistribute out of a collapsed single column" +
-        label +
-        JSON.stringify(measurement),
-    );
+    fail("packer did not redistribute out of a collapsed single column");
 }
 
 if (require.main === module) {

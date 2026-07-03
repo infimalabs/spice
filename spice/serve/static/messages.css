@@ -2,6 +2,7 @@
 .messages {
   --message-card-max-width: 30rem;
   --message-card-min-width: 20rem;
+  --message-pack-band: 6;
   --message-pack-row-height: 4px;
   align-content: start;
   align-items: start;
@@ -23,6 +24,7 @@
 }
 .messages article {
   --message-badge-surface: var(--panel);
+  align-self: stretch;
   background: var(--panel);
   border: 1px solid var(--border);
   border-color: var(--border-soft);
