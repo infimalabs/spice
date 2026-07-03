@@ -88,6 +88,10 @@ class AgentDriver:
     ) -> Path:
         raise NotImplementedError
 
+    def find_session_transcript(self, thread_id: str) -> Path | None:
+        """The transcript file for `thread_id`, or None when not on disk."""
+        raise NotImplementedError
+
     def owns_transcript(self, path: Path) -> bool:
         """True iff `path` sits in this driver's transcript layout."""
         return False
