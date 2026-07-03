@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import select
+import time
 import uuid
 from dataclasses import dataclass, field
 from importlib import import_module
@@ -301,11 +302,24 @@ class LiveBusSession:
         self._handle_lane_refresh(message)
 
     def _handle_lane_send(self, message: dict[str, Any]) -> None:
+        received_at = time.perf_counter()
         target = self._require_target(message)
         if target is None:
             return
+        target_resolved_at = time.perf_counter()
         payload = message.get("payload") or {}
+        send_payload_started_at = time.perf_counter()
         result, _status = self.callbacks.send_payload(target, payload)
+        send_payload_finished_at = time.perf_counter()
+        result = {
+            **result,
+            "serverTiming": _lane_send_server_timing(
+                received_at=received_at,
+                target_resolved_at=target_resolved_at,
+                send_payload_started_at=send_payload_started_at,
+                send_payload_finished_at=send_payload_finished_at,
+            ),
+        }
         self._reply(message, {"type": "lane.sendResult", "result": result})
         if result.get("ok") is True:
             self._queue_lane_send_followup(target, payload)
@@ -496,6 +510,24 @@ def _pending_lane_payload(target: Any) -> dict[str, Any]:
         for key in PENDING_LANE_PAYLOAD_KEYS
         if key in pending_identity
     }
+
+
+def _lane_send_server_timing(
+    *,
+    received_at: float,
+    target_resolved_at: float,
+    send_payload_started_at: float,
+    send_payload_finished_at: float,
+) -> dict[str, float]:
+    return {
+        "targetResolveMs": _elapsed_ms(received_at, target_resolved_at),
+        "sendPayloadMs": _elapsed_ms(send_payload_started_at, send_payload_finished_at),
+        "totalBeforeReplyMs": _elapsed_ms(received_at, send_payload_finished_at),
+    }
+
+
+def _elapsed_ms(start: float, end: float) -> float:
+    return max(0.0, (end - start) * _MS_PER_SECOND)
 
 
 def _wait_for_change(

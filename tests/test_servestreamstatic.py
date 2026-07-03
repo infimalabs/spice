@@ -415,6 +415,7 @@ def test_static_send_latency_probe_records_submit_timing_buckets():
     assert "sendResultWaitMs:" in app_stream
     assert "responseHandlingMs:" in app_stream
     assert "totalMs:" in app_stream
+    assert "latencyProbe.serverTiming = result.serverTiming || {};" in app_stream
     assert 'markLaneSubmitLatency(timing, "liveBusConnectStartAt");' in app_stream
     assert 'markLaneSubmitLatency(pending.timing, "liveBusResponseReceivedAt");' in (
         app_stream

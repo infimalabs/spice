@@ -128,6 +128,11 @@ function submitLatencySmokeLiveBusRequest(smoke, type, fields, timing) {
           pendingInboxRevision: "submit-latency-smoke",
           pendingInboxVersion: Date.now(),
           requestText: payload.text || "",
+          serverTiming: {
+            targetResolveMs: 0,
+            sendPayloadMs: 5,
+            totalBeforeReplyMs: 5,
+          },
         },
       });
     }, 5);
@@ -153,6 +158,7 @@ function assertSubmitLatencyResult(result) {
     throw new Error("submit latency smoke did not submit the probe text");
   const durations = sample.durations || {};
   const marks = sample.marks || {};
+  const serverTiming = sample.serverTiming || {};
   const requiredDurations = [
     "optimisticRenderMs",
     "liveBusOpenMs",
@@ -182,6 +188,10 @@ function assertSubmitLatencyResult(result) {
     throw new Error("unexpected submit latency status " + sample.status);
   if (!sample.requestId)
     throw new Error("submit latency sample did not record requestId");
+  for (const key of ["targetResolveMs", "sendPayloadMs", "totalBeforeReplyMs"]) {
+    if (!Number.isFinite(serverTiming[key]))
+      throw new Error("missing submit latency server timing " + key);
+  }
 }
 
 if (require.main === module) {

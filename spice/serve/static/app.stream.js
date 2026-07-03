@@ -926,6 +926,7 @@ async function sendLanePayload(lane, payload, sourceLane = lane, options = {}) {
     }, latencyProbe);
     markLaneSubmitLatency(latencyProbe, "responseResolvedAt");
     const result = response.result || {};
+    latencyProbe.serverTiming = result.serverTiming || {};
     if (!isLaneOpen(lane)) {
       finishLaneSubmitLatencyProbe(latencyProbe, "closed");
       return;
