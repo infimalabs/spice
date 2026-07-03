@@ -916,6 +916,7 @@ def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
 def test_side_channel_working_state_suppresses_repeats_and_post_tool_omits(
     tmp_path, monkeypatch
 ):
+    monkeypatch.setattr(sidechannel, "agent_context_meter", lambda _repo: None)
     snapshot = wrap.WorkingStateSnapshot(
         claim_handle="METER-00000002",
         claim_phase="todo",
