@@ -361,8 +361,12 @@ class ServeTeamStore(
         config: TeamConfig,
         members: Iterable[str],
     ) -> TeamState:
-        resolved_team_id = team_id or f"team-{uuidlib.uuid4().hex[:TEAM_ID_HEX_CHARS]}"
         member_list = list(members)
+        if team_id is None:
+            reused = self._adopt_open_shell_team_locked(connection, config, member_list)
+            if reused is not None:
+                return reused
+        resolved_team_id = team_id or f"team-{uuidlib.uuid4().hex[:TEAM_ID_HEX_CHARS]}"
         connection.execute(
             "INSERT INTO teams (team_id, status, created_at, revision, "
             "config_revision, lifetime, speech_mode, selected_view, "
@@ -386,6 +390,50 @@ class ServeTeamStore(
             connection, "createTeam", resolved_team_id, {"members": member_list}
         )
         return self._team_state_locked(connection, resolved_team_id)
+
+    def _adopt_open_shell_team_locked(
+        self,
+        connection: sqlite3.Connection,
+        config: TeamConfig,
+        member_list: list[str],
+    ) -> TeamState | None:
+        # The ensure-open-team affordance keeps one member-less shell around
+        # so the operator can import an agent with a single click. A fresh
+        # team request adopts the oldest shell instead of minting a sibling,
+        # so shells never accumulate next to deliberately created teams.
+        row = connection.execute(
+            "SELECT teams.team_id FROM teams "
+            "LEFT JOIN memberships ON memberships.team_id = teams.team_id "
+            "WHERE teams.status = 'open' AND memberships.agent_id IS NULL "
+            "ORDER BY teams.created_at LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        shell_team_id = str(row["team_id"])
+        connection.execute(
+            "UPDATE teams SET lifetime = ?, speech_mode = ?, selected_view = ?, "
+            "shell_settings = ?, "
+            "config_revision = config_revision + 1 WHERE team_id = ?",
+            (
+                config.lifetime,
+                config.speech_mode,
+                config.selected_view,
+                json.dumps(config.shell_settings),
+                shell_team_id,
+            ),
+        )
+        self._replace_task_filters_locked(
+            connection, shell_team_id, config.task_filters
+        )
+        for agent_id in member_list:
+            self._assign_locked(connection, shell_team_id, agent_id)
+        self._record_event(
+            connection,
+            "createTeam",
+            shell_team_id,
+            {"members": member_list, "reusedOpenShell": True},
+        )
+        return self._team_state_locked(connection, shell_team_id)
 
     def close_team(self, team_id: str) -> int:
         with self.connect() as connection:
