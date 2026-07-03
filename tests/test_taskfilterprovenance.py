@@ -52,6 +52,7 @@ def test_drive_replace_path_preserves_auto_create_filter_for_gc(task_repo, monke
     handle = create.add(
         "Drive replace preserves provenance",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["replace path preserves auto source for empty-project gc"],
     )

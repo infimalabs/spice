@@ -336,7 +336,7 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
         (
             "Queued the follow-up.\n"
             "TASK title=Standalone follow-up | project=task.unit | "
-            "acceptance=Standalone task exists"
+            f"acceptance=Standalone task exists | origin=ack:{INBOX_KEY}"
         ),
         log,
         watchdog.MaximReminderGate(),
@@ -347,6 +347,7 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
     assert rows[0]["description"] == "Standalone follow-up"
     assert rows[0]["project"] == "task.unit"
     assert rows[0]["acceptance"] == "Standalone task exists"
+    assert rows[0]["origin"] == f"ack:{INBOX_KEY}"
     assert rows[0][config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
     handle = identity.render_handle(rows[0])
     assert handle in log.getvalue()
@@ -368,6 +369,51 @@ def test_supervised_standalone_task_directive_creates_task(task_repo, quiet_supe
         _task_backlog_note_feedback(),
     ]
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
+
+
+def test_supervised_standalone_task_without_origin_is_refused(
+    task_repo, quiet_supervisor
+):
+    """A TASK directive with no same-message ACK, no origin= field, and no
+    active claim has no provenance and must be refused with guidance."""
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        (
+            "Queued the follow-up.\n"
+            "TASK title=Rootless follow-up | project=task.unit | acceptance=nope"
+        ),
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    assert tw.export(["status:pending"]) == []
+    assert "task creation requires an origin" in log.getvalue()
+
+
+def test_supervised_ack_message_task_inherits_ack_origin(task_repo, quiet_supervisor):
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(body="capture this", priority=None, stop=False),
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        (
+            f"ACK {INBOX_KEY}: captured the request.\n"
+            "TASK title=Captured from steering | project=task.unit | "
+            "acceptance=Origin inherited from the ack"
+        ),
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    rows = tw.export(["status:pending"])
+    assert len(rows) == 1
+    assert rows[0]["origin"] == f"ack:{INBOX_KEY}"
 
 
 def test_supervised_standalone_task_batch_rejects_without_partial_creation(
@@ -410,6 +456,7 @@ def _claimed_task(title: str) -> str:
     handle = create.add(
         title,
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["steering lands on the active task"],
     )

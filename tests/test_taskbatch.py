@@ -125,7 +125,8 @@ def test_add_batch_creates_from_parsed_requests(task_repo):
     handles = create.add_batch(
         [
             "title=Created batch | project=task.unit | description=Batch body | "
-            "priority=low | acceptance=Batch creation still works"
+            "priority=low | acceptance=Batch creation still works | "
+            "origin=ack:20260101T000000000000Z"
         ]
     )
     row = identity.resolve(handles[0])
@@ -141,7 +142,8 @@ def test_add_batch_deferred_field_creates_waiting_task(task_repo):
     handles = create.add_batch(
         [
             "TASK title=Waiting batch | project=task.unit | "
-            "acceptance=Batch deferred until wake | deferred=true"
+            "acceptance=Batch deferred until wake | deferred=true | "
+            "origin=ack:20260101T000000000000Z"
         ]
     )
     row = identity.resolve(handles[0])
@@ -155,7 +157,8 @@ def test_add_batch_can_mark_cli_creation_surface(task_repo):
     handles = create.add_batch(
         [
             "title=CLI marked batch | project=task.unit | "
-            "acceptance=Batch task card source is durable"
+            "acceptance=Batch task card source is durable | "
+            "origin=ack:20260101T000000000000Z"
         ],
         creation_surface=config.TASK_CREATION_SURFACE_CLI,
     )
@@ -174,7 +177,8 @@ def test_add_batch_results_update_drive_task_filter_with_visible_route(task_repo
     results = create.add_batch_results(
         [
             "TASK title=Visible batch | project=task.batch | "
-            "acceptance=Batch creation updates routing"
+            "acceptance=Batch creation updates routing | "
+            "origin=ack:20260101T000000000000Z"
         ]
     )
     row = identity.resolve(results[0].handle)

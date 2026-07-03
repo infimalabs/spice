@@ -103,7 +103,15 @@ def test_task_ingest_creates_tasks_edges_and_annotations(task_repo, tmp_path, ca
         encoding="utf-8",
     )
     args = build_parser().parse_args(
-        ["task", "ingest", str(source), "--project", "task.unit"]
+        [
+            "task",
+            "ingest",
+            str(source),
+            "--project",
+            "task.unit",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
     )
     args.backend = str(config.backend_root())
 
@@ -134,11 +142,13 @@ def test_task_ledger_exports_dependency_closure(task_repo, capsys):
     child = create.add(
         "Ledger child",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         acceptance=["child accepted"],
     )
     parent = create.add(
         "Ledger parent",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         acceptance=["parent accepted"],
         after=[child],
     )
@@ -171,7 +181,7 @@ def test_canonical_ingest_preserves_absent_priority(task_repo):
         ),
     )
 
-    output = markdown.create_task_dag(dag)
+    output = markdown.create_task_dag(dag, origin="ack:20260101T000000000000Z")
     handle = next(
         line.split()[1] for line in output.splitlines() if line.startswith("root ")
     )

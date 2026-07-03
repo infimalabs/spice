@@ -535,6 +535,7 @@ def adopt(
     priority: str = config.DEFAULT_PRIORITY,
     complete: bool = False,
     validation: list[str] | None = None,
+    origin: str | None = None,
 ) -> str:
     """Fold orphan commit(s) into a task and capture them through the normal flow.
 
@@ -561,10 +562,10 @@ def adopt(
     actor = tw.current_actor()
     _require_single_active_slot(actor, action="task adopt")
     if handle is not None:
-        if title or project or description:
+        if title or project or description or origin:
             raise SpiceError(
                 "task adopt takes either an existing <handle> or new-task fields "
-                "(--title/--project/--description), not both"
+                "(--title/--project/--description/--origin), not both"
             )
         row = identity.resolve(handle)
         _require_pending(row, "adopt")
@@ -596,6 +597,7 @@ def adopt(
             # Claim below without prepare_for_claim; the orphan commits must not
             # be fast-forwarded away before the claim records them.
             claim=False,
+            origin=origin,
         )
         row = identity.resolve(created)
     handle_text = identity.render_handle(row)

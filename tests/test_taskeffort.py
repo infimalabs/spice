@@ -58,6 +58,7 @@ def test_phase_effort_windows_split_real_task_lifecycle_phases(task_repo, monkey
     handle = create.add(
         "Measure two effort phases",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         flow=["todo", "verify", "review"],
         acceptance=["phase effort windows split phases"],
     )
@@ -150,6 +151,7 @@ def test_phase_effort_windows_mark_partial_lifecycle_segments(task_repo):
     handle = create.add(
         "Mark partial effort phases",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         flow=["todo", "verify", "review"],
         acceptance=["partial effort windows are marked"],
     )
@@ -346,6 +348,7 @@ def test_metric_series_phase_effort_matches_task_effort_api(task_repo, monkeypat
     handle = create.add(
         "Expose effort metric series",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         flow=["todo", "verify", "review"],
         acceptance=["phase effort appears in serve metrics"],
     )

@@ -34,6 +34,7 @@ def test_deferred_creation_is_hidden_from_allocator_until_woken(task_repo):
     handle = create.add(
         "Deferred allocator task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         deferred=True,
     )

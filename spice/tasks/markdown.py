@@ -106,15 +106,19 @@ def ingest_path(
     *,
     project: str | None,
     priority: str = config.DEFAULT_PRIORITY,
+    origin: str | None = None,
     creation_surface: str | None = None,
 ) -> str:
     text = Path(path).read_text(encoding="utf-8")
     dag = parse_markdown(text, default_project=project, default_priority=priority)
-    return create_task_dag(dag, creation_surface=creation_surface)
+    return create_task_dag(dag, origin=origin, creation_surface=creation_surface)
 
 
 def create_task_dag(
-    dag: MarkdownTaskDag, *, creation_surface: str | None = None
+    dag: MarkdownTaskDag,
+    *,
+    origin: str | None = None,
+    creation_surface: str | None = None,
 ) -> str:
     _validate_dag(dag)
     nodes = {node.id: node for node in dag.nodes}
@@ -143,6 +147,9 @@ def create_task_dag(
             flow=list(node.flow) or None,
             after=after_handles,
             acceptance=list(node.acceptance),
+            # The whole DAG shares the ingest origin: one provenance root for
+            # one imported document.
+            origin=origin,
             creation_surface=creation_surface,
         )
         ops.note(handle, f"{MARKDOWN_ID_PREFIX} {node.id}")
