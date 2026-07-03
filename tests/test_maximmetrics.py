@@ -322,7 +322,7 @@ def test_watchdog_records_gate_suppressed_metrics(tmp_path, monkeypatch):
         bag_name="alpha",
         driver_name="codex",
         fire_count=2,
-        judged_confirmed_count=2,
+        judged_confirmed_count=1,
         judged_rejected_count=0,
         gate_suppressed_count=1,
         published_count=1,
