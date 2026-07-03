@@ -1,10 +1,8 @@
 """Supervise agent stdout: archive ACKs and police prose against maxims.
 
 The supervisor tees the agent's `exec` stdout into the log while a scanner
-reassembles each assistant message: marker drivers scan stdout directly, and
-json-stdout drivers tail the driver transcript file instead because the claude
-CLI drops post-thinking text blocks from its stream-json stdout (see
-TranscriptTailScanner). Every message gets two treatments:
+keyed on the driver's section markers reassembles each assistant message.
+Every message gets two treatments:
 
 * ACK'd inbox keys are archived immediately (the operator sees inbox items retire
   the moment the agent acknowledges it);
@@ -20,7 +18,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from threading import Event, Thread
+from threading import Thread
 from typing import Callable, Protocol, TextIO, cast
 
 from spice.agent.driver import AgentDriver, driver_for
@@ -135,30 +133,20 @@ def _tee_agent_stdout(
         return
     with log_path.open("a", encoding="utf-8", errors="replace") as log_handle:
         reminder_gate = MaximReminderGate()
-        driver = driver_for(repo_root)
         scanner = make_stdout_scanner(
-            driver,
+            driver_for(repo_root),
             lambda text: process_supervised_assistant_message(
                 repo_root, text, log_handle, reminder_gate
             ),
             on_compaction=reminder_gate.note_compaction,
         )
-        tail: TranscriptTailScanner | None = None
-        if driver.stdout_format == "json":
-            tail = TranscriptTailScanner(driver, cast(JsonStdoutScanner, scanner))
         try:
             for line in stdout:
                 log_handle.write(line)
                 log_handle.flush()
-                if tail is None:
-                    scanner.process_line(line)
-                else:
-                    tail.observe_stdout_line(line)
+                scanner.process_line(line)
         finally:
-            if tail is not None:
-                tail.close()
-            else:
-                scanner.close()
+            scanner.close()
             try:
                 discarded = discard_pending_maxim_reminders(repo_root, reminder_gate)
             except Exception as exc:  # pragma: no cover - defensive supervisor logging
@@ -419,96 +407,6 @@ class JsonStdoutScanner:
 
     def close(self) -> None:
         return
-
-
-class TranscriptTailScanner:
-    """Feed the json scanner from the driver's transcript file, not stdout.
-
-    The claude CLI omits assistant text blocks that follow thinking blocks in
-    the same message from its stream-json stdout — including the
-    --include-partial-messages delta stream — so a stdout-fed scanner never
-    sees most mid-turn prose: ACK archival, inline task capture, and maxim
-    judging all starve until the turn-final message. The transcript file
-    carries every assistant message complete, in the schema the normalizer
-    already speaks, so json-stdout drivers scan the transcript and keep
-    stdout only for the log tee.
-
-    The tail arms from the first stdout line carrying a `session_id`. A
-    transcript that already exists at arm time is a resumed session and is
-    opened at its end so history is not replayed; one that appears later is
-    fresh and is read from the start. Remaining lines drain after stop.
-    """
-
-    def __init__(
-        self,
-        driver: AgentDriver,
-        scanner: JsonStdoutScanner,
-        *,
-        poll_seconds: float = 0.5,
-    ) -> None:
-        self._driver = driver
-        self._scanner = scanner
-        self._poll_seconds = poll_seconds
-        self._stop = Event()
-        self._ready = Event()
-        self._thread: Thread | None = None
-
-    def observe_stdout_line(self, line: str) -> None:
-        if self._thread is not None:
-            return
-        try:
-            raw = json.loads(line)
-        except json.JSONDecodeError:
-            return
-        if not isinstance(raw, dict):
-            return
-        session_id = raw.get("session_id")
-        if not isinstance(session_id, str) or not session_id:
-            return
-        self._thread = Thread(
-            target=self._tail,
-            args=(session_id,),
-            name=f"spice-transcript-tail-{session_id[:8]}",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def close(self) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=10)
-        self._scanner.close()
-
-    def _tail(self, session_id: str) -> None:
-        path = self._driver.find_session_transcript(session_id)
-        skip_existing = path is not None
-        while path is None:
-            if self._stop.wait(self._poll_seconds):
-                return
-            path = self._driver.find_session_transcript(session_id)
-        try:
-            handle = path.open("r", encoding="utf-8", errors="replace")
-        except OSError:
-            return
-        with handle:
-            if skip_existing:
-                handle.seek(0, 2)
-            self._ready.set()
-            while True:
-                position = handle.tell()
-                line = handle.readline()
-                if line.endswith("\n"):
-                    self._scanner.process_line(line)
-                    continue
-                if line and self._stop.is_set():
-                    # The writer is gone; a final unterminated line is complete.
-                    self._scanner.process_line(line)
-                    return
-                handle.seek(position)
-                if self._stop.wait(self._poll_seconds):
-                    for remaining in handle:
-                        self._scanner.process_line(remaining)
-                    return
 
 
 class AgentStdoutMessageScanner:
