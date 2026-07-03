@@ -6,6 +6,7 @@ import pytest
 
 from spice import config
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
+from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.configcli import handle_config
 
@@ -107,6 +108,44 @@ def test_config_agent_reveals_shipped_defaults_without_config(
         "agent worktree driver=- model=- effort=-\n"
         "agent effective driver=codex model=gpt-5.5 effort=xhigh\n"
     )
+
+
+def test_config_system_help_and_parser_contract():
+    parser = build_parser()
+    args = parser.parse_args(["config", "system"])
+    subparsers = next(
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    config_help = subparsers.choices["config"].format_help()
+
+    assert args.config_action == "system"
+    assert args.func == handle_config
+    assert "system" in config_help
+    assert "Print the effective agent configuration." in config_help
+
+
+def test_config_system_renders_effective_agent_config_read_only(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
+        encoding="utf-8",
+    )
+
+    result = handle_config(build_parser().parse_args(["config", "system"]))
+
+    assert result == 0
+    assert (
+        capsys.readouterr().out
+        == "agent project driver=- model=gpt-project effort=low\n"
+        "agent worktree driver=- model=- effort=-\n"
+        "agent effective driver=codex model=gpt-project effort=low\n"
+    )
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["pyproject.toml"]
 
 
 def test_config_agent_writes_project_scope(tmp_path, monkeypatch, capsys):

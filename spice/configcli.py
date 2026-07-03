@@ -19,6 +19,12 @@ def configure_config_parser(subparsers: Any) -> None:
     show = actions.add_parser("show", help="Print the current configuration.")
     show.set_defaults(func=handle_config)
 
+    system = actions.add_parser(
+        "system",
+        help="Print the effective agent configuration.",
+    )
+    system.set_defaults(func=handle_config)
+
     say = actions.add_parser("say", help="Configure speech playback.")
     say.add_argument(
         "--backend",
@@ -86,6 +92,11 @@ def handle_config(args: argparse.Namespace) -> int:
 
 def _handle_show(args: argparse.Namespace, repo_root: Path) -> int:
     print(json.dumps(config.config_overview(repo_root), indent=2, sort_keys=True))
+    return 0
+
+
+def _handle_system(args: argparse.Namespace, repo_root: Path) -> int:
+    print(_agent_config_summary(repo_root))
     return 0
 
 
@@ -173,6 +184,7 @@ def _handle_personality(args: argparse.Namespace, repo_root: Path) -> int:
 
 _CONFIG_ACTIONS = {
     "show": _handle_show,
+    "system": _handle_system,
     "say": _handle_say,
     "judge": _handle_judge,
     "agent": _handle_agent,
