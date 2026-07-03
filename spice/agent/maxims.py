@@ -24,6 +24,8 @@ from spice.agent.driver import ALL_DRIVERS
 from spice.config import configured_judge_bin
 from spice.errors import SpiceError
 from spice.flexstate import load_sticky_items, save_sticky_items
+from spice.mail.ackstate import AckStateRecord, ack_state_records
+from spice.mail.inbox import parse_inbox_payload
 from spice.paths import repo_root_from_cwd
 from spice.repocfg import maxims_table, string_list
 
@@ -55,6 +57,75 @@ class MaximBag:
     words: frozenset[str]
     message: str
     drivers: frozenset[str] = DEFAULT_DRIVER_SCOPE
+
+
+@dataclass(frozen=True)
+class MaximProposalEvidence:
+    field: str
+    text: str
+
+
+@dataclass(frozen=True)
+class MaximProposalSourceRecord:
+    key: str
+    inbox_name: str
+    steering_text: str
+    ack_text: str
+    ack_content: str
+    disposition: str
+    archived_at: float
+    evidence: tuple[MaximProposalEvidence, ...]
+
+
+def maxim_proposal_source_records(
+    repo_root: str | Path,
+) -> tuple[MaximProposalSourceRecord, ...]:
+    """Return normalized ACK ledger records useful for maxim proposal mining."""
+    records: list[MaximProposalSourceRecord] = []
+    for record in ack_state_records(repo_root):
+        source = _maxim_proposal_source_record(record)
+        if source is not None:
+            records.append(source)
+    return tuple(records)
+
+
+def _maxim_proposal_source_record(
+    record: AckStateRecord,
+) -> MaximProposalSourceRecord | None:
+    steering_text = _normalize_proposal_text(parse_inbox_payload(record.text).body)
+    ack_text = _normalize_proposal_text(record.ack_text)
+    ack_content = _normalize_proposal_text(record.ack_content)
+    evidence = tuple(
+        item
+        for item in (
+            _maxim_proposal_evidence("steering_text", steering_text),
+            _maxim_proposal_evidence("ack_text", ack_text),
+            _maxim_proposal_evidence("ack_content", ack_content),
+        )
+        if item is not None
+    )
+    if not evidence:
+        return None
+    return MaximProposalSourceRecord(
+        key=record.key,
+        inbox_name=record.inbox_name,
+        steering_text=steering_text,
+        ack_text=ack_text,
+        ack_content=ack_content,
+        disposition=record.disposition,
+        archived_at=record.archived_at,
+        evidence=evidence,
+    )
+
+
+def _maxim_proposal_evidence(field: str, text: str) -> MaximProposalEvidence | None:
+    if not text:
+        return None
+    return MaximProposalEvidence(field=field, text=text)
+
+
+def _normalize_proposal_text(value: str) -> str:
+    return " ".join(str(value or "").split())
 
 
 # Built-in maxims keyed by a stable bag name. Bags declare every supported

@@ -18,9 +18,11 @@ from spice.agent.maxims import (
     ALL_MAXIM,
     DEFAULT_PROMPT_TEMPLATE,
     META_MAXIMS,
+    MaximProposalSourceRecord,
     builtin_maxim,
     disabled_maxim_bag_names,
     evaluate_maxim,
+    maxim_proposal_source_records,
     resolved_maxim_bags,
     resolve_maxim,
     set_maxim_bag_disabled,
@@ -101,6 +103,12 @@ def configure_maxim_parser(subparsers: Any) -> None:
         help="Show durable maxim metric counts.",
     )
     report.set_defaults(func=run_maxim_report_cli)
+
+    sources = actions.add_parser(
+        "sources",
+        help="Show ACK ledger source records available for maxim proposal mining.",
+    )
+    sources.set_defaults(func=run_maxim_sources_cli)
 
     disable = actions.add_parser(
         "disable",
@@ -262,6 +270,14 @@ def run_maxim_report_cli(_args: argparse.Namespace) -> int:
     return 0
 
 
+def run_maxim_sources_cli(_args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        raise SpiceError("not inside a git worktree")
+    print(render_maxim_sources(maxim_proposal_source_records(repo_root)))
+    return 0
+
+
 def run_maxim_disable_cli(args: argparse.Namespace) -> int:
     repo_root = repo_root_from_cwd()
     if repo_root is None:
@@ -355,6 +371,17 @@ def render_maxim_report(repo_root: Path) -> str:
     return "\n".join([f"maxim metric events: {len(records)}", *rendered])
 
 
+def render_maxim_sources(records: tuple[MaximProposalSourceRecord, ...]) -> str:
+    if not records:
+        return "maxim proposal sources: 0"
+    rows = ["maxim proposal sources: " + str(len(records)), "key disposition evidence"]
+    rows.extend(
+        f"{record.key} {record.disposition} {_render_source_evidence(record)}"
+        for record in records
+    )
+    return "\n".join(rows)
+
+
 def _maxim_report_buckets(
     counts: list[MaximMetricCounts],
 ) -> dict[tuple[str, str, str], _MaximReportBucket]:
@@ -405,6 +432,11 @@ def _format_percent(numerator: int, denominator: int) -> str:
     if denominator <= 0:
         return "-"
     return f"{numerator / denominator:.0%}"
+
+
+def _render_source_evidence(record: MaximProposalSourceRecord) -> str:
+    fields = [item.field for item in record.evidence]
+    return ",".join(fields) if fields else "-"
 
 
 def _render_trigger_key(key: str) -> str:
