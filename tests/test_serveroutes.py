@@ -668,6 +668,14 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
             "query": {"limit": 9, "before": "oldest", "threadId": "thread"},
         }
     )
+    send_timing = connection.sent[0]["result"].pop("serverTiming")
+    assert list(send_timing) == [
+        "targetResolveMs",
+        "sendPayloadMs",
+        "totalBeforeReplyMs",
+    ]
+    assert all(isinstance(value, float) for value in send_timing.values())
+    assert all(value >= 0.0 for value in send_timing.values())
     assert connection.sent == [
         {
             "type": "lane.sendResult",
