@@ -520,6 +520,57 @@ def test_bare_ack_annotation_falls_back_to_steering_body(task_repo, quiet_superv
     ), notes
 
 
+def test_review_feedback_ack_never_mirrors_to_active_task(task_repo, quiet_supervisor):
+    """The annotation mirror captures operator steering only; review facts
+    already live on the task via review_* UDAs and annotations."""
+    handle = _claimed_task("Active work during review ack")
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(
+            body="review feedback: tighten the tests",
+            priority="review",
+            stop=False,
+        ),
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        f"ACK {INBOX_KEY}: review feedback absorbed.",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    row = identity.resolve(handle)
+    assert collect_inbox_items(task_repo) == []
+    assert [item.name for item in collect_acked_inbox_items(task_repo)] == [
+        f"{INBOX_KEY}.txt"
+    ]
+    assert all(not note.startswith("ack ") for note in _annotations(row))
+
+
+def test_maxim_reminder_ack_never_mirrors_to_active_task(task_repo, quiet_supervisor):
+    handle = _claimed_task("Active work during maxim ack")
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        "[MAXIM] prefer one obvious seam over two clever ones\n",
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        f"ACK {INBOX_KEY}: maxim noted.",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    row = identity.resolve(handle)
+    assert collect_inbox_items(task_repo) == []
+    assert all(not note.startswith("ack ") for note in _annotations(row))
+
+
 def test_retired_ack_without_active_claim_skips_annotation(task_repo, quiet_supervisor):
     write_inbox_item(
         task_repo,

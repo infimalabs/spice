@@ -19,7 +19,7 @@ import json
 import subprocess
 from pathlib import Path
 from threading import Thread
-from typing import Callable, Protocol, TextIO, cast
+from typing import Any, Callable, Protocol, TextIO, cast
 
 from spice.agent.driver import AgentDriver, driver_for
 from spice.agent.identity import ambient_thread_id
@@ -301,7 +301,11 @@ def _annotate_active_task_with_acks(
     log_handle: TextIO,
 ) -> None:
     from spice.mail.acks import ack_content_by_key, extract_ack_segments_from_text
-    from spice.mail.inbox import inbox_item_key_aliases
+    from spice.mail.inbox import (
+        AUTOMATED_GUIDANCE_PRIORITIES,
+        inbox_item_key_aliases,
+        parse_inbox_payload,
+    )
     from spice.tasks import identity as task_identity
     from spice.tasks import ops, tw
 
@@ -317,25 +321,39 @@ def _annotate_active_task_with_acks(
         return
     uuid = task_identity.uuid_of(claim)
     content_map = ack_content_by_key(extract_ack_segments_from_text(message_text))
+    records = _acked_state_records_by_aliases(repo_root, archived_keys)
     for key in archived_keys:
         aliases = inbox_item_key_aliases(key)
+        record = records.get(key)
+        payload = parse_inbox_payload(record.text) if record is not None else None
+        # The mirror captures operator steering only. Review feedback already
+        # lives on the task (review_* UDAs and annotations) and maxim
+        # reminders are ambient policy, not task-scoped amendments.
+        if payload is not None and payload.priority in AUTOMATED_GUIDANCE_PRIORITIES:
+            continue
         content = next(
             (content_map[alias] for alias in aliases if content_map.get(alias)), ""
         )
         if not content:
-            content = _acked_steering_body(repo_root, aliases)
+            content = payload.body.strip() if payload is not None else ""
         content = " ".join(content.split())[:ACK_ANNOTATION_CONTENT_LIMIT]
-        ops.annotate(uuid, f"ack {key}: {content}")
+        ops.annotate(uuid, f"ack {key}: {content or '(acknowledged)'}")
 
 
-def _acked_steering_body(repo_root: Path, aliases: set[str]) -> str:
+def _acked_state_records_by_aliases(
+    repo_root: Path, archived_keys: list[str]
+) -> dict[str, Any]:
     from spice.mail.ackstate import ack_state_records
-    from spice.mail.inbox import inbox_item_key_aliases, parse_inbox_payload
+    from spice.mail.inbox import inbox_item_key_aliases
 
+    wanted = {key: inbox_item_key_aliases(key) for key in archived_keys}
+    found: dict[str, Any] = {}
     for record in ack_state_records(repo_root):
-        if inbox_item_key_aliases(record.key) & aliases:
-            return parse_inbox_payload(record.text).body.strip()
-    return "(acknowledged)"
+        record_aliases = inbox_item_key_aliases(record.key)
+        for key, aliases in wanted.items():
+            if key not in found and record_aliases & aliases:
+                found[key] = record
+    return found
 
 
 def publish_supervisor_feedback(
