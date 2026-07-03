@@ -272,6 +272,7 @@
   object-fit: contain;
 }
 .messages article.image-only .message-body p.message-image-stack {
+  justify-content: center;
   margin: 0;
 }
 .messages article.image-only .message-image {

@@ -218,6 +218,9 @@ def test_static_messages_use_responsive_fill_rows():
     )
     stack_image_end = css.index("}", stack_image_start)
     stack_image_rule = css[stack_image_start:stack_image_end]
+    image_only_stack_rule = _between(
+        css, ".messages article.image-only .message-body p.message-image-stack {", "}"
+    )
 
     assert "--message-card-max-width: 30rem;" in messages_rule
     assert "--message-card-min-width: 20rem;" in messages_rule
@@ -242,6 +245,7 @@ def test_static_messages_use_responsive_fill_rows():
     assert "object-fit: contain;" in stack_image_rule
     assert ".messages article.image-only .message-image img" in css
     assert "max-height: 136px" in css
+    assert "justify-content: center;" in image_only_stack_rule
     assert ".history-sentinel {\n  flex: 1 0 100%;" in css
     assert 'if (item.image_only) article.classList.add("image-only");' in app_render
 
