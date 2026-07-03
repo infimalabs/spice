@@ -64,9 +64,11 @@ def configure_config_parser(subparsers: Any) -> None:
     )
     agent.add_argument("--model", help="Model override for agent launches.")
     agent.add_argument("--effort", help="Reasoning effort for agent launches.")
+    from spice.agent.driver import driver_choices
+
     agent.add_argument(
         "--driver",
-        choices=config.AGENT_DRIVER_CHOICES,
+        choices=driver_choices(),
         help="Agent CLI this worktree drives when SPICE_AGENT_DRIVER is unset.",
     )
     agent.add_argument(

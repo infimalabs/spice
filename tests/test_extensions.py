@@ -9,6 +9,14 @@ from pathlib import Path
 
 import pytest
 
+from spice import config
+from spice.agent.driver import (
+    SPICE_AGENT_DRIVER_ENV,
+    driver_choices,
+    driver_for,
+    select_driver,
+)
+from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_DRIVER_ENTRY_POINT_GROUP,
@@ -109,6 +117,51 @@ def test_merge_builtin_and_extension_entry_points_keeps_builtins_first(tmp_path)
     assert tuple(merged) == ("builtin", "codex", "toy")
 
 
+def test_agent_driver_registry_loads_toy_driver_from_fixture_wheel(
+    tmp_path, monkeypatch
+):
+    wheel = _build_fixture_wheel(
+        tmp_path,
+        entry_points={
+            SPICE_DRIVER_ENTRY_POINT_GROUP: {
+                "toy": "spiceextensiondriver:TOY_DRIVER",
+            }
+        },
+    )
+    monkeypatch.syspath_prepend(str(wheel))
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+
+    config.update_section(
+        tmp_path,
+        config.AGENT_KEY,
+        {config.AGENT_DRIVER_KEY: "toy"},
+    )
+    parser_args = build_parser().parse_args(["config", "agent", "--driver", "toy"])
+
+    assert driver_choices() == ("claude", "codex", "toy")
+    assert select_driver("toy").name == "toy"
+    assert driver_for(tmp_path).name == "toy"
+    assert parser_args.driver == "toy"
+    with pytest.raises(RuntimeError) as exc_info:
+        select_driver("missing")
+    assert "expected one of: claude, codex, toy" in str(exc_info.value)
+
+
+def test_agent_driver_registry_rejects_builtin_shadow_from_fixture_wheel(
+    tmp_path, monkeypatch
+):
+    wheel = _build_fixture_wheel(tmp_path)
+    monkeypatch.syspath_prepend(str(wheel))
+
+    with pytest.raises(SpiceError) as exc_info:
+        select_driver("toy")
+
+    message = str(exc_info.value)
+    assert SPICE_DRIVER_ENTRY_POINT_GROUP in message
+    assert "codex" in message
+    assert "shadows built-in" in message
+
+
 def _fixture_distribution(tmp_path: Path) -> metadata.Distribution:
     wheel = _build_fixture_wheel(tmp_path)
     distributions = list(metadata.distributions(path=[str(wheel)]))
@@ -116,7 +169,9 @@ def _fixture_distribution(tmp_path: Path) -> metadata.Distribution:
     return distributions[0]
 
 
-def _build_fixture_wheel(tmp_path: Path) -> Path:
+def _build_fixture_wheel(
+    tmp_path: Path, *, entry_points: dict[str, dict[str, str]] | None = None
+) -> Path:
     pyproject = tomllib.loads(
         (FIXTURE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
@@ -152,7 +207,7 @@ def _build_fixture_wheel(tmp_path: Path) -> Path:
             archive,
             records,
             f"{dist_info}/entry_points.txt",
-            _entry_points_text(project["entry-points"]).encode(),
+            _entry_points_text(entry_points or project["entry-points"]).encode(),
         )
         archive.writestr(f"{dist_info}/RECORD", _record_text(records))
     return wheel

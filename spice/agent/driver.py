@@ -35,6 +35,7 @@ from typing import Any, Callable, Mapping, overload
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_DRIVER_ENTRY_POINT_GROUP,
+    SpiceExtensionEntryPoint,
     merge_builtin_and_extension_entry_points,
 )
 from spice.paths import atomic_write_json, state_dir
@@ -1012,7 +1013,7 @@ _DRIVERS: dict[str, AgentDriver] = {
 }
 
 
-def driver_entry_point_registry() -> dict[str, object]:
+def driver_entry_point_registry() -> dict[str, AgentDriver | SpiceExtensionEntryPoint]:
     return merge_builtin_and_extension_entry_points(
         DRIVER_ENTRY_POINT_GROUP,
         _DRIVERS,
@@ -1020,6 +1021,17 @@ def driver_entry_point_registry() -> dict[str, object]:
 
 
 ALL_DRIVERS: tuple[AgentDriver, ...] = (CODEX_DRIVER, CLAUDE_DRIVER)
+
+
+def driver_registry() -> dict[str, AgentDriver]:
+    return {
+        name: _load_driver_entry(name, entry)
+        for name, entry in driver_entry_point_registry().items()
+    }
+
+
+def driver_choices() -> tuple[str, ...]:
+    return tuple(sorted(driver_entry_point_registry()))
 
 
 def select_driver(name: str = "") -> AgentDriver:
@@ -1057,8 +1069,8 @@ def driver_for(repo_root: Path | None) -> AgentDriver:
 
 
 def driver_for_transcript(path: Path) -> AgentDriver:
-    """The driver whose transcript layout owns `path` (Codex or Claude)."""
-    for driver in ALL_DRIVERS:
+    """The driver whose transcript layout owns `path`."""
+    for driver in driver_registry().values():
         if driver.owns_transcript(path):
             return driver
     return CODEX_DRIVER
@@ -1073,13 +1085,35 @@ def _configured_driver_name(repo_root: Path | None) -> str:
 def _driver_named(name: str, *, source: str) -> AgentDriver:
     if not name:
         return CODEX_DRIVER
+    registry = driver_entry_point_registry()
     try:
-        return _DRIVERS[name]
+        return _load_driver_entry(name, registry[name])
     except KeyError as exc:
-        expected = ", ".join(sorted(_DRIVERS))
+        expected = ", ".join(sorted(registry))
         raise RuntimeError(
             f"unknown agent driver {name!r} from {source}; expected one of: {expected}"
         ) from exc
+
+
+def _load_driver_entry(
+    name: str, entry: AgentDriver | SpiceExtensionEntryPoint
+) -> AgentDriver:
+    if isinstance(entry, AgentDriver):
+        return entry
+    loaded = entry.load()
+    if not isinstance(loaded, AgentDriver):
+        raise SpiceError(
+            f"extension entry point group {entry.group!r} entry {entry.name!r} "
+            f"from {entry.distribution!r} loaded {type(loaded).__name__}; "
+            "expected AgentDriver"
+        )
+    if loaded.name != name:
+        raise SpiceError(
+            f"extension entry point group {entry.group!r} entry {entry.name!r} "
+            f"from {entry.distribution!r} loaded driver named {loaded.name!r}; "
+            "entry point name and driver name must match"
+        )
+    return loaded
 
 
 DRIVER: AgentDriver = select_driver()
