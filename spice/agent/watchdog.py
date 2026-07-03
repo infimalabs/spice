@@ -61,17 +61,18 @@ GENERATED_TOOL_OUTPUT_BOUNDARY_PREFIXES = (
 class MaximReminderGate:
     """Dedupe reminders within one compaction epoch.
 
-    The same violation body publishes at most once until the agent's context
+    The same reminder key publishes at most once until the agent's context
     compacts; after a compaction the agent has lost the earlier reminder, so
-    it becomes eligible again. The key is the final inbox body rather than an
-    individual maxim id, so a new combined reminder can publish even if one of
-    its maxims appeared in an earlier reminder.
+    it becomes eligible again. The key is derived from the triggered maxim bags
+    before judging, while cleanup stores the final inbox body separately so it
+    only discards reminders whose file text still matches this supervisor's
+    rendered reminder.
     """
 
     def __init__(self) -> None:
         self._compaction_index = 0
         self._sent: dict[str, int] = {}
-        self._published: dict[Path, str] = {}
+        self._published: dict[Path, tuple[str, str]] = {}
 
     def note_compaction(self) -> None:
         self._compaction_index += 1
@@ -79,12 +80,15 @@ class MaximReminderGate:
     def should_publish(self, reminder_key: str) -> bool:
         return self._sent.get(reminder_key) != self._compaction_index
 
-    def mark_sent(self, reminder_key: str, path: Path) -> None:
+    def mark_sent(self, reminder_key: str, path: Path, expected_text: str) -> None:
         self._sent[reminder_key] = self._compaction_index
-        self._published[path] = reminder_key
+        self._published[path] = (reminder_key, expected_text)
 
     def published_reminders(self) -> tuple[tuple[Path, str], ...]:
-        return tuple(self._published.items())
+        return tuple(
+            (path, expected_text)
+            for path, (_, expected_text) in self._published.items()
+        )
 
     def forget_published(self, paths: set[Path]) -> None:
         for path in paths:
@@ -471,6 +475,7 @@ def publish_maxim_hits_as_inbox(
     hits = triggered_maxims([statement_text], repo_root=repo_root)
     if not hits:
         return []
+    reminder_key = _maxim_reminder_key(hits)
     violations = [
         hit
         for hit in hits
@@ -479,10 +484,10 @@ def publish_maxim_hits_as_inbox(
     if not violations:
         return []
     body = _maxim_inbox_body(violations)
-    if not reminder_gate.should_publish(body):
+    if not reminder_gate.should_publish(reminder_key):
         return []
     path = write_inbox_item(repo_root, None, body)
-    reminder_gate.mark_sent(body, path)
+    reminder_gate.mark_sent(reminder_key, path, body)
     paths = [path]
     return paths
 
@@ -535,6 +540,14 @@ def _is_generated_tool_output_boundary(line: str) -> bool:
 def _maxim_inbox_body(hits: list[MaximBag]) -> str:
     reminders = dict.fromkeys(_one_line_maxim(hit.message) for hit in hits)
     return " ".join([WATCHDOG_REMINDER_PREFIX, *reminders]) + "\n"
+
+
+def _maxim_reminder_key(hits: list[MaximBag]) -> str:
+    return json.dumps(
+        [(hit.name, hit.message) for hit in hits],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
 
 
 def _one_line_maxim(maxim: str) -> str:

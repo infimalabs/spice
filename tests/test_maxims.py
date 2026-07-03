@@ -239,6 +239,31 @@ def test_maxim_publish_suppression_uses_in_memory_gate_not_pending_file_scan(
     assert collect_inbox_items(repo) == []
 
 
+def test_maxim_reminder_gate_stores_rendered_body_separate_from_key(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    gate = watchdog.MaximReminderGate()
+    reminder_key = "prejudge:first+second"
+    body = "[MAXIM] FIRST reminder. SECOND reminder.\n"
+    path = write_inbox_item(repo, None, body)
+
+    gate.mark_sent(reminder_key, path, body)
+
+    assert not gate.should_publish(reminder_key)
+    assert gate.should_publish(body)
+    assert gate.published_reminders() == ((path, body),)
+
+    discarded = watchdog.discard_pending_maxim_reminders(repo, gate)
+
+    assert discarded == [path]
+    assert collect_inbox_items(repo) == []
+    assert gate.published_reminders() == ()
+    assert not gate.should_publish(reminder_key)
+
+    gate.note_compaction()
+
+    assert gate.should_publish(reminder_key)
+
+
 def test_stdout_supervisor_discards_its_pending_maxim_reminders_on_shutdown(
     tmp_path, monkeypatch
 ):
