@@ -12,6 +12,11 @@ let liveBusReconnectTimer = null;
 let liveBusReconnectAttempt = 0;
 let liveBusLastInboundAt = 0;
 let liveBusHasConnected = false;
+const laneSubmitLatencySamples = [];
+const laneSubmitLatencySampleLimit = 25;
+if (typeof window !== "undefined")
+  /** @type {any} */ (window).__spiceSubmitLatencySamples =
+    laneSubmitLatencySamples;
 
 function liveBusUrl() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -123,13 +128,20 @@ function rejectLiveBusRequests(reason) {
   liveBusPendingRequests.clear();
 }
 
-async function liveBusRequest(type, fields = {}) {
+async function liveBusRequest(type, fields = {}, timing = null) {
   const requestId = "bus-" + ++liveBusRequestSequence;
+  if (timing) {
+    timing.requestId = requestId;
+    markLaneSubmitLatency(timing, "requestCreatedAt");
+  }
   const response = new Promise((resolve, reject) => {
-    liveBusPendingRequests.set(requestId, { resolve, reject });
+    liveBusPendingRequests.set(requestId, { resolve, reject, timing });
   });
   try {
+    markLaneSubmitLatency(timing, "liveBusConnectStartAt");
     const socket = await connectLiveBus();
+    markLaneSubmitLatency(timing, "liveBusConnectReadyAt");
+    markLaneSubmitLatency(timing, "liveBusFrameSentAt");
     socket.send(JSON.stringify({ ...fields, type, requestId }));
   } catch (error) {
     liveBusPendingRequests.delete(requestId);
@@ -145,6 +157,7 @@ async function handleLiveBusMessage(data) {
     : null;
   if (pending) {
     liveBusPendingRequests.delete(message.requestId);
+    markLaneSubmitLatency(pending.timing, "liveBusResponseReceivedAt");
     if (message.type === "bus.error") pending.reject(new Error(message.error));
     else pending.resolve(message);
     return;
@@ -895,31 +908,111 @@ function enqueueSend(lane, payload, sourceLane = lane, options = {}) {
     setLaneTransientStatus(sourceLane, "send already in progress");
     return;
   }
+  const latencyProbe = startLaneSubmitLatencyProbe(lane, payload);
   beginLanePendingSubmission(lane);
-  sendLanePayload(lane, payload, sourceLane, options);
+  markLaneSubmitLatency(latencyProbe, "optimisticRenderedAt");
+  sendLanePayload(lane, payload, sourceLane, { ...options, latencyProbe });
 }
 
 async function sendLanePayload(lane, payload, sourceLane = lane, options = {}) {
+  const latencyProbe =
+    options.latencyProbe || startLaneSubmitLatencyProbe(lane, payload);
   lane.sendAwaitingBackendCount += 1;
   try {
+    markLaneSubmitLatency(latencyProbe, "requestAwaitStartAt");
     const response = await liveBusRequest("lane.send", {
       targetId: lane.targetId,
       payload,
-    });
+    }, latencyProbe);
+    markLaneSubmitLatency(latencyProbe, "responseResolvedAt");
     const result = response.result || {};
-    if (!isLaneOpen(lane)) return;
+    if (!isLaneOpen(lane)) {
+      finishLaneSubmitLatencyProbe(latencyProbe, "closed");
+      return;
+    }
     applyLaneSendResult(lane, payload, result, sourceLane, options);
+    markLaneSubmitLatency(latencyProbe, "resultAppliedAt");
+    finishLaneSubmitLatencyProbe(
+      latencyProbe,
+      result.ok ? "accepted" : "rejected",
+    );
   } catch (error) {
+    markLaneSubmitLatency(latencyProbe, "errorAt");
     if (isLaneOpen(lane)) {
       finishLanePendingSubmission(lane, { accepted: false });
       setLaneTransientStatus(sourceLane, "steer failed");
     }
+    finishLaneSubmitLatencyProbe(latencyProbe, "error");
   } finally {
     lane.sendAwaitingBackendCount = Math.max(
       0,
       lane.sendAwaitingBackendCount - 1,
     );
   }
+}
+
+function startLaneSubmitLatencyProbe(lane, payload) {
+  const text = String((payload || {}).text || "");
+  return {
+    targetId: lane.targetId || "",
+    textLength: text.length,
+    marks: { startedAt: laneSubmitLatencyNow() },
+  };
+}
+
+function markLaneSubmitLatency(probe, name) {
+  if (!probe || !name) return;
+  if (!probe.marks) probe.marks = {};
+  if (probe.marks[name] === undefined) probe.marks[name] = laneSubmitLatencyNow();
+}
+
+function finishLaneSubmitLatencyProbe(probe, status) {
+  if (!probe || probe.completed) return;
+  probe.completed = true;
+  probe.status = status;
+  markLaneSubmitLatency(probe, "completedAt");
+  probe.durations = laneSubmitLatencyDurations(probe.marks || {});
+  laneSubmitLatencySamples.push(probe);
+  while (laneSubmitLatencySamples.length > laneSubmitLatencySampleLimit)
+    laneSubmitLatencySamples.shift();
+}
+
+function laneSubmitLatencyDurations(marks) {
+  const responseAt =
+    marks.liveBusResponseReceivedAt === undefined
+      ? marks.responseResolvedAt
+      : marks.liveBusResponseReceivedAt;
+  const resolvedAt =
+    marks.responseResolvedAt === undefined
+      ? marks.liveBusResponseReceivedAt
+      : marks.responseResolvedAt;
+  return {
+    optimisticRenderMs: laneSubmitLatencyDelta(
+      marks.startedAt,
+      marks.optimisticRenderedAt,
+    ),
+    liveBusOpenMs: laneSubmitLatencyDelta(
+      marks.liveBusConnectStartAt,
+      marks.liveBusConnectReadyAt,
+    ),
+    sendResultWaitMs: laneSubmitLatencyDelta(marks.liveBusFrameSentAt, responseAt),
+    responseHandlingMs: laneSubmitLatencyDelta(
+      resolvedAt,
+      marks.resultAppliedAt || marks.errorAt,
+    ),
+    totalMs: laneSubmitLatencyDelta(marks.startedAt, marks.completedAt),
+  };
+}
+
+function laneSubmitLatencyDelta(start, end) {
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.max(0, end - start);
+}
+
+function laneSubmitLatencyNow() {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
 }
 
 function applyLaneSendResult(

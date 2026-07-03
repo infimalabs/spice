@@ -9,7 +9,10 @@ def test_serve_playwright_harness_starts_short_lived_scratch_server() -> None:
     )
 
     assert 'require("playwright")' in harness
+    assert 'require("fs")' in harness
     assert "fs.mkdtemp" in harness
+    assert "repoLocalServeCommand" in harness
+    assert "defaultServeCommand()" in harness
     assert '"--port"' in harness
     assert "String(options.port ?? 0)" in harness
     assert '"--until"' in harness
@@ -138,6 +141,21 @@ def test_serve_task_card_live_smoke_asserts_task_add_without_reload() -> None:
     assert "Task capture: " in smoke
     assert "framenavigated" in smoke
     assert "task card appeared after page navigation/reload" in smoke
+
+
+def test_serve_submit_latency_smoke_asserts_timing_buckets() -> None:
+    smoke = (ROOT / "browser" / "serve_submit_latency_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert "__spiceSubmitLatencySamples" in smoke
+    assert "optimisticRenderMs" in smoke
+    assert "liveBusOpenMs" in smoke
+    assert "sendResultWaitMs" in smoke
+    assert "responseHandlingMs" in smoke
+    assert "totalMs" in smoke
 
 
 def test_serve_composer_reorder_smoke_asserts_swap_contract() -> None:
