@@ -23,6 +23,7 @@ from typing import Any
 from spice.agent.driver import ALL_DRIVERS
 from spice.config import configured_judge_bin
 from spice.errors import SpiceError
+from spice.flexstate import load_sticky_items, save_sticky_items
 from spice.paths import repo_root_from_cwd
 from spice.repocfg import maxims_table, string_list
 
@@ -34,6 +35,8 @@ ALL_MAXIM = "all"
 ANY_MAXIM = "any"
 META_MAXIMS = frozenset({ALL_MAXIM, ANY_MAXIM})
 DEFAULT_DRIVER_SCOPE = frozenset(driver.name for driver in ALL_DRIVERS)
+DISABLED_MAXIM_BAGS_GIT_PATH = "spice/disabled-maxim-bags.json"
+DISABLED_MAXIM_BAGS_KEY = "disabled_bags"
 DEFAULT_PROMPT_LINES = (
     'IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".',
     'IFF "{maxim}" DISAGREES WITH "{statement}": ANSWER ONLY "NO".',
@@ -172,8 +175,44 @@ _MAXIM_KEY_RE = re.compile(r"^[a-z]+(?: [a-z]+)*$")
 
 
 def resolved_maxim_bags(repo_root: Path | None = None) -> dict[str, MaximBag]:
-    """Return built-in maxim bags merged with tracked repo configuration."""
+    """Return active maxim bags after config, driver scopes, and local disables."""
     root = repo_root if repo_root is not None else repo_root_from_cwd()
+    bags = _configured_maxim_bags(root)
+    if root is None:
+        return bags
+    disabled = _load_disabled_maxim_bag_names(root)
+    _validate_disabled_maxim_bag_names(disabled, bags)
+    return {name: bag for name, bag in bags.items() if name not in disabled}
+
+
+def disabled_maxim_bag_names(repo_root: Path | None = None) -> frozenset[str]:
+    root = _require_maxim_repo_root(repo_root)
+    names = _load_disabled_maxim_bag_names(root)
+    _validate_disabled_maxim_bag_names(names, _configured_maxim_bags(root))
+    return frozenset(names)
+
+
+def set_maxim_bag_disabled(
+    name: str, *, disabled: bool, repo_root: Path | None = None
+) -> frozenset[str]:
+    root = _require_maxim_repo_root(repo_root)
+    configured = _configured_maxim_bags(root)
+    normalized = _normalize_bag_name(name)
+    if normalized not in configured:
+        expected = ", ".join(sorted(configured))
+        raise SpiceError(
+            f"unknown maxim bag {name!r}; configured maxim bags are: {expected}"
+        )
+    names = set(_load_disabled_maxim_bag_names(root))
+    if disabled:
+        names.add(normalized)
+    else:
+        names.discard(normalized)
+    _save_disabled_maxim_bag_names(root, names)
+    return frozenset(names)
+
+
+def _configured_maxim_bags(root: Path | None) -> dict[str, MaximBag]:
     bags = dict(BUILTIN_MAXIM_BAGS)
     if root is None:
         return bags
@@ -190,6 +229,54 @@ def resolved_maxim_bags(repo_root: Path | None = None) -> dict[str, MaximBag]:
         )
     _flatten_bag_keys(bags)
     return bags
+
+
+def _require_maxim_repo_root(repo_root: Path | None = None) -> Path:
+    root = repo_root if repo_root is not None else repo_root_from_cwd()
+    if root is None:
+        raise SpiceError("not inside a git worktree")
+    return root
+
+
+def _load_disabled_maxim_bag_names(root: Path) -> set[str]:
+    return load_sticky_items(
+        root=root,
+        state_path=None,
+        git_path=DISABLED_MAXIM_BAGS_GIT_PATH,
+        entries_key=DISABLED_MAXIM_BAGS_KEY,
+        decode=_decode_disabled_maxim_bag_name,
+    )
+
+
+def _save_disabled_maxim_bag_names(root: Path, names: set[str]) -> None:
+    save_sticky_items(
+        names,
+        root=root,
+        state_path=None,
+        git_path=DISABLED_MAXIM_BAGS_GIT_PATH,
+        entries_key=DISABLED_MAXIM_BAGS_KEY,
+        encode=str,
+    )
+
+
+def _decode_disabled_maxim_bag_name(raw: Any) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    name = _normalize_bag_name(raw)
+    return name or None
+
+
+def _validate_disabled_maxim_bag_names(
+    names: set[str], configured: Mapping[str, MaximBag]
+) -> None:
+    unknown = sorted(name for name in names if name not in configured)
+    if unknown:
+        expected = ", ".join(sorted(configured))
+        raise SpiceError(
+            "disabled maxim bag state references unknown bag(s) "
+            f"{', '.join(repr(name) for name in unknown)}; "
+            f"configured maxim bags are: {expected}"
+        )
 
 
 def _normalize_bag_name(raw: Any) -> str:

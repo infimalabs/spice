@@ -18,9 +18,11 @@ from spice.agent.maxims import (
     DEFAULT_PROMPT_TEMPLATE,
     META_MAXIMS,
     builtin_maxim,
+    disabled_maxim_bag_names,
     evaluate_maxim,
     resolved_maxim_bags,
     resolve_maxim,
+    set_maxim_bag_disabled,
     triggered_maxims,
 )
 from spice.errors import SpiceError
@@ -85,6 +87,30 @@ def configure_maxim_parser(subparsers: Any) -> None:
         help="Show durable maxim metric counts.",
     )
     report.set_defaults(func=run_maxim_report_cli)
+
+    disable = actions.add_parser(
+        "disable",
+        help="Disable one maxim bag for this git worktree.",
+        description=(
+            "Store a worktree-local disabled bag entry outside tracked repo "
+            "configuration. Other worktrees keep the bag enabled."
+        ),
+    )
+    disable.add_argument("name", help="Configured maxim bag name to disable.")
+    disable.set_defaults(func=run_maxim_disable_cli)
+
+    enable = actions.add_parser(
+        "enable",
+        help="Re-enable one worktree-local disabled maxim bag.",
+    )
+    enable.add_argument("name", help="Configured maxim bag name to re-enable.")
+    enable.set_defaults(func=run_maxim_enable_cli)
+
+    disabled = actions.add_parser(
+        "disabled",
+        help="List maxim bags disabled in this git worktree.",
+    )
+    disabled.set_defaults(func=run_maxim_disabled_cli)
 
 
 def _add_verdict_arguments(parser: argparse.ArgumentParser) -> None:
@@ -222,6 +248,29 @@ def run_maxim_report_cli(_args: argparse.Namespace) -> int:
     return 0
 
 
+def run_maxim_disable_cli(args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        raise SpiceError("not inside a git worktree")
+    disabled = set_maxim_bag_disabled(args.name, disabled=True, repo_root=repo_root)
+    print(_render_disabled_bags(disabled))
+    return 0
+
+
+def run_maxim_enable_cli(args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        raise SpiceError("not inside a git worktree")
+    disabled = set_maxim_bag_disabled(args.name, disabled=False, repo_root=repo_root)
+    print(_render_disabled_bags(disabled))
+    return 0
+
+
+def run_maxim_disabled_cli(_args: argparse.Namespace) -> int:
+    print(_render_disabled_bags(disabled_maxim_bag_names()))
+    return 0
+
+
 def _render_maxim_listing() -> str:
     rows = [
         (
@@ -268,6 +317,12 @@ def _render_maxim_report(repo_root: Path) -> str:
         for row in rows
     )
     return "\n".join([f"maxim metric events: {len(records)}", *rendered])
+
+
+def _render_disabled_bags(names: frozenset[str]) -> str:
+    if not names:
+        return "disabled maxim bags: none"
+    return "disabled maxim bags: " + ", ".join(sorted(names))
 
 
 def _maxim_report_row(
