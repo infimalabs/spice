@@ -128,6 +128,111 @@ def test_integrate_and_publish_retries_non_fast_forward_publish_race(
     assert _git(repo, "status", "--porcelain") == ""
 
 
+def test_integrate_and_publish_converges_after_consecutive_publish_races(
+    tmp_path, monkeypatch
+):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
+    agent_head = _git(repo, "rev-parse", "HEAD")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    real_run = gitsync._run
+    push_attempts = 0
+    storm_pushes = 3  # completion storm: three peers land ahead back-to-back
+
+    def storming_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        nonlocal push_attempts
+        if args and args[0] == "push" and repo_root == repo:
+            push_attempts += 1
+            if push_attempts <= storm_pushes:
+                name = f"peer-{push_attempts}.txt"
+                (peer / name).write_text("peer landed first\n", encoding="utf-8")
+                _run(peer, "git", "add", name)
+                _run(peer, "git", "commit", "-m", f"peer work {push_attempts}")
+                _run(peer, "git", "push", "origin", "main")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", storming_run)
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000005Z",
+        repo_root=repo,
+        meta={
+            "title": "Publish storm task work",
+            "actor": ACTOR_A,
+            "phase": "todo",
+            "project": "task.unit",
+        },
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert push_attempts == storm_pushes + 1
+    assert captured["done_head"] == agent_head
+    assert captured["done_upstream_head"] == _git(peer, "rev-parse", "HEAD")
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_integrate_and_publish_surfaces_recovery_when_races_never_stop(
+    tmp_path, monkeypatch
+):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    real_run = gitsync._run
+    push_attempts = 0
+    monkeypatch.setattr(gitsync, "PUBLISH_RACE_RETRY_LIMIT", 2)
+
+    def relentless_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        nonlocal push_attempts
+        if args and args[0] == "push" and repo_root == repo:
+            push_attempts += 1
+            name = f"peer-{push_attempts}.txt"
+            (peer / name).write_text("peer landed first\n", encoding="utf-8")
+            _run(peer, "git", "add", name)
+            _run(peer, "git", "commit", "-m", f"peer work {push_attempts}")
+            _run(peer, "git", "push", "origin", "main")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", relentless_run)
+
+    with pytest.raises(SpiceError, match="publish"):
+        gitsync.integrate_and_publish(
+            "TASK-20260101T000000000006Z",
+            repo_root=repo,
+            meta={
+                "title": "Publish unwinnable race",
+                "actor": ACTOR_A,
+                "phase": "todo",
+                "project": "task.unit",
+            },
+        )
+
+    assert push_attempts == 3  # initial push + bounded retries
+
+
 def test_integrate_and_publish_reports_local_head_ref_lock_race(tmp_path, monkeypatch):
     remote = tmp_path / "remote.git"
     _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
