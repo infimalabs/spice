@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
-from spice.studies.walk import tracked_paths as repo_tracked_paths
+from spice.studies.walk import (
+    is_excluded_path,
+    policy_path_exclusions,
+    staged_renames,
+    tracked_paths as repo_tracked_paths,
+)
 
 _MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]\n]*\]\(([^)\n]*)\)")
 _URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
@@ -33,6 +39,7 @@ def markdown_link_case_findings(
         if tracked_paths is not None
         else tuple(repo_tracked_paths(repo_root))
     )
+    tracked = _commit_candidate_tracked_paths(repo_root, tracked)
     source_paths = tuple(paths) if paths is not None else tracked
     tracked_by_casefold = _tracked_casefold_map(tracked)
     findings: list[MarkdownLinkCaseFinding] = []
@@ -87,6 +94,42 @@ def _tracked_markdown_paths(paths: tuple[Path, ...]) -> tuple[Path, ...]:
 
 def _tracked_casefold_map(paths: tuple[Path, ...]) -> dict[str, Path]:
     return {path.as_posix().casefold(): path for path in paths}
+
+
+def _commit_candidate_tracked_paths(
+    repo_root: Path, paths: tuple[Path, ...]
+) -> tuple[Path, ...]:
+    try:
+        renames = staged_renames(repo_root)
+        deletes = _staged_deletes(repo_root)
+    except subprocess.CalledProcessError:
+        return paths
+    updated = set(paths)
+    updated.difference_update(deletes)
+    for old_path, new_path in renames.items():
+        updated.discard(old_path)
+        updated.add(new_path)
+    return tuple(sorted(updated, key=lambda path: path.as_posix()))
+
+
+def _staged_deletes(repo_root: Path) -> set[Path]:
+    exclusions = policy_path_exclusions(repo_root)
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=D"],
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+        check=True,
+    )
+    deletes: set[Path] = set()
+    for line in result.stdout.splitlines():
+        raw_path = line.strip()
+        if not raw_path:
+            continue
+        path = Path(raw_path)
+        if not is_excluded_path(path, policy_exclusions=exclusions):
+            deletes.add(path)
+    return deletes
 
 
 def _markdown_link_targets(line: str) -> list[str]:
