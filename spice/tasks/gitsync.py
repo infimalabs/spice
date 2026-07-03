@@ -33,6 +33,10 @@ from spice.tasks import config, identity
 GIT_NETWORK_TIMEOUT_SECONDS = 30
 TASK_GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
 _NETWORK_COMMANDS = {"fetch", "push"}
+# Publish-race rounds before surfacing recovery guidance: enough for a full
+# N-agent completion storm to drain ahead of this push, small enough that a
+# genuinely wedged remote fails fast.
+PUBLISH_RACE_RETRY_LIMIT = 5
 
 
 class MergeConflict(SpiceError):
@@ -446,41 +450,50 @@ def _retry_publish_after_race(
     message: str,
     first_push: subprocess.CompletedProcess[str],
 ) -> tuple[str, str]:
-    fetch = _run(repo_root, "fetch", remote)
-    if fetch.returncode != 0:
-        raise SpiceError(_publish_race_recovery(label, remote, baseline, first_push))
-    fresh_upstream_head = _read(repo_root, "rev-parse", baseline)
-    if not fresh_upstream_head or fresh_upstream_head == previous_upstream_head:
-        raise SpiceError(_publish_race_recovery(label, remote, baseline, first_push))
-    if fresh_upstream_head == merge_head:
-        return merge_head, fresh_upstream_head
+    # Under an N-agent completion storm every push can lose to a peer that
+    # landed just before it, so a single retry punts real convergence to the
+    # agent. Re-fetch/re-merge/re-push up to the bound; each round folds the
+    # freshly advanced baseline into the same generated merge shape.
+    last_push = first_push
+    for _ in range(PUBLISH_RACE_RETRY_LIMIT):
+        fetch = _run(repo_root, "fetch", remote)
+        if fetch.returncode != 0:
+            raise SpiceError(_publish_race_recovery(label, remote, baseline, last_push))
+        fresh_upstream_head = _read(repo_root, "rev-parse", baseline)
+        if not fresh_upstream_head or fresh_upstream_head == previous_upstream_head:
+            raise SpiceError(_publish_race_recovery(label, remote, baseline, last_push))
+        if fresh_upstream_head == merge_head:
+            return merge_head, fresh_upstream_head
 
-    merge = _run(repo_root, "merge", "--no-ff", "--no-commit", "-m", message, baseline)
-    if merge.returncode != 0:
-        raise MergeConflict(_merge_conflict_recovery(label, repo_root))
-    merged_tree = _read(repo_root, "write-tree")
-    if not merged_tree:
-        raise SpiceError("could not write publish-race merged tree")
-    _clear_temporary_merge_state(repo_root, action="clear publish-race merge state")
-    retry_head = _synthesize_and_fast_forward(
-        repo_root,
-        merged_tree,
-        fresh_upstream_head,
-        merge_head,
-        message,
-        label=label,
-    )
-    flagged = _conflict_marker_paths(repo_root, fresh_upstream_head, retry_head)
-    if flagged:
-        raise SpiceError(_conflict_marker_refusal(label, flagged))
-    retry_push = _run(repo_root, "push", remote, f"{retry_head}:{branch}")
-    if retry_push.returncode != 0:
-        if _is_non_fast_forward_push(retry_push):
-            raise SpiceError(
-                _publish_race_recovery(label, remote, baseline, retry_push)
-            )
-        raise SpiceError(_fail(f"publish task work to {baseline}", retry_push))
-    return retry_head, fresh_upstream_head
+        merge = _run(
+            repo_root, "merge", "--no-ff", "--no-commit", "-m", message, baseline
+        )
+        if merge.returncode != 0:
+            raise MergeConflict(_merge_conflict_recovery(label, repo_root))
+        merged_tree = _read(repo_root, "write-tree")
+        if not merged_tree:
+            raise SpiceError("could not write publish-race merged tree")
+        _clear_temporary_merge_state(repo_root, action="clear publish-race merge state")
+        retry_head = _synthesize_and_fast_forward(
+            repo_root,
+            merged_tree,
+            fresh_upstream_head,
+            merge_head,
+            message,
+            label=label,
+        )
+        flagged = _conflict_marker_paths(repo_root, fresh_upstream_head, retry_head)
+        if flagged:
+            raise SpiceError(_conflict_marker_refusal(label, flagged))
+        retry_push = _run(repo_root, "push", remote, f"{retry_head}:{branch}")
+        if retry_push.returncode == 0:
+            return retry_head, fresh_upstream_head
+        if not _is_non_fast_forward_push(retry_push):
+            raise SpiceError(_fail(f"publish task work to {baseline}", retry_push))
+        previous_upstream_head = fresh_upstream_head
+        merge_head = retry_head
+        last_push = retry_push
+    raise SpiceError(_publish_race_recovery(label, remote, baseline, last_push))
 
 
 def _is_non_fast_forward_push(completed: subprocess.CompletedProcess[str]) -> bool:
