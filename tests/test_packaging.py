@@ -27,6 +27,7 @@ BROWSER_VALIDATION_FILES = (
     "tests/browser/serve_pending_badge_smoke.js",
     "tests/browser/serve_playwright_harness.js",
     "tests/browser/serve_submit_latency_smoke.js",
+    "tests/browser/serve_task_stack_smoke.js",
     "tests/browser/serve_task_card_live_smoke.js",
     "tests/browser/serve_team_metrics_smoke.js",
 )

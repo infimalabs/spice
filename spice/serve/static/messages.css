@@ -136,6 +136,21 @@
   display: grid;
   gap: 5px;
 }
+.message-body .task-directive-stack {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-start;
+  margin: 6px 0;
+  min-width: 0;
+}
+.message-body .task-directive-stack .task-directive-quote {
+  flex: 1 1 312px;
+  margin: 0;
+  max-width: min(100%, 468px);
+  min-width: min(100%, 312px);
+}
 .message-body .task-directive-quote--hidden {
   --quote-accent: var(--muted);
   background: color-mix(in srgb, var(--quote-accent) 10%, transparent);

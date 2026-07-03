@@ -158,6 +158,19 @@ def test_serve_submit_latency_smoke_asserts_timing_buckets() -> None:
     assert "totalMs" in smoke
 
 
+def test_serve_task_stack_smoke_asserts_card_widths() -> None:
+    smoke = (ROOT / "browser" / "serve_task_stack_smoke.js").read_text(encoding="utf-8")
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert "task-directive-stack" in smoke
+    assert "message-image-stack" in smoke
+    assert "measureTaskStack(page, 1920)" in smoke
+    assert "measureTaskStack(page, 520)" in smoke
+    assert "imageTileWidth * 2" in smoke
+    assert "imageTileWidth * 3" in smoke
+
+
 def test_serve_composer_reorder_smoke_asserts_swap_contract() -> None:
     smoke = (ROOT / "browser" / "serve_composer_reorder_smoke.js").read_text(
         encoding="utf-8"

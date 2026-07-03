@@ -332,6 +332,7 @@ def test_inline_task_directive_counts_multiple_task_cards(tmp_path):
 
     assert item.task_card_count == 2
     assert item.to_payload()["task_card_count"] == 2
+    assert '<div class="task-directive-stack">' in item.display_html
     assert item.display_html.count('class="task-directive-quote"') == 2
 
 
