@@ -25,10 +25,12 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
     assert "`spice task status` and `spice task doctor` report" in text
     assert "A spice session is a real-time interactive loop" in text
     assert (
-        "lead your next working assistant message with a plain-text ACK header" in text
+        "lead your next working assistant message with a plain-text ACK header "
+        "for completed/accepted keys or a reasoned NACK header for refused keys" in text
     )
-    assert "ACKed keys clear from pending" in text
-    assert "Do not bury ACKs mid-message or save them for the final response" in text
+    assert "`NACK <key>: <why this cannot be done>`" in text
+    assert "ACKed or NACKed keys clear from pending" in text
+    assert "Do not bury ACKs or NACKs mid-message" in text
 
 
 def test_available_skill_path_materializes_into_the_worktree(tmp_path):
