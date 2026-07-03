@@ -655,6 +655,11 @@ button.primary:hover {
   color: var(--final-accent);
   cursor: default;
 }
+.lane-filter-chip--auto {
+  border-style: dotted;
+  cursor: default;
+  opacity: 0.82;
+}
 .lane-filter-chip-label {
   min-width: 0;
   overflow: hidden;

@@ -78,6 +78,7 @@ function targetPayloadShim(target) {
     targetIdentity: target.targetIdentity,
     serveAgentIdentity: target.serveAgentIdentity,
     taskFilters: target.taskFilters || [],
+    taskFilterEntries: target.taskFilterEntries || [],
     laneFilterVersion: target.laneFilterVersion || "",
     teamIdentity: target.teamIdentity,
     lifetime: target.lifetime || "",
@@ -460,6 +461,8 @@ function ensureTeamMemberLane(targetId, team, hint = null) {
   if (member && member.renewalIntent) lane.renewalIntent = member.renewalIntent;
   if (Array.isArray(config.taskFilters))
     lane.taskFilters = uniqueStringList(config.taskFilters);
+  if (Array.isArray(config.taskFilterEntries))
+    lane.taskFilterEntries = normalizedTaskFilterEntries(config.taskFilterEntries);
   if (config.lifetime)
     applyServerLaneLifetime(lane, config.lifetime, {
       configRevision: config.revision,

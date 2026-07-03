@@ -83,6 +83,7 @@ def _work_tree_payload(
         ),
         "serveAgentIdentity": serve_identity,
         "taskFilters": team_facts.get("taskFilters", []),
+        "taskFilterEntries": team_facts.get("taskFilterEntries", []),
         "laneFilterVersion": "",
         "teamIdentity": team_identity,
         "lifetime": team_facts.get("lifetime", ""),
