@@ -457,15 +457,13 @@ function historySentinelForLane(lane) {
   return lane.historySentinelEl;
 }
 
-// Deterministic masonry: every card gets an explicit grid position. A card's
-// column range is chosen once and pinned in its dataset, so later height changes
-// only slide columns vertically — a card can never flip sides while the
-// operator is reading. Tall cards may claim two adjacent tracks in regular
-// multi-column Mosaic; fused team streams and single-column/mobile streams keep
-// one card per track. Full-width items (compaction dividers, history sentinels,
-// directive stacks) are barriers: all columns restart on the same row after
-// one, which resets skew and stops reflow from propagating across it. Pins are
-// scoped per barrier segment.
+// Deterministic Mosaic: root width chooses a small set of major columns and a
+// matching major row band. Regular streams fill each barrier segment in
+// document order, left to right, with no hidden column spans. Existing pins are
+// kept when the same-width stream grows above or below the retained items so
+// reading position stays stable; width changes clear pins and run the ordered
+// pass again. Fused team streams remain member-lane columns with natural-height
+// cards.
 function packMessageStream(lane) {
   const host = lane.messagesEl;
   if (!host) return;
@@ -479,9 +477,21 @@ function packMessageStream(lane) {
   const fusedHost = laneIsFusedHost(lane);
   const naturalHeightMode = columnCount <= 1 || fusedHost;
   setMessagePackColumnCount(host, columnCount);
-  const bandRows = messagePackBandRows(style);
+  const itemKeys = messagePackItemKeys(host);
+  const reflowing = messagePackShouldReflow(lane, host, columnCount, itemKeys);
+  if (reflowing) {
+    for (const node of host.children) {
+      if (isMessagePackItem(node)) clearMessagePackPlacement(node);
+    }
+  }
+  const bandRows = messagePackBandRows(host, style, columnCount, rowStride);
+  const bandValue = String(bandRows);
+  if (host.style.getPropertyValue("--message-pack-band-active") !== bandValue)
+    host.style.setProperty("--message-pack-band-active", bandValue);
   const columnRows = new Array(Math.max(1, columnCount)).fill(0);
   let segmentKey = "top";
+  let segmentIndex = 0;
+  let segmentRowStart = 0;
   for (const node of host.children) {
     if (!isMessagePackItem(node)) continue;
     let height = messagePackItemHeight(node, naturalHeightMode);
@@ -492,47 +502,33 @@ function packMessageStream(lane) {
       const start = Math.max(...columnRows);
       setMessagePackPosition(node, "", start + 1, 1);
       columnRows.fill(start + naturalSpan);
-      if (isMessagePackBarrier(node)) segmentKey = messagePackBarrierKey(node);
+      if (isMessagePackBarrier(node)) {
+        segmentKey = messagePackBarrierKey(node);
+        segmentIndex = 0;
+        segmentRowStart = Math.max(...columnRows);
+      }
       continue;
     }
-    const singleColumn = fusedHost
+    if (!fusedHost && segmentIndex % columnRows.length === 0)
+      segmentRowStart = Math.max(...columnRows);
+    const placementColumn = fusedHost
       ? fusedMessagePackColumn(node, columnRows.length)
-      : stickyMessagePackColumn(node, segmentKey, columnRows, bandRows);
+      : orderedMessagePackColumn(
+          node,
+          segmentKey,
+          segmentIndex,
+          columnRows.length,
+          reflowing,
+        );
+    const placementRow = fusedHost
+      ? columnRows[placementColumn]
+      : segmentRowStart;
     if (!fusedHost) {
       setMessagePackProvisionalPosition(
         node,
-        String(singleColumn + 1),
-        columnRows[singleColumn] + 1,
-        1,
-      );
-      height = naturalMessagePackItemHeight(node);
-      if (!Number.isFinite(height) || height <= 0) continue;
-      naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
-    }
-    const columnSpan = messagePackColumnSpan(
-      node,
-      columnCount,
-      fusedHost,
-      naturalSpan,
-      bandRows,
-    );
-    const placementColumn = fusedHost
-      ? singleColumn
-      : columnSpan > 1
-        ? stickyMessagePackColumnSpanStart(
-            node,
-            segmentKey,
-            columnRows,
-            columnSpan,
-            bandRows,
-          )
-        : stickyMessagePackColumn(node, segmentKey, columnRows, bandRows);
-    if (columnSpan > 1) {
-      setMessagePackProvisionalPosition(
-        node,
         String(placementColumn + 1),
-        maxMessagePackRows(columnRows, placementColumn, columnSpan) + 1,
-        columnSpan,
+        placementRow + 1,
+        1,
       );
       height = naturalMessagePackItemHeight(node);
       if (!Number.isFinite(height) || height <= 0) continue;
@@ -548,19 +544,16 @@ function packMessageStream(lane) {
         ? naturalSpan
         : Math.ceil(naturalSpan / bandRows) * bandRows;
     setMessagePackRowSpan(node, span);
-    const start = maxMessagePackRows(
-      columnRows,
-      placementColumn,
-      columnSpan,
-    );
     setMessagePackPosition(
       node,
       String(placementColumn + 1),
-      start + 1,
-      columnSpan,
+      placementRow + 1,
+      1,
     );
-    fillMessagePackRows(columnRows, placementColumn, columnSpan, start + span);
+    fillMessagePackRows(columnRows, placementColumn, 1, placementRow + span);
+    if (!fusedHost) segmentIndex += 1;
   }
+  commitMessagePackLayoutState(lane, host, columnCount, itemKeys);
 }
 
 function scheduleMessageStreamPack(lane) {

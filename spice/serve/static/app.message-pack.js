@@ -42,29 +42,51 @@ function messagePackBarrierKey(node) {
 // packer into a single ever-growing column. The auto-fit formula is
 // deterministic from the host width, so recompute it directly.
 function messagePackColumnCount(lane, host, style) {
-  const geometryColumns = messagePackGeometryColumnCount(host, style);
-  if (!laneIsFusedHost(lane)) return geometryColumns;
+  if (!laneIsFusedHost(lane)) return messagePackRegularColumnCount(host, style);
+  const geometryColumns = messagePackGeometryColumnCount(host, style, "min");
   return Math.max(
     1,
     Math.min(geometryColumns, laneGroupMemberLanes(lane).length),
   );
 }
 
-function messagePackGeometryColumnCount(host, style) {
+function messagePackRegularColumnCount(host, style) {
+  return messagePackGeometryColumnCount(host, style, "max");
+}
+
+function messagePackGeometryColumnCount(host, style, widthMode = "min") {
   if (messagePackViewportForcesSingleColumn()) return 1;
-  const inner =
-    host.clientWidth -
-    cssPixelValue(style.paddingLeft) -
-    cssPixelValue(style.paddingRight);
+  const inner = messagePackInnerWidth(host, style);
   if (!Number.isFinite(inner) || inner <= 0) return 1;
   const gap = cssPixelValue(style.columnGap);
   const minWidth = cssLengthValue(
     style.getPropertyValue("--message-card-min-width"),
     style,
   );
-  const trackMin = Math.min(inner, minWidth > 0 ? minWidth : inner);
-  if (trackMin <= 0) return 1;
-  return Math.max(1, Math.floor((inner + gap) / (trackMin + gap)));
+  const maxWidth = cssLengthValue(
+    style.getPropertyValue("--message-card-max-width"),
+    style,
+  );
+  const targetWidth = widthMode === "max" && maxWidth > 0 ? maxWidth : minWidth;
+  const trackTarget = Math.min(inner, targetWidth > 0 ? targetWidth : inner);
+  if (trackTarget <= 0) return 1;
+  return Math.max(1, Math.floor((inner + gap) / (trackTarget + gap)));
+}
+
+function messagePackInnerWidth(host, style) {
+  return (
+    host.clientWidth -
+    cssPixelValue(style.paddingLeft) -
+    cssPixelValue(style.paddingRight)
+  );
+}
+
+function messagePackTrackWidth(host, style, columnCount) {
+  const columns = Math.max(1, columnCount);
+  const inner = messagePackInnerWidth(host, style);
+  if (!Number.isFinite(inner) || inner <= 0) return 0;
+  const gap = cssPixelValue(style.columnGap);
+  return (inner - gap * (columns - 1)) / columns;
 }
 
 function messagePackViewportForcesSingleColumn() {
@@ -79,32 +101,6 @@ function fusedMessagePackColumn(node, columnCount) {
   const slot = Number.parseInt(node.dataset.accentSlot || "", 10);
   if (!Number.isFinite(slot) || slot < 0) return 0;
   return slot % Math.max(1, columnCount);
-}
-
-const messagePackTallSpanColumns = 2;
-const messagePackTallSpanBandThreshold = 4;
-
-function messagePackColumnSpan(
-  node,
-  columnCount,
-  fusedHost,
-  naturalSpan,
-  bandRows,
-) {
-  if (fusedHost || columnCount < messagePackTallSpanColumns) return 1;
-  if (!node.matches("article[data-message-key]")) return 1;
-  if (node.classList.contains("image-only")) return 1;
-  if (isMessagePackBarrier(node)) return 1;
-  const previous = Number.parseInt(node.dataset.messagePackColumnSpan || "", 10);
-  if (
-    Number.isInteger(previous) &&
-    previous > 1 &&
-    previous <= columnCount
-  )
-    return Math.min(previous, messagePackTallSpanColumns);
-  if (naturalSpan >= bandRows * messagePackTallSpanBandThreshold)
-    return messagePackTallSpanColumns;
-  return 1;
 }
 
 function setMessagePackColumnSpan(node, columnSpan) {
@@ -143,100 +139,41 @@ function isMessagePackBarrier(node) {
   );
 }
 
-function stickyMessagePackColumn(node, segmentKey, columnRows, bandRows) {
-  const pinned = Number(node.dataset.messagePackColumn);
-  if (
-    node.dataset.messagePackSegment === segmentKey &&
-    Number.isInteger(pinned) &&
-    pinned >= 0 &&
-    pinned < columnRows.length
-  )
-    return pinned;
-  const column = leftmostFeasiblePackColumn(columnRows, bandRows);
-  node.dataset.messagePackSegment = segmentKey;
-  node.dataset.messagePackColumn = String(column);
-  return column;
-}
-
-function stickyMessagePackColumnSpanStart(
+function orderedMessagePackColumn(
   node,
   segmentKey,
-  columnRows,
-  columnSpan,
-  bandRows,
+  segmentIndex,
+  columnCount,
+  reflowing,
 ) {
-  const pinned = Number(node.dataset.messagePackColumn);
-  const pinnedSpan = Number.parseInt(
-    node.dataset.messagePackColumnSpan || "",
-    10,
-  );
+  const pinned = Number.parseInt(node.dataset.messagePackColumn || "", 10);
   if (
-    node.dataset.messagePackSegment === segmentKey &&
+    !reflowing &&
     Number.isInteger(pinned) &&
-    pinnedSpan === columnSpan &&
     pinned >= 0 &&
-    pinned + columnSpan <= columnRows.length
+    pinned < columnCount
   )
     return pinned;
-  const column = leftmostFeasiblePackColumnSpanStart(
-    columnRows,
-    columnSpan,
-    bandRows,
-  );
+  const column = segmentIndex % Math.max(1, columnCount);
   node.dataset.messagePackSegment = segmentKey;
   node.dataset.messagePackColumn = String(column);
   return column;
 }
 
-// One band of tolerance turns shortest-column masonry into row-major filling:
-// a level fills left to right, then the next level starts, so chronological
-// insertion keeps each visual band a contiguous time slice. The lowest column
-// is always feasible, so the scan always returns.
 const messagePackBandRowsDefault = 6;
 
-function messagePackBandRows(style) {
+function messagePackBandRows(host, style, columnCount, rowStride) {
   const parsed = Number.parseInt(
     style.getPropertyValue("--message-pack-band"),
     10,
   );
-  return parsed > 0 ? parsed : messagePackBandRowsDefault;
-}
-
-function leftmostFeasiblePackColumn(columnRows, bandRows) {
-  // Strictly less than one band: a column that already took a full band is
-  // spent for this level, so equal-height cards fan left-to-right instead of
-  // stacking pairs into the leftmost column.
-  const lowest = Math.min(...columnRows);
-  for (let index = 0; index < columnRows.length; index += 1) {
-    if (columnRows[index] < lowest + bandRows) return index;
-  }
-  return columnRows.indexOf(lowest);
-}
-
-function leftmostFeasiblePackColumnSpanStart(columnRows, columnSpan, bandRows) {
-  const starts = Math.max(1, columnRows.length - columnSpan + 1);
-  const lowest = Math.min(...columnRows);
-  let fallbackColumn = 0;
-  let fallbackRow = Infinity;
-  let bestColumn = null;
-  let bestRow = Infinity;
-  for (let column = 0; column < starts; column += 1) {
-    const row = maxMessagePackRows(columnRows, column, columnSpan);
-    if (row < fallbackRow) {
-      fallbackColumn = column;
-      fallbackRow = row;
-    }
-    const leftColumnAtSameRow = columnRows
-      .slice(0, column)
-      .some((value) => value === row);
-    if (leftColumnAtSameRow) continue;
-    if (row < bestRow) {
-      bestColumn = column;
-      bestRow = row;
-    }
-    if (row < lowest + bandRows) return column;
-  }
-  return bestColumn ?? fallbackColumn;
+  const floor = parsed > 0 ? parsed : messagePackBandRowsDefault;
+  if (columnCount <= 1 || !Number.isFinite(rowStride) || rowStride <= 0)
+    return floor;
+  const trackWidth = messagePackTrackWidth(host, style, columnCount);
+  if (!Number.isFinite(trackWidth) || trackWidth <= 0) return floor;
+  const targetPx = Math.max(72, Math.min(160, trackWidth * 0.25));
+  return Math.max(floor, Math.round(targetPx / rowStride));
 }
 
 function maxMessagePackRows(columnRows, column, columnSpan) {
@@ -259,6 +196,66 @@ function fillMessagePackRows(columnRows, column, columnSpan, row) {
   ) {
     columnRows[index] = row;
   }
+}
+
+function messagePackItemKeys(host) {
+  const keys = [];
+  for (const node of host.children) {
+    if (!isMessagePackItem(node)) continue;
+    keys.push(messagePackItemIdentity(node));
+  }
+  return keys;
+}
+
+function messagePackItemIdentity(node) {
+  if (node.matches("article[data-message-key]"))
+    return "message:" + (node.dataset.messageKey || "");
+  if (node.dataset.historyTargetId)
+    return "history:" + node.dataset.historyTargetId;
+  if (node.dataset.messageTs) return "time:" + node.dataset.messageTs;
+  return "barrier:" + messagePackBarrierKey(node);
+}
+
+function messagePackShouldReflow(lane, host, columnCount, itemKeys) {
+  const state = lane.messagePackLayoutState;
+  if (!state) return true;
+  if (state.columnCount !== columnCount) return true;
+  if (state.hostWidth !== Math.round(host.clientWidth || 0)) return true;
+  const previous = state.itemKeys || [];
+  return !messagePackKnownSequencePreserved(previous, itemKeys);
+}
+
+function messagePackKnownSequencePreserved(previous, current) {
+  if (!previous.length) return !current.length;
+  const previousSet = new Set(previous);
+  let previousIndex = 0;
+  let knownCount = 0;
+  let matchedCount = 0;
+  for (const key of current) {
+    if (!previousSet.has(key)) continue;
+    knownCount += 1;
+    while (previousIndex < previous.length && previous[previousIndex] !== key) {
+      previousIndex += 1;
+    }
+    if (previousIndex >= previous.length) continue;
+    matchedCount += 1;
+    previousIndex += 1;
+  }
+  return knownCount > 0 && matchedCount === knownCount;
+}
+
+function clearMessagePackPlacement(node) {
+  delete node.dataset.messagePackColumn;
+  delete node.dataset.messagePackSegment;
+  delete node.dataset.messagePackColumnSpan;
+}
+
+function commitMessagePackLayoutState(lane, host, columnCount, itemKeys) {
+  lane.messagePackLayoutState = {
+    columnCount,
+    hostWidth: Math.round(host.clientWidth || 0),
+    itemKeys: itemKeys.slice(),
+  };
 }
 
 function setMessagePackProvisionalPosition(

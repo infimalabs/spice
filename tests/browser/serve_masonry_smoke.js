@@ -54,21 +54,29 @@ async function run(screenshotDir) {
         measurements[width] = await measureMasonry(page, width);
         assertMasonryMeasurement(measurements[width]);
       }
-      const teamMeasurements = {};
-      for (const width of masonryTeamMeasuredWidths) {
-        teamMeasurements[width] = await measureMasonryTeam(page, width);
-        assertMasonryTeamMeasurement(teamMeasurements[width]);
-      }
+      const resizeAudit = await measureMasonryResize(page);
+      assertMasonryResizeAudit(resizeAudit);
       const screenshots = [];
       if (screenshotDir) {
         for (const width of masonryScreenshotWidths) {
-          await measureMasonry(page, width);
+          await renderMasonryScreenshot(page, width);
           const file = path.join(screenshotDir, "masonry-" + width + ".png");
           await page.screenshot({ path: file });
           screenshots.push(file);
         }
       }
-      return { measurements, screenshots, teamMeasurements, url: server.url };
+      const teamMeasurements = {};
+      for (const width of masonryTeamMeasuredWidths) {
+        teamMeasurements[width] = await measureMasonryTeam(page, width);
+        assertMasonryTeamMeasurement(teamMeasurements[width]);
+      }
+      return {
+        measurements,
+        resizeAudit,
+        screenshots,
+        teamMeasurements,
+        url: server.url,
+      };
     },
   );
 }
@@ -87,9 +95,12 @@ async function installMasonrySmokeHelpers(page) {
       masonrySmokeBarrierBounds,
       masonrySmokeColumnAudit,
       masonrySmokeSegmentFanOut,
-      masonrySmokeBackfillAudit,
+      masonrySmokeAppendStabilityAudit,
+      masonrySmokeHydrationGrowthAudit,
       masonrySmokeColumnRecovery,
       masonrySmokeRepackAudit,
+      masonrySmokeResizeAudit,
+      masonrySmokeStructuredFinalAudit,
       renderMasonryTeamFixture,
       masonryTeamTargetPayload,
       masonryTeamItems,
@@ -111,6 +122,33 @@ async function measureMasonry(page, width) {
     expectedRuleIsos: masonryExpectedRuleIsos,
     plan: masonryFixturePlan,
     width,
+  });
+}
+
+async function renderMasonryScreenshot(page, width) {
+  await page.setViewportSize({ width, height: 1400 });
+  await page.evaluate(renderMasonryFixture, {
+    captureOnly: true,
+    expectedColumns: masonryColumnFloorByWidth[width] || 1,
+    expectedRuleIsos: masonryExpectedRuleIsos,
+    plan: masonryFixturePlan,
+    width,
+  });
+}
+
+async function measureMasonryResize(page) {
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  await page.evaluate(renderMasonryFixture, {
+    captureOnly: true,
+    expectedColumns: masonryColumnFloorByWidth[1280],
+    expectedRuleIsos: masonryExpectedRuleIsos,
+    plan: masonryFixturePlan,
+    width: 1280,
+  });
+  await page.setViewportSize({ width: 1920, height: 1400 });
+  return page.evaluate(masonrySmokeResizeAudit, {
+    expectedColumns: masonryColumnFloorByWidth[1920],
+    width: 1920,
   });
 }
 
@@ -337,8 +375,10 @@ function masonrySmokeItems(config) {
     step < plan.segmentCardCount * 2;
     step += 1
   ) {
-    const shape = shapes[step % shapes.length];
-    push(step === plan.finalCardStep ? "final" : "assistant", 56 + (step - plan.segmentCardCount) * 12, {
+    const kind = step === plan.finalCardStep ? "final" : "assistant";
+    const shape =
+      kind === "final" ? "structured-final" : shapes[step % shapes.length];
+    push(kind, 56 + (step - plan.segmentCardCount) * 12, {
       ack_count: step === plan.ackCardStep ? 1 : 0,
       display_html: masonrySmokeBodyHtml(shape, step),
       display_text: "masonry card " + step,
@@ -400,6 +440,17 @@ function masonrySmokeBodyHtml(shape, step) {
       step +
       "] += span</code></pre>"
     );
+  if (shape === "structured-final")
+    return (
+      sentence +
+      sentence +
+      "<p>Final response section one carries the decision and validation.</p>" +
+      "<ul><li>Implemented deterministic placement.</li>" +
+      "<li>Verified wide screen refresh.</li>" +
+      "<li>Checked responsive resize behavior.</li></ul>" +
+      "<pre><code>spice task done UI-1k9vBqzn --validation \"...\"</code></pre>" +
+      "<p>Final response section two stays long enough to exercise a tall card.</p>"
+    );
   return sentence + sentence + sentence + sentence + sentence;
 }
 
@@ -409,14 +460,18 @@ async function masonrySmokeMeasurement(lane, host, config) {
   );
   const divider = host.querySelector('[data-masonry-smoke="divider"]');
   if (!divider) throw new Error("masonry fixture divider missing");
-  const repackAudit = await masonrySmokeRepackAudit(lane, host);
+  const repackAudit = config.captureOnly
+    ? { firstDiff: null, spannedCards: 0, stable: true }
+    : await masonrySmokeRepackAudit(lane, host);
   const dividerRect = masonrySmokeRect(divider);
   const dividerIndex = Number(divider.dataset.masonrySmokeIndex);
   const cardRects = cards.map((card) => ({
     alignSelf: getComputedStyle(card).alignSelf,
     column: card.style.gridColumnStart,
+    final: card.classList.contains("final"),
     imageOnly: card.classList.contains("image-only"),
     index: Number(card.dataset.masonrySmokeIndex),
+    key: card.dataset.messageKey,
     left: masonrySmokeRect(card).left,
     rect: masonrySmokeRect(card),
     row: Number.parseInt(card.style.gridRowStart || "0", 10),
@@ -439,15 +494,24 @@ async function masonrySmokeMeasurement(lane, host, config) {
     config.expectedColumns,
   );
   const ruleAudits = masonrySmokeRuleAudits(host, cardRects, hostInnerWidth);
-  const backfillAudit = await masonrySmokeBackfillAudit(lane, host, config);
-  const columnRecovery = await masonrySmokeColumnRecovery(lane, cards);
+  const appendStabilityAudit = config.captureOnly
+    ? { stable: true }
+    : await masonrySmokeAppendStabilityAudit(lane, host, config);
+  const hydrationGrowthAudit = config.captureOnly
+    ? { stable: true }
+    : await masonrySmokeHydrationGrowthAudit(lane, host, config);
+  const columnRecovery = config.captureOnly
+    ? { distinctColumns: config.expectedColumns }
+    : await masonrySmokeColumnRecovery(lane, cards);
   return {
-    backfillAudit,
+    appendStabilityAudit,
     bandAudit: masonrySmokeBandAudit(cardRects, hostStyle),
     columnAudit,
     columnRecovery,
+    hydrationGrowthAudit,
     repackAudit,
     segmentFanOut,
+    structuredFinalAudit: masonrySmokeStructuredFinalAudit(cardRects),
     dividerIndex,
     dividerRect,
     dividerFillRatio:
@@ -481,7 +545,8 @@ async function masonrySmokeMeasurement(lane, host, config) {
 function masonrySmokeBandAudit(cardRects, hostStyle) {
   return {
     bandRows: Number.parseInt(
-      hostStyle.getPropertyValue("--message-pack-band"),
+      hostStyle.getPropertyValue("--message-pack-band-active") ||
+        hostStyle.getPropertyValue("--message-pack-band"),
       10,
     ),
     cards: cardRects.map((card) => ({
@@ -714,42 +779,97 @@ function masonrySmokeSegmentFanOut(cardRects, barrierIndexes, expectedColumns) {
   return fans;
 }
 
-// Prepending history must not re-pin a single existing card: segment keys are
-// barrier identities, so untouched downstream segments keep their pins.
-async function masonrySmokeBackfillAudit(lane, host, config) {
+// Newer live arrivals enter ahead of the retained DOM in the same shape as the
+// app's newest-first render path. Existing cards must keep their columns while
+// the operator is reading; only the new cards need fresh placement.
+async function masonrySmokeAppendStabilityAudit(lane, host, config) {
   const cards = Array.from(
     host.querySelectorAll('[data-masonry-smoke="card"]'),
   );
   const capturePins = () =>
-    cards.map((card) => [
-      card.dataset.messageKey,
-      card.style.gridColumnStart,
-      card.dataset.messagePackSegment,
-    ]);
+    Object.fromEntries(
+      cards.map((card) => [
+        card.dataset.messageKey,
+        card.style.gridColumnStart,
+      ]),
+    );
   const pinsBefore = capturePins();
   const base = Date.parse(config.plan.baseIso);
-  const nodes = config.plan.backfillMinutes.map((minute, position) => {
+  const nodes = [0, 1, 2].map((offset, position) => {
+    const minute = config.plan.epilogueMinute + 20 + offset;
     const node = renderMessage(lane, {
       ack_count: 0,
       ack_keys: [],
-      display_html: "<p>Backfill card " + position + " arrives late.</p>",
-      display_text: "backfill card " + position,
-      index: minute,
-      key: "masonry-backfill-" + position + "-" + config.width,
+      display_html: "<p>Live card " + position + " arrives while reading.</p>",
+      display_text: "live card " + position,
+      index: 1000 + position,
+      key: "masonry-live-" + position + "-" + config.width,
       kind: "assistant",
-      text: "backfill card " + position,
+      text: "live card " + position,
       timestamp: new Date(base + minute * 60000).toISOString(),
     });
     node.dataset.masonrySmoke = "card";
-    node.dataset.masonrySmokeIndex = String(minute);
+    node.dataset.masonrySmokeIndex = String(1000 + position);
     return node;
   });
   host.prepend(...nodes);
   packMessageStream(lane);
   await new Promise((resolve) => requestAnimationFrame(resolve));
   return {
-    backfillColumns: nodes.map((node) => node.style.gridColumnStart),
-    stable: JSON.stringify(pinsBefore) === JSON.stringify(capturePins()),
+    existingColumnsBefore: pinsBefore,
+    existingColumnsAfter: capturePins(),
+    newColumns: nodes.map((node) => node.style.gridColumnStart),
+    stable:
+      JSON.stringify(pinsBefore) === JSON.stringify(capturePins()) &&
+      (config.expectedColumns <= 1 ||
+        new Set(nodes.map((node) => node.style.gridColumnStart)).size > 1),
+  };
+}
+
+// Older history hydration grows the retained transcript past the old tail.
+// When the width is unchanged, existing cards should keep their columns and
+// the newly hydrated cards should grow below them.
+async function masonrySmokeHydrationGrowthAudit(lane, host, config) {
+  const cards = Array.from(
+    host.querySelectorAll('[data-masonry-smoke="card"]'),
+  );
+  const capturePins = () =>
+    Object.fromEntries(
+      cards.map((card) => [
+        card.dataset.messageKey,
+        card.style.gridColumnStart,
+      ]),
+    );
+  const pinsBefore = capturePins();
+  const base = Date.parse(config.plan.baseIso);
+  const nodes = config.plan.backfillMinutes.map((minute, position) => {
+    const node = renderMessage(lane, {
+      ack_count: 0,
+      ack_keys: [],
+      display_html: "<p>Hydrated card " + position + " arrives late.</p>",
+      display_text: "hydrated card " + position,
+      index: minute,
+      key: "masonry-hydrated-" + position + "-" + config.width,
+      kind: "assistant",
+      text: "hydrated card " + position,
+      timestamp: new Date(base + minute * 60000).toISOString(),
+    });
+    node.dataset.masonrySmoke = "card";
+    node.dataset.masonrySmokeIndex = String(minute);
+    return node;
+  });
+  host.append(...nodes);
+  packMessageStream(lane);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const hydratedColumns = nodes.map((node) => node.style.gridColumnStart);
+  return {
+    existingColumnsBefore: pinsBefore,
+    existingColumnsAfter: capturePins(),
+    hydratedColumns,
+    stable:
+      JSON.stringify(pinsBefore) === JSON.stringify(capturePins()) &&
+      (config.expectedColumns <= 1 ||
+        hydratedColumns.every((column) => Boolean(column))),
   };
 }
 
@@ -800,6 +920,44 @@ async function masonrySmokeColumnRecovery(lane, cards) {
   return { distinctColumns: lefts.size };
 }
 
+function masonrySmokeResizeAudit(config) {
+  const lane = masonrySmokeLane();
+  const host = lane.messagesEl || document.querySelector(".messages");
+  packMessageStream(lane);
+  const cards = Array.from(
+    host.querySelectorAll('[data-masonry-smoke="card"]'),
+  );
+  const lefts = new Set(
+    cards.map((card) => Math.round(card.getBoundingClientRect().left)),
+  );
+  return {
+    distinctColumns: lefts.size,
+    expectedColumns: config.expectedColumns,
+    spannedCards: cards.filter((card) => (+card.style.gridColumnEnd[5] || 1) > 1)
+      .length,
+    viewportWidth: config.width,
+  };
+}
+
+function masonrySmokeStructuredFinalAudit(cardRects) {
+  const regularHeights = cardRects
+    .filter((card) => !card.final && !card.imageOnly)
+    .map((card) => card.rect.height)
+    .sort((a, b) => a - b);
+  const finalHeights = cardRects
+    .filter((card) => card.final)
+    .map((card) => card.rect.height);
+  const medianRegular =
+    regularHeights[Math.floor(regularHeights.length / 2)] || 0;
+  const maxFinalHeight = Math.max(...finalHeights, 0);
+  return {
+    finalCount: finalHeights.length,
+    maxFinalHeight,
+    medianRegular,
+    ratio: medianRegular > 0 ? maxFinalHeight / medianRegular : 0,
+  };
+}
+
 function masonrySmokeRect(element) {
   const rect = element.getBoundingClientRect();
   return {
@@ -820,6 +978,13 @@ function assertMasonryMeasurement(measurement) {
   assertMasonryDividerBarrier(measurement, fail);
   assertMasonryTimeRules(measurement, fail);
   assertMasonryDistribution(measurement, fail);
+}
+
+function assertMasonryResizeAudit(audit) {
+  if (audit.distinctColumns !== audit.expectedColumns)
+    throw new Error("resize reflow used " + JSON.stringify(audit));
+  if (audit.spannedCards !== 0)
+    throw new Error("resize reflow left hidden spans " + JSON.stringify(audit));
 }
 
 function assertMasonryTeamMeasurement(measurement) {
@@ -870,15 +1035,15 @@ function assertMasonryBaseLayout(measurement, fail) {
   if (measurement.missingTimestampStamps > 0)
     fail("pack items missing data-message-ts");
   if (!measurement.repackAudit.stable) fail("pack is not idempotent");
+  if (measurement.repackAudit.spannedCards !== 0)
+    fail("regular Mosaic unexpectedly spanned cards");
   if (!measurement.columnAudit.chronological)
     fail("column order is not chronological");
   if (!measurement.columnAudit.sameRowChronological)
     fail("cards sharing a row are not chronological left-to-right");
-  const hasColumnSpans = measurement.repackAudit.spannedCards > 0;
-  const gapBound = hasColumnSpans
-    ? measurement.bandAudit.rowStridePx * measurement.bandAudit.bandRows +
-      measurement.bandAudit.rowGapPx
-    : measurement.bandAudit.rowStridePx + measurement.bandAudit.rowGapPx;
+  const gapBound =
+    measurement.bandAudit.rowStridePx * measurement.bandAudit.bandRows +
+    measurement.bandAudit.rowGapPx;
   if (measurement.columnAudit.maxInnerGapPx > gapBound)
     fail(
       "column contains an interior hole of " +
@@ -886,6 +1051,13 @@ function assertMasonryBaseLayout(measurement, fail) {
         "px (bound " +
         gapBound +
         "px)",
+    );
+  if (measurement.structuredFinalAudit.finalCount < 1)
+    fail("fixture did not include a final message");
+  if (measurement.structuredFinalAudit.ratio < 2)
+    fail(
+      "structured final card was not at least 2x a normal card: " +
+        JSON.stringify(measurement.structuredFinalAudit),
     );
 }
 
@@ -939,10 +1111,7 @@ function assertMasonryTimeRules(measurement, fail) {
 function assertMasonryDistribution(measurement, fail) {
   const expectedColumns = measurement.expectedColumns;
   const spannedCards = measurement.repackAudit.spannedCards;
-  if (expectedColumns <= 1 && spannedCards > 0)
-    fail("single-column Mosaic unexpectedly spanned cards");
-  if (expectedColumns > 1 && spannedCards === 0)
-    fail("multi-column Mosaic did not span tall cards");
+  if (spannedCards > 0) fail("Mosaic unexpectedly spanned cards");
   if (expectedColumns > 1) {
     for (const fan of measurement.segmentFanOut) {
       const orderedColumns = fan.map((column, position) => String(position + 1));
@@ -950,18 +1119,24 @@ function assertMasonryDistribution(measurement, fail) {
         fail("segment does not fan out left-to-right: " + JSON.stringify(fan));
     }
   }
-  if (!measurement.backfillAudit.stable)
-    fail("history backfill re-pinned downstream cards");
-  if (measurement.distinctColumnLefts < expectedColumns)
+  if (!measurement.appendStabilityAudit.stable)
     fail(
-      "cards under-distributed (" +
-        measurement.distinctColumnLefts +
-        " columns, expected at least " +
-        expectedColumns +
-        ")",
+      "newer append changed existing card columns: " +
+        JSON.stringify(measurement.appendStabilityAudit),
     );
-  if (expectedColumns === 1 && measurement.distinctColumnLefts !== 1)
-    fail("narrow viewport did not collapse to one column");
+  if (!measurement.hydrationGrowthAudit.stable)
+    fail(
+      "history hydration changed existing card columns: " +
+        JSON.stringify(measurement.hydrationGrowthAudit),
+    );
+  if (measurement.distinctColumnLefts !== expectedColumns)
+    fail(
+      "cards used " +
+        measurement.distinctColumnLefts +
+        " columns, expected " +
+        expectedColumns +
+        "",
+    );
   if (
     expectedColumns > 1 &&
     measurement.columnRecovery.distinctColumns < expectedColumns

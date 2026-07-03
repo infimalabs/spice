@@ -189,7 +189,7 @@ def test_serve_task_stack_smoke_asserts_card_fill() -> None:
     assert "wrapped image card did not fill row" in smoke
     assert "wide message cards did not fill the row" in smoke
     assert "wrapped message card did not fill row" in smoke
-    assert "stable row packing did not stack below short cards" in smoke
+    assert "major-row packing overlapped the previous row group" in smoke
     assert "message repack moved the reading anchor" in smoke
 
 
