@@ -34,6 +34,11 @@ from spice.paths import repo_root_from_cwd
 CONDITION_MET_EXIT_CODE = 0
 CONDITION_UNMET_EXIT_CODE = 1
 DEFAULT_OUTPUT_FORMAT = "{maxim}"
+SCOPE_DECISION_EVIDENCE_ROW = (
+    "scope decisions: run `spice maxim report` and cite per-driver fire_rate, "
+    "confirm_rate, and recurrence before editing "
+    "[tool.spice.maxims.<bag>].drivers or using maxim disable/enable."
+)
 
 
 @dataclass
@@ -100,7 +105,12 @@ def configure_maxim_parser(subparsers: Any) -> None:
 
     report = actions.add_parser(
         "report",
-        help="Show durable maxim metric counts.",
+        help="Show durable maxim metric counts for scope decisions.",
+        description=(
+            "Show per-bag, per-driver, per-thread maxim metric history. Cite "
+            "this report before narrowing [tool.spice.maxims.<bag>].drivers "
+            "or using worktree-local maxim disable/enable."
+        ),
     )
     report.set_defaults(func=run_maxim_report_cli)
 
@@ -114,8 +124,10 @@ def configure_maxim_parser(subparsers: Any) -> None:
         "disable",
         help="Disable one maxim bag for this git worktree.",
         description=(
-            "Store a worktree-local disabled bag entry outside tracked repo "
-            "configuration. Other worktrees keep the bag enabled."
+            "Before disabling, run `spice maxim report` and cite per-driver "
+            "fire_rate, confirm_rate, and recurrence evidence for the bag. "
+            "The disable entry is worktree-local and stored outside tracked "
+            "repo configuration. Other worktrees keep the bag enabled."
         ),
     )
     disable.add_argument("name", help="Configured maxim bag name to disable.")
@@ -124,6 +136,10 @@ def configure_maxim_parser(subparsers: Any) -> None:
     enable = actions.add_parser(
         "enable",
         help="Re-enable one worktree-local disabled maxim bag.",
+        description=(
+            "Before re-enabling, run `spice maxim report` and cite per-driver "
+            "fire_rate, confirm_rate, and recurrence evidence for the bag."
+        ),
     )
     enable.add_argument("name", help="Configured maxim bag name to re-enable.")
     enable.set_defaults(func=run_maxim_enable_cli)
@@ -284,6 +300,7 @@ def run_maxim_disable_cli(args: argparse.Namespace) -> int:
         raise SpiceError("not inside a git worktree")
     disabled = set_maxim_bag_disabled(args.name, disabled=True, repo_root=repo_root)
     print(_render_disabled_bags(disabled))
+    print(_render_scope_decision_evidence_hint())
     return 0
 
 
@@ -293,6 +310,7 @@ def run_maxim_enable_cli(args: argparse.Namespace) -> int:
         raise SpiceError("not inside a git worktree")
     disabled = set_maxim_bag_disabled(args.name, disabled=False, repo_root=repo_root)
     print(_render_disabled_bags(disabled))
+    print(_render_scope_decision_evidence_hint())
     return 0
 
 
@@ -316,7 +334,9 @@ def _render_maxim_listing() -> str:
 def render_maxim_report(repo_root: Path) -> str:
     records = maxim_metric_records(repo_root)
     if not records:
-        return "maxim metric events: 0"
+        return "\n".join(
+            ["maxim metric events: 0", _render_scope_decision_evidence_hint()]
+        )
     buckets = _maxim_report_buckets(maxim_metric_counts(repo_root))
     recurrence_by_key = Counter()
     for item in maxim_recurrence_counts(repo_root):
@@ -368,7 +388,13 @@ def render_maxim_report(repo_root: Path) -> str:
         " ".join(str(value).ljust(widths[index]) for index, value in enumerate(row))
         for row in rows
     )
-    return "\n".join([f"maxim metric events: {len(records)}", *rendered])
+    return "\n".join(
+        [
+            f"maxim metric events: {len(records)}",
+            *rendered,
+            _render_scope_decision_evidence_hint(),
+        ]
+    )
 
 
 def render_maxim_sources(records: tuple[MaximProposalSourceRecord, ...]) -> str:
@@ -406,6 +432,10 @@ def _render_disabled_bags(names: frozenset[str]) -> str:
     if not names:
         return "disabled maxim bags: none"
     return "disabled maxim bags: " + ", ".join(sorted(names))
+
+
+def _render_scope_decision_evidence_hint() -> str:
+    return SCOPE_DECISION_EVIDENCE_ROW
 
 
 def _maxim_report_row(

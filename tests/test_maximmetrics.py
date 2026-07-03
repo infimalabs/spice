@@ -8,6 +8,7 @@ from spice.agent import watchdog
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.identity import ambient_thread_id
 from spice.agent.maximcli import render_maxim_report, run_maxim_report_cli
+from spice.agent.maximcli import SCOPE_DECISION_EVIDENCE_ROW
 from spice.agent.maximmetrics import (
     MAXIM_EVENT_FIRE,
     MAXIM_EVENT_GATE_SUPPRESSED,
@@ -404,7 +405,7 @@ def test_maxim_report_uses_recurrence_counts(tmp_path):
     _write_report_metric_fixture(repo)
 
     lines = render_maxim_report(repo).splitlines()
-    rows = {line.split()[0]: line.split() for line in lines[2:]}
+    rows = {line.split()[0]: line.split() for line in lines[2:-1]}
 
     assert lines[1].split() == [
         "bag",
@@ -447,6 +448,18 @@ def test_maxim_report_uses_recurrence_counts(tmp_path):
         "0",
         "1",
         "1",
+    ]
+    assert lines[-1] == SCOPE_DECISION_EVIDENCE_ROW
+
+
+def test_maxim_report_empty_history_points_to_scope_evidence(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+
+    lines = render_maxim_report(repo).splitlines()
+
+    assert lines == [
+        "maxim metric events: 0",
+        SCOPE_DECISION_EVIDENCE_ROW,
     ]
 
 

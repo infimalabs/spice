@@ -638,9 +638,11 @@ def test_maxim_disable_enable_cli_updates_worktree_state(tmp_path, monkeypatch, 
 
     assert disable_code == 0
     assert "disabled maxim bags: first" in disable_output
+    assert maximcli.SCOPE_DECISION_EVIDENCE_ROW in disable_output
     assert maxims.disabled_maxim_bag_names(repo) == frozenset()
     assert enable_code == 0
     assert "disabled maxim bags: none" in enable_output
+    assert maximcli.SCOPE_DECISION_EVIDENCE_ROW in enable_output
 
 
 def test_builtin_phrase_trigger_matches_whole_phrase_across_punctuation():
