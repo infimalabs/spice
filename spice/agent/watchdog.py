@@ -386,6 +386,7 @@ def create_inline_tasks(
         batch_lines,
         actor_override=actor,
         creation_surface=task_config.TASK_CREATION_SURFACE_CLI,
+        default_origin=_inline_task_default_origin(message_text),
     )
     if results:
         log_handle.write(
@@ -399,6 +400,20 @@ def _supervised_inline_task_actor(repo_root: Path) -> str:
     from spice.agent.lifecycle import agent_status
 
     return agent_status(repo_root).thread_id or ambient_thread_id() or ""
+
+
+def _inline_task_default_origin(message_text: str) -> str | None:
+    """The ack origin an inline TASK inherits from its own message.
+
+    The capture idiom is `ACK <key>: ...` followed by a TASK line, so the
+    acknowledged key IS the provenance of the captured work. Explicit
+    origin= fields in the batch line win; a message that ACKs nothing
+    provides no default and the batch's own origin requirement applies.
+    """
+    from spice.mail.acks import extract_ack_keys_from_text
+
+    keys = list(extract_ack_keys_from_text(message_text))
+    return f"ack:{keys[0]}" if keys else None
 
 
 def _inline_task_result_text(results: list[TaskAddResult]) -> str:

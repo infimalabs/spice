@@ -301,6 +301,13 @@ def _configure_ingest_parser(actions: Any) -> None:
         default=config.DEFAULT_PRIORITY,
         help="Default priority for nodes without priority fields.",
     )
+    ingest.add_argument(
+        "--origin",
+        help=(
+            "Origin for the ingested DAG: ack:<inbox-key> or task:<handle> "
+            "(root provenance for every created node)."
+        ),
+    )
     ingest.set_defaults(func=handle)
 
 
@@ -435,6 +442,13 @@ def _configure_adopt_parser(actions: Any) -> None:
         help="Immediately complete the adopted implementation phase.",
     )
     adopt.add_argument("--validation", action="append", default=[])
+    adopt.add_argument(
+        "--origin",
+        help=(
+            "Origin when minting a new task: ack:<inbox-key> or task:<handle> "
+            "(the acknowledgment or task that surfaced this orphan work)."
+        ),
+    )
     adopt.set_defaults(func=handle)
 
 
@@ -518,6 +532,15 @@ def _configure_add_parser(actions: Any) -> None:
     add.add_argument("--until")
     add.add_argument("--due", help="Native due date; defaults from priority SLA.")
     add.add_argument("--claim", action="store_true")
+    add.add_argument(
+        "--origin",
+        help=(
+            "Provenance reference: ack:<inbox-key> for the acknowledgment "
+            "that steered this work, or task:<handle> for the task it "
+            "descends from. Required for assignable projects unless an "
+            "active claim supplies it."
+        ),
+    )
     add.set_defaults(func=handle)
 
 
@@ -692,6 +715,7 @@ _DISPATCH = {
         a.path,
         project=a.project,
         priority=a.priority,
+        origin=a.origin,
         creation_surface=config.TASK_CREATION_SURFACE_CLI,
     ),
     "done": lambda a: ops.done(
@@ -724,6 +748,7 @@ _DISPATCH = {
         priority=a.priority,
         complete=a.done,
         validation=list(a.validation),
+        origin=a.origin,
     ),
 }
 
@@ -800,6 +825,7 @@ def _handle_add(args: argparse.Namespace) -> int:
             scheduled=args.scheduled,
             until=args.until,
             due=args.due,
+            origin=args.origin,
             creation_surface=config.TASK_CREATION_SURFACE_CLI,
         )
         print(render_add_result(handle_text, claimed=args.claim))

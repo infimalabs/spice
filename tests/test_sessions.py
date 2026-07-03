@@ -392,6 +392,7 @@ def test_briefing_learnings_use_active_stem_top_five(session_task_repo):
     active = create.add(
         "Read top task learnings",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["briefing renders the top five learnings"],
     )
@@ -422,6 +423,7 @@ def test_briefing_surfaces_learning_from_prior_task_done(
     completed = create.add(
         "Distill session learning",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["task done stores a durable learning"],
     )
@@ -438,6 +440,7 @@ def test_briefing_surfaces_learning_from_prior_task_done(
     active = create.add(
         "Use session learning",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["briefing surfaces the active stem learning"],
     )

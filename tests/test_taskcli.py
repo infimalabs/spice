@@ -137,7 +137,16 @@ def test_task_wake_parser_rejects_claim_flag():
 
 def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
     args = build_parser().parse_args(
-        ["task", "add", "--title", "Alias title lands", "--project", "task.unit"]
+        [
+            "task",
+            "add",
+            "--title",
+            "Alias title lands",
+            "--project",
+            "task.unit",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
     )
 
     assert args.func(args) == 0
@@ -150,7 +159,16 @@ def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
 
 def test_task_add_deferred_flag_creates_waiting_task(task_repo, capsys):
     args = build_parser().parse_args(
-        ["task", "add", "Deferred CLI task", "--project", "task.unit", "--deferred"]
+        [
+            "task",
+            "add",
+            "Deferred CLI task",
+            "--project",
+            "task.unit",
+            "--deferred",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
     )
 
     assert args.func(args) == 0
@@ -169,6 +187,7 @@ def test_task_review_then_marks_spawned_followup_as_cli_creation_surface(
     handle = create.add(
         "Review target for CLI follow-up",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         flow=["review"],
         acceptance=["review starts directly for CLI coverage"],
@@ -742,6 +761,7 @@ def test_task_artifact_cli_stores_text_and_binary_sidecars(task_repo, capsys):
     handle = create.add(
         "Capture task artifacts",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["artifact CLI stores text and binary evidence"],
     )
@@ -827,6 +847,7 @@ def test_task_artifact_prune_is_dry_run_until_apply(task_repo, tmp_path, capsys)
     handle = create.add(
         "Prune completed artifact",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         flow=["todo"],
         acceptance=["prunable artifacts are removed only with --apply"],

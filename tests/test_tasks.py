@@ -86,7 +86,12 @@ def _ready_handles() -> set[str]:
 
 
 def test_task_edit_changes_priority_in_place(task_repo):
-    handle = create.add("Bump me", project="task.unit", priority="low")
+    handle = create.add(
+        "Bump me",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="low",
+    )
     assert identity.resolve(handle)["priority"] == "L"
 
     ops.edit(handle, priority="high")
@@ -95,7 +100,12 @@ def test_task_edit_changes_priority_in_place(task_repo):
 
 
 def test_task_edit_reassigns_project_in_place(task_repo):
-    handle = create.add("Move me", project="task.unit", priority="medium")
+    handle = create.add(
+        "Move me",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+    )
 
     ops.edit(handle, project="task.moved")
 
@@ -103,7 +113,12 @@ def test_task_edit_reassigns_project_in_place(task_repo):
 
 
 def test_task_edit_requires_at_least_one_field(task_repo):
-    handle = create.add("Leave me", project="task.unit", priority="medium")
+    handle = create.add(
+        "Leave me",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+    )
     with pytest.raises(SpiceError):
         ops.edit(handle)
 
@@ -113,6 +128,7 @@ def test_task_wake_clears_multiple_waits_and_makes_tasks_current(task_repo):
         create.add(
             f"Wake delayed task {index}",
             project="task.unit",
+            origin="ack:20260101T000000000000Z",
             priority="medium",
             wait=config.OOPS_WAIT,
         )
@@ -139,10 +155,16 @@ def test_task_wake_rejects_batch_without_partial_clear(task_repo):
     delayed = create.add(
         "Wake batch delayed task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         wait=config.OOPS_WAIT,
     )
-    claimed = create.add("Wake batch claimed task", project="task.unit", claim=True)
+    claimed = create.add(
+        "Wake batch claimed task",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        claim=True,
+    )
 
     with pytest.raises(SpiceError, match="active or claimed"):
         ops.wake([delayed, claimed])
@@ -166,6 +188,7 @@ def test_drive_wake_auto_subscribes_woken_project(task_repo):
     handle = create.add(
         "Drive wakes delayed task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         wait=config.OOPS_WAIT,
         acceptance=["drive wake subscribes delayed work"],
@@ -196,6 +219,7 @@ def test_drain_wake_auto_subscribes_woken_project(task_repo):
     handle = create.add(
         "Drain wakes delayed task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         wait=config.OOPS_WAIT,
         acceptance=["drain wake subscribes delayed work"],
@@ -222,6 +246,7 @@ def test_steer_wake_keeps_preparation_only_boundary(task_repo):
     handle = create.add(
         "Steer wakes delayed task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         wait=config.OOPS_WAIT,
         acceptance=["steer wake remains preparation only"],
@@ -239,7 +264,7 @@ def test_task_adopt_mints_task_over_orphan_then_done_captures_it(remote_task_rep
     orphan = _make_orphan_commit(remote_task_repo, subject="orphan fix worth keeping")
     assert gitsync.commits_ahead_of_baseline(remote_task_repo) == 1
 
-    output = ops.adopt(project="task.unit")
+    output = ops.adopt(project="task.unit", origin="ack:20260101T000000000000Z")
     handle = output.splitlines()[0].split()[-1]
     row = identity.resolve(handle)
 
@@ -267,6 +292,7 @@ def test_task_adopt_can_complete_orphan_in_one_shot(remote_task_repo):
 
     output = ops.adopt(
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         complete=True,
         validation=["one-shot validation"],
     )
@@ -283,6 +309,7 @@ def test_task_adopt_claims_existing_handle_over_orphan(remote_task_repo):
     handle = create.add(
         "Pre-filed task awaiting its commit",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["orphan is folded into this task"],
     )
@@ -306,7 +333,12 @@ def test_task_add_claim_refuses_dirty_tree_without_creating_task(remote_task_rep
     (remote_task_repo / "README.md").write_text("dirty\n", encoding="utf-8")
 
     with pytest.raises(SpiceError, match="commit or clear the working tree first"):
-        create.add("Dirty claim should not leak", project="task.unit", claim=True)
+        create.add(
+            "Dirty claim should not leak",
+            project="task.unit",
+            origin="ack:20260101T000000000000Z",
+            claim=True,
+        )
 
     rows = tw.export(["status:pending"])
     assert [
@@ -315,7 +347,12 @@ def test_task_add_claim_refuses_dirty_tree_without_creating_task(remote_task_rep
 
 
 def test_task_add_claim_creates_and_claims_clean_task(task_repo):
-    handle = create.add("Clean claim lands", project="task.unit", claim=True)
+    handle = create.add(
+        "Clean claim lands",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        claim=True,
+    )
     row = identity.resolve(handle)
 
     assert row["claim_by"] == ACTOR_A
@@ -324,7 +361,11 @@ def test_task_add_claim_creates_and_claims_clean_task(task_repo):
 
 def test_task_adopt_rejects_handle_with_new_task_fields(remote_task_repo):
     handle = create.add(
-        "Existing task", project="task.unit", priority="medium", acceptance=["x"]
+        "Existing task",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["x"],
     )
     _make_orphan_commit(remote_task_repo)
     with pytest.raises(SpiceError, match="either an existing <handle> or new-task"):
@@ -345,6 +386,7 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     handle = create.add(
         "Exercise task phase flow",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["phase flow is covered"],
     )
@@ -392,7 +434,12 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
 
 
 def test_task_next_takes_over_stale_peer_claim(task_repo, monkeypatch):
-    handle = create.add("Stale takeover", project="task.unit", priority="medium")
+    handle = create.add(
+        "Stale takeover",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+    )
     uuid = identity.uuid_of(identity.resolve(handle))
     monkeypatch.setattr(
         "spice.tasks.lanes.team_route_for_actor",
@@ -428,8 +475,18 @@ def test_task_next_takes_over_stale_peer_claim(task_repo, monkeypatch):
 
 
 def test_task_next_prefers_ready_work_over_stale_takeover(task_repo, monkeypatch):
-    stale_handle = create.add("Stale claim", project="task.unit", priority="medium")
-    ready_handle = create.add("Fresh work", project="task.unit", priority="medium")
+    stale_handle = create.add(
+        "Stale claim",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+    )
+    ready_handle = create.add(
+        "Fresh work",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+    )
     stale_uuid = identity.uuid_of(identity.resolve(stale_handle))
     monkeypatch.setattr(
         "spice.tasks.lanes.team_route_for_actor",
@@ -480,6 +537,7 @@ def test_task_done_advances_when_learning_transcript_is_missing(
     handle = create.add(
         "Complete without transcript",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["task done remains non-fragile"],
     )
@@ -506,6 +564,7 @@ def test_task_done_advances_when_learning_judge_is_unavailable(
     handle = create.add(
         "Complete with unavailable learning judge",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["judge skip remains non-fragile"],
     )
@@ -530,6 +589,7 @@ def test_plan_phase_show_injects_board_generation_guidance(task_repo):
     handle = create.add(
         "Plan a task arc",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         flow=["plan", "todo", "review"],
         acceptance=["plan bookend acceptance exists"],
     )
@@ -546,6 +606,7 @@ def test_design_phase_show_injects_artifact_boundary_guidance(task_repo):
     handle = create.add(
         "Design a task arc",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         flow=["design", "plan", "todo", "review"],
         acceptance=["design surveys environment"],
     )
@@ -564,6 +625,7 @@ def test_plan_phase_done_requires_connected_child_board(task_repo):
     handle = create.add(
         "Plan needs children",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         flow=["plan", "todo", "review"],
         acceptance=["parent bookend acceptance exists"],
     )
@@ -581,10 +643,15 @@ def test_plan_phase_done_requires_child_acceptance(task_repo):
     handle = create.add(
         "Plan needs accepted children",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         flow=["plan", "todo", "review"],
         acceptance=["parent bookend acceptance exists"],
     )
-    child = create.add("Unaccepted child", project="task.unit")
+    child = create.add(
+        "Unaccepted child",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
     ops.depends(handle, [child])
     ops.claim(handle)
 
@@ -600,11 +667,13 @@ def test_plan_phase_done_requires_bookend_acceptance(task_repo):
     handle = create.add(
         "Plan needs bookend acceptance",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         flow=["plan", "todo", "review"],
     )
     child = create.add(
         "Accepted child for unaccepted plan",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         acceptance=["child node has acceptance"],
     )
     ops.depends(handle, [child])
@@ -622,12 +691,14 @@ def test_plan_phase_done_advances_after_board_population(task_repo):
     handle = create.add(
         "Plan has children",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         flow=["plan", "todo", "review"],
         acceptance=["parent bookend acceptance exists"],
     )
     child = create.add(
         "Accepted child",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         acceptance=["child node has acceptance"],
     )
     ops.depends(handle, [child])
@@ -647,6 +718,7 @@ def test_task_next_repairs_active_claim_missing_owner(task_repo, monkeypatch):
     handle = create.add(
         "Repair partial active claim",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["active missing-owner claims are repaired"],
     )
@@ -669,6 +741,7 @@ def test_active_claim_phase_reports_claimed_task_phase(task_repo):
     handle = create.add(
         "Report phase of an active claim",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["active_claim_phase reflects the claimed task's phase"],
     )
@@ -685,6 +758,7 @@ def test_task_add_stores_description_and_caps_title(task_repo):
         create.add(
             overlong,
             project="task.unit",
+            origin="ack:20260101T000000000000Z",
             priority="medium",
             acceptance=["title cap is enforced"],
         )
@@ -693,6 +767,7 @@ def test_task_add_stores_description_and_caps_title(task_repo):
     handle = create.add(
         "Short subject",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         description=body,
         priority="medium",
         acceptance=["description is stored"],
@@ -715,6 +790,7 @@ def test_task_add_preserves_shared_attachment_refs(task_repo):
     handle = create.add(
         "Preserve shared attachment references",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         description=f"Screenshot/reference attachment: {shared_ref}.",
         priority="medium",
         acceptance=[f"Open {shared_ref}."],
@@ -730,6 +806,7 @@ def test_task_note_preserves_shared_attachment_refs(task_repo):
     handle = create.add(
         "Track attachment note",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["notes are normalized"],
     )
@@ -761,6 +838,7 @@ def test_repo_configured_per_stem_default_flow_feeds_task_add(task_repo):
     handle = create.add(
         "Exercise configured flow",
         project="qa.pipeline",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["configured flow is applied"],
     )
@@ -936,6 +1014,7 @@ def test_unclean_review_links_existing_followup(task_repo, monkeypatch):
     existing = create.add(
         "Existing review follow-up",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         acceptance=["Tracks the requested review change"],
     )
 
@@ -993,6 +1072,7 @@ def _done_learning_task(task_repo: Path, codex_home: Path, turn_id: str) -> str:
     handle = create.add(
         f"Distill learning {turn_id}",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["learning distillation is captured"],
     )
@@ -1053,6 +1133,7 @@ def _review_claim(task_repo: Path, monkeypatch) -> str:
     handle = create.add(
         "Review follow-up invariant",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["review follow-up tracking is enforced"],
     )

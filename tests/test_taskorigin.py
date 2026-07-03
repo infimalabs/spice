@@ -1,0 +1,182 @@
+"""Task origin provenance: ack:/task: realms, requirement, and defaults."""
+
+from __future__ import annotations
+
+
+import pytest
+
+from spice.errors import SpiceError
+from spice.tasks import config, create, identity, ops, tw
+
+from tests.test_tasks import ACTOR_A, task_repo
+
+__all__ = ["task_repo"]
+
+ACK_KEY = "20260104T000000000004Z"
+
+
+def _seed_task(title: str = "Provenance root") -> str:
+    return create.add(
+        title,
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+        priority="medium",
+        acceptance=["origin seed"],
+    )
+
+
+def test_origin_accepts_ack_task_and_bare_forms(task_repo):
+    assert task_repo.is_dir()
+    root = _seed_task()
+
+    explicit_ack = create.add(
+        "Explicit ack origin",
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+        priority="medium",
+        acceptance=["ack realm"],
+    )
+    explicit_task = create.add(
+        "Explicit task origin",
+        project="task.unit",
+        origin=f"task:{root}",
+        priority="medium",
+        acceptance=["task realm"],
+    )
+    bare_ack = create.add(
+        "Bare ack key auto-realms",
+        project="task.unit",
+        # Transcribed keys sometimes drop the trailing Z; canonicalized back.
+        origin=ACK_KEY[:-1],
+        priority="medium",
+        acceptance=["bare ack"],
+    )
+    bare_task = create.add(
+        "Bare handle auto-realms",
+        project="task.unit",
+        origin=root,
+        priority="medium",
+        acceptance=["bare task"],
+    )
+
+    assert identity.resolve(explicit_ack)["origin"] == f"ack:{ACK_KEY}"
+    assert identity.resolve(explicit_task)["origin"] == f"task:{root}"
+    assert identity.resolve(bare_ack)["origin"] == f"ack:{ACK_KEY}"
+    assert identity.resolve(bare_task)["origin"] == f"task:{root}"
+
+
+def test_assignable_creation_without_origin_or_claim_fails(task_repo):
+    assert task_repo.is_dir()
+    with pytest.raises(SpiceError, match="task creation requires an origin"):
+        create.add(
+            "No provenance",
+            project="task.unit",
+            priority="medium",
+            acceptance=["should not exist"],
+        )
+
+
+def test_active_claim_supplies_default_origin(task_repo):
+    assert task_repo.is_dir()
+    root = _seed_task()
+    ops.claim(root)
+
+    spawned = create.add(
+        "Created mid-claim",
+        project="task.unit",
+        priority="medium",
+        acceptance=["inherits the active claim"],
+    )
+
+    assert identity.resolve(spawned)["origin"] == f"task:{root}"
+
+
+def test_private_and_hidden_projects_are_origin_exempt(task_repo):
+    from spice.serve.team.store import ServeTeamStore, TeamConfig
+
+    from tests.test_tasks import ACTOR_A_MEMBER
+
+    assert task_repo.is_dir()
+    ServeTeamStore().create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Steer")
+    )
+    private = create.add(
+        "Private scratch has no origin requirement",
+        priority="medium",
+        acceptance=["private exempt"],
+    )
+    oops_line = ops.oops("Automated triage capture", description="origin exempt")
+    oops_handle = oops_line.split()[1]
+
+    private_row = identity.resolve(private)
+    oops_row = identity.resolve(oops_handle)
+
+    assert private_row["project"] == config.private_project(ACTOR_A)
+    assert not str(private_row.get("origin") or "")
+    assert not str(oops_row.get("origin") or "")
+
+
+def test_origin_rejects_unresolvable_handles_and_malformed_keys(task_repo):
+    assert task_repo.is_dir()
+    with pytest.raises(SpiceError, match="task origin"):
+        create.validated_task_origin("task:NOPE-404")
+    with pytest.raises(SpiceError, match="task origin ack key"):
+        create.validated_task_origin("ack:not-a-key")
+    with pytest.raises(SpiceError, match="task origin"):
+        create.validated_task_origin("gibberish without realm")
+
+
+def test_batch_origin_field_round_trips(task_repo):
+    assert task_repo.is_dir()
+    handles = create.add_batch(
+        [
+            f"title=Batch with origin | project=task.unit | acceptance=ok | "
+            f"origin=ack:{ACK_KEY}"
+        ]
+    )
+
+    assert len(handles) == 1
+    assert identity.resolve(handles[0])["origin"] == f"ack:{ACK_KEY}"
+
+
+def test_batch_rejects_invalid_origin_before_creating_anything(task_repo):
+    assert task_repo.is_dir()
+    with pytest.raises(SpiceError, match="task origin"):
+        create.add_batch(
+            [
+                "title=Bad origin | project=task.unit | acceptance=ok | "
+                "origin=task:NOPE-404"
+            ]
+        )
+    assert tw.export(["status:pending"]) == []
+
+
+def test_review_then_followup_inherits_reviewed_task_origin(task_repo, monkeypatch):
+    from spice.agent.driver import DRIVER
+
+    from tests.test_tasks import PEER_ACTOR
+
+    assert task_repo.is_dir()
+    handle = _seed_task("Reviewed work spawns follow-up")
+    ops.claim(handle)
+    ops.done(handle, validation=["implementation complete"])
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(handle)
+
+    ops.review(
+        handle,
+        finding="unclean",
+        note="needs a follow-up",
+        then=[
+            "title=Follow the review | project=task.unit | "
+            "acceptance=Review feedback addressed"
+        ],
+    )
+
+    followups = [
+        row
+        for row in tw.export(["status:pending"])
+        if row.get("description") == "Follow the review"
+    ]
+    assert len(followups) == 1
+    assert followups[0]["origin"] == f"task:{handle}"

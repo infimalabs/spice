@@ -295,6 +295,7 @@ _EVIDENCE = [
     "validation",
     "judgment",
     "delete_reason",
+    "origin",
     TASK_CREATION_SURFACE_UDA,
     "origin_thread",
     "origin_worktree",

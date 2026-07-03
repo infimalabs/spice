@@ -35,6 +35,7 @@ def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
     handle = create.add(
         "Manual claim out of lane",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["manual claim subscribes the project"],
     )
@@ -123,12 +124,14 @@ def test_steer_next_task_ignores_auto_subscriptions_but_honors_pins(
     create.add(
         "Auto-subscribed project task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="high",
         acceptance=["steer must not allocate through auto subscriptions"],
     )
     pinned = create.add(
         "Pinned project task",
         project="serve.ui",
+        origin="ack:20260101T000000000000Z",
         priority="low",
         acceptance=["steer allocates through manual pins"],
     )
@@ -150,6 +153,7 @@ def test_steer_manual_claim_never_subscribes(task_repo):
     handle = create.add(
         "Steer manual claim out of lane",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["steer manual claim leaves team filters untouched"],
     )
@@ -174,6 +178,7 @@ def test_task_next_auto_claim_does_not_rewrite_team_filters(task_repo):
     handle = create.add(
         "Auto claim in lane",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["auto claim leaves filter store unchanged"],
     )
@@ -216,6 +221,7 @@ def test_manual_claim_skips_subscription_for_teamless_actor(task_repo):
     handle = create.add(
         "Teamless manual claim",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["teamless claims do not create subscriptions"],
     )
@@ -251,6 +257,7 @@ def test_final_review_completion_gcs_auto_claim_filter(task_repo, monkeypatch):
     handle = create.add(
         "Review keeps project subscribed",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["review keeps auto filter until complete"],
     )
@@ -286,6 +293,7 @@ def test_empty_project_gc_removes_auto_sources_but_preserves_manual(
     handle = create.add(
         "Manual filter survives auto gc",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["manual task filter survives empty-project gc"],
     )
@@ -324,12 +332,14 @@ def test_delete_gcs_empty_auto_create_filter_after_project_subtree_empties(
     parent = create.add(
         "Parent task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["parent deletion keeps filter while child pending"],
     )
     child = create.add(
         "Child task",
         project="task.unit.child",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["child deletion empties parent subtree"],
     )
@@ -360,12 +370,14 @@ def test_empty_project_gc_counts_waiting_tasks(task_repo):
     doomed = create.add(
         "Deleted while sibling waits",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["gc keeps filter while a waiting task remains"],
     )
     sleeper = create.add(
         "Wakes back into the project",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["waiting task holds the subscription"],
         deferred=True,
@@ -397,6 +409,7 @@ def test_drive_task_creation_subscribes_project_idempotently(task_repo):
     first = create.add(
         "Drive creates first task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["drive creation subscribes"],
     )
@@ -405,6 +418,7 @@ def test_drive_task_creation_subscribes_project_idempotently(task_repo):
     second = create.add(
         "Drive creates second task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["duplicate drive creation is idempotent"],
     )
@@ -429,6 +443,7 @@ def test_steer_task_creation_keeps_manual_subscription_boundary(task_repo):
     handle = create.add(
         "Steer creates task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["steer creation does not auto-subscribe"],
     )
@@ -449,6 +464,7 @@ def test_drain_task_creation_uses_effective_visibility_not_stored_filter(task_re
     handle = create.add(
         "Drain creates task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["drain creation relies on computed visibility"],
     )
@@ -466,6 +482,7 @@ def test_teamless_task_creation_routes_creator_without_team_subscription(task_re
     handle = create.add(
         "Teamless creates task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["teamless creation has no team subscription"],
     )
@@ -488,6 +505,7 @@ def test_teamless_creator_scope_does_not_route_peer_public_tasks(
     handle = create.add(
         "Peer teamless public task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["origin scope is not global public visibility"],
     )
@@ -514,6 +532,7 @@ def test_explicit_thread_membership_routes_peer_review_through_status_and_next(
     handle = create.add(
         "Peer serve review",
         project="serve.ui",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["explicit thread membership routes serve reviews"],
     )
@@ -587,6 +606,7 @@ def test_drive_create_allocate_review_and_gc_capstone(task_repo, monkeypatch):
     handle = create.add(
         "Drive capstone task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["drive lifecycle capstone"],
     )
@@ -629,6 +649,7 @@ def test_task_lifecycle_events_are_emitted_for_scripted_task_lifecycle(
     handle = create.add(
         "Lifecycle metric task",
         project="task.unit",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["task lifecycle emits metric facts"],
     )
@@ -678,6 +699,7 @@ def test_drain_visibility_and_empty_steer_private_fail_closed(task_repo, monkeyp
     public = create.add(
         "Drain-visible public task",
         project="serve.ui",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["drain sees assignable public work"],
     )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -12,6 +13,15 @@ from spice.tasks import config, gitsync, identity, ops, tw
 TASK_TITLE_LIMIT = COMMIT_MESSAGE_WRAP_LIMIT
 TASK_BATCH_DIRECTIVE_TOKEN = "TASK"
 TASK_BATCH_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
+# Inbox keys are UTC stamps like 20260104T000000000004Z; agents transcribing
+# one sometimes drop the trailing Z (see inbox_item_key_aliases).
+TASK_ORIGIN_ACK_KEY_RE = re.compile(r"^\d{8}T\d{6,}Z?$")
+TASK_ORIGIN_REQUIRED_ERROR = (
+    "task creation requires an origin: reference the acknowledgment that "
+    "steered it (--origin ack:<inbox-key> / origin=ack:<inbox-key>) or the "
+    "task it descends from (--origin task:<handle>); work created while "
+    "holding an active claim inherits that claim automatically"
+)
 
 
 @dataclass(frozen=True)
@@ -26,6 +36,7 @@ class TaskAddBatchRequest:
     after: tuple[str, ...] = ()
     due: str | None = None
     deferred: bool = False
+    origin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +83,69 @@ def _resolved_wait(*, wait: str | None, deferred: bool, claim: bool) -> str | No
     return config.OOPS_WAIT
 
 
+def validated_task_origin(value: str) -> str:
+    """Canonicalize an origin reference into ack:<inbox-key> or task:<HANDLE>.
+
+    Bare values are auto-realmed: an inbox-key-shaped value is an ack
+    reference, anything else must resolve to an existing task (any status --
+    completed ancestors are valid provenance). Ack keys are validated by
+    shape, not archival state: inline TASK capture may run before or after
+    the acknowledgment itself is archived by the supervisor.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        raise SpiceError(TASK_ORIGIN_REQUIRED_ERROR)
+    realm, _, rest = raw.partition(":")
+    if realm == "ack" and rest:
+        return f"ack:{_validated_origin_ack_key(rest)}"
+    if realm == "task" and rest:
+        return f"task:{_validated_origin_task_handle(rest)}"
+    if TASK_ORIGIN_ACK_KEY_RE.match(raw):
+        return f"ack:{_validated_origin_ack_key(raw)}"
+    return f"task:{_validated_origin_task_handle(raw)}"
+
+
+def _validated_origin_ack_key(key: str) -> str:
+    key = key.strip()
+    if not TASK_ORIGIN_ACK_KEY_RE.match(key):
+        raise SpiceError(
+            "task origin ack key must be an inbox key like "
+            f"20260104T000000000004Z: {key!r}"
+        )
+    return key if key.endswith("Z") else f"{key}Z"
+
+
+def _validated_origin_task_handle(handle: str) -> str:
+    handle = handle.strip()
+    try:
+        return identity.render_handle(identity.resolve(handle))
+    except SpiceError as exc:
+        raise SpiceError(
+            "task origin must reference ack:<inbox-key> or an existing "
+            f"task handle: {handle!r} ({exc})"
+        ) from exc
+
+
+def _origin_required(resolved_project: str) -> bool:
+    # Provenance is a board contract: private agent scratch projects and
+    # hidden/internal system projects (oops triage, maxim proposals) are
+    # exempt by design.
+    if config.is_internal_or_hidden_project(resolved_project):
+        return False
+    return resolved_project.split(config.PROJECT_DELIMITER, 1)[0] != "agent"
+
+
+def _resolved_task_origin(origin: str | None, actor: str, project: str) -> str:
+    if origin:
+        return validated_task_origin(origin)
+    if not _origin_required(project):
+        return ""
+    claim = ops.active_claim(actor)
+    if claim is not None:
+        return f"task:{identity.render_handle(claim)}"
+    raise SpiceError(TASK_ORIGIN_REQUIRED_ERROR)
+
+
 def _resolve_add_project(actor: str, project: str | None, system_project: bool) -> str:
     if project is None:
         _require_steer_lifetime(actor, action="creating a private task")
@@ -111,6 +185,7 @@ def _build_add_args(
     due: str | None,
     extra: list[str] | None,
     creation_surface: str | None,
+    origin: str = "",
 ) -> list[str]:
     mapped_priority = config.map_priority(priority)
     hidden_project = config.is_hidden_project(resolved_project)
@@ -141,6 +216,8 @@ def _build_add_args(
     surface = _task_creation_surface(creation_surface)
     if surface:
         args.append(f"{config.TASK_CREATION_SURFACE_UDA}:{surface}")
+    if origin:
+        args.append(f"origin:{origin}")
     args += [
         f"origin_thread:{actor}",
         f"origin_worktree:{config.repo_root()}",
@@ -178,6 +255,7 @@ def _add_result(
     scheduled: str | None = None,
     until: str | None = None,
     due: str | None = None,
+    origin: str | None = None,
     extra: list[str] | None = None,
     existing: set[str] | None = None,
     system_project: bool = False,
@@ -188,12 +266,13 @@ def _add_result(
     body = _task_description(description)
     resolved_wait = _resolved_wait(wait=wait, deferred=deferred, claim=claim)
     actor = tw.canonical_actor(actor_override or tw.current_actor())
+    resolved_project = _resolve_add_project(actor, project, system_project)
+    resolved_origin = _resolved_task_origin(origin, actor, resolved_project)
     if claim:
         ops._require_single_active_slot(actor, action="task add --claim")
         # Match a normal claim's baseline check before creating the task row.
         # If this fails, task add --claim must not leave unclaimed work behind.
         gitsync.prepare_for_claim()
-    resolved_project = _resolve_add_project(actor, project, system_project)
     phases = config.resolve_flow(flow, resolved_project)
     incepted = identity.mint_incepted(existing)
     if existing is not None:
@@ -215,6 +294,7 @@ def _add_result(
         due=due,
         extra=extra,
         creation_surface=creation_surface,
+        origin=resolved_origin,
     )
     tw.run(args)
     route_feedback = ops._subscribe_created_project(resolved_project, actor)
@@ -247,6 +327,7 @@ def add_one(
     scheduled: str | None = None,
     until: str | None = None,
     due: str | None = None,
+    origin: str | None = None,
     extra: list[str] | None = None,
     existing: set[str] | None = None,
     system_project: bool = False,
@@ -268,6 +349,7 @@ def add_one(
         scheduled=scheduled,
         until=until,
         due=due,
+        origin=origin,
         extra=extra,
         existing=existing,
         system_project=system_project,
@@ -292,6 +374,7 @@ def add(
     scheduled: str | None = None,
     until: str | None = None,
     due: str | None = None,
+    origin: str | None = None,
     creation_surface: str | None = None,
 ) -> str:
     return add_one(
@@ -309,6 +392,7 @@ def add(
         scheduled=scheduled,
         until=until,
         due=due,
+        origin=origin,
         creation_surface=creation_surface,
     )
 
@@ -373,6 +457,11 @@ def _batch_field_errors(fields: dict[str, str], index: int) -> list[str]:
             identity.resolve(dep)
         except SpiceError:
             errors.append(f"line {index}: unknown after handle {dep!r}")
+    if fields.get("origin"):
+        try:
+            validated_task_origin(fields["origin"])
+        except SpiceError as exc:
+            errors.append(f"line {index}: {exc}")
     return errors
 
 
@@ -388,6 +477,7 @@ def _batch_request_from_fields(fields: dict[str, str]) -> TaskAddBatchRequest:
         acceptance=(fields["acceptance"],),
         due=fields.get("due") or None,
         deferred=_batch_bool(fields.get("deferred", "")),
+        origin=fields.get("origin") or None,
     )
 
 
@@ -450,6 +540,7 @@ def add_batch_results(
     *,
     actor_override: str | None = None,
     creation_surface: str | None = None,
+    default_origin: str | None = None,
 ) -> list[TaskAddResult]:
     parsed = parse_add_batch(lines)
     existing = {str(r.get("incepted") or "") for r in tw.export()}
@@ -468,6 +559,7 @@ def add_batch_results(
             deferred=request.deferred,
             claim=False,
             due=request.due,
+            origin=request.origin or default_origin,
             existing=existing,
             actor_override=actor_override,
             creation_surface=creation_surface,

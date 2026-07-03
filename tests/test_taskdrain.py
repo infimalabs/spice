@@ -50,6 +50,7 @@ def test_drain_phase_boundary_sees_configured_assignable_stem(task_repo, monkeyp
     handle = create.add(
         "Drain sees configured stem",
         project="paintball.docs",
+        origin="ack:20260101T000000000000Z",
         priority="medium",
         acceptance=["drain sees repo-defined assignable stems"],
     )
