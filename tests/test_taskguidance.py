@@ -99,7 +99,13 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     )
     monkeypatch.setattr(
         "spice.tasks.lanes.team_route_for_actor",
-        lambda _actor: {"filter": ["project:task.guidance"], "lifetime": "Steer"},
+        # Steer reads the manual-pin layer only, so a Steer lane scoped to a
+        # project is represented as a pin.
+        lambda _actor: {
+            "filter": ["project:task.guidance"],
+            "manual": ["project:task.guidance"],
+            "lifetime": "Steer",
+        },
     )
     ops.claim(handle)
 
