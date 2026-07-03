@@ -87,9 +87,18 @@ the Claude Code hook experiment recorded on the task:
 
 Conclusion: vendor hooks are a proven inbound ambient channel for non-shell
 tool spans. They should be used to close "native tool dark stretches" for
-steering delivery, while Bash keeps the existing shell reexec/stderr path.
-That does not replace the assistant-output marker protocol; it reduces how
-often the assistant must ask the harness for state.
+steering delivery where the active driver exposes that coverage, while Bash
+keeps the existing shell reexec/stderr path. That does not replace the
+assistant-output marker protocol; it reduces how often the assistant must ask
+the harness for state.
+
+Codex is deliberately narrower. Codex CLI 0.136.0 exposes stable
+`hooks.PostToolUse` and can return `additionalContext`, but the OpenAI Codex
+hooks documentation scopes PostToolUse to Bash, `apply_patch`, and MCP tool
+calls. It explicitly does not fire for WebSearch or other non-shell non-MCP
+native tools. The Codex launch path therefore must wire only the supported
+PostToolUse surface unless a separate delivery mechanism is introduced; it must
+not inherit Claude's native non-shell coverage claim by implication.
 
 ### Unicode Normalization
 
@@ -151,6 +160,8 @@ Before enabling the protocol:
 - replay Codex and Claude reconstructed assistant messages through the scanner;
 - prove the Claude `PostToolUse "*"` inbound hook path uses repeat suppression
   and does not fire unbounded duplicate reminders;
+- assert the Codex PostToolUse path is limited to Bash, `apply_patch`, and MCP
+  tools, with WebSearch and other non-MCP native tools recorded as unsupported;
 - include examples where markers are discussed in docs without taking effect.
 
 ## Follow-Ups

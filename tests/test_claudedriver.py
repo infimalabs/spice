@@ -228,6 +228,25 @@ def test_claude_skill_prompt_matches_codex_link_form():
     )
 
 
+def test_driver_post_tool_hook_capabilities_name_codex_gap():
+    codex_hook = CODEX_DRIVER.post_tool_hook
+    claude_hook = CLAUDE_DRIVER.post_tool_hook
+
+    assert codex_hook is not None
+    assert "hooks.PostToolUse" in codex_hook.config_surface
+    assert codex_hook.supported_tools == ("Bash", "apply_patch", "MCP")
+    assert "WebSearch" in codex_hook.unsupported_tools
+    assert "non-MCP native tools" in codex_hook.unsupported_tools
+    assert codex_hook.native_non_shell_complete is False
+    assert "WebSearch" in codex_hook.note
+
+    assert claude_hook is not None
+    assert "PostToolUse" in claude_hook.config_surface
+    assert claude_hook.unsupported_tools == ()
+    assert claude_hook.native_non_shell_complete is True
+    assert claude_hook.context_output_field == "hookSpecificOutput.additionalContext"
+
+
 def test_claude_transcript_resolves_by_session_glob(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
     dashed = "768bcba1-a66f-4d22-9ce7-bcf65b5d16aa"
