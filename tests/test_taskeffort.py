@@ -7,10 +7,12 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from spice.agent.driver import DRIVER
+from spice.serve.payload import metric
 from spice.serve.team.ids import thread_actor_id
 from spice.serve.team.store import ServeTeamStore
 from spice.tasks import config, create, effort, identity, ops
@@ -324,6 +326,94 @@ def test_phase_effort_usage_aggregates_transcript_spend_by_window(tmp_path):
             (str(transcript),),
             (),
         ),
+    ]
+
+
+def test_metric_series_phase_effort_matches_task_effort_api(task_repo, monkeypatch):
+    transcript = task_repo / "thread-a.jsonl"
+    clock = {"now": _epoch(0)}
+    monkeypatch.setattr("spice.serve.team.metrics.time.time", lambda: clock["now"])
+    store = ServeTeamStore()
+    team = store.create_team(members=[ACTOR_A_MEMBER])
+    _record_identity(
+        store,
+        ACTOR_A_MEMBER,
+        thread_id=ACTOR_A,
+        driver="codex",
+        model="gpt-5.5",
+        effort_value="xhigh",
+    )
+    handle = create.add(
+        "Expose effort metric series",
+        project="task.unit",
+        flow=["todo", "verify", "review"],
+        acceptance=["phase effort appears in serve metrics"],
+    )
+
+    clock["now"] = _epoch(0)
+    ops.claim(handle)
+    clock["now"] = _epoch(20)
+    ops.done(handle, validation=["todo complete"])
+    ops.claim(handle)
+    clock["now"] = _epoch(40)
+    ops.done(handle, validation=["verify complete"])
+
+    _write_usage_transcript(transcript)
+    row = identity.resolve(handle)
+    usage_rows = store.task_phase_effort_usage([row], {ACTOR_A: [transcript]})
+    assert [(usage.phase, usage.total_tokens) for usage in usage_rows] == [
+        ("todo", 135),
+        ("verify", 267),
+    ]
+    state = SimpleNamespace(
+        team_store=store,
+        phase_effort_task_rows=[row],
+        phase_effort_transcript_files_by_thread={ACTOR_A: (transcript,)},
+    )
+
+    payload = metric.metric_series_payload(
+        state,
+        {
+            "agentId": ACTOR_A_MEMBER,
+            "metric": "phaseEffort",
+            "start": _epoch(0),
+            "end": _epoch(40),
+            "bucketSeconds": 10,
+        },
+    )
+
+    assert payload["metric"] == "phaseEffort"
+    assert payload["points"] == [
+        {
+            "bucketStart": int(usage.window.started_at),
+            "value": usage.total_tokens,
+            "taskId": usage.task_id,
+            "handle": usage.handle,
+            "title": usage.window.title,
+            "phase": usage.phase,
+            "phaseIndex": usage.phase_index,
+            "agentId": usage.actor_id,
+            "threadId": usage.thread_id,
+            "teamId": team.team_id,
+            "driver": usage.driver,
+            "model": usage.model,
+            "effort": usage.effort,
+            "startedAt": usage.window.started_at,
+            "endedAt": usage.window.ended_at,
+            "wallSeconds": usage.wall_seconds,
+            "inputTokens": usage.input_tokens,
+            "cachedInputTokens": usage.cached_input_tokens,
+            "outputTokens": usage.output_tokens,
+            "reasoningOutputTokens": usage.reasoning_output_tokens,
+            "totalTokens": usage.total_tokens,
+            "turns": usage.turn_count,
+            "messages": usage.message_count,
+            "renewals": usage.renewal_count,
+            "sourceFiles": list(usage.source_files),
+            "partial": usage.partial,
+            "partialMarkers": list(usage.partial_markers),
+        }
+        for usage in usage_rows
     ]
 
 

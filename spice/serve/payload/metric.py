@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from spice.errors import SpiceError
 from spice.serve.team.metrics import (
@@ -14,7 +15,16 @@ from spice.serve.team.metrics import (
 )
 
 SERIES_METRICS = frozenset(
-    {"activity", "sends", "acks", "burndown", "distribution", "stuck", "drained"}
+    {
+        "activity",
+        "sends",
+        "acks",
+        "burndown",
+        "distribution",
+        "stuck",
+        "drained",
+        "phaseEffort",
+    }
 )
 SERIES_LENSES = frozenset({"lineage", "perSession", "teamHistorical"})
 TASK_METRIC_FIELDS = {
@@ -41,7 +51,7 @@ def metric_series_payload(state: Any, query: dict[str, Any]) -> dict[str, Any]:
     subject = _series_subject(state.team_store, query)
     series_start = _effective_series_start(state.team_store, subject, lens, start)
     points = _series_points(
-        state.team_store,
+        state,
         metric=metric,
         lens=lens,
         subject=subject,
@@ -63,7 +73,7 @@ def metric_series_payload(state: Any, query: dict[str, Any]) -> dict[str, Any]:
 
 
 def _series_points(
-    store: Any,
+    state: Any,
     *,
     metric: str,
     lens: str,
@@ -72,6 +82,7 @@ def _series_points(
     end: float,
     bucket_seconds: int,
 ) -> list[dict[str, Any]]:
+    store = state.team_store
     if metric == "activity":
         return _activity_points(
             store,
@@ -92,6 +103,15 @@ def _series_points(
         )
     if metric == "distribution":
         return _distribution_points(
+            store,
+            subject=subject,
+            start=start,
+            end=end,
+            bucket_seconds=bucket_seconds,
+        )
+    if metric == "phaseEffort":
+        return _phase_effort_points(
+            state,
             store,
             subject=subject,
             start=start,
@@ -271,6 +291,154 @@ def _distribution_points(
             bucket_seconds=bucket_seconds,
         )
     ]
+
+
+def _phase_effort_points(
+    state: Any,
+    store: Any,
+    *,
+    subject: _SeriesSubject,
+    start: float,
+    end: float,
+    bucket_seconds: int,
+) -> list[dict[str, Any]]:
+    task_rows = _phase_effort_task_rows(state)
+    windows = store.task_phase_effort_windows(task_rows)
+    files_by_thread = _phase_effort_transcript_files_by_thread(state, windows)
+    usage_rows = store.task_phase_effort_usage(task_rows, files_by_thread)
+    return [
+        _phase_effort_point(usage, bucket_seconds=bucket_seconds)
+        for usage in usage_rows
+        if _phase_effort_usage_matches_subject(usage, subject)
+        if _phase_effort_usage_overlaps_range(usage, start=start, end=end)
+    ]
+
+
+def _phase_effort_task_rows(state: Any) -> list[dict[str, Any]]:
+    configured = getattr(state, "phase_effort_task_rows", None)
+    if callable(configured):
+        configured = configured()
+    if isinstance(configured, Iterable):
+        return [dict(cast(Mapping[str, Any], row)) for row in configured]
+    from spice.tasks import tw
+
+    return tw.export()
+
+
+def _phase_effort_transcript_files_by_thread(
+    state: Any, windows: tuple[Any, ...]
+) -> dict[str, tuple[Any, ...]]:
+    configured = getattr(state, "phase_effort_transcript_files_by_thread", None)
+    if callable(configured):
+        return _normalized_transcript_files_by_thread(configured(windows))
+    if configured is not None:
+        return _normalized_transcript_files_by_thread(configured)
+
+    from spice.serve.messages import resolve_thread_transcript
+
+    files_by_thread: dict[str, tuple[Any, ...]] = {}
+    repo_roots = _phase_effort_repo_roots(state)
+    for thread_id in sorted(
+        {window.thread_id for window in windows if window.thread_id}
+    ):
+        for repo_root in repo_roots:
+            resolution = resolve_thread_transcript(thread_id, repo_root)
+            if resolution is not None:
+                files_by_thread[thread_id] = (resolution.path,)
+                break
+    return files_by_thread
+
+
+def _normalized_transcript_files_by_thread(raw: Any) -> dict[str, tuple[Any, ...]]:
+    return {
+        str(thread_id): _transcript_path_tuple(paths)
+        for thread_id, paths in dict(raw or {}).items()
+        if str(thread_id)
+    }
+
+
+def _transcript_path_tuple(paths: Any) -> tuple[Any, ...]:
+    if isinstance(paths, str):
+        return (paths,)
+    try:
+        return tuple(paths)
+    except TypeError:
+        return (paths,)
+
+
+def _phase_effort_repo_roots(state: Any) -> tuple[Any, ...]:
+    worktree_targets = getattr(state, "worktree_targets", None)
+    if not callable(worktree_targets):
+        return (None,)
+    targets = worktree_targets()
+    if not isinstance(targets, Iterable):
+        return (None,)
+    roots = tuple(
+        target.repo_root
+        for target in targets
+        if getattr(target, "repo_root", None) is not None
+    )
+    return roots or (None,)
+
+
+def _phase_effort_usage_matches_subject(usage: Any, subject: _SeriesSubject) -> bool:
+    if subject.scope == "team":
+        return usage.window.team_id in subject.team_ids
+    return usage.actor_id in subject.agent_ids
+
+
+def _phase_effort_usage_overlaps_range(usage: Any, *, start: float, end: float) -> bool:
+    started_at = usage.window.started_at
+    ended_at = usage.window.ended_at
+    first = started_at if started_at is not None else ended_at
+    last = ended_at if ended_at is not None else started_at
+    if last is not None and last < start:
+        return False
+    if first is not None and first > end:
+        return False
+    return True
+
+
+def _phase_effort_point(usage: Any, *, bucket_seconds: int) -> dict[str, Any]:
+    window = usage.window
+    return {
+        "bucketStart": _bucket_start(_phase_effort_bucket_time(usage), bucket_seconds),
+        "value": usage.total_tokens,
+        "taskId": usage.task_id,
+        "handle": usage.handle,
+        "title": window.title,
+        "phase": usage.phase,
+        "phaseIndex": usage.phase_index,
+        "agentId": usage.actor_id,
+        "threadId": usage.thread_id,
+        "teamId": window.team_id,
+        "driver": usage.driver,
+        "model": usage.model,
+        "effort": usage.effort,
+        "startedAt": window.started_at,
+        "endedAt": window.ended_at,
+        "wallSeconds": usage.wall_seconds,
+        "inputTokens": usage.input_tokens,
+        "cachedInputTokens": usage.cached_input_tokens,
+        "outputTokens": usage.output_tokens,
+        "reasoningOutputTokens": usage.reasoning_output_tokens,
+        "totalTokens": usage.total_tokens,
+        "turns": usage.turn_count,
+        "messages": usage.message_count,
+        "renewals": usage.renewal_count,
+        "sourceFiles": list(usage.source_files),
+        "partial": usage.partial,
+        "partialMarkers": list(usage.partial_markers),
+    }
+
+
+def _phase_effort_bucket_time(usage: Any) -> float:
+    window = usage.window
+    if window.started_at is not None:
+        return float(window.started_at)
+    if window.ended_at is not None:
+        return float(window.ended_at)
+    return 0.0
 
 
 def _series_subject(store: Any, query: dict[str, Any]) -> _SeriesSubject:
