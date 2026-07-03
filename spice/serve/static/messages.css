@@ -3,6 +3,7 @@
   --message-card-max-width: 30rem;
   --message-card-min-width: 20rem;
   --message-pack-band: 6;
+  --message-pack-column-count: auto-fit;
   --message-pack-row-height: 4px;
   align-content: start;
   align-items: start;
@@ -12,7 +13,7 @@
   grid-auto-flow: row;
   grid-auto-rows: var(--message-pack-row-height);
   grid-template-columns: repeat(
-    auto-fit,
+    var(--message-pack-column-count),
     minmax(min(100%, var(--message-card-min-width)), 1fr)
   );
   min-width: 0;

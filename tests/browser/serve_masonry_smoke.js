@@ -6,6 +6,7 @@ const { withServePage } = require("./serve_playwright_harness");
 // The injected helpers are serialized into the page, so every fixture constant
 // travels through the evaluate config rather than lexical capture.
 const masonryColumnFloorByWidth = { 560: 1, 1280: 2, 1920: 3 };
+const masonryForcedTallSpan = 120;
 const masonryMobileBreakpointWidth = 720;
 const masonryMeasuredWidths = Object.keys(masonryColumnFloorByWidth).map(Number);
 const masonryScreenshotWidths = [900, 1280, 1920];
@@ -91,6 +92,7 @@ async function installMasonrySmokeHelpers(page) {
       masonryTeamTargetPayload,
       masonryTeamItems,
       masonryTeamMeasurement,
+      masonryTeamNaturalHeightRecovery,
       masonrySmokeImageHtml,
       masonrySmokeImagesReady,
       masonrySmokeRect,
@@ -114,6 +116,7 @@ async function measureMasonryTeam(page, width) {
   await page.setViewportSize({ width, height: 1400 });
   return page.evaluate(renderMasonryTeamFixture, {
     expectedColumns: masonryTeamColumnFloorByWidth[width] || 1,
+    forcedTallSpan: masonryForcedTallSpan,
     plan: masonryFixturePlan,
     width,
   });
@@ -551,6 +554,13 @@ function masonryTeamMeasurement(lane, host, config) {
       width: rect.width,
     };
   });
+  const naturalHeightRecovery = masonryTeamNaturalHeightRecovery(
+    lane,
+    cards[0],
+    rowStride,
+    rowGap,
+    config.forcedTallSpan,
+  );
   const memberColumnCounts = Object.fromEntries(
     Object.entries(memberColumns).map(([member, columns]) => [
       member,
@@ -573,8 +583,33 @@ function masonryTeamMeasurement(lane, host, config) {
       ),
     ),
     memberColumnCounts,
+    naturalHeightRecovery,
     rowStridePx: rowStride,
     viewportWidth: config.width,
+  };
+}
+
+function masonryTeamNaturalHeightRecovery(
+  lane,
+  card,
+  rowStride,
+  rowGap,
+  forcedTallSpan,
+) {
+  const naturalHeight = card.scrollHeight + 2;
+  card.style.setProperty("--message-pack-row-span", String(forcedTallSpan));
+  card.getBoundingClientRect();
+  packMessageStream(lane);
+  const span = Number.parseInt(
+    card.style.getPropertyValue("--message-pack-row-span") || "0",
+    10,
+  );
+  const cellHeight = span * rowStride - rowGap;
+  return {
+    cellHeight,
+    naturalHeight,
+    slackPx: Math.max(0, cellHeight - naturalHeight),
+    span,
   };
 }
 
@@ -781,6 +816,11 @@ function assertMasonryTeamMeasurement(measurement) {
     fail(
       "team cards retained masonry band stretch slack " +
         measurement.maxStretchSlackPx,
+    );
+  if (measurement.naturalHeightRecovery.slackPx > measurement.rowStridePx + 2)
+    fail(
+      "single-lane natural height recovery retained stretch slack " +
+        measurement.naturalHeightRecovery.slackPx,
     );
 }
 
