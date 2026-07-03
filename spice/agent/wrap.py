@@ -20,6 +20,7 @@ runs is an opportunity for the operator to be heard.
 from __future__ import annotations
 
 import contextlib
+import datetime
 import json
 import os
 import select
@@ -29,6 +30,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
 from typing import Any, Protocol, TextIO
@@ -78,6 +80,24 @@ COMMAND_NOT_FOUND_EXIT_CODE = 127
 InboxSignature = tuple[tuple[str, int, int], ...]
 ContextWarningSignature = tuple[str, str, int]
 ContextWarningKey = tuple[str]
+
+
+@dataclass(frozen=True)
+class WorkingStateSnapshot:
+    pending_inbox_count: int = 0
+    claim_handle: str = ""
+    claim_phase: str = ""
+    claim_elapsed_seconds: int | None = None
+    dirty_file_count: int = 0
+    last_maxim_bag: str = ""
+
+    def has_fields(self) -> bool:
+        return bool(
+            self.pending_inbox_count
+            or self.claim_handle
+            or self.dirty_file_count
+            or self.last_maxim_bag
+        )
 
 
 class _KqueueHandle(Protocol):
@@ -696,6 +716,29 @@ class AgentSideChannelNoticeInjector:
         self.stderr.flush()
 
 
+class AgentWorkingStateInjector:
+    """Collect live working state for the one-line stderr meter."""
+
+    def __init__(
+        self,
+        repo_root: Path | None,
+        *,
+        stderr: TextIO,
+        snapshot_factory: Callable[[Path | None], WorkingStateSnapshot] | None = None,
+    ) -> None:
+        self.repo_root = repo_root
+        self.stderr = stderr
+        self.snapshot_factory = snapshot_factory or collect_working_state_snapshot
+
+    def inject(self, *, force: bool) -> None:
+        del force
+        snapshot = self.snapshot_factory(self.repo_root)
+        if not snapshot.has_fields():
+            return
+        # The renderer/suppression child owns visible output.
+        return
+
+
 def inbox_pending_signature(repo_root: Path | None) -> InboxSignature:
     if repo_root is None:
         return ()
@@ -805,6 +848,113 @@ def _signature_rows(signature: InboxSignature) -> list[tuple[str, tuple[int, int
 def _inbox_item_key(name: str) -> str:
     path = Path(name)
     return path.stem or path.name
+
+
+def collect_working_state_snapshot(
+    repo_root: Path | None, *, now: float | None = None
+) -> WorkingStateSnapshot:
+    if repo_root is None:
+        return WorkingStateSnapshot()
+    root = Path(repo_root)
+    claim_handle, claim_phase, claim_elapsed_seconds = _working_state_claim(
+        root, now=now
+    )
+    return WorkingStateSnapshot(
+        pending_inbox_count=_working_state_pending_count(root),
+        claim_handle=claim_handle,
+        claim_phase=claim_phase,
+        claim_elapsed_seconds=claim_elapsed_seconds,
+        dirty_file_count=_working_state_dirty_file_count(root),
+        last_maxim_bag=_working_state_last_maxim_bag(root),
+    )
+
+
+def _working_state_pending_count(repo_root: Path) -> int:
+    return len(inbox_pending_signature(repo_root))
+
+
+def _working_state_claim(
+    repo_root: Path, *, now: float | None
+) -> tuple[str, str, int | None]:
+    actor = ambient_thread_id()
+    if not actor:
+        return "", "", None
+    try:
+        from spice.tasks import identity, tw
+
+        rows = tw.export(["status:pending", "+ACTIVE"])
+    except Exception:
+        return "", "", None
+    own_rows = [
+        row
+        for row in rows
+        if str(row.get("claim_by") or "") == actor
+        and _claim_worktree_matches(row, repo_root)
+    ]
+    if not own_rows:
+        return "", "", None
+    row = max(
+        own_rows,
+        key=lambda item: str(item.get("claim_at") or item.get("start") or ""),
+    )
+    claim_started_at = _iso_timestamp_seconds(str(row.get("claim_at") or ""))
+    elapsed = None
+    if claim_started_at is not None:
+        elapsed = int(
+            max(0.0, (time.time() if now is None else now) - claim_started_at)
+        )
+    return identity.render_handle(row), str(row.get("phase") or ""), elapsed
+
+
+def _claim_worktree_matches(row: dict[str, Any], repo_root: Path) -> bool:
+    raw = str(row.get("claim_worktree") or "").strip()
+    if not raw:
+        return False
+    try:
+        return Path(raw).expanduser().resolve() == repo_root.expanduser().resolve()
+    except OSError:
+        return False
+
+
+def _working_state_dirty_file_count(repo_root: Path) -> int:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return 0
+    if result.returncode != 0:
+        return 0
+    return sum(1 for line in result.stdout.splitlines() if line.strip())
+
+
+def _working_state_last_maxim_bag(repo_root: Path) -> str:
+    try:
+        from spice.agent.maximmetrics import MAXIM_EVENT_FIRE, maxim_metric_records
+
+        records = maxim_metric_records(repo_root)
+    except Exception:
+        return ""
+    for record in reversed(records):
+        if record.event_type == MAXIM_EVENT_FIRE:
+            return record.bag_name
+    return ""
+
+
+def _iso_timestamp_seconds(value: str) -> float | None:
+    clean = str(value or "").strip()
+    if not clean:
+        return None
+    if clean.endswith("Z"):
+        clean = f"{clean[:-1]}+00:00"
+    try:
+        return datetime.datetime.fromisoformat(clean).timestamp()
+    except ValueError:
+        return None
 
 
 class AgentContextMeterInjector:
