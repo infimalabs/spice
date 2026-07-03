@@ -16,6 +16,7 @@ import os
 import select
 import socket
 import tempfile
+import time
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import TextIO, cast
@@ -28,6 +29,7 @@ from spice.agent.wrap import (
     AgentInboxInjector,
     AgentSideChannelNoticeInjector,
     agent_context_meter,
+    post_tool_hook_inbox_state_path,
     side_channel_marker_path,
 )
 
@@ -290,6 +292,24 @@ def render_side_channel_payload(repo_root: Path) -> str:
         stderr=stderr,
         repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
     ).inject(force=True)
+    AgentContextMeterInjector(
+        repo_root,
+        stderr=stderr,
+        repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
+        meter_factory=agent_context_meter,
+    ).inject(force=True)
+    return stderr.getvalue()
+
+
+def render_post_tool_hook_payload(repo_root: Path) -> str:
+    stderr = io.StringIO()
+    AgentInboxInjector(
+        repo_root,
+        stderr=stderr,
+        repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
+        time_factory=time.monotonic,
+        state_path=post_tool_hook_inbox_state_path(repo_root),
+    ).inject(force=False)
     AgentContextMeterInjector(
         repo_root,
         stderr=stderr,

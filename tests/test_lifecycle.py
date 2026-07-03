@@ -205,6 +205,51 @@ def test_post_tool_hook_response_renders_pending_steering(tmp_path):
     assert "hook-delivered steering" in payload["additionalContext"]
 
 
+def test_post_tool_hook_response_suppresses_recently_rendered_pending_steering(
+    tmp_path,
+):
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000005Z.txt",
+        compose_inbox_text(body="hook-suppressed steering", priority=None, stop=False),
+    )
+
+    first = json.loads(agent_cli.render_post_tool_hook_response(tmp_path))
+    second = json.loads(agent_cli.render_post_tool_hook_response(tmp_path))
+    first_context = first["hookSpecificOutput"]["additionalContext"]
+    second_context = second["hookSpecificOutput"]["additionalContext"]
+
+    assert "hook-suppressed steering" in first_context
+    assert second_context.splitlines() == [
+        "Inbox Steering",
+        "  pending=1 (recently shown; full readout on repeat or run "
+        "`spice session briefing`)",
+    ]
+
+
+def test_post_tool_hook_response_renders_new_pending_key_after_suppressed_key(
+    tmp_path,
+):
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000005Z.txt",
+        compose_inbox_text(body="first hook steering", priority=None, stop=False),
+    )
+    json.loads(agent_cli.render_post_tool_hook_response(tmp_path))
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000006Z.txt",
+        compose_inbox_text(body="second hook steering", priority=None, stop=False),
+    )
+
+    response = json.loads(agent_cli.render_post_tool_hook_response(tmp_path))
+    context = response["hookSpecificOutput"]["additionalContext"]
+
+    assert "key=20260101T000000000005Z: age=" in context
+    assert "(shown earlier; ACK to clear)" in context
+    assert "second hook steering" in context
+
+
 def test_ensure_agent_uses_shipped_codex_defaults_without_config(tmp_path, monkeypatch):
     monkeypatch.delenv(agent_driver.SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr(

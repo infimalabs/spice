@@ -215,9 +215,9 @@ def render_activation_packet(repo_root: Path) -> str:
 def render_post_tool_hook_response(
     repo_root: Path, *, hook_event_name: str = POST_TOOL_HOOK_EVENT
 ) -> str:
-    from spice.agent.sidechannel import render_side_channel_payload
+    from spice.agent.sidechannel import render_post_tool_hook_payload
 
-    additional_context = render_side_channel_payload(repo_root).strip()
+    additional_context = render_post_tool_hook_payload(repo_root).strip()
     if not additional_context:
         return ""
     return json.dumps(
