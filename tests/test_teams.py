@@ -794,6 +794,7 @@ def test_team_command_service_replaces_membership_without_rewriting_sources(tmp_
     assert [entry.to_payload() for entry in replaced.task_filter_entries] == [
         {"project": "task.extra", "source": TASK_FILTER_SOURCE_MANUAL},
         {"project": "task.review", "source": TASK_FILTER_SOURCE_AUTO_CLAIM},
+        {"project": "task.review", "source": TASK_FILTER_SOURCE_MANUAL},
     ]
 
 
@@ -821,8 +822,48 @@ def test_team_config_replace_preserves_existing_filter_sources(tmp_path):
     )
     replaced = store.team_config(team.team_id)
 
-    assert replaced.task_filters == ("serve.ui", "task.extra")
+    assert replaced.task_filters == ("serve.ui", "task.extra", "task.review")
     assert [entry.to_payload() for entry in replaced.task_filter_entries] == [
         {"project": "serve.ui", "source": TASK_FILTER_SOURCE_AUTO_CREATE},
+        {"project": "serve.ui", "source": TASK_FILTER_SOURCE_MANUAL},
         {"project": "task.extra", "source": TASK_FILTER_SOURCE_MANUAL},
+        {"project": "task.review", "source": TASK_FILTER_SOURCE_AUTO_CLAIM},
+    ]
+
+
+def test_team_config_replace_never_deletes_auto_subscriptions(tmp_path):
+    """A stale client-side list must not clobber server-managed auto:* rows."""
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    team = store.create_team(
+        members=["agent-a"], config=TeamConfig(task_filters=("serve.ui",))
+    )
+    store.add_task_filter(
+        team.team_id, "task.review", source=TASK_FILTER_SOURCE_AUTO_CLAIM
+    )
+
+    # Client snapshot predates the auto:claim row; its replace list omits it.
+    store.update_team_config(
+        team.team_id,
+        TeamConfig(task_filters=("serve.ui",)),
+        replace_task_filters=True,
+    )
+    after_stale = store.team_config(team.team_id)
+
+    assert after_stale.task_filters == ("serve.ui", "task.review")
+    assert [entry.to_payload() for entry in after_stale.task_filter_entries] == [
+        {"project": "serve.ui", "source": TASK_FILTER_SOURCE_MANUAL},
+        {"project": "task.review", "source": TASK_FILTER_SOURCE_AUTO_CLAIM},
+    ]
+
+    # An empty pin list clears manual pins only.
+    store.update_team_config(
+        team.team_id,
+        TeamConfig(task_filters=()),
+        replace_task_filters=True,
+    )
+    after_clear = store.team_config(team.team_id)
+
+    assert after_clear.task_filters == ("task.review",)
+    assert [entry.to_payload() for entry in after_clear.task_filter_entries] == [
+        {"project": "task.review", "source": TASK_FILTER_SOURCE_AUTO_CLAIM},
     ]

@@ -97,29 +97,29 @@ class TeamFilterStoreMixin:
     def _replace_task_filters_locked(
         self, connection: sqlite3.Connection, team_id: str, projects: Iterable[str]
     ) -> tuple[str, ...]:
+        # Replace is scoped to manual pins: the incoming list is the complete
+        # desired set of source='manual' rows and nothing else. auto:* rows are
+        # server-managed subscriptions owned by task ops (claim/create/wake and
+        # empty-project GC); a config update carrying a stale client-side list
+        # must never delete them.
         validated = validated_task_filter_projects(projects)
         if validated:
             placeholders = ",".join("?" for _ in validated)
             connection.execute(
                 "DELETE FROM team_task_filters "
-                f"WHERE team_id = ? AND project NOT IN ({placeholders})",
-                (team_id, *validated),
+                "WHERE team_id = ? AND source = ? "
+                f"AND project NOT IN ({placeholders})",
+                (team_id, TASK_FILTER_SOURCE_MANUAL, *validated),
             )
         else:
             connection.execute(
-                "DELETE FROM team_task_filters WHERE team_id = ?", (team_id,)
+                "DELETE FROM team_task_filters WHERE team_id = ? AND source = ?",
+                (team_id, TASK_FILTER_SOURCE_MANUAL),
             )
         now = time.time()
         for project in validated:
-            existing = connection.execute(
-                "SELECT 1 FROM team_task_filters "
-                "WHERE team_id = ? AND project = ? LIMIT 1",
-                (team_id, project),
-            ).fetchone()
-            if existing:
-                continue
             connection.execute(
-                "INSERT INTO team_task_filters "
+                "INSERT OR IGNORE INTO team_task_filters "
                 "(team_id, project, source, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (team_id, project, TASK_FILTER_SOURCE_MANUAL, now, now),
