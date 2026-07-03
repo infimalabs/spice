@@ -15,6 +15,7 @@ from spice.agent.driver import driver_for_transcript
 from spice.agent.identity import canonical_thread_id
 from spice.sessions import analysis
 from spice.sessions import commandaudit, commandrecords
+from spice.sessions import learnings as session_learnings
 from spice.sessions import records
 from spice.sessions import slices as session_slices
 from spice.sessions.briefing import (
@@ -48,6 +49,7 @@ DEFAULT_COMMANDS_LIMIT = 80
 DEFAULT_COMMAND_TEXT_CHARS = 220
 COMMIT_LINE_PREVIEW_CHARS = 160
 COMMIT_USER_PREVIEW_CHARS = 120
+SESSION_STORAGE_MODULES = (session_learnings,)
 
 
 class SessionFilterKwargs(TypedDict):
