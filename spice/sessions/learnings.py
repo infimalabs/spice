@@ -12,14 +12,61 @@ from typing import Any, Iterable
 
 from spice.errors import SpiceError
 from spice.paths import atomic_write_text, state_dir
+from spice.sessions import slices as session_slices
+from spice.sessions.records import CompactionRecord, TurnRecord
+from spice.sessions.slices import SliceRecord
 
 LEARNINGS_DIRNAME = "learnings"
 LEARNING_STORE_LIMIT = 200
 BRIEFING_LEARNING_LIMIT = 5
 LEARNING_RECORD_VERSION = 1
+MAX_EXTRACTED_LEARNING_CANDIDATES = 8
+MAX_LEARNING_SCAN_MESSAGES = 80
+MAX_LEARNING_EVIDENCE_CHARS = 240
+MIN_LEARNING_STATEMENT_WORDS = 4
 
 _PROJECT_STEM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _TRAILING_STATEMENT_NOISE = string.punctuation + string.whitespace
+_SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]|$)")
+_ERROR_CUES = (
+    "assertionerror",
+    "error",
+    "exception",
+    "failed",
+    "failure",
+    "traceback",
+)
+_FIX_CUES = (
+    "changed",
+    "fixed",
+    "passes",
+    "resolved",
+    "reran",
+    "switched",
+)
+_LEARNING_MARKER_PREFIXES = (
+    "lesson learned",
+    "lesson",
+    "learning",
+    "learned that",
+    "learned",
+    "going forward",
+    "next time",
+)
+_LEARNING_IMPERATIVE_PREFIXES = (
+    "always ",
+    "avoid ",
+    "do not ",
+    "don't ",
+    "never ",
+    "prefer ",
+    "remember to ",
+    "run ",
+    "use ",
+)
+_FIXED_IT_USING_PREFIX = "fixed it by using "
+_FIXED_THIS_USING_PREFIX = "fixed this by using "
+_SWITCHED_TO_PREFIX = "switched to "
 
 
 @dataclass(frozen=True)
@@ -59,6 +106,34 @@ class LearningRecord:
             "last_confirmed_at": self.last_confirmed_at,
             "confirmation_count": self.confirmation_count,
         }
+
+
+@dataclass(frozen=True)
+class ExtractedLearningCandidate:
+    statement: str
+    normalized_statement: str
+    source_task: str
+    project_stem: str
+    evidence: str
+    source_slice_id: str
+    source_turn_ids: tuple[str, ...]
+    kind: str
+
+    def to_learning_candidate(self) -> LearningCandidate:
+        return LearningCandidate(
+            statement=self.statement,
+            source_task=self.source_task,
+            project_stem=self.project_stem,
+            evidence=self.evidence,
+            source_slice_id=self.source_slice_id,
+            source_turn_ids=self.source_turn_ids,
+        )
+
+
+@dataclass(frozen=True)
+class _LearningMessage:
+    text: str
+    turn_id: str
 
 
 def learning_store_path(repo_root: str | Path, project_stem: str) -> Path:
@@ -139,6 +214,113 @@ def top_learning_records(
     ]
 
 
+def claim_to_done_learning_slice(
+    turns: Iterable[TurnRecord],
+    compactions: Iterable[CompactionRecord],
+    *,
+    claim_started_at: str,
+    done_at: str,
+) -> SliceRecord | None:
+    start = str(claim_started_at or "").strip()
+    end = str(done_at or "").strip()
+    if not start or not end or start > end:
+        return None
+    return session_slices.build_exact_slice(
+        list(turns),
+        list(compactions),
+        start_ts=start,
+        end_ts=end,
+        basis="claim_to_done",
+    )
+
+
+def extract_learning_candidates_from_task_slice(
+    turns: Iterable[TurnRecord],
+    compactions: Iterable[CompactionRecord],
+    *,
+    claim_started_at: str,
+    done_at: str,
+    source_task: str,
+    project_stem: str,
+    max_candidates: int = MAX_EXTRACTED_LEARNING_CANDIDATES,
+) -> tuple[ExtractedLearningCandidate, ...]:
+    turn_rows = list(turns)
+    slice_record = claim_to_done_learning_slice(
+        turn_rows,
+        list(compactions),
+        claim_started_at=claim_started_at,
+        done_at=done_at,
+    )
+    if slice_record is None:
+        return ()
+    slice_turns = session_slices.turns_overlapping(
+        turn_rows, slice_record.start_ts, slice_record.end_ts
+    )
+    return extract_learning_candidates_from_slice(
+        slice_record,
+        slice_turns,
+        source_task=source_task,
+        project_stem=project_stem,
+        max_candidates=max_candidates,
+    )
+
+
+def extract_learning_candidates_from_slice(
+    slice_record: SliceRecord,
+    turns: Iterable[TurnRecord],
+    *,
+    source_task: str,
+    project_stem: str,
+    max_candidates: int = MAX_EXTRACTED_LEARNING_CANDIDATES,
+) -> tuple[ExtractedLearningCandidate, ...]:
+    limit = max(0, int(max_candidates))
+    if limit <= 0:
+        return ()
+    stem = _validated_project_stem(project_stem)
+    messages = _learning_messages(turns)[:MAX_LEARNING_SCAN_MESSAGES]
+    candidates: list[ExtractedLearningCandidate] = []
+    seen: set[str] = set()
+    pending_errors: list[_LearningMessage] = []
+    for message in messages:
+        if pending_errors and _is_fix_message(message.text):
+            _append_extracted_candidate(
+                candidates,
+                seen,
+                _fix_statement(message.text),
+                source_task=source_task,
+                project_stem=stem,
+                evidence=_evidence_snippet(pending_errors[-1].text, message.text),
+                source_slice_id=slice_record.slice_id,
+                source_turn_ids=_dedupe_turn_ids(
+                    (pending_errors[-1].turn_id, message.turn_id)
+                ),
+                kind="error_to_fix",
+                limit=limit,
+            )
+            if len(candidates) >= limit:
+                break
+        for statement in _explicit_learning_statements(message.text):
+            _append_extracted_candidate(
+                candidates,
+                seen,
+                statement,
+                source_task=source_task,
+                project_stem=stem,
+                evidence=_evidence_snippet(message.text),
+                source_slice_id=slice_record.slice_id,
+                source_turn_ids=_dedupe_turn_ids((message.turn_id,)),
+                kind="explicit",
+                limit=limit,
+            )
+            if len(candidates) >= limit:
+                break
+        if len(candidates) >= limit:
+            break
+        if _is_error_message(message.text):
+            pending_errors.append(message)
+    return tuple(candidates)
+
+
 def normalize_learning_statement(statement: str) -> str:
     normalized = " ".join(str(statement or "").split()).rstrip(
         _TRAILING_STATEMENT_NOISE
@@ -146,6 +328,141 @@ def normalize_learning_statement(statement: str) -> str:
     if not normalized:
         raise SpiceError("learning statement must be non-empty")
     return normalized.casefold()
+
+
+def _learning_messages(turns: Iterable[TurnRecord]) -> list[_LearningMessage]:
+    messages: list[_LearningMessage] = []
+    for turn in sorted(turns, key=lambda row: (row.start_ts, row.turn_id or "")):
+        turn_id = str(turn.turn_id or "").strip()
+        for _role, text in turn.ordered_messages:
+            clean = _compact_text(text)
+            if not clean:
+                continue
+            messages.append(
+                _LearningMessage(
+                    text=clean,
+                    turn_id=turn_id,
+                )
+            )
+    return messages
+
+
+def _append_extracted_candidate(
+    candidates: list[ExtractedLearningCandidate],
+    seen: set[str],
+    statement: str,
+    *,
+    source_task: str,
+    project_stem: str,
+    evidence: str,
+    source_slice_id: str,
+    source_turn_ids: tuple[str, ...],
+    kind: str,
+    limit: int,
+) -> None:
+    if len(candidates) >= limit:
+        return
+    statement = _clean_statement(statement)
+    if len(statement.split()) < MIN_LEARNING_STATEMENT_WORDS:
+        return
+    try:
+        normalized = normalize_learning_statement(statement)
+    except SpiceError:
+        return
+    if normalized in seen:
+        return
+    seen.add(normalized)
+    candidates.append(
+        ExtractedLearningCandidate(
+            statement=statement,
+            normalized_statement=normalized,
+            source_task=str(source_task or "").strip(),
+            project_stem=project_stem,
+            evidence=evidence,
+            source_slice_id=str(source_slice_id or "").strip(),
+            source_turn_ids=source_turn_ids,
+            kind=kind,
+        )
+    )
+
+
+def _explicit_learning_statements(text: str) -> list[str]:
+    statements: list[str] = []
+    for sentence in _sentences(text):
+        lower = sentence.casefold()
+        marker_statement = _marker_learning_statement(sentence, lower)
+        if marker_statement:
+            statements.append(marker_statement)
+            continue
+        if lower.startswith(_LEARNING_IMPERATIVE_PREFIXES):
+            statements.append(sentence)
+    return statements
+
+
+def _marker_learning_statement(sentence: str, lower: str) -> str:
+    for prefix in _LEARNING_MARKER_PREFIXES:
+        if lower.startswith(prefix):
+            return sentence[len(prefix) :].lstrip(" :-,")
+    return ""
+
+
+def _is_error_message(text: str) -> bool:
+    lower = text.casefold()
+    return any(cue in lower for cue in _ERROR_CUES)
+
+
+def _is_fix_message(text: str) -> bool:
+    lower = text.casefold()
+    return any(cue in lower for cue in _FIX_CUES)
+
+
+def _fix_statement(text: str) -> str:
+    for sentence in _sentences(text):
+        lower = sentence.casefold()
+        if _FIXED_IT_USING_PREFIX in lower:
+            start = lower.index(_FIXED_IT_USING_PREFIX) + len(_FIXED_IT_USING_PREFIX)
+            return "Use " + sentence[start:]
+        if _FIXED_THIS_USING_PREFIX in lower:
+            start = lower.index(_FIXED_THIS_USING_PREFIX) + len(
+                _FIXED_THIS_USING_PREFIX
+            )
+            return "Use " + sentence[start:]
+        if lower.startswith(_SWITCHED_TO_PREFIX):
+            return "Use " + sentence[len(_SWITCHED_TO_PREFIX) :]
+        if any(cue in lower for cue in _FIX_CUES):
+            return sentence
+    return text
+
+
+def _sentences(text: str) -> list[str]:
+    return [_clean_statement(match.group(0)) for match in _SENTENCE_RE.finditer(text)]
+
+
+def _clean_statement(text: str) -> str:
+    return _compact_text(text).strip(" :-,").rstrip(_TRAILING_STATEMENT_NOISE)
+
+
+def _compact_text(text: object) -> str:
+    return " ".join(str(text or "").split())
+
+
+def _evidence_snippet(*parts: str) -> str:
+    text = " -> ".join(_compact_text(part) for part in parts if _compact_text(part))
+    if len(text) <= MAX_LEARNING_EVIDENCE_CHARS:
+        return text
+    return text[: MAX_LEARNING_EVIDENCE_CHARS - 3].rstrip() + "..."
+
+
+def _dedupe_turn_ids(turn_ids: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for turn_id in turn_ids:
+        clean = str(turn_id or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        result.append(clean)
+    return tuple(result)
 
 
 def _record_for_candidate(
@@ -273,9 +590,13 @@ def _required_int(payload: dict[str, Any], field: str, path: Path, line: int) ->
 
 
 LEARNING_STORAGE_SURFACE = (
+    ExtractedLearningCandidate,
     LearningCandidate,
     LearningRecord,
+    claim_to_done_learning_slice,
     confirm_learning_candidates,
+    extract_learning_candidates_from_slice,
+    extract_learning_candidates_from_task_slice,
     learning_store_path,
     load_learning_records,
     top_learning_records,
