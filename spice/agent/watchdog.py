@@ -278,6 +278,64 @@ def _publish_ack_feedback(
             "ack.noop",
             message=ACK_NOOP_MESSAGE,
         )
+    if ack_summary.archived:
+        try:
+            _annotate_active_task_with_acks(
+                repo_root, message_text, ack_summary.archived, log_handle
+            )
+        except Exception as exc:  # surface-and-survive: retirement already landed
+            log_handle.write(f"spice ack annotate supervisor error: {exc}\n")
+            log_handle.flush()
+
+
+# Steering routinely amends the acceptance criteria or the very understanding
+# of the task in flight; the retired acknowledgment lands on the active task
+# record so that drift is durable and reviewable.
+ACK_ANNOTATION_CONTENT_LIMIT = 500
+
+
+def _annotate_active_task_with_acks(
+    repo_root: Path,
+    message_text: str,
+    archived_keys: list[str],
+    log_handle: TextIO,
+) -> None:
+    from spice.mail.acks import ack_content_by_key, extract_ack_segments_from_text
+    from spice.mail.inbox import inbox_item_key_aliases
+    from spice.tasks import identity as task_identity
+    from spice.tasks import ops, tw
+
+    thread_id = _supervised_inline_task_actor(repo_root)
+    if not thread_id:
+        return
+    claim = ops.active_claim(tw.canonical_actor(thread_id))
+    if claim is None:
+        log_handle.write(
+            "spice ack annotate: no active claim; retired ack not mirrored\n"
+        )
+        log_handle.flush()
+        return
+    uuid = task_identity.uuid_of(claim)
+    content_map = ack_content_by_key(extract_ack_segments_from_text(message_text))
+    for key in archived_keys:
+        aliases = inbox_item_key_aliases(key)
+        content = next(
+            (content_map[alias] for alias in aliases if content_map.get(alias)), ""
+        )
+        if not content:
+            content = _acked_steering_body(repo_root, aliases)
+        content = " ".join(content.split())[:ACK_ANNOTATION_CONTENT_LIMIT]
+        ops.annotate(uuid, f"ack {key}: {content}")
+
+
+def _acked_steering_body(repo_root: Path, aliases: set[str]) -> str:
+    from spice.mail.ackstate import ack_state_records
+    from spice.mail.inbox import inbox_item_key_aliases, parse_inbox_payload
+
+    for record in ack_state_records(repo_root):
+        if inbox_item_key_aliases(record.key) & aliases:
+            return parse_inbox_payload(record.text).body.strip()
+    return "(acknowledged)"
 
 
 def publish_supervisor_feedback(

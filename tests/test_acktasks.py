@@ -400,6 +400,131 @@ def test_supervised_standalone_task_batch_rejects_without_partial_creation(
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
 
 
+def _annotations(row) -> list[str]:
+    return [str(item.get("description") or "") for item in row.get("annotations") or []]
+
+
+def _claimed_task(title: str) -> str:
+    from spice.tasks import create, ops
+
+    handle = create.add(
+        title,
+        project="task.unit",
+        priority="medium",
+        acceptance=["steering lands on the active task"],
+    )
+    ops.claim(handle)
+    return handle
+
+
+def test_retired_ack_annotates_active_task_with_key_and_response(
+    task_repo, quiet_supervisor
+):
+    handle = _claimed_task("Active work amended by steering")
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(
+            body="tighten the acceptance to cover retries",
+            priority=None,
+            stop=False,
+        ),
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        f"ACK {INBOX_KEY}: acceptance now covers retry storms.",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    row = identity.resolve(handle)
+    assert collect_inbox_items(task_repo) == []
+    assert f"ack {INBOX_KEY}: acceptance now covers retry storms." in _annotations(row)
+
+
+def test_bare_ack_annotation_falls_back_to_steering_body(task_repo, quiet_supervisor):
+    handle = _claimed_task("Active work amended by bare ack")
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(
+            body="fold the edge case into the description",
+            priority=None,
+            stop=False,
+        ),
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        f"ACK {INBOX_KEY}",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    row = identity.resolve(handle)
+    notes = _annotations(row)
+    assert any(
+        note.startswith(f"ack {INBOX_KEY}: ")
+        and "fold the edge case into the description" in note
+        for note in notes
+    ), notes
+
+
+def test_retired_ack_without_active_claim_skips_annotation(task_repo, quiet_supervisor):
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(body="steering with no claim", priority=None, stop=False),
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        f"ACK {INBOX_KEY}: noted.",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    assert collect_inbox_items(task_repo) == []
+    assert [item.name for item in collect_acked_inbox_items(task_repo)] == [
+        f"{INBOX_KEY}.txt"
+    ]
+    assert "spice ack annotate: no active claim" in log.getvalue()
+
+
+def test_ack_annotation_failure_never_blocks_retirement(
+    task_repo, quiet_supervisor, monkeypatch
+):
+    from spice.tasks import ops
+
+    _claimed_task("Active work with failing annotate")
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(body="steering survives failure", priority=None, stop=False),
+    )
+    monkeypatch.setattr(
+        ops, "annotate", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        f"ACK {INBOX_KEY}: noted.",
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    assert collect_inbox_items(task_repo) == []
+    assert [item.name for item in collect_acked_inbox_items(task_repo)] == [
+        f"{INBOX_KEY}.txt"
+    ]
+    assert "spice ack annotate supervisor error: boom" in log.getvalue()
+
+
 def _init_repo(path: Path) -> Path:
     path.mkdir()
     _run(path, "git", "init", "-b", "main")
