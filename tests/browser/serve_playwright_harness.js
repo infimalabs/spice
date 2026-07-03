@@ -1,10 +1,12 @@
 const fs = require("fs/promises");
+const fsSync = require("fs");
 const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 const { chromium } = require("playwright");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
+const repoLocalServeCommand = path.join(repoRoot, ".venv", "bin", "spice");
 const defaultPlaywrightConfigPath = path.join(
   repoRoot,
   ".spice",
@@ -50,7 +52,7 @@ function spawnServeProcess(options, scratch) {
   const stdout = [];
   const stderr = [];
   const command =
-    options.serveCommand || process.env.SPICE_SERVE_BIN || "spice"; // env-policy: allow
+    options.serveCommand || process.env.SPICE_SERVE_BIN || defaultServeCommand(); // env-policy: allow
   const args = [
     "serve",
     "--host",
@@ -73,6 +75,10 @@ function spawnServeProcess(options, scratch) {
   child.stdout.on("data", (chunk) => stdout.push(chunk));
   child.stderr.on("data", (chunk) => stderr.push(chunk));
   return { child, stderr, stdout };
+}
+
+function defaultServeCommand() {
+  return fsSync.existsSync(repoLocalServeCommand) ? repoLocalServeCommand : "spice";
 }
 
 function serveStopper(child, stdout, stderr, scratch, options) {

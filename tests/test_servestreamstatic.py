@@ -355,15 +355,32 @@ def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
         "function enqueueSend(lane, payload, sourceLane = lane, options = {})"
         in app_stream
     )
-    assert "sendLanePayload(lane, payload, sourceLane, options);" in app_stream
+    assert "const latencyProbe = startLaneSubmitLatencyProbe(lane, payload);" in (
+        app_stream
+    )
+    assert 'markLaneSubmitLatency(latencyProbe, "optimisticRenderedAt");' in app_stream
     assert (
-        "    const result = response.result || {};\n"
-        "    if (!isLaneOpen(lane)) return;\n"
-        "    applyLaneSendResult(lane, payload, result, sourceLane, options);\n"
-        "  } catch (error) {\n"
-        "    if (isLaneOpen(lane)) {\n"
-        "      finishLanePendingSubmission(lane, { accepted: false });"
-    ) in send_payload_body
+        "sendLanePayload(lane, payload, sourceLane, { ...options, latencyProbe });"
+        in app_stream
+    )
+    assert 'markLaneSubmitLatency(latencyProbe, "requestAwaitStartAt");' in (
+        send_payload_body
+    )
+    assert 'markLaneSubmitLatency(latencyProbe, "responseResolvedAt");' in (
+        send_payload_body
+    )
+    assert 'finishLaneSubmitLatencyProbe(latencyProbe, "closed");' in (
+        send_payload_body
+    )
+    assert "applyLaneSendResult(lane, payload, result, sourceLane, options);" in (
+        send_payload_body
+    )
+    assert 'markLaneSubmitLatency(latencyProbe, "resultAppliedAt");' in (
+        send_payload_body
+    )
+    assert 'result.ok ? "accepted" : "rejected"' in send_payload_body
+    assert 'markLaneSubmitLatency(latencyProbe, "errorAt");' in send_payload_body
+    assert 'finishLaneSubmitLatencyProbe(latencyProbe, "error");' in (send_payload_body)
     assert "options = {}," in result_body
     assert (
         "clearAcceptedComposerDrafts(\n"
@@ -378,6 +395,25 @@ def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
         in focus_reset_body
     )
     assert "element.focus({ preventScroll: true });" in focus_reset_body
+
+
+def test_static_send_latency_probe_records_submit_timing_buckets():
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+
+    assert ").__spiceSubmitLatencySamples =" in app_stream
+    assert "laneSubmitLatencySamples;" in app_stream
+    assert "function startLaneSubmitLatencyProbe(lane, payload)" in app_stream
+    assert "function finishLaneSubmitLatencyProbe(probe, status)" in app_stream
+    assert "function laneSubmitLatencyDurations(marks)" in app_stream
+    assert "optimisticRenderMs:" in app_stream
+    assert "liveBusOpenMs:" in app_stream
+    assert "sendResultWaitMs:" in app_stream
+    assert "responseHandlingMs:" in app_stream
+    assert "totalMs:" in app_stream
+    assert 'markLaneSubmitLatency(timing, "liveBusConnectStartAt");' in app_stream
+    assert 'markLaneSubmitLatency(pending.timing, "liveBusResponseReceivedAt");' in (
+        app_stream
+    )
 
 
 def test_static_css_adds_visible_nested_quote_depth():
