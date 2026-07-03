@@ -69,6 +69,7 @@ async function installMasonrySmokeHelpers(page) {
       masonrySmokeItems,
       masonrySmokeBodyHtml,
       masonrySmokeMeasurement,
+      masonrySmokeBarrierBounds,
       masonrySmokeColumnAudit,
       masonrySmokeSegmentFanOut,
       masonrySmokeBackfillAudit,
@@ -263,6 +264,7 @@ async function masonrySmokeMeasurement(lane, host, config) {
     index: Number(card.dataset.masonrySmokeIndex),
     left: masonrySmokeRect(card).left,
     rect: masonrySmokeRect(card),
+    row: Number.parseInt(card.style.gridRowStart || "0", 10),
     span: Number.parseInt(
       card.style.getPropertyValue("--message-pack-row-span") || "0",
       10,
@@ -274,10 +276,11 @@ async function masonrySmokeMeasurement(lane, host, config) {
     hostRect.width -
     Number.parseFloat(hostStyle.paddingLeft) -
     Number.parseFloat(hostStyle.paddingRight);
-  const columnAudit = masonrySmokeColumnAudit(cardRects);
+  const barrierIndexes = masonrySmokeBarrierBounds(host);
+  const columnAudit = masonrySmokeColumnAudit(cardRects, barrierIndexes);
   const segmentFanOut = masonrySmokeSegmentFanOut(
     cardRects,
-    host,
+    barrierIndexes,
     config.expectedColumns,
   );
   // Rule rects are read live, so audit them before the backfill and recovery
@@ -358,19 +361,39 @@ async function masonrySmokeMeasurement(lane, host, config) {
   };
 }
 
-// Per column: cards sorted by top must appear in chronological fixture order,
-// and the largest vertical hole between consecutive cards is reported so the
-// banded-packing work has a measured baseline to tighten.
-function masonrySmokeColumnAudit(cardRects) {
-  const byColumn = new Map();
+function masonrySmokeBarrierBounds(host) {
+  return Array.from(
+    host.querySelectorAll(
+      '[data-masonry-smoke="divider"], [data-masonry-smoke="rule"]',
+    ),
+  )
+    .map((node) => Number(node.dataset.masonrySmokeIndex))
+    .sort((a, b) => a - b);
+}
+
+// Per column and barrier segment: cards sorted by top must appear in
+// chronological fixture order, with no interior hole beyond one row stride
+// (stretch fill leaves only the row gap; an unstretched image card may add
+// sub-stride slack). Cards sharing a grid row must also read left-to-right in
+// chronological order — that is the visible band.
+function masonrySmokeColumnAudit(cardRects, barrierIndexes) {
+  const bounds = [-Infinity, ...barrierIndexes, Infinity];
+  const byColumnSegment = new Map();
   for (const card of cardRects) {
-    const key = Math.round(card.left);
-    const column = byColumn.get(key) || [];
+    let segment = 0;
+    while (card.index > bounds[segment + 1]) segment += 1;
+    const key = Math.round(card.left) + ":" + segment;
+    const column = byColumnSegment.get(key) || [];
     column.push(card);
-    byColumn.set(key, column);
+    byColumnSegment.set(key, column);
   }
-  const audit = { chronological: true, maxInnerGapPx: 0, perColumnCounts: [] };
-  for (const column of byColumn.values()) {
+  const audit = {
+    chronological: true,
+    maxInnerGapPx: 0,
+    perColumnCounts: [],
+    sameRowChronological: true,
+  };
+  for (const column of byColumnSegment.values()) {
     column.sort((a, b) => a.rect.top - b.rect.top);
     audit.perColumnCounts.push(column.length);
     for (let i = 1; i < column.length; i += 1) {
@@ -380,20 +403,26 @@ function masonrySmokeColumnAudit(cardRects) {
       if (gap > audit.maxInnerGapPx) audit.maxInnerGapPx = gap;
     }
   }
+  const byRow = new Map();
+  for (const card of cardRects) {
+    const row = byRow.get(card.row) || [];
+    row.push(card);
+    byRow.set(card.row, row);
+  }
+  for (const row of byRow.values()) {
+    row.sort((a, b) => a.index - b.index);
+    for (let i = 1; i < row.length; i += 1) {
+      if (Number(row[i].column) <= Number(row[i - 1].column))
+        audit.sameRowChronological = false;
+    }
+  }
   return audit;
 }
 
 // Leftmost-feasible placement must open every barrier segment as a left-to-
 // right fan: the first cards of a segment land in columns 1, 2, 3, ... in
 // chronological order.
-function masonrySmokeSegmentFanOut(cardRects, host, expectedColumns) {
-  const barrierIndexes = Array.from(
-    host.querySelectorAll(
-      '[data-masonry-smoke="divider"], [data-masonry-smoke="rule"]',
-    ),
-  )
-    .map((node) => Number(node.dataset.masonrySmokeIndex))
-    .sort((a, b) => a - b);
+function masonrySmokeSegmentFanOut(cardRects, barrierIndexes, expectedColumns) {
   const bounds = [-Infinity, ...barrierIndexes, Infinity];
   const fans = [];
   for (let i = 0; i + 1 < bounds.length; i += 1) {
@@ -513,6 +542,18 @@ function assertMasonryBaseLayout(measurement, fail) {
   if (!measurement.repackAudit.stable) fail("pack is not idempotent");
   if (!measurement.columnAudit.chronological)
     fail("column order is not chronological");
+  if (!measurement.columnAudit.sameRowChronological)
+    fail("cards sharing a row are not chronological left-to-right");
+  const gapBound =
+    measurement.bandAudit.rowStridePx + measurement.bandAudit.rowGapPx;
+  if (measurement.columnAudit.maxInnerGapPx > gapBound)
+    fail(
+      "column contains an interior hole of " +
+        measurement.columnAudit.maxInnerGapPx +
+        "px (bound " +
+        gapBound +
+        "px)",
+    );
 }
 
 function assertMasonryBands(measurement, fail) {
