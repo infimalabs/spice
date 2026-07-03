@@ -555,6 +555,7 @@ const laneMetricSeriesMetrics = [
   ["burndown", "burndown"],
   ["distribution", "distribution"],
   ["stuck", "stuck"],
+  ["phaseEffort", "phase effort"],
 ];
 const laneMetricSeriesLenses = [
   ["lineage", "lineage"],
