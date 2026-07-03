@@ -527,11 +527,8 @@ def test_review_feedback_ack_never_mirrors_to_active_task(task_repo, quiet_super
     write_inbox_item(
         task_repo,
         f"{INBOX_KEY}.txt",
-        compose_inbox_text(
-            body="review feedback: tighten the tests",
-            priority="review",
-            stop=False,
-        ),
+        # The emitted form: [REVIEW] body prefix, no Priority: header.
+        "[REVIEW] Peer feedback for TASK-1: \n\n> tighten the tests\n",
     )
     log = io.StringIO()
 
