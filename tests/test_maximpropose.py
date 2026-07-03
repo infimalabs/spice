@@ -12,10 +12,12 @@ import pytest
 from spice.agent.driver import DRIVER
 from spice.agent import maximcli, maxims
 from spice.agent.maximcli import (
+    MAXIM_PROPOSE_CONTRACT_ROW,
     render_filed_maxim_proposal_tasks,
     render_maxim_proposals,
     render_maxim_sources,
     run_maxim_file_proposals_cli,
+    run_maxim_propose_cli,
     run_maxim_proposals_cli,
     run_maxim_sources_cli,
 )
@@ -429,6 +431,115 @@ def test_maxim_proposals_cli_does_not_pre_screen_with_judge(
         "[tool.spice.maxims.fallbacks]",
         'words = ["branches", "deterministic", "fallback", "path"]',
         'message = "Avoid fallback branches. Use one deterministic path."',
+    ]
+    assert not (repo / "pyproject.toml").exists()
+
+
+def test_maxim_propose_help_names_candidate_contract(capsys):
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["maxim", "propose", "--help"])
+
+    assert exc_info.value.code == 0
+    output = " ".join(capsys.readouterr().out.split())
+    assert "raw evidence-backed candidates for human triage" in output
+    assert "does not call the local maxim judge for pre-screening" in output
+    assert "install maxim configuration" in output
+
+
+def test_maxim_propose_cli_files_and_reports_inspectable_hidden_task(
+    maxim_task_repo, monkeypatch, capsys
+):
+    _record_ack_source(
+        maxim_task_repo,
+        key=KEY_A,
+        body="Avoid fallback branches. Use one deterministic path.",
+        ack_text=f"ACK {KEY_A}: captured fallback correction.",
+        ack_content="captured fallback correction.",
+        archived_at=ARCHIVED_AT_OLDER,
+    )
+    _record_ack_source(
+        maxim_task_repo,
+        key=KEY_B,
+        body="Fallback branches hide the deterministic path.",
+        ack_text=f"ACK {KEY_B}: captured fallback correction.",
+        ack_content="captured fallback correction.",
+        archived_at=ARCHIVED_AT_NEWER,
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("proposal mining must not call the maxim judge")
+
+    monkeypatch.setattr(maximcli, "evaluate_maxim", fail_if_called)
+    monkeypatch.setattr(maxims, "evaluate_maxim_any_violation", fail_if_called)
+    args = build_parser().parse_args(["maxim", "propose"])
+
+    assert args.func is run_maxim_propose_cli
+    assert args.func(args) == 0
+    output = capsys.readouterr().out.splitlines()
+    assert output[:2] == [
+        "maxim propose: sources=2 themes=1 drafts=1 filed=1",
+        MAXIM_PROPOSE_CONTRACT_ROW,
+    ]
+    match = re.match(
+        r'proposal (\S+) project=(\S+) bag=fallbacks inspect="spice task show (\S+)"',
+        output[2],
+    )
+    assert match is not None
+    handle = match.group(1)
+    row = identity.resolve(handle)
+    show = build_parser().parse_args(["task", "show", handle])
+    show.backend = str(task_config.backend_root())
+
+    assert match.group(2) == task_config.MAXIM_PROPOSAL_PROJECT
+    assert match.group(3) == handle
+    assert row["project"] == task_config.MAXIM_PROPOSAL_PROJECT
+    assert row[task_config.PROJECT_HIDDEN_UDA] == "1"
+    assert str(row.get("wait") or "").startswith("2099")
+    assert sorted(row["tags"]) == ["hidden", "maxim_proposal"]
+    assert row[task_config.TASK_CREATION_SURFACE_UDA] == (
+        MAXIM_PROPOSAL_TASK_CREATION_SURFACE
+    )
+    assert "Human triage decides whether to merge" in row["acceptance"]
+    assert "[tool.spice.maxims.fallbacks]" in row["task_description"]
+    assert "Fallback branches hide the deterministic path." in row["task_description"]
+    assert show.func(show) == 0
+    show_output = capsys.readouterr().out
+    assert f"handle {handle}" in show_output
+    assert "project .maxim_proposal" in show_output
+    assert "[tool.spice.maxims.fallbacks]" in show_output
+    assert "Fallback branches hide the deterministic path." in show_output
+    assert maxims.resolved_maxim_bags(maxim_task_repo) == maxims.BUILTIN_MAXIM_BAGS
+
+
+def test_maxim_propose_cli_reports_no_candidate_history_without_install(
+    tmp_path, monkeypatch, capsys
+):
+    repo = _init_repo(tmp_path / "repo")
+    _record_ack_source(
+        repo,
+        key=KEY_A,
+        body="Preserve the prompt boundary.",
+        ack_text=f"ACK {KEY_A}: captured prompt boundary.",
+        ack_content="captured prompt boundary.",
+        archived_at=ARCHIVED_AT_OLDER,
+    )
+    monkeypatch.chdir(repo)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("proposal mining must not call the maxim judge")
+
+    monkeypatch.setattr(maximcli, "evaluate_maxim", fail_if_called)
+    monkeypatch.setattr(maxims, "evaluate_maxim_any_violation", fail_if_called)
+    args = build_parser().parse_args(["maxim", "propose"])
+
+    assert args.func is run_maxim_propose_cli
+    assert args.func(args) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "maxim propose: sources=1 themes=0 drafts=0 filed=0",
+        MAXIM_PROPOSE_CONTRACT_ROW,
+        "result: no recurring maxim proposal candidates found; filed=0",
     ]
     assert not (repo / "pyproject.toml").exists()
 

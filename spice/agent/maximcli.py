@@ -47,6 +47,10 @@ SCOPE_DECISION_EVIDENCE_ROW = (
     "confirm_rate, and recurrence before editing "
     "[tool.spice.maxims.<bag>].drivers or using maxim disable/enable."
 )
+MAXIM_PROPOSE_CONTRACT_ROW = (
+    "candidate contract: raw evidence-backed candidates for human triage; "
+    "local judge pre-screen not required; no maxim configuration installed."
+)
 MAXIM_PROPOSAL_EVIDENCE_COMMENT_LIMIT = 8
 
 
@@ -61,6 +65,14 @@ class _MaximReportBucket:
     gate_suppressed_count: int = 0
     published_count: int = 0
     recurrence_count: int = 0
+
+
+@dataclass(frozen=True)
+class MaximProposeResult:
+    source_count: int
+    theme_count: int
+    draft_count: int
+    filed: tuple[FiledMaximProposalTask, ...]
 
 
 def configure_maxim_parser(subparsers: Any) -> None:
@@ -123,36 +135,11 @@ def configure_maxim_parser(subparsers: Any) -> None:
     )
     report.set_defaults(func=run_maxim_report_cli)
 
-    sources = actions.add_parser(
-        "sources",
-        help="Show ACK ledger source records available for maxim proposal mining.",
-    )
-    sources.set_defaults(func=run_maxim_sources_cli)
+    _configure_proposal_parsers(actions)
+    _configure_bag_state_parsers(actions)
 
-    proposals = actions.add_parser(
-        "proposals",
-        help="Show TOML draft maxims from recurring ACK correction themes.",
-        description=(
-            "Cluster ACK-ledger correction sources into evidence-backed "
-            "[tool.spice.maxims.<bag>] draft stanzas. This command only "
-            "prints mergeable text; it does not edit repo config, install a "
-            "bag, or call the maxim judge. Human triage remains mandatory."
-        ),
-    )
-    proposals.set_defaults(func=run_maxim_proposals_cli)
 
-    file_proposals = actions.add_parser(
-        "file-proposals",
-        help="File TOML draft maxims as hidden deferred triage tasks.",
-        description=(
-            "Mine recurring ACK-ledger correction sources, draft mergeable "
-            "[tool.spice.maxims.<bag>] stanzas, and file each draft as a "
-            "hidden deferred task for human triage. This command does not edit "
-            "pyproject.toml, install a maxim bag, or call the maxim judge."
-        ),
-    )
-    file_proposals.set_defaults(func=run_maxim_file_proposals_cli)
-
+def _configure_bag_state_parsers(actions: Any) -> None:
     disable = actions.add_parser(
         "disable",
         help="Disable one maxim bag for this git worktree.",
@@ -182,6 +169,52 @@ def configure_maxim_parser(subparsers: Any) -> None:
         help="List maxim bags disabled in this git worktree.",
     )
     disabled.set_defaults(func=run_maxim_disabled_cli)
+
+
+def _configure_proposal_parsers(actions: Any) -> None:
+    propose = actions.add_parser(
+        "propose",
+        help="Mine ACK history and file hidden deferred maxim proposal tasks.",
+        description=(
+            "Mine real ACK ledger history, cluster recurring correction themes, "
+            "draft mergeable [tool.spice.maxims.<bag>] stanzas, and file each "
+            "draft as a hidden deferred proposal task. Proposals are raw "
+            "evidence-backed candidates for human triage; this command does "
+            "not call the local maxim judge for pre-screening, edit "
+            "pyproject.toml, or install maxim configuration."
+        ),
+    )
+    propose.set_defaults(func=run_maxim_propose_cli)
+
+    sources = actions.add_parser(
+        "sources",
+        help="Show ACK ledger source records available for maxim proposal mining.",
+    )
+    sources.set_defaults(func=run_maxim_sources_cli)
+
+    proposals = actions.add_parser(
+        "proposals",
+        help="Show TOML draft maxims from recurring ACK correction themes.",
+        description=(
+            "Cluster ACK-ledger correction sources into evidence-backed "
+            "[tool.spice.maxims.<bag>] draft stanzas. This command only "
+            "prints mergeable text; it does not edit repo config, install a "
+            "bag, or call the maxim judge. Human triage remains mandatory."
+        ),
+    )
+    proposals.set_defaults(func=run_maxim_proposals_cli)
+
+    file_proposals = actions.add_parser(
+        "file-proposals",
+        help="File TOML draft maxims as hidden deferred triage tasks.",
+        description=(
+            "Mine recurring ACK-ledger correction sources, draft mergeable "
+            "[tool.spice.maxims.<bag>] stanzas, and file each draft as a "
+            "hidden deferred task for human triage. This command does not edit "
+            "pyproject.toml, install a maxim bag, or call the maxim judge."
+        ),
+    )
+    file_proposals.set_defaults(func=run_maxim_file_proposals_cli)
 
 
 def _add_verdict_arguments(parser: argparse.ArgumentParser) -> None:
@@ -341,6 +374,14 @@ def run_maxim_proposals_cli(_args: argparse.Namespace) -> int:
     return 0
 
 
+def run_maxim_propose_cli(_args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        raise SpiceError("not inside a git worktree")
+    print(render_maxim_propose_result(maxim_propose_result(repo_root)))
+    return 0
+
+
 def run_maxim_file_proposals_cli(_args: argparse.Namespace) -> int:
     repo_root = repo_root_from_cwd()
     if repo_root is None:
@@ -352,6 +393,21 @@ def run_maxim_file_proposals_cli(_args: argparse.Namespace) -> int:
     )
     print(render_filed_maxim_proposal_tasks(file_maxim_proposal_tasks(drafts)))
     return 0
+
+
+def maxim_propose_result(repo_root: Path) -> MaximProposeResult:
+    records = maxim_proposal_source_records(repo_root)
+    themes = maxim_proposal_themes(records)
+    drafts = maxim_proposal_drafts(
+        themes,
+        existing_bags=resolved_maxim_bags(repo_root),
+    )
+    return MaximProposeResult(
+        source_count=len(records),
+        theme_count=len(themes),
+        draft_count=len(drafts),
+        filed=file_maxim_proposal_tasks(drafts),
+    )
 
 
 def run_maxim_disable_cli(args: argparse.Namespace) -> int:
@@ -481,6 +537,28 @@ def render_maxim_proposals(
         if index:
             rows.append("")
         rows.extend(_render_maxim_proposal_draft(draft))
+    return "\n".join(rows)
+
+
+def render_maxim_propose_result(result: MaximProposeResult) -> str:
+    rows = [
+        (
+            "maxim propose: "
+            f"sources={result.source_count} themes={result.theme_count} "
+            f"drafts={result.draft_count} filed={len(result.filed)}"
+        ),
+        MAXIM_PROPOSE_CONTRACT_ROW,
+    ]
+    if not result.filed:
+        rows.append("result: no recurring maxim proposal candidates found; filed=0")
+        return "\n".join(rows)
+    rows.extend(
+        (
+            f"proposal {item.handle} project={item.project} bag={item.bag_name} "
+            f'inspect="spice task show {item.handle}"'
+        )
+        for item in result.filed
+    )
     return "\n".join(rows)
 
 
