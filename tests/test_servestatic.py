@@ -199,10 +199,12 @@ def test_static_css_centers_two_pip_lane_light_stack():
     assert "place-content: center;" in lights_rules
 
 
-def test_static_messages_use_responsive_fill_rows():
+def test_static_messages_use_dense_packed_rows():
     css = _serve_css_text()
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
-    messages_start = css.rindex(".messages {")
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    messages_section = css.index("/* ---- messages ---- */")
+    messages_start = css.index(".messages {", messages_section)
     messages_end = css.index(".messages article {", messages_start)
     messages_rule = css[messages_start:messages_end]
     article_start = css.index(".messages article {")
@@ -224,17 +226,23 @@ def test_static_messages_use_responsive_fill_rows():
 
     assert "--message-card-max-width: 30rem;" in messages_rule
     assert "--message-card-min-width: 20rem;" in messages_rule
-    assert "display: flex;" in messages_rule
-    assert "flex-wrap: wrap;" in messages_rule
-    assert "direction: rtl;" in messages_rule
+    assert "--message-pack-row-height: 8px;" in messages_rule
+    assert "display: grid;" in messages_rule
+    assert "grid-auto-flow: row dense;" in messages_rule
+    assert "grid-auto-rows: var(--message-pack-row-height);" in messages_rule
+    assert "auto-fit" in messages_rule
+    assert "minmax(min(100%, var(--message-card-min-width)), 1fr)" in (messages_rule)
     assert "overflow-x: auto;" in messages_rule
     assert "display: flex;" in article_rule
-    assert "flex: 1 1 min(100%, var(--message-card-min-width));" in article_rule
     assert "flex-direction: column;" in article_rule
+    assert "grid-row-end: span var(--message-pack-row-span, 1);" in article_rule
     assert "max-width: none;" in article_rule
     assert "direction: ltr;" in article_rule
     assert ".messages article.image-only" in css
-    assert "flex: 1 1 min(100%, var(--message-card-min-width));" in css
+    assert "grid-column: 1 / -1;" in css
+    assert ".messages article:has(.task-directive-stack) {\n  grid-column: 1 / -1;" in (
+        css
+    )
     assert "display: flex;" in stack_rule
     assert "flex-direction: row;" in stack_rule
     assert "flex-wrap: nowrap;" in stack_rule
@@ -246,7 +254,11 @@ def test_static_messages_use_responsive_fill_rows():
     assert ".messages article.image-only .message-image img" in css
     assert "max-height: 136px" in css
     assert "justify-content: center;" in image_only_stack_rule
-    assert ".history-sentinel {\n  flex: 1 0 100%;" in css
+    assert ".history-sentinel {\n  grid-column: 1 / -1;" in css
+    assert "function packMessageStream(lane)" in app_stream
+    assert "function scheduleMessageStreamPack(lane)" in app_stream
+    assert "restoreMessageViewportAnchor(lane, anchor);" in app_stream
+    assert "syncMessagePackObserver(lane);" in app_stream
     assert 'if (item.image_only) article.classList.add("image-only");' in app_render
 
 

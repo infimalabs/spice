@@ -175,6 +175,9 @@ def test_serve_task_stack_smoke_asserts_card_fill() -> None:
     assert "messageCardHostInnerWidth" in smoke
     assert "messageCardFirstRowFillWidth" in smoke
     assert "messageCardFirstRowHeights" in smoke
+    assert "hostGridAutoFlow" in smoke
+    assert "messageCardRowSpans" in smoke
+    assert "anchorStability" in smoke
     assert "measureTaskStack(page, 1920)" in smoke
     assert "measureTaskStack(page, 520)" in smoke
     assert "messageCardLimit: rootFontSize * 30" in smoke
@@ -183,7 +186,8 @@ def test_serve_task_stack_smoke_asserts_card_fill() -> None:
     assert "image card did not fill row" in smoke
     assert "wide message cards did not fill the row" in smoke
     assert "wrapped message card did not fill row" in smoke
-    assert "message cards did not stretch to row height" in smoke
+    assert "dense packing did not backfill below short cards" in smoke
+    assert "message repack moved the reading anchor" in smoke
 
 
 def test_serve_composer_reorder_smoke_asserts_swap_contract() -> None:
