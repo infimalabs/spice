@@ -481,7 +481,12 @@ def publish_maxim_hits_as_inbox(
         return []
     if any(prefix in statement_text for prefix in REMINDER_SUPPRESSION_PREFIXES):
         return []
-    hits = triggered_maxims([statement_text], repo_root=repo_root)
+    driver = driver_for(repo_root)
+    hits = triggered_maxims(
+        [statement_text],
+        repo_root=repo_root,
+        driver_name=driver.name,
+    )
     if not hits:
         return []
     _record_maxim_metrics(

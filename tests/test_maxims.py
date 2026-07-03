@@ -335,6 +335,60 @@ drivers = ["Codex", "codex"]
 
     assert bag.drivers == frozenset({"codex"})
     assert hits == [bag]
+    assert maxims.triggered_maxims(
+        ["This quiet route drifts."],
+        repo_root=repo,
+        driver_name="codex",
+    ) == [bag]
+    assert (
+        maxims.triggered_maxims(
+            ["This quiet route drifts."],
+            repo_root=repo,
+            driver_name="claude",
+        )
+        == []
+    )
+
+
+def test_watchdog_filters_maxim_bags_by_active_driver(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    _write_pyproject(
+        repo,
+        """
+[tool.spice.maxims.codexonly]
+words = ["codex route"]
+message = "CODEX only reminder."
+drivers = ["codex"]
+
+[tool.spice.maxims.shared]
+words = ["shared route"]
+message = "Shared reminder."
+""",
+    )
+    _make_every_maxim_violate(monkeypatch)
+
+    monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "codex")
+    codex_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo,
+        "The codex route and shared route both drift.",
+        reminder_gate=watchdog.MaximReminderGate(),
+    )
+    codex_items = collect_inbox_items(repo)
+
+    for item in codex_items:
+        item.source_path.unlink()
+    monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "claude")
+    claude_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo,
+        "The codex route and shared route both drift.",
+        reminder_gate=watchdog.MaximReminderGate(),
+    )
+    claude_items = collect_inbox_items(repo)
+
+    assert len(codex_paths) == 1
+    assert codex_items[0].text == "[MAXIM] CODEX only reminder. Shared reminder.\n"
+    assert len(claude_paths) == 1
+    assert claude_items[0].text == "[MAXIM] Shared reminder.\n"
 
 
 def test_repo_config_rejects_unknown_maxim_driver_scope(tmp_path):

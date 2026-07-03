@@ -483,7 +483,10 @@ def builtin_maxim(name: str) -> str:
 
 
 def triggered_maxims(
-    statements: Sequence[str], *, repo_root: Path | None = None
+    statements: Sequence[str],
+    *,
+    repo_root: Path | None = None,
+    driver_name: str | None = None,
 ) -> list[MaximBag]:
     """Return matched maxim bags, in declared order.
 
@@ -492,6 +495,7 @@ def triggered_maxims(
     maxim's frozenset bag, not in match-time word mutation.
     """
     bags, key_to_name, bag_order = _resolved_lookup(repo_root)
+    driver_scope = _normalized_driver_scope_name(driver_name)
     seen: set[str] = set()
     trigger_parts = {key: tuple(key.split()) for key in key_to_name}
     for statement in statements:
@@ -506,7 +510,29 @@ def triggered_maxims(
                 continue
             if _contains_word_phrase(words, parts):
                 seen.add(key_to_name[key])
-    return [bags[name] for name in sorted(seen, key=bag_order.__getitem__)]
+    return [
+        bag
+        for bag in (bags[name] for name in sorted(seen, key=bag_order.__getitem__))
+        if _maxim_bag_matches_driver(bag, driver_scope)
+    ]
+
+
+def _normalized_driver_scope_name(driver_name: str | None) -> str:
+    if driver_name is None:
+        return ""
+    driver = str(driver_name or "").strip().casefold()
+    if not driver:
+        return ""
+    if driver not in DEFAULT_DRIVER_SCOPE:
+        expected = ", ".join(sorted(DEFAULT_DRIVER_SCOPE))
+        raise SpiceError(
+            f"maxim driver scope {driver_name!r} must be one of: {expected}"
+        )
+    return driver
+
+
+def _maxim_bag_matches_driver(bag: MaximBag, driver_name: str) -> bool:
+    return not driver_name or driver_name in bag.drivers
 
 
 def _contains_word_phrase(words: Sequence[str], phrase: tuple[str, ...]) -> bool:
