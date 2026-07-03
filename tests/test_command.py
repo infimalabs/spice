@@ -14,6 +14,11 @@ import pytest
 
 from spice.agent import driver as agent_driver
 from spice.agent import sidechannel, sidechannelnotify, wrap
+from spice.agent.maximmetrics import (
+    MAXIM_EVENT_FIRE,
+    MaximMetricEventWrite,
+    record_maxim_metric_events,
+)
 from spice.agent.shadow import shadow_environment
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import InboxResendAttempt, compose_inbox_text, write_inbox_item
@@ -23,11 +28,124 @@ from spice.sessions.meter import (
     context_meter_instruction,
 )
 
+COMMAND_WORKING_STATE_ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+COMMAND_WORKING_STATE_NOW = 1_767_225_600.0
+COMMAND_WORKING_STATE_MONOTONIC = 50_000.0
+COMMAND_WORKING_STATE_ELAPSED_SECONDS = 90
+COMMAND_WORKING_STATE_PROCESS_PID = 123
+COMMAND_WORKING_STATE_EXIT_CODE = 0
+COMMAND_WORKING_STATE_ONE_PENDING = 1
+COMMAND_WORKING_STATE_TWO_PENDING = 2
+COMMAND_WORKING_STATE_ONE_DIRTY = 1
+COMMAND_WORKING_STATE_TWO_DIRTY = 2
+COMMAND_WORKING_STATE_SENTENCE_PERIODS = 1
+COMMAND_WORKING_STATE_INCEPTED = "00000001"
+COMMAND_WORKING_STATE_HANDLE = f"METER-{COMMAND_WORKING_STATE_INCEPTED}"
+
 
 @pytest.fixture(autouse=True)
 def _git_worktree_tmp_path(request, tmp_path):
     if "tmp_path" in request.fixturenames:
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+
+
+def _working_state_lines(text: str) -> list[str]:
+    lines = [line for line in text.splitlines() if line.startswith("🌶️ Working state:")]
+    for line in lines:
+        assert "\n" not in line
+        assert line.count(".") == COMMAND_WORKING_STATE_SENTENCE_PERIODS
+    return lines
+
+
+class _CommandWorkingStateProcess:
+    pid = COMMAND_WORKING_STATE_PROCESS_PID
+
+    def wait(self) -> int:
+        return COMMAND_WORKING_STATE_EXIT_CODE
+
+
+def _run_working_state_command(repo_root: Path) -> str:
+    stderr = io.StringIO()
+    exit_code = wrap.run_agent_command(
+        repo_root,
+        ["true"],
+        popen_factory=lambda _command, env=None: _CommandWorkingStateProcess(),
+        stderr=stderr,
+    )
+    assert exit_code == COMMAND_WORKING_STATE_EXIT_CODE
+    return stderr.getvalue()
+
+
+def _record_command_working_state_maxim(repo_root: Path, bag_name: str) -> None:
+    record_maxim_metric_events(
+        repo_root,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE,
+                bag_name=bag_name,
+                driver_name=agent_driver.DRIVER.name,
+                thread_id=COMMAND_WORKING_STATE_ACTOR,
+                trigger_family=bag_name,
+                statement=f"{bag_name} triggered",
+            )
+        ],
+        now=COMMAND_WORKING_STATE_NOW,
+    )
+
+
+def _assert_command_working_state(
+    text: str, *, pending: int, phase: str, dirty: int, maxim: str
+) -> None:
+    inbox_label = "pending inbox" if pending == 1 else "pending inboxes"
+    dirty_label = "dirty file" if dirty == 1 else "dirty files"
+    assert _working_state_lines(text) == [
+        (
+            f"🌶️ Working state: {pending} {inbox_label}; claim "
+            f"{COMMAND_WORKING_STATE_HANDLE} {phase} for "
+            f"{COMMAND_WORKING_STATE_ELAPSED_SECONDS}s; {dirty} {dirty_label}; "
+            f"last maxim {maxim}."
+        )
+    ]
+
+
+def _configure_command_working_state(tmp_path: Path, monkeypatch) -> list[str]:
+    monkeypatch.setenv(agent_driver.DRIVER.thread_id_env, COMMAND_WORKING_STATE_ACTOR)
+    monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    monkeypatch.setattr(wrap.time, "time", lambda: COMMAND_WORKING_STATE_NOW)
+    monkeypatch.setattr(wrap.time, "monotonic", lambda: COMMAND_WORKING_STATE_MONOTONIC)
+    monkeypatch.setattr(
+        wrap, "start_agent_side_channel_watch", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(wrap, "join_agent_side_channel_watch", lambda _thread: None)
+    (tmp_path / ".git" / "info" / "exclude").write_text(".spice/\n", encoding="utf-8")
+    claim_phase = ["todo"]
+    claim_at = (
+        wrap.datetime.datetime.fromtimestamp(
+            COMMAND_WORKING_STATE_NOW - COMMAND_WORKING_STATE_ELAPSED_SECONDS,
+            wrap.datetime.UTC,
+        )
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+    def fake_export(args=None):
+        assert args == ["status:pending", "+ACTIVE"]
+        return [
+            {
+                "claim_at": claim_at,
+                "claim_by": COMMAND_WORKING_STATE_ACTOR,
+                "claim_worktree": str(tmp_path),
+                "description": "Validate working-state stderr line end to end",
+                "incepted": COMMAND_WORKING_STATE_INCEPTED,
+                "phase": claim_phase[0],
+                "project": "session.meter",
+                "status": "pending",
+            }
+        ]
+
+    monkeypatch.setattr("spice.tasks.tw.export", fake_export)
+    return claim_phase
 
 
 def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
@@ -150,6 +268,74 @@ def test_run_agent_command_initial_stderr_includes_working_state(tmp_path, monke
         ("wait", None, None),
         ("join", watch_thread, None),
     ]
+
+
+def test_run_agent_command_stderr_reflects_live_working_state_fields(
+    tmp_path, monkeypatch
+):
+    claim_phase = _configure_command_working_state(tmp_path, monkeypatch)
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000010Z.txt",
+        compose_inbox_text(body="pending command work", priority=None, stop=False),
+    )
+    (tmp_path / "dirty-one.txt").write_text("dirty\n", encoding="utf-8")
+    _record_command_working_state_maxim(tmp_path, "fallbacks")
+
+    first = _run_working_state_command(tmp_path)
+    assert "Inbox Steering" in first
+    assert "pending command work" in first
+    _assert_command_working_state(
+        first,
+        pending=COMMAND_WORKING_STATE_ONE_PENDING,
+        phase="todo",
+        dirty=COMMAND_WORKING_STATE_ONE_DIRTY,
+        maxim="fallbacks",
+    )
+
+    assert _working_state_lines(_run_working_state_command(tmp_path)) == []
+
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000011Z.txt",
+        compose_inbox_text(
+            body="second pending command work", priority=None, stop=False
+        ),
+    )
+    _assert_command_working_state(
+        _run_working_state_command(tmp_path),
+        pending=COMMAND_WORKING_STATE_TWO_PENDING,
+        phase="todo",
+        dirty=COMMAND_WORKING_STATE_ONE_DIRTY,
+        maxim="fallbacks",
+    )
+
+    claim_phase[0] = "verify"
+    _assert_command_working_state(
+        _run_working_state_command(tmp_path),
+        pending=COMMAND_WORKING_STATE_TWO_PENDING,
+        phase="verify",
+        dirty=COMMAND_WORKING_STATE_ONE_DIRTY,
+        maxim="fallbacks",
+    )
+
+    (tmp_path / "dirty-two.txt").write_text("dirty\n", encoding="utf-8")
+    _assert_command_working_state(
+        _run_working_state_command(tmp_path),
+        pending=COMMAND_WORKING_STATE_TWO_PENDING,
+        phase="verify",
+        dirty=COMMAND_WORKING_STATE_TWO_DIRTY,
+        maxim="fallbacks",
+    )
+
+    _record_command_working_state_maxim(tmp_path, "aliases")
+    _assert_command_working_state(
+        _run_working_state_command(tmp_path),
+        pending=COMMAND_WORKING_STATE_TWO_PENDING,
+        phase="verify",
+        dirty=COMMAND_WORKING_STATE_TWO_DIRTY,
+        maxim="aliases",
+    )
 
 
 def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monkeypatch):
