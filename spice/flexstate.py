@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
+from spice.paths import git_common_dir
 from spice.policy import flex_limit as flex_limit  # single source of the ratio
 
 StickyKey = TypeVar("StickyKey")
@@ -62,6 +63,12 @@ def git_state_path(git_path: str, *, root: Path) -> Path:
     )
     raw_path = Path(completed.stdout.strip())
     return raw_path if raw_path.is_absolute() else root / raw_path
+
+
+def flex_slice_claims_state_path(
+    *, root: Path, git_path: str = FLEX_SLICE_CLAIMS_GIT_PATH
+) -> Path:
+    return git_common_dir(root) / git_path
 
 
 def load_sticky_items(
@@ -113,7 +120,7 @@ def load_flex_slice_claims(
     renames: dict[Path, Path] | None = None,
     now: float | None = None,
 ) -> tuple[FlexSliceClaim, ...]:
-    path = state_path or git_state_path(git_path, root=root)
+    path = state_path or flex_slice_claims_state_path(root=root, git_path=git_path)
     if not path.exists():
         return ()
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -143,7 +150,7 @@ def save_flex_slice_claims(
     state_path: Path | None = None,
     git_path: str = FLEX_SLICE_CLAIMS_GIT_PATH,
 ) -> None:
-    path = state_path or git_state_path(git_path, root=root)
+    path = state_path or flex_slice_claims_state_path(root=root, git_path=git_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": FLEX_SLICE_CLAIMS_VERSION,
@@ -164,7 +171,7 @@ def prune_flex_slice_claims(
     renames: dict[Path, Path] | None = None,
     now: float | None = None,
 ) -> tuple[FlexSliceClaim, ...]:
-    path = state_path or git_state_path(git_path, root=root)
+    path = state_path or flex_slice_claims_state_path(root=root, git_path=git_path)
     if not path.exists():
         return ()
     active = load_flex_slice_claims(

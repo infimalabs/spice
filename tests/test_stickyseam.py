@@ -14,9 +14,9 @@ from pathlib import Path
 
 from spice.flexstate import (
     FLEX_SLICE_CLAIM_TTL_SECONDS,
-    FLEX_SLICE_CLAIMS_GIT_PATH,
     FLEX_SLICE_CLAIMS_VERSION,
     FlexSliceClaim,
+    flex_slice_claims_state_path,
     git_state_path,
     load_flex_slice_claims,
     save_flex_slice_claims,
@@ -397,6 +397,109 @@ def test_fileloc_unrelated_peer_claim_does_not_block_new_path(tmp_path):
     )
 
 
+def test_fileloc_linked_worktrees_share_slice_claims_and_ttl(tmp_path):
+    repo = _init_repo(tmp_path)
+    (repo / "big.py").write_text("x = 1\n" * 8, encoding="utf-8")
+    _commit_all(repo, "seed hot path")
+    peer_repo = tmp_path / "peer"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", str(peer_repo), "HEAD"],
+        check=True,
+    )
+
+    first_findings = fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+        flex_actor="actor-a",
+        flex_claim_now=100.0,
+    )
+    peer_findings = fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=peer_repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+        flex_actor="actor-b",
+        flex_claim_now=200.0,
+    )
+    late_findings = fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=peer_repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+        flex_actor="actor-b",
+        flex_claim_now=100.0 + FLEX_SLICE_CLAIM_TTL_SECONDS + 1.0,
+    )
+
+    assert flex_slice_claims_state_path(root=repo) == flex_slice_claims_state_path(
+        root=peer_repo
+    )
+    assert fileloc.render_loc_board(
+        first_findings,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+    ) == "\n".join(
+        [
+            "file-loc: 1 violation(s)",
+            "  FAIL  big.py: 8 lines > 5",
+            "  a file that breached flex stays held to the base limit until it "
+            "shrinks back under it; split by naming the seam",
+        ]
+    )
+    assert fileloc.render_loc_board(
+        peer_findings,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+    ) == "\n".join(
+        [
+            "file-loc: 1 violation(s)",
+            "  FAIL  big.py: 8 lines > 5; live flex slice held by actor-a "
+            "until 1970-01-01T06:01:40Z; keep this change append-only or "
+            "move to another seam",
+            "  peer-held flex slices redirect duplicate refactors; keep changes "
+            "append-only or move to another seam",
+        ]
+    )
+    assert fileloc.render_loc_board(
+        late_findings,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+    ) == "\n".join(
+        [
+            "file-loc: 1 violation(s)",
+            "  FAIL  big.py: 8 lines > 5",
+            "  a file that breached flex stays held to the base limit until it "
+            "shrinks back under it; split by naming the seam",
+        ]
+    )
+    assert load_flex_slice_claims(
+        root=repo, now=100.0 + FLEX_SLICE_CLAIM_TTL_SECONDS + 2.0
+    ) == (
+        FlexSliceClaim(
+            path=Path("big.py"),
+            actor="actor-b",
+            created_at=100.0 + FLEX_SLICE_CLAIM_TTL_SECONDS + 1.0,
+            expires_at=100.0 + (2 * FLEX_SLICE_CLAIM_TTL_SECONDS) + 1.0,
+        ),
+    )
+
+
 def test_complexity_peer_claim_redirects_routine_board(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path)
     (repo / "big.py").write_text("def f():\n    return 1\n", encoding="utf-8")
@@ -495,9 +598,7 @@ def test_repo_doc_peer_claim_redirects_guard_error(tmp_path):
 
 def _flex_slice_claims_payload(repo: Path) -> dict:
     return json.loads(
-        git_state_path(FLEX_SLICE_CLAIMS_GIT_PATH, root=repo).read_text(
-            encoding="utf-8"
-        )
+        flex_slice_claims_state_path(root=repo).read_text(encoding="utf-8")
     )
 
 
@@ -506,3 +607,22 @@ def _init_repo(tmp_path: Path) -> Path:
     repo.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
     return repo
+
+
+def _commit_all(repo: Path, message: str) -> None:
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=spice@example.test",
+            "-c",
+            "user.name=Spice Tests",
+            "commit",
+            "-q",
+            "-m",
+            message,
+        ],
+        cwd=repo,
+        check=True,
+    )
