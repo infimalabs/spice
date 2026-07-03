@@ -1,5 +1,23 @@
 // Pure lane task-filter derivation helpers.
 
+const TASK_FILTER_SOURCE_MANUAL = "manual";
+
+function normalizedTaskFilterEntries(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => ({
+      project: String((entry || {}).project || ""),
+      source: String((entry || {}).source || ""),
+    }))
+    .filter((entry) => entry.project);
+}
+
+function manualTaskFilterProjects(entries) {
+  return (entries || [])
+    .filter((entry) => entry.source === TASK_FILTER_SOURCE_MANUAL)
+    .map((entry) => entry.project);
+}
+
 function taskFilterEffectiveAssignedNames(inventory, assignedFilters) {
   const covered = new Set();
   const stems = new Map(

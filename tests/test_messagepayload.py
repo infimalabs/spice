@@ -1026,6 +1026,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
         "targetIdentity",
         "serveAgentIdentity",
         "taskFilters",
+        "taskFilterEntries",
         "laneFilterVersion",
         "teamIdentity",
         "lifetime",

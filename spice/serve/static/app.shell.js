@@ -165,6 +165,7 @@ function laneControlState(target, hint) {
     serverLifetime: lifetime,
     selectedView: hint ? hint.selectedView : defaultLaneViewMode,
     taskFilters: uniqueStringList(target.taskFilters || []),
+    taskFilterEntries: normalizedTaskFilterEntries(target.taskFilterEntries),
     laneFilterVersion: target.laneFilterVersion || "",
     taskFilterInventory: target.taskFilterInventory || null,
     laneMetrics: target.laneMetrics || {},
@@ -332,6 +333,8 @@ function syncEmptyTeamLane(lane, team = {}, options = {}) {
     lane.speechMode = config.speechMode;
   if (Array.isArray(config.taskFilters))
     lane.taskFilters = uniqueStringList(config.taskFilters);
+  if (Array.isArray(config.taskFilterEntries))
+    lane.taskFilterEntries = normalizedTaskFilterEntries(config.taskFilterEntries);
   lane.shardTextareas.clear();
   lane.shardAttachments.clear();
   lane.quoteDrafts.clear();

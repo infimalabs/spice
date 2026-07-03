@@ -12,6 +12,19 @@ function laneAssignedTaskFilters(lane) {
   return filters.sort();
 }
 
+// The operator's sticky pin layer: the only filter list the UI ever writes
+// back. Auto subscriptions (auto:create/auto:claim) are server-managed by the
+// lifetime and must never round-trip through client state.
+function laneManualTaskFilters(lane) {
+  const pins = [];
+  for (const member of laneGroupMemberLanes(laneGroupHost(lane))) {
+    for (const project of manualTaskFilterProjects(member.taskFilterEntries)) {
+      if (project && !pins.includes(project)) pins.push(project);
+    }
+  }
+  return pins.sort();
+}
+
 function laneFilterInventory(lane) {
   return laneGroupHost(lane).taskFilterInventory;
 }
@@ -42,8 +55,9 @@ function renderLaneFiltersPane(lane) {
   lane.renderedFilterPaneFingerprint = model.fingerprint;
   const { filterPolicy, filters, pickerAssignedFilters, privateQueues, queueCount } =
     model;
+  const pins = laneManualTaskFilters(lane);
   for (const filter of [...lane.selectedFilterRemovals]) {
-    if (!filters.includes(filter)) lane.selectedFilterRemovals.delete(filter);
+    if (!pins.includes(filter)) lane.selectedFilterRemovals.delete(filter);
   }
   lane.filtersSummaryEl.textContent =
     filterPolicy === "all projects"
@@ -66,6 +80,7 @@ function renderLaneFiltersPane(lane) {
 
 function laneFilterPaneRenderModel(lane) {
   const filters = laneAssignedTaskFilters(lane);
+  const pins = laneManualTaskFilters(lane);
   const pickerAssignedFilters = laneFilterPickerAssignedFilters(lane, filters);
   const privateQueues = lanePrivateQueues(lane);
   const removals = [...lane.selectedFilterRemovals].sort();
@@ -108,6 +123,7 @@ function laneFilterPaneRenderModel(lane) {
       pickerOpen: lane.filterPickerOpen,
       pickerQuery: lane.filterPickerQuery || "",
       pending,
+      pins,
       privateQueues,
       removals,
     }),
@@ -140,7 +156,8 @@ function laneFilterPickerActionFingerprint(action) {
 }
 
 function laneFilterChip(lane, filter) {
-  const selected = lane.selectedFilterRemovals.has(filter);
+  const pinned = laneManualTaskFilters(lane).includes(filter);
+  const selected = pinned && lane.selectedFilterRemovals.has(filter);
   const count = laneTaskFilterOpenCount(lane, filter);
   const chip = document.createElement("button");
   chip.type = "button";
@@ -148,13 +165,17 @@ function laneFilterChip(lane, filter) {
   chip.classList.toggle("lane-filter-chip--selected", selected);
   chip.classList.toggle("lane-filter-chip--existing", count > 0);
   chip.classList.toggle("lane-filter-chip--empty", count === 0);
-  chip.title = "Select lane filter for removal: " + filter;
+  chip.classList.toggle("lane-filter-chip--auto", !pinned);
+  chip.title = pinned
+    ? "Select pinned lane filter for removal: " + filter
+    : "Auto subscription (lifetime-managed): " + filter;
   chip.innerHTML =
     '<span class="lane-filter-chip-label"></span>' +
     '<span class="lane-filter-chip-count"></span>';
   chip.querySelector(".lane-filter-chip-label").textContent = filter;
   chip.querySelector(".lane-filter-chip-count").textContent = String(count);
   chip.addEventListener("click", () => {
+    if (!pinned) return;
     if (selected) lane.selectedFilterRemovals.delete(filter);
     else lane.selectedFilterRemovals.add(filter);
     renderLaneFiltersPane(lane);
@@ -540,7 +561,7 @@ function laneFilterPickerFooterText(lane) {
 function mutateLaneTaskFilters(lane, updateFilters) {
   const host = laneGroupHost(lane);
   updateLaneTeamConfigForLane(host, {
-    taskFilters: uniqueStringList(updateFilters(laneAssignedTaskFilters(host))),
+    taskFilters: uniqueStringList(updateFilters(laneManualTaskFilters(host))),
   }).catch(() => {
     setLaneTransientStatus(host, "task filters update failed");
   });

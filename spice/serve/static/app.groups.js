@@ -527,6 +527,9 @@ async function restorePreviousTeamOnServer(host) {
 }
 
 async function updateLaneGroupConfigOnServer(host) {
+  // Deliberately no taskFilters here: membership flows must never write
+  // filter state. Pins go through mutateLaneTaskFilters; auto subscriptions
+  // are server-managed by the lifetime.
   await requestTeamCommand(
     teamCommandPayload("updateTeamConfig", {
       teamId: host.teamId,
@@ -534,7 +537,6 @@ async function updateLaneGroupConfigOnServer(host) {
         speechMode: laneEffectiveSpeechMode(host),
         lifetime: laneEffectiveLifetime(host),
         selectedView: host.selectedView,
-        taskFilters: laneAssignedTaskFilters(host),
       },
     }),
   );

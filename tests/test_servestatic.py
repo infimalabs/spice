@@ -997,8 +997,10 @@ def test_static_lifetime_slider_syncs_server_state_sources():
         app_panes,
         (
             "updateLaneTeamConfigForLane(host, {",
-            "taskFilters: uniqueStringList(updateFilters(laneAssignedTaskFilters(host)))",
+            "taskFilters: uniqueStringList(updateFilters(laneManualTaskFilters(host)))",
             'setLaneTransientStatus(host, "task filters update failed");',
+            "function laneManualTaskFilters(lane) {",
+            "manualTaskFilterProjects(member.taskFilterEntries)",
         ),
     )
     _assert_contains_all(
@@ -1028,6 +1030,10 @@ def test_static_lifetime_slider_syncs_server_state_sources():
     assert "function updateTaskDrainForLane" not in app_stream
     assert "settleLaneLifetimeCommit(" not in app_stream
     assert "replaceTaskFilters" not in app_panes
+    # Membership flows must never round-trip a filter list; pins are the only
+    # filter payload the UI writes and they go through mutateLaneTaskFilters.
+    assert "taskFilters:" not in app_groups
+    assert "laneAssignedTaskFilters" not in app_groups
 
 
 def test_lifetime_slider_pending_commit_ignores_stale_server_lifetimes():

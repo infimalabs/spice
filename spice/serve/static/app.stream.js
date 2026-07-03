@@ -1352,6 +1352,8 @@ function applyTaskDrainRouteConfig(lane, result) {
     lane.taskFilters = uniqueStringList(config.taskFilters);
     lane.laneFilterVersion = String(config.laneFilterVersion || "");
   }
+  if (Array.isArray(config.taskFilterEntries))
+    lane.taskFilterEntries = normalizedTaskFilterEntries(config.taskFilterEntries);
   if (payloadHasField(config, "teamIdentity")) {
     lane.teamId = teamIdentityTeamId(config.teamIdentity);
     lane.teamRevision = teamIdentityRevision(config.teamIdentity);
@@ -1378,6 +1380,8 @@ function applyRouteConfigToTargetInventory(lane, config) {
     target.teamIdentity = config.teamIdentity;
   if (Array.isArray(config.taskFilters))
     target.taskFilters = uniqueStringList(config.taskFilters);
+  if (Array.isArray(config.taskFilterEntries))
+    target.taskFilterEntries = normalizedTaskFilterEntries(config.taskFilterEntries);
   if (payloadHasField(config, "laneFilterVersion"))
     target.laneFilterVersion = String(config.laneFilterVersion || "");
   if (payloadHasField(config, "lifetime"))
