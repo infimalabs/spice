@@ -41,6 +41,7 @@ DEFAULT_DRIVER_SCOPE = frozenset(driver.name for driver in ALL_DRIVERS)
 DISABLED_MAXIM_BAGS_GIT_PATH = "spice/disabled-maxim-bags.json"
 DISABLED_MAXIM_BAGS_KEY = "disabled_bags"
 MAXIM_PROPOSAL_MIN_RECURRENCE = 2
+MAXIM_PROPOSAL_DRAFT_MAX_WORDS = 8
 DEFAULT_PROMPT_LINES = (
     'IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".',
     'IFF "{maxim}" DISAGREES WITH "{statement}": ANSWER ONLY "NO".',
@@ -96,6 +97,19 @@ class MaximProposalTheme:
 
 
 @dataclass(frozen=True)
+class MaximProposalDraft:
+    bag_name: str
+    words: tuple[str, ...]
+    message: str
+    theme_name: str
+    recurring_terms: tuple[str, ...]
+    evidence_count: int
+    source_keys: tuple[str, ...]
+    dispositions: tuple[MaximProposalDispositionCount, ...]
+    evidence: tuple[MaximProposalEvidence, ...]
+
+
+@dataclass(frozen=True)
 class _PreparedProposalSource:
     record: MaximProposalSourceRecord
     terms: frozenset[str]
@@ -141,6 +155,42 @@ def maxim_proposal_themes(
             ),
         )
     )
+
+
+def maxim_proposal_drafts(
+    themes: Sequence[MaximProposalTheme],
+    *,
+    existing_bags: Mapping[str, MaximBag] | None = None,
+) -> tuple[MaximProposalDraft, ...]:
+    """Return mergeable TOML draft data for human-reviewed maxim proposals."""
+    trigger_owners = _flatten_bag_keys(existing_bags or BUILTIN_MAXIM_BAGS)
+    drafts: list[MaximProposalDraft] = []
+    for theme in themes:
+        candidate_words = _maxim_proposal_draft_words(theme.recurring_terms)
+        if not candidate_words:
+            continue
+        bag_name = _maxim_proposal_draft_bag_name(candidate_words, trigger_owners)
+        words = tuple(
+            word
+            for word in candidate_words
+            if (owner := trigger_owners.get(word)) is None or owner == bag_name
+        )
+        if not words:
+            continue
+        drafts.append(
+            MaximProposalDraft(
+                bag_name=bag_name,
+                words=words,
+                message=_maxim_proposal_draft_message(theme, words),
+                theme_name=theme.name,
+                recurring_terms=theme.recurring_terms,
+                evidence_count=theme.evidence_count,
+                source_keys=theme.source_keys,
+                dispositions=theme.dispositions,
+                evidence=theme.evidence,
+            )
+        )
+    return tuple(drafts)
 
 
 def _maxim_proposal_source_record(
@@ -216,6 +266,65 @@ _MAXIM_PROPOSAL_STOP_WORDS = frozenset(
         "would",
     }
 )
+_MAXIM_PROPOSAL_DRAFT_STOP_WORDS = _MAXIM_PROPOSAL_STOP_WORDS | frozenset(
+    {
+        "acceptance",
+        "accepted",
+        "acked",
+        "agent",
+        "agents",
+        "allocator",
+        "briefing",
+        "codex",
+        "command",
+        "commands",
+        "evidence",
+        "guidance",
+        "inbox",
+        "maxim",
+        "message",
+        "project",
+        "refused",
+        "session",
+        "source",
+        "spice",
+        "status",
+        "task",
+        "tests",
+        "then",
+        "validation",
+        "worktree",
+    }
+)
+_MAXIM_PROPOSAL_DRAFT_WORD_RE = re.compile(r"[a-z]+")
+_ACK_MESSAGE_PREFIX_RE = re.compile(r"^(?:ACK|NACK)\s+\S+:\s*", re.IGNORECASE)
+_MAXIM_PROPOSAL_IMPERATIVE_STARTS = (
+    "avoid ",
+    "cite ",
+    "commit ",
+    "delete ",
+    "do not ",
+    "don't ",
+    "drive ",
+    "fail ",
+    "hold ",
+    "keep ",
+    "let ",
+    "migrate ",
+    "prefer ",
+    "preserve ",
+    "react ",
+    "remove ",
+    "rename ",
+    "replace ",
+    "require ",
+    "respond ",
+    "route ",
+    "run ",
+    "treat ",
+    "update ",
+    "use ",
+)
 
 
 def _maxim_proposal_terms(record: MaximProposalSourceRecord) -> frozenset[str]:
@@ -235,6 +344,93 @@ def _maxim_proposal_terms(record: MaximProposalSourceRecord) -> frozenset[str]:
 
 def _looks_like_ack_key_fragment(token: str) -> bool:
     return token.startswith("t") and token.endswith("z") and token[1:-1].isdigit()
+
+
+def _maxim_proposal_draft_words(candidates: Sequence[str]) -> tuple[str, ...]:
+    words: list[str] = []
+    for candidate in candidates:
+        word = _normalize_proposal_draft_trigger(candidate)
+        if word is None:
+            continue
+        if word in _MAXIM_PROPOSAL_DRAFT_STOP_WORDS:
+            continue
+        if word not in words:
+            words.append(word)
+        if len(words) >= MAXIM_PROPOSAL_DRAFT_MAX_WORDS:
+            break
+    return tuple(words)
+
+
+def _normalize_proposal_draft_trigger(raw: Any) -> str | None:
+    text = str(raw or "").casefold()
+    if any(character.isdigit() for character in text):
+        return None
+    normalized = _normalize_trigger_key(
+        " ".join(_MAXIM_PROPOSAL_DRAFT_WORD_RE.findall(text))
+    )
+    if not normalized:
+        return None
+    if not _MAXIM_KEY_RE.fullmatch(normalized):
+        return None
+    return normalized
+
+
+def _maxim_proposal_draft_bag_name(
+    words: Sequence[str], trigger_owners: Mapping[str, str]
+) -> str:
+    owner_counts = Counter(
+        owner for word in words if (owner := trigger_owners.get(word)) is not None
+    )
+    if owner_counts:
+        return min(owner_counts, key=lambda name: (-owner_counts[name], name))
+    name_terms: list[str] = []
+    for word in words:
+        name_terms.extend(word.split())
+        if len(name_terms) >= 4:
+            break
+    return "proposal-" + "-".join(name_terms[:4])
+
+
+def _maxim_proposal_draft_message(
+    theme: MaximProposalTheme, words: Sequence[str]
+) -> str:
+    preferred = tuple(
+        item for item in theme.evidence if item.field == "steering_text"
+    ) + tuple(item for item in theme.evidence if item.field != "steering_text")
+    for item in preferred:
+        message = _clean_proposal_draft_message(item.text)
+        if message and _looks_imperative(message):
+            return _ensure_terminal_punctuation(message)
+    return (
+        "Keep "
+        + _format_proposal_word_list(words)
+        + " guidance broad, portable, and immediately actionable across contexts."
+    )
+
+
+def _clean_proposal_draft_message(raw: str) -> str:
+    message = _normalize_proposal_text(raw)
+    message = _ACK_MESSAGE_PREFIX_RE.sub("", message)
+    return message.removeprefix("[MAXIM] ").strip()
+
+
+def _looks_imperative(message: str) -> bool:
+    normalized = re.sub(r"^[^A-Za-z]+", "", message).casefold()
+    return normalized.startswith(_MAXIM_PROPOSAL_IMPERATIVE_STARTS)
+
+
+def _ensure_terminal_punctuation(message: str) -> str:
+    if message[-1:] in {".", "!", "?"}:
+        return message
+    return message + "."
+
+
+def _format_proposal_word_list(words: Sequence[str]) -> str:
+    if len(words) == 1:
+        return words[0]
+    if len(words) == 2:
+        return f"{words[0]} and {words[1]}"
+    return ", ".join(words[:-1]) + f", and {words[-1]}"
 
 
 def _maxim_proposal_clusters(
