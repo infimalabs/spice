@@ -180,3 +180,47 @@ def test_review_then_followup_inherits_reviewed_task_origin(task_repo, monkeypat
     ]
     assert len(followups) == 1
     assert followups[0]["origin"] == f"task:{handle}"
+
+
+def test_review_then_explicit_origin_overrides_reviewed_task(task_repo, monkeypatch):
+    from spice.agent.driver import DRIVER
+
+    from tests.test_tasks import PEER_ACTOR
+
+    assert task_repo.is_dir()
+    handle = _seed_task("Reviewed work with redirected follow-up")
+    ops.claim(handle)
+    ops.done(handle, validation=["implementation complete"])
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(handle)
+
+    ops.review(
+        handle,
+        finding="unclean",
+        note="follow-up traces to the steering ack",
+        then=[
+            "title=Redirected follow-up | project=task.unit | "
+            f"acceptance=Explicit origin wins | origin=ack:{ACK_KEY}"
+        ],
+    )
+
+    followups = [
+        row
+        for row in tw.export(["status:pending"])
+        if row.get("description") == "Redirected follow-up"
+    ]
+    assert len(followups) == 1
+    assert followups[0]["origin"] == f"ack:{ACK_KEY}"
+
+
+def test_adopt_mint_new_records_origin(task_repo, monkeypatch):
+    from spice.tasks import gitsync
+
+    assert task_repo.is_dir()
+    monkeypatch.setattr(gitsync, "commits_ahead_of_baseline", lambda *_a: 1)
+    monkeypatch.setattr(tw, "require_clean_worktree", lambda *_a, **_k: None)
+
+    output = ops.adopt(project="task.unit", origin=f"ack:{ACK_KEY}")
+    handle = output.splitlines()[0].split()[-1]
+
+    assert identity.resolve(handle)["origin"] == f"ack:{ACK_KEY}"

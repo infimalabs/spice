@@ -915,13 +915,18 @@ def review(
         modify.append(f"review_note:{note}")
     tw.run(modify)
     annotate(uuid, f"review: finding={finding}; by={actor}")
+    reviewed_handle = identity.render_handle(row)
     spawned: list[str] = []
     for spec in then or []:
         spawned.append(
-            _spawn_followup(spec, after_uuid=uuid, creation_surface=creation_surface)
+            _spawn_followup(
+                spec,
+                after_uuid=uuid,
+                after_handle=reviewed_handle,
+                creation_surface=creation_surface,
+            )
         )
     linked: list[str] = []
-    reviewed_handle = identity.render_handle(row)
     for followup_handle in followup or []:
         linked.append(
             _link_existing_followup(
@@ -1007,7 +1012,11 @@ def _task_continuation_contract(actor: str | None = None):
 
 
 def _spawn_followup(
-    spec: str, *, after_uuid: str, creation_surface: str | None = None
+    spec: str,
+    *,
+    after_uuid: str,
+    after_handle: str,
+    creation_surface: str | None = None,
 ) -> str:
     fields: dict[str, str] = {}
     for part in spec.split("|"):
@@ -1036,6 +1045,9 @@ def _spawn_followup(
         wait=None,
         claim=False,
         due=fields.get("due"),
+        # A review follow-up descends from the reviewed task; an explicit
+        # origin= field in the spec wins.
+        origin=fields.get("origin") or f"task:{after_handle}",
         extra=[f"depends:{after_uuid}"],
         creation_surface=creation_surface,
     )
