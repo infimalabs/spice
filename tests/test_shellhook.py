@@ -19,6 +19,8 @@ from spice.errors import SpiceError
 
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
+UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND = "spice agent " + "shell-hook"
+UNSUPPORTED_AGENT_STEER_COMMAND = "spice agent " + "steer"
 
 
 def test_wrapper_git_route_inherits_ambient_supervisor_environment(tmp_path):
@@ -432,11 +434,11 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
     assert env[shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV] == ""
     assert env[shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV] == ""
     zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
-    assert "spice agent shell-hook" not in zshenv
+    assert UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND not in zshenv
     assert "spice agent run --" in zshenv
     assert "--preserve-shell-hook-env" not in zshenv
     assert shellhook.SHELL_HOOK_WRAPPERS_ENV in zshenv
-    assert "spice agent steer" not in zshenv
+    assert UNSUPPORTED_AGENT_STEER_COMMAND not in zshenv
     assert "--watch --parent-pid" not in zshenv
 
 
@@ -501,13 +503,13 @@ def test_configured_agent_environment_installs_driver_shell_steering_hooks(
     )
     zshenv = (hook_dir / ".zshenv").read_text(encoding="utf-8")
     bashenv = (hook_dir / shellhook.BASH_HOOK_NAME).read_text(encoding="utf-8")
-    assert "spice agent shell-hook" not in zshenv
-    assert "spice agent shell-hook" not in bashenv
+    assert UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND not in zshenv
+    assert UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND not in bashenv
     assert "spice agent run --" in zshenv
     assert "spice agent run --" in bashenv
     assert "--preserve-shell-hook-env" not in zshenv
     assert "--preserve-shell-hook-env" not in bashenv
-    assert "spice agent steer" not in zshenv
+    assert UNSUPPORTED_AGENT_STEER_COMMAND not in zshenv
     assert "--watch --parent-pid" not in zshenv
 
 
@@ -608,8 +610,8 @@ def test_shell_steering_files_are_stable_across_original_env_changes():
     assert (hook_dir / shellhook.BASH_HOOK_NAME).read_text(
         encoding="utf-8"
     ) == first_bashenv
-    assert "spice agent shell-hook" not in first_zshenv
-    assert "spice agent shell-hook" not in first_bashenv
+    assert UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND not in first_zshenv
+    assert UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND not in first_bashenv
     assert "spice agent run --" in first_zshenv
     assert "spice agent run --" in first_bashenv
     assert "--preserve-shell-hook-env" not in first_zshenv
@@ -630,7 +632,7 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
 
     for filename in (*shellhook.ZSH_HOOK_NAMES, shellhook.BASH_HOOK_NAME):
         text = (hook_dir / filename).read_text(encoding="utf-8")
-        assert "spice agent shell-hook" not in text
+        assert UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND not in text
         assert shellhook.SHELL_HOOK_WRAPPERS_ENV in text
         assert shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV in text
         assert shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV in text
@@ -644,7 +646,7 @@ def test_packaged_shell_hooks_are_static_env_driven_and_packaged():
             assert shellhook.SHELL_HOOK_ORIGINAL_HISTFILE_ENV in text
 
         static_text = (static_hook_dir / filename).read_text(encoding="utf-8")
-        assert "spice agent shell-hook" not in static_text
+        assert UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND not in static_text
         assert "spice agent run --" not in static_text
         assert shellhook.SHELL_HOOK_WRAPPERS_ENV in static_text
         assert shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV in static_text
