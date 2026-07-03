@@ -484,12 +484,23 @@ def publish_maxim_hits_as_inbox(
     hits = triggered_maxims([statement_text], repo_root=repo_root)
     if not hits:
         return []
+    reminder_key = _maxim_reminder_key(hits)
     _record_maxim_metrics(
         repo_root,
         hits,
         event_type=MAXIM_EVENT_FIRE,
         statement=statement_text,
     )
+    if not reminder_gate.should_publish(reminder_key):
+        _record_maxim_metrics(
+            repo_root,
+            hits,
+            event_type=MAXIM_EVENT_GATE_SUPPRESSED,
+            statement=statement_text,
+            reminder_key=reminder_key,
+            reminder_body=_maxim_inbox_body(hits),
+        )
+        return []
     violations: list[MaximBag] = []
     for hit in hits:
         verdict = evaluate_maxim_any_violation(hit.message, statement_text)
@@ -511,16 +522,6 @@ def publish_maxim_hits_as_inbox(
     if not violations:
         return []
     body = _maxim_inbox_body(violations)
-    reminder_key = _maxim_reminder_key(hits)
-    if not reminder_gate.should_publish(reminder_key):
-        _record_maxim_metrics(
-            repo_root,
-            violations,
-            event_type=MAXIM_EVENT_GATE_SUPPRESSED,
-            statement=statement_text,
-            reminder_body=body,
-        )
-        return []
     path = write_inbox_item(repo_root, None, body)
     reminder_gate.mark_sent(reminder_key, path, body)
     _record_maxim_metrics(
