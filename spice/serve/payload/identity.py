@@ -55,7 +55,8 @@ def resolve_thread_id_for_target(state: Any, target: WorktreeTarget) -> str | No
         if thread_id:
             state.cached_thread_ids[target.id] = thread_id
             return thread_id
-        return state.cached_thread_ids.get(target.id)
+        state.cached_thread_ids.pop(target.id, None)
+        return None
 
 
 def team_facts_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:

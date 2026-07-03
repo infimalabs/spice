@@ -108,6 +108,26 @@ def test_bound_target_rewrites_placeholder_membership_and_renewal_atomically(
     ]
 
 
+def test_unstarted_target_ignores_stale_cached_thread_when_already_imported(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    created = state.team_store.create_team(members=[ACTOR_A, f"target:{target.id}"])
+    state.cached_thread_ids[target.id] = THREAD_A
+    _patch_payload_dependencies(monkeypatch, thread_id="", running=False)
+
+    result = inventory.work_trees_payload(state)
+
+    work_tree = result["workTrees"][0]
+    members = state.team_store.team_state(created.team_id).members
+    assert work_tree["targetIdentity"]["thread"] == {"state": "unbound"}
+    assert work_tree["teamIdentity"]["teamId"] == created.team_id
+    assert [member.agent_id for member in members] == [ACTOR_A, f"target:{target.id}"]
+    assert state.cached_thread_ids == {}
+
+
 def test_task_drain_uses_unstarted_target_actor_without_binding_thread(
     tmp_path, monkeypatch
 ):
