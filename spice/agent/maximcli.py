@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import json
+import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from spice.agent.maximmetrics import (
     MaximMetricCounts,
@@ -18,11 +20,14 @@ from spice.agent.maxims import (
     ALL_MAXIM,
     DEFAULT_PROMPT_TEMPLATE,
     META_MAXIMS,
+    MaximBag,
+    MaximProposalDraft,
     MaximProposalSourceRecord,
     MaximProposalTheme,
     builtin_maxim,
     disabled_maxim_bag_names,
     evaluate_maxim,
+    maxim_proposal_drafts,
     maxim_proposal_source_records,
     maxim_proposal_themes,
     resolved_maxim_bags,
@@ -41,6 +46,8 @@ SCOPE_DECISION_EVIDENCE_ROW = (
     "confirm_rate, and recurrence before editing "
     "[tool.spice.maxims.<bag>].drivers or using maxim disable/enable."
 )
+MAXIM_PROPOSAL_EVIDENCE_COMMENT_LIMIT = 8
+_TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 @dataclass
@@ -124,11 +131,12 @@ def configure_maxim_parser(subparsers: Any) -> None:
 
     proposals = actions.add_parser(
         "proposals",
-        help="Show recurring ACK correction themes for human maxim review.",
+        help="Show TOML draft maxims from recurring ACK correction themes.",
         description=(
-            "Cluster ACK-ledger correction sources into raw evidence-backed "
-            "candidate themes. This command does not call the maxim judge; "
-            "human triage remains mandatory."
+            "Cluster ACK-ledger correction sources into evidence-backed "
+            "[tool.spice.maxims.<bag>] draft stanzas. This command only "
+            "prints mergeable text; it does not edit repo config, install a "
+            "bag, or call the maxim judge. Human triage remains mandatory."
         ),
     )
     proposals.set_defaults(func=run_maxim_proposals_cli)
@@ -312,7 +320,12 @@ def run_maxim_proposals_cli(_args: argparse.Namespace) -> int:
     if repo_root is None:
         raise SpiceError("not inside a git worktree")
     records = maxim_proposal_source_records(repo_root)
-    print(render_maxim_proposals(maxim_proposal_themes(records)))
+    print(
+        render_maxim_proposals(
+            maxim_proposal_themes(records),
+            existing_bags=resolved_maxim_bags(repo_root),
+        )
+    )
     return 0
 
 
@@ -430,25 +443,19 @@ def render_maxim_sources(records: tuple[MaximProposalSourceRecord, ...]) -> str:
     return "\n".join(rows)
 
 
-def render_maxim_proposals(themes: tuple[MaximProposalTheme, ...]) -> str:
-    if not themes:
-        return "maxim proposals: 0"
-    rows = [
-        "maxim proposals: " + str(len(themes)),
-        "theme evidence dispositions source_keys terms",
-    ]
-    rows.extend(
-        " ".join(
-            (
-                theme.name,
-                str(theme.evidence_count),
-                _render_proposal_dispositions(theme),
-                ",".join(theme.source_keys),
-                ",".join(theme.recurring_terms),
-            )
-        )
-        for theme in themes
-    )
+def render_maxim_proposals(
+    themes: tuple[MaximProposalTheme, ...],
+    *,
+    existing_bags: Mapping[str, MaximBag] | None = None,
+) -> str:
+    drafts = maxim_proposal_drafts(themes, existing_bags=existing_bags)
+    if not drafts:
+        return "# maxim proposals: 0"
+    rows = ["# maxim proposals: " + str(len(drafts))]
+    for index, draft in enumerate(drafts):
+        if index:
+            rows.append("")
+        rows.extend(_render_maxim_proposal_draft(draft))
     return "\n".join(rows)
 
 
@@ -513,8 +520,61 @@ def _render_source_evidence(record: MaximProposalSourceRecord) -> str:
     return ",".join(fields) if fields else "-"
 
 
-def _render_proposal_dispositions(theme: MaximProposalTheme) -> str:
-    return ",".join(f"{item.disposition}={item.count}" for item in theme.dispositions)
+def _render_maxim_proposal_draft(draft: MaximProposalDraft) -> list[str]:
+    rows = [
+        f"# theme = {draft.theme_name}",
+        f"# evidence_count = {draft.evidence_count}",
+        f"# dispositions = {_render_proposal_dispositions(draft)}",
+        f"# source_keys = {','.join(draft.source_keys)}",
+    ]
+    rows.extend(_render_proposal_evidence_comments(draft.evidence))
+    rows.extend(
+        [
+            f"[tool.spice.maxims.{_render_toml_key(draft.bag_name)}]",
+            f"words = {_render_toml_string_array(draft.words)}",
+            f"message = {_render_toml_string(draft.message)}",
+        ]
+    )
+    return rows
+
+
+def _render_proposal_evidence_comments(
+    evidence: tuple[Any, ...],
+) -> list[str]:
+    rows = [
+        f"# evidence {index} {item.field}: {_render_toml_comment(item.text)}"
+        for index, item in enumerate(
+            evidence[:MAXIM_PROPOSAL_EVIDENCE_COMMENT_LIMIT], start=1
+        )
+    ]
+    omitted = len(evidence) - MAXIM_PROPOSAL_EVIDENCE_COMMENT_LIMIT
+    if omitted > 0:
+        rows.append(f"# evidence omitted = {omitted}")
+    return rows
+
+
+def _render_proposal_dispositions(
+    proposal: MaximProposalTheme | MaximProposalDraft,
+) -> str:
+    return ",".join(
+        f"{item.disposition}={item.count}" for item in proposal.dispositions
+    )
+
+
+def _render_toml_key(key: str) -> str:
+    return key if _TOML_BARE_KEY_RE.fullmatch(key) else _render_toml_string(key)
+
+
+def _render_toml_string_array(values: tuple[str, ...]) -> str:
+    return "[" + ", ".join(_render_toml_string(value) for value in values) + "]"
+
+
+def _render_toml_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _render_toml_comment(value: str) -> str:
+    return " ".join(value.split())
 
 
 def _render_trigger_key(key: str) -> str:

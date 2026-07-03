@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import tomllib
 
 from spice.agent import maximcli, maxims
 from spice.agent.maximcli import (
@@ -14,6 +15,8 @@ from spice.agent.maximcli import (
 from spice.agent.maxims import (
     MaximProposalDispositionCount,
     MaximProposalEvidence,
+    MaximProposalTheme,
+    maxim_proposal_drafts,
     maxim_proposal_source_records,
     maxim_proposal_themes,
 )
@@ -253,7 +256,7 @@ def test_maxim_proposal_themes_cluster_recurring_corrections_with_evidence(tmp_p
     )
 
 
-def test_render_maxim_proposals_lists_counts_dispositions_and_keys(tmp_path):
+def test_render_maxim_proposals_prints_valid_toml_stanza_with_evidence(tmp_path):
     repo = _init_repo(tmp_path / "repo")
     _record_ack_source(
         repo,
@@ -274,16 +277,83 @@ def test_render_maxim_proposals_lists_counts_dispositions_and_keys(tmp_path):
         archived_at=ARCHIVED_AT_NEWER,
     )
 
-    assert render_maxim_proposals(
-        maxim_proposal_themes(maxim_proposal_source_records(repo))
-    ).splitlines() == [
-        "maxim proposals: 1",
-        "theme evidence dispositions source_keys terms",
-        (
-            "branches/deterministic/fallback/path 2 acked=1,refused=1 "
-            f"{KEY_B},{KEY_A} branches,deterministic,fallback,path"
-        ),
+    rendered = render_maxim_proposals(
+        maxim_proposal_themes(maxim_proposal_source_records(repo)),
+        existing_bags=maxims.resolved_maxim_bags(repo),
+    )
+
+    assert rendered.splitlines() == [
+        "# maxim proposals: 1",
+        "# theme = branches/deterministic/fallback/path",
+        "# evidence_count = 2",
+        "# dispositions = acked=1,refused=1",
+        f"# source_keys = {KEY_B},{KEY_A}",
+        "# evidence 1 steering_text: Fallback branches hide the deterministic path.",
+        f"# evidence 2 ack_text: NACK {KEY_B}: refusing fallback path.",
+        "# evidence 3 ack_content: refusing fallback path.",
+        "# evidence 4 steering_text: Avoid fallback branches. Use one deterministic path.",
+        f"# evidence 5 ack_text: ACK {KEY_A}: captured fallback correction.",
+        "# evidence 6 ack_content: captured fallback correction.",
+        "[tool.spice.maxims.fallbacks]",
+        'words = ["branches", "deterministic", "fallback", "path"]',
+        'message = "Avoid fallback branches. Use one deterministic path."',
     ]
+    parsed = tomllib.loads(rendered)
+    assert parsed["tool"]["spice"]["maxims"]["fallbacks"] == {
+        "words": ["branches", "deterministic", "fallback", "path"],
+        "message": "Avoid fallback branches. Use one deterministic path.",
+    }
+    (repo / "pyproject.toml").write_text(rendered, encoding="utf-8")
+    assert maxims.resolved_maxim_bags(repo)["fallbacks"].words == frozenset(
+        {"branches", "deterministic", "fallback", "path"}
+    )
+
+
+def test_maxim_proposal_drafts_drop_or_normalize_invalid_trigger_candidates(
+    tmp_path,
+):
+    repo = _init_repo(tmp_path / "repo")
+    theme = MaximProposalTheme(
+        name="raw-theme",
+        recurring_terms=(
+            "Quiet-Route",
+            "route2",
+            "soft   landing",
+            "spice",
+            "task",
+            "!!!",
+        ),
+        evidence_count=1,
+        source_keys=(KEY_A,),
+        dispositions=(
+            MaximProposalDispositionCount(
+                disposition=ACK_DISPOSITION_ACKED,
+                count=1,
+            ),
+        ),
+        evidence=(
+            MaximProposalEvidence(
+                field="steering_text",
+                text="Avoid quiet routes across contexts",
+            ),
+        ),
+    )
+
+    drafts = maxim_proposal_drafts((theme,), existing_bags={})
+    rendered = render_maxim_proposals((theme,), existing_bags={})
+
+    assert drafts[0].bag_name == "proposal-quiet-route-soft-landing"
+    assert drafts[0].words == ("quiet route", "soft landing")
+    assert drafts[0].message == "Avoid quiet routes across contexts."
+    parsed = tomllib.loads(rendered)
+    assert parsed["tool"]["spice"]["maxims"]["proposal-quiet-route-soft-landing"] == {
+        "words": ["quiet route", "soft landing"],
+        "message": "Avoid quiet routes across contexts.",
+    }
+    (repo / "pyproject.toml").write_text(rendered, encoding="utf-8")
+    assert maxims.resolved_maxim_bags(repo)[
+        "proposal-quiet-route-soft-landing"
+    ].words == frozenset({"quiet route", "soft landing"})
 
 
 def test_maxim_proposals_cli_does_not_pre_screen_with_judge(
@@ -318,13 +388,22 @@ def test_maxim_proposals_cli_does_not_pre_screen_with_judge(
     assert args.func is run_maxim_proposals_cli
     assert args.func(args) == 0
     assert capsys.readouterr().out.splitlines() == [
-        "maxim proposals: 1",
-        "theme evidence dispositions source_keys terms",
-        (
-            "branches/deterministic/fallback/path 2 acked=2 "
-            f"{KEY_B},{KEY_A} branches,deterministic,fallback,path"
-        ),
+        "# maxim proposals: 1",
+        "# theme = branches/deterministic/fallback/path",
+        "# evidence_count = 2",
+        "# dispositions = acked=2",
+        f"# source_keys = {KEY_B},{KEY_A}",
+        "# evidence 1 steering_text: Fallback branches hide the deterministic path.",
+        f"# evidence 2 ack_text: ACK {KEY_B}: captured fallback correction.",
+        "# evidence 3 ack_content: captured fallback correction.",
+        "# evidence 4 steering_text: Avoid fallback branches. Use one deterministic path.",
+        f"# evidence 5 ack_text: ACK {KEY_A}: captured fallback correction.",
+        "# evidence 6 ack_content: captured fallback correction.",
+        "[tool.spice.maxims.fallbacks]",
+        'words = ["branches", "deterministic", "fallback", "path"]',
+        'message = "Avoid fallback branches. Use one deterministic path."',
     ]
+    assert not (repo / "pyproject.toml").exists()
 
 
 def _record_ack_source(
