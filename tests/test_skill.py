@@ -31,6 +31,8 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
     assert "`NACK <key>: <why this cannot be done>`" in text
     assert "ACKed or NACKed keys clear from pending" in text
     assert "Do not bury ACKs or NACKs mid-message" in text
+    assert "spice agent show" not in text
+    assert "spice agent status" not in text
 
 
 def test_available_skill_path_materializes_into_the_worktree(tmp_path):
