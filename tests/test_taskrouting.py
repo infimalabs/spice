@@ -349,6 +349,44 @@ def test_delete_gcs_empty_auto_create_filter_after_project_subtree_empties(
     assert store.global_revision() == after_empty_revision
 
 
+def test_empty_project_gc_counts_waiting_tasks(task_repo):
+    """Deferred work keeps a project subscribed: GC must not strip auto
+    filters while waiting tasks will wake back into the project."""
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drive")
+    )
+    doomed = create.add(
+        "Deleted while sibling waits",
+        project="task.unit",
+        priority="medium",
+        acceptance=["gc keeps filter while a waiting task remains"],
+    )
+    sleeper = create.add(
+        "Wakes back into the project",
+        project="task.unit",
+        priority="medium",
+        acceptance=["waiting task holds the subscription"],
+        deferred=True,
+    )
+
+    ops.delete(doomed, "abandoned while sibling defers")
+    still_subscribed = store.team_config(team.team_id)
+
+    assert still_subscribed.task_filters == ("task.unit",)
+    assert [entry.to_payload() for entry in still_subscribed.task_filter_entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE}
+    ]
+
+    ops.wake([sleeper])
+    ops.delete(sleeper, "abandoned after wake")
+    emptied = store.team_config(team.team_id)
+
+    assert emptied.task_filters == ()
+    assert emptied.task_filter_entries == ()
+
+
 def test_drive_task_creation_subscribes_project_idempotently(task_repo):
     assert task_repo.is_dir()
     store = ServeTeamStore()
