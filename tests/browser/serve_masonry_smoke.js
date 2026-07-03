@@ -6,8 +6,13 @@ const { withServePage } = require("./serve_playwright_harness");
 // The injected helpers are serialized into the page, so every fixture constant
 // travels through the evaluate config rather than lexical capture.
 const masonryColumnFloorByWidth = { 560: 1, 1280: 2, 1920: 3 };
+const masonryMobileBreakpointWidth = 720;
 const masonryMeasuredWidths = Object.keys(masonryColumnFloorByWidth).map(Number);
 const masonryScreenshotWidths = [900, 1280, 1920];
+const masonryTeamColumnFloorByWidth = { 700: 1, 900: 2, 1280: 3 };
+const masonryTeamMeasuredWidths = Object.keys(masonryTeamColumnFloorByWidth).map(
+  Number,
+);
 const masonryFixturePlan = {
   ackCardStep: 20,
   backfillMinutes: [-4, -3, -2],
@@ -36,6 +41,8 @@ async function run(screenshotDir) {
       await page.waitForFunction(
         () =>
           typeof renderMessage === "function" &&
+          typeof applyTeamSnapshotPayload === "function" &&
+          typeof laneGroupMemberTargetIds === "function" &&
           Array.isArray(targets) &&
           targets.length > 0,
         { timeout: 10000 },
@@ -46,6 +53,11 @@ async function run(screenshotDir) {
         measurements[width] = await measureMasonry(page, width);
         assertMasonryMeasurement(measurements[width]);
       }
+      const teamMeasurements = {};
+      for (const width of masonryTeamMeasuredWidths) {
+        teamMeasurements[width] = await measureMasonryTeam(page, width);
+        assertMasonryTeamMeasurement(teamMeasurements[width]);
+      }
       const screenshots = [];
       if (screenshotDir) {
         for (const width of masonryScreenshotWidths) {
@@ -55,7 +67,7 @@ async function run(screenshotDir) {
           screenshots.push(file);
         }
       }
-      return { measurements, screenshots, url: server.url };
+      return { measurements, screenshots, teamMeasurements, url: server.url };
     },
   );
 }
@@ -75,6 +87,10 @@ async function installMasonrySmokeHelpers(page) {
       masonrySmokeBackfillAudit,
       masonrySmokeColumnRecovery,
       masonrySmokeRepackAudit,
+      renderMasonryTeamFixture,
+      masonryTeamTargetPayload,
+      masonryTeamItems,
+      masonryTeamMeasurement,
       masonrySmokeImageHtml,
       masonrySmokeImagesReady,
       masonrySmokeRect,
@@ -89,6 +105,15 @@ async function measureMasonry(page, width) {
   return page.evaluate(renderMasonryFixture, {
     expectedColumns: masonryColumnFloorByWidth[width] || 1,
     expectedRuleIsos: masonryExpectedRuleIsos,
+    plan: masonryFixturePlan,
+    width,
+  });
+}
+
+async function measureMasonryTeam(page, width) {
+  await page.setViewportSize({ width, height: 1400 });
+  return page.evaluate(renderMasonryTeamFixture, {
+    expectedColumns: masonryTeamColumnFloorByWidth[width] || 1,
     plan: masonryFixturePlan,
     width,
   });
@@ -124,6 +149,131 @@ async function renderMasonryFixture(config) {
   await new Promise((resolve) => requestAnimationFrame(resolve));
   await new Promise((resolve) => requestAnimationFrame(resolve));
   return masonrySmokeMeasurement(lane, host, config);
+}
+
+async function renderMasonryTeamFixture(config) {
+  const teamTargets = ["alpha", "beta", "gamma"].map((id, index) =>
+    masonryTeamTargetPayload(id, index),
+  );
+  targets = teamTargets;
+  targetById = new Map(targets.map((target) => [target.id, target]));
+  laneStates.clear();
+  lanesEl.replaceChildren();
+  teamSnapshotRevision = 0;
+  applyTeamSnapshotPayload(
+    {
+      revision: 1,
+      changed: true,
+      snapshot: {
+        globalSettings: { fastMode: false },
+        teams: [
+          {
+            teamId: "masonry-team",
+            revision: 1,
+            config: {
+              revision: 1,
+              lifetime: "Drive",
+              speechMode: "speak",
+              selectedView: "compose",
+              taskFilters: [],
+              taskFilterEntries: [],
+            },
+            splitBack: {},
+            members: teamTargets.map((target) => ({
+              agentId: "target:" + target.id,
+            })),
+          },
+        ],
+      },
+    },
+    { force: true },
+  );
+  const host = Array.from(laneStates.values()).find(
+    (lane) =>
+      !isShadowLane(lane) &&
+      laneGroupMemberTargetIds(lane).length === teamTargets.length,
+  );
+  if (!host) throw new Error("missing masonry team host");
+  const messageHost = host.messagesEl || document.querySelector(".messages");
+  if (!messageHost) throw new Error("team message host unavailable");
+  messageHost
+    .querySelectorAll("article[data-message-key], .compaction-divider, .time-rule")
+    .forEach((node) => node.remove());
+  const nodes = masonryTeamItems(config, teamTargets).map((item) => {
+    const node = renderMessage(host, item);
+    if (!node) throw new Error("team masonry item did not render");
+    node.dataset.masonryTeamSmoke = "card";
+    node.dataset.masonryTeamMember = item.producerTargetId;
+    return node;
+  });
+  messageHost.append(...nodes);
+  await masonrySmokeImagesReady(messageHost);
+  packMessageStream(host);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  return masonryTeamMeasurement(host, messageHost, config);
+}
+
+function masonryTeamTargetPayload(id, index) {
+  const threadId = id + "-thread";
+  return {
+    id,
+    name: id,
+    branch: id,
+    targetIdentity: {
+      targetId: id,
+      worktreeName: id,
+      branch: id,
+      driver: { name: "codex", model: "gpt-5.5", effort: "xhigh" },
+      agent: { state: "configured", name: id },
+      thread: { state: "bound", threadId },
+    },
+    serveAgentIdentity: {
+      actorId: "thread:" + threadId,
+      target: { id },
+      thread: { state: "bound", threadId },
+    },
+    teamIdentity: {
+      state: "member",
+      teamId: "masonry-team",
+      teamRevision: 1,
+      configRevision: 1,
+    },
+    taskFilters: [],
+    laneFilterVersion: "",
+    lifetime: "Drive",
+    statusLine: {
+      agentVisualStatus: index === 0 ? "running" : "idle",
+      pendingInboxCount: 0,
+      pendingInboxKeys: [],
+      pendingInboxRevision: "pending-" + id,
+      pendingInboxVersion: 1,
+    },
+  };
+}
+
+function masonryTeamItems(config, teamTargets) {
+  const plan = config.plan;
+  const base = Date.parse(plan.baseIso);
+  const shapes = ["short", "medium", "tall", "code", "short"];
+  return Array.from({ length: 15 }, (_, index) => {
+    const target = teamTargets[index % teamTargets.length];
+    const threadId = target.targetIdentity.thread.threadId;
+    const timestamp = new Date(base + index * 60000).toISOString();
+    return {
+      ack_count: 0,
+      ack_keys: [],
+      display_html: masonrySmokeBodyHtml(shapes[index % shapes.length], index),
+      display_text: "team masonry card " + index,
+      index,
+      key: "team-masonry-" + index + "-" + config.width,
+      kind: index % 7 === 0 ? "final" : "assistant",
+      producerTargetId: target.id,
+      text: "team masonry card " + index,
+      threadId,
+      timestamp,
+    };
+  });
 }
 
 function masonrySmokeLane() {
@@ -361,6 +511,73 @@ async function masonrySmokeMeasurement(lane, host, config) {
   };
 }
 
+function masonryTeamMeasurement(lane, host, config) {
+  const cards = Array.from(
+    host.querySelectorAll('[data-masonry-team-smoke="card"]'),
+  );
+  if (!cards.length) throw new Error("team masonry fixture missing cards");
+  const hostStyle = getComputedStyle(host);
+  const hostRect = masonrySmokeRect(host);
+  const columnGap = Number.parseFloat(hostStyle.columnGap) || 0;
+  const rowGap = Number.parseFloat(hostStyle.rowGap) || 0;
+  const rowStride =
+    (Number.parseFloat(hostStyle.gridAutoRows) || 0) + rowGap;
+  const hostInnerWidth =
+    hostRect.width -
+    Number.parseFloat(hostStyle.paddingLeft) -
+    Number.parseFloat(hostStyle.paddingRight);
+  const expectedTrackWidth =
+    (hostInnerWidth - columnGap * (config.expectedColumns - 1)) /
+    config.expectedColumns;
+  const memberColumns = {};
+  const cardAudits = cards.map((card) => {
+    const rect = masonrySmokeRect(card);
+    const member = card.dataset.masonryTeamMember || "";
+    const left = Math.round(rect.left);
+    const columns = memberColumns[member] || new Set();
+    columns.add(left);
+    memberColumns[member] = columns;
+    const span = Number.parseInt(
+      card.style.getPropertyValue("--message-pack-row-span") || "0",
+      10,
+    );
+    const cellHeight = span * rowStride - rowGap;
+    return {
+      cellHeight,
+      left,
+      member,
+      scrollHeight: card.scrollHeight,
+      span,
+      width: rect.width,
+    };
+  });
+  const memberColumnCounts = Object.fromEntries(
+    Object.entries(memberColumns).map(([member, columns]) => [
+      member,
+      columns.size,
+    ]),
+  );
+  return {
+    cardWidths: cardAudits.map((card) => card.width),
+    distinctColumnLefts: new Set(cardAudits.map((card) => card.left)).size,
+    expectedColumns: config.expectedColumns,
+    expectedTrackWidth,
+    hostDisplay: hostStyle.display,
+    hostInnerWidth,
+    maxCardWidthDelta: Math.max(
+      ...cardAudits.map((card) => Math.abs(card.width - expectedTrackWidth)),
+    ),
+    maxStretchSlackPx: Math.max(
+      ...cardAudits.map((card) =>
+        Math.max(0, card.cellHeight - card.scrollHeight - 2),
+      ),
+    ),
+    memberColumnCounts,
+    rowStridePx: rowStride,
+    viewportWidth: config.width,
+  };
+}
+
 function masonrySmokeBarrierBounds(host) {
   return Array.from(
     host.querySelectorAll(
@@ -531,6 +748,40 @@ function assertMasonryMeasurement(measurement) {
   assertMasonryDividerBarrier(measurement, fail);
   assertMasonryTimeRules(measurement, fail);
   assertMasonryDistribution(measurement, fail);
+}
+
+function assertMasonryTeamMeasurement(measurement) {
+  const label = " at " + measurement.viewportWidth + "px: ";
+  const fail = (reason) => {
+    throw new Error(reason + label + JSON.stringify(measurement));
+  };
+  if (measurement.hostDisplay !== "grid") fail("team message host is not grid");
+  if (
+    measurement.viewportWidth <= masonryMobileBreakpointWidth &&
+    measurement.expectedColumns !== 1
+  )
+    fail("mobile team expected more than one sub lane");
+  if (measurement.distinctColumnLefts !== measurement.expectedColumns)
+    fail(
+      "team cards used " +
+        measurement.distinctColumnLefts +
+        " sub lanes instead of " +
+        measurement.expectedColumns,
+    );
+  if (measurement.maxCardWidthDelta > 2)
+    fail(
+      "team cards did not fill sub lanes; max width delta " +
+        measurement.maxCardWidthDelta,
+    );
+  for (const [member, count] of Object.entries(measurement.memberColumnCounts)) {
+    if (count !== 1)
+      fail(member + " cards split across " + count + " sub lanes");
+  }
+  if (measurement.maxStretchSlackPx > measurement.rowStridePx + 2)
+    fail(
+      "team cards retained masonry band stretch slack " +
+        measurement.maxStretchSlackPx,
+    );
 }
 
 function assertMasonryBaseLayout(measurement, fail) {

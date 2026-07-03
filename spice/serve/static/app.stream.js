@@ -836,7 +836,8 @@ function packMessageStream(lane) {
   const rowGap = cssPixelValue(style.rowGap) || 0;
   const rowStride = rowHeight + rowGap;
   if (!Number.isFinite(rowStride) || rowStride <= 0) return;
-  const columnCount = messagePackColumnCount(host, style);
+  const columnCount = messagePackColumnCount(lane, host, style);
+  const fusedHost = laneIsFusedHost(lane);
   const bandRows = messagePackBandRows(style);
   const columnRows = new Array(Math.max(1, columnCount)).fill(0);
   let segmentKey = "top";
@@ -857,11 +858,15 @@ function packMessageStream(lane) {
     // so the quantization slack lives inside the card box instead of the grid.
     // Image-only cards keep their natural span: stretching would distort them,
     // and start-alignment keeps the slack invisible against the row below.
-    const span = node.classList.contains("image-only")
+    const span = fusedHost
       ? naturalSpan
-      : Math.ceil(naturalSpan / bandRows) * bandRows;
+      : node.classList.contains("image-only")
+        ? naturalSpan
+        : Math.ceil(naturalSpan / bandRows) * bandRows;
     setMessagePackRowSpan(node, span);
-    const column = stickyMessagePackColumn(node, segmentKey, columnRows, bandRows);
+    const column = fusedHost
+      ? fusedMessagePackColumn(node, columnRows.length)
+      : stickyMessagePackColumn(node, segmentKey, columnRows, bandRows);
     setMessagePackPosition(node, String(column + 1), columnRows[column] + 1);
     columnRows[column] += span;
   }
@@ -899,7 +904,17 @@ function messagePackBarrierKey(node) {
 // track list shrinks to one entry and a computed-style reading locks the
 // packer into a single ever-growing column. The auto-fit formula is
 // deterministic from the host width, so recompute it directly.
-function messagePackColumnCount(host, style) {
+function messagePackColumnCount(lane, host, style) {
+  const geometryColumns = messagePackGeometryColumnCount(host, style);
+  if (!laneIsFusedHost(lane)) return geometryColumns;
+  return Math.max(
+    1,
+    Math.min(geometryColumns, laneGroupMemberLanes(lane).length),
+  );
+}
+
+function messagePackGeometryColumnCount(host, style) {
+  if (messagePackViewportForcesSingleColumn()) return 1;
   const inner =
     host.clientWidth -
     cssPixelValue(style.paddingLeft) -
@@ -913,6 +928,20 @@ function messagePackColumnCount(host, style) {
   const trackMin = Math.min(inner, minWidth > 0 ? minWidth : inner);
   if (trackMin <= 0) return 1;
   return Math.max(1, Math.floor((inner + gap) / (trackMin + gap)));
+}
+
+function messagePackViewportForcesSingleColumn() {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(max-width: 720px)").matches
+  );
+}
+
+function fusedMessagePackColumn(node, columnCount) {
+  const slot = Number.parseInt(node.dataset.accentSlot || "", 10);
+  if (!Number.isFinite(slot) || slot < 0) return 0;
+  return slot % Math.max(1, columnCount);
 }
 
 function cssLengthValue(value, style) {

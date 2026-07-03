@@ -650,7 +650,7 @@ def test_stream_merge_keeps_known_messages_newest_first_with_task_cards():
 def test_static_stream_renders_message_badge_dom():
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     badge_start = app_render.index("function renderBadges")
-    badge_end = app_render.index("function renderCompactionDivider", badge_start)
+    badge_end = app_render.index("// The packer", badge_start)
 
     assert app_render[badge_start:badge_end] == (
         "function renderBadges(ackCount, kind, maximAckCount, taskCardCount) {\n"
