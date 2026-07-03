@@ -2,18 +2,28 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol
 
 from spice.serve.team.ids import thread_id_for_actor
 from spice.serve.team.store import ServeTeamStore
+from spice.sessions import records
+from spice.sessions.meter import (
+    ActiveContextSnapshot,
+    active_context_snapshot_from_object,
+)
+from spice.sessions.slices import turn_activity_ts
+from spice.sessions.util import parse_iso_ts
 from spice.tasks import identity, ops
 
 PARTIAL_MISSING_START = "missing_start"
 PARTIAL_MISSING_END = "missing_end"
 PARTIAL_HANDOFF = "handoff"
+PARTIAL_MISSING_TRANSCRIPT = "missing_transcript"
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +52,65 @@ class PhaseEffortWindow:
         if self.started_at is None or self.ended_at is None:
             return None
         return max(0.0, self.ended_at - self.started_at)
+
+
+@dataclass(frozen=True, slots=True)
+class PhaseEffortUsage:
+    window: PhaseEffortWindow
+    source_files: tuple[str, ...]
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_output_tokens: int = 0
+    total_tokens: int = 0
+    turn_count: int = 0
+    message_count: int = 0
+    renewal_count: int = 0
+    partial_markers: tuple[str, ...] = ()
+
+    @property
+    def task_id(self) -> str:
+        return self.window.task_id
+
+    @property
+    def handle(self) -> str:
+        return self.window.handle
+
+    @property
+    def phase(self) -> str:
+        return self.window.phase
+
+    @property
+    def phase_index(self) -> int:
+        return self.window.phase_index
+
+    @property
+    def actor_id(self) -> str:
+        return self.window.actor_id
+
+    @property
+    def thread_id(self) -> str:
+        return self.window.thread_id
+
+    @property
+    def driver(self) -> str:
+        return self.window.driver
+
+    @property
+    def model(self) -> str:
+        return self.window.model
+
+    @property
+    def effort(self) -> str:
+        return self.window.effort
+
+    @property
+    def wall_seconds(self) -> float | None:
+        return self.window.wall_seconds
+
+    @property
+    def partial(self) -> bool:
+        return bool(self.partial_markers)
 
 
 class _EffortWindowStore(Protocol):
@@ -126,6 +195,35 @@ def phase_effort_windows_for_tasks(
     )
 
 
+def phase_effort_usage_for_tasks(
+    task_rows: Iterable[Mapping[str, Any]],
+    transcript_files_by_thread: Mapping[str, Iterable[str | Path]],
+    *,
+    store: _EffortWindowStore | None = None,
+) -> tuple[PhaseEffortUsage, ...]:
+    return phase_effort_usage_for_windows(
+        phase_effort_windows_for_tasks(task_rows, store=store),
+        transcript_files_by_thread,
+    )
+
+
+def phase_effort_usage_for_windows(
+    windows: Iterable[PhaseEffortWindow],
+    transcript_files_by_thread: Mapping[str, Iterable[str | Path]],
+) -> tuple[PhaseEffortUsage, ...]:
+    transcript_cache: dict[str, _ThreadTranscriptUsage] = {}
+    rows: list[PhaseEffortUsage] = []
+    for window in windows:
+        usage = transcript_cache.get(window.thread_id)
+        if usage is None:
+            usage = _thread_transcript_usage(
+                transcript_files_by_thread.get(window.thread_id, ())
+            )
+            transcript_cache[window.thread_id] = usage
+        rows.append(_phase_effort_usage(window, usage))
+    return tuple(rows)
+
+
 def _task_shapes(task_rows: Iterable[Mapping[str, Any]]) -> dict[str, _TaskShape]:
     shapes: dict[str, _TaskShape] = {}
     for raw in task_rows:
@@ -204,6 +302,105 @@ def _agent_effort_tags_locked(
             ),
         )
     return tags
+
+
+@dataclass(frozen=True, slots=True)
+class _ThreadTranscriptUsage:
+    source_files: tuple[str, ...]
+    snapshots: tuple[ActiveContextSnapshot, ...]
+    turns: tuple[records.TurnRecord, ...]
+    renewals: tuple[str, ...]
+
+
+def _thread_transcript_usage(files: Iterable[str | Path]) -> _ThreadTranscriptUsage:
+    paths = tuple(Path(path) for path in files)
+    existing = tuple(path for path in paths if path.is_file())
+    if not existing:
+        return _ThreadTranscriptUsage((), (), (), ())
+    return _ThreadTranscriptUsage(
+        source_files=tuple(str(path) for path in existing),
+        snapshots=_active_context_snapshots(existing),
+        turns=tuple(records.collect_turns(list(existing))),
+        renewals=tuple(
+            record.ts for record in records.collect_compactions(list(existing))
+        ),
+    )
+
+
+def _phase_effort_usage(
+    window: PhaseEffortWindow, transcript_usage: _ThreadTranscriptUsage
+) -> PhaseEffortUsage:
+    markers = _usage_partial_markers(window, transcript_usage)
+    snapshots = [
+        snapshot
+        for snapshot in transcript_usage.snapshots
+        if _timestamp_in_window(snapshot.ts, window)
+    ]
+    turns = [
+        turn
+        for turn in transcript_usage.turns
+        if _timestamp_in_window(turn_activity_ts(turn), window)
+    ]
+    renewals = [
+        renewal_ts
+        for renewal_ts in transcript_usage.renewals
+        if _timestamp_in_window(renewal_ts, window)
+    ]
+    return PhaseEffortUsage(
+        window=window,
+        source_files=transcript_usage.source_files,
+        input_tokens=sum(snapshot.input_tokens for snapshot in snapshots),
+        cached_input_tokens=sum(snapshot.cached_input_tokens for snapshot in snapshots),
+        output_tokens=sum(snapshot.output_tokens for snapshot in snapshots),
+        reasoning_output_tokens=sum(
+            snapshot.reasoning_output_tokens for snapshot in snapshots
+        ),
+        total_tokens=sum(snapshot.total_tokens for snapshot in snapshots),
+        turn_count=len(turns),
+        message_count=sum(len(turn.ordered_messages) for turn in turns),
+        renewal_count=len(renewals),
+        partial_markers=markers,
+    )
+
+
+def _usage_partial_markers(
+    window: PhaseEffortWindow, transcript_usage: _ThreadTranscriptUsage
+) -> tuple[str, ...]:
+    markers = list(window.partial_markers)
+    if not transcript_usage.source_files:
+        markers.append(PARTIAL_MISSING_TRANSCRIPT)
+    return tuple(dict.fromkeys(markers))
+
+
+def _active_context_snapshots(
+    paths: tuple[Path, ...],
+) -> tuple[ActiveContextSnapshot, ...]:
+    snapshots: list[ActiveContextSnapshot] = []
+    for path in paths:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(raw, dict):
+                    continue
+                snapshot = active_context_snapshot_from_object(path, raw)
+                if snapshot is not None:
+                    snapshots.append(snapshot)
+    return tuple(sorted(snapshots, key=lambda item: (item.ts, item.source_file)))
+
+
+def _timestamp_in_window(ts: str | None, window: PhaseEffortWindow) -> bool:
+    parsed = parse_iso_ts(ts)
+    if parsed is None:
+        return False
+    value = parsed.timestamp()
+    if window.started_at is not None and value < window.started_at:
+        return False
+    if window.ended_at is not None and value >= window.ended_at:
+        return False
+    return True
 
 
 def _windows_for_task(

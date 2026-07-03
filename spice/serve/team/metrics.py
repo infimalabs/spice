@@ -10,6 +10,7 @@ import time
 from collections import Counter
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, Mapping, Protocol
 
 from spice.errors import SpiceError
@@ -616,6 +617,17 @@ class TeamMetricStoreMixin:
         from spice.tasks.effort import phase_effort_windows_for_tasks
 
         return phase_effort_windows_for_tasks(task_rows, store=self)
+
+    def task_phase_effort_usage(
+        self: _TeamMetricStore,
+        task_rows: Iterable[dict],
+        transcript_files_by_thread: Mapping[str, Iterable[str | Path]],
+    ):
+        from spice.tasks.effort import phase_effort_usage_for_tasks
+
+        return phase_effort_usage_for_tasks(
+            task_rows, transcript_files_by_thread, store=self
+        )
 
     def _prune_metric_history_locked(
         self: _TeamMetricStore, connection: sqlite3.Connection, *, now: float
