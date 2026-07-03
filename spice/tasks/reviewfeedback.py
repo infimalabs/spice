@@ -60,7 +60,6 @@ def emit_review_feedback(
         return result
     body = _feedback_body(
         reviewed_row,
-        finding=finding,
         note=note,
     )
     path = write_inbox_item(
@@ -141,7 +140,6 @@ def _actor_keys(value: str) -> set[str]:
 def _feedback_body(
     reviewed_row: dict[str, Any],
     *,
-    finding: str,
     note: str | None,
 ) -> str:
     reviewed = identity.render_handle(reviewed_row)
@@ -149,17 +147,18 @@ def _feedback_body(
     return "\n".join(
         [
             f"Peer review feedback for {reviewed}",
-            f"finding={finding or '-'}",
             "",
-            "Review note:",
-            note_text,
+            _blockquote(note_text),
             "",
-            "Allocator note:",
-            "Do not switch tasks solely because of this message. Keep the current "
-            "claim valid; allocator-selected follow-up work will arrive through "
-            "the task queue.",
+            "NOTE: Respectfully consider the honest feedback, but keep working "
+            "your current claim and task; allocator-selected follow-up work "
+            "will arrive through the task queue.",
         ]
     )
+
+
+def _blockquote(text: str) -> str:
+    return "\n".join(f"> {line}" if line else ">" for line in text.splitlines())
 
 
 def _record_feedback_status(
