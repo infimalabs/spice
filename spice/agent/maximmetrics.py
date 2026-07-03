@@ -15,6 +15,7 @@ from spice.tasks.config import SHARED_DIR
 MAXIM_METRICS_DATABASE_FILENAME = "spicemaxims.sqlite3"
 MAXIM_METRICS_DATA_SUBDIR = "data"
 MAXIM_METRICS_SQLITE_BUSY_TIMEOUT_MS = 5000
+MAXIM_RECURRENCE_HORIZON_SECONDS = 24 * 60 * 60
 
 MAXIM_EVENT_FIRE = "fire"
 MAXIM_EVENT_JUDGED_CONFIRMED = "judged_confirmed"
@@ -90,6 +91,15 @@ class MaximMetricCounts:
     judged_rejected_count: int
     gate_suppressed_count: int
     published_count: int
+
+
+@dataclass(frozen=True)
+class MaximRecurrenceCounts:
+    bag_name: str
+    driver_name: str
+    thread_id: str
+    trigger_family: str
+    recurrence_count: int
 
 
 @dataclass(frozen=True)
@@ -239,6 +249,40 @@ def maxim_recurrence_inputs(repo_root: str | Path) -> list[MaximRecurrenceInput]
     ]
 
 
+def maxim_recurrence_counts(
+    repo_root: str | Path,
+    *,
+    horizon_seconds: float = MAXIM_RECURRENCE_HORIZON_SECONDS,
+) -> list[MaximRecurrenceCounts]:
+    horizon = max(0.0, float(horizon_seconds))
+    inputs = maxim_recurrence_inputs(repo_root)
+    published = [item for item in inputs if item.event_type == MAXIM_EVENT_PUBLISHED]
+    if not published:
+        return []
+    recurrence_indexes_by_key: dict[tuple[str, str, str, str], set[int]] = {}
+    for index, item in enumerate(inputs):
+        if item.event_type != MAXIM_EVENT_FIRE:
+            continue
+        key = (
+            item.bag_name,
+            item.driver_name,
+            item.thread_id,
+            item.trigger_family,
+        )
+        if any(_fire_recurred_after(item, reminder, horizon) for reminder in published):
+            recurrence_indexes_by_key.setdefault(key, set()).add(index)
+    return [
+        MaximRecurrenceCounts(
+            bag_name=key[0],
+            driver_name=key[1],
+            thread_id=key[2],
+            trigger_family=key[3],
+            recurrence_count=len(indexes),
+        )
+        for key, indexes in sorted(recurrence_indexes_by_key.items())
+    ]
+
+
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     connection.execute(f"PRAGMA busy_timeout = {MAXIM_METRICS_SQLITE_BUSY_TIMEOUT_MS}")
     connection.execute(MAXIM_METRICS_TABLE_SQL)
@@ -278,6 +322,20 @@ def _record_from_row(row: tuple[object, ...]) -> MaximMetricRecord:
         statement=str(row[7]),
         reminder_key=str(row[8]),
         reminder_body=str(row[9]),
+    )
+
+
+def _fire_recurred_after(
+    fire: MaximRecurrenceInput, reminder: MaximRecurrenceInput, horizon_seconds: float
+) -> bool:
+    return (
+        reminder.event_type == MAXIM_EVENT_PUBLISHED
+        and fire.bag_name == reminder.bag_name
+        and fire.driver_name == reminder.driver_name
+        and fire.thread_id == reminder.thread_id
+        and fire.trigger_family == reminder.trigger_family
+        and reminder.occurred_at < fire.occurred_at
+        and fire.occurred_at - reminder.occurred_at <= horizon_seconds
     )
 
 

@@ -11,7 +11,7 @@ from spice.agent.maximmetrics import (
     MaximMetricCounts,
     maxim_metric_counts,
     maxim_metric_records,
-    maxim_recurrence_inputs,
+    maxim_recurrence_counts,
 )
 from spice.agent.maxims import (
     ALL_MAXIM,
@@ -244,7 +244,7 @@ def run_maxim_report_cli(_args: argparse.Namespace) -> int:
     repo_root = repo_root_from_cwd()
     if repo_root is None:
         raise SpiceError("not inside a git worktree")
-    print(_render_maxim_report(repo_root))
+    print(render_maxim_report(repo_root))
     return 0
 
 
@@ -283,12 +283,12 @@ def _render_maxim_listing() -> str:
     return "\n".join(f"{name.ljust(width)}  {text}" for name, text in rows)
 
 
-def _render_maxim_report(repo_root: Path) -> str:
+def render_maxim_report(repo_root: Path) -> str:
     counts = maxim_metric_counts(repo_root)
     records = maxim_metric_records(repo_root)
-    recurrence_by_key = Counter(
-        (item.bag_name, item.driver_name) for item in maxim_recurrence_inputs(repo_root)
-    )
+    recurrence_by_key = Counter()
+    for item in maxim_recurrence_counts(repo_root):
+        recurrence_by_key[(item.bag_name, item.driver_name)] += item.recurrence_count
     if not counts:
         return "maxim metric events: 0"
     rows = [

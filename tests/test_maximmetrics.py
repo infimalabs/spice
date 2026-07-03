@@ -6,6 +6,7 @@ import subprocess
 
 from spice.agent import watchdog
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
+from spice.agent.maximcli import render_maxim_report
 from spice.agent.maximmetrics import (
     MAXIM_EVENT_FIRE,
     MAXIM_EVENT_GATE_SUPPRESSED,
@@ -14,9 +15,11 @@ from spice.agent.maximmetrics import (
     MAXIM_EVENT_PUBLISHED,
     MaximMetricCounts,
     MaximMetricEventWrite,
+    MaximRecurrenceCounts,
     maxim_metric_counts,
     maxim_metric_records,
     maxim_metrics_database_path,
+    maxim_recurrence_counts,
     maxim_recurrence_inputs,
     record_maxim_metric_events,
 )
@@ -237,6 +240,135 @@ def test_maxim_metric_recurrence_inputs_keep_trigger_and_reminder_context(tmp_pa
             "",
         ),
     ]
+
+
+def test_maxim_recurrence_counts_only_later_fires_inside_horizon(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    shared = {
+        "bag_name": "polling",
+        "driver_name": "codex",
+        "thread_id": "thread-a",
+        "trigger_family": "poll-loop",
+    }
+
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE,
+                statement="Before the reminder, I will poll.",
+                **shared,
+            )
+        ],
+        now=100.0,
+    )
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_PUBLISHED,
+                reminder_key="20260703T010000000000Z",
+                reminder_body="[MAXIM] Use a watcher.",
+                **shared,
+            )
+        ],
+        now=110.0,
+    )
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE,
+                statement="After the reminder, I still poll.",
+                **shared,
+            )
+        ],
+        now=120.0,
+    )
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE,
+                statement="After the horizon, I poll again.",
+                **shared,
+            )
+        ],
+        now=200.0,
+    )
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE,
+                bag_name="polling",
+                driver_name="codex",
+                thread_id="thread-a",
+                trigger_family="other-loop",
+                statement="A different trigger family is separate.",
+            )
+        ],
+        now=121.0,
+    )
+
+    assert maxim_recurrence_counts(repo, horizon_seconds=30.0) == [
+        MaximRecurrenceCounts(
+            bag_name="polling",
+            driver_name="codex",
+            thread_id="thread-a",
+            trigger_family="poll-loop",
+            recurrence_count=1,
+        )
+    ]
+
+
+def test_maxim_report_uses_recurrence_counts(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    shared = {
+        "bag_name": "polling",
+        "driver_name": "codex",
+        "thread_id": "thread-a",
+        "trigger_family": "poll-loop",
+    }
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE,
+                statement="Before the reminder, I will poll.",
+                **shared,
+            )
+        ],
+        now=100.0,
+    )
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_PUBLISHED,
+                reminder_key="20260703T010000000000Z",
+                reminder_body="[MAXIM] Use a watcher.",
+                **shared,
+            )
+        ],
+        now=110.0,
+    )
+    record_maxim_metric_events(
+        repo,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE,
+                statement="After the reminder, I still poll.",
+                **shared,
+            )
+        ],
+        now=120.0,
+    )
+
+    lines = render_maxim_report(repo).splitlines()
+
+    assert "recurrence" in lines[1]
+    assert lines[2].split() == ["polling", "codex", "2", "0", "0", "0", "1", "1"]
 
 
 def test_watchdog_records_published_violation_metrics(tmp_path, monkeypatch):
