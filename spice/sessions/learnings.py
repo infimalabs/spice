@@ -107,13 +107,13 @@ def confirm_learning_candidates(
         previous = by_normalized.get(record.normalized_statement)
         if previous is not None:
             record = LearningRecord(
-                statement=record.statement,
-                normalized_statement=record.normalized_statement,
-                source_task=record.source_task,
-                project_stem=record.project_stem,
-                evidence=record.evidence,
-                source_slice_id=record.source_slice_id,
-                source_turn_ids=record.source_turn_ids,
+                statement=previous.statement,
+                normalized_statement=previous.normalized_statement,
+                source_task=previous.source_task,
+                project_stem=previous.project_stem,
+                evidence=previous.evidence,
+                source_slice_id=previous.source_slice_id,
+                source_turn_ids=previous.source_turn_ids,
                 created_at=previous.created_at,
                 last_confirmed_at=timestamp,
                 confirmation_count=previous.confirmation_count + 1,
@@ -133,11 +133,9 @@ def confirm_learning_candidates(
 def top_learning_records(
     repo_root: str | Path,
     project_stem: str,
-    *,
-    limit: int = BRIEFING_LEARNING_LIMIT,
 ) -> list[LearningRecord]:
     return _rank_records(load_learning_records(repo_root, project_stem))[
-        : max(0, limit)
+        :BRIEFING_LEARNING_LIMIT
     ]
 
 

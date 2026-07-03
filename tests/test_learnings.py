@@ -31,6 +31,17 @@ def _candidate(statement: str, *, stem: str = "session.learnings") -> LearningCa
     )
 
 
+def _candidate_with_evidence(statement: str, evidence: str) -> LearningCandidate:
+    return LearningCandidate(
+        statement=statement,
+        source_task="TASK-2",
+        project_stem="session.learnings",
+        evidence=evidence,
+        source_slice_id="slice-2",
+        source_turn_ids=("turn-2",),
+    )
+
+
 def test_missing_learning_store_reads_empty_and_path_is_per_stem(tmp_path):
     path = learning_store_path(tmp_path, "session.learnings")
 
@@ -55,8 +66,9 @@ def test_learning_store_dedupes_duplicate_confirmations(tmp_path):
         tmp_path,
         "session.learnings",
         [
-            _candidate(
+            _candidate_with_evidence(
                 "  use spice dev pre-commit for the staged gate  ",
+                "replacement duplicate evidence",
             )
         ],
         now=SECOND_CONFIRMATION_AT,
@@ -65,10 +77,16 @@ def test_learning_store_dedupes_duplicate_confirmations(tmp_path):
     records = load_learning_records(tmp_path, "session.learnings")
     assert len(records) == 1
     assert confirmed == records
-    assert records[0].statement == "use spice dev pre-commit for the staged gate"
+    assert records[0].statement == "Use spice dev pre-commit for the staged gate."
     assert records[0].normalized_statement == (
         "use spice dev pre-commit for the staged gate"
     )
+    assert records[0].evidence == (
+        "evidence for Use spice dev pre-commit for the staged gate."
+    )
+    assert records[0].source_task == "TASK-1"
+    assert records[0].source_slice_id == "slice-1"
+    assert records[0].source_turn_ids == ("turn-1",)
     assert records[0].created_at == FIRST_CONFIRMATION_AT
     assert records[0].last_confirmed_at == SECOND_CONFIRMATION_AT
     assert records[0].confirmation_count == 2
