@@ -49,6 +49,15 @@ def test_activation_command_surface_explains_pending_count_recovery():
     assert "run the next command through spice agent run --" in text
 
 
+def test_activation_command_surface_does_not_steer_agents_to_agent_show():
+    text = "\n".join(activation_command_surface_lines())
+
+    assert "agent_show=" not in text
+    assert "agent_status=" not in text
+    assert "spice agent show" not in text
+    assert "spice agent status" not in text
+
+
 def test_activation_browser_validation_uses_repo_local_node_playwright():
     text = "\n".join(activation_browser_validation_lines())
 
