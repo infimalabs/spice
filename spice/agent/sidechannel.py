@@ -28,6 +28,7 @@ from spice.agent.wrap import (
     AgentContextMeterInjector,
     AgentInboxInjector,
     AgentSideChannelNoticeInjector,
+    AgentWorkingStateInjector,
     agent_context_meter,
     post_tool_hook_inbox_state_path,
     side_channel_marker_path,
@@ -164,6 +165,10 @@ class AgentSideChannelServer:
             repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
             meter_factory=agent_context_meter,
         )
+        working_state_injector = AgentWorkingStateInjector(
+            self.repo_root,
+            stderr=writer,
+        )
         notice_injector = AgentSideChannelNoticeInjector(
             self.repo_root,
             stderr=writer,
@@ -176,6 +181,7 @@ class AgentSideChannelServer:
                     return
                 inbox_injector.inject(force=False)
                 context_injector.inject(force=False)
+                working_state_injector.inject(force=False)
 
         try:
             if not initial_payload_already_rendered:
@@ -298,6 +304,10 @@ def render_side_channel_payload(repo_root: Path) -> str:
         repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
         meter_factory=agent_context_meter,
     ).inject(force=True)
+    AgentWorkingStateInjector(
+        repo_root,
+        stderr=stderr,
+    ).inject(force=True)
     return stderr.getvalue()
 
 
@@ -315,6 +325,10 @@ def render_post_tool_hook_payload(repo_root: Path) -> str:
         stderr=stderr,
         repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
         meter_factory=agent_context_meter,
+    ).inject(force=True)
+    AgentWorkingStateInjector(
+        repo_root,
+        stderr=stderr,
     ).inject(force=True)
     return stderr.getvalue()
 

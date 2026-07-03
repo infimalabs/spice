@@ -1,6 +1,7 @@
 """Agent lifecycle, wrapper routing, and supervisor contracts."""
 
 import argparse
+from datetime import UTC, datetime
 import io
 import json
 import os
@@ -35,6 +36,11 @@ from spice.agent.driver import (
     post_tool_hook_config_path,
     write_playwright_mcp_config,
 )
+from spice.agent.maximmetrics import (
+    MAXIM_EVENT_FIRE,
+    MaximMetricEventWrite,
+    record_maxim_metric_events,
+)
 from spice.errors import SpiceError
 from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ack_state_records
 from spice.mail.inbox import collect_inbox_items, compose_inbox_text, write_inbox_item
@@ -45,6 +51,7 @@ SUPERVISOR_PID = 3333
 SUPERVISED_AGENT_PID = 4444
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
+WORKING_STATE_ELAPSED_SECONDS = 90
 
 
 @pytest.fixture(autouse=True)
@@ -381,6 +388,70 @@ def test_post_tool_hook_steering_end_to_end_without_shell_readout(
     command_stderr = io.StringIO()
     wrap.AgentInboxInjector(tmp_path, stderr=command_stderr).inject(force=True)
     assert command_stderr.getvalue() == ""
+
+
+def test_working_state_snapshot_is_empty_when_no_live_state(tmp_path):
+    snapshot = wrap.collect_working_state_snapshot(tmp_path)
+
+    assert snapshot == wrap.WorkingStateSnapshot()
+    assert not snapshot.has_fields()
+
+
+def test_working_state_snapshot_collects_live_fields(tmp_path, monkeypatch):
+    actor = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    claim_at = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+    now = (
+        datetime(2026, 1, 1, 0, 0, tzinfo=UTC).timestamp()
+        + WORKING_STATE_ELAPSED_SECONDS
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, actor)
+
+    def fake_export(args=None):
+        assert args == ["status:pending", "+ACTIVE"]
+        return [
+            {
+                "claim_at": claim_at.isoformat().replace("+00:00", "Z"),
+                "claim_by": actor,
+                "claim_worktree": str(tmp_path),
+                "description": "Collect working-state snapshot",
+                "incepted": "00000001",
+                "phase": "todo",
+                "project": "session.meter",
+                "status": "pending",
+            }
+        ]
+
+    monkeypatch.setattr("spice.tasks.tw.export", fake_export)
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000009Z.txt",
+        compose_inbox_text(body="pending work", priority=None, stop=False),
+    )
+    (tmp_path / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+    record_maxim_metric_events(
+        tmp_path,
+        [
+            MaximMetricEventWrite(
+                MAXIM_EVENT_FIRE,
+                bag_name="fallbacks",
+                driver_name="codex",
+                thread_id=actor,
+                trigger_family="fallbacks",
+                statement="fallback triggered",
+            )
+        ],
+        now=now,
+    )
+
+    snapshot = wrap.collect_working_state_snapshot(tmp_path, now=now)
+
+    assert snapshot.pending_inbox_count == 1
+    assert snapshot.claim_handle == "METER-00000001"
+    assert snapshot.claim_phase == "todo"
+    assert snapshot.claim_elapsed_seconds == WORKING_STATE_ELAPSED_SECONDS
+    assert snapshot.dirty_file_count >= 1
+    assert snapshot.last_maxim_bag == "fallbacks"
+    assert snapshot.has_fields()
 
 
 def test_ensure_agent_uses_shipped_codex_defaults_without_config(tmp_path, monkeypatch):
