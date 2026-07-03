@@ -37,6 +37,7 @@ async function installTaskStackSmokeHelpers(page) {
       taskStackSmokeHorizontalBounds,
       taskStackSmokeAnchorStability,
       taskStackSmokeColumnStability,
+      taskStackSmokeColumnRecovery,
       taskStackSmokeTaskHtml,
       taskStackSmokeImageHtml,
       taskStackSmokeImagesReady,
@@ -131,6 +132,10 @@ async function taskStackSmokeMeasurement(lane, host, taskArticle, imageArticle, 
     messageCardNodes,
     messageCardNodes[0],
   );
+  const columnRecovery = await taskStackSmokeColumnRecovery(
+    lane,
+    messageCardNodes,
+  );
   const hostStyle = getComputedStyle(host);
   const hostRect = taskStackSmokeRect(host);
   const hostInlinePadding =
@@ -142,6 +147,7 @@ async function taskStackSmokeMeasurement(lane, host, taskArticle, imageArticle, 
   return {
     anchorStability,
     columnStability,
+    columnRecovery,
     backfilledCardTop: backfilledCardRect.top,
     cardWidths: cards.map((card) => card.width),
     firstRowCount: cards.filter(
@@ -321,6 +327,23 @@ async function taskStackSmokeColumnStability(lane, cards, growCard) {
   };
 }
 
+async function taskStackSmokeColumnRecovery(lane, cards) {
+  // Reproduce the auto-fit death spiral: every card forced into column 1
+  // collapses the remaining tracks, so a computed-style track count reads 1
+  // and the packer never redistributes. Geometry-derived counting must
+  // recover on the next pack.
+  for (const card of cards) {
+    delete card.dataset.messagePackColumn;
+    delete card.dataset.messagePackSegment;
+    card.style.gridColumnStart = "1";
+  }
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  packMessageStream(lane);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const columns = cards.map((card) => card.style.gridColumnStart);
+  return { distinctColumns: Array.from(new Set(columns)).length, columns };
+}
+
 function taskStackSmokeTaskHtml() {
   const cards = ["First", "Second", "Third"]
     .map(
@@ -391,6 +414,16 @@ function assertTaskStackMeasurement(measurement, options) {
   assertMessageCardPacking(measurement, options);
   assertMessageAnchorStability(measurement, options);
   assertMessageColumnStability(measurement, options);
+  assertMessageColumnRecovery(measurement, options);
+}
+
+function assertMessageColumnRecovery(measurement, options) {
+  if (options.wraps) return;
+  if (measurement.columnRecovery.distinctColumns < 2)
+    throw new Error(
+      "packer did not redistribute cards out of a collapsed single column: " +
+        JSON.stringify(measurement),
+    );
 }
 
 function assertMessageColumnStability(measurement, options) {
