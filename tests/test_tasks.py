@@ -177,7 +177,11 @@ def test_task_wake_rejects_batch_without_partial_clear(task_repo):
 
 
 def test_task_wake_refuses_deferred_oops_triage(task_repo):
-    created = ops.oops("Delayed oops remains triage", description="triage only")
+    created = ops.oops(
+        "Delayed oops remains triage",
+        description="triage only",
+        origin="ack:20260101T000000000000Z",
+    )
     handle = created.split()[1]
 
     with pytest.raises(SpiceError, match="oops triage"):

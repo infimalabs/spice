@@ -240,7 +240,11 @@ def test_manual_claim_skips_oops_subscription(task_repo):
     team = store.create_team(
         members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Steer")
     )
-    created = ops.oops("Manual oops claim target", description="triage only")
+    created = ops.oops(
+        "Manual oops claim target",
+        description="triage only",
+        origin="ack:20260101T000000000000Z",
+    )
     handle = created.split()[1]
     before = store.global_revision()
 
@@ -586,7 +590,11 @@ def test_drive_oops_creation_skips_subscription(task_repo):
     )
     before = store.global_revision()
 
-    created = ops.oops("Drive oops creation", description="triage only")
+    created = ops.oops(
+        "Drive oops creation",
+        description="triage only",
+        origin="ack:20260101T000000000000Z",
+    )
     handle = created.split()[1]
     row = identity.resolve(handle)
 

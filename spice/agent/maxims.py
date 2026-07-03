@@ -207,6 +207,7 @@ def file_maxim_proposal_tasks(
     drafts: Sequence[MaximProposalDraft],
     *,
     actor_override: str | None = None,
+    origin: str | None = None,
 ) -> tuple[FiledMaximProposalTask, ...]:
     """File draft maxims as deferred hidden triage tasks, never as config edits."""
     from spice.tasks import config as task_config
@@ -215,6 +216,11 @@ def file_maxim_proposal_tasks(
     filed: list[FiledMaximProposalTask] = []
     existing_incepted: set[str] = set()
     for draft in drafts:
+        # A proposal originates from the ack evidence it mined: the draft's
+        # leading source key is its provenance unless the caller overrides.
+        draft_origin = origin or (
+            f"ack:{draft.source_keys[0]}" if draft.source_keys else None
+        )
         handle = create.add_one(
             title=_maxim_proposal_task_title(draft, limit=create.TASK_TITLE_LIMIT),
             description=maxim_proposal_task_description(draft),
@@ -233,6 +239,7 @@ def file_maxim_proposal_tasks(
             wait=None,
             claim=False,
             deferred=True,
+            origin=draft_origin,
             existing=existing_incepted,
             system_project=True,
             actor_override=actor_override,

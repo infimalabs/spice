@@ -126,31 +126,17 @@ def _validated_origin_task_handle(handle: str) -> str:
         ) from exc
 
 
-def _origin_required(resolved_project: str) -> bool:
-    # There is almost never truly no origination: a claim-less private task
-    # is typically a Steer agent responding to an acknowledgment, and it
-    # cites that ack. Hidden projects are exempt as a class per their
-    # charter (one kind of thing: oops triage, maxim proposals). oops in
-    # particular is always agent-filed, already ceremony-heavy, and usually
-    # mid-claim -- where opportunistic linkage records the origin anyway --
-    # so a hard requirement would add friction without closing a loop.
-    return not config.is_hidden_project(resolved_project)
-
-
-def _resolved_task_origin(origin: str | None, actor: str, project: str) -> str:
-    # Derivation runs for every project: origin exists to link work back to
-    # whatever the agent was doing in that moment, at zero agent effort. Only
-    # the failure is scoped to the shared board -- exempt projects (private
-    # scratch, hidden/internal system triage) fall through to empty rather
-    # than refuse creation.
+def _resolved_task_origin(origin: str | None, actor: str) -> str:
+    # Every single task carries an origin -- there is almost never truly no
+    # origination to point at. Derivation keeps the common cases hands-free
+    # (explicit reference, else the actor's active claim); anything truly
+    # context-free names the acknowledgment or task that prompted it.
     if origin:
         return validated_task_origin(origin)
     claim = ops.active_claim(actor)
     if claim is not None:
         return f"task:{identity.render_handle(claim)}"
-    if _origin_required(project):
-        raise SpiceError(TASK_ORIGIN_REQUIRED_ERROR)
-    return ""
+    raise SpiceError(TASK_ORIGIN_REQUIRED_ERROR)
 
 
 def _resolve_add_project(actor: str, project: str | None, system_project: bool) -> str:
@@ -274,7 +260,7 @@ def _add_result(
     resolved_wait = _resolved_wait(wait=wait, deferred=deferred, claim=claim)
     actor = tw.canonical_actor(actor_override or tw.current_actor())
     resolved_project = _resolve_add_project(actor, project, system_project)
-    resolved_origin = _resolved_task_origin(origin, actor, resolved_project)
+    resolved_origin = _resolved_task_origin(origin, actor)
     if claim:
         ops._require_single_active_slot(actor, action="task add --claim")
         # Match a normal claim's baseline check before creating the task row.

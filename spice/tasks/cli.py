@@ -541,8 +541,7 @@ def _configure_add_parser(actions: Any) -> None:
         help=(
             "Provenance reference: ack:<inbox-key> for the acknowledgment "
             "that steered this work, or task:<handle> for the task it "
-            "descends from. Required for assignable projects unless an "
-            "active claim supplies it."
+            "descends from. Required unless an active claim supplies it."
         ),
     )
     add.set_defaults(func=handle)
@@ -571,7 +570,14 @@ def _configure_oops_parser(actions: Any) -> None:
     oops.add_argument("--surface", default="")
     oops.add_argument("--command", dest="oops_command", default="")
     oops.add_argument("--workaround", default="")
-    oops.add_argument("--origin", default="")
+    oops.add_argument(
+        "--origin",
+        default="",
+        help=(
+            "Provenance reference: ack:<inbox-key> or task:<handle>. "
+            "Required unless an active claim supplies it."
+        ),
+    )
     oops.add_argument("--tag", action="append", default=[], dest="tags")
     oops.set_defaults(func=handle)
 

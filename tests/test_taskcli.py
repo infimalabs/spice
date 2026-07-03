@@ -236,6 +236,8 @@ def test_task_oops_description_records_triage_context(task_repo, capsys):
             "hiccup",
             "--description",
             "Longer triage context for the board.",
+            "--origin",
+            "ack:20260101T000000000000Z",
         ]
     )
 
@@ -256,7 +258,16 @@ def test_task_oops_description_records_triage_context(task_repo, capsys):
 
 def test_task_oops_accepts_priority_style_severity_shorthand(task_repo, capsys):
     args = build_parser().parse_args(
-        ["task", "oops", "wrapper", "hiccup", "--severity", "H"]
+        [
+            "task",
+            "oops",
+            "wrapper",
+            "hiccup",
+            "--severity",
+            "H",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
     )
 
     assert args.func(args) == 0
