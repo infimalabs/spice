@@ -883,11 +883,12 @@ def test_static_pending_count_clears_stale_submitted_predictions_after_drain():
 
 def test_static_lane_differential_frames_update_pending_and_messages():
     app_render = STATIC_ROOT / "app.render.js"
+    app_live_bus = STATIC_ROOT / "app.live-bus.js"
     app_stream = STATIC_ROOT / "app.stream.js"
     script = Path(__file__).with_name("fixtures") / "lane_diff_frames.js"
 
     result = subprocess.run(
-        ["node", str(script), str(app_render), str(app_stream)],
+        ["node", str(script), str(app_render), str(app_live_bus), str(app_stream)],
         check=True,
     )
     assert result.returncode == 0

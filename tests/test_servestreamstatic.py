@@ -405,21 +405,23 @@ def test_static_keyboard_quote_submit_focuses_main_composer_after_reset():
 
 def test_static_send_latency_probe_records_submit_timing_buckets():
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    app_live_bus = (STATIC_ROOT / "app.live-bus.js").read_text(encoding="utf-8")
+    app_static = app_live_bus + "\n" + app_stream
 
-    assert ").__spiceSubmitLatencySamples =" in app_stream
-    assert "laneSubmitLatencySamples;" in app_stream
-    assert "function startLaneSubmitLatencyProbe(lane, payload)" in app_stream
-    assert "function finishLaneSubmitLatencyProbe(probe, status)" in app_stream
-    assert "function laneSubmitLatencyDurations(marks)" in app_stream
-    assert "optimisticRenderMs:" in app_stream
-    assert "liveBusOpenMs:" in app_stream
-    assert "sendResultWaitMs:" in app_stream
-    assert "responseHandlingMs:" in app_stream
-    assert "totalMs:" in app_stream
-    assert "latencyProbe.serverTiming = result.serverTiming || {};" in app_stream
-    assert 'markLaneSubmitLatency(timing, "liveBusConnectStartAt");' in app_stream
+    assert ").__spiceSubmitLatencySamples =" in app_live_bus
+    assert "laneSubmitLatencySamples;" in app_live_bus
+    assert "function startLaneSubmitLatencyProbe(lane, payload)" in app_static
+    assert "function finishLaneSubmitLatencyProbe(probe, status)" in app_static
+    assert "function laneSubmitLatencyDurations(marks)" in app_static
+    assert "optimisticRenderMs:" in app_static
+    assert "liveBusOpenMs:" in app_static
+    assert "sendResultWaitMs:" in app_static
+    assert "responseHandlingMs:" in app_static
+    assert "totalMs:" in app_static
+    assert "latencyProbe.serverTiming = result.serverTiming || {};" in app_static
+    assert 'markLaneSubmitLatency(timing, "liveBusConnectStartAt");' in app_live_bus
     assert 'markLaneSubmitLatency(pending.timing, "liveBusResponseReceivedAt");' in (
-        app_stream
+        app_live_bus
     )
 
 
@@ -804,10 +806,12 @@ def test_static_stream_reports_deadlettered_agent_ensure_failure():
 
 
 def test_static_stream_queues_fresh_speech_for_all_post_prime_sources():
-    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
-    apply_start = app_stream.index("async function applyLaneBusPayload")
-    apply_body = app_stream[
-        apply_start : app_stream.index("\n}\n\nfunction syncLaneThreadId", apply_start)
+    app_live_bus = (STATIC_ROOT / "app.live-bus.js").read_text(encoding="utf-8")
+    apply_start = app_live_bus.index("async function applyLaneBusPayload")
+    apply_body = app_live_bus[
+        apply_start : app_live_bus.index(
+            "\n}\n\nfunction applyLanePendingBusPayload", apply_start
+        )
     ]
 
     assert 'if (source === "watch" && (payload.messages || []).length)' in apply_body
@@ -823,9 +827,10 @@ def test_static_stream_queues_fresh_speech_for_all_post_prime_sources():
 
 def test_static_stream_queues_initial_payload_before_silent_prime():
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
-    apply_start = app_stream.index("async function applyLaneBusPayload")
-    apply_body = app_stream[
-        apply_start : app_stream.index(
+    app_live_bus = (STATIC_ROOT / "app.live-bus.js").read_text(encoding="utf-8")
+    apply_start = app_live_bus.index("async function applyLaneBusPayload")
+    apply_body = app_live_bus[
+        apply_start : app_live_bus.index(
             "\n}\n\nfunction applyLanePendingBusPayload", apply_start
         )
     ]

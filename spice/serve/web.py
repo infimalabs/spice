@@ -55,6 +55,8 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
   <main id="swimlanes" class="swimlanes" aria-label="Open teams"></main>
   <script>const spiceServeBranding = {brand_json};</script>
   <script src="/static/app.render.js"></script>
+  <script src="/static/app.live-bus.js"></script>
+  <script src="/static/app.message-pack.js"></script>
   <script src="/static/app.stream.js"></script>
   <script src="/static/app.lanes.js"></script>
   <script src="/static/app.menu.js"></script>
