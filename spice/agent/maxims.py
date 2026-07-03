@@ -14,6 +14,7 @@ import random
 import re
 import string
 import subprocess
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ META_MAXIMS = frozenset({ALL_MAXIM, ANY_MAXIM})
 DEFAULT_DRIVER_SCOPE = frozenset(driver.name for driver in ALL_DRIVERS)
 DISABLED_MAXIM_BAGS_GIT_PATH = "spice/disabled-maxim-bags.json"
 DISABLED_MAXIM_BAGS_KEY = "disabled_bags"
+MAXIM_PROPOSAL_MIN_RECURRENCE = 2
 DEFAULT_PROMPT_LINES = (
     'IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".',
     'IFF "{maxim}" DISAGREES WITH "{statement}": ANSWER ONLY "NO".',
@@ -77,6 +79,28 @@ class MaximProposalSourceRecord:
     evidence: tuple[MaximProposalEvidence, ...]
 
 
+@dataclass(frozen=True)
+class MaximProposalDispositionCount:
+    disposition: str
+    count: int
+
+
+@dataclass(frozen=True)
+class MaximProposalTheme:
+    name: str
+    recurring_terms: tuple[str, ...]
+    evidence_count: int
+    source_keys: tuple[str, ...]
+    dispositions: tuple[MaximProposalDispositionCount, ...]
+    evidence: tuple[MaximProposalEvidence, ...]
+
+
+@dataclass(frozen=True)
+class _PreparedProposalSource:
+    record: MaximProposalSourceRecord
+    terms: frozenset[str]
+
+
 def maxim_proposal_source_records(
     repo_root: str | Path,
 ) -> tuple[MaximProposalSourceRecord, ...]:
@@ -87,6 +111,36 @@ def maxim_proposal_source_records(
         if source is not None:
             records.append(source)
     return tuple(records)
+
+
+def maxim_proposal_themes(
+    records: Sequence[MaximProposalSourceRecord],
+    *,
+    min_recurrence: int = MAXIM_PROPOSAL_MIN_RECURRENCE,
+) -> tuple[MaximProposalTheme, ...]:
+    """Cluster recurring ACK correction sources into human-reviewed themes."""
+    threshold = max(2, int(min_recurrence))
+    prepared = [
+        _PreparedProposalSource(record=record, terms=terms)
+        for record in records
+        if (terms := _maxim_proposal_terms(record))
+    ]
+    clusters = _maxim_proposal_clusters(prepared)
+    themes = [
+        theme
+        for cluster in clusters
+        if (theme := _maxim_proposal_theme(cluster, threshold)) is not None
+    ]
+    return tuple(
+        sorted(
+            themes,
+            key=lambda theme: (
+                -theme.evidence_count,
+                theme.name,
+                theme.source_keys,
+            ),
+        )
+    )
 
 
 def _maxim_proposal_source_record(
@@ -126,6 +180,117 @@ def _maxim_proposal_evidence(field: str, text: str) -> MaximProposalEvidence | N
 
 def _normalize_proposal_text(value: str) -> str:
     return " ".join(str(value or "").split())
+
+
+_MAXIM_PROPOSAL_TOKEN_RE = re.compile(r"[a-z][a-z0-9]*")
+_MAXIM_PROPOSAL_STOP_WORDS = frozenset(
+    {
+        "about",
+        "again",
+        "because",
+        "being",
+        "cannot",
+        "capture",
+        "captured",
+        "correction",
+        "could",
+        "done",
+        "from",
+        "have",
+        "into",
+        "must",
+        "nack",
+        "need",
+        "needs",
+        "operator",
+        "please",
+        "should",
+        "that",
+        "their",
+        "there",
+        "these",
+        "this",
+        "those",
+        "through",
+        "with",
+        "would",
+    }
+)
+
+
+def _maxim_proposal_terms(record: MaximProposalSourceRecord) -> frozenset[str]:
+    text = " ".join(item.text for item in record.evidence)
+    tokens = []
+    for raw in _MAXIM_PROPOSAL_TOKEN_RE.findall(text.casefold().replace("-", " ")):
+        token = raw.strip()
+        if len(token) < 4:
+            continue
+        if token in _MAXIM_PROPOSAL_STOP_WORDS:
+            continue
+        if _looks_like_ack_key_fragment(token):
+            continue
+        tokens.append(token)
+    return frozenset(tokens)
+
+
+def _looks_like_ack_key_fragment(token: str) -> bool:
+    return token.startswith("t") and token.endswith("z") and token[1:-1].isdigit()
+
+
+def _maxim_proposal_clusters(
+    sources: Sequence[_PreparedProposalSource],
+) -> list[list[_PreparedProposalSource]]:
+    clusters: list[list[_PreparedProposalSource]] = []
+    for source in sources:
+        matches = [
+            index
+            for index, cluster in enumerate(clusters)
+            if any(
+                _maxim_proposal_terms_close(source.terms, item.terms)
+                for item in cluster
+            )
+        ]
+        if not matches:
+            clusters.append([source])
+            continue
+        first = matches[0]
+        clusters[first].append(source)
+        for index in reversed(matches[1:]):
+            clusters[first].extend(clusters.pop(index))
+    return clusters
+
+
+def _maxim_proposal_terms_close(left: frozenset[str], right: frozenset[str]) -> bool:
+    shared = left & right
+    if len(shared) < 2:
+        return False
+    return len(shared) / max(1, min(len(left), len(right))) >= 0.5
+
+
+def _maxim_proposal_theme(
+    cluster: Sequence[_PreparedProposalSource], threshold: int
+) -> MaximProposalTheme | None:
+    if len(cluster) < threshold:
+        return None
+    counts = Counter(term for source in cluster for term in source.terms)
+    recurring_terms = tuple(
+        sorted(term for term, count in counts.items() if count >= threshold)
+    )
+    if not recurring_terms:
+        return None
+    records = tuple(source.record for source in cluster)
+    disposition_counts = Counter(record.disposition for record in records)
+    return MaximProposalTheme(
+        name="/".join(recurring_terms[:4]),
+        recurring_terms=recurring_terms,
+        evidence_count=len(records),
+        source_keys=tuple(record.key for record in records),
+        dispositions=tuple(
+            MaximProposalDispositionCount(disposition=disposition, count=count)
+            for disposition, count in sorted(disposition_counts.items())
+        ),
+        evidence=tuple(item for record in records for item in record.evidence),
+    )
 
 
 # Built-in maxims keyed by a stable bag name. Bags declare every supported
