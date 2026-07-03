@@ -80,7 +80,7 @@ def _build_fixture_wheel(fixture_root: Path, tmp_path: Path) -> Path:
     records: list[tuple[str, bytes]] = []
     with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for source in sorted((fixture_root / "src").rglob("*")):
-            if not source.is_file():
+            if not source.is_file() or source.suffix != ".py":
                 continue
             archive_name = source.relative_to(fixture_root / "src").as_posix()
             _write_wheel_file(archive, records, archive_name, source.read_bytes())
