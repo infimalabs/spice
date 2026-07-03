@@ -13,7 +13,7 @@ from threading import Lock
 import pytest
 
 from spice.agent import maximcli, maxims, watchdog
-from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
+from spice.agent.driver import ALL_DRIVERS, SPICE_AGENT_DRIVER_ENV
 from spice.agent.maxims import MaximVerdict
 from spice.errors import SpiceError
 from spice.mail.acks import archive_ackd_inbox_items
@@ -306,8 +306,51 @@ words = ["detour"]
     )[0]
 
     assert bag.words == frozenset({"detour"})
+    assert bag.drivers == _all_driver_names()
     assert hit.name == "fallbacks"
     assert hit.message == bag.message
+
+
+def test_builtin_maxim_bags_default_to_all_driver_scopes():
+    expected = _all_driver_names()
+
+    assert expected == frozenset({"claude", "codex"})
+    assert all(bag.drivers == expected for bag in maxims.resolved_maxim_bags().values())
+
+
+def test_repo_config_declares_maxim_driver_scope(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    _write_pyproject(
+        repo,
+        """
+[tool.spice.maxims.routes]
+words = ["quiet route"]
+message = "DO NOT take the quiet route."
+drivers = ["Codex", "codex"]
+""",
+    )
+
+    bag = maxims.resolved_maxim_bags(repo)["routes"]
+    hits = maxims.triggered_maxims(["This quiet route drifts."], repo_root=repo)
+
+    assert bag.drivers == frozenset({"codex"})
+    assert hits == [bag]
+
+
+def test_repo_config_rejects_unknown_maxim_driver_scope(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    _write_pyproject(
+        repo,
+        """
+[tool.spice.maxims.routes]
+words = ["quiet route"]
+message = "DO NOT take the quiet route."
+drivers = ["codex", "ghost"]
+""",
+    )
+
+    with pytest.raises(SpiceError, match="known agent drivers"):
+        maxims.resolved_maxim_bags(repo)
 
 
 def test_builtin_phrase_trigger_matches_whole_phrase_across_punctuation():
@@ -478,6 +521,10 @@ words = ["beta"]
 message = "SECOND reminder."
 """,
     )
+
+
+def _all_driver_names() -> frozenset[str]:
+    return frozenset(driver.name for driver in ALL_DRIVERS)
 
 
 def _make_every_maxim_violate(monkeypatch) -> None:
