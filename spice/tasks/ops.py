@@ -9,13 +9,20 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Sequence
 
 from spice.agent.identity import ambient_thread
 from spice.errors import SpiceError
+from spice.hooks import install as hook_install
 from spice.hooks import precommit
 from spice.paths import repo_root_from_cwd
+from spice.sessions import learnings as session_learnings
+from spice.sessions import records as session_records
+from spice.sessions import resolve as session_resolve
 from spice.tasks import alloc, config, gitsync, identity, reviewfeedback, tw
 
 
@@ -587,6 +594,28 @@ def adopt(
 # ---- done / advance -----------------------------------------------------
 
 
+LEARNING_DIAGNOSTIC_DETAIL_LIMIT = 160
+
+
+@dataclass(frozen=True)
+class _TaskLearningDistillation:
+    stored: int = 0
+    extracted: int = 0
+    skipped: tuple[str, ...] = ()
+    reason: str = ""
+    detail: str = ""
+
+    def render(self) -> str:
+        if self.stored:
+            suffix = f"; skipped {len(self.skipped)}" if self.skipped else ""
+            return (
+                f"learnings: stored {self.stored} accepted "
+                f"from {self.extracted} candidate(s){suffix}"
+            )
+        detail = f": {self.detail}" if self.detail else ""
+        return f"learnings: skipped {self.reason}{detail}"
+
+
 def _publish_meta(
     row: dict[str, Any], actor: str, validation: list[str]
 ) -> dict[str, str]:
@@ -687,10 +716,135 @@ def done(
         modify.append(f"judgment:{judgment}")
     tw.run(modify)
     result = _advance(identity.resolve(handle))
+    learning_line = _distill_task_done_learnings(
+        row,
+        done_at=tw.now_iso(),
+        handle_text=identity.render_handle(row),
+        repo_root=config.repo_root(),
+    ).render()
     next_line = next_task_drain_line()
     if result.endswith(" -> review"):
         next_line = next_task_drain_line(review_assignment=True)
-    return f"{result}\n{next_line}"
+    return f"{result}\n{learning_line}\n{next_line}"
+
+
+def _distill_task_done_learnings(
+    row: dict[str, Any],
+    *,
+    done_at: str,
+    handle_text: str,
+    repo_root: Path,
+) -> _TaskLearningDistillation:
+    project = str(row.get("project") or "").strip()
+    claim_started_at = str(row.get("claim_at") or "").strip()
+    thread_id = str(row.get("claim_thread") or "").strip()
+    if not project or not claim_started_at or not done_at or not thread_id:
+        return _TaskLearningDistillation(reason="missing_claim_metadata")
+    try:
+        project_stem = config.project_stem(project)
+    except SpiceError as exc:
+        return _TaskLearningDistillation(
+            reason="invalid_project_stem",
+            detail=_learning_detail(exc),
+        )
+    try:
+        transcript = session_resolve.resolve_thread_transcript(
+            thread_id, repo_root=repo_root
+        )
+    except SystemExit as exc:
+        return _TaskLearningDistillation(
+            reason="missing_transcript",
+            detail=_learning_detail(exc),
+        )
+    except (OSError, RuntimeError, SpiceError) as exc:
+        return _TaskLearningDistillation(
+            reason="missing_transcript",
+            detail=_learning_detail(exc),
+        )
+    try:
+        turns = session_records.collect_turns([transcript])
+        compactions = session_records.collect_compactions([transcript])
+        extracted = session_learnings.extract_learning_candidates_from_task_slice(
+            turns,
+            compactions,
+            claim_started_at=claim_started_at,
+            done_at=done_at,
+            source_task=handle_text,
+            project_stem=project_stem,
+        )
+    except Exception as exc:
+        return _TaskLearningDistillation(
+            reason="extract_error",
+            detail=_learning_detail(exc),
+        )
+    if not extracted:
+        return _TaskLearningDistillation(reason="no_candidates")
+    candidates: list[session_learnings.LearningCandidate] = []
+    malformed = 0
+    for candidate in extracted:
+        try:
+            learning = candidate.to_learning_candidate()
+            session_learnings.normalize_learning_statement(learning.statement)
+        except SpiceError:
+            malformed += 1
+            continue
+        candidates.append(learning)
+    if not candidates:
+        return _TaskLearningDistillation(
+            extracted=len(extracted),
+            reason="malformed_candidate",
+            detail=f"{malformed} malformed",
+        )
+    try:
+        judged = session_learnings.judge_filter_learning_candidates(candidates)
+    except Exception as exc:
+        return _TaskLearningDistillation(
+            extracted=len(extracted),
+            reason="judge_error",
+            detail=_learning_detail(exc),
+        )
+    if not judged.kept:
+        return _TaskLearningDistillation(
+            extracted=len(extracted),
+            skipped=tuple(skip.reason for skip in judged.skipped),
+            reason=_learning_skip_reason(judged.skipped),
+        )
+    try:
+        hook_install.materialize_state_gitignore(repo_root)
+        confirmed = session_learnings.confirm_learning_candidates(
+            repo_root,
+            project_stem,
+            judged.kept,
+        )
+    except Exception as exc:
+        return _TaskLearningDistillation(
+            extracted=len(extracted),
+            skipped=tuple(skip.reason for skip in judged.skipped),
+            reason="store_error",
+            detail=_learning_detail(exc),
+        )
+    return _TaskLearningDistillation(
+        stored=len(confirmed),
+        extracted=len(extracted),
+        skipped=tuple(skip.reason for skip in judged.skipped),
+    )
+
+
+def _learning_skip_reason(
+    skipped: Sequence[session_learnings.LearningJudgeSkip],
+) -> str:
+    if not skipped:
+        return "rejected"
+    counts = Counter(skip.reason for skip in skipped)
+    return ",".join(
+        reason if count == 1 else f"{reason}x{count}"
+        for reason, count in sorted(counts.items())
+    )
+
+
+def _learning_detail(exc: BaseException) -> str:
+    detail = " ".join(str(exc).split())
+    return detail[:LEARNING_DIAGNOSTIC_DETAIL_LIMIT]
 
 
 def _require_bound_quality_gates_clean(row: dict[str, Any]) -> None:

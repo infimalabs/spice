@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,6 +20,7 @@ from spice.serve.team.store import (
     TeamConfig,
 )
 from spice.serve.team.ids import thread_actor_id
+from spice.sessions import learnings
 from spice.tasks import alloc, config, create, gitsync, identity, ops, render, tw
 
 pytestmark = pytest.mark.skipif(
@@ -386,6 +389,83 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     assert completed_row["review_by"] == ACTOR_A
     assert completed_row["review_finding"] == "clean"
     assert completed_row["review_note"] == "review passed"
+
+
+def test_task_done_distills_and_reconfirms_project_stem_learning(
+    task_repo, tmp_path, monkeypatch
+):
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(
+        learnings,
+        "evaluate_maxim",
+        lambda *_args, **_kwargs: SimpleNamespace(agrees=True),
+    )
+
+    first = _done_learning_task(task_repo, codex_home, "first-task")
+    second = _done_learning_task(task_repo, codex_home, "second-task")
+    records = learnings.load_learning_records(task_repo, "task")
+
+    assert "learnings: stored 1 accepted from 1 candidate(s)" in first
+    assert "learnings: stored 1 accepted from 1 candidate(s)" in second
+    assert len(records) == 1
+    assert records[0].statement == "Use spice task next after phase boundaries"
+    assert records[0].project_stem == "task"
+    assert records[0].confirmation_count == 2
+    assert _git(task_repo, "status", "--porcelain") == ""
+
+
+def test_task_done_advances_when_learning_transcript_is_missing(
+    task_repo, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "missing-codex-home"))
+    handle = create.add(
+        "Complete without transcript",
+        project="task.unit",
+        priority="medium",
+        acceptance=["task done remains non-fragile"],
+    )
+    ops.claim(handle)
+
+    output = ops.done(handle, validation=["validated without transcript"])
+    row = identity.resolve(handle)
+
+    assert f"advanced {handle} -> review" in output
+    assert "learnings: skipped missing_transcript" in output
+    assert row["phase"] == "review"
+
+
+def test_task_done_advances_when_learning_judge_is_unavailable(
+    task_repo, tmp_path, monkeypatch
+):
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    def unavailable_judge(*_args, **_kwargs):
+        raise SpiceError("could not launch 'afm-cli': missing")
+
+    monkeypatch.setattr(learnings, "evaluate_maxim", unavailable_judge)
+    handle = create.add(
+        "Complete with unavailable learning judge",
+        project="task.unit",
+        priority="medium",
+        acceptance=["judge skip remains non-fragile"],
+    )
+    ops.claim(handle)
+    claimed = identity.resolve(handle)
+    _write_learning_transcript(
+        codex_home,
+        thread_id=ACTOR_A,
+        turn_id="turn-judge-unavailable",
+        timestamp=str(claimed["claim_at"]),
+    )
+
+    output = ops.done(handle, validation=["validated with unavailable judge"])
+    row = identity.resolve(handle)
+
+    assert f"advanced {handle} -> review" in output
+    assert "learnings: skipped unavailable" in output
+    assert row["phase"] == "review"
 
 
 def test_plan_phase_show_injects_board_generation_guidance(task_repo):
@@ -849,6 +929,65 @@ def _init_repo(path: Path) -> Path:
 def _configure_git_identity(repo: Path) -> None:
     _run(repo, "git", "config", "user.email", "spice@example.test")
     _run(repo, "git", "config", "user.name", "Spice Tests")
+
+
+def _done_learning_task(task_repo: Path, codex_home: Path, turn_id: str) -> str:
+    handle = create.add(
+        f"Distill learning {turn_id}",
+        project="task.unit",
+        priority="medium",
+        acceptance=["learning distillation is captured"],
+    )
+    ops.claim(handle)
+    claimed = identity.resolve(handle)
+    _write_learning_transcript(
+        codex_home,
+        thread_id=ACTOR_A,
+        turn_id=turn_id,
+        timestamp=str(claimed["claim_at"]),
+    )
+    output = ops.done(handle, validation=[f"validated {turn_id}"])
+    assert _git(task_repo, "status", "--porcelain") == ""
+    return output
+
+
+def _write_learning_transcript(
+    codex_home: Path,
+    *,
+    thread_id: str,
+    turn_id: str,
+    timestamp: str,
+) -> Path:
+    transcript = codex_home / "sessions" / f"rollout-{thread_id}.jsonl"
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    events: list[dict[str, object]] = [
+        {
+            "timestamp": timestamp,
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": turn_id},
+        },
+        {
+            "timestamp": timestamp,
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {"text": ("Lesson: Use spice task next after phase boundaries.")}
+                ],
+            },
+        },
+        {
+            "timestamp": timestamp,
+            "type": "event_msg",
+            "payload": {"type": "task_complete"},
+        },
+    ]
+    transcript.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events),
+        encoding="utf-8",
+    )
+    return transcript
 
 
 def _review_claim(task_repo: Path, monkeypatch) -> str:
