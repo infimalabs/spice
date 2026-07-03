@@ -498,8 +498,11 @@ function assertWideMessagePacking(measurement) {
     measurement.messageCardFirstRowFillWidth / measurement.messageCardHostInnerWidth;
   if (fillRatio < 0.92)
     throw new Error("wide message cards did not fill the row: " + JSON.stringify(measurement));
-  if (measurement.backfilledCardTop >= measurement.tallCardBottom - 2)
-    throw new Error("stable row packing did not stack below short cards: " + JSON.stringify(measurement));
+  if (measurement.backfilledCardTop < measurement.tallCardBottom - 2)
+    throw new Error(
+      "major-row packing overlapped the previous row group: " +
+        JSON.stringify(measurement),
+    );
   if (measurement.messageCardTopSpread < 8)
     throw new Error("wide message cards did not create multiple packed tiers: " + JSON.stringify(measurement));
   const heights = measurement.messageCardFirstRowHeights;

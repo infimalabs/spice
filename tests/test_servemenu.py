@@ -843,6 +843,7 @@ def test_static_empty_team_controls_lock_collapsed_until_populated():
 def test_static_empty_team_importer_renders_message_stream_choices():
     css = _serve_css_text()
     app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+    app_live_bus = (STATIC_ROOT / "app.live-bus.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
 
     empty_team_sync_start = app_shell.index(
@@ -883,10 +884,10 @@ def test_static_empty_team_importer_renders_message_stream_choices():
     )
     assert 'host.teamMenuButtonEl.setAttribute("aria-expanded", "true");' in (app_shell)
     assert "syncTeamImportOverlay(lane);" in app_stream
-    assert "if (lane.emptyTeam) return;" in app_stream
+    assert "if (lane.emptyTeam) return;" in app_live_bus
     assert (
         "if (isLaneOpen(lane) && !lane.emptyTeam) subscribeLaneToLiveBus(lane);"
-        in app_stream
+        in app_live_bus
     )
     assert "function renderEmptyTeamMessages(lane)" in app_stream
     assert "function emptyTeamMessageFingerprint(lane)" in app_stream
