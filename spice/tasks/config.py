@@ -40,7 +40,8 @@ PHASE_MODELS_KEY = "phase_models"
 # an agent.
 BASE_APPROVED_STEMS = ("task", "serve", "agent")
 INTERNAL_STEMS = ("agent",)
-BASE_HIDDEN_STEMS = ("oops",)
+MAXIM_PROPOSAL_HIDDEN_STEM = "maxim_proposal"
+BASE_HIDDEN_STEMS = ("oops", MAXIM_PROPOSAL_HIDDEN_STEM)
 HIDDEN_PROJECT_PREFIX = "."
 APPROVED_PHASES = ("design", "plan", "todo", "verify", "review")
 PHASE_SLOT_COUNT = 7  # phase_0 .. phase_6
@@ -56,6 +57,7 @@ HIDDEN_TASK_TAG = "hidden"
 SENTINEL_ACTOR = "00000000-0000-0000-0000-000000000000"
 OOPS_WAIT = "2099-01-01T00:00:00"
 OOPS_PROJECT = ".oops"
+MAXIM_PROPOSAL_PROJECT = f".{MAXIM_PROPOSAL_HIDDEN_STEM}"
 
 # Native Taskwarrior priorities (H/M/L, or unset). Word aliases map to them.
 DEFAULT_PRIORITY = "medium"
