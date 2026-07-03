@@ -116,6 +116,8 @@ def test_static_css_has_narrow_viewport_affordances():
     assert "--mobile-lane-gap: 8px" in css
     assert "--mobile-lane-gutter: 4px" in css
     assert "gap: var(--mobile-lane-gap)" in css
+    assert "column-gap: 8px;" in css
+    assert "row-gap: 5px;" in css
     assert "padding: 0 var(--mobile-lane-gutter) 8px" in css
     assert "scroll-padding-inline: var(--mobile-lane-gutter)" in css
     assert "touch-action: pan-x pan-y" in css
@@ -199,7 +201,7 @@ def test_static_css_centers_two_pip_lane_light_stack():
     assert "place-content: center;" in lights_rules
 
 
-def test_static_messages_use_dense_packed_rows():
+def test_static_messages_use_stable_packed_rows():
     css = _serve_css_text()
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
@@ -210,6 +212,11 @@ def test_static_messages_use_dense_packed_rows():
     article_start = css.index(".messages article {")
     article_end = css.index(".messages article.image-only", article_start)
     article_rule = css[article_start:article_end]
+    image_only_start = css.index(".messages article.image-only {")
+    image_only_end = css.index(
+        ".messages article:has(.task-directive-stack)", image_only_start
+    )
+    image_only_rule = css[image_only_start:image_only_end]
     stack_start = css.index(".message-body p.message-image-stack {")
     stack_end = css.index(
         ".message-body p.message-image-stack .message-image", stack_start
@@ -223,22 +230,28 @@ def test_static_messages_use_dense_packed_rows():
     image_only_stack_rule = _between(
         css, ".messages article.image-only .message-body p.message-image-stack {", "}"
     )
+    image_only_image_rule = _between(
+        css, ".messages article.image-only .message-image img {", "}"
+    )
 
     assert "--message-card-max-width: 30rem;" in messages_rule
     assert "--message-card-min-width: 20rem;" in messages_rule
-    assert "--message-pack-row-height: 8px;" in messages_rule
+    assert "--message-pack-row-height: 4px;" in messages_rule
+    assert "column-gap: 9px;" in messages_rule
     assert "display: grid;" in messages_rule
-    assert "grid-auto-flow: row dense;" in messages_rule
+    assert "grid-auto-flow: row;" in messages_rule
     assert "grid-auto-rows: var(--message-pack-row-height);" in messages_rule
     assert "auto-fit" in messages_rule
     assert "minmax(min(100%, var(--message-card-min-width)), 1fr)" in (messages_rule)
     assert "overflow-x: auto;" in messages_rule
+    assert "row-gap: 6px;" in messages_rule
     assert "display: flex;" in article_rule
     assert "flex-direction: column;" in article_rule
     assert "grid-row-end: span var(--message-pack-row-span, 1);" in article_rule
     assert "max-width: none;" in article_rule
     assert "direction: ltr;" in article_rule
     assert ".messages article.image-only" in css
+    assert "grid-column:" not in image_only_rule
     assert "grid-column: 1 / -1;" in css
     assert ".messages article:has(.task-directive-stack) {\n  grid-column: 1 / -1;" in (
         css
@@ -253,7 +266,11 @@ def test_static_messages_use_dense_packed_rows():
     assert "object-fit: contain;" in stack_image_rule
     assert ".messages article.image-only .message-image img" in css
     assert "max-height: 136px" in css
-    assert "justify-content: center;" in image_only_stack_rule
+    assert "align-items: center;" in image_only_stack_rule
+    assert "justify-content: flex-end;" in image_only_stack_rule
+    assert "max-height: min(32vh, 260px);" in image_only_image_rule
+    assert "max-width: min(100%, 56rem);" in image_only_image_rule
+    assert "width: auto;" in image_only_image_rule
     assert ".history-sentinel {\n  grid-column: 1 / -1;" in css
     assert "function packMessageStream(lane)" in app_stream
     assert "function scheduleMessageStreamPack(lane)" in app_stream
