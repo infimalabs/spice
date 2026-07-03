@@ -159,31 +159,100 @@ def test_maxim_reminder_gate_suppresses_same_combined_body_until_compaction(
 ):
     repo = _init_repo(tmp_path / "repo")
     _write_dual_maxim_config(repo)
-    _make_every_maxim_violate(monkeypatch)
     gate = watchdog.MaximReminderGate()
+    judged: list[tuple[str, str]] = []
+
+    def judge_violation(maxim: str, statement: str) -> MaximVerdict:
+        judged.append((maxim, statement))
+        return MaximVerdict(
+            maxim=maxim,
+            statement=statement,
+            prompt="",
+            answer="NO",
+            attempts=("NO",),
+        )
+
+    monkeypatch.setattr(watchdog, "evaluate_maxim_any_violation", judge_violation)
 
     first_paths = watchdog.publish_maxim_hits_as_inbox(
         repo, "alpha beta", reminder_gate=gate
     )
+    first_judged = list(judged)
     duplicate_paths = watchdog.publish_maxim_hits_as_inbox(
         repo, "alpha beta again", reminder_gate=gate
     )
+    duplicate_judged = list(judged)
     archive_ackd_inbox_items(repo, [inbox_item_key(first_paths[0].name)])
     after_ack_paths = watchdog.publish_maxim_hits_as_inbox(
         repo, "alpha beta", reminder_gate=gate
     )
+    after_ack_judged = list(judged)
     gate.note_compaction()
     after_compaction_paths = watchdog.publish_maxim_hits_as_inbox(
         repo, "alpha beta", reminder_gate=gate
     )
 
     assert len(first_paths) == 1
+    assert first_judged == [
+        ("FIRST reminder.", "alpha beta"),
+        ("SECOND reminder.", "alpha beta"),
+    ]
     assert duplicate_paths == []
+    assert duplicate_judged == first_judged
     assert after_ack_paths == []
+    assert after_ack_judged == first_judged
     assert len(after_compaction_paths) == 1
+    assert judged == [
+        ("FIRST reminder.", "alpha beta"),
+        ("SECOND reminder.", "alpha beta"),
+        ("FIRST reminder.", "alpha beta"),
+        ("SECOND reminder.", "alpha beta"),
+    ]
     assert after_compaction_paths != first_paths
     assert [item.text for item in collect_inbox_items(repo)] == [
         "[MAXIM] FIRST reminder. SECOND reminder.\n",
+    ]
+
+
+def test_maxim_reminder_gate_agreeing_first_pass_does_not_poison_later_violation(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_dual_maxim_config(repo)
+    gate = watchdog.MaximReminderGate()
+    answers = ["YES", "NO"]
+    judged: list[tuple[str, str]] = []
+
+    def judge_once_agree_then_violate(maxim: str, statement: str) -> MaximVerdict:
+        judged.append((maxim, statement))
+        answer = answers.pop(0)
+        return MaximVerdict(
+            maxim=maxim,
+            statement=statement,
+            prompt="",
+            answer=answer,
+            attempts=(answer,),
+        )
+
+    monkeypatch.setattr(
+        watchdog, "evaluate_maxim_any_violation", judge_once_agree_then_violate
+    )
+
+    agreeing_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha", reminder_gate=gate
+    )
+    violating_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha again", reminder_gate=gate
+    )
+
+    assert agreeing_paths == []
+    assert len(violating_paths) == 1
+    assert judged == [
+        ("FIRST reminder.", "alpha"),
+        ("FIRST reminder.", "alpha again"),
+    ]
+    assert [item.text for item in collect_inbox_items(repo)] == [
+        "[MAXIM] FIRST reminder.\n"
     ]
 
 

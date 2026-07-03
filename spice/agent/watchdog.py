@@ -476,6 +476,8 @@ def publish_maxim_hits_as_inbox(
     if not hits:
         return []
     reminder_key = _maxim_reminder_key(hits)
+    if not reminder_gate.should_publish(reminder_key):
+        return []
     violations = [
         hit
         for hit in hits
@@ -484,8 +486,6 @@ def publish_maxim_hits_as_inbox(
     if not violations:
         return []
     body = _maxim_inbox_body(violations)
-    if not reminder_gate.should_publish(reminder_key):
-        return []
     path = write_inbox_item(repo_root, None, body)
     reminder_gate.mark_sent(reminder_key, path, body)
     paths = [path]
