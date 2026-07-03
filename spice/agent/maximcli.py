@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,19 @@ from spice.paths import repo_root_from_cwd
 CONDITION_MET_EXIT_CODE = 0
 CONDITION_UNMET_EXIT_CODE = 1
 DEFAULT_OUTPUT_FORMAT = "{maxim}"
+
+
+@dataclass
+class _MaximReportBucket:
+    bag_name: str
+    driver_name: str
+    thread_id: str
+    fire_count: int = 0
+    judged_confirmed_count: int = 0
+    judged_rejected_count: int = 0
+    gate_suppressed_count: int = 0
+    published_count: int = 0
+    recurrence_count: int = 0
 
 
 def configure_maxim_parser(subparsers: Any) -> None:
@@ -284,26 +298,48 @@ def _render_maxim_listing() -> str:
 
 
 def render_maxim_report(repo_root: Path) -> str:
-    counts = maxim_metric_counts(repo_root)
     records = maxim_metric_records(repo_root)
+    if not records:
+        return "maxim metric events: 0"
+    buckets = _maxim_report_buckets(maxim_metric_counts(repo_root))
     recurrence_by_key = Counter()
     for item in maxim_recurrence_counts(repo_root):
-        recurrence_by_key[(item.bag_name, item.driver_name)] += item.recurrence_count
-    if not counts:
-        return "maxim metric events: 0"
-    rows = [
-        _maxim_report_row(count, recurrence_by_key[(count.bag_name, count.driver_name)])
-        for count in counts
-    ]
+        recurrence_by_key[(item.bag_name, item.driver_name, item.thread_id)] += (
+            item.recurrence_count
+        )
+    for key, recurrence_count in recurrence_by_key.items():
+        if key in buckets:
+            buckets[key].recurrence_count = recurrence_count
+    fire_totals_by_driver_thread = Counter()
+    for bucket in buckets.values():
+        fire_totals_by_driver_thread[(bucket.driver_name, bucket.thread_id)] += (
+            bucket.fire_count
+        )
+    rows = sorted(
+        (
+            _maxim_report_row(
+                bucket,
+                total_driver_thread_fires=fire_totals_by_driver_thread[
+                    (bucket.driver_name, bucket.thread_id)
+                ],
+            )
+            for bucket in buckets.values()
+        ),
+        key=lambda row: (row[0], row[1], row[2]),
+    )
     headers = (
         "bag",
         "driver",
+        "thread",
+        "fire_rate",
+        "confirm_rate",
+        "recurrence",
         "fire",
         "confirmed",
         "rejected",
         "suppressed",
         "published",
-        "recurrence",
+        "recur",
     )
     widths = [
         max(len(str(row[index])) for row in [headers, *rows])
@@ -319,6 +355,26 @@ def render_maxim_report(repo_root: Path) -> str:
     return "\n".join([f"maxim metric events: {len(records)}", *rendered])
 
 
+def _maxim_report_buckets(
+    counts: list[MaximMetricCounts],
+) -> dict[tuple[str, str, str], _MaximReportBucket]:
+    buckets: dict[tuple[str, str, str], _MaximReportBucket] = {}
+    for count in counts:
+        buckets[(count.bag_name, count.driver_name, count.thread_id)] = (
+            _MaximReportBucket(
+                bag_name=count.bag_name,
+                driver_name=count.driver_name,
+                thread_id=count.thread_id,
+                fire_count=count.fire_count,
+                judged_confirmed_count=count.judged_confirmed_count,
+                judged_rejected_count=count.judged_rejected_count,
+                gate_suppressed_count=count.gate_suppressed_count,
+                published_count=count.published_count,
+            )
+        )
+    return buckets
+
+
 def _render_disabled_bags(names: frozenset[str]) -> str:
     if not names:
         return "disabled maxim bags: none"
@@ -326,18 +382,29 @@ def _render_disabled_bags(names: frozenset[str]) -> str:
 
 
 def _maxim_report_row(
-    count: MaximMetricCounts, recurrence_inputs: int
-) -> tuple[str, str, int, int, int, int, int, int]:
+    bucket: _MaximReportBucket, *, total_driver_thread_fires: int
+) -> tuple[str, str, str, str, str, str, int, int, int, int, int, int]:
+    judged_count = bucket.judged_confirmed_count + bucket.judged_rejected_count
     return (
-        count.bag_name,
-        count.driver_name,
-        count.fire_count,
-        count.judged_confirmed_count,
-        count.judged_rejected_count,
-        count.gate_suppressed_count,
-        count.published_count,
-        recurrence_inputs,
+        bucket.bag_name,
+        bucket.driver_name,
+        bucket.thread_id or "-",
+        _format_percent(bucket.fire_count, total_driver_thread_fires),
+        _format_percent(bucket.judged_confirmed_count, judged_count),
+        _format_percent(bucket.recurrence_count, bucket.published_count),
+        bucket.fire_count,
+        bucket.judged_confirmed_count,
+        bucket.judged_rejected_count,
+        bucket.gate_suppressed_count,
+        bucket.published_count,
+        bucket.recurrence_count,
     )
+
+
+def _format_percent(numerator: int, denominator: int) -> str:
+    if denominator <= 0:
+        return "-"
+    return f"{numerator / denominator:.0%}"
 
 
 def _render_trigger_key(key: str) -> str:
