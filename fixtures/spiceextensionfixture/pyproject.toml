@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spice-extension-fixture"
+version = "0.1.0"
+description = "Third-party spice extension fixture for entry-point tests."
+requires-python = ">=3.12"
+
+[tool.setuptools]
+py-modules = [
+    "spiceextensiondriver",
+    "spiceextensionstudy",
+    "spiceextensionwrapper",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[project.entry-points."spice.drivers"]
+toy = "spiceextensiondriver:TOY_DRIVER"
+codex = "spiceextensiondriver:SHADOW_CODEX_DRIVER"
+
+[project.entry-points."spice.studies"]
+toy-study = "spiceextensionstudy:run_toy_study"
+file-loc = "spiceextensionstudy:shadow_file_loc_study"
+
+[project.entry-points."spice.wrappers"]
+toy-wrapper = "spiceextensionwrapper:toy_wrapper_spec"
+spice-dev = "spiceextensionwrapper:shadow_spice_dev_wrapper_spec"
