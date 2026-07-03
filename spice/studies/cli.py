@@ -412,19 +412,21 @@ def _study_file_loc(args: argparse.Namespace, root: Path) -> int:
         *resolved.file_shape_paths.generated_patterns,
         *shape.generated_path_patterns(root),
     )
-    findings = scan(
-        paths,
-        root=root,
-        limit=args.limit,
-        flex_limit_value=args.flex_limit,
-        byte_limit=args.byte_limit,
-        byte_flex_limit_value=args.byte_flex_limit,
-        source_suffixes=resolved.file_shape_paths.source_suffixes,
-        generated_patterns=generated_patterns,
-        repo_doc_paths=set(repodocs.repo_truth_doc_candidate_paths(root, resolved)),
-        lockfile_suffixes=resolved.lockfiles.suffixes,
-        lockfile_names=resolved.lockfiles.names,
-    )
+    scan_kwargs = {
+        "root": root,
+        "limit": args.limit,
+        "flex_limit_value": args.flex_limit,
+        "byte_limit": args.byte_limit,
+        "byte_flex_limit_value": args.byte_flex_limit,
+        "source_suffixes": resolved.file_shape_paths.source_suffixes,
+        "generated_patterns": generated_patterns,
+        "repo_doc_paths": set(repodocs.repo_truth_doc_candidate_paths(root, resolved)),
+        "lockfile_suffixes": resolved.lockfiles.suffixes,
+        "lockfile_names": resolved.lockfiles.names,
+    }
+    if args.staged:
+        scan_kwargs["flex_actor"] = resolved.flex_actor_id
+    findings = scan(paths, **scan_kwargs)
     if args.emit_json:
         _print_study_json(
             args.study_action,
@@ -459,6 +461,7 @@ def _study_complexity(args: argparse.Namespace, root: Path) -> int:
         ccn_flex_limit_value=args.ccn_flex_limit,
         length_flex_limit_value=args.length_flex_limit,
         suffixes=resolved.languages.complexity,
+        flex_actor=resolved.flex_actor_id,
     )
     if args.emit_json:
         _print_study_json(

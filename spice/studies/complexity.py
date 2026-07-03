@@ -22,9 +22,12 @@ from typing import Callable, Protocol
 from spice.errors import SpiceError
 from spice.paths import find_tool
 from spice.flexstate import (
+    FlexSliceClaim,
+    claim_flex_slice_paths,
     flex_limit,
     git_state_path,
     load_sticky_items,
+    render_flex_slice_claim_redirect,
     save_sticky_items,
     sticky_function_keys_after_renames,
     sticky_items_after_flex_breaches,
@@ -72,6 +75,7 @@ class ComplexityFinding:
     over_length: bool
     ccn_limit: int
     length_limit: int
+    flex_slice_claim: FlexSliceClaim | None = None
 
 
 def complexity_hotspot_rows(
@@ -242,16 +246,14 @@ def scan_staged_complexity_violations(
     bounds_for_path: Callable[[Path], ComplexityBounds] | None = None,
     suffixes: tuple[str, ...] = COMPLEXITY_SUFFIXES,
     persist: bool = False,
+    flex_actor: str = "",
+    flex_claim_now: float | None = None,
 ) -> list[ComplexityFinding]:
     """Scan staged routines against the flex+sticky CCN/length limits.
 
-    New flex breaches are folded into the sticky set used to compute this
-    call's findings. Persisting that set to the git dir is **opt-in**: pass
-    ``persist=True`` (the committing gate does); a reporting or study caller
-    leaves it ``False`` so the scan is a pure query that never advances shared
-    sticky state. A ``persist=True`` scan must be paired with
-    ``clear_complexity_sticky_state`` on gate success — scan ratchets up, clear
-    prunes down once the tree passes.
+    ``persist`` writes sticky state for the committing gate; ``flex_actor``
+    separately records or honors live flex slice claims for files whose
+    routines breach flex. Leave ``flex_actor`` empty for read-only scans.
     """
     records = collect_complexity_records(paths, root=root, suffixes=suffixes)
     renames = staged_renames(root)
@@ -278,29 +280,93 @@ def scan_staged_complexity_violations(
         length_flex_limit=length_flex,
     )
     resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
+    ccn_breaches, length_breaches = _complexity_breach_sets(records, resolve_bounds)
     updated_ccn_sticky = sticky_items_after_flex_breaches(
         records,
         ccn_sticky,
         key_for_item=lambda record: record.key,
-        is_breach=lambda record: (
-            not resolve_bounds(Path(record.path)).ccn_unlimited
-            and record.ccn > resolve_bounds(Path(record.path)).ccn_flex_limit
-        ),
+        is_breach=lambda record: record in ccn_breaches,
     )
     updated_length_sticky = sticky_items_after_flex_breaches(
         records,
         length_sticky,
         key_for_item=lambda record: record.key,
-        is_breach=lambda record: (
-            not resolve_bounds(Path(record.path)).length_unlimited
-            and record.length > resolve_bounds(Path(record.path)).length_flex_limit
-        ),
+        is_breach=lambda record: record in length_breaches,
     )
     if persist:
         if updated_ccn_sticky != ccn_sticky:
             _save_sticky(updated_ccn_sticky, root, COMPLEXITY_CCN_STICKY_GIT_PATH)
         if updated_length_sticky != length_sticky:
             _save_sticky(updated_length_sticky, root, COMPLEXITY_LENGTH_STICKY_GIT_PATH)
+    peer_claims = _peer_flex_slice_claims(
+        {Path(record.path) for record in ccn_breaches | length_breaches},
+        root=root,
+        actor=flex_actor,
+        renames=renames,
+        now=flex_claim_now,
+    )
+    return _complexity_findings(
+        records,
+        resolve_bounds=resolve_bounds,
+        updated_ccn_sticky=updated_ccn_sticky,
+        updated_length_sticky=updated_length_sticky,
+        peer_claims=peer_claims,
+    )
+
+
+def _complexity_breach_sets(
+    records: list[ComplexityRecord],
+    resolve_bounds: Callable[[Path], ComplexityBounds],
+) -> tuple[set[ComplexityRecord], set[ComplexityRecord]]:
+    ccn_breaches = {
+        record
+        for record in records
+        if (
+            not resolve_bounds(Path(record.path)).ccn_unlimited
+            and record.ccn > resolve_bounds(Path(record.path)).ccn_flex_limit
+        )
+    }
+    length_breaches = {
+        record
+        for record in records
+        if (
+            not resolve_bounds(Path(record.path)).length_unlimited
+            and record.length > resolve_bounds(Path(record.path)).length_flex_limit
+        )
+    }
+    return ccn_breaches, length_breaches
+
+
+def _peer_flex_slice_claims(
+    paths: set[Path],
+    *,
+    root: Path,
+    actor: str,
+    renames: dict[Path, Path],
+    now: float | None,
+) -> dict[Path, FlexSliceClaim]:
+    claim_decisions = claim_flex_slice_paths(
+        paths,
+        root=root,
+        actor=actor,
+        renames=renames,
+        now=now,
+    )
+    return {
+        path: decision.claim
+        for path, decision in claim_decisions.items()
+        if decision.peer_held
+    }
+
+
+def _complexity_findings(
+    records: list[ComplexityRecord],
+    *,
+    resolve_bounds: Callable[[Path], ComplexityBounds],
+    updated_ccn_sticky: set[tuple[str, str]],
+    updated_length_sticky: set[tuple[str, str]],
+    peer_claims: dict[Path, FlexSliceClaim],
+) -> list[ComplexityFinding]:
     findings: list[ComplexityFinding] = []
     for record in records:
         bounds = resolve_bounds(Path(record.path))
@@ -326,6 +392,7 @@ def scan_staged_complexity_violations(
                     over_length=over_length,
                     ccn_limit=ccn_limit,
                     length_limit=length_limit,
+                    flex_slice_claim=peer_claims.get(Path(record.path)),
                 )
             )
     return findings
@@ -403,8 +470,15 @@ def render_complexity_board(
             reasons.append(f"ccn {finding.record.ccn} > {finding.ccn_limit}")
         if finding.over_length:
             reasons.append(f"length {finding.record.length} > {finding.length_limit}")
+        if finding.flex_slice_claim is not None:
+            reasons.append(render_flex_slice_claim_redirect(finding.flex_slice_claim))
         lines.append(
             f"  FAIL  {finding.record.path}:{finding.record.function_name}: "
             f"{'; '.join(reasons)}"
+        )
+    if any(finding.flex_slice_claim is not None for finding in findings):
+        lines.append(
+            "  peer-held flex slices redirect duplicate refactors; keep changes "
+            "append-only or move to another seam"
         )
     return "\n".join(lines)

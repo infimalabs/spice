@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from spice.flexstate import (
+    FlexSliceClaim,
+    claim_flex_slice_paths,
     git_state_path,
     load_sticky_items,
+    render_flex_slice_claim_redirect,
     save_sticky_items,
-    sticky_items_after_flex_breaches,
     sticky_paths_after_renames,
 )
 from spice.policy import REPO_TRUTH_DOCS
@@ -21,25 +24,54 @@ REPO_DOC_CHAR_STICKY_VERSION = 1
 REPO_DOC_CHAR_STICKY_STATE_GIT_PATH = "spice/repo-doc-chars-sticky.json"
 
 
+@dataclass(frozen=True)
+class RepoTruthDocFinding:
+    path: Path
+    char_count: int
+    limit: int
+    flex_slice_claim: FlexSliceClaim | None = None
+
+
 def repo_truth_docs(repo_root: Path) -> list[str]:
     declared = string_list(policy_table(repo_root).get("repo_truth_docs"))
     return declared or list(REPO_TRUTH_DOCS)
 
 
-def repo_truth_doc_violations(repo_root: Path, *, persist: bool = False) -> list[str]:
-    """Return one ``name: count characters (cap N)`` line per over-cap doc."""
-    over: list[str] = []
+def repo_truth_doc_findings(
+    repo_root: Path,
+    *,
+    persist: bool = False,
+    flex_actor: str = "",
+    flex_claim_now: float | None = None,
+) -> list[RepoTruthDocFinding]:
     resolved = resolve_policy(repo_root)
     paths = repo_truth_doc_candidate_paths(repo_root, resolved)
+    renames = _staged_renames_or_empty(repo_root)
     loaded_sticky = sticky_paths_after_renames(
         _load_repo_doc_char_sticky(repo_root),
-        _staged_renames_or_empty(repo_root),
+        renames,
     )
-    updated_sticky = _repo_doc_char_sticky_after_flex_breaches(
-        paths, loaded_sticky, repo_root=repo_root, resolved=resolved
-    )
+    flex_breaches = {
+        path
+        for path in paths
+        if _repo_doc_path_breaches_flex(path, repo_root=repo_root, resolved=resolved)
+    }
+    updated_sticky = loaded_sticky | flex_breaches
     if persist and updated_sticky != loaded_sticky:
         _save_repo_doc_char_sticky(updated_sticky, repo_root)
+    claim_decisions = claim_flex_slice_paths(
+        flex_breaches,
+        root=repo_root,
+        actor=flex_actor,
+        renames=renames,
+        now=flex_claim_now,
+    )
+    peer_claims = {
+        path: decision.claim
+        for path, decision in claim_decisions.items()
+        if decision.peer_held
+    }
+    findings: list[RepoTruthDocFinding] = []
     for rel_path in paths:
         count = _doc_char_count(repo_root / rel_path)
         if count is None:
@@ -53,8 +85,38 @@ def repo_truth_doc_violations(repo_root: Path, *, persist: bool = False) -> list
             continue
         limit = scoped.limit if rel_path in updated_sticky else scoped.flex_limit
         if count > limit:
-            over.append(f"  {rel_path.as_posix()}: {count} characters (cap {limit})")
-    return over
+            findings.append(
+                RepoTruthDocFinding(
+                    path=rel_path,
+                    char_count=count,
+                    limit=limit,
+                    flex_slice_claim=peer_claims.get(rel_path),
+                )
+            )
+    return findings
+
+
+def render_repo_truth_doc_lines(findings: list[RepoTruthDocFinding]) -> list[str]:
+    lines: list[str] = []
+    for finding in findings:
+        details = f"{finding.char_count} characters (cap {finding.limit}"
+        if finding.flex_slice_claim is not None:
+            details += "; " + render_flex_slice_claim_redirect(finding.flex_slice_claim)
+        lines.append(f"  {finding.path.as_posix()}: {details})")
+    return lines
+
+
+def render_repo_truth_doc_guard_error(findings: list[RepoTruthDocFinding]) -> str:
+    if not findings:
+        return "repo-truth docs: ok"
+    if all(finding.flex_slice_claim is not None for finding in findings):
+        header = (
+            "repo-truth docs hit peer-held flex slices; keep this change "
+            "append-only or move to another seam:"
+        )
+    else:
+        header = "repo-truth docs exceed the character cap; tighten the doctrine:"
+    return header + "\n" + "\n".join(render_repo_truth_doc_lines(findings))
 
 
 def clear_repo_truth_doc_sticky_state(
@@ -148,23 +210,6 @@ def _save_repo_doc_char_sticky(paths: set[Path], repo_root: Path) -> None:
         )
     except subprocess.CalledProcessError:
         return
-
-
-def _repo_doc_char_sticky_after_flex_breaches(
-    paths: list[Path],
-    sticky_paths: set[Path],
-    *,
-    repo_root: Path,
-    resolved: ResolvedPolicy,
-) -> set[Path]:
-    return sticky_items_after_flex_breaches(
-        paths,
-        sticky_paths,
-        key_for_item=lambda path: path,
-        is_breach=lambda path: _repo_doc_path_breaches_flex(
-            path, repo_root=repo_root, resolved=resolved
-        ),
-    )
 
 
 def _repo_doc_path_breaches_flex(

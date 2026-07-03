@@ -16,14 +16,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Mapping, Protocol
 
 from spice.flexstate import (
+    FlexSliceClaim,
+    claim_flex_slice_paths,
     flex_limit,
     git_state_path,
     load_sticky_items,
+    render_flex_slice_claim_redirect,
     save_sticky_items,
-    sticky_items_after_flex_breaches,
     sticky_paths_after_renames,
 )
 from spice.policy import (
@@ -50,6 +52,7 @@ class LocFinding:
     over_byte_limit: bool
     line_limit: int
     byte_limit: int
+    flex_slice_claim: FlexSliceClaim | None = None
 
 
 class FileShapeBounds(Protocol):
@@ -80,6 +83,21 @@ class _DefaultFileShapeBounds:
     byte_flex_limit: int
     line_unlimited: bool = False
     byte_unlimited: bool = False
+
+
+@dataclass(frozen=True)
+class _FileShapeScanConfig:
+    line_limit: int
+    line_flex: int
+    byte_limit: int
+    byte_flex: int
+    bounds_for_path: Callable[[Path], FileShapeBounds] | None
+    resolve_bounds: Callable[[Path], FileShapeBounds]
+    source_suffixes: tuple[str, ...]
+    generated_patterns: tuple[str, ...]
+    repo_doc_paths: set[Path]
+    lockfile_suffixes: tuple[str, ...]
+    lockfile_names: tuple[str, ...]
 
 
 def count_file_lines(path: Path) -> int:
@@ -231,17 +249,50 @@ def scan_staged_loc_violations(
     lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
     lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
     persist: bool = False,
+    flex_actor: str = "",
+    flex_claim_now: float | None = None,
 ) -> list[LocFinding]:
     """Scan staged paths against the flex+sticky line/byte limits.
 
-    New flex breaches are folded into the sticky set used to compute this
-    call's findings. Persisting that set to the git dir is the committing
-    gate's job and is **opt-in**: pass ``persist=True`` (the gate does). A
-    reporting or study caller leaves it ``False`` so the scan is a pure query
-    that never advances shared sticky state. The gate must pair a
-    ``persist=True`` scan with ``clear_file_loc_sticky_state`` on success — the
-    scan ratchets the set up; the clear prunes it down once the tree passes.
+    ``persist`` writes sticky state for the committing gate; ``flex_actor``
+    separately records or honors live flex slice claims for flex-breaching
+    paths. Leave ``flex_actor`` empty for read-only scans.
     """
+    config = _file_shape_scan_config(
+        limit=limit,
+        flex_limit_value=flex_limit_value,
+        byte_limit=byte_limit,
+        byte_flex_limit_value=byte_flex_limit_value,
+        bounds_for_path=bounds_for_path,
+        source_suffixes=source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths=repo_doc_paths,
+        lockfile_suffixes=lockfile_suffixes,
+        lockfile_names=lockfile_names,
+    )
+    return _scan_staged_file_shape(
+        paths,
+        root=root,
+        config=config,
+        persist=persist,
+        flex_actor=flex_actor,
+        flex_claim_now=flex_claim_now,
+    )
+
+
+def _file_shape_scan_config(
+    *,
+    limit: int,
+    flex_limit_value: int | None,
+    byte_limit: int,
+    byte_flex_limit_value: int | None,
+    bounds_for_path: Callable[[Path], FileShapeBounds] | None,
+    source_suffixes: tuple[str, ...],
+    generated_patterns: tuple[str, ...],
+    repo_doc_paths: set[Path] | frozenset[Path] | None,
+    lockfile_suffixes: tuple[str, ...],
+    lockfile_names: tuple[str, ...],
+) -> _FileShapeScanConfig:
     line_flex = flex_limit_value if flex_limit_value is not None else flex_limit(limit)
     byte_flex = (
         byte_flex_limit_value
@@ -254,9 +305,100 @@ def scan_staged_loc_violations(
         byte_limit=byte_limit,
         byte_flex_limit=byte_flex,
     )
-    resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
-    repo_doc_path_set = {_repo_path(path) for path in repo_doc_paths or set()}
+    return _FileShapeScanConfig(
+        line_limit=limit,
+        line_flex=line_flex,
+        byte_limit=byte_limit,
+        byte_flex=byte_flex,
+        bounds_for_path=bounds_for_path,
+        resolve_bounds=bounds_for_path or (lambda _path: default_bounds),
+        source_suffixes=source_suffixes,
+        generated_patterns=generated_patterns,
+        repo_doc_paths={_repo_path(path) for path in repo_doc_paths or set()},
+        lockfile_suffixes=lockfile_suffixes,
+        lockfile_names=lockfile_names,
+    )
+
+
+def _scan_staged_file_shape(
+    paths: list[Path],
+    *,
+    root: Path,
+    config: _FileShapeScanConfig,
+    persist: bool,
+    flex_actor: str,
+    flex_claim_now: float | None,
+) -> list[LocFinding]:
     renames = staged_renames(root)
+    loaded_line_sticky, loaded_byte_sticky, line_sticky, byte_sticky = (
+        _current_file_shape_sticky(root=root, renames=renames, config=config)
+    )
+    line_breaches, byte_breaches = _file_shape_breach_sets(
+        paths,
+        root=root,
+        config=config,
+    )
+    updated_line_sticky = line_sticky | line_breaches
+    updated_byte_sticky = byte_sticky | byte_breaches
+    if persist:
+        _save_file_shape_sticky(
+            root=root,
+            loaded_line_sticky=loaded_line_sticky,
+            loaded_byte_sticky=loaded_byte_sticky,
+            updated_line_sticky=updated_line_sticky,
+            updated_byte_sticky=updated_byte_sticky,
+        )
+    peer_claims = _peer_flex_slice_claims(
+        line_breaches | byte_breaches,
+        root=root,
+        actor=flex_actor,
+        renames=renames,
+        now=flex_claim_now,
+    )
+    return _scan_file_shape_findings(
+        paths,
+        root=root,
+        config=config,
+        updated_line_sticky=updated_line_sticky,
+        updated_byte_sticky=updated_byte_sticky,
+        peer_claims=peer_claims,
+    )
+
+
+def _scan_file_shape_findings(
+    paths: list[Path],
+    *,
+    root: Path,
+    config: _FileShapeScanConfig,
+    updated_line_sticky: set[Path],
+    updated_byte_sticky: set[Path],
+    peer_claims: dict[Path, FlexSliceClaim],
+) -> list[LocFinding]:
+    return scan_loc_violations(
+        paths,
+        root=root,
+        limit=config.line_limit,
+        flex_limit_value=config.line_flex,
+        byte_limit=config.byte_limit,
+        byte_flex_limit_value=config.byte_flex,
+        source_suffixes=config.source_suffixes,
+        generated_patterns=config.generated_patterns,
+        repo_doc_paths=config.repo_doc_paths,
+        lockfile_suffixes=config.lockfile_suffixes,
+        lockfile_names=config.lockfile_names,
+        sticky_paths=updated_line_sticky,
+        byte_sticky_paths=updated_byte_sticky,
+        bounds_for_path=config.bounds_for_path,
+        flex_slice_claims=peer_claims,
+    )
+
+
+def _current_file_shape_sticky(
+    *,
+    root: Path,
+    renames: dict[Path, Path],
+    config: _FileShapeScanConfig,
+) -> tuple[set[Path], set[Path], set[Path], set[Path]]:
     loaded_line_sticky = sticky_paths_after_renames(
         _load_sticky(root, FILE_LOC_STICKY_STATE_GIT_PATH), renames
     )
@@ -266,75 +408,97 @@ def scan_staged_loc_violations(
     line_sticky = _drop_unscanned_file_shape_paths(
         loaded_line_sticky,
         root=root,
-        source_suffixes=source_suffixes,
-        generated_patterns=generated_patterns,
-        repo_doc_paths=repo_doc_path_set,
-        lockfile_suffixes=lockfile_suffixes,
-        lockfile_names=lockfile_names,
+        source_suffixes=config.source_suffixes,
+        generated_patterns=config.generated_patterns,
+        repo_doc_paths=config.repo_doc_paths,
+        lockfile_suffixes=config.lockfile_suffixes,
+        lockfile_names=config.lockfile_names,
     )
     byte_sticky = _drop_unscanned_file_shape_paths(
         loaded_byte_sticky,
         root=root,
-        source_suffixes=source_suffixes,
-        generated_patterns=generated_patterns,
-        repo_doc_paths=repo_doc_path_set,
-        lockfile_suffixes=lockfile_suffixes,
-        lockfile_names=lockfile_names,
+        source_suffixes=config.source_suffixes,
+        generated_patterns=config.generated_patterns,
+        repo_doc_paths=config.repo_doc_paths,
+        lockfile_suffixes=config.lockfile_suffixes,
+        lockfile_names=config.lockfile_names,
     )
-    updated_line_sticky = _after_breaches(
-        paths,
-        line_sticky,
-        root=root,
-        flex=line_flex,
-        measure=count_file_lines,
-        flex_for_path=lambda path: resolve_bounds(path).line_flex_limit,
-        unlimited_for_path=lambda path: resolve_bounds(path).line_unlimited,
-        source_suffixes=source_suffixes,
-        generated_patterns=generated_patterns,
-        repo_doc_paths=repo_doc_path_set,
-        lockfile_suffixes=lockfile_suffixes,
-        lockfile_names=lockfile_names,
-    )
-    updated_byte_sticky = _after_breaches(
-        paths,
-        byte_sticky,
-        root=root,
-        flex=byte_flex,
-        measure=count_file_bytes,
-        flex_for_path=lambda path: resolve_bounds(path).byte_flex_limit,
-        unlimited_for_path=lambda path: resolve_bounds(path).byte_unlimited,
-        source_suffixes=source_suffixes,
-        generated_patterns=generated_patterns,
-        repo_doc_paths=repo_doc_path_set,
-        lockfile_suffixes=lockfile_suffixes,
-        lockfile_names=lockfile_names,
-    )
-    if persist:
-        if updated_line_sticky != loaded_line_sticky:
-            _save_sticky(updated_line_sticky, root, FILE_LOC_STICKY_STATE_GIT_PATH)
-        if updated_byte_sticky != loaded_byte_sticky:
-            _save_sticky(updated_byte_sticky, root, FILE_BYTE_STICKY_STATE_GIT_PATH)
-    return scan_loc_violations(
-        paths,
-        root=root,
-        limit=limit,
-        flex_limit_value=line_flex,
-        byte_limit=byte_limit,
-        byte_flex_limit_value=byte_flex,
-        source_suffixes=source_suffixes,
-        generated_patterns=generated_patterns,
-        repo_doc_paths=repo_doc_path_set,
-        lockfile_suffixes=lockfile_suffixes,
-        lockfile_names=lockfile_names,
-        sticky_paths=updated_line_sticky,
-        byte_sticky_paths=updated_byte_sticky,
-        bounds_for_path=bounds_for_path,
-    )
+    return loaded_line_sticky, loaded_byte_sticky, line_sticky, byte_sticky
 
 
-def _after_breaches(
+def _save_file_shape_sticky(
+    *,
+    root: Path,
+    loaded_line_sticky: set[Path],
+    loaded_byte_sticky: set[Path],
+    updated_line_sticky: set[Path],
+    updated_byte_sticky: set[Path],
+) -> None:
+    if updated_line_sticky != loaded_line_sticky:
+        _save_sticky(updated_line_sticky, root, FILE_LOC_STICKY_STATE_GIT_PATH)
+    if updated_byte_sticky != loaded_byte_sticky:
+        _save_sticky(updated_byte_sticky, root, FILE_BYTE_STICKY_STATE_GIT_PATH)
+
+
+def _file_shape_breach_sets(
     paths: list[Path],
-    sticky: set[Path],
+    *,
+    root: Path,
+    config: _FileShapeScanConfig,
+) -> tuple[set[Path], set[Path]]:
+    line_breaches = _breach_paths(
+        paths,
+        root=root,
+        flex=config.line_flex,
+        measure=count_file_lines,
+        flex_for_path=lambda path: config.resolve_bounds(path).line_flex_limit,
+        unlimited_for_path=lambda path: config.resolve_bounds(path).line_unlimited,
+        source_suffixes=config.source_suffixes,
+        generated_patterns=config.generated_patterns,
+        repo_doc_paths=config.repo_doc_paths,
+        lockfile_suffixes=config.lockfile_suffixes,
+        lockfile_names=config.lockfile_names,
+    )
+    byte_breaches = _breach_paths(
+        paths,
+        root=root,
+        flex=config.byte_flex,
+        measure=count_file_bytes,
+        flex_for_path=lambda path: config.resolve_bounds(path).byte_flex_limit,
+        unlimited_for_path=lambda path: config.resolve_bounds(path).byte_unlimited,
+        source_suffixes=config.source_suffixes,
+        generated_patterns=config.generated_patterns,
+        repo_doc_paths=config.repo_doc_paths,
+        lockfile_suffixes=config.lockfile_suffixes,
+        lockfile_names=config.lockfile_names,
+    )
+    return line_breaches, byte_breaches
+
+
+def _peer_flex_slice_claims(
+    paths: set[Path],
+    *,
+    root: Path,
+    actor: str,
+    renames: dict[Path, Path],
+    now: float | None,
+) -> dict[Path, FlexSliceClaim]:
+    claim_decisions = claim_flex_slice_paths(
+        paths,
+        root=root,
+        actor=actor,
+        renames=renames,
+        now=now,
+    )
+    return {
+        path: decision.claim
+        for path, decision in claim_decisions.items()
+        if decision.peer_held
+    }
+
+
+def _breach_paths(
+    paths: list[Path],
     *,
     root: Path,
     flex: int,
@@ -347,8 +511,9 @@ def _after_breaches(
     lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
     lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
 ) -> set[Path]:
-    return sticky_items_after_flex_breaches(
-        [
+    return {
+        rel_path
+        for rel_path in [
             _repo_path(path)
             for path in paths
             if _is_file_shape_candidate(
@@ -360,18 +525,14 @@ def _after_breaches(
                 lockfile_suffixes=lockfile_suffixes,
                 lockfile_names=lockfile_names,
             )
-        ],
-        sticky,
-        key_for_item=lambda path: path,
-        is_breach=lambda path: (
-            (root / path).exists()
-            and not (
-                unlimited_for_path(path) if unlimited_for_path is not None else False
-            )
-            and measure(root / path)
-            > (flex_for_path(path) if flex_for_path is not None else flex)
-        ),
-    )
+        ]
+        if (root / rel_path).exists()
+        and not (
+            unlimited_for_path(rel_path) if unlimited_for_path is not None else False
+        )
+        and measure(root / rel_path)
+        > (flex_for_path(rel_path) if flex_for_path is not None else flex)
+    }
 
 
 def scan_loc_violations(
@@ -390,6 +551,7 @@ def scan_loc_violations(
     sticky_paths: set[Path] | None = None,
     byte_sticky_paths: set[Path] | None = None,
     bounds_for_path: Callable[[Path], FileShapeBounds] | None = None,
+    flex_slice_claims: Mapping[Path, FlexSliceClaim] | None = None,
 ) -> list[LocFinding]:
     findings: list[LocFinding] = []
     line_flex = flex_limit_value if flex_limit_value is not None else flex_limit(limit)
@@ -407,6 +569,9 @@ def scan_loc_violations(
     resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
     sticky_paths = sticky_paths or set()
     byte_sticky_paths = byte_sticky_paths or set()
+    flex_slice_claims = {
+        _repo_path(path): claim for path, claim in (flex_slice_claims or {}).items()
+    }
     repo_doc_path_set = {_repo_path(path) for path in repo_doc_paths or set()}
     for rel_path in paths:
         rel_path = _repo_path(rel_path)
@@ -447,6 +612,7 @@ def scan_loc_violations(
                 over_byte_limit=over_bytes,
                 line_limit=active_line_limit,
                 byte_limit=active_byte_limit,
+                flex_slice_claim=flex_slice_claims.get(rel_path),
             )
         )
     return findings
@@ -579,9 +745,17 @@ def render_loc_board(
             reasons.append(f"{finding.line_count} lines > {finding.line_limit}")
         if finding.over_byte_limit:
             reasons.append(f"{finding.byte_count} bytes > {finding.byte_limit}")
+        if finding.flex_slice_claim is not None:
+            reasons.append(render_flex_slice_claim_redirect(finding.flex_slice_claim))
         lines.append(f"  FAIL  {finding.path}: {'; '.join(reasons)}")
-    lines.append(
-        "  a file that breached flex stays held to the base limit until it "
-        "shrinks back under it; split by naming the seam"
-    )
+    if any(finding.flex_slice_claim is None for finding in findings):
+        lines.append(
+            "  a file that breached flex stays held to the base limit until it "
+            "shrinks back under it; split by naming the seam"
+        )
+    if any(finding.flex_slice_claim is not None for finding in findings):
+        lines.append(
+            "  peer-held flex slices redirect duplicate refactors; keep changes "
+            "append-only or move to another seam"
+        )
     return "\n".join(lines)
