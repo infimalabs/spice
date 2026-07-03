@@ -10,9 +10,19 @@ const masonryMeasuredWidths = Object.keys(masonryColumnFloorByWidth).map(Number)
 const masonryScreenshotWidths = [900, 1280, 1920];
 const masonryFixturePlan = {
   ackCardStep: 20,
+  baseIso: "2026-07-03T10:04:00.000Z",
+  epilogueMinute: 320,
   finalCardStep: 17,
   segmentCardCount: 12,
 };
+// The fixture crosses 11:00 right after the compaction divider (rule
+// suppressed), 12:00 and 13:00 mid-stream (one rule each), then jumps
+// multiple hours to the epilogue card (one collapsed rule at 15:00).
+const masonryExpectedRuleIsos = [
+  "2026-07-03T12:00:00.000Z",
+  "2026-07-03T13:00:00.000Z",
+  "2026-07-03T15:00:00.000Z",
+];
 
 async function run(screenshotDir) {
   return withServePage(
@@ -70,6 +80,7 @@ async function measureMasonry(page, width) {
   await page.setViewportSize({ width, height: 1400 });
   return page.evaluate(renderMasonryFixture, {
     expectedColumns: masonryColumnFloorByWidth[width] || 1,
+    expectedRuleIsos: masonryExpectedRuleIsos,
     plan: masonryFixturePlan,
     width,
   });
@@ -81,12 +92,20 @@ async function renderMasonryFixture(config) {
   const host = lane.messagesEl || document.querySelector(".messages");
   if (!host) throw new Error("message host unavailable");
   host
-    .querySelectorAll("article[data-message-key], .compaction-divider")
+    .querySelectorAll("article[data-message-key], .compaction-divider, .time-rule")
     .forEach((node) => node.remove());
   const nodes = [];
+  let previousItem = null;
   for (const item of masonrySmokeItems(config)) {
     const node = renderMessage(lane, item);
     if (!node) continue;
+    const rule = timeRuleBetween(previousItem, item);
+    if (rule) {
+      rule.dataset.masonrySmoke = "rule";
+      rule.dataset.masonrySmokeIndex = String(item.index - 0.5);
+      nodes.push(rule);
+    }
+    previousItem = item;
     node.dataset.masonrySmoke = item.kind === "compaction" ? "divider" : "card";
     node.dataset.masonrySmokeIndex = String(item.index);
     nodes.push(node);
@@ -119,7 +138,7 @@ function masonrySmokeUseSingleLane(activeLane) {
 // tall, and code-block bodies so the packer sees realistic spread.
 function masonrySmokeItems(config) {
   const plan = config.plan;
-  const base = Date.parse("2026-07-03T10:04:00.000Z");
+  const base = Date.parse(plan.baseIso);
   const shapes = ["short", "medium", "tall", "short", "code", "medium"];
   const items = [];
   let index = 0;
@@ -162,6 +181,11 @@ function masonrySmokeItems(config) {
       text: "masonry card " + step,
     });
   }
+  push("assistant", plan.epilogueMinute, {
+    display_html: masonrySmokeBodyHtml("short", plan.segmentCardCount * 2),
+    display_text: "masonry epilogue card",
+    text: "masonry epilogue card",
+  });
   return items;
 }
 
@@ -202,8 +226,34 @@ async function masonrySmokeMeasurement(lane, host, config) {
   }));
   const hostStyle = getComputedStyle(host);
   const hostRect = masonrySmokeRect(host);
+  const hostInnerWidth =
+    hostRect.width -
+    Number.parseFloat(hostStyle.paddingLeft) -
+    Number.parseFloat(hostStyle.paddingRight);
   const columnAudit = masonrySmokeColumnAudit(cardRects);
   const columnRecovery = await masonrySmokeColumnRecovery(lane, cards);
+  const ruleAudits = Array.from(
+    host.querySelectorAll('[data-masonry-smoke="rule"]'),
+  ).map((rule) => {
+    const rect = masonrySmokeRect(rule);
+    const ruleIndex = Number(rule.dataset.masonrySmokeIndex);
+    return {
+      fillRatio: rect.width / hostInnerWidth,
+      iso: rule.querySelector("time")?.dateTime || "",
+      maxCardBottomAbove: Math.max(
+        ...cardRects
+          .filter((card) => card.index < ruleIndex)
+          .map((card) => card.rect.top + card.rect.height),
+      ),
+      minCardTopBelow: Math.min(
+        ...cardRects
+          .filter((card) => card.index > ruleIndex)
+          .map((card) => card.rect.top),
+      ),
+      bottom: rect.top + rect.height,
+      top: rect.top,
+    };
+  });
   return {
     columnAudit,
     columnRecovery,
@@ -224,10 +274,14 @@ async function masonrySmokeMeasurement(lane, host, config) {
       new Set(cardRects.map((card) => Math.round(card.left))),
     ).length,
     expectedColumns: config.expectedColumns,
+    expectedRuleIsos: config.expectedRuleIsos,
     hostDisplay: hostStyle.display,
     missingTimestampStamps: Array.from(
-      host.querySelectorAll("article[data-message-key], .compaction-divider"),
+      host.querySelectorAll(
+        "article[data-message-key], .compaction-divider, .time-rule",
+      ),
     ).filter((node) => !node.dataset.messageTs).length,
+    ruleAudits,
     spans: cardRects.map((card) => card.span),
     viewportWidth: config.width,
   };
@@ -303,6 +357,22 @@ function assertMasonryMeasurement(measurement) {
     throw new Error("post-compaction card floated above the barrier" + label + JSON.stringify(measurement));
   if (!measurement.columnAudit.chronological)
     throw new Error("column order is not chronological" + label + JSON.stringify(measurement));
+  const ruleIsos = measurement.ruleAudits.map((rule) => rule.iso);
+  if (JSON.stringify(ruleIsos) !== JSON.stringify(measurement.expectedRuleIsos))
+    throw new Error(
+      "time rules mismatch (suppression or collapse broken): " +
+        JSON.stringify(ruleIsos) +
+        label +
+        JSON.stringify(measurement),
+    );
+  for (const rule of measurement.ruleAudits) {
+    if (rule.fillRatio < 0.98)
+      throw new Error("time rule is not full width" + label + JSON.stringify(measurement));
+    if (rule.maxCardBottomAbove > rule.top + 1)
+      throw new Error("card crossed a time-rule barrier from above" + label + JSON.stringify(measurement));
+    if (rule.minCardTopBelow < rule.bottom - 1)
+      throw new Error("card floated above a time-rule barrier" + label + JSON.stringify(measurement));
+  }
   const expectedColumns = measurement.expectedColumns;
   if (measurement.distinctColumnLefts < expectedColumns)
     throw new Error(

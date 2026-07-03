@@ -996,6 +996,32 @@ function renderCompactionDivider(lane, item) {
   return divider;
 }
 
+// Hour-bucket rule: absolute time only, no relative refresh — the label is a
+// fixed anchor the operator aligns against, not a drifting age.
+function renderTimeRule(bucketStartMs) {
+  const rule = document.createElement("div");
+  rule.className = "time-rule";
+  rule.dataset.messageTs = String(bucketStartMs);
+  const date = new Date(bucketStartMs);
+  const time = document.createElement("time");
+  time.dateTime = date.toISOString();
+  time.textContent = timeRuleLabel(date);
+  rule.append(time);
+  return rule;
+}
+
+function timeRuleLabel(date) {
+  const sameDay = date.toDateString() === new Date().toDateString();
+  if (sameDay)
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return date.toLocaleString([], {
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short",
+  });
+}
+
 function compactionAgentLabel(lane, item) {
   return (
     agentNameForThread(item.threadId || "") ||
