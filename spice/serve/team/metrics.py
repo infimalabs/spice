@@ -612,6 +612,11 @@ class TeamMetricStoreMixin:
             for claim in claims
         )
 
+    def task_phase_effort_windows(self: _TeamMetricStore, task_rows: Iterable[dict]):
+        from spice.tasks.effort import phase_effort_windows_for_tasks
+
+        return phase_effort_windows_for_tasks(task_rows, store=self)
+
     def _prune_metric_history_locked(
         self: _TeamMetricStore, connection: sqlite3.Connection, *, now: float
     ) -> None:
