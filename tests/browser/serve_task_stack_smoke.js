@@ -29,6 +29,8 @@ async function installTaskStackSmokeHelpers(page) {
     content: [
       renderTaskStackFixture,
       taskStackSmokeLane,
+      taskStackSmokeUseSingleLane,
+      taskStackSmokeMessageArticles,
       taskStackSmokeTaskHtml,
       taskStackSmokeImageHtml,
       taskStackSmokeImagesReady,
@@ -46,9 +48,11 @@ async function measureTaskStack(page, width) {
 
 async function renderTaskStackFixture(config) {
   const lane = taskStackSmokeLane();
-  const host = document.querySelector(".messages");
+  taskStackSmokeUseSingleLane(lane);
+  const host = lane.messagesEl || document.querySelector(".messages");
   if (!host) throw new Error("message host unavailable");
   host.querySelectorAll("[data-task-stack-smoke]").forEach((node) => node.remove());
+  const messageArticles = taskStackSmokeMessageArticles(lane, config.width);
   const taskArticle = renderMessage(lane, {
     ack_count: 0,
     ack_keys: [],
@@ -72,10 +76,12 @@ async function renderTaskStackFixture(config) {
     text: "image stack smoke",
     timestamp: new Date().toISOString(),
   });
+  for (const article of messageArticles) {
+    article.dataset.taskStackSmoke = "message-card";
+  }
   taskArticle.dataset.taskStackSmoke = "task";
   imageArticle.dataset.taskStackSmoke = "image";
-  host.prepend(imageArticle);
-  host.prepend(taskArticle);
+  host.prepend(...messageArticles, taskArticle, imageArticle);
   await taskStackSmokeImagesReady(imageArticle);
   await new Promise((resolve) => requestAnimationFrame(resolve));
   await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -85,6 +91,14 @@ async function renderTaskStackFixture(config) {
   const cards = Array.from(
     taskArticle.querySelectorAll(".task-directive-stack .task-directive-quote"),
   ).map((card) => taskStackSmokeRect(card));
+  const messageCards = Array.from(
+    host.querySelectorAll('[data-task-stack-smoke="message-card"]'),
+  ).map((card) => taskStackSmokeRect(card));
+  const firstRowMessageCards = messageCards.filter(
+    (card) => Math.abs(card.top - messageCards[0].top) < 2,
+  );
+  const rootFontSize =
+    Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
   return {
     cardWidths: cards.map((card) => card.width),
     firstRowCount: cards.filter(
@@ -92,6 +106,17 @@ async function renderTaskStackFixture(config) {
     ).length,
     imageStackDisplay: getComputedStyle(imageStack).display,
     imageWidth: taskStackSmokeRect(image).width,
+    messageCardDisplays: Array.from(
+      host.querySelectorAll('[data-task-stack-smoke="message-card"]'),
+    ).map((card) => getComputedStyle(card).display),
+    messageCardFirstRowCount: firstRowMessageCards.length,
+    messageCardFirstRowHeights: firstRowMessageCards.map((card) => card.height),
+    messageCardFloor: rootFontSize * 20,
+    messageCardLimit: rootFontSize * 30,
+    messageCardRowCount: new Set(
+      messageCards.map((card) => Math.round(card.top)),
+    ).size,
+    messageCardWidths: messageCards.map((card) => card.width),
     rowCount: new Set(cards.map((card) => Math.round(card.top))).size,
     stackDisplay: getComputedStyle(stack).display,
     viewportWidth: config.width,
@@ -106,6 +131,56 @@ function taskStackSmokeLane() {
   }
   if (!lane) throw new Error("no lane available for task stack smoke");
   return lane;
+}
+
+function taskStackSmokeUseSingleLane(activeLane) {
+  for (const lane of laneStates.values()) {
+    lane.element.style.display = lane === activeLane ? "" : "none";
+  }
+}
+
+function taskStackSmokeMessageArticles(lane, width) {
+  const timestamp = new Date().toISOString();
+  return [
+    {
+      display_html: "<p>Short card.</p>",
+      display_text: "Short card.",
+      key: "message-card-short-" + width,
+      kind: "assistant",
+      text: "Short card.",
+    },
+    {
+      display_html:
+        "<p>Longer card body with enough text to define the row height.</p>" +
+        "<p>It should make neighboring cards stretch to the same row height.</p>",
+      display_text:
+        "Longer card body with enough text to define the row height. " +
+        "It should make neighboring cards stretch to the same row height.",
+      key: "message-card-final-" + width,
+      kind: "final",
+      text: "Longer card body.",
+    },
+    {
+      ack_count: 1,
+      display_html: "<p>Acked card.</p>",
+      display_text: "Acked card.",
+      key: "message-card-acked-" + width,
+      kind: "assistant",
+      text: "Acked card.",
+    },
+  ].map((item, index) =>
+    renderMessage(lane, {
+      ack_count: item.ack_count || 0,
+      ack_keys: [],
+      display_html: item.display_html,
+      display_text: item.display_text,
+      index: 10 + index,
+      key: item.key,
+      kind: item.kind,
+      text: item.text,
+      timestamp,
+    }),
+  );
 }
 
 function taskStackSmokeTaskHtml() {
@@ -172,21 +247,41 @@ function taskStackSmokeRect(element) {
 }
 
 function assertTaskStackMeasurement(measurement, options) {
-  if (measurement.stackDisplay !== "flex")
-    throw new Error("task stack is not flex: " + JSON.stringify(measurement));
+  if (measurement.stackDisplay !== "grid")
+    throw new Error("task stack is not grid: " + JSON.stringify(measurement));
   if (measurement.imageStackDisplay !== "flex")
     throw new Error("image stack control is not flex: " + JSON.stringify(measurement));
   const imageTileWidth = Math.max(measurement.imageWidth, 156);
+  const minCardWidth = Math.max(measurement.messageCardFloor, imageTileWidth * 2);
+  const maxCardWidth = measurement.messageCardLimit;
   for (const width of measurement.cardWidths) {
-    if (width + 2 < imageTileWidth * 2)
-      throw new Error("task card below 2x image width: " + JSON.stringify(measurement));
-    if (width - 2 > imageTileWidth * 3)
-      throw new Error("task card above 3x image width: " + JSON.stringify(measurement));
+    if (width + 2 < minCardWidth)
+      throw new Error("task card below card min width: " + JSON.stringify(measurement));
+    if (width - 2 > maxCardWidth)
+      throw new Error("task card above card max width: " + JSON.stringify(measurement));
+  }
+  if (!measurement.messageCardDisplays.every((display) => display === "flex"))
+    throw new Error("message cards are not flex: " + JSON.stringify(measurement));
+  for (const width of measurement.messageCardWidths) {
+    if (width + 2 < minCardWidth)
+      throw new Error("message card below card min width: " + JSON.stringify(measurement));
+    if (width - 2 > maxCardWidth)
+      throw new Error("message card above card max width: " + JSON.stringify(measurement));
   }
   if (!options.wraps && measurement.firstRowCount < 2)
     throw new Error("wide task cards did not share a row: " + JSON.stringify(measurement));
   if (options.wraps && measurement.rowCount < 2)
     throw new Error("narrow task cards did not wrap: " + JSON.stringify(measurement));
+  if (!options.wraps && measurement.messageCardFirstRowCount < 2)
+    throw new Error("wide message cards did not share a row: " + JSON.stringify(measurement));
+  if (options.wraps && measurement.messageCardRowCount < 2)
+    throw new Error("narrow message cards did not wrap: " + JSON.stringify(measurement));
+  if (!options.wraps) {
+    const heights = measurement.messageCardFirstRowHeights;
+    const spread = Math.max(...heights) - Math.min(...heights);
+    if (spread > 2)
+      throw new Error("message cards did not stretch to row height: " + JSON.stringify(measurement));
+  }
 }
 
 if (require.main === module) {

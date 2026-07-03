@@ -219,10 +219,18 @@ def test_static_messages_use_compact_image_grid():
     stack_image_end = css.index("}", stack_image_start)
     stack_image_rule = css[stack_image_start:stack_image_end]
 
+    assert "--message-card-max-width: 30rem;" in messages_rule
+    assert "--message-card-min-width: 20rem;" in messages_rule
+    assert "--message-image-tile-width: 156px;" in messages_rule
+    assert "grid-auto-flow: row dense;" in messages_rule
     assert "grid-template-columns: repeat(" in css
     assert "direction: rtl;" in messages_rule
-    assert "minmax(156px, 1fr)" in messages_rule
+    assert "minmax(var(--message-image-tile-width), 1fr)" in messages_rule
     assert "overflow-x: auto;" in messages_rule
+    assert "display: flex;" in article_rule
+    assert "flex-direction: column;" in article_rule
+    assert "grid-column: span var(--message-card-grid-span);" in article_rule
+    assert "max-width: min(100%, var(--message-card-max-width));" in article_rule
     assert "direction: ltr;" in article_rule
     assert ".messages article.image-only" in css
     assert "grid-column: span 1" in css

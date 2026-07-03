@@ -169,10 +169,15 @@ def test_serve_task_stack_smoke_asserts_card_widths() -> None:
     assert "withServePage(" in smoke
     assert "task-directive-stack" in smoke
     assert "message-image-stack" in smoke
+    assert "messageCardLimit" in smoke
+    assert "messageCardFloor" in smoke
+    assert "messageCardFirstRowHeights" in smoke
     assert "measureTaskStack(page, 1920)" in smoke
     assert "measureTaskStack(page, 520)" in smoke
+    assert "messageCardLimit: rootFontSize * 30" in smoke
     assert "imageTileWidth * 2" in smoke
-    assert "imageTileWidth * 3" in smoke
+    assert "task card below card min width" in smoke
+    assert "message cards did not stretch to row height" in smoke
 
 
 def test_serve_composer_reorder_smoke_asserts_swap_contract() -> None:

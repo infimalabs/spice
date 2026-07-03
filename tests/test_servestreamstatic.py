@@ -290,9 +290,10 @@ def test_static_task_directive_card_styles_are_present():
     assert ".message-body .task-directive-quote {" in css
     assert ".message-body .task-directive-stack {" in css
     assert ".message-body .task-directive-stack .task-directive-quote {" in css
-    assert "flex: 1 1 312px;" in css
-    assert "max-width: min(100%, 468px);" in css
-    assert "min-width: min(100%, 312px);" in css
+    assert "grid-template-columns: repeat(" in css
+    assert "var(--message-card-max-width)" in css
+    assert "max-width: min(100%, var(--message-card-max-width));" in css
+    assert "min-width: 0;" in css
     assert ".message-body .task-directive-quote--hidden {" in css
     assert ".message-body .task-directive-quote--oops {" in css
     assert ".message-body .task-directive-quote--private {" in css
