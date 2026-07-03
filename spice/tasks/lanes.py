@@ -95,6 +95,7 @@ def team_route_for_actor(actor: str) -> RouteEntry | None:
     if not actor:
         return None
     lookup_id = route_actor_id(actor)
+    from spice.serve.team.schema import TASK_FILTER_SOURCE_MANUAL
     from spice.serve.team.store import ServeTeamStore
 
     for team in ServeTeamStore().team_snapshot().teams:
@@ -105,9 +106,15 @@ def team_route_for_actor(actor: str) -> RouteEntry | None:
             f"project:{config.validate_assignable_project(task_filter)}"
             for task_filter in team.config.task_filters
         ]
+        manual_terms = [
+            f"project:{config.validate_assignable_project(entry.project)}"
+            for entry in team.config.task_filter_entries
+            if entry.source == TASK_FILTER_SOURCE_MANUAL
+        ]
         entry: RouteEntry = {
             "agents": member_ids,
             "filter": _clean_filter(filter_terms),
+            "manual": _clean_filter(manual_terms),
             "lifetime": team.config.lifetime,
         }
         rc_tokens = _team_rc_overrides(team.config.shell_settings)
@@ -127,11 +134,20 @@ def _team_rc_overrides(shell_settings: dict[str, Any]) -> list[str]:
 
 
 def effective_filter_terms(route: RouteEntry | None) -> list[str]:
+    """Interpret stored filters through the lifetime lens.
+
+    Filter rows are durable state; the lifetime only changes how they are
+    read, so flipping the slider never mutates the store. Drain dissolves the
+    boundary (all assignable stems), Steer narrows to the operator's manual
+    pins, and Drive uses everything (pins + auto subscriptions).
+    """
     if not route:
         return []
     lifetime = _lifetime(route.get("lifetime")) if route.get("lifetime") else ""
     if lifetime == "Drain":
         return _clean_filter([f"project:{stem}" for stem in config.assignable_stems()])
+    if lifetime == "Steer":
+        return _clean_filter(_route_list(route, "manual"))
     return _clean_filter(_route_list(route, "filter"))
 
 
