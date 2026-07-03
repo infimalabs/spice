@@ -88,6 +88,7 @@ async function renderTaskStackFixture(config) {
   const stack = taskArticle.querySelector(".task-directive-stack");
   const imageStack = imageArticle.querySelector(".message-image-stack");
   const image = imageArticle.querySelector(".message-image img");
+  const imageArticleRect = taskStackSmokeRect(imageArticle);
   const cards = Array.from(
     taskArticle.querySelectorAll(".task-directive-stack .task-directive-quote"),
   ).map((card) => taskStackSmokeRect(card));
@@ -97,6 +98,15 @@ async function renderTaskStackFixture(config) {
   const firstRowMessageCards = messageCards.filter(
     (card) => Math.abs(card.top - messageCards[0].top) < 2,
   );
+  const hostStyle = getComputedStyle(host);
+  const hostRect = taskStackSmokeRect(host);
+  const hostInlinePadding =
+    Number.parseFloat(hostStyle.paddingLeft) +
+    Number.parseFloat(hostStyle.paddingRight);
+  const firstRowLeft = Math.min(...firstRowMessageCards.map((card) => card.left));
+  const firstRowRight = Math.max(
+    ...firstRowMessageCards.map((card) => card.left + card.width),
+  );
   const rootFontSize =
     Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
   return {
@@ -105,13 +115,16 @@ async function renderTaskStackFixture(config) {
       (card) => Math.abs(card.top - cards[0].top) < 2,
     ).length,
     imageStackDisplay: getComputedStyle(imageStack).display,
+    imageArticleWidth: imageArticleRect.width,
     imageWidth: taskStackSmokeRect(image).width,
     messageCardDisplays: Array.from(
       host.querySelectorAll('[data-task-stack-smoke="message-card"]'),
     ).map((card) => getComputedStyle(card).display),
     messageCardFirstRowCount: firstRowMessageCards.length,
+    messageCardFirstRowFillWidth: firstRowRight - firstRowLeft,
     messageCardFirstRowHeights: firstRowMessageCards.map((card) => card.height),
     messageCardFloor: rootFontSize * 20,
+    messageCardHostInnerWidth: hostRect.width - hostInlinePadding,
     messageCardLimit: rootFontSize * 30,
     messageCardRowCount: new Set(
       messageCards.map((card) => Math.round(card.top)),
@@ -251,6 +264,8 @@ function assertTaskStackMeasurement(measurement, options) {
     throw new Error("task stack is not grid: " + JSON.stringify(measurement));
   if (measurement.imageStackDisplay !== "flex")
     throw new Error("image stack control is not flex: " + JSON.stringify(measurement));
+  if (measurement.imageArticleWidth < measurement.messageCardHostInnerWidth * 0.92)
+    throw new Error("image card did not fill row: " + JSON.stringify(measurement));
   const imageTileWidth = Math.max(measurement.imageWidth, 156);
   const minCardWidth = Math.max(measurement.messageCardFloor, imageTileWidth * 2);
   const maxCardWidth = measurement.messageCardLimit;
@@ -262,12 +277,6 @@ function assertTaskStackMeasurement(measurement, options) {
   }
   if (!measurement.messageCardDisplays.every((display) => display === "flex"))
     throw new Error("message cards are not flex: " + JSON.stringify(measurement));
-  for (const width of measurement.messageCardWidths) {
-    if (width + 2 < minCardWidth)
-      throw new Error("message card below card min width: " + JSON.stringify(measurement));
-    if (width - 2 > maxCardWidth)
-      throw new Error("message card above card max width: " + JSON.stringify(measurement));
-  }
   if (!options.wraps && measurement.firstRowCount < 2)
     throw new Error("wide task cards did not share a row: " + JSON.stringify(measurement));
   if (options.wraps && measurement.rowCount < 2)
@@ -276,6 +285,19 @@ function assertTaskStackMeasurement(measurement, options) {
     throw new Error("wide message cards did not share a row: " + JSON.stringify(measurement));
   if (options.wraps && measurement.messageCardRowCount < 2)
     throw new Error("narrow message cards did not wrap: " + JSON.stringify(measurement));
+  if (!options.wraps) {
+    const fillRatio =
+      measurement.messageCardFirstRowFillWidth /
+      measurement.messageCardHostInnerWidth;
+    if (fillRatio < 0.92)
+      throw new Error("wide message cards did not fill the row: " + JSON.stringify(measurement));
+  }
+  if (options.wraps) {
+    for (const width of measurement.messageCardWidths) {
+      if (width < measurement.messageCardHostInnerWidth * 0.92)
+        throw new Error("wrapped message card did not fill row: " + JSON.stringify(measurement));
+    }
+  }
   if (!options.wraps) {
     const heights = measurement.messageCardFirstRowHeights;
     const spread = Math.max(...heights) - Math.min(...heights);

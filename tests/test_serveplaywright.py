@@ -162,21 +162,27 @@ def test_serve_submit_latency_smoke_asserts_timing_buckets() -> None:
     assert 'stubbed: type === "lane.send"' in smoke
 
 
-def test_serve_task_stack_smoke_asserts_card_widths() -> None:
+def test_serve_task_stack_smoke_asserts_card_fill() -> None:
     smoke = (ROOT / "browser" / "serve_task_stack_smoke.js").read_text(encoding="utf-8")
 
     assert 'require("./serve_playwright_harness")' in smoke
     assert "withServePage(" in smoke
     assert "task-directive-stack" in smoke
     assert "message-image-stack" in smoke
+    assert "imageArticleWidth" in smoke
     assert "messageCardLimit" in smoke
     assert "messageCardFloor" in smoke
+    assert "messageCardHostInnerWidth" in smoke
+    assert "messageCardFirstRowFillWidth" in smoke
     assert "messageCardFirstRowHeights" in smoke
     assert "measureTaskStack(page, 1920)" in smoke
     assert "measureTaskStack(page, 520)" in smoke
     assert "messageCardLimit: rootFontSize * 30" in smoke
     assert "imageTileWidth * 2" in smoke
     assert "task card below card min width" in smoke
+    assert "image card did not fill row" in smoke
+    assert "wide message cards did not fill the row" in smoke
+    assert "wrapped message card did not fill row" in smoke
     assert "message cards did not stretch to row height" in smoke
 
 
