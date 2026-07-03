@@ -22,7 +22,7 @@ from threading import Event, Lock
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from spice.agent.driver import ALL_DRIVERS, SPICE_AGENT_DRIVER_ENV
+from spice.agent.driver import SPICE_AGENT_DRIVER_ENV, all_drivers
 from spice.errors import SpiceError
 from spice.mail.attachments import resolve_shared_attachment_ref
 from spice.mail.inbox import (
@@ -168,7 +168,7 @@ def run_serve(args: argparse.Namespace) -> int:
     # The operator server is never an agent and never a single-driver lane; a
     # leaked ambient thread id or driver override would make every worktree
     # inherit process-local agent state instead of its own config.
-    for driver in ALL_DRIVERS:
+    for driver in all_drivers():
         os.environ.pop(driver.thread_id_env, None)  # env-policy: allow
     os.environ.pop(SPICE_AGENT_DRIVER_ENV, None)  # env-policy: allow
     backend = getattr(args, "task_backend", None)

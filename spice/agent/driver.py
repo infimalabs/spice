@@ -1007,10 +1007,8 @@ CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
 )
 
 SPICE_AGENT_DRIVER_ENV = "SPICE_AGENT_DRIVER"  # env-policy: allow
-_DRIVERS: dict[str, AgentDriver] = {
-    CODEX_DRIVER.name: CODEX_DRIVER,
-    CLAUDE_DRIVER.name: CLAUDE_DRIVER,
-}
+BUILTIN_DRIVERS: tuple[AgentDriver, ...] = (CODEX_DRIVER, CLAUDE_DRIVER)
+_DRIVERS: dict[str, AgentDriver] = {driver.name: driver for driver in BUILTIN_DRIVERS}
 
 
 def driver_entry_point_registry() -> dict[str, AgentDriver | SpiceExtensionEntryPoint]:
@@ -1020,14 +1018,15 @@ def driver_entry_point_registry() -> dict[str, AgentDriver | SpiceExtensionEntry
     )
 
 
-ALL_DRIVERS: tuple[AgentDriver, ...] = (CODEX_DRIVER, CLAUDE_DRIVER)
-
-
 def driver_registry() -> dict[str, AgentDriver]:
     return {
         name: _load_driver_entry(name, entry)
         for name, entry in driver_entry_point_registry().items()
     }
+
+
+def all_drivers() -> tuple[AgentDriver, ...]:
+    return tuple(driver_registry().values())
 
 
 def driver_choices() -> tuple[str, ...]:
@@ -1070,7 +1069,7 @@ def driver_for(repo_root: Path | None) -> AgentDriver:
 
 def driver_for_transcript(path: Path) -> AgentDriver:
     """The driver whose transcript layout owns `path`."""
-    for driver in driver_registry().values():
+    for driver in all_drivers():
         if driver.owns_transcript(path):
             return driver
     return CODEX_DRIVER

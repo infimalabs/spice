@@ -13,7 +13,7 @@ from threading import Lock
 import pytest
 
 from spice.agent import maximcli, maxims, watchdog
-from spice.agent.driver import ALL_DRIVERS, SPICE_AGENT_DRIVER_ENV
+from spice.agent.driver import SPICE_AGENT_DRIVER_ENV, driver_choices
 from spice.agent.maxims import MaximVerdict
 from spice.errors import SpiceError
 from spice.flexstate import git_state_path
@@ -816,7 +816,7 @@ message = "SECOND reminder."
 
 
 def _all_driver_names() -> frozenset[str]:
-    return frozenset(driver.name for driver in ALL_DRIVERS)
+    return frozenset(driver_choices())
 
 
 def _make_every_maxim_violate(monkeypatch) -> None:

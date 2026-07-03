@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spice.agent.driver import ALL_DRIVERS, AgentDriver, driver_for
+from spice.agent.driver import AgentDriver, all_drivers, driver_for
 from spice.agent.identity import ambient_thread, canonical_thread_id
 from spice.sessions.util import dedupe_paths
 
@@ -66,4 +66,7 @@ def resolve_thread_transcript(thread_id: str, repo_root: Path | None = None) -> 
 
 
 def _ordered_drivers(preferred: AgentDriver) -> list[AgentDriver]:
-    return [preferred, *(driver for driver in ALL_DRIVERS if driver is not preferred)]
+    return [
+        preferred,
+        *(driver for driver in all_drivers() if driver.name != preferred.name),
+    ]
