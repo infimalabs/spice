@@ -4,6 +4,7 @@ from pathlib import Path
 from spice.cli.parser import build_parser
 from spice.studies import cli as studies_cli
 from spice.studies.javascriptunused import JavaScriptUnusedEntry
+from spice.studies.links import MarkdownLinkCaseFinding
 
 
 def test_general_purpose_study_flags_cover_reference_surface():
@@ -99,6 +100,47 @@ def test_javascript_unused_cli_json_payload(tmp_path, monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["artifactKind"] == "spice.study.javascript-unused"
     assert payload["findings"][0]["name"] == "candidateHelper"
+
+
+def test_markdown_links_cli_renders_clean_board(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(studies_cli, "tracked_paths", lambda root: [Path("docs/a.md")])
+    monkeypatch.setattr(
+        studies_cli.links,
+        "markdown_link_case_findings",
+        lambda root, *, paths: [],
+    )
+    args = build_parser().parse_args(["study", "markdown-links"])
+
+    assert args.func(args) == 0
+    assert capsys.readouterr().out == "markdown-links: ok\n"
+
+
+def test_markdown_links_cli_renders_finding_board(tmp_path, monkeypatch, capsys):
+    finding = MarkdownLinkCaseFinding(
+        source_path=Path("docs/index.md"),
+        line=3,
+        raw_target="GUIDE.md",
+        resolved_path=Path("docs/GUIDE.md"),
+        expected_path=Path("docs/guide.md"),
+    )
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(studies_cli, "tracked_paths", lambda root: [Path("docs/a.md")])
+    monkeypatch.setattr(
+        studies_cli.links,
+        "markdown_link_case_findings",
+        lambda root, *, paths: [finding],
+    )
+    args = build_parser().parse_args(["study", "markdown-links"])
+
+    assert args.func(args) == 1
+    assert capsys.readouterr().out == "\n".join(
+        [
+            "markdown-links: 1 case-mismatched tracked markdown link target(s)",
+            "  FAIL  docs/index.md:3 GUIDE.md -> docs/guide.md",
+            "",
+        ]
+    )
 
 
 def test_assertion_free_cli_json_create_tasks(tmp_path, monkeypatch, capsys):

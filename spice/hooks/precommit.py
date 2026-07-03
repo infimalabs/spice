@@ -46,6 +46,7 @@ from spice.studies import (
     complexity,
     envpolicy,
     fileloc,
+    links,
     localpaths,
     magicnums,
     reachability,
@@ -212,6 +213,11 @@ def _builtin_pre_commit_steps(
             "magic-numbers",
             "magic numbers",
             lambda: _run_magic_numbers_guard(repo_root, paths),
+        ),
+        PreCommitStep(
+            "markdown-links",
+            "markdown links",
+            lambda: _run_markdown_links_guard(repo_root),
         ),
         PreCommitStep(
             "reachability",
@@ -718,6 +724,12 @@ def _run_magic_numbers_guard(repo_root: Path, paths: list[Path]) -> None:
                 findings, baseline_ref=resolved.magic.baseline_ref
             )
         )
+
+
+def _run_markdown_links_guard(repo_root: Path) -> None:
+    findings = links.markdown_link_case_findings(repo_root)
+    if findings:
+        raise SpiceError(links.render_markdown_link_case_board(findings))
 
 
 def _run_reachability_guard(repo_root: Path, paths: list[Path] | None = None) -> None:

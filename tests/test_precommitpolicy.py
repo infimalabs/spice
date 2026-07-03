@@ -33,6 +33,7 @@ BUILTIN_PRE_COMMIT_LABELS = [
     "file shape",
     "complexity",
     "magic numbers",
+    "markdown links",
     "reachability",
     "symbol reachability",
     "assertion-free tests",
@@ -53,6 +54,7 @@ EXPECTED_BUILTIN_PRE_COMMIT_KEYS = [
     "file-shape",
     "complexity",
     "magic-numbers",
+    "markdown-links",
     "reachability",
     "symbol-reachability",
     "assertion-free-tests",
@@ -428,11 +430,37 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
         "file shape",
         "complexity",
         "custom magic",
+        "markdown links",
         "reachability",
         "symbol reachability",
         "assertion-free tests",
         "private internals",
     ]
+
+
+def test_markdown_links_pre_commit_guard_reports_shared_board(tmp_path, monkeypatch):
+    finding = precommit.links.MarkdownLinkCaseFinding(
+        source_path=Path("docs/index.md"),
+        line=4,
+        raw_target="GUIDE.md",
+        resolved_path=Path("docs/GUIDE.md"),
+        expected_path=Path("docs/guide.md"),
+    )
+    monkeypatch.setattr(
+        precommit.links,
+        "markdown_link_case_findings",
+        lambda repo_root: [finding],
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        precommit._run_markdown_links_guard(tmp_path)
+
+    assert str(exc_info.value) == "\n".join(
+        [
+            "markdown-links: 1 case-mismatched tracked markdown link target(s)",
+            "  FAIL  docs/index.md:4 GUIDE.md -> docs/guide.md",
+        ]
+    )
 
 
 def test_policy_pre_commit_failure_reports_the_step_label(tmp_path, monkeypatch):
@@ -783,6 +811,11 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         precommit,
+        "_run_markdown_links_guard",
+        lambda repo_root: record("markdown links"),
+    )
+    monkeypatch.setattr(
+        precommit,
         "_run_reachability_guard",
         lambda repo_root, paths=None: record("reachability"),
     )
@@ -830,6 +863,7 @@ def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
     monkeypatch.setattr(
         precommit, "_run_magic_numbers_guard", lambda repo_root, paths: None
     )
+    monkeypatch.setattr(precommit, "_run_markdown_links_guard", lambda repo_root: None)
     monkeypatch.setattr(
         precommit, "_run_reachability_guard", lambda repo_root, paths=None: None
     )
