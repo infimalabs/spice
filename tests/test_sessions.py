@@ -3,12 +3,15 @@
 import argparse
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import time
+from types import SimpleNamespace
 
 import pytest
 
+from spice.agent.driver import DRIVER
 from spice.cli.parser import build_parser
 from spice.mail.inbox import (
     collect_deadlettered_inbox_items,
@@ -28,9 +31,11 @@ from spice.sessions.meter import (
     context_pressure_level,
     context_pressure_should_warn,
 )
-from spice.sessions import records
+from spice.sessions import learnings, records
 from spice.sessions.util import first_text, normalize_timestamp
 from spice.errors import SpiceError
+from spice.tasks import config as task_config
+from spice.tasks import create, identity as task_identity, ops
 from spice.tasks.identity import (
     BASE,
     INCEPTED_RE,
@@ -52,6 +57,7 @@ BRIEFING_FILTER_MAX_BYTES = 10_000
 BRIEFING_PRUNE_MAX_LINES = 6
 BRIEFING_PARSE_MAX_LINES = 10
 BRIEFING_PARSE_MAX_BYTES = 1_000
+ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def test_pressure_levels_at_documented_thresholds():
@@ -316,6 +322,22 @@ def test_session_thread_parser_exposes_thread_id_argument():
     assert args.thread_id == THREAD_DASHED
 
 
+@pytest.fixture
+def session_task_repo(tmp_path, monkeypatch):
+    if shutil.which("task") is None:
+        pytest.skip("Taskwarrior binary is required")
+    repo = _init_git_repo(tmp_path / "repo")
+    backend = tmp_path / "task-backend"
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    monkeypatch.setenv("CODEX_TURN_ID", "turn-session-learning")
+    task_config.set_backend(str(backend))
+    try:
+        yield repo
+    finally:
+        task_config.set_backend(None)
+
+
 def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
     transcript = tmp_path / "filtered.jsonl"
@@ -338,6 +360,99 @@ def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
     assert "Latest Ask\n  needle request" in briefing
     assert "Working Set\n  spice/sessions/briefing.py touches=1" in briefing
     assert "Git\n  branch=main upstream=- ahead=- behind=-\n  dirty=clean" in briefing
+
+
+def test_briefing_learnings_use_active_stem_top_five(session_task_repo):
+    repo = session_task_repo
+    for index in range(6):
+        learnings.confirm_learning_candidates(
+            repo,
+            "task",
+            [
+                learnings.LearningCandidate(
+                    statement=f"Use durable session learning number {index}.",
+                    source_task=f"TASK-{index}",
+                    project_stem="task",
+                )
+            ],
+            now=float(index),
+        )
+    learnings.confirm_learning_candidates(
+        repo,
+        "serve",
+        [
+            learnings.LearningCandidate(
+                statement="Use unrelated serve learning only for serve tasks.",
+                source_task="SERVE-1",
+                project_stem="serve",
+            )
+        ],
+        now=99.0,
+    )
+    active = create.add(
+        "Read top task learnings",
+        project="task.unit",
+        priority="medium",
+        acceptance=["briefing renders the top five learnings"],
+    )
+    ops.claim(active)
+    briefing = render_briefing([], max_lines=200, max_bytes=20000)
+
+    assert _section_lines(briefing, "Learnings") == [
+        "Learnings",
+        "  stem=task",
+        "  - Use durable session learning number 5. (confirmed=1, source=TASK-5)",
+        "  - Use durable session learning number 4. (confirmed=1, source=TASK-4)",
+        "  - Use durable session learning number 3. (confirmed=1, source=TASK-3)",
+        "  - Use durable session learning number 2. (confirmed=1, source=TASK-2)",
+        "  - Use durable session learning number 1. (confirmed=1, source=TASK-1)",
+    ]
+
+
+def test_briefing_surfaces_learning_from_prior_task_done(
+    session_task_repo, tmp_path, monkeypatch
+):
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
+    monkeypatch.setattr(
+        learnings,
+        "evaluate_maxim",
+        lambda *_args, **_kwargs: SimpleNamespace(agrees=True),
+    )
+    completed = create.add(
+        "Distill session learning",
+        project="task.unit",
+        priority="medium",
+        acceptance=["task done stores a durable learning"],
+    )
+    ops.claim(completed)
+    claimed = task_identity.resolve(completed)
+    _write_learning_transcript(
+        codex_home,
+        thread_id=ACTOR_A,
+        turn_id="turn-session-learning",
+        timestamp=str(claimed["claim_at"]),
+    )
+
+    done_output = ops.done(completed, validation=["validated learning capture"])
+    active = create.add(
+        "Use session learning",
+        project="task.unit",
+        priority="medium",
+        acceptance=["briefing surfaces the active stem learning"],
+    )
+    ops.claim(active)
+    transcript = tmp_path / "briefing.jsonl"
+    _write_filter_transcript(transcript)
+
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+
+    assert "learnings: stored 1 accepted from 1 candidate(s)" in done_output
+    assert _section_lines(briefing, "Learnings") == [
+        "Learnings",
+        "  stem=task",
+        f"  - Use spice task next after phase boundaries (confirmed=1, source={completed})",
+    ]
 
 
 def test_briefing_reports_deadlettered_inbox_items(tmp_path, monkeypatch):
@@ -785,6 +900,54 @@ def _write_filter_transcript(path) -> None:
     path.write_text(
         "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
     )
+
+
+def _write_learning_transcript(
+    codex_home,
+    *,
+    thread_id: str,
+    turn_id: str,
+    timestamp: str,
+) -> None:
+    transcript = codex_home / "sessions" / f"rollout-{thread_id}.jsonl"
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    events: list[dict[str, object]] = [
+        {
+            "timestamp": timestamp,
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": turn_id},
+        },
+        {
+            "timestamp": timestamp,
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {"text": "Lesson: Use spice task next after phase boundaries."}
+                ],
+            },
+        },
+        {
+            "timestamp": timestamp,
+            "type": "event_msg",
+            "payload": {"type": "task_complete"},
+        },
+    ]
+    transcript.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events),
+        encoding="utf-8",
+    )
+
+
+def _section_lines(output: str, header: str) -> list[str]:
+    lines = output.splitlines()
+    section = [lines[lines.index(header)]]
+    for line in lines[lines.index(header) + 1 :]:
+        if line and not line.startswith(" "):
+            break
+        section.append(line)
+    return section
 
 
 def _init_git_repo(path) -> None:
