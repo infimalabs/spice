@@ -2,7 +2,8 @@ const fs = require("fs");
 const vm = require("vm");
 
 const renderPath = process.argv[2];
-const streamPath = process.argv[3];
+const liveBusPath = process.argv[3];
+const streamPath = process.argv[4];
 const context = {
   console,
   WebSocket: { OPEN: 1, CONNECTING: 0 },
@@ -12,6 +13,9 @@ const context = {
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
   filename: "app.render.js",
+});
+vm.runInContext(fs.readFileSync(liveBusPath, "utf8"), context, {
+  filename: "app.live-bus.js",
 });
 vm.runInContext(fs.readFileSync(streamPath, "utf8"), context, {
   filename: "app.stream.js",

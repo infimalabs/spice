@@ -1,366 +1,3 @@
-// Live bus client: one WebSocket, request/response plus push, with heartbeat,
-// liveness, exponential reconnect, and full resync after reconnect. Lane
-// payloads merge into a known-message cache keyed by message key; rendering is
-// fingerprint-gated so unchanged streams never repaint.
-
-let liveBusSocket = null;
-let liveBusOpenPromise = null;
-let liveBusRequestSequence = 0;
-const liveBusPendingRequests = new Map();
-let liveBusHeartbeatTimer = null;
-let liveBusReconnectTimer = null;
-let liveBusReconnectAttempt = 0;
-let liveBusLastInboundAt = 0;
-let liveBusHasConnected = false;
-const laneSubmitLatencySamples = [];
-const laneSubmitLatencySampleLimit = 25;
-if (typeof window !== "undefined")
-  /** @type {any} */ (window).__spiceSubmitLatencySamples =
-    laneSubmitLatencySamples;
-
-function liveBusUrl() {
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return protocol + "://" + window.location.host + "/api/live/bus";
-}
-
-function liveBusIsOpen() {
-  return Boolean(liveBusSocket && liveBusSocket.readyState === WebSocket.OPEN);
-}
-
-function connectLiveBus() {
-  if (liveBusIsOpen()) return Promise.resolve(liveBusSocket);
-  if (
-    liveBusSocket &&
-    liveBusSocket.readyState === WebSocket.CONNECTING &&
-    liveBusOpenPromise
-  )
-    return liveBusOpenPromise;
-  const socket = new WebSocket(liveBusUrl());
-  liveBusSocket = socket;
-  liveBusOpenPromise = new Promise((resolve, reject) => {
-    socket.addEventListener(
-      "open",
-      () => {
-        const reconnected = liveBusHasConnected;
-        liveBusHasConnected = true;
-        liveBusReconnectAttempt = 0;
-        noteLiveBusInbound();
-        startLiveBusHeartbeat();
-        resolve(socket);
-        if (reconnected) resyncLiveBusAfterReconnect();
-      },
-      { once: true },
-    );
-    socket.addEventListener(
-      "error",
-      () => {
-        reject(new Error("live bus unavailable"));
-      },
-      { once: true },
-    );
-  });
-  socket.addEventListener("message", (event) => {
-    noteLiveBusInbound();
-    handleLiveBusMessage(event.data).catch((error) => {
-      setGlobalTransientError(String(error || "live bus message failed"));
-    });
-  });
-  socket.addEventListener("close", () => {
-    if (liveBusSocket !== socket) return;
-    liveBusSocket = null;
-    liveBusOpenPromise = null;
-    stopLiveBusHeartbeat();
-    rejectLiveBusRequests("live bus closed");
-    scheduleLiveBusReconnect();
-  });
-  return liveBusOpenPromise;
-}
-
-function noteLiveBusInbound() {
-  liveBusLastInboundAt = Date.now();
-}
-
-function startLiveBusHeartbeat() {
-  stopLiveBusHeartbeat();
-  liveBusHeartbeatTimer = setInterval(() => {
-    if (!liveBusIsOpen()) return;
-    liveBusRequest("bus.ping").catch(() => {});
-    if (Date.now() - liveBusLastInboundAt > liveBusLivenessTimeoutMs) {
-      // A stale half-open socket never fires close on its own; provoke it so
-      // the normal close path drives the reconnect.
-      try {
-        liveBusSocket.close();
-      } catch (error) {
-        scheduleLiveBusReconnect();
-      }
-    }
-  }, liveBusHeartbeatIntervalMs);
-}
-
-function stopLiveBusHeartbeat() {
-  if (liveBusHeartbeatTimer) clearInterval(liveBusHeartbeatTimer);
-  liveBusHeartbeatTimer = null;
-}
-
-function scheduleLiveBusReconnect() {
-  if (liveBusReconnectTimer) return;
-  const delay = Math.min(
-    liveBusReconnectMaxMs,
-    liveBusReconnectBaseMs * 2 ** liveBusReconnectAttempt,
-  );
-  liveBusReconnectAttempt += 1;
-  liveBusReconnectTimer = setTimeout(() => {
-    liveBusReconnectTimer = null;
-    connectLiveBus().catch(() => scheduleLiveBusReconnect());
-  }, delay);
-}
-
-function resyncLiveBusAfterReconnect() {
-  refreshServerTopology()
-    .then(resubscribeLiveBusLanes)
-    .catch(() => {});
-}
-
-function rejectLiveBusRequests(reason) {
-  for (const pending of liveBusPendingRequests.values()) {
-    pending.reject(new Error(reason));
-  }
-  liveBusPendingRequests.clear();
-}
-
-async function liveBusRequest(type, fields = {}, timing = null) {
-  const requestId = "bus-" + ++liveBusRequestSequence;
-  if (timing) {
-    timing.requestId = requestId;
-    markLaneSubmitLatency(timing, "requestCreatedAt");
-  }
-  const response = new Promise((resolve, reject) => {
-    liveBusPendingRequests.set(requestId, { resolve, reject, timing });
-  });
-  try {
-    markLaneSubmitLatency(timing, "liveBusConnectStartAt");
-    const socket = await connectLiveBus();
-    markLaneSubmitLatency(timing, "liveBusConnectReadyAt");
-    markLaneSubmitLatency(timing, "liveBusFrameSentAt");
-    socket.send(JSON.stringify({ ...fields, type, requestId }));
-  } catch (error) {
-    liveBusPendingRequests.delete(requestId);
-    throw error;
-  }
-  return response;
-}
-
-async function handleLiveBusMessage(data) {
-  const message = JSON.parse(data || "{}");
-  const pending = message.requestId
-    ? liveBusPendingRequests.get(message.requestId)
-    : null;
-  if (pending) {
-    liveBusPendingRequests.delete(message.requestId);
-    markLaneSubmitLatency(pending.timing, "liveBusResponseReceivedAt");
-    if (message.type === "bus.error") pending.reject(new Error(message.error));
-    else pending.resolve(message);
-    return;
-  }
-  if (message.type === "targets.payload") {
-    applyTargetsPayload(message.payload || {});
-  } else if (message.type === "teams.payload") {
-    applyTeamSnapshotPayload(message.payload || {});
-  } else if (message.type === "lane.payload") {
-    const lane = laneStates.get(message.targetId);
-    if (lane && isLaneOpen(lane))
-      await applyLaneBusPayload(
-        lane,
-        message.payload || {},
-        message.source || "bus",
-      );
-  } else if (message.type === "lane.pending") {
-    const lane = laneStates.get(message.targetId);
-    if (lane && isLaneOpen(lane))
-      applyLanePendingBusPayload(lane, message.payload || {});
-  } else if (message.type === "lane.append") {
-    const lane = laneStates.get(message.targetId);
-    if (lane && isLaneOpen(lane))
-      await applyLaneAppendBusPayload(lane, message.payload || {});
-  } else if (message.type === "bus.error") {
-    setGlobalTransientError(message.error || "live bus error");
-  }
-}
-
-function isLaneOpen(lane) {
-  return !lane.closed && laneStates.get(lane.targetId) === lane;
-}
-
-// ---- lane subscription ------------------------------------------------------
-
-function laneMessageQuery(lane) {
-  return {
-    limit: lane.newestMessageKey ? lane.retainedMessageLimit : initialRequestLimit,
-    after: lane.newestMessageKey || "",
-    threadId: lane.targetThreadId || "",
-  };
-}
-
-async function subscribeLaneToLiveBus(lane) {
-  if (!isLaneOpen(lane)) return;
-  if (lane.emptyTeam) return;
-  lane.liveBusSubscribed = true;
-  try {
-    const response = await liveBusRequest("lane.subscribe", {
-      targetId: lane.targetId,
-      query: laneMessageQuery(lane),
-    });
-    if (response.payload)
-      await applyLaneBusPayload(lane, response.payload, "bus");
-  } catch (error) {
-    if (isLaneOpen(lane)) setLaneTransientStatus(lane, "live bus unavailable");
-  }
-}
-
-function resubscribeLiveBusLanes() {
-  for (const lane of laneStates.values()) {
-    if (isLaneOpen(lane) && !lane.emptyTeam) subscribeLaneToLiveBus(lane);
-  }
-}
-
-function configureLiveBusLanes() {
-  for (const lane of laneStates.values()) {
-    if (
-      lane.emptyTeam ||
-      !isLaneOpen(lane) ||
-      !lane.liveBusSubscribed ||
-      !liveBusIsOpen()
-    )
-      continue;
-    liveBusRequest("lane.configure", {
-      targetId: lane.targetId,
-      query: laneMessageQuery(lane),
-    }).catch(() => {});
-  }
-}
-
-function unsubscribeLaneFromLiveBus(lane) {
-  if (!lane.liveBusSubscribed) return;
-  lane.liveBusSubscribed = false;
-  liveBusRequest("lane.unsubscribe", { targetId: lane.targetId }).catch(
-    () => {},
-  );
-}
-
-async function refreshLane(lane) {
-  if (lane.refreshInFlight || !isLaneOpen(lane)) return;
-  lane.refreshInFlight = true;
-  try {
-    const response = await liveBusRequest("lane.refresh", {
-      targetId: lane.targetId,
-      query: laneMessageQuery(lane),
-    });
-    if (!isLaneOpen(lane)) return;
-    lane.serverReachable = true;
-    await applyLaneBusPayload(lane, response.payload || {}, "refresh");
-  } catch (error) {
-    if (!isLaneOpen(lane)) return;
-    lane.serverReachable = false;
-    setLaneTransientStatus(lane, "server unreachable");
-  } finally {
-    lane.refreshInFlight = false;
-  }
-}
-
-// ---- payload application ------------------------------------------------------
-
-async function applyLaneBusPayload(lane, payload, source) {
-  const wasSpeechPrimed = lane.speechPrimed;
-  const knownBefore = new Set(lane.knownMessageKeys);
-  // Auto-narration is gated in queueSpeechForMessages against the lane's UI
-  // materialization instant, so the whole initial payload can flow through it:
-  // nothing older than this browser's lane ever plays, and primeSpeechBoundary
-  // still marks every known message so it is never reconsidered.
-  const initialSpeechMessages = wasSpeechPrimed ? [] : payload.messages || [];
-  lane.serverReachable = true;
-  const threadChanged = syncLaneThreadId(lane, payload);
-  if (threadChanged) {
-    // A renewal hands the lane to a new agent UUID, but the lane is the
-    // operator's space, not the agent's: history survives the handoff, only
-    // render fingerprints drop so the merged stream repaints cleanly.
-    lane.renderedMessageFingerprint = "";
-    lane.renderedStatusFingerprint = "";
-  }
-  removePayloadMessages(lane, payload);
-  mergePayloadMessages(lane, payload);
-  renderLaneChrome(lane, payload);
-  cacheLaneLatestPayload(lane, payload);
-  await hydrateAckContextsForMessages(lane, lane.knownMessages);
-  renderMessagesIfChanged(lane);
-  if (source === "watch" && (payload.messages || []).length)
-    refreshServerTopology().catch(() => {});
-  if (!lane.speechPrimed) {
-    queueSpeechForMessages(lane, initialSpeechMessages);
-    primeSpeechBoundary(lane);
-  } else if (wasSpeechPrimed) {
-    const fresh = (payload.messages || []).filter(
-      (item) => item.key && !knownBefore.has(item.key),
-    );
-    queueSpeechForMessages(lane, fresh);
-  }
-  if (threadChanged) subscribeLaneToLiveBus(lane);
-}
-
-function applyLanePendingBusPayload(lane, payload) {
-  lane.serverReachable = true;
-  if (!syncLaneBackendPending(lane, payload)) return;
-  if (lane.latestPayload) cacheLaneLatestPayload(lane, lane.latestPayload);
-  renderLaneViewShell(laneGroupHost(lane));
-  syncComposerPlaceholders(laneGroupHost(lane));
-}
-
-function cacheLaneLatestPayload(lane, payload) {
-  const latestPayload = payload || {};
-  const version = Math.max(0, Number(lane.backendPendingInboxVersion) || 0);
-  if (!version) {
-    lane.latestPayload = latestPayload;
-    return;
-  }
-  const statusLine = statusLineWithLanePendingIdentity(
-    lane,
-    latestPayload.statusLine || {},
-  );
-  lane.latestPayload = {
-    ...latestPayload,
-    pendingInboxCount: statusLine.pendingInboxCount,
-    pendingInboxLabel: statusLine.pendingInboxLabel,
-    pendingInboxKeys: statusLine.pendingInboxKeys,
-    pendingInboxRevision: statusLine.pendingInboxRevision,
-    pendingInboxVersion: statusLine.pendingInboxVersion,
-    statusLine,
-  };
-}
-
-async function applyLaneAppendBusPayload(lane, payload) {
-  const messages = laneAppendMessages(payload);
-  const wasSpeechPrimed = lane.speechPrimed;
-  const knownBefore = new Set(lane.knownMessageKeys);
-  const initialSpeechMessages = wasSpeechPrimed ? [] : messages;
-  lane.serverReachable = true;
-  removePayloadMessages(lane, payload);
-  mergePayloadMessages(lane, { ...payload, messages });
-  await hydrateAckContextsForMessages(lane, lane.knownMessages);
-  renderMessagesIfChanged(lane);
-  if (!lane.speechPrimed) {
-    queueSpeechForMessages(lane, initialSpeechMessages);
-    primeSpeechBoundary(lane);
-  } else if (wasSpeechPrimed) {
-    const fresh = messages.filter((item) => item.key && !knownBefore.has(item.key));
-    queueSpeechForMessages(lane, fresh);
-  }
-}
-
-function laneAppendMessages(payload) {
-  if (!payload || !Array.isArray(payload.messages))
-    throw new Error("lane.append messages are required");
-  return payload.messages;
-}
-
 function syncLaneThreadId(lane, payload) {
   const previous = lane.targetThreadId || "";
   if (!payloadHasField(payload, "targetIdentity")) return false;
@@ -821,12 +458,14 @@ function historySentinelForLane(lane) {
 }
 
 // Deterministic masonry: every card gets an explicit grid position. A card's
-// column is chosen once (shortest column at first placement) and pinned in its
-// dataset, so later height changes only slide columns vertically — a card can
-// never flip sides while the operator is reading. Full-width items (compaction
-// dividers, history sentinels, directive stacks) are barriers: both columns
-// restart on the same row after one, which resets skew and stops reflow from
-// propagating across it. Pins are scoped per barrier segment.
+// column range is chosen once and pinned in its dataset, so later height changes
+// only slide columns vertically — a card can never flip sides while the
+// operator is reading. Tall cards may claim two adjacent tracks in regular
+// multi-column Mosaic; fused team streams and single-column/mobile streams keep
+// one card per track. Full-width items (compaction dividers, history sentinels,
+// directive stacks) are barriers: all columns restart on the same row after
+// one, which resets skew and stops reflow from propagating across it. Pins are
+// scoped per barrier segment.
 function packMessageStream(lane) {
   const host = lane.messagesEl;
   if (!host) return;
@@ -845,16 +484,59 @@ function packMessageStream(lane) {
   let segmentKey = "top";
   for (const node of host.children) {
     if (!isMessagePackItem(node)) continue;
-    const height = messagePackItemHeight(node, naturalHeightMode);
+    let height = messagePackItemHeight(node, naturalHeightMode);
     if (!Number.isFinite(height) || height <= 0) continue;
-    const naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
+    let naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
     if (columnCount <= 1 || isMessagePackBarrier(node)) {
       setMessagePackRowSpan(node, naturalSpan);
       const start = Math.max(...columnRows);
-      setMessagePackPosition(node, "", start + 1);
+      setMessagePackPosition(node, "", start + 1, 1);
       columnRows.fill(start + naturalSpan);
       if (isMessagePackBarrier(node)) segmentKey = messagePackBarrierKey(node);
       continue;
+    }
+    const singleColumn = fusedHost
+      ? fusedMessagePackColumn(node, columnRows.length)
+      : stickyMessagePackColumn(node, segmentKey, columnRows, bandRows);
+    if (!fusedHost) {
+      setMessagePackProvisionalPosition(
+        node,
+        String(singleColumn + 1),
+        columnRows[singleColumn] + 1,
+        1,
+      );
+      height = naturalMessagePackItemHeight(node);
+      if (!Number.isFinite(height) || height <= 0) continue;
+      naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
+    }
+    const columnSpan = messagePackColumnSpan(
+      node,
+      columnCount,
+      fusedHost,
+      naturalSpan,
+      bandRows,
+    );
+    const placementColumn = fusedHost
+      ? singleColumn
+      : columnSpan > 1
+        ? stickyMessagePackColumnSpanStart(
+            node,
+            segmentKey,
+            columnRows,
+            columnSpan,
+            bandRows,
+          )
+        : stickyMessagePackColumn(node, segmentKey, columnRows, bandRows);
+    if (columnSpan > 1) {
+      setMessagePackProvisionalPosition(
+        node,
+        String(placementColumn + 1),
+        maxMessagePackRows(columnRows, placementColumn, columnSpan) + 1,
+        columnSpan,
+      );
+      height = naturalMessagePackItemHeight(node);
+      if (!Number.isFinite(height) || height <= 0) continue;
+      naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
     }
     // Cards round up to whole bands and stretch to fill them (CSS align-self),
     // so the quantization slack lives inside the card box instead of the grid.
@@ -866,171 +548,19 @@ function packMessageStream(lane) {
         ? naturalSpan
         : Math.ceil(naturalSpan / bandRows) * bandRows;
     setMessagePackRowSpan(node, span);
-    const column = fusedHost
-      ? fusedMessagePackColumn(node, columnRows.length)
-      : stickyMessagePackColumn(node, segmentKey, columnRows, bandRows);
-    setMessagePackPosition(node, String(column + 1), columnRows[column] + 1);
-    columnRows[column] += span;
-  }
-}
-
-// Stretch-aligned cards report their assigned grid cell as rect height, which
-// would freeze a fresh card at the span-1 default forever. scrollHeight sees
-// the natural content height through the stretch (plus the border, which
-// scrollHeight excludes), so a card measures natural when fresh or grown and
-// its settled band cell otherwise — a fixed point either way.
-const messageCardBorderAllowancePx = 2;
-
-function messagePackItemHeight(node, naturalHeightMode = false) {
-  const rectHeight = node.getBoundingClientRect().height;
-  if (!node.matches("article[data-message-key]")) return rectHeight;
-  if (naturalHeightMode) return naturalMessagePackItemHeight(node);
-  const naturalHeight = node.scrollHeight + messageCardBorderAllowancePx;
-  return Math.max(rectHeight, naturalHeight);
-}
-
-function naturalMessagePackItemHeight(node) {
-  const previousSpan = node.style.getPropertyValue("--message-pack-row-span");
-  if (previousSpan) node.style.removeProperty("--message-pack-row-span");
-  const height = node.scrollHeight + messageCardBorderAllowancePx;
-  if (previousSpan)
-    node.style.setProperty("--message-pack-row-span", previousSpan);
-  return height;
-}
-
-// Segments are keyed by the identity of the barrier that opens them, never by
-// ordinal position: history backfill or a newly synthesized time rule must not
-// shift the key of untouched downstream segments and cascade re-pins while the
-// operator is reading.
-function messagePackBarrierKey(node) {
-  return (
-    node.dataset.messageKey ||
-    node.dataset.messageTs ||
-    node.dataset.historyTargetId ||
-    node.className
-  );
-}
-
-// Derive the track count from geometry, never from computed
-// grid-template-columns: the stream uses repeat(auto-fit, ...), which
-// collapses empty tracks — once every card sits in column 1, the computed
-// track list shrinks to one entry and a computed-style reading locks the
-// packer into a single ever-growing column. The auto-fit formula is
-// deterministic from the host width, so recompute it directly.
-function messagePackColumnCount(lane, host, style) {
-  const geometryColumns = messagePackGeometryColumnCount(host, style);
-  if (!laneIsFusedHost(lane)) return geometryColumns;
-  return Math.max(
-    1,
-    Math.min(geometryColumns, laneGroupMemberLanes(lane).length),
-  );
-}
-
-function messagePackGeometryColumnCount(host, style) {
-  if (messagePackViewportForcesSingleColumn()) return 1;
-  const inner =
-    host.clientWidth -
-    cssPixelValue(style.paddingLeft) -
-    cssPixelValue(style.paddingRight);
-  if (!Number.isFinite(inner) || inner <= 0) return 1;
-  const gap = cssPixelValue(style.columnGap);
-  const minWidth = cssLengthValue(
-    style.getPropertyValue("--message-card-min-width"),
-    style,
-  );
-  const trackMin = Math.min(inner, minWidth > 0 ? minWidth : inner);
-  if (trackMin <= 0) return 1;
-  return Math.max(1, Math.floor((inner + gap) / (trackMin + gap)));
-}
-
-function messagePackViewportForcesSingleColumn() {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(max-width: 720px)").matches
-  );
-}
-
-function fusedMessagePackColumn(node, columnCount) {
-  const slot = Number.parseInt(node.dataset.accentSlot || "", 10);
-  if (!Number.isFinite(slot) || slot < 0) return 0;
-  return slot % Math.max(1, columnCount);
-}
-
-function setMessagePackColumnCount(host, columnCount) {
-  const value = String(Math.max(1, columnCount));
-  if (host.style.getPropertyValue("--message-pack-column-count") !== value)
-    host.style.setProperty("--message-pack-column-count", value);
-}
-
-function cssLengthValue(value, style) {
-  const text = String(value || "").trim();
-  const parsed = Number.parseFloat(text);
-  if (!Number.isFinite(parsed)) return 0;
-  if (text.endsWith("rem")) {
-    const rootSize = Number.parseFloat(
-      getComputedStyle(document.documentElement).fontSize,
+    const start = maxMessagePackRows(
+      columnRows,
+      placementColumn,
+      columnSpan,
     );
-    return parsed * (Number.isFinite(rootSize) ? rootSize : 16);
+    setMessagePackPosition(
+      node,
+      String(placementColumn + 1),
+      start + 1,
+      columnSpan,
+    );
+    fillMessagePackRows(columnRows, placementColumn, columnSpan, start + span);
   }
-  if (text.endsWith("em") && !text.endsWith("rem")) {
-    const fontSize = cssPixelValue(style.fontSize) || 16;
-    return parsed * fontSize;
-  }
-  return parsed;
-}
-
-function isMessagePackBarrier(node) {
-  return node.matches(
-    ".compaction-divider, .time-rule, [data-history-sentinel], article:has(.task-directive-stack)",
-  );
-}
-
-function stickyMessagePackColumn(node, segmentKey, columnRows, bandRows) {
-  const pinned = Number(node.dataset.messagePackColumn);
-  if (
-    node.dataset.messagePackSegment === segmentKey &&
-    Number.isInteger(pinned) &&
-    pinned >= 0 &&
-    pinned < columnRows.length
-  )
-    return pinned;
-  const column = leftmostFeasiblePackColumn(columnRows, bandRows);
-  node.dataset.messagePackSegment = segmentKey;
-  node.dataset.messagePackColumn = String(column);
-  return column;
-}
-
-// One band of tolerance turns shortest-column masonry into row-major filling:
-// a level fills left to right, then the next level starts, so chronological
-// insertion keeps each visual band a contiguous time slice. The lowest column
-// is always feasible, so the scan always returns.
-const messagePackBandRowsDefault = 6;
-
-function messagePackBandRows(style) {
-  const parsed = Number.parseInt(
-    style.getPropertyValue("--message-pack-band"),
-    10,
-  );
-  return parsed > 0 ? parsed : messagePackBandRowsDefault;
-}
-
-function leftmostFeasiblePackColumn(columnRows, bandRows) {
-  // Strictly less than one band: a column that already took a full band is
-  // spent for this level, so equal-height cards fan left-to-right instead of
-  // stacking pairs into the leftmost column.
-  const lowest = Math.min(...columnRows);
-  for (let index = 0; index < columnRows.length; index += 1) {
-    if (columnRows[index] < lowest + bandRows) return index;
-  }
-  return columnRows.indexOf(lowest);
-}
-
-function setMessagePackPosition(node, columnStart, rowStart) {
-  if (node.style.gridColumnStart !== columnStart)
-    node.style.gridColumnStart = columnStart;
-  const rowValue = String(rowStart);
-  if (node.style.gridRowStart !== rowValue) node.style.gridRowStart = rowValue;
 }
 
 function scheduleMessageStreamPack(lane) {
