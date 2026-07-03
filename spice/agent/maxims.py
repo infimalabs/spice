@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from spice.agent.driver import ALL_DRIVERS
 from spice.config import configured_judge_bin
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
@@ -32,6 +33,7 @@ TRAILING_NOISE = string.punctuation + string.whitespace
 ALL_MAXIM = "all"
 ANY_MAXIM = "any"
 META_MAXIMS = frozenset({ALL_MAXIM, ANY_MAXIM})
+DEFAULT_DRIVER_SCOPE = frozenset(driver.name for driver in ALL_DRIVERS)
 DEFAULT_PROMPT_LINES = (
     'IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".',
     'IFF "{maxim}" DISAGREES WITH "{statement}": ANSWER ONLY "NO".',
@@ -49,6 +51,7 @@ class MaximBag:
     name: str
     words: frozenset[str]
     message: str
+    drivers: frozenset[str] = DEFAULT_DRIVER_SCOPE
 
 
 # Built-in maxims keyed by a stable bag name. Bags declare every supported
@@ -183,6 +186,7 @@ def resolved_maxim_bags(repo_root: Path | None = None) -> dict[str, MaximBag]:
             name=name,
             words=_configured_words(raw_config, base, name),
             message=_configured_message(raw_config, base, name),
+            drivers=_configured_drivers(raw_config, name),
         )
     _flatten_bag_keys(bags)
     return bags
@@ -238,6 +242,26 @@ def _configured_message(
     if not message:
         raise SpiceError(f"[tool.spice.maxims.{name}] message must be non-empty")
     return message
+
+
+def _configured_drivers(raw_config: Mapping[str, Any], name: str) -> frozenset[str]:
+    if "drivers" not in raw_config:
+        return DEFAULT_DRIVER_SCOPE
+    known = DEFAULT_DRIVER_SCOPE
+    configured: list[str] = []
+    for raw_driver in string_list(raw_config.get("drivers")):
+        driver = raw_driver.casefold()
+        if driver not in known:
+            expected = ", ".join(sorted(known))
+            raise SpiceError(
+                f"[tool.spice.maxims.{name}] drivers must be known agent "
+                f"drivers; got {raw_driver!r}; expected one of: {expected}"
+            )
+        if driver not in configured:
+            configured.append(driver)
+    if not configured:
+        raise SpiceError(f"[tool.spice.maxims.{name}] drivers must be non-empty")
+    return frozenset(configured)
 
 
 def _resolved_lookup(
