@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
-from spice.agent.driver import DRIVER
+from spice.agent.driver import DRIVER, POST_TOOL_HOOK_EVENT
 from spice.errors import SpiceError
 from spice.paths import require_repo_root
 
@@ -41,6 +42,14 @@ def configure_agent_parser(subparsers: Any) -> None:
     run.add_argument("args", nargs=argparse.REMAINDER)
     run.set_defaults(func=handle_agent)
 
+    post_tool_hook = actions.add_parser(
+        "post-tool-hook",
+        help="Emit pending steering as PostToolUse hook additional context.",
+    )
+    post_tool_hook.add_argument("--repo-root", default="")
+    post_tool_hook.add_argument("--event-name", default=POST_TOOL_HOOK_EVENT)
+    post_tool_hook.set_defaults(func=handle_agent)
+
     ensure = actions.add_parser("ensure", help="Start or resume the worktree's agent.")
     ensure.add_argument("--dry-run", action="store_true")
     ensure.add_argument("--force-new", action="store_true")
@@ -73,6 +82,18 @@ def handle_agent(args: argparse.Namespace) -> int:
     action = args.agent_action
     if action == "supervise":
         return lifecycle.run_agent_supervisor(args)
+    if action == "post-tool-hook":
+        repo_root = (
+            Path(str(args.repo_root)).expanduser().resolve()
+            if str(getattr(args, "repo_root", "") or "").strip()
+            else require_repo_root()
+        )
+        response = render_post_tool_hook_response(
+            repo_root, hook_event_name=str(args.event_name or POST_TOOL_HOOK_EVENT)
+        )
+        if response:
+            print(response)
+        return 0
     repo_root = require_repo_root()
     if action == "status":
         print(render_agent_status(lifecycle.agent_status(repo_root)))
@@ -188,4 +209,23 @@ def render_activation_packet(repo_root: Path) -> str:
             *activation_browser_validation_lines(),
             *activation_command_surface_lines(),
         ]
+    )
+
+
+def render_post_tool_hook_response(
+    repo_root: Path, *, hook_event_name: str = POST_TOOL_HOOK_EVENT
+) -> str:
+    from spice.agent.sidechannel import render_side_channel_payload
+
+    additional_context = render_side_channel_payload(repo_root).strip()
+    if not additional_context:
+        return ""
+    return json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": hook_event_name or POST_TOOL_HOOK_EVENT,
+                "additionalContext": additional_context,
+            }
+        },
+        sort_keys=True,
     )

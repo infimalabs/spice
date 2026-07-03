@@ -12,19 +12,23 @@ import pytest
 
 from spice import config
 from spice.agent import driver as agent_driver
+from spice.agent import cli as agent_cli
 from spice.agent import lifecycle, renewal, sidechannel, sidechannelnotify, wrap
 from spice.agent.driver import (
     CLAUDE_DRIVER,
     CODEX_DRIVER,
     DRIVER,
+    POST_TOOL_HOOK_EVENT,
     PLAYWRIGHT_MCP_ARGS,
     PLAYWRIGHT_MCP_COMMAND,
     PLAYWRIGHT_MCP_SERVER_NAME,
     operator_color_scheme,
     playwright_mcp_args,
+    post_tool_hook_config_path,
     write_playwright_mcp_config,
 )
 from spice.errors import SpiceError
+from spice.mail.inbox import compose_inbox_text, write_inbox_item
 from spice.tasks import ops
 
 DIRECT_AGENT_PID = 2222
@@ -140,6 +144,17 @@ def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_m
         f'["--yes","@playwright/mcp@latest","--headless","--config",'
         f'"{tmp_path / ".spice" / "agent" / "playwright-mcp.json"}"]'
     ) in configs
+    hook_config_path = post_tool_hook_config_path(tmp_path, DRIVER)
+    hook_config = json.loads(hook_config_path.read_text(encoding="utf-8"))
+    hook_overrides = [
+        config for config in configs if config.startswith("hooks.PostToolUse=")
+    ]
+    assert len(hook_overrides) == 1
+    assert hook_config["event"] == POST_TOOL_HOOK_EVENT
+    assert hook_config["matcher"] == "^(Bash|apply_patch|Edit|Write|mcp__.*)$"
+    assert "spice agent post-tool-hook" in hook_config["command"]
+    assert str(tmp_path) in hook_config["command"]
+    assert hook_config["command"] in hook_overrides[0]
     assert list(PLAYWRIGHT_MCP_ARGS) == [
         "--yes",
         "@playwright/mcp@latest",
@@ -154,6 +169,40 @@ def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_m
     assert 'service_tier="fast"' in configs
     assert command[command.index("--enable") + 1] == "fast_mode"
     assert command[-3:] == ["resume", "thread-1", prompt]
+
+
+def test_post_tool_hook_config_requires_driver_capability(tmp_path):
+    driver = agent_driver.AgentDriver(
+        name="unsupported",
+        default_bin="unsupported",
+        bin_env="FAKEENV_THIRD_BIN",
+        thread_id_env="FAKEENV_THIRD_THREAD_ID",
+        default_model="model",
+        default_reasoning_effort="",
+        default_service_tier="",
+        stdout_assistant_marker="",
+        stdout_section_markers=frozenset(),
+        stdout_compaction_marker="",
+        session_id_pattern=re.compile("unsupported"),
+    )
+
+    with pytest.raises(SpiceError, match="does not declare supported PostToolUse"):
+        agent_driver.write_post_tool_hook_config(tmp_path, driver)
+
+
+def test_post_tool_hook_response_renders_pending_steering(tmp_path):
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000005Z.txt",
+        compose_inbox_text(body="hook-delivered steering", priority=None, stop=False),
+    )
+
+    response = json.loads(agent_cli.render_post_tool_hook_response(tmp_path))
+    payload = response["hookSpecificOutput"]
+
+    assert payload["hookEventName"] == POST_TOOL_HOOK_EVENT
+    assert "Inbox Steering" in payload["additionalContext"]
+    assert "hook-delivered steering" in payload["additionalContext"]
 
 
 def test_ensure_agent_uses_shipped_codex_defaults_without_config(tmp_path, monkeypatch):
