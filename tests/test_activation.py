@@ -1,6 +1,7 @@
 """Activation packet rows that teach first-run harness behavior."""
 
 import json
+import re
 from pathlib import Path
 
 from spice.agent.activation import (
@@ -49,13 +50,11 @@ def test_activation_command_surface_explains_pending_count_recovery():
     assert "run the next command through spice agent run --" in text
 
 
-def test_activation_command_surface_does_not_steer_agents_to_agent_show():
+def test_activation_command_surface_ordinary_agent_command_allowlist():
     text = "\n".join(activation_command_surface_lines())
+    agent_commands = sorted(set(re.findall(r"\b(spice agent [a-z][a-z0-9-]*)", text)))
 
-    assert "agent_show=" not in text
-    assert "agent_status=" not in text
-    assert "spice agent show" not in text
-    assert "spice agent status" not in text
+    assert agent_commands == ["spice agent run"]
 
 
 def test_activation_browser_validation_uses_repo_local_node_playwright():
