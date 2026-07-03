@@ -152,6 +152,13 @@ def _tee_agent_stdout(
                 repo_root, text, log_handle, reminder_gate
             ),
             on_compaction=reminder_gate.note_compaction,
+            on_text_starvation=lambda count: publish_supervisor_feedback(
+                repo_root,
+                log_handle,
+                "prose.starved",
+                count=count,
+                message=TEXT_STARVATION_NUDGE,
+            ),
         )
         try:
             for line in stdout:
@@ -283,6 +290,16 @@ def publish_supervisor_feedback(
         log_handle.flush()
 
 
+# The lane believes it is narrating, so name the symptom concretely: its last
+# many assistant responses reached the wire with tool calls but zero text.
+TEXT_STARVATION_NUDGE = (
+    "your recent responses carried tool calls but NO text — your narration "
+    "and ACK headers are not materializing as visible prose. Lead your next "
+    "response with a short plain-text status line (ACKs first) before any "
+    "tool call."
+)
+
+
 # An inline-created task lands on the backlog and is not the creator's to work.
 # Phrased "unless" (not "until") so agents drop it rather than wait.
 INLINE_TASK_BACKLOG_NOTE = (
@@ -368,6 +385,7 @@ def make_stdout_scanner(
     on_message: Callable[[str], None],
     *,
     on_compaction: Callable[[], None],
+    on_text_starvation: Callable[[int], None] | None = None,
 ) -> StdoutScanner:
     """Pick the scanner matching this worktree's driver's stdout format."""
     if driver.stdout_format == "json":
@@ -375,8 +393,17 @@ def make_stdout_scanner(
             on_message,
             driver.normalize_transcript_line,
             on_compaction=on_compaction,
+            on_text_starvation=on_text_starvation,
         )
     return AgentStdoutMessageScanner(driver, on_message, on_compaction=on_compaction)
+
+
+# Consecutive tool-calling assistant events with no text before the supervisor
+# flags the lane as text-starved. Long turns have been observed to stop
+# materializing prose entirely (thinking + tool_use only) while the agent
+# believes it is narrating; ~12 tool calls of pure silence is far beyond the
+# normal narrate-every-step cadence and cheap to nudge.
+TEXT_STARVATION_THRESHOLD = 12
 
 
 class JsonStdoutScanner:
@@ -385,6 +412,11 @@ class JsonStdoutScanner:
     Each stdout line is one transcript event; the injected normalizer turns an
     assistant-message line into canonical prose, which feeds ACK archiving and
     maxim judging exactly as the marker scanner's reassembled blocks do.
+
+    The scanner also watches for text starvation: canonical assistant events
+    that keep calling tools while emitting zero text blocks. Once the streak
+    reaches `TEXT_STARVATION_THRESHOLD` the starvation callback fires (once per
+    streak) so the supervisor can nudge the lane; any real text resets it.
     """
 
     def __init__(
@@ -393,10 +425,14 @@ class JsonStdoutScanner:
         normalize: Callable[[dict], dict | None],
         *,
         on_compaction: Callable[[], None] | None = None,
+        on_text_starvation: Callable[[int], None] | None = None,
     ) -> None:
         self.on_message = on_message
         self._normalize = normalize
         self._on_compaction = on_compaction or (lambda: None)
+        self._on_text_starvation = on_text_starvation or (lambda _count: None)
+        self._textless_streak = 0
+        self._starvation_fired = False
 
     def process_line(self, line: str) -> None:
         try:
@@ -405,6 +441,7 @@ class JsonStdoutScanner:
             return
         if not isinstance(raw, dict):
             return
+        self._track_text_starvation(raw)
         event = self._normalize(raw)
         if event is None:
             return
@@ -417,6 +454,28 @@ class JsonStdoutScanner:
         text = first_text(payload.get("content"))
         if text and text.strip():
             self.on_message(text.strip())
+
+    def _track_text_starvation(self, raw: dict) -> None:
+        if raw.get("type") != "assistant":
+            return
+        message = raw.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            return
+        blocks = [item.get("type") for item in content if isinstance(item, dict)]
+        text = first_text(content)
+        if text and text.strip():
+            self._textless_streak = 0
+            self._starvation_fired = False
+            return
+        if "tool_use" not in blocks:
+            return
+        self._textless_streak += 1
+        if self._starvation_fired:
+            return
+        if self._textless_streak >= TEXT_STARVATION_THRESHOLD:
+            self._starvation_fired = True
+            self._on_text_starvation(self._textless_streak)
 
     def close(self) -> None:
         return
