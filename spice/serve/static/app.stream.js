@@ -728,7 +728,9 @@ function renderMessagesIfChanged(lane) {
   );
   suppressLanePaneScrollIntentForFrame(lane);
   lane.messagesEl.replaceChildren(...nodes);
+  packMessageStream(lane);
   restoreMessageViewportAnchor(lane, viewportAnchor);
+  syncMessagePackObserver(lane);
   syncLaneHistoryObserver(lane);
   syncTeamImportOverlay(lane);
   lane.renderedMessageFingerprint = fingerprint;
@@ -744,6 +746,7 @@ function renderEmptyTeamMessages(lane) {
     emptyTeamImportPanel(lane),
     lane.historySentinelEl,
   );
+  resetMessagePackObserver(lane);
   restoreMessageViewportAnchor(lane, viewportAnchor);
   syncLaneHistoryObserver(lane);
   lane.renderedMessageFingerprint = fingerprint;
@@ -791,6 +794,81 @@ function historySentinelMemberLanes(lane) {
 function historySentinelForLane(lane) {
   lane.historySentinelEl.dataset.historyTargetId = lane.targetId;
   return lane.historySentinelEl;
+}
+
+function packMessageStream(lane) {
+  const host = lane.messagesEl;
+  if (!host) return;
+  const style = getComputedStyle(host);
+  if (style.display !== "grid") return;
+  const rowHeight = cssPixelValue(style.gridAutoRows) || 8;
+  const rowGap = cssPixelValue(style.rowGap) || 0;
+  const rowStride = rowHeight + rowGap;
+  if (!Number.isFinite(rowStride) || rowStride <= 0) return;
+  for (const node of host.children) {
+    if (!isMessagePackItem(node)) continue;
+    const height = node.getBoundingClientRect().height;
+    if (!Number.isFinite(height) || height <= 0) continue;
+    const span = Math.max(1, Math.ceil((height + rowGap) / rowStride));
+    setMessagePackRowSpan(node, span);
+  }
+}
+
+function scheduleMessageStreamPack(lane) {
+  if (lane.messagePackFrame) return;
+  lane.messagePackFrame = requestAnimationFrame(() => {
+    lane.messagePackFrame = 0;
+    if (lane.closed) return;
+    const anchor = captureMessageViewportAnchor(lane);
+    packMessageStream(lane);
+    restoreMessageViewportAnchor(lane, anchor);
+  });
+}
+
+function syncMessagePackObserver(lane) {
+  if (typeof ResizeObserver === "undefined" || !lane.messagesEl) return;
+  if (!lane.messagePackResizeObserver)
+    lane.messagePackResizeObserver = new ResizeObserver(() => {
+      scheduleMessageStreamPack(lane);
+    });
+  const current = new Set();
+  for (const node of lane.messagesEl.children) {
+    if (!isMessagePackItem(node)) continue;
+    current.add(node);
+    if (!lane.messagePackObservedNodes?.has(node))
+      lane.messagePackResizeObserver.observe(node);
+  }
+  for (const node of lane.messagePackObservedNodes || []) {
+    if (!current.has(node)) lane.messagePackResizeObserver.unobserve(node);
+  }
+  lane.messagePackObservedNodes = current;
+}
+
+function resetMessagePackObserver(lane) {
+  if (lane.messagePackFrame) {
+    cancelAnimationFrame(lane.messagePackFrame);
+    lane.messagePackFrame = 0;
+  }
+  if (lane.messagePackResizeObserver) lane.messagePackResizeObserver.disconnect();
+  lane.messagePackObservedNodes = new Set();
+}
+
+function isMessagePackItem(node) {
+  if (!node || typeof node.matches !== "function") return false;
+  return node.matches(
+    "article[data-message-key], .compaction-divider, [data-history-sentinel]",
+  );
+}
+
+function cssPixelValue(value) {
+  const parsed = Number.parseFloat(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function setMessagePackRowSpan(node, span) {
+  const value = String(span);
+  if (node.style.getPropertyValue("--message-pack-row-span") === value) return;
+  node.style.setProperty("--message-pack-row-span", value);
 }
 
 function emptyTeamMessageFingerprint(lane) {
