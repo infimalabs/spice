@@ -84,15 +84,19 @@ def test_review_feedback_delivers_deduped_review_guidance(tmp_path, monkeypatch)
     assert first.key == second.key
     assert pending_inbox_count(tmp_path / "repo-a") == 1
     assert payload.priority == "review"
+    # The [REVIEW] prefix rides the same idiom as [MAXIM]: it IS the priority
+    # marker, so parsing strips it from the body and no Priority: header exists.
+    assert items[0].text.startswith(f"{reviewfeedback.REVIEW_FEEDBACK_PREFIX} ")
+    assert "Priority:" not in items[0].text
     assert body == "\n".join(
         [
-            "Peer review feedback for REVIEW-20260102T000000000001Z",
+            "Peer feedback for REVIEW-20260102T000000000001Z:",
             "",
             "> needs coverage",
             "",
-            "NOTE: Respectfully consider the honest feedback, but keep working "
-            "your current claim and task; allocator-selected follow-up work "
-            "will arrive through the task queue.",
+            "\N{SMILING FACE WITH SMILING EYES} Respectfully consider peer "
+            "feedback and carry it forward; continue working your current "
+            "claim and task (trust the allocator)!",
         ]
     )
     assert calls == [

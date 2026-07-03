@@ -16,7 +16,9 @@ from spice.mail.inbox import (
 from spice.tasks import config, identity, tw
 from spice.worktrees import list_worktrees
 
-REVIEW_FEEDBACK_PRIORITY = "review"
+# Review steering rides the same body-prefix idiom as [MAXIM]: the prefix
+# parses to the item priority, so no Priority: header is emitted.
+REVIEW_FEEDBACK_PREFIX = "[REVIEW]"
 
 
 @dataclass(frozen=True)
@@ -65,7 +67,7 @@ def emit_review_feedback(
     path = write_inbox_item(
         Path(target.repo_root),
         default_inbox_name(),
-        compose_inbox_text(body=body, priority=REVIEW_FEEDBACK_PRIORITY, stop=False),
+        compose_inbox_text(body=body, priority=None, stop=False),
         dedupe_pending_text=True,
     )
     result = ReviewFeedbackResult(
@@ -146,13 +148,13 @@ def _feedback_body(
     note_text = (note or "-").strip() or "-"
     return "\n".join(
         [
-            f"Peer review feedback for {reviewed}",
+            f"{REVIEW_FEEDBACK_PREFIX} Peer feedback for {reviewed}:",
             "",
             _blockquote(note_text),
             "",
-            "NOTE: Respectfully consider the honest feedback, but keep working "
-            "your current claim and task; allocator-selected follow-up work "
-            "will arrive through the task queue.",
+            "\N{SMILING FACE WITH SMILING EYES} Respectfully consider peer "
+            "feedback and carry it forward; continue working your current "
+            "claim and task (trust the allocator)!",
         ]
     )
 
