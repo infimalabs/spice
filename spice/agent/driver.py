@@ -38,6 +38,18 @@ CommandTextRewriter = Callable[[str], str | None]
 
 
 @dataclass(frozen=True)
+class PostToolHookCapability:
+    """Driver-owned support boundary for ambient PostToolUse delivery."""
+
+    config_surface: str
+    supported_tools: tuple[str, ...]
+    native_non_shell_complete: bool
+    unsupported_tools: tuple[str, ...] = ()
+    context_output_field: str = ""
+    note: str = ""
+
+
+@dataclass(frozen=True)
 class AgentDriver:
     name: str
     default_bin: str
@@ -58,6 +70,10 @@ class AgentDriver:
     # "marker" reads the driver's plain-text section markers; "json" parses
     # one JSON event per line (a stream-json transcript echoed to stdout).
     stdout_format: str = "marker"
+    # Optional driver-owned support boundary for hook-delivered steering after
+    # native tool calls. Consumers must check this rather than assuming every
+    # driver has Claude-equivalent PostToolUse coverage.
+    post_tool_hook: PostToolHookCapability | None = None
 
     @property
     def state_dirname(self) -> str:
@@ -819,6 +835,18 @@ CODEX_DRIVER: AgentDriver = CodexDriver(
     stdout_compaction_marker="context compacted",
     session_id_pattern=re.compile(r"^session id:\s*(\S+)\s*$", re.MULTILINE),
     out_of_credits_patterns=OUT_OF_CREDITS_PATTERNS,
+    post_tool_hook=PostToolHookCapability(
+        config_surface="Codex config.toml hooks.PostToolUse",
+        supported_tools=("Bash", "apply_patch", "MCP"),
+        unsupported_tools=("WebSearch", "non-MCP native tools"),
+        native_non_shell_complete=False,
+        context_output_field="additionalContext",
+        note=(
+            "Codex PostToolUse is supported for Bash, apply_patch, and MCP "
+            "tool calls only; downstream launch and validation must not claim "
+            "WebSearch or other non-MCP native-tool coverage from this hook."
+        ),
+    ),
 )
 
 # Claude's `stream-json` stdout is one JSON event per line, so the watchdog
@@ -841,6 +869,17 @@ CLAUDE_DRIVER: AgentDriver = ClaudeDriver(
     default_context_window=200000,
     out_of_credits_patterns=OUT_OF_CREDITS_PATTERNS,
     stdout_format="json",
+    post_tool_hook=PostToolHookCapability(
+        config_surface="Claude settings PostToolUse",
+        supported_tools=("native tools",),
+        native_non_shell_complete=True,
+        context_output_field="hookSpecificOutput.additionalContext",
+        note=(
+            "Claude Code PostToolUse can deliver additional context after "
+            "native non-shell tool calls, as validated by the Read-tool hook "
+            "experiment recorded in the design note."
+        ),
+    ),
 )
 
 SPICE_AGENT_DRIVER_ENV = "SPICE_AGENT_DRIVER"  # env-policy: allow
