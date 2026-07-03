@@ -33,6 +33,8 @@ async function installTaskStackSmokeHelpers(page) {
       taskStackSmokeLane,
       taskStackSmokeUseSingleLane,
       taskStackSmokeMessageArticles,
+      taskStackSmokeMeasurement,
+      taskStackSmokeHorizontalBounds,
       taskStackSmokeAnchorStability,
       taskStackSmokeTaskHtml,
       taskStackSmokeImageHtml,
@@ -90,6 +92,10 @@ async function renderTaskStackFixture(config) {
   syncMessagePackObserver(lane);
   await new Promise((resolve) => requestAnimationFrame(resolve));
   await new Promise((resolve) => requestAnimationFrame(resolve));
+  return taskStackSmokeMeasurement(lane, host, taskArticle, imageArticle, config);
+}
+
+async function taskStackSmokeMeasurement(lane, host, taskArticle, imageArticle, config) {
   const stack = taskArticle.querySelector(".task-directive-stack");
   const imageStack = imageArticle.querySelector(".message-image-stack");
   const image = imageArticle.querySelector(".message-image img");
@@ -124,10 +130,7 @@ async function renderTaskStackFixture(config) {
   const hostInlinePadding =
     Number.parseFloat(hostStyle.paddingLeft) +
     Number.parseFloat(hostStyle.paddingRight);
-  const firstRowLeft = Math.min(...firstRowMessageCards.map((card) => card.left));
-  const firstRowRight = Math.max(
-    ...firstRowMessageCards.map((card) => card.left + card.width),
-  );
+  const firstRowBounds = taskStackSmokeHorizontalBounds(firstRowMessageCards);
   const rootFontSize =
     Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
   return {
@@ -137,15 +140,17 @@ async function renderTaskStackFixture(config) {
     firstRowCount: cards.filter(
       (card) => Math.abs(card.top - cards[0].top) < 2,
     ).length,
+    hostColumnGap: hostStyle.columnGap,
     hostDisplay: hostStyle.display,
     hostGridAutoFlow: hostStyle.gridAutoFlow,
     hostGridAutoRows: hostStyle.gridAutoRows,
+    hostRowGap: hostStyle.rowGap,
     imageStackDisplay: getComputedStyle(imageStack).display,
     imageArticleWidth: imageArticleRect.width,
     imageWidth: taskStackSmokeRect(image).width,
     messageCardDisplays: messageCardNodes.map((card) => getComputedStyle(card).display),
     messageCardFirstRowCount: firstRowMessageCards.length,
-    messageCardFirstRowFillWidth: firstRowRight - firstRowLeft,
+    messageCardFirstRowFillWidth: firstRowBounds.right - firstRowBounds.left,
     messageCardFirstRowHeights: firstRowMessageCards.map((card) => card.height),
     messageCardFloor: rootFontSize * 20,
     messageCardHostInnerWidth: hostRect.width - hostInlinePadding,
@@ -167,6 +172,13 @@ async function renderTaskStackFixture(config) {
     stackDisplay: getComputedStyle(stack).display,
     tallCardBottom: tallCardRect.top + tallCardRect.height,
     viewportWidth: config.width,
+  };
+}
+
+function taskStackSmokeHorizontalBounds(cards) {
+  return {
+    left: Math.min(...cards.map((card) => card.left)),
+    right: Math.max(...cards.map((card) => card.left + card.width)),
   };
 }
 
@@ -202,7 +214,7 @@ function taskStackSmokeMessageArticles(lane, width) {
       display_html:
         "<p>Longer card body with enough text to create a tall packing column.</p>" +
         "<p>It should not stretch neighboring cards to the same height.</p>" +
-        "<p>The dense grid should let later short cards fill under shorter siblings.</p>" +
+        "<p>The row grid should let later short cards stack under shorter siblings.</p>" +
         "<p>That keeps the stream from leaving a blank bucket beside this card.</p>",
       display_text:
         "Longer card body with enough text to create a tall packing column. " +
@@ -348,6 +360,7 @@ function taskStackSmokeRect(element) {
 
 function assertTaskStackMeasurement(measurement, options) {
   assertBaseTaskStackLayout(measurement);
+  assertImageArticleSizing(measurement, options);
   assertTaskDirectiveCardWidths(measurement);
   assertMessageCardPacking(measurement, options);
   assertMessageAnchorStability(measurement, options);
@@ -356,20 +369,32 @@ function assertTaskStackMeasurement(measurement, options) {
 function assertBaseTaskStackLayout(measurement) {
   if (measurement.hostDisplay !== "grid")
     throw new Error("message host is not grid: " + JSON.stringify(measurement));
-  if (!measurement.hostGridAutoFlow.includes("dense"))
-    throw new Error("message host is not dense-packed: " + JSON.stringify(measurement));
-  if (measurement.hostGridAutoRows !== "8px")
+  if (measurement.hostGridAutoFlow !== "row")
+    throw new Error("message host is not stable row-packed: " + JSON.stringify(measurement));
+  if (measurement.hostGridAutoRows !== "4px")
     throw new Error("message host row unit changed: " + JSON.stringify(measurement));
+  if (measurement.hostRowGap !== "6px")
+    throw new Error("message host row gap changed: " + JSON.stringify(measurement));
+  if (measurement.hostColumnGap !== "9px")
+    throw new Error("message host column gap changed: " + JSON.stringify(measurement));
   if (measurement.stackDisplay !== "grid")
     throw new Error("task stack is not grid: " + JSON.stringify(measurement));
   if (measurement.imageStackDisplay !== "flex")
     throw new Error("image stack control is not flex: " + JSON.stringify(measurement));
-  if (measurement.imageArticleWidth < measurement.messageCardHostInnerWidth * 0.92)
-    throw new Error("image card did not fill row: " + JSON.stringify(measurement));
   if (!measurement.messageCardDisplays.every((display) => display === "flex"))
     throw new Error("message cards are not flex: " + JSON.stringify(measurement));
   if (!measurement.messageCardRowSpans.every((span) => span > 0))
     throw new Error("message cards were not measured into row spans: " + JSON.stringify(measurement));
+}
+
+function assertImageArticleSizing(measurement, options) {
+  if (options.wraps) {
+    if (measurement.imageArticleWidth < measurement.messageCardHostInnerWidth * 0.92)
+      throw new Error("wrapped image card did not fill row: " + JSON.stringify(measurement));
+    return;
+  }
+  if (measurement.imageArticleWidth > measurement.messageCardHostInnerWidth * 0.55)
+    throw new Error("wide image card consumed too much row: " + JSON.stringify(measurement));
 }
 
 function assertTaskDirectiveCardWidths(measurement) {
@@ -399,7 +424,7 @@ function assertWideMessagePacking(measurement) {
   if (fillRatio < 0.92)
     throw new Error("wide message cards did not fill the row: " + JSON.stringify(measurement));
   if (measurement.backfilledCardTop >= measurement.tallCardBottom - 2)
-    throw new Error("dense packing did not backfill below short cards: " + JSON.stringify(measurement));
+    throw new Error("stable row packing did not stack below short cards: " + JSON.stringify(measurement));
   if (measurement.messageCardTopSpread < 8)
     throw new Error("wide message cards did not create multiple packed tiers: " + JSON.stringify(measurement));
   const heights = measurement.messageCardFirstRowHeights;

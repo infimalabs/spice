@@ -1226,8 +1226,9 @@ button.primary:hover {
     padding: 6px 8px;
   }
   .messages {
-    gap: 8px;
+    column-gap: 8px;
     padding: 8px;
+    row-gap: 5px;
   }
   .messages article { font-size: 14px; }
   .message-footer {
