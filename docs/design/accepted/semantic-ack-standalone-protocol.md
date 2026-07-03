@@ -45,7 +45,8 @@ The protocol also gives useful failure modes:
 
 - ignored directive: it remains pending and is shown again;
 - stale or hallucinated key: the system says it retired nothing;
-- duplicate resend: a fresh key forces a fresh closure;
+- duplicate resend: the same durable record gains resend lineage and still
+  requires one closure;
 - ambiguous closure: the summary can be reviewed against the directive.
 
 Those properties are the part likely to transfer to other agent harnesses,
@@ -87,8 +88,11 @@ Recommended behavior:
 
 - Accept low-risk aliases for copied keys only when they remain unambiguous.
 - Re-display pending directives on a cadence or at command boundaries.
-- Escalate long-unretired directives by creating a fresh key rather than
-  mutating the old directive.
+- Escalate long-unretired directives by mutating the same durable
+  directive/inbox record with resend lineage. The receiver should show a clear
+  resend count such as `resend #N`, may raise priority to explain why the
+  record is louder, and should retire the whole lineage with one ACK to the
+  stable key.
 - Keep task-capture side effects separate from ACK retirement.
 
 ## Non-goals

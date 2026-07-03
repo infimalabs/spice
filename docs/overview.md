@@ -69,7 +69,8 @@ them.
 One principle runs through the design: do not let a thing fail silently in
 either direction. A successful ACK names the key it retired. An ACK for a
 nonexistent key reports that it retired nothing. Ignored steering can be resent
-under a fresh key so the transcript shows this instance was not handled.
+by updating the same pending record with resend lineage; readout labels the
+record as `resend #N`, and the eventual ACK retires the whole lineage.
 Operations that complete without effect say so explicitly. The goal is that
 silence means nothing happened, not that something happened invisibly.
 
