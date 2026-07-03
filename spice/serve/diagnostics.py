@@ -146,7 +146,11 @@ def _route_payloads(teams: Iterable[TeamState]) -> list[dict[str, Any]]:
     for team in teams:
         member_agents = [member.agent_id for member in team.members]
         configured_terms = _filter_terms(team)
-        route = {"filter": configured_terms, "lifetime": team.config.lifetime}
+        route = {
+            "filter": configured_terms,
+            "manual": _manual_filter_terms(team),
+            "lifetime": team.config.lifetime,
+        }
         effective_terms = lanes.effective_filter_terms(route)
         for actor in member_agents:
             routes.append(
@@ -176,7 +180,11 @@ def _task_drain_filters(teams: Iterable[TeamState]) -> list[dict[str, Any]]:
     for team in teams:
         filter_terms = _filter_terms(team)
         effective_terms = lanes.effective_filter_terms(
-            {"filter": filter_terms, "lifetime": team.config.lifetime}
+            {
+                "filter": filter_terms,
+                "manual": _manual_filter_terms(team),
+                "lifetime": team.config.lifetime,
+            }
         )
         configs.append(
             {
@@ -194,7 +202,11 @@ def _task_drain_filters(teams: Iterable[TeamState]) -> list[dict[str, Any]]:
 
 
 def _filter_scope(lifetime: str) -> str:
-    return "all-assignable" if lifetime == "Drain" else "stored"
+    if lifetime == "Drain":
+        return "all-assignable"
+    if lifetime == "Steer":
+        return "manual-pins"
+    return "stored"
 
 
 def _filter_terms(team: TeamState) -> list[str]:
@@ -202,6 +214,18 @@ def _filter_terms(team: TeamState) -> list[str]:
         {
             f"project:{task_config.validate_assignable_project(task_filter)}"
             for task_filter in team.config.task_filters
+        }
+    )
+
+
+def _manual_filter_terms(team: TeamState) -> list[str]:
+    from spice.serve.team.schema import TASK_FILTER_SOURCE_MANUAL
+
+    return sorted(
+        {
+            f"project:{task_config.validate_assignable_project(entry.project)}"
+            for entry in team.config.task_filter_entries
+            if entry.source == TASK_FILTER_SOURCE_MANUAL
         }
     )
 

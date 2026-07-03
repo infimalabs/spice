@@ -57,6 +57,88 @@ def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
     assert assigned["claim_by"] == PEER_ACTOR
 
 
+def test_lifetime_lens_reinterprets_same_stored_filters_without_writes(task_repo):
+    """The slider is virtual: the same filter rows read differently per
+    lifetime, and flipping lifetime never mutates the filter store."""
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER],
+        config=TeamConfig(lifetime="Drive", task_filters=("serve.ui",)),
+    )
+    store.add_task_filter(
+        team.team_id, "task.unit", source=TASK_FILTER_SOURCE_AUTO_CLAIM
+    )
+
+    def entries():
+        return [
+            entry.to_payload()
+            for entry in store.team_config(team.team_id).task_filter_entries
+        ]
+
+    stored_entries = entries()
+    drive_route = lanes.team_route_for_actor(ACTOR_A)
+    assert drive_route is not None
+    assert lanes.effective_filter_terms(drive_route) == [
+        "project:serve.ui",
+        "project:task.unit",
+    ]
+
+    store.update_team_config(
+        team.team_id,
+        TeamConfig(lifetime="Steer"),
+        replace_task_filters=False,
+    )
+    steer_route = lanes.team_route_for_actor(ACTOR_A)
+    assert steer_route is not None
+    assert lanes.effective_filter_terms(steer_route) == ["project:serve.ui"]
+    assert entries() == stored_entries
+
+    store.update_team_config(
+        team.team_id,
+        TeamConfig(lifetime="Drain"),
+        replace_task_filters=False,
+    )
+    drain_route = lanes.team_route_for_actor(ACTOR_A)
+    assert drain_route is not None
+    assert lanes.effective_filter_terms(drain_route) == [
+        "project:serve",
+        "project:task",
+    ]
+    assert entries() == stored_entries
+
+
+def test_steer_next_task_ignores_auto_subscriptions_but_honors_pins(
+    task_repo,
+):
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER],
+        config=TeamConfig(lifetime="Steer", task_filters=("serve.ui",)),
+    )
+    store.add_task_filter(
+        team.team_id, "task.unit", source=TASK_FILTER_SOURCE_AUTO_CLAIM
+    )
+    create.add(
+        "Auto-subscribed project task",
+        project="task.unit",
+        priority="high",
+        acceptance=["steer must not allocate through auto subscriptions"],
+    )
+    pinned = create.add(
+        "Pinned project task",
+        project="serve.ui",
+        priority="low",
+        acceptance=["steer allocates through manual pins"],
+    )
+
+    assigned = alloc.next_task()
+
+    assert identity.render_handle(assigned or {}) == pinned
+    assert assigned["project"] == "serve.ui"
+
+
 def test_steer_manual_claim_never_subscribes(task_repo):
     """Steer never auto-subscribes: manual claims stay claimable but must not
     widen the team filter set (the auto:claim ratchet)."""
@@ -584,9 +666,17 @@ def test_drain_visibility_and_empty_steer_private_fail_closed(task_repo, monkeyp
 def test_lifetime_filter_args_use_single_visibility_contract(task_repo):
     assert task_repo.is_dir()
     stored = ["project:task.unit"]
+    pinned = ["project:serve.ui"]
     private = f"project:{config.private_project(ACTOR_A)}"
 
-    assert lanes.filter_args({"filter": stored, "lifetime": "Steer"}) == stored
+    # Steer reads only the manual-pin layer of the same stored route.
+    assert lanes.filter_args({"filter": stored, "lifetime": "Steer"}) == []
+    assert (
+        lanes.filter_args(
+            {"filter": stored + pinned, "manual": pinned, "lifetime": "Steer"}
+        )
+        == pinned
+    )
     assert lanes.filter_args({"filter": stored, "lifetime": "Drive"}) == stored
     assert lanes.filter_args({"filter": stored, "lifetime": "Drain"}) == [
         "(",
