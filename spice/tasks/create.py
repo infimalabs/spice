@@ -127,12 +127,13 @@ def _validated_origin_task_handle(handle: str) -> str:
 
 
 def _origin_required(resolved_project: str) -> bool:
-    # Provenance is a board contract: private agent scratch projects and
-    # hidden/internal system projects (oops triage, maxim proposals) are
-    # exempt by design.
-    if config.is_internal_or_hidden_project(resolved_project):
-        return False
-    return resolved_project.split(config.PROJECT_DELIMITER, 1)[0] != "agent"
+    # There is almost never truly no origination: a claim-less private task
+    # is typically a Steer agent responding to an acknowledgment, and it
+    # cites that ack. Only hidden system surfaces are infallible -- oops is
+    # the error trap (it runs when something already failed, sometimes with
+    # no agent context), so a provenance precondition there would convert
+    # error capture into error loss.
+    return not config.is_hidden_project(resolved_project)
 
 
 def _resolved_task_origin(origin: str | None, actor: str, project: str) -> str:

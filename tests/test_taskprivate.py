@@ -27,6 +27,7 @@ def test_private_task_creation_allowed_in_steer_lifetime(task_repo):
     handle = create.add(
         "Steer scratch task",
         acceptance=["private creation is allowed in Steer"],
+        origin="ack:20260101T000000000000Z",
     )
     row = identity.resolve(handle)
 

@@ -205,6 +205,7 @@ def test_manual_claim_skips_private_project_subscription(task_repo):
         "Private manual claim",
         priority="medium",
         acceptance=["private claims do not touch team filters"],
+        origin="ack:20260101T000000000000Z",
     )
     before = store.global_revision()
 
@@ -708,6 +709,7 @@ def test_drain_visibility_and_empty_steer_private_fail_closed(task_repo, monkeyp
         "Peer private task",
         priority="medium",
         acceptance=["empty steer sees own private work"],
+        origin="ack:20260101T000000000000Z",
     )
 
     monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)

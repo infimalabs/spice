@@ -463,16 +463,20 @@ def _configure_add_parser(actions: Any) -> None:
             "private task. Only allowed in Steer lifetime; Drive and Drain "
             "require --project.\n"
             "  Do not pass agent.*; agent stems are reserved for automatic "
-            "private task creation.\n\n"
+            "private task creation.\n"
+            "  Private tasks share the origin contract: cite the "
+            "acknowledgment that prompted the work (--origin ack:<key>) "
+            "unless an active claim supplies it.\n\n"
             "Examples:\n"
             '  spice task add "Clarify CLI help" --project task.cli '
             '--description "Longer merge body context"\n'
-            '  spice task add "Private scratch task" --private\n'
-            '  spice task add "Private scratch task"'
+            '  spice task add "Private scratch task" --private '
+            "--origin ack:<key>\n"
+            '  spice task add "Private scratch task" --origin ack:<key>'
         ),
         recovery_examples=(
             'spice task add "Clarify CLI help" --project task.cli',
-            'spice task add "Private scratch task" --private',
+            'spice task add "Private scratch task" --private --origin ack:<key>',
         ),
     )
     add.add_argument("title", nargs="?")
