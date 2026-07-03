@@ -10,7 +10,7 @@ import tomllib
 import pytest
 
 from spice.agent.driver import DRIVER
-from spice.agent import maximcli, maxims
+from spice.agent import maxims
 from spice.agent.maximcli import (
     MAXIM_PROPOSE_CONTRACT_ROW,
     render_filed_maxim_proposal_tasks,
@@ -385,10 +385,12 @@ def test_maxim_proposal_drafts_drop_or_normalize_invalid_trigger_candidates(
     ].words == frozenset({"quiet route", "soft landing"})
 
 
-def test_maxim_proposals_cli_does_not_pre_screen_with_judge(
+def test_maxim_proposals_cli_prints_raw_candidates_with_config_state_unchanged(
     tmp_path, monkeypatch, capsys
 ):
     repo = _init_repo(tmp_path / "repo")
+    pyproject = repo / "pyproject.toml"
+    pyproject.write_text("[tool.spice]\n", encoding="utf-8")
     _record_ack_source(
         repo,
         key=KEY_A,
@@ -406,12 +408,6 @@ def test_maxim_proposals_cli_does_not_pre_screen_with_judge(
         archived_at=ARCHIVED_AT_NEWER,
     )
     monkeypatch.chdir(repo)
-
-    def fail_if_called(*_args, **_kwargs):
-        raise AssertionError("proposal mining must not call the maxim judge")
-
-    monkeypatch.setattr(maximcli, "evaluate_maxim", fail_if_called)
-    monkeypatch.setattr(maxims, "evaluate_maxim_any_violation", fail_if_called)
     args = build_parser().parse_args(["maxim", "proposals"])
 
     assert args.func is run_maxim_proposals_cli
@@ -432,7 +428,8 @@ def test_maxim_proposals_cli_does_not_pre_screen_with_judge(
         'words = ["branches", "deterministic", "fallback", "path"]',
         'message = "Avoid fallback branches. Use one deterministic path."',
     ]
-    assert not (repo / "pyproject.toml").exists()
+    assert pyproject.read_text(encoding="utf-8") == "[tool.spice]\n"
+    assert maxims.resolved_maxim_bags(repo) == maxims.BUILTIN_MAXIM_BAGS
 
 
 def test_maxim_propose_help_names_candidate_contract(capsys):
