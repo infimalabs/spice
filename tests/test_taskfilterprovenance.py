@@ -12,6 +12,7 @@ from spice.agent.driver import DRIVER
 from spice.serve.team.ids import thread_actor_id
 from spice.serve.team.store import (
     TASK_FILTER_SOURCE_AUTO_CREATE,
+    TASK_FILTER_SOURCE_MANUAL,
     ServeTeamStore,
     TeamConfig,
 )
@@ -62,8 +63,11 @@ def test_drive_replace_path_preserves_auto_create_filter_for_gc(task_repo, monke
     )
     after_replace = store.team_config(team.team_id)
 
+    # The replace list is the manual pin layer; the auto:create subscription
+    # from task creation coexists with the new pin.
     assert [entry.to_payload() for entry in after_replace.task_filter_entries] == [
-        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE}
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE},
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_MANUAL},
     ]
 
     assigned = alloc.next_task()
@@ -75,8 +79,12 @@ def test_drive_replace_path_preserves_auto_create_filter_for_gc(task_repo, monke
     ops.review(handle, finding="clean", note="review complete")
     after_review = store.team_config(team.team_id)
 
-    assert after_review.task_filters == ()
-    assert after_review.task_filter_entries == ()
+    # Empty-project GC reclaims the auto subscription; the manual pin is
+    # sticky and survives.
+    assert after_review.task_filters == ("task.unit",)
+    assert [entry.to_payload() for entry in after_review.task_filter_entries] == [
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_MANUAL}
+    ]
 
 
 def _init_repo(path: Path) -> Path:
