@@ -131,6 +131,7 @@ def test_declared_extension_fixture_shadow_entries_fail_loudly_by_surface(
     wheel, distribution = build_fixture_distribution(tmp_path)
     monkeypatch.syspath_prepend(str(wheel))
     _use_extension_entries(monkeypatch, distribution, {group: names})
+    _assert_shared_loader_shadow(group, distribution, shadow_name)
     _write_agent_config(tmp_path, wrappers=["spice-dev"])
     _write_agent_wrapper_group(tmp_path, "spice-dev")
 
@@ -141,6 +142,21 @@ def test_declared_extension_fixture_shadow_entries_fail_loudly_by_surface(
     assert group in message
     assert shadow_name in message
     assert expected in message
+
+
+def _assert_shared_loader_shadow(group: str, distribution, shadow_name: str) -> None:
+    filtered = FilteredExtensionDistribution(distribution, {group: {shadow_name}})
+    with pytest.raises(SpiceError) as exc_info:
+        extension_loader.extension_entry_points(
+            group,
+            built_in_names=[shadow_name],
+            distributions=[filtered],
+        )
+
+    message = str(exc_info.value)
+    assert group in message
+    assert shadow_name in message
+    assert "shadows built-in" in message
 
 
 def test_doctor_namespace_guard_fails_when_second_checkout_is_on_sys_path(
