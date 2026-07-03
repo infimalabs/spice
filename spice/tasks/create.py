@@ -106,7 +106,6 @@ def _build_add_args(
     after: list[str],
     acceptance: list[str],
     wait: str | None,
-    every: str | None,
     scheduled: str | None,
     until: str | None,
     due: str | None,
@@ -131,9 +130,6 @@ def _build_add_args(
         args.append(f"due:{tw.future_iso(config.SLA_DUE_SECONDS[mapped_priority])}")
     if wait:
         args.append(f"wait:{wait}")
-    if every:
-        config.parse_duration(every)  # validate the pacing duration up front
-        args.append(f"pace:{every}")
     if scheduled:
         args.append(f"scheduled:{scheduled}")
     if until:
@@ -179,7 +175,6 @@ def _add_result(
     wait: str | None,
     claim: bool,
     deferred: bool = False,
-    every: str | None = None,
     scheduled: str | None = None,
     until: str | None = None,
     due: str | None = None,
@@ -215,7 +210,6 @@ def _add_result(
         after=after,
         acceptance=acceptance,
         wait=resolved_wait,
-        every=every,
         scheduled=scheduled,
         until=until,
         due=due,
@@ -250,7 +244,6 @@ def add_one(
     wait: str | None,
     claim: bool,
     deferred: bool = False,
-    every: str | None = None,
     scheduled: str | None = None,
     until: str | None = None,
     due: str | None = None,
@@ -272,7 +265,6 @@ def add_one(
         wait=wait,
         claim=claim,
         deferred=deferred,
-        every=every,
         scheduled=scheduled,
         until=until,
         due=due,
@@ -297,7 +289,6 @@ def add(
     wait: str | None = None,
     deferred: bool = False,
     claim: bool = False,
-    every: str | None = None,
     scheduled: str | None = None,
     until: str | None = None,
     due: str | None = None,
@@ -315,7 +306,6 @@ def add(
         wait=wait,
         deferred=deferred,
         claim=claim,
-        every=every,
         scheduled=scheduled,
         until=until,
         due=due,

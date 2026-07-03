@@ -647,22 +647,6 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
     handle = identity.render_handle(row)
     actor = str(row.get("claim_by") or "").strip() or tw.current_actor()
     if index + 1 >= len(phases):
-        pace = str(row.get("pace") or "").strip()
-        if pace:
-            wait = tw.future_iso(config.parse_duration(pace))
-            tw.run(
-                [
-                    uuid,
-                    "modify",
-                    "phase_i:0",
-                    f"phase:{phases[0]}",
-                    f"wait:{wait}",
-                    "start:",
-                    *CLAIM_CLEAR,
-                ]
-            )
-            _record_task_lifecycle_event(uuid, "phaseAdvance", actor)
-            return f"looped {handle} -> {phases[0]} (paced {pace}, waits until {wait})"
         project = str(row.get("project") or "")
         tw.run([uuid, "done"])
         _record_task_lifecycle_event(uuid, "complete", actor)

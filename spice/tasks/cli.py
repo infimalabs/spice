@@ -514,9 +514,6 @@ def _configure_add_parser(actions: Any) -> None:
         action="store_true",
         help="Create with the far-future wait used for deferred work.",
     )
-    add.add_argument(
-        "--every", help="Pace a looping flow (e.g. 1d): re-enter phase_0 on completion."
-    )
     add.add_argument("--scheduled")
     add.add_argument("--until")
     add.add_argument("--due", help="Native due date; defaults from priority SLA.")
@@ -800,7 +797,6 @@ def _handle_add(args: argparse.Namespace) -> int:
             wait=args.wait,
             deferred=args.deferred,
             claim=args.claim,
-            every=args.every,
             scheduled=args.scheduled,
             until=args.until,
             due=args.due,
