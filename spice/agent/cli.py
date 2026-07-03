@@ -19,7 +19,13 @@ def configure_agent_parser(subparsers: Any) -> None:
     )
     actions = parser.add_subparsers(dest="agent_action", required=True)
 
-    status = actions.add_parser("status", help="Show the bound agent's state.")
+    show = actions.add_parser("show", help="Show the bound agent's state.")
+    show.set_defaults(func=handle_agent)
+
+    status = actions.add_parser(
+        "status",
+        help="Compatibility alias for agent show.",
+    )
     status.set_defaults(func=handle_agent)
 
     activation = actions.add_parser(
@@ -95,7 +101,7 @@ def handle_agent(args: argparse.Namespace) -> int:
             print(response)
         return 0
     repo_root = require_repo_root()
-    if action == "status":
+    if action in {"show", "status"}:
         print(render_agent_status(lifecycle.agent_status(repo_root)))
         return 0
     if action == "activation":
