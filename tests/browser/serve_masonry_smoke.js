@@ -10,6 +10,7 @@ const masonryMeasuredWidths = Object.keys(masonryColumnFloorByWidth).map(Number)
 const masonryScreenshotWidths = [900, 1280, 1920];
 const masonryFixturePlan = {
   ackCardStep: 20,
+  backfillMinutes: [-4, -3, -2],
   baseIso: "2026-07-03T10:04:00.000Z",
   epilogueMinute: 320,
   finalCardStep: 17,
@@ -68,6 +69,8 @@ async function installMasonrySmokeHelpers(page) {
       masonrySmokeBodyHtml,
       masonrySmokeMeasurement,
       masonrySmokeColumnAudit,
+      masonrySmokeSegmentFanOut,
+      masonrySmokeBackfillAudit,
       masonrySmokeColumnRecovery,
       masonrySmokeRect,
     ]
@@ -231,7 +234,13 @@ async function masonrySmokeMeasurement(lane, host, config) {
     Number.parseFloat(hostStyle.paddingLeft) -
     Number.parseFloat(hostStyle.paddingRight);
   const columnAudit = masonrySmokeColumnAudit(cardRects);
-  const columnRecovery = await masonrySmokeColumnRecovery(lane, cards);
+  const segmentFanOut = masonrySmokeSegmentFanOut(
+    cardRects,
+    host,
+    config.expectedColumns,
+  );
+  // Rule rects are read live, so audit them before the backfill and recovery
+  // probes below mutate the layout.
   const ruleAudits = Array.from(
     host.querySelectorAll('[data-masonry-smoke="rule"]'),
   ).map((rule) => {
@@ -254,9 +263,13 @@ async function masonrySmokeMeasurement(lane, host, config) {
       top: rect.top,
     };
   });
+  const backfillAudit = await masonrySmokeBackfillAudit(lane, host, config);
+  const columnRecovery = await masonrySmokeColumnRecovery(lane, cards);
   return {
+    backfillAudit,
     columnAudit,
     columnRecovery,
+    segmentFanOut,
     dividerIndex,
     dividerRect,
     dividerFillRatio:
@@ -310,6 +323,72 @@ function masonrySmokeColumnAudit(cardRects) {
     }
   }
   return audit;
+}
+
+// Leftmost-feasible placement must open every barrier segment as a left-to-
+// right fan: the first cards of a segment land in columns 1, 2, 3, ... in
+// chronological order.
+function masonrySmokeSegmentFanOut(cardRects, host, expectedColumns) {
+  const barrierIndexes = Array.from(
+    host.querySelectorAll(
+      '[data-masonry-smoke="divider"], [data-masonry-smoke="rule"]',
+    ),
+  )
+    .map((node) => Number(node.dataset.masonrySmokeIndex))
+    .sort((a, b) => a - b);
+  const bounds = [-Infinity, ...barrierIndexes, Infinity];
+  const fans = [];
+  for (let i = 0; i + 1 < bounds.length; i += 1) {
+    const cards = cardRects
+      .filter((card) => card.index > bounds[i] && card.index < bounds[i + 1])
+      .sort((a, b) => a.index - b.index);
+    if (!cards.length) continue;
+    fans.push(
+      cards
+        .slice(0, Math.min(expectedColumns, cards.length))
+        .map((card) => card.column),
+    );
+  }
+  return fans;
+}
+
+// Prepending history must not re-pin a single existing card: segment keys are
+// barrier identities, so untouched downstream segments keep their pins.
+async function masonrySmokeBackfillAudit(lane, host, config) {
+  const cards = Array.from(
+    host.querySelectorAll('[data-masonry-smoke="card"]'),
+  );
+  const capturePins = () =>
+    cards.map((card) => [
+      card.dataset.messageKey,
+      card.style.gridColumnStart,
+      card.dataset.messagePackSegment,
+    ]);
+  const pinsBefore = capturePins();
+  const base = Date.parse(config.plan.baseIso);
+  const nodes = config.plan.backfillMinutes.map((minute, position) => {
+    const node = renderMessage(lane, {
+      ack_count: 0,
+      ack_keys: [],
+      display_html: "<p>Backfill card " + position + " arrives late.</p>",
+      display_text: "backfill card " + position,
+      index: minute,
+      key: "masonry-backfill-" + position + "-" + config.width,
+      kind: "assistant",
+      text: "backfill card " + position,
+      timestamp: new Date(base + minute * 60000).toISOString(),
+    });
+    node.dataset.masonrySmoke = "card";
+    node.dataset.masonrySmokeIndex = String(minute);
+    return node;
+  });
+  host.prepend(...nodes);
+  packMessageStream(lane);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  return {
+    backfillColumns: nodes.map((node) => node.style.gridColumnStart),
+    stable: JSON.stringify(pinsBefore) === JSON.stringify(capturePins()),
+  };
 }
 
 // Regression guard for the auto-fit collapse (f63d310): force every card into
@@ -374,6 +453,20 @@ function assertMasonryMeasurement(measurement) {
       throw new Error("card floated above a time-rule barrier" + label + JSON.stringify(measurement));
   }
   const expectedColumns = measurement.expectedColumns;
+  if (expectedColumns > 1) {
+    for (const fan of measurement.segmentFanOut) {
+      const orderedColumns = fan.map((column, position) => String(position + 1));
+      if (JSON.stringify(fan) !== JSON.stringify(orderedColumns))
+        throw new Error(
+          "segment does not fan out left-to-right: " +
+            JSON.stringify(fan) +
+            label +
+            JSON.stringify(measurement),
+        );
+    }
+  }
+  if (!measurement.backfillAudit.stable)
+    throw new Error("history backfill re-pinned downstream cards" + label + JSON.stringify(measurement));
   if (measurement.distinctColumnLefts < expectedColumns)
     throw new Error(
       "cards under-distributed (" +

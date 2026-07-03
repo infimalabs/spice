@@ -838,7 +838,7 @@ function packMessageStream(lane) {
   if (!Number.isFinite(rowStride) || rowStride <= 0) return;
   const columnCount = messagePackColumnCount(host, style);
   const columnRows = new Array(Math.max(1, columnCount)).fill(0);
-  let segment = 0;
+  let segmentKey = "top";
   for (const node of host.children) {
     if (!isMessagePackItem(node)) continue;
     const height = node.getBoundingClientRect().height;
@@ -849,13 +849,26 @@ function packMessageStream(lane) {
       const start = Math.max(...columnRows);
       setMessagePackPosition(node, "", start + 1);
       columnRows.fill(start + span);
-      segment += 1;
+      if (isMessagePackBarrier(node)) segmentKey = messagePackBarrierKey(node);
       continue;
     }
-    const column = stickyMessagePackColumn(node, segment, columnRows);
+    const column = stickyMessagePackColumn(node, segmentKey, columnRows);
     setMessagePackPosition(node, String(column + 1), columnRows[column] + 1);
     columnRows[column] += span;
   }
+}
+
+// Segments are keyed by the identity of the barrier that opens them, never by
+// ordinal position: history backfill or a newly synthesized time rule must not
+// shift the key of untouched downstream segments and cascade re-pins while the
+// operator is reading.
+function messagePackBarrierKey(node) {
+  return (
+    node.dataset.messageKey ||
+    node.dataset.messageTs ||
+    node.dataset.historyTargetId ||
+    node.className
+  );
 }
 
 // Derive the track count from geometry, never from computed
@@ -903,22 +916,33 @@ function isMessagePackBarrier(node) {
   );
 }
 
-function stickyMessagePackColumn(node, segment, columnRows) {
+function stickyMessagePackColumn(node, segmentKey, columnRows) {
   const pinned = Number(node.dataset.messagePackColumn);
   if (
-    node.dataset.messagePackSegment === String(segment) &&
+    node.dataset.messagePackSegment === segmentKey &&
     Number.isInteger(pinned) &&
     pinned >= 0 &&
     pinned < columnRows.length
   )
     return pinned;
-  let column = 0;
-  for (let index = 1; index < columnRows.length; index += 1) {
-    if (columnRows[index] < columnRows[column]) column = index;
-  }
-  node.dataset.messagePackSegment = String(segment);
+  const column = leftmostFeasiblePackColumn(columnRows);
+  node.dataset.messagePackSegment = segmentKey;
   node.dataset.messagePackColumn = String(column);
   return column;
+}
+
+// One band of tolerance turns shortest-column masonry into row-major filling:
+// a level fills left to right, then the next level starts, so chronological
+// insertion keeps each visual band a contiguous time slice. The lowest column
+// is always feasible, so the scan always returns.
+const messagePackBandRows = 6;
+
+function leftmostFeasiblePackColumn(columnRows) {
+  const lowest = Math.min(...columnRows);
+  for (let index = 0; index < columnRows.length; index += 1) {
+    if (columnRows[index] <= lowest + messagePackBandRows) return index;
+  }
+  return columnRows.indexOf(lowest);
 }
 
 function setMessagePackPosition(node, columnStart, rowStart) {
