@@ -9,6 +9,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from spice.errors import SpiceError
+from spice.extensions import (
+    SPICE_WRAPPER_ENTRY_POINT_GROUP,
+    SpiceExtensionEntryPoint,
+    extension_entry_points,
+)
 from spice.repocfg import agent_table, agent_wrapper_definitions_table
 
 ZDOTDIR_ENV = "ZDOTDIR"
@@ -21,6 +26,7 @@ SHELL_HOOK_DIR_NAME = "shellhooks"
 STATIC_SHELL_HOOK_DIR_NAME = "staticshellhooks"
 AGENT_WRAPPERS_KEY = "wrappers"
 DEFAULT_AGENT_WRAPPER_GROUP = "common"
+WRAPPER_ENTRY_POINT_GROUP = SPICE_WRAPPER_ENTRY_POINT_GROUP
 BUILTIN_AGENT_WRAPPER_GROUPS = {
     DEFAULT_AGENT_WRAPPER_GROUP: {},
 }
@@ -183,10 +189,10 @@ def single_python_executable(command: Sequence[str]) -> str:
 
 def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
     agent_settings = agent_table(repo_root)
-    definitions = {
-        **BUILTIN_AGENT_WRAPPER_GROUPS,
-        **agent_wrapper_definitions_table(repo_root),
-    }
+    definitions, configured_sources = configured_agent_wrapper_definitions(repo_root)
+    extension_entries = entry_point_agent_wrapper_entries(
+        configured_sources=configured_sources
+    )
     if AGENT_WRAPPERS_KEY in agent_settings:
         ordered_groups = config_string_list(
             agent_settings.get(AGENT_WRAPPERS_KEY),
@@ -204,6 +210,10 @@ def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
             label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY} group",
         )
         raw_group = definitions.get(group_name)
+        if raw_group is None and group_name in extension_entries:
+            raw_group = entry_point_wrapper_group_from_entry(
+                extension_entries[group_name]
+            )
         if not isinstance(raw_group, dict):
             raise SpiceError(
                 f"spice shell hook: missing tool.spice.wrappers.{group_name}"
@@ -216,6 +226,63 @@ def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
             )
         )
     return lines
+
+
+def configured_agent_wrapper_definitions(
+    repo_root: Path,
+) -> tuple[dict[str, object], dict[str, str]]:
+    definitions: dict[str, object] = dict(BUILTIN_AGENT_WRAPPER_GROUPS)
+    sources: dict[str, str] = {
+        name: f"built-in wrapper group {name}" for name in definitions
+    }
+    for name, group in agent_wrapper_definitions_table(repo_root).items():
+        definitions[name] = group
+        sources[name] = f"tool.spice.wrappers.{name}"
+    return definitions, sources
+
+
+def entry_point_agent_wrapper_entries(
+    *, configured_sources: Mapping[str, str]
+) -> dict[str, SpiceExtensionEntryPoint]:
+    entries: dict[str, SpiceExtensionEntryPoint] = {}
+    for entry in extension_entry_points(WRAPPER_ENTRY_POINT_GROUP):
+        name = entry.name
+        require_config_name(name, label=f"{WRAPPER_ENTRY_POINT_GROUP} entry point")
+        source = entry_point_wrapper_source(entry)
+        previous = configured_sources.get(name)
+        if previous is not None:
+            raise wrapper_shadowing_error(name, previous, source)
+        entries[name] = entry
+    return entries
+
+
+def entry_point_wrapper_group_from_entry(entry: SpiceExtensionEntryPoint) -> object:
+    source = entry_point_wrapper_source(entry)
+    try:
+        loaded = entry.load()
+        raw = loaded() if callable(loaded) else loaded
+    except Exception as exc:
+        raise SpiceError(f"spice shell hook: failed to load {source}: {exc}") from exc
+    return entry_point_wrapper_group(entry.name, raw, source=source)
+
+
+def entry_point_wrapper_source(entry: SpiceExtensionEntryPoint) -> str:
+    return f"{WRAPPER_ENTRY_POINT_GROUP} entry point {entry.name}"
+
+
+def entry_point_wrapper_group(name: str, raw: object, *, source: str) -> object:
+    if not isinstance(raw, Mapping):
+        raise SpiceError(f"spice shell hook: {source} must load a wrapper table")
+    if "argv" in raw:
+        return {name: dict(raw)}
+    return dict(raw)
+
+
+def wrapper_shadowing_error(name: str, first: str, second: str) -> SpiceError:
+    return SpiceError(
+        "spice shell hook: wrapper group "
+        f"{name!r} is configured by both {first} and {second}"
+    )
 
 
 def render_agent_wrapper_group_lines(
