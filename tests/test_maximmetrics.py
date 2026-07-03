@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import subprocess
 
+from spice.agent import watchdog
+from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.maximmetrics import (
     MAXIM_EVENT_FIRE,
     MAXIM_EVENT_GATE_SUPPRESSED,
@@ -18,12 +20,35 @@ from spice.agent.maximmetrics import (
     maxim_recurrence_inputs,
     record_maxim_metric_events,
 )
+from spice.agent.maxims import MaximVerdict
 
 
 def _init_repo(path):
     path.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
     return path
+
+
+def _write_maxim_config(repo, *, name: str = "alpha") -> None:
+    (repo / "pyproject.toml").write_text(
+        f"""
+[tool.spice.maxims.{name}]
+words = ["{name}"]
+message = "{name.upper()} reminder."
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+
+def _judge_verdict(*, agrees: bool) -> MaximVerdict:
+    answer = "YES" if agrees else "NO"
+    return MaximVerdict(
+        maxim="",
+        statement="",
+        prompt="",
+        answer=answer,
+        attempts=(answer,),
+    )
 
 
 def test_maxim_metric_store_persists_aggregate_counts_after_reload(tmp_path):
@@ -212,3 +237,93 @@ def test_maxim_metric_recurrence_inputs_keep_trigger_and_reminder_context(tmp_pa
             "",
         ),
     ]
+
+
+def test_watchdog_records_published_violation_metrics(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    _write_maxim_config(repo)
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.setattr(
+        watchdog,
+        "evaluate_maxim_any_violation",
+        lambda _maxim, _statement: _judge_verdict(agrees=False),
+    )
+
+    watchdog.publish_maxim_hits_as_inbox(
+        repo,
+        "alpha appears in this assistant message",
+        reminder_gate=watchdog.MaximReminderGate(),
+    )
+    count = maxim_metric_counts(repo)[0]
+
+    assert count == MaximMetricCounts(
+        bag_name="alpha",
+        driver_name="codex",
+        fire_count=1,
+        judged_confirmed_count=1,
+        judged_rejected_count=0,
+        gate_suppressed_count=0,
+        published_count=1,
+    )
+
+
+def test_watchdog_records_judged_rejection_metrics(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    _write_maxim_config(repo)
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.setattr(
+        watchdog,
+        "evaluate_maxim_any_violation",
+        lambda _maxim, _statement: _judge_verdict(agrees=True),
+    )
+
+    watchdog.publish_maxim_hits_as_inbox(
+        repo,
+        "alpha appears in compliant assistant prose",
+        reminder_gate=watchdog.MaximReminderGate(),
+    )
+    count = maxim_metric_counts(repo)[0]
+
+    assert count == MaximMetricCounts(
+        bag_name="alpha",
+        driver_name="codex",
+        fire_count=1,
+        judged_confirmed_count=0,
+        judged_rejected_count=1,
+        gate_suppressed_count=0,
+        published_count=0,
+    )
+
+
+def test_watchdog_records_gate_suppressed_metrics(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    _write_maxim_config(repo)
+    gate = watchdog.MaximReminderGate()
+    monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
+    monkeypatch.setattr(
+        watchdog,
+        "evaluate_maxim_any_violation",
+        lambda _maxim, _statement: _judge_verdict(agrees=False),
+    )
+
+    watchdog.publish_maxim_hits_as_inbox(
+        repo,
+        "alpha appears once",
+        reminder_gate=gate,
+    )
+    watchdog.publish_maxim_hits_as_inbox(
+        repo,
+        "alpha appears again before compaction",
+        reminder_gate=gate,
+    )
+    count = maxim_metric_counts(repo)[0]
+
+    assert count == MaximMetricCounts(
+        bag_name="alpha",
+        driver_name="codex",
+        fire_count=2,
+        judged_confirmed_count=2,
+        judged_rejected_count=0,
+        gate_suppressed_count=1,
+        published_count=1,
+    )
