@@ -33,9 +33,14 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, overload
 
 from spice.errors import SpiceError
+from spice.extensions import (
+    SPICE_DRIVER_ENTRY_POINT_GROUP,
+    merge_builtin_and_extension_entry_points,
+)
 from spice.paths import atomic_write_json, state_dir
 
 CommandTextRewriter = Callable[[str], str | None]
+DRIVER_ENTRY_POINT_GROUP = SPICE_DRIVER_ENTRY_POINT_GROUP
 
 
 @dataclass(frozen=True)
@@ -1005,6 +1010,13 @@ _DRIVERS: dict[str, AgentDriver] = {
     CODEX_DRIVER.name: CODEX_DRIVER,
     CLAUDE_DRIVER.name: CLAUDE_DRIVER,
 }
+
+
+def driver_entry_point_registry() -> dict[str, object]:
+    return merge_builtin_and_extension_entry_points(
+        DRIVER_ENTRY_POINT_GROUP,
+        _DRIVERS,
+    )
 
 
 ALL_DRIVERS: tuple[AgentDriver, ...] = (CODEX_DRIVER, CLAUDE_DRIVER)

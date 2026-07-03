@@ -4,8 +4,8 @@ spice is the Simultaneous Production, Integration, and Control Environment: an
 installed agent harness for operating coding agents inside real git worktrees.
 This root file states the system contract. Detail lives deeper:
 
-- [Architecture](docs/design/architecture.md)
-- [Invariants](docs/design/invariants.md)
+- [Architecture](docs/design/ARCHITECTURE.md)
+- [Invariants](docs/design/INVARIANTS.md)
 - [Serve UI invariants](docs/serve/invariants.md)
 
 ## Core Thesis
