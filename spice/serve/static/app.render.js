@@ -687,6 +687,7 @@ function renderMessage(lane, item) {
   if (item.image_only) article.classList.add("image-only");
   article.dataset.messageKey = item.key;
   article.id = messageDomId(item.key);
+  stampMessageTimestamp(article, item);
   if (item.threadId) article.dataset.threadId = item.threadId;
   if (laneShouldAttributeMessages(lane)) {
     const accentSlot = laneMessageAccentIndex(lane, item);
@@ -966,10 +967,18 @@ function renderBadges(ackCount, kind, maximAckCount, taskCardCount) {
   return badges;
 }
 
+// The packer and stream barrier synthesis read time from this dataset stamp,
+// never by re-parsing <time> elements out of rendered content.
+function stampMessageTimestamp(node, item) {
+  const parsed = Date.parse(item.timestamp || "");
+  if (Number.isFinite(parsed)) node.dataset.messageTs = String(parsed);
+}
+
 function renderCompactionDivider(lane, item) {
   const divider = document.createElement("div");
   divider.className = "compaction-divider";
   divider.title = item.timestamp;
+  stampMessageTimestamp(divider, item);
   const accentSlot = laneMessageAccentIndex(lane, item);
   divider.dataset.accentSlot = String(accentSlot);
   divider.style.setProperty("--compaction-accent", messageOccupantAccent(accentSlot));

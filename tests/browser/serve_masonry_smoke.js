@@ -225,6 +225,9 @@ async function masonrySmokeMeasurement(lane, host, config) {
     ).length,
     expectedColumns: config.expectedColumns,
     hostDisplay: hostStyle.display,
+    missingTimestampStamps: Array.from(
+      host.querySelectorAll("article[data-message-key], .compaction-divider"),
+    ).filter((node) => !node.dataset.messageTs).length,
     spans: cardRects.map((card) => card.span),
     viewportWidth: config.width,
   };
@@ -288,6 +291,8 @@ function assertMasonryMeasurement(measurement) {
     throw new Error("message host is not grid" + label + JSON.stringify(measurement));
   if (!measurement.spans.every((span) => span > 0))
     throw new Error("cards missing row spans" + label + JSON.stringify(measurement));
+  if (measurement.missingTimestampStamps > 0)
+    throw new Error("pack items missing data-message-ts" + label + JSON.stringify(measurement));
   if (measurement.dividerFillRatio < 0.98)
     throw new Error("compaction divider is not full width" + label + JSON.stringify(measurement));
   const dividerTop = measurement.dividerRect.top;
