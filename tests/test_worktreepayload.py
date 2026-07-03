@@ -249,3 +249,15 @@ def test_work_trees_payload_includes_latest_activity_for_global_menu(
             "repo_root": tmp_path,
         }
     ]
+
+
+def test_pending_inbox_identity_version_is_positive_without_inbox_activity(tmp_path):
+    from spice.serve.pending import pending_inbox_identity_payload
+
+    payload = pending_inbox_identity_payload(tmp_path)
+
+    assert payload["pendingInboxCount"] == 0
+    assert payload["pendingInboxKeys"] == []
+    # The UI rejects any identity payload without a positive version; a
+    # worktree that has never seen inbox activity must still be importable.
+    assert payload["pendingInboxVersion"] >= 1

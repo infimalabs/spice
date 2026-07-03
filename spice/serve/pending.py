@@ -41,13 +41,18 @@ def pending_inbox_revision(items: list[InboxItem]) -> str:
 
 
 def pending_inbox_version(repo_root: str | Path | None, items: list[InboxItem]) -> int:
-    """Comparable inbox snapshot version safe for JavaScript Number ordering."""
+    """Comparable inbox snapshot version safe for JavaScript Number ordering.
+
+    Never 0 for a real worktree: the UI treats an identity payload without a
+    positive version as a protocol violation, and a worktree that has never
+    seen inbox activity (missing inbox dir) still needs a valid identity.
+    """
     if not repo_root:
         return 0
     version_ns = _path_mtime_ns(inbox_dir(repo_root))
     for item in items:
         version_ns = max(version_ns, _path_mtime_ns(item.source_path))
-    return version_ns // _NANOSECONDS_PER_MICROSECOND
+    return max(1, version_ns // _NANOSECONDS_PER_MICROSECOND)
 
 
 def _path_mtime_ns(path: Path) -> int:
