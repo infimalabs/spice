@@ -837,25 +837,47 @@ function packMessageStream(lane) {
   const rowStride = rowHeight + rowGap;
   if (!Number.isFinite(rowStride) || rowStride <= 0) return;
   const columnCount = messagePackColumnCount(host, style);
+  const bandRows = messagePackBandRows(style);
   const columnRows = new Array(Math.max(1, columnCount)).fill(0);
   let segmentKey = "top";
   for (const node of host.children) {
     if (!isMessagePackItem(node)) continue;
-    const height = node.getBoundingClientRect().height;
+    const height = messagePackItemHeight(node);
     if (!Number.isFinite(height) || height <= 0) continue;
-    const span = Math.max(1, Math.ceil((height + rowGap) / rowStride));
-    setMessagePackRowSpan(node, span);
+    const naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
     if (columnCount <= 1 || isMessagePackBarrier(node)) {
+      setMessagePackRowSpan(node, naturalSpan);
       const start = Math.max(...columnRows);
       setMessagePackPosition(node, "", start + 1);
-      columnRows.fill(start + span);
+      columnRows.fill(start + naturalSpan);
       if (isMessagePackBarrier(node)) segmentKey = messagePackBarrierKey(node);
       continue;
     }
-    const column = stickyMessagePackColumn(node, segmentKey, columnRows);
+    // Cards round up to whole bands and stretch to fill them (CSS align-self),
+    // so the quantization slack lives inside the card box instead of the grid.
+    // Image-only cards keep their natural span: stretching would distort them,
+    // and start-alignment keeps the slack invisible against the row below.
+    const span = node.classList.contains("image-only")
+      ? naturalSpan
+      : Math.ceil(naturalSpan / bandRows) * bandRows;
+    setMessagePackRowSpan(node, span);
+    const column = stickyMessagePackColumn(node, segmentKey, columnRows, bandRows);
     setMessagePackPosition(node, String(column + 1), columnRows[column] + 1);
     columnRows[column] += span;
   }
+}
+
+// Stretch-aligned cards report their assigned grid cell as rect height, which
+// would freeze a fresh card at the span-1 default forever. scrollHeight sees
+// the natural content height through the stretch (plus the border, which
+// scrollHeight excludes), so a card measures natural when fresh or grown and
+// its settled band cell otherwise — a fixed point either way.
+const messageCardBorderAllowancePx = 2;
+
+function messagePackItemHeight(node) {
+  const rectHeight = node.getBoundingClientRect().height;
+  if (!node.matches("article[data-message-key]")) return rectHeight;
+  return Math.max(rectHeight, node.scrollHeight + messageCardBorderAllowancePx);
 }
 
 // Segments are keyed by the identity of the barrier that opens them, never by
@@ -916,7 +938,7 @@ function isMessagePackBarrier(node) {
   );
 }
 
-function stickyMessagePackColumn(node, segmentKey, columnRows) {
+function stickyMessagePackColumn(node, segmentKey, columnRows, bandRows) {
   const pinned = Number(node.dataset.messagePackColumn);
   if (
     node.dataset.messagePackSegment === segmentKey &&
@@ -925,7 +947,7 @@ function stickyMessagePackColumn(node, segmentKey, columnRows) {
     pinned < columnRows.length
   )
     return pinned;
-  const column = leftmostFeasiblePackColumn(columnRows);
+  const column = leftmostFeasiblePackColumn(columnRows, bandRows);
   node.dataset.messagePackSegment = segmentKey;
   node.dataset.messagePackColumn = String(column);
   return column;
@@ -935,12 +957,23 @@ function stickyMessagePackColumn(node, segmentKey, columnRows) {
 // a level fills left to right, then the next level starts, so chronological
 // insertion keeps each visual band a contiguous time slice. The lowest column
 // is always feasible, so the scan always returns.
-const messagePackBandRows = 6;
+const messagePackBandRowsDefault = 6;
 
-function leftmostFeasiblePackColumn(columnRows) {
+function messagePackBandRows(style) {
+  const parsed = Number.parseInt(
+    style.getPropertyValue("--message-pack-band"),
+    10,
+  );
+  return parsed > 0 ? parsed : messagePackBandRowsDefault;
+}
+
+function leftmostFeasiblePackColumn(columnRows, bandRows) {
+  // Strictly less than one band: a column that already took a full band is
+  // spent for this level, so equal-height cards fan left-to-right instead of
+  // stacking pairs into the leftmost column.
   const lowest = Math.min(...columnRows);
   for (let index = 0; index < columnRows.length; index += 1) {
-    if (columnRows[index] <= lowest + messagePackBandRows) return index;
+    if (columnRows[index] < lowest + bandRows) return index;
   }
   return columnRows.indexOf(lowest);
 }
