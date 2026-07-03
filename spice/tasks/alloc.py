@@ -133,6 +133,11 @@ def stale_rows() -> list[dict[str, Any]]:
     return out
 
 
+def _is_stale_claim(row: dict[str, Any], now: str) -> bool:
+    until = str(row.get("claim_until") or "")
+    return bool(until) and until < now
+
+
 def _scope_filter(
     actor: str, lane_filter: list[str] | None, *, include_origin: bool = False
 ) -> list[str]:
@@ -244,16 +249,15 @@ def next_task() -> dict[str, Any] | None:
     overrides = actor_overrides(actor, route)
     lane_filter = lanes.filter_args(route)
     include_origin = _route_includes_origin(route)
-    repair_candidates = _unclaimed_actionable(
-        tw.export(
-            [
-                "status:pending",
-                "+ACTIVE",
-                *_scope_filter(actor, lane_filter, include_origin=include_origin),
-            ],
-            overrides=overrides,
-        )
+    scoped_active = tw.export(
+        [
+            "status:pending",
+            "+ACTIVE",
+            *_scope_filter(actor, lane_filter, include_origin=include_origin),
+        ],
+        overrides=overrides,
     )
+    repair_candidates = _unclaimed_actionable(scoped_active)
     if repair_candidates:
         repaired = _claim_first(
             repair_candidates, actor, [], active_rows, guard_unclaimed=False
@@ -263,13 +267,64 @@ def next_task() -> dict[str, Any] | None:
     candidates = _unclaimed_actionable(
         _candidate_rows(actor, lane_filter, overrides, include_origin=include_origin)
     )
-    if not candidates:
+    if candidates:
+        # We intend to claim: bring the tree to the current baseline once
+        # before the claim records HEAD, so new work starts from the latest
+        # shared state.
+        for note_text in gitsync.prepare_for_claim().notes:
+            print(f"task: {note_text}")
+        claimed_rows = tw.export([f"claim_by.is:{actor}"])
+        claimed = _claim_first(
+            candidates, actor, claimed_rows, active_rows, guard_unclaimed=True
+        )
+        if claimed is not None:
+            return claimed
+    stale_candidates = _stale_takeover_candidates(actor, scoped_active)
+    if not stale_candidates:
         return None
-    # We intend to claim: bring the tree to the current baseline once before
-    # the claim records HEAD, so new work starts from the latest shared state.
     for note_text in gitsync.prepare_for_claim().notes:
         print(f"task: {note_text}")
-    claimed_rows = tw.export([f"claim_by.is:{actor}"])
-    return _claim_first(
-        candidates, actor, claimed_rows, active_rows, guard_unclaimed=True
-    )
+    return _take_over_stale(stale_candidates, actor, active_rows)
+
+
+def _stale_takeover_candidates(
+    actor: str, scoped_active: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Peer claims whose deadline elapsed. The TTL is stamped once at claim
+    time and never refreshed, so a slow-but-alive lane looks identical to a
+    dead one — takeover therefore runs only when no fresh READY work exists.
+    Reviews this actor authored stay off-limits even when stale."""
+    now = tw.now_iso()
+    return [
+        r
+        for r in scoped_active
+        if not is_hidden(r)
+        and str(r.get("claim_by") or "") not in ("", actor)
+        and _is_stale_claim(r, now)
+        and not (
+            str(r.get("phase") or "") == "review"
+            and str(r.get("review_author") or "") == actor
+        )
+    ]
+
+
+def _take_over_stale(
+    candidates: list[dict[str, Any]],
+    actor: str,
+    active_rows: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    from spice.tasks import ops
+
+    for chosen in order(candidates, actor, [], active_rows):
+        previous = str(chosen.get("claim_by") or "")
+        ops.do_claim(identity.uuid_of(chosen), actor, guard_unclaimed=False)
+        fresh = identity.resolve(identity.render_handle(chosen))
+        if str(fresh.get("claim_by") or "") != actor:
+            # lost the takeover race to a concurrent agent; try the next one
+            continue
+        ops.annotate(
+            identity.uuid_of(fresh),
+            f"stale claim reassigned: {previous} -> {actor}",
+        )
+        return fresh
+    return None
