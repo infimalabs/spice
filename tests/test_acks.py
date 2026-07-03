@@ -617,17 +617,13 @@ def test_ack_watch_nack_halts_resend_escalation(tmp_path):
     assert state.current_key == original_key
 
 
-def test_ack_watch_resends_after_budget_and_escalates_stop_payload(
-    tmp_path, monkeypatch
-):
+def test_ack_watch_resends_after_budget_and_escalates_stop_payload(tmp_path):
     original_key = "20260101T000000000001Z"
     original_text = compose_inbox_text(
         body="wind down after this", priority=None, stop=True
     )
     write_inbox_item(tmp_path, f"{original_key}.txt", original_text)
-    stamps = iter(["20260101T000000000101Z", "20260101T000000000102Z"])
     observed_acks: list[tuple[str, str]] = []
-    monkeypatch.setattr("spice.mail.inbox.inbox_timestamp", lambda: next(stamps))
     state = AckWatchState(
         inbox_key=original_key,
         original_text=original_text,
@@ -639,24 +635,33 @@ def test_ack_watch_resends_after_budget_and_escalates_stop_payload(
     for index in range(3):
         state.process_line(_assistant_line(f"ordinary response {index}"))
 
-    first_resend = inbox_dir(tmp_path) / "20260101T000000000101Z.txt"
+    first_resend = inbox_dir(tmp_path) / f"{original_key}.txt"
     first_payload = parse_inbox_payload(first_resend.read_text(encoding="utf-8"))
     assert state.resends == 1
-    assert state.current_key == "20260101T000000000101Z"
+    assert state.current_key == original_key
     assert first_payload.priority == "urgent"
     assert first_payload.body == "wind down after this"
     assert first_payload.is_stop is True
+    assert first_payload.resend_count == 1
+    assert [attempt.messages_elapsed for attempt in first_payload.resend_attempts] == [
+        3
+    ]
 
     for index in range(3, 6):
         state.process_line(_assistant_line(f"ordinary response {index}"))
 
-    second_resend = inbox_dir(tmp_path) / "20260101T000000000102Z.txt"
+    second_resend = inbox_dir(tmp_path) / f"{original_key}.txt"
     second_payload = parse_inbox_payload(second_resend.read_text(encoding="utf-8"))
     assert state.resends == 2
-    assert state.current_key == "20260101T000000000102Z"
+    assert state.current_key == original_key
     assert second_payload.priority == "critical"
     assert second_payload.body == "wind down after this"
     assert second_payload.is_stop is True
+    assert second_payload.resend_count == 2
+    assert [attempt.messages_elapsed for attempt in second_payload.resend_attempts] == [
+        3,
+        3,
+    ]
 
     ack_text = f"ACK {state.current_key[:-1]}: received after retry."
     state.process_line(_assistant_line(ack_text))
@@ -664,7 +669,7 @@ def test_ack_watch_resends_after_budget_and_escalates_stop_payload(
     assert state.outcome() == AckWatchOutcome(
         acked=True, assistant_messages_seen=7, resends=2
     )
-    assert observed_acks == [(ack_text, "20260101T000000000102Z")]
+    assert observed_acks == [(ack_text, original_key)]
 
 
 def test_supervised_nack_reports_refused_key(tmp_path, monkeypatch):

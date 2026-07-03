@@ -18,6 +18,7 @@ from spice.mail.inbox import (
     collect_inbox_items,
     compose_inbox_text,
     deadletter_inbox_item,
+    InboxResendAttempt,
     inbox_ack_format_hint_row,
     inbox_attachment_dir,
     inbox_dir,
@@ -29,6 +30,7 @@ from spice.mail.inbox import (
     pending_inbox_count,
     pending_operator_inbox_items,
     requeue_deadlettered_inbox_item,
+    resend_inbox_item,
     write_inbox_item,
 )
 from spice.paths import shared_attachment_root
@@ -122,6 +124,45 @@ def test_compose_parse_round_trip_with_review_priority():
     assert parsed.priority == "review"
     assert parsed.body == "peer review found follow-up work"
     assert parsed.is_stop is False
+
+
+def test_compose_parse_round_trip_with_resend_lineage():
+    composed = compose_inbox_text(
+        body="keep going",
+        priority="urgent",
+        stop=False,
+        controls=(INBOX_CONTROL_DRAIN_QUEUE,),
+        resend_attempts=(
+            InboxResendAttempt(
+                attempt=1,
+                at="2026-01-01T00:00:00Z",
+                messages_elapsed=3,
+            ),
+            InboxResendAttempt(
+                attempt=2,
+                at="2026-01-01T00:01:00Z",
+                messages_elapsed=4,
+            ),
+        ),
+    )
+    parsed = parse_inbox_payload(composed)
+
+    assert parsed.priority == "urgent"
+    assert parsed.controls == (INBOX_CONTROL_DRAIN_QUEUE,)
+    assert parsed.body == "keep going"
+    assert parsed.resend_count == 2
+    assert parsed.resend_attempts == (
+        InboxResendAttempt(
+            attempt=1,
+            at="2026-01-01T00:00:00Z",
+            messages_elapsed=3,
+        ),
+        InboxResendAttempt(
+            attempt=2,
+            at="2026-01-01T00:01:00Z",
+            messages_elapsed=4,
+        ),
+    )
 
 
 def test_compose_normal_priority_stays_implicit():
@@ -257,6 +298,59 @@ def test_ack_records_pending_item_with_attachments_in_sqlite_state(tmp_path):
     assert archived_attachment.path == attachment_path
     assert archived_attachment.size == len(b"image-bytes")
     assert attachment_path.is_file()
+
+
+def test_resend_mutates_original_pending_item_with_lineage_and_attachments(tmp_path):
+    _init_repo(tmp_path)
+    key = "20260102T000000000009Z"
+    name = f"{key}.txt"
+    composed = compose_inbox_text(
+        body="please inspect this",
+        priority=None,
+        stop=False,
+        controls=(INBOX_CONTROL_DRAIN_QUEUE,),
+    )
+    attachments = prepare_inbox_attachments(
+        [
+            {
+                "name": "paste.png",
+                "contentType": "image/png",
+                "dataUrl": IMAGE_DATA_URL,
+            }
+        ]
+    )
+    original_path = write_inbox_item(tmp_path, name, composed, attachments=attachments)
+
+    first_path = resend_inbox_item(
+        tmp_path,
+        original_key=key,
+        original_text=composed,
+        attempt=1,
+        messages_elapsed=3,
+    )
+    second_path = resend_inbox_item(
+        tmp_path,
+        original_key=key,
+        original_text=composed,
+        attempt=2,
+        messages_elapsed=4,
+    )
+    items = collect_inbox_items(tmp_path)
+    parsed = parse_inbox_payload(items[0].text)
+
+    assert first_path == original_path
+    assert second_path == original_path
+    assert [item.name for item in items] == [name]
+    assert pending_inbox_count(tmp_path) == 1
+    assert parsed.priority == "critical"
+    assert parsed.controls == (INBOX_CONTROL_DRAIN_QUEUE,)
+    assert parsed.body == "please inspect this"
+    assert parsed.is_stop is False
+    assert parsed.resend_count == 2
+    assert [attempt.attempt for attempt in parsed.resend_attempts] == [1, 2]
+    assert [attempt.messages_elapsed for attempt in parsed.resend_attempts] == [3, 4]
+    assert items[0].attachments[0].name == "paste.png"
+    assert items[0].attachments[0].path.read_bytes() == b"image-bytes"
 
 
 def test_inbox_attachment_readout_rows_render_clickable_reference(tmp_path):
