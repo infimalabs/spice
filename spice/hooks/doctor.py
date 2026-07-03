@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Iterable
 import os
 import shlex
 import shutil
@@ -81,6 +83,7 @@ def run_doctor(repo_root: Path, *, fix: bool = False) -> DoctorReport:
     checks = [
         *_binary_checks(repo_root),
         _runtime_resolution_check(repo_root),
+        _spice_namespace_portions_check(repo_root),
         _installed_spice_source_check(repo_root),
         _skill_check(repo_root),
         _policy_check(repo_root),
@@ -163,6 +166,70 @@ def _runtime_resolution_check(repo_root: Path) -> DoctorCheck:
         f"installed spice package -> {runtime}",
         "spice dev doctor",
     )
+
+
+def _spice_namespace_portions_check(repo_root: Path) -> DoctorCheck:
+    del repo_root
+    portions = _spice_namespace_portions()
+    if len(portions) == 1:
+        return _ok(
+            "runtime.spice-namespace",
+            f"single spice namespace portion -> {portions[0]}",
+            _SPICE_NAMESPACE_COMMAND,
+        )
+    if not portions:
+        return _fail(
+            "runtime.spice-namespace",
+            "no spice namespace portion resolved",
+            _SPICE_NAMESPACE_COMMAND,
+        )
+    return _fail(
+        "runtime.spice-namespace",
+        "conflicting spice namespace portions: "
+        + ", ".join(str(portion) for portion in portions),
+        _SPICE_NAMESPACE_COMMAND,
+    )
+
+
+_SPICE_NAMESPACE_COMMAND = (
+    "uv run python -c 'import spice; print(list(spice.__path__))'"
+)
+
+
+def _spice_namespace_portions() -> list[Path]:
+    spice_package = sys.modules.get("spice")
+    package_paths = getattr(spice_package, "__path__", ()) if spice_package else ()
+    return _spice_namespace_portions_from(package_paths, _spice_module_file_paths())
+
+
+def _spice_module_file_paths() -> list[str]:
+    paths: list[str] = []
+    for name, module in sorted(sys.modules.items()):
+        if name != "spice" and not name.startswith("spice."):
+            continue
+        raw = getattr(module, "__file__", None)
+        if raw:
+            paths.append(str(raw))
+    return paths
+
+
+def _spice_namespace_portions_from(
+    package_paths: Iterable[object], module_paths: Iterable[object]
+) -> list[Path]:
+    portions: list[Path] = []
+    for raw in (*package_paths, *module_paths):
+        portion = _spice_namespace_portion_from_path(Path(str(raw)))
+        if portion is not None and portion not in portions:
+            portions.append(portion)
+    return portions
+
+
+def _spice_namespace_portion_from_path(path: Path) -> Path | None:
+    resolved = path.expanduser().resolve(strict=False)
+    for candidate in (resolved, *resolved.parents):
+        if candidate.name == "spice":
+            return candidate.parent
+    return None
 
 
 def _installed_spice_source_check(repo_root: Path) -> DoctorCheck:
