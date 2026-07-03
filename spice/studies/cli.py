@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
+from spice.extensions import (
+    SPICE_STUDY_ENTRY_POINT_GROUP,
+    SpiceExtensionEntryPoint,
+    extension_entry_points,
+    merge_builtin_and_extension_entry_points,
+)
 from spice.paths import require_repo_root
 from spice.policyconfig import resolve_policy
 from spice.policy import (
@@ -56,6 +62,7 @@ def configure_study_parser(subparsers: Any) -> None:
     _configure_subsumption_parser(actions)
     _configure_assertion_free_parser(actions)
     _configure_private_internals_parser(actions)
+    _configure_extension_study_parsers(actions)
 
 
 def _configure_file_loc_parser(actions: Any) -> None:
@@ -342,6 +349,15 @@ def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
     return sub
 
 
+def _configure_extension_study_parsers(actions: Any) -> None:
+    for entry in _extension_study_entry_points():
+        _add_study_action(
+            actions,
+            entry.name,
+            f"Third-party study from {entry.distribution}.",
+        )
+
+
 def _positive_int_arg(raw: str) -> int:
     try:
         value = int(raw)
@@ -402,10 +418,35 @@ def _test_target_path(path: Path, root: Path) -> Path:
 
 def handle_study(args: argparse.Namespace) -> int:
     root = require_repo_root()
-    handler = _STUDY_ACTIONS.get(args.study_action)
+    handler = _study_action_registry().get(args.study_action)
     if handler is None:
         raise SpiceError(f"unknown study action {args.study_action!r}")
+    if isinstance(handler, SpiceExtensionEntryPoint):
+        return _study_extension(handler, args, root)
     return handler(args, root)
+
+
+def _study_extension(
+    entry_point: SpiceExtensionEntryPoint, args: argparse.Namespace, root: Path
+) -> int:
+    loaded = entry_point.load()
+    if not callable(loaded):
+        raise SpiceError(
+            f"study extension {entry_point.name!r} from "
+            f"{entry_point.distribution!r} is not callable"
+        )
+    result = loaded([path.as_posix() for path in _target_paths(args, root)])
+    if args.emit_json:
+        _print_study_json(args.study_action, result=result)
+    elif result is not None:
+        print(_render_extension_study_result(result))
+    return 0
+
+
+def _render_extension_study_result(result: object) -> str:
+    if isinstance(result, str):
+        return result
+    return json.dumps(_json_ready(result), indent=2, sort_keys=True)
 
 
 def _study_shape(args: argparse.Namespace, root: Path) -> int:
@@ -965,7 +1006,24 @@ def _json_ready(value: object) -> object:
     raise TypeError(f"unsupported JSON payload value: {type(value).__name__}")
 
 
-_STUDY_ACTIONS = {
+StudyHandler = Callable[[argparse.Namespace, Path], int]
+
+
+def _extension_study_entry_points() -> tuple[SpiceExtensionEntryPoint, ...]:
+    return extension_entry_points(
+        SPICE_STUDY_ENTRY_POINT_GROUP,
+        built_in_names=_STUDY_ACTIONS,
+    )
+
+
+def _study_action_registry() -> dict[str, StudyHandler | SpiceExtensionEntryPoint]:
+    return merge_builtin_and_extension_entry_points(
+        SPICE_STUDY_ENTRY_POINT_GROUP,
+        _STUDY_ACTIONS,
+    )
+
+
+_STUDY_ACTIONS: dict[str, StudyHandler] = {
     "shape": _study_shape,
     "file-loc": _study_file_loc,
     "complexity": _study_complexity,
