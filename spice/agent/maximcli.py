@@ -19,10 +19,12 @@ from spice.agent.maxims import (
     DEFAULT_PROMPT_TEMPLATE,
     META_MAXIMS,
     MaximProposalSourceRecord,
+    MaximProposalTheme,
     builtin_maxim,
     disabled_maxim_bag_names,
     evaluate_maxim,
     maxim_proposal_source_records,
+    maxim_proposal_themes,
     resolved_maxim_bags,
     resolve_maxim,
     set_maxim_bag_disabled,
@@ -119,6 +121,17 @@ def configure_maxim_parser(subparsers: Any) -> None:
         help="Show ACK ledger source records available for maxim proposal mining.",
     )
     sources.set_defaults(func=run_maxim_sources_cli)
+
+    proposals = actions.add_parser(
+        "proposals",
+        help="Show recurring ACK correction themes for human maxim review.",
+        description=(
+            "Cluster ACK-ledger correction sources into raw evidence-backed "
+            "candidate themes. This command does not call the maxim judge; "
+            "human triage remains mandatory."
+        ),
+    )
+    proposals.set_defaults(func=run_maxim_proposals_cli)
 
     disable = actions.add_parser(
         "disable",
@@ -294,6 +307,15 @@ def run_maxim_sources_cli(_args: argparse.Namespace) -> int:
     return 0
 
 
+def run_maxim_proposals_cli(_args: argparse.Namespace) -> int:
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        raise SpiceError("not inside a git worktree")
+    records = maxim_proposal_source_records(repo_root)
+    print(render_maxim_proposals(maxim_proposal_themes(records)))
+    return 0
+
+
 def run_maxim_disable_cli(args: argparse.Namespace) -> int:
     repo_root = repo_root_from_cwd()
     if repo_root is None:
@@ -408,6 +430,28 @@ def render_maxim_sources(records: tuple[MaximProposalSourceRecord, ...]) -> str:
     return "\n".join(rows)
 
 
+def render_maxim_proposals(themes: tuple[MaximProposalTheme, ...]) -> str:
+    if not themes:
+        return "maxim proposals: 0"
+    rows = [
+        "maxim proposals: " + str(len(themes)),
+        "theme evidence dispositions source_keys terms",
+    ]
+    rows.extend(
+        " ".join(
+            (
+                theme.name,
+                str(theme.evidence_count),
+                _render_proposal_dispositions(theme),
+                ",".join(theme.source_keys),
+                ",".join(theme.recurring_terms),
+            )
+        )
+        for theme in themes
+    )
+    return "\n".join(rows)
+
+
 def _maxim_report_buckets(
     counts: list[MaximMetricCounts],
 ) -> dict[tuple[str, str, str], _MaximReportBucket]:
@@ -467,6 +511,10 @@ def _format_percent(numerator: int, denominator: int) -> str:
 def _render_source_evidence(record: MaximProposalSourceRecord) -> str:
     fields = [item.field for item in record.evidence]
     return ",".join(fields) if fields else "-"
+
+
+def _render_proposal_dispositions(theme: MaximProposalTheme) -> str:
+    return ",".join(f"{item.disposition}={item.count}" for item in theme.dispositions)
 
 
 def _render_trigger_key(key: str) -> str:
