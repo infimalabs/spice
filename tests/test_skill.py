@@ -1,5 +1,6 @@
 """Worktree skill materialization contracts."""
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -11,6 +12,9 @@ from spice.errors import SpiceError
 
 def test_packaged_skill_uses_uniform_spice_command_surface():
     text = lifecycle.packaged_skill_path().read_text(encoding="utf-8")
+    agent_commands = sorted(
+        command for command in set(re.findall(r"`(spice agent [^`]+)`", text))
+    )
 
     assert "using the\n`spice` command directly" in text
     assert "agents should not switch entrypoints" in text
@@ -31,8 +35,11 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
     assert "`NACK <key>: <why this cannot be done>`" in text
     assert "ACKed or NACKed keys clear from pending" in text
     assert "Do not bury ACKs or NACKs mid-message" in text
-    assert "spice agent show" not in text
-    assert "spice agent status" not in text
+    assert agent_commands == [
+        "spice agent activation",
+        "spice agent run",
+        "spice agent run -- <command>",
+    ]
 
 
 def test_available_skill_path_materializes_into_the_worktree(tmp_path):
