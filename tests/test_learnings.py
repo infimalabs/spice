@@ -285,11 +285,29 @@ def test_learning_extractor_is_bounded_deduped_and_side_effect_free(
     turns = records.collect_turns([transcript])
     compactions = records.collect_compactions([transcript])
 
-    def fail_storage_call(*_args, **_kwargs):
-        raise AssertionError("extraction must not write or read the learning store")
+    side_effect_boundary_calls = {
+        "confirm_learning_candidates": 0,
+        "judge_filter_learning_candidates": 0,
+        "load_learning_records": 0,
+    }
 
-    monkeypatch.setattr(learnings, "confirm_learning_candidates", fail_storage_call)
-    monkeypatch.setattr(learnings, "load_learning_records", fail_storage_call)
+    def record_confirm_call(*_args, **_kwargs):
+        side_effect_boundary_calls["confirm_learning_candidates"] += 1
+        return []
+
+    def record_judge_call(*_args, **_kwargs):
+        side_effect_boundary_calls["judge_filter_learning_candidates"] += 1
+        return learnings.LearningJudgeFilterResult(kept=(), skipped=())
+
+    def record_load_call(*_args, **_kwargs):
+        side_effect_boundary_calls["load_learning_records"] += 1
+        return []
+
+    monkeypatch.setattr(learnings, "confirm_learning_candidates", record_confirm_call)
+    monkeypatch.setattr(
+        learnings, "judge_filter_learning_candidates", record_judge_call
+    )
+    monkeypatch.setattr(learnings, "load_learning_records", record_load_call)
 
     candidates = extract_learning_candidates_from_task_slice(
         turns,
@@ -311,7 +329,11 @@ def test_learning_extractor_is_bounded_deduped_and_side_effect_free(
         candidates[0].source_slice_id
     }
     assert all(candidate.source_turn_ids == ("turn-many",) for candidate in candidates)
-    assert not (tmp_path / ".spice" / "learnings").exists()
+    assert side_effect_boundary_calls == {
+        "confirm_learning_candidates": 0,
+        "judge_filter_learning_candidates": 0,
+        "load_learning_records": 0,
+    }
 
 
 def test_learning_judge_filter_keeps_yes_and_skips_no_candidates():
