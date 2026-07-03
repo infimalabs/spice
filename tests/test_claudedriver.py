@@ -17,11 +17,13 @@ import pytest
 from spice.agent.driver import (
     CLAUDE_DRIVER,
     CODEX_DRIVER,
+    POST_TOOL_HOOK_EVENT,
     PLAYWRIGHT_MCP_COMMAND,
     PLAYWRIGHT_MCP_SERVER_NAME,
     SPICE_AGENT_DRIVER_ENV,
     driver_for,
     playwright_mcp_args,
+    post_tool_hook_config_path,
     resolve_claude_model,
     select_driver,
 )
@@ -99,6 +101,27 @@ def test_claude_command_disables_commit_attribution(tmp_path):
 
     assert settings["attribution"]["commit"] == ""
     assert settings["attribution"]["sessionUrl"] is False
+
+
+def test_claude_command_writes_post_tool_hook_settings(tmp_path):
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path,
+        prompt="follow the skill",
+    )
+    settings = json.loads(command[command.index("--settings") + 1])
+    hook_config = json.loads(
+        post_tool_hook_config_path(tmp_path, CLAUDE_DRIVER).read_text(encoding="utf-8")
+    )
+    group = settings["hooks"][POST_TOOL_HOOK_EVENT][0]
+    hook = group["hooks"][0]
+
+    assert hook_config["event"] == POST_TOOL_HOOK_EVENT
+    assert hook_config["matcher"] == "*"
+    assert "spice agent post-tool-hook" in hook_config["command"]
+    assert str(tmp_path) in hook_config["command"]
+    assert group["matcher"] == hook_config["matcher"]
+    assert hook["command"] == hook_config["command"]
+    assert hook["statusMessage"] == "Checking spice steering"
 
 
 def test_claude_command_uses_shipped_claude_sonnet_5_xhigh_defaults(tmp_path):

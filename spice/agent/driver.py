@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, overload
 
+from spice.errors import SpiceError
 from spice.paths import atomic_write_json, state_dir
 
 CommandTextRewriter = Callable[[str], str | None]
@@ -185,6 +186,116 @@ class AgentDriver:
 PLAYWRIGHT_MCP_SERVER_NAME = "playwright"
 PLAYWRIGHT_MCP_COMMAND = "npx"
 PLAYWRIGHT_MCP_ARGS = ("--yes", "@playwright/mcp@latest", "--headless")
+POST_TOOL_HOOK_EVENT = "PostToolUse"
+POST_TOOL_HOOK_TIMEOUT_SECONDS = 30
+POST_TOOL_HOOK_STATUS_MESSAGE = "Checking spice steering"
+
+
+def post_tool_hook_config_path(repo_root: Path, driver: AgentDriver) -> Path:
+    return state_dir(repo_root) / "agent" / f"{driver.name}-post-tool-hook.json"
+
+
+def post_tool_hook_command(repo_root: Path) -> str:
+    return " ".join(
+        shlex.quote(part)
+        for part in (
+            sys.executable,
+            "-m",
+            "spice",
+            "agent",
+            "post-tool-hook",
+            "--repo-root",
+            str(repo_root),
+        )
+    )
+
+
+def post_tool_hook_matcher(driver: AgentDriver) -> str:
+    capability = _post_tool_hook_capability(driver)
+    if capability.native_non_shell_complete:
+        return "*"
+    patterns: list[str] = []
+    for tool in capability.supported_tools:
+        if tool == "MCP":
+            patterns.append("mcp__.*")
+        elif tool == "apply_patch":
+            patterns.extend(["apply_patch", "Edit", "Write"])
+        else:
+            patterns.append(re.escape(tool))
+    if not patterns:
+        raise SpiceError(f"{driver.name} declares no supported PostToolUse tools")
+    return f"^({'|'.join(patterns)})$"
+
+
+def post_tool_hook_settings(repo_root: Path, driver: AgentDriver) -> dict[str, Any]:
+    payload = write_post_tool_hook_config(repo_root, driver)
+    return {
+        POST_TOOL_HOOK_EVENT: [
+            {
+                "matcher": payload["matcher"],
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": payload["command"],
+                        "timeout": POST_TOOL_HOOK_TIMEOUT_SECONDS,
+                        "statusMessage": POST_TOOL_HOOK_STATUS_MESSAGE,
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def post_tool_hook_codex_config_overrides(
+    repo_root: Path, driver: AgentDriver
+) -> list[str]:
+    settings = post_tool_hook_settings(repo_root, driver)
+    group = settings[POST_TOOL_HOOK_EVENT][0]
+    hook = group["hooks"][0]
+    return [
+        (
+            "hooks.PostToolUse=[{"
+            f"matcher={_toml_string(str(group['matcher']))},"
+            "hooks=[{"
+            f"type={_toml_string(str(hook['type']))},"
+            f"command={_toml_string(str(hook['command']))},"
+            f"timeout={POST_TOOL_HOOK_TIMEOUT_SECONDS},"
+            f"statusMessage={_toml_string(POST_TOOL_HOOK_STATUS_MESSAGE)}"
+            "}]"
+            "}]"
+        )
+    ]
+
+
+def write_post_tool_hook_config(repo_root: Path, driver: AgentDriver) -> dict[str, Any]:
+    capability = _post_tool_hook_capability(driver)
+    payload: dict[str, Any] = {
+        "driver": driver.name,
+        "event": POST_TOOL_HOOK_EVENT,
+        "matcher": post_tool_hook_matcher(driver),
+        "command": post_tool_hook_command(repo_root),
+        "timeout": POST_TOOL_HOOK_TIMEOUT_SECONDS,
+        "statusMessage": POST_TOOL_HOOK_STATUS_MESSAGE,
+        "configSurface": capability.config_surface,
+        "contextOutputField": capability.context_output_field,
+        "nativeNonShellComplete": capability.native_non_shell_complete,
+        "supportedTools": list(capability.supported_tools),
+        "unsupportedTools": list(capability.unsupported_tools),
+    }
+    atomic_write_json(post_tool_hook_config_path(repo_root, driver), payload)
+    return payload
+
+
+def _post_tool_hook_capability(driver: AgentDriver) -> PostToolHookCapability:
+    if driver.post_tool_hook is None:
+        raise SpiceError(
+            f"{driver.name} does not declare supported PostToolUse hook coverage"
+        )
+    return driver.post_tool_hook
+
+
+def _toml_string(value: str) -> str:
+    return json.dumps(value)
 
 
 @overload
@@ -295,6 +406,7 @@ class CodexDriver(AgentDriver):
         fast_mode: bool = False,
     ) -> list[str]:
         config_overrides = [
+            *post_tool_hook_codex_config_overrides(repo_root, self),
             f'model_reasoning_effort="{reasoning_effort or self.default_reasoning_effort}"',
             *playwright_mcp_config_overrides(repo_root),
         ]
@@ -357,10 +469,16 @@ def resolve_claude_model(value: str = "") -> str:
     return model or CLAUDE_DEFAULT_MODEL
 
 
-def claude_settings_json() -> str:
-    return json.dumps(
-        CLAUDE_ATTRIBUTION_DISABLED_SETTINGS, separators=(",", ":"), sort_keys=True
-    )
+def claude_settings_json(
+    repo_root: Path | None = None, driver: AgentDriver | None = None
+) -> str:
+    settings: dict[str, Any] = {
+        key: value.copy() if isinstance(value, dict) else value
+        for key, value in CLAUDE_ATTRIBUTION_DISABLED_SETTINGS.items()
+    }
+    if repo_root is not None and driver is not None:
+        settings["hooks"] = post_tool_hook_settings(repo_root, driver)
+    return json.dumps(settings, separators=(",", ":"), sort_keys=True)
 
 
 def dashed_uuid(value: str) -> str:
@@ -465,7 +583,7 @@ class ClaudeDriver(AgentDriver):
             "--mcp-config",
             claude_mcp_config_json(repo_root),
             "--settings",
-            claude_settings_json(),
+            claude_settings_json(repo_root, self),
             # Claude reads CLAUDE.md but not skill files on its own, so pin the
             # spice skill into the system prompt on every launch. The trailing
             # prompt is the same skill relpath link (operator prose rides the
