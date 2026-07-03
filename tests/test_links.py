@@ -70,9 +70,47 @@ def test_markdown_link_case_findings_compare_against_tracked_index_case(tmp_path
     assert render_markdown_link_case_board([]) == "markdown-links: ok"
 
 
+def test_markdown_link_case_findings_apply_staged_renames_to_tracked_map(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "Guide.md").write_text("Guide\n", encoding="utf-8")
+    (docs / "Obsolete.md").write_text("Obsolete\n", encoding="utf-8")
+    (docs / "index.md").write_text(
+        "[Guide](GUIDE.md)\n[Obsolete](OBSOLETE.md)\n",
+        encoding="utf-8",
+    )
+    _run(repo, "git", "add", "docs")
+    _run(repo, "git", "commit", "-m", "base")
+
+    _run(repo, "git", "mv", "docs/Guide.md", "docs/guide.md")
+    _run(repo, "git", "rm", "docs/Obsolete.md")
+
+    findings = markdown_link_case_findings(
+        repo,
+        tracked_paths=[
+            Path("docs/index.md"),
+            Path("docs/Guide.md"),
+            Path("docs/Obsolete.md"),
+        ],
+    )
+
+    assert findings == [
+        MarkdownLinkCaseFinding(
+            source_path=Path("docs/index.md"),
+            line=1,
+            raw_target="GUIDE.md",
+            resolved_path=Path("docs/GUIDE.md"),
+            expected_path=Path("docs/guide.md"),
+        )
+    ]
+
+
 def _init_repo(path: Path) -> Path:
     path.mkdir()
     _run(path, "git", "init", "-q", "-b", "main")
+    _run(path, "git", "config", "user.email", "spice@example.test")
+    _run(path, "git", "config", "user.name", "Spice Tests")
     return path
 
 
