@@ -900,8 +900,10 @@ def task_card_message(
     fields: list[tuple[str, str]],
     *,
     source_kind: str,
+    classes: list[str] | None = None,
+    kicker: str = "Task capture",
 ) -> AssistantMessage:
-    directive = {"fields": fields}
+    directive = {"classes": classes or [], "fields": fields, "kicker": kicker}
     display_text = _task_directive_summary(directive)
     display_html = _task_directive_html(directive)
     return AssistantMessage(

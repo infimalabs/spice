@@ -121,8 +121,6 @@ def _task_card_messages_for_thread(
         rows = tw.export(
             [
                 "status.any:",
-                f"{task_config.TASK_CREATION_SURFACE_UDA}.is:"
-                f"{task_config.TASK_CREATION_SURFACE_CLI}",
                 f"origin_thread.is:{actor}",
             ]
         )
@@ -147,25 +145,88 @@ def _task_card_message_from_row(
     handle = task_identity.render_handle(row)
     fields: list[tuple[str, str]] = []
     title = str(row.get("description") or "").strip()
+    description = str(row.get("task_description") or "").strip()
     project = str(row.get("project") or "").strip()
+    status = str(row.get("status") or "").strip()
+    phase = str(row.get("phase") or "").strip()
     acceptance = str(row.get("acceptance") or "").strip()
     if title:
         fields.append(("title", title))
+    if description:
+        fields.append(("description", description))
     if project:
         fields.append(("project", project))
+    if status:
+        fields.append(("status", status))
+    if phase:
+        fields.append(("phase", phase))
     if acceptance:
         fields.append(("acceptance", acceptance))
     if handle:
         fields.append(("handle", handle))
     if not fields:
         return None
+    classes, kicker = _task_card_presentation(row)
     return message_reader.task_card_message(
         key=f"{timestamp}#task-card:{str(row.get('uuid') or handle)}",
         index=_task_card_index(row),
         timestamp=timestamp,
         fields=fields,
-        source_kind=TASK_CARD_SOURCE_KIND,
+        source_kind=_task_card_source_kind(row),
+        classes=classes,
+        kicker=kicker,
     )
+
+
+def _task_card_source_kind(row: dict[str, Any]) -> str:
+    if (
+        str(row.get(task_config.TASK_CREATION_SURFACE_UDA) or "")
+        == task_config.TASK_CREATION_SURFACE_CLI
+    ):
+        return TASK_CARD_SOURCE_KIND
+    return "task_created"
+
+
+def _task_card_presentation(row: dict[str, Any]) -> tuple[list[str], str]:
+    project = str(row.get("project") or "").strip()
+    tags = _task_card_tags(row)
+    is_oops = project == task_config.OOPS_PROJECT or "oops" in tags
+    is_hidden = (
+        task_config.is_hidden_project(project)
+        or str(row.get(task_config.PROJECT_HIDDEN_UDA) or "") == "1"
+        or task_config.HIDDEN_TASK_TAG in tags
+    )
+    is_private = _task_card_is_private_project(project)
+    classes: list[str] = []
+    if is_oops:
+        classes.append("task-directive-quote--oops")
+    if is_hidden:
+        classes.append("task-directive-quote--hidden")
+    if is_private:
+        classes.append("task-directive-quote--private")
+    if is_oops:
+        return classes, "Oops task"
+    if is_private:
+        return classes, "Private task"
+    if is_hidden:
+        return classes, "Hidden task"
+    return classes, "Task capture"
+
+
+def _task_card_tags(row: dict[str, Any]) -> set[str]:
+    raw_tags = row.get("tags")
+    if isinstance(raw_tags, list):
+        return {str(tag).strip() for tag in raw_tags if str(tag).strip()}
+    if isinstance(raw_tags, str):
+        return {
+            tag.strip() for tag in raw_tags.replace(",", " ").split() if tag.strip()
+        }
+    return set()
+
+
+def _task_card_is_private_project(project: str) -> bool:
+    segments = project.split(".")
+    return len(segments) == 3 and segments[0] == "agent" and segments[2] == "task"
 
 
 def _task_card_index(row: dict[str, Any]) -> int:

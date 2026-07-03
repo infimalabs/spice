@@ -22,6 +22,7 @@ from spice.serve.payload import identity, lane, message
 from spice.serve.payload.message import ack_context_payload_for_worktree
 from spice.serve.steering import submit_steering_message
 from spice.serve.team.store import ServeTeamStore
+from spice.tasks import config as task_config
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 
@@ -350,7 +351,7 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     seen: dict[str, object] = {}
 
     def fake_export(filters: list[str] | None = None) -> list[dict[str, object]]:
-        if filters and "creation_surface.is:cli" in filters:
+        if filters and f"origin_thread.is:{actor}" in filters:
             seen["filters"] = filters
             return [row]
         return []
@@ -421,7 +422,6 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
 
     assert seen["filters"] == [
         "status.any:",
-        "creation_surface.is:cli",
         f"origin_thread.is:{actor}",
     ]
     item = payload["messages"][0]
@@ -437,11 +437,85 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     )
     assert "<dt>title</dt><dd>CLI follow-up</dd>" in item["display_html"]
     assert "<dt>project</dt><dd>serve.ui</dd>" in item["display_html"]
+    assert "<dt>status</dt><dd>pending</dd>" in item["display_html"]
     assert (
         "<dt>acceptance</dt><dd>Task card comes from the backend</dd>"
         in item["display_html"]
     )
     assert "<dt>handle</dt><dd>UI-20260610T120001000001Z</dd>" in item["display_html"]
+
+
+def test_agent_created_hidden_oops_and_private_rows_render_full_task_cards(
+    monkeypatch,
+):
+    actor = "a" * 32
+    rows = [
+        {
+            "id": 42,
+            "uuid": "oops-task-42",
+            "incepted": "20260610T120001000001Z",
+            "description": "Oops task card",
+            "task_description": "Full oops diagnostic stays visible.",
+            "project": task_config.OOPS_PROJECT,
+            "status": "waiting",
+            "phase": "todo",
+            "origin_thread": actor,
+            task_config.PROJECT_HIDDEN_UDA: "1",
+            "tags": ["oops", task_config.HIDDEN_TASK_TAG],
+        },
+        {
+            "id": 43,
+            "uuid": "private-task-43",
+            "incepted": "20260610T120002000001Z",
+            "description": "Private task card",
+            "task_description": "Private details stay visible.",
+            "project": task_config.private_project(actor),
+            "status": "pending",
+            "phase": "todo",
+            "origin_thread": actor,
+            "acceptance": "Private acceptance renders.",
+        },
+    ]
+    seen: dict[str, object] = {}
+
+    def fake_export(filters: list[str] | None = None) -> list[dict[str, object]]:
+        seen["filters"] = filters
+        return rows
+
+    monkeypatch.setattr(message.tw, "export", fake_export)
+
+    cards = message._task_card_messages_for_thread(actor, after=None, before=None)
+
+    assert seen["filters"] == ["status.any:", f"origin_thread.is:{actor}"]
+    assert [card.display_text for card in cards] == [
+        f"Task capture: Oops task card ({task_config.OOPS_PROJECT})",
+        f"Task capture: Private task card ({task_config.private_project(actor)})",
+    ]
+    oops_card = cards[0]
+    private_card = cards[1]
+    assert oops_card.source_kind == "task_created"
+    assert (
+        'class="task-directive-quote task-directive-quote--oops '
+        'task-directive-quote--hidden"'
+    ) in oops_card.display_html
+    assert '<div class="task-directive-kicker">Oops task</div>' in (
+        oops_card.display_html
+    )
+    assert "<dt>description</dt><dd>Full oops diagnostic stays visible.</dd>" in (
+        oops_card.display_html
+    )
+    assert "<dt>status</dt><dd>waiting</dd>" in oops_card.display_html
+    assert "<dt>phase</dt><dd>todo</dd>" in oops_card.display_html
+    assert private_card.source_kind == "task_created"
+    assert 'class="task-directive-quote task-directive-quote--private"' in (
+        private_card.display_html
+    )
+    assert '<div class="task-directive-kicker">Private task</div>' in (
+        private_card.display_html
+    )
+    assert "<dt>acceptance</dt><dd>Private acceptance renders.</dd>" in (
+        private_card.display_html
+    )
 
 
 def test_messages_payload_after_cursor_preserves_transcript_delta(
@@ -565,7 +639,6 @@ def test_cli_review_followup_row_renders_standalone_task_card(monkeypatch):
 
     assert seen["filters"] == [
         "status.any:",
-        "creation_surface.is:cli",
         f"origin_thread.is:{actor}",
     ]
     assert len(cards) == 1
