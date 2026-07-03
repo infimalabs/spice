@@ -391,6 +391,64 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     assert completed_row["review_note"] == "review passed"
 
 
+def test_task_next_takes_over_stale_peer_claim(task_repo, monkeypatch):
+    handle = create.add("Stale takeover", project="task.unit", priority="medium")
+    uuid = identity.uuid_of(identity.resolve(handle))
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(handle)
+
+    # A fresh peer claim is untouchable: no READY work means no assignment.
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    assert alloc.next_task() is None
+
+    # Once the deadline elapses the allocator reassigns without --steal.
+    tw.run([uuid, "modify", "claim_until:2020-01-01T00:00:00.000000Z"])
+    assigned = alloc.next_task()
+
+    assert identity.render_handle(assigned or {}) == handle
+    assert assigned["claim_by"] == ACTOR_A
+    annotations = [
+        str(entry.get("description") or "")
+        for entry in tw.export([uuid])[0].get("annotations") or []
+    ]
+    assert any(
+        f"stale claim reassigned: {PEER_ACTOR} -> {ACTOR_A}" in note
+        for note in annotations
+    )
+
+    # The original owner returning late is refused cleanly.
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    with pytest.raises(SpiceError, match="not yours"):
+        ops.done(handle, validation=["late owner attempt"])
+
+
+def test_task_next_prefers_ready_work_over_stale_takeover(task_repo, monkeypatch):
+    stale_handle = create.add("Stale claim", project="task.unit", priority="medium")
+    ready_handle = create.add("Fresh work", project="task.unit", priority="medium")
+    stale_uuid = identity.uuid_of(identity.resolve(stale_handle))
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(stale_handle)
+    tw.run([stale_uuid, "modify", "claim_until:2020-01-01T00:00:00.000000Z"])
+
+    # The TTL is never refreshed mid-task, so a slow lane looks dead; fresh
+    # READY work must win before any takeover happens.
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    assigned = alloc.next_task()
+
+    assert identity.render_handle(assigned or {}) == ready_handle
+    assert tw.export([stale_uuid])[0]["claim_by"] == PEER_ACTOR
+
+
 def test_task_done_distills_and_reconfirms_project_stem_learning(
     task_repo, tmp_path, monkeypatch
 ):
