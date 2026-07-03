@@ -136,14 +136,19 @@ def _origin_required(resolved_project: str) -> bool:
 
 
 def _resolved_task_origin(origin: str | None, actor: str, project: str) -> str:
+    # Derivation runs for every project: origin exists to link work back to
+    # whatever the agent was doing in that moment, at zero agent effort. Only
+    # the failure is scoped to the shared board -- exempt projects (private
+    # scratch, hidden/internal system triage) fall through to empty rather
+    # than refuse creation.
     if origin:
         return validated_task_origin(origin)
-    if not _origin_required(project):
-        return ""
     claim = ops.active_claim(actor)
     if claim is not None:
         return f"task:{identity.render_handle(claim)}"
-    raise SpiceError(TASK_ORIGIN_REQUIRED_ERROR)
+    if _origin_required(project):
+        raise SpiceError(TASK_ORIGIN_REQUIRED_ERROR)
+    return ""
 
 
 def _resolve_add_project(actor: str, project: str | None, system_project: bool) -> str:
