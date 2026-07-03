@@ -178,6 +178,16 @@ def has_active_claim() -> bool:
     return bool(_active_claims_for(tw.current_actor()))
 
 
+def active_claim(actor: str) -> dict[str, Any] | None:
+    """The actor's active task claim (latest claim_at), or None."""
+    if not actor:
+        return None
+    claims = _active_claims_for(actor)
+    if not claims:
+        return None
+    return max(claims, key=lambda r: str(r.get("claim_at") or ""))
+
+
 def active_claim_phase(actor: str) -> str:
     """The phase of `actor`'s active task claim, or "" when none is held."""
     if not actor:
