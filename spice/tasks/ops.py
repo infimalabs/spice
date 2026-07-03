@@ -321,20 +321,16 @@ def rtk_usage_nudge() -> str | None:
 
 
 def _subscribe_claim_project(row: dict[str, Any], actor: str) -> None:
-    project = str(row.get("project") or "").strip()
-    if not project:
-        return
-    if _project_is_subscription_excluded(project):
-        return
+    from spice.serve.team.store import TASK_FILTER_SOURCE_AUTO_CLAIM
 
-    from spice.serve.team.store import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CLAIM
-    from spice.tasks import lanes
-
-    store = ServeTeamStore()
-    team_id = store.current_team_for_agent(lanes.route_actor_id(actor))
-    if team_id is None:
-        return
-    store.add_task_filter(team_id, project, source=TASK_FILTER_SOURCE_AUTO_CLAIM)
+    # Steer never auto-subscribes: a manual claim, steal, or ownership repair
+    # in Steer must not widen the team's filter set.
+    _subscribe_auto_project(
+        str(row.get("project") or ""),
+        actor,
+        allowed_lifetimes=("Drive", "Drain"),
+        source=TASK_FILTER_SOURCE_AUTO_CLAIM,
+    )
 
 
 def _subscribe_created_project(project: str, actor: str) -> str:
@@ -354,6 +350,7 @@ def _subscribe_auto_project(
     actor: str,
     *,
     allowed_lifetimes: tuple[str, ...],
+    source: str | None = None,
 ) -> str:
     project = str(project or "").strip()
     if not project or _project_is_subscription_excluded(project):
@@ -362,6 +359,8 @@ def _subscribe_auto_project(
     from spice.serve.team.store import ServeTeamStore, TASK_FILTER_SOURCE_AUTO_CREATE
     from spice.tasks import lanes
 
+    if source is None:
+        source = TASK_FILTER_SOURCE_AUTO_CREATE
     store = ServeTeamStore()
     team_id = store.current_team_for_agent(lanes.route_actor_id(actor))
     if team_id is None:
@@ -372,11 +371,9 @@ def _subscribe_auto_project(
     before = {
         (entry.project, entry.source) for entry in team_config.task_filter_entries
     }
-    store.add_task_filter(team_id, project, source=TASK_FILTER_SOURCE_AUTO_CREATE)
-    outcome = (
-        "present" if (project, TASK_FILTER_SOURCE_AUTO_CREATE) in before else "added"
-    )
-    return f"route_filter={outcome}:{project}:{TASK_FILTER_SOURCE_AUTO_CREATE}"
+    store.add_task_filter(team_id, project, source=source)
+    outcome = "present" if (project, source) in before else "added"
+    return f"route_filter={outcome}:{project}:{source}"
 
 
 def _project_is_subscription_excluded(project: str) -> bool:

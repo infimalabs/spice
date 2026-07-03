@@ -30,7 +30,7 @@ def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
     assert task_repo.is_dir()
     store = ServeTeamStore()
     team = store.create_team(
-        members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER], config=TeamConfig(lifetime="Steer")
+        members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER], config=TeamConfig(lifetime="Drive")
     )
     handle = create.add(
         "Manual claim out of lane",
@@ -45,7 +45,8 @@ def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
     assert handle in claimed.splitlines()
     assert after_claim.task_filters == ("task.unit",)
     assert [entry.to_payload() for entry in after_claim.task_filter_entries] == [
-        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CLAIM}
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CLAIM},
+        {"project": "task.unit", "source": TASK_FILTER_SOURCE_AUTO_CREATE},
     ]
 
     ops.done(handle, validation=["claim subscription routed review"])
@@ -54,6 +55,31 @@ def test_manual_claim_subscribes_project_and_routes_review_to_teammate(
 
     assert identity.render_handle(assigned or {}) == handle
     assert assigned["claim_by"] == PEER_ACTOR
+
+
+def test_steer_manual_claim_never_subscribes(task_repo):
+    """Steer never auto-subscribes: manual claims stay claimable but must not
+    widen the team filter set (the auto:claim ratchet)."""
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER, PEER_ACTOR_MEMBER], config=TeamConfig(lifetime="Steer")
+    )
+    handle = create.add(
+        "Steer manual claim out of lane",
+        project="task.unit",
+        priority="medium",
+        acceptance=["steer manual claim leaves team filters untouched"],
+    )
+    before = store.global_revision()
+
+    claimed = ops.claim(handle)
+    after_claim = store.team_config(team.team_id)
+
+    assert handle in claimed.splitlines()
+    assert store.global_revision() == before
+    assert after_claim.task_filters == ()
+    assert after_claim.task_filter_entries == ()
 
 
 def test_task_next_auto_claim_does_not_rewrite_team_filters(task_repo):
