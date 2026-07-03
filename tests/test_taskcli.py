@@ -18,6 +18,7 @@ from spice.tasks import (
     cli as task_cli,
     config,
     create,
+    effort,
     identity,
     ops,
     render,
@@ -674,6 +675,116 @@ def test_task_show_omits_merge_aware_diff_command_for_task_head(monkeypatch):
     assert "plain git show" not in output
 
 
+def test_task_show_renders_phase_effort_as_model_tagged_phase_rows(monkeypatch):
+    row = _row(
+        "Render effort",
+        project="task.render",
+        incepted="1k4yrMDR",
+        status="pending",
+        phase="verify",
+    )
+    row.update(
+        {
+            "uuid": "effort-task-uuid",
+            "task_description": "Render the effort ledger",
+            "phase_i": "1",
+            "urgency": "9.2",
+        }
+    )
+    windows = (
+        effort.PhaseEffortWindow(
+            task_id="effort-task-uuid",
+            handle="TASK-test",
+            title="Render effort",
+            phase="todo",
+            phase_index=0,
+            actor_id="agent-a",
+            thread_id=ACTOR_A,
+            team_id="team-a",
+            driver="codex",
+            model="gpt-5.5",
+            effort="xhigh",
+            started_at=10.0,
+            ended_at=30.0,
+        ),
+        effort.PhaseEffortWindow(
+            task_id="effort-task-uuid",
+            handle="TASK-test",
+            title="Render effort",
+            phase="verify",
+            phase_index=1,
+            actor_id="agent-a",
+            thread_id=ACTOR_A,
+            team_id="team-a",
+            driver="codex",
+            model="gpt-5.5",
+            effort="xhigh",
+            started_at=45.0,
+            ended_at=120.0,
+        ),
+    )
+    usage_rows = (
+        effort.PhaseEffortUsage(
+            window=windows[0],
+            source_files=("thread-a.jsonl",),
+            input_tokens=100,
+            cached_input_tokens=10,
+            output_tokens=20,
+            reasoning_output_tokens=5,
+            total_tokens=135,
+            turn_count=1,
+            message_count=2,
+            renewal_count=0,
+        ),
+        effort.PhaseEffortUsage(
+            window=windows[1],
+            source_files=("thread-a.jsonl",),
+            input_tokens=207,
+            cached_input_tokens=20,
+            output_tokens=30,
+            reasoning_output_tokens=10,
+            total_tokens=267,
+            turn_count=1,
+            message_count=2,
+            renewal_count=1,
+            partial_markers=(effort.PARTIAL_MISSING_TRANSCRIPT,),
+        ),
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "verify"])
+    monkeypatch.setattr(
+        render.effort, "phase_effort_windows_for_tasks", lambda _rows: windows
+    )
+    monkeypatch.setattr(
+        render.effort,
+        "phase_effort_usage_for_windows",
+        lambda _windows, _files_by_thread: usage_rows,
+    )
+    monkeypatch.setattr(
+        render,
+        "_phase_effort_transcript_files_by_thread",
+        lambda _windows: {ACTOR_A: (Path("thread-a.jsonl"),)},
+    )
+
+    output = render.render_show("TASK-test")
+
+    assert _section_lines(output, "phase_effort:") == [
+        "phase_effort:",
+        (
+            "  todo[0] driver=codex model=gpt-5.5 effort=xhigh tokens=135 "
+            "input=100 cached=10 output=20 reasoning=5 turns=1 msgs=2 "
+            "renewals=0 wall=20s"
+        ),
+        (
+            "  verify[1] driver=codex model=gpt-5.5 effort=xhigh tokens=267 "
+            "input=207 cached=20 output=30 reasoning=10 turns=1 msgs=2 "
+            "renewals=1 wall=1m15s partial=missing_transcript"
+        ),
+    ]
+
+
 def test_task_artifact_cli_stores_text_and_binary_sidecars(task_repo, capsys):
     handle = create.add(
         "Capture task artifacts",
@@ -862,6 +973,16 @@ def _row(
         "incepted": incepted,
         "entry": incepted,
     }
+
+
+def _section_lines(output: str, header: str) -> list[str]:
+    lines = output.splitlines()
+    section = [lines[lines.index(header)]]
+    for line in lines[lines.index(header) + 1 :]:
+        if line and not line.startswith(" "):
+            break
+        section.append(line)
+    return section
 
 
 def _init_repo(path: Path) -> Path:

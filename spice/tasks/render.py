@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import shlex
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.tasks import alloc, artifacts, config, identity, lanes, ops, tw
+from spice.paths import repo_root_from_cwd
+from spice.tasks import alloc, artifacts, config, effort, identity, lanes, ops, tw
 
 
 SHOW_ANNOTATIONS_LIMIT = 6
+SECONDS_PER_MINUTE = 60
+MINUTES_PER_HOUR = 60
 _ACTIVE_CLAIM_FIELD_PROBLEMS = (
     ("claim_by", "active without claim_by"),
     ("claim_until", "active without claim deadline"),
@@ -278,6 +282,70 @@ def _review_commit_lines(row: dict[str, Any]) -> list[str]:
     return [f"review_commit {review_ref} (task head)"]
 
 
+def _phase_effort_lines(row: dict[str, Any]) -> list[str]:
+    windows = effort.phase_effort_windows_for_tasks([row])
+    if not windows:
+        return []
+    usage_rows = effort.phase_effort_usage_for_windows(
+        windows, _phase_effort_transcript_files_by_thread(windows)
+    )
+    return ["phase_effort:", *[_phase_effort_row_line(usage) for usage in usage_rows]]
+
+
+def _phase_effort_transcript_files_by_thread(
+    windows: tuple[effort.PhaseEffortWindow, ...],
+) -> dict[str, tuple[Path, ...]]:
+    from spice.serve.messages import resolve_thread_transcript
+
+    repo_root = repo_root_from_cwd()
+    files_by_thread: dict[str, tuple[Path, ...]] = {}
+    for thread_id in sorted(
+        {window.thread_id for window in windows if window.thread_id}
+    ):
+        resolution = resolve_thread_transcript(thread_id, repo_root)
+        if resolution is not None:
+            files_by_thread[thread_id] = (resolution.path,)
+    return files_by_thread
+
+
+def _phase_effort_row_line(usage: effort.PhaseEffortUsage) -> str:
+    parts = [
+        f"  {usage.phase}[{usage.phase_index}]",
+        f"driver={_label(usage.driver)}",
+        f"model={_label(usage.model)}",
+        f"effort={_label(usage.effort)}",
+        f"tokens={usage.total_tokens}",
+        f"input={usage.input_tokens}",
+        f"cached={usage.cached_input_tokens}",
+        f"output={usage.output_tokens}",
+        f"reasoning={usage.reasoning_output_tokens}",
+        f"turns={usage.turn_count}",
+        f"msgs={usage.message_count}",
+        f"renewals={usage.renewal_count}",
+        f"wall={_format_wall_seconds(usage.wall_seconds)}",
+    ]
+    if usage.partial_markers:
+        parts.append(f"partial={','.join(usage.partial_markers)}")
+    return " ".join(parts)
+
+
+def _label(value: str) -> str:
+    return value or "-"
+
+
+def _format_wall_seconds(seconds: float | None) -> str:
+    if seconds is None:
+        return "-"
+    rounded = int(round(seconds))
+    if rounded < SECONDS_PER_MINUTE:
+        return f"{rounded}s"
+    minutes, remainder = divmod(rounded, SECONDS_PER_MINUTE)
+    if minutes < MINUTES_PER_HOUR:
+        return f"{minutes}m{remainder:02d}s"
+    hours, minutes = divmod(minutes, MINUTES_PER_HOUR)
+    return f"{hours}h{minutes:02d}m{remainder:02d}s"
+
+
 def _next_command_line(row: dict[str, Any], rendered: str) -> str:
     phase = _f(row, "phase")
     if alloc.is_oops(row):
@@ -298,6 +366,7 @@ def render_show(handle: str) -> str:
     rendered = identity.render_handle(row)
     lines = _base_show_lines(row, rendered, flow)
     lines.extend(_review_commit_lines(row))
+    lines.extend(_phase_effort_lines(row))
     rehydrate = _rehydrate_lines(row)
     lines.extend(rehydrate)
     lines.extend(_context_check_lines(row, has_rehydrate_commands=bool(rehydrate)))
