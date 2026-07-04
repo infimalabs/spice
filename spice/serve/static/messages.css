@@ -572,14 +572,12 @@
   }
 }
 
-/* Mosaic §9 render plane. Additive and not yet load-bearing: nothing in the
-   live render path constructs .mosaic-plane/[data-mosaic-card] elements yet
-   (mosaic-stream-integration wires that up once the engine, wet/frozen, and
-   replay tasks land). The uniform component (whole-board shift) lives only
-   on .mosaic-plane; the differential component (per-card settle/ripple)
-   lives only on [data-mosaic-card] -- the two transitions are declared
-   separately here and toggled independently in app.mosaic-render.js so they
-   never share one (§9, §11c). */
+/* Mosaic §9 render plane, live render path (app.mosaic-stream.js). The
+   uniform component (whole-board shift) lives only on .mosaic-plane; the
+   differential component (per-card settle/ripple) lives only on
+   [data-mosaic-card] -- the two transitions are declared separately here
+   and toggled independently in app.mosaic-render.js so they never share
+   one (§9, §11c). */
 .mosaic-plane {
   left: 0;
   position: absolute;

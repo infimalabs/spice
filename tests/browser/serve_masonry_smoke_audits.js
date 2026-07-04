@@ -186,73 +186,6 @@ async function masonrySmokeNoopRenderAudit(lane) {
   return audit;
 }
 
-async function masonrySmokeRootWidthStaleRecoveryAudit(config) {
-  const lane = masonrySmokeLane();
-  masonrySmokeUseSingleLane(lane);
-  const host = lane.messagesEl || document.querySelector(".messages");
-  if (!host) throw new Error("message host unavailable");
-  host
-    .querySelectorAll("article[data-message-key], .compaction-divider, .time-rule")
-    .forEach((node) => node.remove());
-  const items = masonrySmokeItems(config);
-  const nodes = [];
-  let previousItem = null;
-  for (const item of items) {
-    const node = renderMessage(lane, item);
-    if (!node) continue;
-    const rule = timeRuleBetween(previousItem, item);
-    if (rule) {
-      rule.dataset.masonrySmoke = "rule";
-      rule.dataset.masonrySmokeIndex = String(item.index - 0.5);
-      nodes.push(rule);
-    }
-    previousItem = item;
-    node.dataset.masonrySmoke = item.kind === "compaction" ? "divider" : "card";
-    node.dataset.masonrySmokeIndex = String(item.index);
-    nodes.push(node);
-  }
-  host.append(...nodes);
-  await masonrySmokeImagesReady(host);
-  lane.knownMessages = items.slice();
-  lane.knownMessageKeys = new Set(items.map((item) => item.key));
-  lane.newestMessageKey = items.length ? items[0].key : "";
-  lane.oldestMessageKey = items.length ? items[items.length - 1].key : "";
-  lane.renderedMessageFingerprint = messageRenderFingerprint(lane, items);
-  packMessageStream(lane);
-  const root = messagePackRootElement(host);
-  lane.element.classList.add("lane--message-pack-root");
-  host.style.setProperty(
-    "--message-pack-root-width",
-    Math.max(lane.element.getBoundingClientRect().width, root.clientWidth) + "px",
-  );
-  lane.messagePackLayoutState = {
-    columnCount: config.expectedColumns,
-    itemKeys: messagePackItemKeys(host),
-    rootWidthActive: true,
-    version: messagePackLayoutVersion,
-  };
-  const beforeRootWidthActive =
-    lane.element.classList.contains("lane--message-pack-root") &&
-    Boolean(host.style.getPropertyValue("--message-pack-root-width"));
-  masonrySmokeShowAllLanes();
-  renderMessagesIfChanged(lane);
-  await new Promise((resolve) => requestAnimationFrame(resolve));
-  await new Promise((resolve) => requestAnimationFrame(resolve));
-  const cards = Array.from(host.querySelectorAll('[data-masonry-smoke="card"]'));
-  return {
-    afterRootWidthActive:
-      lane.element.classList.contains("lane--message-pack-root") &&
-      Boolean(host.style.getPropertyValue("--message-pack-root-width")),
-    beforeRootWidthActive,
-    distinctColumnLefts: new Set(
-      cards.map((card) => Math.round(card.getBoundingClientRect().left)),
-    ).size,
-    expectedColumns: config.expectedColumns,
-    gridTrackCount: masonrySmokeGridTrackCount(getComputedStyle(host)),
-    visibleLaneCount: masonrySmokeVisibleLaneCount(),
-  };
-}
-
 async function masonrySmokeMiddleRemovalReflowAudit(lane, host, config) {
   if (config.expectedColumns <= 1) return { reflowed: true };
   const cards = Array.from(
@@ -364,7 +297,6 @@ const masonrySmokeAuditHelpers = [
   masonrySmokeSpannedCardCount,
   masonrySmokeColumnRecovery,
   masonrySmokeNoopRenderAudit,
-  masonrySmokeRootWidthStaleRecoveryAudit,
   masonrySmokeMiddleRemovalReflowAudit,
   masonrySmokePinnedCollapseReflowAudit,
   masonrySmokeObserverFanoutAudit,
@@ -382,7 +314,6 @@ module.exports = {
   masonrySmokeSpannedCardCount,
   masonrySmokeColumnRecovery,
   masonrySmokeNoopRenderAudit,
-  masonrySmokeRootWidthStaleRecoveryAudit,
   masonrySmokeMiddleRemovalReflowAudit,
   masonrySmokePinnedCollapseReflowAudit,
   masonrySmokeObserverFanoutAudit,

@@ -8,7 +8,6 @@ const {
 const {
   masonrySmokeAuditHelpers,
   masonrySmokeResizeAudit,
-  masonrySmokeRootWidthStaleRecoveryAudit,
 } = require("./serve_masonry_smoke_audits");
 
 // Deterministic fixture clock: three hour buckets so time-rule work can build
@@ -75,8 +74,6 @@ async function run(screenshotDir) {
       assertMasonryResizeAudit(resizeAudit);
       const rootWidthMeasurement = await measureMasonryRootWidth(page);
       assertMasonryMeasurement(rootWidthMeasurement);
-      const rootWidthRecovery = await measureMasonryRootWidthRecovery(page);
-      assertMasonryRootWidthRecovery(rootWidthRecovery);
       const screenshots = [];
       if (screenshotDir) {
         for (const width of masonryScreenshotWidths) {
@@ -95,7 +92,6 @@ async function run(screenshotDir) {
         measurements,
         resizeAudit,
         rootWidthMeasurement,
-        rootWidthRecovery,
         screenshots,
         teamMeasurements,
         url: server.url,
@@ -180,17 +176,6 @@ async function measureMasonryRootWidth(page) {
   });
 }
 
-async function measureMasonryRootWidthRecovery(page) {
-  await page.setViewportSize({ width: 1920, height: 1400 });
-  return page.evaluate(masonrySmokeRootWidthStaleRecoveryAudit, {
-    expectedColumns: 2,
-    expectedRuleIsos: masonryExpectedRuleIsos,
-    keepLanesVisible: true,
-    plan: masonryFixturePlan,
-    width: 1920,
-  });
-}
-
 async function measureMasonryTeam(page, width) {
   await page.setViewportSize({ width, height: 1400 });
   return page.evaluate(renderMasonryTeamFixture, {
@@ -218,19 +203,6 @@ function assertMasonryResizeAudit(audit) {
     throw new Error("resize reflow used " + JSON.stringify(audit));
   if (audit.gridTrackCount !== masonryExpectedGridTrackCount)
     throw new Error("resize reflow lost 12 grid tracks " + JSON.stringify(audit));
-}
-
-function assertMasonryRootWidthRecovery(audit) {
-  if (!audit.beforeRootWidthActive)
-    throw new Error("root-width recovery did not exercise stale state");
-  if (audit.visibleLaneCount <= 1)
-    throw new Error("root-width recovery did not reveal sibling lanes");
-  if (audit.afterRootWidthActive)
-    throw new Error("same-fingerprint render kept stale root width");
-  if (audit.distinctColumnLefts < audit.expectedColumns)
-    throw new Error("root-width recovery collapsed columns " + JSON.stringify(audit));
-  if (audit.gridTrackCount !== masonryExpectedGridTrackCount)
-    throw new Error("root-width recovery lost 12 grid tracks " + JSON.stringify(audit));
 }
 
 function assertMasonryTeamMeasurement(measurement) {

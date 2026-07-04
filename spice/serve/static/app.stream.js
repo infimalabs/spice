@@ -355,18 +355,7 @@ function renderMessagesIfChanged(lane) {
   const visibleItems = renderItems.filter((item) => !isPresenceMessage(item));
   renderLaneViewShell(lane);
   const fingerprint = messageRenderFingerprint(lane, visibleItems);
-  if (fingerprint === lane.renderedMessageFingerprint) {
-    // Legacy fallback: syncMessagePackLayoutIfNeeded/packMessageStream only
-    // ever act on DIRECT children of lane.messagesEl matching
-    // isMessagePackItem; mosaic cards live one level deeper inside
-    // .mosaic-plane, so this is a harmless no-op for the live mosaic render
-    // path. It stays here only because pre-existing masonry smoke coverage
-    // (serve_masonry_smoke.js) builds legacy-shaped DOM directly and still
-    // depends on a no-op render catching a stale root-width/column-count
-    // layout state; dies with the rest of the legacy system (mosaic-demolition).
-    syncMessagePackLayoutIfNeeded(lane);
-    return;
-  }
+  if (fingerprint === lane.renderedMessageFingerprint) return;
   const viewportAnchor = captureMessageViewportAnchor(lane);
   suppressLanePaneScrollIntentForFrame(lane);
   mosaicRenderMessageStream(lane, visibleItems);
@@ -397,10 +386,6 @@ function mosaicAttachHistorySentinels(lane, visibleItems) {
     }
   }
   if (!attachedAny) lane.messagesEl.append(historySentinelForLane(lane));
-}
-
-function syncMessagePackLayoutIfNeeded(lane) {
-  if (messagePackLayoutNeedsSync(lane)) scheduleMessageStreamPack(lane);
 }
 
 function renderEmptyTeamMessages(lane) {
@@ -501,23 +486,14 @@ function packMessageStream(lane) {
   if (!host) return;
   let style = getComputedStyle(host);
   if (style.display !== "grid") return;
-  const rootWidthReset = messagePackRootWidthEligible(lane, host)
-    ? false
-    : clearMessagePackRootWidth(lane, host);
-  if (rootWidthReset) {
-    host.getBoundingClientRect();
-    style = getComputedStyle(host);
-  }
   const columnCount = messagePackColumnCount(lane, host, style);
   const naturalHeightMode = columnCount <= 1;
-  const rootWidthChanged = syncMessagePackRootWidth(lane, host, style, columnCount);
   const columnCountChanged = setMessagePackColumnCount(
     host,
     messagePackGridTrackCount,
   );
   const trackMinChanged = setMessagePackTrackMin(host, "0px");
-  const gridChanged =
-    rootWidthReset || rootWidthChanged || columnCountChanged || trackMinChanged;
+  const gridChanged = columnCountChanged || trackMinChanged;
   if (gridChanged) host.getBoundingClientRect();
   style = getComputedStyle(host);
   const rowHeight = cssPixelValue(style.gridAutoRows) || 8;
@@ -552,7 +528,7 @@ function packMessageStream(lane) {
       rowStride,
     });
   }
-  commitMessagePackLayoutState(lane, host, columnCount, itemKeys);
+  commitMessagePackLayoutState(lane, columnCount, itemKeys);
 }
 
 // Places one item within the ordered pass, mutating `segment` (the
