@@ -75,9 +75,7 @@ function messagePackBarrierKey(node) {
 
 function messagePackColumnCount(lane, host, style) {
   if (messagePackViewportForcesSingleColumn()) return 1;
-  const inner = messagePackRootWidthEligible(lane, host)
-    ? messagePackRootInnerWidth(host, style)
-    : messagePackInnerWidth(host, style);
+  const inner = messagePackInnerWidth(host, style);
   if (!Number.isFinite(inner) || inner <= 0) return 1;
   const gap = cssPixelValue(style.columnGap);
   const minWidth = cssLengthValue(
@@ -98,123 +96,18 @@ function messagePackEffectiveColumnWidth(inner, gap, count) {
   return (inner - gap * (columns - 1)) / columns;
 }
 
+// A lone visible lane's own width already answers the "should this lane use
+// the full swimlanes width" question honestly: .lane{flex:1 1 0} in
+// .swimlanes{display:flex} already stretches it to fill all available
+// space when it is the only flex item, so host.clientWidth here (and in
+// mosaic-geometry's mosaicContainerWidthPx for the live render path)
+// already reflects the correct width with no packing-time override needed.
 function messagePackInnerWidth(host, style) {
   return (
     host.clientWidth -
     cssPixelValue(style.paddingLeft) -
     cssPixelValue(style.paddingRight)
   );
-}
-
-function messagePackRootInnerWidth(host, style) {
-  const root = messagePackRootElement(host);
-  if (!root || root === host) return messagePackInnerWidth(host, style);
-  const rootStyle = getComputedStyle(root);
-  return (
-    root.clientWidth -
-    cssPixelValue(rootStyle.paddingLeft) -
-    cssPixelValue(rootStyle.paddingRight) -
-    cssPixelValue(style.paddingLeft) -
-    cssPixelValue(style.paddingRight)
-  );
-}
-
-function messagePackRootElement(host) {
-  return host.closest(".swimlanes") || host;
-}
-
-function messagePackRootWidthEligible(lane, host) {
-  const root = messagePackRootElement(host);
-  if (!root || root === host) return false;
-  return messagePackVisibleRootLaneCount(root, lane.element) <= 1;
-}
-
-function messagePackVisibleRootLaneCount(root, activeLane) {
-  let count = 0;
-  for (const node of root.children) {
-    if (!node.classList?.contains("lane")) continue;
-    if (node.classList.contains("lane--shadowed")) continue;
-    if (getComputedStyle(node).display === "none") continue;
-    count += 1;
-    if (count > 1) return count;
-  }
-  return count || (activeLane ? 1 : 0);
-}
-
-function clearMessagePackRootWidth(lane, host) {
-  const hadClass = lane.element.classList.contains("lane--message-pack-root");
-  const hadRootWidth = Boolean(
-    host.style.getPropertyValue("--message-pack-root-width"),
-  );
-  lane.element.classList.remove("lane--message-pack-root");
-  host.style.removeProperty("--message-pack-root-width");
-  return hadClass || hadRootWidth;
-}
-
-function messagePackRootWidthState(lane, host, style, columnCount) {
-  const root = messagePackRootElement(host);
-  const rootWidth =
-    root && root !== host
-      ? root.clientWidth -
-        cssPixelValue(getComputedStyle(root).paddingLeft) -
-        cssPixelValue(getComputedStyle(root).paddingRight)
-      : 0;
-  const laneWidth = lane.element.getBoundingClientRect().width;
-  const useRootWidth =
-    messagePackRootWidthEligible(lane, host) &&
-    columnCount > 1 &&
-    rootWidth > laneWidth + cssPixelValue(style.columnGap);
-  return {
-    useRootWidth,
-    value: Math.max(laneWidth, rootWidth) + "px",
-  };
-}
-
-function messagePackLayoutNeedsSync(lane) {
-  const host = lane.messagesEl;
-  if (!host) return false;
-  const style = getComputedStyle(host);
-  if (style.display !== "grid") return false;
-  const columnCount = messagePackColumnCount(lane, host, style);
-  const rootWidth = messagePackRootWidthState(lane, host, style, columnCount);
-  const hasRootWidthClass = lane.element.classList.contains(
-    "lane--message-pack-root",
-  );
-  const rootWidthValue = host.style.getPropertyValue(
-    "--message-pack-root-width",
-  );
-  if (rootWidth.useRootWidth)
-    return !hasRootWidthClass || rootWidthValue !== rootWidth.value;
-  return hasRootWidthClass || Boolean(rootWidthValue);
-}
-
-function messagePackRootWidthActive(lane, host) {
-  return (
-    lane.element.classList.contains("lane--message-pack-root") &&
-    Boolean(host.style.getPropertyValue("--message-pack-root-width"))
-  );
-}
-
-function syncMessagePackRootWidth(lane, host, style, columnCount) {
-  const rootWidth = messagePackRootWidthState(lane, host, style, columnCount);
-  const classChanged =
-    lane.element.classList.contains("lane--message-pack-root") !==
-    rootWidth.useRootWidth;
-  lane.element.classList.toggle(
-    "lane--message-pack-root",
-    rootWidth.useRootWidth,
-  );
-  if (rootWidth.useRootWidth) {
-    if (
-      host.style.getPropertyValue("--message-pack-root-width") !== rootWidth.value
-    ) {
-      host.style.setProperty("--message-pack-root-width", rootWidth.value);
-      return true;
-    }
-  } else {
-    return clearMessagePackRootWidth(lane, host) || classChanged;
-  }
-  return classChanged;
 }
 
 function messagePackViewportForcesSingleColumn() {
@@ -522,8 +415,6 @@ function messagePackShouldReflow(lane, host, columnCount, itemKeys) {
   if (!state) return true;
   if (state.version !== messagePackLayoutVersion) return true;
   if (state.columnCount !== columnCount) return true;
-  if (state.rootWidthActive !== messagePackRootWidthActive(lane, host))
-    return true;
   const previous = state.itemKeys || [];
   if (!messagePackKnownSequencePreserved(previous, itemKeys)) return true;
   return messagePackPinnedLayoutCollapsed(host, columnCount);
@@ -610,11 +501,10 @@ function clearMessagePackPlacement(node) {
   node.style.removeProperty("--message-pack-column-span");
 }
 
-function commitMessagePackLayoutState(lane, host, columnCount, itemKeys) {
+function commitMessagePackLayoutState(lane, columnCount, itemKeys) {
   lane.messagePackLayoutState = {
     columnCount,
     itemKeys: itemKeys.slice(),
-    rootWidthActive: messagePackRootWidthActive(lane, host),
     version: messagePackLayoutVersion,
   };
 }

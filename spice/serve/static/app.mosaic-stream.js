@@ -543,15 +543,30 @@ function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
   }
 }
 
-function mosaicRunFullReplay(lane, entries, nodesByKey, geometry, backfillKeySet) {
-  const withCandidates = entries.map((entry) => {
+// §8/§14: creationIndex must be the stream's stable (epoch, index, key)
+// order (app.mosaic-wet-frozen.js), never DOM/arrival-observation order.
+// `entries` is already in that true order (newest-first, mirroring
+// laneGroupMergedMessages/knownMessages) -- deriving creationIndex from
+// its reversed position covers every surviving card, old and newly-merged
+// alike, in one pass, so no backfillKeySet special-case is needed here:
+// unlike mosaicRunBackfill (which must avoid disturbing already-placed
+// cards' indices to skip a full replay), this function is already
+// recomputing everyone's position from scratch, so it can just read the
+// truth entries already encodes. mosaicCreationIndexFor's incremental
+// counter is right for a single live append (mosaicRunInsert, where the
+// new key really is the newest thing ever observed) but wrong here: a bulk
+// batch of previously-unseen keys -- a team fuse pulling in another
+// member's whole backlog, or a history-pagination hydration landing
+// several older messages at once -- would otherwise get stapled onto the
+// END of the counter in newest-first iteration order, backwards, and
+// stamped as newer than every already-known card regardless of true age.
+function mosaicRunFullReplay(lane, entries, nodesByKey, geometry) {
+  const withCandidates = entries.map((entry, index) => {
     const previous = lane.mosaicCards.find((card) => card.key === entry.key);
     const node = nodesByKey.get(entry.key);
     return {
       key: entry.key,
-      creationIndex: backfillKeySet?.has(entry.key)
-        ? mosaicBackfillCreationIndexFor(lane, entry.key)
-        : mosaicCreationIndexFor(lane, entry.key),
+      creationIndex: entries.length - 1 - index,
       frozen: false,
       candidates: mosaicCandidatesFor(lane, entry, node, geometry),
       t: previous ? previous.t : 0,
@@ -567,6 +582,7 @@ function mosaicRunFullReplay(lane, entries, nodesByKey, geometry, backfillKeySet
   });
   const replayed = mosaicFullReplay(withCandidates, mosaicGridTrackCount, MOSAIC_FREEZE_DEPTH);
   lane.mosaicCards = replayed.map(({ candidates, ...card }) => card);
+  lane.mosaicNextCreationIndex = entries.length;
 }
 
 function mosaicCaptureBackfillViewport(lane) {
@@ -633,14 +649,11 @@ function mosaicRenderMessageStream(lane, visibleItems) {
   const addedKeys = desiredKeys.filter((key) => !previousKeySet.has(key));
   const removedKeys = [...previousKeySet].filter((key) => !desiredKeySet.has(key));
   const backfillEntries = mosaicBackfillEntries(entries, previousKeySet, addedKeys);
-  const backfillKeySet = backfillEntries
-    ? new Set(backfillEntries.map((entry) => entry.key))
-    : null;
   const backfillViewport = backfillEntries ? mosaicCaptureBackfillViewport(lane) : null;
   let replaying = geometryChanged;
 
   if (geometryChanged) {
-    mosaicRunFullReplay(lane, entries, nodesByKey, geometry, backfillKeySet);
+    mosaicRunFullReplay(lane, entries, nodesByKey, geometry);
   } else if (!addedKeys.length) {
     if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
     mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
@@ -655,7 +668,7 @@ function mosaicRenderMessageStream(lane, visibleItems) {
     mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
   } else {
     replaying = true;
-    mosaicRunFullReplay(lane, entries, nodesByKey, geometry, backfillKeySet);
+    mosaicRunFullReplay(lane, entries, nodesByKey, geometry);
   }
 
   mosaicApplyRender(lane, lane.mosaicCards, geometry, nodesByKey, {

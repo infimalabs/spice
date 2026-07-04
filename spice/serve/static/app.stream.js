@@ -392,10 +392,6 @@ function mosaicAttachHistorySentinels(lane, visibleItems) {
   if (!attachedAny) lane.messagesEl.append(historySentinelForLane(lane));
 }
 
-function syncMessagePackLayoutIfNeeded(lane) {
-  if (messagePackLayoutNeedsSync(lane)) scheduleMessageStreamPack(lane);
-}
-
 function renderEmptyTeamMessages(lane) {
   renderLaneViewShell(lane);
   const fingerprint = emptyTeamMessageFingerprint(lane);
@@ -494,23 +490,14 @@ function packMessageStream(lane) {
   if (!host) return;
   let style = getComputedStyle(host);
   if (style.display !== "grid") return;
-  const rootWidthReset = messagePackRootWidthEligible(lane, host)
-    ? false
-    : clearMessagePackRootWidth(lane, host);
-  if (rootWidthReset) {
-    host.getBoundingClientRect();
-    style = getComputedStyle(host);
-  }
   const columnCount = messagePackColumnCount(lane, host, style);
   const naturalHeightMode = columnCount <= 1;
-  const rootWidthChanged = syncMessagePackRootWidth(lane, host, style, columnCount);
   const columnCountChanged = setMessagePackColumnCount(
     host,
     messagePackGridTrackCount,
   );
   const trackMinChanged = setMessagePackTrackMin(host, "0px");
-  const gridChanged =
-    rootWidthReset || rootWidthChanged || columnCountChanged || trackMinChanged;
+  const gridChanged = columnCountChanged || trackMinChanged;
   if (gridChanged) host.getBoundingClientRect();
   style = getComputedStyle(host);
   const rowHeight = cssPixelValue(style.gridAutoRows) || 8;
@@ -545,7 +532,7 @@ function packMessageStream(lane) {
       rowStride,
     });
   }
-  commitMessagePackLayoutState(lane, host, columnCount, itemKeys);
+  commitMessagePackLayoutState(lane, columnCount, itemKeys);
 }
 
 // Places one item within the ordered pass, mutating `segment` (the
