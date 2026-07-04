@@ -471,6 +471,28 @@ function mosaicRunInsert(lane, entry, node, geometry) {
   lane.mosaicCards = mosaicRecomputeFrozen(lane.mosaicCards, MOSAIC_FREEZE_DEPTH);
 }
 
+// All added keys forming the contiguous NEWEST prefix of entries place by
+// sequential insert instead of a full replay. Layout-identical -- a card's
+// decision depends only on the cards before it in creation order, so
+// replaying [old..., new...] reproduces the old prefix placements exactly
+// -- but structurally guaranteed zero-movement: no existing card is
+// re-decided, re-measured, or re-spanned, no time-rule churn, no style
+// writes. Bulk catch-up batches during hydration stop reshuffling the
+// board (the operator-visible "whole batches removed and reinserted"
+// snapping between staged loads).
+function mosaicNewestPrefixEntries(entries, previousKeySet, addedKeys) {
+  if (!addedKeys.length) return null;
+  let prefixLength = 0;
+  while (
+    prefixLength < entries.length &&
+    !previousKeySet.has(entries[prefixLength].key)
+  ) {
+    prefixLength += 1;
+  }
+  if (prefixLength !== addedKeys.length) return null;
+  return entries.slice(0, prefixLength);
+}
+
 function mosaicBackfillEntries(entries, previousKeySet, addedKeys) {
   if (!addedKeys.length) return null;
   const firstAddedIndex = entries.findIndex((entry) => !previousKeySet.has(entry.key));
@@ -743,7 +765,14 @@ function mosaicRenderMessageStream(lane, visibleItems) {
 
   const addedKeys = desiredKeys.filter((key) => !previousKeySet.has(key));
   const removedKeys = [...previousKeySet].filter((key) => !desiredKeySet.has(key));
-  const backfillEntries = mosaicBackfillEntries(entries, previousKeySet, addedKeys);
+  const newestPrefixEntries = mosaicNewestPrefixEntries(
+    entries,
+    previousKeySet,
+    addedKeys,
+  );
+  const backfillEntries = newestPrefixEntries
+    ? null
+    : mosaicBackfillEntries(entries, previousKeySet, addedKeys);
   const backfillViewport = backfillEntries ? mosaicCaptureBackfillViewport(lane) : null;
   let replaying = geometryChanged;
 
@@ -752,10 +781,14 @@ function mosaicRenderMessageStream(lane, visibleItems) {
   } else if (!addedKeys.length) {
     if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
     mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
-  } else if (addedKeys.length === 1 && addedKeys[0] === desiredKeys[0]) {
+  } else if (newestPrefixEntries) {
     if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
-    const entry = entries.find((candidate) => candidate.key === addedKeys[0]);
-    mosaicRunInsert(lane, entry, nodesByKey.get(entry.key), geometry);
+    // Oldest new card first: sequential inserts assign creation indexes in
+    // true stream order (entries run newest-first).
+    for (let i = newestPrefixEntries.length - 1; i >= 0; i -= 1) {
+      const entry = newestPrefixEntries[i];
+      mosaicRunInsert(lane, entry, nodesByKey.get(entry.key), geometry);
+    }
     mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
   } else if (backfillEntries) {
     if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);

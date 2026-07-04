@@ -536,9 +536,13 @@ function mosaicStreamMeasureClobberCheck() {
   }
   trimKnownMessages(lane);
   renderMessagesIfChanged(lane);
-  // Bulk add of two forces a same-geometry full replay: placements mostly
+  // A mixed-age bulk (one older than every seeded card, one newest) forces
+  // a same-geometry FULL REPLAY -- a strictly-newer bulk would take the
+  // zero-movement append branch and never re-measure: placements mostly
   // unchanged, every node re-measured.
-  upsertKnownMessage(lane, item(60, shortHtml), "newest");
+  const older = item(60, shortHtml);
+  older.timestamp = new Date(2026, 0, 1, 2, 0, 0).toISOString();
+  upsertKnownMessage(lane, older, "newest");
   upsertKnownMessage(lane, item(61, tallHtml), "newest");
   trimKnownMessages(lane);
   renderMessagesIfChanged(lane);
@@ -562,6 +566,62 @@ function mosaicStreamMeasureClobberCheck() {
       });
   }
   return { cardCount: lane.mosaicCards.length, mismatches };
+}
+
+// A bulk of strictly-newer messages arriving in ONE render must place by
+// sequential insert: every existing card's lattice record AND inline styles
+// stay byte-identical (no re-decide, no re-measure, no style writes), and
+// the new cards land in true stream order.
+function mosaicStreamBulkAppendCheck() {
+  const lane = mosaicStreamResolveLane();
+  const item = (i, lines) => ({
+    ack_count: 0,
+    ack_keys: [],
+    index: 800 + i,
+    key: "bulk-" + i,
+    kind: "assistant",
+    timestamp: new Date(2026, 0, 1, 5, i, 0).toISOString(),
+    display_html: Array.from({ length: lines }, (_, j) => "bulk line " + j).join("<br>"),
+    display_text: "x",
+    text: "x",
+  });
+  const snapshotExisting = () =>
+    lane.mosaicCards
+      .map((card) => {
+        const node = lane.mosaicPlaneEl.querySelector(
+          'article[data-message-key="' + CSS.escape(card.key) + '"]',
+        );
+        return {
+          key: card.key,
+          t: card.t,
+          b: card.b,
+          n: card.n,
+          span: card.span,
+          transform: node ? node.style.transform : "",
+          width: node ? node.style.width : "",
+          height: node ? node.style.height : "",
+        };
+      })
+      .sort((a, b) => a.key.localeCompare(b.key));
+  const before = snapshotExisting();
+  const beforeKeys = new Set(lane.mosaicCards.map((card) => card.key));
+  for (let i = 1; i <= 3; i += 1) upsertKnownMessage(lane, item(i, 1 + i), "newest");
+  trimKnownMessages(lane);
+  renderMessagesIfChanged(lane);
+  const after = snapshotExisting().filter((card) => beforeKeys.has(card.key));
+  const placed = lane.mosaicCards.filter((card) => card.key.startsWith("bulk-"));
+  return {
+    beforeCount: before.length,
+    identical: JSON.stringify(before) === JSON.stringify(after),
+    placedCount: placed.length,
+    placedInOrder:
+      placed.length === 3 &&
+      placed
+        .slice()
+        .sort((a, b) => a.creationIndex - b.creationIndex)
+        .map((card) => card.key)
+        .join(",") === "bulk-1,bulk-2,bulk-3",
+  };
 }
 
 function mosaicStreamEventLogReplayCheck() {
@@ -623,6 +683,7 @@ async function installMosaicStreamHelpers(page) {
       mosaicStreamBackfillCheck,
       mosaicStreamEventLogReplayCheck,
       mosaicStreamMeasureClobberCheck,
+      mosaicStreamBulkAppendCheck,
     ]
       .map((helper) => helper.toString())
       .join("\n"),
@@ -906,6 +967,15 @@ function assertMosaicStreamResult(result) {
     );
   if (result.measureClobber.cardCount < MOSAIC_STREAM_CLOBBER_MIN_CARDS)
     throw new Error("clobber scenario ran on too few cards");
+  if (!result.bulkAppend.identical)
+    throw new Error(
+      "bulk-newer batch moved or re-styled existing cards: " +
+        JSON.stringify(result.bulkAppend),
+    );
+  if (!result.bulkAppend.placedInOrder)
+    throw new Error(
+      "bulk-newer batch placed out of order: " + JSON.stringify(result.bulkAppend),
+    );
   const fail = (message) => {
     throw new Error(message + ": " + JSON.stringify(result));
   };
@@ -956,6 +1026,7 @@ async function run() {
       const backfillResult = await page.evaluate(mosaicStreamBackfillCheck);
       const eventLogReplay = await page.evaluate(mosaicStreamEventLogReplayCheck);
       const measureClobber = await page.evaluate(mosaicStreamMeasureClobberCheck);
+      const bulkAppend = await page.evaluate(mosaicStreamBulkAppendCheck);
       const result = {
         insertResult,
         removalResult,
@@ -968,6 +1039,7 @@ async function run() {
         backfillResult,
         eventLogReplay,
         measureClobber,
+        bulkAppend,
       };
       assertMosaicStreamResult(result);
       return { ...result, url: server.url };
