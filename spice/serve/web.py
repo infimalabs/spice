@@ -54,6 +54,7 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
   </header>
   <main id="swimlanes" class="swimlanes" aria-label="Open teams"></main>
   <script>const spiceServeBranding = {brand_json};</script>
+  <script>const spiceServeInitialGlobalSettings = {global_settings_json};</script>
   <script src="/static/app.render.js"></script>
   <script src="/static/app.live-bus.js"></script>
   <script src="/static/app.message-pack.js"></script>
@@ -100,7 +101,10 @@ def serve_branding(repo_root: Path | None = None) -> ServeBranding:
 
 
 def render_index_html(
-    repo_root: Path | None = None, *, branding: ServeBranding | None = None
+    repo_root: Path | None = None,
+    *,
+    branding: ServeBranding | None = None,
+    initial_global_settings: dict[str, Any] | None = None,
 ) -> str:
     resolved = branding or serve_branding(repo_root)
     brand_html = html.escape(resolved.name)
@@ -113,10 +117,21 @@ def render_index_html(
         },
         ensure_ascii=False,
     ).replace("</", "<\\/")
+    global_settings_json = json.dumps(
+        {
+            "fastMode": (
+                initial_global_settings.get("fastMode") is True
+                if initial_global_settings
+                else False
+            )
+        },
+        ensure_ascii=False,
+    ).replace("</", "<\\/")
     return _INDEX_HTML_TEMPLATE.format(
         brand_html=brand_html,
         brand_attr=brand_attr,
         brand_json=brand_json,
+        global_settings_json=global_settings_json,
     )
 
 

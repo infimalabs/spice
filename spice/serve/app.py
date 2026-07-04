@@ -761,7 +761,14 @@ class _ServeHandler(BaseHTTPRequestHandler):
             self._send_text(serve_metrics_text(self.state), METRICS_CONTENT_TYPE)
             return
         if parsed.path == "/":
-            self._send_html(render_index_html(self.state.anchor_root))
+            self._send_html(
+                render_index_html(
+                    self.state.anchor_root,
+                    initial_global_settings={
+                        "fastMode": self.state.team_store.global_fast_mode_enabled(),
+                    },
+                ),
+            )
             return
         if parsed.path.startswith(STATIC_ASSET_ROUTE_PREFIX):
             send_static_asset(self, parsed.path.removeprefix(STATIC_ASSET_ROUTE_PREFIX))

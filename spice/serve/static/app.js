@@ -88,7 +88,7 @@ let spiceMenuDragTargetId = "";
 let spiceMenuTargetDragState = null;
 let spiceMenuRenderPending = false;
 let spiceMenuNewTeamPlacementHints = [];
-let fastModeEnabled = false;
+let fastModeEnabled = initialFastModeEnabled();
 let teamSnapshotRevision = 0;
 let sessionOpenTargetIds = new Set();
 
@@ -179,6 +179,14 @@ function browserStorage() {
   } catch (error) {
     return null;
   }
+}
+
+function initialFastModeEnabled() {
+  return Boolean(
+    typeof spiceServeInitialGlobalSettings === "object" &&
+      spiceServeInitialGlobalSettings &&
+      spiceServeInitialGlobalSettings.fastMode === true,
+  );
 }
 
 function currentFastModeEnabled() {
