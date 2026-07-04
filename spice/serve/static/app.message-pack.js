@@ -7,7 +7,7 @@ const messageCardBorderAllowancePx = 2;
 const messagePackGridTrackCount = 12;
 const messagePackMaxEffectiveColumns = 6;
 const messagePackEffectiveColumnCounts = [6, 4, 3, 2, 1];
-const messagePackLayoutVersion = 3;
+const messagePackLayoutVersion = 4;
 const messagePackLegalTrackSpans = [2, 3, 4, 6, 12];
 const messagePackSlackPenalty = 3;
 const messagePackTallFinalMinHeightPx = 280;
@@ -438,7 +438,8 @@ function messagePackShouldReflow(lane, host, columnCount, itemKeys) {
   if (state.rootWidthActive !== messagePackRootWidthActive(lane, host))
     return true;
   const previous = state.itemKeys || [];
-  return !messagePackKnownSequencePreserved(previous, itemKeys);
+  if (!messagePackKnownSequencePreserved(previous, itemKeys)) return true;
+  return messagePackPinnedLayoutCollapsed(host, columnCount);
 }
 
 function messagePackKnownSequencePreserved(previous, current) {
@@ -474,6 +475,45 @@ function messagePackKnownSequencePreserved(previous, current) {
   const before = current.slice(0, bestCurrentStart);
   const after = current.slice(bestCurrentStart + bestLength);
   return ![...before, ...after].some((key) => previousSet.has(key));
+}
+
+function messagePackPinnedLayoutCollapsed(host, columnCount) {
+  if (columnCount <= 1) return false;
+  const minimumTrackSpan = messagePackColumnSpan(columnCount);
+  const step = Math.max(1, minimumTrackSpan);
+  const possibleStarts = new Set();
+  const pinnedStarts = new Set();
+  let pinnedCount = 0;
+  let packableCount = 0;
+  for (const node of host.children) {
+    if (!isMessagePackItem(node) || isMessagePackBarrier(node)) continue;
+    packableCount += 1;
+    const slotSpan = messagePackTrackSpan(node, minimumTrackSpan, 0);
+    for (
+      let candidate = 0;
+      candidate <= Math.max(0, messagePackGridTrackCount - slotSpan);
+      candidate += step
+    ) {
+      possibleStarts.add(candidate);
+    }
+    const pinned = Number.parseInt(node.dataset.messagePackColumn || "", 10);
+    if (
+      Number.isInteger(pinned) &&
+      pinned >= 0 &&
+      pinned + slotSpan <= messagePackGridTrackCount &&
+      pinned % step === 0
+    ) {
+      pinnedCount += 1;
+      pinnedStarts.add(pinned);
+    }
+  }
+  const expectedStarts = Math.min(columnCount, possibleStarts.size, packableCount);
+  if (expectedStarts <= 1 || pinnedCount < expectedStarts) return false;
+  const coverageFloor = Math.min(
+    expectedStarts,
+    Math.max(2, Math.ceil(expectedStarts * 0.75)),
+  );
+  return pinnedStarts.size < coverageFloor;
 }
 
 function clearMessagePackPlacement(node) {

@@ -277,6 +277,40 @@ async function masonrySmokeMiddleRemovalReflowAudit(lane, host, config) {
   };
 }
 
+async function masonrySmokePinnedCollapseReflowAudit(lane, host, config) {
+  if (config.expectedColumns <= 1) return { reflowed: true };
+  const cards = Array.from(
+    host.querySelectorAll('[data-masonry-smoke="card"]'),
+  );
+  if (cards.length < config.expectedColumns) return { reflowed: true };
+  for (const card of cards) {
+    card.dataset.messagePackColumn = "0";
+    card.style.gridColumnStart = "1";
+  }
+  packMessageStream(lane);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const distinctColumns = new Set(
+    cards.map((card) => card.style.gridColumnStart),
+  ).size;
+  return {
+    distinctColumns,
+    expectedColumns: config.expectedColumns,
+    reflowed: distinctColumns >= Math.min(config.expectedColumns, cards.length),
+  };
+}
+
+function masonrySmokeObserverFanoutAudit(lane) {
+  syncMessagePackObserver(lane);
+  const observed = lane.messagePackObservedNodes || new Set();
+  return {
+    hostObserved: observed.has(lane.messagesEl),
+    mediaHandlerCount: lane.messagePackImageLoadHandlers
+      ? lane.messagePackImageLoadHandlers.size
+      : 0,
+    observedCount: observed.size,
+  };
+}
+
 function masonrySmokeResizeAudit(config) {
   const lane = masonrySmokeLane();
   const host = lane.messagesEl || document.querySelector(".messages");
@@ -335,6 +369,8 @@ const masonrySmokeAuditHelpers = [
   masonrySmokeNoopRenderAudit,
   masonrySmokeRootWidthStaleRecoveryAudit,
   masonrySmokeMiddleRemovalReflowAudit,
+  masonrySmokePinnedCollapseReflowAudit,
+  masonrySmokeObserverFanoutAudit,
   masonrySmokeResizeAudit,
   masonrySmokeStructuredFinalAudit,
   masonrySmokeRect,
@@ -351,6 +387,8 @@ module.exports = {
   masonrySmokeNoopRenderAudit,
   masonrySmokeRootWidthStaleRecoveryAudit,
   masonrySmokeMiddleRemovalReflowAudit,
+  masonrySmokePinnedCollapseReflowAudit,
+  masonrySmokeObserverFanoutAudit,
   masonrySmokeResizeAudit,
   masonrySmokeStructuredFinalAudit,
   masonrySmokeRect,
