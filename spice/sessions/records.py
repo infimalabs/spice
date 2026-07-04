@@ -23,6 +23,7 @@ from typing import Any
 
 from spice.agent.driver import driver_for_transcript
 from spice.errors import SpiceError
+from spice.sessions.jsonl import iter_jsonl_lines
 from spice.sessions.util import first_text, int_or_zero, normalize_timestamp
 
 COMMIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
@@ -86,17 +87,16 @@ class CommitRecord:
 
 def iter_events(path: Path) -> Iterator[dict[str, Any]]:
     driver = driver_for_transcript(path)
-    with path.open(encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(obj, dict):
-                continue
-            event = driver.normalize_transcript_line(obj)
-            if event is not None:
-                yield event
+    for line in iter_jsonl_lines(path):
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        event = driver.normalize_transcript_line(obj)
+        if event is not None:
+            yield event
 
 
 def is_scaffolding_text(text: str) -> bool:

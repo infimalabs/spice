@@ -269,7 +269,10 @@ def _add_files_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "files",
         nargs="*",
-        help="Transcript paths or thread ids; defaults to the ambient agent.",
+        help=(
+            "Transcript paths (.jsonl or .jsonl.gz) or thread ids; defaults to "
+            "the ambient agent."
+        ),
     )
 
 
