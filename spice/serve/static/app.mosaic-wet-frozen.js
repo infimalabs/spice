@@ -77,3 +77,77 @@ function mosaicWetReplay(cards, trackCount, freezeDepth) {
   );
   return mosaicRecomputeFrozen(replaced, freezeDepth);
 }
+
+// §7 rippleRows: when the growing card must extend downward, every card
+// resting below it in an overlapping track slides down by the same delta,
+// transitively. Breadth is over the spec's set definition -- {d : d
+// overlaps m in tracks and d.b < m.b} -- not insertion order; a card is
+// discovered once (never re-shifted) using whichever frontier card reaches
+// it first, and once discovered its OWN b becomes the threshold for
+// reaching further cards below it, so the shift cascades. This mirrors
+// .spice/mosaic-demo.html's rippleRows() bookkeeping exactly, including
+// using each already-shifted descendant's new b (not its pre-shift b) once
+// it becomes a frontier card itself. Only b moves; t and span never change
+// (§7, §11). Row indices may go negative (§14) -- this never clamps or
+// re-normalizes them. Returns a NEW array in the input's original order;
+// cards whose b did not change keep their original object reference (no-op
+// for a shallow-equality render diff, §9(c)); never mutates its input or
+// any input card object.
+function mosaicRippleRows(cards, growingCreationIndex, delta) {
+  const growingCard = cards.find(
+    (card) => card.creationIndex === growingCreationIndex,
+  );
+  if (!growingCard) {
+    throw new Error(
+      "mosaicRippleRows: no card with creationIndex " + growingCreationIndex,
+    );
+  }
+
+  const shiftedB = new Map();
+  const seen = new Set([growingCreationIndex]);
+  const stack = [growingCard];
+  while (stack.length) {
+    const frontier = stack.pop();
+    const frontierB =
+      frontier.creationIndex === growingCreationIndex
+        ? growingCard.b
+        : shiftedB.get(frontier.creationIndex);
+    for (const candidate of cards) {
+      if (seen.has(candidate.creationIndex)) continue;
+      if (mosaicTracksOverlap(candidate, frontier) && candidate.b < frontierB) {
+        shiftedB.set(candidate.creationIndex, candidate.b - delta);
+        seen.add(candidate.creationIndex);
+        stack.push(candidate);
+      }
+    }
+  }
+
+  return cards.map((card) => {
+    if (card.creationIndex === growingCreationIndex) {
+      return { ...card, b: card.b - delta, n: card.n + delta };
+    }
+    if (shiftedB.has(card.creationIndex)) {
+      return { ...card, b: shiftedB.get(card.creationIndex) };
+    }
+    return card;
+  });
+}
+
+// §7 frozen resize dispatch: late content on a frozen card either grows
+// past its reservation (rare by design) or resolves smaller. Growth keeps
+// the card's top row fixed (b+n invariant) and ripples the chain below it
+// downward via mosaicRippleRows; the card's own n and b both change to
+// reflect the new row count. Shrinking keeps the reserved n exactly as-is
+// -- zero movement outranks reclaiming a row (§7) -- so this returns
+// `cards` completely untouched (same array, same object references),
+// which is what makes "zero style writes on any other card in that frame"
+// true by construction. The vacated space reconciles at the next full
+// replay (§8), never here.
+function mosaicResolveFrozenResize(cards, creationIndex, newN) {
+  const card = cards.find((candidate) => candidate.creationIndex === creationIndex);
+  if (!card) {
+    throw new Error("mosaicResolveFrozenResize: no card with creationIndex " + creationIndex);
+  }
+  if (newN <= card.n) return cards;
+  return mosaicRippleRows(cards, creationIndex, newN - card.n);
+}

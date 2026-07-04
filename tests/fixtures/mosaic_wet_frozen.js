@@ -144,4 +144,78 @@ function card(creationIndex, t, span, n, frozen, b = 0) {
   assert(freezeDepthConst === 2, "MOSAIC_FREEZE_DEPTH must be the named constant 2");
 }
 
+// --- rippleRows: frozen growth ----------------------------------------
+
+// A grows by delta=2 (b+n invariant at the top edge); B rests directly
+// below A in overlapping tracks (b < A.b) and must shift down by delta; C
+// shares no tracks with A and must not move; D overlaps A's tracks but
+// sits ABOVE A (b > A.b) and must not move either.
+{
+  const a = card(0, 0, 4, 3, true, 10); // tracks 0-3, rows [10,13)
+  const b = card(1, 2, 4, 2, true, 5); // tracks 2-5 (overlaps a), rows [5,7)
+  const c = card(2, 8, 4, 2, true, 5); // tracks 8-11 (disjoint from a)
+  const d = card(3, 0, 4, 2, true, 20); // tracks 0-3 (overlaps a), ABOVE a
+
+  const topBefore = a.b + a.n;
+  const replayed = context.mosaicRippleRows([a, b, c, d], 0, 2);
+  const [ra, rb, rc, rd] = replayed;
+
+  assert(ra.b + ra.n === topBefore, "growing card's top row (b+n) must be invariant, got " + (ra.b + ra.n));
+  assert(ra.n === a.n + 2, "growing card's n must increase by delta");
+  assert(ra.b === a.b - 2, "growing card's b must decrease by delta to hold the top row");
+  assert(ra.t === a.t && ra.span === a.span, "ripple must never change t or span");
+
+  assert(rb.b === b.b - 2, "a card resting below the grower in overlapping tracks must shift down by delta, got " + rb.b);
+  assert(rb.t === b.t && rb.n === b.n && rb.span === b.span, "ripple only moves b, nothing else");
+
+  assert(rc === c, "a card sharing no tracks with the grower must be untouched (same reference)");
+  assert(rd === d, "a card above the grower (b > grower.b) must not move even if tracks overlap");
+}
+
+// Transitive chain: A grows, B rests below A, C rests below B in tracks
+// that do NOT overlap A at all -- C is only reachable via B, using B's
+// already-shifted b as the frontier threshold for that second hop.
+{
+  const a = card(0, 0, 4, 2, true, 10); // tracks 0-3
+  const b = card(1, 2, 4, 2, true, 5); // tracks 2-5 (overlaps a on 2,3), below a
+  const c = card(2, 4, 4, 2, true, -3); // tracks 4-7 (overlaps b on 4,5; disjoint from a's 0-3)
+  const delta = 4;
+
+  const replayed = context.mosaicRippleRows([a, b, c], 0, delta);
+  const [ra, rb, rc] = replayed;
+  assert(ra.b === a.b - delta, "root grower shifts by exactly delta (as its own top-row bookkeeping)");
+  assert(rb.b === b.b - delta, "direct child shifts by delta");
+  assert(rc.b === c.b - delta, "transitive grandchild (reachable only via the shifted child) shifts by delta too, got " + rc.b);
+}
+
+// A deep stack with a large delta drives b negative; nothing clamps it.
+{
+  const deep = [card(0, 0, 12, 2, true, 3)];
+  for (let i = 1; i <= 5; i += 1) deep.push(card(i, 0, 12, 1, true, 3 - i));
+  const replayed = context.mosaicRippleRows(deep, 0, 50);
+  const bottom = replayed[replayed.length - 1];
+  assert(bottom.b < 0, "a large enough delta over a deep stack must be able to drive b negative, got " + bottom.b);
+  assert(bottom.b === deep[deep.length - 1].b - 50, "the negative result must still be exactly original b minus delta");
+}
+
+// --- frozen resize dispatch: growth ripples, shrink pads in place ------
+
+{
+  const a = card(0, 0, 4, 3, true, 10);
+  const below = card(1, 0, 4, 2, true, 5);
+
+  const grown = context.mosaicResolveFrozenResize([a, below], 0, 5); // n: 3 -> 5, delta 2
+  assert(grown[0].n === 5, "growth path must adopt the new row count");
+  assert(grown[0].b === a.b - 2, "growth path must ripple via the same top-row-invariant bookkeeping");
+  assert(grown[1].b === below.b - 2, "growth path must cascade the ripple to cards below");
+
+  const shrunkSame = context.mosaicResolveFrozenResize([a, below], 0, 3); // n unchanged
+  assert(shrunkSame[0] === a && shrunkSame[1] === below, "no-op resize (newN === n) must return cards untouched, same references");
+
+  const shrunk = context.mosaicResolveFrozenResize([a, below], 0, 1); // newN < n: pad, don't shrink
+  assert(shrunk[0] === a, "shrink must keep the reserved n and return the SAME object reference (pad-in-place, zero style writes)");
+  assert(shrunk[0].n === a.n, "shrink must never actually reduce the reserved row count");
+  assert(shrunk[1] === below, "shrink must leave every other card untouched too");
+}
+
 console.log("mosaic wet/frozen: all assertions passed");
