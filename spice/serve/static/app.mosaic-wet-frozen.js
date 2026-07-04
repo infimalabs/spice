@@ -83,11 +83,16 @@ function mosaicWetReplay(cards, trackCount, freezeDepth) {
 // transitively. Breadth is over the spec's set definition -- {d : d
 // overlaps m in tracks and d.b < m.b} -- not insertion order; a card is
 // discovered once (never re-shifted) using whichever frontier card reaches
-// it first, and once discovered its OWN b becomes the threshold for
-// reaching further cards below it, so the shift cascades. This mirrors
-// .spice/mosaic-demo.html's rippleRows() bookkeeping exactly, including
-// using each already-shifted descendant's new b (not its pre-shift b) once
-// it becomes a frontier card itself. Only b moves; t and span never change
+// it first. Discovery always compares against a frontier's ORIGINAL b
+// (frontier.b, read straight off the untouched input card -- this pure
+// implementation never mutates cards in place, unlike
+// .spice/mosaic-demo.html's rippleRows(), which mutates d.b directly and so
+// reads an already-shifted value once d becomes m). Comparing against a
+// shifted threshold instead would understate the gap between a frontier and
+// its neighbor whenever delta exceeds that original gap, silently dropping
+// a downstream card from the ripple and leaving it overlapping the card
+// above it -- reachability must be computed entirely over the original
+// layout, independent of delta. Only b moves; t and span never change
 // (§7, §11). Row indices may go negative (§14) -- this never clamps or
 // re-normalizes them. Returns a NEW array in the input's original order;
 // cards whose b did not change keep their original object reference (no-op
@@ -108,13 +113,9 @@ function mosaicRippleRows(cards, growingCreationIndex, delta) {
   const stack = [growingCard];
   while (stack.length) {
     const frontier = stack.pop();
-    const frontierB =
-      frontier.creationIndex === growingCreationIndex
-        ? growingCard.b
-        : shiftedB.get(frontier.creationIndex);
     for (const candidate of cards) {
       if (seen.has(candidate.creationIndex)) continue;
-      if (mosaicTracksOverlap(candidate, frontier) && candidate.b < frontierB) {
+      if (mosaicTracksOverlap(candidate, frontier) && candidate.b < frontier.b) {
         shiftedB.set(candidate.creationIndex, candidate.b - delta);
         seen.add(candidate.creationIndex);
         stack.push(candidate);
