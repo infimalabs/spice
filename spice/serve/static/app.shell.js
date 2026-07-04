@@ -836,6 +836,14 @@ function expandLanePane(lane) {
   suppressLanePaneScrollIntentForFrame(lane);
 }
 
+function expandLanePaneForInput(lane) {
+  if (!lane || !lane.viewStackEl) return;
+  if (lane.paneCollapsePx > 1 || lane.paneMaxHeight <= 0)
+    syncLanePaneMetrics(lane);
+  setLanePaneCollapse(lane, 0);
+  suppressLanePaneScrollIntentForFrame(lane);
+}
+
 function handleLanePaneWheel(lane, event) {
   const delta = lanePaneWheelDelta(lane, event);
   if (!lanePaneCanConsumeDelta(lane, delta)) return;

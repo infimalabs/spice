@@ -275,7 +275,7 @@ function createComposerPrimaryTextarea(lane, targetId) {
   const textarea = document.createElement("textarea");
   textarea.rows = 3;
   textarea.addEventListener("focus", () => expandLanePane(lane));
-  textarea.addEventListener("input", () => expandLanePane(lane));
+  textarea.addEventListener("input", () => expandLanePaneForInput(lane));
   wireComposerAttachmentIngress(textarea, lane, targetId);
   textarea.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -925,7 +925,7 @@ function createComposerQuoteTextarea(lane, targetId, draft) {
   textarea.addEventListener("focus", () => expandLanePane(lane));
   textarea.addEventListener("input", () => {
     draft.text = textarea.value;
-    expandLanePane(lane);
+    expandLanePaneForInput(lane);
   });
   wireComposerAttachmentIngress(textarea, lane, targetId);
   textarea.addEventListener("keydown", (event) => {
