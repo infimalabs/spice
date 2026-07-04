@@ -201,7 +201,7 @@ function mosaicStreamGeometryChangeCheck() {
   const lane = mosaicStreamResolveLane();
   const before = mosaicStreamCardSnapshot(lane);
   document.documentElement.style.fontSize = "20px";
-  // Mirrors what mosaicScheduleFullReplay's ResizeObserver callback does on
+  // Mirrors what mosaicScheduleRender's ResizeObserver callback does on
   // a real geometry change: force past the fingerprint early-return
   // (app.stream.js renderMessagesIfChanged) so the render path actually
   // runs and mosaicGeometryChanged sees the new root/M and full-replays.

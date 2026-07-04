@@ -114,7 +114,7 @@ function mosaicSingleColumnRunAtNarrowWidth() {
 
 // No explicit forced re-render here: the real trigger for a viewport
 // resize in production is mosaicSyncResizeObserver's ResizeObserver ->
-// mosaicScheduleFullReplay's requestAnimationFrame -> renderMessagesIfChanged,
+// mosaicScheduleRender's requestAnimationFrame -> renderMessagesIfChanged,
 // exactly the path this check observes (via waitForFullReplayCallCount
 // below, awaited by the caller before this runs). Forcing an extra manual
 // re-render here would race the natural observer callback and could
@@ -246,7 +246,7 @@ async function run() {
       // The real production trigger for a viewport resize is the
       // ResizeObserver on lane.messagesEl (mosaicSyncResizeObserver), which
       // schedules its full replay via requestAnimationFrame
-      // (mosaicScheduleFullReplay) -- so each resize below waits on the
+      // (mosaicScheduleRender) -- so each resize below waits on the
       // observed effect (the full-replay counter advancing) rather than
       // forcing a render manually, which would race the real observer.
       await page.setViewportSize({ width: MOSAIC_SINGLE_COLUMN_WIDE_WIDTH, height: 900 });

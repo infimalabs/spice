@@ -278,10 +278,16 @@ function mosaicAckResolutionRacingRemovalCheck() {
 // already complete before mosaicSyncImageLoadHandlers can attach listeners,
 // so this catches cards that wait forever for a future load/error event
 // while stuck on the image reservation prior.
-function mosaicAckCompleteImageResolutionCheck() {
+async function mosaicAckCompleteImageResolutionCheck() {
   const lane = mosaicAckResolveLane();
   mosaicAckResetLane(lane);
   mosaicAckPush(lane, mosaicAckBuildCompleteImageItem(35));
+  // Already-complete images resolve through the deferred render scheduler
+  // (a render never re-enters itself); the re-measured row count lands on
+  // the next frame, not synchronously with the insert.
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve)),
+  );
   const node = lane.mosaicPlaneEl.querySelector('article[data-message-key="ack-complete-image-35"]');
   const image = node.querySelector(".message-image img");
   const card = lane.mosaicCards.find((c) => c.key === "ack-complete-image-35");

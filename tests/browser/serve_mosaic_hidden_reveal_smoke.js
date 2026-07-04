@@ -441,6 +441,69 @@ function assertFontsCorrection(fonts) {
     );
 }
 
+// Render coalescing: several image resolutions marked in the same tick get
+// ONE deferred follow-up render; render machinery never re-enters
+// renderMessagesIfChanged synchronously (counted by wrapping the global
+// around three driven inserts of already-complete data-URI images).
+async function measureImageCoalescing(page) {
+  return page.evaluate(async () => {
+    const lane = hiddenRevealResolveLane();
+    hiddenRevealPurgeLiveTraffic(lane);
+    const imageHtml =
+      '<p class="message-image-stack"><a class="message-image" href="data:image/gif;base64,R0lGODlhAQABAAAAACw="><img alt="fixture" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a></p>';
+    const imageItem = (i) => ({
+      ack_count: 0,
+      ack_keys: [],
+      display_html: imageHtml,
+      display_text: "image",
+      image_only: true,
+      index: 200 + i,
+      key: "hidden-reveal-img-" + i,
+      kind: "assistant",
+      text: "image",
+      timestamp: new Date(2027, 0, 1, 1, 0, i).toISOString(),
+    });
+    const original = renderMessagesIfChanged;
+    let renders = 0;
+    window.renderMessagesIfChanged = function (l) {
+      renders += 1;
+      return original(l);
+    };
+    try {
+      for (let i = 1; i <= 3; i += 1) {
+        upsertKnownMessage(lane, imageItem(i), "newest");
+        trimKnownMessages(lane);
+        renderMessagesIfChanged(lane);
+      }
+      const syncRenders = renders;
+      renders = 0;
+      await new Promise((resolve) =>
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+      );
+      return { syncRenders, deferredRenders: renders };
+    } finally {
+      window.renderMessagesIfChanged = original;
+    }
+  });
+}
+
+function assertImageCoalescing(result) {
+  if (result.syncRenders !== 3)
+    throw new Error(
+      "driven inserts re-entered the render: " +
+        result.syncRenders +
+        " sync renders for 3 driven calls",
+    );
+  if (result.deferredRenders !== 1)
+    throw new Error(
+      "image resolutions did not coalesce: " +
+        result.deferredRenders +
+        " deferred renders (want 1)",
+    );
+}
+
 async function run() {
   return withServePage(
     {
@@ -484,6 +547,8 @@ async function run() {
         );
       const fonts = await measureFontsCorrection(page);
       assertFontsCorrection(fonts);
+      const coalescing = await measureImageCoalescing(page);
+      assertImageCoalescing(coalescing);
       return {
         floor,
         queued: revealed.queued,

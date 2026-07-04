@@ -92,7 +92,7 @@ function mosaicArmFontsCorrection(lane) {
     lane.mosaicMeasuredBeforeFonts = false;
     lane.mosaicSettled = false;
     lane.mosaicGeometry = null;
-    mosaicScheduleFullReplay(lane);
+    mosaicScheduleRender(lane);
   });
 }
 
@@ -772,7 +772,14 @@ function mosaicHostResizeChanged(lane) {
   return Math.abs(next.width - previous.width) > MOSAIC_RESIZE_WIDTH_EPSILON_PX;
 }
 
-function mosaicScheduleFullReplay(lane) {
+// The single deferred re-render scheduler for every self-triggered render
+// (resize settlement, reveal, fonts correction, image resolution): resets
+// the fingerprint and re-enters renderMessagesIfChanged on the next frame,
+// coalescing everything marked in the same tick into ONE render. Render
+// machinery must never call renderMessagesIfChanged synchronously from
+// inside a render -- re-entrant renders multiply content-diff passes, wet
+// replays, and motion events (the load-time image cascade).
+function mosaicScheduleRender(lane) {
   if (lane.mosaicFrame) return;
   lane.mosaicFrame = requestAnimationFrame(() => {
     lane.mosaicFrame = 0;
@@ -788,13 +795,13 @@ function mosaicSyncResizeObserver(lane) {
     lane.mosaicResizeObserver = new ResizeObserver(() => {
       if (!mosaicHostResizeChanged(lane)) return;
       if (lane.mosaicRenderDeferred) {
-        mosaicScheduleFullReplay(lane);
+        mosaicScheduleRender(lane);
         return;
       }
       if (lane.mosaicResizeDebounce) clearTimeout(lane.mosaicResizeDebounce);
       lane.mosaicResizeDebounce = setTimeout(() => {
         lane.mosaicResizeDebounce = 0;
-        mosaicScheduleFullReplay(lane);
+        mosaicScheduleRender(lane);
       }, MOSAIC_RESIZE_DEBOUNCE_MS);
     });
     lane.mosaicHostResizeSize = mosaicElementResizeSize(lane.messagesEl);
@@ -818,8 +825,7 @@ function mosaicSyncImageLoadHandlers(lane) {
     }
     const handler = () => {
       if (!mosaicMarkImageResolved(lane, image)) return;
-      lane.renderedMessageFingerprint = "";
-      renderMessagesIfChanged(lane);
+      mosaicScheduleRender(lane);
     };
     image.addEventListener("load", handler);
     image.addEventListener("error", handler);
@@ -833,10 +839,10 @@ function mosaicSyncImageLoadHandlers(lane) {
     image.removeEventListener("error", handler);
     lane.mosaicImageLoadHandlers.delete(image);
   }
-  if (resolvedCompleteImage) {
-    lane.renderedMessageFingerprint = "";
-    renderMessagesIfChanged(lane);
-  }
+  // Already-complete images (cache hits) resolve through the same deferred
+  // scheduler: this function runs at the tail of a render, and a render
+  // must never re-enter itself.
+  if (resolvedCompleteImage) mosaicScheduleRender(lane);
 }
 
 function mosaicMarkImageResolved(lane, image) {
