@@ -333,6 +333,32 @@ def test_static_mosaic_wet_frozen_is_wired_after_engine_before_message_pack():
     assert engine_index < wet_frozen_index < message_pack_index
 
 
+def test_static_mosaic_full_replay_helpers_are_pure_and_covered():
+    script = Path(__file__).with_name("fixtures") / "mosaic_full_replay.js"
+
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.mosaic-engine.js"),
+            str(STATIC_ROOT / "app.mosaic-wet-frozen.js"),
+            str(STATIC_ROOT / "app.mosaic-full-replay.js"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_static_mosaic_full_replay_is_wired_after_wet_frozen_before_sizing():
+    app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
+    wet_frozen_index = app_js.index('src="/static/app.mosaic-wet-frozen.js"')
+    full_replay_index = app_js.index('src="/static/app.mosaic-full-replay.js"')
+    sizing_index = app_js.index('src="/static/app.mosaic-sizing.js"')
+    assert wet_frozen_index < full_replay_index < sizing_index
+
+
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
     css = _serve_css_text()
 
