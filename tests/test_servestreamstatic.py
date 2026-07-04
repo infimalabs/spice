@@ -308,6 +308,31 @@ def test_static_mosaic_render_is_wired_after_engine_before_message_pack():
     assert engine_index < render_index < message_pack_index
 
 
+def test_static_mosaic_wet_frozen_helpers_are_pure_and_covered():
+    script = Path(__file__).with_name("fixtures") / "mosaic_wet_frozen.js"
+
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.mosaic-engine.js"),
+            str(STATIC_ROOT / "app.mosaic-wet-frozen.js"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_static_mosaic_wet_frozen_is_wired_after_engine_before_message_pack():
+    app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
+    engine_index = app_js.index('src="/static/app.mosaic-engine.js"')
+    wet_frozen_index = app_js.index('src="/static/app.mosaic-wet-frozen.js"')
+    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
+    assert engine_index < wet_frozen_index < message_pack_index
+
+
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
     css = _serve_css_text()
 
