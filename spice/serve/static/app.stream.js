@@ -355,7 +355,18 @@ function renderMessagesIfChanged(lane) {
   const visibleItems = renderItems.filter((item) => !isPresenceMessage(item));
   renderLaneViewShell(lane);
   const fingerprint = messageRenderFingerprint(lane, visibleItems);
-  if (fingerprint === lane.renderedMessageFingerprint) return;
+  if (fingerprint === lane.renderedMessageFingerprint) {
+    // Legacy fallback: syncMessagePackLayoutIfNeeded/packMessageStream only
+    // ever act on DIRECT children of lane.messagesEl matching
+    // isMessagePackItem; mosaic cards live one level deeper inside
+    // .mosaic-plane, so this is a harmless no-op for the live mosaic render
+    // path. It stays here only because pre-existing masonry smoke coverage
+    // (serve_masonry_smoke.js) builds legacy-shaped DOM directly and still
+    // depends on a no-op render catching a stale root-width/column-count
+    // layout state; dies with the rest of the legacy system (mosaic-demolition).
+    syncMessagePackLayoutIfNeeded(lane);
+    return;
+  }
   const viewportAnchor = captureMessageViewportAnchor(lane);
   suppressLanePaneScrollIntentForFrame(lane);
   mosaicRenderMessageStream(lane, visibleItems);
