@@ -93,6 +93,20 @@ def test_serve_menu_smoke_uses_harness_for_interaction() -> None:
     assert "New team" not in smoke
 
 
+def test_serve_lane_reload_smoke_asserts_open_lane_restore() -> None:
+    smoke = (ROOT / "browser" / "serve_lane_reload_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert "laneReloadTargetCount = 3" in smoke
+    assert "addLane(target.id)" in smoke
+    assert "page.reload" in smoke
+    assert "laneHintsByTargetId().get(targetId)?.open === true" in smoke
+    assert "not enough bound targets for lane reload smoke" in smoke
+
+
 def test_serve_team_metrics_smoke_asserts_work_follows_agent() -> None:
     smoke = (ROOT / "browser" / "serve_team_metrics_smoke.js").read_text(
         encoding="utf-8"
