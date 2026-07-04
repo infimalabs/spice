@@ -325,6 +325,32 @@ function assertRoundTrip(roundTrip) {
     throw new Error("no-change round-trip changed the lattice");
 }
 
+// Plane recreation on a SETTLED lane (post-settle, outside the motion
+// gate): a fresh plane's first sync must land the real frontier target from
+// the null sentinel with zero transitions -- the board never animates in.
+async function measurePlaneRecreate(page) {
+  await page.evaluate(() => {
+    const lane = hiddenRevealResolveLane();
+    hiddenRevealPurgeLiveTraffic(lane);
+    lane.messagesEl.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true }),
+    );
+    if (!lane.mosaicSettled)
+      throw new Error("pointerdown interaction did not settle the lane");
+    window.__hiddenRevealTransitions.length = 0;
+    lane.mosaicPlaneEl.remove();
+    lane.mosaicExtentEl.remove();
+    lane.renderedMessageFingerprint = "";
+    renderMessagesIfChanged(lane);
+  });
+  await hiddenRevealWaitFrames(page);
+  return page.evaluate(() => ({
+    transitions: window.__hiddenRevealTransitions.slice(),
+    agreement: hiddenRevealRectAgreement(hiddenRevealResolveLane()),
+    settled: hiddenRevealResolveLane().mosaicSettled,
+  }));
+}
+
 async function run() {
   return withServePage(
     {
@@ -349,6 +375,12 @@ async function run() {
       assertRoundTrip(roundTrip);
       const midTween = await measureMidTweenInterrupt(page, config);
       assertAgreement(midTween, "mid-tween interrupt");
+      const recreate = await measurePlaneRecreate(page);
+      if (recreate.transitions.length)
+        throw new Error(
+          "settled plane recreation animated: " + recreate.transitions.join(","),
+        );
+      assertAgreement(recreate.agreement, "settled plane recreation");
       return {
         floor,
         queued: revealed.queued,
