@@ -48,6 +48,21 @@ async function installMosaicTestHelpers(page) {
       window.__mosaicWriteCount = function (counts) {
         return Object.values(counts).reduce((sum, n) => sum + n, 0);
       };
+      // Ordered [prop, value] log instead of counts: proves *sequence*, e.g.
+      // that a transform write lands strictly between a transition:'none'
+      // write and the transition re-enable that follows it (the §9
+      // first-paint rule), not merely that both happened somewhere.
+      window.__mosaicInstrumentStyleLog = function (el, props) {
+        const log = [];
+        for (const prop of props) {
+          Object.defineProperty(el.style, prop, {
+            configurable: true,
+            get() { return el.style.getPropertyValue(prop); },
+            set(value) { log.push([prop, value]); el.style.setProperty(prop, value); },
+          });
+        }
+        return log;
+      };
     `,
   });
 }
@@ -74,14 +89,29 @@ async function setupMosaicFixture(page, edges, gap) {
 
 // Initial placement (first apply always writes, must not touch the plane)
 // plus the first plane/host sync. Stashes prevA/prevB/prevMaxRow/prevExtent
-// on the fixture for later steps.
+// on the fixture for later steps. Also covers the two §9 first-paint sites:
+// the plane's pre-anchor (mosaicAnchorPlane, run before any card renders)
+// and the first card's suppress/write/reenable sequence, captured as
+// ordered logs so the assertions can check sequence, not just occurrence.
 async function measureInitialPlacement(page, cards, m, styleProps) {
   return page.evaluate(
     ({ cards, m, styleProps }) => {
       const f = window.__mosaicFixture;
       const instr = window.__mosaicInstrumentStyle;
+      const log = window.__mosaicInstrumentStyleLog;
       const count = window.__mosaicWriteCount;
+
+      const anchorLog = log(f.plane, ["transition", "transform"]);
+      f.prevMaxRow = mosaicAnchorPlane(f.plane, m, {});
+      const anchorTransform = f.plane.style.transform;
+      const anchorTransitionAfter = f.plane.style.transition;
+      // Independent oracle (spec §9: plane translated by -(K-maxRow)*M; at
+      // maxRow=0 that's -K*M) rather than re-deriving via mosaicPlaneTransform,
+      // so this cannot pass merely by the module being self-consistent.
+      const expectedAnchorTransform = `translateY(${-MOSAIC_PLANE_K * m}px)`;
+
       const planeCounts = instr(f.plane, ["transform", "transition"]);
+      const cardALog = log(f.cardA, ["transition", "transform", "width", "height", "opacity"]);
       f.prevA = mosaicApplyCardPosition(f.cardA, cards[0], null, f.edges, m, f.gap, {});
       f.prevB = mosaicApplyCardPosition(f.cardB, cards[1], null, f.edges, m, f.gap, {});
       const planeTouchedByCardApply = count(planeCounts);
@@ -89,13 +119,52 @@ async function measureInitialPlacement(page, cards, m, styleProps) {
       f.extent = mosaicCardsExtent(cards);
       const cardACounts = instr(f.cardA, styleProps);
       const cardBCounts = instr(f.cardB, styleProps);
-      f.prevMaxRow = mosaicSyncPlane(f.plane, f.extent.maxRow, 0, m, {});
+      f.prevMaxRow = mosaicSyncPlane(f.plane, f.extent.maxRow, f.prevMaxRow, m, {});
       const cardsTouchedByPlaneSync = count(cardACounts) + count(cardBCounts);
 
       f.prevExtent = mosaicSyncHostHeight(f.host, f.extent.maxRow, f.extent.minB, m, null);
-      return { planeTouchedByCardApply, cardsTouchedByPlaneSync };
+      return {
+        planeTouchedByCardApply,
+        cardsTouchedByPlaneSync,
+        anchorLog,
+        anchorTransform,
+        anchorTransitionAfter,
+        expectedAnchorTransform,
+        cardALog,
+      };
     },
     { cards, m, styleProps },
+  );
+}
+
+// §9: from the first painted frame through entrance-animation end (300ms,
+// §12 entrance fade), a fresh card's position must be pixel-stable -- the
+// only thing allowed to animate on entrance is opacity, never position.
+// Checked via the style values this module itself controls (transform
+// unchanged, zero further writes) rather than a live getBoundingClientRect()
+// diff: the served page has its own unrelated timers/reflows (message-stream
+// ticks, etc.) that can shift real layout geometry within the window for
+// reasons that have nothing to do with this module, which would make a
+// DOM-geometry check flaky for a cause this module does not own.
+async function measureEntranceStability(page) {
+  return page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const f = window.__mosaicFixture;
+        const transformBefore = f.cardA.style.transform;
+        const counts = window.__mosaicInstrumentStyle(f.cardA, [
+          "transform",
+          "width",
+          "height",
+          "opacity",
+        ]);
+        setTimeout(() => {
+          resolve({
+            transformStable: transformBefore === f.cardA.style.transform,
+            writesDuringEntranceWindow: window.__mosaicWriteCount(counts),
+          });
+        }, 320);
+      }),
   );
 }
 
@@ -180,6 +249,43 @@ function assertMosaicRenderInvariants(result) {
     fail("host height did not match (maxRow-minB)*M");
   if (!result.prevMaxRowUnchanged || !result.extentUnchangedRef)
     fail("no-op sync did not return the prior reference");
+
+  // §9 first-paint rule, plane side: pre-anchored to the K constant before
+  // the first card renders, with the anchor write itself transition-free.
+  if (result.anchorTransform !== result.expectedAnchorTransform)
+    fail("plane was not pre-anchored to the K constant before the first card");
+  if (result.anchorTransitionAfter !== "")
+    fail("plane transition was not re-enabled after the pre-anchor forced flush");
+  const anchorLog = result.anchorLog;
+  const anchorOrdered =
+    anchorLog.length === 3 &&
+    anchorLog[0][0] === "transition" && anchorLog[0][1] === "none" &&
+    anchorLog[1][0] === "transform" && anchorLog[1][1] === result.expectedAnchorTransform &&
+    anchorLog[2][0] === "transition" && anchorLog[2][1] === "";
+  if (!anchorOrdered)
+    fail("plane pre-anchor did not suppress/write/re-enable transition in that order");
+
+  // §9 first-paint rule, card side: the fresh transform write must land
+  // strictly between the transition:'none' write and the re-enable, so no
+  // transform-transition is ever in effect while the transform changes --
+  // the deterministic equivalent of "no transform transition event fires".
+  const cardALog = result.cardALog;
+  if (cardALog[0][0] !== "transition" || cardALog[0][1] !== "none")
+    fail("fresh card did not suppress transitions before its first transform write");
+  const transformIndex = cardALog.findIndex(([prop]) => prop === "transform");
+  const reenableIndex = cardALog.findIndex(
+    ([prop, value], i) => prop === "transition" && i > 0 && value !== "none",
+  );
+  if (transformIndex <= 0 || reenableIndex === -1 || transformIndex >= reenableIndex)
+    fail("fresh card transform write did not land between transition suppress and re-enable");
+  if (cardALog.some(([prop]) => prop === "opacity"))
+    fail("mosaicApplyCardPosition wrote opacity -- entrance fade is a CSS concern, not this module's");
+
+  // §9 first-paint rule: pixel-stable from first paint through entrance-fade end.
+  if (!result.transformStable)
+    fail("fresh card's transform changed between first paint and entrance-animation end");
+  if (result.writesDuringEntranceWindow !== 0)
+    fail("fresh card received additional style writes during the entrance-fade window");
 }
 
 async function run() {
@@ -190,9 +296,11 @@ async function run() {
         () =>
           typeof mosaicApplyCardPosition === "function" &&
           typeof mosaicSyncPlane === "function" &&
+          typeof mosaicAnchorPlane === "function" &&
           typeof mosaicSyncHostHeight === "function" &&
           typeof mosaicCardsExtent === "function" &&
           typeof mosaicCardY === "function" &&
+          typeof mosaicPlaneTransform === "function" &&
           typeof MOSAIC_PLANE_K === "number",
         { timeout: 10000 },
       );
@@ -200,9 +308,10 @@ async function run() {
       await installMosaicTestHelpers(page);
       await setupMosaicFixture(page, EDGES, GAP);
       const placement = await measureInitialPlacement(page, CARDS, M, STYLE_PROPS);
+      const entrance = await measureEntranceStability(page);
       const unchanged = await measureUnchangedWrites(page, CARDS, M, STYLE_PROPS);
       const extras = await measureMovedCardAndExtras(page, CARDS, M, STYLE_PROPS);
-      const result = { ...placement, ...unchanged, ...extras };
+      const result = { ...placement, ...entrance, ...unchanged, ...extras };
 
       assertMosaicRenderInvariants(result);
       return { ...result, url: server.url };

@@ -107,6 +107,23 @@ function mosaicApplyCardPosition(el, card, prev, edges, M, gap, options) {
   return { t: card.t, b: card.b, n: card.n, span: card.span };
 }
 
+// First-paint rule applied to the plane itself (§9): call once, before the
+// first card is ever created, so the plane's actual inline transform already
+// reads the K-anchor value with no transition in play. Without this, the
+// plane's own first mosaicSyncPlane call would tween from its untouched CSS
+// default (the identity matrix) up to the K-anchor -- the same "transitions
+// from the identity matrix" bug the card-side first-paint rule guards
+// against, just on the plane instead of a card. Returns 0, the `prevMaxRow`
+// baseline a caller threads into the first mosaicSyncPlane call.
+function mosaicAnchorPlane(planeEl, M, options) {
+  const reducedMotion = Boolean(options && options.reducedMotion);
+  planeEl.style.transition = "none";
+  planeEl.style.transform = mosaicPlaneTransform(0, M);
+  void planeEl.offsetWidth;
+  planeEl.style.transition = reducedMotion ? "none" : "";
+  return 0;
+}
+
 // Applies the uniform plane component. Returns the maxRow to remember as
 // `prevMaxRow` next call. No-ops (no style write) when maxRow is unchanged,
 // mirroring the card-side skip invariant for the plane itself.
