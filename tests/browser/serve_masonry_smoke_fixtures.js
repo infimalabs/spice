@@ -353,6 +353,7 @@ async function masonrySmokeMeasurement(lane, host, config) {
     barrierIndexes,
     config.expectedColumns,
   );
+  const segmentSlotPressure = masonrySmokeSegmentSlotPressure(segmentFanOut);
   const ruleAudits = masonrySmokeRuleAudits(host, cardRects, hostInnerWidth);
   const appendStabilityAudit = config.captureOnly
     ? { stable: true }
@@ -386,6 +387,10 @@ async function masonrySmokeMeasurement(lane, host, config) {
     keepLanesVisible: Boolean(config.keepLanesVisible),
     rootWidthActive: lane.element.classList.contains("lane--message-pack-root"),
     segmentFanOut,
+    segmentOpeningSlots: segmentFanOut
+      .map((fan) => fan[0]?.slot || 0)
+      .filter(Boolean),
+    segmentSlotPressure,
     structuredFinalAudit: masonrySmokeStructuredFinalAudit(cardRects),
     dividerIndex,
     dividerRect,
@@ -690,6 +695,30 @@ function masonrySmokeSegmentFanOut(cardRects, barrierIndexes, expectedColumns) {
   return fans;
 }
 
+function masonrySmokeSegmentSlotPressure(segmentFanOut) {
+  const occupiedTrackCounts = new Array(masonryExpectedGridTrackCount).fill(0);
+  for (const fan of segmentFanOut) {
+    for (const entry of fan) {
+      for (
+        let slot = entry.slot;
+        slot < entry.slot + entry.slotSpan &&
+        slot <= masonryExpectedGridTrackCount;
+        slot += 1
+      ) {
+        occupiedTrackCounts[slot - 1] += 1;
+      }
+    }
+  }
+  const maxOccupiedTrackCount = Math.max(...occupiedTrackCounts);
+  const minOccupiedTrackCount = Math.min(...occupiedTrackCounts);
+  return {
+    maxOccupiedTrackCount,
+    minOccupiedTrackCount,
+    occupiedTrackCounts,
+    spread: maxOccupiedTrackCount - minOccupiedTrackCount,
+  };
+}
+
 // Newer live arrivals enter ahead of the retained DOM in the same shape as the
 // app's newest-first render path. Existing cards must keep their columns while
 // the operator is reading; only the new cards need fresh placement.
@@ -717,6 +746,7 @@ const masonrySmokeFixtureHelpers = [
   masonrySmokeBarrierBounds,
   masonrySmokeColumnAudit,
   masonrySmokeSegmentFanOut,
+  masonrySmokeSegmentSlotPressure,
 ];
 
 module.exports = {
@@ -742,5 +772,6 @@ module.exports = {
   masonrySmokeBarrierBounds,
   masonrySmokeColumnAudit,
   masonrySmokeSegmentFanOut,
+  masonrySmokeSegmentSlotPressure,
   masonrySmokeFixtureHelpers,
 };
