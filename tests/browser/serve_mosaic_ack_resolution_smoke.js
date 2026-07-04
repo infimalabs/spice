@@ -268,6 +268,8 @@ function mosaicAckSimultaneousOrderStabilityCheck() {
     lane.mosaicPlaneEl = null;
     lane.mosaicCards = [];
     lane.mosaicNextCreationIndex = 0;
+    lane.mosaicNextBackfillCreationIndex = -1;
+    lane.mosaicEventLog = mosaicCreateEventLog(mosaicGridTrackCount, MOSAIC_FREEZE_DEPTH);
     lane.mosaicGeometry = null;
     lane.knownMessages = [];
     lane.knownMessageKeys = new Set();

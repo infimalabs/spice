@@ -20,13 +20,101 @@
 // entirely, pinned to the plane's bottom edge in CSS alone (messages.css).
 
 const MOSAIC_RESIZE_WIDTH_EPSILON_PX = 0.5;
+const MOSAIC_BACKFILL_BOTTOM_EPSILON_PX = 2;
+
+// ---- root-width visibility signal -------------------------------------------------
+
+function mosaicCssPixelValue(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function mosaicRootElement(host) {
+  return host.closest(".swimlanes") || host;
+}
+
+function mosaicVisibleRootLaneCount(root, activeLane) {
+  let count = 0;
+  for (const node of root.children) {
+    if (!node.classList?.contains("lane")) continue;
+    if (node.classList.contains("lane--shadowed")) continue;
+    if (getComputedStyle(node).display === "none") continue;
+    count += 1;
+    if (count > 1) return count;
+  }
+  return count || (activeLane ? 1 : 0);
+}
+
+function mosaicRootWidthEligible(lane, host) {
+  const root = mosaicRootElement(host);
+  if (!root || root === host) return false;
+  return mosaicVisibleRootLaneCount(root, lane.element) <= 1;
+}
+
+function mosaicRootWidthState(lane, host, style) {
+  const root = mosaicRootElement(host);
+  const rootWidth =
+    root && root !== host
+      ? root.clientWidth -
+        mosaicCssPixelValue(getComputedStyle(root).paddingLeft) -
+        mosaicCssPixelValue(getComputedStyle(root).paddingRight)
+      : 0;
+  const laneWidth = lane.element.getBoundingClientRect().width;
+  const rootGeometry = mosaicGeometry(mosaicRootFontSizePx(), rootWidth);
+  const useRootWidth =
+    mosaicRootWidthEligible(lane, host) &&
+    rootGeometry.L > 1 &&
+    rootWidth > laneWidth + mosaicCssPixelValue(style.columnGap);
+  return {
+    useRootWidth,
+    value: Math.max(laneWidth, rootWidth) + "px",
+  };
+}
+
+function mosaicClearRootWidth(lane, host) {
+  const hadClass = lane.element.classList.contains("lane--message-pack-root");
+  const hadRootWidth = Boolean(
+    host.style.getPropertyValue("--message-pack-root-width"),
+  );
+  lane.element.classList.remove("lane--message-pack-root");
+  host.style.removeProperty("--message-pack-root-width");
+  return hadClass || hadRootWidth;
+}
+
+function mosaicSyncRootWidth(lane) {
+  const host = lane.messagesEl;
+  if (!host) return false;
+  const style = getComputedStyle(host);
+  if (style.display !== "grid") return mosaicClearRootWidth(lane, host);
+  const rootWidth = mosaicRootWidthState(lane, host, style);
+  const classChanged =
+    lane.element.classList.contains("lane--message-pack-root") !==
+    rootWidth.useRootWidth;
+  lane.element.classList.toggle(
+    "lane--message-pack-root",
+    rootWidth.useRootWidth,
+  );
+  if (!rootWidth.useRootWidth) {
+    return mosaicClearRootWidth(lane, host) || classChanged;
+  }
+  if (host.style.getPropertyValue("--message-pack-root-width") !== rootWidth.value) {
+    host.style.setProperty("--message-pack-root-width", rootWidth.value);
+    return true;
+  }
+  return classChanged;
+}
 
 // ---- lane lattice state ----------------------------------------------------------
 
 function mosaicLaneReady(lane) {
   if (lane.mosaicCards) return;
   lane.mosaicCards = [];
+  lane.mosaicEventLog = mosaicCreateEventLog(
+    mosaicGridTrackCount,
+    MOSAIC_FREEZE_DEPTH,
+  );
   lane.mosaicNextCreationIndex = 0;
+  lane.mosaicNextBackfillCreationIndex = -1;
   // Keyed by ELEMENT, not by card key: renderOrReuseMessageNode/mosaicRuleNode
   // build a fresh element whenever a message's content fingerprint changes
   // (e.g. an ack skeleton resolving to its real quote) even when the card's
@@ -67,6 +155,21 @@ function mosaicCreationIndexFor(lane, key) {
   if (existing) return existing.creationIndex;
   const index = lane.mosaicNextCreationIndex;
   lane.mosaicNextCreationIndex += 1;
+  return index;
+}
+
+function mosaicBackfillCreationIndexFor(lane, key) {
+  const existing = lane.mosaicCards.find((card) => card.key === key);
+  if (existing) return existing.creationIndex;
+  if (!Number.isFinite(lane.mosaicNextBackfillCreationIndex))
+    lane.mosaicNextBackfillCreationIndex = -1;
+  if (lane.mosaicCards.length) {
+    const minIndex = Math.min(...lane.mosaicCards.map((card) => card.creationIndex));
+    if (lane.mosaicNextBackfillCreationIndex >= minIndex)
+      lane.mosaicNextBackfillCreationIndex = minIndex - 1;
+  }
+  const index = lane.mosaicNextBackfillCreationIndex;
+  lane.mosaicNextBackfillCreationIndex -= 1;
   return index;
 }
 
@@ -278,12 +381,92 @@ function mosaicRunInsert(lane, entry, node, geometry) {
   const candidates = mosaicCandidatesFor(lane, entry, node, geometry);
   const placement = mosaicInsert(lane.mosaicCards, rowFloor, candidates, mosaicGridTrackCount);
   const creationIndex = mosaicCreationIndexFor(lane, entry.key);
+  mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+    type: "insert",
+    key: entry.key,
+    creationIndex,
+    candidates,
+  });
   const card = { ...placement.card, key: entry.key, creationIndex, frozen: false };
   lane.mosaicCards = lane.mosaicCards.concat([card]);
   lane.mosaicCards = mosaicRecomputeFrozen(lane.mosaicCards, MOSAIC_FREEZE_DEPTH);
 }
 
+function mosaicBackfillEntries(entries, previousKeySet, addedKeys) {
+  if (!addedKeys.length) return null;
+  const firstAddedIndex = entries.findIndex((entry) => !previousKeySet.has(entry.key));
+  if (firstAddedIndex <= 0) return null;
+  for (let index = 0; index < firstAddedIndex; index += 1) {
+    if (!previousKeySet.has(entries[index].key)) return null;
+  }
+  const backfillEntries = [];
+  for (let index = firstAddedIndex; index < entries.length; index += 1) {
+    if (previousKeySet.has(entries[index].key)) return null;
+    backfillEntries.push(entries[index]);
+  }
+  return backfillEntries;
+}
+
+function mosaicDeriveDownwardRowFloor(cards, trackCount) {
+  const tracks = mosaicTrackCount(trackCount);
+  const bottomByTrack = new Array(tracks).fill(0);
+  for (const card of cards) {
+    const start = Math.max(0, card.t);
+    const end = Math.min(tracks, card.t + card.span);
+    for (let track = start; track < end; track += 1) {
+      if (card.b < bottomByTrack[track]) bottomByTrack[track] = card.b;
+    }
+  }
+  const anchor = Math.max(...bottomByTrack);
+  return {
+    anchor,
+    rowFloor: bottomByTrack.map((bottom) => anchor - bottom),
+  };
+}
+
+function mosaicRunBackfill(lane, entries, nodesByKey, geometry) {
+  const downward = mosaicDeriveDownwardRowFloor(lane.mosaicCards, mosaicGridTrackCount);
+  let rowFloor = downward.rowFloor;
+  const placedCards = [];
+  const eventCards = [];
+  for (const entry of entries) {
+    const node = nodesByKey.get(entry.key);
+    const candidates = mosaicCandidatesFor(lane, entry, node, geometry);
+    const placement = mosaicInsert([], rowFloor, candidates, mosaicGridTrackCount);
+    const creationIndex = mosaicBackfillCreationIndexFor(lane, entry.key);
+    rowFloor = placement.rowFloor;
+    eventCards.push({
+      key: entry.key,
+      creationIndex,
+      candidates,
+    });
+    placedCards.push({
+      ...placement.card,
+      key: entry.key,
+      creationIndex,
+      b: downward.anchor - placement.card.b - placement.card.n,
+      frozen: true,
+    });
+  }
+  mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+    type: "backfill",
+    trackCount: mosaicGridTrackCount,
+    cards: eventCards,
+  });
+  lane.mosaicCards = lane.mosaicCards.concat(placedCards);
+  lane.mosaicCards = mosaicRecomputeFrozen(lane.mosaicCards, MOSAIC_FREEZE_DEPTH);
+}
+
 function mosaicDropVacatedKeys(lane, desiredKeySet) {
+  const removedKeys = lane.mosaicCards
+    .filter((card) => !desiredKeySet.has(card.key))
+    .map((card) => card.key);
+  if (removedKeys.length) {
+    mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+      type: "remove",
+      keys: removedKeys,
+    });
+  }
   lane.mosaicCards = lane.mosaicCards.filter((card) => desiredKeySet.has(card.key));
 }
 
@@ -328,6 +511,12 @@ function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
           geometry.M,
         );
     if (resolvedN === card.n) continue;
+    mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+      type: "content-resize",
+      key: card.key,
+      creationIndex: card.creationIndex,
+      n: resolvedN,
+    });
     if (card.frozen) {
       lane.mosaicCards = mosaicResolveFrozenResize(lane.mosaicCards, card.creationIndex, resolvedN);
     } else {
@@ -344,13 +533,15 @@ function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
   }
 }
 
-function mosaicRunFullReplay(lane, entries, nodesByKey, geometry) {
+function mosaicRunFullReplay(lane, entries, nodesByKey, geometry, backfillKeySet) {
   const withCandidates = entries.map((entry) => {
     const previous = lane.mosaicCards.find((card) => card.key === entry.key);
     const node = nodesByKey.get(entry.key);
     return {
       key: entry.key,
-      creationIndex: mosaicCreationIndexFor(lane, entry.key),
+      creationIndex: backfillKeySet?.has(entry.key)
+        ? mosaicBackfillCreationIndexFor(lane, entry.key)
+        : mosaicCreationIndexFor(lane, entry.key),
       frozen: false,
       candidates: mosaicCandidatesFor(lane, entry, node, geometry),
       t: previous ? previous.t : 0,
@@ -359,8 +550,30 @@ function mosaicRunFullReplay(lane, entries, nodesByKey, geometry) {
       span: previous ? previous.span : geometry.baseSpan,
     };
   });
+  mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+    type: "full-replay",
+    trackCount: mosaicGridTrackCount,
+    cards: withCandidates,
+  });
   const replayed = mosaicFullReplay(withCandidates, mosaicGridTrackCount, MOSAIC_FREEZE_DEPTH);
   lane.mosaicCards = replayed.map(({ candidates, ...card }) => card);
+}
+
+function mosaicCaptureBackfillViewport(lane) {
+  const scroller = lane.messagesEl;
+  if (!scroller) return null;
+  const distanceFromBottom = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+  if (distanceFromBottom > MOSAIC_BACKFILL_BOTTOM_EPSILON_PX) return null;
+  return { distanceFromBottom: Math.max(0, distanceFromBottom) };
+}
+
+function mosaicRestoreBackfillViewport(lane, renderResult) {
+  const viewport = renderResult ? renderResult.backfillViewport : null;
+  if (!viewport || !lane.messagesEl) return;
+  const scroller = lane.messagesEl;
+  const nextTop =
+    scroller.scrollHeight - scroller.clientHeight - viewport.distanceFromBottom;
+  setLaneScrollTopWithoutPaneIntent(lane, Math.max(0, nextTop));
 }
 
 // ---- entry point --------------------------------------------------------------------
@@ -372,6 +585,7 @@ function mosaicRunFullReplay(lane, entries, nodesByKey, geometry) {
 // lane.messagesEl.
 function mosaicRenderMessageStream(lane, visibleItems) {
   mosaicLaneReady(lane);
+  mosaicSyncRootWidth(lane);
   // Geometry first: the plane is position:absolute, so creating it cannot
   // affect lane.messagesEl's own clientWidth, and mosaicPlane needs the
   // real M immediately if it has to anchor a fresh plane (see mosaicPlane).
@@ -408,9 +622,15 @@ function mosaicRenderMessageStream(lane, visibleItems) {
 
   const addedKeys = desiredKeys.filter((key) => !previousKeySet.has(key));
   const removedKeys = [...previousKeySet].filter((key) => !desiredKeySet.has(key));
+  const backfillEntries = mosaicBackfillEntries(entries, previousKeySet, addedKeys);
+  const backfillKeySet = backfillEntries
+    ? new Set(backfillEntries.map((entry) => entry.key))
+    : null;
+  const backfillViewport = backfillEntries ? mosaicCaptureBackfillViewport(lane) : null;
+  let replaying = geometryChanged;
 
   if (geometryChanged) {
-    mosaicRunFullReplay(lane, entries, nodesByKey, geometry);
+    mosaicRunFullReplay(lane, entries, nodesByKey, geometry, backfillKeySet);
   } else if (!addedKeys.length) {
     if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
     mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
@@ -419,15 +639,21 @@ function mosaicRenderMessageStream(lane, visibleItems) {
     const entry = entries.find((candidate) => candidate.key === addedKeys[0]);
     mosaicRunInsert(lane, entry, nodesByKey.get(entry.key), geometry);
     mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
+  } else if (backfillEntries) {
+    if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
+    mosaicRunBackfill(lane, backfillEntries, nodesByKey, geometry);
+    mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
   } else {
-    mosaicRunFullReplay(lane, entries, nodesByKey, geometry);
+    replaying = true;
+    mosaicRunFullReplay(lane, entries, nodesByKey, geometry, backfillKeySet);
   }
 
   mosaicApplyRender(lane, lane.mosaicCards, geometry, nodesByKey, {
-    replaying: geometryChanged || (addedKeys.length > 1),
+    replaying,
   });
   mosaicSyncResizeObserver(lane);
   mosaicSyncImageLoadHandlers(lane);
+  return { backfillViewport };
 }
 
 // ---- resize + image-load wiring (mirrors the legacy syncMessagePackObserver
