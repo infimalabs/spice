@@ -24,6 +24,8 @@ const MOSAIC_STREAM_BACKFILL_EXISTING_COUNT = 24;
 const MOSAIC_STREAM_BACKFILL_COUNT = 3;
 const MOSAIC_STREAM_BACKFILL_LINES = 8;
 const MOSAIC_STREAM_SCROLL_EPSILON_PX = 2;
+// Clobber scenario: 8 seeded + 2 bulk-added cards, minus any trimmed.
+const MOSAIC_STREAM_CLOBBER_MIN_CARDS = 10;
 
 function mosaicStreamResolveLane() {
   let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
@@ -507,6 +509,61 @@ function mosaicStreamBackfillCheck() {
   };
 }
 
+// Measurement must never leave a card wearing its probe styles: a
+// same-geometry bulk replay re-measures every node (tall cards at the wide
+// tier LAST), and any card whose lattice position is unchanged would keep
+// that measurement width -- a double-wide card jammed in a single slot --
+// plus a cleared height, until some later write happened to land. After
+// any render, every card's inline width/height must equal its lattice
+// values exactly.
+function mosaicStreamMeasureClobberCheck() {
+  const lane = mosaicStreamResolveLane();
+  const tallHtml = Array.from({ length: 20 }, (_, i) => "clobber line " + i).join("<br>");
+  const shortHtml = "clobber line";
+  const item = (i, html) => ({
+    ack_count: 0,
+    ack_keys: [],
+    index: 700 + i,
+    key: "clobber-" + i,
+    kind: "assistant",
+    timestamp: new Date(2026, 0, 1, 3, i, 0).toISOString(),
+    display_html: html,
+    display_text: "x",
+    text: "x",
+  });
+  for (let i = 1; i <= 8; i += 1) {
+    upsertKnownMessage(lane, item(i, i % 3 === 0 ? tallHtml : shortHtml), "newest");
+  }
+  trimKnownMessages(lane);
+  renderMessagesIfChanged(lane);
+  // Bulk add of two forces a same-geometry full replay: placements mostly
+  // unchanged, every node re-measured.
+  upsertKnownMessage(lane, item(60, shortHtml), "newest");
+  upsertKnownMessage(lane, item(61, tallHtml), "newest");
+  trimKnownMessages(lane);
+  renderMessagesIfChanged(lane);
+  const g = lane.mosaicGeometry;
+  const mismatches = [];
+  for (const card of lane.mosaicCards) {
+    const node = lane.mosaicPlaneEl.querySelector(
+      'article[data-message-key="' + CSS.escape(card.key) + '"]',
+    );
+    if (!node) continue;
+    const wantW = g.edges[card.t + card.span] - g.edges[card.t] - g.gap + "px";
+    const wantH = card.n * g.M - g.gap + "px";
+    if (node.style.width !== wantW || node.style.height !== wantH)
+      mismatches.push({
+        key: card.key,
+        span: card.span,
+        inlineW: node.style.width,
+        wantW,
+        inlineH: node.style.height,
+        wantH,
+      });
+  }
+  return { cardCount: lane.mosaicCards.length, mismatches };
+}
+
 function mosaicStreamEventLogReplayCheck() {
   const lane = mosaicStreamResolveLane();
   const replayed = mosaicReplayEventLog(lane.mosaicEventLog);
@@ -565,6 +622,7 @@ async function installMosaicStreamHelpers(page) {
       mosaicStreamBarrierResetCheck,
       mosaicStreamBackfillCheck,
       mosaicStreamEventLogReplayCheck,
+      mosaicStreamMeasureClobberCheck,
     ]
       .map((helper) => helper.toString())
       .join("\n"),
@@ -841,6 +899,13 @@ function assertEventLogReplayInvariants(eventLogReplay, fail) {
 }
 
 function assertMosaicStreamResult(result) {
+  if (result.measureClobber.mismatches.length)
+    throw new Error(
+      "measurement clobbered card styles: " +
+        JSON.stringify(result.measureClobber.mismatches),
+    );
+  if (result.measureClobber.cardCount < MOSAIC_STREAM_CLOBBER_MIN_CARDS)
+    throw new Error("clobber scenario ran on too few cards");
   const fail = (message) => {
     throw new Error(message + ": " + JSON.stringify(result));
   };
@@ -890,6 +955,7 @@ async function run() {
       const barrierResult = await page.evaluate(mosaicStreamBarrierResetCheck);
       const backfillResult = await page.evaluate(mosaicStreamBackfillCheck);
       const eventLogReplay = await page.evaluate(mosaicStreamEventLogReplayCheck);
+      const measureClobber = await page.evaluate(mosaicStreamMeasureClobberCheck);
       const result = {
         insertResult,
         removalResult,
@@ -901,6 +967,7 @@ async function run() {
         barrierResult,
         backfillResult,
         eventLogReplay,
+        measureClobber,
       };
       assertMosaicStreamResult(result);
       return { ...result, url: server.url };
