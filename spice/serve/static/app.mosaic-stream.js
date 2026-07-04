@@ -293,6 +293,10 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
     geometry.M,
     planeOptions,
   );
+  // Snap mode batches the first-paint flush: per-card forced reflows would
+  // be O(n) layouts for a reveal rebuild, so suppressed writes accumulate
+  // and a single flush + transition restore lands them all (§13).
+  const written = [];
   for (const card of cards) {
     const node = nodesByKey.get(card.key);
     if (!node) continue;
@@ -304,9 +308,16 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
       geometry.edges,
       geometry.M,
       geometry.gap,
-      { reducedMotion, snap },
+      { reducedMotion, snap, deferFlush: snap },
     );
+    if (snap && next !== prev) written.push(node);
     lane.mosaicAppliedByNode.set(node, next);
+  }
+  if (written.length) {
+    void lane.mosaicPlaneEl.offsetWidth;
+    if (!reducedMotion) {
+      for (const node of written) node.style.transition = "";
+    }
   }
   lane.mosaicPrevExtent = mosaicSyncHostHeight(
     lane.mosaicPlaneEl,
@@ -558,6 +569,17 @@ function mosaicRenderMessageStream(lane, visibleItems) {
   }
   const revealing = Boolean(lane.mosaicRenderDeferred);
   lane.mosaicRenderDeferred = false;
+  if (revealing) {
+    // First-paint discipline board-wide: whatever the engine rendered (or
+    // froze) while the lane was unmeasurable, no tween may start from that
+    // baseline. Dropping the applied-position memo makes every card look
+    // fresh to mosaicApplyCardPosition, and the NaN/null sentinels force
+    // unconditional plane-transform and extent rewrites -- all of which the
+    // snap option below applies with transitions suppressed in one flush.
+    lane.mosaicAppliedByNode = new WeakMap();
+    lane.mosaicPrevMaxRow = NaN;
+    lane.mosaicPrevExtent = null;
+  }
   // Geometry first: the plane is position:absolute, so creating it cannot
   // affect lane.messagesEl's own clientWidth, and mosaicPlane needs the
   // real M immediately if it has to anchor a fresh plane (see mosaicPlane).

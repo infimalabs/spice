@@ -537,7 +537,13 @@
   width: 100%;
   will-change: transform;
 }
-[data-mosaic-card] {
+/* Specificity note: `.messages article` (0,1,1) declares position:relative
+   as the card-chrome containing block; the bare attribute selector (0,1,0)
+   LOSES that fight, silently leaving mosaic cards in normal flow with the
+   K-anchored transform stacked on their flow offset -- every card below the
+   first displaced by the cumulative height of its DOM-preceding siblings
+   (the reported giant-void board). The .messages prefix (0,2,0) wins. */
+.messages [data-mosaic-card] {
   position: absolute;
   transition: transform 340ms cubic-bezier(0.25, 0.8, 0.3, 1);
   top: 0;

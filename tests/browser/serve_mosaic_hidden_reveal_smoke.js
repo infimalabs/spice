@@ -64,6 +64,41 @@ function hiddenRevealPurgeLiveTraffic(lane) {
   );
 }
 
+// Rendered-vs-inline agreement: the frozen-transform defect manifests as
+// getBoundingClientRect permanently disagreeing with the inline transform
+// after a reveal. Cards are compared against the plane's own rect so the
+// check holds regardless of scroll position or host padding.
+function hiddenRevealRectAgreement(lane) {
+  const plane = lane.mosaicPlaneEl;
+  const planeRect = plane.getBoundingClientRect();
+  const parse = (transform) => {
+    const match = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(transform || "");
+    return match ? { x: Number(match[1]), y: Number(match[2]) } : null;
+  };
+  const planeMatch = /translateY\((-?[\d.]+)px\)/.exec(plane.style.transform || "");
+  const planeInlineY = planeMatch ? Number(planeMatch[1]) : NaN;
+  const computed = new DOMMatrixReadOnly(getComputedStyle(plane).transform);
+  const disagreements = [];
+  if (Math.abs(computed.m42 - planeInlineY) > 1)
+    disagreements.push("plane rendered " + computed.m42 + " vs inline " + planeInlineY);
+  for (const el of plane.querySelectorAll("[data-mosaic-card]")) {
+    if (!(el.dataset.messageKey || "").startsWith("hidden-reveal-")) continue;
+    const inline = parse(el.style.transform);
+    if (!inline) continue;
+    const rect = el.getBoundingClientRect();
+    const dx = rect.left - planeRect.left - inline.x;
+    const dy = rect.top - planeRect.top - inline.y;
+    if (Math.abs(dx) > 1 || Math.abs(dy) > 1)
+      disagreements.push(el.dataset.messageKey + " off by " + dx + "," + dy);
+  }
+  return {
+    disagreements,
+    scrollDelta: lane.messagesEl.scrollWidth - lane.messagesEl.clientWidth,
+    scrollHeight: lane.messagesEl.scrollHeight,
+    planeHeight: plane.getBoundingClientRect().height,
+  };
+}
+
 function hiddenRevealWatchWrites(lane) {
   window.__hiddenRevealWrites = [];
   window.__hiddenRevealTransitions = [];
@@ -96,6 +131,7 @@ const hiddenRevealPageHelpers = [
   hiddenRevealResolveLane,
   hiddenRevealSnapshot,
   hiddenRevealPurgeLiveTraffic,
+  hiddenRevealRectAgreement,
   hiddenRevealWatchWrites,
 ];
 
@@ -206,6 +242,42 @@ function assertReveal(revealed, hidden) {
     throw new Error("geometry drifted across hide/reveal round-trip");
 }
 
+// Mid-tween interrupt: hide the lane while a plane tween is in flight
+// (fresh insert at top animates the push-down), reveal, and require the
+// rebuild to land rendered == inline with sane scroll extents.
+async function measureMidTweenInterrupt(page, config) {
+  await page.evaluate((cfg) => {
+    const lane = hiddenRevealResolveLane();
+    hiddenRevealPurgeLiveTraffic(lane);
+    upsertKnownMessage(lane, hiddenRevealBuildItem(cfg.seedCount + 2, 4), "newest");
+    trimKnownMessages(lane);
+    renderMessagesIfChanged(lane);
+    lane.element.style.display = "none";
+    lane.renderedMessageFingerprint = "";
+    renderMessagesIfChanged(lane);
+    lane.element.style.display = "";
+  }, config);
+  await hiddenRevealWaitFrames(page);
+  return page.evaluate(() => hiddenRevealRectAgreement(hiddenRevealResolveLane()));
+}
+
+function assertAgreement(agreement, label) {
+  if (agreement.disagreements.length)
+    throw new Error(
+      label + " rendered/inline disagreement: " + agreement.disagreements.join("; "),
+    );
+  if (agreement.scrollDelta > 0)
+    throw new Error(label + " horizontal overflow: " + agreement.scrollDelta);
+  if (agreement.scrollHeight > agreement.planeHeight + 64)
+    throw new Error(
+      label +
+        " scroll extent inflated: scrollHeight " +
+        agreement.scrollHeight +
+        " vs plane " +
+        agreement.planeHeight,
+    );
+}
+
 async function measureRoundTrip(page) {
   const started = await page.evaluate(() => {
     const lane = hiddenRevealResolveLane();
@@ -253,8 +325,14 @@ async function run() {
       assertHiddenRender(hidden);
       const revealed = await measureReveal(page, config);
       assertReveal(revealed, hidden);
+      const revealAgreement = await page.evaluate(() =>
+        hiddenRevealRectAgreement(hiddenRevealResolveLane()),
+      );
+      assertAgreement(revealAgreement, "reveal");
       const roundTrip = await measureRoundTrip(page);
       assertRoundTrip(roundTrip);
+      const midTween = await measureMidTweenInterrupt(page, config);
+      assertAgreement(midTween, "mid-tween interrupt");
       return {
         floor,
         queued: revealed.queued,
