@@ -4,11 +4,16 @@
   --message-card-min-width: 20rem;
   --mosaic-image-height: 8.75rem;
   --mosaic-image-large-height: 15.75rem;
+  /* Lattice origin pad: rem-denominated (0.6875rem = 11px at a 16px root)
+     so the breathing room scales with the type ramp like every other
+     lattice dimension. One owner: the host padding AND the plane's
+     content-box anchor both read this variable. */
+  --mosaic-origin-pad: 0.6875rem;
   flex: 1;
   min-width: 0;
   overflow-x: auto;
   overflow-y: auto;
-  padding: 11px;
+  padding: var(--mosaic-origin-pad);
   position: relative;
   scrollbar-gutter: stable;
 }
@@ -530,11 +535,15 @@
    and toggled independently in app.mosaic-render.js so they never share
    one (§9, §11c). */
 .mosaic-plane {
-  left: 0;
+  /* Absolute positioning anchors to the PADDING box; offsetting by the
+     origin pad lands the lattice origin on the content box, so track 0
+     honors the left padding and edges[12] ends symmetrically short of the
+     right edge (geometry already spans the content width). */
+  left: var(--mosaic-origin-pad);
   position: absolute;
-  top: 0;
+  top: var(--mosaic-origin-pad);
   transition: transform 340ms cubic-bezier(0.25, 0.8, 0.3, 1);
-  width: 100%;
+  width: calc(100% - 2 * var(--mosaic-origin-pad));
   will-change: transform;
 }
 /* Static spacer owning the scroll extent (height = lattice extent, set

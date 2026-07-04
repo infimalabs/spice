@@ -81,6 +81,20 @@ function hiddenRevealRectAgreement(lane) {
   const disagreements = [];
   if (Math.abs(computed.m42 - planeInlineY) > 1)
     disagreements.push("plane rendered " + computed.m42 + " vs inline " + planeInlineY);
+  // Origin: the lattice anchors to the content box, so the plane's
+  // untranslated position sits exactly paddingLeft/paddingTop inside the
+  // host (transform and scroll backed out of the rect).
+  const host = lane.messagesEl;
+  const hostRect = host.getBoundingClientRect();
+  const hostStyle = getComputedStyle(host);
+  const originDx =
+    planeRect.left - (hostRect.left + host.clientLeft) -
+    Number.parseFloat(hostStyle.paddingLeft) + host.scrollLeft;
+  const originDy =
+    planeRect.top - computed.m42 - (hostRect.top + host.clientTop) -
+    Number.parseFloat(hostStyle.paddingTop) + host.scrollTop;
+  if (Math.abs(originDx) > 1 || Math.abs(originDy) > 1)
+    disagreements.push("origin off content box by " + originDx + "," + originDy);
   for (const el of plane.querySelectorAll("[data-mosaic-card]")) {
     if (!(el.dataset.messageKey || "").startsWith("hidden-reveal-")) continue;
     const inline = parse(el.style.transform);
