@@ -707,29 +707,27 @@ function mosaicSyncResizeObserver(lane) {
 function mosaicSyncImageLoadHandlers(lane) {
   if (!lane.messagesEl) return;
   if (!lane.mosaicImageLoadHandlers) lane.mosaicImageLoadHandlers = new Map();
+  if (!lane.mosaicResolvedImages) lane.mosaicResolvedImages = new WeakSet();
   const current = new Set(
     lane.messagesEl.querySelectorAll("[data-mosaic-card] img"),
   );
+  let resolvedCompleteImage = false;
   for (const image of current) {
-    if (lane.mosaicImageLoadHandlers.has(image)) continue;
+    if (lane.mosaicImageLoadHandlers.has(image)) {
+      if (image.complete && mosaicMarkImageResolved(lane, image))
+        resolvedCompleteImage = true;
+      continue;
+    }
     const handler = () => {
-      const card = image.closest("[data-mosaic-card]");
-      if (card) {
-        // The node is never replaced by a load/error event (the item's
-        // fingerprint doesn't change), so data-mosaic-reservation-type
-        // would otherwise stay stamped forever and mosaicPendingReservationType
-        // would keep returning the reservation instead of ever measuring
-        // the real (possibly text+image) content -- clear it so the
-        // content-diff pass this triggers takes the real-measurement path.
-        delete card.dataset.mosaicReservationType;
-        card.dataset.mosaicContentDirty = "1";
-      }
+      if (!mosaicMarkImageResolved(lane, image)) return;
       lane.renderedMessageFingerprint = "";
       renderMessagesIfChanged(lane);
     };
     image.addEventListener("load", handler);
     image.addEventListener("error", handler);
     lane.mosaicImageLoadHandlers.set(image, handler);
+    if (image.complete && mosaicMarkImageResolved(lane, image))
+      resolvedCompleteImage = true;
   }
   for (const [image, handler] of lane.mosaicImageLoadHandlers) {
     if (current.has(image)) continue;
@@ -737,6 +735,28 @@ function mosaicSyncImageLoadHandlers(lane) {
     image.removeEventListener("error", handler);
     lane.mosaicImageLoadHandlers.delete(image);
   }
+  if (resolvedCompleteImage) {
+    lane.renderedMessageFingerprint = "";
+    renderMessagesIfChanged(lane);
+  }
+}
+
+function mosaicMarkImageResolved(lane, image) {
+  if (!lane.mosaicResolvedImages) lane.mosaicResolvedImages = new WeakSet();
+  if (lane.mosaicResolvedImages.has(image)) return false;
+  const card = image.closest("[data-mosaic-card]");
+  if (!card) return false;
+  lane.mosaicResolvedImages.add(image);
+  // The node is never replaced by a load/error event (the item's
+  // fingerprint doesn't change), so data-mosaic-reservation-type would
+  // otherwise stay stamped forever and mosaicPendingReservationType would
+  // keep returning the reservation instead of ever measuring the real
+  // (possibly text+image) content -- clear it so the content-diff pass this
+  // triggers takes the real-measurement path. Already-complete images take
+  // this same path because no future load event is guaranteed.
+  delete card.dataset.mosaicReservationType;
+  card.dataset.mosaicContentDirty = "1";
+  return true;
 }
 
 function mosaicResetResizeObserver(lane) {
@@ -752,4 +772,5 @@ function mosaicResetResizeObserver(lane) {
     image.removeEventListener("error", handler);
   }
   lane.mosaicImageLoadHandlers = new Map();
+  lane.mosaicResolvedImages = new WeakSet();
 }
