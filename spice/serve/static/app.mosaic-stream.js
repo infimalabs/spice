@@ -75,6 +75,33 @@ function mosaicSyncSettle(lane, structural) {
   }, MOSAIC_SETTLE_QUIET_MS);
 }
 
+// Measurements taken before web fonts resolve bake fallback-font row counts
+// into explicit card heights that nothing ever corrects (frozen cards keep
+// their rows; the ResizeObserver watches width only). Serve ships system
+// fonts today -- document.fonts.status is "loaded" at first measure and
+// this whole path stays dormant -- but the day a web font lands, flagged
+// lanes get exactly one correction replay at fonts.ready: unsettling
+// re-engages the §9 motion gate (snap + quiet-window restart) and the
+// geometry invalidation forces a true re-measuring full replay.
+function mosaicArmFontsCorrection(lane) {
+  if (lane.mosaicFontsCorrectionArmed) return;
+  if (typeof document === "undefined" || !document.fonts) return;
+  lane.mosaicFontsCorrectionArmed = true;
+  document.fonts.ready.then(() => {
+    if (lane.closed || !lane.mosaicMeasuredBeforeFonts) return;
+    lane.mosaicMeasuredBeforeFonts = false;
+    lane.mosaicSettled = false;
+    lane.mosaicGeometry = null;
+    mosaicScheduleFullReplay(lane);
+  });
+}
+
+function mosaicTrackFontsAtMeasure(lane) {
+  if (!document.fonts || document.fonts.status === "loaded") return;
+  lane.mosaicMeasuredBeforeFonts = true;
+  mosaicArmFontsCorrection(lane);
+}
+
 // The reader's first deliberate interaction settles immediately (§8):
 // deliberate gestures only -- programmatic scrolls (compensation, backfill
 // restore) must not count, so the raw scroll event is deliberately absent.
@@ -638,6 +665,7 @@ function mosaicRenderMessageStream(lane, visibleItems) {
   }
   const revealing = Boolean(lane.mosaicRenderDeferred);
   lane.mosaicRenderDeferred = false;
+  mosaicTrackFontsAtMeasure(lane);
   if (revealing) {
     // First-paint discipline board-wide: whatever the engine rendered (or
     // froze) while the lane was unmeasurable, no tween may start from that

@@ -380,6 +380,67 @@ async function measureResizeBurst(page) {
   };
 }
 
+// Fonts correction: measurements taken while document.fonts is loading get
+// exactly one silent re-measuring full replay at fonts.ready; warm loads
+// (system fonts, the shipping default) never set the flag at all.
+async function measureFontsCorrection(page) {
+  const warm = await page.evaluate(() =>
+    Boolean(hiddenRevealResolveLane().mosaicMeasuredBeforeFonts),
+  );
+  const before = await page.evaluate(() => {
+    const lane = hiddenRevealResolveLane();
+    hiddenRevealPurgeLiveTraffic(lane);
+    window.__hiddenRevealTransitions.length = 0;
+    // A 200 non-font route: keeps document.fonts in "loading" while the
+    // fetch runs, then rejects with a decode WARNING (the harness fails the
+    // run on console errors, so a 404 is not usable here).
+    const face = new FontFace("HiddenRevealSmokeFont", 'url("/")');
+    document.fonts.add(face);
+    face.load().catch(() => {});
+    if (document.fonts.status !== "loading")
+      throw new Error("could not force fonts into loading state");
+    lane.renderedMessageFingerprint = "";
+    renderMessagesIfChanged(lane);
+    return {
+      flagged: Boolean(lane.mosaicMeasuredBeforeFonts),
+      replays: lane.mosaicEventLog.events.filter(
+        (event) => event.type === "full-replay",
+      ).length,
+    };
+  });
+  await page.waitForTimeout(900);
+  const after = await page.evaluate(() => {
+    const lane = hiddenRevealResolveLane();
+    return {
+      flagged: Boolean(lane.mosaicMeasuredBeforeFonts),
+      replays: lane.mosaicEventLog.events.filter(
+        (event) => event.type === "full-replay",
+      ).length,
+      transitions: window.__hiddenRevealTransitions.slice(),
+      fontsStatus: document.fonts.status,
+    };
+  });
+  return { warm, before, after };
+}
+
+function assertFontsCorrection(fonts) {
+  if (fonts.warm)
+    throw new Error("system-font load flagged measuredBeforeFonts (warm path broken)");
+  if (!fonts.before.flagged)
+    throw new Error("loading-fonts render did not flag measuredBeforeFonts");
+  if (fonts.after.fontsStatus !== "loaded")
+    throw new Error("fonts never settled: " + fonts.after.fontsStatus);
+  if (fonts.after.flagged)
+    throw new Error("fonts correction did not clear the flag");
+  const delta = fonts.after.replays - fonts.before.replays;
+  if (delta !== 1)
+    throw new Error("fonts.ready ran " + delta + " correction replays (want 1)");
+  if (fonts.after.transitions.length)
+    throw new Error(
+      "fonts correction animated: " + fonts.after.transitions.join(","),
+    );
+}
+
 async function run() {
   return withServePage(
     {
@@ -421,6 +482,8 @@ async function run() {
             resize.roundTripReplays +
             " full replays (want 0)",
         );
+      const fonts = await measureFontsCorrection(page);
+      assertFontsCorrection(fonts);
       return {
         floor,
         queued: revealed.queued,
