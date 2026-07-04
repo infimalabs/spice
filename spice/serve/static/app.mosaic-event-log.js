@@ -44,6 +44,17 @@ function mosaicNormalizeEventLogEvent(event) {
       keys: (event.keys || []).map((key) => String(key)),
     };
   }
+  if (event.type === "backfill") {
+    return {
+      type: "backfill",
+      trackCount: mosaicTrackCount(event.trackCount),
+      cards: (event.cards || []).map((card) => ({
+        key: String(card.key),
+        creationIndex: card.creationIndex,
+        candidates: mosaicCloneCandidates(card.candidates),
+      })),
+    };
+  }
   if (event.type === "full-replay") {
     return {
       type: "full-replay",
@@ -106,6 +117,42 @@ function mosaicReplayEventLogContentResize(cards, event, trackCount, freezeDepth
   return mosaicWetReplay(resized, trackCount, freezeDepth);
 }
 
+function mosaicEventLogDownwardRowFloor(cards, trackCount) {
+  const tracks = mosaicTrackCount(trackCount);
+  const bottomByTrack = new Array(tracks).fill(0);
+  for (const card of cards) {
+    const start = Math.max(0, card.t);
+    const end = Math.min(tracks, card.t + card.span);
+    for (let track = start; track < end; track += 1) {
+      if (card.b < bottomByTrack[track]) bottomByTrack[track] = card.b;
+    }
+  }
+  const anchor = Math.max(...bottomByTrack);
+  return {
+    anchor,
+    rowFloor: bottomByTrack.map((bottom) => anchor - bottom),
+  };
+}
+
+function mosaicReplayEventLogBackfill(cards, event, freezeDepth) {
+  const trackCount = mosaicTrackCount(event.trackCount);
+  const downward = mosaicEventLogDownwardRowFloor(cards, trackCount);
+  let rowFloor = downward.rowFloor;
+  const placedCards = [];
+  for (const entry of event.cards || []) {
+    const placement = mosaicInsert([], rowFloor, entry.candidates, trackCount);
+    rowFloor = placement.rowFloor;
+    placedCards.push({
+      ...placement.card,
+      key: entry.key,
+      creationIndex: entry.creationIndex,
+      b: downward.anchor - placement.card.b - placement.card.n,
+      frozen: true,
+    });
+  }
+  return mosaicRecomputeFrozen(cards.concat(placedCards), freezeDepth);
+}
+
 function mosaicReplayEventLogFullReplay(cards, event, freezeDepth) {
   const trackCount = mosaicTrackCount(event.trackCount);
   const replayInput = event.cards.map((entry) => {
@@ -151,6 +198,9 @@ function mosaicReplayEventLog(log) {
     } else if (event.type === "remove") {
       const removed = new Set(event.keys || []);
       cards = cards.filter((card) => !removed.has(card.key));
+    } else if (event.type === "backfill") {
+      trackCount = mosaicTrackCount(event.trackCount);
+      cards = mosaicReplayEventLogBackfill(cards, event, freezeDepth);
     } else if (event.type === "full-replay") {
       trackCount = mosaicTrackCount(event.trackCount);
       cards = mosaicReplayEventLogFullReplay(cards, event, freezeDepth);

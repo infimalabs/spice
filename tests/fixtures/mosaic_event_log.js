@@ -87,6 +87,19 @@ function fullReplayEvent(seed, count) {
   };
 }
 
+function backfillEvent(seed, count) {
+  const rng = mulberry32(seed);
+  return {
+    type: "backfill",
+    trackCount: TRACKS,
+    cards: Array.from({ length: count }, (_, i) => ({
+      key: "older-card-" + i,
+      creationIndex: -i - 1,
+      candidates: candidatesFor(rng),
+    })),
+  };
+}
+
 function assertNoOverlaps(cards, label) {
   for (let i = 0; i < cards.length; i += 1) {
     for (let j = i + 1; j < cards.length; j += 1) {
@@ -126,6 +139,21 @@ for (const seed of [3, 5, 8, 13, 21]) {
   const second = context.mosaicReplayEventLog(log);
   assert(deepEqual(first.layout, second.layout), "mixed event log replay diverged");
   assert(first.layout.length === 7, "full replay should define the surviving card set");
+}
+
+// Backfill events extend the lattice below the current archive while keeping
+// existing card records byte-identical.
+{
+  const log = recordInserts(55, 8);
+  const before = context.mosaicReplayEventLog(log).layout;
+  context.mosaicRecordEventLogEvent(log, backfillEvent(89, 4));
+  const after = context.mosaicReplayEventLog(log).layout;
+  const existing = after.slice(0, before.length);
+  const added = after.slice(before.length);
+  assert(deepEqual(existing, before), "backfill replay preserved existing layout failed");
+  assert(added.length === 4, "backfill replay added wrong card count");
+  assert(added.every((card) => card.b + card.n <= 0), "backfill replay landed above archive");
+  assertNoOverlaps(after, "backfill event");
 }
 
 // History independence: divergent prehistories converge when the same
