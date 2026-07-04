@@ -403,6 +403,20 @@
   white-space: nowrap;
 }
 .message-agent-name:disabled { cursor: default; }
+/* Live text rule (Mosaic §9): .compaction-meta time / .message-footer time
+   (index.css) already pin white-space: pre, so a tick's digit-count change
+   can never wrap a line or grow a card. relativeTime() emits " 9s".."59s" /
+   "23h" / an uncapped day count ("999d" is the realistic ceiling at ~2.7
+   years of history); a fixed width on top of that stops the box itself
+   from growing and jittering .message-footer-right badges sideways. Ages
+   past the ceiling clip rather than grow. Shared by message footers and
+   compaction dividers. */
+.message-age {
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: clip;
+  width: 4ch;
+}
 .badges {
   display: inline-flex;
   gap: 4px;
