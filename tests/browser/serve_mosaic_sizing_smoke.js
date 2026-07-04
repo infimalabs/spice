@@ -1,12 +1,12 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic §4 card sizing / interlock. Verifies against the live DOM: (a)
+// Mosaic card sizing / interlock. Verifies against the live DOM: (a)
 // card chrome (border + padding + fixed footer strip) plus gap sums to a
 // whole multiple of the resolved line-height at the default type ramp; (b)
 // k whole lines of body text produce the designed zero/bounded slack
 // pattern at each lane-count's module (L>=3, L=2, L=1); (c) slack never
 // reaches a full module; (d) the congruence still holds after a root
-// font-size change (the §8 full-replay geometry recompute case).
+// font-size change (the full-replay geometry recompute case).
 
 const SIZING_SCENARIOS = [
   { label: "L>=3", width: 1200 },
@@ -112,7 +112,7 @@ function mosaicSizingProbe() {
   const gap = mosaicGeometry(16, SIZING_SCENARIOS[0].width).gap;
   const spotChecks = mosaicSizingCollectSpotChecks(lane);
 
-  // Root font-size change (§8 full replay): the congruence must still hold
+  // Root font-size change (full replay): the congruence must still hold
   // once every rem-denominated constant re-resolves.
   document.documentElement.style.fontSize = mosaicSizingRescaledRootFontPx + "px";
   const rescaledChrome = mosaicSizingMeasureChrome(lane);

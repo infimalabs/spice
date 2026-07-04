@@ -1,12 +1,12 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic stream integration (mosaic-stream-integration, spec §1/§6/§7/§8):
+// Mosaic stream integration:
 // drives a real lane through renderMessagesIfChanged exactly as live
 // traffic would (upsertKnownMessage + trimKnownMessages, not renderMessage
 // called directly) and checks the persistent-lattice invariants: insert
 // never moves existing cards; unchanged cards get zero style writes on a
 // no-op re-render; removing the oldest message vacates without moving the
-// rest; newest-first reading order holds; image reservations (§4/§12) are
+// rest; newest-first reading order holds; image reservations are
 // exact and a load/error event never triggers pack/position/size activity.
 
 // msg-10..msg-16 (frozen-growth chain) plus the surviving msg-2/msg-3 from
@@ -119,7 +119,7 @@ function mosaicStreamRemovalCheck() {
   const lane = mosaicStreamResolveLane();
   const before = mosaicStreamCardSnapshot(lane);
   // Drop the oldest known message directly (vacancy, not agent removal) and
-  // re-render -- per §8, a single removal must not move the survivors.
+  // re-render -- a single removal must not move the survivors.
   lane.knownMessages = lane.knownMessages.filter((item) => item.key !== "msg-1");
   lane.knownMessageKeys.delete("msg-1");
   renderMessagesIfChanged(lane);
@@ -127,7 +127,7 @@ function mosaicStreamRemovalCheck() {
   return { before, after };
 }
 
-// §7 wetReplay: growing a still-wet card's content must re-place the wet
+// wetReplay: growing a still-wet card's content must re-place the wet
 // band (this card's own n grows, possibly shifting its own (t,b)) while
 // never touching any FROZEN card. msg-1 was already vacated by the removal
 // check, so msg-2/msg-3 are the whole wet band here.
@@ -146,7 +146,7 @@ function mosaicStreamContentChangeCheck() {
   return { before, after, grownBefore, grownAfter };
 }
 
-// §7 rippleRows: growing a FROZEN card must keep its top row fixed
+// rippleRows: growing a FROZEN card must keep its top row fixed
 // (b+n invariant) and ripple only the chain resting below it in
 // overlapping tracks downward -- never the cards above it, never a
 // different column, never a full replay. Seven single-line messages
@@ -193,7 +193,7 @@ function mosaicStreamFrozenGrowthCheck() {
   };
 }
 
-// §8 full replay: a geometry change (root font-size here, cheaper to drive
+// Full replay: a geometry change (root font-size here, cheaper to drive
 // deterministically in a smoke than a real container resize) must trigger
 // a full replay -- every surviving card re-decided against a fresh
 // rowFloor in creation order, reading order back to clean chronological.
@@ -208,7 +208,7 @@ function mosaicStreamGeometryChangeCheck() {
   lane.renderedMessageFingerprint = "";
   renderMessagesIfChanged(lane);
   const afterAtNewRoot = mosaicStreamCardSnapshot(lane);
-  // Idempotence (§10) at a STABLE geometry (no font-size toggle in
+  // Idempotence at a STABLE geometry (no font-size toggle in
   // between): replaying again must reproduce a byte-identical layout. A
   // toggle-and-restore round trip is deliberately NOT used for this
   // assertion -- text-metric sub-pixel rounding across a real inline
@@ -227,7 +227,7 @@ function mosaicStreamGeometryChangeCheck() {
 function mosaicStreamReadingOrderCheck() {
   const lane = mosaicStreamResolveLane();
   const cards = lane.mosaicCards.filter((c) => c.kind !== "barrier");
-  // Newest-first is only an EXACT guarantee within a column chain (§1
+  // Newest-first is only an EXACT guarantee within a column chain (the
   // guarantee 3: "exact within any column chain"); across chains, cards of
   // very different heights can legitimately interleave (a tall older card
   // can end up with a higher top than a short newer one placed in a
@@ -254,7 +254,7 @@ function mosaicStreamReadingOrderCheck() {
   return { count: cards.length, chainTops, monotonic };
 }
 
-// Images (§4/§12 imageHeights): a message with an inline image reserves the
+// Images: a message with an inline image reserves the
 // small letterbox cap ("image"); an image-only message reserves the large
 // cap ("imageLarge") -- both sourced from the single dataset classification
 // app.render.js computes once (article.dataset.mosaicReservationType), never
@@ -408,7 +408,7 @@ async function mosaicStreamImageReservationCheck() {
   };
 }
 
-// §14 span clamped to 12 / §5 no special span policy: a task-directive-stack
+// Span clamped to 12, no special span policy: a task-directive-stack
 // quote (detected from item.display_html -- server-emitted markup,
 // spice/serve/taskdirectives.py, always exactly
 // `<div class="task-directive-stack">`) gets the same forced span-12
@@ -592,13 +592,13 @@ function assertInsertInvariants(insertResult, fail) {
   if (insertResult.afterThird.cards.length !== 3)
     fail("third insert must produce exactly three cards");
 
-  // §6: insertion must never touch any existing card's rendered position.
+  // Insertion must never touch any existing card's rendered position.
   const firstCardAfterFirst = insertResult.afterFirst.cards.find((c) => c.key === "msg-1");
   const firstCardAfterThird = insertResult.afterThird.cards.find((c) => c.key === "msg-1");
   if (!firstCardAfterFirst || !firstCardAfterThird)
     fail("msg-1's card disappeared across inserts");
 
-  // §11c: a no-op re-render must write zero new style strings.
+  // A no-op re-render must write zero new style strings.
   for (const before of insertResult.beforeNoop) {
     const after = insertResult.afterNoop.cards.find((c) => c.key === before.key);
     if (!after || after.transform !== before.transform || after.width !== before.width || after.height !== before.height)
@@ -607,7 +607,7 @@ function assertInsertInvariants(insertResult, fail) {
 }
 
 function assertRemovalInvariants(removalResult, fail) {
-  // §8 vacancy: removing the oldest message must not move the survivors.
+  // Vacancy: removing the oldest message must not move the survivors.
   const survivorsBefore = removalResult.before.cards.filter((c) => c.key !== "msg-1");
   for (const before of survivorsBefore) {
     const after = removalResult.after.cards.find((c) => c.key === before.key);
@@ -619,7 +619,7 @@ function assertRemovalInvariants(removalResult, fail) {
 }
 
 function assertContentChangeInvariants(contentChangeResult, fail) {
-  // §7 wetReplay: growing msg-3's content must change its own row count
+  // wetReplay: growing msg-3's content must change its own row count
   // (n), and must not touch msg-2 unless the wet band's relative order
   // actually shifted -- here msg-3 (newer) growing means it may now
   // legitimately move msg-2, so we only assert msg-3 itself actually grew
@@ -631,7 +631,7 @@ function assertContentChangeInvariants(contentChangeResult, fail) {
 }
 
 function assertFrozenGrowthInvariants(frozenGrowthResult, fail) {
-  // §7 rippleRows: growing a frozen card keeps its own top row fixed
+  // rippleRows: growing a frozen card keeps its own top row fixed
   // (b+n invariant) and ripples only the same-column chain resting below
   // it downward by exactly the growth delta -- never the cards above it or
   // in another column, and never a full replay (card count unchanged).
@@ -664,7 +664,7 @@ function assertFrozenGrowthInvariants(frozenGrowthResult, fail) {
 }
 
 function assertGeometryChangeInvariants(geometryChangeResult, fail) {
-  // §8 full replay: a geometry change must re-decide every surviving card
+  // Full replay: a geometry change must re-decide every surviving card
   // (module M changes with root font-size).
   if (geometryChangeResult.before.lattice.length !== geometryChangeResult.afterAtNewRoot.lattice.length)
     fail("full replay must not change the surviving card count");
@@ -673,7 +673,7 @@ function assertGeometryChangeInvariants(geometryChangeResult, fail) {
   if (moduleBefore === moduleAfterNewRoot)
     fail("full replay at a new root font-size must change rendered card height");
 
-  // §10 determinism: replaying again at a STABLE geometry (no font-size
+  // Determinism: replaying again at a STABLE geometry (no font-size
   // toggle in between) must reproduce a byte-identical layout.
   const byKey = (a, b) => a.key.localeCompare(b.key);
   const atNewRootLattice = JSON.stringify(geometryChangeResult.afterAtNewRoot.lattice.slice().sort(byKey));
@@ -714,7 +714,7 @@ function assertImageReservationInvariants(imageResult, fail) {
       fail("reservation type did not clear after resolution: " + key + "=" + imageResult[key]);
   }
 
-  // Tier proportionality (§4/§12): an image-only card letterboxes to the
+  // Tier proportionality: an image-only card letterboxes to the
   // large cap, a regular inline image to the small cap -- the large tier
   // must actually settle taller, proving the two CSS caps (and the fixed
   // classification read from app.render.js's dataset, not the .media-rich
@@ -729,7 +729,7 @@ function assertImageReservationInvariants(imageResult, fail) {
   if (imageResult.brokenN !== imageResult.regularN)
     fail("a broken image must settle at the same height as a loaded one: " + JSON.stringify(imageResult));
 
-  // Multi-image stacking rule (§4/§12): three images in one stack (laid out
+  // Multi-image stacking rule: three images in one stack (laid out
   // in a single horizontal row, messages.css) must settle at exactly the
   // SAME one-slot height as a single image, never a per-image sum.
   if (imageResult.multiImageCount !== 3)

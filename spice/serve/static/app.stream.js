@@ -360,7 +360,7 @@ function renderMessagesIfChanged(lane) {
   // renders -- plane compensation (mosaicSyncPlane onCompensate) covers
   // frontier shifts for a scrolled reader, mosaicRestoreBackfillViewport
   // covers the backfill bottom seam, and every other movement class is a
-  // defined §7/§8 motion the reader is meant to see (wet settling, ripple
+  // defined lattice motion the reader is meant to see (wet settling, ripple
   // push, replay FLIP). The legacy grid-era capture/restore anchor is gone
   // from this path: it re-anchored against getBoundingClientRect mid-tween
   // and fought the compensation it duplicated.

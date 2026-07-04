@@ -1,12 +1,12 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic §5/§11 structural checks not covered elsewhere in the smoke suite:
+// Mosaic structural checks not covered elsewhere in the smoke suite:
 // (1) the capacity rule's four L-transition thresholds (556/840/1124/1692px
 // at a 16px root -- derived from minLane=17rem against each legal base
 // span) hold exactly, not approximately, at a ±1px boundary; (2) skyline
 // spread across a realistic mixed-height insertion sequence stays within
-// about two tallest-card heights (§11). The wide-placement structural
-// property (§5, §11) is already covered at the pure-engine level by
+// about two tallest-card heights. The wide-placement structural
+// property is already covered at the pure-engine level by
 // tests/fixtures/mosaic_engine.js (see test_static_mosaic_engine_helpers_
 // are_pure_and_covered) -- re-deriving it against rendered pixels here
 // would be a noisier version of the same fixture-level proof.
@@ -110,7 +110,7 @@ function mosaicCapacitySkylineItem(index, lines) {
   };
 }
 
-// §11: skyline spread (max(rowFloor) - min(rowFloor)) across a realistic
+// Skyline spread (max(rowFloor) - min(rowFloor)) across a realistic
 // mixed-height insertion sequence stays within about two tallest-card
 // heights. Mostly short cards (1-2 lines) with occasional tall ones (18
 // lines, clearing tallThreshold to trigger wide candidates) mirrors a

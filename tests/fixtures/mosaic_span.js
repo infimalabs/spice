@@ -35,7 +35,7 @@ function countingMeasure(heightBySpan) {
   return measure;
 }
 
-// §5/§12: short content never clears tallThreshold -- exactly one candidate,
+// Short content never clears tallThreshold -- exactly one candidate,
 // exactly one measurement read.
 {
   const measure = countingMeasure({ 4: 100 });
@@ -50,7 +50,7 @@ function countingMeasure(heightBySpan) {
   );
 }
 
-// §5/§13: content at or above tallThreshold adds the wide tier -- exactly
+// Content at or above tallThreshold adds the wide tier -- exactly
 // two measurement reads, one per candidate width.
 {
   const measure = countingMeasure({ 4: 230, 8: 340 });
@@ -81,7 +81,7 @@ function countingMeasure(heightBySpan) {
   assert(candidates.length === 1, "just-under-threshold must not widen");
 }
 
-// §5/§14: a baseSpan that already fills the grid has nowhere to widen into --
+// A baseSpan that already fills the grid has nowhere to widen into --
 // never measured twice, never offered a wide candidate, no matter how tall.
 {
   const measure = countingMeasure({ 12: 5000 });
@@ -97,7 +97,7 @@ function countingMeasure(heightBySpan) {
   assert(context.mosaicWideSpan(TRACKS, TRACKS) === TRACKS, "full-width baseSpan has no wider tier");
 }
 
-// Default tallThreshold (no override) matches the documented §12 constant.
+// Default tallThreshold (no override) matches the documented constant.
 {
   const measure = countingMeasure({ 4: 229 });
   const below = context.mosaicCandidates(4, TRACKS, GAP, MODULE, measure);
@@ -107,7 +107,7 @@ function countingMeasure(heightBySpan) {
   assert(at.length === 2, "default threshold must accept the documented 230px");
 }
 
-// §5/§11 end-to-end: on a flat frontier, exact integer ties are common, and
+// End-to-end: on a flat frontier, exact integer ties are common, and
 // the placement key's -span term means the wide candidate wins a tie rather
 // than the base one -- widening is emergent from the key, not chosen here.
 {
@@ -118,7 +118,7 @@ function countingMeasure(heightBySpan) {
   assert(decision.span === 8, "a flat frontier with a tied key must pick the wider candidate");
 }
 
-// §5/§11 end-to-end: the wide candidate must never win by digging a hole --
+// End-to-end: the wide candidate must never win by digging a hole --
 // when every wide anchor straddles a bump that a base-width card can dodge,
 // base must win even though the card measured tall enough to be offered wide.
 {

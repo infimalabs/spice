@@ -1,7 +1,7 @@
 const { withServePage } = require("./serve_playwright_harness");
 
 // Ack quote resolution riding the mosaic-stream-integration resolution
-// paths end to end (mosaic-ack-resolution, spec §4 ackReserve, §7, §14):
+// paths end to end (mosaic-ack-resolution):
 // drives real lanes through renderMessagesIfChanged exactly as live ack
 // hydration would (mutating lane.ackContextByKey/missingAckContextKeys
 // directly, not faking the fetch), and checks that resolution takes
@@ -67,7 +67,7 @@ function mosaicAckBuildCompleteImageItem(index) {
 
 // segment html is deliberately empty: renderMessageContent renders ONLY
 // the ack quote/skeleton for a segment-driven item with no segment body
-// text, so the reservation (sized only for the quote block, §4) actually
+// text, so the reservation (sized only for the quote block) actually
 // represents the whole card -- an ack reply with extra prose alongside it
 // would need a bigger, content-aware reservation this task does not add.
 function mosaicAckBuildAckItem(index, ackKey) {
@@ -131,7 +131,7 @@ function mosaicAckResetLane(lane) {
   lane.missingAckContextKeys.clear();
 }
 
-// §4: a pending ack reserves its quote block instead of measuring -- the
+// A pending ack reserves its quote block instead of measuring -- the
 // skeleton (.ack-quote--pending) renders and the card's row count comes
 // from mosaicReservationRows("ack", ...), not from measuring "reply body".
 function mosaicAckPendingReservationCheck() {
@@ -153,7 +153,7 @@ function mosaicAckPendingReservationCheck() {
   };
 }
 
-// §7 wetReplay: a still-wet ack card resolving must swap the skeleton for
+// wetReplay: a still-wet ack card resolving must swap the skeleton for
 // the real quote, update its own row count to reflect the real content,
 // and go through wetReplay (never touching a frozen card, none exist yet).
 function mosaicAckWetResolutionCheck() {
@@ -189,7 +189,7 @@ function mosaicAckFreezeFixture(lane, ackKey) {
     mosaicAckPush(lane, mosaicAckBuildPlainItem(i, 1));
 }
 
-// §7: a frozen ack resolving to content that still fits within (or exactly
+// A frozen ack resolving to content that still fits within (or exactly
 // matches) its reservation must pad in place -- zero position/size writes
 // on ANY card, including the resolving one itself (this is exactly the
 // case the node-identity fix in mosaicApplyRender exists for: the DOM node
@@ -215,7 +215,7 @@ function mosaicAckFrozenPadCheck() {
   };
 }
 
-// §7 rippleRows: a frozen ack resolving to content TALLER than its
+// rippleRows: a frozen ack resolving to content TALLER than its
 // reservation must extend downward (keep b+n fixed on itself) and ripple
 // the same-column chain resting below it by exactly the growth delta,
 // touching nothing above it or in the other column.
@@ -306,7 +306,7 @@ async function mosaicAckCompleteImageResolutionCheck() {
   };
 }
 
-// §14: two simultaneously-resolving acks must yield an IDENTICAL final
+// Two simultaneously-resolving acks must yield an IDENTICAL final
 // layout regardless of which one's fetch happened to land first. Compares
 // resolving both in one pass (entries visits them newest-first) against
 // resolving them one at a time across two renders in the OPPOSITE

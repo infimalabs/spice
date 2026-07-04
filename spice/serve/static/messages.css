@@ -25,7 +25,7 @@
 .messages article {
   --message-badge-surface: var(--panel);
   background: var(--panel);
-  /* Mosaic §4 interlock: border/padding are rem-denominated (same 1px/9px
+  /* Mosaic interlock: border/padding are rem-denominated (same 1px/9px
      at the default 16px root) so chrome + gap stays a whole multiple of
      lineHeight at any root font size, not just the default; see
      mosaic-sizing-interlock. */
@@ -387,7 +387,7 @@
   flex: 0 0 auto;
   font-size: 12px;
   gap: 8px;
-  /* Mosaic §4 interlock: fixed at 2 lineHeights (2.5rem) so the footer
+  /* Mosaic interlock: fixed at 2 lineHeights (2.5rem) so the footer
      never varies with its own content and comfortably contains the
      32px .icon-button without clipping. Border(2px) + padding(18px) +
      margin(0.5rem) + this height sum to a whole multiple of lineHeight
@@ -422,7 +422,7 @@
   white-space: nowrap;
 }
 .message-agent-name:disabled { cursor: default; }
-/* Live text rule (Mosaic §9): .compaction-meta time / .message-footer time
+/* Live text rule: .compaction-meta time / .message-footer time
    (index.css) already pin white-space: pre, so a tick's digit-count change
    can never wrap a line or grow a card. relativeTime() emits " 9s".."59s" /
    "23h" / an uncapped day count ("999d" is the realistic ceiling at ~2.7
@@ -533,12 +533,12 @@
 }
 .dot-separator { color: var(--muted); }
 
-/* Mosaic §9 render plane, live render path (app.mosaic-stream.js). The
+/* Mosaic render plane, live render path (app.mosaic-stream.js). The
    uniform component (whole-board shift) lives only on .mosaic-plane; the
    differential component (per-card settle/ripple) lives only on
    [data-mosaic-card] -- the two transitions are declared separately here
    and toggled independently in app.mosaic-render.js so they never share
-   one (§9, §11c). */
+   one. */
 .mosaic-plane {
   /* Absolute positioning anchors to the PADDING box; offsetting by the
      origin pad lands the lattice origin on the content box, so track 0

@@ -1,6 +1,6 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic §9 live text rule: per-tick text (relative ages) must sit in a
+// Mosaic live text rule: per-tick text (relative ages) must sit in a
 // fixed-width single-line slot so a digit-count change on tick can never
 // wrap a line, grow a card, or trigger a repack/ripple. Exercises the real
 // production code path (setRelativeTimeText against a `.message-age` node)

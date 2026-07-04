@@ -1,6 +1,6 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic §9 prefers-reduced-motion: transform transitions and entrance
+// Mosaic prefers-reduced-motion: transform transitions and entrance
 // animation are disabled for insertion, settling/ripple, and full replay;
 // the plane never animates. Scrolled-reader compensation is a correctness
 // behavior, not a motion effect, and must still land under reduced motion.

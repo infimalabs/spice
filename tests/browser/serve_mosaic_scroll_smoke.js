@@ -1,6 +1,6 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic §9 plane scroll behavior: scrolled down-page, a frontier rise must
+// Mosaic plane scroll behavior: scrolled down-page, a frontier rise must
 // produce zero visual viewport movement (plane jump + scroll compensation
 // land in the same frame, transitions disabled); at top, the same rise
 // animates the plane gently with no compensation; the compensation must

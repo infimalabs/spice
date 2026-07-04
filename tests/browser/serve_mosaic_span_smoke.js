@@ -1,6 +1,6 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic §5 candidate-span generation against the live DOM: (a) short
+// Mosaic candidate-span generation against the live DOM: (a) short
 // content never clears tallThreshold and reads the base width only; (b)
 // tall content clears it and reads exactly two widths (base, then wide);
 // (c) on a flat frontier the wide candidate wins the placement-key tie,
@@ -132,7 +132,7 @@ function assertMosaicSpanResult(result) {
     throw new Error(message + ": " + JSON.stringify(result));
   };
   if (result.tallThreshold !== SPAN_SMOKE_EXPECTED_TALL_THRESHOLD_PX)
-    fail("MOSAIC_TALL_THRESHOLD_PX drifted from the documented §12 constant");
+    fail("MOSAIC_TALL_THRESHOLD_PX drifted from the documented constant");
   if (result.wideSpan <= result.baseSpan)
     fail("fixture viewport must have room to widen (wideSpan must exceed baseSpan)");
   if (result.shortCalls.length !== 1 || result.shortCalls[0] !== result.baseSpan)

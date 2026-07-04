@@ -1,6 +1,6 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic §13 complexity contract: insert is O(candidates x 12 x span) --
+// Mosaic complexity contract: insert is O(candidates x 12 x span) --
 // constant -- with at most two measurement reads (base and wide widths);
 // full replay is O(n x 12) plus one measurement pass; no per-frame work
 // happens outside real events (the live-text tick touches zero mosaic
@@ -94,7 +94,7 @@ async function buildMosaicPerfBoard(page, cardCount) {
   }, cardCount);
 }
 
-// §13: a single new message is the fast insert path -- at most two content
+// A single new message is the fast insert path -- at most two content
 // measurements (base width, wide width), never a pass over the whole board.
 async function measureSingleInsert(page) {
   return page.evaluate(() => {
@@ -109,9 +109,9 @@ async function measureSingleInsert(page) {
   });
 }
 
-// §13: a full replay (geometry actually changed) re-measures every
+// A full replay (geometry actually changed) re-measures every
 // surviving card exactly once -- "one measurement pass" -- never more than
-// the §5 two-reads-per-card ceiling times the board size.
+// the two-reads-per-card ceiling times the board size.
 async function measureFullReplay(page, cardCount) {
   await page.setViewportSize({ width: 900, height: 900 });
   return page.evaluate((count) => {
@@ -123,7 +123,7 @@ async function measureFullReplay(page, cardCount) {
   }, cardCount);
 }
 
-// §13: per-frame work outside real events is zero -- the live-text tick
+// Per-frame work outside real events is zero -- the live-text tick
 // (updateLiveRelativeTimes, the real setInterval callback) must never touch
 // mosaic measurement or packing machinery.
 async function measureSteadyStateTicks(page, tickCount) {

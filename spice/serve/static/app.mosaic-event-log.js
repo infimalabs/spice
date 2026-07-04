@@ -1,4 +1,5 @@
-// Mosaic event-log replay (spec .spice/mosaic-packing-spec.md §10, §11d).
+// Mosaic event-log replay: layout is a pure function of the recorded event
+// sequence, so replaying a log reproduces every position exactly.
 // This is the shared, DOM-free replay format used by node fixtures and browser
 // smokes: record measured candidates and stream events, then replay them
 // through the same pure lattice functions that the live path uses.

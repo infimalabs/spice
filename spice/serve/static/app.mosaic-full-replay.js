@@ -1,5 +1,4 @@
-// Mosaic §8 full replay (spec .spice/mosaic-packing-spec.md §8, §4, §9,
-// §10, §14). Pure function built on the engine's decide/commit primitives
+// Mosaic full replay. Pure function built on the engine's decide/commit primitives
 // (app.mosaic-engine.js) and the freeze latch (app.mosaic-wet-frozen.js):
 // clears every freeze latch, re-decides each surviving card's span/anchor
 // in creation order against a fresh rowFloor, then recomputes freeze
@@ -8,15 +7,15 @@
 // FLIP, and mapping resize/agent-removal events to this call are
 // mosaic-stream-integration concerns and stay out of this module. Card
 // records add `candidates` (this pass's pre-measured { span, n } options,
-// per §4/§5 -- content may have been re-measured since the card was first
+// (sizing and span policy) -- content may have been re-measured since the card was first
 // placed) to the creationIndex/frozen shape from app.mosaic-wet-frozen.js.
 
-// §8: recompute geometry (caller's concern), clear freeze latches, and for
+// Recompute geometry (caller's concern), clear freeze latches, and for
 // every surviving card in creation order re-run decide() against a fresh
 // rowFloor. Because the procedure reads only creationIndex and candidates
 // from each card -- never its prior t/b/span/n/frozen -- the outcome is a
 // pure function of (creation order, content, trackCount) alone, identical
-// regardless of layout or freeze history (§10, §14) and idempotent when
+// regardless of layout or freeze history and idempotent when
 // replayed again with unchanged candidates. Returns a new array in the
 // input's original order; never mutates its input.
 function mosaicFullReplay(cards, trackCount, freezeDepth) {

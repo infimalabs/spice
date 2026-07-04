@@ -1,6 +1,6 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic §9 scrollbar rule: the pack host must reserve its scrollbar gutter
+// Mosaic scrollbar rule: the pack host must reserve its scrollbar gutter
 // from the first frame, so growing content past one viewport of height never
 // changes clientWidth (which would otherwise shrink colW and slide every
 // card horizontally on the next geometry pass).

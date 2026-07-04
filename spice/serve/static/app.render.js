@@ -703,7 +703,7 @@ function renderMessage(lane, item) {
   article.append(renderMessageContent(lane, item));
   if (article.querySelector(".message-image, .ack-attachment"))
     article.classList.add("media-rich");
-  // Multi-image stacking rule (§4/§12): a message-image-stack lays its
+  // Multi-image stacking rule: a message-image-stack lays its
   // images out in a single horizontal row (messages.css .message-image-stack
   // is flex-row, not a vertical stack), all at the same letterbox height --
   // so the reservation is exactly one image slot regardless of how many

@@ -1,7 +1,6 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic team/fusion surface (spec .spice/mosaic-packing-spec.md §8; task
-// UI-1k9xkJYW). A fused team host must run exactly one lattice over the
+// Mosaic team/fusion surface. A fused team host must run exactly one lattice over the
 // merged (epoch, index, key) creation order -- never one lattice per
 // member, and never DOM/arrival-observation order standing in for true
 // creation order. Also covers the companion width-borrowing deletion: a
@@ -162,7 +161,7 @@ async function fuseBetaAndMeasureLattice(page, { alpha, beta, fusedTeam, betaMes
   );
 }
 
-// Removes beta from the team: §8's "their cards leave with them" full
+// Removes beta from the team: the "their cards leave with them" full
 // replay must drop the departed member's cards from the survivor lattice.
 async function removeBetaAndMeasureSurvivors(page, { alpha, survivorTeam }) {
   return page.evaluate(

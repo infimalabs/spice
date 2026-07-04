@@ -1,10 +1,10 @@
-// Mosaic render plane (spec .spice/mosaic-packing-spec.md §9, §11(a)(c), §12).
+// Mosaic render plane.
 // Motion is split into two layers that must never share a transition: the
 // uniform whole-board shift lives on a single plane element; differential
 // per-card settling/ripple lives on the cards as individual transform
 // tweens. Card positions are anchored to the fixed high-water constant K, so
 // a card whose (t, b, n, span) did not change since the last apply receives
-// no style write at all in that frame (§11c) -- that is the load-bearing
+// no style write at all in that frame -- that is the load-bearing
 // invariant this module exists to preserve; it is stronger than "the
 // computed value happens to be the same" and must be enforced by skipping
 // the write, not by relying on idempotence.
@@ -19,7 +19,7 @@ const MOSAIC_PLANE_K = 4096;
 const MOSAIC_TWEEN_TRANSITION =
   "transform 340ms cubic-bezier(.25,.8,.3,1)";
 
-// §9: the reader's OS/browser-level motion preference. Callers read this
+// The reader's OS/browser-level motion preference. Callers read this
 // once per event (it can change mid-session) and pass it through as
 // options.reducedMotion to mosaicApplyCardPosition/mosaicSyncPlane; the
 // CSS @media (prefers-reduced-motion: reduce) block in messages.css is the
@@ -33,7 +33,7 @@ function mosaicPrefersReducedMotion() {
 }
 
 // Plane-space y for a card's top edge, anchored to K so unchanged cards
-// never recompute to a different value merely because maxRow rose (§9).
+// never recompute to a different value merely because maxRow rose.
 function mosaicCardY(card, M) {
   return (MOSAIC_PLANE_K - (card.b + card.n)) * M;
 }
@@ -65,7 +65,7 @@ function mosaicPlaneTransform(maxRow, M) {
 }
 
 // maxRow/minB across the current card set; host height is (maxRow-minB)*M,
-// absorbing negative rows via minB (§9).
+// absorbing negative rows via minB.
 function mosaicCardsExtent(cards) {
   let maxRow = 0;
   let minB = 0;
@@ -97,7 +97,7 @@ function mosaicCardPositionChanged(card, prev) {
 // remember next time -- unchanged (same reference as `prev`) when no write
 // occurred, so callers can tell "skipped" from "wrote" without re-deriving
 // the comparison. A fresh card (no prev) gets its first transform applied
-// with transitions suppressed and one forced reflow (§9 first-paint rule)
+// with transitions suppressed and one forced reflow (first-paint rule)
 // so it never tweens in from the identity matrix.
 //
 // Call-order contract: mosaicSyncPlane must land the plane at the current
@@ -145,15 +145,15 @@ function mosaicApplyCardPosition(el, card, prev, edges, M, gap, options) {
 // `prevMaxRow` next call. No-ops (no style write) when maxRow is unchanged,
 // mirroring the card-side skip invariant for the plane itself.
 //
-// prevMaxRow === null is the first-paint sentinel (§9): a fresh plane (or a
+// prevMaxRow === null is the first-paint sentinel: a fresh plane (or a
 // reveal rebuild) has no visible prior state, so its FIRST sync writes the
 // real target with transitions suppressed and one forced flush -- never a
 // placeholder value that the same render then animates away. Anchoring at a
 // synthetic maxRow 0 and tweening to the real frontier made every lane
 // open/reopen slide the whole board in by its own height.
 //
-// options.scrolled + options.onCompensate implement the plane behavior rule
-// (§9): scrolled down-page, the jump is applied with transitions disabled
+// options.scrolled + options.onCompensate implement the plane behavior
+// rule: scrolled down-page, the jump is applied with transitions disabled
 // and the viewport is compensated by the same delta in the same frame, so
 // the reader never sees the shift; at the top (or during full replay) the
 // plane animates normally so the push-down is the visible signal.
@@ -171,7 +171,7 @@ function mosaicSyncPlane(planeEl, maxRow, prevMaxRow, M, options) {
   const replaying = Boolean(options && options.replaying);
   const scrolled = Boolean(options && options.scrolled);
   const snap = Boolean(options && options.snap);
-  // Compensation is a correctness behavior, not a motion effect (§9): it
+  // Compensation is a correctness behavior, not a motion effect: it
   // must still land whenever the reader is scrolled, reduced motion or
   // not. Only the transition -- animated tween vs instant jump -- takes
   // reducedMotion (and snap, the correction path) into account.
@@ -195,8 +195,8 @@ function mosaicSyncPlane(planeEl, maxRow, prevMaxRow, M, options) {
   return maxRow;
 }
 
-// Sets the host's explicit height so scroll extent matches the lattice
-// (§9). No-ops when the extent has not changed since `prevExtent`.
+// Sets the host's explicit height so scroll extent matches the lattice.
+// No-ops when the extent has not changed since `prevExtent`.
 function mosaicSyncHostHeight(hostEl, maxRow, minB, M, prevExtent) {
   if (prevExtent && prevExtent.maxRow === maxRow && prevExtent.minB === minB) {
     return prevExtent;
