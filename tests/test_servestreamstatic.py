@@ -243,6 +243,25 @@ def test_static_filter_model_helpers_are_pure_and_covered():
     assert result.returncode == 0
 
 
+def test_static_mosaic_geometry_helpers_are_pure_and_covered():
+    script = Path(__file__).with_name("fixtures") / "mosaic_geometry.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(STATIC_ROOT / "app.mosaic-geometry.js")],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_static_mosaic_geometry_is_wired_before_message_pack():
+    app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
+    geometry_index = app_js.index('src="/static/app.mosaic-geometry.js"')
+    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
+    assert geometry_index < message_pack_index
+
+
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
     css = _serve_css_text()
 
