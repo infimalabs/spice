@@ -90,9 +90,11 @@ async function setupMosaicFixture(page, edges, gap) {
 // Initial placement (first apply always writes, must not touch the plane)
 // plus the first plane/host sync. Stashes prevA/prevB/prevMaxRow/prevExtent
 // on the fixture for later steps. Also covers the two §9 first-paint sites:
-// the plane's pre-anchor (mosaicAnchorPlane, run before any card renders)
-// and the first card's suppress/write/reenable sequence, captured as
-// ordered logs so the assertions can check sequence, not just occurrence.
+// the plane's first sync from the null prevMaxRow sentinel (run at the REAL
+// frontier target before any card renders -- a fresh plane is never
+// anchored at a placeholder and animated away) and the first card's
+// suppress/write/reenable sequence, captured as ordered logs so the
+// assertions can check sequence, not just occurrence.
 async function measureInitialPlacement(page, cards, m, styleProps) {
   return page.evaluate(
     ({ cards, m, styleProps }) => {
@@ -101,14 +103,16 @@ async function measureInitialPlacement(page, cards, m, styleProps) {
       const log = window.__mosaicInstrumentStyleLog;
       const count = window.__mosaicWriteCount;
 
+      f.extent = mosaicCardsExtent(cards);
       const anchorLog = log(f.plane, ["transition", "transform"]);
-      f.prevMaxRow = mosaicAnchorPlane(f.plane, m, {});
+      f.prevMaxRow = mosaicSyncPlane(f.plane, f.extent.maxRow, null, m, {});
       const anchorTransform = f.plane.style.transform;
       const anchorTransitionAfter = f.plane.style.transition;
-      // Independent oracle (spec §9: plane translated by -(K-maxRow)*M; at
-      // maxRow=0 that's -K*M) rather than re-deriving via mosaicPlaneTransform,
-      // so this cannot pass merely by the module being self-consistent.
-      const expectedAnchorTransform = `translateY(${-MOSAIC_PLANE_K * m}px)`;
+      // Independent oracle (spec §9: plane translated by -(K-maxRow)*M at
+      // the REAL first target) rather than re-deriving via
+      // mosaicPlaneTransform, so this cannot pass merely by the module
+      // being self-consistent.
+      const expectedAnchorTransform = `translateY(${-(MOSAIC_PLANE_K - f.extent.maxRow) * m}px)`;
 
       const planeCounts = instr(f.plane, ["transform", "transition"]);
       const cardALog = log(f.cardA, ["transition", "transform", "width", "height", "opacity"]);
@@ -116,7 +120,6 @@ async function measureInitialPlacement(page, cards, m, styleProps) {
       f.prevB = mosaicApplyCardPosition(f.cardB, cards[1], null, f.edges, m, f.gap, {});
       const planeTouchedByCardApply = count(planeCounts);
 
-      f.extent = mosaicCardsExtent(cards);
       const cardACounts = instr(f.cardA, styleProps);
       const cardBCounts = instr(f.cardB, styleProps);
       f.prevMaxRow = mosaicSyncPlane(f.plane, f.extent.maxRow, f.prevMaxRow, m, {});
@@ -250,12 +253,13 @@ function assertMosaicRenderInvariants(result) {
   if (!result.prevMaxRowUnchanged || !result.extentUnchangedRef)
     fail("no-op sync did not return the prior reference");
 
-  // §9 first-paint rule, plane side: pre-anchored to the K constant before
-  // the first card renders, with the anchor write itself transition-free.
+  // §9 first-paint rule, plane side: the first sync from the null sentinel
+  // lands the REAL frontier target transition-free before the first card
+  // renders -- never a placeholder that the same render animates away.
   if (result.anchorTransform !== result.expectedAnchorTransform)
-    fail("plane was not pre-anchored to the K constant before the first card");
+    fail("plane first sync did not land the real K-anchored frontier target");
   if (result.anchorTransitionAfter !== "")
-    fail("plane transition was not re-enabled after the pre-anchor forced flush");
+    fail("plane transition was not re-enabled after the first-sync forced flush");
   const anchorLog = result.anchorLog;
   const anchorOrdered =
     anchorLog.length === 3 &&
@@ -263,7 +267,7 @@ function assertMosaicRenderInvariants(result) {
     anchorLog[1][0] === "transform" && anchorLog[1][1] === result.expectedAnchorTransform &&
     anchorLog[2][0] === "transition" && anchorLog[2][1] === "";
   if (!anchorOrdered)
-    fail("plane pre-anchor did not suppress/write/re-enable transition in that order");
+    fail("plane first sync did not suppress/write/re-enable transition in that order");
 
   // §9 first-paint rule, card side: the fresh transform write must land
   // strictly between the transition:'none' write and the re-enable, so no
@@ -296,7 +300,6 @@ async function run() {
         () =>
           typeof mosaicApplyCardPosition === "function" &&
           typeof mosaicSyncPlane === "function" &&
-          typeof mosaicAnchorPlane === "function" &&
           typeof mosaicSyncHostHeight === "function" &&
           typeof mosaicCardsExtent === "function" &&
           typeof mosaicCardY === "function" &&

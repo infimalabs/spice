@@ -102,20 +102,19 @@ function mosaicLaneReady(lane) {
   // correct force-a-write case), and needs no manual cleanup since entries
   // vanish with their (detached, unreferenced) elements.
   lane.mosaicAppliedByNode = new WeakMap();
-  lane.mosaicPrevMaxRow = 0;
+  lane.mosaicPrevMaxRow = null;
   lane.mosaicPrevExtent = null;
   lane.mosaicGeometry = null;
   lane.mosaicSettled = false;
   lane.mosaicSettleTimer = 0;
 }
 
-// geometry must already be resolved for THIS render before a fresh plane
-// is anchored: mosaicAnchorPlane's first-paint transform has to read the
-// real M immediately, never a placeholder later overwritten by
-// mosaicApplyRender's mosaicSyncPlane call -- a wrong interim value here
-// is exactly the kind of stale/incorrect plane transform the documented
-// call-order contract on mosaicApplyCardPosition warns against (see
-// app.mosaic-render.js).
+// A fresh plane carries NO transform until mosaicApplyRender's first
+// mosaicSyncPlane call, which receives the null prevMaxRow sentinel and
+// writes the real frontier target with first-paint discipline (transition
+// suppressed, one flush) -- before any card write, per the call-order
+// contract on mosaicApplyCardPosition (see app.mosaic-render.js). Creating
+// a plane therefore never animates the board in, at any settle state.
 function mosaicPlane(lane, geometry) {
   mosaicLaneReady(lane);
   if (
@@ -140,7 +139,7 @@ function mosaicPlane(lane, geometry) {
   lane.mosaicPlaneEl = plane;
   lane.mosaicExtentEl = extentEl;
   lane.mosaicAppliedByNode = new WeakMap();
-  lane.mosaicPrevMaxRow = mosaicAnchorPlane(plane, geometry.M);
+  lane.mosaicPrevMaxRow = null;
   lane.mosaicPrevExtent = null;
   return plane;
 }
@@ -637,11 +636,11 @@ function mosaicRenderMessageStream(lane, visibleItems) {
     // First-paint discipline board-wide: whatever the engine rendered (or
     // froze) while the lane was unmeasurable, no tween may start from that
     // baseline. Dropping the applied-position memo makes every card look
-    // fresh to mosaicApplyCardPosition, and the NaN/null sentinels force
-    // unconditional plane-transform and extent rewrites -- all of which the
-    // snap option below applies with transitions suppressed in one flush.
+    // fresh to mosaicApplyCardPosition, and the null sentinels force
+    // unconditional first-paint plane-transform and extent rewrites --
+    // everything lands with transitions suppressed.
     lane.mosaicAppliedByNode = new WeakMap();
-    lane.mosaicPrevMaxRow = NaN;
+    lane.mosaicPrevMaxRow = null;
     lane.mosaicPrevExtent = null;
   }
   // Geometry first: the plane is position:absolute, so creating it cannot

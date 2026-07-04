@@ -141,26 +141,16 @@ function mosaicApplyCardPosition(el, card, prev, edges, M, gap, options) {
   return { t: card.t, b: card.b, n: card.n, span: card.span };
 }
 
-// First-paint rule applied to the plane itself (§9): call once, before the
-// first card is ever created, so the plane's actual inline transform already
-// reads the K-anchor value with no transition in play. Without this, the
-// plane's own first mosaicSyncPlane call would tween from its untouched CSS
-// default (the identity matrix) up to the K-anchor -- the same "transitions
-// from the identity matrix" bug the card-side first-paint rule guards
-// against, just on the plane instead of a card. Returns 0, the `prevMaxRow`
-// baseline a caller threads into the first mosaicSyncPlane call.
-function mosaicAnchorPlane(planeEl, M, options) {
-  const reducedMotion = Boolean(options && options.reducedMotion);
-  planeEl.style.transition = "none";
-  planeEl.style.transform = mosaicPlaneTransform(0, M);
-  void planeEl.offsetWidth;
-  planeEl.style.transition = reducedMotion ? "none" : "";
-  return 0;
-}
-
 // Applies the uniform plane component. Returns the maxRow to remember as
 // `prevMaxRow` next call. No-ops (no style write) when maxRow is unchanged,
 // mirroring the card-side skip invariant for the plane itself.
+//
+// prevMaxRow === null is the first-paint sentinel (§9): a fresh plane (or a
+// reveal rebuild) has no visible prior state, so its FIRST sync writes the
+// real target with transitions suppressed and one forced flush -- never a
+// placeholder value that the same render then animates away. Anchoring at a
+// synthetic maxRow 0 and tweening to the real frontier made every lane
+// open/reopen slide the whole board in by its own height.
 //
 // options.scrolled + options.onCompensate implement the plane behavior rule
 // (§9): scrolled down-page, the jump is applied with transitions disabled
@@ -171,6 +161,13 @@ function mosaicSyncPlane(planeEl, maxRow, prevMaxRow, M, options) {
   if (maxRow === prevMaxRow) return prevMaxRow;
   const transform = mosaicPlaneTransform(maxRow, M);
   const reducedMotion = Boolean(options && options.reducedMotion);
+  if (prevMaxRow === null || prevMaxRow === undefined) {
+    planeEl.style.transition = "none";
+    planeEl.style.transform = transform;
+    void planeEl.offsetWidth;
+    planeEl.style.transition = reducedMotion ? "none" : "";
+    return maxRow;
+  }
   const replaying = Boolean(options && options.replaying);
   const scrolled = Boolean(options && options.scrolled);
   const snap = Boolean(options && options.snap);
