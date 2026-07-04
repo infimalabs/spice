@@ -369,9 +369,10 @@ function renderMessagesIfChanged(lane) {
   }
   const viewportAnchor = captureMessageViewportAnchor(lane);
   suppressLanePaneScrollIntentForFrame(lane);
-  mosaicRenderMessageStream(lane, visibleItems);
+  const mosaicRenderResult = mosaicRenderMessageStream(lane, visibleItems);
   mosaicAttachHistorySentinels(lane, visibleItems);
   restoreMessageViewportAnchor(lane, viewportAnchor);
+  mosaicRestoreBackfillViewport(lane, mosaicRenderResult);
   syncLaneHistoryObserver(lane);
   syncTeamImportOverlay(lane);
   lane.renderedMessageFingerprint = fingerprint;
