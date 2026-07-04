@@ -351,6 +351,35 @@ async function measurePlaneRecreate(page) {
   }));
 }
 
+// Resize discipline: a burst of width changes coalesces to exactly one
+// full replay at the settled width; a grow/shrink round-trip inside the
+// debounce window produces zero replays (geometry lands back where the
+// committed lattice already is).
+async function measureResizeBurst(page) {
+  const replayCount = () =>
+    page.evaluate(
+      () =>
+        hiddenRevealResolveLane().mosaicEventLog.events.filter(
+          (event) => event.type === "full-replay",
+        ).length,
+    );
+  const before = await replayCount();
+  await page.setViewportSize({ width: 1180, height: 900 });
+  await page.setViewportSize({ width: 1080, height: 900 });
+  await page.setViewportSize({ width: 980, height: 900 });
+  await page.waitForTimeout(600);
+  const afterBurst = await replayCount();
+  await page.setViewportSize({ width: 1120, height: 900 });
+  await page.waitForTimeout(40);
+  await page.setViewportSize({ width: 980, height: 900 });
+  await page.waitForTimeout(600);
+  const afterRoundTrip = await replayCount();
+  return {
+    burstReplays: afterBurst - before,
+    roundTripReplays: afterRoundTrip - afterBurst,
+  };
+}
+
 async function run() {
   return withServePage(
     {
@@ -381,6 +410,17 @@ async function run() {
           "settled plane recreation animated: " + recreate.transitions.join(","),
         );
       assertAgreement(recreate.agreement, "settled plane recreation");
+      const resize = await measureResizeBurst(page);
+      if (resize.burstReplays !== 1)
+        throw new Error(
+          "resize burst ran " + resize.burstReplays + " full replays (want 1)",
+        );
+      if (resize.roundTripReplays !== 0)
+        throw new Error(
+          "debounced width round-trip ran " +
+            resize.roundTripReplays +
+            " full replays (want 0)",
+        );
       return {
         floor,
         queued: revealed.queued,

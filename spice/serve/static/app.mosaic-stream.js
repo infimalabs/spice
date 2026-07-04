@@ -35,6 +35,12 @@ const MOSAIC_MIN_RENDER_WIDTH_PX = 24;
 // settled-board rule suppresses every transform transition (spec §12
 // settleQuiet). Settling flips a flag and never triggers a render.
 const MOSAIC_SETTLE_QUIET_MS = 500;
+// Width churn coalesces: a burst of host width changes (lane mounts, pane
+// dividers mid-drag, window drags) runs ONE full replay at the settled
+// width instead of one per observation. The reveal path (deferred renders
+// waiting on the 0-to-real transition) bypasses the debounce -- stale
+// content should come back in a frame, not a fifth of a second.
+const MOSAIC_RESIZE_DEBOUNCE_MS = 200;
 const MOSAIC_SETTLE_INTERACTION_EVENTS = [
   "pointerdown",
   "wheel",
@@ -753,7 +759,15 @@ function mosaicSyncResizeObserver(lane) {
   if (!lane.mosaicResizeObserver) {
     lane.mosaicResizeObserver = new ResizeObserver(() => {
       if (!mosaicHostResizeChanged(lane)) return;
-      mosaicScheduleFullReplay(lane);
+      if (lane.mosaicRenderDeferred) {
+        mosaicScheduleFullReplay(lane);
+        return;
+      }
+      if (lane.mosaicResizeDebounce) clearTimeout(lane.mosaicResizeDebounce);
+      lane.mosaicResizeDebounce = setTimeout(() => {
+        lane.mosaicResizeDebounce = 0;
+        mosaicScheduleFullReplay(lane);
+      }, MOSAIC_RESIZE_DEBOUNCE_MS);
     });
     lane.mosaicHostResizeSize = mosaicElementResizeSize(lane.messagesEl);
     lane.mosaicResizeObserver.observe(lane.messagesEl);
@@ -819,6 +833,10 @@ function mosaicResetResizeObserver(lane) {
   if (lane.mosaicSettleTimer) {
     clearTimeout(lane.mosaicSettleTimer);
     lane.mosaicSettleTimer = 0;
+  }
+  if (lane.mosaicResizeDebounce) {
+    clearTimeout(lane.mosaicResizeDebounce);
+    lane.mosaicResizeDebounce = 0;
   }
   if (lane.mosaicFrame) {
     cancelAnimationFrame(lane.mosaicFrame);
