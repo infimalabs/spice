@@ -183,13 +183,14 @@ def test_serve_task_stack_smoke_asserts_card_fill() -> None:
     assert "measureTaskStack(page, 1920)" in smoke
     assert "measureTaskStack(page, 520)" in smoke
     assert "messageCardLimit: rootFontSize * 30" in smoke
-    assert "imageTileWidth * 2" in smoke
+    assert "const minCardWidth = measurement.messageCardFloor" in smoke
     assert "task card below card min width" in smoke
     assert "wide image card consumed too much row" in smoke
     assert "wrapped image card did not fill row" in smoke
     assert "wide message cards did not fill the row" in smoke
     assert "wrapped message card did not fill row" in smoke
-    assert "major-row packing overlapped the previous row group" in smoke
+    assert "wide message cards did not create multiple packed tiers" in smoke
+    assert "message cards still look stretched to row height" in smoke
     assert "message repack moved the reading anchor" in smoke
 
 

@@ -457,26 +457,35 @@ function historySentinelForLane(lane) {
   return lane.historySentinelEl;
 }
 
-// Deterministic Mosaic: root width chooses a small set of major columns and a
-// matching major row band. Regular streams fill each barrier segment in
-// document order, left to right, with no hidden column spans. Existing pins are
-// kept when the same-width stream grows above or below the retained items so
-// reading position stays stable; width changes clear pins and run the ordered
-// pass again. Fused team streams remain member-lane columns with natural-height
-// cards.
+// Deterministic Mosaic: every stream uses a stable 12-track grid. Root width
+// chooses up to six effective card slots that divide the 12 tracks cleanly, then
+// each card spans an even slice while columns stack at natural card height.
+// Existing pins are kept when the same-width stream grows above or below the
+// retained items so reading position stays stable; effective column changes
+// clear pins and run the ordered pass again. Team hosts use the same card
+// stream; the grouping contract is producer attribution, not a separate visual
+// lane per member.
 function packMessageStream(lane) {
   const host = lane.messagesEl;
   if (!host) return;
-  const style = getComputedStyle(host);
+  let style = getComputedStyle(host);
   if (style.display !== "grid") return;
+  const columnCount = messagePackColumnCount(host, style);
+  const naturalHeightMode = columnCount <= 1;
+  const rootWidthChanged = syncMessagePackRootWidth(lane, host, style, columnCount);
+  const columnCountChanged = setMessagePackColumnCount(
+    host,
+    messagePackGridTrackCount,
+  );
+  const trackMinChanged = setMessagePackTrackMin(host, "0px");
+  const gridChanged =
+    rootWidthChanged || columnCountChanged || trackMinChanged;
+  if (gridChanged) host.getBoundingClientRect();
+  style = getComputedStyle(host);
   const rowHeight = cssPixelValue(style.gridAutoRows) || 8;
   const rowGap = cssPixelValue(style.rowGap) || 0;
   const rowStride = rowHeight + rowGap;
   if (!Number.isFinite(rowStride) || rowStride <= 0) return;
-  const columnCount = messagePackColumnCount(lane, host, style);
-  const fusedHost = laneIsFusedHost(lane);
-  const naturalHeightMode = columnCount <= 1 || fusedHost;
-  setMessagePackColumnCount(host, columnCount);
   const itemKeys = messagePackItemKeys(host);
   const reflowing = messagePackShouldReflow(lane, host, columnCount, itemKeys);
   if (reflowing) {
@@ -484,74 +493,82 @@ function packMessageStream(lane) {
       if (isMessagePackItem(node)) clearMessagePackPlacement(node);
     }
   }
-  const bandRows = messagePackBandRows(host, style, columnCount, rowStride);
-  const bandValue = String(bandRows);
-  if (host.style.getPropertyValue("--message-pack-band-active") !== bandValue)
-    host.style.setProperty("--message-pack-band-active", bandValue);
   const columnRows = new Array(Math.max(1, columnCount)).fill(0);
   let segmentKey = "top";
   let segmentIndex = 0;
-  let segmentRowStart = 0;
+  const columnSpan = messagePackColumnSpan(columnRows.length);
   for (const node of host.children) {
     if (!isMessagePackItem(node)) continue;
     let height = messagePackItemHeight(node, naturalHeightMode);
     if (!Number.isFinite(height) || height <= 0) continue;
     let naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
-    if (columnCount <= 1 || isMessagePackBarrier(node)) {
-      setMessagePackRowSpan(node, naturalSpan);
+    const barrier = isMessagePackBarrier(node);
+    if (columnCount <= 1 || barrier) {
       const start = Math.max(...columnRows);
-      setMessagePackPosition(node, "", start + 1, 1);
-      columnRows.fill(start + naturalSpan);
-      if (isMessagePackBarrier(node)) {
-        segmentKey = messagePackBarrierKey(node);
-        segmentIndex = 0;
-        segmentRowStart = Math.max(...columnRows);
-      }
-      continue;
-    }
-    if (!fusedHost && segmentIndex % columnRows.length === 0)
-      segmentRowStart = Math.max(...columnRows);
-    const placementColumn = fusedHost
-      ? fusedMessagePackColumn(node, columnRows.length)
-      : orderedMessagePackColumn(
-          node,
-          segmentKey,
-          segmentIndex,
-          columnRows.length,
-          reflowing,
-        );
-    const placementRow = fusedHost
-      ? columnRows[placementColumn]
-      : segmentRowStart;
-    if (!fusedHost) {
       setMessagePackProvisionalPosition(
         node,
-        String(placementColumn + 1),
-        placementRow + 1,
-        1,
+        "1",
+        start + 1,
+        messagePackGridTrackCount,
       );
       height = naturalMessagePackItemHeight(node);
       if (!Number.isFinite(height) || height <= 0) continue;
       naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
+      setMessagePackRowSpan(node, naturalSpan);
+      setMessagePackPosition(
+        node,
+        "1",
+        start + 1,
+        messagePackGridTrackCount,
+      );
+      columnRows.fill(start + naturalSpan);
+      if (barrier) {
+        segmentKey = messagePackBarrierKey(node);
+        segmentIndex = 0;
+      }
+      continue;
     }
-    // Cards round up to whole bands and stretch to fill them (CSS align-self),
-    // so the quantization slack lives inside the card box instead of the grid.
-    // Image-only cards keep their natural span: stretching would distort them,
-    // and start-alignment keeps the slack invisible against the row below.
-    const span = fusedHost
-      ? naturalSpan
-      : node.classList.contains("image-only")
-        ? naturalSpan
-        : Math.ceil(naturalSpan / bandRows) * bandRows;
+    const slotSpan = messagePackSlotSpan(node, columnRows.length);
+    const placementColumn = orderedMessagePackColumn(
+      node,
+      segmentKey,
+      segmentIndex,
+      columnRows.length,
+      columnRows,
+      slotSpan,
+      reflowing,
+    );
+    const placementRow = maxMessagePackRows(
+      columnRows,
+      placementColumn,
+      slotSpan,
+    );
+    const gridColumnStart = messagePackGridColumnStart(placementColumn, columnSpan);
+    const gridColumnSpan = columnSpan * slotSpan;
+    setMessagePackProvisionalPosition(
+      node,
+      String(gridColumnStart),
+      placementRow + 1,
+      gridColumnSpan,
+    );
+    height = naturalMessagePackItemHeight(node);
+    if (!Number.isFinite(height) || height <= 0) continue;
+    naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
+    const span = naturalSpan;
     setMessagePackRowSpan(node, span);
     setMessagePackPosition(
       node,
-      String(placementColumn + 1),
+      String(gridColumnStart),
       placementRow + 1,
-      1,
+      gridColumnSpan,
     );
-    fillMessagePackRows(columnRows, placementColumn, 1, placementRow + span);
-    if (!fusedHost) segmentIndex += 1;
+    fillMessagePackRows(
+      columnRows,
+      placementColumn,
+      slotSpan,
+      placementRow + span,
+    );
+    segmentIndex += slotSpan;
   }
   commitMessagePackLayoutState(lane, host, columnCount, itemKeys);
 }
