@@ -299,7 +299,8 @@ function masonrySmokeBodyHtml(shape, step) {
       "<li>Verified wide screen refresh.</li>" +
       "<li>Checked responsive resize behavior.</li></ul>" +
       "<pre><code>spice task done UI-1k9vBqzn --validation \"...\"</code></pre>" +
-      "<p>Final response section two stays long enough to exercise a tall card.</p>"
+      "<p>Final response section two stays long enough to exercise a tall card.</p>" +
+      "<p>Review notes keep this fixture safely above ordinary message height.</p>"
     );
   return sentence + sentence + sentence + sentence + sentence;
 }
@@ -371,7 +372,7 @@ async function masonrySmokeMeasurement(lane, host, config) {
     ? { reflowed: true }
     : await masonrySmokePinnedCollapseReflowAudit(lane, host, config);
   const observerFanoutAudit = config.captureOnly
-    ? { hostObserved: true, mediaHandlerCount: 0, observedCount: 1 }
+    ? { hostObserved: true, observedCount: 1 }
     : masonrySmokeObserverFanoutAudit(lane);
   return {
     appendStabilityAudit,

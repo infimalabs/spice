@@ -269,26 +269,29 @@ def test_static_messages_use_stable_packed_rows():
     assert "flex-wrap: nowrap;" in stack_rule
     assert "justify-content: flex-start;" in stack_rule
     assert "overflow-x: auto;" in stack_rule
-    assert "max-height: 136px;" in stack_image_rule
+    assert "max-height: var(--mosaic-image-height);" in stack_image_rule
     assert "max-width: 156px;" in stack_image_rule
     assert "object-fit: contain;" in stack_image_rule
     assert ".messages article.image-only .message-image img" in css
-    assert "max-height: 136px" in css
+    assert "--mosaic-image-height: 140px;" in css
+    assert "--mosaic-image-large-height: 252px;" in css
     assert "align-items: center;" in image_only_stack_rule
     assert "justify-content: flex-end;" in image_only_stack_rule
     assert "max-width: min(100%, 56rem);" in image_only_link_rule
     assert "min-width: 0;" in image_only_link_rule
-    assert "max-height: min(32vh, 260px);" in image_only_image_rule
+    assert "height: var(--mosaic-image-large-height);" in image_only_image_rule
+    assert "max-height: var(--mosaic-image-large-height);" in image_only_image_rule
     assert "max-width: 100%;" in image_only_image_rule
     assert "width: auto;" in image_only_image_rule
     assert ".history-sentinel {\n  grid-column: 1 / -1;" in css
     assert "function packMessageStream(lane)" in app_stream
-    assert "const messagePackLayoutVersion = 4;" in app_message_pack
+    assert "const messagePackLayoutVersion = 5;" in app_message_pack
     assert "function messagePackPinnedLayoutCollapsed(" in app_message_pack
     assert "function scheduleMessageStreamPack(lane)" in app_stream
     assert "restoreMessageViewportAnchor(lane, anchor);" in app_stream
     assert "syncMessagePackObserver(lane);" in app_stream
-    assert "syncMessagePackImageLoadHandlers(lane);" in app_stream
+    assert "function messagePackReservedSpan(" in app_message_pack
+    assert "mosaicReservationRows(" in app_message_pack
     assert "lane.messagePackResizeObserver.observe(lane.messagesEl);" in app_stream
     assert 'if (item.image_only) article.classList.add("image-only");' in app_render
 

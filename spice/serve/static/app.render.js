@@ -686,6 +686,8 @@ function renderMessage(lane, item) {
   if (item.kind === "final") article.classList.add("final");
   if (item.image_only) article.classList.add("image-only");
   article.dataset.messageKey = item.key;
+  const reservationType = messageReservationType(lane, item);
+  if (reservationType) article.dataset.mosaicReservationType = reservationType;
   article.id = messageDomId(item.key);
   stampMessageTimestamp(article, item);
   if (item.threadId) article.dataset.threadId = item.threadId;
@@ -701,8 +703,33 @@ function renderMessage(lane, item) {
   article.append(renderMessageContent(lane, item));
   if (article.querySelector(".message-image, .ack-attachment"))
     article.classList.add("media-rich");
+  if (!article.dataset.mosaicReservationType && article.querySelector(".message-image"))
+    article.dataset.mosaicReservationType = "image";
   article.append(renderMessageFooter(lane, item, maximAckCount));
   return article;
+}
+
+function messageReservationType(lane, item) {
+  if (messageHasPendingAckContext(lane, item)) return "ack";
+  if (item.image_only) return "imageLarge";
+  return "";
+}
+
+function messageHasPendingAckContext(lane, item) {
+  for (const key of messageAckSegmentKeys(item)) {
+    if (key && !ackContextForKey(lane, key)) return true;
+  }
+  return false;
+}
+
+function messageAckSegmentKeys(item) {
+  const keys = [];
+  for (const segment of item.ack_segments || []) {
+    for (const key of segment.keys || []) {
+      if (key && !keys.includes(key)) keys.push(key);
+    }
+  }
+  return keys;
 }
 
 function messageOccupantAccent(occupant) {
@@ -744,25 +771,65 @@ function makeMessageBody(html, fallbackText) {
 }
 
 function renderSegmentQuotes(lane, keys) {
-  const contexts = (keys || [])
-    .map((key) => ackContextForKey(lane, key))
-    .filter((context) => context && context.text);
-  if (!contexts.length) return null;
+  const refs = (keys || [])
+    .filter((key) => key)
+    .map((key) => ({ key, context: ackContextForKey(lane, key) }));
+  if (!refs.length) return null;
   const wrap = document.createElement("div");
   wrap.className = "ack-quotes";
-  for (const context of contexts) {
-    const quote = document.createElement("blockquote");
-    quote.className = "ack-quote";
-    if (context.priority === maximPriority) quote.classList.add("maxim-quote");
-    quote.innerHTML = context.html || "";
-    if (!quote.childNodes.length)
-      quote.append(document.createTextNode(context.text));
-    quote.querySelectorAll("hr").forEach((rule) => rule.remove());
-    const attachments = renderAckAttachments(context.attachments || []);
-    if (attachments) quote.append(attachments);
-    wrap.append(quote);
+  for (const ref of refs) {
+    wrap.append(
+      ref.context && ref.context.text
+        ? renderAckQuote(ref.context)
+        : renderPendingAckQuote(ref.key),
+    );
   }
   return wrap;
+}
+
+function renderAckQuote(context) {
+  const quote = document.createElement("blockquote");
+  quote.className = "ack-quote";
+  if (context.priority === maximPriority) quote.classList.add("maxim-quote");
+  quote.innerHTML = context.html || "";
+  if (!quote.childNodes.length) quote.append(document.createTextNode(context.text));
+  quote.querySelectorAll("hr").forEach((rule) => rule.remove());
+  const attachments = renderAckAttachments(context.attachments || []);
+  if (attachments) quote.append(attachments);
+  return quote;
+}
+
+function renderPendingAckQuote(key) {
+  const quote = document.createElement("blockquote");
+  quote.className = "ack-quote ack-quote--pending";
+  quote.dataset.ackContextKey = key;
+  quote.dataset.mosaicReservationType = "ack";
+  quote.setAttribute("aria-hidden", "true");
+  const reservePx = pendingAckQuoteReservePx();
+  if (Number.isFinite(reservePx) && reservePx > 0)
+    quote.style.setProperty("--ack-quote-reserve", reservePx + "px");
+  for (const width of ["wide", "mid"]) {
+    const line = document.createElement("span");
+    line.className = "ack-quote-skeleton-line ack-quote-skeleton-line--" + width;
+    quote.append(line);
+  }
+  return quote;
+}
+
+function pendingAckQuoteReservePx() {
+  if (typeof mosaicReservationPriorPx === "function") {
+    const px = mosaicReservationPriorPx("ack", pendingAckRootFontSizePx());
+    if (Number.isFinite(px)) return px;
+  }
+  return 56;
+}
+
+function pendingAckRootFontSizePx() {
+  if (typeof mosaicRootFontSizePx === "function") return mosaicRootFontSizePx();
+  const parsed = Number.parseFloat(
+    getComputedStyle(document.documentElement).fontSize,
+  );
+  return Number.isFinite(parsed) ? parsed : 16;
 }
 
 function renderAckAttachments(attachments) {

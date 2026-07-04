@@ -530,14 +530,15 @@ function packMessageStream(lane) {
       height = naturalMessagePackItemHeight(node);
       if (!Number.isFinite(height) || height <= 0) continue;
       naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
-      setMessagePackRowSpan(node, naturalSpan);
+      const span = messagePackReservedSpan(node, naturalSpan, rowGap, rowStride);
+      setMessagePackRowSpan(node, span);
       setMessagePackPosition(
         node,
         "1",
         start + 1,
         messagePackGridTrackCount,
       );
-      columnRows.fill(start + naturalSpan);
+      columnRows.fill(start + span);
       if (barrier) {
         segmentKey = messagePackBarrierKey(node);
         segmentIndex = 0;
@@ -573,7 +574,7 @@ function packMessageStream(lane) {
     height = naturalMessagePackItemHeight(node);
     if (!Number.isFinite(height) || height <= 0) continue;
     naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
-    const span = naturalSpan;
+    const span = messagePackReservedSpan(node, naturalSpan, rowGap, rowStride);
     setMessagePackRowSpan(node, span);
     setMessagePackPosition(
       node,
@@ -619,31 +620,6 @@ function syncMessagePackObserver(lane) {
     if (!current.has(node)) lane.messagePackResizeObserver.unobserve(node);
   }
   lane.messagePackObservedNodes = current;
-  syncMessagePackImageLoadHandlers(lane);
-}
-
-function syncMessagePackImageLoadHandlers(lane) {
-  if (!lane.messagesEl) return;
-  if (!lane.messagePackImageLoadHandlers)
-    lane.messagePackImageLoadHandlers = new Map();
-  const current = new Set(
-    lane.messagesEl.querySelectorAll(
-      "article.media-rich img, article.image-only img",
-    ),
-  );
-  for (const image of current) {
-    if (lane.messagePackImageLoadHandlers.has(image)) continue;
-    const handler = () => scheduleMessageStreamPack(lane);
-    image.addEventListener("load", handler);
-    image.addEventListener("error", handler);
-    lane.messagePackImageLoadHandlers.set(image, handler);
-  }
-  for (const [image, handler] of lane.messagePackImageLoadHandlers) {
-    if (current.has(image)) continue;
-    image.removeEventListener("load", handler);
-    image.removeEventListener("error", handler);
-    lane.messagePackImageLoadHandlers.delete(image);
-  }
 }
 
 function messagePackHostResizeChanged(lane) {
@@ -668,11 +644,6 @@ function resetMessagePackObserver(lane) {
   if (lane.messagePackResizeObserver) lane.messagePackResizeObserver.disconnect();
   lane.messagePackObservedNodes = new Set();
   lane.messagePackHostResizeSize = null;
-  for (const [image, handler] of lane.messagePackImageLoadHandlers || []) {
-    image.removeEventListener("load", handler);
-    image.removeEventListener("error", handler);
-  }
-  lane.messagePackImageLoadHandlers = new Map();
 }
 
 function isMessagePackItem(node) {
