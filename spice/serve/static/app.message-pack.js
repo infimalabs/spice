@@ -7,10 +7,12 @@ const messageCardBorderAllowancePx = 2;
 const messagePackGridTrackCount = 12;
 const messagePackMaxEffectiveColumns = 6;
 const messagePackEffectiveColumnCounts = [6, 4, 3, 2, 1];
-const messagePackLayoutVersion = 3;
+const messagePackLayoutVersion = 4;
 const messagePackLegalTrackSpans = [2, 3, 4, 6, 12];
 const messagePackSlackPenalty = 3;
 const messagePackTallFinalMinHeightPx = 280;
+const messagePackHashInitial = 2166136261;
+const messagePackHashMultiplier = 16777619;
 
 function messagePackItemHeight(node, naturalHeightMode = false) {
   const rectHeight = node.getBoundingClientRect().height;
@@ -253,6 +255,7 @@ function orderedMessagePackColumn(
   node,
   segmentKey,
   segmentIndex,
+  segmentSeed,
   columnCount,
   columnRows,
   slotSpan,
@@ -269,6 +272,7 @@ function orderedMessagePackColumn(
   if (pinned >= 0) return pinned;
   const column = messagePackBestColumn(
     segmentIndex,
+    segmentSeed,
     columnCount,
     columnRows,
     slotSpan,
@@ -301,6 +305,7 @@ function messagePackPinnedColumn(
 
 function messagePackBestColumn(
   segmentIndex,
+  segmentSeed,
   columnCount,
   columnRows,
   slotSpan,
@@ -309,6 +314,13 @@ function messagePackBestColumn(
   const rightToLeft = messagePackPlacementRightToLeft(
     segmentIndex,
     columnCount,
+  );
+  const preferredColumn = messagePackPlacementPreferredColumn(
+    segmentIndex,
+    segmentSeed,
+    columnCount,
+    slotSpan,
+    placementStep,
   );
   const step = Math.max(1, placementStep);
   let best = { column: 0, row: Infinity, score: Infinity };
@@ -323,9 +335,33 @@ function messagePackBestColumn(
       slotSpan,
     );
     const current = { column: candidate, ...candidateMetrics };
-    if (messagePackPlacementBeats(current, best, rightToLeft)) best = current;
+    if (messagePackPlacementBeats(current, best, preferredColumn, rightToLeft))
+      best = current;
   }
   return best.column;
+}
+
+function messagePackPlacementPreferredColumn(
+  segmentIndex,
+  segmentSeed,
+  columnCount,
+  slotSpan,
+  placementStep,
+) {
+  const step = Math.max(1, placementStep);
+  const candidateCount = messagePackPlacementCandidateCount(
+    columnCount,
+    slotSpan,
+    step,
+  );
+  if (candidateCount <= 1) return 0;
+  const sequenceIndex = Math.floor(Math.max(0, segmentIndex) / step);
+  const preferredIndex = (sequenceIndex + segmentSeed) % candidateCount;
+  return preferredIndex * step;
+}
+
+function messagePackPlacementCandidateCount(columnCount, slotSpan, step) {
+  return Math.floor(Math.max(0, columnCount - slotSpan) / step) + 1;
 }
 
 function messagePackPlacementRightToLeft(segmentIndex, columnCount) {
@@ -333,11 +369,20 @@ function messagePackPlacementRightToLeft(segmentIndex, columnCount) {
   return Math.floor(segmentIndex / columnCount) % 2 === 1;
 }
 
-function messagePackPlacementBeats(candidate, current, rightToLeft) {
+function messagePackPlacementBeats(
+  candidate,
+  current,
+  preferredColumn,
+  rightToLeft,
+) {
   if (candidate.score < current.score) return true;
   if (candidate.score > current.score) return false;
   if (candidate.row < current.row) return true;
   if (candidate.row > current.row) return false;
+  const candidateDistance = Math.abs(candidate.column - preferredColumn);
+  const currentDistance = Math.abs(current.column - preferredColumn);
+  if (candidateDistance < currentDistance) return true;
+  if (candidateDistance > currentDistance) return false;
   if (rightToLeft) return candidate.column > current.column;
   return candidate.column < current.column;
 }
@@ -388,6 +433,21 @@ function messagePackPreferredTrackSpan(minimumTrackSpan, preferredTrackSpan) {
     if (span >= target) return span;
   }
   return messagePackGridTrackCount;
+}
+
+function messagePackSegmentSeed(segmentKey) {
+  if (!segmentKey || segmentKey === "top") return 0;
+  let hash = messagePackHashInitial;
+  for (let index = 0; index < segmentKey.length; index += 1) {
+    hash ^= segmentKey.charCodeAt(index);
+    hash = Math.imul(hash, messagePackHashMultiplier) >>> 0;
+  }
+  return hash;
+}
+
+function messagePackBarrierSegmentSeed(node, segmentKey) {
+  if (node.dataset.historyTargetId) return 0;
+  return messagePackSegmentSeed(segmentKey);
 }
 
 function maxMessagePackRows(columnRows, column, columnSpan) {

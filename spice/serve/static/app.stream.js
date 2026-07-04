@@ -512,6 +512,7 @@ function packMessageStream(lane) {
   const columnRows = new Array(messagePackGridTrackCount).fill(0);
   let segmentKey = "top";
   let segmentIndex = 0;
+  let segmentSeed = messagePackSegmentSeed(segmentKey);
   for (const node of host.children) {
     if (!isMessagePackItem(node)) continue;
     let height = messagePackItemHeight(node, naturalHeightMode);
@@ -540,6 +541,7 @@ function packMessageStream(lane) {
       if (barrier) {
         segmentKey = messagePackBarrierKey(node);
         segmentIndex = 0;
+        segmentSeed = messagePackBarrierSegmentSeed(node, segmentKey);
       }
       continue;
     }
@@ -548,6 +550,7 @@ function packMessageStream(lane) {
       node,
       segmentKey,
       segmentIndex,
+      segmentSeed,
       columnRows.length,
       columnRows,
       slotSpan,

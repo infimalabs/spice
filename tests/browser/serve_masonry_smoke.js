@@ -421,6 +421,14 @@ function assertMasonryDistribution(measurement, fail) {
       if (fan.some((entry) => entry.slotSpan < 1))
         fail("segment fan included an invalid span: " + JSON.stringify(fan));
     }
+    if (
+      measurement.segmentOpeningSlots.length > 1 &&
+      new Set(measurement.segmentOpeningSlots).size <= 1
+    )
+      fail(
+        "barrier segments all reopened on the same slot: " +
+          JSON.stringify(measurement.segmentOpeningSlots),
+      );
   }
   if (!measurement.appendStabilityAudit.stable)
     fail(
