@@ -95,6 +95,20 @@ WORK_TREE_API_METRIC_ACTIONS = frozenset(
         "send",
     }
 )
+MISSING_IMAGE_PLACEHOLDER_SVG = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" '
+    b'role="img" aria-label="Image unavailable">'
+    b'<rect width="320" height="180" fill="#111814"/>'
+    b'<rect x="12" y="12" width="296" height="156" rx="10" '
+    b'fill="#18211c" stroke="#4b6255"/>'
+    b'<text x="160" y="86" fill="#d7e6dc" '
+    b'font-family="system-ui, sans-serif" font-size="18" '
+    b'text-anchor="middle">Image unavailable</text>'
+    b'<text x="160" y="112" fill="#8aa091" '
+    b'font-family="system-ui, sans-serif" font-size="13" '
+    b'text-anchor="middle">The referenced file is no longer present.</text>'
+    b"</svg>"
+)
 
 _CLIENT_DISCONNECT_ERRNOS = frozenset(
     {errno.EBADF, errno.ECONNRESET, errno.EPIPE, errno.ECONNABORTED}
@@ -922,15 +936,24 @@ class _ServeHandler(BaseHTTPRequestHandler):
             return
         resolved = _resolve_worktree_image_path(target.repo_root, raw)
         if resolved is None:
+            if _query_str(query, "missing") == "placeholder":
+                _send_missing_worktree_image(self)
+                return
             self.send_error(HTTPStatus.NOT_FOUND, "image not found in work tree")
             return
         content_type, _encoding = mimetypes.guess_type(resolved.name)
         if not content_type or not content_type.startswith("image/"):
+            if _query_str(query, "missing") == "placeholder":
+                _send_missing_worktree_image(self)
+                return
             self.send_error(HTTPStatus.NOT_FOUND, "not an image file")
             return
         try:
             data = resolved.read_bytes()
         except OSError:
+            if _query_str(query, "missing") == "placeholder":
+                _send_missing_worktree_image(self)
+                return
             self.send_error(HTTPStatus.NOT_FOUND, "image not found in work tree")
             return
         self._send_bytes(data, content_type)
@@ -1169,6 +1192,10 @@ class _ServeHandler(BaseHTTPRequestHandler):
         _send_auth_cookie_if_needed(self)
         self.end_headers()
         self.wfile.write(data)
+
+
+def _send_missing_worktree_image(handler: Any) -> None:
+    handler._send_bytes(MISSING_IMAGE_PLACEHOLDER_SVG, "image/svg+xml; charset=utf-8")
 
 
 def _work_tree_api_route(path: str) -> tuple[str, str] | None:

@@ -110,9 +110,14 @@ def markdown_image_reference(alt: str, target: str) -> str:
     return f"![{escaped_alt}]({escaped_target})"
 
 
-def worktree_file_image_url(worktree_id: str, path: str) -> str:
+def worktree_file_image_url(
+    worktree_id: str, path: str, *, missing_placeholder: bool = True
+) -> str:
     encoded = quote(worktree_id, safe="")
-    return f"/api/work/trees/{encoded}/files/image?path={quote(path, safe='/')}"
+    url = f"/api/work/trees/{encoded}/files/image?path={quote(path, safe='/')}"
+    if missing_placeholder:
+        url += "&missing=placeholder"
+    return url
 
 
 def embedded_image_url(worktree_id: str, *, source_offset: int, item_index: int) -> str:

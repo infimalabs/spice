@@ -121,8 +121,14 @@ def test_render_html_inlines_worktree_image():
     html = render_message_html("![shot](shots/a.png)", worktree_id="wt")
     assert '<p class="message-image-stack">' in html
     assert '<a class="message-image" ' in html
-    assert 'href="/api/work/trees/wt/files/image?path=shots/a.png"' in html
-    assert '<img src="/api/work/trees/wt/files/image?path=shots/a.png"' in html
+    assert (
+        'href="/api/work/trees/wt/files/image?path=shots/a.png&amp;'
+        'missing=placeholder"' in html
+    )
+    assert (
+        '<img src="/api/work/trees/wt/files/image?path=shots/a.png&amp;'
+        'missing=placeholder"' in html
+    )
     assert 'target="_blank" rel="noopener"' in html
 
 
@@ -167,5 +173,5 @@ def test_paired_view_image_call_collapses_into_its_output(tmp_path):
 def test_worktree_file_image_url_encodes_target():
     assert (
         worktree_file_image_url("lane one", ".spice/shots/x.png")
-        == "/api/work/trees/lane%20one/files/image?path=.spice/shots/x.png"
+        == "/api/work/trees/lane%20one/files/image?path=.spice/shots/x.png&missing=placeholder"
     )
