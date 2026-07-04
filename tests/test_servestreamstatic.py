@@ -359,6 +359,43 @@ def test_static_mosaic_full_replay_is_wired_after_wet_frozen_before_sizing():
     assert wet_frozen_index < full_replay_index < sizing_index
 
 
+def test_static_mosaic_seam_rule_holds_across_widths_including_fractional_colw():
+    script = Path(__file__).with_name("fixtures") / "mosaic_seam.js"
+
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.mosaic-geometry.js"),
+            str(STATIC_ROOT / "app.mosaic-render.js"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_static_mosaic_seam_rule_colw_multiplication_confined_to_geometry():
+    # §9 seam rule: only the edges[] table construction in mosaic-geometry.js
+    # may reference colW in code. Any other mosaic file computing with colW
+    # would be deriving a card's x/width independently of the shared integer
+    # edges table -- exactly the per-card rounding the seam rule forbids.
+    # Comments may still discuss colW (e.g. explaining what NOT to do), so
+    # strip `//` line comments before scanning.
+    def code_only(text):
+        return "\n".join(line.split("//", 1)[0] for line in text.splitlines())
+
+    mosaic_files = sorted(STATIC_ROOT.glob("app.mosaic-*.js"))
+    offenders = [
+        path.name
+        for path in mosaic_files
+        if path.name != "app.mosaic-geometry.js"
+        and "colW" in code_only(path.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
+
+
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
     css = _serve_css_text()
 
