@@ -257,6 +257,16 @@ function mosaicStreamBarrierResetCheck() {
   return { barrierCard, nextCard };
 }
 
+function mosaicStreamEventLogReplayCheck() {
+  const lane = mosaicStreamResolveLane();
+  const replayed = mosaicReplayEventLog(lane.mosaicEventLog);
+  return {
+    eventCount: lane.mosaicEventLog.events.length,
+    live: mosaicEventLogLayout(lane.mosaicCards),
+    replayed: replayed.layout,
+  };
+}
+
 async function installMosaicStreamHelpers(page) {
   await page.addScriptTag({
     content: [
@@ -277,6 +287,7 @@ async function installMosaicStreamHelpers(page) {
       mosaicStreamGeometryChangeCheck,
       mosaicStreamReadingOrderCheck,
       mosaicStreamBarrierResetCheck,
+      mosaicStreamEventLogReplayCheck,
     ]
       .map((helper) => helper.toString())
       .join("\n"),
@@ -430,6 +441,13 @@ function assertBarrierResetInvariants(barrierResult, fail) {
     );
 }
 
+function assertEventLogReplayInvariants(eventLogReplay, fail) {
+  if (eventLogReplay.eventCount <= 0)
+    fail("mosaic stream did not record any event-log events");
+  if (JSON.stringify(eventLogReplay.live) !== JSON.stringify(eventLogReplay.replayed))
+    fail("mosaic event-log replay did not reproduce the live lattice byte-identically");
+}
+
 function assertMosaicStreamResult(result) {
   const fail = (message) => {
     throw new Error(message + ": " + JSON.stringify(result));
@@ -441,6 +459,7 @@ function assertMosaicStreamResult(result) {
   assertGeometryChangeInvariants(result.geometryChangeResult, fail);
   assertReadingOrderInvariants(result.readingOrder, fail);
   assertBarrierResetInvariants(result.barrierResult, fail);
+  assertEventLogReplayInvariants(result.eventLogReplay, fail);
 }
 
 async function waitForMosaicStreamGlobals(page) {
@@ -450,6 +469,8 @@ async function waitForMosaicStreamGlobals(page) {
       typeof renderMessagesIfChanged === "function" &&
       typeof upsertKnownMessage === "function" &&
       typeof trimKnownMessages === "function" &&
+      typeof mosaicReplayEventLog === "function" &&
+      typeof mosaicEventLogLayout === "function" &&
       Array.isArray(targets) &&
       targets.length > 0,
     { timeout: 10000 },
@@ -472,6 +493,7 @@ async function run() {
       const geometryChangeResult = await page.evaluate(mosaicStreamGeometryChangeCheck);
       const readingOrder = await page.evaluate(mosaicStreamReadingOrderCheck);
       const barrierResult = await page.evaluate(mosaicStreamBarrierResetCheck);
+      const eventLogReplay = await page.evaluate(mosaicStreamEventLogReplayCheck);
       const result = {
         insertResult,
         removalResult,
@@ -480,6 +502,7 @@ async function run() {
         geometryChangeResult,
         readingOrder,
         barrierResult,
+        eventLogReplay,
       };
       assertMosaicStreamResult(result);
       return { ...result, url: server.url };
