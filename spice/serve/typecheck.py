@@ -22,6 +22,7 @@ SERVE_WEB_JS_PATHS = (
     "spice/serve/static/app.mosaic-span.js",
     "spice/serve/static/app.mosaic-render.js",
     "spice/serve/static/app.mosaic-scroll.js",
+    "spice/serve/static/app.mosaic-stream.js",
     "spice/serve/static/app.message-pack.js",
     "spice/serve/static/app.stream.js",
     "spice/serve/static/app.lanes.js",

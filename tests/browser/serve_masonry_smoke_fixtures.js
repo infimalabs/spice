@@ -305,21 +305,8 @@ function masonrySmokeBodyHtml(shape, step) {
   return sentence + sentence + sentence + sentence + sentence;
 }
 
-async function masonrySmokeMeasurement(lane, host, config) {
-  const cards = Array.from(
-    host.querySelectorAll('[data-masonry-smoke="card"]'),
-  );
-  const divider = host.querySelector('[data-masonry-smoke="divider"]');
-  if (!divider) throw new Error("masonry fixture divider missing");
-  const repackAudit = config.captureOnly
-    ? { firstDiff: null, spannedCards: 0, stable: true }
-    : await masonrySmokeRepackAudit(lane, host);
-  const noopRenderAudit = config.captureOnly
-    ? { historySyncCount: 0, observerSyncCount: 0, packCount: 0, teamSyncCount: 0 }
-    : await masonrySmokeNoopRenderAudit(lane);
-  const dividerRect = masonrySmokeRect(divider);
-  const dividerIndex = Number(divider.dataset.masonrySmokeIndex);
-  const cardRects = cards.map((card) => {
+function masonrySmokeCardRects(cards) {
+  return cards.map((card) => {
     const columnSpan = masonrySmokeColumnSpan(card);
     return {
       alignSelf: getComputedStyle(card).alignSelf,
@@ -341,21 +328,29 @@ async function masonrySmokeMeasurement(lane, host, config) {
       ),
     };
   });
-  const hostStyle = getComputedStyle(host);
-  const hostRect = masonrySmokeRect(host);
-  const hostInnerWidth =
-    hostRect.width -
-    Number.parseFloat(hostStyle.paddingLeft) -
-    Number.parseFloat(hostStyle.paddingRight);
-  const barrierIndexes = masonrySmokeBarrierBounds(host);
-  const columnAudit = masonrySmokeColumnAudit(cardRects, barrierIndexes);
-  const segmentFanOut = masonrySmokeSegmentFanOut(
-    cardRects,
-    barrierIndexes,
-    config.expectedColumns,
-  );
-  const segmentSlotPressure = masonrySmokeSegmentSlotPressure(segmentFanOut);
-  const ruleAudits = masonrySmokeRuleAudits(host, cardRects, hostInnerWidth);
+}
+
+// Split strictly along the original ordering: masonrySmokeMeasurement took
+// a cardRects/dividerRect DOM snapshot between the early pair (repack,
+// noop-render) and the later group -- several of the later audits mutate
+// the DOM (append/remove cards, force reflow), so moving them earlier
+// would snapshot a different DOM state than the original code measured.
+// This split (mechanical extraction, no behavior change) preserves that
+// relative order; only extracted to keep masonrySmokeMeasurement itself
+// under the commit-blocking length limit. columnRecovery stays inline in
+// masonrySmokeMeasurement -- it needs `cards` (the raw elements) fetched
+// there, not just `config`.
+async function masonrySmokeEarlyAudits(lane, host, config) {
+  const repackAudit = config.captureOnly
+    ? { firstDiff: null, spannedCards: 0, stable: true }
+    : await masonrySmokeRepackAudit(lane, host);
+  const noopRenderAudit = config.captureOnly
+    ? { historySyncCount: 0, observerSyncCount: 0, packCount: 0, teamSyncCount: 0 }
+    : await masonrySmokeNoopRenderAudit(lane);
+  return { repackAudit, noopRenderAudit };
+}
+
+async function masonrySmokeLateAudits(lane, host, config, cards) {
   const appendStabilityAudit = config.captureOnly
     ? { stable: true }
     : await masonrySmokeAppendStabilityAudit(lane, host, config);
@@ -376,15 +371,45 @@ async function masonrySmokeMeasurement(lane, host, config) {
     : masonrySmokeObserverFanoutAudit(lane);
   return {
     appendStabilityAudit,
-    rowAudit: masonrySmokeRowAudit(cardRects, hostStyle),
-    columnAudit,
-    columnRecovery,
     hydrationGrowthAudit,
+    columnRecovery,
     middleRemovalReflowAudit,
     pinnedCollapseReflowAudit,
     observerFanoutAudit,
-    noopRenderAudit,
-    repackAudit,
+  };
+}
+
+async function masonrySmokeMeasurement(lane, host, config) {
+  const cards = Array.from(
+    host.querySelectorAll('[data-masonry-smoke="card"]'),
+  );
+  const divider = host.querySelector('[data-masonry-smoke="divider"]');
+  if (!divider) throw new Error("masonry fixture divider missing");
+  const earlyAudits = await masonrySmokeEarlyAudits(lane, host, config);
+  const dividerRect = masonrySmokeRect(divider);
+  const dividerIndex = Number(divider.dataset.masonrySmokeIndex);
+  const cardRects = masonrySmokeCardRects(cards);
+  const hostStyle = getComputedStyle(host);
+  const hostRect = masonrySmokeRect(host);
+  const hostInnerWidth =
+    hostRect.width -
+    Number.parseFloat(hostStyle.paddingLeft) -
+    Number.parseFloat(hostStyle.paddingRight);
+  const barrierIndexes = masonrySmokeBarrierBounds(host);
+  const columnAudit = masonrySmokeColumnAudit(cardRects, barrierIndexes);
+  const segmentFanOut = masonrySmokeSegmentFanOut(
+    cardRects,
+    barrierIndexes,
+    config.expectedColumns,
+  );
+  const segmentSlotPressure = masonrySmokeSegmentSlotPressure(segmentFanOut);
+  const ruleAudits = masonrySmokeRuleAudits(host, cardRects, hostInnerWidth);
+  const lateAudits = await masonrySmokeLateAudits(lane, host, config, cards);
+  return {
+    ...earlyAudits,
+    ...lateAudits,
+    rowAudit: masonrySmokeRowAudit(cardRects, hostStyle),
+    columnAudit,
     keepLanesVisible: Boolean(config.keepLanesVisible),
     rootWidthActive: lane.element.classList.contains("lane--message-pack-root"),
     segmentFanOut,
@@ -736,6 +761,9 @@ const masonrySmokeFixtureHelpers = [
   masonrySmokeImageHtml,
   masonrySmokeImagesReady,
   masonrySmokeBodyHtml,
+  masonrySmokeCardRects,
+  masonrySmokeEarlyAudits,
+  masonrySmokeLateAudits,
   masonrySmokeMeasurement,
   masonrySmokeVisibleLaneCount,
   masonrySmokeRowAudit,
@@ -762,6 +790,9 @@ module.exports = {
   masonrySmokeImageHtml,
   masonrySmokeImagesReady,
   masonrySmokeBodyHtml,
+  masonrySmokeCardRects,
+  masonrySmokeEarlyAudits,
+  masonrySmokeLateAudits,
   masonrySmokeMeasurement,
   masonrySmokeVisibleLaneCount,
   masonrySmokeRowAudit,

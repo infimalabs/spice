@@ -206,6 +206,9 @@ def test_static_messages_use_stable_packed_rows():
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
     app_message_pack = (STATIC_ROOT / "app.message-pack.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    app_mosaic_stream = (STATIC_ROOT / "app.mosaic-stream.js").read_text(
+        encoding="utf-8"
+    )
     messages_section = css.index("/* ---- messages ---- */")
     messages_start = css.index(".messages {", messages_section)
     messages_end = css.index(".messages article {", messages_start)
@@ -289,10 +292,16 @@ def test_static_messages_use_stable_packed_rows():
     assert "function messagePackPinnedLayoutCollapsed(" in app_message_pack
     assert "function scheduleMessageStreamPack(lane)" in app_stream
     assert "restoreMessageViewportAnchor(lane, anchor);" in app_stream
-    assert "syncMessagePackObserver(lane);" in app_stream
     assert "function messagePackReservedSpan(" in app_message_pack
     assert "mosaicReservationRows(" in app_message_pack
     assert "lane.messagePackResizeObserver.observe(lane.messagesEl);" in app_stream
+    # packMessageStream/syncMessagePackObserver are superseded call sites
+    # (mosaic-stream-integration): the render path now delegates to
+    # mosaicRenderMessageStream, which syncs its own resize observer.
+    # Their function bodies stay defined -- untouched, unused -- pending
+    # the wholesale legacy deletion sweep (mosaic-demolition).
+    assert "mosaicRenderMessageStream(lane, visibleItems);" in app_stream
+    assert "mosaicSyncResizeObserver(lane);" in app_mosaic_stream
     assert 'if (item.image_only) article.classList.add("image-only");' in app_render
 
 
