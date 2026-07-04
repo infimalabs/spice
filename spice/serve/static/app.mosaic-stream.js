@@ -27,6 +27,10 @@ const MOSAIC_BACKFILL_BOTTOM_EPSILON_PX = 2;
 function mosaicLaneReady(lane) {
   if (lane.mosaicCards) return;
   lane.mosaicCards = [];
+  lane.mosaicEventLog = mosaicCreateEventLog(
+    mosaicGridTrackCount,
+    MOSAIC_FREEZE_DEPTH,
+  );
   lane.mosaicNextCreationIndex = 0;
   lane.mosaicNextBackfillCreationIndex = -1;
   lane.mosaicAppliedByKey = new Map();
@@ -283,6 +287,12 @@ function mosaicRunInsert(lane, entry, node, geometry) {
   const candidates = mosaicCandidatesFor(lane, entry, node, geometry);
   const placement = mosaicInsert(lane.mosaicCards, rowFloor, candidates, mosaicGridTrackCount);
   const creationIndex = mosaicCreationIndexFor(lane, entry.key);
+  mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+    type: "insert",
+    key: entry.key,
+    creationIndex,
+    candidates,
+  });
   const card = { ...placement.card, key: entry.key, creationIndex, frozen: false };
   lane.mosaicCards = lane.mosaicCards.concat([card]);
   lane.mosaicCards = mosaicRecomputeFrozen(lane.mosaicCards, MOSAIC_FREEZE_DEPTH);
@@ -324,24 +334,45 @@ function mosaicRunBackfill(lane, entries, nodesByKey, geometry) {
   const downward = mosaicDeriveDownwardRowFloor(lane.mosaicCards, mosaicGridTrackCount);
   let rowFloor = downward.rowFloor;
   const placedCards = [];
+  const eventCards = [];
   for (const entry of entries) {
     const node = nodesByKey.get(entry.key);
     const candidates = mosaicCandidatesFor(lane, entry, node, geometry);
     const placement = mosaicInsert([], rowFloor, candidates, mosaicGridTrackCount);
+    const creationIndex = mosaicBackfillCreationIndexFor(lane, entry.key);
     rowFloor = placement.rowFloor;
+    eventCards.push({
+      key: entry.key,
+      creationIndex,
+      candidates,
+    });
     placedCards.push({
       ...placement.card,
       key: entry.key,
-      creationIndex: mosaicBackfillCreationIndexFor(lane, entry.key),
+      creationIndex,
       b: downward.anchor - placement.card.b - placement.card.n,
       frozen: true,
     });
   }
+  mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+    type: "backfill",
+    trackCount: mosaicGridTrackCount,
+    cards: eventCards,
+  });
   lane.mosaicCards = lane.mosaicCards.concat(placedCards);
   lane.mosaicCards = mosaicRecomputeFrozen(lane.mosaicCards, MOSAIC_FREEZE_DEPTH);
 }
 
 function mosaicDropVacatedKeys(lane, desiredKeySet) {
+  const removedKeys = lane.mosaicCards
+    .filter((card) => !desiredKeySet.has(card.key))
+    .map((card) => card.key);
+  if (removedKeys.length) {
+    mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+      type: "remove",
+      keys: removedKeys,
+    });
+  }
   lane.mosaicCards = lane.mosaicCards.filter((card) => desiredKeySet.has(card.key));
 }
 
@@ -370,6 +401,12 @@ function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
           geometry.M,
         );
     if (resolvedN === card.n) continue;
+    mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+      type: "content-resize",
+      key: card.key,
+      creationIndex: card.creationIndex,
+      n: resolvedN,
+    });
     if (card.frozen) {
       lane.mosaicCards = mosaicResolveFrozenResize(lane.mosaicCards, card.creationIndex, resolvedN);
     } else {
@@ -402,6 +439,11 @@ function mosaicRunFullReplay(lane, entries, nodesByKey, geometry, backfillKeySet
       n: previous ? previous.n : 0,
       span: previous ? previous.span : geometry.baseSpan,
     };
+  });
+  mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+    type: "full-replay",
+    trackCount: mosaicGridTrackCount,
+    cards: withCandidates,
   });
   const replayed = mosaicFullReplay(withCandidates, mosaicGridTrackCount, MOSAIC_FREEZE_DEPTH);
   lane.mosaicCards = replayed.map(({ candidates, ...card }) => card);
