@@ -14,6 +14,10 @@ const MOSAIC_STREAM_FROZEN_CHAIN_FIRST_KEY = 10;
 const MOSAIC_STREAM_FROZEN_CHAIN_LAST_KEY = 16;
 const MOSAIC_STREAM_EXPECTED_SURVIVOR_COUNT =
   MOSAIC_STREAM_FROZEN_CHAIN_LAST_KEY - MOSAIC_STREAM_FROZEN_CHAIN_FIRST_KEY + 1 + 2;
+// Mirrors app.mosaic-geometry.js's mosaicGridTrackCount -- this assertion
+// runs on the Node side (not injected into the page), so it can't read
+// that in-page global directly.
+const MOSAIC_STREAM_GRID_TRACK_COUNT = 12;
 const MOSAIC_STREAM_BACKFILL_EXISTING_FIRST_KEY = 100;
 const MOSAIC_STREAM_BACKFILL_EXISTING_COUNT = 24;
 const MOSAIC_STREAM_BACKFILL_COUNT = 3;
@@ -249,6 +253,43 @@ function mosaicStreamReadingOrderCheck() {
   return { count: cards.length, chainTops, monotonic };
 }
 
+// §14 span clamped to 12 / §5 no special span policy: a task-directive-stack
+// quote (detected from item.display_html -- server-emitted markup,
+// spice/serve/taskdirectives.py, always exactly
+// `<div class="task-directive-stack">`) gets the same forced span-12
+// treatment already given compaction dividers and time rules
+// (mosaicItemIsBarrier). A span-12 card resets the frontier flat across
+// every track with no special-cased reset logic -- it falls out of the
+// shared engine's rowFloor commit for any full-width card -- so the very
+// next inserted card, regardless of its own span, must anchor at exactly
+// the barrier's top row. Self-contained: vacates its own messages after
+// asserting so it leaves no residue for any other check.
+function mosaicStreamBarrierResetCheck() {
+  const lane = mosaicStreamResolveLane();
+  const directiveItem = mosaicStreamBuildItem(90, 1);
+  directiveItem.display_html = '<div class="task-directive-stack">directive</div>';
+  directiveItem.display_text = "directive";
+  directiveItem.text = "directive";
+  upsertKnownMessage(lane, directiveItem, "newest");
+  trimKnownMessages(lane);
+  renderMessagesIfChanged(lane);
+  const afterBarrier = mosaicStreamCardSnapshot(lane);
+  const barrierCard = afterBarrier.lattice.find((c) => c.key === "msg-90");
+
+  mosaicStreamPushMessage(lane, 91, 1);
+  const afterNext = mosaicStreamCardSnapshot(lane);
+  const nextCard = afterNext.lattice.find((c) => c.key === "msg-91");
+
+  lane.knownMessages = lane.knownMessages.filter(
+    (item) => item.key !== "msg-90" && item.key !== "msg-91",
+  );
+  lane.knownMessageKeys.delete("msg-90");
+  lane.knownMessageKeys.delete("msg-91");
+  renderMessagesIfChanged(lane);
+
+  return { barrierCard, nextCard };
+}
+
 function mosaicStreamBackfillCheck() {
   const lane = mosaicStreamResolveLane();
   mosaicStreamResetLane(lane);
@@ -354,6 +395,7 @@ async function installMosaicStreamHelpers(page) {
       mosaicStreamFrozenGrowthCheck,
       mosaicStreamGeometryChangeCheck,
       mosaicStreamReadingOrderCheck,
+      mosaicStreamBarrierResetCheck,
       mosaicStreamBackfillCheck,
       mosaicStreamEventLogReplayCheck,
     ]
@@ -494,6 +536,21 @@ function assertReadingOrderInvariants(readingOrder, fail) {
     );
 }
 
+function assertBarrierResetInvariants(barrierResult, fail) {
+  if (!barrierResult.barrierCard)
+    fail("task-directive-stack message did not produce a lattice card");
+  if (barrierResult.barrierCard.span !== MOSAIC_STREAM_GRID_TRACK_COUNT)
+    fail("task-directive-stack message must force span 12, got " + barrierResult.barrierCard.span);
+  const barrierTop = barrierResult.barrierCard.b + barrierResult.barrierCard.n;
+  if (!barrierResult.nextCard)
+    fail("card following the barrier did not exist");
+  if (barrierResult.nextCard.b !== barrierTop)
+    fail(
+      "a span-12 card must reset the frontier flat across every track -- the next card must anchor exactly at the barrier's top row (" +
+        barrierTop + "), got " + barrierResult.nextCard.b,
+    );
+}
+
 function assertBackfillInvariants(backfillResult, fail) {
   const beforeCardsByKey = new Map(backfillResult.before.cards.map((card) => [card.key, card]));
   const beforeLatticeByKey = new Map(
@@ -571,6 +628,7 @@ function assertMosaicStreamResult(result) {
   assertFrozenGrowthInvariants(result.frozenGrowthResult, fail);
   assertGeometryChangeInvariants(result.geometryChangeResult, fail);
   assertReadingOrderInvariants(result.readingOrder, fail);
+  assertBarrierResetInvariants(result.barrierResult, fail);
   assertBackfillInvariants(result.backfillResult, fail);
   assertEventLogReplayInvariants(result.eventLogReplay, fail);
 }
@@ -605,6 +663,7 @@ async function run() {
       const frozenGrowthResult = await page.evaluate(mosaicStreamFrozenGrowthCheck);
       const geometryChangeResult = await page.evaluate(mosaicStreamGeometryChangeCheck);
       const readingOrder = await page.evaluate(mosaicStreamReadingOrderCheck);
+      const barrierResult = await page.evaluate(mosaicStreamBarrierResetCheck);
       const backfillResult = await page.evaluate(mosaicStreamBackfillCheck);
       const eventLogReplay = await page.evaluate(mosaicStreamEventLogReplayCheck);
       const result = {
@@ -614,6 +673,7 @@ async function run() {
         frozenGrowthResult,
         geometryChangeResult,
         readingOrder,
+        barrierResult,
         backfillResult,
         eventLogReplay,
       };

@@ -175,8 +175,18 @@ function mosaicBackfillCreationIndexFor(lane, key) {
 
 // ---- entries: messages, compaction dividers, and derived time-rule markers -------
 
+// A card is span-12 ("barrier") for either of two reasons: its own kind
+// (compaction dividers), or its rendered content (task-directive-stack
+// quotes -- server-emitted markup, spice/serve/taskdirectives.py -- always
+// exactly `<div class="task-directive-stack">`, so a plain substring check
+// on the pre-render display_html is exact and needs no DOM node). No card
+// type gets a different SPAN POLICY (§5) from this -- both still place
+// through the identical decide()/insert() path with span forced to 12
+// rather than measured, the same treatment already given compaction
+// dividers and time rules.
 function mosaicItemIsBarrier(item) {
-  return item.kind === "compaction";
+  if (item.kind === "compaction") return true;
+  return Boolean(item.display_html && item.display_html.includes("task-directive-stack"));
 }
 
 // Mirrors app.stream.js's messageStreamNodesWithHistorySentinels ordering
