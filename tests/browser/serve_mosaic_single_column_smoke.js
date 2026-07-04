@@ -1,6 +1,6 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic §3 single-column degeneration (mosaic-single-column): at L=1 the
+// Mosaic single-column degeneration (mosaic-single-column): at L=1 the
 // live stream integration must take the SAME code path as any other column
 // count -- one candidate span (12), one anchor, pure append -- with no
 // special-cased "natural height mode" fork. Drives a real lane through

@@ -14,7 +14,7 @@ const EXPECTED_ROWS_FOR_1000PX = 17; // ceil((1000+12)/60)
 const EXPECTED_CARD_HEIGHT_N3 = 168; // 3*60 - 12
 const SLACK_SWEEP_MAX_CONTENT_PX = 400;
 
-// rowsFor formula and the 2-row minimum (§4).
+// rowsFor formula and the 2-row minimum.
 assert(context.mosaicRowsFor(0, 12, 60) === 2, "near-empty content must floor at 2 rows");
 assert(
   context.mosaicRowsFor(1000, 12, 60) === EXPECTED_ROWS_FOR_1000PX,
@@ -26,7 +26,7 @@ assert(
 );
 assert(context.mosaicRowsFor(48, 12, 60) === 2, "sub-module content still floors at 2 rows");
 
-// Rendered height/width formulas (§2).
+// Rendered height/width formulas.
 assert(
   context.mosaicCardHeightPx(3, 60, 12) === EXPECTED_CARD_HEIGHT_N3,
   "cardHeightPx = n*M - gap",
@@ -37,7 +37,7 @@ assert(
   "cardWidthPx must read from the shared edges table",
 );
 
-// Interior slack bounded below the module (§4): property check across a
+// Interior slack bounded below the module: property check across a
 // spread of realistic content heights (px is the whole card's natural
 // height, chrome included -- messages.css chrome alone is ~68px at the
 // default root, so real cards never sit near the synthetic near-empty
@@ -60,7 +60,7 @@ for (const module of [20, 40, 60]) {
   }
 }
 
-// The designed interlock (§4): chrome + gap = 4*lineHeight at the default
+// The designed interlock: chrome + gap = 4*lineHeight at the default
 // type ramp (messages.css: border 0.0625rem*2 + padding 0.5625rem*2 +
 // footer margin 0.5rem + footer height 2.5rem = 4.25rem; +gap 0.75rem =
 // 5rem = 4*1.25rem). At 16px root: chrome=68px, gap=12px, lineHeight=20px.

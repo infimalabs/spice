@@ -1,13 +1,13 @@
 const path = require("path");
 const { withServePage } = require("./serve_playwright_harness");
 
-// Load-stability smoke (spec §11(e), hydration amendment): staged bulk
+// Load-stability smoke: staged bulk
 // hydration -- multi-hour buckets, a compaction divider, pending acks
 // resolving at staggered times, delayed images, a second lane mounting
 // mid-load -- must paint with ZERO transform transitions before first
 // settle, a bounded replay count, and a settled layout byte-identical to a
-// single-shot render of the same content at the same geometry (§10/§8
-// idempotence). Post-settle, the steady-state gentle push must still
+// single-shot render of the same content at the same geometry
+// (idempotence). Post-settle, the steady-state gentle push must still
 // animate (no over-suppression).
 
 const HYDRATION_BATCH_A = 12;
@@ -206,11 +206,11 @@ async function waitForSettleSample(page) {
   throw new Error("lane did not settle within " + HYDRATION_SETTLE_TIMEOUT_MS + "ms");
 }
 
-// §11(d): replaying the recorded event log reproduces the live layout
+// Replaying the recorded event log reproduces the live layout
 // byte-identically -- the normative purity oracle. A raw single-shot render
-// is deliberately NOT the oracle: §8 lets frozen pads keep reserved rows
+// is deliberately NOT the oracle: frozen pads keep reserved rows
 // and single-card vacancies persist until the next replay, so incremental
-// state legitimately differs from a fresh pack until then. The §8
+// state legitimately differs from a fresh pack until then. The
 // idempotence corollary is asserted separately: two forced replays at
 // unchanged content and geometry are byte-identical to each other.
 async function measurePurity(page) {
@@ -259,7 +259,7 @@ async function measurePostSettlePush(page) {
 function assertHydration(settleSample, purity, postSettle) {
   if (settleSample.trace.plane !== 0 || settleSample.trace.card !== 0)
     throw new Error(
-      "transform transitions before first settle (§11e): " +
+      "transform transitions before first settle: " +
         JSON.stringify(settleSample.trace),
     );
   if (
@@ -276,9 +276,9 @@ function assertHydration(settleSample, purity, postSettle) {
         ")",
     );
   if (JSON.stringify(purity.live) !== JSON.stringify(purity.replayed))
-    throw new Error("event-log replay did not reproduce the live layout (§11d)");
+    throw new Error("event-log replay did not reproduce the live layout");
   if (JSON.stringify(purity.firstReplay) !== JSON.stringify(purity.secondReplay))
-    throw new Error("forced replay is not idempotent (§8)");
+    throw new Error("forced replay is not idempotent");
   if (!purity.firstReplay.length)
     throw new Error("purity comparison ran on an empty lattice");
   if (postSettle.plane < 1)

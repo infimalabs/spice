@@ -1,4 +1,4 @@
-// Mosaic §9 plane scroll behavior: same-frame compensation when scrolled,
+// Mosaic plane scroll behavior: same-frame compensation when scrolled,
 // gentle push at top. mosaicSyncPlane (app.mosaic-render.js) already takes
 // {scrolled, onCompensate, replaying, reducedMotion} as its options; this
 // module supplies {scrolled, onCompensate} from the real lane pane scroll

@@ -1,12 +1,11 @@
-// Mosaic §7 wet tail / frozen prefix (spec .spice/mosaic-packing-spec.md §7,
-// §11, §12 freezeDepth, §14). Pure functions built on the engine's
+// Mosaic wet tail / frozen prefix. Pure functions built on the engine's
 // rowFloor/anchor/commit primitives (app.mosaic-engine.js): burial depth,
 // the freeze latch, and wetReplay's keep-span settling for the still-wet
 // band. DOM-free and side-effect-free like the engine; mapping stream
 // deltas to insert/wetReplay/ripple/fullReplay events is a
 // mosaic-stream-integration concern and stays out of this module. Card
 // records here add `creationIndex` (the stream's stable (epoch, index,
-// key) order, per §14 -- never DOM order or arrival race order) and
+// key) order -- never DOM order or arrival race order) and
 // `frozen` to the engine's { t, span, b, n }.
 
 const MOSAIC_FREEZE_DEPTH = 2;
@@ -28,7 +27,7 @@ function mosaicBurialDepth(card, cards) {
   return depth;
 }
 
-// §7: freezing is a latch -- already-frozen cards are left untouched here;
+// Freezing is a latch -- already-frozen cards are left untouched here;
 // only a full replay resets frozen back to false. Returns a NEW array;
 // never mutates its input or any card object in place.
 function mosaicRecomputeFrozen(cards, freezeDepth) {
@@ -40,7 +39,7 @@ function mosaicRecomputeFrozen(cards, freezeDepth) {
   });
 }
 
-// §7 placeKeepSpan: re-anchor a card at its LATCHED span (never re-chosen —
+// placeKeepSpan: re-anchor a card at its LATCHED span (never re-chosen —
 // wetReplay settles position, not width) against the current rowFloor,
 // committing the placement into rowFloor. Returns { card, rowFloor }; never
 // mutates its inputs.
@@ -50,12 +49,12 @@ function mosaicPlaceKeepSpan(card, rowFloor, trackCount) {
   return { card: placed, rowFloor: mosaicCommit(rowFloor, placed, trackCount) };
 }
 
-// §7 wetReplay: derive the floor from FROZEN cards only, then re-place each
+// wetReplay: derive the floor from FROZEN cards only, then re-place each
 // wet card in creation order at its latched span -- spans never change
 // here, only (t, b) settle. Frozen cards are untouched. Order-invariant to
 // the input array's order (only creationIndex governs processing order),
 // so resolving two pending cards in either arrival order produces the same
-// final layout (§14). Returns a new array in the input's original order;
+// final layout regardless of arrival races. Returns a new array in the input's original order;
 // never mutates its input.
 function mosaicWetReplay(cards, trackCount, freezeDepth) {
   const frozenCards = cards.filter((card) => card.frozen);
@@ -78,25 +77,25 @@ function mosaicWetReplay(cards, trackCount, freezeDepth) {
   return mosaicRecomputeFrozen(replaced, freezeDepth);
 }
 
-// §7 rippleRows: when the growing card must extend downward, every card
+// rippleRows: when the growing card must extend downward, every card
 // resting below it in an overlapping track slides down by the same delta,
 // transitively. Breadth is over the spec's set definition -- {d : d
 // overlaps m in tracks and d.b < m.b} -- not insertion order; a card is
 // discovered once (never re-shifted) using whichever frontier card reaches
 // it first. Discovery always compares against a frontier's ORIGINAL b
 // (frontier.b, read straight off the untouched input card -- this pure
-// implementation never mutates cards in place, unlike
-// .spice/mosaic-demo.html's rippleRows(), which mutates d.b directly and so
-// reads an already-shifted value once d becomes m). Comparing against a
+// implementation never mutates cards in place; an implementation that
+// shifts d.b as it walks reads an already-shifted value once d becomes
+// the frontier). Comparing against a
 // shifted threshold instead would understate the gap between a frontier and
 // its neighbor whenever delta exceeds that original gap, silently dropping
 // a downstream card from the ripple and leaving it overlapping the card
 // above it -- reachability must be computed entirely over the original
 // layout, independent of delta. Only b moves; t and span never change
-// (§7, §11). Row indices may go negative (§14) -- this never clamps or
+// Row indices may go negative -- this never clamps or
 // re-normalizes them. Returns a NEW array in the input's original order;
 // cards whose b did not change keep their original object reference (no-op
-// for a shallow-equality render diff, §9(c)); never mutates its input or
+// for a shallow-equality render diff); never mutates its input or
 // any input card object.
 function mosaicRippleRows(cards, growingCreationIndex, delta) {
   const growingCard = cards.find(
@@ -134,16 +133,16 @@ function mosaicRippleRows(cards, growingCreationIndex, delta) {
   });
 }
 
-// §7 frozen resize dispatch: late content on a frozen card either grows
+// Frozen resize dispatch: late content on a frozen card either grows
 // past its reservation (rare by design) or resolves smaller. Growth keeps
 // the card's top row fixed (b+n invariant) and ripples the chain below it
 // downward via mosaicRippleRows; the card's own n and b both change to
 // reflect the new row count. Shrinking keeps the reserved n exactly as-is
-// -- zero movement outranks reclaiming a row (§7) -- so this returns
+// -- zero movement outranks reclaiming a row -- so this returns
 // `cards` completely untouched (same array, same object references),
 // which is what makes "zero style writes on any other card in that frame"
 // true by construction. The vacated space reconciles at the next full
-// replay (§8), never here.
+// replay, never here.
 function mosaicResolveFrozenResize(cards, creationIndex, newN) {
   const card = cards.find((candidate) => candidate.creationIndex === creationIndex);
   if (!card) {

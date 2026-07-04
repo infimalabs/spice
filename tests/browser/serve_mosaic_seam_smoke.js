@@ -1,6 +1,6 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic §9 seam rule / §11(b): adjacent cards sharing a column boundary
+// Mosaic seam rule: adjacent cards sharing a column boundary
 // must have identical boundary pixels in a real browser, at container
 // widths where colW is fractional (1281/977 at root 16px, per
 // tests/fixtures/mosaic_seam.js), and the boundary must hold mid-transition

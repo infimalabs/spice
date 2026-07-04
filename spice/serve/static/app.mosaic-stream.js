@@ -1,5 +1,4 @@
-// Mosaic stream integration (spec .spice/mosaic-packing-spec.md §1, §6, §7,
-// §8, §13). Wires the pure mosaic-*.js modules into the fingerprint-gated
+// Mosaic stream integration. Wires the pure mosaic-*.js modules into the fingerprint-gated
 // render path (app.stream.js renderMessagesIfChanged): persistent per-card
 // lattice state keyed by message identity, replacing the legacy grid
 // packer's whole-board repack. This module owns the DOM-facing
@@ -30,10 +29,10 @@ const MOSAIC_BACKFILL_BOTTOM_EPSILON_PX = 2;
 // Renders defer instead; the ResizeObserver's 0-to-real transition brings
 // the deferred render back as a motion-suppressed correction.
 const MOSAIC_MIN_RENDER_WIDTH_PX = 24;
-// §8 settled predicate: a populated board with no structural change for this
-// window (or first pane interaction) counts as settled; until then the §9
-// settled-board rule suppresses every transform transition (spec §12
-// settleQuiet). Settling flips a flag and never triggers a render.
+// Settled predicate: a populated board with no structural change for this
+// window (or first pane interaction) counts as settled; until then the
+// settled-board rule suppresses every transform transition. Settling flips
+// a flag and never triggers a render.
 const MOSAIC_SETTLE_QUIET_MS = 500;
 // Width churn coalesces: a burst of host width changes (lane mounts, pane
 // dividers mid-drag, window drags) runs ONE full replay at the settled
@@ -81,7 +80,7 @@ function mosaicSyncSettle(lane, structural) {
 // fonts today -- document.fonts.status is "loaded" at first measure and
 // this whole path stays dormant -- but the day a web font lands, flagged
 // lanes get exactly one correction replay at fonts.ready: unsettling
-// re-engages the §9 motion gate (snap + quiet-window restart) and the
+// re-engages the motion gate (snap + quiet-window restart) and the
 // geometry invalidation forces a true re-measuring full replay.
 function mosaicArmFontsCorrection(lane) {
   if (lane.mosaicFontsCorrectionArmed) return;
@@ -102,7 +101,7 @@ function mosaicTrackFontsAtMeasure(lane) {
   mosaicArmFontsCorrection(lane);
 }
 
-// The reader's first deliberate interaction settles immediately (§8):
+// The reader's first deliberate interaction settles immediately:
 // deliberate gestures only -- programmatic scrolls (compensation, backfill
 // restore) must not count, so the raw scroll event is deliberately absent.
 function mosaicArmSettleInteraction(lane) {
@@ -207,7 +206,7 @@ function mosaicBackfillCreationIndexFor(lane, key) {
 // quotes -- server-emitted markup, spice/serve/taskdirectives.py -- always
 // exactly `<div class="task-directive-stack">`, so a plain substring check
 // on the pre-render display_html is exact and needs no DOM node). No card
-// type gets a different SPAN POLICY (§5) from this -- both still place
+// type gets a different SPAN POLICY from this -- both still place
 // through the identical decide()/insert() path with span forced to 12
 // rather than measured, the same treatment already given compaction
 // dividers and time rules.
@@ -268,11 +267,11 @@ function mosaicExistingNodesByKey(lane) {
   return nodes;
 }
 
-// ---- reservation classification (§4) ----------------------------------------------
+// ---- reservation classification ---------------------------------------------------
 
 // Two different lifetimes share this one lookup: an ack/quote reservation is
 // genuinely pending -- real content hasn't hydrated yet, and shrink-on-
-// resolve is the common case (§4) -- while an image reservation is
+// resolve is the common case -- while an image reservation is
 // permanent: images letterbox to their named cap regardless of load state
 // (messages.css), so the reservation never needs to give way to a measured
 // height, whether the image is loading, loaded, or broken. Both read the
@@ -281,7 +280,7 @@ function mosaicExistingNodesByKey(lane) {
 // has no resolved context yet via ackContextForKey, "imageLarge" for
 // image_only items, an "image" fallback for any other card containing
 // .message-image), stamped onto the node as data-mosaic-reservation-type --
-// no reservation logic scattered per-call-site (§4), and no second,
+// no reservation logic scattered per-call-site, and no second,
 // divergent check here (an earlier version of this function re-derived the
 // ack case from lane.missingAckContextKeys, which only tracks confirmed-
 // missing keys, not "not yet resolved", so a genuinely-pending ack fell
@@ -349,7 +348,7 @@ function mosaicCandidatesFor(lane, entry, node, geometry) {
 // ---- geometry change detection ------------------------------------------------------
 
 // Width comparison reads the shared edges table's total span rather than
-// colW directly (§9 seam rule: only mosaic-geometry.js's edges[] table
+// colW directly (seam rule: only mosaic-geometry.js's edges[] table
 // construction may compute with colW; every other mosaic file derives
 // widths from that table alone).
 function mosaicGeometryChanged(lane, geometry) {
@@ -391,7 +390,7 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
   );
   // Snap mode batches the first-paint flush: per-card forced reflows would
   // be O(n) layouts for a reveal rebuild, so suppressed writes accumulate
-  // and a single flush + transition restore lands them all (§13).
+  // and a single flush + transition restore lands them all.
   const written = [];
   for (const card of cards) {
     const node = nodesByKey.get(card.key);
@@ -424,7 +423,7 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
   );
 }
 
-// ---- events (§6 insert, §7 wetReplay/ripple, §8 fullReplay/vacancy) ---------------
+// ---- events (insert, wetReplay/ripple, fullReplay/vacancy) ------------------------
 
 function mosaicRunInsert(lane, entry, node, geometry) {
   const rowFloor = mosaicDeriveRowFloor(lane.mosaicCards, mosaicGridTrackCount);
@@ -521,15 +520,15 @@ function mosaicDropVacatedKeys(lane, desiredKeySet) {
 }
 
 // Re-measures a card at its OWN already-committed span (never a fresh
-// candidate/decide pass -- span is fixed outside insert/fullReplay, per §7)
+// candidate/decide pass -- span is fixed outside insert/fullReplay)
 // and routes the outcome to wetReplay (wet) or mosaicResolveFrozenResize
 // (frozen, which itself no-ops on shrink/exact and only ripples on true
-// growth, §7). Only cards whose node was actually replaced by a fresh
+// growth). Only cards whose node was actually replaced by a fresh
 // render (content genuinely changed, flagged by the caller) are touched;
 // an untouched reused node must never re-enter this pass; that is what
-// keeps a no-op re-render from moving anything (§11c).
+// keeps a no-op re-render from moving anything.
 //
-// §14: dirty entries are resolved in CREATION-INDEX order, not entries'
+// Dirty entries are resolved in CREATION-INDEX order, not entries'
 // (newest-first) order -- two simultaneously-resolving cards (e.g. two acks
 // racing back in reversed arrival order) must ripple/replay identically
 // regardless of which happened to finish its fetch first. wetReplay already
@@ -583,7 +582,7 @@ function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
   }
 }
 
-// §8/§14: creationIndex must be the stream's stable (epoch, index, key)
+// creationIndex must be the stream's stable (epoch, index, key)
 // order (app.mosaic-wet-frozen.js), never DOM/arrival-observation order.
 // `entries` is already in that true order (newest-first, mirroring
 // laneGroupMergedMessages/knownMessages) -- deriving creationIndex from
@@ -736,7 +735,7 @@ function mosaicRenderMessageStream(lane, visibleItems) {
     mosaicRunFullReplay(lane, entries, nodesByKey, geometry);
   }
 
-  // Motion suppression unions three sources: reveal corrections, the §9
+  // Motion suppression unions three sources: reveal corrections, the
   // settled-board gate (nothing animates until first settle), and -- inside
   // the apply -- prefers-reduced-motion. Layout is identical either way.
   mosaicApplyRender(lane, lane.mosaicCards, geometry, nodesByKey, {

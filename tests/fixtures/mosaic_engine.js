@@ -35,9 +35,9 @@ function pick(rng, list) {
   return list[Math.floor(rng() * list.length)];
 }
 
-// Mirrors §5's real candidate generation: baseSpan always, plus the wide
+// Mirrors the real candidate generation: baseSpan always, plus the wide
 // tier only when tall enough -- but driven by a seeded RNG instead of DOM
-// measurement, since measurement is a §4 concern out of scope here.
+// measurement, since measurement is a sizing concern out of scope here.
 function randomCandidates(rng) {
   const baseSpan = pick(rng, LEGAL_BASE_SPANS);
   const baseN = 1 + Math.floor(rng() * 6);
@@ -60,14 +60,14 @@ function runSequence(seed, count) {
     const candidates = randomCandidates(rng);
     const before = cards.map((card) => ({ ...card }));
     const result = context.mosaicInsert(cards, rowFloor, candidates, TRACKS);
-    // Non-mutation (§6): insertion must never touch any prior card.
+    // Non-mutation: insertion must never touch any prior card.
     for (let index = 0; index < before.length; index += 1) {
       assert(
         deepEqual(before[index], result.cards[index]),
         "insertion mutated an existing card at step " + step,
       );
     }
-    // Wide-placement property (§5, §11): a wide placement only wins if it
+    // Wide-placement property: a wide placement only wins if it
     // lands strictly lower than, or ties with no more waste than, the best
     // base placement.
     if (candidates.length > 1 && result.card.span === candidates[1].span) {
@@ -114,7 +114,7 @@ for (const seed of [1, 2, 3, 4, 5, 42, 1337]) {
   const first = runSequence(seed, 40);
   assertNoOverlaps(first.cards, seed);
 
-  // §10 determinism: replaying the identical sequence reproduces
+  // Determinism: replaying the identical sequence reproduces
   // byte-identical (t, b, n, span) for every card.
   const second = runSequence(seed, 40);
   assert(
@@ -127,7 +127,7 @@ for (const seed of [1, 2, 3, 4, 5, 42, 1337]) {
   );
 }
 
-// §14: the first card anchors track 0, row 0, regardless of span.
+// The first card anchors track 0, row 0, regardless of span.
 {
   const rowFloor = context.mosaicDeriveRowFloor([], TRACKS);
   const result = context.mosaicInsert(
@@ -140,7 +140,7 @@ for (const seed of [1, 2, 3, 4, 5, 42, 1337]) {
   assert(result.card.b === 0, "first card must anchor row 0");
 }
 
-// §14: a span request wider than 12 clamps to 12.
+// A span request wider than 12 clamps to 12.
 {
   const rowFloor = context.mosaicDeriveRowFloor([], TRACKS);
   const anchor = context.mosaicAnchorFor(15, rowFloor, TRACKS);

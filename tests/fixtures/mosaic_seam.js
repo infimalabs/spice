@@ -17,7 +17,7 @@ function assert(condition, message) {
 const TRACK_COUNT = 12;
 const LEGAL_SPANS = [2, 3, 4, 6, TRACK_COUNT];
 
-// §9 seam rule / §11(b): for every adjacent (leftSpan, rightSpan) pair that
+// Seam rule: for every adjacent (leftSpan, rightSpan) pair that
 // fits side by side on the 12-track grid, the left card's right edge plus
 // gap must equal the right card's left edge EXACTLY -- both must derive
 // from the same shared integer edges[] table, never from independent

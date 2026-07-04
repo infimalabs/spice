@@ -50,7 +50,7 @@ function card(creationIndex, candidates, extra) {
   assert(byIndex.get(1).b === 0, "second-created card must land at b=0 alongside the first");
 }
 
-// --- history independence (§10, §14) -------------------------------------
+// --- history independence ------------------------------------------------
 
 // Same cards (creationIndex + candidates) but wildly different prior
 // t/b/span/n/frozen "history" must converge to the identical replayed

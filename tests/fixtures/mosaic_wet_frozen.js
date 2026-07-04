@@ -75,7 +75,7 @@ function card(creationIndex, t, span, n, frozen, b = 0) {
   const [replayedFrozen, replayedLow, replayedHigh] = replayed;
 
   assert(JSON.stringify(replayedFrozen) === before, "frozen card must be untouched by wetReplay");
-  // §13: "touches only wet cards" is a stronger claim than "values happen
+  // "Touches only wet cards" is a stronger claim than "values happen
   // to match" -- the frozen card must be the SAME object, never even
   // reconstructed, let alone re-decided.
   assert(replayedFrozen === frozenCard, "frozen card must be the same object reference, proving wetReplay never touched it");
@@ -83,7 +83,7 @@ function card(creationIndex, t, span, n, frozen, b = 0) {
   assert(replayedHigh.span === wetHigh.span, "wetReplay must never change a card's span");
 }
 
-// §13: the wet tail stays bounded by freezeDepth regardless of total board
+// The wet tail stays bounded by freezeDepth regardless of total board
 // size. Build a straight vertical stack of N cards (each resting directly
 // on the one before, single track so every card buries every earlier one)
 // and recompute freeze latches after each append, mirroring how
@@ -147,7 +147,7 @@ function card(creationIndex, t, span, n, frozen, b = 0) {
 }
 
 // Two wet cards resolving in either arrival order produce the same final
-// (t, b) per creationIndex -- order invariance (§14).
+// (t, b) per creationIndex -- order invariance.
 {
   const frozenBase = card(0, 0, 12, 2, true);
   const wetA = card(1, 0, 4, 2, false);

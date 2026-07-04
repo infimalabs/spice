@@ -485,7 +485,7 @@ def test_static_mosaic_seam_rule_holds_across_widths_including_fractional_colw()
 
 
 def test_static_mosaic_seam_rule_colw_multiplication_confined_to_geometry():
-    # §9 seam rule: only the edges[] table construction in mosaic-geometry.js
+    # Seam rule: only the edges[] table construction in mosaic-geometry.js
     # may reference colW in code. Any other mosaic file computing with colW
     # would be deriving a card's x/width independently of the shared integer
     # edges table -- exactly the per-card rounding the seam rule forbids.

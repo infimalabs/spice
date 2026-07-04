@@ -23,7 +23,7 @@ const RESCALED_ROOT_FONT_PX = 20;
 const WIDE_CONTAINER_PX = 1200; // L>=3, the common wide-lane case
 
 // Every reservation-bearing type is enumerated with a positive named prior;
-// an unknown type has none (§4 last paragraph: "unknown types default to no
+// an unknown type has none ("unknown types default to no
 // reservation").
 for (const type of ["ack", "quote", "image", "imageLarge"]) {
   const priorPx = context.mosaicReservationPriorPx(type, DEFAULT_ROOT_FONT_PX);
@@ -41,13 +41,13 @@ assert(
   "an unknown card type must have no reserved row count either",
 );
 
-// Image reservations are exact by construction (§12 imageHeights): the
+// Image reservations are exact by construction: the
 // reserved row count, derived purely from the letterbox cap constant, is
 // what a resolved image -- always letterboxed to that same cap -- will also
 // measure to. Sweep every module the card sizing lattice actually uses
-// (§4: 3/2/1 lines at L>=3/2/1) plus a non-lattice module, and both the
+// (3/2/1 lines at L>=3/2/1) plus a non-lattice module, and both the
 // default and a rescaled root font size: image caps are rem-denominated
-// (§4/§12), so a root font-size change rescales the cap coherently, exactly
+// so a root font-size change rescales the cap coherently, exactly
 // like the quote priors below -- the letterboxed <img> rescales right along
 // with it (messages.css), so exactness holds at any root font size.
 for (const rootFontSizePx of [DEFAULT_ROOT_FONT_PX, RESCALED_ROOT_FONT_PX]) {
@@ -86,8 +86,8 @@ for (const rootFontSizePx of [DEFAULT_ROOT_FONT_PX, RESCALED_ROOT_FONT_PX]) {
 }
 
 // The ack/quote prior is reader-facing content sharing the message body's
-// rem type ramp (§4), not fixed UI chrome -- it must resolve against the
-// live root font size the same way mosaicGeometry resolves gap/module (§3),
+// rem type ramp, not fixed UI chrome -- it must resolve against the
+// live root font size the same way mosaicGeometry resolves gap/module,
 // and must actually change when the root font changes (this is exactly the
 // bug a hardcoded-px prior would have: silently drifting from the real
 // `.ack-quote` render once a user rescales the root font).
@@ -130,7 +130,7 @@ for (const rootFontSizePx of [DEFAULT_ROOT_FONT_PX, RESCALED_ROOT_FONT_PX]) {
   );
 }
 
-// §7 resolution outcome classification: shrink and exact both pad in place
+// Resolution outcome classification: shrink and exact both pad in place
 // (no ripple); only growth needs one. This module only classifies the
 // outcome -- applying a ripple is app.mosaic-wet-frozen.js's concern.
 {
@@ -147,7 +147,7 @@ for (const rootFontSizePx of [DEFAULT_ROOT_FONT_PX, RESCALED_ROOT_FONT_PX]) {
   assert(growth.delta === 1, "growth delta must be resolvedRows - reservedRows");
 }
 
-// Priors are empirically shrink-biased (§4): across a realistic sample of
+// Priors are empirically shrink-biased: across a realistic sample of
 // pending ack-quote resolutions (short acknowledgments, 1-5 rendered lines
 // -- true outliers run far longer but are rare by construction), the
 // 2-line prior at the real L>=3 geometry never produces a growth ripple, at

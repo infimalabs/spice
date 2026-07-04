@@ -1,11 +1,11 @@
-// Mosaic geometry pass (spec .spice/mosaic-packing-spec.md §3). All
+// Mosaic geometry pass. All
 // dimensional constants are rem-denominated and resolved against the live
 // root font size once per pass. minLane is the single width tunable: the
 // capacity rule's emergent per-lane upper edge (min..min*(L+1)/L before the
 // next column fits) is NOT a divisor and must never be encoded as
 // floor(width / X) to pick a column count — that roughly halves the
 // achievable lane count. mosaicModuleLineHeightRem mirrors the reference
-// computeGeometry() in .spice/mosaic-demo.html; §4's type-ramp interlock
+// the type-ramp interlock
 // owns the real card-chrome CSS this must ultimately agree with.
 const mosaicGridTrackCount = 12;
 const mosaicLegalBaseSpans = [2, 3, 4, 6, 12];

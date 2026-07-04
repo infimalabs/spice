@@ -1,6 +1,6 @@
 const { withServePage } = require("./serve_playwright_harness");
 
-// Mosaic §9/§11(a)(c) render plane: card positions are transforms derived
+// Mosaic render plane: card positions are transforms derived
 // from (t, b, n, span) anchored to the fixed constant K, so a card whose
 // position did not change must receive zero style writes, and the uniform
 // plane component must never share a transition (or an element) with the
@@ -50,7 +50,7 @@ async function installMosaicTestHelpers(page) {
       };
       // Ordered [prop, value] log instead of counts: proves *sequence*, e.g.
       // that a transform write lands strictly between a transition:'none'
-      // write and the transition re-enable that follows it (the §9
+      // write and the transition re-enable that follows it (the
       // first-paint rule), not merely that both happened somewhere.
       window.__mosaicInstrumentStyleLog = function (el, props) {
         const log = [];
@@ -89,7 +89,7 @@ async function setupMosaicFixture(page, edges, gap) {
 
 // Initial placement (first apply always writes, must not touch the plane)
 // plus the first plane/host sync. Stashes prevA/prevB/prevMaxRow/prevExtent
-// on the fixture for later steps. Also covers the two §9 first-paint sites:
+// on the fixture for later steps. Also covers the two first-paint sites:
 // the plane's first sync from the null prevMaxRow sentinel (run at the REAL
 // frontier target before any card renders -- a fresh plane is never
 // anchored at a placeholder and animated away) and the first card's
@@ -108,7 +108,7 @@ async function measureInitialPlacement(page, cards, m, styleProps) {
       f.prevMaxRow = mosaicSyncPlane(f.plane, f.extent.maxRow, null, m, {});
       const anchorTransform = f.plane.style.transform;
       const anchorTransitionAfter = f.plane.style.transition;
-      // Independent oracle (spec §9: plane translated by -(K-maxRow)*M at
+      // Independent oracle (plane translated by -(K-maxRow)*M at
       // the REAL first target) rather than re-deriving via
       // mosaicPlaneTransform, so this cannot pass merely by the module
       // being self-consistent.
@@ -140,8 +140,8 @@ async function measureInitialPlacement(page, cards, m, styleProps) {
   );
 }
 
-// §9: from the first painted frame through entrance-animation end (300ms,
-// §12 entrance fade), a fresh card's position must be pixel-stable -- the
+// From the first painted frame through entrance-animation end (300ms
+// entrance fade), a fresh card's position must be pixel-stable -- the
 // only thing allowed to animate on entrance is opacity, never position.
 // Checked via the style values this module itself controls (transform
 // unchanged, zero further writes) rather than a live getBoundingClientRect()
@@ -171,7 +171,7 @@ async function measureEntranceStability(page) {
   );
 }
 
-// §11c: re-applying the same card values, and re-syncing plane/host at the
+// Re-applying the same card values, and re-syncing plane/host at the
 // same extent, must invoke zero setters.
 async function measureUnchangedWrites(page, cards, m, styleProps) {
   return page.evaluate(
@@ -204,7 +204,7 @@ async function measureUnchangedWrites(page, cards, m, styleProps) {
 }
 
 // Moving a card must write (discriminates the skip logic from "never
-// writes"), and every card's plane-space top must be 0 mod M (§11a).
+// writes"), and every card's plane-space top must be 0 mod M.
 async function measureMovedCardAndExtras(page, cards, m, styleProps) {
   return page.evaluate(
     ({ cards, m, styleProps }) => {
@@ -253,7 +253,7 @@ function assertMosaicRenderInvariants(result) {
   if (!result.prevMaxRowUnchanged || !result.extentUnchangedRef)
     fail("no-op sync did not return the prior reference");
 
-  // §9 first-paint rule, plane side: the first sync from the null sentinel
+  // First-paint rule, plane side: the first sync from the null sentinel
   // lands the REAL frontier target transition-free before the first card
   // renders -- never a placeholder that the same render animates away.
   if (result.anchorTransform !== result.expectedAnchorTransform)
@@ -269,7 +269,7 @@ function assertMosaicRenderInvariants(result) {
   if (!anchorOrdered)
     fail("plane first sync did not suppress/write/re-enable transition in that order");
 
-  // §9 first-paint rule, card side: the fresh transform write must land
+  // First-paint rule, card side: the fresh transform write must land
   // strictly between the transition:'none' write and the re-enable, so no
   // transform-transition is ever in effect while the transform changes --
   // the deterministic equivalent of "no transform transition event fires".
@@ -285,7 +285,7 @@ function assertMosaicRenderInvariants(result) {
   if (cardALog.some(([prop]) => prop === "opacity"))
     fail("mosaicApplyCardPosition wrote opacity -- entrance fade is a CSS concern, not this module's");
 
-  // §9 first-paint rule: pixel-stable from first paint through entrance-fade end.
+  // First-paint rule: pixel-stable from first paint through entrance-fade end.
   if (!result.transformStable)
     fail("fresh card's transform changed between first paint and entrance-animation end");
   if (result.writesDuringEntranceWindow !== 0)
