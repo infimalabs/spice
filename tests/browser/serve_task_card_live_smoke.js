@@ -3,6 +3,9 @@ const { promisify } = require("util");
 const { repoRoot, withServePage } = require("./serve_playwright_harness");
 
 const execFileAsync = promisify(execFile);
+const liveTaskCardSmokeOrigin = "ack:20260101T000000000000Z";
+// Later bound scratch targets avoid unrelated historical image fixtures.
+const liveTaskCardTargetOffset = 2;
 
 async function run() {
   return withServePage(
@@ -72,17 +75,23 @@ async function waitForLiveTaskCardSubscription(page, targetId) {
 }
 
 async function ensureLiveTaskCardLane(page) {
-  return page.evaluate(() => {
-    let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-    if (!lane && targets.length) {
-      addLane(targets[0].id);
-      lane = laneStates.get(targets[0].id);
+  return page.evaluate((targetOffset) => {
+    const boundTargets = targets.filter(
+      (target) => target.targetIdentity?.thread?.state === "bound",
+    );
+    const choices = boundTargets.length ? boundTargets : targets;
+    const target = choices[Math.min(targetOffset, choices.length - 1)];
+    if (!target) throw new Error("no target available for task-card smoke");
+    let lane = laneStates.get(target.id);
+    if (!lane) {
+      addLane(target.id);
+      lane = laneStates.get(target.id);
     }
     if (!lane) throw new Error("no lane available for task-card smoke");
     const threadId = lane.targetThreadId || lane.activeThreadId || "";
     if (!threadId) throw new Error("lane has no bound thread for task-card smoke");
     return { targetId: lane.targetId, threadId };
-  });
+  }, liveTaskCardTargetOffset);
 }
 
 async function taskCardDiagnostics(page, targetId) {
@@ -117,6 +126,8 @@ async function createTaskForLane(backendDir, threadId, title) {
       "serve.ui",
       "--acceptance",
       "Live task card appears without page reload",
+      "--origin",
+      liveTaskCardSmokeOrigin,
     ],
     {
       cwd: repoRoot,

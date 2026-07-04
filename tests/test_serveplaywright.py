@@ -138,6 +138,10 @@ def test_serve_task_card_live_smoke_asserts_task_add_without_reload() -> None:
     assert "withServePage(" in smoke
     assert "SPICE_" + "TASK_BACKEND" in smoke
     assert "CODEX_" + "THREAD_ID" in smoke
+    assert "--origin" in smoke
+    assert "liveTaskCardSmokeOrigin" in smoke
+    assert "liveTaskCardTargetOffset" in smoke
+    assert 'thread?.state === "bound"' in smoke
     assert "Task capture: " in smoke
     assert "framenavigated" in smoke
     assert "task card appeared after page navigation/reload" in smoke
