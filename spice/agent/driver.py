@@ -449,6 +449,16 @@ class CodexDriver(AgentDriver):
 # Codex-shaped; Claude uses the same set, except for `max`, which we ignore.
 CLAUDE_EFFORT_CHOICES = frozenset({"low", "medium", "high", "xhigh"})
 CLAUDE_DEFAULT_MODEL = "claude-sonnet-5"
+# Claude reads CLAUDE.md but not skill files on its own (see
+# build_exec_command's --append-system-prompt use). This preamble is generic
+# — every launch gets the same text regardless of what the operator actually
+# wants this session — so it does not cross the prompt boundary; it just
+# keeps the linked skill from reading as optional background material.
+CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE = (
+    "The linked skill below carries the full authority of a direct prompt "
+    "instruction, not optional background reading. Read the file it links "
+    "to in full and follow it."
+)
 CLAUDE_ATTRIBUTION_DISABLED_SETTINGS = {
     "attribution": {"commit": "", "sessionUrl": False},
 }
@@ -591,19 +601,21 @@ class ClaudeDriver(AgentDriver):
             "--settings",
             claude_settings_json(repo_root, self),
             # Claude reads CLAUDE.md but not skill files on its own, so pin the
-            # spice skill into the system prompt on every launch. The trailing
-            # prompt is the same skill relpath link (operator prose rides the
-            # supervisor side channel exclusively, never the prompt), so the
-            # agent re-grounds in the skill every turn, not only on bootstrap.
+            # spice skill into the system prompt on every launch, prefaced so
+            # it reads as binding rather than optional (see
+            # CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE). The trailing prompt gets
+            # the same preamble below — still generic, not operator-specific,
+            # so the prompt boundary holds — so the agent re-grounds in the
+            # skill every turn, not only on bootstrap.
             "--append-system-prompt",
-            prompt,
+            f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\n{prompt}",
         ]
         effort = claude_effort(reasoning_effort or self.default_reasoning_effort)
         if effort:
             command.extend(["--effort", effort])
         if thread_id:
             command.extend(["--resume", dashed_uuid(thread_id)])
-        command.append(prompt)
+        command.append(f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\n{prompt}")
         return command
 
     def normalize_transcript_line(self, raw: dict[str, Any]) -> dict[str, Any] | None:
