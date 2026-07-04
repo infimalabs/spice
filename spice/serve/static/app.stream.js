@@ -359,6 +359,10 @@ function renderMessagesIfChanged(lane) {
   const viewportAnchor = captureMessageViewportAnchor(lane);
   suppressLanePaneScrollIntentForFrame(lane);
   const mosaicRenderResult = mosaicRenderMessageStream(lane, visibleItems);
+  // Deferred (unmeasurable host): nothing was painted, so the fingerprint
+  // must stay uncommitted -- the reveal render re-enters here with the same
+  // content and actually paints it.
+  if (mosaicRenderResult && mosaicRenderResult.deferred) return;
   mosaicAttachHistorySentinels(lane, visibleItems);
   restoreMessageViewportAnchor(lane, viewportAnchor);
   mosaicRestoreBackfillViewport(lane, mosaicRenderResult);
