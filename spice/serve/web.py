@@ -59,6 +59,7 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
   <script src="/static/app.live-bus.js"></script>
   <script src="/static/app.mosaic-geometry.js"></script>
   <script src="/static/app.mosaic-engine.js"></script>
+  <script src="/static/app.mosaic-wet-frozen.js"></script>
   <script src="/static/app.mosaic-render.js"></script>
   <script src="/static/app.message-pack.js"></script>
   <script src="/static/app.stream.js"></script>
