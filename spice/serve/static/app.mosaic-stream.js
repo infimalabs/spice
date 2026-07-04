@@ -718,17 +718,15 @@ function mosaicRenderMessageStream(lane, visibleItems) {
   lane.mosaicRenderDeferred = false;
   lane.mosaicMeasuredNodes = new Set();
   mosaicTrackFontsAtMeasure(lane);
-  if (revealing) {
-    // First-paint discipline board-wide: whatever the engine rendered (or
-    // froze) while the lane was unmeasurable, no tween may start from that
-    // baseline. Dropping the applied-position memo makes every card look
-    // fresh to mosaicApplyCardPosition, and the null sentinels force
-    // unconditional first-paint plane-transform and extent rewrites --
-    // everything lands with transitions suppressed.
-    lane.mosaicAppliedByNode = new WeakMap();
-    lane.mosaicPrevMaxRow = null;
-    lane.mosaicPrevExtent = null;
-  }
+  // A reveal deliberately does NOT rebuild the board: deferral guarantees
+  // zero writes while unmeasurable, so the pre-hide rendered state is still
+  // exactly the committed state (an interrupted tween lands on its inline
+  // target when the transition cancels). Only what actually changed while
+  // hidden (content, geometry) produces writes, applied with snap below.
+  // Rebuilding unconditionally made rapid hide/reveal flapping -- a
+  // composer pane growing over the stream, pane drags across the width
+  // floor -- rewrite every card per flap, painting mid-rebuild states as
+  // visible jitter.
   // Geometry first: the plane is position:absolute, so creating it cannot
   // affect lane.messagesEl's own clientWidth, and mosaicPlane needs the
   // real M immediately if it has to anchor a fresh plane (see mosaicPlane).
