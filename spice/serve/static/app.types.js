@@ -154,3 +154,11 @@
 
 /** @type {ServeBranding} */
 var spiceServeBranding;
+
+/**
+ * @typedef {Object} ServeInitialGlobalSettings
+ * @property {boolean=} fastMode
+ */
+
+/** @type {ServeInitialGlobalSettings} */
+var spiceServeInitialGlobalSettings;

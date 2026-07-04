@@ -55,6 +55,7 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
         'const spiceServeBranding = {"name": "spice", "defaultLifetime": "Drive", '
         '"version":' in html
     )
+    assert 'const spiceServeInitialGlobalSettings = {"fastMode": false};' in html
     assert "const serveBrandName = String(spiceServeBranding.name" in app_js
     assert "function serveBrandMenuTitle()" in app_js
     assert 'querySelector("#global-status")' not in app_js
@@ -243,6 +244,12 @@ def test_index_branding_defaults_to_project_name_and_allows_explicit_override(
     )
 
 
+def test_index_injects_initial_global_settings():
+    html = render_index_html(initial_global_settings={"fastMode": True})
+
+    assert 'const spiceServeInitialGlobalSettings = {"fastMode": true};' in html
+
+
 def test_static_branding_config_feeds_fast_mode_and_audio_titles():
     app_types = (STATIC_ROOT / "app.types.js").read_text(encoding="utf-8")
     app_menu = (STATIC_ROOT / "app.menu.js").read_text(encoding="utf-8")
@@ -250,6 +257,8 @@ def test_static_branding_config_feeds_fast_mode_and_audio_titles():
 
     assert "@typedef {Object} ServeBranding" in app_types
     assert "var spiceServeBranding;" in app_types
+    assert "@typedef {Object} ServeInitialGlobalSettings" in app_types
+    assert "var spiceServeInitialGlobalSettings;" in app_types
     assert 'serveBrandMenuTitle() + " - fast mode on"' in app_menu
     assert ": serveBrandMenuTitle();" in app_menu
     assert "spiceServeBranding.name" in app_audio
@@ -426,7 +435,9 @@ def test_static_spice_menu_fast_mode_uses_server_global_state():
     app_controls = (STATIC_ROOT / "app.controls.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
 
-    assert "let fastModeEnabled = false;" in app_js
+    assert "let fastModeEnabled = initialFastModeEnabled();" in app_js
+    assert "function initialFastModeEnabled()" in app_js
+    assert "spiceServeInitialGlobalSettings.fastMode === true" in app_js
     assert "function currentFastModeEnabled()" in app_js
     assert "function applyGlobalSettingsPayload(settings)" in app_js
     assert 'throw new Error("team snapshot missing global fast mode");' in app_js
