@@ -355,7 +355,10 @@ function renderMessagesIfChanged(lane) {
   const visibleItems = renderItems.filter((item) => !isPresenceMessage(item));
   renderLaneViewShell(lane);
   const fingerprint = messageRenderFingerprint(lane, visibleItems);
-  if (fingerprint === lane.renderedMessageFingerprint) return;
+  if (fingerprint === lane.renderedMessageFingerprint) {
+    syncMessagePackLayoutIfNeeded(lane);
+    return;
+  }
   const viewportAnchor = captureMessageViewportAnchor(lane);
   const existingNodes = existingMessageNodesByKey(lane);
   const nodes = messageStreamNodesWithHistorySentinels(
@@ -371,6 +374,13 @@ function renderMessagesIfChanged(lane) {
   syncLaneHistoryObserver(lane);
   syncTeamImportOverlay(lane);
   lane.renderedMessageFingerprint = fingerprint;
+}
+
+function syncMessagePackLayoutIfNeeded(lane) {
+  syncMessagePackObserver(lane);
+  syncLaneHistoryObserver(lane);
+  syncTeamImportOverlay(lane);
+  if (messagePackLayoutNeedsSync(lane)) scheduleMessageStreamPack(lane);
 }
 
 function renderEmptyTeamMessages(lane) {
@@ -457,20 +467,27 @@ function historySentinelForLane(lane) {
   return lane.historySentinelEl;
 }
 
-// Deterministic Mosaic: every stream uses a stable 12-track grid. Root width
-// chooses up to six effective card slots that divide the 12 tracks cleanly, then
-// each card spans an even slice while columns stack at natural card height.
+// Deterministic Mosaic: every stream uses the same stable 12-track grid. The
+// 20rem floor chooses the minimum legal track span, then richer cards can take
+// larger 3/4/6-track pieces while every placement stacks at natural card height.
 // Existing pins are kept when the same-width stream grows above or below the
-// retained items so reading position stays stable; effective column changes
-// clear pins and run the ordered pass again. Team hosts use the same card
-// stream; the grouping contract is producer attribution, not a separate visual
-// lane per member.
+// retained items so reading position stays stable; grid-basis changes clear pins
+// and run the ordered pass again. Team hosts use the same card stream; the
+// grouping contract is producer attribution, not a separate visual lane per
+// member.
 function packMessageStream(lane) {
   const host = lane.messagesEl;
   if (!host) return;
   let style = getComputedStyle(host);
   if (style.display !== "grid") return;
-  const columnCount = messagePackColumnCount(host, style);
+  const rootWidthReset = messagePackRootWidthEligible(lane, host)
+    ? false
+    : clearMessagePackRootWidth(lane, host);
+  if (rootWidthReset) {
+    host.getBoundingClientRect();
+    style = getComputedStyle(host);
+  }
+  const columnCount = messagePackColumnCount(lane, host, style);
   const naturalHeightMode = columnCount <= 1;
   const rootWidthChanged = syncMessagePackRootWidth(lane, host, style, columnCount);
   const columnCountChanged = setMessagePackColumnCount(
@@ -479,7 +496,7 @@ function packMessageStream(lane) {
   );
   const trackMinChanged = setMessagePackTrackMin(host, "0px");
   const gridChanged =
-    rootWidthChanged || columnCountChanged || trackMinChanged;
+    rootWidthReset || rootWidthChanged || columnCountChanged || trackMinChanged;
   if (gridChanged) host.getBoundingClientRect();
   style = getComputedStyle(host);
   const rowHeight = cssPixelValue(style.gridAutoRows) || 8;
@@ -493,10 +510,11 @@ function packMessageStream(lane) {
       if (isMessagePackItem(node)) clearMessagePackPlacement(node);
     }
   }
-  const columnRows = new Array(Math.max(1, columnCount)).fill(0);
+  const minimumTrackSpan = messagePackColumnSpan(columnCount);
+  const placementStep = minimumTrackSpan;
+  const columnRows = new Array(messagePackGridTrackCount).fill(0);
   let segmentKey = "top";
   let segmentIndex = 0;
-  const columnSpan = messagePackColumnSpan(columnRows.length);
   for (const node of host.children) {
     if (!isMessagePackItem(node)) continue;
     let height = messagePackItemHeight(node, naturalHeightMode);
@@ -528,7 +546,7 @@ function packMessageStream(lane) {
       }
       continue;
     }
-    const slotSpan = messagePackSlotSpan(node, columnRows.length);
+    const slotSpan = messagePackTrackSpan(node, minimumTrackSpan, height);
     const placementColumn = orderedMessagePackColumn(
       node,
       segmentKey,
@@ -536,6 +554,7 @@ function packMessageStream(lane) {
       columnRows.length,
       columnRows,
       slotSpan,
+      placementStep,
       reflowing,
     );
     const placementRow = maxMessagePackRows(
@@ -543,8 +562,8 @@ function packMessageStream(lane) {
       placementColumn,
       slotSpan,
     );
-    const gridColumnStart = messagePackGridColumnStart(placementColumn, columnSpan);
-    const gridColumnSpan = columnSpan * slotSpan;
+    const gridColumnStart = placementColumn + 1;
+    const gridColumnSpan = slotSpan;
     setMessagePackProvisionalPosition(
       node,
       String(gridColumnStart),

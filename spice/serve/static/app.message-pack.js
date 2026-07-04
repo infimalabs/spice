@@ -7,6 +7,10 @@ const messageCardBorderAllowancePx = 2;
 const messagePackGridTrackCount = 12;
 const messagePackMaxEffectiveColumns = 6;
 const messagePackEffectiveColumnCounts = [6, 4, 3, 2, 1];
+const messagePackLayoutVersion = 3;
+const messagePackLegalTrackSpans = [2, 3, 4, 6, 12];
+const messagePackSlackPenalty = 3;
+const messagePackTallFinalMinHeightPx = 280;
 
 function messagePackItemHeight(node, naturalHeightMode = false) {
   const rectHeight = node.getBoundingClientRect().height;
@@ -40,9 +44,11 @@ function messagePackBarrierKey(node) {
   );
 }
 
-function messagePackColumnCount(host, style) {
+function messagePackColumnCount(lane, host, style) {
   if (messagePackViewportForcesSingleColumn()) return 1;
-  const inner = messagePackRootInnerWidth(host, style);
+  const inner = messagePackRootWidthEligible(lane, host)
+    ? messagePackRootInnerWidth(host, style)
+    : messagePackInnerWidth(host, style);
   if (!Number.isFinite(inner) || inner <= 0) return 1;
   const gap = cssPixelValue(style.columnGap);
   const minWidth = cssLengthValue(
@@ -64,16 +70,6 @@ function messagePackEffectiveColumnWidth(inner, gap, count) {
 }
 
 function messagePackInnerWidth(host, style) {
-  const rootWidth = Number.parseFloat(
-    host.style.getPropertyValue("--message-pack-root-width") || "",
-  );
-  if (Number.isFinite(rootWidth) && rootWidth > 0) {
-    return (
-      rootWidth -
-      cssPixelValue(style.paddingLeft) -
-      cssPixelValue(style.paddingRight)
-    );
-  }
   return (
     host.clientWidth -
     cssPixelValue(style.paddingLeft) -
@@ -98,7 +94,35 @@ function messagePackRootElement(host) {
   return host.closest(".swimlanes") || host;
 }
 
-function syncMessagePackRootWidth(lane, host, style, columnCount) {
+function messagePackRootWidthEligible(lane, host) {
+  const root = messagePackRootElement(host);
+  if (!root || root === host) return false;
+  return messagePackVisibleRootLaneCount(root, lane.element) <= 1;
+}
+
+function messagePackVisibleRootLaneCount(root, activeLane) {
+  let count = 0;
+  for (const node of root.children) {
+    if (!node.classList?.contains("lane")) continue;
+    if (node.classList.contains("lane--shadowed")) continue;
+    if (getComputedStyle(node).display === "none") continue;
+    count += 1;
+    if (count > 1) return count;
+  }
+  return count || (activeLane ? 1 : 0);
+}
+
+function clearMessagePackRootWidth(lane, host) {
+  const hadClass = lane.element.classList.contains("lane--message-pack-root");
+  const hadRootWidth = Boolean(
+    host.style.getPropertyValue("--message-pack-root-width"),
+  );
+  lane.element.classList.remove("lane--message-pack-root");
+  host.style.removeProperty("--message-pack-root-width");
+  return hadClass || hadRootWidth;
+}
+
+function messagePackRootWidthState(lane, host, style, columnCount) {
   const root = messagePackRootElement(host);
   const rootWidth =
     root && root !== host
@@ -108,23 +132,58 @@ function syncMessagePackRootWidth(lane, host, style, columnCount) {
       : 0;
   const laneWidth = lane.element.getBoundingClientRect().width;
   const useRootWidth =
+    messagePackRootWidthEligible(lane, host) &&
     columnCount > 1 &&
     rootWidth > laneWidth + cssPixelValue(style.columnGap);
+  return {
+    useRootWidth,
+    value: Math.max(laneWidth, rootWidth) + "px",
+  };
+}
+
+function messagePackLayoutNeedsSync(lane) {
+  const host = lane.messagesEl;
+  if (!host) return false;
+  const style = getComputedStyle(host);
+  if (style.display !== "grid") return false;
+  const columnCount = messagePackColumnCount(lane, host, style);
+  const rootWidth = messagePackRootWidthState(lane, host, style, columnCount);
+  const hasRootWidthClass = lane.element.classList.contains(
+    "lane--message-pack-root",
+  );
+  const rootWidthValue = host.style.getPropertyValue(
+    "--message-pack-root-width",
+  );
+  if (rootWidth.useRootWidth)
+    return !hasRootWidthClass || rootWidthValue !== rootWidth.value;
+  return hasRootWidthClass || Boolean(rootWidthValue);
+}
+
+function messagePackRootWidthActive(lane, host) {
+  return (
+    lane.element.classList.contains("lane--message-pack-root") &&
+    Boolean(host.style.getPropertyValue("--message-pack-root-width"))
+  );
+}
+
+function syncMessagePackRootWidth(lane, host, style, columnCount) {
+  const rootWidth = messagePackRootWidthState(lane, host, style, columnCount);
   const classChanged =
-    lane.element.classList.contains("lane--message-pack-root") !== useRootWidth;
-  lane.element.classList.toggle("lane--message-pack-root", useRootWidth);
-  if (useRootWidth) {
-    const value = Math.max(laneWidth, rootWidth) + "px";
-    if (host.style.getPropertyValue("--message-pack-root-width") !== value) {
-      host.style.setProperty("--message-pack-root-width", value);
+    lane.element.classList.contains("lane--message-pack-root") !==
+    rootWidth.useRootWidth;
+  lane.element.classList.toggle(
+    "lane--message-pack-root",
+    rootWidth.useRootWidth,
+  );
+  if (rootWidth.useRootWidth) {
+    if (
+      host.style.getPropertyValue("--message-pack-root-width") !== rootWidth.value
+    ) {
+      host.style.setProperty("--message-pack-root-width", rootWidth.value);
       return true;
     }
   } else {
-    const hadRootWidth = Boolean(
-      host.style.getPropertyValue("--message-pack-root-width"),
-    );
-    host.style.removeProperty("--message-pack-root-width");
-    return classChanged || hadRootWidth;
+    return clearMessagePackRootWidth(lane, host) || classChanged;
   }
   return classChanged;
 }
@@ -197,28 +256,44 @@ function orderedMessagePackColumn(
   columnCount,
   columnRows,
   slotSpan,
+  placementStep,
   reflowing,
 ) {
-  const pinned = messagePackPinnedColumn(node, columnCount, slotSpan, reflowing);
+  const pinned = messagePackPinnedColumn(
+    node,
+    columnCount,
+    slotSpan,
+    placementStep,
+    reflowing,
+  );
   if (pinned >= 0) return pinned;
   const column = messagePackBestColumn(
     segmentIndex,
     columnCount,
     columnRows,
     slotSpan,
+    placementStep,
   );
   node.dataset.messagePackSegment = segmentKey;
   node.dataset.messagePackColumn = String(column);
   return column;
 }
 
-function messagePackPinnedColumn(node, columnCount, slotSpan, reflowing) {
+function messagePackPinnedColumn(
+  node,
+  columnCount,
+  slotSpan,
+  placementStep,
+  reflowing,
+) {
   const pinned = Number.parseInt(node.dataset.messagePackColumn || "", 10);
+  const step = Math.max(1, placementStep);
   if (
     !reflowing &&
     Number.isInteger(pinned) &&
     pinned >= 0 &&
-    pinned + slotSpan <= columnCount
+    pinned + slotSpan <= columnCount &&
+    pinned % step === 0
   )
     return pinned;
   return -1;
@@ -229,16 +304,18 @@ function messagePackBestColumn(
   columnCount,
   columnRows,
   slotSpan,
+  placementStep,
 ) {
   const rightToLeft = messagePackPlacementRightToLeft(
     segmentIndex,
     columnCount,
   );
+  const step = Math.max(1, placementStep);
   let best = { column: 0, row: Infinity, score: Infinity };
   for (
     let candidate = 0;
     candidate <= Math.max(0, columnCount - slotSpan);
-    candidate += 1
+    candidate += step
   ) {
     const candidateMetrics = messagePackPlacementMetrics(
       columnRows,
@@ -277,7 +354,7 @@ function messagePackPlacementMetrics(columnRows, column, slotSpan) {
   }
   return {
     row,
-    score: row + slack,
+    score: row + slack * messagePackSlackPenalty,
   };
 }
 
@@ -288,20 +365,29 @@ function messagePackColumnSpan(columnCount) {
   );
 }
 
-function messagePackGridColumnStart(column, columnSpan) {
-  return column * columnSpan + 1;
-}
-
-function messagePackSlotSpan(node, columnCount) {
-  if (columnCount <= 1) return 1;
+function messagePackTrackSpan(node, minimumTrackSpan, itemHeight = 0) {
+  const floor = Math.max(1, minimumTrackSpan);
+  if (node.classList.contains("final"))
+    return messagePackPreferredTrackSpan(
+      floor,
+      itemHeight > messagePackTallFinalMinHeightPx ? 6 : 4,
+    );
   if (
-    node.classList.contains("final") ||
-    node.classList.contains("acked") ||
     node.classList.contains("media-rich") ||
     node.classList.contains("image-only")
   )
-    return Math.min(2, columnCount);
-  return 1;
+    return messagePackPreferredTrackSpan(floor, 4);
+  if (node.classList.contains("acked"))
+    return messagePackPreferredTrackSpan(floor, 3);
+  return floor;
+}
+
+function messagePackPreferredTrackSpan(minimumTrackSpan, preferredTrackSpan) {
+  const target = Math.max(minimumTrackSpan, preferredTrackSpan);
+  for (const span of messagePackLegalTrackSpans) {
+    if (span >= target) return span;
+  }
+  return messagePackGridTrackCount;
 }
 
 function maxMessagePackRows(columnRows, column, columnSpan) {
@@ -347,7 +433,10 @@ function messagePackItemIdentity(node) {
 function messagePackShouldReflow(lane, host, columnCount, itemKeys) {
   const state = lane.messagePackLayoutState;
   if (!state) return true;
+  if (state.version !== messagePackLayoutVersion) return true;
   if (state.columnCount !== columnCount) return true;
+  if (state.rootWidthActive !== messagePackRootWidthActive(lane, host))
+    return true;
   const previous = state.itemKeys || [];
   return !messagePackKnownSequencePreserved(previous, itemKeys);
 }
@@ -398,6 +487,8 @@ function commitMessagePackLayoutState(lane, host, columnCount, itemKeys) {
   lane.messagePackLayoutState = {
     columnCount,
     itemKeys: itemKeys.slice(),
+    rootWidthActive: messagePackRootWidthActive(lane, host),
+    version: messagePackLayoutVersion,
   };
 }
 
