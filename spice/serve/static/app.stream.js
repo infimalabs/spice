@@ -355,10 +355,7 @@ function renderMessagesIfChanged(lane) {
   const visibleItems = renderItems.filter((item) => !isPresenceMessage(item));
   renderLaneViewShell(lane);
   const fingerprint = messageRenderFingerprint(lane, visibleItems);
-  if (fingerprint === lane.renderedMessageFingerprint) {
-    const rootWidthChanged = mosaicSyncRootWidth(lane);
-    if (!rootWidthChanged || !lane.mosaicCards) return;
-  }
+  if (fingerprint === lane.renderedMessageFingerprint) return;
   const viewportAnchor = captureMessageViewportAnchor(lane);
   suppressLanePaneScrollIntentForFrame(lane);
   const mosaicRenderResult = mosaicRenderMessageStream(lane, visibleItems);

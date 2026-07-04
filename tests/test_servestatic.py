@@ -220,11 +220,22 @@ def test_static_messages_have_no_legacy_pack_vestige():
     assert "message-pack" not in app_stream.lower()
     assert "messagepack" not in app_stream.lower()
 
+    # UI-1k9zdKM9: the mosaic-native root-width mechanism (mosaicSyncRootWidth
+    # et al, briefly restored in app.mosaic-stream.js under the same visual
+    # concern) proved to be a genuine no-op empirically -- a lone visible
+    # lane already reaches the swimlanes' full width via plain
+    # .lane{flex:1 1 0} layout, and a sibling-lane-closes transition is
+    # already corrected by the existing mosaicSyncResizeObserver, with or
+    # without this mechanism running. Deleted outright; mosaic-geometry
+    # reads clientWidth with no CSS-adornment step beforehand.
+    assert "mosaicSyncRootWidth" not in app_stream
+    assert "mosaicSyncRootWidth" not in app_mosaic_stream
+    assert "mosaic-root-width" not in css.lower()
+
     # index.css has an unrelated `.messages { ... }` mobile-padding override
-    # and a `.lane--mosaic-root-width .messages { ... }` rule that both
-    # contain the substring ".messages {"; anchor the search from the
+    # containing the substring ".messages {"; anchor the search from the
     # "---- messages ----" section banner, unique to messages.css, so the
-    # base rule (not those overrides) is what gets sliced.
+    # base rule (not that override) is what gets sliced.
     messages_section = css.index("/* ---- messages ---- */")
     messages_rule = _between(css[messages_section:], ".messages {", "}")
     article_rule = _between(css[messages_section:], ".messages article {", "}")
