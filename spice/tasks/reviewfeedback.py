@@ -152,9 +152,8 @@ def _feedback_body(
             "",
             _blockquote(note_text),
             "",
-            "\N{SMILING FACE WITH SMILING EYES} Respectfully consider peer "
-            "feedback and carry it forward; continue working your current "
-            "claim and task (trust the allocator)!",
+            "\N{SMILING FACE WITH SMILING EYES} Respectfully internalize as "
+            "guidance and keep working your current task!",
         ]
     )
 

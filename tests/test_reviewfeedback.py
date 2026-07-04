@@ -94,9 +94,8 @@ def test_review_feedback_delivers_deduped_review_guidance(tmp_path, monkeypatch)
             "",
             "> needs coverage",
             "",
-            "\N{SMILING FACE WITH SMILING EYES} Respectfully consider peer "
-            "feedback and carry it forward; continue working your current "
-            "claim and task (trust the allocator)!",
+            "\N{SMILING FACE WITH SMILING EYES} Respectfully internalize as "
+            "guidance and keep working your current task!",
         ]
     )
     assert calls == [
