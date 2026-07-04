@@ -86,6 +86,17 @@ function mosaicCardPositionChanged(card, prev) {
 // the comparison. A fresh card (no prev) gets its first transform applied
 // with transitions suppressed and one forced reflow (§9 first-paint rule)
 // so it never tweens in from the identity matrix.
+//
+// Call-order contract: mosaicSyncPlane must land the plane at the current
+// maxRow's transform BEFORE this runs for any card whose reflow (the void
+// el.offsetWidth above) would otherwise happen while the plane still
+// carries a stale/absent transform. Placing a K-anchored card (routinely
+// (K±few)*M px) while the ancestor plane's cancelling transform isn't in
+// place yet causes at least one engine (confirmed: this project's headless
+// Chromium) to freeze a stale, enormous scrollable-overflow region on the
+// scrolling ancestor that a later plane transform update does not correct
+// -- reproduced directly by swapping the two calls' order. Sync the plane
+// first, always.
 function mosaicApplyCardPosition(el, card, prev, edges, M, gap, options) {
   if (!mosaicCardPositionChanged(card, prev)) return prev;
   const transform = mosaicCardTransform(card, edges, M);

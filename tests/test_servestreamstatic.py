@@ -326,12 +326,59 @@ def test_static_mosaic_reservations_is_wired_after_sizing_before_message_pack():
     assert sizing_index < reservations_index < message_pack_index
 
 
+def test_static_mosaic_span_helpers_are_pure_and_covered():
+    script = Path(__file__).with_name("fixtures") / "mosaic_span.js"
+
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.mosaic-engine.js"),
+            str(STATIC_ROOT / "app.mosaic-sizing.js"),
+            str(STATIC_ROOT / "app.mosaic-span.js"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_static_mosaic_span_is_wired_after_sizing_before_render():
+    app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
+    sizing_index = app_js.index('src="/static/app.mosaic-sizing.js"')
+    span_index = app_js.index('src="/static/app.mosaic-span.js"')
+    render_index = app_js.index('src="/static/app.mosaic-render.js"')
+    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
+    assert sizing_index < span_index < render_index < message_pack_index
+
+
 def test_static_mosaic_render_is_wired_after_engine_before_message_pack():
     app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
     engine_index = app_js.index('src="/static/app.mosaic-engine.js"')
     render_index = app_js.index('src="/static/app.mosaic-render.js"')
     message_pack_index = app_js.index('src="/static/app.message-pack.js"')
     assert engine_index < render_index < message_pack_index
+
+
+def test_static_mosaic_scroll_helpers_are_pure_and_covered():
+    script = Path(__file__).with_name("fixtures") / "mosaic_scroll.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(STATIC_ROOT / "app.mosaic-scroll.js")],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_static_mosaic_scroll_is_wired_after_render_before_message_pack():
+    app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
+    render_index = app_js.index('src="/static/app.mosaic-render.js"')
+    scroll_index = app_js.index('src="/static/app.mosaic-scroll.js"')
+    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
+    assert render_index < scroll_index < message_pack_index
 
 
 def test_static_mosaic_wet_frozen_helpers_are_pure_and_covered():
@@ -357,6 +404,69 @@ def test_static_mosaic_wet_frozen_is_wired_after_engine_before_message_pack():
     wet_frozen_index = app_js.index('src="/static/app.mosaic-wet-frozen.js"')
     message_pack_index = app_js.index('src="/static/app.message-pack.js"')
     assert engine_index < wet_frozen_index < message_pack_index
+
+
+def test_static_mosaic_full_replay_helpers_are_pure_and_covered():
+    script = Path(__file__).with_name("fixtures") / "mosaic_full_replay.js"
+
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.mosaic-engine.js"),
+            str(STATIC_ROOT / "app.mosaic-wet-frozen.js"),
+            str(STATIC_ROOT / "app.mosaic-full-replay.js"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_static_mosaic_full_replay_is_wired_after_wet_frozen_before_sizing():
+    app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
+    wet_frozen_index = app_js.index('src="/static/app.mosaic-wet-frozen.js"')
+    full_replay_index = app_js.index('src="/static/app.mosaic-full-replay.js"')
+    sizing_index = app_js.index('src="/static/app.mosaic-sizing.js"')
+    assert wet_frozen_index < full_replay_index < sizing_index
+
+
+def test_static_mosaic_seam_rule_holds_across_widths_including_fractional_colw():
+    script = Path(__file__).with_name("fixtures") / "mosaic_seam.js"
+
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.mosaic-geometry.js"),
+            str(STATIC_ROOT / "app.mosaic-render.js"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_static_mosaic_seam_rule_colw_multiplication_confined_to_geometry():
+    # §9 seam rule: only the edges[] table construction in mosaic-geometry.js
+    # may reference colW in code. Any other mosaic file computing with colW
+    # would be deriving a card's x/width independently of the shared integer
+    # edges table -- exactly the per-card rounding the seam rule forbids.
+    # Comments may still discuss colW (e.g. explaining what NOT to do), so
+    # strip `//` line comments before scanning.
+    def code_only(text):
+        return "\n".join(line.split("//", 1)[0] for line in text.splitlines())
+
+    mosaic_files = sorted(STATIC_ROOT.glob("app.mosaic-*.js"))
+    offenders = [
+        path.name
+        for path in mosaic_files
+        if path.name != "app.mosaic-geometry.js"
+        and "colW" in code_only(path.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
 
 
 def test_static_message_footer_controls_stay_right_aligned_on_mobile():
