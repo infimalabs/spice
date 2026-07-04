@@ -16,6 +16,7 @@ import pytest
 
 from spice.agent.driver import (
     CLAUDE_DRIVER,
+    CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE,
     CODEX_DRIVER,
     POST_TOOL_HOOK_EVENT,
     PLAYWRIGHT_MCP_COMMAND,
@@ -89,7 +90,7 @@ def test_claude_command_starts_headless_stream_json_with_effort(tmp_path):
     assert command[command.index("--model") + 1] == "haiku"
     assert command[command.index("--permission-mode") + 1] == "bypassPermissions"
     assert command[command.index("--effort") + 1] == "xhigh"
-    assert command[-1] == "follow the skill"
+    assert command[-1] == f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\nfollow the skill"
 
 
 def test_claude_command_disables_commit_attribution(tmp_path):
@@ -163,11 +164,14 @@ def test_claude_command_appends_skill_to_system_prompt(tmp_path):
         prompt=skill_link,
         model="haiku",
     )
-    # The skill rides Claude's system prompt every launch, carrying the same
+    expected = f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\n{skill_link}"
+    # The skill rides Claude's system prompt every launch, prefaced so it
+    # reads as binding rather than optional, carrying the same preamble and
     # relpath link as the trailing prompt — not just the bootstrap turn.
-    assert command[command.index("--append-system-prompt") + 1] == skill_link
-    # It is a flag value, not the trailing prompt the agent acts on.
-    assert command[-1] == skill_link
+    assert command[command.index("--append-system-prompt") + 1] == expected
+    # The trailing prompt the agent acts on gets the identical preamble --
+    # still generic, not operator-specific, so the prompt boundary holds.
+    assert command[-1] == expected
     assert command.index("--append-system-prompt") < len(command) - 1
 
 
@@ -183,7 +187,7 @@ def test_claude_command_registers_playwright_mcp_server(tmp_path):
     assert server["command"] == PLAYWRIGHT_MCP_COMMAND
     assert server["args"] == playwright_mcp_args(tmp_path)
     # The MCP config is a flag, not the trailing prompt.
-    assert command[-1] == "follow the skill"
+    assert command[-1] == f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\nfollow the skill"
 
 
 def test_claude_command_resumes_with_dashed_session_id(tmp_path):
@@ -196,7 +200,7 @@ def test_claude_command_resumes_with_dashed_session_id(tmp_path):
     assert command[command.index("--resume") + 1] == (
         "768bcba1-a66f-4d22-9ce7-bcf65b5d16aa"
     )
-    assert command[-1] == "continue"
+    assert command[-1] == f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\ncontinue"
 
 
 def test_claude_user_event_carries_prompt_id_as_turn_boundary():
