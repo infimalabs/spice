@@ -230,6 +230,9 @@ def test_static_messages_use_stable_packed_rows():
     image_only_stack_rule = _between(
         css, ".messages article.image-only .message-body p.message-image-stack {", "}"
     )
+    image_only_link_rule = _between(
+        css, ".messages article.image-only .message-image {", "}"
+    )
     image_only_image_rule = _between(
         css, ".messages article.image-only .message-image img {", "}"
     )
@@ -272,8 +275,10 @@ def test_static_messages_use_stable_packed_rows():
     assert "max-height: 136px" in css
     assert "align-items: center;" in image_only_stack_rule
     assert "justify-content: flex-end;" in image_only_stack_rule
+    assert "max-width: min(100%, 56rem);" in image_only_link_rule
+    assert "min-width: 0;" in image_only_link_rule
     assert "max-height: min(32vh, 260px);" in image_only_image_rule
-    assert "max-width: min(100%, 56rem);" in image_only_image_rule
+    assert "max-width: 100%;" in image_only_image_rule
     assert "width: auto;" in image_only_image_rule
     assert ".history-sentinel {\n  grid-column: 1 / -1;" in css
     assert "function packMessageStream(lane)" in app_stream
