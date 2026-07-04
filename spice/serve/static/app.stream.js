@@ -377,9 +377,6 @@ function renderMessagesIfChanged(lane) {
 }
 
 function syncMessagePackLayoutIfNeeded(lane) {
-  syncMessagePackObserver(lane);
-  syncLaneHistoryObserver(lane);
-  syncTeamImportOverlay(lane);
   if (messagePackLayoutNeedsSync(lane)) scheduleMessageStreamPack(lane);
 }
 

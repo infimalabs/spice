@@ -103,6 +103,7 @@ async function taskStackSmokeMeasurement(lane, host, taskArticle, imageArticle, 
   const stack = taskArticle.querySelector(".task-directive-stack");
   const imageStack = imageArticle.querySelector(".message-image-stack");
   const image = imageArticle.querySelector(".message-image img");
+  const imageLinks = Array.from(imageArticle.querySelectorAll(".message-image"));
   const imageArticleRect = taskStackSmokeRect(imageArticle);
   const messageCardNodes = Array.from(
     host.querySelectorAll('[data-task-stack-smoke="message-card"]'),
@@ -161,7 +162,10 @@ async function taskStackSmokeMeasurement(lane, host, taskArticle, imageArticle, 
     hostGridAutoRows: hostStyle.gridAutoRows,
     hostRowGap: hostStyle.rowGap,
     imageStackDisplay: getComputedStyle(imageStack).display,
+    imageStackClientWidth: imageStack.clientWidth,
+    imageStackScrollWidth: imageStack.scrollWidth,
     imageArticleWidth: imageArticleRect.width,
+    imageLinkWidths: imageLinks.map((link) => taskStackSmokeRect(link).width),
     imageWidth: taskStackSmokeRect(image).width,
     messageCardDisplays: messageCardNodes.map((card) => getComputedStyle(card).display),
     messageCardFirstRowCount: firstRowMessageCards.length,
@@ -443,8 +447,8 @@ function taskStackSmokeTaskHtml() {
 
 function taskStackSmokeImageHtml() {
   const svg = encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="156" height="96">' +
-      '<rect width="156" height="96" fill="#8a4fbf"/>' +
+    '<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1200">' +
+      '<rect width="2400" height="1200" fill="#8a4fbf"/>' +
       "</svg>",
   );
   const image =
@@ -542,6 +546,12 @@ function assertBaseTaskStackLayout(measurement) {
 }
 
 function assertImageArticleSizing(measurement, options) {
+  if (measurement.imageWidth > measurement.imageArticleWidth + 2)
+    throw new Error("image exceeded its message card: " + JSON.stringify(measurement));
+  if (measurement.imageLinkWidths.some((width) => width > measurement.imageArticleWidth + 2))
+    throw new Error("image link exceeded its message card: " + JSON.stringify(measurement));
+  if (measurement.imageStackScrollWidth > measurement.imageStackClientWidth + 2)
+    throw new Error("image stack kept horizontal overflow: " + JSON.stringify(measurement));
   if (options.wraps) {
     if (measurement.imageArticleWidth < measurement.messageCardHostInnerWidth * 0.92)
       throw new Error("wrapped image card did not fill row: " + JSON.stringify(measurement));
