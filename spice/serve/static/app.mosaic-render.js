@@ -19,6 +19,19 @@ const MOSAIC_PLANE_K = 4096;
 const MOSAIC_TWEEN_TRANSITION =
   "transform 340ms cubic-bezier(.25,.8,.3,1)";
 
+// §9: the reader's OS/browser-level motion preference. Callers read this
+// once per event (it can change mid-session) and pass it through as
+// options.reducedMotion to mosaicApplyCardPosition/mosaicSyncPlane; the
+// CSS @media (prefers-reduced-motion: reduce) block in messages.css is the
+// backstop that holds even if a caller forgets to check.
+function mosaicPrefersReducedMotion() {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
 // Plane-space y for a card's top edge, anchored to K so unchanged cards
 // never recompute to a different value merely because maxRow rose (§9).
 function mosaicCardY(card, M) {
@@ -133,19 +146,19 @@ function mosaicSyncPlane(planeEl, maxRow, prevMaxRow, M, options) {
   const reducedMotion = Boolean(options && options.reducedMotion);
   const replaying = Boolean(options && options.replaying);
   const scrolled = Boolean(options && options.scrolled);
-  if (reducedMotion) {
-    planeEl.style.transition = "none";
-    planeEl.style.transform = transform;
-  } else if (scrolled && !replaying) {
-    planeEl.style.transition = "none";
-    planeEl.style.transform = transform;
+  // Compensation is a correctness behavior, not a motion effect (§9): it
+  // must still land whenever the reader is scrolled, reduced motion or
+  // not. Only the transition -- animated tween vs instant jump -- takes
+  // reducedMotion into account.
+  const jumpAndCompensate = scrolled && !replaying;
+  planeEl.style.transition =
+    reducedMotion || jumpAndCompensate ? "none" : MOSAIC_TWEEN_TRANSITION;
+  planeEl.style.transform = transform;
+  if (jumpAndCompensate) {
     void planeEl.offsetWidth;
     if (options && typeof options.onCompensate === "function") {
       options.onCompensate((maxRow - prevMaxRow) * M);
     }
-  } else {
-    planeEl.style.transition = MOSAIC_TWEEN_TRANSITION;
-    planeEl.style.transform = transform;
   }
   return maxRow;
 }
