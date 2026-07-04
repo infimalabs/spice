@@ -16,6 +16,7 @@ SERVE_WEB_JS_PATHS = (
     "spice/serve/static/app.mosaic-geometry.js",
     "spice/serve/static/app.mosaic-engine.js",
     "spice/serve/static/app.mosaic-wet-frozen.js",
+    "spice/serve/static/app.mosaic-full-replay.js",
     "spice/serve/static/app.mosaic-sizing.js",
     "spice/serve/static/app.mosaic-render.js",
     "spice/serve/static/app.message-pack.js",
