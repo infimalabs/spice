@@ -986,3 +986,25 @@ def test_worktree_image_rejects_missing_shared_attachment_reference(tmp_path):
     )
 
     assert handler.status == HTTPStatus.NOT_FOUND
+
+
+def test_worktree_image_placeholder_for_missing_rendered_attachment(tmp_path):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    handler = _ImageHandler(state)
+
+    app._ServeHandler._send_worktree_image(
+        handler,
+        target,
+        {
+            "missing": ["placeholder"],
+            "path": [
+                (shared_attachment_root(repo) / "missing" / "01-image.png").as_posix()
+            ],
+        },
+    )
+
+    assert handler.status == HTTPStatus.OK
+    assert handler.headers["Content-Type"] == "image/svg+xml; charset=utf-8"
+    assert b"Image unavailable" in handler.body.getvalue()
