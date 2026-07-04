@@ -21,7 +21,7 @@ async function run() {
           typeof submitLaneForm === "function" &&
           typeof renderMessage === "function" &&
           typeof renderMessagesIfChanged === "function" &&
-          typeof packMessageStream === "function" &&
+          typeof mosaicRenderMessageStream === "function" &&
           typeof liveBusIsOpen === "function" &&
           Array.isArray(window.__spiceSubmitLatencySamples) &&
           Array.isArray(targets) &&
@@ -114,16 +114,15 @@ async function runSubmitTypingDuringMosaicSmokePage() {
   lane.oldestMessageKey = items[items.length - 1].key;
   lane.renderedMessageFingerprint = "";
   renderMessagesIfChanged(lane);
-  syncMessagePackObserver(lane);
   await waitForSubmitTypingFrame();
   await waitForSubmitTypingFrame();
 
-  const originalPack = packMessageStream;
+  const originalRender = mosaicRenderMessageStream;
   const packDurations = [];
-  packMessageStream = function (...args) {
+  mosaicRenderMessageStream = function (...args) {
     const startedAt = performance.now();
     try {
-      return originalPack.apply(this, args);
+      return originalRender.apply(this, args);
     } finally {
       packDurations.push(performance.now() - startedAt);
     }
@@ -145,7 +144,7 @@ async function runSubmitTypingDuringMosaicSmokePage() {
       await waitForSubmitTypingFrame();
     }
   } finally {
-    packMessageStream = originalPack;
+    mosaicRenderMessageStream = originalRender;
   }
   return {
     inputCount: inputDurations.length,
@@ -154,9 +153,9 @@ async function runSubmitTypingDuringMosaicSmokePage() {
     messageCount: lane.knownMessages.length,
     packCount: packDurations.length,
     maxPackMs: Math.max(...packDurations, 0),
-    observedCount: lane.messagePackObservedNodes
-      ? lane.messagePackObservedNodes.size
-      : 0,
+    // Mosaic observes exactly one node (the message host) by construction,
+    // never per-card -- see mosaicSyncResizeObserver in app.mosaic-stream.js.
+    observedCount: lane.mosaicResizeObserver ? 1 : 0,
   };
 }
 
@@ -169,7 +168,7 @@ function submitTypingMosaicItems(count, offset) {
       step +
       " keeps the loaded Mosaic realistic.</p>";
     const code =
-      "<pre><code>packMessageStream(lane)\\nrow += " +
+      "<pre><code>mosaicRenderMessageStream(lane)\\nrow += " +
       step +
       "</code></pre>";
     return {

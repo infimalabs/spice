@@ -255,11 +255,11 @@ def test_static_mosaic_geometry_helpers_are_pure_and_covered():
     assert result.returncode == 0
 
 
-def test_static_mosaic_geometry_is_wired_before_message_pack():
+def test_static_mosaic_geometry_is_wired_before_app_stream():
     app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
     geometry_index = app_js.index('src="/static/app.mosaic-geometry.js"')
-    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
-    assert geometry_index < message_pack_index
+    app_stream_index = app_js.index('src="/static/app.stream.js"')
+    assert geometry_index < app_stream_index
 
 
 def test_static_mosaic_engine_helpers_are_pure_and_covered():
@@ -274,11 +274,11 @@ def test_static_mosaic_engine_helpers_are_pure_and_covered():
     assert result.returncode == 0
 
 
-def test_static_mosaic_engine_is_wired_before_message_pack():
+def test_static_mosaic_engine_is_wired_before_app_stream():
     app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
     engine_index = app_js.index('src="/static/app.mosaic-engine.js"')
-    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
-    assert engine_index < message_pack_index
+    app_stream_index = app_js.index('src="/static/app.stream.js"')
+    assert engine_index < app_stream_index
 
 
 def test_static_mosaic_sizing_helpers_are_pure_and_covered():
@@ -293,11 +293,11 @@ def test_static_mosaic_sizing_helpers_are_pure_and_covered():
     assert result.returncode == 0
 
 
-def test_static_mosaic_sizing_is_wired_before_message_pack():
+def test_static_mosaic_sizing_is_wired_before_app_stream():
     app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
     sizing_index = app_js.index('src="/static/app.mosaic-sizing.js"')
-    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
-    assert sizing_index < message_pack_index
+    app_stream_index = app_js.index('src="/static/app.stream.js"')
+    assert sizing_index < app_stream_index
 
 
 def test_static_mosaic_reservations_helpers_are_pure_and_covered():
@@ -318,12 +318,12 @@ def test_static_mosaic_reservations_helpers_are_pure_and_covered():
     assert result.returncode == 0
 
 
-def test_static_mosaic_reservations_is_wired_after_sizing_before_message_pack():
+def test_static_mosaic_reservations_is_wired_after_sizing_before_app_stream():
     app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
     sizing_index = app_js.index('src="/static/app.mosaic-sizing.js"')
     reservations_index = app_js.index('src="/static/app.mosaic-reservations.js"')
-    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
-    assert sizing_index < reservations_index < message_pack_index
+    app_stream_index = app_js.index('src="/static/app.stream.js"')
+    assert sizing_index < reservations_index < app_stream_index
 
 
 def test_static_mosaic_span_helpers_are_pure_and_covered():
@@ -349,16 +349,16 @@ def test_static_mosaic_span_is_wired_after_sizing_before_render():
     sizing_index = app_js.index('src="/static/app.mosaic-sizing.js"')
     span_index = app_js.index('src="/static/app.mosaic-span.js"')
     render_index = app_js.index('src="/static/app.mosaic-render.js"')
-    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
-    assert sizing_index < span_index < render_index < message_pack_index
+    app_stream_index = app_js.index('src="/static/app.stream.js"')
+    assert sizing_index < span_index < render_index < app_stream_index
 
 
-def test_static_mosaic_render_is_wired_after_engine_before_message_pack():
+def test_static_mosaic_render_is_wired_after_engine_before_app_stream():
     app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
     engine_index = app_js.index('src="/static/app.mosaic-engine.js"')
     render_index = app_js.index('src="/static/app.mosaic-render.js"')
-    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
-    assert engine_index < render_index < message_pack_index
+    app_stream_index = app_js.index('src="/static/app.stream.js"')
+    assert engine_index < render_index < app_stream_index
 
 
 def test_static_mosaic_scroll_helpers_are_pure_and_covered():
@@ -373,20 +373,20 @@ def test_static_mosaic_scroll_helpers_are_pure_and_covered():
     assert result.returncode == 0
 
 
-def test_static_mosaic_scroll_is_wired_after_render_before_message_pack():
+def test_static_mosaic_scroll_is_wired_after_render_before_app_stream():
     app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
     render_index = app_js.index('src="/static/app.mosaic-render.js"')
     scroll_index = app_js.index('src="/static/app.mosaic-scroll.js"')
-    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
-    assert render_index < scroll_index < message_pack_index
+    app_stream_index = app_js.index('src="/static/app.stream.js"')
+    assert render_index < scroll_index < app_stream_index
 
 
-def test_static_mosaic_stream_is_wired_after_scroll_before_message_pack():
+def test_static_mosaic_stream_is_wired_after_scroll_before_app_stream():
     app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
     scroll_index = app_js.index('src="/static/app.mosaic-scroll.js"')
     stream_index = app_js.index('src="/static/app.mosaic-stream.js"')
-    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
-    assert scroll_index < stream_index < message_pack_index
+    app_stream_index = app_js.index('src="/static/app.stream.js"')
+    assert scroll_index < stream_index < app_stream_index
 
 
 def test_static_mosaic_wet_frozen_helpers_are_pure_and_covered():
@@ -406,12 +406,12 @@ def test_static_mosaic_wet_frozen_helpers_are_pure_and_covered():
     assert result.returncode == 0
 
 
-def test_static_mosaic_wet_frozen_is_wired_after_engine_before_message_pack():
+def test_static_mosaic_wet_frozen_is_wired_after_engine_before_app_stream():
     app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
     engine_index = app_js.index('src="/static/app.mosaic-engine.js"')
     wet_frozen_index = app_js.index('src="/static/app.mosaic-wet-frozen.js"')
-    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
-    assert engine_index < wet_frozen_index < message_pack_index
+    app_stream_index = app_js.index('src="/static/app.stream.js"')
+    assert engine_index < wet_frozen_index < app_stream_index
 
 
 def test_static_mosaic_full_replay_helpers_are_pure_and_covered():

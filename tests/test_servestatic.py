@@ -116,8 +116,6 @@ def test_static_css_has_narrow_viewport_affordances():
     assert "--mobile-lane-gap: 8px" in css
     assert "--mobile-lane-gutter: 4px" in css
     assert "gap: var(--mobile-lane-gap)" in css
-    assert "column-gap: 8px;" in css
-    assert "row-gap: 5px;" in css
     assert "padding: 0 var(--mobile-lane-gutter) 8px" in css
     assert "scroll-padding-inline: var(--mobile-lane-gutter)" in css
     assert "touch-action: pan-x pan-y" in css
@@ -201,41 +199,38 @@ def test_static_css_centers_two_pip_lane_light_stack():
     assert "place-content: center;" in lights_rules
 
 
-def test_static_messages_use_stable_packed_rows():
+def test_static_messages_have_no_legacy_pack_vestige():
+    # mosaic-demolition: the legacy grid packer (app.message-pack.js,
+    # packMessageStream and its orbit in app.stream.js, every
+    # --message-pack-* CSS custom property) is deleted outright, not shimmed
+    # or left dormant. This asserts the negative -- no legacy trace survives
+    # -- and that the still-real image-stack CSS and mosaic wiring it used to
+    # sit alongside are untouched.
     css = _serve_css_text()
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
-    app_message_pack = (STATIC_ROOT / "app.message-pack.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     app_mosaic_stream = (STATIC_ROOT / "app.mosaic-stream.js").read_text(
         encoding="utf-8"
     )
+    static_names = {path.name for path in STATIC_ROOT.glob("*.js")}
+
+    assert "app.message-pack.js" not in static_names
+    assert "message-pack" not in css.lower()
+    assert "messagepack" not in css.lower()
+    assert "message-pack" not in app_stream.lower()
+    assert "messagepack" not in app_stream.lower()
+
+    # index.css has an unrelated `.messages { ... }` mobile-padding override
+    # and a `.lane--mosaic-root-width .messages { ... }` rule that both
+    # contain the substring ".messages {"; anchor the search from the
+    # "---- messages ----" section banner, unique to messages.css, so the
+    # base rule (not those overrides) is what gets sliced.
     messages_section = css.index("/* ---- messages ---- */")
-    messages_start = css.index(".messages {", messages_section)
-    messages_end = css.index(".messages article {", messages_start)
-    messages_rule = css[messages_start:messages_end]
-    article_start = css.index(".messages article {")
-    article_end = css.index(".messages article.image-only", article_start)
-    article_rule = css[article_start:article_end]
-    image_only_start = css.index(".messages article.image-only {")
-    image_only_end = css.index(
-        ".messages article:has(.task-directive-stack)", image_only_start
-    )
-    image_only_rule = css[image_only_start:image_only_end]
-    stack_start = css.index(".message-body p.message-image-stack {")
-    stack_end = css.index(
-        ".message-body p.message-image-stack .message-image", stack_start
-    )
-    stack_rule = css[stack_start:stack_end]
-    stack_image_start = css.index(
-        ".message-body p.message-image-stack .message-image img {"
-    )
-    stack_image_end = css.index("}", stack_image_start)
-    stack_image_rule = css[stack_image_start:stack_image_end]
-    image_only_stack_rule = _between(
-        css, ".messages article.image-only .message-body p.message-image-stack {", "}"
-    )
-    image_only_link_rule = _between(
-        css, ".messages article.image-only .message-image {", "}"
+    messages_rule = _between(css[messages_section:], ".messages {", "}")
+    article_rule = _between(css[messages_section:], ".messages article {", "}")
+    stack_rule = _between(css, ".message-body p.message-image-stack {", "}")
+    stack_image_rule = _between(
+        css, ".message-body p.message-image-stack .message-image img {", "}"
     )
     image_only_image_rule = _between(
         css, ".messages article.image-only .message-image img {", "}"
@@ -243,63 +238,29 @@ def test_static_messages_use_stable_packed_rows():
 
     assert "--message-card-max-width: 30rem;" in messages_rule
     assert "--message-card-min-width: 20rem;" in messages_rule
-    assert "--message-pack-row-height: 4px;" in messages_rule
-    assert "--message-pack-column-gap: 9px;" in messages_rule
-    assert "--message-pack-track-min: min(100%, var(--message-card-min-width));" in (
-        messages_rule
-    )
-    assert "column-gap: var(--message-pack-column-gap);" in messages_rule
-    assert "display: grid;" in messages_rule
-    assert "grid-auto-flow: row;" in messages_rule
-    assert "grid-auto-rows: var(--message-pack-row-height);" in messages_rule
-    assert "auto-fit" in messages_rule
-    assert "minmax(var(--message-pack-track-min), 1fr)" in messages_rule
+    assert "--mosaic-image-height: 8.75rem;" in messages_rule
+    assert "--mosaic-image-large-height: 15.75rem;" in messages_rule
+    assert "display: grid;" not in messages_rule
+    assert "grid-template-columns:" not in messages_rule
     assert "overflow-x: auto;" in messages_rule
-    assert "row-gap: 6px;" in messages_rule
+    assert "position: relative;" in messages_rule
     assert "display: flex;" in article_rule
     assert "flex-direction: column;" in article_rule
-    assert "grid-row-end: span var(--message-pack-row-span, 1);" in article_rule
+    assert "grid-row-end:" not in article_rule
     assert "max-width: none;" in article_rule
     assert "direction: ltr;" in article_rule
-    assert ".messages article.image-only" in css
-    assert "grid-column:" not in image_only_rule
-    assert "grid-column: 1 / -1;" in css
-    assert ".messages article:has(.task-directive-stack) {\n  grid-column: 1 / -1;" in (
-        css
-    )
     assert "display: flex;" in stack_rule
     assert "flex-direction: row;" in stack_rule
     assert "flex-wrap: nowrap;" in stack_rule
     assert "justify-content: flex-start;" in stack_rule
     assert "overflow-x: auto;" in stack_rule
-    assert "max-height: var(--mosaic-image-height);" in stack_image_rule
     assert "max-width: 156px;" in stack_image_rule
-    assert "object-fit: contain;" in stack_image_rule
-    assert ".messages article.image-only .message-image img" in css
-    assert "--mosaic-image-height: 140px;" in css
-    assert "--mosaic-image-large-height: 252px;" in css
-    assert "align-items: center;" in image_only_stack_rule
-    assert "justify-content: flex-end;" in image_only_stack_rule
-    assert "max-width: min(100%, 56rem);" in image_only_link_rule
-    assert "min-width: 0;" in image_only_link_rule
     assert "height: var(--mosaic-image-large-height);" in image_only_image_rule
     assert "max-height: var(--mosaic-image-large-height);" in image_only_image_rule
     assert "max-width: 100%;" in image_only_image_rule
     assert "width: auto;" in image_only_image_rule
-    assert ".history-sentinel {\n  grid-column: 1 / -1;" in css
-    assert "function packMessageStream(lane)" in app_stream
-    assert "const messagePackLayoutVersion = 5;" in app_message_pack
-    assert "function messagePackPinnedLayoutCollapsed(" in app_message_pack
-    assert "function scheduleMessageStreamPack(lane)" in app_stream
-    assert "restoreMessageViewportAnchor(lane, anchor);" in app_stream
-    assert "function messagePackReservedSpan(" in app_message_pack
-    assert "mosaicReservationRows(" in app_message_pack
-    assert "lane.messagePackResizeObserver.observe(lane.messagesEl);" in app_stream
-    # packMessageStream/syncMessagePackObserver are superseded call sites
-    # (mosaic-stream-integration): the render path now delegates to
-    # mosaicRenderMessageStream, which syncs its own resize observer.
-    # Their function bodies stay defined -- untouched, unused -- pending
-    # the wholesale legacy deletion sweep (mosaic-demolition).
+    assert "grid-row-end:" not in _between(css, ".history-sentinel {", "}")
+
     assert "mosaicRenderMessageStream(lane, visibleItems);" in app_stream
     assert "mosaicSyncResizeObserver(lane);" in app_mosaic_stream
     assert 'if (item.image_only) article.classList.add("image-only");' in app_render
