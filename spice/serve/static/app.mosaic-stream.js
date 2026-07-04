@@ -30,9 +30,55 @@ const MOSAIC_BACKFILL_BOTTOM_EPSILON_PX = 2;
 // Renders defer instead; the ResizeObserver's 0-to-real transition brings
 // the deferred render back as a motion-suppressed correction.
 const MOSAIC_MIN_RENDER_WIDTH_PX = 24;
+// §8 settled predicate: a populated board with no structural change for this
+// window (or first pane interaction) counts as settled; until then the §9
+// settled-board rule suppresses every transform transition (spec §12
+// settleQuiet). Settling flips a flag and never triggers a render.
+const MOSAIC_SETTLE_QUIET_MS = 500;
+const MOSAIC_SETTLE_INTERACTION_EVENTS = [
+  "pointerdown",
+  "wheel",
+  "touchstart",
+  "keydown",
+  "focusin",
+];
 
 function mosaicHostMeasurable(host) {
   return Boolean(host) && host.clientWidth >= MOSAIC_MIN_RENDER_WIDTH_PX;
+}
+
+function mosaicSettleNow(lane) {
+  lane.mosaicSettled = true;
+  if (lane.mosaicSettleTimer) {
+    clearTimeout(lane.mosaicSettleTimer);
+    lane.mosaicSettleTimer = 0;
+  }
+}
+
+// Restart the quiet window on structural change; leave it running across
+// renders that changed nothing structural (content-diff only). First settle
+// latches for the lane's lifetime -- post-settle events never re-gate.
+function mosaicSyncSettle(lane, structural) {
+  if (lane.mosaicSettled) return;
+  if (!lane.mosaicCards.length) return;
+  if (lane.mosaicSettleTimer && !structural) return;
+  if (lane.mosaicSettleTimer) clearTimeout(lane.mosaicSettleTimer);
+  lane.mosaicSettleTimer = setTimeout(() => {
+    lane.mosaicSettleTimer = 0;
+    lane.mosaicSettled = true;
+  }, MOSAIC_SETTLE_QUIET_MS);
+}
+
+// The reader's first deliberate interaction settles immediately (§8):
+// deliberate gestures only -- programmatic scrolls (compensation, backfill
+// restore) must not count, so the raw scroll event is deliberately absent.
+function mosaicArmSettleInteraction(lane) {
+  if (lane.mosaicSettleInteractionArmed || !lane.messagesEl) return;
+  lane.mosaicSettleInteractionArmed = true;
+  const settle = () => mosaicSettleNow(lane);
+  for (const type of MOSAIC_SETTLE_INTERACTION_EVENTS) {
+    lane.messagesEl.addEventListener(type, settle, { once: true, passive: true });
+  }
 }
 
 // ---- lane lattice state ----------------------------------------------------------
@@ -59,6 +105,8 @@ function mosaicLaneReady(lane) {
   lane.mosaicPrevMaxRow = 0;
   lane.mosaicPrevExtent = null;
   lane.mosaicGeometry = null;
+  lane.mosaicSettled = false;
+  lane.mosaicSettleTimer = 0;
 }
 
 // geometry must already be resolved for THIS render before a fresh plane
@@ -655,15 +703,23 @@ function mosaicRenderMessageStream(lane, visibleItems) {
     mosaicRunFullReplay(lane, entries, nodesByKey, geometry);
   }
 
-  // A reveal after deferred renders is a layout correction, never a
-  // user-intentional replay moment: whatever changed while unmeasurable
-  // (content, geometry, or nothing) applies with motion suppressed.
+  // Motion suppression unions three sources: reveal corrections, the §9
+  // settled-board gate (nothing animates until first settle), and -- inside
+  // the apply -- prefers-reduced-motion. Layout is identical either way.
   mosaicApplyRender(lane, lane.mosaicCards, geometry, nodesByKey, {
     replaying,
-    snap: revealing,
+    snap: revealing || !lane.mosaicSettled,
   });
   mosaicSyncResizeObserver(lane);
   mosaicSyncImageLoadHandlers(lane);
+  mosaicArmSettleInteraction(lane);
+  mosaicSyncSettle(
+    lane,
+    geometryChanged ||
+      addedKeys.length > 0 ||
+      removedKeys.length > 0 ||
+      Boolean(backfillEntries),
+  );
   return { backfillViewport };
 }
 
@@ -761,6 +817,10 @@ function mosaicMarkImageResolved(lane, image) {
 }
 
 function mosaicResetResizeObserver(lane) {
+  if (lane.mosaicSettleTimer) {
+    clearTimeout(lane.mosaicSettleTimer);
+    lane.mosaicSettleTimer = 0;
+  }
   if (lane.mosaicFrame) {
     cancelAnimationFrame(lane.mosaicFrame);
     lane.mosaicFrame = 0;
