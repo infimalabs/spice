@@ -1,6 +1,7 @@
 """Session forensics: context metering and identity primitives."""
 
 import argparse
+import gzip
 import json
 import os
 import shutil
@@ -57,6 +58,7 @@ BRIEFING_FILTER_MAX_BYTES = 10_000
 BRIEFING_PRUNE_MAX_LINES = 6
 BRIEFING_PARSE_MAX_LINES = 10
 BRIEFING_PARSE_MAX_BYTES = 1_000
+GZIP_SESSION_TOTAL_TOKENS = 115
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
@@ -160,6 +162,79 @@ def test_session_timeline_prints_turn_and_compaction(tmp_path, capsys):
     assert "user=build timeline" in output
     assert "compaction assistant_before=ready to compact" in output
     assert "user_after=after compaction" in output
+
+
+def test_session_briefing_reads_direct_gzip_jsonl_path(tmp_path, capsys):
+    transcript = tmp_path / "session.jsonl.gz"
+    _write_gzip_jsonl(
+        transcript,
+        [
+            {
+                "timestamp": "2026-01-01T00:00:00Z",
+                "type": "event_msg",
+                "payload": {"type": "task_started", "turn_id": "turn-gzip"},
+            },
+            {
+                "timestamp": "2026-01-01T00:00:01Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"text": "compressed request"}],
+                },
+            },
+            {
+                "timestamp": "2026-01-01T00:00:02Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 100,
+                            "cached_input_tokens": 25,
+                            "output_tokens": 10,
+                            "reasoning_output_tokens": 5,
+                            "total_tokens": GZIP_SESSION_TOTAL_TOKENS,
+                        },
+                        "total_token_usage": {
+                            "total_tokens": GZIP_SESSION_TOTAL_TOKENS
+                        },
+                        "model_context_window": 200000,
+                    },
+                },
+            },
+            {
+                "timestamp": "2026-01-01T00:00:03Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_complete",
+                    "last_agent_message": "compressed done",
+                },
+            },
+        ],
+    )
+
+    args = build_parser().parse_args(
+        [
+            "session",
+            "briefing",
+            str(transcript),
+            "--max-lines",
+            "80",
+            "--max-bytes",
+            "10000",
+        ]
+    )
+    handle_session(args)
+    meter = collect_context_meter([transcript])
+
+    output = capsys.readouterr().out
+    assert "files=session.jsonl.gz turns=1" in output
+    assert "Latest Ask\n  compressed request" in output
+    assert "Latest Final\n  compressed done" in output
+    assert meter.snapshot_count == 1
+    assert meter.latest_snapshot is not None
+    assert meter.latest_snapshot.total_tokens == GZIP_SESSION_TOTAL_TOKENS
 
 
 def test_session_timeline_contains_keeps_turn_when_match_is_not_latest(
@@ -793,6 +868,13 @@ def _write_thread_transcript(path) -> None:
     path.write_text(
         "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
     )
+
+
+def _write_gzip_jsonl(path, events) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        for event in events:
+            handle.write(f"{json.dumps(event)}\n")
 
 
 def _write_claude_thread_transcript(path) -> None:

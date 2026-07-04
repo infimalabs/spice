@@ -16,12 +16,12 @@ from statistics import median
 from typing import Any, Iterator
 
 from spice.agent.driver import driver_for_transcript
+from spice.sessions.jsonl import iter_jsonl_lines, iter_jsonl_lines_reverse
 from spice.sessions.util import (
     normalize_timestamp,
     safe_percent,
 )
 
-REVERSE_READ_BLOCK_BYTES = 64 * 1024
 RED_PRESSURE_PERCENT = 90.0
 ORANGE_PRESSURE_PERCENT = 85.0
 YELLOW_PRESSURE_PERCENT = 75.0
@@ -100,7 +100,7 @@ def collect_latest_context_meter(files: list[Path]) -> ContextMeter:
 
 
 def latest_active_context_snapshot_for_file(path: Path) -> ActiveContextSnapshot | None:
-    for line in _iter_jsonl_lines_reverse(path):
+    for line in iter_jsonl_lines_reverse(path):
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:
@@ -113,33 +113,13 @@ def latest_active_context_snapshot_for_file(path: Path) -> ActiveContextSnapshot
 
 
 def _iter_jsonl_objects(path: Path) -> Iterator[dict[str, Any]]:
-    with path.open(encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(obj, dict):
-                yield obj
-
-
-def _iter_jsonl_lines_reverse(path: Path) -> Iterator[str]:
-    with path.open("rb") as handle:
-        handle.seek(0, 2)
-        position = handle.tell()
-        buffer = b""
-        while position > 0:
-            read_size = min(REVERSE_READ_BLOCK_BYTES, position)
-            position -= read_size
-            handle.seek(position)
-            chunk = handle.read(read_size) + buffer
-            lines = chunk.split(b"\n")
-            buffer = lines[0]
-            for raw_line in reversed(lines[1:]):
-                if raw_line.strip():
-                    yield raw_line.decode("utf-8", errors="replace")
-        if buffer.strip():
-            yield buffer.decode("utf-8", errors="replace")
+    for line in iter_jsonl_lines(path):
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            yield obj
 
 
 def active_context_snapshot_from_object(
