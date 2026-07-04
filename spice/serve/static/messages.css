@@ -331,7 +331,7 @@
   background: color-mix(in srgb, var(--quote-accent) 6%, transparent);
   border-left: var(--quote-rail-width) solid var(--quote-accent);
   border-radius: var(--soft-radius) 0 0 var(--soft-radius);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.34;
   margin: 0;
   overflow-wrap: anywhere;
