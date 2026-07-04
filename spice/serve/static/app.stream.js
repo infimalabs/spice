@@ -523,86 +523,94 @@ function packMessageStream(lane) {
   const minimumTrackSpan = messagePackColumnSpan(columnCount);
   const placementStep = minimumTrackSpan;
   const columnRows = new Array(messagePackGridTrackCount).fill(0);
-  let segmentKey = "top";
-  let segmentIndex = 0;
-  let segmentSeed = messagePackSegmentSeed(segmentKey);
+  const segment = {
+    key: "top",
+    index: 0,
+    seed: messagePackSegmentSeed("top"),
+  };
   for (const node of host.children) {
     if (!isMessagePackItem(node)) continue;
-    let height = messagePackItemHeight(node, naturalHeightMode);
-    if (!Number.isFinite(height) || height <= 0) continue;
-    let naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
-    const barrier = isMessagePackBarrier(node);
-    if (columnCount <= 1 || barrier) {
-      const start = Math.max(...columnRows);
-      setMessagePackProvisionalPosition(
-        node,
-        "1",
-        start + 1,
-        messagePackGridTrackCount,
-      );
-      height = naturalMessagePackItemHeight(node);
-      if (!Number.isFinite(height) || height <= 0) continue;
-      naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
-      setMessagePackRowSpan(node, naturalSpan);
-      setMessagePackPosition(
-        node,
-        "1",
-        start + 1,
-        messagePackGridTrackCount,
-      );
-      columnRows.fill(start + naturalSpan);
-      if (barrier) {
-        segmentKey = messagePackBarrierKey(node);
-        segmentIndex = 0;
-        segmentSeed = messagePackBarrierSegmentSeed(node, segmentKey);
-      }
-      continue;
-    }
-    const slotSpan = messagePackTrackSpan(node, minimumTrackSpan, height);
-    const placementColumn = orderedMessagePackColumn(
-      node,
-      segmentKey,
-      segmentIndex,
-      segmentSeed,
-      columnRows.length,
+    packMessageStreamPlaceNode(node, segment, {
+      columnCount,
+      naturalHeightMode,
       columnRows,
-      slotSpan,
-      placementStep,
       reflowing,
-    );
-    const placementRow = maxMessagePackRows(
-      columnRows,
-      placementColumn,
-      slotSpan,
-    );
-    const gridColumnStart = placementColumn + 1;
-    const gridColumnSpan = slotSpan;
-    setMessagePackProvisionalPosition(
-      node,
-      String(gridColumnStart),
-      placementRow + 1,
-      gridColumnSpan,
-    );
-    height = naturalMessagePackItemHeight(node);
-    if (!Number.isFinite(height) || height <= 0) continue;
-    naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
-    const span = naturalSpan;
-    setMessagePackRowSpan(node, span);
-    setMessagePackPosition(
-      node,
-      String(gridColumnStart),
-      placementRow + 1,
-      gridColumnSpan,
-    );
-    fillMessagePackRows(
-      columnRows,
-      placementColumn,
-      slotSpan,
-      placementRow + span,
-    );
-    segmentIndex += slotSpan;
+      minimumTrackSpan,
+      placementStep,
+      rowGap,
+      rowStride,
+    });
   }
   commitMessagePackLayoutState(lane, host, columnCount, itemKeys);
+}
+
+// Places one item within the ordered pass, mutating `segment` (the
+// barrier-driven {key, index, seed} run state threaded across nodes) and
+// `context.columnRows` (the per-column fill skyline) in place -- a
+// mechanical extraction of packMessageStream's per-node body, unchanged in
+// behavior, split out only to keep packMessageStream itself under the
+// commit-blocking length limit.
+function packMessageStreamPlaceNode(node, segment, context) {
+  const {
+    columnCount,
+    naturalHeightMode,
+    columnRows,
+    reflowing,
+    minimumTrackSpan,
+    placementStep,
+    rowGap,
+    rowStride,
+  } = context;
+  let height = messagePackItemHeight(node, naturalHeightMode);
+  if (!Number.isFinite(height) || height <= 0) return;
+  let naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
+  const barrier = isMessagePackBarrier(node);
+  if (columnCount <= 1 || barrier) {
+    const start = Math.max(...columnRows);
+    setMessagePackProvisionalPosition(node, "1", start + 1, messagePackGridTrackCount);
+    height = naturalMessagePackItemHeight(node);
+    if (!Number.isFinite(height) || height <= 0) return;
+    naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
+    const span = messagePackReservedSpan(node, naturalSpan, rowGap, rowStride);
+    setMessagePackRowSpan(node, span);
+    setMessagePackPosition(node, "1", start + 1, messagePackGridTrackCount);
+    columnRows.fill(start + span);
+    if (barrier) {
+      segment.key = messagePackBarrierKey(node);
+      segment.index = 0;
+      segment.seed = messagePackBarrierSegmentSeed(node, segment.key);
+    }
+    return;
+  }
+  const slotSpan = messagePackTrackSpan(node, minimumTrackSpan, height);
+  const placementColumn = orderedMessagePackColumn(
+    node,
+    segment.key,
+    segment.index,
+    segment.seed,
+    columnRows.length,
+    columnRows,
+    slotSpan,
+    placementStep,
+    reflowing,
+  );
+  const placementRow = maxMessagePackRows(columnRows, placementColumn, slotSpan);
+  const gridColumnStart = placementColumn + 1;
+  const gridColumnSpan = slotSpan;
+  setMessagePackProvisionalPosition(
+    node,
+    String(gridColumnStart),
+    placementRow + 1,
+    gridColumnSpan,
+  );
+  height = naturalMessagePackItemHeight(node);
+  if (!Number.isFinite(height) || height <= 0) return;
+  naturalSpan = Math.max(1, Math.ceil((height + rowGap) / rowStride));
+  const span = messagePackReservedSpan(node, naturalSpan, rowGap, rowStride);
+  setMessagePackRowSpan(node, span);
+  setMessagePackPosition(node, String(gridColumnStart), placementRow + 1, gridColumnSpan);
+  fillMessagePackRows(columnRows, placementColumn, slotSpan, placementRow + span);
+  segment.index += slotSpan;
 }
 
 function scheduleMessageStreamPack(lane) {
@@ -632,31 +640,6 @@ function syncMessagePackObserver(lane) {
     if (!current.has(node)) lane.messagePackResizeObserver.unobserve(node);
   }
   lane.messagePackObservedNodes = current;
-  syncMessagePackImageLoadHandlers(lane);
-}
-
-function syncMessagePackImageLoadHandlers(lane) {
-  if (!lane.messagesEl) return;
-  if (!lane.messagePackImageLoadHandlers)
-    lane.messagePackImageLoadHandlers = new Map();
-  const current = new Set(
-    lane.messagesEl.querySelectorAll(
-      "article.media-rich img, article.image-only img",
-    ),
-  );
-  for (const image of current) {
-    if (lane.messagePackImageLoadHandlers.has(image)) continue;
-    const handler = () => scheduleMessageStreamPack(lane);
-    image.addEventListener("load", handler);
-    image.addEventListener("error", handler);
-    lane.messagePackImageLoadHandlers.set(image, handler);
-  }
-  for (const [image, handler] of lane.messagePackImageLoadHandlers) {
-    if (current.has(image)) continue;
-    image.removeEventListener("load", handler);
-    image.removeEventListener("error", handler);
-    lane.messagePackImageLoadHandlers.delete(image);
-  }
 }
 
 function messagePackHostResizeChanged(lane) {
@@ -681,11 +664,6 @@ function resetMessagePackObserver(lane) {
   if (lane.messagePackResizeObserver) lane.messagePackResizeObserver.disconnect();
   lane.messagePackObservedNodes = new Set();
   lane.messagePackHostResizeSize = null;
-  for (const [image, handler] of lane.messagePackImageLoadHandlers || []) {
-    image.removeEventListener("load", handler);
-    image.removeEventListener("error", handler);
-  }
-  lane.messagePackImageLoadHandlers = new Map();
 }
 
 function isMessagePackItem(node) {
