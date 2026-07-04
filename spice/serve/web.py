@@ -57,6 +57,7 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
   <script>const spiceServeInitialGlobalSettings = {global_settings_json};</script>
   <script src="/static/app.render.js"></script>
   <script src="/static/app.live-bus.js"></script>
+  <script src="/static/app.mosaic-geometry.js"></script>
   <script src="/static/app.message-pack.js"></script>
   <script src="/static/app.stream.js"></script>
   <script src="/static/app.lanes.js"></script>

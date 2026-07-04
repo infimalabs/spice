@@ -13,6 +13,7 @@ SERVE_WEB_JS_PATHS = (
     "spice/serve/static/app.types.js",
     "spice/serve/static/app.render.js",
     "spice/serve/static/app.live-bus.js",
+    "spice/serve/static/app.mosaic-geometry.js",
     "spice/serve/static/app.message-pack.js",
     "spice/serve/static/app.stream.js",
     "spice/serve/static/app.lanes.js",
