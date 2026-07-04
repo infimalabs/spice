@@ -7,7 +7,7 @@ const messageCardBorderAllowancePx = 2;
 const messagePackGridTrackCount = 12;
 const messagePackMaxEffectiveColumns = 6;
 const messagePackEffectiveColumnCounts = [6, 4, 3, 2, 1];
-const messagePackLayoutVersion = 4;
+const messagePackLayoutVersion = 5;
 const messagePackLegalTrackSpans = [2, 3, 4, 6, 12];
 const messagePackSlackPenalty = 3;
 const messagePackTallFinalMinHeightPx = 280;
@@ -25,12 +25,39 @@ function messagePackItemHeight(node, naturalHeightMode = false) {
 function naturalMessagePackItemHeight(node) {
   const previousSpan = node.style.getPropertyValue("--message-pack-row-span");
   if (previousSpan) node.style.removeProperty("--message-pack-row-span");
-  const height = node.matches("article[data-message-key]")
-    ? node.scrollHeight + messageCardBorderAllowancePx
-    : node.getBoundingClientRect().height;
+  const height = node.matches("article.image-only[data-message-key]")
+    ? node.getBoundingClientRect().height
+    : node.matches("article[data-message-key]")
+      ? node.scrollHeight + messageCardBorderAllowancePx
+      : node.getBoundingClientRect().height;
   if (previousSpan)
     node.style.setProperty("--message-pack-row-span", previousSpan);
   return height;
+}
+
+function messagePackReservedSpan(node, naturalSpan, rowGap, rowStride) {
+  const type = messagePackReservationType(node);
+  if (!type || typeof mosaicReservationRows !== "function") return naturalSpan;
+  const rows = mosaicReservationRows(
+    type,
+    messagePackRootFontSizePx(),
+    rowGap,
+    rowStride,
+  );
+  return Number.isFinite(rows) ? Math.max(naturalSpan, rows) : naturalSpan;
+}
+
+function messagePackReservationType(node) {
+  if (!node || !node.dataset) return "";
+  return node.dataset.mosaicReservationType || "";
+}
+
+function messagePackRootFontSizePx() {
+  if (typeof mosaicRootFontSizePx === "function") return mosaicRootFontSizePx();
+  const parsed = Number.parseFloat(
+    getComputedStyle(document.documentElement).fontSize,
+  );
+  return Number.isFinite(parsed) ? parsed : 16;
 }
 
 // Segments are keyed by the identity of the barrier that opens them, never by

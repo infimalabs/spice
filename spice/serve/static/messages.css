@@ -2,6 +2,8 @@
 .messages {
   --message-card-max-width: 30rem;
   --message-card-min-width: 20rem;
+  --mosaic-image-height: 140px;
+  --mosaic-image-large-height: 252px;
   --message-pack-column-gap: 9px;
   --message-pack-column-count: auto-fit;
   --message-pack-row-height: 4px;
@@ -294,8 +296,8 @@
   min-width: 0;
 }
 .message-body p.message-image-stack .message-image img {
-  height: 136px;
-  max-height: 136px;
+  height: var(--mosaic-image-height);
+  max-height: var(--mosaic-image-height);
   max-width: 156px;
   object-fit: contain;
 }
@@ -312,8 +314,8 @@
   min-width: 0;
 }
 .messages article.image-only .message-image img {
-  height: auto;
-  max-height: min(32vh, 260px);
+  height: var(--mosaic-image-large-height);
+  max-height: var(--mosaic-image-large-height);
   max-width: 100%;
   object-fit: contain;
   width: auto;
@@ -340,6 +342,24 @@
 .ack-quote.maxim-quote {
   background: color-mix(in srgb, var(--maxim-accent) 6%, transparent);
   border-left-color: var(--maxim-accent);
+}
+.ack-quote--pending {
+  min-height: var(--ack-quote-reserve, 3.5rem);
+  display: grid;
+  gap: 6px;
+}
+.ack-quote-skeleton-line {
+  align-self: center;
+  background: color-mix(in srgb, var(--quote-accent) 18%, transparent);
+  border-radius: 999px;
+  display: block;
+  height: 0.55rem;
+}
+.ack-quote-skeleton-line--wide {
+  width: 82%;
+}
+.ack-quote-skeleton-line--mid {
+  width: 58%;
 }
 .ack-attachments {
   display: flex;

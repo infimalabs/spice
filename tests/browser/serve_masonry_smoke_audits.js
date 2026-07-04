@@ -304,9 +304,6 @@ function masonrySmokeObserverFanoutAudit(lane) {
   const observed = lane.messagePackObservedNodes || new Set();
   return {
     hostObserved: observed.has(lane.messagesEl),
-    mediaHandlerCount: lane.messagePackImageLoadHandlers
-      ? lane.messagePackImageLoadHandlers.size
-      : 0,
     observedCount: observed.size,
   };
 }
