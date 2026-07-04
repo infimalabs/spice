@@ -46,14 +46,16 @@ assert(
 // what a resolved image -- always letterboxed to that same cap -- will also
 // measure to. Sweep every module the card sizing lattice actually uses
 // (§4: 3/2/1 lines at L>=3/2/1) plus a non-lattice module, and both the
-// default and a rescaled root font size: image caps are fixed regardless of
-// the text type ramp (§12), unlike the quote priors below.
+// default and a rescaled root font size: image caps are rem-denominated
+// (§4/§12), so a root font-size change rescales the cap coherently, exactly
+// like the quote priors below -- the letterboxed <img> rescales right along
+// with it (messages.css), so exactness holds at any root font size.
 for (const rootFontSizePx of [DEFAULT_ROOT_FONT_PX, RESCALED_ROOT_FONT_PX]) {
   for (const module of [60, 40, 20, 37]) {
     const gap = 12;
-    for (const [type, heightPx] of [
-      ["image", 140],
-      ["imageLarge", 252],
+    for (const [type, heightRem] of [
+      ["image", 8.75],
+      ["imageLarge", 15.75],
     ]) {
       const reservedRows = context.mosaicReservationRows(
         type,
@@ -61,7 +63,11 @@ for (const rootFontSizePx of [DEFAULT_ROOT_FONT_PX, RESCALED_ROOT_FONT_PX]) {
         gap,
         module,
       );
-      const resolvedRows = context.mosaicRowsFor(heightPx, gap, module);
+      const resolvedRows = context.mosaicRowsFor(
+        heightRem * rootFontSizePx,
+        gap,
+        module,
+      );
       assert(
         reservedRows === resolvedRows,
         "image reservation must equal the resolved rows exactly: type=" +

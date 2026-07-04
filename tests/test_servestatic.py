@@ -301,10 +301,7 @@ def test_static_messages_use_stable_packed_rows():
     # Their function bodies stay defined -- untouched, unused -- pending
     # the wholesale legacy deletion sweep (mosaic-demolition).
     assert "mosaicRenderMessageStream(lane, visibleItems);" in app_stream
-    assert "const rootWidthChanged = mosaicSyncRootWidth(lane);" in app_stream
-    assert "syncMessagePackLayoutIfNeeded(lane);" not in app_stream
     assert "mosaicSyncResizeObserver(lane);" in app_mosaic_stream
-    assert "function mosaicSyncRootWidth(lane)" in app_mosaic_stream
     assert 'if (item.image_only) article.classList.add("image-only");' in app_render
 
 

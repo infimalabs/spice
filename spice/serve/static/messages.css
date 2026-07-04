@@ -2,8 +2,8 @@
 .messages {
   --message-card-max-width: 30rem;
   --message-card-min-width: 20rem;
-  --mosaic-image-height: 140px;
-  --mosaic-image-large-height: 252px;
+  --mosaic-image-height: 8.75rem;
+  --mosaic-image-large-height: 15.75rem;
   --message-pack-column-gap: 9px;
   --message-pack-column-count: auto-fit;
   --message-pack-row-height: 4px;
@@ -266,14 +266,15 @@
   text-decoration: none;
 }
 .message-image img {
-  aspect-ratio: 16 / 10;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
   display: block;
-  max-height: min(30vh, 280px);
+  height: var(--mosaic-image-height);
+  max-height: var(--mosaic-image-height);
   max-width: 100%;
   object-fit: contain;
+  width: auto;
 }
 .message-image:focus-visible img {
   outline: 2px solid var(--accent);
@@ -296,10 +297,7 @@
   min-width: 0;
 }
 .message-body p.message-image-stack .message-image img {
-  height: var(--mosaic-image-height);
-  max-height: var(--mosaic-image-height);
   max-width: 156px;
-  object-fit: contain;
 }
 .messages article.image-only .message-body p.message-image-stack {
   align-items: center;

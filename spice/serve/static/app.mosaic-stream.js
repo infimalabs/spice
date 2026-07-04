@@ -241,29 +241,29 @@ function mosaicExistingNodesByKey(lane) {
   return nodes;
 }
 
-// ---- pending-content reservation classification (§4) ------------------------------
+// ---- reservation classification (§4) ----------------------------------------------
 
-// "Pending" means real content has not resolved yet: an ack/quote whose
-// context text has not hydrated, or an image that has not finished
-// loading. Named priors size these so shrink-on-resolve is the common
-// case (§4); anything else measures live like normal. Barrier entries
-// (dividers, rules) are never pending -- their content is fixed at
+// Two different lifetimes share this one lookup: an ack/quote reservation is
+// genuinely pending -- real content hasn't hydrated yet, and shrink-on-
+// resolve is the common case (§4) -- while an image reservation is
+// permanent: images letterbox to their named cap regardless of load state
+// (messages.css), so the reservation never needs to give way to a measured
+// height, whether the image is loading, loaded, or broken. Both read the
+// single reservation type app.render.js already computes once, at node-
+// creation time (messageReservationType: "ack" while any ack_segments key
+// has no resolved context yet via ackContextForKey, "imageLarge" for
+// image_only items, an "image" fallback for any other card containing
+// .message-image), stamped onto the node as data-mosaic-reservation-type --
+// no reservation logic scattered per-call-site (§4), and no second,
+// divergent check here (an earlier version of this function re-derived the
+// ack case from lane.missingAckContextKeys, which only tracks confirmed-
+// missing keys, not "not yet resolved", so a genuinely-pending ack fell
+// through to real measurement instead of reserving). A fresh node built once
+// its content resolves has no reservation type at all (messageReservationType
+// returns "" once ackContextForKey finds a context), so resolution falls
+// through to real measurement with no extra branching needed here. Barrier
+// entries (dividers, rules) are never reserved -- their content is fixed at
 // creation.
-// app.render.js already computes the correct reservation type once, at
-// node-creation time (messageReservationType: "ack" while any ack_segments
-// key has no resolved context yet via ackContextForKey, "imageLarge" for
-// image_only items, a "image" fallback for any other card containing
-// .message-image) and stamps it onto the node as data-mosaic-reservation-
-// type. Re-deriving that classification here duplicated it with a
-// DIFFERENT (and wrong) check -- lane.missingAckContextKeys only tracks
-// confirmed-missing keys, not "not yet resolved", so a genuinely-pending
-// ack (fetched but not yet answered) fell through to real measurement
-// instead of reserving. Reading the dataset directly trusts the single
-// source of truth instead of maintaining a second, divergent one. A fresh
-// node built once its content resolves has no reservation type at all
-// (messageReservationType returns "" once ackContextForKey finds a
-// context), so this naturally falls through to real measurement on
-// resolution with no extra branching needed here.
 function mosaicPendingReservationType(lane, entry, node) {
   if (entry.kind === "barrier") return null;
   return node.dataset.mosaicReservationType || null;

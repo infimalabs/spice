@@ -6,7 +6,8 @@ const { withServePage } = require("./serve_playwright_harness");
 // called directly) and checks the persistent-lattice invariants: insert
 // never moves existing cards; unchanged cards get zero style writes on a
 // no-op re-render; removing the oldest message vacates without moving the
-// rest; newest-first reading order holds.
+// rest; newest-first reading order holds; image reservations (§4/§12) are
+// exact and a load/error event never triggers pack/position/size activity.
 
 // msg-10..msg-16 (frozen-growth chain) plus the surviving msg-2/msg-3 from
 // the earlier insert/removal/content-change scenarios.
@@ -253,6 +254,160 @@ function mosaicStreamReadingOrderCheck() {
   return { count: cards.length, chainTops, monotonic };
 }
 
+// Images (§4/§12 imageHeights): a message with an inline image reserves the
+// small letterbox cap ("image"); an image-only message reserves the large
+// cap ("imageLarge") -- both sourced from the single dataset classification
+// app.render.js computes once (article.dataset.mosaicReservationType), never
+// re-derived from the .media-rich class, which is true for BOTH tiers and
+// would misclassify the small case as large. Once an image resolves (loads,
+// errors, or is already complete with no src), mosaicMarkImageResolved
+// clears the reservation and the content-diff pass measures the card for
+// real -- these fixtures carry no other content, so their real measured
+// height is exactly what messages.css letterboxes the image to, proving the
+// two tiers actually render at different, correct heights end to end
+// (mosaic-ack-resolution-smoke separately proves the mixed text+image case,
+// where the real height legitimately exceeds the image reservation).
+const MOSAIC_STREAM_IMAGE_HTML =
+  '<p class="message-image-stack"><a class="message-image" href="#">' +
+  '<img alt="fixture" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a></p>';
+// A message-image-stack lays its images out in a single horizontal row
+// (messages.css), all at the same letterbox height -- three images here
+// prove the reservation (and the final settled height) stays at exactly one
+// slot, never a per-image sum.
+const MOSAIC_STREAM_MULTI_IMAGE_HTML =
+  '<p class="message-image-stack">' +
+  '<a class="message-image" href="#"><img alt="fixture 1" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a>' +
+  '<a class="message-image" href="#"><img alt="fixture 2" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a>' +
+  '<a class="message-image" href="#"><img alt="fixture 3" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a>' +
+  "</p>";
+// No src at all makes the image "complete" synchronously with zero network
+// activity and no console noise (mirrors mosaic-ack-resolution-smoke's
+// already-complete-image fixture) -- messages.css still gives it a real,
+// non-collapsed letterbox slot since height/max-height are unconditional,
+// not derived from the (absent) image content.
+const MOSAIC_STREAM_BROKEN_IMAGE_HTML =
+  '<p class="message-image-stack"><a class="message-image" href="#">' +
+  '<img alt="broken fixture"></a></p>';
+
+function mosaicStreamImageItem(key, imageOnly, html) {
+  return {
+    ack_count: 0,
+    ack_keys: [],
+    display_html: html,
+    display_text: "image",
+    image_only: imageOnly,
+    index: 100,
+    key,
+    kind: "assistant",
+    text: "image",
+    timestamp: new Date(2026, 0, 2).toISOString(),
+  };
+}
+
+function mosaicStreamImageWaitForResolution(images) {
+  return Promise.all(
+    images.map(
+      (image) =>
+        new Promise((resolve) => {
+          if (image.complete) {
+            resolve();
+            return;
+          }
+          const done = () => resolve();
+          image.addEventListener("load", done, { once: true });
+          image.addEventListener("error", done, { once: true });
+        }),
+    ),
+  );
+}
+
+async function mosaicStreamImageReservationCheck() {
+  const lane = mosaicStreamResolveLane();
+  upsertKnownMessage(
+    lane,
+    mosaicStreamImageItem("img-regular", false, MOSAIC_STREAM_IMAGE_HTML),
+    "newest",
+  );
+  upsertKnownMessage(
+    lane,
+    mosaicStreamImageItem("img-only", true, MOSAIC_STREAM_IMAGE_HTML),
+    "newest",
+  );
+  upsertKnownMessage(
+    lane,
+    mosaicStreamImageItem("img-broken", false, MOSAIC_STREAM_BROKEN_IMAGE_HTML),
+    "newest",
+  );
+  upsertKnownMessage(
+    lane,
+    mosaicStreamImageItem("img-multi", false, MOSAIC_STREAM_MULTI_IMAGE_HTML),
+    "newest",
+  );
+  trimKnownMessages(lane);
+  renderMessagesIfChanged(lane);
+
+  const articleFor = (key) =>
+    lane.mosaicPlaneEl.querySelector('[data-message-key="' + key + '"]');
+  const cardFor = (key) => lane.mosaicCards.find((c) => c.key === key);
+
+  const regularImg = articleFor("img-regular").querySelector("img");
+  const onlyImg = articleFor("img-only").querySelector("img");
+  const brokenImg = articleFor("img-broken").querySelector("img");
+  const multiImgs = Array.from(articleFor("img-multi").querySelectorAll("img"));
+
+  // Wait for every image to resolve (already-complete or a real load/error
+  // event) so mosaicMarkImageResolved's clear-and-remeasure has actually run
+  // for all four cards before the settled state below is snapshotted.
+  await mosaicStreamImageWaitForResolution([
+    regularImg,
+    onlyImg,
+    brokenImg,
+    ...multiImgs,
+  ]);
+  // mosaicMarkImageResolved's own renderMessagesIfChanged call runs
+  // synchronously inside the load/error handler, but that handler was
+  // registered by mosaicSyncImageLoadHandlers before this check's own
+  // listeners above -- give the resulting content-diff pass a frame to
+  // fully settle before reading state.
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve)),
+  );
+
+  const settled = {
+    regularReserve: articleFor("img-regular").dataset.mosaicReservationType || "",
+    onlyReserve: articleFor("img-only").dataset.mosaicReservationType || "",
+    brokenReserve: articleFor("img-broken").dataset.mosaicReservationType || "",
+    multiReserve: articleFor("img-multi").dataset.mosaicReservationType || "",
+    regularN: cardFor("img-regular").n,
+    onlyN: cardFor("img-only").n,
+    brokenN: cardFor("img-broken").n,
+    multiN: cardFor("img-multi").n,
+    multiImageCount: multiImgs.length,
+  };
+
+  // Idempotence: once resolved, further load/error events (a real image can
+  // fire "load" more than once in some browsers on style/attribute churn)
+  // must be true no-ops -- mosaicMarkImageResolved's WeakSet guard returns
+  // false the second time, so no further dirty flag, no further re-render.
+  const fingerprintBefore = lane.renderedMessageFingerprint;
+  const before = mosaicStreamCardSnapshot(lane);
+  for (const img of [regularImg, onlyImg, brokenImg, ...multiImgs]) {
+    img.dispatchEvent(new Event("load"));
+    img.dispatchEvent(new Event("error"));
+  }
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve)),
+  );
+
+  return {
+    ...settled,
+    fingerprintBefore,
+    fingerprintAfter: lane.renderedMessageFingerprint,
+    before,
+    after: mosaicStreamCardSnapshot(lane),
+  };
+}
+
 // §14 span clamped to 12 / §5 no special span policy: a task-directive-stack
 // quote (detected from item.display_html -- server-emitted markup,
 // spice/serve/taskdirectives.py, always exactly
@@ -371,6 +526,15 @@ async function installMosaicStreamHelpers(page) {
       "const MOSAIC_STREAM_FROZEN_CHAIN_LAST_KEY = " +
         MOSAIC_STREAM_FROZEN_CHAIN_LAST_KEY +
         ";",
+      "const MOSAIC_STREAM_IMAGE_HTML = " +
+        JSON.stringify(MOSAIC_STREAM_IMAGE_HTML) +
+        ";",
+      "const MOSAIC_STREAM_BROKEN_IMAGE_HTML = " +
+        JSON.stringify(MOSAIC_STREAM_BROKEN_IMAGE_HTML) +
+        ";",
+      "const MOSAIC_STREAM_MULTI_IMAGE_HTML = " +
+        JSON.stringify(MOSAIC_STREAM_MULTI_IMAGE_HTML) +
+        ";",
       "const MOSAIC_STREAM_BACKFILL_EXISTING_FIRST_KEY = " +
         MOSAIC_STREAM_BACKFILL_EXISTING_FIRST_KEY +
         ";",
@@ -395,6 +559,9 @@ async function installMosaicStreamHelpers(page) {
       mosaicStreamFrozenGrowthCheck,
       mosaicStreamGeometryChangeCheck,
       mosaicStreamReadingOrderCheck,
+      mosaicStreamImageItem,
+      mosaicStreamImageWaitForResolution,
+      mosaicStreamImageReservationCheck,
       mosaicStreamBarrierResetCheck,
       mosaicStreamBackfillCheck,
       mosaicStreamEventLogReplayCheck,
@@ -536,6 +703,61 @@ function assertReadingOrderInvariants(readingOrder, fail) {
     );
 }
 
+function assertImageReservationInvariants(imageResult, fail) {
+  // Once resolved (mosaicMarkImageResolved), the reservation type clears
+  // unconditionally so the content-diff pass measures the real (letterboxed)
+  // height instead -- true for a pure image-only/image-stack card as much as
+  // a mixed text+image one (mosaic-ack-resolution-smoke covers the mixed
+  // case; these fixtures carry no other content).
+  for (const key of ["regularReserve", "onlyReserve", "brokenReserve", "multiReserve"]) {
+    if (imageResult[key])
+      fail("reservation type did not clear after resolution: " + key + "=" + imageResult[key]);
+  }
+
+  // Tier proportionality (§4/§12): an image-only card letterboxes to the
+  // large cap, a regular inline image to the small cap -- the large tier
+  // must actually settle taller, proving the two CSS caps (and the fixed
+  // classification read from app.render.js's dataset, not the .media-rich
+  // class which is true for both tiers) really do produce different,
+  // correct heights end to end.
+  if (!(imageResult.onlyN > imageResult.regularN))
+    fail("an image-only card must settle taller than a regular inline image: " + JSON.stringify(imageResult));
+
+  // A broken (no-src) image still gets a real, non-collapsed letterbox slot
+  // (messages.css height/max-height are unconditional) -- identical to a
+  // loaded regular image at the same (small) tier.
+  if (imageResult.brokenN !== imageResult.regularN)
+    fail("a broken image must settle at the same height as a loaded one: " + JSON.stringify(imageResult));
+
+  // Multi-image stacking rule (§4/§12): three images in one stack (laid out
+  // in a single horizontal row, messages.css) must settle at exactly the
+  // SAME one-slot height as a single image, never a per-image sum.
+  if (imageResult.multiImageCount !== 3)
+    fail("multi-image fixture did not render all three images: " + JSON.stringify(imageResult));
+  if (imageResult.multiN !== imageResult.regularN)
+    fail(
+      "a multi-image stack must settle at exactly one slot, not a per-image sum: " +
+        JSON.stringify(imageResult),
+    );
+
+  // Idempotence: once every image has already resolved, a further load/error
+  // event must be a true no-op (mosaicMarkImageResolved's WeakSet guard) --
+  // zero re-render, zero style write on any card in the lane.
+  if (imageResult.fingerprintAfter !== imageResult.fingerprintBefore)
+    fail("a load/error event after resolution triggered another re-render (fingerprint changed)");
+  for (const before of imageResult.before.cards) {
+    const after = imageResult.after.cards.find((c) => c.key === before.key);
+    if (
+      !after ||
+      after.transform !== before.transform ||
+      after.width !== before.width ||
+      after.height !== before.height
+    )
+      fail("a load/error event after resolution changed a card's rendered style: " + before.key);
+  }
+}
+
+
 function assertBarrierResetInvariants(barrierResult, fail) {
   if (!barrierResult.barrierCard)
     fail("task-directive-stack message did not produce a lattice card");
@@ -628,6 +850,7 @@ function assertMosaicStreamResult(result) {
   assertFrozenGrowthInvariants(result.frozenGrowthResult, fail);
   assertGeometryChangeInvariants(result.geometryChangeResult, fail);
   assertReadingOrderInvariants(result.readingOrder, fail);
+  assertImageReservationInvariants(result.imageResult, fail);
   assertBarrierResetInvariants(result.barrierResult, fail);
   assertBackfillInvariants(result.backfillResult, fail);
   assertEventLogReplayInvariants(result.eventLogReplay, fail);
@@ -663,6 +886,7 @@ async function run() {
       const frozenGrowthResult = await page.evaluate(mosaicStreamFrozenGrowthCheck);
       const geometryChangeResult = await page.evaluate(mosaicStreamGeometryChangeCheck);
       const readingOrder = await page.evaluate(mosaicStreamReadingOrderCheck);
+      const imageResult = await page.evaluate(mosaicStreamImageReservationCheck);
       const barrierResult = await page.evaluate(mosaicStreamBarrierResetCheck);
       const backfillResult = await page.evaluate(mosaicStreamBackfillCheck);
       const eventLogReplay = await page.evaluate(mosaicStreamEventLogReplayCheck);
@@ -673,6 +897,7 @@ async function run() {
         frozenGrowthResult,
         geometryChangeResult,
         readingOrder,
+        imageResult,
         barrierResult,
         backfillResult,
         eventLogReplay,

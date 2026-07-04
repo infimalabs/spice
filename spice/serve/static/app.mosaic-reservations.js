@@ -32,27 +32,38 @@ function mosaicQuoteReservePx(rootFontSizePx, lines) {
   return chromePx + typicalLines * lineHeightPx;
 }
 
-// Image letterbox caps (§12 imageHeights): fixed px, never measured -- an
-// image reservation is exact by construction because the rendered image is
-// letterboxed to this same cap at card width, so resolution never moves
-// anything (mirrors .spice/mosaic-demo.html IMG_H / IMG_H_BIG).
-const MOSAIC_IMAGE_HEIGHT_PX = 140;
-const MOSAIC_IMAGE_HEIGHT_LARGE_PX = 252;
+// Image letterbox caps (§12 imageHeights), rem-denominated like the rest of
+// §3's geometry pass so a root font-size change rescales the slot
+// coherently through full replay -- messages.css's --mosaic-image-height /
+// --mosaic-image-large-height custom properties must stay in sync with
+// these. The rendered image is letterboxed to this exact cap regardless of
+// its intrinsic size or load state (messages.css), so an image reservation
+// is exact by construction and never depends on measurement.
+const MOSAIC_IMAGE_HEIGHT_REM = 8.75; // --mosaic-image-height: 140px at the 16px default root
+const MOSAIC_IMAGE_HEIGHT_LARGE_REM = 15.75; // --mosaic-image-large-height: 252px at the 16px default root
+
+function mosaicImageReservePx(heightRem, rootFontSizePx) {
+  const rem =
+    Number.isFinite(rootFontSizePx) && rootFontSizePx > 0
+      ? rootFontSizePx
+      : 16;
+  return heightRem * rem;
+}
 
 // One table, one place: every reservation-bearing card type and how to
-// resolve its prior against the live root font size. Image caps ignore the
-// root font (§12: fixed, letterbox-known constants, not part of the text
-// type ramp); quote priors resolve through it like everything else in §3's
-// geometry pass. A type absent from this table has no reservation -- its
-// measured height stands, unchanged from today (§4 last paragraph: "unknown
-// types default to no reservation").
+// resolve its prior against the live root font size (§3's geometry pass
+// governs every prior here, quote and image alike). A type absent from this
+// table has no reservation -- its measured height stands, unchanged from
+// today (§4 last paragraph: "unknown types default to no reservation").
 const MOSAIC_RESERVATION_PRIORS = {
   ack: (rootFontSizePx) =>
     mosaicQuoteReservePx(rootFontSizePx, MOSAIC_ACK_QUOTE_TYPICAL_LINES),
   quote: (rootFontSizePx) =>
     mosaicQuoteReservePx(rootFontSizePx, MOSAIC_ACK_QUOTE_TYPICAL_LINES),
-  image: () => MOSAIC_IMAGE_HEIGHT_PX,
-  imageLarge: () => MOSAIC_IMAGE_HEIGHT_LARGE_PX,
+  image: (rootFontSizePx) =>
+    mosaicImageReservePx(MOSAIC_IMAGE_HEIGHT_REM, rootFontSizePx),
+  imageLarge: (rootFontSizePx) =>
+    mosaicImageReservePx(MOSAIC_IMAGE_HEIGHT_LARGE_REM, rootFontSizePx),
 };
 
 function mosaicReservationPriorPx(type, rootFontSizePx) {
