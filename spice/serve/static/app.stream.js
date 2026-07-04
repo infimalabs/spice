@@ -355,12 +355,16 @@ function renderMessagesIfChanged(lane) {
   const visibleItems = renderItems.filter((item) => !isPresenceMessage(item));
   renderLaneViewShell(lane);
   const fingerprint = messageRenderFingerprint(lane, visibleItems);
-  if (fingerprint === lane.renderedMessageFingerprint) return;
+  if (fingerprint === lane.renderedMessageFingerprint) {
+    const rootWidthChanged = mosaicSyncRootWidth(lane);
+    if (!rootWidthChanged || !lane.mosaicCards) return;
+  }
   const viewportAnchor = captureMessageViewportAnchor(lane);
   suppressLanePaneScrollIntentForFrame(lane);
-  mosaicRenderMessageStream(lane, visibleItems);
+  const mosaicRenderResult = mosaicRenderMessageStream(lane, visibleItems);
   mosaicAttachHistorySentinels(lane, visibleItems);
   restoreMessageViewportAnchor(lane, viewportAnchor);
+  mosaicRestoreBackfillViewport(lane, mosaicRenderResult);
   syncLaneHistoryObserver(lane);
   syncTeamImportOverlay(lane);
   lane.renderedMessageFingerprint = fingerprint;

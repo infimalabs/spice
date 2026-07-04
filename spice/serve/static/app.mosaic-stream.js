@@ -20,14 +20,111 @@
 // entirely, pinned to the plane's bottom edge in CSS alone (messages.css).
 
 const MOSAIC_RESIZE_WIDTH_EPSILON_PX = 0.5;
+const MOSAIC_BACKFILL_BOTTOM_EPSILON_PX = 2;
+
+// ---- root-width visibility signal -------------------------------------------------
+
+function mosaicCssPixelValue(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function mosaicRootElement(host) {
+  return host.closest(".swimlanes") || host;
+}
+
+function mosaicVisibleRootLaneCount(root, activeLane) {
+  let count = 0;
+  for (const node of root.children) {
+    if (!node.classList?.contains("lane")) continue;
+    if (node.classList.contains("lane--shadowed")) continue;
+    if (getComputedStyle(node).display === "none") continue;
+    count += 1;
+    if (count > 1) return count;
+  }
+  return count || (activeLane ? 1 : 0);
+}
+
+function mosaicRootWidthEligible(lane, host) {
+  const root = mosaicRootElement(host);
+  if (!root || root === host) return false;
+  return mosaicVisibleRootLaneCount(root, lane.element) <= 1;
+}
+
+function mosaicRootWidthState(lane, host, style) {
+  const root = mosaicRootElement(host);
+  const rootWidth =
+    root && root !== host
+      ? root.clientWidth -
+        mosaicCssPixelValue(getComputedStyle(root).paddingLeft) -
+        mosaicCssPixelValue(getComputedStyle(root).paddingRight)
+      : 0;
+  const laneWidth = lane.element.getBoundingClientRect().width;
+  const rootGeometry = mosaicGeometry(mosaicRootFontSizePx(), rootWidth);
+  const useRootWidth =
+    mosaicRootWidthEligible(lane, host) &&
+    rootGeometry.L > 1 &&
+    rootWidth > laneWidth + mosaicCssPixelValue(style.columnGap);
+  return {
+    useRootWidth,
+    value: Math.max(laneWidth, rootWidth) + "px",
+  };
+}
+
+function mosaicClearRootWidth(lane, host) {
+  const hadClass = lane.element.classList.contains("lane--message-pack-root");
+  const hadRootWidth = Boolean(
+    host.style.getPropertyValue("--message-pack-root-width"),
+  );
+  lane.element.classList.remove("lane--message-pack-root");
+  host.style.removeProperty("--message-pack-root-width");
+  return hadClass || hadRootWidth;
+}
+
+function mosaicSyncRootWidth(lane) {
+  const host = lane.messagesEl;
+  if (!host) return false;
+  const style = getComputedStyle(host);
+  if (style.display !== "grid") return mosaicClearRootWidth(lane, host);
+  const rootWidth = mosaicRootWidthState(lane, host, style);
+  const classChanged =
+    lane.element.classList.contains("lane--message-pack-root") !==
+    rootWidth.useRootWidth;
+  lane.element.classList.toggle(
+    "lane--message-pack-root",
+    rootWidth.useRootWidth,
+  );
+  if (!rootWidth.useRootWidth) {
+    return mosaicClearRootWidth(lane, host) || classChanged;
+  }
+  if (host.style.getPropertyValue("--message-pack-root-width") !== rootWidth.value) {
+    host.style.setProperty("--message-pack-root-width", rootWidth.value);
+    return true;
+  }
+  return classChanged;
+}
 
 // ---- lane lattice state ----------------------------------------------------------
 
 function mosaicLaneReady(lane) {
   if (lane.mosaicCards) return;
   lane.mosaicCards = [];
+  lane.mosaicEventLog = mosaicCreateEventLog(
+    mosaicGridTrackCount,
+    MOSAIC_FREEZE_DEPTH,
+  );
   lane.mosaicNextCreationIndex = 0;
-  lane.mosaicAppliedByKey = new Map();
+  lane.mosaicNextBackfillCreationIndex = -1;
+  // Keyed by ELEMENT, not by card key: renderOrReuseMessageNode/mosaicRuleNode
+  // build a fresh element whenever a message's content fingerprint changes
+  // (e.g. an ack skeleton resolving to its real quote) even when the card's
+  // own (t,b,n,span) stays identical. A key-keyed memo would then see
+  // "unchanged" and skip mosaicApplyCardPosition entirely, leaving the FRESH
+  // element with no transform/width/height ever applied -- a WeakMap keyed
+  // by the element makes a first-time element always look prev-less (the
+  // correct force-a-write case), and needs no manual cleanup since entries
+  // vanish with their (detached, unreferenced) elements.
+  lane.mosaicAppliedByNode = new WeakMap();
   lane.mosaicPrevMaxRow = 0;
   lane.mosaicPrevExtent = null;
   lane.mosaicGeometry = null;
@@ -47,7 +144,7 @@ function mosaicPlane(lane, geometry) {
   plane.className = "mosaic-plane";
   lane.messagesEl.prepend(plane);
   lane.mosaicPlaneEl = plane;
-  lane.mosaicAppliedByKey = new Map();
+  lane.mosaicAppliedByNode = new WeakMap();
   lane.mosaicPrevMaxRow = mosaicAnchorPlane(plane, geometry.M);
   lane.mosaicPrevExtent = null;
   return plane;
@@ -61,10 +158,35 @@ function mosaicCreationIndexFor(lane, key) {
   return index;
 }
 
+function mosaicBackfillCreationIndexFor(lane, key) {
+  const existing = lane.mosaicCards.find((card) => card.key === key);
+  if (existing) return existing.creationIndex;
+  if (!Number.isFinite(lane.mosaicNextBackfillCreationIndex))
+    lane.mosaicNextBackfillCreationIndex = -1;
+  if (lane.mosaicCards.length) {
+    const minIndex = Math.min(...lane.mosaicCards.map((card) => card.creationIndex));
+    if (lane.mosaicNextBackfillCreationIndex >= minIndex)
+      lane.mosaicNextBackfillCreationIndex = minIndex - 1;
+  }
+  const index = lane.mosaicNextBackfillCreationIndex;
+  lane.mosaicNextBackfillCreationIndex -= 1;
+  return index;
+}
+
 // ---- entries: messages, compaction dividers, and derived time-rule markers -------
 
+// A card is span-12 ("barrier") for either of two reasons: its own kind
+// (compaction dividers), or its rendered content (task-directive-stack
+// quotes -- server-emitted markup, spice/serve/taskdirectives.py -- always
+// exactly `<div class="task-directive-stack">`, so a plain substring check
+// on the pre-render display_html is exact and needs no DOM node). No card
+// type gets a different SPAN POLICY (§5) from this -- both still place
+// through the identical decide()/insert() path with span forced to 12
+// rather than measured, the same treatment already given compaction
+// dividers and time rules.
 function mosaicItemIsBarrier(item) {
-  return item.kind === "compaction";
+  if (item.kind === "compaction") return true;
+  return Boolean(item.display_html && item.display_html.includes("task-directive-stack"));
 }
 
 // Mirrors app.stream.js's messageStreamNodesWithHistorySentinels ordering
@@ -127,18 +249,24 @@ function mosaicExistingNodesByKey(lane) {
 // case (§4); anything else measures live like normal. Barrier entries
 // (dividers, rules) are never pending -- their content is fixed at
 // creation.
+// app.render.js already computes the correct reservation type once, at
+// node-creation time (messageReservationType: "ack" while any ack_segments
+// key has no resolved context yet via ackContextForKey, "imageLarge" for
+// image_only items, a "image" fallback for any other card containing
+// .message-image) and stamps it onto the node as data-mosaic-reservation-
+// type. Re-deriving that classification here duplicated it with a
+// DIFFERENT (and wrong) check -- lane.missingAckContextKeys only tracks
+// confirmed-missing keys, not "not yet resolved", so a genuinely-pending
+// ack (fetched but not yet answered) fell through to real measurement
+// instead of reserving. Reading the dataset directly trusts the single
+// source of truth instead of maintaining a second, divergent one. A fresh
+// node built once its content resolves has no reservation type at all
+// (messageReservationType returns "" once ackContextForKey finds a
+// context), so this naturally falls through to real measurement on
+// resolution with no extra branching needed here.
 function mosaicPendingReservationType(lane, entry, node) {
   if (entry.kind === "barrier") return null;
-  const item = entry.item;
-  const pendingAck = (item.ack_keys || []).some((key) =>
-    lane.missingAckContextKeys.has(key),
-  );
-  if (pendingAck) return "ack";
-  const image = node.querySelector("img");
-  if (image && !image.complete) {
-    return node.classList.contains("media-rich") ? "imageLarge" : "image";
-  }
-  return null;
+  return node.dataset.mosaicReservationType || null;
 }
 
 // ---- measurement ------------------------------------------------------------------
@@ -214,7 +342,7 @@ function mosaicGeometryChanged(lane, geometry) {
 // Applies every card's position/size, syncing the plane BEFORE any card
 // reflow per mosaicApplyCardPosition's documented call-order contract
 // (app.mosaic-render.js), then syncs host height. Returns nothing; mutates
-// lane's render-memo fields only (mosaicAppliedByKey/mosaicPrevMaxRow/
+// lane's render-memo fields only (mosaicAppliedByNode/mosaicPrevMaxRow/
 // mosaicPrevExtent), never the card records themselves.
 function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
   const extent = mosaicCardsExtent(cards);
@@ -235,7 +363,7 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
   for (const card of cards) {
     const node = nodesByKey.get(card.key);
     if (!node) continue;
-    const prev = lane.mosaicAppliedByKey.get(card.key) || null;
+    const prev = lane.mosaicAppliedByNode.get(node) || null;
     const next = mosaicApplyCardPosition(
       node,
       card,
@@ -245,10 +373,7 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
       geometry.gap,
       { reducedMotion },
     );
-    lane.mosaicAppliedByKey.set(card.key, next);
-  }
-  for (const key of Array.from(lane.mosaicAppliedByKey.keys())) {
-    if (!cards.some((card) => card.key === key)) lane.mosaicAppliedByKey.delete(key);
+    lane.mosaicAppliedByNode.set(node, next);
   }
   lane.mosaicPrevExtent = mosaicSyncHostHeight(
     lane.mosaicPlaneEl,
@@ -266,12 +391,92 @@ function mosaicRunInsert(lane, entry, node, geometry) {
   const candidates = mosaicCandidatesFor(lane, entry, node, geometry);
   const placement = mosaicInsert(lane.mosaicCards, rowFloor, candidates, mosaicGridTrackCount);
   const creationIndex = mosaicCreationIndexFor(lane, entry.key);
+  mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+    type: "insert",
+    key: entry.key,
+    creationIndex,
+    candidates,
+  });
   const card = { ...placement.card, key: entry.key, creationIndex, frozen: false };
   lane.mosaicCards = lane.mosaicCards.concat([card]);
   lane.mosaicCards = mosaicRecomputeFrozen(lane.mosaicCards, MOSAIC_FREEZE_DEPTH);
 }
 
+function mosaicBackfillEntries(entries, previousKeySet, addedKeys) {
+  if (!addedKeys.length) return null;
+  const firstAddedIndex = entries.findIndex((entry) => !previousKeySet.has(entry.key));
+  if (firstAddedIndex <= 0) return null;
+  for (let index = 0; index < firstAddedIndex; index += 1) {
+    if (!previousKeySet.has(entries[index].key)) return null;
+  }
+  const backfillEntries = [];
+  for (let index = firstAddedIndex; index < entries.length; index += 1) {
+    if (previousKeySet.has(entries[index].key)) return null;
+    backfillEntries.push(entries[index]);
+  }
+  return backfillEntries;
+}
+
+function mosaicDeriveDownwardRowFloor(cards, trackCount) {
+  const tracks = mosaicTrackCount(trackCount);
+  const bottomByTrack = new Array(tracks).fill(0);
+  for (const card of cards) {
+    const start = Math.max(0, card.t);
+    const end = Math.min(tracks, card.t + card.span);
+    for (let track = start; track < end; track += 1) {
+      if (card.b < bottomByTrack[track]) bottomByTrack[track] = card.b;
+    }
+  }
+  const anchor = Math.max(...bottomByTrack);
+  return {
+    anchor,
+    rowFloor: bottomByTrack.map((bottom) => anchor - bottom),
+  };
+}
+
+function mosaicRunBackfill(lane, entries, nodesByKey, geometry) {
+  const downward = mosaicDeriveDownwardRowFloor(lane.mosaicCards, mosaicGridTrackCount);
+  let rowFloor = downward.rowFloor;
+  const placedCards = [];
+  const eventCards = [];
+  for (const entry of entries) {
+    const node = nodesByKey.get(entry.key);
+    const candidates = mosaicCandidatesFor(lane, entry, node, geometry);
+    const placement = mosaicInsert([], rowFloor, candidates, mosaicGridTrackCount);
+    const creationIndex = mosaicBackfillCreationIndexFor(lane, entry.key);
+    rowFloor = placement.rowFloor;
+    eventCards.push({
+      key: entry.key,
+      creationIndex,
+      candidates,
+    });
+    placedCards.push({
+      ...placement.card,
+      key: entry.key,
+      creationIndex,
+      b: downward.anchor - placement.card.b - placement.card.n,
+      frozen: true,
+    });
+  }
+  mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+    type: "backfill",
+    trackCount: mosaicGridTrackCount,
+    cards: eventCards,
+  });
+  lane.mosaicCards = lane.mosaicCards.concat(placedCards);
+  lane.mosaicCards = mosaicRecomputeFrozen(lane.mosaicCards, MOSAIC_FREEZE_DEPTH);
+}
+
 function mosaicDropVacatedKeys(lane, desiredKeySet) {
+  const removedKeys = lane.mosaicCards
+    .filter((card) => !desiredKeySet.has(card.key))
+    .map((card) => card.key);
+  if (removedKeys.length) {
+    mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+      type: "remove",
+      keys: removedKeys,
+    });
+  }
   lane.mosaicCards = lane.mosaicCards.filter((card) => desiredKeySet.has(card.key));
 }
 
@@ -283,14 +488,30 @@ function mosaicDropVacatedKeys(lane, desiredKeySet) {
 // render (content genuinely changed, flagged by the caller) are touched;
 // an untouched reused node must never re-enter this pass; that is what
 // keeps a no-op re-render from moving anything (§11c).
+//
+// §14: dirty entries are resolved in CREATION-INDEX order, not entries'
+// (newest-first) order -- two simultaneously-resolving cards (e.g. two acks
+// racing back in reversed arrival order) must ripple/replay identically
+// regardless of which happened to finish its fetch first. wetReplay already
+// re-sorts internally, but mosaicResolveFrozenResize applies ripples one
+// card at a time as this loop reaches them, so the loop order IS the
+// ripple-application order and must be deterministic on its own.
 function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
-  let touchedWet = false;
+  const dirty = [];
   for (const entry of entries) {
     const card = lane.mosaicCards.find((candidate) => candidate.key === entry.key);
     if (!card) continue;
     const node = nodesByKey.get(entry.key);
     if (!node || !node.dataset.mosaicContentDirty) continue;
     delete node.dataset.mosaicContentDirty;
+    dirty.push({ entry, node, creationIndex: card.creationIndex });
+  }
+  dirty.sort((a, b) => a.creationIndex - b.creationIndex);
+
+  let touchedWet = false;
+  for (const { entry, node, creationIndex } of dirty) {
+    const card = lane.mosaicCards.find((candidate) => candidate.creationIndex === creationIndex);
+    if (!card) continue;
     const reservationType = mosaicPendingReservationType(lane, entry, node);
     const resolvedN = reservationType
       ? mosaicReservationRows(reservationType, mosaicRootFontSizePx(), geometry.gap, geometry.M)
@@ -300,6 +521,12 @@ function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
           geometry.M,
         );
     if (resolvedN === card.n) continue;
+    mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+      type: "content-resize",
+      key: card.key,
+      creationIndex: card.creationIndex,
+      n: resolvedN,
+    });
     if (card.frozen) {
       lane.mosaicCards = mosaicResolveFrozenResize(lane.mosaicCards, card.creationIndex, resolvedN);
     } else {
@@ -321,9 +548,13 @@ function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
 // `entries` is already in that true order (newest-first, mirroring
 // laneGroupMergedMessages/knownMessages) -- deriving creationIndex from
 // its reversed position covers every surviving card, old and newly-merged
-// alike, in one pass. mosaicCreationIndexFor's incremental counter is
-// right for a single live append (mosaicRunInsert, where the new key really
-// is the newest thing ever observed) but wrong for a full replay: a bulk
+// alike, in one pass, so no backfillKeySet special-case is needed here:
+// unlike mosaicRunBackfill (which must avoid disturbing already-placed
+// cards' indices to skip a full replay), this function is already
+// recomputing everyone's position from scratch, so it can just read the
+// truth entries already encodes. mosaicCreationIndexFor's incremental
+// counter is right for a single live append (mosaicRunInsert, where the
+// new key really is the newest thing ever observed) but wrong here: a bulk
 // batch of previously-unseen keys -- a team fuse pulling in another
 // member's whole backlog, or a history-pagination hydration landing
 // several older messages at once -- would otherwise get stapled onto the
@@ -344,9 +575,31 @@ function mosaicRunFullReplay(lane, entries, nodesByKey, geometry) {
       span: previous ? previous.span : geometry.baseSpan,
     };
   });
+  mosaicRecordEventLogEvent(lane.mosaicEventLog, {
+    type: "full-replay",
+    trackCount: mosaicGridTrackCount,
+    cards: withCandidates,
+  });
   const replayed = mosaicFullReplay(withCandidates, mosaicGridTrackCount, MOSAIC_FREEZE_DEPTH);
   lane.mosaicCards = replayed.map(({ candidates, ...card }) => card);
   lane.mosaicNextCreationIndex = entries.length;
+}
+
+function mosaicCaptureBackfillViewport(lane) {
+  const scroller = lane.messagesEl;
+  if (!scroller) return null;
+  const distanceFromBottom = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+  if (distanceFromBottom > MOSAIC_BACKFILL_BOTTOM_EPSILON_PX) return null;
+  return { distanceFromBottom: Math.max(0, distanceFromBottom) };
+}
+
+function mosaicRestoreBackfillViewport(lane, renderResult) {
+  const viewport = renderResult ? renderResult.backfillViewport : null;
+  if (!viewport || !lane.messagesEl) return;
+  const scroller = lane.messagesEl;
+  const nextTop =
+    scroller.scrollHeight - scroller.clientHeight - viewport.distanceFromBottom;
+  setLaneScrollTopWithoutPaneIntent(lane, Math.max(0, nextTop));
 }
 
 // ---- entry point --------------------------------------------------------------------
@@ -358,6 +611,7 @@ function mosaicRunFullReplay(lane, entries, nodesByKey, geometry) {
 // lane.messagesEl.
 function mosaicRenderMessageStream(lane, visibleItems) {
   mosaicLaneReady(lane);
+  mosaicSyncRootWidth(lane);
   // Geometry first: the plane is position:absolute, so creating it cannot
   // affect lane.messagesEl's own clientWidth, and mosaicPlane needs the
   // real M immediately if it has to anchor a fresh plane (see mosaicPlane).
@@ -394,6 +648,9 @@ function mosaicRenderMessageStream(lane, visibleItems) {
 
   const addedKeys = desiredKeys.filter((key) => !previousKeySet.has(key));
   const removedKeys = [...previousKeySet].filter((key) => !desiredKeySet.has(key));
+  const backfillEntries = mosaicBackfillEntries(entries, previousKeySet, addedKeys);
+  const backfillViewport = backfillEntries ? mosaicCaptureBackfillViewport(lane) : null;
+  let replaying = geometryChanged;
 
   if (geometryChanged) {
     mosaicRunFullReplay(lane, entries, nodesByKey, geometry);
@@ -405,15 +662,21 @@ function mosaicRenderMessageStream(lane, visibleItems) {
     const entry = entries.find((candidate) => candidate.key === addedKeys[0]);
     mosaicRunInsert(lane, entry, nodesByKey.get(entry.key), geometry);
     mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
+  } else if (backfillEntries) {
+    if (removedKeys.length) mosaicDropVacatedKeys(lane, desiredKeySet);
+    mosaicRunBackfill(lane, backfillEntries, nodesByKey, geometry);
+    mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry);
   } else {
+    replaying = true;
     mosaicRunFullReplay(lane, entries, nodesByKey, geometry);
   }
 
   mosaicApplyRender(lane, lane.mosaicCards, geometry, nodesByKey, {
-    replaying: geometryChanged || (addedKeys.length > 1),
+    replaying,
   });
   mosaicSyncResizeObserver(lane);
   mosaicSyncImageLoadHandlers(lane);
+  return { backfillViewport };
 }
 
 // ---- resize + image-load wiring (mirrors the legacy syncMessagePackObserver
@@ -457,20 +720,27 @@ function mosaicSyncResizeObserver(lane) {
 function mosaicSyncImageLoadHandlers(lane) {
   if (!lane.messagesEl) return;
   if (!lane.mosaicImageLoadHandlers) lane.mosaicImageLoadHandlers = new Map();
+  if (!lane.mosaicResolvedImages) lane.mosaicResolvedImages = new WeakSet();
   const current = new Set(
     lane.messagesEl.querySelectorAll("[data-mosaic-card] img"),
   );
+  let resolvedCompleteImage = false;
   for (const image of current) {
-    if (lane.mosaicImageLoadHandlers.has(image)) continue;
+    if (lane.mosaicImageLoadHandlers.has(image)) {
+      if (image.complete && mosaicMarkImageResolved(lane, image))
+        resolvedCompleteImage = true;
+      continue;
+    }
     const handler = () => {
-      const card = image.closest("[data-mosaic-card]");
-      if (card) card.dataset.mosaicContentDirty = "1";
+      if (!mosaicMarkImageResolved(lane, image)) return;
       lane.renderedMessageFingerprint = "";
       renderMessagesIfChanged(lane);
     };
     image.addEventListener("load", handler);
     image.addEventListener("error", handler);
     lane.mosaicImageLoadHandlers.set(image, handler);
+    if (image.complete && mosaicMarkImageResolved(lane, image))
+      resolvedCompleteImage = true;
   }
   for (const [image, handler] of lane.mosaicImageLoadHandlers) {
     if (current.has(image)) continue;
@@ -478,6 +748,28 @@ function mosaicSyncImageLoadHandlers(lane) {
     image.removeEventListener("error", handler);
     lane.mosaicImageLoadHandlers.delete(image);
   }
+  if (resolvedCompleteImage) {
+    lane.renderedMessageFingerprint = "";
+    renderMessagesIfChanged(lane);
+  }
+}
+
+function mosaicMarkImageResolved(lane, image) {
+  if (!lane.mosaicResolvedImages) lane.mosaicResolvedImages = new WeakSet();
+  if (lane.mosaicResolvedImages.has(image)) return false;
+  const card = image.closest("[data-mosaic-card]");
+  if (!card) return false;
+  lane.mosaicResolvedImages.add(image);
+  // The node is never replaced by a load/error event (the item's
+  // fingerprint doesn't change), so data-mosaic-reservation-type would
+  // otherwise stay stamped forever and mosaicPendingReservationType would
+  // keep returning the reservation instead of ever measuring the real
+  // (possibly text+image) content -- clear it so the content-diff pass this
+  // triggers takes the real-measurement path. Already-complete images take
+  // this same path because no future load event is guaranteed.
+  delete card.dataset.mosaicReservationType;
+  card.dataset.mosaicContentDirty = "1";
+  return true;
 }
 
 function mosaicResetResizeObserver(lane) {
@@ -493,4 +785,5 @@ function mosaicResetResizeObserver(lane) {
     image.removeEventListener("error", handler);
   }
   lane.mosaicImageLoadHandlers = new Map();
+  lane.mosaicResolvedImages = new WeakSet();
 }

@@ -14,6 +14,15 @@ const MOSAIC_STREAM_FROZEN_CHAIN_FIRST_KEY = 10;
 const MOSAIC_STREAM_FROZEN_CHAIN_LAST_KEY = 16;
 const MOSAIC_STREAM_EXPECTED_SURVIVOR_COUNT =
   MOSAIC_STREAM_FROZEN_CHAIN_LAST_KEY - MOSAIC_STREAM_FROZEN_CHAIN_FIRST_KEY + 1 + 2;
+// Mirrors app.mosaic-geometry.js's mosaicGridTrackCount -- this assertion
+// runs on the Node side (not injected into the page), so it can't read
+// that in-page global directly.
+const MOSAIC_STREAM_GRID_TRACK_COUNT = 12;
+const MOSAIC_STREAM_BACKFILL_EXISTING_FIRST_KEY = 100;
+const MOSAIC_STREAM_BACKFILL_EXISTING_COUNT = 24;
+const MOSAIC_STREAM_BACKFILL_COUNT = 3;
+const MOSAIC_STREAM_BACKFILL_LINES = 8;
+const MOSAIC_STREAM_SCROLL_EPSILON_PX = 2;
 
 function mosaicStreamResolveLane() {
   let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
@@ -56,6 +65,34 @@ function mosaicStreamCardSnapshot(lane) {
     height: el.style.height,
   }));
   return { cards, lattice: lane.mosaicCards.map((c) => ({ ...c })) };
+}
+
+function mosaicStreamResetLane(lane) {
+  if (lane.mosaicFrame) {
+    cancelAnimationFrame(lane.mosaicFrame);
+    lane.mosaicFrame = 0;
+  }
+  mosaicResetResizeObserver(lane);
+  if (lane.mosaicPlaneEl) lane.mosaicPlaneEl.remove();
+  lane.messagesEl.replaceChildren();
+  lane.knownMessages = [];
+  lane.knownMessageKeys = new Set();
+  lane.newestMessageKey = "";
+  lane.oldestMessageKey = "";
+  lane.renderedMessageFingerprint = "";
+  lane.mosaicCards = [];
+  lane.mosaicEventLog = mosaicCreateEventLog(mosaicGridTrackCount, MOSAIC_FREEZE_DEPTH);
+  lane.mosaicNextCreationIndex = 0;
+  lane.mosaicNextBackfillCreationIndex = -1;
+  lane.mosaicAppliedByKey = new Map();
+  lane.mosaicPrevMaxRow = 0;
+  lane.mosaicPrevExtent = null;
+  lane.mosaicGeometry = null;
+  lane.mosaicPlaneEl = null;
+}
+
+function mosaicStreamBottomDistance(lane) {
+  return lane.messagesEl.scrollHeight - lane.messagesEl.clientHeight - lane.messagesEl.scrollTop;
 }
 
 function mosaicStreamInsertSequence() {
@@ -216,6 +253,115 @@ function mosaicStreamReadingOrderCheck() {
   return { count: cards.length, chainTops, monotonic };
 }
 
+// §14 span clamped to 12 / §5 no special span policy: a task-directive-stack
+// quote (detected from item.display_html -- server-emitted markup,
+// spice/serve/taskdirectives.py, always exactly
+// `<div class="task-directive-stack">`) gets the same forced span-12
+// treatment already given compaction dividers and time rules
+// (mosaicItemIsBarrier). A span-12 card resets the frontier flat across
+// every track with no special-cased reset logic -- it falls out of the
+// shared engine's rowFloor commit for any full-width card -- so the very
+// next inserted card, regardless of its own span, must anchor at exactly
+// the barrier's top row. Self-contained: vacates its own messages after
+// asserting so it leaves no residue for any other check.
+function mosaicStreamBarrierResetCheck() {
+  const lane = mosaicStreamResolveLane();
+  const directiveItem = mosaicStreamBuildItem(90, 1);
+  directiveItem.display_html = '<div class="task-directive-stack">directive</div>';
+  directiveItem.display_text = "directive";
+  directiveItem.text = "directive";
+  upsertKnownMessage(lane, directiveItem, "newest");
+  trimKnownMessages(lane);
+  renderMessagesIfChanged(lane);
+  const afterBarrier = mosaicStreamCardSnapshot(lane);
+  const barrierCard = afterBarrier.lattice.find((c) => c.key === "msg-90");
+
+  mosaicStreamPushMessage(lane, 91, 1);
+  const afterNext = mosaicStreamCardSnapshot(lane);
+  const nextCard = afterNext.lattice.find((c) => c.key === "msg-91");
+
+  lane.knownMessages = lane.knownMessages.filter(
+    (item) => item.key !== "msg-90" && item.key !== "msg-91",
+  );
+  lane.knownMessageKeys.delete("msg-90");
+  lane.knownMessageKeys.delete("msg-91");
+  renderMessagesIfChanged(lane);
+
+  return { barrierCard, nextCard };
+}
+
+function mosaicStreamBackfillCheck() {
+  const lane = mosaicStreamResolveLane();
+  mosaicStreamResetLane(lane);
+  for (let offset = 0; offset < MOSAIC_STREAM_BACKFILL_EXISTING_COUNT; offset += 1) {
+    mosaicStreamPushMessage(
+      lane,
+      MOSAIC_STREAM_BACKFILL_EXISTING_FIRST_KEY + offset,
+      MOSAIC_STREAM_BACKFILL_LINES,
+    );
+  }
+  const before = mosaicStreamCardSnapshot(lane);
+  const existingKeys = before.lattice.map((card) => card.key);
+  const existingMinB = Math.min(...before.lattice.map((card) => card.b));
+  lane.messagesEl.scrollTop = Math.max(
+    0,
+    lane.messagesEl.scrollHeight - lane.messagesEl.clientHeight,
+  );
+  const bottomDistanceBefore = mosaicStreamBottomDistance(lane);
+  const sentinelBefore = lane.historySentinelEl;
+  const olderMessages = Array.from({ length: MOSAIC_STREAM_BACKFILL_COUNT }, (_, index) =>
+    mosaicStreamBuildItem(
+      MOSAIC_STREAM_BACKFILL_EXISTING_FIRST_KEY - index - 1,
+      MOSAIC_STREAM_BACKFILL_LINES,
+    ),
+  );
+  mergeOlderPayloadMessages(lane, { messages: olderMessages });
+  renderMessagesIfChanged(lane);
+  const after = mosaicStreamCardSnapshot(lane);
+  const bottomDistanceAfter = mosaicStreamBottomDistance(lane);
+  const sentinelAfter = lane.historySentinelEl;
+  const newKeys = after.lattice
+    .map((card) => card.key)
+    .filter((key) => !existingKeys.includes(key));
+  const backfillKeys = olderMessages.map((item) => item.key);
+  const backfillCreationIndexes = backfillKeys.map(
+    (key) => after.lattice.find((card) => card.key === key)?.creationIndex,
+  );
+  document.documentElement.style.fontSize = "20px";
+  lane.renderedMessageFingerprint = "";
+  renderMessagesIfChanged(lane);
+  const afterReplay = mosaicStreamCardSnapshot(lane);
+  document.documentElement.style.fontSize = "";
+  lane.renderedMessageFingerprint = "";
+  renderMessagesIfChanged(lane);
+  return {
+    before,
+    after,
+    afterReplay,
+    existingKeys,
+    existingMinB,
+    newKeys,
+    backfillKeys,
+    backfillCreationIndexes,
+    bottomDistanceBefore,
+    bottomDistanceAfter,
+    sentinelStable: sentinelBefore === sentinelAfter,
+    sentinelConnected: Boolean(sentinelAfter && sentinelAfter.isConnected),
+    sentinelTargetId: sentinelAfter?.dataset?.historyTargetId || "",
+    laneTargetId: lane.targetId,
+  };
+}
+
+function mosaicStreamEventLogReplayCheck() {
+  const lane = mosaicStreamResolveLane();
+  const replayed = mosaicReplayEventLog(lane.mosaicEventLog);
+  return {
+    eventCount: lane.mosaicEventLog.events.length,
+    live: mosaicEventLogLayout(lane.mosaicCards),
+    replayed: replayed.layout,
+  };
+}
+
 async function installMosaicStreamHelpers(page) {
   await page.addScriptTag({
     content: [
@@ -225,16 +371,33 @@ async function installMosaicStreamHelpers(page) {
       "const MOSAIC_STREAM_FROZEN_CHAIN_LAST_KEY = " +
         MOSAIC_STREAM_FROZEN_CHAIN_LAST_KEY +
         ";",
+      "const MOSAIC_STREAM_BACKFILL_EXISTING_FIRST_KEY = " +
+        MOSAIC_STREAM_BACKFILL_EXISTING_FIRST_KEY +
+        ";",
+      "const MOSAIC_STREAM_BACKFILL_EXISTING_COUNT = " +
+        MOSAIC_STREAM_BACKFILL_EXISTING_COUNT +
+        ";",
+      "const MOSAIC_STREAM_BACKFILL_COUNT = " +
+        MOSAIC_STREAM_BACKFILL_COUNT +
+        ";",
+      "const MOSAIC_STREAM_BACKFILL_LINES = " +
+        MOSAIC_STREAM_BACKFILL_LINES +
+        ";",
       mosaicStreamResolveLane,
       mosaicStreamBuildItem,
       mosaicStreamPushMessage,
       mosaicStreamCardSnapshot,
+      mosaicStreamResetLane,
+      mosaicStreamBottomDistance,
       mosaicStreamInsertSequence,
       mosaicStreamRemovalCheck,
       mosaicStreamContentChangeCheck,
       mosaicStreamFrozenGrowthCheck,
       mosaicStreamGeometryChangeCheck,
       mosaicStreamReadingOrderCheck,
+      mosaicStreamBarrierResetCheck,
+      mosaicStreamBackfillCheck,
+      mosaicStreamEventLogReplayCheck,
     ]
       .map((helper) => helper.toString())
       .join("\n"),
@@ -373,6 +536,88 @@ function assertReadingOrderInvariants(readingOrder, fail) {
     );
 }
 
+function assertBarrierResetInvariants(barrierResult, fail) {
+  if (!barrierResult.barrierCard)
+    fail("task-directive-stack message did not produce a lattice card");
+  if (barrierResult.barrierCard.span !== MOSAIC_STREAM_GRID_TRACK_COUNT)
+    fail("task-directive-stack message must force span 12, got " + barrierResult.barrierCard.span);
+  const barrierTop = barrierResult.barrierCard.b + barrierResult.barrierCard.n;
+  if (!barrierResult.nextCard)
+    fail("card following the barrier did not exist");
+  if (barrierResult.nextCard.b !== barrierTop)
+    fail(
+      "a span-12 card must reset the frontier flat across every track -- the next card must anchor exactly at the barrier's top row (" +
+        barrierTop + "), got " + barrierResult.nextCard.b,
+    );
+}
+
+function assertBackfillInvariants(backfillResult, fail) {
+  const beforeCardsByKey = new Map(backfillResult.before.cards.map((card) => [card.key, card]));
+  const beforeLatticeByKey = new Map(
+    backfillResult.before.lattice.map((card) => [card.key, card]),
+  );
+  for (const key of backfillResult.existingKeys) {
+    const beforeCard = beforeCardsByKey.get(key);
+    const afterCard = backfillResult.after.cards.find((card) => card.key === key);
+    if (
+      !beforeCard ||
+      !afterCard ||
+      beforeCard.transform !== afterCard.transform ||
+      beforeCard.width !== afterCard.width ||
+      beforeCard.height !== afterCard.height
+    )
+      fail("history backfill changed an existing card's rendered style: " + key);
+    const before = beforeLatticeByKey.get(key);
+    const after = backfillResult.after.lattice.find((card) => card.key === key);
+    if (
+      !before ||
+      !after ||
+      before.t !== after.t ||
+      before.b !== after.b ||
+      before.n !== after.n ||
+      before.span !== after.span
+    )
+      fail("history backfill changed an existing card lattice record: " + key);
+  }
+
+  for (const key of backfillResult.backfillKeys) {
+    const card = backfillResult.after.lattice.find((candidate) => candidate.key === key);
+    if (!card) fail("history backfill did not create card " + key);
+    if (card.b + card.n > backfillResult.existingMinB)
+      fail("history backfill card did not land below the existing archive: " + key);
+  }
+  if (!backfillResult.newKeys.some((key) => backfillResult.backfillKeys.includes(key)))
+    fail("history backfill did not add any message keys");
+  if (!backfillResult.backfillCreationIndexes.every((index) => Number.isFinite(index) && index < 0))
+    fail("history backfill cards were not assigned earlier creation indexes");
+  if (
+    Math.abs(backfillResult.bottomDistanceAfter - backfillResult.bottomDistanceBefore) >
+    MOSAIC_STREAM_SCROLL_EPSILON_PX
+  )
+    fail("history backfill moved the bottom seam viewport");
+  if (!backfillResult.sentinelStable)
+    fail("history sentinel identity changed during backfill");
+  if (!backfillResult.sentinelConnected)
+    fail("history sentinel was detached after backfill");
+  if (backfillResult.sentinelTargetId !== backfillResult.laneTargetId)
+    fail("history sentinel target identity changed during backfill");
+
+  const replayOverlap = mosaicStreamCardsOverlap(backfillResult.afterReplay.lattice);
+  if (replayOverlap)
+    fail("full replay after history backfill produced overlapping cards: " + JSON.stringify(replayOverlap));
+  for (const key of backfillResult.backfillKeys) {
+    if (!backfillResult.afterReplay.lattice.some((card) => card.key === key))
+      fail("full replay dropped backfilled card " + key);
+  }
+}
+
+function assertEventLogReplayInvariants(eventLogReplay, fail) {
+  if (eventLogReplay.eventCount <= 0)
+    fail("mosaic stream did not record any event-log events");
+  if (JSON.stringify(eventLogReplay.live) !== JSON.stringify(eventLogReplay.replayed))
+    fail("mosaic event-log replay did not reproduce the live lattice byte-identically");
+}
+
 function assertMosaicStreamResult(result) {
   const fail = (message) => {
     throw new Error(message + ": " + JSON.stringify(result));
@@ -383,6 +628,9 @@ function assertMosaicStreamResult(result) {
   assertFrozenGrowthInvariants(result.frozenGrowthResult, fail);
   assertGeometryChangeInvariants(result.geometryChangeResult, fail);
   assertReadingOrderInvariants(result.readingOrder, fail);
+  assertBarrierResetInvariants(result.barrierResult, fail);
+  assertBackfillInvariants(result.backfillResult, fail);
+  assertEventLogReplayInvariants(result.eventLogReplay, fail);
 }
 
 async function waitForMosaicStreamGlobals(page) {
@@ -392,6 +640,8 @@ async function waitForMosaicStreamGlobals(page) {
       typeof renderMessagesIfChanged === "function" &&
       typeof upsertKnownMessage === "function" &&
       typeof trimKnownMessages === "function" &&
+      typeof mosaicReplayEventLog === "function" &&
+      typeof mosaicEventLogLayout === "function" &&
       Array.isArray(targets) &&
       targets.length > 0,
     { timeout: 10000 },
@@ -413,6 +663,9 @@ async function run() {
       const frozenGrowthResult = await page.evaluate(mosaicStreamFrozenGrowthCheck);
       const geometryChangeResult = await page.evaluate(mosaicStreamGeometryChangeCheck);
       const readingOrder = await page.evaluate(mosaicStreamReadingOrderCheck);
+      const barrierResult = await page.evaluate(mosaicStreamBarrierResetCheck);
+      const backfillResult = await page.evaluate(mosaicStreamBackfillCheck);
+      const eventLogReplay = await page.evaluate(mosaicStreamEventLogReplayCheck);
       const result = {
         insertResult,
         removalResult,
@@ -420,6 +673,9 @@ async function run() {
         frozenGrowthResult,
         geometryChangeResult,
         readingOrder,
+        barrierResult,
+        backfillResult,
+        eventLogReplay,
       };
       assertMosaicStreamResult(result);
       return { ...result, url: server.url };
