@@ -440,6 +440,33 @@ def test_static_mosaic_full_replay_is_wired_after_wet_frozen_before_sizing():
     assert wet_frozen_index < full_replay_index < sizing_index
 
 
+def test_static_mosaic_event_log_helpers_are_pure_and_covered():
+    script = Path(__file__).with_name("fixtures") / "mosaic_event_log.js"
+
+    result = subprocess.run(
+        [
+            "node",
+            str(script),
+            str(STATIC_ROOT / "app.mosaic-engine.js"),
+            str(STATIC_ROOT / "app.mosaic-wet-frozen.js"),
+            str(STATIC_ROOT / "app.mosaic-full-replay.js"),
+            str(STATIC_ROOT / "app.mosaic-event-log.js"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_static_mosaic_event_log_is_wired_after_full_replay_before_sizing():
+    app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
+    full_replay_index = app_js.index('src="/static/app.mosaic-full-replay.js"')
+    event_log_index = app_js.index('src="/static/app.mosaic-event-log.js"')
+    sizing_index = app_js.index('src="/static/app.mosaic-sizing.js"')
+    assert full_replay_index < event_log_index < sizing_index
+
+
 def test_static_mosaic_seam_rule_holds_across_widths_including_fractional_colw():
     script = Path(__file__).with_name("fixtures") / "mosaic_seam.js"
 
