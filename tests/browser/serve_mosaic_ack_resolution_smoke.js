@@ -45,6 +45,26 @@ function mosaicAckBuildPlainItem(index, lines) {
   };
 }
 
+function mosaicAckBuildCompleteImageItem(index) {
+  const text = Array.from(
+    { length: 24 },
+    (_, i) => "already complete image line " + (i + 1),
+  ).join("<br>");
+  const imageHtml =
+    '<p class="message-image-stack"><a class="message-image"><img alt="already complete"></a></p>';
+  return {
+    ack_count: 0,
+    ack_keys: [],
+    index,
+    key: "ack-complete-image-" + index,
+    kind: "assistant",
+    timestamp: new Date(2026, 0, 1, 0, 0, index).toISOString(),
+    display_html: text + imageHtml,
+    display_text: text,
+    text,
+  };
+}
+
 // segment html is deliberately empty: renderMessageContent renders ONLY
 // the ack quote/skeleton for a segment-driven item with no segment body
 // text, so the reservation (sized only for the quote block, §4) actually
@@ -94,6 +114,21 @@ function mosaicAckSnapshot(lane) {
     hasQuote: Boolean(el.querySelector(".ack-quote:not(.ack-quote--pending)")),
   }));
   return { cards, lattice: lane.mosaicCards.map((c) => ({ ...c })) };
+}
+
+function mosaicAckResetLane(lane) {
+  if (lane.mosaicPlaneEl) lane.mosaicPlaneEl.remove();
+  lane.mosaicPlaneEl = null;
+  lane.mosaicCards = [];
+  lane.mosaicNextCreationIndex = 0;
+  lane.mosaicNextBackfillCreationIndex = -1;
+  lane.mosaicEventLog = mosaicCreateEventLog(mosaicGridTrackCount, MOSAIC_FREEZE_DEPTH);
+  lane.mosaicGeometry = null;
+  lane.knownMessages = [];
+  lane.knownMessageKeys = new Set();
+  lane.renderedMessageFingerprint = "";
+  lane.ackContextByKey.clear();
+  lane.missingAckContextKeys.clear();
 }
 
 // §4: a pending ack reserves its quote block instead of measuring -- the
@@ -239,6 +274,32 @@ function mosaicAckResolutionRacingRemovalCheck() {
   return { threw, stillInLattice, stillInDom };
 }
 
+// Image completion is another late-content path. An image with no src is
+// already complete before mosaicSyncImageLoadHandlers can attach listeners,
+// so this catches cards that wait forever for a future load/error event
+// while stuck on the image reservation prior.
+function mosaicAckCompleteImageResolutionCheck() {
+  const lane = mosaicAckResolveLane();
+  mosaicAckResetLane(lane);
+  mosaicAckPush(lane, mosaicAckBuildCompleteImageItem(35));
+  const node = lane.mosaicPlaneEl.querySelector('article[data-message-key="ack-complete-image-35"]');
+  const image = node.querySelector(".message-image img");
+  const card = lane.mosaicCards.find((c) => c.key === "ack-complete-image-35");
+  const geometry = lane.mosaicGeometry;
+  const reservedRows = mosaicReservationRows(
+    "image",
+    mosaicRootFontSizePx(),
+    geometry.gap,
+    geometry.M,
+  );
+  return {
+    cardN: card.n,
+    imageComplete: image.complete,
+    reservationType: node.dataset.mosaicReservationType || "",
+    reservedRows,
+  };
+}
+
 // §14: two simultaneously-resolving acks must yield an IDENTICAL final
 // layout regardless of which one's fetch happened to land first. Compares
 // resolving both in one pass (entries visits them newest-first) against
@@ -264,18 +325,7 @@ function mosaicAckSimultaneousOrderStabilityCheck() {
   // comparison needs an identical, fully-reset starting lattice before
   // EACH run -- not just before the second one.
   function resetLane(lane) {
-    if (lane.mosaicPlaneEl) lane.mosaicPlaneEl.remove();
-    lane.mosaicPlaneEl = null;
-    lane.mosaicCards = [];
-    lane.mosaicNextCreationIndex = 0;
-    lane.mosaicNextBackfillCreationIndex = -1;
-    lane.mosaicEventLog = mosaicCreateEventLog(mosaicGridTrackCount, MOSAIC_FREEZE_DEPTH);
-    lane.mosaicGeometry = null;
-    lane.knownMessages = [];
-    lane.knownMessageKeys = new Set();
-    lane.renderedMessageFingerprint = "";
-    lane.ackContextByKey.clear();
-    lane.missingAckContextKeys.clear();
+    mosaicAckResetLane(lane);
   }
 
   const laneA = mosaicAckResolveLane();
@@ -327,16 +377,19 @@ async function installMosaicAckHelpers(page) {
         ";",
       mosaicAckResolveLane,
       mosaicAckBuildPlainItem,
+      mosaicAckBuildCompleteImageItem,
       mosaicAckBuildAckItem,
       mosaicAckPush,
       mosaicAckResolve,
       mosaicAckSnapshot,
+      mosaicAckResetLane,
       mosaicAckPendingReservationCheck,
       mosaicAckWetResolutionCheck,
       mosaicAckFreezeFixture,
       mosaicAckFrozenPadCheck,
       mosaicAckFrozenRippleCheck,
       mosaicAckResolutionRacingRemovalCheck,
+      mosaicAckCompleteImageResolutionCheck,
       mosaicAckSimultaneousOrderStabilityCheck,
     ]
       .map((helper) => helper.toString())
@@ -397,6 +450,14 @@ function assertRacingRemoval(result, fail) {
   if (result.stillInDom) fail("a removed message's ack resolution must not leave an orphan DOM node");
 }
 
+function assertCompleteImageResolution(result, fail) {
+  if (!result.imageComplete) fail("complete-image fixture image was not already complete");
+  if (result.reservationType)
+    fail("already-complete image card kept its reservation type: " + result.reservationType);
+  if (!(result.cardN > result.reservedRows))
+    fail("already-complete text+image card stayed at the image reservation instead of measuring");
+}
+
 function assertOrderStability(result, fail) {
   if (!result.identical)
     fail(
@@ -437,6 +498,7 @@ async function run() {
       const frozenPad = await page.evaluate(mosaicAckFrozenPadCheck);
       const frozenRipple = await page.evaluate(mosaicAckFrozenRippleCheck);
       const racingRemoval = await page.evaluate(mosaicAckResolutionRacingRemovalCheck);
+      const completeImageResolution = await page.evaluate(mosaicAckCompleteImageResolutionCheck);
       const orderStability = await page.evaluate(mosaicAckSimultaneousOrderStabilityCheck);
 
       const fail = (message) => {
@@ -449,6 +511,7 @@ async function run() {
               frozenPad,
               frozenRipple,
               racingRemoval,
+              completeImageResolution,
               orderStability,
             }),
         );
@@ -458,6 +521,7 @@ async function run() {
       assertFrozenPad(frozenPad, fail);
       assertFrozenRipple(frozenRipple, fail);
       assertRacingRemoval(racingRemoval, fail);
+      assertCompleteImageResolution(completeImageResolution, fail);
       assertOrderStability(orderStability, fail);
 
       return {
@@ -466,6 +530,7 @@ async function run() {
         frozenPad,
         frozenRipple,
         racingRemoval,
+        completeImageResolution,
         orderStability,
         url: server.url,
       };
