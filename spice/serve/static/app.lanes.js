@@ -1,7 +1,8 @@
-// Targets and server-team-backed lane topology. Which lanes
-// are open is server truth: opening an agent creates a team, the team snapshot
-// reconciles lanes (including fused groups), closing a lane closes its team.
-// localStorage keeps only per-target hints (speech mode, selected view).
+// Targets and server-team-backed lane topology. Opening an agent creates a
+// team, the team snapshot reconciles lanes (including fused groups), and
+// closing a lane closes its team. localStorage keeps the operator's open target
+// set plus per-target hints (speech mode, selected view) so reload can recreate
+// the current Mosaic surface.
 
 const emptyTeamTargetPrefix = "empty-team:";
 const targetChoiceStatusValues = [
@@ -26,7 +27,12 @@ function emptyTeamTargetId(teamId) {
 
 async function refreshServerTopology() {
   await refreshTargets();
-  await refreshTeamSnapshot({ force: true });
+  const restoreHints = openLaneRestoreHintsByTargetId();
+  await refreshTeamSnapshot({
+    force: true,
+    preserveLaneHints: restoreHints.size > 0,
+  });
+  await restoreOpenTargetTeams(restoreHints);
 }
 
 function refreshTargets() {
@@ -317,7 +323,11 @@ function applyTeamSnapshotPayload(payload, options = {}) {
     closeLaneCore(lane);
   }
   reconcileLaneGroups(groupRuns);
-  persistLaneHints();
+  if (
+    (typeof targetsLoaded === "undefined" || targetsLoaded) &&
+    !options.preserveLaneHints
+  )
+    persistLaneHints();
   if (!sameStringSets(openBefore, laneStateTargetIds()))
     renderSpiceMenuIfAvailable();
   renderFilterPills();
@@ -444,7 +454,7 @@ function teamMemberActorIds(team) {
 }
 
 function ensureTeamMemberLane(targetId, team, hint = null) {
-  if (!laneStates.has(targetId)) addLane(targetId, hint);
+  if (!laneStates.has(targetId)) addLane(targetId, hint, { persist: false });
   const lane = laneStates.get(targetId);
   if (!lane) return;
   const config = team.config || {};
@@ -602,6 +612,7 @@ function laneHintsByTargetId() {
     if (!targetId || hints.has(targetId)) continue;
     hints.set(targetId, {
       targetId,
+      open: value.open === true,
       speechMode: speechModes.includes(value.speechMode)
         ? value.speechMode
         : defaultSpeechMode,
@@ -611,14 +622,44 @@ function laneHintsByTargetId() {
   return hints;
 }
 
+function openLaneRestoreHintsByTargetId() {
+  const hints = laneHintsByTargetId();
+  for (const [targetId, hint] of [...hints]) {
+    if (!hint.open || !targetById.has(targetId)) hints.delete(targetId);
+  }
+  return hints;
+}
+
+async function restoreOpenTargetTeams(hints) {
+  if (!hints.size) return;
+  for (const [targetId, hint] of hints) {
+    if (laneStates.has(targetId)) continue;
+    const target = targetById.get(targetId);
+    if (!target) continue;
+    await requestTeamCommand(
+      teamCommandPayload("createTeam", {
+        members: [targetTeamAgentId(target)],
+        config: {
+          ...defaultTeamConfig(),
+          speechMode: hint.speechMode,
+          selectedView: hint.selectedView,
+        },
+      }),
+    );
+  }
+  persistLaneHints();
+}
+
 function persistLaneHints() {
   const storage = browserStorage();
   if (!storage) return;
   const hints = [];
   for (const lane of laneStates.values()) {
     if (!isLaneOpen(lane)) continue;
+    if (lane.emptyTeam || !targetById.has(lane.targetId)) continue;
     hints.push({
       targetId: lane.targetId,
+      open: true,
       speechMode: lane.speechMode,
       selectedView: lane.selectedView,
     });

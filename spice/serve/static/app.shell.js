@@ -3,7 +3,7 @@
 // newest-first message stream. The rail is the lane's mode control; panels
 // slide horizontally along --lane-view-position.
 
-function addLane(targetId, hint = null) {
+function addLane(targetId, hint = null, options = {}) {
   if (!targetById.has(targetId) || laneStates.has(targetId)) return;
   const lane = createLaneState(targetId, hint);
   laneStates.set(targetId, lane);
@@ -11,6 +11,8 @@ function addLane(targetId, hint = null) {
   renderSpiceMenuIfAvailable();
   renderFilterPills();
   subscribeLaneToLiveBus(lane);
+  if (options.persist !== false && typeof persistLaneHints === "function")
+    persistLaneHints();
 }
 
 function addEmptyTeamLane(team, options = {}) {
