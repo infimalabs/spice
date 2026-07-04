@@ -22,88 +22,6 @@
 const MOSAIC_RESIZE_WIDTH_EPSILON_PX = 0.5;
 const MOSAIC_BACKFILL_BOTTOM_EPSILON_PX = 2;
 
-// ---- root-width visibility signal -------------------------------------------------
-
-function mosaicCssPixelValue(value) {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function mosaicRootElement(host) {
-  return host.closest(".swimlanes") || host;
-}
-
-function mosaicVisibleRootLaneCount(root, activeLane) {
-  let count = 0;
-  for (const node of root.children) {
-    if (!node.classList?.contains("lane")) continue;
-    if (node.classList.contains("lane--shadowed")) continue;
-    if (getComputedStyle(node).display === "none") continue;
-    count += 1;
-    if (count > 1) return count;
-  }
-  return count || (activeLane ? 1 : 0);
-}
-
-function mosaicRootWidthEligible(lane, host) {
-  const root = mosaicRootElement(host);
-  if (!root || root === host) return false;
-  return mosaicVisibleRootLaneCount(root, lane.element) <= 1;
-}
-
-function mosaicRootWidthState(lane, host, style) {
-  const root = mosaicRootElement(host);
-  const rootWidth =
-    root && root !== host
-      ? root.clientWidth -
-        mosaicCssPixelValue(getComputedStyle(root).paddingLeft) -
-        mosaicCssPixelValue(getComputedStyle(root).paddingRight)
-      : 0;
-  const laneWidth = lane.element.getBoundingClientRect().width;
-  const rootGeometry = mosaicGeometry(mosaicRootFontSizePx(), rootWidth);
-  const useRootWidth =
-    mosaicRootWidthEligible(lane, host) &&
-    rootGeometry.L > 1 &&
-    rootWidth > laneWidth + mosaicCssPixelValue(style.columnGap);
-  return {
-    useRootWidth,
-    value: Math.max(laneWidth, rootWidth) + "px",
-  };
-}
-
-function mosaicClearRootWidth(lane, host) {
-  const hadClass = lane.element.classList.contains("lane--mosaic-root-width");
-  const hadRootWidth = Boolean(
-    host.style.getPropertyValue("--mosaic-root-width"),
-  );
-  lane.element.classList.remove("lane--mosaic-root-width");
-  host.style.removeProperty("--mosaic-root-width");
-  return hadClass || hadRootWidth;
-}
-
-function mosaicSyncRootWidth(lane) {
-  const host = lane.messagesEl;
-  if (!host) return false;
-  const style = getComputedStyle(host);
-  if (style.display !== "grid") return mosaicClearRootWidth(lane, host);
-  const rootWidth = mosaicRootWidthState(lane, host, style);
-  const classChanged =
-    lane.element.classList.contains("lane--mosaic-root-width") !==
-    rootWidth.useRootWidth;
-  lane.element.classList.toggle(
-    "lane--mosaic-root-width",
-    rootWidth.useRootWidth,
-  );
-  if (!rootWidth.useRootWidth) {
-    return mosaicClearRootWidth(lane, host) || classChanged;
-  }
-  if (host.style.getPropertyValue("--mosaic-root-width") !== rootWidth.value) {
-    host.style.setProperty("--mosaic-root-width", rootWidth.value);
-    return true;
-  }
-  return classChanged;
-}
-
 // ---- lane lattice state ----------------------------------------------------------
 
 function mosaicLaneReady(lane) {
@@ -611,7 +529,6 @@ function mosaicRestoreBackfillViewport(lane, renderResult) {
 // lane.messagesEl.
 function mosaicRenderMessageStream(lane, visibleItems) {
   mosaicLaneReady(lane);
-  mosaicSyncRootWidth(lane);
   // Geometry first: the plane is position:absolute, so creating it cannot
   // affect lane.messagesEl's own clientWidth, and mosaicPlane needs the
   // real M immediately if it has to anchor a fresh plane (see mosaicPlane).
