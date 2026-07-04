@@ -537,6 +537,13 @@
   width: 100%;
   will-change: transform;
 }
+/* Static spacer owning the scroll extent (height = lattice extent, set
+   inline); decoupled from the plane's transform state by design. */
+.mosaic-extent {
+  pointer-events: none;
+  visibility: hidden;
+  width: 0;
+}
 /* Specificity note: `.messages article` (0,1,1) declares position:relative
    as the card-chrome containing block; the bare attribute selector (0,1,0)
    LOSES that fight, silently leaving mosaic cards in normal flow with the

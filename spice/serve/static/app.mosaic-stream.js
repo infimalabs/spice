@@ -70,11 +70,27 @@ function mosaicLaneReady(lane) {
 // app.mosaic-render.js).
 function mosaicPlane(lane, geometry) {
   mosaicLaneReady(lane);
-  if (lane.mosaicPlaneEl && lane.mosaicPlaneEl.isConnected) return lane.mosaicPlaneEl;
+  if (
+    lane.mosaicPlaneEl &&
+    lane.mosaicPlaneEl.isConnected &&
+    lane.mosaicExtentEl &&
+    lane.mosaicExtentEl.isConnected
+  )
+    return lane.mosaicPlaneEl;
+  if (lane.mosaicPlaneEl) lane.mosaicPlaneEl.remove();
+  if (lane.mosaicExtentEl) lane.mosaicExtentEl.remove();
   const plane = document.createElement("div");
   plane.className = "mosaic-plane";
+  // Scroll extent lives on a static, untransformed spacer -- never on the
+  // plane, whose rendered transform is exactly the state that can disagree
+  // with layout (frozen transforms, mid-tween excursions). The spacer's
+  // explicit height is the lattice extent; the plane stays heightless.
+  const extentEl = document.createElement("div");
+  extentEl.className = "mosaic-extent";
+  lane.messagesEl.prepend(extentEl);
   lane.messagesEl.prepend(plane);
   lane.mosaicPlaneEl = plane;
+  lane.mosaicExtentEl = extentEl;
   lane.mosaicAppliedByNode = new WeakMap();
   lane.mosaicPrevMaxRow = mosaicAnchorPlane(plane, geometry.M);
   lane.mosaicPrevExtent = null;
@@ -320,7 +336,7 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
     }
   }
   lane.mosaicPrevExtent = mosaicSyncHostHeight(
-    lane.mosaicPlaneEl,
+    lane.mosaicExtentEl,
     extent.maxRow,
     extent.minB,
     geometry.M,
