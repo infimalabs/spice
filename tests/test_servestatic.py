@@ -204,6 +204,7 @@ def test_static_css_centers_two_pip_lane_light_stack():
 def test_static_messages_use_stable_packed_rows():
     css = _serve_css_text()
     app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    app_message_pack = (STATIC_ROOT / "app.message-pack.js").read_text(encoding="utf-8")
     app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
     messages_section = css.index("/* ---- messages ---- */")
     messages_start = css.index(".messages {", messages_section)
@@ -282,9 +283,13 @@ def test_static_messages_use_stable_packed_rows():
     assert "width: auto;" in image_only_image_rule
     assert ".history-sentinel {\n  grid-column: 1 / -1;" in css
     assert "function packMessageStream(lane)" in app_stream
+    assert "const messagePackLayoutVersion = 4;" in app_message_pack
+    assert "function messagePackPinnedLayoutCollapsed(" in app_message_pack
     assert "function scheduleMessageStreamPack(lane)" in app_stream
     assert "restoreMessageViewportAnchor(lane, anchor);" in app_stream
     assert "syncMessagePackObserver(lane);" in app_stream
+    assert "syncMessagePackImageLoadHandlers(lane);" in app_stream
+    assert "lane.messagePackResizeObserver.observe(lane.messagesEl);" in app_stream
     assert 'if (item.image_only) article.classList.add("image-only");' in app_render
 
 

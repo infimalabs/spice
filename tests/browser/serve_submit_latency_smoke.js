@@ -1,5 +1,14 @@
 const { withServePage } = require("./serve_playwright_harness");
 
+const typingMosaicInitialMessageCount = 72;
+const typingMosaicInputCount = 24;
+const typingMosaicLiveAppendInterval = 3;
+const typingMosaicMinimumMessageCount = 80;
+const typingMosaicMaxPackCount = 12;
+const typingMosaicMaxInputDispatchMs = 8;
+const typingMosaicMaxInputDelayMs = 50;
+const typingMosaicMaxPackMs = 50;
+
 async function run() {
   return withServePage(
     {
@@ -10,6 +19,9 @@ async function run() {
       await page.waitForFunction(
         () =>
           typeof submitLaneForm === "function" &&
+          typeof renderMessage === "function" &&
+          typeof renderMessagesIfChanged === "function" &&
+          typeof packMessageStream === "function" &&
           typeof liveBusIsOpen === "function" &&
           Array.isArray(window.__spiceSubmitLatencySamples) &&
           Array.isArray(targets) &&
@@ -19,7 +31,9 @@ async function run() {
       await installSubmitLatencySmokeHelpers(page);
       const result = await page.evaluate(runSubmitLatencySmokePage);
       assertSubmitLatencyResult(result);
-      return { ...result, url: server.url };
+      const typing = await page.evaluate(runSubmitTypingDuringMosaicSmokePage);
+      assertSubmitTypingDuringMosaicResult(typing);
+      return { ...result, typing, url: server.url };
     },
   );
 }
@@ -27,11 +41,22 @@ async function run() {
 async function installSubmitLatencySmokeHelpers(page) {
   await page.addScriptTag({
     content: [
+      "const typingMosaicInitialMessageCount = " +
+        typingMosaicInitialMessageCount +
+        ";",
+      "const typingMosaicInputCount = " + typingMosaicInputCount + ";",
+      "const typingMosaicLiveAppendInterval = " +
+        typingMosaicLiveAppendInterval +
+        ";",
       runSubmitLatencySmokePage,
       submitLatencySmokeLane,
       submitLatencySmokeTextarea,
       submitLatencySmokeLiveBusRequest,
       cleanupSubmitLatencySmokePage,
+      runSubmitTypingDuringMosaicSmokePage,
+      submitTypingMosaicItems,
+      appendSubmitTypingMosaicMessage,
+      waitForSubmitTypingFrame,
     ]
       .map((helper) => helper.toString())
       .join("\n"),
@@ -75,6 +100,102 @@ async function runSubmitLatencySmokePage() {
   } finally {
     cleanupSubmitLatencySmokePage();
   }
+}
+
+async function runSubmitTypingDuringMosaicSmokePage() {
+  const lane = submitLatencySmokeLane();
+  const textarea = submitLatencySmokeTextarea(lane);
+  const host = lane.messagesEl || document.querySelector(".messages");
+  if (!host) throw new Error("no message host available");
+  const items = submitTypingMosaicItems(typingMosaicInitialMessageCount, 0);
+  lane.knownMessages = items.slice();
+  lane.knownMessageKeys = new Set(items.map((item) => item.key));
+  lane.newestMessageKey = items[0].key;
+  lane.oldestMessageKey = items[items.length - 1].key;
+  lane.renderedMessageFingerprint = "";
+  renderMessagesIfChanged(lane);
+  syncMessagePackObserver(lane);
+  await waitForSubmitTypingFrame();
+  await waitForSubmitTypingFrame();
+
+  const originalPack = packMessageStream;
+  const packDurations = [];
+  packMessageStream = function (...args) {
+    const startedAt = performance.now();
+    try {
+      return originalPack.apply(this, args);
+    } finally {
+      packDurations.push(performance.now() - startedAt);
+    }
+  };
+  const inputDurations = [];
+  const inputDelays = [];
+  try {
+    for (let index = 0; index < typingMosaicInputCount; index += 1) {
+      const scheduledAt = performance.now();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const inputStartedAt = performance.now();
+      inputDelays.push(inputStartedAt - scheduledAt);
+      textarea.value = "typing under mosaic load " + index;
+      const beforeInput = performance.now();
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      inputDurations.push(performance.now() - beforeInput);
+      if (index % typingMosaicLiveAppendInterval === 0)
+        appendSubmitTypingMosaicMessage(lane, index);
+      await waitForSubmitTypingFrame();
+    }
+  } finally {
+    packMessageStream = originalPack;
+  }
+  return {
+    inputCount: inputDurations.length,
+    maxInputDelayMs: Math.max(...inputDelays, 0),
+    maxInputDispatchMs: Math.max(...inputDurations, 0),
+    messageCount: lane.knownMessages.length,
+    packCount: packDurations.length,
+    maxPackMs: Math.max(...packDurations, 0),
+    observedCount: lane.messagePackObservedNodes
+      ? lane.messagePackObservedNodes.size
+      : 0,
+  };
+}
+
+function submitTypingMosaicItems(count, offset) {
+  const base = Date.parse("2026-07-04T00:00:00.000Z");
+  return Array.from({ length: count }, (_, index) => {
+    const step = offset + index;
+    const paragraph =
+      "<p>Typing stress card " +
+      step +
+      " keeps the loaded Mosaic realistic.</p>";
+    const code =
+      "<pre><code>packMessageStream(lane)\\nrow += " +
+      step +
+      "</code></pre>";
+    return {
+      ack_count: step % 11 === 0 ? 1 : 0,
+      ack_keys: [],
+      display_html: paragraph.repeat(1 + (step % 4)) + (step % 9 === 0 ? code : ""),
+      display_text: "typing stress card " + step,
+      index: step,
+      key: "typing-mosaic-" + step,
+      kind: step % 17 === 0 ? "final" : "assistant",
+      text: "typing stress card " + step,
+      timestamp: new Date(base + step * 60000).toISOString(),
+    };
+  });
+}
+
+function appendSubmitTypingMosaicMessage(lane, index) {
+  const item = submitTypingMosaicItems(1, 1000 + index)[0];
+  lane.knownMessages.unshift(item);
+  lane.knownMessageKeys.add(item.key);
+  lane.newestMessageKey = item.key;
+  renderMessagesIfChanged(lane);
+}
+
+function waitForSubmitTypingFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
 }
 
 function submitLatencySmokeLane() {
@@ -192,6 +313,23 @@ function assertSubmitLatencyResult(result) {
     if (!Number.isFinite(serverTiming[key]))
       throw new Error("missing submit latency server timing " + key);
   }
+}
+
+function assertSubmitTypingDuringMosaicResult(result) {
+  if (result.inputCount !== typingMosaicInputCount)
+    throw new Error("typing stress did not run all inputs");
+  if (result.messageCount < typingMosaicMinimumMessageCount)
+    throw new Error("typing stress did not append live messages");
+  if (result.observedCount > 1)
+    throw new Error("typing stress observed per-card Mosaic nodes");
+  if (result.packCount > typingMosaicMaxPackCount)
+    throw new Error("typing stress did excessive Mosaic packs: " + JSON.stringify(result));
+  if (result.maxInputDispatchMs > typingMosaicMaxInputDispatchMs)
+    throw new Error("typing dispatch was slow under Mosaic load: " + JSON.stringify(result));
+  if (result.maxInputDelayMs > typingMosaicMaxInputDelayMs)
+    throw new Error("typing event was delayed under Mosaic load: " + JSON.stringify(result));
+  if (result.maxPackMs > typingMosaicMaxPackMs)
+    throw new Error("Mosaic pack was too slow under typing load: " + JSON.stringify(result));
 }
 
 if (require.main === module) {

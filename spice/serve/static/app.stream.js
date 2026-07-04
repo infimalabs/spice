@@ -604,19 +604,57 @@ function syncMessagePackObserver(lane) {
   if (typeof ResizeObserver === "undefined" || !lane.messagesEl) return;
   if (!lane.messagePackResizeObserver)
     lane.messagePackResizeObserver = new ResizeObserver(() => {
+      if (!messagePackHostResizeChanged(lane)) return;
       scheduleMessageStreamPack(lane);
     });
-  const current = new Set();
-  for (const node of lane.messagesEl.children) {
-    if (!isMessagePackItem(node)) continue;
-    current.add(node);
-    if (!lane.messagePackObservedNodes?.has(node))
-      lane.messagePackResizeObserver.observe(node);
+  const current = new Set([lane.messagesEl]);
+  if (!lane.messagePackObservedNodes?.has(lane.messagesEl)) {
+    lane.messagePackHostResizeSize = messagePackElementResizeSize(lane.messagesEl);
+    lane.messagePackResizeObserver.observe(lane.messagesEl);
   }
   for (const node of lane.messagePackObservedNodes || []) {
     if (!current.has(node)) lane.messagePackResizeObserver.unobserve(node);
   }
   lane.messagePackObservedNodes = current;
+  syncMessagePackImageLoadHandlers(lane);
+}
+
+function syncMessagePackImageLoadHandlers(lane) {
+  if (!lane.messagesEl) return;
+  if (!lane.messagePackImageLoadHandlers)
+    lane.messagePackImageLoadHandlers = new Map();
+  const current = new Set(
+    lane.messagesEl.querySelectorAll(
+      "article.media-rich img, article.image-only img",
+    ),
+  );
+  for (const image of current) {
+    if (lane.messagePackImageLoadHandlers.has(image)) continue;
+    const handler = () => scheduleMessageStreamPack(lane);
+    image.addEventListener("load", handler);
+    image.addEventListener("error", handler);
+    lane.messagePackImageLoadHandlers.set(image, handler);
+  }
+  for (const [image, handler] of lane.messagePackImageLoadHandlers) {
+    if (current.has(image)) continue;
+    image.removeEventListener("load", handler);
+    image.removeEventListener("error", handler);
+    lane.messagePackImageLoadHandlers.delete(image);
+  }
+}
+
+function messagePackHostResizeChanged(lane) {
+  if (!lane.messagesEl) return false;
+  const next = messagePackElementResizeSize(lane.messagesEl);
+  const previous = lane.messagePackHostResizeSize || null;
+  lane.messagePackHostResizeSize = next;
+  if (!previous) return false;
+  return Math.abs(next.width - previous.width) > 0.5;
+}
+
+function messagePackElementResizeSize(element) {
+  const rect = element.getBoundingClientRect();
+  return { height: rect.height, width: rect.width };
 }
 
 function resetMessagePackObserver(lane) {
@@ -626,6 +664,12 @@ function resetMessagePackObserver(lane) {
   }
   if (lane.messagePackResizeObserver) lane.messagePackResizeObserver.disconnect();
   lane.messagePackObservedNodes = new Set();
+  lane.messagePackHostResizeSize = null;
+  for (const [image, handler] of lane.messagePackImageLoadHandlers || []) {
+    image.removeEventListener("load", handler);
+    image.removeEventListener("error", handler);
+  }
+  lane.messagePackImageLoadHandlers = new Map();
 }
 
 function isMessagePackItem(node) {

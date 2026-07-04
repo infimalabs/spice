@@ -366,6 +366,12 @@ async function masonrySmokeMeasurement(lane, host, config) {
   const middleRemovalReflowAudit = config.captureOnly
     ? { reflowed: true }
     : await masonrySmokeMiddleRemovalReflowAudit(lane, host, config);
+  const pinnedCollapseReflowAudit = config.captureOnly
+    ? { reflowed: true }
+    : await masonrySmokePinnedCollapseReflowAudit(lane, host, config);
+  const observerFanoutAudit = config.captureOnly
+    ? { hostObserved: true, mediaHandlerCount: 0, observedCount: 1 }
+    : masonrySmokeObserverFanoutAudit(lane);
   return {
     appendStabilityAudit,
     rowAudit: masonrySmokeRowAudit(cardRects, hostStyle),
@@ -373,6 +379,8 @@ async function masonrySmokeMeasurement(lane, host, config) {
     columnRecovery,
     hydrationGrowthAudit,
     middleRemovalReflowAudit,
+    pinnedCollapseReflowAudit,
+    observerFanoutAudit,
     noopRenderAudit,
     repackAudit,
     keepLanesVisible: Boolean(config.keepLanesVisible),

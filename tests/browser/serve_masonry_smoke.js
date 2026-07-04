@@ -320,6 +320,18 @@ function assertMasonryBaseLayout(measurement, fail) {
     fail("same-fingerprint render did heavy sync work");
   if (!measurement.columnAudit.chronological)
     fail("column order is not chronological");
+  if (!measurement.pinnedCollapseReflowAudit.reflowed)
+    fail(
+      "stale pinned columns stayed collapsed: " +
+        JSON.stringify(measurement.pinnedCollapseReflowAudit),
+    );
+  if (!measurement.observerFanoutAudit.hostObserved)
+    fail("message host is not observed for Mosaic resize");
+  if (measurement.observerFanoutAudit.observedCount > 1)
+    fail(
+      "Mosaic observer still watches per-card nodes: " +
+        JSON.stringify(measurement.observerFanoutAudit),
+    );
   if (!measurement.columnAudit.sameRowNonOverlapping)
     fail("cards sharing a row overlap slot ranges");
   const gapBound =
