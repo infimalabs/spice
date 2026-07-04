@@ -297,6 +297,19 @@ function mosaicPendingReservationType(lane, entry, node) {
 
 // ---- measurement ------------------------------------------------------------------
 
+// Measurement MUTATES the node: it sets an inline width and clears the
+// height/min-height, so the applied-position memo no longer describes the
+// element even when the card's lattice position is unchanged. Dropping the
+// memo entry forces the next apply pass to rewrite the committed styles --
+// without this, a full replay leaves every unmoved card wearing its LAST
+// measurement width (the wide tier for tall cards: a double-wide card
+// jammed in a single slot, overflowing the lane) with no height at all,
+// until some later write happens to land.
+function mosaicMeasureCard(lane, node, widthPx) {
+  lane.mosaicAppliedByNode.delete(node);
+  return mosaicMeasureNodeAt(node, widthPx);
+}
+
 // Natural content height at a candidate width: the node must already be a
 // child of the plane (real .messages/.mosaic-plane ancestry for CSS chrome
 // to match, per mosaic-sizing-interlock) with min-height cleared so
@@ -322,7 +335,7 @@ function mosaicCandidatesFor(lane, entry, node, geometry) {
   const reservationType = mosaicPendingReservationType(lane, entry, node);
   const measure = (span) => {
     if (reservationType) return null;
-    return mosaicMeasureNodeAt(node, mosaicCardWidthPx(geometry.edges, 0, span, geometry.gap));
+    return mosaicMeasureCard(lane, node, mosaicCardWidthPx(geometry.edges, 0, span, geometry.gap));
   };
   if (entry.kind === "barrier") {
     const reservedRows = reservationType
@@ -403,9 +416,11 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
       geometry.edges,
       geometry.M,
       geometry.gap,
-      { reducedMotion, snap, deferFlush: snap },
+      { reducedMotion, snap, deferFlush: true },
     );
-    if (snap && next !== prev) written.push(node);
+    // Every suppressed-path write (fresh element, snap correction, reduced
+    // motion) joins the single batched flush; tween-path writes need none.
+    if (next !== prev && (!prev || snap || reducedMotion)) written.push(node);
     lane.mosaicAppliedByNode.set(node, next);
   }
   if (written.length) {
@@ -555,7 +570,7 @@ function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
     const resolvedN = reservationType
       ? mosaicReservationRows(reservationType, mosaicRootFontSizePx(), geometry.gap, geometry.M)
       : mosaicRowsFor(
-          mosaicMeasureNodeAt(node, mosaicCardWidthPx(geometry.edges, 0, card.span, geometry.gap)),
+          mosaicMeasureCard(lane, node, mosaicCardWidthPx(geometry.edges, 0, card.span, geometry.gap)),
           geometry.gap,
           geometry.M,
         );
