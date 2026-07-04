@@ -134,6 +134,7 @@ function mosaicLaneReady(lane) {
   // correct force-a-write case), and needs no manual cleanup since entries
   // vanish with their (detached, unreferenced) elements.
   lane.mosaicAppliedByNode = new WeakMap();
+  lane.mosaicMeasuredNodes = new Set();
   lane.mosaicPrevMaxRow = null;
   lane.mosaicPrevExtent = null;
   lane.mosaicGeometry = null;
@@ -299,14 +300,18 @@ function mosaicPendingReservationType(lane, entry, node) {
 
 // Measurement MUTATES the node: it sets an inline width and clears the
 // height/min-height, so the applied-position memo no longer describes the
-// element even when the card's lattice position is unchanged. Dropping the
-// memo entry forces the next apply pass to rewrite the committed styles --
-// without this, a full replay leaves every unmoved card wearing its LAST
-// measurement width (the wide tier for tall cards: a double-wide card
-// jammed in a single slot, overflowing the lane) with no height at all,
-// until some later write happens to land.
+// element even when the card's lattice position is unchanged. Measured
+// nodes are tracked per render (the set clears at render start) and the
+// apply pass force-rewrites any measured card whose position did NOT
+// change -- without this, a full replay leaves every unmoved card wearing
+// its LAST measurement width (the wide tier for tall cards: a double-wide
+// card jammed in a single slot, overflowing the lane) with no height at
+// all, until some later write happens to land. The memo record itself is
+// kept, NOT deleted: a measured card whose position DID change must still
+// look prev-bearing so a settled replay FLIP-tweens it rather than
+// snapping.
 function mosaicMeasureCard(lane, node, widthPx) {
-  lane.mosaicAppliedByNode.delete(node);
+  lane.mosaicMeasuredNodes.add(node);
   return mosaicMeasureNodeAt(node, widthPx);
 }
 
@@ -409,10 +414,19 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
     const node = nodesByKey.get(card.key);
     if (!node) continue;
     const prev = lane.mosaicAppliedByNode.get(node) || null;
+    // A measured node whose position is unchanged carries probe styles the
+    // memo cannot see; treating it as prev-less forces the committed-style
+    // rewrite (suppressed, no tween -- it isn't moving). A measured node
+    // whose position DID change keeps its prev so settled replays FLIP.
+    const measuredInPlace =
+      prev &&
+      lane.mosaicMeasuredNodes.has(node) &&
+      !mosaicCardPositionChanged(card, prev);
+    const applyPrev = measuredInPlace ? null : prev;
     const next = mosaicApplyCardPosition(
       node,
       card,
-      prev,
+      applyPrev,
       geometry.edges,
       geometry.M,
       geometry.gap,
@@ -420,7 +434,8 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
     );
     // Every suppressed-path write (fresh element, snap correction, reduced
     // motion) joins the single batched flush; tween-path writes need none.
-    if (next !== prev && (!prev || snap || reducedMotion)) written.push(node);
+    if (next !== applyPrev && (!applyPrev || snap || reducedMotion))
+      written.push(node);
     lane.mosaicAppliedByNode.set(node, next);
   }
   if (written.length) {
@@ -679,6 +694,7 @@ function mosaicRenderMessageStream(lane, visibleItems) {
   }
   const revealing = Boolean(lane.mosaicRenderDeferred);
   lane.mosaicRenderDeferred = false;
+  lane.mosaicMeasuredNodes = new Set();
   mosaicTrackFontsAtMeasure(lane);
   if (revealing) {
     // First-paint discipline board-wide: whatever the engine rendered (or
