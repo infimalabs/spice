@@ -133,9 +133,24 @@ class AgentDriver:
     def skill_invocation_prompt(self, skill_path: Path) -> str:
         """The neutral launch prompt: a bare skill invocation, no operator ask.
 
-        The prompt boundary is sacred — operator prose never rides the start
-        prompt. The phrasing is a driver concern because each agent CLI invokes
-        a skill differently; the default is the Codex `[$name](path)` link form.
+        The prompt boundary is sacred — operator-specific prose (this
+        session's actual ask) never rides the start prompt. That is a
+        narrower claim than "the skill carries no weight": the skill file
+        itself is generic, not operator-specific, and its own text says so
+        explicitly and demands full-prompt-strength compliance once reached
+        — reaching it through a link rather than inline text is a transport
+        detail, not a downgrade to optional reading. The phrasing is a
+        driver concern because each agent CLI invokes a skill differently;
+        the default is the Codex `[$name](path)` link form.
+
+        This same neutral signal recurs on every relaunch (renewal, crash
+        recovery, and for drivers that re-append it to the system prompt,
+        every turn) — the skill file's own "standing user demand" working
+        rule is the matching half: it tells the agent that seeing this bare
+        invocation again means resume from state, not restart. Keep the two
+        in step; strengthening this prompt with operator-specific content to
+        compensate for an agent losing the thread is the wrong fix — that is
+        the working rule's job, not this method's.
         """
         return f"[$spice]({skill_path})"
 
