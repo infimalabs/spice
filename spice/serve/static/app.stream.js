@@ -356,7 +356,14 @@ function renderMessagesIfChanged(lane) {
   renderLaneViewShell(lane);
   const fingerprint = messageRenderFingerprint(lane, visibleItems);
   if (fingerprint === lane.renderedMessageFingerprint) return;
-  const viewportAnchor = captureMessageViewportAnchor(lane);
+  // One scroll authority: the mosaic owns viewport stability during its own
+  // renders -- plane compensation (mosaicSyncPlane onCompensate) covers
+  // frontier shifts for a scrolled reader, mosaicRestoreBackfillViewport
+  // covers the backfill bottom seam, and every other movement class is a
+  // defined §7/§8 motion the reader is meant to see (wet settling, ripple
+  // push, replay FLIP). The legacy grid-era capture/restore anchor is gone
+  // from this path: it re-anchored against getBoundingClientRect mid-tween
+  // and fought the compensation it duplicated.
   suppressLanePaneScrollIntentForFrame(lane);
   const mosaicRenderResult = mosaicRenderMessageStream(lane, visibleItems);
   // Deferred (unmeasurable host): nothing was painted, so the fingerprint
@@ -364,7 +371,6 @@ function renderMessagesIfChanged(lane) {
   // content and actually paints it.
   if (mosaicRenderResult && mosaicRenderResult.deferred) return;
   mosaicAttachHistorySentinels(lane, visibleItems);
-  restoreMessageViewportAnchor(lane, viewportAnchor);
   mosaicRestoreBackfillViewport(lane, mosaicRenderResult);
   syncLaneHistoryObserver(lane);
   syncTeamImportOverlay(lane);

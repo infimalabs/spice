@@ -13,6 +13,11 @@
   min-width: 0;
   overflow-x: auto;
   overflow-y: auto;
+  /* One scroll authority: the mosaic compensates frontier shifts itself
+     (plane onCompensate, backfill restore). Native scroll anchoring would
+     react to extent-spacer height changes with its own adjustments and
+     fight that compensation. */
+  overflow-anchor: none;
   padding: var(--mosaic-origin-pad);
   position: relative;
   scrollbar-gutter: stable;
