@@ -120,13 +120,19 @@ function mosaicApplyCardPosition(el, card, prev, edges, M, gap, options) {
   // renders, unsettled-board writes) -- same suppressed write as the
   // first-paint path, but transitions re-enable afterwards.
   const snap = Boolean(options && options.snap);
+  // options.deferFlush: the caller owns one batched flush + transition
+  // restore for many suppressed writes (reveal rebuilds), instead of a
+  // forced reflow per card.
+  const deferFlush = Boolean(options && options.deferFlush);
   if (!prev || reducedMotion || snap) {
     el.style.transition = "none";
     el.style.transform = transform;
     el.style.width = width;
     el.style.height = height;
-    void el.offsetWidth;
-    el.style.transition = reducedMotion ? "none" : "";
+    if (!deferFlush) {
+      void el.offsetWidth;
+      el.style.transition = reducedMotion ? "none" : "";
+    }
   } else {
     el.style.transform = transform;
     el.style.width = width;
@@ -178,8 +184,15 @@ function mosaicSyncPlane(planeEl, maxRow, prevMaxRow, M, options) {
   planeEl.style.transform = transform;
   if (jumpAndCompensate) {
     void planeEl.offsetWidth;
-    if (options && typeof options.onCompensate === "function") {
-      options.onCompensate((maxRow - prevMaxRow) * M);
+    const delta = (maxRow - prevMaxRow) * M;
+    // prevMaxRow may be a deliberate NaN sentinel (reveal rebuild forcing an
+    // unconditional rewrite); there is no meaningful delta to compensate.
+    if (
+      Number.isFinite(delta) &&
+      options &&
+      typeof options.onCompensate === "function"
+    ) {
+      options.onCompensate(delta);
     }
   }
   return maxRow;
