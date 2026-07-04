@@ -377,8 +377,8 @@ function renderMessagesIfChanged(lane) {
   lane.renderedMessageFingerprint = fingerprint;
 }
 
-// History sentinels carry no lattice position of their own (the spec is
-// silent on non-card stream elements, mosaic-stream-integration); each
+// History sentinels carry no lattice position of their own (the lattice
+// has no concept of non-card stream elements); each
 // tracks a specific fused member's oldest visible message purely for
 // IntersectionObserver purposes, so appending it as a normal-flow child of
 // that message's own (already positioned) card reuses the card's real

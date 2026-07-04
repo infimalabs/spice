@@ -79,7 +79,7 @@ function mosaicWetReplay(cards, trackCount, freezeDepth) {
 
 // rippleRows: when the growing card must extend downward, every card
 // resting below it in an overlapping track slides down by the same delta,
-// transitively. Breadth is over the spec's set definition -- {d : d
+// transitively. Breadth is over the defining set -- {d : d
 // overlaps m in tracks and d.b < m.b} -- not insertion order; a card is
 // discovered once (never re-shifted) using whichever frontier card reaches
 // it first. Discovery always compares against a frontier's ORIGINAL b
