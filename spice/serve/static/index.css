@@ -287,6 +287,13 @@ button.primary:hover {
   overscroll-behavior-y: contain;
   position: relative;
 }
+.lane--message-pack-root {
+  overflow: visible;
+}
+.lane--message-pack-root .messages {
+  width: var(--message-pack-root-width);
+  z-index: 4;
+}
 .lane--shadowed { display: none; }
 .lane--dragging {
   background: color-mix(in srgb, var(--panel) 72%, transparent);

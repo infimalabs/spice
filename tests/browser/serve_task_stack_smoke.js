@@ -36,8 +36,10 @@ async function installTaskStackSmokeHelpers(page) {
       taskStackSmokeMeasurement,
       taskStackSmokeHorizontalBounds,
       taskStackSmokeAnchorStability,
+      taskStackSmokeViewportAnchor,
       taskStackSmokeColumnStability,
       taskStackSmokeColumnRecovery,
+      taskStackSmokeColumnSpan,
       taskStackSmokeTaskHtml,
       taskStackSmokeImageHtml,
       taskStackSmokeImagesReady,
@@ -165,6 +167,9 @@ async function taskStackSmokeMeasurement(lane, host, taskArticle, imageArticle, 
     messageCardFirstRowCount: firstRowMessageCards.length,
     messageCardFirstRowFillWidth: firstRowBounds.right - firstRowBounds.left,
     messageCardFirstRowHeights: firstRowMessageCards.map((card) => card.height),
+    messageCardColumnSpans: messageCardNodes.map((card) =>
+      taskStackSmokeColumnSpan(card),
+    ),
     messageCardFloor: rootFontSize * 20,
     messageCardHostInnerWidth: hostRect.width - hostInlinePadding,
     messageCardLimit: rootFontSize * 30,
@@ -262,6 +267,54 @@ function taskStackSmokeMessageArticles(lane, width) {
       text: "Small follow-up.",
     },
     {
+      size: "short",
+      display_html: "<p>Extra compact card one.</p>",
+      display_text: "Extra compact card one.",
+      key: "message-card-extra-one-" + width,
+      kind: "assistant",
+      text: "Extra compact card one.",
+    },
+    {
+      size: "short",
+      display_html: "<p>Extra compact card two.</p>",
+      display_text: "Extra compact card two.",
+      key: "message-card-extra-two-" + width,
+      kind: "assistant",
+      text: "Extra compact card two.",
+    },
+    {
+      size: "short",
+      display_html: "<p>Extra compact card three.</p>",
+      display_text: "Extra compact card three.",
+      key: "message-card-extra-three-" + width,
+      kind: "assistant",
+      text: "Extra compact card three.",
+    },
+    {
+      size: "short",
+      display_html: "<p>Extra compact card four.</p>",
+      display_text: "Extra compact card four.",
+      key: "message-card-extra-four-" + width,
+      kind: "assistant",
+      text: "Extra compact card four.",
+    },
+    {
+      size: "short",
+      display_html: "<p>Extra compact card five.</p>",
+      display_text: "Extra compact card five.",
+      key: "message-card-extra-five-" + width,
+      kind: "assistant",
+      text: "Extra compact card five.",
+    },
+    {
+      size: "short",
+      display_html: "<p>Extra compact card six.</p>",
+      display_text: "Extra compact card six.",
+      key: "message-card-extra-six-" + width,
+      kind: "assistant",
+      text: "Extra compact card six.",
+    },
+    {
       size: "backfill",
       display_html: "<p>Backfill card.</p>",
       display_text: "Backfill card.",
@@ -289,8 +342,8 @@ function taskStackSmokeMessageArticles(lane, width) {
 async function taskStackSmokeAnchorStability(lane, host, tallCard, anchorCard) {
   host.scrollTop = Math.max(0, anchorCard.offsetTop - 24);
   await new Promise((resolve) => requestAnimationFrame(resolve));
-  const hostTop = taskStackSmokeRect(host).top;
-  const before = taskStackSmokeRect(anchorCard).top - hostTop;
+  const beforeAnchor = taskStackSmokeViewportAnchor(host);
+  if (!beforeAnchor) throw new Error("anchor fixture did not expose an anchor");
   const body = tallCard.querySelector(".message-body");
   const extra = document.createElement("p");
   extra.textContent =
@@ -299,13 +352,31 @@ async function taskStackSmokeAnchorStability(lane, host, tallCard, anchorCard) {
   scheduleMessageStreamPack(lane);
   await new Promise((resolve) => requestAnimationFrame(resolve));
   await new Promise((resolve) => requestAnimationFrame(resolve));
-  const after = taskStackSmokeRect(anchorCard).top - taskStackSmokeRect(host).top;
+  const afterNode = host.querySelector(
+    'article[data-message-key="' + CSS.escape(beforeAnchor.key) + '"]',
+  );
+  if (!afterNode) throw new Error("anchor disappeared after repack");
+  const after = taskStackSmokeRect(afterNode).top - taskStackSmokeRect(host).top;
   return {
     after,
-    before,
-    delta: Math.abs(after - before),
+    before: beforeAnchor.offsetTop,
+    delta: Math.abs(after - beforeAnchor.offsetTop),
+    key: beforeAnchor.key,
     scrollTop: host.scrollTop,
   };
+}
+
+function taskStackSmokeViewportAnchor(host) {
+  const hostTop = taskStackSmokeRect(host).top;
+  for (const node of host.querySelectorAll("article[data-message-key]")) {
+    const rect = taskStackSmokeRect(node);
+    if (rect.top + rect.height <= hostTop) continue;
+    return {
+      key: node.dataset.messageKey || "",
+      offsetTop: rect.top - hostTop,
+    };
+  }
+  return null;
 }
 
 async function taskStackSmokeColumnStability(lane, cards, growCard) {
@@ -407,6 +478,14 @@ function taskStackSmokeRect(element) {
   };
 }
 
+function taskStackSmokeColumnSpan(card) {
+  const span = Number.parseInt(
+    String(card.style.gridColumnEnd || "").replace("span", ""),
+    10,
+  );
+  return Number.isFinite(span) && span > 0 ? span : 1;
+}
+
 function assertTaskStackMeasurement(measurement, options) {
   assertBaseTaskStackLayout(measurement);
   assertImageArticleSizing(measurement, options);
@@ -473,8 +552,7 @@ function assertImageArticleSizing(measurement, options) {
 }
 
 function assertTaskDirectiveCardWidths(measurement) {
-  const imageTileWidth = Math.max(measurement.imageWidth, 156);
-  const minCardWidth = Math.max(measurement.messageCardFloor, imageTileWidth * 2);
+  const minCardWidth = measurement.messageCardFloor;
   const maxCardWidth = measurement.messageCardLimit;
   for (const width of measurement.cardWidths) {
     if (width + 2 < minCardWidth)
@@ -498,11 +576,14 @@ function assertWideMessagePacking(measurement) {
     measurement.messageCardFirstRowFillWidth / measurement.messageCardHostInnerWidth;
   if (fillRatio < 0.92)
     throw new Error("wide message cards did not fill the row: " + JSON.stringify(measurement));
-  if (measurement.backfilledCardTop < measurement.tallCardBottom - 2)
-    throw new Error(
-      "major-row packing overlapped the previous row group: " +
-        JSON.stringify(measurement),
-    );
+  const baseColumnSpan = Math.min(...measurement.messageCardColumnSpans);
+  for (const [index, width] of measurement.messageCardWidths.entries()) {
+    if (measurement.messageCardColumnSpans[index] !== baseColumnSpan) continue;
+    if (width + 2 < measurement.messageCardFloor)
+      throw new Error("wide message card below min width: " + JSON.stringify(measurement));
+    if (width - 2 > measurement.messageCardLimit)
+      throw new Error("wide message card above max width: " + JSON.stringify(measurement));
+  }
   if (measurement.messageCardTopSpread < 8)
     throw new Error("wide message cards did not create multiple packed tiers: " + JSON.stringify(measurement));
   const heights = measurement.messageCardFirstRowHeights;

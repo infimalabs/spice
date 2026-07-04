@@ -699,6 +699,8 @@ function renderMessage(lane, item) {
   }
   if (messageIsCurrentSpeech(lane, item)) article.classList.add("now-playing");
   article.append(renderMessageContent(lane, item));
+  if (article.querySelector(".message-image, .ack-attachment"))
+    article.classList.add("media-rich");
   article.append(renderMessageFooter(lane, item, maximAckCount));
   return article;
 }

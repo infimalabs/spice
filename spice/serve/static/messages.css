@@ -2,19 +2,20 @@
 .messages {
   --message-card-max-width: 30rem;
   --message-card-min-width: 20rem;
-  --message-pack-band: 6;
+  --message-pack-column-gap: 9px;
   --message-pack-column-count: auto-fit;
   --message-pack-row-height: 4px;
+  --message-pack-track-min: min(100%, var(--message-card-min-width));
   align-content: start;
   align-items: start;
   display: grid;
   flex: 1;
-  column-gap: 9px;
+  column-gap: var(--message-pack-column-gap);
   grid-auto-flow: row;
   grid-auto-rows: var(--message-pack-row-height);
   grid-template-columns: repeat(
     var(--message-pack-column-count),
-    minmax(min(100%, var(--message-card-min-width)), 1fr)
+    minmax(var(--message-pack-track-min), 1fr)
   );
   min-width: 0;
   overflow-x: auto;
@@ -247,17 +248,21 @@
   padding-left: 18px;
 }
 .message-image {
-  display: inline-block;
+  display: inline-grid;
   flex: 0 0 auto;
   max-width: 100%;
+  place-items: center;
   text-decoration: none;
 }
 .message-image img {
+  aspect-ratio: 16 / 10;
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
   display: block;
-  max-height: 320px;
+  max-height: min(30vh, 280px);
   max-width: 100%;
+  object-fit: contain;
 }
 .message-image:focus-visible img {
   outline: 2px solid var(--accent);
@@ -276,6 +281,7 @@
   max-width: none;
 }
 .message-body p.message-image-stack .message-image img {
+  height: 136px;
   max-height: 136px;
   max-width: 156px;
   object-fit: contain;
@@ -292,6 +298,7 @@
   width: auto;
 }
 .messages article.image-only .message-image img {
+  height: min(32vh, 260px);
   max-height: min(32vh, 260px);
   max-width: min(100%, 56rem);
   object-fit: contain;

@@ -237,12 +237,16 @@ def test_static_messages_use_stable_packed_rows():
     assert "--message-card-max-width: 30rem;" in messages_rule
     assert "--message-card-min-width: 20rem;" in messages_rule
     assert "--message-pack-row-height: 4px;" in messages_rule
-    assert "column-gap: 9px;" in messages_rule
+    assert "--message-pack-column-gap: 9px;" in messages_rule
+    assert "--message-pack-track-min: min(100%, var(--message-card-min-width));" in (
+        messages_rule
+    )
+    assert "column-gap: var(--message-pack-column-gap);" in messages_rule
     assert "display: grid;" in messages_rule
     assert "grid-auto-flow: row;" in messages_rule
     assert "grid-auto-rows: var(--message-pack-row-height);" in messages_rule
     assert "auto-fit" in messages_rule
-    assert "minmax(min(100%, var(--message-card-min-width)), 1fr)" in (messages_rule)
+    assert "minmax(var(--message-pack-track-min), 1fr)" in messages_rule
     assert "overflow-x: auto;" in messages_rule
     assert "row-gap: 6px;" in messages_rule
     assert "display: flex;" in article_rule

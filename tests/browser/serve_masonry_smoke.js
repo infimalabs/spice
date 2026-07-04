@@ -5,12 +5,13 @@ const { withServePage } = require("./serve_playwright_harness");
 // on the same fixture, one compaction divider mid-stream as a pack barrier.
 // The injected helpers are serialized into the page, so every fixture constant
 // travels through the evaluate config rather than lexical capture.
-const masonryColumnFloorByWidth = { 560: 1, 1280: 2, 1920: 3 };
+const masonryColumnFloorByWidth = { 560: 1, 1280: 3, 1920: 4, 2560: 6 };
 const masonryForcedTallSpan = 120;
+const masonryExpectedGridTrackCount = 12;
 const masonryMobileBreakpointWidth = 720;
 const masonryMeasuredWidths = Object.keys(masonryColumnFloorByWidth).map(Number);
 const masonryScreenshotWidths = [900, 1280, 1920];
-const masonryTeamColumnFloorByWidth = { 700: 1, 900: 2, 1280: 3 };
+const masonryTeamColumnFloorByWidth = { 700: 1, 1280: 3, 1920: 4, 2560: 6 };
 const masonryTeamMeasuredWidths = Object.keys(masonryTeamColumnFloorByWidth).map(
   Number,
 );
@@ -56,6 +57,8 @@ async function run(screenshotDir) {
       }
       const resizeAudit = await measureMasonryResize(page);
       assertMasonryResizeAudit(resizeAudit);
+      const rootWidthMeasurement = await measureMasonryRootWidth(page);
+      assertMasonryMeasurement(rootWidthMeasurement);
       const screenshots = [];
       if (screenshotDir) {
         for (const width of masonryScreenshotWidths) {
@@ -73,6 +76,7 @@ async function run(screenshotDir) {
       return {
         measurements,
         resizeAudit,
+        rootWidthMeasurement,
         screenshots,
         teamMeasurements,
         url: server.url,
@@ -84,19 +88,29 @@ async function run(screenshotDir) {
 async function installMasonrySmokeHelpers(page) {
   await page.addScriptTag({
     content: [
+      "const masonryExpectedGridTrackCount = " +
+        masonryExpectedGridTrackCount +
+        ";",
       renderMasonryFixture,
       masonrySmokeLane,
+      masonrySmokeShowAllLanes,
       masonrySmokeUseSingleLane,
       masonrySmokeItems,
       masonrySmokeBodyHtml,
       masonrySmokeMeasurement,
-      masonrySmokeBandAudit,
+      masonrySmokeRowAudit,
+      masonrySmokeColumnSpan,
+      masonrySmokeGridTrackCount,
       masonrySmokeRuleAudits,
       masonrySmokeBarrierBounds,
       masonrySmokeColumnAudit,
       masonrySmokeSegmentFanOut,
       masonrySmokeAppendStabilityAudit,
       masonrySmokeHydrationGrowthAudit,
+      masonrySmokeMiddleRemovalReflowAudit,
+      masonrySmokePackSnapshot,
+      masonrySmokeFirstPackDiff,
+      masonrySmokeSpannedCardCount,
       masonrySmokeColumnRecovery,
       masonrySmokeRepackAudit,
       masonrySmokeResizeAudit,
@@ -105,7 +119,7 @@ async function installMasonrySmokeHelpers(page) {
       masonryTeamTargetPayload,
       masonryTeamItems,
       masonryTeamMeasurement,
-      masonryTeamNaturalHeightRecovery,
+      masonryTeamForcedSpanRecovery,
       masonrySmokeImageHtml,
       masonrySmokeImagesReady,
       masonrySmokeRect,
@@ -152,6 +166,17 @@ async function measureMasonryResize(page) {
   });
 }
 
+async function measureMasonryRootWidth(page) {
+  await page.setViewportSize({ width: 1920, height: 1400 });
+  return page.evaluate(renderMasonryFixture, {
+    expectedColumns: masonryColumnFloorByWidth[1920],
+    expectedRuleIsos: masonryExpectedRuleIsos,
+    keepLanesVisible: true,
+    plan: masonryFixturePlan,
+    width: 1920,
+  });
+}
+
 async function measureMasonryTeam(page, width) {
   await page.setViewportSize({ width, height: 1400 });
   return page.evaluate(renderMasonryTeamFixture, {
@@ -164,7 +189,8 @@ async function measureMasonryTeam(page, width) {
 
 async function renderMasonryFixture(config) {
   const lane = masonrySmokeLane();
-  masonrySmokeUseSingleLane(lane);
+  if (config.keepLanesVisible) masonrySmokeShowAllLanes();
+  else masonrySmokeUseSingleLane(lane);
   const host = lane.messagesEl || document.querySelector(".messages");
   if (!host) throw new Error("message host unavailable");
   host
@@ -299,8 +325,9 @@ function masonryTeamItems(config, teamTargets) {
   const plan = config.plan;
   const base = Date.parse(plan.baseIso);
   const shapes = ["short", "medium", "tall", "code", "short"];
+  const producerPattern = [0, 1, 0, 2, 1, 2, 0, 2, 1, 0, 1, 2, 2, 0, 1];
   return Array.from({ length: 15 }, (_, index) => {
-    const target = teamTargets[index % teamTargets.length];
+    const target = teamTargets[producerPattern[index] % teamTargets.length];
     const threadId = target.targetIdentity.thread.threadId;
     const timestamp = new Date(base + index * 60000).toISOString();
     return {
@@ -332,6 +359,12 @@ function masonrySmokeLane() {
 function masonrySmokeUseSingleLane(activeLane) {
   for (const lane of laneStates.values()) {
     lane.element.style.display = lane === activeLane ? "" : "none";
+  }
+}
+
+function masonrySmokeShowAllLanes() {
+  for (const lane of laneStates.values()) {
+    lane.element.style.display = "";
   }
 }
 
@@ -465,21 +498,30 @@ async function masonrySmokeMeasurement(lane, host, config) {
     : await masonrySmokeRepackAudit(lane, host);
   const dividerRect = masonrySmokeRect(divider);
   const dividerIndex = Number(divider.dataset.masonrySmokeIndex);
-  const cardRects = cards.map((card) => ({
-    alignSelf: getComputedStyle(card).alignSelf,
-    column: card.style.gridColumnStart,
-    final: card.classList.contains("final"),
-    imageOnly: card.classList.contains("image-only"),
-    index: Number(card.dataset.masonrySmokeIndex),
-    key: card.dataset.messageKey,
-    left: masonrySmokeRect(card).left,
-    rect: masonrySmokeRect(card),
-    row: Number.parseInt(card.style.gridRowStart || "0", 10),
-    span: Number.parseInt(
-      card.style.getPropertyValue("--message-pack-row-span") || "0",
-      10,
-    ),
-  }));
+  const expectedColumnSpan =
+    masonryExpectedGridTrackCount / config.expectedColumns;
+  const cardRects = cards.map((card) => {
+    const columnSpan = masonrySmokeColumnSpan(card);
+    return {
+      alignSelf: getComputedStyle(card).alignSelf,
+      column: card.style.gridColumnStart,
+      columnSpan,
+      final: card.classList.contains("final"),
+      imageOnly: card.classList.contains("image-only"),
+      index: Number(card.dataset.masonrySmokeIndex),
+      key: card.dataset.messageKey,
+      left: masonrySmokeRect(card).left,
+      rect: masonrySmokeRect(card),
+      row: Number.parseInt(card.style.gridRowStart || "0", 10),
+      scrollHeight: card.scrollHeight,
+      slot: Number.parseInt(card.dataset.messagePackColumn || "0", 10) + 1,
+      slotSpan: Math.max(1, Math.round(columnSpan / expectedColumnSpan)),
+      span: Number.parseInt(
+        card.style.getPropertyValue("--message-pack-row-span") || "0",
+        10,
+      ),
+    };
+  });
   const hostStyle = getComputedStyle(host);
   const hostRect = masonrySmokeRect(host);
   const hostInnerWidth =
@@ -503,12 +545,16 @@ async function masonrySmokeMeasurement(lane, host, config) {
   const columnRecovery = config.captureOnly
     ? { distinctColumns: config.expectedColumns }
     : await masonrySmokeColumnRecovery(lane, cards);
+  const middleRemovalReflowAudit = config.captureOnly
+    ? { reflowed: true }
+    : await masonrySmokeMiddleRemovalReflowAudit(lane, host, config);
   return {
     appendStabilityAudit,
-    bandAudit: masonrySmokeBandAudit(cardRects, hostStyle),
+    rowAudit: masonrySmokeRowAudit(cardRects, hostStyle),
     columnAudit,
     columnRecovery,
     hydrationGrowthAudit,
+    middleRemovalReflowAudit,
     repackAudit,
     segmentFanOut,
     structuredFinalAudit: masonrySmokeStructuredFinalAudit(cardRects),
@@ -519,6 +565,7 @@ async function masonrySmokeMeasurement(lane, host, config) {
       (hostRect.width -
         Number.parseFloat(hostStyle.paddingLeft) -
         Number.parseFloat(hostStyle.paddingRight)),
+    gridTrackCount: masonrySmokeGridTrackCount(hostStyle),
     cardsAboveDivider: cardRects
       .filter((card) => card.index < dividerIndex)
       .map((card) => card.rect.top + card.rect.height),
@@ -537,22 +584,19 @@ async function masonrySmokeMeasurement(lane, host, config) {
       ),
     ).filter((node) => !node.dataset.messageTs).length,
     ruleAudits,
+    columnSpans: cardRects.map((card) => card.columnSpan),
     spans: cardRects.map((card) => card.span),
     viewportWidth: config.width,
   };
 }
 
-function masonrySmokeBandAudit(cardRects, hostStyle) {
+function masonrySmokeRowAudit(cardRects, hostStyle) {
   return {
-    bandRows: Number.parseInt(
-      hostStyle.getPropertyValue("--message-pack-band-active") ||
-        hostStyle.getPropertyValue("--message-pack-band"),
-      10,
-    ),
     cards: cardRects.map((card) => ({
       alignSelf: card.alignSelf,
       height: card.rect.height,
       imageOnly: card.imageOnly,
+      scrollHeight: card.scrollHeight,
       span: card.span,
     })),
     rowGapPx: Number.parseFloat(hostStyle.rowGap),
@@ -560,6 +604,20 @@ function masonrySmokeBandAudit(cardRects, hostStyle) {
       Number.parseFloat(hostStyle.gridAutoRows) +
       Number.parseFloat(hostStyle.rowGap),
   };
+}
+
+function masonrySmokeColumnSpan(card) {
+  const span = Number.parseInt(
+    String(card.style.gridColumnEnd || "").replace("span", ""),
+    10,
+  );
+  return Number.isFinite(span) && span > 0 ? span : 1;
+}
+
+function masonrySmokeGridTrackCount(style) {
+  return String(style.gridTemplateColumns || "")
+    .split(/\s+/)
+    .filter(Boolean).length;
 }
 
 function masonrySmokeRuleAudits(host, cardRects, hostInnerWidth) {
@@ -617,7 +675,7 @@ function masonryTeamMeasurement(lane, host, config) {
       card.style.getPropertyValue("--message-pack-row-span") || "0",
       10,
     );
-    const columnSpan = +card.style.gridColumnEnd[5] || 1;
+    const columnSpan = masonrySmokeColumnSpan(card);
     const cellHeight = span * rowStride - rowGap;
     return {
       cellHeight,
@@ -629,7 +687,7 @@ function masonryTeamMeasurement(lane, host, config) {
       width: rect.width,
     };
   });
-  const naturalHeightRecovery = masonryTeamNaturalHeightRecovery(
+  const forcedSpanRecovery = masonryTeamForcedSpanRecovery(
     lane,
     cards[0],
     rowStride,
@@ -646,26 +704,38 @@ function masonryTeamMeasurement(lane, host, config) {
     cardWidths: cardAudits.map((card) => card.width),
     distinctColumnLefts: new Set(cardAudits.map((card) => card.left)).size,
     expectedColumns: config.expectedColumns,
+    expectedColumnSpan: masonryExpectedGridTrackCount / config.expectedColumns,
     expectedTrackWidth,
+    baseMaxCardWidthDelta: Math.max(
+      ...cardAudits
+        .filter(
+          (card) =>
+            card.columnSpan ===
+            masonryExpectedGridTrackCount / config.expectedColumns,
+        )
+        .map((card) => Math.abs(card.width - expectedTrackWidth)),
+    ),
+    gridTrackCount: masonrySmokeGridTrackCount(hostStyle),
     hostDisplay: hostStyle.display,
     hostInnerWidth,
     maxCardWidthDelta: Math.max(
       ...cardAudits.map((card) => Math.abs(card.width - expectedTrackWidth)),
     ),
     maxColumnSpan: Math.max(...cardAudits.map((card) => card.columnSpan)),
+    minColumnSpan: Math.min(...cardAudits.map((card) => card.columnSpan)),
     maxStretchSlackPx: Math.max(
       ...cardAudits.map((card) =>
         Math.max(0, card.cellHeight - card.scrollHeight - 2),
       ),
     ),
     memberColumnCounts,
-    naturalHeightRecovery,
+    forcedSpanRecovery,
     rowStridePx: rowStride,
     viewportWidth: config.width,
   };
 }
 
-function masonryTeamNaturalHeightRecovery(
+function masonryTeamForcedSpanRecovery(
   lane,
   card,
   rowStride,
@@ -702,30 +772,28 @@ function masonrySmokeBarrierBounds(host) {
 // Per column and barrier segment: cards sorted by top must appear in
 // chronological fixture order, with no interior hole beyond one row stride
 // (stretch fill leaves only the row gap; an unstretched image card may add
-// sub-stride slack). Cards sharing a grid row must also read left-to-right in
-// chronological order — that is the visible band.
+// sub-stride slack). Cards sharing a grid row may read left-to-right,
+// right-to-left, or from independent best-fit columns, but their occupied slot
+// ranges must not overlap.
 function masonrySmokeColumnAudit(cardRects, barrierIndexes) {
   const bounds = [-Infinity, ...barrierIndexes, Infinity];
   const byColumnSegment = new Map();
-  const columnWidth = Math.min(...cardRects.map((card) => card.rect.width));
   for (const card of cardRects) {
     let segment = 0;
     while (card.index > bounds[segment + 1]) segment += 1;
-    const start = Number(card.column) || 1;
-    const columnSpan = Math.max(1, Math.round(card.rect.width / columnWidth));
-    const end = start + columnSpan - 1;
-    for (let occupied = start; occupied <= end; occupied += 1) {
-      const key = occupied + ":" + segment;
+    for (let slot = card.slot; slot < card.slot + card.slotSpan; slot += 1) {
+      const key = slot + ":" + segment;
       const column = byColumnSegment.get(key) || [];
-      column.push(card);
+      column.push({ ...card, slot });
       byColumnSegment.set(key, column);
     }
   }
   const audit = {
     chronological: true,
+    maxInnerGapPair: null,
     maxInnerGapPx: 0,
     perColumnCounts: [],
-    sameRowChronological: true,
+    sameRowNonOverlapping: true,
   };
   for (const column of byColumnSegment.values()) {
     column.sort((a, b) => a.rect.top - b.rect.top);
@@ -734,7 +802,16 @@ function masonrySmokeColumnAudit(cardRects, barrierIndexes) {
       if (column[i].index < column[i - 1].index) audit.chronological = false;
       const previous = column[i - 1].rect;
       const gap = column[i].rect.top - (previous.top + previous.height);
-      if (gap > audit.maxInnerGapPx) audit.maxInnerGapPx = gap;
+      if (gap > audit.maxInnerGapPx) {
+        audit.maxInnerGapPx = gap;
+        audit.maxInnerGapPair = {
+          gap,
+          previousIndex: column[i - 1].index,
+          previousSlot: column[i - 1].slot,
+          nextIndex: column[i].index,
+          nextSlot: column[i].slot,
+        };
+      }
     }
   }
   const byRow = new Map();
@@ -744,36 +821,30 @@ function masonrySmokeColumnAudit(cardRects, barrierIndexes) {
     byRow.set(card.row, row);
   }
   for (const row of byRow.values()) {
-    row.sort((a, b) => a.index - b.index);
+    row.sort((a, b) => a.slot - b.slot);
     for (let i = 1; i < row.length; i += 1) {
-      const previousSpan = Math.max(
-        1,
-        Math.round(row[i - 1].rect.width / columnWidth),
-      );
-      const previousEnd =
-        (Number(row[i - 1].column) || 1) + previousSpan - 1;
-      if ((Number(row[i].column) || 1) <= previousEnd)
-        audit.sameRowChronological = false;
+      if (row[i].slot < row[i - 1].slot + row[i - 1].slotSpan)
+        audit.sameRowNonOverlapping = false;
     }
   }
   return audit;
 }
 
-// Leftmost-feasible placement must open every barrier segment as a left-to-
-// right fan: the first cards of a segment land in columns 1, 2, 3, ... in
-// chronological order.
+// Best-slot placement must open every barrier segment without overflowing the
+// effective slot grid. Multi-slot cards may consume several adjacent slots, so
+// coverage is checked by occupied slot range rather than a single-column march.
 function masonrySmokeSegmentFanOut(cardRects, barrierIndexes, expectedColumns) {
   const bounds = [-Infinity, ...barrierIndexes, Infinity];
   const fans = [];
   for (let i = 0; i + 1 < bounds.length; i += 1) {
     const cards = cardRects
-      .filter((card) => card.index > bounds[i] && card.index < bounds[i + 1])
-      .sort((a, b) => a.index - b.index);
+        .filter((card) => card.index > bounds[i] && card.index < bounds[i + 1])
+        .sort((a, b) => a.index - b.index);
     if (!cards.length) continue;
     fans.push(
       cards
         .slice(0, Math.min(expectedColumns, cards.length))
-        .map((card) => card.column),
+        .map((card) => ({ slot: card.slot, slotSpan: card.slotSpan })),
     );
   }
   return fans;
@@ -877,30 +948,39 @@ async function masonrySmokeHydrationGrowthAudit(lane, host, config) {
 // rows all identical, or stretch-fill and measurement are feeding back.
 async function masonrySmokeRepackAudit(lane, host) {
   const items = Array.from(host.querySelectorAll("[data-masonry-smoke]"));
-  const capture = () =>
-    items.map((node) => [
-      node.style.getPropertyValue("--message-pack-row-span"),
-      node.style.gridColumnStart,
-      node.style.gridRowStart,
-    ]);
-  const before = capture();
+  const before = masonrySmokePackSnapshot(items);
   packMessageStream(lane);
   await new Promise((resolve) => requestAnimationFrame(resolve));
-  const after = capture();
-  const firstDiffIndex = before.findIndex(
-    (entry, index) => JSON.stringify(entry) !== JSON.stringify(after[index]),
-  );
-  const spannedCards = items.filter(
-    (node) => (+node.style.gridColumnEnd[5] || 1) > 1,
-  ).length;
+  const after = masonrySmokePackSnapshot(items);
+  const firstDiff = masonrySmokeFirstPackDiff(before, after);
   return {
-    firstDiff:
-      firstDiffIndex < 0
-        ? null
-        : { after: after[firstDiffIndex], before: before[firstDiffIndex] },
-    spannedCards,
-    stable: firstDiffIndex < 0,
+    firstDiff,
+    spannedCards: masonrySmokeSpannedCardCount(items),
+    stable: firstDiff === null,
   };
+}
+
+function masonrySmokePackSnapshot(items) {
+  return items.map((node) => [
+    node.style.getPropertyValue("--message-pack-row-span"),
+    node.style.gridColumnStart,
+    node.style.gridRowStart,
+  ]);
+}
+
+function masonrySmokeFirstPackDiff(before, after) {
+  const index = before.findIndex(
+    (entry, position) => JSON.stringify(entry) !== JSON.stringify(after[position]),
+  );
+  if (index < 0) return null;
+  return { after: after[index], before: before[index] };
+}
+
+function masonrySmokeSpannedCardCount(items) {
+  return items.filter(
+    (node) =>
+      node.dataset.masonrySmoke === "card" && masonrySmokeColumnSpan(node) > 1,
+  ).length;
 }
 
 // Regression guard for the auto-fit collapse (f63d310): force every card into
@@ -920,6 +1000,30 @@ async function masonrySmokeColumnRecovery(lane, cards) {
   return { distinctColumns: lefts.size };
 }
 
+async function masonrySmokeMiddleRemovalReflowAudit(lane, host, config) {
+  if (config.expectedColumns <= 1) return { reflowed: true };
+  const cards = Array.from(
+    host.querySelectorAll('[data-masonry-smoke="card"]'),
+  );
+  if (cards.length < 5) return { reflowed: true };
+  cards[2].remove();
+  const remaining = cards.filter((card) => card.isConnected);
+  for (const card of remaining) {
+    card.dataset.messagePackColumn = "0";
+    card.style.gridColumnStart = "1";
+  }
+  packMessageStream(lane);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const distinctColumns = new Set(
+    remaining.map((card) => card.style.gridColumnStart),
+  ).size;
+  return {
+    distinctColumns,
+    reflowed:
+      distinctColumns >= Math.min(config.expectedColumns, remaining.length),
+  };
+}
+
 function masonrySmokeResizeAudit(config) {
   const lane = masonrySmokeLane();
   const host = lane.messagesEl || document.querySelector(".messages");
@@ -933,8 +1037,7 @@ function masonrySmokeResizeAudit(config) {
   return {
     distinctColumns: lefts.size,
     expectedColumns: config.expectedColumns,
-    spannedCards: cards.filter((card) => (+card.style.gridColumnEnd[5] || 1) > 1)
-      .length,
+    gridTrackCount: masonrySmokeGridTrackCount(getComputedStyle(host)),
     viewportWidth: config.width,
   };
 }
@@ -974,7 +1077,7 @@ function assertMasonryMeasurement(measurement) {
     throw new Error(reason + label + JSON.stringify(measurement));
   };
   assertMasonryBaseLayout(measurement, fail);
-  assertMasonryBands(measurement, fail);
+  assertMasonryRows(measurement, fail);
   assertMasonryDividerBarrier(measurement, fail);
   assertMasonryTimeRules(measurement, fail);
   assertMasonryDistribution(measurement, fail);
@@ -983,8 +1086,8 @@ function assertMasonryMeasurement(measurement) {
 function assertMasonryResizeAudit(audit) {
   if (audit.distinctColumns !== audit.expectedColumns)
     throw new Error("resize reflow used " + JSON.stringify(audit));
-  if (audit.spannedCards !== 0)
-    throw new Error("resize reflow left hidden spans " + JSON.stringify(audit));
+  if (audit.gridTrackCount !== masonryExpectedGridTrackCount)
+    throw new Error("resize reflow lost 12 grid tracks " + JSON.stringify(audit));
 }
 
 function assertMasonryTeamMeasurement(measurement) {
@@ -993,57 +1096,80 @@ function assertMasonryTeamMeasurement(measurement) {
     throw new Error(reason + label + JSON.stringify(measurement));
   };
   if (measurement.hostDisplay !== "grid") fail("team message host is not grid");
+  if (measurement.gridTrackCount !== masonryExpectedGridTrackCount)
+    fail("team message host did not keep 12 grid tracks");
   if (
     measurement.viewportWidth <= masonryMobileBreakpointWidth &&
     measurement.expectedColumns !== 1
   )
-    fail("mobile team expected more than one sub lane");
+    fail("mobile team expected more than one Mosaic column");
   if (measurement.distinctColumnLefts !== measurement.expectedColumns)
     fail(
       "team cards used " +
         measurement.distinctColumnLefts +
-        " sub lanes instead of " +
+        " Mosaic columns instead of " +
         measurement.expectedColumns,
     );
-  if (measurement.maxCardWidthDelta > 2)
+  if (measurement.baseMaxCardWidthDelta > 2)
     fail(
-      "team cards did not fill sub lanes; max width delta " +
-        measurement.maxCardWidthDelta,
+      "base team cards did not fill Mosaic columns; max width delta " +
+        measurement.baseMaxCardWidthDelta,
     );
-  if (measurement.maxColumnSpan !== 1)
-    fail("team cards unexpectedly spanned " + measurement.maxColumnSpan + " lanes");
-  for (const [member, count] of Object.entries(measurement.memberColumnCounts)) {
-    if (count !== 1)
-      fail(member + " cards split across " + count + " sub lanes");
-  }
-  if (measurement.maxStretchSlackPx > measurement.rowStridePx + 2)
+  if (
+    measurement.minColumnSpan !== measurement.expectedColumnSpan ||
+    measurement.maxColumnSpan >
+      Math.min(
+        masonryExpectedGridTrackCount,
+        measurement.expectedColumnSpan * 2,
+      )
+  )
     fail(
-      "team cards retained masonry band stretch slack " +
+      "team cards did not use bounded 12-track spans: " +
+        measurement.minColumnSpan +
+        ".." +
+        measurement.maxColumnSpan,
+    );
+  if (
+    measurement.expectedColumns > 1 &&
+    measurement.maxColumnSpan <= measurement.expectedColumnSpan
+  )
+    fail("team Mosaic did not include a larger piece");
+  if (measurement.expectedColumns > 1) {
+    for (const [member, count] of Object.entries(
+      measurement.memberColumnCounts,
+    )) {
+      if (count <= 1)
+        fail(member + " cards stayed in one producer column");
+    }
+  }
+  const slackBound = measurement.rowStridePx + 2;
+  if (measurement.maxStretchSlackPx > slackBound)
+    fail(
+      "team cards retained excessive row-span slack " +
         measurement.maxStretchSlackPx,
     );
-  if (measurement.naturalHeightRecovery.slackPx > measurement.rowStridePx + 2)
+  if (measurement.forcedSpanRecovery.slackPx > slackBound)
     fail(
-      "single-lane natural height recovery retained stretch slack " +
-        measurement.naturalHeightRecovery.slackPx,
+      "forced span recovery retained excessive row-span slack " +
+        measurement.forcedSpanRecovery.slackPx,
     );
 }
 
 function assertMasonryBaseLayout(measurement, fail) {
   if (measurement.hostDisplay !== "grid") fail("message host is not grid");
+  if (measurement.gridTrackCount !== masonryExpectedGridTrackCount)
+    fail("message host did not keep 12 grid tracks");
   if (!measurement.spans.every((span) => span > 0))
     fail("cards missing row spans");
   if (measurement.missingTimestampStamps > 0)
     fail("pack items missing data-message-ts");
   if (!measurement.repackAudit.stable) fail("pack is not idempotent");
-  if (measurement.repackAudit.spannedCards !== 0)
-    fail("regular Mosaic unexpectedly spanned cards");
   if (!measurement.columnAudit.chronological)
     fail("column order is not chronological");
-  if (!measurement.columnAudit.sameRowChronological)
-    fail("cards sharing a row are not chronological left-to-right");
+  if (!measurement.columnAudit.sameRowNonOverlapping)
+    fail("cards sharing a row overlap slot ranges");
   const gapBound =
-    measurement.bandAudit.rowStridePx * measurement.bandAudit.bandRows +
-    measurement.bandAudit.rowGapPx;
+    measurement.rowAudit.rowStridePx * 4 + measurement.rowAudit.rowGapPx + 2;
   if (measurement.columnAudit.maxInnerGapPx > gapBound)
     fail(
       "column contains an interior hole of " +
@@ -1061,23 +1187,22 @@ function assertMasonryBaseLayout(measurement, fail) {
     );
 }
 
-function assertMasonryBands(measurement, fail) {
-  const band = measurement.bandAudit;
-  for (const card of band.cards) {
-    const cellHeight = card.span * band.rowStridePx - band.rowGapPx;
+function assertMasonryRows(measurement, fail) {
+  const row = measurement.rowAudit;
+  for (const card of row.cards) {
+    const cellHeight = card.span * row.rowStridePx - row.rowGapPx;
     if (card.imageOnly) {
       if (card.alignSelf !== "start")
         fail("image-only card lost start alignment");
-      if (cellHeight - card.height >= band.rowStridePx)
-        fail("image-only card span was band-inflated");
+      if (cellHeight - card.height >= row.rowStridePx)
+        fail("image-only card span was over-expanded");
       continue;
     }
     if (card.alignSelf !== "stretch") fail("card is not stretch-aligned");
-    if (measurement.expectedColumns <= 1) continue;
-    if (card.span % band.bandRows !== 0)
-      fail("card span is not a whole band multiple");
     if (Math.abs(cellHeight - card.height) > 1)
-      fail("card box does not fill its band cell");
+      fail("card box does not fill its grid cell");
+    if (cellHeight - card.scrollHeight > row.rowStridePx + 2)
+      fail("card retained excessive row-span slack");
   }
 }
 
@@ -1110,13 +1235,51 @@ function assertMasonryTimeRules(measurement, fail) {
 
 function assertMasonryDistribution(measurement, fail) {
   const expectedColumns = measurement.expectedColumns;
-  const spannedCards = measurement.repackAudit.spannedCards;
-  if (spannedCards > 0) fail("Mosaic unexpectedly spanned cards");
+  const expectedColumnSpan = masonryExpectedGridTrackCount / expectedColumns;
+  const maxColumnSpan = Math.min(
+    masonryExpectedGridTrackCount,
+    expectedColumnSpan * 2,
+  );
+  if (
+    !measurement.columnSpans.every(
+      (span) => span === expectedColumnSpan || span === maxColumnSpan,
+    )
+  )
+    fail(
+      "cards did not use bounded 12-grid spans from " +
+        expectedColumnSpan +
+        " to " +
+        maxColumnSpan +
+        ": " +
+        JSON.stringify(measurement.columnSpans),
+    );
+  if (
+    expectedColumns > 1 &&
+    !measurement.columnSpans.some((span) => span > expectedColumnSpan)
+  )
+    fail("Mosaic did not include a larger piece");
   if (expectedColumns > 1) {
     for (const fan of measurement.segmentFanOut) {
-      const orderedColumns = fan.map((column, position) => String(position + 1));
-      if (JSON.stringify(fan) !== JSON.stringify(orderedColumns))
-        fail("segment does not fan out left-to-right: " + JSON.stringify(fan));
+      const coveredSlots = new Set();
+      for (const entry of fan) {
+        if (entry.slot < 1 || entry.slot + entry.slotSpan - 1 > expectedColumns)
+          fail("segment fan overflowed the slot grid: " + JSON.stringify(fan));
+        for (
+          let slot = entry.slot;
+          slot < entry.slot + entry.slotSpan;
+          slot += 1
+        ) {
+          coveredSlots.add(slot);
+        }
+      }
+      if (fan.some((entry) => entry.slotSpan < 1))
+        fail("segment fan included an invalid span: " + JSON.stringify(fan));
+      const expectedCoverage = Math.min(
+        expectedColumns,
+        fan.reduce((total, entry) => total + entry.slotSpan, 0),
+      );
+      if (coveredSlots.size < expectedCoverage)
+        fail("segment fan left an avoidable slot gap: " + JSON.stringify(fan));
     }
   }
   if (!measurement.appendStabilityAudit.stable)
@@ -1128,6 +1291,11 @@ function assertMasonryDistribution(measurement, fail) {
     fail(
       "history hydration changed existing card columns: " +
         JSON.stringify(measurement.hydrationGrowthAudit),
+    );
+  if (!measurement.middleRemovalReflowAudit.reflowed)
+    fail(
+      "middle removal did not trigger reflow: " +
+        JSON.stringify(measurement.middleRemovalReflowAudit),
     );
   if (measurement.distinctColumnLefts !== expectedColumns)
     fail(
