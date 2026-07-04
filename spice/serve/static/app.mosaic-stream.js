@@ -115,7 +115,16 @@ function mosaicLaneReady(lane) {
   );
   lane.mosaicNextCreationIndex = 0;
   lane.mosaicNextBackfillCreationIndex = -1;
-  lane.mosaicAppliedByKey = new Map();
+  // Keyed by ELEMENT, not by card key: renderOrReuseMessageNode/mosaicRuleNode
+  // build a fresh element whenever a message's content fingerprint changes
+  // (e.g. an ack skeleton resolving to its real quote) even when the card's
+  // own (t,b,n,span) stays identical. A key-keyed memo would then see
+  // "unchanged" and skip mosaicApplyCardPosition entirely, leaving the FRESH
+  // element with no transform/width/height ever applied -- a WeakMap keyed
+  // by the element makes a first-time element always look prev-less (the
+  // correct force-a-write case), and needs no manual cleanup since entries
+  // vanish with their (detached, unreferenced) elements.
+  lane.mosaicAppliedByNode = new WeakMap();
   lane.mosaicPrevMaxRow = 0;
   lane.mosaicPrevExtent = null;
   lane.mosaicGeometry = null;
@@ -135,7 +144,7 @@ function mosaicPlane(lane, geometry) {
   plane.className = "mosaic-plane";
   lane.messagesEl.prepend(plane);
   lane.mosaicPlaneEl = plane;
-  lane.mosaicAppliedByKey = new Map();
+  lane.mosaicAppliedByNode = new WeakMap();
   lane.mosaicPrevMaxRow = mosaicAnchorPlane(plane, geometry.M);
   lane.mosaicPrevExtent = null;
   return plane;
@@ -230,18 +239,24 @@ function mosaicExistingNodesByKey(lane) {
 // case (§4); anything else measures live like normal. Barrier entries
 // (dividers, rules) are never pending -- their content is fixed at
 // creation.
+// app.render.js already computes the correct reservation type once, at
+// node-creation time (messageReservationType: "ack" while any ack_segments
+// key has no resolved context yet via ackContextForKey, "imageLarge" for
+// image_only items, a "image" fallback for any other card containing
+// .message-image) and stamps it onto the node as data-mosaic-reservation-
+// type. Re-deriving that classification here duplicated it with a
+// DIFFERENT (and wrong) check -- lane.missingAckContextKeys only tracks
+// confirmed-missing keys, not "not yet resolved", so a genuinely-pending
+// ack (fetched but not yet answered) fell through to real measurement
+// instead of reserving. Reading the dataset directly trusts the single
+// source of truth instead of maintaining a second, divergent one. A fresh
+// node built once its content resolves has no reservation type at all
+// (messageReservationType returns "" once ackContextForKey finds a
+// context), so this naturally falls through to real measurement on
+// resolution with no extra branching needed here.
 function mosaicPendingReservationType(lane, entry, node) {
   if (entry.kind === "barrier") return null;
-  const item = entry.item;
-  const pendingAck = (item.ack_keys || []).some((key) =>
-    lane.missingAckContextKeys.has(key),
-  );
-  if (pendingAck) return "ack";
-  const image = node.querySelector("img");
-  if (image && !image.complete) {
-    return node.classList.contains("media-rich") ? "imageLarge" : "image";
-  }
-  return null;
+  return node.dataset.mosaicReservationType || null;
 }
 
 // ---- measurement ------------------------------------------------------------------
@@ -317,7 +332,7 @@ function mosaicGeometryChanged(lane, geometry) {
 // Applies every card's position/size, syncing the plane BEFORE any card
 // reflow per mosaicApplyCardPosition's documented call-order contract
 // (app.mosaic-render.js), then syncs host height. Returns nothing; mutates
-// lane's render-memo fields only (mosaicAppliedByKey/mosaicPrevMaxRow/
+// lane's render-memo fields only (mosaicAppliedByNode/mosaicPrevMaxRow/
 // mosaicPrevExtent), never the card records themselves.
 function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
   const extent = mosaicCardsExtent(cards);
@@ -338,7 +353,7 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
   for (const card of cards) {
     const node = nodesByKey.get(card.key);
     if (!node) continue;
-    const prev = lane.mosaicAppliedByKey.get(card.key) || null;
+    const prev = lane.mosaicAppliedByNode.get(node) || null;
     const next = mosaicApplyCardPosition(
       node,
       card,
@@ -348,10 +363,7 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
       geometry.gap,
       { reducedMotion },
     );
-    lane.mosaicAppliedByKey.set(card.key, next);
-  }
-  for (const key of Array.from(lane.mosaicAppliedByKey.keys())) {
-    if (!cards.some((card) => card.key === key)) lane.mosaicAppliedByKey.delete(key);
+    lane.mosaicAppliedByNode.set(node, next);
   }
   lane.mosaicPrevExtent = mosaicSyncHostHeight(
     lane.mosaicPlaneEl,
@@ -466,14 +478,30 @@ function mosaicDropVacatedKeys(lane, desiredKeySet) {
 // render (content genuinely changed, flagged by the caller) are touched;
 // an untouched reused node must never re-enter this pass; that is what
 // keeps a no-op re-render from moving anything (§11c).
+//
+// §14: dirty entries are resolved in CREATION-INDEX order, not entries'
+// (newest-first) order -- two simultaneously-resolving cards (e.g. two acks
+// racing back in reversed arrival order) must ripple/replay identically
+// regardless of which happened to finish its fetch first. wetReplay already
+// re-sorts internally, but mosaicResolveFrozenResize applies ripples one
+// card at a time as this loop reaches them, so the loop order IS the
+// ripple-application order and must be deterministic on its own.
 function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
-  let touchedWet = false;
+  const dirty = [];
   for (const entry of entries) {
     const card = lane.mosaicCards.find((candidate) => candidate.key === entry.key);
     if (!card) continue;
     const node = nodesByKey.get(entry.key);
     if (!node || !node.dataset.mosaicContentDirty) continue;
     delete node.dataset.mosaicContentDirty;
+    dirty.push({ entry, node, creationIndex: card.creationIndex });
+  }
+  dirty.sort((a, b) => a.creationIndex - b.creationIndex);
+
+  let touchedWet = false;
+  for (const { entry, node, creationIndex } of dirty) {
+    const card = lane.mosaicCards.find((candidate) => candidate.creationIndex === creationIndex);
+    if (!card) continue;
     const reservationType = mosaicPendingReservationType(lane, entry, node);
     const resolvedN = reservationType
       ? mosaicReservationRows(reservationType, mosaicRootFontSizePx(), geometry.gap, geometry.M)
@@ -676,7 +704,16 @@ function mosaicSyncImageLoadHandlers(lane) {
     if (lane.mosaicImageLoadHandlers.has(image)) continue;
     const handler = () => {
       const card = image.closest("[data-mosaic-card]");
-      if (card) card.dataset.mosaicContentDirty = "1";
+      if (card) {
+        // The node is never replaced by a load/error event (the item's
+        // fingerprint doesn't change), so data-mosaic-reservation-type
+        // would otherwise stay stamped forever and mosaicPendingReservationType
+        // would keep returning the reservation instead of ever measuring
+        // the real (possibly text+image) content -- clear it so the
+        // content-diff pass this triggers takes the real-measurement path.
+        delete card.dataset.mosaicReservationType;
+        card.dataset.mosaicContentDirty = "1";
+      }
       lane.renderedMessageFingerprint = "";
       renderMessagesIfChanged(lane);
     };
