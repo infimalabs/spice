@@ -180,6 +180,21 @@ def test_serve_submit_latency_smoke_asserts_timing_buckets() -> None:
     assert 'stubbed: type === "lane.send"' in smoke
 
 
+def test_serve_composer_typing_latency_smoke_asserts_no_layout_work() -> None:
+    smoke = (ROOT / "browser" / "serve_composer_typing_latency_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert "typingLatencyLaneCount = 4" in smoke
+    assert "typingLatencyCardsPerLane = 48" in smoke
+    assert "syncLanePaneMetrics = function" in smoke
+    assert "packMessageStream = function" in smoke
+    assert "typing triggered pane metric syncs" in smoke
+    assert "typing triggered message packing" in smoke
+
+
 def test_serve_task_stack_smoke_asserts_card_fill() -> None:
     smoke = (ROOT / "browser" / "serve_task_stack_smoke.js").read_text(encoding="utf-8")
 
