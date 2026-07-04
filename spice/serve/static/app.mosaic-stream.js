@@ -21,6 +21,19 @@
 
 const MOSAIC_RESIZE_WIDTH_EPSILON_PX = 0.5;
 const MOSAIC_BACKFILL_BOTTOM_EPSILON_PX = 2;
+// Below this host width the lane is not meaningfully measurable (hidden
+// ancestor, mid-mount, collapsed pane): rendering would run the geometry
+// pass against garbage (clientWidth 0 degenerates edges to [0..12] and a
+// spurious full replay re-spans every card), and any transform written to
+// an unrendered will-change element can freeze a stale scrollable-overflow
+// region that outlives the reveal (probe scenarios B/C on freeze-root).
+// Renders defer instead; the ResizeObserver's 0-to-real transition brings
+// the deferred render back as a motion-suppressed correction.
+const MOSAIC_MIN_RENDER_WIDTH_PX = 24;
+
+function mosaicHostMeasurable(host) {
+  return Boolean(host) && host.clientWidth >= MOSAIC_MIN_RENDER_WIDTH_PX;
+}
 
 // ---- lane lattice state ----------------------------------------------------------
 
@@ -265,10 +278,12 @@ function mosaicGeometryChanged(lane, geometry) {
 function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
   const extent = mosaicCardsExtent(cards);
   const reducedMotion = mosaicPrefersReducedMotion();
+  const snap = Boolean(options && options.snap);
   const scrollOptions = mosaicPlaneScrollOptions(lane, undefined);
   const planeOptions = {
     ...scrollOptions,
     reducedMotion,
+    snap,
     replaying: Boolean(options && options.replaying),
   };
   lane.mosaicPrevMaxRow = mosaicSyncPlane(
@@ -289,7 +304,7 @@ function mosaicApplyRender(lane, cards, geometry, nodesByKey, options) {
       geometry.edges,
       geometry.M,
       geometry.gap,
-      { reducedMotion },
+      { reducedMotion, snap },
     );
     lane.mosaicAppliedByNode.set(node, next);
   }
@@ -529,6 +544,20 @@ function mosaicRestoreBackfillViewport(lane, renderResult) {
 // lane.messagesEl.
 function mosaicRenderMessageStream(lane, visibleItems) {
   mosaicLaneReady(lane);
+  // Unmeasurable host: touch nothing -- not the lattice, not the plane, not
+  // a single style. The caller must not commit its render fingerprint, so
+  // the content this render would have painted stays pending; the reveal
+  // ResizeObserver transition re-schedules it against real geometry.
+  if (!mosaicHostMeasurable(lane.messagesEl)) {
+    lane.mosaicRenderDeferred = true;
+    // The observer is the reveal hook: it must exist even when the very
+    // first render defers, or the 0-to-real width transition would never
+    // re-schedule this lane and it would stay blank until new content.
+    mosaicSyncResizeObserver(lane);
+    return { deferred: true, backfillViewport: null };
+  }
+  const revealing = Boolean(lane.mosaicRenderDeferred);
+  lane.mosaicRenderDeferred = false;
   // Geometry first: the plane is position:absolute, so creating it cannot
   // affect lane.messagesEl's own clientWidth, and mosaicPlane needs the
   // real M immediately if it has to anchor a fresh plane (see mosaicPlane).
@@ -588,8 +617,12 @@ function mosaicRenderMessageStream(lane, visibleItems) {
     mosaicRunFullReplay(lane, entries, nodesByKey, geometry);
   }
 
+  // A reveal after deferred renders is a layout correction, never a
+  // user-intentional replay moment: whatever changed while unmeasurable
+  // (content, geometry, or nothing) applies with motion suppressed.
   mosaicApplyRender(lane, lane.mosaicCards, geometry, nodesByKey, {
     replaying,
+    snap: revealing,
   });
   mosaicSyncResizeObserver(lane);
   mosaicSyncImageLoadHandlers(lane);

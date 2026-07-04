@@ -116,7 +116,11 @@ function mosaicApplyCardPosition(el, card, prev, edges, M, gap, options) {
   const width = `${mosaicCardWidth(card, edges, gap)}px`;
   const height = `${mosaicCardHeight(card, M, gap)}px`;
   const reducedMotion = Boolean(options && options.reducedMotion);
-  if (!prev || reducedMotion) {
+  // options.snap: motion-suppressed correction (reveal after deferred
+  // renders, unsettled-board writes) -- same suppressed write as the
+  // first-paint path, but transitions re-enable afterwards.
+  const snap = Boolean(options && options.snap);
+  if (!prev || reducedMotion || snap) {
     el.style.transition = "none";
     el.style.transform = transform;
     el.style.width = width;
@@ -163,13 +167,14 @@ function mosaicSyncPlane(planeEl, maxRow, prevMaxRow, M, options) {
   const reducedMotion = Boolean(options && options.reducedMotion);
   const replaying = Boolean(options && options.replaying);
   const scrolled = Boolean(options && options.scrolled);
+  const snap = Boolean(options && options.snap);
   // Compensation is a correctness behavior, not a motion effect (§9): it
   // must still land whenever the reader is scrolled, reduced motion or
   // not. Only the transition -- animated tween vs instant jump -- takes
-  // reducedMotion into account.
+  // reducedMotion (and snap, the correction path) into account.
   const jumpAndCompensate = scrolled && !replaying;
   planeEl.style.transition =
-    reducedMotion || jumpAndCompensate ? "none" : MOSAIC_TWEEN_TRANSITION;
+    reducedMotion || snap || jumpAndCompensate ? "none" : MOSAIC_TWEEN_TRANSITION;
   planeEl.style.transform = transform;
   if (jumpAndCompensate) {
     void planeEl.offsetWidth;
