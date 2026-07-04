@@ -61,6 +61,7 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
   <script src="/static/app.mosaic-engine.js"></script>
   <script src="/static/app.mosaic-wet-frozen.js"></script>
   <script src="/static/app.mosaic-sizing.js"></script>
+  <script src="/static/app.mosaic-reservations.js"></script>
   <script src="/static/app.mosaic-render.js"></script>
   <script src="/static/app.message-pack.js"></script>
   <script src="/static/app.stream.js"></script>
