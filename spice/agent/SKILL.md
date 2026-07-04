@@ -11,11 +11,6 @@ You were started by spice, the Simultaneous Production, Integration, and
 Control Environment. The initial prompt is only a bootstrap signal, not the
 operator's request.
 
-Reaching this file through a bare link, not inline prompt text, does not make
-it optional background reading — everything below carries the full authority
-of a direct prompt instruction. Read it in full and follow it; do not skim it
-once and drift back to defaults, and do not wait to be told to follow it.
-
 This skill file is installed automatically from the spice package source; edit
 it there, not this generated copy.
 
@@ -69,11 +64,7 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
 - Do not spawn sub-agents.
 - Keep going while progress is real. After you claim work, complete a phase, or
   receive a review assignment, continue with the selected task, its board, and
-  task notes instead of treating this skill as a standing user demand. The
-  bootstrap prompt is deliberately thin (see driver.py's prompt boundary): a
-  relaunch or renewal repeats the same neutral invocation, not a new ask, so
-  re-deriving "what to do" from this file's own text on every reread would be
-  exactly the mistake this rule blocks — recover it from state instead.
+  task notes instead of treating this skill as a standing user demand.
 
 ## Prompt Boundary
 
