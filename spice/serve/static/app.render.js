@@ -799,6 +799,7 @@ function renderMessageFooter(lane, item, maximAckCount) {
   const left = document.createElement("div");
   left.className = "message-footer-left";
   const time = document.createElement("time");
+  time.className = "message-age";
   time.dateTime = item.timestamp;
   time.title = item.timestamp;
   time.dataset.relativeTimestamp = item.timestamp;
@@ -985,6 +986,7 @@ function renderCompactionDivider(lane, item) {
   divider.dataset.accentSlot = String(accentSlot);
   divider.style.setProperty("--compaction-accent", messageOccupantAccent(accentSlot));
   const time = document.createElement("time");
+  time.className = "message-age";
   time.dateTime = item.timestamp;
   time.dataset.relativeTimestamp = item.timestamp;
   setRelativeTimeText(time);
