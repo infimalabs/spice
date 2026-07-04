@@ -23,6 +23,7 @@
   padding: 11px;
   position: relative;
   row-gap: 6px;
+  scrollbar-gutter: stable;
 }
 .messages article {
   --message-badge-surface: var(--panel);
