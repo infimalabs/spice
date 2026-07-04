@@ -6,7 +6,8 @@ const { withServePage } = require("./serve_playwright_harness");
 // called directly) and checks the persistent-lattice invariants: insert
 // never moves existing cards; unchanged cards get zero style writes on a
 // no-op re-render; removing the oldest message vacates without moving the
-// rest; newest-first reading order holds.
+// rest; newest-first reading order holds; image reservations (§4/§12) are
+// exact and a load/error event never triggers pack/position/size activity.
 
 // msg-10..msg-16 (frozen-growth chain) plus the surviving msg-2/msg-3 from
 // the earlier insert/removal/content-change scenarios.
@@ -216,6 +217,148 @@ function mosaicStreamReadingOrderCheck() {
   return { count: cards.length, chainTops, monotonic };
 }
 
+// Images (§4/§12 imageHeights): a message with an inline image reserves the
+// small letterbox cap ("image"); an image-only message reserves the large
+// cap ("imageLarge") -- both sourced from the single dataset classification
+// app.render.js computes once (article.dataset.mosaicReservationType), never
+// re-derived from the .media-rich class, which is true for BOTH cases and
+// would misclassify the small case as large. A load/error event on the
+// image must cause zero pack/position/size activity anywhere in the lane:
+// the reservation is permanent (images letterbox to their cap regardless of
+// load state), so there is nothing left to resolve once the image settles,
+// broken or not -- unlike the ack/quote reservation, which genuinely is
+// pending until real content hydrates.
+const MOSAIC_STREAM_IMAGE_HTML =
+  '<p class="message-image-stack"><a class="message-image" href="#">' +
+  '<img alt="fixture" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a></p>';
+// A message-image-stack lays its images out in a single horizontal row
+// (messages.css), all at the same letterbox height -- three images here
+// prove the reservation stays at exactly one slot, never a per-image sum.
+const MOSAIC_STREAM_MULTI_IMAGE_HTML =
+  '<p class="message-image-stack">' +
+  '<a class="message-image" href="#"><img alt="fixture 1" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a>' +
+  '<a class="message-image" href="#"><img alt="fixture 2" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a>' +
+  '<a class="message-image" href="#"><img alt="fixture 3" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a>' +
+  "</p>";
+// A malformed data URI fails to decode (fires "error") with no network
+// request at all -- an actual unreachable URL would either hit the
+// browser's blocked-port list or depend on network timing neither of which
+// this smoke needs, since only the broken image's SLOT (not the fetch
+// itself) is under test here.
+const MOSAIC_STREAM_BROKEN_IMAGE_HTML =
+  '<p class="message-image-stack"><a class="message-image" href="#">' +
+  '<img alt="broken fixture" src="data:image/png;base64,not-a-valid-image"></a></p>';
+
+function mosaicStreamImageItem(key, imageOnly, html) {
+  return {
+    ack_count: 0,
+    ack_keys: [],
+    display_html: html,
+    display_text: "image",
+    image_only: imageOnly,
+    index: 100,
+    key,
+    kind: "assistant",
+    text: "image",
+    timestamp: new Date(2026, 0, 2).toISOString(),
+  };
+}
+
+function mosaicStreamImageReservationCheck() {
+  const lane = mosaicStreamResolveLane();
+  upsertKnownMessage(
+    lane,
+    mosaicStreamImageItem("img-regular", false, MOSAIC_STREAM_IMAGE_HTML),
+    "newest",
+  );
+  upsertKnownMessage(
+    lane,
+    mosaicStreamImageItem("img-only", true, MOSAIC_STREAM_IMAGE_HTML),
+    "newest",
+  );
+  upsertKnownMessage(
+    lane,
+    mosaicStreamImageItem("img-broken", false, MOSAIC_STREAM_BROKEN_IMAGE_HTML),
+    "newest",
+  );
+  upsertKnownMessage(
+    lane,
+    mosaicStreamImageItem("img-multi", false, MOSAIC_STREAM_MULTI_IMAGE_HTML),
+    "newest",
+  );
+  trimKnownMessages(lane);
+  renderMessagesIfChanged(lane);
+
+  const articleFor = (key) =>
+    lane.mosaicPlaneEl.querySelector('[data-message-key="' + key + '"]');
+  const cardFor = (key) => lane.mosaicCards.find((c) => c.key === key);
+  const geometry = lane.mosaicGeometry;
+
+  const regularImg = articleFor("img-regular").querySelector("img");
+  const onlyImg = articleFor("img-only").querySelector("img");
+  const brokenImg = articleFor("img-broken").querySelector("img");
+  const multiImgs = Array.from(articleFor("img-multi").querySelectorAll("img"));
+
+  const snapshot = {
+    regularReserve: articleFor("img-regular").dataset.mosaicReservationType,
+    onlyReserve: articleFor("img-only").dataset.mosaicReservationType,
+    brokenReserve: articleFor("img-broken").dataset.mosaicReservationType,
+    multiReserve: articleFor("img-multi").dataset.mosaicReservationType,
+    regularN: cardFor("img-regular").n,
+    onlyN: cardFor("img-only").n,
+    brokenN: cardFor("img-broken").n,
+    multiN: cardFor("img-multi").n,
+    multiImageCount: multiImgs.length,
+    regularHeightRows: mosaicRowsFor(
+      Number.parseFloat(getComputedStyle(regularImg).height),
+      geometry.gap,
+      geometry.M,
+    ),
+    onlyHeightRows: mosaicRowsFor(
+      Number.parseFloat(getComputedStyle(onlyImg).height),
+      geometry.gap,
+      geometry.M,
+    ),
+    brokenHeightRows: mosaicRowsFor(
+      Number.parseFloat(getComputedStyle(brokenImg).height),
+      geometry.gap,
+      geometry.M,
+    ),
+    multiHeightRows: mosaicRowsFor(
+      Number.parseFloat(getComputedStyle(multiImgs[0]).height),
+      geometry.gap,
+      geometry.M,
+    ),
+  };
+
+  const fingerprintBefore = lane.renderedMessageFingerprint;
+  const before = mosaicStreamCardSnapshot(lane);
+
+  for (const img of [regularImg, onlyImg, brokenImg, ...multiImgs]) {
+    img.dispatchEvent(new Event("load"));
+    img.dispatchEvent(new Event("error"));
+  }
+
+  // A leftover load/error handler would schedule its work via rAF (the
+  // pattern every other mosaic-stream scheduling path in this module uses);
+  // two nested rAFs give any such stray callback a full frame to run before
+  // re-snapshotting, so its absence is actually proven, not just unlucky
+  // timing.
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        resolve({
+          ...snapshot,
+          fingerprintBefore,
+          fingerprintAfter: lane.renderedMessageFingerprint,
+          before,
+          after: mosaicStreamCardSnapshot(lane),
+        });
+      });
+    });
+  });
+}
+
 async function installMosaicStreamHelpers(page) {
   await page.addScriptTag({
     content: [
@@ -224,6 +367,15 @@ async function installMosaicStreamHelpers(page) {
         ";",
       "const MOSAIC_STREAM_FROZEN_CHAIN_LAST_KEY = " +
         MOSAIC_STREAM_FROZEN_CHAIN_LAST_KEY +
+        ";",
+      "const MOSAIC_STREAM_IMAGE_HTML = " +
+        JSON.stringify(MOSAIC_STREAM_IMAGE_HTML) +
+        ";",
+      "const MOSAIC_STREAM_BROKEN_IMAGE_HTML = " +
+        JSON.stringify(MOSAIC_STREAM_BROKEN_IMAGE_HTML) +
+        ";",
+      "const MOSAIC_STREAM_MULTI_IMAGE_HTML = " +
+        JSON.stringify(MOSAIC_STREAM_MULTI_IMAGE_HTML) +
         ";",
       mosaicStreamResolveLane,
       mosaicStreamBuildItem,
@@ -235,6 +387,8 @@ async function installMosaicStreamHelpers(page) {
       mosaicStreamFrozenGrowthCheck,
       mosaicStreamGeometryChangeCheck,
       mosaicStreamReadingOrderCheck,
+      mosaicStreamImageItem,
+      mosaicStreamImageReservationCheck,
     ]
       .map((helper) => helper.toString())
       .join("\n"),
@@ -373,6 +527,62 @@ function assertReadingOrderInvariants(readingOrder, fail) {
     );
 }
 
+function assertImageReservationInvariants(imageResult, fail) {
+  // §4: classification must come from the single dataset attribute, not
+  // re-derived from .media-rich (true for every image, which would collapse
+  // both tiers into "imageLarge").
+  if (imageResult.regularReserve !== "image")
+    fail("an inline (non-image-only) image must reserve the small cap, got " + imageResult.regularReserve);
+  if (imageResult.onlyReserve !== "imageLarge")
+    fail("an image-only message must reserve the large cap, got " + imageResult.onlyReserve);
+  if (imageResult.brokenReserve !== "image")
+    fail("a broken inline image must still reserve the small cap, got " + imageResult.brokenReserve);
+  if (imageResult.multiReserve !== "image")
+    fail("a multi-image stack (not image-only) must reserve the small cap, got " + imageResult.multiReserve);
+
+  // Exactness (§4/§12): the reserved row count must equal the rows the
+  // actually-rendered (letterboxed) image height converts to, for a normal
+  // image, an image-only image, a broken one, AND a multi-image stack --
+  // none measure the intrinsic image, all sit at their named cap.
+  if (imageResult.regularN !== imageResult.regularHeightRows)
+    fail("regular image reservation is not exact: " + JSON.stringify(imageResult));
+  if (imageResult.onlyN !== imageResult.onlyHeightRows)
+    fail("image-only reservation is not exact: " + JSON.stringify(imageResult));
+  if (imageResult.brokenN !== imageResult.brokenHeightRows)
+    fail("broken image reservation is not exact: " + JSON.stringify(imageResult));
+  if (imageResult.multiN !== imageResult.multiHeightRows)
+    fail("multi-image stack reservation is not exact: " + JSON.stringify(imageResult));
+
+  // Multi-image stacking rule (§4/§12): three images in one stack (laid out
+  // in a single horizontal row, messages.css) must reserve exactly the SAME
+  // one-slot height as a single image, never a per-image sum.
+  if (imageResult.multiImageCount !== 3)
+    fail("multi-image fixture did not render all three images: " + JSON.stringify(imageResult));
+  if (imageResult.multiN !== imageResult.regularN)
+    fail(
+      "a multi-image stack must reserve exactly one slot, not a per-image sum: " +
+        JSON.stringify(imageResult),
+    );
+
+  // §4: a load/error event must never schedule any pack/position/size
+  // activity -- the reservation is permanent, so there is nothing to
+  // resolve. Proven both at the fingerprint level (no re-render was
+  // scheduled at all) and at the rendered-style level (identical transform/
+  // width/height strings for every card, not just the image cards).
+  if (imageResult.fingerprintAfter !== imageResult.fingerprintBefore)
+    fail("a load/error event triggered a re-render (fingerprint changed)");
+  for (const before of imageResult.before.cards) {
+    const after = imageResult.after.cards.find((c) => c.key === before.key);
+    if (
+      !after ||
+      after.transform !== before.transform ||
+      after.width !== before.width ||
+      after.height !== before.height
+    )
+      fail("a load/error event changed a card's rendered style: " + before.key);
+  }
+}
+
 function assertMosaicStreamResult(result) {
   const fail = (message) => {
     throw new Error(message + ": " + JSON.stringify(result));
@@ -383,6 +593,7 @@ function assertMosaicStreamResult(result) {
   assertFrozenGrowthInvariants(result.frozenGrowthResult, fail);
   assertGeometryChangeInvariants(result.geometryChangeResult, fail);
   assertReadingOrderInvariants(result.readingOrder, fail);
+  assertImageReservationInvariants(result.imageResult, fail);
 }
 
 async function waitForMosaicStreamGlobals(page) {
@@ -404,7 +615,7 @@ async function run() {
       path: "/?smoke=serve-mosaic-stream-" + Date.now(),
       contextOptions: { viewport: { width: 1280, height: 900 } },
     },
-    async ({ page, server }) => {
+    async ({ page, server, browserErrors }) => {
       await waitForMosaicStreamGlobals(page);
       await installMosaicStreamHelpers(page);
       const insertResult = await page.evaluate(mosaicStreamInsertSequence);
@@ -413,6 +624,26 @@ async function run() {
       const frozenGrowthResult = await page.evaluate(mosaicStreamFrozenGrowthCheck);
       const geometryChangeResult = await page.evaluate(mosaicStreamGeometryChangeCheck);
       const readingOrder = await page.evaluate(mosaicStreamReadingOrderCheck);
+      const imageResult = await page.evaluate(mosaicStreamImageReservationCheck);
+      // The broken-image fixture (mosaicStreamImageReservationCheck) is
+      // deliberately an undecodable image src, to prove a broken image
+      // still occupies its exact letterbox slot (§4). The browser's own
+      // "failed to load this resource" console error is the expected,
+      // intentional side effect of that fixture, not a real bug -- drop
+      // only that specific entry so the harness's blanket
+      // assertNoBrowserErrors below still catches anything unexpected.
+      const expectedBrokenImageErrors = browserErrors.filter(
+        (error) => error.type === "error" && /Failed to load resource/.test(error.text),
+      );
+      if (expectedBrokenImageErrors.length !== 1) {
+        throw new Error(
+          "expected exactly one broken-image resource-load console error, got " +
+            expectedBrokenImageErrors.length +
+            ": " +
+            JSON.stringify(browserErrors),
+        );
+      }
+      browserErrors.length = 0;
       const result = {
         insertResult,
         removalResult,
@@ -420,6 +651,7 @@ async function run() {
         frozenGrowthResult,
         geometryChangeResult,
         readingOrder,
+        imageResult,
       };
       assertMosaicStreamResult(result);
       return { ...result, url: server.url };

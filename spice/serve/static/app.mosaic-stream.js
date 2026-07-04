@@ -119,13 +119,18 @@ function mosaicExistingNodesByKey(lane) {
   return nodes;
 }
 
-// ---- pending-content reservation classification (§4) ------------------------------
+// ---- reservation classification (§4) ----------------------------------------------
 
-// "Pending" means real content has not resolved yet: an ack/quote whose
-// context text has not hydrated, or an image that has not finished
-// loading. Named priors size these so shrink-on-resolve is the common
-// case (§4); anything else measures live like normal. Barrier entries
-// (dividers, rules) are never pending -- their content is fixed at
+// Two different lifetimes share this one lookup: an ack/quote reservation is
+// genuinely pending -- real content hasn't hydrated yet, and shrink-on-
+// resolve is the common case (§4) -- while an image reservation is
+// permanent: images letterbox to their named cap regardless of load state
+// (messages.css), so the reservation never needs to give way to a measured
+// height, whether the image is loading, loaded, or broken. Both read the
+// single reservation type app.render.js already computed once at build time
+// (article.dataset.mosaicReservationType) rather than re-deriving it here --
+// no reservation logic scattered per-call-site (§4). Barrier entries
+// (dividers, rules) are never reserved -- their content is fixed at
 // creation.
 function mosaicPendingReservationType(lane, entry, node) {
   if (entry.kind === "barrier") return null;
@@ -134,11 +139,7 @@ function mosaicPendingReservationType(lane, entry, node) {
     lane.missingAckContextKeys.has(key),
   );
   if (pendingAck) return "ack";
-  const image = node.querySelector("img");
-  if (image && !image.complete) {
-    return node.classList.contains("media-rich") ? "imageLarge" : "image";
-  }
-  return null;
+  return node.dataset.mosaicReservationType || null;
 }
 
 // ---- measurement ------------------------------------------------------------------
@@ -399,11 +400,15 @@ function mosaicRenderMessageStream(lane, visibleItems) {
     replaying: geometryChanged || (addedKeys.length > 1),
   });
   mosaicSyncResizeObserver(lane);
-  mosaicSyncImageLoadHandlers(lane);
 }
 
-// ---- resize + image-load wiring (mirrors the legacy syncMessagePackObserver
-// pattern, retargeted at full replay instead of a repack) ---------------------------
+// ---- resize wiring (mirrors the legacy syncMessagePackObserver pattern,
+// retargeted at full replay instead of a repack) --------------------------------------
+//
+// No image-load wiring here: images letterbox to a named cap regardless of
+// load state (messages.css, mosaicPendingReservationType above), so a load
+// or error event never changes a card's reserved size -- there is nothing
+// for a load handler to schedule.
 
 function mosaicElementResizeSize(element) {
   const rect = element.getBoundingClientRect();
@@ -440,32 +445,6 @@ function mosaicSyncResizeObserver(lane) {
   }
 }
 
-function mosaicSyncImageLoadHandlers(lane) {
-  if (!lane.messagesEl) return;
-  if (!lane.mosaicImageLoadHandlers) lane.mosaicImageLoadHandlers = new Map();
-  const current = new Set(
-    lane.messagesEl.querySelectorAll("[data-mosaic-card] img"),
-  );
-  for (const image of current) {
-    if (lane.mosaicImageLoadHandlers.has(image)) continue;
-    const handler = () => {
-      const card = image.closest("[data-mosaic-card]");
-      if (card) card.dataset.mosaicContentDirty = "1";
-      lane.renderedMessageFingerprint = "";
-      renderMessagesIfChanged(lane);
-    };
-    image.addEventListener("load", handler);
-    image.addEventListener("error", handler);
-    lane.mosaicImageLoadHandlers.set(image, handler);
-  }
-  for (const [image, handler] of lane.mosaicImageLoadHandlers) {
-    if (current.has(image)) continue;
-    image.removeEventListener("load", handler);
-    image.removeEventListener("error", handler);
-    lane.mosaicImageLoadHandlers.delete(image);
-  }
-}
-
 function mosaicResetResizeObserver(lane) {
   if (lane.mosaicFrame) {
     cancelAnimationFrame(lane.mosaicFrame);
@@ -474,9 +453,4 @@ function mosaicResetResizeObserver(lane) {
   if (lane.mosaicResizeObserver) lane.mosaicResizeObserver.disconnect();
   lane.mosaicResizeObserver = null;
   lane.mosaicHostResizeSize = null;
-  for (const [image, handler] of lane.mosaicImageLoadHandlers || []) {
-    image.removeEventListener("load", handler);
-    image.removeEventListener("error", handler);
-  }
-  lane.mosaicImageLoadHandlers = new Map();
 }
