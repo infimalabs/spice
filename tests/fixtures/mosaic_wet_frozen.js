@@ -173,8 +173,9 @@ function card(creationIndex, t, span, n, frozen, b = 0) {
 }
 
 // Transitive chain: A grows, B rests below A, C rests below B in tracks
-// that do NOT overlap A at all -- C is only reachable via B, using B's
-// already-shifted b as the frontier threshold for that second hop.
+// that do NOT overlap A at all -- C is only reachable via B, discovered
+// using B's ORIGINAL (not shifted) b as the frontier threshold for that
+// second hop.
 {
   const a = card(0, 0, 4, 2, true, 10); // tracks 0-3
   const b = card(1, 2, 4, 2, true, 5); // tracks 2-5 (overlaps a on 2,3), below a
@@ -186,6 +187,37 @@ function card(creationIndex, t, span, n, frozen, b = 0) {
   assert(ra.b === a.b - delta, "root grower shifts by exactly delta (as its own top-row bookkeeping)");
   assert(rb.b === b.b - delta, "direct child shifts by delta");
   assert(rc.b === c.b - delta, "transitive grandchild (reachable only via the shifted child) shifts by delta too, got " + rc.b);
+}
+
+// Regression: a staggered multi-hop chain (E reachable only via D, not
+// directly via A) with delta LARGER than the original gap between D and E
+// (gap=2, delta=3). Discovering E via D's shifted b (8-3=5) instead of D's
+// original b (8) would wrongly require E.b(6) < 5, which is false, so E
+// would be left behind -- overlapping D after the ripple. Using D's
+// original b (8) correctly finds E.b(6) < 8.
+{
+  const a = card(0, 0, 4, 2, true, 10); // tracks 0-3, rows [10,12)
+  const d = card(1, 2, 4, 2, true, 8); // tracks 2-5 (overlaps a), rows [8,10) touching a's bottom
+  const e = card(2, 4, 4, 2, true, 6); // tracks 4-7 (overlaps d only, not a), rows [6,8) touching d's bottom
+  const delta = 3; // > the original gap between d and e (8-6=2)
+
+  const replayed = context.mosaicRippleRows([a, d, e], 0, delta);
+  const [ra, rd, re] = replayed;
+
+  assert(rd.b === d.b - delta, "direct child (d) shifts by delta, got " + rd.b);
+  assert(
+    re.b === e.b - delta,
+    "grandchild (e) reachable only via d must still shift by the full delta even though delta exceeds the original d/e gap, got " +
+      re.b,
+  );
+  for (let i = 0; i < replayed.length; i += 1) {
+    for (let j = i + 1; j < replayed.length; j += 1) {
+      assert(
+        !context.mosaicCardsOverlap(replayed[i], replayed[j]),
+        "no two replayed cards may overlap in both axes after a ripple, cards " + i + " and " + j,
+      );
+    }
+  }
 }
 
 // A deep stack with a large delta drives b negative; nothing clamps it.
