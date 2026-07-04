@@ -75,8 +75,52 @@ function card(creationIndex, t, span, n, frozen, b = 0) {
   const [replayedFrozen, replayedLow, replayedHigh] = replayed;
 
   assert(JSON.stringify(replayedFrozen) === before, "frozen card must be untouched by wetReplay");
+  // §13: "touches only wet cards" is a stronger claim than "values happen
+  // to match" -- the frozen card must be the SAME object, never even
+  // reconstructed, let alone re-decided.
+  assert(replayedFrozen === frozenCard, "frozen card must be the same object reference, proving wetReplay never touched it");
   assert(replayedLow.span === wetLow.span, "wetReplay must never change a card's span");
   assert(replayedHigh.span === wetHigh.span, "wetReplay must never change a card's span");
+}
+
+// §13: the wet tail stays bounded by freezeDepth regardless of total board
+// size. Build a straight vertical stack of N cards (each resting directly
+// on the one before, single track so every card buries every earlier one)
+// and recompute freeze latches after each append, mirroring how
+// mosaicRunInsert really drives this over a live stream. Only the last
+// freezeDepth cards can still be wet; wetReplay must return every other
+// (frozen) card by the same object reference.
+{
+  const freezeDepth = 2;
+  const boardSize = 50;
+  let cards = [];
+  for (let i = 0; i < boardSize; i += 1) {
+    cards = cards.concat([card(i, 0, 12, 1, false, i)]);
+    cards = context.mosaicRecomputeFrozen(cards, freezeDepth);
+  }
+  const wetCountBefore = cards.filter((c) => !c.frozen).length;
+  assert(
+    wetCountBefore <= freezeDepth,
+    "wet tail must stay bounded by freezeDepth (" + freezeDepth + ") regardless of board size (" +
+      boardSize + "), got " + wetCountBefore,
+  );
+
+  const replayed = context.mosaicWetReplay(cards, TRACKS, freezeDepth);
+  let untouchedFrozenCount = 0;
+  for (let i = 0; i < cards.length; i += 1) {
+    if (cards[i].frozen) {
+      assert(
+        replayed[i] === cards[i],
+        "frozen card at index " + i + " must be untouched (same reference) in a " + boardSize + "-card board",
+      );
+      untouchedFrozenCount += 1;
+    }
+  }
+  assert(
+    untouchedFrozenCount === boardSize - wetCountBefore,
+    "every frozen card in the large board must come back untouched, got " +
+      untouchedFrozenCount + " of " + (boardSize - wetCountBefore),
+  );
 }
 
 // Sharper floor-source discriminator: full-width (span 12) cards force a
