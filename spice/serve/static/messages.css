@@ -29,19 +29,27 @@
   --message-badge-surface: var(--panel);
   align-self: stretch;
   background: var(--panel);
-  border: 1px solid var(--border);
+  /* Mosaic §4 interlock: border/padding are rem-denominated (same 1px/9px
+     at the default 16px root) so chrome + gap stays a whole multiple of
+     lineHeight at any root font size, not just the default; see
+     mosaic-sizing-interlock. */
+  border: 0.0625rem solid var(--border);
   border-color: var(--border-soft);
   border-radius: var(--soft-radius);
   color: color-mix(in srgb, var(--fg) 90%, var(--muted));
   direction: ltr;
   display: flex;
   flex-direction: column;
-  font-size: 15px;
+  /* One body text line must equal lineHeight (1.25rem,
+     app.mosaic-geometry.js) exactly, or "k whole lines" no longer lands on
+     the module grid. font-size/line-height are chosen as a pair for that
+     product, not independently for typographic taste. */
+  font-size: 1rem;
   grid-row-end: span var(--message-pack-row-span, 1);
-  line-height: 1.38;
+  line-height: 1.25;
   max-width: none;
   min-width: 0;
-  padding: 9px;
+  padding: 0.5625rem;
   position: relative;
   width: 100%;
 }
@@ -374,8 +382,14 @@
   flex: 0 0 auto;
   font-size: 12px;
   gap: 8px;
+  /* Mosaic §4 interlock: fixed at 2 lineHeights (2.5rem) so the footer
+     never varies with its own content and comfortably contains the
+     32px .icon-button without clipping. Border(2px) + padding(18px) +
+     margin(0.5rem) + this height sum to a whole multiple of lineHeight
+     (1.25rem) at the default type ramp; see mosaic-sizing-interlock. */
+  height: 2.5rem;
   justify-content: space-between;
-  margin-top: 8px;
+  margin-top: 0.5rem;
 }
 .message-footer-left, .message-footer-right {
   align-items: center;
