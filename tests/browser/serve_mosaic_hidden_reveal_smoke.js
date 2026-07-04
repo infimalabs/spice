@@ -95,7 +95,9 @@ function hiddenRevealRectAgreement(lane) {
     disagreements,
     scrollDelta: lane.messagesEl.scrollWidth - lane.messagesEl.clientWidth,
     scrollHeight: lane.messagesEl.scrollHeight,
-    planeHeight: plane.getBoundingClientRect().height,
+    extentHeight: lane.mosaicExtentEl
+      ? Number.parseFloat(lane.mosaicExtentEl.style.height) || 0
+      : 0,
   };
 }
 
@@ -268,13 +270,13 @@ function assertAgreement(agreement, label) {
     );
   if (agreement.scrollDelta > 0)
     throw new Error(label + " horizontal overflow: " + agreement.scrollDelta);
-  if (agreement.scrollHeight > agreement.planeHeight + 64)
+  if (agreement.scrollHeight > agreement.extentHeight + 64)
     throw new Error(
       label +
         " scroll extent inflated: scrollHeight " +
         agreement.scrollHeight +
-        " vs plane " +
-        agreement.planeHeight,
+        " vs lattice extent " +
+        agreement.extentHeight,
     );
 }
 
