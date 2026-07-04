@@ -90,7 +90,7 @@ function card(creationIndex, candidates, extra) {
 // --- idempotence ----------------------------------------------------------
 
 // Replaying twice with unchanged candidates reproduces a byte-identical
-// layout -- the "compact" control the spec says is unnecessary would do
+// layout -- an explicit "compact" control would do
 // nothing, because this is already true.
 {
   const cards = [

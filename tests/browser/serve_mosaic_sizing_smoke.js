@@ -198,7 +198,7 @@ function assertSpotChecks(result) {
       );
   }
 
-  // At L=1 (lines=1), every k lands with near-zero slack -- the spec's own
+  // At L=1 (lines=1), every k lands with near-zero slack -- the
   // claim that a single lane has nothing to align across.
   const l1 = result.spotChecks.filter((check) => check.label === "L=1");
   if (!l1.every((check) => check.slack <= SIZING_CONGRUENCE_TOLERANCE_PX))

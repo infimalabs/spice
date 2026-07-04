@@ -65,7 +65,7 @@ function countingMeasure(heightBySpan) {
   );
 }
 
-// Exactly-at-threshold is inclusive (mirrors the reference demo's `>=`).
+// Exactly-at-threshold is inclusive (`>=`).
 {
   const measure = countingMeasure({ 4: 230, 8: 50 });
   const candidates = context.mosaicCandidates(4, TRACKS, GAP, MODULE, measure, TALL);

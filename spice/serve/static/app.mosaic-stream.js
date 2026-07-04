@@ -7,8 +7,8 @@
 // order -- none of the algorithm itself, which lives in the modules this
 // composes.
 //
-// Scope note (serve-specific extension beyond the spec, which is silent on
-// non-card stream elements): compaction dividers are real keyed messages
+// Scope note (non-card stream elements are a serve concern, not a lattice
+// concern): compaction dividers are real keyed messages
 // (kind === "compaction") and get the same forced-full-span lattice
 // treatment the legacy packer gave "barrier" nodes. Time rules are
 // synthesized fresh per render from adjacency gaps (timeRuleBetween,

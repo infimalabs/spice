@@ -5,7 +5,7 @@ const { withServePage } = require("./serve_playwright_harness");
 // drives real lanes through renderMessagesIfChanged exactly as live ack
 // hydration would (mutating lane.ackContextByKey/missingAckContextKeys
 // directly, not faking the fetch), and checks that resolution takes
-// exactly the branch the spec's demo resolvePending() takes -- wetReplay,
+// exactly one of the three defined resolution branches -- wetReplay,
 // frozen pad (zero writes), or frozen ripple -- plus the two safety
 // properties (resolution racing removal is a no-op; simultaneous
 // resolutions are creation-order stable).
