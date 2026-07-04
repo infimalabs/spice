@@ -355,25 +355,37 @@ function renderMessagesIfChanged(lane) {
   const visibleItems = renderItems.filter((item) => !isPresenceMessage(item));
   renderLaneViewShell(lane);
   const fingerprint = messageRenderFingerprint(lane, visibleItems);
-  if (fingerprint === lane.renderedMessageFingerprint) {
-    syncMessagePackLayoutIfNeeded(lane);
-    return;
-  }
+  if (fingerprint === lane.renderedMessageFingerprint) return;
   const viewportAnchor = captureMessageViewportAnchor(lane);
-  const existingNodes = existingMessageNodesByKey(lane);
-  const nodes = messageStreamNodesWithHistorySentinels(
-    lane,
-    visibleItems,
-    existingNodes,
-  );
   suppressLanePaneScrollIntentForFrame(lane);
-  lane.messagesEl.replaceChildren(...nodes);
-  packMessageStream(lane);
+  mosaicRenderMessageStream(lane, visibleItems);
+  mosaicAttachHistorySentinels(lane, visibleItems);
   restoreMessageViewportAnchor(lane, viewportAnchor);
-  syncMessagePackObserver(lane);
   syncLaneHistoryObserver(lane);
   syncTeamImportOverlay(lane);
   lane.renderedMessageFingerprint = fingerprint;
+}
+
+// History sentinels carry no lattice position of their own (the spec is
+// silent on non-card stream elements, mosaic-stream-integration); each
+// tracks a specific fused member's oldest visible message purely for
+// IntersectionObserver purposes, so appending it as a normal-flow child of
+// that message's own (already positioned) card reuses the card's real
+// geometry for free instead of computing a redundant position.
+function mosaicAttachHistorySentinels(lane, visibleItems) {
+  const membersByMessageKey = historySentinelMembersByMessageKey(lane, visibleItems);
+  let attachedAny = false;
+  for (const [messageKey, members] of membersByMessageKey) {
+    const card = lane.mosaicPlaneEl?.querySelector(
+      'article[data-message-key="' + CSS.escape(messageKey) + '"]',
+    );
+    if (!card) continue;
+    for (const member of members) {
+      card.append(historySentinelForLane(member));
+      attachedAny = true;
+    }
+  }
+  if (!attachedAny) lane.messagesEl.append(historySentinelForLane(lane));
 }
 
 function syncMessagePackLayoutIfNeeded(lane) {
@@ -391,6 +403,7 @@ function renderEmptyTeamMessages(lane) {
     lane.historySentinelEl,
   );
   resetMessagePackObserver(lane);
+  mosaicResetResizeObserver(lane);
   restoreMessageViewportAnchor(lane, viewportAnchor);
   syncLaneHistoryObserver(lane);
   lane.renderedMessageFingerprint = fingerprint;

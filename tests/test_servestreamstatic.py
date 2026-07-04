@@ -381,6 +381,14 @@ def test_static_mosaic_scroll_is_wired_after_render_before_message_pack():
     assert render_index < scroll_index < message_pack_index
 
 
+def test_static_mosaic_stream_is_wired_after_scroll_before_message_pack():
+    app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
+    scroll_index = app_js.index('src="/static/app.mosaic-scroll.js"')
+    stream_index = app_js.index('src="/static/app.mosaic-stream.js"')
+    message_pack_index = app_js.index('src="/static/app.message-pack.js"')
+    assert scroll_index < stream_index < message_pack_index
+
+
 def test_static_mosaic_wet_frozen_helpers_are_pure_and_covered():
     script = Path(__file__).with_name("fixtures") / "mosaic_wet_frozen.js"
 
