@@ -1,8 +1,8 @@
 // Mosaic stream integration (spec .spice/mosaic-packing-spec.md §1, §6, §7,
 // §8, §13). Wires the pure mosaic-*.js modules into the fingerprint-gated
 // render path (app.stream.js renderMessagesIfChanged): persistent per-card
-// lattice state keyed by message identity, replacing the legacy
-// packMessageStream whole-board repack. This module owns the DOM-facing
+// lattice state keyed by message identity, replacing the legacy grid
+// packer's whole-board repack. This module owns the DOM-facing
 // glue -- node lifecycle inside .mosaic-plane, event classification,
 // measurement, and calling engine/render primitives in the documented
 // order -- none of the algorithm itself, which lives in the modules this
@@ -72,12 +72,12 @@ function mosaicRootWidthState(lane, host, style) {
 }
 
 function mosaicClearRootWidth(lane, host) {
-  const hadClass = lane.element.classList.contains("lane--message-pack-root");
+  const hadClass = lane.element.classList.contains("lane--mosaic-root-width");
   const hadRootWidth = Boolean(
-    host.style.getPropertyValue("--message-pack-root-width"),
+    host.style.getPropertyValue("--mosaic-root-width"),
   );
-  lane.element.classList.remove("lane--message-pack-root");
-  host.style.removeProperty("--message-pack-root-width");
+  lane.element.classList.remove("lane--mosaic-root-width");
+  host.style.removeProperty("--mosaic-root-width");
   return hadClass || hadRootWidth;
 }
 
@@ -88,17 +88,17 @@ function mosaicSyncRootWidth(lane) {
   if (style.display !== "grid") return mosaicClearRootWidth(lane, host);
   const rootWidth = mosaicRootWidthState(lane, host, style);
   const classChanged =
-    lane.element.classList.contains("lane--message-pack-root") !==
+    lane.element.classList.contains("lane--mosaic-root-width") !==
     rootWidth.useRootWidth;
   lane.element.classList.toggle(
-    "lane--message-pack-root",
+    "lane--mosaic-root-width",
     rootWidth.useRootWidth,
   );
   if (!rootWidth.useRootWidth) {
     return mosaicClearRootWidth(lane, host) || classChanged;
   }
-  if (host.style.getPropertyValue("--message-pack-root-width") !== rootWidth.value) {
-    host.style.setProperty("--message-pack-root-width", rootWidth.value);
+  if (host.style.getPropertyValue("--mosaic-root-width") !== rootWidth.value) {
+    host.style.setProperty("--mosaic-root-width", rootWidth.value);
     return true;
   }
   return classChanged;
@@ -604,7 +604,7 @@ function mosaicRestoreBackfillViewport(lane, renderResult) {
 
 // ---- entry point --------------------------------------------------------------------
 
-// Replaces packMessageStream(lane) in the fingerprint-gated render path.
+// Replaces the legacy grid packer in the fingerprint-gated render path.
 // visibleItems is newest-first (matches app.stream.js's existing
 // convention); nodes are created/reused exactly as before, just parented
 // under the persistent .mosaic-plane instead of directly under
@@ -679,8 +679,8 @@ function mosaicRenderMessageStream(lane, visibleItems) {
   return { backfillViewport };
 }
 
-// ---- resize + image-load wiring (mirrors the legacy syncMessagePackObserver
-// pattern, retargeted at full replay instead of a repack) ---------------------------
+// ---- resize + image-load wiring (mirrors the legacy grid packer's resize
+// observer pattern, retargeted at full replay instead of a repack) -----------------
 
 function mosaicElementResizeSize(element) {
   const rect = element.getBoundingClientRect();

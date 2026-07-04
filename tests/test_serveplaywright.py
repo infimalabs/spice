@@ -190,41 +190,9 @@ def test_serve_composer_typing_latency_smoke_asserts_no_layout_work() -> None:
     assert "typingLatencyLaneCount = 4" in smoke
     assert "typingLatencyCardsPerLane = 48" in smoke
     assert "syncLanePaneMetrics = function" in smoke
-    assert "packMessageStream = function" in smoke
+    assert "mosaicRenderMessageStream = function" in smoke
     assert "typing triggered pane metric syncs" in smoke
     assert "typing triggered message packing" in smoke
-
-
-def test_serve_task_stack_smoke_asserts_card_fill() -> None:
-    smoke = (ROOT / "browser" / "serve_task_stack_smoke.js").read_text(encoding="utf-8")
-
-    assert 'require("./serve_playwright_harness")' in smoke
-    assert "withServePage(" in smoke
-    assert "task-directive-stack" in smoke
-    assert "message-image-stack" in smoke
-    assert "imageArticleWidth" in smoke
-    assert "messageCardLimit" in smoke
-    assert "messageCardFloor" in smoke
-    assert "messageCardHostInnerWidth" in smoke
-    assert "messageCardFirstRowFillWidth" in smoke
-    assert "messageCardFirstRowHeights" in smoke
-    assert "hostColumnGap" in smoke
-    assert "hostGridAutoFlow" in smoke
-    assert "messageCardRowSpans" in smoke
-    assert "hostRowGap" in smoke
-    assert "anchorStability" in smoke
-    assert "measureTaskStack(page, 1920)" in smoke
-    assert "measureTaskStack(page, 520)" in smoke
-    assert "messageCardLimit: rootFontSize * 30" in smoke
-    assert "const minCardWidth = measurement.messageCardFloor" in smoke
-    assert "task card below card min width" in smoke
-    assert "wide image card consumed too much row" in smoke
-    assert "wrapped image card did not fill row" in smoke
-    assert "wide message cards did not fill the row" in smoke
-    assert "wrapped message card did not fill row" in smoke
-    assert "wide message cards did not create multiple packed tiers" in smoke
-    assert "message cards still look stretched to row height" in smoke
-    assert "message repack moved the reading anchor" in smoke
 
 
 def test_serve_composer_reorder_smoke_asserts_swap_contract() -> None:

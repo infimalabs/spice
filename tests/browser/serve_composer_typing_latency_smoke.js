@@ -16,8 +16,8 @@ async function run() {
       await page.waitForFunction(
         () =>
           typeof addLane === "function" &&
-          typeof packMessageStream === "function" &&
-          typeof renderMessage === "function" &&
+          typeof mosaicRenderMessageStream === "function" &&
+          typeof renderMessagesIfChanged === "function" &&
           Array.isArray(targets) &&
           targets.length >= 4,
         { timeout: 10000 },
@@ -52,16 +52,12 @@ async function runTypingLatencySmokePage(config) {
   for (const targetId of targetIds) addLane(targetId);
   const lanes = targetIds.map((targetId) => laneStates.get(targetId));
   for (const lane of lanes) {
-    const host = lane.messagesEl;
-    host
-      .querySelectorAll("article[data-message-key], .compaction-divider, .time-rule")
-      .forEach((node) => node.remove());
-    host.append(
-      ...typingLatencySmokeItems(lane, config.cardCount).map((item) =>
-        renderMessage(lane, item),
-      ),
-    );
-    packMessageStream(lane);
+    const items = typingLatencySmokeItems(lane, config.cardCount);
+    lane.knownMessages = items.slice();
+    lane.knownMessageKeys = new Set(items.map((item) => item.key));
+    lane.retainedMessageLimit = config.cardCount;
+    lane.renderedMessageFingerprint = "";
+    renderMessagesIfChanged(lane);
     syncComposerShards(laneGroupHost(lane), laneGroupMemberLanes(laneGroupHost(lane)));
   }
   await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -72,7 +68,7 @@ async function runTypingLatencySmokePage(config) {
   textarea.focus({ preventScroll: true });
   await new Promise((resolve) => requestAnimationFrame(resolve));
   const originalSync = syncLanePaneMetrics;
-  const originalPack = packMessageStream;
+  const originalRender = mosaicRenderMessageStream;
   const durations = [];
   let metricSyncCount = 0;
   let packCount = 0;
@@ -80,9 +76,9 @@ async function runTypingLatencySmokePage(config) {
     metricSyncCount += 1;
     return originalSync.apply(this, args);
   };
-  packMessageStream = function (...args) {
+  mosaicRenderMessageStream = function (...args) {
     packCount += 1;
-    return originalPack.apply(this, args);
+    return originalRender.apply(this, args);
   };
   try {
     textarea.value = "";
@@ -100,7 +96,7 @@ async function runTypingLatencySmokePage(config) {
     }
   } finally {
     syncLanePaneMetrics = originalSync;
-    packMessageStream = originalPack;
+    mosaicRenderMessageStream = originalRender;
   }
   return {
     inputLength: config.inputText.length,
@@ -133,7 +129,7 @@ function typingLatencySmokeBodyHtml(index) {
     index +
     " carries enough prose to exercise Mosaic layout.</p>";
   if (index % 7 === 0)
-    return sentence + "<pre><code>packMessageStream(lane)</code></pre>";
+    return sentence + "<pre><code>mosaicRenderMessageStream(lane)</code></pre>";
   if (index % 5 === 0) return sentence + sentence + sentence + sentence;
   return sentence + sentence;
 }

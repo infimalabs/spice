@@ -2,8 +2,8 @@
 // §12 tallThreshold/wideFactor, §13). No card type is special: every card
 // evaluates baseSpan, and the wide tier only when ITS OWN measured height at
 // base width clears tallThreshold -- never by class, kind, or content type.
-// This is an explicit break from the legacy messagePackTrackSpan()
-// (app.message-pack.js lines 413-436), which grants finals 4-6 tracks,
+// This is an explicit break from the deleted legacy grid packer's
+// track-span-by-class heuristic, which granted finals 4-6 tracks,
 // media-rich/image-only 4, and acked 3 by class; those type preferences have
 // no successor here and must never be ported back in as biases, priors, or
 // thresholds-by-class.

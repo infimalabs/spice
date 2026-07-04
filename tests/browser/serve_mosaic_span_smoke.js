@@ -8,7 +8,7 @@ const { withServePage } = require("./serve_playwright_harness");
 // mosaicCandidates itself. tallThreshold travels through the evaluate
 // config (read live from the page's own MOSAIC_TALL_THRESHOLD_PX global)
 // rather than a lexically captured Node-side constant, per the established
-// smoke-test convention (see serve_masonry_smoke.js).
+// smoke-test convention (see serve_mosaic_render_smoke.js).
 
 const SPAN_SMOKE_WIDTH = 1200;
 const SPAN_SMOKE_SHORT_LINES = 1;

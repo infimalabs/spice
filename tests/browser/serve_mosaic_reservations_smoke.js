@@ -28,35 +28,46 @@ function mosaicReservationsBuildAckItem(key, ackKey) {
   };
 }
 
+// Drives a single message through the real mosaic render path
+// (renderMessagesIfChanged) against a fresh lattice, rather than calling
+// renderMessage/packMessageStream directly -- the legacy DOM harness these
+// measurements used before the mosaic-demolition sweep no longer exists.
+function mosaicReservationsRenderSingle(lane, item) {
+  delete lane.mosaicCards;
+  lane.messagesEl.innerHTML = "";
+  lane.knownMessages = [item];
+  lane.knownMessageKeys = new Set([item.key]);
+  lane.retainedMessageLimit = 1;
+  lane.renderedMessageFingerprint = "";
+  renderMessagesIfChanged(lane);
+  const node = lane.messagesEl.querySelector(
+    'article[data-message-key="' + item.key + '"]',
+  );
+  if (!node) throw new Error(item.key + ": card was not rendered");
+  return node;
+}
+
 function mosaicReservationsMeasurePendingAck() {
   const lane = mosaicReservationsResolveLane();
-  const host = lane.messagesEl;
-  host.innerHTML = "";
   lane.ackContextByKey.clear();
   lane.missingAckContextKeys.clear();
   const item = mosaicReservationsBuildAckItem("pending-ack-card", "ack-key-1");
-  const node = renderMessage(lane, item);
-  host.append(node);
-  packMessageStream(lane);
+  const node = mosaicReservationsRenderSingle(lane, item);
   const skeleton = node.querySelector(".ack-quote--pending");
   const rootFontSizePx = mosaicRootFontSizePx();
-  const style = getComputedStyle(host);
-  const rowGap = Number.parseFloat(style.rowGap) || 0;
-  const rowStride = (Number.parseFloat(style.gridAutoRows) || 0) + rowGap;
+  const geometry = lane.mosaicGeometry;
   const reservedRows = mosaicReservationRows(
     "ack",
     rootFontSizePx,
-    rowGap,
-    rowStride,
+    geometry.gap,
+    geometry.M,
   );
+  const card = lane.mosaicCards.find((candidate) => candidate.key === item.key);
   return {
     articleReserve: node.dataset.mosaicReservationType,
     expectedReserve: mosaicReservationPriorPx("ack", rootFontSizePx),
     reservedRows,
-    rowSpan: Number.parseInt(
-      node.style.getPropertyValue("--message-pack-row-span"),
-      10,
-    ),
+    rowSpan: card ? card.n : null,
     skeletonKey: skeleton ? skeleton.dataset.ackContextKey : "",
     skeletonReserve: skeleton
       ? Number.parseFloat(skeleton.style.getPropertyValue("--ack-quote-reserve"))
@@ -66,8 +77,6 @@ function mosaicReservationsMeasurePendingAck() {
 
 function mosaicReservationsMeasureResolvedAck() {
   const lane = mosaicReservationsResolveLane();
-  const host = lane.messagesEl;
-  host.innerHTML = "";
   lane.ackContextByKey.set("ack-key-2", {
     attachments: [],
     html: "<p>quoted context</p>",
@@ -76,9 +85,7 @@ function mosaicReservationsMeasureResolvedAck() {
     text: "quoted context",
   });
   const item = mosaicReservationsBuildAckItem("resolved-ack-card", "ack-key-2");
-  const node = renderMessage(lane, item);
-  host.append(node);
-  packMessageStream(lane);
+  const node = mosaicReservationsRenderSingle(lane, item);
   const quote = node.querySelector(".ack-quote");
   return {
     articleReserve: node.dataset.mosaicReservationType || "",
@@ -125,18 +132,22 @@ function mosaicReservationsBuildImageItem(key, imageOnly) {
 
 function mosaicReservationsMeasureImages() {
   const lane = mosaicReservationsResolveLane();
-  const host = lane.messagesEl;
-  host.innerHTML = "";
-  const regular = renderMessage(
-    lane,
-    mosaicReservationsBuildImageItem("regular-image-card", false),
+  const regularItem = mosaicReservationsBuildImageItem("regular-image-card", false);
+  const largeItem = mosaicReservationsBuildImageItem("large-image-card", true);
+  delete lane.mosaicCards;
+  lane.messagesEl.innerHTML = "";
+  lane.knownMessages = [largeItem, regularItem];
+  lane.knownMessageKeys = new Set([largeItem.key, regularItem.key]);
+  lane.retainedMessageLimit = 2;
+  lane.renderedMessageFingerprint = "";
+  renderMessagesIfChanged(lane);
+  const regular = lane.messagesEl.querySelector(
+    'article[data-message-key="' + regularItem.key + '"]',
   );
-  const large = renderMessage(
-    lane,
-    mosaicReservationsBuildImageItem("large-image-card", true),
+  const large = lane.messagesEl.querySelector(
+    'article[data-message-key="' + largeItem.key + '"]',
   );
-  host.append(regular, large);
-  packMessageStream(lane);
+  if (!regular || !large) throw new Error("image reservation cards were not rendered");
   const regularImg = regular.querySelector(".message-image img");
   const largeImg = large.querySelector(".message-image img");
   return {
@@ -209,6 +220,7 @@ async function installMosaicReservationsHelpers(page) {
   await page.addScriptTag({
     content: [
       mosaicReservationsResolveLane,
+      mosaicReservationsRenderSingle,
       mosaicReservationsBuildAckItem,
       mosaicReservationsMeasurePendingAck,
       mosaicReservationsMeasureResolvedAck,
@@ -224,8 +236,7 @@ async function installMosaicReservationsHelpers(page) {
 async function waitForMosaicReservationsGlobals(page) {
   await page.waitForFunction(
     () =>
-      typeof renderMessage === "function" &&
-      typeof packMessageStream === "function" &&
+      typeof renderMessagesIfChanged === "function" &&
       typeof mosaicReservationPriorPx === "function" &&
       typeof mosaicReservationRows === "function" &&
       typeof mosaicWetReplay === "function" &&
