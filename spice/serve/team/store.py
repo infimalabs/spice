@@ -92,6 +92,13 @@ ZERO_ACTIVITY_EVENT_KINDS = frozenset(
 PRUNE_EVENT_TEAM_ID = "__system__"
 GLOBAL_SETTINGS_EVENT_TEAM_ID = "__global_settings__"
 GLOBAL_FAST_MODE_KEY = "fast_mode"
+# A team fills six accent slots (the message occupant palette in
+# app.render.js has exactly six colors and throws on a seventh). Enforce that
+# ceiling at every membership-growing path -- create, single assign/move, and
+# merge -- so a merge or a driver switch that appends a successor can never
+# push a team past what it can render. Renewal successors that inherit an
+# existing slot do not count as growth and are never blocked.
+MAX_TEAM_MEMBERS = 6
 
 
 def team_database_path() -> Path:
@@ -362,6 +369,11 @@ class ServeTeamStore(
         members: Iterable[str],
     ) -> TeamState:
         member_list = list(members)
+        if len(dict.fromkeys(member_list)) > MAX_TEAM_MEMBERS:
+            raise SpiceError(
+                f"team is limited to {MAX_TEAM_MEMBERS} agents; "
+                f"cannot create a team of {len(member_list)}"
+            )
         if team_id is None:
             reused = self._adopt_open_shell_team_locked(connection, config, member_list)
             if reused is not None:
@@ -515,6 +527,14 @@ class ServeTeamStore(
                 "DELETE FROM memberships WHERE agent_id = ?", (alias_id,)
             )
         if inherited_position is None:
+            # Genuinely new member (no alias already holds a slot here), so
+            # this grows the team -- enforce the ceiling. Renewal successors
+            # took the inherited-position branch above and are exempt.
+            if self._team_member_count_locked(connection, team_id) >= MAX_TEAM_MEMBERS:
+                raise SpiceError(
+                    f"team is limited to {MAX_TEAM_MEMBERS} agents; "
+                    f"{agent_id} would exceed it"
+                )
             row = connection.execute(
                 "SELECT COALESCE(MAX(position) + 1, 0) AS position "
                 "FROM memberships WHERE team_id = ?",
@@ -713,6 +733,17 @@ class ServeTeamStore(
             (source_team_id,),
         ).fetchall()
         agent_ids = [str(row["agent_id"]) for row in rows]
+        # Reject the whole merge up front rather than half-filling the
+        # destination: source agents are distinct membership ids not present
+        # in the destination, so every one is net-new growth.
+        destination_count = self._team_member_count_locked(
+            connection, destination_team_id
+        )
+        if destination_count + len(agent_ids) > MAX_TEAM_MEMBERS:
+            raise SpiceError(
+                f"team is limited to {MAX_TEAM_MEMBERS} agents: merging "
+                f"{len(agent_ids)} into a team of {destination_count} exceeds it"
+            )
         for agent_id in agent_ids:
             self._assign_locked(connection, destination_team_id, agent_id)
         connection.execute(
@@ -793,6 +824,15 @@ class ServeTeamStore(
             team_id,
             {"agentIds": ordered_agent_ids},
         )
+
+    def _team_member_count_locked(
+        self, connection: sqlite3.Connection, team_id: str
+    ) -> int:
+        row = connection.execute(
+            "SELECT COUNT(*) AS count FROM memberships WHERE team_id = ?",
+            (team_id,),
+        ).fetchone()
+        return int(row["count"] or 0) if row else 0
 
     def _team_member_ids_locked(
         self, connection: sqlite3.Connection, team_id: str
