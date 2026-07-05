@@ -63,6 +63,31 @@ def test_team_event_wakes_task_event_file_after_commit(tmp_path):
         task_config.set_backend(None)
 
 
+def test_reorder_does_not_wake_the_lane_watchers(tmp_path):
+    # A composer reorder permutes accent slots only -- no lane's messages
+    # change -- so it must NOT bump the watched task event file. Waking made
+    # every swap re-push all members' messages and re-render the whole board.
+    task_config.set_backend(str(tmp_path / "task-backend"))
+    try:
+        event_path = task_config.ensure_task_event_file()
+        store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+        team = store.create_team(members=["thread:a", "thread:b", "thread:c"])
+
+        after_create = event_path.read_text(encoding="utf-8")
+        store.reorder_team_agents(team.team_id, ["thread:b", "thread:a", "thread:c"])
+        after_reorder = event_path.read_text(encoding="utf-8")
+        assert after_reorder == after_create  # reorder did NOT wake the watchers
+
+        # A membership change still wakes them (its stream genuinely changes).
+        store.remove_agent(team.team_id, "thread:c")
+        assert event_path.read_text(encoding="utf-8") != after_reorder
+
+        state = store.team_state(team.team_id)
+        assert [member.agent_id for member in state.members] == ["thread:b", "thread:a"]
+    finally:
+        task_config.set_backend(None)
+
+
 def test_team_metric_write_does_not_wake_task_event_file(tmp_path):
     task_config.set_backend(str(tmp_path / "task-backend"))
     try:
