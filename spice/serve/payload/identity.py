@@ -430,16 +430,16 @@ def _promote_team_actor(
 def _target_actor_previous_names(
     store: ServeTeamStore, target: WorktreeTarget, actor: str
 ) -> list[str]:
-    # The target actor AND every prior thread actor of this target: a driver
-    # switch mints a new thread whose only shared identity with the team's
-    # existing membership is the target, but the membership may already sit
-    # under an EARLIER thread of that target (the placeholder was rewritten to
-    # a thread on first bind). Offering all prior threads as aliases lets the
-    # successor inherit that slot instead of appending a duplicate member.
+    # A driver switch is an implicit renewal: the successor inherits the ONE
+    # slot the target currently holds, whatever actor form holds it (target
+    # actor, or an earlier thread of the same target after the placeholder was
+    # rewritten on first bind). Resolving the current membership keeps the
+    # alias set bounded by the live roster -- offering the target's whole
+    # thread history would grow it with every switch.
     names: list[str] = []
     candidates = [
         target_actor_id(target.id),
-        *store.thread_actors_for_target(target.id),
+        *store.team_membership_actors_for_target(target.id),
     ]
     for name in candidates:
         if name and name != actor and name not in names:

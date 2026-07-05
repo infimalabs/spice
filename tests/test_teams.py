@@ -499,12 +499,25 @@ def test_driver_switch_successor_replaces_prior_thread_membership(tmp_path):
     _record_identity(store, "thread:new", target_id="wt-a", thread_id="new")
     target = SimpleNamespace(id="wt-a")
     names = identity_payload._target_actor_previous_names(store, target, "thread:new")
-    assert "thread:old" in names  # prior thread offered as an alias
+    assert "thread:old" in names  # the current membership offered as an alias
     identity_payload._promote_team_actor(store, "thread:new", names)
 
     after = [member.agent_id for member in store.team_state(team.team_id).members]
     assert after == ["thread:new", "thread:b", "thread:c"]  # replaced, not appended
     assert store.current_team_for_agent("thread:old") is None
+
+    # A second switch must stay bounded: it offers the CURRENT membership
+    # (thread:new) but never the grandparent (thread:old), so the alias set a
+    # successor carries does not grow with the target's thread history.
+    _record_identity(store, "thread:newer", target_id="wt-a", thread_id="newer")
+    names2 = identity_payload._target_actor_previous_names(
+        store, target, "thread:newer"
+    )
+    assert "thread:new" in names2
+    assert "thread:old" not in names2
+    identity_payload._promote_team_actor(store, "thread:newer", names2)
+    final = [member.agent_id for member in store.team_state(team.team_id).members]
+    assert final == ["thread:newer", "thread:b", "thread:c"]
 
 
 def test_reorder_resolves_client_ids_through_aliases(tmp_path):
