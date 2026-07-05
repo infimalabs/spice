@@ -692,6 +692,15 @@ function mosaicRunFullReplay(lane, entries, nodesByKey, geometry) {
   const replayed = mosaicFullReplay(withCandidates, mosaicGridTrackCount, MOSAIC_FREEZE_DEPTH);
   lane.mosaicCards = replayed.map(({ candidates, ...card }) => card);
   lane.mosaicNextCreationIndex = entries.length;
+  // Full replay just re-measured and re-placed every card, so any pending
+  // content-dirty marks are already consumed. Clear them: unlike the
+  // incremental branches, this path does not run the content-diff pass, and
+  // a mark left behind would make the NEXT content-diff render re-measure a
+  // card that never changed -- a spurious one-time ripple after a replay
+  // (e.g. a task card rebuilt during a replay, flushed on a later reorder).
+  for (const node of nodesByKey.values()) {
+    if (node.dataset) delete node.dataset.mosaicContentDirty;
+  }
 }
 
 function mosaicCaptureBackfillViewport(lane) {
