@@ -340,6 +340,19 @@
   display: grid;
   gap: 6px;
 }
+/* Same reserved footprint as the shimmer skeleton so a failed lookup swaps
+   in without reflowing the card -- but static and labeled. */
+.ack-quote--missing {
+  min-height: var(--ack-quote-reserve, 3.5rem);
+  display: grid;
+  place-items: center;
+}
+.ack-quote-missing-label {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-style: italic;
+  opacity: 0.7;
+}
 .ack-quote-skeleton-line {
   align-self: center;
   background: color-mix(in srgb, var(--quote-accent) 18%, transparent);

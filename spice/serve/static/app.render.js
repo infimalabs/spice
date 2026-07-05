@@ -726,10 +726,12 @@ function messageReservationType(lane, item) {
 
 function messageHasPendingAckContext(lane, item) {
   for (const key of messageAckSegmentKeys(item)) {
-    // Pending means the lookup is still outstanding -- a confirmed-missing
-    // key (found:false) is resolved, not pending, so it reserves nothing.
-    if (key && !ackContextForKey(lane, key) && !ackContextConfirmedMissing(lane, key))
-      return true;
+    // A key that is not yet resolved reserves its quote block whether the
+    // lookup is still outstanding (skeleton) or came back missing (a
+    // same-height "unavailable" block) -- both hold the reservation so a
+    // failed ack never reflows the card. Only a resolved-with-content key
+    // measures real content.
+    if (key && !ackContextForKey(lane, key)) return true;
   }
   return false;
 }
@@ -785,19 +787,21 @@ function makeMessageBody(html, fallbackText) {
 function renderSegmentQuotes(lane, keys) {
   const refs = (keys || [])
     .filter((key) => key)
-    // A confirmed-missing key contributes nothing -- no quote, no skeleton --
-    // so a failed ack lookup leaves no dangling placeholder.
-    .filter((key) => !ackContextConfirmedMissing(lane, key))
-    .map((key) => ({ key, context: ackContextForKey(lane, key) }));
+    .map((key) => ({
+      key,
+      context: ackContextForKey(lane, key),
+      missing: ackContextConfirmedMissing(lane, key),
+    }));
   if (!refs.length) return null;
   const wrap = document.createElement("div");
   wrap.className = "ack-quotes";
   for (const ref of refs) {
-    wrap.append(
-      ref.context && ref.context.text
-        ? renderAckQuote(ref.context)
-        : renderPendingAckQuote(ref.key),
-    );
+    if (ref.context && ref.context.text) wrap.append(renderAckQuote(ref.context));
+    // A confirmed-missing key swaps the shimmer for a same-height failed
+    // block so the reservation is honored without a reflow; a still-loading
+    // key keeps shimmering.
+    else if (ref.missing) wrap.append(renderMissingAckQuote(ref.key));
+    else wrap.append(renderPendingAckQuote(ref.key));
   }
   return wrap;
 }
@@ -828,6 +832,25 @@ function renderPendingAckQuote(key) {
     line.className = "ack-quote-skeleton-line ack-quote-skeleton-line--" + width;
     quote.append(line);
   }
+  return quote;
+}
+
+// Same reserved footprint as the pending skeleton, so a lookup that resolves
+// missing swaps in place with zero reflow -- but static (no shimmer) and
+// labeled, so the reader sees the context failed to load rather than a
+// spinner that never resolves.
+function renderMissingAckQuote(key) {
+  const quote = document.createElement("blockquote");
+  quote.className = "ack-quote ack-quote--missing";
+  quote.dataset.ackContextKey = key;
+  quote.dataset.mosaicReservationType = "ack";
+  const reservePx = pendingAckQuoteReservePx();
+  if (Number.isFinite(reservePx) && reservePx > 0)
+    quote.style.setProperty("--ack-quote-reserve", reservePx + "px");
+  const label = document.createElement("span");
+  label.className = "ack-quote-missing-label";
+  label.textContent = "context unavailable";
+  quote.append(label);
   return quote;
 }
 
