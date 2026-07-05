@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from spice.serve.team.ids import normalized_id as _normalized_id
+from spice.serve.team.ids import target_actor_id as _target_actor_id
 from spice.serve.team.models import TeamAgentIdentity
 
 
@@ -245,25 +246,30 @@ class TeamIdentityStoreMixin:
             row = self._agent_identity_row_locked(connection, actor_id)
             return agent_identity_from_row(row) if row is not None else None
 
-    def thread_actors_for_target(self: _TeamIdentityStore, target_id: str) -> list[str]:
-        """Every thread actor ever recorded for a target, newest first.
+    def team_membership_actors_for_target(
+        self: _TeamIdentityStore, target_id: str
+    ) -> list[str]:
+        """The actor(s) that CURRENTLY hold a team slot for a target.
 
-        A driver switch mints a new thread for the same target; team
-        membership may already sit under an earlier thread of that target, so
-        the successor must offer all of them as aliases to inherit that slot
-        rather than append a duplicate.
+        A driver switch is an implicit renewal: the new thread inherits the
+        one slot the target already occupies, whatever actor form holds it
+        (the target actor, or an earlier thread of the same target). Bounded
+        by the current roster -- never the target's full thread history -- so
+        the alias set a successor carries cannot grow with each switch. A
+        clean roster yields exactly one; the query also surfaces any stale
+        duplicate so a single bind collapses it.
         """
         target = str(target_id or "").strip()
         if not target:
             return []
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT actor_id FROM agent_identities "
-                "WHERE target_id = ? AND actor_id LIKE 'thread:%' "
-                "ORDER BY updated_at DESC",
-                (target,),
+                "SELECT m.agent_id FROM memberships m "
+                "LEFT JOIN agent_identities i ON i.actor_id = m.agent_id "
+                "WHERE m.agent_id = ? OR i.target_id = ?",
+                (_target_actor_id(target), target),
             ).fetchall()
-        return [str(row["actor_id"]) for row in rows]
+        return [str(row["agent_id"]) for row in rows]
 
 
 def target_id_from_actor(actor_id: str) -> str:
