@@ -612,7 +612,7 @@ function wireComposerMoveDrag(host, handle, targetId) {
   });
   handle.addEventListener("pointerup", (event) => {
     if (!composerMoveDragMatches(event)) return;
-    finishComposerMoveDrag(composerMoveDragState, event.clientX, event.clientY);
+    finishComposerMoveDrag(composerMoveDragState);
   });
   handle.addEventListener("pointercancel", (event) => {
     if (!composerMoveDragMatches(event)) return;
@@ -659,7 +659,7 @@ function wireComposerMovePointerDocumentEvents(handle) {
   };
   const onUp = (event) => {
     if (!composerMoveDragMatches(event)) return;
-    finishComposerMoveDrag(composerMoveDragState, event.clientX, event.clientY);
+    finishComposerMoveDrag(composerMoveDragState);
   };
   const onCancel = (event) => {
     if (!composerMoveDragMatches(event)) return;
@@ -682,7 +682,7 @@ function wireComposerMoveMouseDocumentEvents(handle) {
   };
   const onUp = (event) => {
     if (!composerMoveDragState) return;
-    finishComposerMoveDrag(composerMoveDragState, event.clientX, event.clientY);
+    finishComposerMoveDrag(composerMoveDragState);
   };
   document.addEventListener("mousemove", onMove);
   document.addEventListener("mouseup", onUp, { once: true });
@@ -853,8 +853,14 @@ function composerCanMoveToLane(sourceMember, targetLane) {
   );
 }
 
-function finishComposerMoveDrag(state, clientX, clientY) {
-  updateComposerMoveDragTarget(state, clientX, clientY);
+// The drop commits exactly what the preview shows. state.dropTarget is
+// re-resolved on every pointermove, coherently with the painted preview
+// (a noop clears both), so re-resolving here against the RELEASE
+// coordinates only introduces disagreement: a few pixels of hand wobble on
+// release -- pointerup routinely lands outside the thin shard strip that
+// the last pointermove was inside -- resolved to no target and silently
+// ate a swap the preview was still promising.
+function finishComposerMoveDrag(state) {
   const { host, targetId, dropTarget, dragging } = state;
   clearComposerMoveDrag(state);
   if (!dragging || !dropTarget) return;
@@ -927,7 +933,10 @@ async function reorderComposersOnServer(host, orderedTargetIds) {
   await requestTeamCommand(
     teamCommandPayload("reorderTeamAgents", {
       teamId,
-      agentIds: members.map((member) => laneTeamAgentId(member)),
+      agents: members.map((member) => ({
+        agentId: laneTeamAgentId(member),
+        agentAliases: laneTeamAgentAliases(member),
+      })),
     }),
   );
 }
