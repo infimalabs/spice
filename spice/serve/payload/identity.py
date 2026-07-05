@@ -129,13 +129,35 @@ def normalize_team_command_payload(
             normalized["agentId"] = _normalize_command_actor(
                 normalized["agentId"], target_ids
             )
-    elif command in {"splitTeam", "reorderTeamAgents"}:
+    elif command == "splitTeam":
         normalized["agentIds"] = [
             _normalize_command_actor(item, target_ids)
             for item in normalized.get("agentIds") or []
             if str(item or "").strip()
         ]
+    elif command == "reorderTeamAgents":
+        # reorder carries per-agent aliases (agentId + agentAliases); normalize
+        # every actor form so the store resolves against membership the same
+        # way whether the client sent thread- or target-actor ids.
+        normalized["agents"] = [
+            _normalize_command_agent_entry(item, target_ids)
+            for item in normalized.get("agents") or []
+            if isinstance(item, dict) and str(item.get("agentId") or "").strip()
+        ]
     return normalized
+
+
+def _normalize_command_agent_entry(
+    item: dict[str, Any], target_ids: set[str]
+) -> dict[str, Any]:
+    return {
+        "agentId": _normalize_command_actor(item.get("agentId"), target_ids),
+        "agentAliases": [
+            _normalize_command_actor(alias, target_ids)
+            for alias in item.get("agentAliases") or []
+            if str(alias or "").strip()
+        ],
+    }
 
 
 def serve_agent_identity_payload(

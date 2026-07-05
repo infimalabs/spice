@@ -753,8 +753,16 @@ class ServeTeamStore(
         ).fetchall()
         current_agent_ids = [str(row["agent_id"]) for row in rows]
         current_set = set(current_agent_ids)
-        # Entries are bare ids or (id, aliases); each resolves to whichever
-        # alias is the actual membership id, mirroring _remove_agent_locked.
+        # A PARTIAL reorder. The client only knows the members it has open as
+        # composers, which is routinely a subset of the team (a member can be
+        # closed on the client, or an extra membership can linger) -- so
+        # reorder must never demand the full set. Entries are bare ids or
+        # (id, aliases); each resolves to its membership id via alias, exactly
+        # like _remove_agent_locked. The resolved subset is permuted among the
+        # slots those same members currently occupy; every unmentioned member
+        # keeps its position. Requiring the exact set here is what rejected
+        # every real drag ("reorder requires exactly the current team
+        # members") on a team with any closed or lingering member.
         ordered_agent_ids = []
         for entry in agents:
             agent_id, aliases = entry if isinstance(entry, tuple) else (entry, ())
@@ -767,13 +775,17 @@ class ServeTeamStore(
             ordered_agent_ids.append(member_id)
         if len(set(ordered_agent_ids)) != len(ordered_agent_ids):
             raise SpiceError("reorder requires unique agent ids")
-        if set(ordered_agent_ids) != current_set:
-            raise SpiceError("reorder requires exactly the current team members")
-        for index, agent_id in enumerate(ordered_agent_ids):
+        reorder_set = set(ordered_agent_ids)
+        # The slots the mentioned members occupy, ascending; fill them in the
+        # requested order. Rows are already position-ordered.
+        target_positions = [
+            int(row["position"]) for row in rows if str(row["agent_id"]) in reorder_set
+        ]
+        for position, agent_id in zip(target_positions, ordered_agent_ids):
             connection.execute(
                 "UPDATE memberships SET position = ? "
                 "WHERE team_id = ? AND agent_id = ?",
-                (index, team_id, agent_id),
+                (position, team_id, agent_id),
             )
         return self._record_event(
             connection,
