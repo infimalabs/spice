@@ -98,9 +98,17 @@ class TeamCommandService:
     def _cmd_reorder_team_agents(
         self, payload: dict[str, Any], connection: sqlite3.Connection
     ) -> None:
-        agent_ids = [str(item) for item in payload.get("agentIds") or [] if item]
+        # Each entry carries the client's aliases so membership ids resolve
+        # the same way remove/assign resolve them: a member whose membership
+        # row is target:-form while the client now derives the thread actor
+        # must still reorder, not reject the whole set.
+        agents = []
+        for item in payload.get("agents") or []:
+            if not isinstance(item, dict):
+                raise SpiceError("reorder agents entries must be objects")
+            agents.append((_required(item, "agentId"), _aliases(item)))
         self.store._reorder_team_agents_locked(
-            connection, _required(payload, "teamId"), agent_ids
+            connection, _required(payload, "teamId"), agents
         )
 
     def _cmd_update_team_config(

@@ -340,7 +340,7 @@ def test_team_command_payload_preserves_explicit_actor_ids(tmp_path):
         {
             "command": "reorderTeamAgents",
             "teamId": team_id,
-            "agentIds": [ACTOR_A, target_actor],
+            "agents": [{"agentId": ACTOR_A}, {"agentId": target_actor}],
         },
     )
 

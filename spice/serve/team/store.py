@@ -743,18 +743,30 @@ class ServeTeamStore(
         self,
         connection: sqlite3.Connection,
         team_id: str,
-        agent_ids: Iterable[str],
+        agents: Iterable[str | tuple[str, Iterable[str]]],
     ) -> int:
-        ordered_agent_ids = [_normalized_id(agent, "agent_id") for agent in agent_ids]
-        if len(set(ordered_agent_ids)) != len(ordered_agent_ids):
-            raise SpiceError("reorder requires unique agent ids")
         self._require_team(connection, team_id)
         rows = connection.execute(
             "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY position",
             (team_id,),
         ).fetchall()
         current_agent_ids = [str(row["agent_id"]) for row in rows]
-        if set(ordered_agent_ids) != set(current_agent_ids):
+        current_set = set(current_agent_ids)
+        # Entries are bare ids or (id, aliases); each resolves to whichever
+        # alias is the actual membership id, mirroring _remove_agent_locked.
+        ordered_agent_ids = []
+        for entry in agents:
+            agent_id, aliases = entry if isinstance(entry, tuple) else (entry, ())
+            alias_ids = _agent_alias_ids(_normalized_id(agent_id, "agent_id"), aliases)
+            member_id = next(
+                (alias for alias in alias_ids if alias in current_set), None
+            )
+            if member_id is None:
+                raise SpiceError(f"agent {agent_id} is not assigned to team {team_id}")
+            ordered_agent_ids.append(member_id)
+        if len(set(ordered_agent_ids)) != len(ordered_agent_ids):
+            raise SpiceError("reorder requires unique agent ids")
+        if set(ordered_agent_ids) != current_set:
             raise SpiceError("reorder requires exactly the current team members")
         for index, agent_id in enumerate(ordered_agent_ids):
             connection.execute(

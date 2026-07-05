@@ -308,7 +308,11 @@ def test_team_command_service_reorders_team_agents(tmp_path):
         {
             "command": "reorderTeamAgents",
             "teamId": team.team_id,
-            "agentIds": ["agent-c", "agent-a", "agent-b"],
+            "agents": [
+                {"agentId": "agent-c"},
+                {"agentId": "agent-a"},
+                {"agentId": "agent-b"},
+            ],
             "expectedRevision": created.revision,
         }
     )
@@ -437,6 +441,58 @@ def test_started_renewal_preserves_predecessor_roster_slot(tmp_path):
     assert renewal.successor_identity["actorId"] == "thread:agent-b-renewed"
     assert renewal.successor_identity["targetId"] == "wt-b"
     assert renewal.successor_identity["threadId"] == "agent-b-renewed"
+
+
+def test_reorder_resolves_client_ids_through_aliases(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    service = TeamCommandService(store)
+    created = service.apply(
+        {
+            "command": "createTeam",
+            "members": ["target:wt-a", "target:wt-b", "target:wt-c"],
+        }
+    )
+    team = created.snapshot.teams[0]
+
+    service.apply(
+        {
+            "command": "reorderTeamAgents",
+            "teamId": team.team_id,
+            "agents": [
+                {"agentId": "thread:tb", "agentAliases": ["target:wt-b"]},
+                {"agentId": "thread:ta", "agentAliases": ["target:wt-a"]},
+                {"agentId": "thread:tc", "agentAliases": ["target:wt-c"]},
+            ],
+        }
+    )
+
+    state = store.team_state(team.team_id)
+    assert [member.agent_id for member in state.members] == [
+        "target:wt-b",
+        "target:wt-a",
+        "target:wt-c",
+    ]
+
+
+def test_reorder_rejects_id_no_alias_resolves(tmp_path):
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    service = TeamCommandService(store)
+    created = service.apply(
+        {"command": "createTeam", "members": ["target:wt-a", "target:wt-b"]}
+    )
+    team = created.snapshot.teams[0]
+
+    with pytest.raises(SpiceError, match="not assigned"):
+        service.apply(
+            {
+                "command": "reorderTeamAgents",
+                "teamId": team.team_id,
+                "agents": [
+                    {"agentId": "thread:stranger"},
+                    {"agentId": "target:wt-b"},
+                ],
+            }
+        )
 
 
 def test_reorder_then_renew_preserves_successor_visible_slot(tmp_path):
