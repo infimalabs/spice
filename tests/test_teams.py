@@ -481,6 +481,32 @@ def test_started_renewal_preserves_predecessor_roster_slot(tmp_path):
     assert renewal.successor_identity["threadId"] == "agent-b-renewed"
 
 
+def test_driver_switch_successor_replaces_prior_thread_membership(tmp_path):
+    # The bug that produced a seventh member: a team's membership sits under an
+    # earlier THREAD of a target (the placeholder was rewritten to a thread on
+    # first bind), then a driver switch mints a new thread for the same target.
+    # The successor's only shared identity with the roster is the target, so if
+    # the promotion offers only the target actor it appends a duplicate. It must
+    # also offer the target's prior threads as aliases and inherit the slot.
+    from types import SimpleNamespace
+
+    from spice.serve.payload import identity as identity_payload
+
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    _record_identity(store, "thread:old", target_id="wt-a", thread_id="old")
+    team = store.create_team(members=["thread:old", "thread:b", "thread:c"])
+
+    _record_identity(store, "thread:new", target_id="wt-a", thread_id="new")
+    target = SimpleNamespace(id="wt-a")
+    names = identity_payload._target_actor_previous_names(store, target, "thread:new")
+    assert "thread:old" in names  # prior thread offered as an alias
+    identity_payload._promote_team_actor(store, "thread:new", names)
+
+    after = [member.agent_id for member in store.team_state(team.team_id).members]
+    assert after == ["thread:new", "thread:b", "thread:c"]  # replaced, not appended
+    assert store.current_team_for_agent("thread:old") is None
+
+
 def test_reorder_resolves_client_ids_through_aliases(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     service = TeamCommandService(store)

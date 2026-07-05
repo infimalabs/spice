@@ -89,7 +89,9 @@ def team_actor_for_target(
     before callers read team facts.
     """
     actor = target_bound_actor(target, thread_id)
-    _promote_team_actor(store, actor, _target_actor_previous_names(target, actor))
+    _promote_team_actor(
+        store, actor, _target_actor_previous_names(store, target, actor)
+    )
     return actor
 
 
@@ -425,10 +427,21 @@ def _promote_team_actor(
         return
 
 
-def _target_actor_previous_names(target: WorktreeTarget, actor: str) -> list[str]:
+def _target_actor_previous_names(
+    store: ServeTeamStore, target: WorktreeTarget, actor: str
+) -> list[str]:
+    # The target actor AND every prior thread actor of this target: a driver
+    # switch mints a new thread whose only shared identity with the team's
+    # existing membership is the target, but the membership may already sit
+    # under an EARLIER thread of that target (the placeholder was rewritten to
+    # a thread on first bind). Offering all prior threads as aliases lets the
+    # successor inherit that slot instead of appending a duplicate member.
     names: list[str] = []
-    target_actor = target_actor_id(target.id)
-    for name in (target_actor,):
+    candidates = [
+        target_actor_id(target.id),
+        *store.thread_actors_for_target(target.id),
+    ]
+    for name in candidates:
         if name and name != actor and name not in names:
             names.append(name)
     return names

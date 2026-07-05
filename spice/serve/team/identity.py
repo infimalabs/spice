@@ -245,6 +245,26 @@ class TeamIdentityStoreMixin:
             row = self._agent_identity_row_locked(connection, actor_id)
             return agent_identity_from_row(row) if row is not None else None
 
+    def thread_actors_for_target(self: _TeamIdentityStore, target_id: str) -> list[str]:
+        """Every thread actor ever recorded for a target, newest first.
+
+        A driver switch mints a new thread for the same target; team
+        membership may already sit under an earlier thread of that target, so
+        the successor must offer all of them as aliases to inherit that slot
+        rather than append a duplicate.
+        """
+        target = str(target_id or "").strip()
+        if not target:
+            return []
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT actor_id FROM agent_identities "
+                "WHERE target_id = ? AND actor_id LIKE 'thread:%' "
+                "ORDER BY updated_at DESC",
+                (target,),
+            ).fetchall()
+        return [str(row["actor_id"]) for row in rows]
+
 
 def target_id_from_actor(actor_id: str) -> str:
     actor = str(actor_id or "").strip()
