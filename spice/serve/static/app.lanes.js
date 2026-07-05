@@ -499,11 +499,18 @@ function laneTeamAgentId(lane) {
   return targetActor || targetTeamActorId(lane.targetId);
 }
 
+// Every actor form this member could be persisted under, minus the primary:
+// the target actor (stable) AND the thread actor (whichever the primary
+// isn't). Membership rows may be stored under either form depending on how
+// the member joined, so a reorder/move resolves against the widest net
+// rather than guessing one form.
 function laneTeamAgentAliases(lane) {
   const actor = laneTeamAgentId(lane);
-  const aliases = [targetTeamActorId(lane.targetId)].filter(
-    (alias) => alias && alias !== actor,
-  );
+  const aliases = [
+    targetTeamActorId(lane.targetId),
+    threadTeamActorId(lane.targetThreadId),
+    threadTeamActorId(lane.activeThreadId),
+  ].filter((alias) => alias && alias !== actor);
   return uniqueStringList(aliases);
 }
 

@@ -354,6 +354,12 @@ function renderMessagesIfChanged(lane) {
     : lane.knownMessages;
   const visibleItems = renderItems.filter((item) => !isPresenceMessage(item));
   renderLaneViewShell(lane);
+  // Accent color is a pure presentation mapping (member order -> border
+  // color), NOT part of message identity: a composer reorder must recolor
+  // in place, never re-measure or move a single card. It rides its own
+  // fingerprint and a style-only pass over existing nodes, and is
+  // deliberately absent from messageRenderFingerprint below.
+  applyMessageAccentsIfChanged(lane);
   const fingerprint = messageRenderFingerprint(lane, visibleItems);
   if (fingerprint === lane.renderedMessageFingerprint) return;
   // One scroll authority: the mosaic owns viewport stability during its own
@@ -558,6 +564,57 @@ function renderOrReuseMessageNode(lane, item, existingNodes) {
   return node;
 }
 
+// Style-only accent recolor: recomputes each rendered card's occupant
+// accent from the CURRENT member order and writes only the color CSS var +
+// slot dataset. No measurement, no fingerprint change, no mosaic touch --
+// composer reorder recolors without moving anything. Gated by an accent
+// fingerprint (attribution flag + ordered member target ids) so a no-op
+// render writes nothing.
+function laneAccentFingerprint(lane) {
+  const host = laneGroupHost(lane);
+  return JSON.stringify([
+    laneShouldAttributeMessages(host),
+    laneGroupMemberTargetIds(host),
+  ]);
+}
+
+function applyMessageAccentsIfChanged(lane) {
+  const fingerprint = laneAccentFingerprint(lane);
+  if (fingerprint === lane.renderedAccentFingerprint) return;
+  lane.renderedAccentFingerprint = fingerprint;
+  const plane = lane.mosaicPlaneEl;
+  if (!plane) return;
+  const attribute = laneShouldAttributeMessages(lane);
+  for (const node of plane.querySelectorAll(
+    "article[data-message-key], [data-compaction-accent-node]",
+  )) {
+    if (!attribute) {
+      delete node.dataset.accentSlot;
+      node.style.removeProperty("--message-occupant-accent");
+      node.style.removeProperty("--compaction-accent");
+      continue;
+    }
+    const item = mosaicNodeAccentItem(node);
+    const accentSlot = laneMessageAccentIndex(lane, item);
+    node.dataset.accentSlot = String(accentSlot);
+    const accent = messageOccupantAccent(accentSlot);
+    if (node.matches("article[data-message-key]"))
+      node.style.setProperty("--message-occupant-accent", accent);
+    else node.style.setProperty("--compaction-accent", accent);
+  }
+}
+
+// Minimal item shape laneMessageAccentIndex needs (producer target / thread),
+// reconstructed from the node's own datasets so the recolor pass needs no
+// message-list lookup.
+function mosaicNodeAccentItem(node) {
+  return {
+    key: node.dataset.messageKey || "",
+    threadId: node.dataset.threadId || "",
+    producerTargetId: node.dataset.producerTargetId || "",
+  };
+}
+
 function messageRenderFingerprint(lane, messages) {
   return JSON.stringify(
     messages.map((item) => messageFingerprintParts(lane, item)),
@@ -571,7 +628,6 @@ function messageFingerprintParts(lane, item) {
     timestamp: item.timestamp,
     kind: item.kind,
     threadId: item.threadId || "",
-    accentSlot: laneMessageAccentIndex(lane, item),
     displayHtml: item.display_html,
     displayText: item.display_text,
     ackCount: item.ack_count,

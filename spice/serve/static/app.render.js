@@ -692,6 +692,10 @@ function renderMessage(lane, item) {
   stampMessageTimestamp(article, item);
   if (item.threadId) article.dataset.threadId = item.threadId;
   if (laneShouldAttributeMessages(lane)) {
+    // Stamp the resolved producer so the style-only accent pass
+    // (app.stream.js) recomputes the identical slot on composer reorder.
+    const producerTargetId = laneMessageProducerTargetId(lane, item);
+    if (producerTargetId) article.dataset.producerTargetId = producerTargetId;
     const accentSlot = laneMessageAccentIndex(lane, item);
     article.dataset.accentSlot = String(accentSlot);
     article.style.setProperty(
@@ -1054,6 +1058,12 @@ function renderCompactionDivider(lane, item) {
   divider.className = "compaction-divider";
   divider.title = item.timestamp;
   stampMessageTimestamp(divider, item);
+  // Marked + thread-stamped so the style-only accent pass (app.stream.js)
+  // can recolor it on composer reorder without a message-list lookup.
+  divider.dataset.compactionAccentNode = "";
+  if (item.threadId) divider.dataset.threadId = item.threadId;
+  const producerTargetId = laneMessageProducerTargetId(lane, item);
+  if (producerTargetId) divider.dataset.producerTargetId = producerTargetId;
   const accentSlot = laneMessageAccentIndex(lane, item);
   divider.dataset.accentSlot = String(accentSlot);
   divider.style.setProperty("--compaction-accent", messageOccupantAccent(accentSlot));

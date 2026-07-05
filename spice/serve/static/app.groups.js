@@ -150,7 +150,14 @@ function laneGroupMergedMessages(host) {
     const at = a.timestamp || "";
     const bt = b.timestamp || "";
     if (at !== bt) return at < bt ? 1 : -1;
-    return (b.index || 0) - (a.index || 0);
+    if ((a.index || 0) !== (b.index || 0)) return (b.index || 0) - (a.index || 0);
+    // Key tiebreaker: without it, fully-tied messages keep member-iteration
+    // order -- composer order -- so dragging a composer could reshuffle the
+    // mosaic. Message order must be a pure function of the messages.
+    const ak = String(a.key || "");
+    const bk = String(b.key || "");
+    if (ak !== bk) return ak < bk ? 1 : -1;
+    return 0;
   });
   return merged;
 }
@@ -866,8 +873,13 @@ function finishComposerMoveDrag(state) {
   if (!dragging || !dropTarget) return;
   if (dropTarget.kind === "reorder") {
     reorderComposersOnServer(dropTarget.host, dropTarget.orderedTargetIds).catch(
-      () => {
-        setLaneTransientStatus(dropTarget.host, "reorder composer failed");
+      (error) => {
+        const reason = (error && error.message) || "unknown error";
+        console.warn("composer reorder rejected:", reason);
+        setLaneTransientStatus(
+          dropTarget.host,
+          "reorder composer failed: " + reason,
+        );
         refreshTeamSnapshot({ force: true }).catch(() => {});
       },
     );

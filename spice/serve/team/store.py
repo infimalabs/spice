@@ -747,7 +747,8 @@ class ServeTeamStore(
     ) -> int:
         self._require_team(connection, team_id)
         rows = connection.execute(
-            "SELECT agent_id FROM memberships WHERE team_id = ? ORDER BY position",
+            "SELECT agent_id, position FROM memberships"
+            " WHERE team_id = ? ORDER BY position",
             (team_id,),
         ).fetchall()
         current_agent_ids = [str(row["agent_id"]) for row in rows]
