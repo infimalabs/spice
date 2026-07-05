@@ -179,30 +179,38 @@ function mosaicAckWetResolutionCheck() {
   };
 }
 
-// A lookup that comes back found:false is CONFIRMED absent: the skeleton
-// must be dropped, no quote rendered, and the card re-rendered (the missing
-// state is distinct from still-loading in the fingerprint).
+// A lookup that comes back found:false is CONFIRMED absent: the shimmer
+// swaps for a same-height "unavailable" block so the reservation is honored
+// with ZERO reflow -- the card keeps its exact row count, nothing below it
+// moves, and the reader sees it failed rather than a spinner that never ends.
 function mosaicAckMissingResolutionCheck() {
   const lane = mosaicAckResolveLane();
   mosaicAckPush(lane, mosaicAckBuildAckItem(15, "ack-key-missing"));
-  const before = mosaicAckSnapshot(lane);
+  const beforeCard = lane.mosaicCards.find((c) => c.key === "ack-card-15");
   const beforeNode = lane.mosaicPlaneEl.querySelector(
     'article[data-message-key="ack-card-15"]',
   );
+  const beforeHasSkeleton = Boolean(beforeNode.querySelector(".ack-quote--pending"));
+  const beforeRows = beforeCard.n;
 
   // Simulate the found:false branch of hydrateAckContextsForMessages.
   lane.missingAckContextKeys.add("ack-key-missing");
   renderMessagesIfChanged(lane);
+  const afterCard = lane.mosaicCards.find((c) => c.key === "ack-card-15");
   const afterNode = lane.mosaicPlaneEl.querySelector(
     'article[data-message-key="ack-card-15"]',
   );
 
   return {
-    beforeHasSkeleton: Boolean(beforeNode.querySelector(".ack-quote--pending")),
+    beforeHasSkeleton,
     afterHasSkeleton: Boolean(afterNode.querySelector(".ack-quote--pending")),
-    afterHasQuote: Boolean(
-      afterNode.querySelector(".ack-quote:not(.ack-quote--pending)"),
+    afterHasMissing: Boolean(afterNode.querySelector(".ack-quote--missing")),
+    afterHasRealQuote: Boolean(
+      afterNode.querySelector(
+        ".ack-quote:not(.ack-quote--pending):not(.ack-quote--missing)",
+      ),
     ),
+    rowsUnchanged: afterCard.n === beforeRows,
     nodeRebuilt: afterNode !== beforeNode,
   };
 }
@@ -450,8 +458,12 @@ function assertWetResolution(result, fail) {
 function assertMissingResolution(result, fail) {
   if (!result.beforeHasSkeleton) fail("missing fixture must start with a skeleton");
   if (!result.nodeRebuilt) fail("a found:false resolution must re-render the card");
-  if (result.afterHasSkeleton) fail("a found:false ack must drop the skeleton");
-  if (result.afterHasQuote) fail("a found:false ack must not render a quote");
+  if (result.afterHasSkeleton) fail("a found:false ack must drop the shimmer skeleton");
+  if (!result.afterHasMissing)
+    fail("a found:false ack must render the same-height unavailable block");
+  if (result.afterHasRealQuote) fail("a found:false ack must not render a real quote");
+  if (!result.rowsUnchanged)
+    fail("a found:false ack must not change the card's row count (no reflow)");
 }
 
 function assertFrozenPad(result, fail) {
