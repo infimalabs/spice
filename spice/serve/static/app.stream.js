@@ -642,8 +642,13 @@ function messageFingerprintParts(lane, item) {
     displayHtml: item.display_html,
     displayText: item.display_text,
     ackCount: item.ack_count,
+    // Whether attribution shows at all (solo vs team) legitimately changes a
+    // card's chrome, so the boolean stays in the identity. The member COUNT
+    // does not: nothing per-card depends on it, and including it rebuilt and
+    // re-measured every card each time an agent joined -- the one-by-one
+    // flash on load. Accent (which does track member order) rides its own
+    // fingerprint and a style-only recolor pass, not this identity.
     attributed: laneShouldAttributeMessages(lane),
-    attributionAgents: laneMessageAttributionAgentCount(lane),
     ackContexts: (item.ack_keys || []).map((key) => {
       const context = ackContextForKey(lane, key);
       return context
