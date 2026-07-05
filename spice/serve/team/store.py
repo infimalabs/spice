@@ -170,6 +170,8 @@ class ServeTeamStore(
         kind: str,
         team_id: str,
         payload: dict[str, Any],
+        *,
+        wake: bool = True,
     ) -> int:
         cursor = connection.execute(
             "INSERT INTO events (ts, kind, team_id, payload) VALUES (?, ?, ?, ?)",
@@ -182,8 +184,14 @@ class ServeTeamStore(
         # Wake the serve lane watcher after commit: it watches the task event
         # file, not the team store (whose writes are dominated by non-display
         # metric churn), so a real team event surfaces in the UI without waking
-        # readers before the transaction is visible.
-        self._task_event_wake_connection_ids.add(id(connection))
+        # readers before the transaction is visible. Events that change NO
+        # lane's message stream (a composer reorder only permutes accent slots)
+        # pass wake=False: the acting client already has the new order from the
+        # command response and other clients pick it up from the team revision,
+        # so waking every member lane into a message re-push -- and the full
+        # re-render and history re-pagination that follows -- is pure churn.
+        if wake:
+            self._task_event_wake_connection_ids.add(id(connection))
         return revision
 
     def global_fast_mode_enabled(self) -> bool:
@@ -818,11 +826,16 @@ class ServeTeamStore(
                 "WHERE team_id = ? AND agent_id = ?",
                 (position, team_id, agent_id),
             )
+        # A reorder permutes accent slots only -- no lane's message stream
+        # changes -- so it must NOT wake the lane watchers. Waking them made
+        # every composer swap re-push all members' messages and re-render the
+        # whole board (a visible reflow, and a spurious history re-pagination).
         return self._record_event(
             connection,
             "reorderTeamAgents",
             team_id,
             {"agentIds": ordered_agent_ids},
+            wake=False,
         )
 
     def _team_member_count_locked(
