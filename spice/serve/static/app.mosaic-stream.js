@@ -353,30 +353,26 @@ function mosaicMeasureNodeAt(node, widthPx) {
   return node.offsetHeight;
 }
 
+// Every card is MEASURED, including one whose content is still pending. Its
+// placeholder -- the ack skeleton, the "unavailable" block, the letterboxed
+// image slot -- renders at its reserved footprint via CSS (a min-height or a
+// fixed slot height, both keyed to the same rem prior), so measuring the card
+// captures the reserved element AND the reply body/chrome around it. Reserving
+// a fixed row count for the placeholder ALONE ignored the body that was
+// present from the first frame, placing an ack card far too short so later
+// cards packed on top of it (the operator's card buried three deep). The
+// placeholder height keeps a later resolution shrink-biased just as the fixed
+// prior did, without dropping the body.
 function mosaicCandidatesFor(lane, entry, node, geometry) {
-  const rootFontSizePx = mosaicRootFontSizePx();
-  const reservationType = mosaicPendingReservationType(lane, entry, node);
-  const measure = (span) => {
-    if (reservationType) return null;
-    return mosaicMeasureCard(lane, node, mosaicCardWidthPx(geometry.edges, 0, span, geometry.gap));
-  };
+  const measure = (span) =>
+    mosaicMeasureCard(lane, node, mosaicCardWidthPx(geometry.edges, 0, span, geometry.gap));
   if (entry.kind === "barrier") {
-    const reservedRows = reservationType
-      ? mosaicReservationRows(reservationType, rootFontSizePx, geometry.gap, geometry.M)
-      : null;
-    const n = reservedRows !== null
-      ? reservedRows
-      : mosaicRowsFor(measure(mosaicGridTrackCount), geometry.gap, geometry.M);
-    return [{ span: mosaicGridTrackCount, n }];
-  }
-  if (reservationType) {
-    const reservedRows = mosaicReservationRows(
-      reservationType,
-      rootFontSizePx,
-      geometry.gap,
-      geometry.M,
-    );
-    return [{ span: geometry.baseSpan, n: reservedRows }];
+    return [
+      {
+        span: mosaicGridTrackCount,
+        n: mosaicRowsFor(measure(mosaicGridTrackCount), geometry.gap, geometry.M),
+      },
+    ];
   }
   return mosaicCandidates(geometry.baseSpan, mosaicGridTrackCount, geometry.gap, geometry.M, measure);
 }
@@ -621,14 +617,15 @@ function mosaicRunContentDiffPass(lane, entries, nodesByKey, geometry) {
   for (const { entry, node, creationIndex } of dirty) {
     const card = lane.mosaicCards.find((candidate) => candidate.creationIndex === creationIndex);
     if (!card) continue;
-    const reservationType = mosaicPendingReservationType(lane, entry, node);
-    const resolvedN = reservationType
-      ? mosaicReservationRows(reservationType, mosaicRootFontSizePx(), geometry.gap, geometry.M)
-      : mosaicRowsFor(
-          mosaicMeasureCard(lane, node, mosaicCardWidthPx(geometry.edges, 0, card.span, geometry.gap)),
-          geometry.gap,
-          geometry.M,
-        );
+    // Always measure the resolved card: the placeholder's CSS footprint means
+    // a still-pending (or resolved-missing) card measures the same rows it was
+    // placed at, so it stays put, while a resolved-with-content card measures
+    // its real height. Reserving fixed rows here dropped the reply body.
+    const resolvedN = mosaicRowsFor(
+      mosaicMeasureCard(lane, node, mosaicCardWidthPx(geometry.edges, 0, card.span, geometry.gap)),
+      geometry.gap,
+      geometry.M,
+    );
     if (resolvedN === card.n) continue;
     mosaicRecordEventLogEvent(lane.mosaicEventLog, {
       type: "content-resize",

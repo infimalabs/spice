@@ -14,7 +14,7 @@ const { withServePage } = require("./serve_playwright_harness");
 // fixtures below (mirrors serve_mosaic_stream_smoke.js's frozen-growth
 // fixture: enough same-column siblings to bury the target card two deep).
 const MOSAIC_ACK_FREEZE_PLAIN_FIRST_INDEX = 21;
-const MOSAIC_ACK_FREEZE_PLAIN_LAST_INDEX = 26;
+const MOSAIC_ACK_FREEZE_PLAIN_LAST_INDEX = 32;
 const MOSAIC_ACK_ORDER_FIRST_BLOCK_START = 41;
 const MOSAIC_ACK_ORDER_FIRST_BLOCK_END = 44;
 const MOSAIC_ACK_ORDER_SECOND_BLOCK_START = 46;
@@ -131,16 +131,18 @@ function mosaicAckResetLane(lane) {
   lane.missingAckContextKeys.clear();
 }
 
-// A pending ack reserves its quote block instead of measuring -- the
-// skeleton (.ack-quote--pending) renders and the card's row count comes
-// from mosaicReservationRows("ack", ...), not from measuring "reply body".
+// A pending ack renders its skeleton and is PLACED tall enough to hold it:
+// the card is measured (skeleton at its reserved footprint + any reply body +
+// chrome), so it never packs shorter than it renders. Placing by the quote
+// reserve alone dropped the reply body and buried the card under its
+// neighbors -- the operator's overlap.
 function mosaicAckPendingReservationCheck() {
   const lane = mosaicAckResolveLane();
   mosaicAckPush(lane, mosaicAckBuildAckItem(1, "ack-key-pending"));
   const card = lane.mosaicCards.find((c) => c.key === "ack-card-1");
   const node = lane.mosaicPlaneEl.querySelector('article[data-message-key="ack-card-1"]');
   const geometry = lane.mosaicGeometry;
-  const expectedRows = mosaicReservationRows(
+  const reserveRows = mosaicReservationRows(
     "ack",
     mosaicRootFontSizePx(),
     geometry.gap,
@@ -149,7 +151,9 @@ function mosaicAckPendingReservationCheck() {
   return {
     hasSkeleton: Boolean(node.querySelector(".ack-quote--pending")),
     cardN: card.n,
-    expectedRows,
+    reserveRows,
+    renderedHeight: node.offsetHeight,
+    placedHeight: card.n * geometry.M - geometry.gap,
   };
 }
 
@@ -177,6 +181,61 @@ function mosaicAckWetResolutionCheck() {
     transformSet: node.style.transform !== "",
     heightSet: node.style.height !== "",
   };
+}
+
+// An ack message with a real reply body plus a pending ack must be placed
+// tall enough for BOTH -- the body was present from the first frame, only
+// the quote is pending. Placing by the quote reserve alone buried the card
+// under its neighbors (the operator's card three deep). No card may overlap.
+function mosaicAckBodyOverlapCheck() {
+  const lane = mosaicAckResolveLane();
+  mosaicAckResetLane(lane);
+  const body = Array.from({ length: 6 }, (_, j) => "reply body line " + j).join("<br>");
+  const ackItem = {
+    ack_count: 1,
+    ack_keys: ["ack-key-body"],
+    ack_segments: [{ keys: ["ack-key-body"], html: body }],
+    index: 5,
+    key: "ack-body",
+    kind: "assistant",
+    timestamp: new Date(2026, 0, 1, 0, 0, 5).toISOString(),
+    display_html: body,
+    display_text: "body",
+    text: "body",
+  };
+  mosaicAckPush(lane, mosaicAckBuildPlainItem(1, 1));
+  mosaicAckPush(lane, mosaicAckBuildPlainItem(2, 1));
+  mosaicAckPush(lane, ackItem);
+  mosaicAckPush(lane, mosaicAckBuildPlainItem(8, 1));
+  mosaicAckPush(lane, mosaicAckBuildPlainItem(9, 1));
+
+  const node = lane.mosaicPlaneEl.querySelector('article[data-message-key="ack-body"]');
+  const card = lane.mosaicCards.find((c) => c.key === "ack-body");
+  const geometry = lane.mosaicGeometry;
+  const cards = lane.mosaicCards;
+  let overlaps = 0;
+  for (let i = 0; i < cards.length; i += 1)
+    for (let j = i + 1; j < cards.length; j += 1) {
+      const a = cards[i];
+      const b = cards[j];
+      const xo = a.t < b.t + b.span && b.t < a.t + a.span;
+      const yo = a.b < b.b + b.n && b.b < a.b + a.n;
+      if (xo && yo) overlaps += 1;
+    }
+  return {
+    hasSkeleton: Boolean(node.querySelector(".ack-quote--pending")),
+    renderedHeight: node.offsetHeight,
+    placedHeight: card.n * geometry.M - geometry.gap,
+    overlaps,
+  };
+}
+
+function assertBodyOverlap(result, fail) {
+  if (!result.hasSkeleton) fail("ack-with-body fixture must render the pending skeleton");
+  if (result.renderedHeight > result.placedHeight + 2)
+    fail("ack-with-body card is placed shorter than it renders (body dropped)");
+  if (result.overlaps !== 0)
+    fail("ack-with-body card overlaps its neighbors: " + JSON.stringify(result));
 }
 
 // A lookup that comes back found:false is CONFIRMED absent: the shimmer
@@ -428,6 +487,7 @@ async function installMosaicAckHelpers(page) {
       mosaicAckPendingReservationCheck,
       mosaicAckWetResolutionCheck,
       mosaicAckMissingResolutionCheck,
+      mosaicAckBodyOverlapCheck,
       mosaicAckFreezeFixture,
       mosaicAckFrozenPadCheck,
       mosaicAckFrozenRippleCheck,
@@ -442,8 +502,12 @@ async function installMosaicAckHelpers(page) {
 
 function assertPendingReservation(result, fail) {
   if (!result.hasSkeleton) fail("pending ack must render the skeleton, not the real quote");
-  if (result.cardN !== result.expectedRows)
-    fail("pending ack card row count must come from the reservation, not measurement");
+  // Placed tall enough for the skeleton (no overflow -> no burial), and at
+  // least the quote reserve (the skeleton footprint is never dropped).
+  if (result.renderedHeight > result.placedHeight + 2)
+    fail("pending ack card is placed shorter than it renders (skeleton overflows)");
+  if (result.cardN < result.reserveRows)
+    fail("pending ack card must reserve at least its quote-block footprint");
 }
 
 function assertWetResolution(result, fail) {
@@ -550,6 +614,7 @@ async function run() {
       const pendingReservation = await page.evaluate(mosaicAckPendingReservationCheck);
       const wetResolution = await page.evaluate(mosaicAckWetResolutionCheck);
   const missingResolution = await page.evaluate(mosaicAckMissingResolutionCheck);
+  const bodyOverlap = await page.evaluate(mosaicAckBodyOverlapCheck);
       const frozenPad = await page.evaluate(mosaicAckFrozenPadCheck);
       const frozenRipple = await page.evaluate(mosaicAckFrozenRippleCheck);
       const racingRemoval = await page.evaluate(mosaicAckResolutionRacingRemovalCheck);
@@ -564,6 +629,7 @@ async function run() {
               pendingReservation,
               wetResolution,
     missingResolution,
+    bodyOverlap,
               frozenPad,
               frozenRipple,
               racingRemoval,
@@ -575,6 +641,7 @@ async function run() {
       assertPendingReservation(pendingReservation, fail);
       assertWetResolution(wetResolution, fail);
   assertMissingResolution(missingResolution, fail);
+  assertBodyOverlap(bodyOverlap, fail);
       assertFrozenPad(frozenPad, fail);
       assertFrozenRipple(frozenRipple, fail);
       assertRacingRemoval(racingRemoval, fail);
