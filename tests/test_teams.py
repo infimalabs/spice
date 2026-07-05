@@ -64,8 +64,8 @@ def test_team_event_wakes_task_event_file_after_commit(tmp_path):
 
 
 def test_reorder_does_not_wake_the_lane_watchers(tmp_path):
-    # A composer reorder permutes accent slots only -- no lane's messages
-    # change -- so it must NOT bump the watched task event file. Waking made
+    # A composer reorder permutes member order only -- no lane's content
+    # changes -- so it must NOT bump the watched task event file. Waking made
     # every swap re-push all members' messages and re-render the whole board.
     task_config.set_backend(str(tmp_path / "task-backend"))
     try:

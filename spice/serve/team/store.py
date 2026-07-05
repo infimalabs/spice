@@ -185,7 +185,7 @@ class ServeTeamStore(
         # file, not the team store (whose writes are dominated by non-display
         # metric churn), so a real team event surfaces in the UI without waking
         # readers before the transaction is visible. Events that change NO
-        # lane's message stream (a composer reorder only permutes accent slots)
+        # lane's content (a composer reorder only permutes member order)
         # pass wake=False: the acting client already has the new order from the
         # command response and other clients pick it up from the team revision,
         # so waking every member lane into a message re-push -- and the full
@@ -826,10 +826,14 @@ class ServeTeamStore(
                 "WHERE team_id = ? AND agent_id = ?",
                 (position, team_id, agent_id),
             )
-        # A reorder permutes accent slots only -- no lane's message stream
-        # changes -- so it must NOT wake the lane watchers. Waking them made
-        # every composer swap re-push all members' messages and re-render the
-        # whole board (a visible reflow, and a spurious history re-pagination).
+        # A reorder permutes member order only -- it adds and removes no
+        # messages and no members, so no lane's content changes and it must
+        # NOT wake the lane watchers. The new order reaches clients on the team
+        # channel (the command response, and teams.refresh for others), never
+        # the lane bus -- and that holds however the order is later read (a
+        # lead, say): order semantics ride the team channel, not lane content.
+        # Waking made every swap re-push all members' messages and re-render
+        # the whole board (a visible reflow, and a spurious history re-pagination).
         return self._record_event(
             connection,
             "reorderTeamAgents",
