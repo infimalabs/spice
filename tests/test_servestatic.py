@@ -253,7 +253,11 @@ def test_static_messages_have_no_legacy_pack_vestige():
     assert "--mosaic-image-large-height: 15.75rem;" in messages_rule
     assert "display: grid;" not in messages_rule
     assert "grid-template-columns:" not in messages_rule
-    assert "overflow-x: auto;" in messages_rule
+    # The mosaic host clips horizontal overflow rather than scrolling it: the
+    # lattice always fits, so a horizontal scrollbar is never intended and its
+    # appearance would shrink clientWidth and cascade a re-measure.
+    assert "overflow-x: clip;" in messages_rule
+    assert "overflow-x: auto;" not in messages_rule
     assert "position: relative;" in messages_rule
     assert "display: flex;" in article_rule
     assert "flex-direction: column;" in article_rule
