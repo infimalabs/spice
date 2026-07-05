@@ -179,6 +179,34 @@ function mosaicAckWetResolutionCheck() {
   };
 }
 
+// A lookup that comes back found:false is CONFIRMED absent: the skeleton
+// must be dropped, no quote rendered, and the card re-rendered (the missing
+// state is distinct from still-loading in the fingerprint).
+function mosaicAckMissingResolutionCheck() {
+  const lane = mosaicAckResolveLane();
+  mosaicAckPush(lane, mosaicAckBuildAckItem(15, "ack-key-missing"));
+  const before = mosaicAckSnapshot(lane);
+  const beforeNode = lane.mosaicPlaneEl.querySelector(
+    'article[data-message-key="ack-card-15"]',
+  );
+
+  // Simulate the found:false branch of hydrateAckContextsForMessages.
+  lane.missingAckContextKeys.add("ack-key-missing");
+  renderMessagesIfChanged(lane);
+  const afterNode = lane.mosaicPlaneEl.querySelector(
+    'article[data-message-key="ack-card-15"]',
+  );
+
+  return {
+    beforeHasSkeleton: Boolean(beforeNode.querySelector(".ack-quote--pending")),
+    afterHasSkeleton: Boolean(afterNode.querySelector(".ack-quote--pending")),
+    afterHasQuote: Boolean(
+      afterNode.querySelector(".ack-quote:not(.ack-quote--pending)"),
+    ),
+    nodeRebuilt: afterNode !== beforeNode,
+  };
+}
+
 // Builds a frozen ack scenario: the ack card (msg-20) plus 6 short cards
 // settling into 2 columns (mirrors serve_mosaic_stream_smoke.js's frozen-
 // growth fixture) so msg-20 is buried by 2 later same-column cards and
@@ -391,6 +419,7 @@ async function installMosaicAckHelpers(page) {
       mosaicAckResetLane,
       mosaicAckPendingReservationCheck,
       mosaicAckWetResolutionCheck,
+      mosaicAckMissingResolutionCheck,
       mosaicAckFreezeFixture,
       mosaicAckFrozenPadCheck,
       mosaicAckFrozenRippleCheck,
@@ -416,6 +445,13 @@ function assertWetResolution(result, fail) {
   if (result.beforeFrozen || result.afterFrozen) fail("wet fixture card unexpectedly frozen");
   if (!result.transformSet) fail("resolved card's fresh node must receive a transform");
   if (!result.heightSet) fail("resolved card's fresh node must receive a height");
+}
+
+function assertMissingResolution(result, fail) {
+  if (!result.beforeHasSkeleton) fail("missing fixture must start with a skeleton");
+  if (!result.nodeRebuilt) fail("a found:false resolution must re-render the card");
+  if (result.afterHasSkeleton) fail("a found:false ack must drop the skeleton");
+  if (result.afterHasQuote) fail("a found:false ack must not render a quote");
 }
 
 function assertFrozenPad(result, fail) {
@@ -501,6 +537,7 @@ async function run() {
 
       const pendingReservation = await page.evaluate(mosaicAckPendingReservationCheck);
       const wetResolution = await page.evaluate(mosaicAckWetResolutionCheck);
+  const missingResolution = await page.evaluate(mosaicAckMissingResolutionCheck);
       const frozenPad = await page.evaluate(mosaicAckFrozenPadCheck);
       const frozenRipple = await page.evaluate(mosaicAckFrozenRippleCheck);
       const racingRemoval = await page.evaluate(mosaicAckResolutionRacingRemovalCheck);
@@ -514,6 +551,7 @@ async function run() {
             JSON.stringify({
               pendingReservation,
               wetResolution,
+    missingResolution,
               frozenPad,
               frozenRipple,
               racingRemoval,
@@ -524,6 +562,7 @@ async function run() {
       };
       assertPendingReservation(pendingReservation, fail);
       assertWetResolution(wetResolution, fail);
+  assertMissingResolution(missingResolution, fail);
       assertFrozenPad(frozenPad, fail);
       assertFrozenRipple(frozenRipple, fail);
       assertRacingRemoval(racingRemoval, fail);
