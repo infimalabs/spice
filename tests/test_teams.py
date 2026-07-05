@@ -190,6 +190,44 @@ def test_assigning_agent_with_target_alias_retires_stale_membership(tmp_path):
     ]
 
 
+def test_team_membership_is_capped_at_six_across_growth_paths(tmp_path):
+    # A team renders six accent slots; every growth path must refuse a
+    # seventh so a merge or a driver-switch append can never exceed what the
+    # board can color. Verified for create, single assign/move, and merge --
+    # with merge rejected up front so neither team is left half-changed.
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    with pytest.raises(SpiceError, match="limited to 6 agents"):
+        store.create_team(members=[f"thread:{index:032x}" for index in range(7)])
+
+    full = store.create_team(members=[f"thread:{index:032x}" for index in range(6)])
+    store.create_team(members=["thread:newcomer"])
+    with pytest.raises(SpiceError, match="limited to 6 agents"):
+        store.assign_agent(full.team_id, "thread:newcomer")
+
+    source = store.create_team(members=["thread:s1", "thread:s2"])
+    with pytest.raises(SpiceError, match="limited to 6 agents"):
+        store.merge_teams(source.team_id, full.team_id)
+    # Both teams untouched by the rejected merge.
+    assert len(store.team_state(full.team_id).members) == 6
+    assert len(store.team_state(source.team_id).members) == 2
+
+
+def test_renewal_successor_replaces_slot_on_a_full_team(tmp_path):
+    # The exemption that keeps the cap safe: a successor carrying its
+    # predecessor's id as an alias inherits that slot, so a driver switch on a
+    # full team replaces rather than being blocked by the ceiling.
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    members = [f"thread:{index:032x}" for index in range(6)]
+    full = store.create_team(members=members)
+
+    store.assign_agent(full.team_id, "thread:successor", aliases=[members[0]])
+
+    after = [member.agent_id for member in store.team_state(full.team_id).members]
+    assert "thread:successor" in after
+    assert members[0] not in after
+    assert len(after) == 6
+
+
 def test_assigning_agent_with_same_team_alias_preserves_roster_slot(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     team = store.create_team(
@@ -483,13 +521,13 @@ def test_reorder_of_open_subset_holds_hidden_members(tmp_path):
     # thread-actor form here, matching the real serve database.
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     service = TeamCommandService(store)
-    members = [f"thread:{index:032x}" for index in range(7)]
+    members = [f"thread:{index:032x}" for index in range(6)]
     created = service.apply({"command": "createTeam", "members": members})
     team = created.snapshot.teams[0]
     assert [member.agent_id for member in team.members] == members
 
-    # Member at index 3 is "closed" on the client; the other six are visible
-    # and dragged so the first two swap.
+    # Member at index 3 is "closed" on the client; the others are visible and
+    # dragged so the first two swap.
     visible = [member for index, member in enumerate(members) if index != 3]
     reordered = [visible[1], visible[0], *visible[2:]]
     result = service.apply(
