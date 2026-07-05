@@ -11,7 +11,14 @@
   --mosaic-origin-pad: 0.6875rem;
   flex: 1;
   min-width: 0;
-  overflow-x: auto;
+  /* The mosaic is a fixed 12-track lattice that always fits the content box,
+     so horizontal scrolling is never intended -- any horizontal overflow is
+     a transient during a render (a wide measurement, a not-yet-wrapped
+     string). overflow-x: clip absorbs it without creating a scroll
+     container, so no horizontal scrollbar flashes and, crucially, the
+     scrollbar's appearance can never shrink clientWidth and cascade a
+     re-measure of every card ("the container exploding"). */
+  overflow-x: clip;
   overflow-y: auto;
   /* One scroll authority: the mosaic compensates frontier shifts itself
      (plane onCompensate, backfill restore). Native scroll anchoring would

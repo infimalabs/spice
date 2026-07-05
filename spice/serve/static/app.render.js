@@ -726,7 +726,10 @@ function messageReservationType(lane, item) {
 
 function messageHasPendingAckContext(lane, item) {
   for (const key of messageAckSegmentKeys(item)) {
-    if (key && !ackContextForKey(lane, key)) return true;
+    // Pending means the lookup is still outstanding -- a confirmed-missing
+    // key (found:false) is resolved, not pending, so it reserves nothing.
+    if (key && !ackContextForKey(lane, key) && !ackContextConfirmedMissing(lane, key))
+      return true;
   }
   return false;
 }
@@ -782,6 +785,9 @@ function makeMessageBody(html, fallbackText) {
 function renderSegmentQuotes(lane, keys) {
   const refs = (keys || [])
     .filter((key) => key)
+    // A confirmed-missing key contributes nothing -- no quote, no skeleton --
+    // so a failed ack lookup leaves no dangling placeholder.
+    .filter((key) => !ackContextConfirmedMissing(lane, key))
     .map((key) => ({ key, context: ackContextForKey(lane, key) }));
   if (!refs.length) return null;
   const wrap = document.createElement("div");

@@ -291,6 +291,21 @@ function ackContextForKey(lane, key) {
   return null;
 }
 
+// A key whose lookup came back found:false is CONFIRMED absent, not still
+// loading -- the placeholder skeleton must be dropped rather than shimmer
+// forever. Mirrors ackContextForKey's fused-member traversal.
+function ackContextConfirmedMissing(lane, key) {
+  if (!key) return false;
+  if (lane.ackContextByKey.has(key)) return false;
+  if (lane.missingAckContextKeys.has(key)) return true;
+  for (const member of laneGroupMemberLanes(laneGroupHost(lane))) {
+    if (member === lane) continue;
+    if (member.ackContextByKey.has(key)) return false;
+    if (member.missingAckContextKeys.has(key)) return true;
+  }
+  return false;
+}
+
 function ackKeysForMessages(messages) {
   const keys = [];
   for (const item of messages) {
@@ -651,9 +666,11 @@ function messageFingerprintParts(lane, item) {
     attributed: laneShouldAttributeMessages(lane),
     ackContexts: (item.ack_keys || []).map((key) => {
       const context = ackContextForKey(lane, key);
-      return context
-        ? [key, context.text, context.html, context.priority, context.attachments || []]
-        : [key, "", "", "", []];
+      if (context)
+        return [key, context.text, context.html, context.priority, context.attachments || []];
+      // Distinguish still-loading ("") from confirmed-missing ("missing") so
+      // the card re-renders (dropping its skeleton) when a lookup fails.
+      return [key, ackContextConfirmedMissing(lane, key) ? "missing" : "", "", "", []];
     }),
   };
 }
