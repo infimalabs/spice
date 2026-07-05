@@ -474,6 +474,44 @@ def test_reorder_resolves_client_ids_through_aliases(tmp_path):
     ]
 
 
+def test_reorder_of_open_subset_holds_hidden_members(tmp_path):
+    # The live failure: the client only knows the members it has open as
+    # composers, a subset of the team, so it sends fewer entries than there
+    # are memberships. Reorder must permute the mentioned members among their
+    # own slots and leave every unmentioned member exactly where it was --
+    # never reject the whole drag for not naming the full set. Membership is
+    # thread-actor form here, matching the real serve database.
+    store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    service = TeamCommandService(store)
+    members = [f"thread:{index:032x}" for index in range(7)]
+    created = service.apply({"command": "createTeam", "members": members})
+    team = created.snapshot.teams[0]
+    assert [member.agent_id for member in team.members] == members
+
+    # Member at index 3 is "closed" on the client; the other six are visible
+    # and dragged so the first two swap.
+    visible = [member for index, member in enumerate(members) if index != 3]
+    reordered = [visible[1], visible[0], *visible[2:]]
+    result = service.apply(
+        {
+            "command": "reorderTeamAgents",
+            "teamId": team.team_id,
+            "agents": [
+                {
+                    "agentId": agent,
+                    "agentAliases": [agent.replace("thread:", "target:")],
+                }
+                for agent in reordered
+            ],
+        }
+    )
+
+    after = [member.agent_id for member in result.snapshot.teams[0].members]
+    assert after[3] == members[3]  # hidden member unmoved
+    assert after[0] == members[1] and after[1] == members[0]  # visible swap
+    assert set(after) == set(members)  # no member lost or duplicated
+
+
 def test_reorder_rejects_id_no_alias_resolves(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     service = TeamCommandService(store)
