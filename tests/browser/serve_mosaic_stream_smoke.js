@@ -223,7 +223,29 @@ function mosaicStreamGeometryChangeCheck() {
   lane.renderedMessageFingerprint = "";
   renderMessagesIfChanged(lane);
   const afterRestored = mosaicStreamCardSnapshot(lane);
-  return { before, afterAtNewRoot, afterNewRootAgain, afterRestored };
+  // A card rebuilt (content changed) in the SAME render that full-replays
+  // must not leave a content-dirty mark behind: the replay already
+  // re-measured it, and a stale mark would make the next content-diff render
+  // re-measure a card that never changed -- a one-time ripple after a replay.
+  const dirtyCard = lane.mosaicPlaneEl.querySelector("article[data-message-key]");
+  const dirtyKey = dirtyCard ? dirtyCard.dataset.messageKey : "";
+  const dirtyItem = lane.knownMessages.find((item) => String(item.key) === dirtyKey);
+  if (dirtyItem) dirtyItem.display_html = (dirtyItem.display_html || "") + "<br>grown";
+  document.documentElement.style.fontSize = "22px";
+  lane.mosaicGeometry = null;
+  lane.renderedMessageFingerprint = "";
+  renderMessagesIfChanged(lane);
+  document.documentElement.style.fontSize = "";
+  const dirtyMarksAfterReplay = Array.from(
+    lane.mosaicPlaneEl.querySelectorAll("[data-mosaic-content-dirty]"),
+  ).map((node) => node.dataset.messageKey);
+  return {
+    before,
+    afterAtNewRoot,
+    afterNewRootAgain,
+    afterRestored,
+    dirtyMarksAfterReplay,
+  };
 }
 
 function mosaicStreamReadingOrderCheck() {
@@ -810,6 +832,14 @@ function assertGeometryChangeInvariants(geometryChangeResult, fail) {
     fail("restoring geometry must not change the surviving card count");
   const overlap = mosaicStreamCardsOverlap(geometryChangeResult.afterRestored.lattice);
   if (overlap) fail("cards overlap after restoring geometry: " + JSON.stringify(overlap));
+
+  // A full replay that rebuilt a card must leave no content-dirty mark for a
+  // later render to flush into a spurious one-time re-measure.
+  if (geometryChangeResult.dirtyMarksAfterReplay.length)
+    fail(
+      "full replay left stale content-dirty marks: " +
+        JSON.stringify(geometryChangeResult.dirtyMarksAfterReplay),
+    );
 }
 
 function assertReadingOrderInvariants(readingOrder, fail) {
