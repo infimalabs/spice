@@ -286,6 +286,15 @@ def test_static_inline_task_directives_use_quote_like_accented_blocks():
     detail_rule = _between(css, ".task-directive-property dd {", "}")
     palette = _between(app_render, "const messageOccupantAccentPalette = [", "];")
 
+    # The accent slot count that bounds attribution indices (app.stream.js)
+    # must equal the render palette length, or an in-range index could still
+    # exceed the palette and make messageOccupantAccent throw mid-render.
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    palette_length = len([line for line in palette.splitlines() if "var(--" in line])
+    assert palette_length == 6
+    assert f"const MESSAGE_ACCENT_SLOT_COUNT = {palette_length};" in app_stream
+    assert "% MESSAGE_ACCENT_SLOT_COUNT" in app_stream
+
     assert '"var(--team-plum-accent)",' in palette.splitlines()[6]
     assert "--quote-accent: var(--team-plum-accent);" in quote_rule
     assert "background: color-mix(in srgb, var(--quote-accent) 7%, transparent);" in (
@@ -1203,7 +1212,7 @@ def test_static_composer_headers_use_agent_accent_border():
         'throw new Error("team slot accent requires a lane group member");'
         in app_stream
     )
-    assert "return index;" in app_stream
+    assert "return index % MESSAGE_ACCENT_SLOT_COUNT;" in app_stream
     assert "syncComposerBandAccent(primary, lane, member);" in app_shell
     assert "syncComposerBandAccent(band, lane, member);" in app_shell
 
@@ -1372,9 +1381,18 @@ def test_static_message_accents_follow_team_slots_for_single_member_teams():
     assert (
         "const index = laneGroupMemberTargetIds(host).indexOf(targetId);" in app_stream
     )
-    assert "return laneOccupantOrdinal(host, item.threadId);" in app_stream
-    assert "accentSlot: laneMessageAccentIndex(lane, item)," in app_stream
+    # Attribution indices are reduced into the palette range at the source so
+    # a grown occupant ordinal can never make messageOccupantAccent throw.
+    assert (
+        "return laneOccupantOrdinal(host, item.threadId) % MESSAGE_ACCENT_SLOT_COUNT;"
+        in app_stream
+    )
+    # Accent is decoupled from message identity: it is NOT in the render
+    # fingerprint (so a composer reorder never re-renders a card) and is
+    # applied by a style-only recolor pass instead.
+    assert "accentSlot: laneMessageAccentIndex(lane, item)," not in app_stream
     assert "attributed: laneShouldAttributeMessages(lane)," in app_stream
+    assert "function applyMessageAccentsIfChanged(lane)" in app_stream
     assert "const accentSlot = laneMessageAccentIndex(lane, item);" in app_render
     assert "if (item.threadId && laneShouldAttributeMessages(lane))" not in app_render
     assert "if (laneShouldAttributeMessages(lane))" in app_render
