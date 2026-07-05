@@ -134,12 +134,23 @@ function laneShouldAttributeMessages(lane) {
   );
 }
 
+// The render palette has this many accent colors (app.render.js
+// messageOccupantAccentPalette; kept in sync by a static test). Every accent
+// index is reduced into this range at its source so messageOccupantAccent
+// never receives an out-of-range slot: the team cap keeps LIVE member indices
+// in range, but a departed/renewed producer whose occupant ordinal has grown
+// past the palette (driver switches each register an occupant), or a legacy
+// team created before the cap, would otherwise make messageOccupantAccent
+// throw and abort the whole render -- surfacing as a wholesale rebuild.
+// Recycling a color is strictly better than crashing the board.
+const MESSAGE_ACCENT_SLOT_COUNT = 6;
+
 function laneMemberAccentIndex(lane, member) {
   const host = laneGroupHost(lane);
   const index = laneGroupMemberTargetIds(host).indexOf(member.targetId);
   if (index < 0)
     throw new Error("team slot accent requires a lane group member");
-  return index;
+  return index % MESSAGE_ACCENT_SLOT_COUNT;
 }
 
 function laneMessageAccentIndex(lane, item) {
@@ -147,9 +158,9 @@ function laneMessageAccentIndex(lane, item) {
   const targetId = laneMessageProducerTargetId(host, item);
   if (targetId) {
     const index = laneGroupMemberTargetIds(host).indexOf(targetId);
-    if (index >= 0) return index;
+    if (index >= 0) return index % MESSAGE_ACCENT_SLOT_COUNT;
   }
-  return laneOccupantOrdinal(host, item.threadId);
+  return laneOccupantOrdinal(host, item.threadId) % MESSAGE_ACCENT_SLOT_COUNT;
 }
 
 function laneMessageProducerTargetId(lane, item) {
