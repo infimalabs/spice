@@ -257,6 +257,24 @@ function mosaicEntryNode(lane, entry, existingNodes) {
   return mosaicRuleNode(lane, entry, existingNodes);
 }
 
+// Incremental DOM reconcile: remove only nodes that left the stream, append
+// only nodes that entered it, and NEVER touch a node that is already in the
+// plane. Cards are positioned by absolute transform, so DOM order does not
+// affect layout -- replaceChildren detached and re-attached every reused
+// card each render, which momentarily removed the whole board from the DOM
+// and read as a wholesale delete/reinstate flash (worst on agent join, when
+// a new member's keys arrive alongside the existing ones). New nodes append
+// in newest-first entry order; the transform is their real position.
+function mosaicSyncPlaneChildren(plane, orderedNodes) {
+  const desired = new Set(orderedNodes);
+  for (const child of Array.from(plane.children)) {
+    if (!desired.has(child)) child.remove();
+  }
+  for (const node of orderedNodes) {
+    if (node.parentNode !== plane) plane.appendChild(node);
+  }
+}
+
 function mosaicExistingNodesByKey(lane) {
   const nodes = new Map();
   const plane = lane.mosaicPlaneEl;
@@ -746,7 +764,10 @@ function mosaicRenderMessageStream(lane, visibleItems) {
     const node = mosaicEntryNode(lane, entry, existingNodes);
     if (node) nodesByKey.set(entry.key, node);
   }
-  plane.replaceChildren(...entries.map((entry) => nodesByKey.get(entry.key)).filter(Boolean));
+  const orderedNodes = entries
+    .map((entry) => nodesByKey.get(entry.key))
+    .filter(Boolean);
+  mosaicSyncPlaneChildren(plane, orderedNodes);
 
   // A node is "content dirty" only when renderOrReuseMessageNode/
   // mosaicRuleNode decided its fingerprint changed and built a FRESH
