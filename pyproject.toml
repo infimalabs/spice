@@ -86,6 +86,7 @@ stems = ["session", "mail", "hooks", "studies", "cli", "lifecycle", "tests"]
 [tool.spice.policy]
 env_names = [
     "BASH_ENV",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
     "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",

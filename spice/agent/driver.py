@@ -466,6 +466,18 @@ CLAUDE_ATTRIBUTION_DISABLED_SETTINGS = {
 # the settings layer, not left to the skill's "do not spawn sub-agents" prose.
 # Task is Claude Code's sub-agent tool; Agent covers the alternate label.
 CLAUDE_DENIED_TOOLS = ("Task", "Agent")
+# Claude Code reads this at launch and takes it as the token count at which it
+# reactively summarizes the conversation, taking precedence over its own
+# `/config` auto-compact setting. Left unset, a session can run toward its
+# real (possibly ~1M-token overflow-tier) API ceiling before compacting --
+# matching the operator's own observation that auto-compact did not appear to
+# trigger before ~1M tokens. 140_000 gives a solid margin under the 200K
+# standard-tier ceiling context_snapshot_fields already meters pressure
+# against (see its "always meter against the standard tier" comment below),
+# so a long-running lane compacts well before that reported pressure reads
+# 100%, without operator intervention.
+CLAUDE_AUTO_COMPACT_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"  # env-policy: allow
+CLAUDE_AUTO_COMPACT_WINDOW_TOKENS = 140_000
 OUT_OF_CREDITS_PATTERNS = (
     re.compile(r"\busage limit\b", re.IGNORECASE),
     re.compile(r"\b(?:out of|insufficient)\s+credits?\b", re.IGNORECASE),
@@ -487,6 +499,22 @@ def claude_effort(value: str) -> str:
 def resolve_claude_model(value: str = "") -> str:
     model = (value or "").strip()
     return model or CLAUDE_DEFAULT_MODEL
+
+
+def claude_auto_compact_environment(
+    repo_root: Path | None, *, base_env: Mapping[str, str]
+) -> dict[str, str]:
+    """Env addition that gets Claude Code compacting before its real ceiling.
+
+    A no-op for a non-Claude worktree, and a no-op when the operator (or a
+    parent process) already set the variable explicitly -- this only supplies
+    a default, never overrides one already in play.
+    """
+    if driver_for(repo_root) is not CLAUDE_DRIVER:
+        return {}
+    if CLAUDE_AUTO_COMPACT_WINDOW_ENV in base_env:
+        return {}
+    return {CLAUDE_AUTO_COMPACT_WINDOW_ENV: str(CLAUDE_AUTO_COMPACT_WINDOW_TOKENS)}
 
 
 def claude_settings_json(

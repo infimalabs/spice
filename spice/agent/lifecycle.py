@@ -32,7 +32,7 @@ from pathlib import Path
 from threading import Event, Thread
 from typing import Any, Iterator, Sequence, cast
 
-from spice.agent.driver import driver_for
+from spice.agent.driver import claude_auto_compact_environment, driver_for
 from spice.agent.shadow import (
     shadow_environment,
     ensure_origin_head,
@@ -962,6 +962,7 @@ def agent_environment(repo_root: Path | None = None) -> dict[str, str]:
     env = shadow_environment(repo_root)
     if repo_root is not None:
         env = apply_shell_steering_environment(repo_root, base_env=env)
+        env.update(claude_auto_compact_environment(repo_root, base_env=env))
     return env
 
 
