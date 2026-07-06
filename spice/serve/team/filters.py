@@ -30,6 +30,8 @@ class _TeamFilterStore(Protocol):
         kind: str,
         team_id: str,
         payload: dict[str, Any],
+        *,
+        wake: bool = True,
     ) -> int: ...
 
     def _current_revision_locked(self, connection: sqlite3.Connection) -> int: ...
@@ -165,11 +167,19 @@ class TeamFilterStoreMixin:
         if replace_task_filters:
             self._replace_task_filters_locked(connection, team_id, config.task_filters)
         task_filters = self._task_filter_projects_locked(connection, team_id)
+        # A config change (lifetime/filters) alters only THIS team's effective
+        # task view, but the wake bumps the shared task event file that sits in
+        # every lane's signature across every team -- so waking here re-pushed
+        # (and reflowed) unrelated teams' boards. It must NOT wake: this team's
+        # config_revision bump rides the team channel, and each client
+        # resubscribes exactly the lanes whose config revision changed, so the
+        # acting team re-fetches its filtered tasks while other teams stay put.
         return self._record_event(
             connection,
             "updateTeamConfig",
             team_id,
             {"lifetime": config.lifetime, "taskFilters": list(task_filters)},
+            wake=False,
         )
 
     def add_task_filter(
