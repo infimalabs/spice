@@ -963,6 +963,7 @@ def import_agent(repo_root: Path, raw_thread_id: str) -> AgentStatus:
             f"(thread {running.thread_id or '-'}, pid {running.pid}); "
             "stop it before importing another"
         )
+    predecessor = canonical_thread_id(running.thread_id)
     prompt_skill_path = available_skill_path(repo_root, required=False)
     write_agent_state(
         repo_root,
@@ -981,4 +982,32 @@ def import_agent(repo_root: Path, raw_thread_id: str) -> AgentStatus:
             "log_path": "",
         },
     )
+    _carry_team_membership(predecessor, thread_id)
     return agent_status(repo_root)
+
+
+def _carry_team_membership(predecessor: str, successor: str) -> None:
+    """Move the predecessor's team slot to the imported thread (a renewal).
+
+    An import is a renewal of whoever this worktree was bound to: the imported
+    thread should inherit the predecessor's team membership so team-scoped
+    allocation keeps seeing it. Reuses the store's alias slot-transfer --
+    assign_agent with the predecessor as an alias deletes the predecessor's
+    membership and seats the successor in the same slot, so the team neither
+    grows nor recharges its ceiling. A no-op when there is no predecessor, it is
+    the same thread, the successor already holds a slot, or the predecessor was
+    on no team (e.g. a fresh worktree -- the fork case; conveying fork lineage
+    across worktrees is a separate, operator-owned concern on ALLOC-1kBN9MVL).
+    """
+    if not predecessor or predecessor == successor:
+        return
+    from spice.serve.team.store import ServeTeamStore
+
+    store = ServeTeamStore()
+    for team in store.team_snapshot().teams:
+        member_ids = [member.agent_id for member in team.members]
+        if successor in member_ids:
+            return
+        if predecessor in member_ids:
+            store.assign_agent(team.team_id, successor, aliases=[predecessor])
+            return
