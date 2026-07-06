@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import sys
@@ -128,7 +129,21 @@ def shell_steering_runtime_environment(
         ),
     }
     if repo_root is not None:
-        env[SHELL_HOOK_REPO_ROOT_ENV] = str(repo_root.resolve())
+        resolved_root = repo_root.resolve()
+        env[SHELL_HOOK_REPO_ROOT_ENV] = str(resolved_root)
+        # Put the worktree's own .venv first on PATH so a bare `python` in an
+        # agent shell resolves to the interpreter that has this project's deps,
+        # not a system python3 that fails on tree_sitter and the like. Not a full
+        # venv activation (no VIRTUAL_ENV) -- just makes `python` findable.
+        venv_bin = resolved_root / ".venv" / "bin"
+        if venv_bin.is_dir():
+            existing_path = base_env.get("PATH", "")
+            if str(venv_bin) not in existing_path.split(os.pathsep):
+                env["PATH"] = (
+                    os.pathsep.join([str(venv_bin), existing_path])
+                    if existing_path
+                    else str(venv_bin)
+                )
     return env
 
 
