@@ -37,7 +37,12 @@ from spice.agent.shadow import (
     shadow_environment,
     ensure_origin_head,
 )
-from spice.agent.identity import ambient_thread, ambient_thread_id, canonical_thread_id
+from spice.agent.identity import (
+    ambient_thread,
+    ambient_thread_id,
+    canonical_thread_id,
+    uuid_thread_id,
+)
 from spice.agent.paths import (
     agent_state_dir,
     agent_thread_state_dir,
@@ -932,4 +937,48 @@ def bind_ambient_agent_activation(repo_root: Path) -> AgentStatus:
             "log_path": "",
         }
     write_agent_state(repo_root, state)
+    return agent_status(repo_root)
+
+
+def import_agent(repo_root: Path, raw_thread_id: str) -> AgentStatus:
+    """Bind this worktree to an externally-driven agent by thread id.
+
+    The counterpart to :func:`bind_ambient_agent_activation` for an agent spice
+    does not spawn: it writes the same worktree binding activation writes, but
+    for a thread id the operator supplies (dashed or dashless) rather than the
+    ambient environment. `agent show`, serve lanes, and task attribution then
+    recognize the tree as driven by that agent. The binding owns no process, so
+    it reads back idle -- spice tracks the agent without supervising it.
+    """
+    thread_id = uuid_thread_id(raw_thread_id)
+    if not thread_id:
+        raise SpiceError(
+            f"not a thread UUID: {raw_thread_id!r} -- expected dashed or "
+            "dashless hex (e.g. f2249a9f-b996-41e2-9e18-54cb381cc634)"
+        )
+    running = agent_status(repo_root)
+    if running.process_status == "running":
+        raise SpiceError(
+            "refusing to import over the agent already running on this worktree "
+            f"(thread {running.thread_id or '-'}, pid {running.pid}); "
+            "stop it before importing another"
+        )
+    prompt_skill_path = available_skill_path(repo_root, required=False)
+    write_agent_state(
+        repo_root,
+        {
+            "pid": 0,
+            "process_group_id": 0,
+            "started_at": utc_now(),
+            "mode": "import",
+            "command": [],
+            "driver": driver_for(repo_root).name,
+            "model": "",
+            "reasoning_effort": "",
+            "service_tier": "",
+            "thread_id": thread_id,
+            "prompt_skill_path": str(prompt_skill_path or ""),
+            "log_path": "",
+        },
+    )
     return agent_status(repo_root)

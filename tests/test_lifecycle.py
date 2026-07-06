@@ -1368,3 +1368,68 @@ class _FakeSideChannel:
 
     def __exit__(self, *_exc):
         self.events.append(("exit", self.repo_root))
+
+
+def _init_git_repo(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "spice@example.test"], cwd=path, check=True
+    )
+    subprocess.run(["git", "config", "user.name", "Spice Tests"], cwd=path, check=True)
+
+
+def test_agent_import_parses_uuid_and_lists_in_help():
+    parser = build_parser()
+    subparsers = next(
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    assert "import" in subparsers.choices["agent"].format_help()
+
+    args = build_parser().parse_args(
+        ["agent", "import", "f2249a9f-b996-41e2-9e18-54cb381cc634"]
+    )
+    assert args.agent_action == "import"
+    assert args.func == agent_cli.handle_agent
+    assert args.uuid == "f2249a9f-b996-41e2-9e18-54cb381cc634"
+
+
+def test_agent_import_binds_external_thread_from_either_uuid_form(tmp_path):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    dashless = "f2249a9fb99641e29e1854cb381cc634"
+    dashed = "f2249a9f-b996-41e2-9e18-54cb381cc634"
+
+    status = lifecycle.import_agent(repo, dashed)
+    # The dashed argument normalizes to the dashless canonical thread, and the
+    # binding owns no process, so spice tracks it as idle without supervising.
+    assert status.thread_id == dashless
+    assert status.process_status == "idle"
+    assert status.pid is None
+    assert lifecycle.agent_status(repo).thread_id == dashless
+
+    # The dashless form of the same UUID is the same binding.
+    assert lifecycle.import_agent(repo, dashless).thread_id == dashless
+
+
+def test_agent_import_rejects_non_uuid(tmp_path):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    with pytest.raises(SpiceError, match="not a thread UUID"):
+        lifecycle.import_agent(repo, "not-a-uuid")
+
+
+def test_agent_import_refuses_over_a_running_agent(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    monkeypatch.setattr(
+        lifecycle,
+        "agent_status",
+        lambda _root: SimpleNamespace(
+            process_status="running", thread_id="live", pid=4321
+        ),
+    )
+    with pytest.raises(SpiceError, match="already running"):
+        lifecycle.import_agent(repo, "f2249a9f-b996-41e2-9e18-54cb381cc634")
