@@ -462,6 +462,10 @@ CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE = (
 CLAUDE_ATTRIBUTION_DISABLED_SETTINGS = {
     "attribution": {"commit": "", "sessionUrl": False},
 }
+# One agent inhabits one worktree: a sub-agent spawn is refused mechanically at
+# the settings layer, not left to the skill's "do not spawn sub-agents" prose.
+# Task is Claude Code's sub-agent tool; Agent covers the alternate label.
+CLAUDE_DENIED_TOOLS = ("Task", "Agent")
 OUT_OF_CREDITS_PATTERNS = (
     re.compile(r"\busage limit\b", re.IGNORECASE),
     re.compile(r"\b(?:out of|insufficient)\s+credits?\b", re.IGNORECASE),
@@ -492,6 +496,7 @@ def claude_settings_json(
         key: value.copy() if isinstance(value, dict) else value
         for key, value in CLAUDE_ATTRIBUTION_DISABLED_SETTINGS.items()
     }
+    settings["permissions"] = {"deny": list(CLAUDE_DENIED_TOOLS)}
     if repo_root is not None and driver is not None:
         settings["hooks"] = post_tool_hook_settings(repo_root, driver)
     return json.dumps(settings, separators=(",", ":"), sort_keys=True)
