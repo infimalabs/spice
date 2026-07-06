@@ -1439,64 +1439,71 @@ def test_agent_import_refuses_over_a_running_agent(tmp_path, monkeypatch):
         lifecycle.import_agent(repo, "f2249a9f-b996-41e2-9e18-54cb381cc634")
 
 
-def test_agent_ack_retires_pending_steering_key(tmp_path, monkeypatch):
+def test_agent_reply_retires_acked_key_from_stdin(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     _init_git_repo(repo)
     monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
     write_inbox_item(repo, "20260104T000000000004Z.txt", "please do the thing")
-    assert collect_inbox_items(str(repo))  # pending before ack
-
-    args = build_parser().parse_args(
-        ["agent", "ack", "20260104T000000000004Z", "-m", "did the thing"]
+    assert collect_inbox_items(str(repo))  # pending before reply
+    monkeypatch.setattr(
+        agent_cli.sys,
+        "stdin",
+        io.StringIO("ACK 20260104T000000000004Z: did the thing\n"),
     )
+
+    args = build_parser().parse_args(["agent", "reply"])
     assert agent_cli.handle_agent(args) == 0
 
     assert not collect_inbox_items(str(repo))  # the key was retired
-    records = ack_state_records(repo)
     assert any(
         r.key == "20260104T000000000004Z"
         and r.disposition == ACK_DISPOSITION_ACKED
         and "did the thing" in (r.ack_content or "")
-        for r in records
+        for r in ack_state_records(repo)
     )
 
 
-def test_agent_ack_requires_a_reason(tmp_path, monkeypatch):
+def test_agent_reply_accepts_text_as_positional(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     _init_git_repo(repo)
     monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
-    args = build_parser().parse_args(["agent", "ack", "20260104T000000000004Z"])
-    with pytest.raises(SpiceError, match="requires a reason"):
+    write_inbox_item(repo, "20260104T000000000004Z.txt", "please do the thing")
+
+    args = build_parser().parse_args(
+        ["agent", "reply", "ACK", "20260104T000000000004Z:", "handled it"]
+    )
+    assert agent_cli.handle_agent(args) == 0
+    assert not collect_inbox_items(str(repo))
+
+
+def test_agent_reply_without_a_header_is_an_error(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
+    args = build_parser().parse_args(["agent", "reply", "just some prose, no header"])
+    with pytest.raises(SpiceError, match="no ACK or NACK header"):
         agent_cli.handle_agent(args)
 
 
-def test_agent_ack_stdin_reads_key_and_reason(tmp_path, monkeypatch):
+def test_agent_reply_handles_ack_and_nack_together(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     _init_git_repo(repo)
     monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
-    write_inbox_item(repo, "20260104T000000000004Z.txt", "please do the thing")
+    write_inbox_item(repo, "20260104T000000000004Z.txt", "do X")
+    write_inbox_item(repo, "20260104T000000000005Z.txt", "do Y")
     monkeypatch.setattr(
-        agent_cli.sys, "stdin", io.StringIO("20260104T000000000004Z handled inline\n")
-    )
-    args = build_parser().parse_args(["agent", "ack", "--stdin"])
-    assert agent_cli.handle_agent(args) == 0
-    assert not collect_inbox_items(str(repo))
-    assert any(
-        "handled inline" in (r.ack_content or "") for r in ack_state_records(repo)
+        agent_cli.sys,
+        "stdin",
+        io.StringIO(
+            "ACK 20260104T000000000004Z: shipped X\n"
+            "NACK 20260104T000000000005Z: Y is out of scope\n"
+        ),
     )
 
-
-def test_agent_nack_refuses_pending_key(tmp_path, monkeypatch):
-    repo = tmp_path / "repo"
-    _init_git_repo(repo)
-    monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
-    write_inbox_item(repo, "20260104T000000000004Z.txt", "please do the thing")
-    args = build_parser().parse_args(
-        ["agent", "nack", "20260104T000000000004Z", "-m", "cannot: out of scope"]
-    )
+    args = build_parser().parse_args(["agent", "reply"])
     assert agent_cli.handle_agent(args) == 0
-    assert not collect_inbox_items(str(repo))
-    assert any(
-        r.key == "20260104T000000000004Z" and r.disposition == ACK_DISPOSITION_REFUSED
-        for r in ack_state_records(repo)
-    )
+
+    assert not collect_inbox_items(str(repo))  # both retired
+    records = {r.key: r.disposition for r in ack_state_records(repo)}
+    assert records["20260104T000000000004Z"] == ACK_DISPOSITION_ACKED
+    assert records["20260104T000000000005Z"] == ACK_DISPOSITION_REFUSED
