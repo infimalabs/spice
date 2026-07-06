@@ -44,7 +44,11 @@ from spice.agent.maximmetrics import (
 )
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
-from spice.mail.ackstate import ACK_DISPOSITION_ACKED, ack_state_records
+from spice.mail.ackstate import (
+    ACK_DISPOSITION_ACKED,
+    ACK_DISPOSITION_REFUSED,
+    ack_state_records,
+)
 from spice.mail.inbox import collect_inbox_items, compose_inbox_text, write_inbox_item
 from spice.tasks import ops
 
@@ -1433,3 +1437,66 @@ def test_agent_import_refuses_over_a_running_agent(tmp_path, monkeypatch):
     )
     with pytest.raises(SpiceError, match="already running"):
         lifecycle.import_agent(repo, "f2249a9f-b996-41e2-9e18-54cb381cc634")
+
+
+def test_agent_ack_retires_pending_steering_key(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
+    write_inbox_item(repo, "20260104T000000000004Z.txt", "please do the thing")
+    assert collect_inbox_items(str(repo))  # pending before ack
+
+    args = build_parser().parse_args(
+        ["agent", "ack", "20260104T000000000004Z", "-m", "did the thing"]
+    )
+    assert agent_cli.handle_agent(args) == 0
+
+    assert not collect_inbox_items(str(repo))  # the key was retired
+    records = ack_state_records(repo)
+    assert any(
+        r.key == "20260104T000000000004Z"
+        and r.disposition == ACK_DISPOSITION_ACKED
+        and "did the thing" in (r.ack_content or "")
+        for r in records
+    )
+
+
+def test_agent_ack_requires_a_reason(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
+    args = build_parser().parse_args(["agent", "ack", "20260104T000000000004Z"])
+    with pytest.raises(SpiceError, match="requires a reason"):
+        agent_cli.handle_agent(args)
+
+
+def test_agent_ack_stdin_reads_key_and_reason(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
+    write_inbox_item(repo, "20260104T000000000004Z.txt", "please do the thing")
+    monkeypatch.setattr(
+        agent_cli.sys, "stdin", io.StringIO("20260104T000000000004Z handled inline\n")
+    )
+    args = build_parser().parse_args(["agent", "ack", "--stdin"])
+    assert agent_cli.handle_agent(args) == 0
+    assert not collect_inbox_items(str(repo))
+    assert any(
+        "handled inline" in (r.ack_content or "") for r in ack_state_records(repo)
+    )
+
+
+def test_agent_nack_refuses_pending_key(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    monkeypatch.setattr(agent_cli, "require_repo_root", lambda: repo)
+    write_inbox_item(repo, "20260104T000000000004Z.txt", "please do the thing")
+    args = build_parser().parse_args(
+        ["agent", "nack", "20260104T000000000004Z", "-m", "cannot: out of scope"]
+    )
+    assert agent_cli.handle_agent(args) == 0
+    assert not collect_inbox_items(str(repo))
+    assert any(
+        r.key == "20260104T000000000004Z" and r.disposition == ACK_DISPOSITION_REFUSED
+        for r in ack_state_records(repo)
+    )

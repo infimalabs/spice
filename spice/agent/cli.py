@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,22 @@ def configure_agent_parser(subparsers: Any) -> None:
     )
     import_agent.add_argument("uuid", metavar="UUID")
     import_agent.set_defaults(func=handle_agent)
+
+    for verb, verb_help in (
+        ("ack", "Accept steering keys (a reason is required for each)."),
+        ("nack", "Refuse steering keys, with the reason why."),
+    ):
+        keyed = actions.add_parser(verb, help=verb_help)
+        keyed.add_argument("keys", nargs="*", metavar="KEY")
+        keyed.add_argument(
+            "-m", "--message", default="", help="Reason recorded against the key(s)."
+        )
+        keyed.add_argument(
+            "--stdin",
+            action="store_true",
+            help="Read 'KEY [reason]' lines from stdin; a bare KEY uses --message.",
+        )
+        keyed.set_defaults(func=handle_agent)
 
     ensure = actions.add_parser("ensure", help="Start or resume the worktree's agent.")
     ensure.add_argument("--dry-run", action="store_true")
@@ -129,6 +146,8 @@ def handle_agent(args: argparse.Namespace) -> int:
             repo_root,
             getattr(args, "args", []),
         )
+    if action in {"ack", "nack"}:
+        return _archive_steering_keys(repo_root, args)
     if action == "import":
         status = lifecycle.import_agent(repo_root, str(args.uuid))
         print(render_agent_status(status))
@@ -147,6 +166,72 @@ def handle_agent(args: argparse.Namespace) -> int:
         print(render_ensure_result(result))
         return 0
     raise SpiceError(f"unknown agent action {action!r}")
+
+
+def _steering_key_reasons(args: argparse.Namespace) -> list[tuple[str, str]]:
+    """Collect (key, reason) pairs from stdin lines and positional keys.
+
+    A reason is mandatory for every key: the agent may not retire steering
+    without saying what it did with it. A stdin line is 'KEY [reason]'; a bare
+    KEY (stdin or positional) inherits --message, and it is an error for a key
+    to end up with no reason at all.
+    """
+    action = args.agent_action
+    message = str(getattr(args, "message", "") or "").strip()
+    pairs: list[tuple[str, str]] = []
+    if getattr(args, "stdin", False):
+        for lineno, raw in enumerate(sys.stdin.read().splitlines(), start=1):
+            line = raw.strip()
+            if not line:
+                continue
+            head, _, tail = line.partition(" ")
+            reason = tail.strip() or message
+            if not reason:
+                raise SpiceError(
+                    f"{action} stdin line {lineno} ({head!r}) needs a reason; "
+                    "add it after the key or pass --message"
+                )
+            pairs.append((head, reason))
+    for key in getattr(args, "keys", []) or []:
+        if not message:
+            raise SpiceError(f"{action} {key} requires a reason (--message)")
+        pairs.append((key, message))
+    return pairs
+
+
+def _archive_steering_keys(repo_root: Path, args: argparse.Namespace) -> int:
+    from spice.mail.acks import archive_ackd_inbox_items, archive_nackd_inbox_items
+    from spice.mail.inbox import inbox_item_key_aliases
+
+    action = args.agent_action
+    pairs = _steering_key_reasons(args)
+    if not pairs:
+        raise SpiceError(f"{action} requires at least one key")
+    keys = list(dict.fromkeys(key for key, _ in pairs))
+    content_by_key = {key: reason for key, reason in pairs}
+    label = action.upper()
+    joined = "; ".join(f"{key}: {reason}" for key, reason in pairs)
+    if action == "ack":
+        retired = archive_ackd_inbox_items(
+            repo_root,
+            keys,
+            ack_text=f"{label} {joined}",
+            ack_content_by_key=content_by_key,
+        )
+    else:
+        retired = archive_nackd_inbox_items(
+            repo_root,
+            keys,
+            nack_text=f"{label} {joined}",
+            nack_content_by_key=content_by_key,
+        )
+    retired_aliases: set[str] = set()
+    for key in retired:
+        retired_aliases |= inbox_item_key_aliases(key)
+    for key in keys:
+        matched = bool(inbox_item_key_aliases(key) & retired_aliases)
+        print(f"{action} {key}: {'retired' if matched else 'no pending item matched'}")
+    return 0
 
 
 def render_agent_status(status: Any) -> str:
