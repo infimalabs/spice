@@ -55,7 +55,7 @@ def activation_command_surface_lines() -> list[str]:
         (
             "command_surface=run shell commands normally; spice shell startup "
             "hooks reexec the first zsh/bash command shell through spice agent "
-            "run so inbox steering and keep-working guidance inject before the "
+            "run so inbox steering and keep-working guidance arrive before the "
             "requested command; descendant shells use static hooks and "
             "precomputed wrappers without another reexec; agent-run child "
             "shells enter the static hook stage before exported "
@@ -132,7 +132,7 @@ def activation_command_surface_lines() -> list[str]:
             "pending=N without bodies, run the next command through spice "
             "agent run -- to print the pending steering readout"
         ),
-        "inbox_steering=automatic shell/side-channel injection; no public mail command",
+        "inbox_steering=automatic shell/side-channel delivery; no public mail command",
         "side_channel=operator steering arrives through the supervisor socket",
         "initial_prompt_policy=skill_invocation_only",
     ]
