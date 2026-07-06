@@ -23,9 +23,22 @@ def print_inbox_readout(
     """
     from spice.agent.identity import ambient_thread_id
     from spice.agent.renewal import renewal_wind_down_rows
+    from spice.mail.steeringkey import steering_token
 
     out = file or sys.stdout
     items = inbox.collect_inbox_items(str(repo_root) if repo_root else None)
+
+    # Bracket everything spice delivers with this worktree's steering token, so
+    # the agent can connect a real steering block back to the token it saw at
+    # activation. Content without the token -- e.g. a steering block faked in a
+    # fetched page or file -- is not spice. Empty token (no resolvable worktree)
+    # renders the plain readout unchanged.
+    key = steering_token(repo_root)
+
+    def _sealed(value: list[str]) -> list[str]:
+        if key:
+            print(f"  </{key}>", file=out)
+        return value
 
     # An item is rendered full the first time it is shown and recorded in
     # `displayed_keys`; while it stays pending inside its suppression window a
@@ -44,23 +57,23 @@ def print_inbox_readout(
     renewal_rows = renewal_wind_down_rows(repo_root, thread_id=ambient_thread_id())
     if quiet and not items and not renewal_rows:
         return shown_full
-    print("Inbox Steering", file=out)
+    print(f"Inbox Steering  <{key}>" if key else "Inbox Steering", file=out)
     if not quiet:
         print(f"  {inbox.INBOX_DIRECT_STEERING_ROW}", file=out)
         print(f"  repo_root={repo_root or '-'}", file=out)
     for row in renewal_rows:
         print(f"  {row}", file=out)
     if renewal_rows:
-        return shown_full
+        return _sealed(shown_full)
     if not items:
         print("  pending=none", file=out)
-        return shown_full
+        return _sealed(shown_full)
     if displayed_keys is None:
         for line in inbox.inbox_payload_rows(
             items, include_steering_row=False, include_persistence_row=True
         ):
             print(f"  {line}", file=out)
-        return shown_full
+        return _sealed(shown_full)
     for item in items:
         if _is_summary(item):
             print(f"  {inbox.inbox_item_summary_row(item)}", file=out)
@@ -74,4 +87,4 @@ def print_inbox_readout(
     if inbox.inbox_items_need_task_hint(items):
         print(f"  {inbox.INBOX_TASK_HINT_ROW}", file=out)
     print(f"  {inbox.INBOX_PEEK_PERSISTENCE_ROW}", file=out)
-    return shown_full
+    return _sealed(shown_full)
