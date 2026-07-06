@@ -1405,3 +1405,29 @@ def _contains(value, needle: str) -> bool:
     if isinstance(value, str):
         return needle in value
     return any(needle in item for item in value)
+
+
+def test_runtime_environment_puts_worktree_venv_first_on_path(tmp_path):
+    (tmp_path / ".venv" / "bin").mkdir(parents=True)
+    env = shellhook.shell_steering_runtime_environment(
+        base_env={"PATH": "/usr/bin"}, repo_root=tmp_path
+    )
+    assert env["PATH"].split(os.pathsep)[0] == str(tmp_path / ".venv" / "bin")
+
+
+def test_runtime_environment_leaves_path_untouched_without_a_venv(tmp_path):
+    env = shellhook.shell_steering_runtime_environment(
+        base_env={"PATH": "/usr/bin"}, repo_root=tmp_path
+    )
+    assert "PATH" not in env
+
+
+def test_runtime_environment_does_not_duplicate_venv_on_path(tmp_path):
+    (tmp_path / ".venv" / "bin").mkdir(parents=True)
+    first = shellhook.shell_steering_runtime_environment(
+        base_env={"PATH": "/usr/bin"}, repo_root=tmp_path
+    )["PATH"]
+    again = shellhook.shell_steering_runtime_environment(
+        base_env={"PATH": first}, repo_root=tmp_path
+    )
+    assert "PATH" not in again
