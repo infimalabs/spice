@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 
 from spice.agent.driver import (
+    CLAUDE_AUTO_COMPACT_WINDOW_ENV,
+    CLAUDE_AUTO_COMPACT_WINDOW_TOKENS,
     CLAUDE_DRIVER,
     CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE,
     CODEX_DRIVER,
@@ -22,6 +24,7 @@ from spice.agent.driver import (
     PLAYWRIGHT_MCP_COMMAND,
     PLAYWRIGHT_MCP_SERVER_NAME,
     SPICE_AGENT_DRIVER_ENV,
+    claude_auto_compact_environment,
     driver_for,
     playwright_mcp_args,
     post_tool_hook_config_path,
@@ -570,3 +573,24 @@ def test_claude_command_denies_the_sub_agent_tool(tmp_path):
     deny = settings["permissions"]["deny"]
     assert "Task" in deny  # Claude Code's sub-agent tool
     assert "Agent" in deny  # alternate label
+
+
+def test_claude_auto_compact_environment_sets_a_default_window(tmp_path, monkeypatch):
+    monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "claude")
+    env = claude_auto_compact_environment(tmp_path, base_env={})
+    assert env == {
+        CLAUDE_AUTO_COMPACT_WINDOW_ENV: str(CLAUDE_AUTO_COMPACT_WINDOW_TOKENS)
+    }
+
+
+def test_claude_auto_compact_environment_is_a_noop_for_codex(tmp_path, monkeypatch):
+    monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "codex")
+    assert claude_auto_compact_environment(tmp_path, base_env={}) == {}
+
+
+def test_claude_auto_compact_environment_never_overrides_an_explicit_value(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "claude")
+    base_env = {CLAUDE_AUTO_COMPACT_WINDOW_ENV: "50000"}
+    assert claude_auto_compact_environment(tmp_path, base_env=base_env) == {}
