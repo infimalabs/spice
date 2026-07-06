@@ -457,6 +457,7 @@ function ensureTeamMemberLane(targetId, team, hint = null) {
   if (!laneStates.has(targetId)) addLane(targetId, hint, { persist: false });
   const lane = laneStates.get(targetId);
   if (!lane) return;
+  const previousConfigRevision = lane.configRevision || 0;
   const config = team.config || {};
   const splitBack = team.splitBack || {};
   const member = teamMemberForTargetId(team, targetId);
@@ -480,6 +481,17 @@ function ensureTeamMemberLane(targetId, team, hint = null) {
   if (!hint && config.speechMode && speechModes.includes(config.speechMode))
     lane.speechMode = config.speechMode;
   syncLaneEffectiveControls(lane);
+  // The server no longer wakes lanes on a team config change (it would reflow
+  // every team). Instead, a lane whose OWN team config revision advanced
+  // re-fetches its now-differently-filtered tasks; lanes on unchanged teams
+  // keep the same revision and never resubscribe, so they do not reflow.
+  if (
+    lane.liveBusSubscribed &&
+    previousConfigRevision > 0 &&
+    lane.configRevision > previousConfigRevision &&
+    typeof subscribeLaneToLiveBus === "function"
+  )
+    subscribeLaneToLiveBus(lane);
 }
 
 function teamMemberForTargetId(team, targetId) {
