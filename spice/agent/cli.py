@@ -62,6 +62,17 @@ def configure_agent_parser(subparsers: Any) -> None:
         help="Bind an external agent (dashed or dashless UUID) to this worktree.",
     )
     import_agent.add_argument("uuid", metavar="UUID")
+    import_agent.add_argument(
+        "--from",
+        dest="predecessor_thread",
+        default="",
+        metavar="PREDECESSOR_THREAD",
+        help=(
+            "Predecessor thread (dashed or dashless UUID) to carry team "
+            "membership from, for a fresh worktree with no local predecessor "
+            "binding (e.g. a forked conversation)."
+        ),
+    )
     import_agent.set_defaults(func=handle_agent)
 
     reply = actions.add_parser(
@@ -140,7 +151,11 @@ def handle_agent(args: argparse.Namespace) -> int:
     if action == "reply":
         return _reply_to_steering(repo_root, args)
     if action == "import":
-        status = lifecycle.import_agent(repo_root, str(args.uuid))
+        status = lifecycle.import_agent(
+            repo_root,
+            str(args.uuid),
+            predecessor_thread=str(getattr(args, "predecessor_thread", "") or ""),
+        )
         print(render_agent_status(status))
         return 0
     if action == "ensure":
