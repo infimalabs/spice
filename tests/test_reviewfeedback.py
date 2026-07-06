@@ -94,8 +94,10 @@ def test_review_feedback_delivers_deduped_review_guidance(tmp_path, monkeypatch)
             "",
             "> needs coverage",
             "",
-            "\N{SMILING FACE WITH SMILING EYES} Respectfully internalize as "
-            "guidance and keep working your current task!",
+            "\N{SMILING FACE WITH SMILING EYES} Internalize this as guidance -- "
+            "any follow-ups it raises are already on the board, so there is "
+            "nothing to capture or act on now. Just keep working your current "
+            "task; do not re-file what the system already filed.",
         ]
     )
     assert calls == [
