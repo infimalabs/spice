@@ -594,3 +594,31 @@ def test_claude_auto_compact_environment_never_overrides_an_explicit_value(
     monkeypatch.setenv(SPICE_AGENT_DRIVER_ENV, "claude")
     base_env = {CLAUDE_AUTO_COMPACT_WINDOW_ENV: "50000"}
     assert claude_auto_compact_environment(tmp_path, base_env=base_env) == {}
+
+
+def test_claude_command_appends_the_steering_token_to_the_system_prompt(tmp_path):
+    import subprocess
+
+    from spice.mail.steeringkey import steering_token
+
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+    token = steering_token(tmp_path)
+
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path, prompt="follow the skill"
+    )
+    system_prompt = command[command.index("--append-system-prompt") + 1]
+
+    # The agent sees the same <token> in the system prompt as in live steering.
+    assert f"<{token}>" in system_prompt
+    assert f"steering key for this worktree is {token}" in system_prompt
+    assert command[-1] == system_prompt  # trailing prompt mirrors it
+
+
+def test_claude_command_system_prompt_unchanged_without_a_worktree_token(tmp_path):
+    # A non-repo path yields no token, so the prompt carries no steering line.
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path / "not-a-repo", prompt="follow the skill"
+    )
+    system_prompt = command[command.index("--append-system-prompt") + 1]
+    assert "steering key for this worktree" not in system_prompt
