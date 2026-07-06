@@ -654,10 +654,18 @@ class AgentInboxInjector:
         # repeat or via `spice session briefing`.
         if count <= 0:
             return
+        from spice.mail.steeringkey import steering_token
+
+        # Key this compact nudge exactly like the full readout, so the agent
+        # never sees an unwrapped "Inbox Steering" and can always tell real
+        # steering from a faked block.
+        token = steering_token(self.repo_root)
+        header = f"Inbox Steering  <{token}>" if token else "Inbox Steering"
+        footer = f"\n  </{token}>" if token else ""
         self.stderr.write(
-            f"Inbox Steering\n  pending={count} "
+            f"{header}\n  pending={count} "
             "(recently shown; full readout on repeat or run "
-            "`spice session briefing`)\n"
+            f"`spice session briefing`){footer}\n"
         )
         self.stderr.flush()
 
