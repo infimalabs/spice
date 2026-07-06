@@ -558,3 +558,15 @@ def test_claude_context_window_stays_at_standard_tier_when_overflowing():
     # Overflow no longer promotes to the 1M tier; it stays pinned at 200K so
     # pressure reads past 100% and drives compaction.
     assert fields["model_context_window"] == CLAUDE_DRIVER.default_context_window
+
+
+def test_claude_command_denies_the_sub_agent_tool(tmp_path):
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path,
+        prompt="follow the skill",
+    )
+    settings = json.loads(command[command.index("--settings") + 1])
+
+    deny = settings["permissions"]["deny"]
+    assert "Task" in deny  # Claude Code's sub-agent tool
+    assert "Agent" in deny  # alternate label
