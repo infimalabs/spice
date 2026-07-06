@@ -13,6 +13,16 @@ from spice.worktrees import resolve_worktree_target
 
 SIGINT_EXIT_CODE = 130
 
+# Hook shims invoke the ambient `spice` on PATH, which for a `uv tool install`
+# resolves to one fixed source checkout regardless of which worktree is being
+# committed -- so `dev` gate backends (pre-commit, typechecks, ...) would read
+# package-relative data (e.g. serve_web_js_targets) from a stale sibling
+# instead of the worktree actually being operated on. Scoped to `dev` (the
+# hook/gate backend namespace, not the hot interactive command surface like
+# `agent run`) to keep the extra resolution check off paths run many times
+# per session.
+SELFEXEC_ENV = "SPICE_SELFEXEC_ROOT"  # env-policy: allow
+
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -23,6 +33,10 @@ def main(argv: list[str] | None = None) -> int:
         except RuntimeError as exc:
             print(f"spice: {exc}", file=sys.stderr)
             return 2
+    if argv[:1] == ["dev"]:
+        reexec_code = _reexec_dev_command_for_worktree_checkout(argv)
+        if reexec_code is not None:
+            return reexec_code
     try:
         return _dispatch(argv)
     except SpiceError as exc:
@@ -74,6 +88,47 @@ def _switch_worktree(target: str) -> None:
         return
     print(f"spice: worktree={current} -> {resolved}", file=sys.stderr)
     os.chdir(resolved)
+
+
+def _worktree_local_python(repo_root: Path) -> Path | None:
+    """The worktree's own venv interpreter, iff this worktree is a spice checkout.
+
+    `spice/` is a namespace package (no `__init__.py`), so its presence is
+    checked against this very file instead -- guaranteed to exist in any
+    checkout that has this re-exec logic at all.
+    """
+    if not (repo_root / "spice" / "cli" / "entry.py").is_file():
+        return None
+    candidate = repo_root / ".venv" / "bin" / "python"
+    return candidate if candidate.is_file() else None
+
+
+def _reexec_dev_command_for_worktree_checkout(argv: list[str]) -> int | None:
+    """Re-run a `dev` gate backend under the current worktree's own checkout.
+
+    None means "run in-process as usual" (no local checkout found, or already
+    running from it). An int is the exit code of the re-executed command.
+    """
+    if os.environ.get(SELFEXEC_ENV):  # env-policy: allow
+        return None
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        return None
+    python = _worktree_local_python(repo_root)
+    if python is None:
+        return None
+    # Compare venv roots, not resolved interpreter binaries: a venv's own
+    # `python` is commonly a symlink to one shared system interpreter, so two
+    # different worktrees' venvs can resolve to the identical binary path --
+    # `sys.prefix` is the venv root itself and does not collapse that way.
+    if Path(sys.prefix).resolve() == (repo_root / ".venv").resolve():
+        return None
+    env = dict(os.environ)  # env-policy: allow
+    env[SELFEXEC_ENV] = str(repo_root)
+    result = subprocess.run(
+        [str(python), "-m", "spice", *argv], cwd=repo_root, env=env, check=False
+    )
+    return result.returncode
 
 
 if __name__ == "__main__":
