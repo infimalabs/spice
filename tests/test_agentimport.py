@@ -100,3 +100,20 @@ def test_import_without_from_is_unchanged_manual_renewal(tmp_path, monkeypatch):
     members = [m.agent_id for m in store.team_state(team.team_id).members]
     assert successor in members
     assert predecessor not in members  # slot moved, team did not grow
+
+
+def test_import_carry_seats_the_imported_driver_on_the_member(tmp_path, monkeypatch):
+    store_path = tmp_path / "teams.sqlite3"
+    store = ServeTeamStore(path=store_path)
+    store.create_team(members=["thread:pred"])
+    monkeypatch.setattr(
+        "spice.serve.team.store.ServeTeamStore",
+        lambda: ServeTeamStore(path=store_path),
+    )
+
+    lifecycle._carry_team_membership("thread:pred", "thread:succ", "codex")
+
+    identity = store.agent_identity_for_actor("thread:succ")
+    assert identity is not None
+    assert identity.actual_driver == "codex"
+    assert identity.desired_driver == "codex"
