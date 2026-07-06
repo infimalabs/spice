@@ -288,10 +288,14 @@ def test_ensure_agent_dry_run_uses_relative_skill_prompt_for_claude(
     # Claude's own command construction prefaces the trailing prompt so the
     # skill reads as binding rather than optional (still generic, not
     # operator-specific -- the neutral result.prompt above is what the
-    # prompt boundary actually locks).
-    assert result.command[-1] == (
+    # prompt boundary actually locks), then appends the worktree steering token
+    # (exact line asserted in test_claudedriver).
+    from spice.mail.steeringkey import steering_token
+
+    assert result.command[-1].startswith(
         f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\n{result.prompt}"
     )
+    assert f"<{steering_token(tmp_path)}>" in result.command[-1]
 
 
 def test_ensure_agent_uses_configured_claude_sonnet_family(tmp_path, monkeypatch):
