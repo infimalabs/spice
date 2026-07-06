@@ -56,6 +56,13 @@ def configure_agent_parser(subparsers: Any) -> None:
     post_tool_hook.add_argument("--event-name", default=POST_TOOL_HOOK_EVENT)
     post_tool_hook.set_defaults(func=handle_agent)
 
+    import_agent = actions.add_parser(
+        "import",
+        help="Bind an external agent (dashed or dashless UUID) to this worktree.",
+    )
+    import_agent.add_argument("uuid", metavar="UUID")
+    import_agent.set_defaults(func=handle_agent)
+
     ensure = actions.add_parser("ensure", help="Start or resume the worktree's agent.")
     ensure.add_argument("--dry-run", action="store_true")
     ensure.add_argument("--force-new", action="store_true")
@@ -122,6 +129,10 @@ def handle_agent(args: argparse.Namespace) -> int:
             repo_root,
             getattr(args, "args", []),
         )
+    if action == "import":
+        status = lifecycle.import_agent(repo_root, str(args.uuid))
+        print(render_agent_status(status))
+        return 0
     if action == "ensure":
         result = lifecycle.ensure_agent(
             repo_root,

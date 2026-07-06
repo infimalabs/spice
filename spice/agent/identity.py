@@ -25,6 +25,22 @@ def canonical_thread_id(raw: str | None) -> str:
     return value
 
 
+def uuid_thread_id(raw: str | None) -> str:
+    """Canonical thread id from a UUID argument, or "" if it is not a UUID.
+
+    Stricter than :func:`canonical_thread_id`, which passes non-UUID driver
+    thread ids through verbatim: this accepts only the dashed and dashless hex
+    forms, so a command that takes a UUID argument can reject garbage instead
+    of binding it. Both forms normalize to the same dashless lowercase id.
+    """
+    value = (raw or "").strip()
+    if DASHLESS_THREAD_ID_RE.fullmatch(value):
+        return value.lower()
+    if DASHED_THREAD_ID_RE.fullmatch(value):
+        return value.replace("-", "").lower()
+    return ""
+
+
 def ambient_thread() -> tuple[str, AgentDriver] | None:
     """Return the ambient agent's thread id and owning driver, or None.
 
