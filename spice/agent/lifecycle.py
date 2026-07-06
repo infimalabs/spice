@@ -940,7 +940,9 @@ def bind_ambient_agent_activation(repo_root: Path) -> AgentStatus:
     return agent_status(repo_root)
 
 
-def import_agent(repo_root: Path, raw_thread_id: str) -> AgentStatus:
+def import_agent(
+    repo_root: Path, raw_thread_id: str, *, predecessor_thread: str = ""
+) -> AgentStatus:
     """Bind this worktree to an externally-driven agent by thread id.
 
     The counterpart to :func:`bind_ambient_agent_activation` for an agent spice
@@ -949,6 +951,12 @@ def import_agent(repo_root: Path, raw_thread_id: str) -> AgentStatus:
     ambient environment. `agent show`, serve lanes, and task attribution then
     recognize the tree as driven by that agent. The binding owns no process, so
     it reads back idle -- spice tracks the agent without supervising it.
+
+    `predecessor_thread` conveys lineage across a fresh worktree with nothing
+    locally bound to inherit from (a forked conversation): it names the
+    predecessor explicitly, taking precedence over any locally-resolved
+    predecessor, so :func:`_carry_team_membership` still finds a team slot
+    to carry forward.
     """
     thread_id = uuid_thread_id(raw_thread_id)
     if not thread_id:
@@ -964,6 +972,14 @@ def import_agent(repo_root: Path, raw_thread_id: str) -> AgentStatus:
             "stop it before importing another"
         )
     predecessor = canonical_thread_id(running.thread_id)
+    if predecessor_thread.strip():
+        explicit_predecessor = uuid_thread_id(predecessor_thread)
+        if not explicit_predecessor:
+            raise SpiceError(
+                f"not a thread UUID: {predecessor_thread!r} -- expected dashed or "
+                "dashless hex (e.g. f2249a9f-b996-41e2-9e18-54cb381cc634)"
+            )
+        predecessor = explicit_predecessor
     prompt_skill_path = available_skill_path(repo_root, required=False)
     write_agent_state(
         repo_root,
@@ -996,8 +1012,10 @@ def _carry_team_membership(predecessor: str, successor: str) -> None:
     membership and seats the successor in the same slot, so the team neither
     grows nor recharges its ceiling. A no-op when there is no predecessor, it is
     the same thread, the successor already holds a slot, or the predecessor was
-    on no team (e.g. a fresh worktree -- the fork case; conveying fork lineage
-    across worktrees is a separate, operator-owned concern on ALLOC-1kBN9MVL).
+    on no team. A fresh worktree with no locally-bound predecessor (the fork
+    case) has nothing to resolve here on its own -- `import_agent`'s
+    `predecessor_thread` parameter (`spice agent import --from`) supplies that
+    lineage explicitly instead.
     """
     if not predecessor or predecessor == successor:
         return
