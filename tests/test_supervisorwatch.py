@@ -1,0 +1,53 @@
+"""Supervisor lane watch: nudge when the bound agent is dirty but unclaimed."""
+
+import subprocess
+
+from spice.agent import lifecycle
+from spice.agent import watchdog
+from spice.tasks import ops
+
+
+def _init_git_repo(path):
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
+
+
+def _capture_feedback(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        watchdog, "publish_supervisor_feedback", lambda *a, **k: calls.append((a, k))
+    )
+    return calls
+
+
+def test_flag_uncaptured_lane_nudges_when_dirty_and_unclaimed(tmp_path, monkeypatch):
+    _init_git_repo(tmp_path)
+    (tmp_path / "dirty.txt").write_text("uncommitted", encoding="utf-8")
+    monkeypatch.setattr(ops, "active_claim", lambda _actor: None)
+    calls = _capture_feedback(monkeypatch)
+
+    lifecycle._flag_uncaptured_lane(tmp_path, "thread-x", tmp_path / "log.txt")
+
+    assert len(calls) == 1
+    assert calls[0][0][2] == "lane.uncaptured"
+    assert calls[0][1]["message"] == lifecycle.LANE_UNCAPTURED_NUDGE
+
+
+def test_flag_uncaptured_lane_silent_when_a_task_is_claimed(tmp_path, monkeypatch):
+    _init_git_repo(tmp_path)
+    (tmp_path / "dirty.txt").write_text("uncommitted", encoding="utf-8")
+    monkeypatch.setattr(ops, "active_claim", lambda _actor: {"uuid": "held"})
+    calls = _capture_feedback(monkeypatch)
+
+    lifecycle._flag_uncaptured_lane(tmp_path, "thread-x", tmp_path / "log.txt")
+
+    assert calls == []
+
+
+def test_flag_uncaptured_lane_silent_when_tree_is_clean(tmp_path, monkeypatch):
+    _init_git_repo(tmp_path)
+    monkeypatch.setattr(ops, "active_claim", lambda _actor: None)
+    calls = _capture_feedback(monkeypatch)
+
+    lifecycle._flag_uncaptured_lane(tmp_path, "thread-x", tmp_path / "log.txt")
+
+    assert calls == []

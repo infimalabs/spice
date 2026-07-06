@@ -29,7 +29,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from typing import Any, Iterator, Sequence, cast
 
 from spice.agent.driver import driver_for
@@ -493,6 +493,58 @@ def agent_state_matches_startup_log(
     return actual == settled
 
 
+# A low-frequency check, not a spinner: the operator asked the supervisor to
+# notice ~every 30-60s when its bound agent is holding no task yet the worktree
+# is dirty -- uncaptured work that cannot land until a task is claimed.
+SUPERVISOR_LANE_WATCH_SECONDS = 45.0
+LANE_UNCAPTURED_NUDGE = (
+    "your worktree has uncommitted or uncaptured changes but you hold no "
+    "claimed task -- work cannot land without one. Claim a task before "
+    "editing further, or fold the changes in with spice task adopt."
+)
+
+
+def _worktree_dirty(repo_root: Path) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0 and result.stdout.strip() != ""
+
+
+def _flag_uncaptured_lane(repo_root: Path, thread_id: str, log_path: Path) -> None:
+    """Surface a nudge when the bound agent holds no task but the tree is dirty."""
+    from spice.agent.watchdog import publish_supervisor_feedback
+    from spice.tasks.ops import active_claim
+
+    if not thread_id or active_claim(thread_id) is not None:
+        return
+    if not _worktree_dirty(repo_root):
+        return
+    with log_path.open("a", encoding="utf-8") as log_handle:
+        publish_supervisor_feedback(
+            repo_root, log_handle, "lane.uncaptured", message=LANE_UNCAPTURED_NUDGE
+        )
+
+
+def _watch_uncaptured_lane(
+    repo_root: Path,
+    thread_id: str,
+    log_path: Path,
+    process: subprocess.Popen[str],
+    stop: Event,
+) -> None:
+    while not stop.wait(SUPERVISOR_LANE_WATCH_SECONDS):
+        if process.poll() is not None:
+            return
+        try:
+            _flag_uncaptured_lane(repo_root, thread_id, log_path)
+        except Exception:  # best-effort watch: never take down the supervisor
+            pass
+
+
 def run_agent_supervisor(args: argparse.Namespace) -> int:
     from spice.agent.sidechannel import AgentSideChannelServer
 
@@ -530,8 +582,20 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
         )
         state["supervisor_pid"] = os.getpid()
         write_agent_state(repo_root, state)
-        exit_code = process.wait()
-        stdout_thread.join(timeout=1.0)
+        stop_watch = Event()
+        lane_watch = Thread(
+            target=_watch_uncaptured_lane,
+            args=(repo_root, started_thread_id, log_path, process, stop_watch),
+            name=f"spice-lane-watch-{started_thread_id or process.pid}",
+            daemon=True,
+        )
+        lane_watch.start()
+        try:
+            exit_code = process.wait()
+        finally:
+            stop_watch.set()
+            stdout_thread.join(timeout=1.0)
+            lane_watch.join(timeout=1.0)
     return int(exit_code or 0)
 
 
