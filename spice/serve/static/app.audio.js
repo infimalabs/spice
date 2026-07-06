@@ -158,6 +158,9 @@ function primeSpeechBoundary(lane) {
 // Automatic speech speaks edges, not essays: final answers and narrated bodies
 // read the first and last visible paragraphs. Non-final ACK messages use the
 // whole extracted ACK body; final ACK messages follow final-answer excerpting.
+// A command-path reply card (kind "reply") is a non-final ACK: it speaks through
+// the ACK-utterance branch below, intentionally NOT the final cue -- a reply
+// acknowledges steering, it is not a final answer.
 function automaticSpeechUtterances(lane, item) {
   const mode = laneEffectiveSpeechMode(lane);
   if (mode === "quiet") return [];

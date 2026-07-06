@@ -268,7 +268,10 @@ function latestComposerMessage(member) {
 }
 
 function isComposerLatestMessage(item) {
-  return item.kind === "assistant" || item.kind === "final";
+  // A command-path reply card (`spice agent reply`) renders exactly like a prose
+  // ACK and is a genuine latest agent message, so the composer header reflects
+  // it just like assistant/final prose.
+  return item.kind === "assistant" || item.kind === "final" || item.kind === "reply";
 }
 
 function createComposerPrimaryTextarea(lane, targetId) {
