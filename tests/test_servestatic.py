@@ -1158,7 +1158,10 @@ def test_static_primary_composer_links_latest_message_like_quote_composers():
     assert "function latestComposerMessage(member)" in app_shell
     assert "return member.knownMessages.find(isComposerLatestMessage);" in app_shell
     assert "function isComposerLatestMessage(item)" in app_shell
-    assert 'return item.kind === "assistant" || item.kind === "final";' in app_shell
+    assert (
+        'return item.kind === "assistant" || item.kind === "final" || '
+        'item.kind === "reply";' in app_shell
+    )
     assert (
         'return String(item.preview || item.display_text || item.text || "assistant message")'
         in app_shell
