@@ -1045,6 +1045,7 @@ def import_agent(
             )
         predecessor = explicit_predecessor
     prompt_skill_path = available_skill_path(repo_root, required=False)
+    driver = driver_for(repo_root).name
     write_agent_state(
         repo_root,
         {
@@ -1053,7 +1054,7 @@ def import_agent(
             "started_at": utc_now(),
             "mode": "import",
             "command": [],
-            "driver": driver_for(repo_root).name,
+            "driver": driver,
             "model": "",
             "reasoning_effort": "",
             "service_tier": "",
@@ -1062,11 +1063,11 @@ def import_agent(
             "log_path": "",
         },
     )
-    _carry_team_membership(predecessor, thread_id)
+    _carry_team_membership(predecessor, thread_id, driver)
     return agent_status(repo_root)
 
 
-def _carry_team_membership(predecessor: str, successor: str) -> None:
+def _carry_team_membership(predecessor: str, successor: str, driver: str = "") -> None:
     """Move the predecessor's team slot to the imported thread (a renewal).
 
     An import is a renewal of whoever this worktree was bound to: the imported
@@ -1092,4 +1093,33 @@ def _carry_team_membership(predecessor: str, successor: str) -> None:
             return
         if predecessor in member_ids:
             store.assign_agent(team.team_id, successor, aliases=[predecessor])
+            _carry_member_driver(store, predecessor, successor, driver)
             return
+
+
+def _carry_member_driver(
+    store: Any, predecessor: str, successor: str, driver: str
+) -> None:
+    """Record the imported driver on the successor, keeping the renewal's config.
+
+    Carries the predecessor's model/effort/target (an import is a renewal) but
+    sets both drivers to the imported worktree's driver, so the team member reads
+    back as the agent that was actually imported. The driver cannot be recovered
+    from the UUID -- it predates the identity and is determined per worktree.
+    """
+    if not driver:
+        return
+    prior = store.agent_identity_for_actor(predecessor)
+    store.record_agent_identity(
+        actor_id=successor,
+        target_id=prior.target_id if prior else "",
+        thread_id=successor,
+        actual_driver=driver,
+        actual_model=prior.actual_model if prior else "",
+        actual_effort=prior.actual_effort if prior else "",
+        actual_service_tier=prior.actual_service_tier if prior else "",
+        desired_driver=driver,
+        desired_model=prior.desired_model if prior else "",
+        desired_effort=prior.desired_effort if prior else "",
+        transcript_owner=successor,
+    )
