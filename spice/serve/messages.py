@@ -923,6 +923,32 @@ def task_card_message(
     )
 
 
+def reply_card_message(
+    key: str,
+    index: int,
+    timestamp: str,
+    text: str,
+    *,
+    source_kind: str = "agent_reply",
+    worktree_id: str | None = None,
+) -> AssistantMessage:
+    """Synthesize the lane card for one `spice agent reply` submission.
+
+    The reply text is the same ACK/NACK grammar a prose reply would carry, so
+    it runs through the ordinary assistant-message builder and renders exactly
+    like a prose ACK -- acknowledgment quote plus ACK chip -- with no prose.
+    """
+    return _assistant_message(
+        key,
+        index,
+        timestamp,
+        text,
+        kind="reply",
+        source_kind=source_kind,
+        worktree_id=worktree_id,
+    )
+
+
 def _key_offset(key: str) -> int | None:
     raw = key.rsplit("#", 1)[-1]
     try:

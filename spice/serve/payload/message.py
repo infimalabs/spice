@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from spice.agent.identity import canonical_thread_id
 from spice.agent.lifecycle import agent_binding_error, agent_status
 from spice.agent.renewal import strip_renewal_handoff_request_suffix
 from spice.errors import SpiceError
+from spice.mail.replies import read_reply_records
 from spice.mail.inbox import (
     collect_acked_inbox_items,
     collect_inbox_items,
@@ -66,30 +68,37 @@ def target_activity_items(
         worktree_id=target.id,
         repo_root=target.repo_root,
     )
-    return (
-        _merge_task_card_messages(thread_id, read.items, limit=1),
-        read.error,
-        read.transcript,
+    merged = _merge_task_card_messages(thread_id, read.items, limit=1)
+    merged = _merge_reply_card_messages(
+        thread_id,
+        merged,
+        repo_root=target.repo_root,
+        worktree_id=target.id,
+        limit=1,
     )
+    return (merged, read.error, read.transcript)
 
 
-def _merge_task_card_messages(
-    thread_id: str,
+def _card_window_after(
     items: list[message_reader.AssistantMessage],
+    after: str | None,
+    before: str | None,
+) -> str | None:
+    if after is not None or before is not None or not items:
+        return after
+    visible_items = [item for item in items if not item.kind.startswith("presence:")]
+    oldest = _oldest_message(visible_items or items)
+    return oldest.key if oldest is not None else after
+
+
+def _merge_synthetic_cards(
+    items: list[message_reader.AssistantMessage],
+    cards: list[message_reader.AssistantMessage],
     *,
     limit: int,
-    after: str | None = None,
-    before: str | None = None,
+    after: str | None,
+    before: str | None,
 ) -> list[message_reader.AssistantMessage]:
-    card_after = after
-    if card_after is None and before is None and items:
-        visible_items = [
-            item for item in items if not item.kind.startswith("presence:")
-        ]
-        oldest = _oldest_message(visible_items or items)
-        if oldest is not None:
-            card_after = oldest.key
-    cards = _task_card_messages_for_thread(thread_id, after=card_after, before=before)
     if not cards:
         return items
     bounded = max(1, min(limit, message_reader.MAX_MESSAGE_LIMIT))
@@ -106,6 +115,66 @@ def _merge_task_card_messages(
     if latest_presence is not None:
         kept.append(latest_presence)
     return _newest_messages(kept, limit=len(kept))
+
+
+def _merge_task_card_messages(
+    thread_id: str,
+    items: list[message_reader.AssistantMessage],
+    *,
+    limit: int,
+    after: str | None = None,
+    before: str | None = None,
+) -> list[message_reader.AssistantMessage]:
+    cards = _task_card_messages_for_thread(
+        thread_id, after=_card_window_after(items, after, before), before=before
+    )
+    return _merge_synthetic_cards(items, cards, limit=limit, after=after, before=before)
+
+
+def _merge_reply_card_messages(
+    thread_id: str,
+    items: list[message_reader.AssistantMessage],
+    *,
+    repo_root: Path,
+    worktree_id: str | None,
+    limit: int,
+    after: str | None = None,
+    before: str | None = None,
+) -> list[message_reader.AssistantMessage]:
+    cards = _reply_card_messages_for_thread(
+        thread_id,
+        repo_root=repo_root,
+        worktree_id=worktree_id,
+        after=_card_window_after(items, after, before),
+        before=before,
+    )
+    return _merge_synthetic_cards(items, cards, limit=limit, after=after, before=before)
+
+
+def _reply_card_messages_for_thread(
+    thread_id: str,
+    *,
+    repo_root: Path,
+    worktree_id: str | None,
+    after: str | None,
+    before: str | None,
+) -> list[message_reader.AssistantMessage]:
+    cards: list[message_reader.AssistantMessage] = []
+    for index, record in enumerate(read_reply_records(repo_root, thread_id)):
+        timestamp = str(record.get("timestamp") or "").strip()
+        text = str(record.get("text") or "").strip()
+        if not timestamp or not text:
+            continue
+        card = message_reader.reply_card_message(
+            f"{timestamp}#reply-card:{index}",
+            index,
+            timestamp,
+            text,
+            worktree_id=worktree_id,
+        )
+        if _message_inside_time_boundary(card, after=after, before=before):
+            cards.append(card)
+    return cards
 
 
 def _task_card_messages_for_thread(
@@ -421,6 +490,15 @@ def _read_thread_messages(
     items = _merge_task_card_messages(
         thread_id,
         read.items,
+        limit=limit,
+        after=after,
+        before=before,
+    )
+    items = _merge_reply_card_messages(
+        thread_id,
+        items,
+        repo_root=target.repo_root,
+        worktree_id=target.id,
         limit=limit,
         after=after,
         before=before,

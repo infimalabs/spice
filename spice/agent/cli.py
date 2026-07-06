@@ -193,9 +193,31 @@ def _reply_to_steering(repo_root: Path, args: argparse.Namespace) -> int:
     refused = archive_nackd_inbox_items(
         repo_root, list(nacks), nack_text=text, nack_content_by_key=nacks
     )
+    _log_reply_card(repo_root, text, list(acks), list(nacks))
     _print_reply_outcomes("ack", acks, retired, inbox_item_key_aliases)
     _print_reply_outcomes("nack", nacks, refused, inbox_item_key_aliases)
     return 0
+
+
+def _log_reply_card(
+    repo_root: Path, text: str, ack_keys: list[str], nack_keys: list[str]
+) -> None:
+    """Record this reply so the lane can render one card for it (no prose)."""
+    from spice.agent.lifecycle import utc_now
+    from spice.agent.paths import current_agent_thread_id
+    from spice.mail.replies import append_reply_record
+
+    thread_id = current_agent_thread_id(repo_root)
+    if not thread_id:
+        return
+    append_reply_record(
+        repo_root,
+        thread_id,
+        timestamp=utc_now(),
+        text=text,
+        ack_keys=ack_keys,
+        nack_keys=nack_keys,
+    )
 
 
 def _print_reply_outcomes(label, content_by_key, retired, aliases_of) -> None:
