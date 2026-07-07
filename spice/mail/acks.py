@@ -188,6 +188,60 @@ def split_nack_message(
     )
 
 
+@dataclass(frozen=True)
+class KeyedResponse:
+    """One steering response: its keys, cleaned body, and polarity.
+
+    ACK and NACK are the same shape with opposite sign — an acknowledgment vs a
+    reasoned refusal. `disposition` is `ACK_DISPOSITION_ACKED` for an ACK header
+    and `ACK_DISPOSITION_REFUSED` for a NACK header; everything else mirrors
+    :class:`AckSegment`.
+    """
+
+    keys: tuple[str, ...]
+    content: str
+    disposition: str
+
+
+def split_keyed_response(
+    text: str, *, drop_task_directives: bool = True
+) -> tuple[str, list[KeyedResponse]]:
+    """Split `text` into leading prose and ordered ACK/NACK responses.
+
+    Unlike :func:`split_ack_message` / :func:`split_nack_message`, which each see
+    only one polarity (so a NACK-led message hides its refusal in the ACK
+    preamble), this walks both marker kinds in source order and tags each segment
+    with its disposition. Bodies stop at the next keyed marker of either kind.
+    """
+    tagged = sorted(
+        [(*b, ACK_DISPOSITION_ACKED) for b in _ack_marker_bounds(text)]
+        + [(*b, ACK_DISPOSITION_REFUSED) for b in _nack_marker_bounds(text)]
+    )
+    if not tagged:
+        return (
+            _clean_segment_content(text, drop_task_directives=drop_task_directives),
+            [],
+        )
+    all_bounds = [(pos, header_end, keys) for pos, header_end, keys, _disp in tagged]
+    preamble = _clean_segment_content(
+        text[: tagged[0][0]], drop_task_directives=drop_task_directives
+    )
+    responses: list[KeyedResponse] = []
+    for marker_pos, header_end, keys, disposition in tagged:
+        body_end = _next_keyed_marker_pos(all_bounds, marker_pos, default=len(text))
+        responses.append(
+            KeyedResponse(
+                keys=keys,
+                content=_clean_segment_content(
+                    text[header_end:body_end],
+                    drop_task_directives=drop_task_directives,
+                ),
+                disposition=disposition,
+            )
+        )
+    return preamble, responses
+
+
 def _split_keyed_message(
     text: str,
     bounds: list[tuple[int, int, tuple[str, ...]]],

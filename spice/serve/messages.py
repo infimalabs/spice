@@ -26,7 +26,8 @@ from spice.agent.driver import (
 )
 from spice.agent.identity import canonical_thread_id
 from spice.mail.feedback import SupervisorFeedback, parse_supervisor_feedback_line
-from spice.mail.acks import split_ack_message
+from spice.mail.ackstate import ACK_DISPOSITION_REFUSED
+from spice.mail.acks import split_keyed_response
 from spice.mail.watch import (
     extract_assistant_text,
     strip_app_directive_lines,
@@ -98,6 +99,8 @@ class AssistantMessage:
     ack_count: int
     ack_keys: list[str]
     ack_utterances: list[str]
+    nack_count: int = 0
+    nack_keys: list[str] = field(default_factory=list)
     kind: str = "assistant"
     preview: str = ""
     image_only: bool = False
@@ -127,6 +130,8 @@ class AssistantMessage:
             "task_card_count": self.task_card_count,
             "ack_count": self.ack_count,
             "ack_keys": self.ack_keys,
+            "nack_count": self.nack_count,
+            "nack_keys": self.nack_keys,
             "ack_utterances": self.ack_utterances,
             "ack_segments": self.ack_segments,
             "speech_utterances": self.speech_utterances,
@@ -999,11 +1004,18 @@ def _assistant_message(
     source_kind: str = "assistant_text",
     worktree_id: str | None = None,
 ) -> AssistantMessage:
-    preamble, segments = split_ack_message(text, drop_task_directives=False)
+    preamble, segments = split_keyed_response(text, drop_task_directives=False)
     preamble = strip_app_directive_lines(preamble)
     ack_segments: list[dict[str, Any]] = []
+    # `ack_keys` is the polarity-agnostic set of keys this message responded to
+    # (ACK and NACK alike): it drives context fetch, cache retention, copy, and
+    # pending-clear, all of which apply to a refusal exactly as to an ack. The
+    # positive/negative split lives in ack_keys/nack_keys for tinting only.
     ack_keys: list[str] = []
+    nack_keys: list[str] = []
     seen_keys: set[str] = set()
+    acked_keys: set[str] = set()
+    refused_keys: set[str] = set()
     ack_utterances: list[str] = []
     display_sources: list[str] = [preamble] if preamble else []
     display_parts: list[str] = (
@@ -1011,7 +1023,8 @@ def _assistant_message(
     )
     task_card_count = _task_directive_count(preamble)
     for segment in segments:
-        # The ACK header is hidden in the UI, so capitalize the response's
+        refused = segment.disposition == ACK_DISPOSITION_REFUSED
+        # The ACK/NACK header is hidden in the UI, so capitalize the response's
         # first letter for display while keeping the spoken text verbatim.
         body = _capitalize_first(strip_app_directive_lines(segment.content))
         task_card_count += _task_directive_count(body)
@@ -1022,12 +1035,14 @@ def _assistant_message(
                 "html": _render_message_html_with_task_directives(
                     body, worktree_id=worktree_id
                 ),
+                "disposition": segment.disposition,
             }
         )
-        for ack_key in segment.keys:
-            if ack_key not in seen_keys:
-                seen_keys.add(ack_key)
-                ack_keys.append(ack_key)
+        for keyed in segment.keys:
+            if keyed not in seen_keys:
+                seen_keys.add(keyed)
+                ack_keys.append(keyed)
+            (refused_keys if refused else acked_keys).add(keyed)
         spoken = _strip_task_directive_lines(strip_app_directive_lines(segment.content))
         if spoken:
             ack_utterances.append(spoken)
@@ -1035,6 +1050,9 @@ def _assistant_message(
             display_sources.append(body)
         if display_body:
             display_parts.append(display_body)
+    nack_keys = [
+        key for key in ack_keys if key in refused_keys and key not in acked_keys
+    ]
     display_text = "\n".join(display_parts)
     image_only = _image_only_markdown(display_text)
     preamble_html = (
@@ -1052,8 +1070,10 @@ def _assistant_message(
         display_html=_render_message_html_with_task_directives(
             display_source, worktree_id=worktree_id
         ),
-        ack_count=len(ack_keys),
+        ack_count=len(acked_keys),
         ack_keys=ack_keys,
+        nack_count=len(nack_keys),
+        nack_keys=nack_keys,
         ack_utterances=ack_utterances,
         kind=kind,
         preview="image" if image_only else _preview_from_text(display_text),

@@ -221,3 +221,21 @@ def test_serve_identity_smoke_uses_harness_for_mismatch() -> None:
     assert "claude-opus -> gpt-5.5" in smoke
     assert "session: claude" in smoke
     assert "driver actual" in smoke
+
+
+def test_serve_nack_render_smoke_asserts_warn_polarity() -> None:
+    smoke = (ROOT / "browser" / "serve_nack_render_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    # The refusal renders like an ack but warn-colored: refused polarity classes,
+    # a NACK chip, the --warn accent, and the combined ACK+NACK card.
+    assert "ack-quotes--refused" in smoke
+    assert "message-body--refused" in smoke
+    assert "nackHasRefusedClass" in smoke
+    assert "nackQuoteAccentIsWarn" in smoke
+    assert 'result.nackBadges.includes("NACK")' in smoke
+    assert "mixedHasBoth" in smoke
+    assert "page.screenshot(" in smoke

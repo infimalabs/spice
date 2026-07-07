@@ -916,12 +916,14 @@ def test_static_stream_renders_message_badge_dom():
     badge_end = app_render.index("// The packer", badge_start)
 
     assert app_render[badge_start:badge_end] == (
-        "function renderBadges(ackCount, kind, maximAckCount, taskCardCount) {\n"
+        "function renderBadges(ackCount, kind, maximAckCount, taskCardCount, nackCount) {\n"
         "  const visibleAckCount = Math.max(0, ackCount - maximAckCount);\n"
+        "  const visibleNackCount = Math.max(0, Number(nackCount) || 0);\n"
         "  const visibleTaskCount = Math.max(0, Number(taskCardCount) || 0);\n"
         "  if (\n"
         "    !maximAckCount &&\n"
         "    !visibleAckCount &&\n"
+        "    !visibleNackCount &&\n"
         "    !visibleTaskCount &&\n"
         '    kind !== "final"\n'
         "  )\n"
@@ -944,6 +946,7 @@ def test_static_stream_renders_message_badge_dom():
         "    badges.append(badge);\n"
         "  };\n"
         '  if (visibleAckCount) add("ACK", "", visibleAckCount);\n'
+        '  if (visibleNackCount) add("NACK", "nack-badge", visibleNackCount);\n'
         '  if (visibleTaskCount) add("TASK", "task-badge", visibleTaskCount);\n'
         '  if (kind === "final") add("FINAL", "final-badge");\n'
         '  if (maximAckCount) add("MAXIM", "maxim-badge");\n'
@@ -952,15 +955,18 @@ def test_static_stream_renders_message_badge_dom():
         "\n"
     )
     assert app_render.index('add("ACK", "", visibleAckCount)') < app_render.index(
-        'add("TASK", "task-badge", visibleTaskCount)'
+        'add("NACK", "nack-badge", visibleNackCount)'
     )
+    assert app_render.index(
+        'add("NACK", "nack-badge", visibleNackCount)'
+    ) < app_render.index('add("TASK", "task-badge", visibleTaskCount)')
     assert app_render.index(
         'add("TASK", "task-badge", visibleTaskCount)'
     ) < app_render.index('add("FINAL", "final-badge")')
     assert app_render.index('add("FINAL", "final-badge")') < app_render.index(
         'add("MAXIM", "maxim-badge")'
     )
-    assert "    item.task_card_count || 0,\n  );" in app_render
+    assert "    item.nack_count || 0,\n  );" in app_render
 
 
 def test_static_message_badge_css_uses_compact_semantic_counts():
@@ -1007,6 +1013,12 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
     ]
     final_css_start = css.index(".messages article.final {")
     final_css_end = css.index(".messages article.final.acked {", final_css_start)
+    refused_article_start = messages_css.index(".messages article.refused {")
+    refused_article_rule = messages_css[
+        refused_article_start : messages_css.index("}", refused_article_start)
+    ]
+    final_refused_start = css.index(".messages article.final.refused {")
+    final_refused_end = css.index("}", final_refused_start)
 
     assert "--message-occupant-accent" not in badges_css_rule
     assert "--message-badge-surface: var(--panel);" in article_rule
@@ -1052,6 +1064,21 @@ def test_static_message_badge_css_uses_compact_semantic_counts():
         "  box-shadow: inset 0 3px 0 var(--final-accent);\n"
         "}\n"
     )
+    # A refusal tints the whole card with --warn: warn-tint surface, a warn rail,
+    # and the same treatment folded onto a final refusal.
+    assert "--warn-tint: color-mix(in srgb, var(--warn) 8%, var(--panel));" in index_css
+    assert "--message-badge-surface: var(--warn-tint);" in refused_article_rule
+    assert "box-shadow: inset 3px 0 0 var(--warn);" in refused_article_rule
+    assert css[final_refused_start:final_refused_end] == (
+        ".messages article.final.refused {\n"
+        "  --message-final-refused-surface: color-mix(in srgb, var(--warn-tint) 50%, var(--final-tint));\n"
+        "  --message-badge-surface: var(--message-final-refused-surface);\n"
+        "  background: var(--message-final-refused-surface);\n"
+        "  box-shadow:\n"
+        "    inset 3px 0 0 var(--warn),\n"
+        "    inset 0 3px 0 var(--final-accent);\n"
+    )
+    assert ".badge.nack-badge { --message-badge-accent: var(--warn); }" in messages_css
 
 
 def test_static_stream_reports_deadlettered_agent_ensure_failure():

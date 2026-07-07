@@ -66,6 +66,12 @@
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   box-shadow: inset 3px 0 0 var(--accent);
 }
+.messages article.refused {
+  --message-badge-surface: var(--warn-tint);
+  background: var(--warn-tint);
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+  box-shadow: inset 3px 0 0 var(--warn);
+}
 .messages article.final {
   --message-badge-surface: var(--final-tint);
   background: var(--final-tint);
@@ -78,6 +84,14 @@
   background: var(--message-final-ack-surface);
   box-shadow:
     inset 3px 0 0 var(--accent),
+    inset 0 3px 0 var(--final-accent);
+}
+.messages article.final.refused {
+  --message-final-refused-surface: color-mix(in srgb, var(--warn-tint) 50%, var(--final-tint));
+  --message-badge-surface: var(--message-final-refused-surface);
+  background: var(--message-final-refused-surface);
+  box-shadow:
+    inset 3px 0 0 var(--warn),
     inset 0 3px 0 var(--final-accent);
 }
 .messages article.now-playing {
@@ -335,6 +349,12 @@
   background: color-mix(in srgb, var(--maxim-accent) 6%, transparent);
   border-left-color: var(--maxim-accent);
 }
+/* A refusal renders identically to an ack, only warn-tinted: the quote rail,
+   the reasoned body, and any nested quotes all take --warn via --quote-accent. */
+.ack-quotes--refused .ack-quote,
+.message-body--refused {
+  --quote-accent: var(--warn);
+}
 .ack-quote--pending {
   min-height: var(--ack-quote-reserve, 3.5rem);
   display: grid;
@@ -504,6 +524,7 @@
   color: var(--fg);
 }
 .badge.final-badge { --message-badge-accent: var(--final-accent); }
+.badge.nack-badge { --message-badge-accent: var(--warn); }
 .badge.task-badge { --message-badge-accent: var(--team-plum-accent); }
 .badge.maxim-badge {
   --message-badge-accent: var(--maxim-accent);
