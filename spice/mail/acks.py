@@ -33,7 +33,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from spice.errors import SpiceError
 from spice.mail.ackstate import (
@@ -74,6 +74,10 @@ _ACK_HEADER_WRAPPER_CHARS = " \t\r\n`\"'[],()*_"
 _ACK_KEY_CLOSER_CHARS = "`\"'])*_"
 _ACK_BODY_SPACE_CHARS = " \t\r\n"
 _ACK_HEADER_SEPARATOR_CHARS = ":—–.-,;!?"
+# Markdown emphasis delimiters. Claude routinely wraps the header in bold
+# (`**ACK <key>:** ...`); a uniform run of these immediately before the token
+# is the wrapper's opening delimiter and its close is consumed with it.
+_EMPHASIS_CHARS = "*_"
 _TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
 _ACK_CONTEXT_BREAK_CHARS = "\r\n.!?;"
 _ACK_CONTEXT_WORD_EXTRA_CHARS = frozenset({"'", "-"})
@@ -222,19 +226,19 @@ def split_keyed_response(
             _clean_segment_content(text, drop_task_directives=drop_task_directives),
             [],
         )
-    all_bounds = [(pos, header_end, keys) for pos, header_end, keys, _disp in tagged]
     preamble = _clean_segment_content(
         text[: tagged[0][0]], drop_task_directives=drop_task_directives
     )
     responses: list[KeyedResponse] = []
-    for marker_pos, header_end, keys, disposition in tagged:
-        body_end = _next_keyed_marker_pos(all_bounds, marker_pos, default=len(text))
+    for marker_pos, header_end, keys, body_wrapper, disposition in tagged:
+        body_end = _next_keyed_marker_pos(tagged, marker_pos, default=len(text))
         responses.append(
             KeyedResponse(
                 keys=keys,
                 content=_clean_segment_content(
                     text[header_end:body_end],
                     drop_task_directives=drop_task_directives,
+                    wrapper=body_wrapper,
                 ),
                 disposition=disposition,
             )
@@ -244,9 +248,9 @@ def split_keyed_response(
 
 def _split_keyed_message(
     text: str,
-    bounds: list[tuple[int, int, tuple[str, ...]]],
+    bounds: list[tuple[int, int, tuple[str, ...], str]],
     *,
-    all_bounds: list[tuple[int, int, tuple[str, ...]]] | None = None,
+    all_bounds: list[tuple[int, int, tuple[str, ...], str]] | None = None,
     drop_task_directives: bool,
 ) -> tuple[str, list[AckSegment]]:
     if not bounds:
@@ -258,7 +262,7 @@ def _split_keyed_message(
     )
     segments: list[AckSegment] = []
     split_bounds = all_bounds if all_bounds is not None else bounds
-    for _index, (marker_pos, header_end, keys) in enumerate(bounds):
+    for marker_pos, header_end, keys, body_wrapper in bounds:
         body_end = _next_keyed_marker_pos(split_bounds, marker_pos, default=len(text))
         segments.append(
             AckSegment(
@@ -266,6 +270,7 @@ def _split_keyed_message(
                 content=_clean_segment_content(
                     text[header_end:body_end],
                     drop_task_directives=drop_task_directives,
+                    wrapper=body_wrapper,
                 ),
             )
         )
@@ -273,9 +278,9 @@ def _split_keyed_message(
 
 
 def _next_keyed_marker_pos(
-    bounds: list[tuple[int, int, tuple[str, ...]]], marker_pos: int, *, default: int
+    bounds: Sequence[tuple[Any, ...]], marker_pos: int, *, default: int
 ) -> int:
-    for next_pos, _header_end, _keys in bounds:
+    for next_pos, *_rest in bounds:
         if next_pos > marker_pos:
             return next_pos
     return default
@@ -629,14 +634,21 @@ def _ack_content_for_item(
     return ""
 
 
-def _ack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...]]]:
-    """Return `(ack_pos, header_end, keys)` for each valid ACK marker in order."""
-    bounds: list[tuple[int, int, tuple[str, ...]]] = []
+def _ack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...], str]]:
+    """Return `(marker_start, header_end, keys, body_wrapper)` per ACK marker.
+
+    `marker_start` backs the position up over any markdown-emphasis wrapper the
+    header opened with, so the leading `**` is excluded from the preamble.
+    `body_wrapper` is the same delimiter when its close still trails the body
+    (`**ACK k: body**`), so the segment cleaner can strip the dangling run.
+    """
+    bounds: list[tuple[int, int, tuple[str, ...], str]] = []
     for ack_pos in _iter_ack_tokens(text):
-        parsed = _parse_ack_header(text, ack_pos)
+        parsed = _parse_keyed_header(text, ack_pos, ACK_TOKEN)
         if parsed is not None:
-            header_end, keys = parsed
-            bounds.append((ack_pos, header_end, keys))
+            header_end, keys, body_wrapper = parsed
+            marker_start, _wrapper = _emphasis_run_before(text, ack_pos)
+            bounds.append((marker_start, header_end, keys, body_wrapper))
     return bounds
 
 
@@ -652,18 +664,19 @@ def _has_noop_ack_marker(text: str) -> bool:
     return False
 
 
-def _nack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...]]]:
-    """Return `(nack_pos, header_end, keys)` for each valid NACK marker."""
-    bounds: list[tuple[int, int, tuple[str, ...]]] = []
+def _nack_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...], str]]:
+    """Return `(marker_start, header_end, keys, body_wrapper)` per NACK marker."""
+    bounds: list[tuple[int, int, tuple[str, ...], str]] = []
     for nack_pos in _iter_nack_tokens(text):
-        parsed = _parse_nack_header(text, nack_pos)
+        parsed = _parse_keyed_header(text, nack_pos, NACK_TOKEN)
         if parsed is not None:
-            header_end, keys = parsed
-            bounds.append((nack_pos, header_end, keys))
+            header_end, keys, body_wrapper = parsed
+            marker_start, _wrapper = _emphasis_run_before(text, nack_pos)
+            bounds.append((marker_start, header_end, keys, body_wrapper))
     return bounds
 
 
-def _keyed_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...]]]:
+def _keyed_marker_bounds(text: str) -> list[tuple[int, int, tuple[str, ...], str]]:
     """Return every valid ACK/NACK marker bound in source order."""
     return sorted((*_ack_marker_bounds(text), *_nack_marker_bounds(text)))
 
@@ -784,18 +797,29 @@ def _contains_phrase(
 
 def _parse_ack_header(text: str, ack_pos: int) -> tuple[int, tuple[str, ...]] | None:
     """Validate an ACK header at `ack_pos`; return `(header_end, keys)` or None."""
-    return _parse_keyed_header(text, ack_pos, ACK_TOKEN)
+    parsed = _parse_keyed_header(text, ack_pos, ACK_TOKEN)
+    return None if parsed is None else (parsed[0], parsed[1])
 
 
 def _parse_nack_header(text: str, nack_pos: int) -> tuple[int, tuple[str, ...]] | None:
     """Validate a NACK header at `nack_pos`; return `(header_end, keys)` or None."""
-    return _parse_keyed_header(text, nack_pos, NACK_TOKEN)
+    parsed = _parse_keyed_header(text, nack_pos, NACK_TOKEN)
+    return None if parsed is None else (parsed[0], parsed[1])
 
 
 def _parse_keyed_header(
     text: str, token_pos: int, token: str
-) -> tuple[int, tuple[str, ...]] | None:
+) -> tuple[int, tuple[str, ...], str] | None:
+    """Validate a keyed header; return `(header_end, keys, body_wrapper)` or None.
+
+    When the header opened with a markdown-emphasis wrapper (`**ACK k:** ...`)
+    whose close sits right after the separator, that close is consumed into
+    `header_end` and `body_wrapper` is empty. When the wrapper instead closes at
+    the end of the body (`**ACK k: body**`), `body_wrapper` names the delimiter
+    so the segment cleaner strips the dangling run.
+    """
     limit = len(text)
+    _marker_start, lead_wrapper = _emphasis_run_before(text, token_pos)
     cursor = token_pos + len(token)
     first_key = _next_header_key(text, cursor, limit, allow_filler_words=True)
     if first_key is None:
@@ -815,11 +839,21 @@ def _parse_keyed_header(
     header_end, consumed_separator = _consume_ack_header_separator(
         text, header_end, limit
     )
+    body_wrapper = lead_wrapper
+    if lead_wrapper:
+        after_wrapper = _consume_body_wrapper_close(
+            text, header_end, limit, lead_wrapper
+        )
+        if after_wrapper != header_end:
+            header_end = after_wrapper
+            consumed_separator = True
+            body_wrapper = ""
+    keys = tuple(match[2] for match in header_key_matches)
     if consumed_separator or header_end >= limit:
-        return header_end, tuple(match[2] for match in header_key_matches)
+        return header_end, keys, body_wrapper
     if text[header_end] not in _ACK_BODY_SPACE_CHARS:
         return None
-    return header_end, tuple(match[2] for match in header_key_matches)
+    return header_end, keys, body_wrapper
 
 
 def is_message_less_keyed_header(header: str) -> bool:
@@ -849,6 +883,36 @@ def _next_header_key(
                 continue
         return None
     return None
+
+
+def _emphasis_run_before(text: str, pos: int) -> tuple[int, str]:
+    """Return `(start, delimiter)` for a markdown-emphasis wrapper before `pos`.
+
+    A wrapper is a uniform run of `*`/`_` immediately preceding `pos` that opens
+    at a non-word boundary (so `**ACK` opens a wrapper but `x**ACK` does not, its
+    `**` closing prior bold). Returns `(pos, "")` when no clean wrapper is found.
+    """
+    start = pos
+    while start > 0 and text[start - 1] in _EMPHASIS_CHARS:
+        start -= 1
+    if start == pos:
+        return pos, ""
+    run = text[start:pos]
+    if run != run[0] * len(run):
+        return pos, ""
+    if start > 0 and _is_word_char(text[start - 1]):
+        return pos, ""
+    return start, run
+
+
+def _consume_body_wrapper_close(text: str, index: int, limit: int, wrapper: str) -> int:
+    """Skip a wrapper-closing emphasis run (and trailing space) at `index`."""
+    if text[index : index + len(wrapper)] != wrapper:
+        return index
+    index += len(wrapper)
+    while index < limit and text[index] in _ACK_BODY_SPACE_CHARS:
+        index += 1
+    return index
 
 
 def _consume_ack_header_separator(
@@ -924,14 +988,19 @@ def _ack_key_end(text: str, start: int, limit: int) -> int | None:
     return suffix_end
 
 
-def _clean_segment_content(body: str, *, drop_task_directives: bool = False) -> str:
+def _clean_segment_content(
+    body: str, *, drop_task_directives: bool = False, wrapper: str = ""
+) -> str:
     lines = [
         line
         for line in body.splitlines()
         if not _is_app_directive_line(line)
         and (not drop_task_directives or not _is_task_directive_line(line))
     ]
-    return "\n".join(lines).strip()
+    cleaned = "\n".join(lines).strip()
+    if wrapper and cleaned.endswith(wrapper):
+        cleaned = cleaned[: -len(wrapper)].rstrip()
+    return cleaned
 
 
 def _is_app_directive_line(line: str) -> bool:
