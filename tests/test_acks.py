@@ -226,7 +226,7 @@ def test_split_keyed_response_without_markers_returns_only_preamble():
     assert responses == []
 
 
-def test_bold_wrapped_ack_header_leaves_no_orphaned_markers():
+def test_bold_wrapped_ack_header_leaves_no_stray_markers():
     # Claude routinely bolds the header: `**ACK k:** body`. The wrapper must be
     # fully consumed — no stray `**` in the preamble or the segment body.
     text = f"**ACK {KEY_A}:** here is the full breakdown."

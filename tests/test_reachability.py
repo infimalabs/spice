@@ -256,7 +256,7 @@ def test_symbol_reachability_excludes_production_used_local_helpers(tmp_path):
     symbol_output = "\n".join(render_symbol_reachability_board(symbol_findings))
 
     assert "reachability: 1 test-only finding(s)" in module_output
-    assert "spice/orphan_module_xyz.py" in module_output
+    assert "spice/unreachable_module_xyz.py" in module_output
     assert "symbol-reachability: 2 test-only symbol(s)" in symbol_output
     assert "spice/live.py:LiveThing.planted_dead_method_abc" in symbol_output
     assert "spice/live.py:planted_dead_function_abc" in symbol_output
@@ -289,26 +289,26 @@ def test_symbol_reachability_resolves_registry_literal_dispatch(tmp_path):
     (tmp_path / "spice" / "handlers.py").write_text(
         "def handle_dict_only():\n    return 1\n\n"
         "def handle_list_only():\n    return 2\n\n"
-        "def handle_orphan():\n    return 3\n",
+        "def handle_unreachable():\n    return 3\n",
         encoding="utf-8",
     )
     (tmp_path / "tests" / "test_handlers.py").write_text(
         "from spice.handlers import (\n"
         "    handle_dict_only,\n"
         "    handle_list_only,\n"
-        "    handle_orphan,\n"
+        "    handle_unreachable,\n"
         ")\n"
         "def test_handlers():\n"
         "    assert handle_dict_only() == 1\n"
         "    assert handle_list_only() == 2\n"
-        "    assert handle_orphan() == 3\n",
+        "    assert handle_unreachable() == 3\n",
         encoding="utf-8",
     )
 
     findings = scan_symbol_reachability(tmp_path)
 
     flagged = {f.symbol for f in findings}
-    assert flagged == {"handle_orphan"}
+    assert flagged == {"handle_unreachable"}
 
 
 def test_symbol_reachability_resolves_typed_parameter_method_calls(tmp_path):
@@ -550,12 +550,12 @@ def _write_symbol_reachability_repo(root: Path) -> None:
         "        return None\n",
         encoding="utf-8",
     )
-    (root / "spice" / "orphan_module_xyz.py").write_text(
+    (root / "spice" / "unreachable_module_xyz.py").write_text(
         "def only_tests_call():\n    return 5\n", encoding="utf-8"
     )
     (root / "tests" / "test_symbols.py").write_text(
         "from spice.live import LiveHandler, LiveThing, planted_dead_function_abc, shared_helper\n"
-        "import spice.orphan_module_xyz\n\n"
+        "import spice.unreachable_module_xyz\n\n"
         "def test_symbols():\n"
         "    shared_helper()\n"
         "    planted_dead_function_abc()\n"
