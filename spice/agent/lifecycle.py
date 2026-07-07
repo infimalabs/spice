@@ -500,7 +500,7 @@ SUPERVISOR_LANE_WATCH_SECONDS = 45.0
 LANE_UNCAPTURED_NUDGE = (
     "your worktree has uncommitted or uncaptured changes but you hold no "
     "claimed task -- work cannot land without one. Claim a task before "
-    "editing further, or fold the changes in with spice task adopt."
+    "editing further, or fold the changes in with spice task capture."
 )
 
 

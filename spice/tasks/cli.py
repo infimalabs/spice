@@ -287,7 +287,7 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     _configure_unclaim_parser(actions)
     _configure_edit_parser(actions)
     _configure_delete_parser(actions)
-    _configure_adopt_parser(actions)
+    _configure_capture_parser(actions)
 
 
 def _configure_ingest_parser(actions: Any) -> None:
@@ -417,51 +417,52 @@ def _configure_delete_parser(actions: Any) -> None:
     delete.set_defaults(func=handle)
 
 
-def _configure_adopt_parser(actions: Any) -> None:
-    adopt = actions.add_parser(
-        "adopt",
-        help="Capture an orphan commit (committed with no task claimed) into a task.",
+def _configure_capture_parser(actions: Any) -> None:
+    capture = actions.add_parser(
+        "capture",
+        help="Capture a loose commit (committed with no task claimed) into a task.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "An orphan commit is one you made while no task was claimed — before "
+            "A loose commit is one you made while no task was claimed — before "
             "your first claim, or after the previous task completed. task next "
-            "won't start new work while an orphan sits uncaptured on your branch.\n\n"
-            "adopt wraps a task around the orphan instead of making you reset and "
-            "redo it: it claims a task — newly minted, or the handle you pass — "
-            "over the commit you already made, so you finish it through the normal "
-            "done/review flow. Minting a new task always requires --project: adopt "
-            "auto-claims regardless of lifetime, so there is no private fallback "
-            "here. With no --title, the new task's title defaults to the orphan "
-            "commit's subject.\n\n"
+            "won't start new work while a loose commit sits uncaptured on your "
+            "branch.\n\n"
+            "capture wraps a task around the loose commit instead of making you "
+            "reset and redo it: it claims a task — newly minted, or the handle you "
+            "pass — over the commit you already made, so you finish it through the "
+            "normal done/review flow. Minting a new task always requires --project: "
+            "capture auto-claims regardless of lifetime, so there is no private "
+            "fallback here. With no --title, the new task's title defaults to the "
+            "loose commit's subject.\n\n"
             "Examples:\n"
-            '  spice task adopt --project task.cli --title "Capture orphan fix"\n'
-            '  spice task adopt --project task.cli --done --validation "tests passed"\n'
-            "  spice task adopt TASK-1k4Q5gJw"
+            '  spice task capture --project task.cli --title "Capture loose fix"\n'
+            '  spice task capture --project task.cli --done --validation "tests passed"\n'
+            "  spice task capture TASK-1k4Q5gJw"
         ),
         recovery_examples=(
-            "spice task adopt --project task.example",
-            "spice task adopt TASK-1k4Q5gJw",
+            "spice task capture --project task.example",
+            "spice task capture TASK-1k4Q5gJw",
         ),
     )
-    adopt.add_argument("handle", nargs="?")
-    adopt.add_argument("--title")
-    adopt.add_argument("--project")
-    adopt.add_argument("--description", action="append", default=[])
-    adopt.add_argument("--priority", default=config.DEFAULT_PRIORITY)
-    adopt.add_argument(
+    capture.add_argument("handle", nargs="?")
+    capture.add_argument("--title")
+    capture.add_argument("--project")
+    capture.add_argument("--description", action="append", default=[])
+    capture.add_argument("--priority", default=config.DEFAULT_PRIORITY)
+    capture.add_argument(
         "--done",
         action="store_true",
-        help="Immediately complete the adopted implementation phase.",
+        help="Immediately complete the captured implementation phase.",
     )
-    adopt.add_argument("--validation", action="append", default=[])
-    adopt.add_argument(
+    capture.add_argument("--validation", action="append", default=[])
+    capture.add_argument(
         "--origin",
         help=(
             "Origin when minting a new task: ack:<inbox-key> or task:<handle> "
-            "(the acknowledgment or task that surfaced this orphan work)."
+            "(the acknowledgment or task that surfaced this loose work)."
         ),
     )
-    adopt.set_defaults(func=handle)
+    capture.set_defaults(func=handle)
 
 
 def _configure_add_parser(actions: Any) -> None:
@@ -762,7 +763,7 @@ _DISPATCH = {
     "unclaim": lambda a: ops.unclaim(a.handle),
     "edit": lambda a: ops.edit(a.handle, priority=a.priority, project=a.project),
     "delete": lambda a: ops.delete(a.handle, a.reason),
-    "adopt": lambda a: ops.adopt(
+    "capture": lambda a: ops.capture(
         a.handle,
         title=a.title,
         project=a.project,

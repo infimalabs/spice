@@ -1,4 +1,4 @@
-"""Private task creation policy: Steer-only, and adopt's --project requirement."""
+"""Private task creation policy: Steer-only, and capture's --project requirement."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from spice.tasks import config, create, identity, ops
 from tests.test_tasks import (
     ACTOR_A,
     ACTOR_A_MEMBER,
-    _make_orphan_commit,
+    _make_loose_commit,
     remote_task_repo,
     task_repo,
 )
@@ -54,8 +54,8 @@ def test_private_task_creation_blocked_outside_steer_lifetime(task_repo):
         )
 
 
-def test_task_adopt_requires_project_when_minting_new_task(remote_task_repo):
-    _make_orphan_commit(remote_task_repo, subject="orphan needing a project")
+def test_task_capture_requires_project_when_minting_new_task(remote_task_repo):
+    _make_loose_commit(remote_task_repo, subject="loose commit needing a project")
 
-    with pytest.raises(SpiceError, match="adopt requires --project"):
-        ops.adopt()
+    with pytest.raises(SpiceError, match="capture requires --project"):
+        ops.capture()

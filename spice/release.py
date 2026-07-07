@@ -244,7 +244,7 @@ def ensure_release_preconditions(root: Path) -> None:
     if ahead > 0:
         raise SpiceError(
             f"refusing to release with {ahead} local commit(s) not captured by a "
-            "completed task; complete or adopt them into a task before releasing"
+            "completed task; complete or capture them into a task before releasing"
         )
 
 
