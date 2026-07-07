@@ -22,6 +22,7 @@ from spice.mail.acks import (
     summarize_ack_archival,
     summarize_nack_archival,
     split_ack_message,
+    split_keyed_response,
 )
 from spice.mail.ackstate import (
     ACK_DISPOSITION_ACKED,
@@ -188,6 +189,41 @@ def test_ack_and_nack_segments_stop_at_next_keyed_marker():
     nack_segments = extract_nack_segments_from_text(ack_then_nack)
     assert [segment.content for segment in ack_segments] == ["completed."]
     assert [segment.content for segment in nack_segments] == ["cannot comply."]
+
+
+def test_split_keyed_response_tags_disposition_in_source_order():
+    text = (
+        "Leading prose.\n"
+        f"ACK {KEY_A}: done the first.\n"
+        f"NACK {KEY_B}: cannot do the second.\n"
+        f"ACK {KEY_C}: done the third."
+    )
+    preamble, responses = split_keyed_response(text)
+
+    assert preamble == "Leading prose."
+    assert [(r.keys, r.content, r.disposition) for r in responses] == [
+        ((KEY_A,), "done the first.", ACK_DISPOSITION_ACKED),
+        ((KEY_B,), "cannot do the second.", ACK_DISPOSITION_REFUSED),
+        ((KEY_C,), "done the third.", ACK_DISPOSITION_ACKED),
+    ]
+
+
+def test_split_keyed_response_keeps_a_nack_out_of_the_preamble():
+    # split_ack_message alone would spill this refusal into the preamble because
+    # it never sees the NACK marker; the unified split must not.
+    text = f"NACK {KEY_A}: refusing because it would weaken the gate."
+    preamble, responses = split_keyed_response(text)
+
+    assert preamble == ""
+    assert [(r.disposition, r.content) for r in responses] == [
+        (ACK_DISPOSITION_REFUSED, "refusing because it would weaken the gate.")
+    ]
+
+
+def test_split_keyed_response_without_markers_returns_only_preamble():
+    preamble, responses = split_keyed_response("just some prose, no markers.")
+    assert preamble == "just some prose, no markers."
+    assert responses == []
 
 
 def test_segment_content_drops_app_directive_lines():

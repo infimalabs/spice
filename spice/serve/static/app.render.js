@@ -683,6 +683,7 @@ function renderMessage(lane, item) {
   const article = document.createElement("article");
   const maximAckCount = itemMaximAckCount(lane, item);
   if (item.ack_count) article.classList.add("acked");
+  if (item.nack_count) article.classList.add("refused");
   if (item.kind === "final") article.classList.add("final");
   if (item.image_only) article.classList.add("image-only");
   article.dataset.messageKey = item.key;
@@ -768,23 +769,26 @@ function renderMessageContent(lane, item) {
   }
   if (item.preamble_html) frag.append(makeMessageBody(item.preamble_html, ""));
   for (const segment of segments) {
-    const quotes = renderSegmentQuotes(lane, segment.keys || []);
+    // ACK and NACK render through one path; a refusal only flips the polarity
+    // class so its quotes and body take the warn accent instead of the ack one.
+    const refused = segment.disposition === "refused";
+    const quotes = renderSegmentQuotes(lane, segment.keys || [], refused);
     if (quotes) frag.append(quotes);
-    if (segment.html) frag.append(makeMessageBody(segment.html, ""));
+    if (segment.html) frag.append(makeMessageBody(segment.html, "", refused));
   }
   return frag;
 }
 
-function makeMessageBody(html, fallbackText) {
+function makeMessageBody(html, fallbackText, refused) {
   const body = document.createElement("div");
-  body.className = "message-body";
+  body.className = refused ? "message-body message-body--refused" : "message-body";
   body.innerHTML = html || "";
   if (!body.childNodes.length && fallbackText)
     body.append(document.createTextNode(fallbackText));
   return body;
 }
 
-function renderSegmentQuotes(lane, keys) {
+function renderSegmentQuotes(lane, keys, refused) {
   const refs = (keys || [])
     .filter((key) => key)
     .map((key) => ({
@@ -794,7 +798,7 @@ function renderSegmentQuotes(lane, keys) {
     }));
   if (!refs.length) return null;
   const wrap = document.createElement("div");
-  wrap.className = "ack-quotes";
+  wrap.className = refused ? "ack-quotes ack-quotes--refused" : "ack-quotes";
   for (const ref of refs) {
     if (ref.context && ref.context.text) wrap.append(renderAckQuote(ref.context));
     // A confirmed-missing key swaps the shimmer for a same-height failed
@@ -916,6 +920,7 @@ function renderMessageFooter(lane, item, maximAckCount) {
     item.kind,
     maximAckCount,
     item.task_card_count || 0,
+    item.nack_count || 0,
   );
   if (badges) left.append(renderDotSeparator(), badges);
   footer.append(left);
@@ -1041,12 +1046,14 @@ function itemMaximAckCount(lane, item) {
   return count;
 }
 
-function renderBadges(ackCount, kind, maximAckCount, taskCardCount) {
+function renderBadges(ackCount, kind, maximAckCount, taskCardCount, nackCount) {
   const visibleAckCount = Math.max(0, ackCount - maximAckCount);
+  const visibleNackCount = Math.max(0, Number(nackCount) || 0);
   const visibleTaskCount = Math.max(0, Number(taskCardCount) || 0);
   if (
     !maximAckCount &&
     !visibleAckCount &&
+    !visibleNackCount &&
     !visibleTaskCount &&
     kind !== "final"
   )
@@ -1069,6 +1076,7 @@ function renderBadges(ackCount, kind, maximAckCount, taskCardCount) {
     badges.append(badge);
   };
   if (visibleAckCount) add("ACK", "", visibleAckCount);
+  if (visibleNackCount) add("NACK", "nack-badge", visibleNackCount);
   if (visibleTaskCount) add("TASK", "task-badge", visibleTaskCount);
   if (kind === "final") add("FINAL", "final-badge");
   if (maximAckCount) add("MAXIM", "maxim-badge");

@@ -305,6 +305,77 @@ def test_inline_task_directive_renders_inside_ack_segment_at_written_position(
     assert "<dt>project</dt><dd>serve.ui</dd>" in segment_html
 
 
+def test_assistant_message_payload_splits_ack_and_nack_polarity(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": (
+                        "ACK 20260610T115900000000Z: shipped the doctor rollup.\n"
+                        "NACK 20260610T115901000000Z: refusing — that weakens "
+                        "the gate."
+                    ),
+                }
+            ],
+        },
+    )
+
+    item = message_reader.read_assistant_messages(transcript, limit=5)[0]
+    payload = item.to_payload()
+
+    # ack_keys is the polarity-agnostic union of responded keys, in source order;
+    # the counts and nack_keys carry the positive/negative split for tinting.
+    assert payload["ack_keys"] == [
+        "20260610T115900000000Z",
+        "20260610T115901000000Z",
+    ]
+    assert payload["ack_count"] == 1
+    assert payload["nack_count"] == 1
+    assert payload["nack_keys"] == ["20260610T115901000000Z"]
+    assert [seg["disposition"] for seg in payload["ack_segments"]] == [
+        "acked",
+        "refused",
+    ]
+
+
+def test_assistant_message_payload_marks_a_pure_nack_without_ack_count(tmp_path):
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": ("NACK 20260610T115900000000Z: cannot comply with that."),
+                }
+            ],
+        },
+    )
+
+    item = message_reader.read_assistant_messages(transcript, limit=5)[0]
+    payload = item.to_payload()
+
+    # A NACK-led message must not spill its refusal into the preamble, and it
+    # must not read as an acknowledgment (no acked tint / ACK chip).
+    assert payload["ack_count"] == 0
+    assert payload["nack_count"] == 1
+    assert payload["nack_keys"] == ["20260610T115900000000Z"]
+    assert payload["preamble_html"] == ""
+    assert [seg["disposition"] for seg in payload["ack_segments"]] == ["refused"]
+    assert "Cannot comply with that." in payload["ack_segments"][0]["html"]
+
+
 def test_inline_task_directive_counts_multiple_task_cards(tmp_path):
     latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
     transcript = tmp_path / "rollout.jsonl"

@@ -14,6 +14,7 @@
   --accent: #2d6a4f;
   --accent-strong: #1b4332;
   --ack-tint: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  --warn-tint: color-mix(in srgb, var(--warn) 8%, var(--panel));
   --final-accent: #4f63b5;
   --final-tint: color-mix(in srgb, var(--final-accent) 8%, var(--panel));
   --say-accent: #8b5f00;
