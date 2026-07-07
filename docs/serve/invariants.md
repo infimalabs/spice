@@ -18,7 +18,7 @@ token, so a late `play()` resolution cannot overlap with a newer clip.
   after the element becomes stale, that element stops itself immediately.
 - `activePlaybackAudio` is the single active reference. Starting a new clip
   calls `stopActivePlayback()` first.
-- `stopOrphanedPlayback(audio)` terminates stale clips whose `play()` promise
+- `stopStalePlayback(audio)` terminates stale clips whose `play()` promise
   resolved late.
 
 Enforcement: `spice/serve/static/app.audio.js:543-586`

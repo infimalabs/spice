@@ -564,8 +564,8 @@ function assertFrozenRipple(result, fail) {
 
 function assertRacingRemoval(result, fail) {
   if (result.threw) fail("resolution racing removal must not throw");
-  if (result.stillInLattice) fail("a removed message's ack resolution must not leave orphan lattice state");
-  if (result.stillInDom) fail("a removed message's ack resolution must not leave an orphan DOM node");
+  if (result.stillInLattice) fail("a removed message's ack resolution must not leave stray lattice state");
+  if (result.stillInDom) fail("a removed message's ack resolution must not leave a stray DOM node");
 }
 
 function assertCompleteImageResolution(result, fail) {

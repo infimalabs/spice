@@ -596,12 +596,12 @@ function playAudioBuffer(buffer) {
     audio.play().then(() => {
       // If a newer clip claimed ownership while play() was pending, this one
       // lost the race after starting: stop it so the two never overlap.
-      if (generation !== playbackGeneration) stopOrphanedPlayback(audio);
+      if (generation !== playbackGeneration) stopStalePlayback(audio);
     }, onEnd);
   });
 }
 
-function stopOrphanedPlayback(audio) {
+function stopStalePlayback(audio) {
   try {
     pauseIntentionally(audio);
   } catch (error) {
