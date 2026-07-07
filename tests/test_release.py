@@ -411,7 +411,19 @@ def test_release_notes_group_edited_highlights_by_project():
     )
 
     assert notes == (
+        "> [!IMPORTANT]\n"
+        "> **Draft release notes — curate before publishing.** The list under\n"
+        "> _Changes by project_ is a raw per-task export, not the final release\n"
+        "> body. Fold it into the highlights below, then delete this banner and the\n"
+        "> placeholder line. Keep the raw list only as a collapsed `<details>`\n"
+        "> appendix if useful. Publishing this file unedited ships the raw export.\n"
+        "\n"
         "## Highlights\n"
+        "\n"
+        "_Replace this line with a short, curated set of highlights folded from "
+        "the changes below._\n"
+        "\n"
+        "## Changes by project\n"
         "\n"
         "### Serve\n"
         "\n"
@@ -441,6 +453,36 @@ def test_release_notes_group_edited_highlights_by_project():
         "- Commit source: first-parent history grouped by `Task-Project` metadata\n"
         "- Release tag: `v0.3.0`\n"
     )
+
+
+def test_release_notes_open_with_a_draft_curation_scaffold():
+    notes = render_release_notes(
+        version="0.4.0",
+        release_commit="abcdef1234567890",
+        release_short="abcdef1",
+        current_tag="v0.4.0",
+        previous_tag="v0.3.0",
+        records=[
+            ReleaseRecord(
+                commit="1111111aaaa",
+                subject="Add a thing",
+                project="cli",
+            )
+        ],
+    )
+
+    # The generated notes are a draft to curate, not a finished body: they lead
+    # with a visible banner and an empty Highlights placeholder above the raw
+    # per-task export, so a raw publish is self-evidently uncurated.
+    assert notes.startswith("> [!IMPORTANT]\n")
+    assert "Draft release notes — curate before publishing." in notes
+    banner = notes.index("> [!IMPORTANT]")
+    highlights = notes.index("## Highlights")
+    placeholder = notes.index("_Replace this line with a short, curated set")
+    changes = notes.index("## Changes by project")
+    assert banner < highlights < placeholder < changes
+    # The raw grouped export sits under Changes by project, not under Highlights.
+    assert "### CLI" in notes and notes.index("### CLI") > changes
 
 
 def _git(repo: Path, *args: str) -> None:

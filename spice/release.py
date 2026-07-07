@@ -61,7 +61,9 @@ def build_release_parser(prog: str = "spice release") -> argparse.ArgumentParser
     prepare.add_argument("bump", choices=BUMP_CHOICES)
     prepare.set_defaults(func=handle_release, release_mode="prepare")
 
-    notes = actions.add_parser("notes", help="Generate edited release-note highlights.")
+    notes = actions.add_parser(
+        "notes", help="Generate a draft changelog to curate into release highlights."
+    )
     notes.add_argument("version", nargs="?")
     notes.add_argument("--output", type=Path, help="Write notes to this path.")
     notes.add_argument(
@@ -168,6 +170,12 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
             print(f"wrote release notes draft for {version} to {notes_output}")
         else:
             print(output, end="" if output.endswith("\n") else "\n")
+        print(
+            f"draft notes for {version} are a raw per-task export — fold them into "
+            "curated highlights (edit the Highlights section, drop the draft "
+            "banner) before publishing; do not ship the raw export",
+            file=sys.stderr,
+        )
         return 0
 
     if mode == "range":
@@ -505,7 +513,22 @@ def render_release_notes(
             edited_release_highlight(record.subject), []
         ).append(shortish_commit(record.commit))
 
-    lines = ["## Highlights", ""]
+    lines = [
+        "> [!IMPORTANT]",
+        "> **Draft release notes — curate before publishing.** The list under",
+        "> _Changes by project_ is a raw per-task export, not the final release",
+        "> body. Fold it into the highlights below, then delete this banner and the",
+        "> placeholder line. Keep the raw list only as a collapsed `<details>`",
+        "> appendix if useful. Publishing this file unedited ships the raw export.",
+        "",
+        "## Highlights",
+        "",
+        "_Replace this line with a short, curated set of highlights folded from "
+        "the changes below._",
+        "",
+        "## Changes by project",
+        "",
+    ]
     if groups:
         for project, subjects in groups.items():
             lines.extend([f"### {release_project_heading(project)}", ""])
@@ -718,7 +741,8 @@ def print_prepare_instructions(version: str) -> None:
         f"spice release notes > /tmp/spice-release-{version}-notes.md"
     )
     print(
-        "curate the draft notes, then run "
+        "the draft is a raw per-task export — fold it into curated highlights "
+        "(edit the Highlights section, drop the draft banner), then run "
         f"spice release publish --notes-file /tmp/spice-release-{version}-notes.md"
     )
 

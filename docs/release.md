@@ -15,8 +15,13 @@ spice release minor           # one-pass bump, validate, commit, publish
 For curated GitHub release notes, generate the draft after `prepare` and edit
 from that file instead of relying on session memory. The draft is built from
 first-parent commits in the exact previous-release-tag-to-release-commit range,
-grouped by landed task project metadata, rewritten into highlight-style bullets,
-and records that range in the package notes.
+grouped by landed task project metadata under a `## Changes by project` section,
+and records that range in the package notes. That grouped export is a **draft,
+not the final release body**: it opens with a curation banner and an empty
+`## Highlights` placeholder. Fold the changes into a short set of human-readable
+highlights, delete the banner and placeholder, and keep the raw list only as a
+collapsed `<details>` appendix if useful. Do not publish the raw export — a
+release that still shows the draft banner was shipped uncurated.
 
 When release history is unusual, pass `--release-commit <rev>` to choose the
 commit used for `spice release notes` or `spice release github`. Use it for tag
