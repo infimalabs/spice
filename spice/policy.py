@@ -49,6 +49,17 @@ COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = ("Co-Authored-By",
 TASTE_WORD_SUGGESTIONS: dict[str, str] = {
     "hallucinate": "confabulate",
     "master": "main, primary, or leader",
+    "adopt": "capture",
+    "adopts": "captures",
+    "adopted": "captured",
+    "adopting": "capturing",
+    "adoption": "capture",
+    "adopter": "integrator",
+    "adopters": "integrators",
+    "orphan": "loose",
+    "orphans": "loose",
+    "orphaned": "loose",
+    "orphaning": "",
 }
 
 # --- repo-truth docs ------------------------------------------------------------
