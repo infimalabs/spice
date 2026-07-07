@@ -226,6 +226,62 @@ def test_split_keyed_response_without_markers_returns_only_preamble():
     assert responses == []
 
 
+def test_bold_wrapped_ack_header_leaves_no_orphaned_markers():
+    # Claude routinely bolds the header: `**ACK k:** body`. The wrapper must be
+    # fully consumed — no stray `**` in the preamble or the segment body.
+    text = f"**ACK {KEY_A}:** here is the full breakdown."
+    preamble, segments = split_ack_message(text)
+    assert preamble == ""
+    assert segments[0].keys == (KEY_A,)
+    assert segments[0].content == "here is the full breakdown."
+
+
+def test_bold_wrapper_closing_at_body_end_is_stripped():
+    # The wrapper can instead close after the body: `**ACK k: body**`.
+    text = f"**ACK {KEY_A}: here is the full breakdown**"
+    preamble, segments = split_ack_message(text)
+    assert preamble == ""
+    assert segments[0].content == "here is the full breakdown"
+
+
+def test_underscore_wrapped_nack_header_is_consumed():
+    text = f"__NACK {KEY_A}:__ cannot comply with this one."
+    segments = extract_nack_segments_from_text(text)
+    assert segments[0].keys == (KEY_A,)
+    assert segments[0].content == "cannot comply with this one."
+
+
+def test_single_asterisk_wrapped_ack_header_is_consumed():
+    text = f"*ACK {KEY_A}:* italic-wrapped body."
+    preamble, segments = split_ack_message(text)
+    assert preamble == ""
+    assert segments[0].content == "italic-wrapped body."
+
+
+def test_bold_header_preserves_inner_bold_in_the_body():
+    # Only the header wrapper is consumed; legitimate bold inside the body stays.
+    text = f"**ACK {KEY_A}:** see **this detail** kept intact."
+    segments = extract_ack_segments_from_text(text)
+    assert segments[0].content == "see **this detail** kept intact."
+
+
+def test_bold_wrapper_before_marker_stays_out_of_the_preamble():
+    text = f"Leading prose about the work.\n**ACK {KEY_A}:** the answer."
+    preamble, segments = split_ack_message(text)
+    assert preamble == "Leading prose about the work."
+    assert segments[0].content == "the answer."
+
+
+def test_split_keyed_response_consumes_bold_wrappers_on_both_polarities():
+    text = f"**ACK {KEY_A}:** did the first.\n**NACK {KEY_B}:** cannot do the second."
+    preamble, responses = split_keyed_response(text)
+    assert preamble == ""
+    assert [(r.keys, r.content, r.disposition) for r in responses] == [
+        ((KEY_A,), "did the first.", ACK_DISPOSITION_ACKED),
+        ((KEY_B,), "cannot do the second.", ACK_DISPOSITION_REFUSED),
+    ]
+
+
 def test_segment_content_drops_app_directive_lines():
     text = f'ACK {KEY_A}: shipped.\n::git-commit{{"sha":"abc"}}\ntrailing prose.'
     segments = extract_ack_segments_from_text(text)
