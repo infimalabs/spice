@@ -148,7 +148,7 @@ def test_audio_playback_enforces_single_owner():
     assert "stopActivePlayback();" in play_rule
     assert "activePlaybackAudio = audio;" in play_rule
     # A late-resolving play() that lost the race stops itself.
-    assert "if (generation !== playbackGeneration) stopOrphanedPlayback(audio);" in (
+    assert "if (generation !== playbackGeneration) stopStalePlayback(audio);" in (
         play_rule
     )
     # finish is idempotent so the pause/ended/error events cannot double-resolve.
