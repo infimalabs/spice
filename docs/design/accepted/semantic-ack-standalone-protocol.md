@@ -54,7 +54,7 @@ chatops systems, IDE agents, CI remediation bots, and long-running coding lanes.
 
 ## Protocol Sketch
 
-Names are intentionally generic so another system can adopt the pattern without
+Names are intentionally generic so another system can use the pattern without
 copying spice internals.
 
 Directive:
@@ -112,7 +112,7 @@ archive later, but the first interoperable unit is the key-plus-summary receipt.
 2. Include a reference implementation over a directory of directive files and a
    transcript text file.
 3. Mark it Draft until a second implementation outside spice exists.
-4. Revisit broader standardization only after another harness adopts the loop
+4. Revisit broader standardization only after another harness takes up the loop
    and reports whether the fields are sufficient.
 
 The answer is therefore yes, publish it, but as a deliberately small draft. Its

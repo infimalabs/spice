@@ -1,12 +1,12 @@
 # Stability
 
 spice is still moving, but not every surface moves at the same speed. Treat this
-page as the adoption map: build on the stable rows, wrap or pin the moving rows,
+page as the build-on map: build on the stable rows, wrap or pin the moving rows,
 and assume anything unlisted is internal unless another document says otherwise.
 
 | Surface | Status | Build-on guidance |
 | --- | --- | --- |
-| Inbox file format and ACK protocol | Stable | Durable inbox items, UTC keys, priority/note fields, pending readout, and transcript `ACK <key>: ...` retirement are core protocol. Adopters can build tooling that writes operator steering and watches semantic ACKs. |
+| Inbox file format and ACK protocol | Stable | Durable inbox items, UTC keys, priority/note fields, pending readout, and transcript `ACK <key>: ...` retirement are core protocol. Integrators can build tooling that writes operator steering and watches semantic ACKs. |
 | Constitution constants and hook policy | Stable | Policy limits, flex/sticky behavior, repo-shape checks, env-literal inventory, magic-number ratchet, and commit-message rules are executable doctrine. Changes should be explicit contract changes, not silent drift. |
 | Public library seam | Stable | Modules documented in [docs/library-seam.md](docs/library-seam.md) are intended for repo tools, including `spice.errors`, `spice.policy`, `spice.flexstate`, `spice.locking`, `spice.paths`, `spice.procs`, `spice.repocfg`, and named study helpers. Underscored names remain private. |
 | Agent bootstrap contract | Stable | Worktree skill invocation, `spice agent activation`, `spice session briefing`, and task-board rehydration are the supported prompt-boundary path. |

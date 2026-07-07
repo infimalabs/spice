@@ -189,7 +189,7 @@ TASK-... size=L score=4 elapsed=+1 commands=+1 validation=+1 review=+1
 This keeps the label debuggable. If a label looks wrong, the team can see which
 component caused it and tune that component.
 
-## What Not To Adopt Yet
+## What Not To Build Yet
 
 - Do not auto-set priority from size. Priority is urgency.
 - Do not refuse allocator selection for `XL` tasks. Spawn split suggestions
