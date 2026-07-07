@@ -208,7 +208,11 @@ def _configure_task_phase_parsers(actions: Any) -> None:
             'spice task done TASK-1k4Q5gJw --validation "tests passed"',
         ),
     )
-    done.add_argument("handle")
+    done.add_argument(
+        "handle",
+        nargs="?",
+        help="Task handle; omit to complete your sole active claim.",
+    )
     done.add_argument("--validation", action="append", default=[])
     done.add_argument("--judgment")
     done.add_argument("--note", action="append", default=[], dest="notes")
@@ -241,7 +245,11 @@ def _configure_task_phase_parsers(actions: Any) -> None:
             "spice task review TASK-1k4Q5gJw --finding changes --followup TASK-1k4Q5gh8",
         ),
     )
-    review.add_argument("handle")
+    review.add_argument(
+        "handle",
+        nargs="?",
+        help="Task handle; omit to review your sole active claim.",
+    )
     review.add_argument("--finding", default="clean")
     review.add_argument("--note")
     review.add_argument(
@@ -378,7 +386,11 @@ def _configure_unclaim_parser(actions: Any) -> None:
         help="Release a claim.",
         recovery_examples=("spice task unclaim TASK-1k4Q5gJw",),
     )
-    unclaim.add_argument("handle")
+    unclaim.add_argument(
+        "handle",
+        nargs="?",
+        help="Task handle; omit to release your sole active claim.",
+    )
     unclaim.set_defaults(func=handle)
 
 

@@ -196,6 +196,30 @@ def active_claim_phase(actor: str) -> str:
     return str(claims[0].get("phase") or "") if claims else ""
 
 
+def resolve_claim_target(handle: str | None, *, action: str) -> dict[str, Any]:
+    """Resolve an explicit handle, or infer the current actor's sole active claim.
+
+    Subcommands that act on the task you are actively working (`done`, `review`,
+    `unclaim`) accept an omitted handle and fill it from the single claim you
+    hold. With no claim, or more than one, the handle stays required so the
+    target is never guessed.
+    """
+    if handle and handle.strip():
+        return identity.resolve(handle)
+    claims = _active_claims_for(tw.current_actor())
+    if len(claims) == 1:
+        return claims[0]
+    if not claims:
+        raise SpiceError(
+            f"task {action} requires a handle: no active claim to infer one from"
+        )
+    held = ", ".join(sorted(identity.render_handle(r) for r in claims))
+    raise SpiceError(
+        f"task {action} requires an explicit handle: you hold "
+        f"{len(claims)} active claims ({held})"
+    )
+
+
 def _require_single_active_slot(
     actor: str, *, action: str, target: dict[str, Any] | None = None
 ) -> None:
@@ -441,8 +465,8 @@ def _project_filter_covers_project(filter_project: str, project: str) -> bool:
     )
 
 
-def unclaim(handle: str) -> str:
-    row = identity.resolve(handle)
+def unclaim(handle: str | None = None) -> str:
+    row = resolve_claim_target(handle, action="unclaim")
     uuid = identity.uuid_of(row)
     # Atomic: clear the start date (deactivate) and the claim metadata together.
     tw.run([uuid, "modify", "start:", *CLAIM_CLEAR])
@@ -684,7 +708,7 @@ def _advance(row: dict[str, Any], *, review_author: str | None = None) -> str:
 
 
 def done(
-    handle: str,
+    handle: str | None,
     *,
     validation: list[str],
     judgment: str | None = None,
@@ -693,7 +717,8 @@ def done(
     if not validation:
         raise SpiceError("task done requires --validation")
     tw.require_clean_worktree("task done")
-    row = identity.resolve(handle)
+    row = resolve_claim_target(handle, action="done")
+    handle = identity.render_handle(row)
     _require_pending(row, "complete")
     actor = tw.current_actor()
     _require_owner(row, actor, "complete")
@@ -880,7 +905,7 @@ def _require_bound_quality_gates_clean(row: dict[str, Any]) -> None:
 
 
 def review(
-    handle: str,
+    handle: str | None,
     *,
     finding: str = "clean",
     note: str | None = None,
@@ -896,7 +921,8 @@ def review(
             "or --followup HANDLE"
         )
     tw.require_clean_worktree("task review")
-    row = identity.resolve(handle)
+    row = resolve_claim_target(handle, action="review")
+    handle = identity.render_handle(row)
     _require_pending(row, "review")
     if str(row.get("phase") or "") != "review":
         raise SpiceError("task review requires a task in the review phase")
