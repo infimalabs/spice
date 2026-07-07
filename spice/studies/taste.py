@@ -2,8 +2,9 @@
 
 The study nudges writing toward better taste: each configured word maps to a
 suggestion. An empty suggestion means "remove or rephrase; it adds no value";
-a non-empty one is the preferred alternative. Matching is whole-word and
-case-insensitive over tracked text files.
+a non-empty one is the preferred alternative. Matching is case-insensitive
+over tracked text files; a key is whole-word, or a stem covering every
+inflection when it ends with ``*`` (``adopt*`` catches adopt/adopted/adoption).
 """
 
 from __future__ import annotations
@@ -14,21 +15,13 @@ from pathlib import Path
 
 from spice.studies.walk import is_excluded_path
 
-# Fallback map when no config is passed; keys match case-insensitively. Repos
-# add their own words via [tool.spice.policy.taste]; this stays minimal.
+# Fallback map when no config is passed; keys match case-insensitively. A
+# trailing ``*`` is a stem covering every inflection. Repos add their own words
+# via [tool.spice.policy.taste]; this stays minimal.
 DEFAULT_TASTE_WORDS: dict[str, str] = {
-    "hallucinate": "confabulate",
-    "adopt": "capture",
-    "adopts": "captures",
-    "adopted": "captured",
-    "adopting": "capturing",
-    "adoption": "capture",
-    "adopter": "integrator",
-    "adopters": "integrators",
-    "orphan": "loose",
-    "orphans": "loose",
-    "orphaned": "loose",
-    "orphaning": "",
+    "hallucinat*": "confabulate",
+    "adopt*": "capture",
+    "orphan*": "loose",
 }
 
 TEXT_SUFFIXES = frozenset({".md", ".txt", ".rst"})
@@ -42,9 +35,42 @@ class TasteFinding:
     suggestion: str
 
 
-def _word_pattern(words: dict[str, str]) -> re.Pattern[str]:
-    alternation = "|".join(re.escape(word) for word in words)
-    return re.compile(rf"\b({alternation})\b", re.IGNORECASE)
+def _compile_words(
+    words: dict[str, str],
+) -> tuple[re.Pattern[str], list[tuple[str, bool, str]]]:
+    """Compile the scan pattern and the ordered token->suggestion rules.
+
+    A key ending in ``*`` is a stem: its fragment matches the stem plus any
+    trailing word characters, so every inflection is caught. Any other key is
+    whole-word. The whole scan is one compiled alternation walked once per line;
+    a matched token is attributed to a suggestion by the first rule it matches,
+    in insertion order (attribution runs only per finding, which is rare).
+    """
+    fragments: list[str] = []
+    rules: list[tuple[str, bool, str]] = []
+    for key, suggestion in words.items():
+        low = key.lower()
+        if low.endswith("*"):
+            stem = low[:-1]
+            fragments.append(re.escape(stem) + r"\w*")
+            rules.append((stem, True, suggestion))
+        else:
+            fragments.append(re.escape(low))
+            rules.append((low, False, suggestion))
+    pattern = re.compile(rf"\b(?:{'|'.join(fragments)})\b", re.IGNORECASE)
+    return pattern, rules
+
+
+def _suggestion_for(token: str, rules: list[tuple[str, bool, str]]) -> str:
+    """The suggestion of the first rule the token satisfies; "" if none does.
+
+    The token always originates from the compiled pattern, so a rule matches;
+    an empty suggestion is a legitimate "rephrase" hint, not a miss.
+    """
+    for needle, is_stem, suggestion in rules:
+        if token.startswith(needle) if is_stem else token == needle:
+            return suggestion
+    return ""
 
 
 def scan_taste(
@@ -53,12 +79,10 @@ def scan_taste(
     root: Path,
     words: dict[str, str] | None = None,
 ) -> list[TasteFinding]:
-    resolved = {
-        key.lower(): value for key, value in (words or DEFAULT_TASTE_WORDS).items()
-    }
-    if not resolved:
+    source = words or DEFAULT_TASTE_WORDS
+    if not source:
         return []
-    pattern = _word_pattern(resolved)
+    pattern, rules = _compile_words(source)
     findings: list[TasteFinding] = []
     for rel_path in paths:
         if rel_path.suffix.lower() not in TEXT_SUFFIXES:
@@ -71,13 +95,13 @@ def scan_taste(
         text = abs_path.read_text(encoding="utf-8", errors="replace")
         for line_number, line in enumerate(text.splitlines(), start=1):
             for match in pattern.finditer(line):
-                word = match.group(1).lower()
+                word = match.group(0).lower()
                 findings.append(
                     TasteFinding(
                         path=rel_path.as_posix(),
                         line=line_number,
                         word=word,
-                        suggestion=resolved[word],
+                        suggestion=_suggestion_for(word, rules),
                     )
                 )
     return findings

@@ -44,22 +44,15 @@ COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS: tuple[str, ...] | None = None
 COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = ("Co-Authored-By",)
 
 # --- taste ----------------------------------------------------------------------
-# Low-value or poor-taste words mapped to a suggestion (empty = rephrase). Repos
-# merge their own words over these defaults under [tool.spice.policy.taste].
+# Low-value or poor-taste words mapped to a suggestion (empty = rephrase). A
+# trailing ``*`` is a stem that matches every inflection (``adopt*`` ->
+# adopt/adopted/adoption); a bare key is whole-word. Repos merge their own words
+# over these defaults under [tool.spice.policy.taste].
 TASTE_WORD_SUGGESTIONS: dict[str, str] = {
-    "hallucinate": "confabulate",
+    "hallucinat*": "confabulate",
     "master": "main, primary, or leader",
-    "adopt": "capture",
-    "adopts": "captures",
-    "adopted": "captured",
-    "adopting": "capturing",
-    "adoption": "capture",
-    "adopter": "integrator",
-    "adopters": "integrators",
-    "orphan": "loose",
-    "orphans": "loose",
-    "orphaned": "loose",
-    "orphaning": "",
+    "adopt*": "capture",
+    "orphan*": "loose",
 }
 
 # --- repo-truth docs ------------------------------------------------------------

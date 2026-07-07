@@ -45,6 +45,51 @@ def test_only_text_files_scanned_and_clean_passes(tmp_path):
     assert taste.render_taste_board([]) == "taste: ok"
 
 
+def test_stem_star_key_matches_every_inflection(tmp_path):
+    doc = tmp_path / "notes.md"
+    doc.write_text(
+        "we adopted it; still adopting; an orphaned note; the adoption.\n",
+        encoding="utf-8",
+    )
+
+    findings = taste.scan_taste(
+        [Path("notes.md")],
+        root=tmp_path,
+        words={"adopt*": "capture", "orphan*": "loose"},
+    )
+
+    hits = {(finding.word, finding.suggestion) for finding in findings}
+    assert ("adopted", "capture") in hits
+    assert ("adopting", "capture") in hits
+    assert ("adoption", "capture") in hits
+    assert ("orphaned", "loose") in hits
+
+
+def test_whole_word_key_never_stem_matches(tmp_path):
+    doc = tmp_path / "notes.md"
+    doc.write_text("a masterpiece of mastery, and the master plan\n", encoding="utf-8")
+
+    findings = taste.scan_taste(
+        [Path("notes.md")], root=tmp_path, words={"master": "main"}
+    )
+
+    # Only the standalone word 'master' matches; 'masterpiece'/'mastery' do not.
+    assert [(finding.word, finding.line) for finding in findings] == [("master", 1)]
+
+
+def test_default_hallucinate_stem_catches_variations(tmp_path):
+    doc = tmp_path / "notes.md"
+    doc.write_text("no hallucination here; stop hallucinating now\n", encoding="utf-8")
+
+    findings = taste.scan_taste([Path("notes.md")], root=tmp_path)
+
+    assert {finding.word for finding in findings} == {
+        "hallucination",
+        "hallucinating",
+    }
+    assert all(finding.suggestion == "confabulate" for finding in findings)
+
+
 def test_custom_word_map_overrides_default(tmp_path):
     doc = tmp_path / "notes.md"
     doc.write_text("this is verbose\n", encoding="utf-8")
