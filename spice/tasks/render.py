@@ -511,6 +511,15 @@ def _identity_problems(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def render_doctor() -> str:
+    return render_doctor_report()[0]
+
+
+def render_doctor_report() -> tuple[str, list[str]]:
+    """The allocator-coherence readout plus the raw problem list behind it.
+
+    The list is the failure signal an aggregate `spice doctor` rolls up: empty
+    means healthy. `render_doctor` keeps its string contract by dropping it.
+    """
     rows = tw.export()
     pending = [r for r in rows if str(r.get("status")) in ("pending", "waiting")]
     problems = _identity_problems(rows)
@@ -542,4 +551,4 @@ def render_doctor() -> str:
         lines.extend(f"  {p}" for p in problems)
     else:
         lines.append("ok: no problems found")
-    return "\n".join(lines)
+    return "\n".join(lines), problems

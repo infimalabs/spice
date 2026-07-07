@@ -17,6 +17,7 @@ BUILTIN_COMMANDS = (
     "maxim",
     "config",
     "study",
+    "doctor",
     "init",
     "dev",
 )
@@ -55,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     from spice.agent.cli import configure_agent_parser
     from spice.agent.maximcli import configure_maxim_parser
     from spice.configcli import configure_config_parser
+    from spice.doctor import configure_doctor_parser
     from spice.hooks.cli import configure_dev_parser
     from spice.serve.cli import configure_serve_parser
     from spice.sessions.cli import configure_session_parser
@@ -68,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     configure_maxim_parser(subparsers)
     configure_config_parser(subparsers)
     configure_study_parser(subparsers)
+    configure_doctor_parser(subparsers)
     configure_dev_parser(subparsers)
     return parser
 
