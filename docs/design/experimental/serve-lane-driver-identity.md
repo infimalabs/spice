@@ -244,7 +244,7 @@ should join through `agent_identities`, not parse the actor id.
   resolver and tests.
 - `UI-20260620T035254978199Z`: add durable `agent_identities` storage and
   legacy bare-id compatibility.
-- `UI-20260620T035301125050Z`: adopt explicit `target:<id>` and `thread:<id>`
+- `UI-20260620T035301125050Z`: use explicit `target:<id>` and `thread:<id>`
   actor ids in team routing.
 - `UI-20260620T035307551021Z`: return transcript owner driver from transcript
   resolution.

@@ -115,7 +115,7 @@ Retention should be explicit, not implicit cleanup of "old-looking" files.
 - Artifacts marked `retention: permanent` are never pruned by the default
   command.
 - Deleting a task should not delete artifacts automatically; deletion should
-  mark the manifest orphaned so a later prune can report it.
+  mark the manifest unreferenced so a later prune can report it.
 
 This is conservative. Design and review artifacts are often only useful much
 later, when someone asks why a decision was made.

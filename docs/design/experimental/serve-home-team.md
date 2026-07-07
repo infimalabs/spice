@@ -8,7 +8,7 @@ Defer a durable home team for now.
 
 Post-keystone, this is only a UX and identity decision. D8 gives the home-team
 proposal ZERO metric motivation: team-id churn no longer fragments lane
-counters, message counters, or metric cursors. Do not adopt a home team to
+counters, message counters, or metric cursors. Do not introduce a home team to
 repair metrics, smooth metric rollups, or preserve metric history.
 
 The UX case is real but not yet strong enough to justify a special permanent
@@ -70,7 +70,7 @@ replacement team already provides that.
 
 ## Metric Boundary
 
-This design record must not use metrics as a reason to adopt the home team.
+This design record must not use metrics as a reason to introduce the home team.
 
 Metrics now have their own durable agent and team storage paths. Merge and
 split explicitly move team metric rows when that history matters. The old fear
@@ -148,9 +148,9 @@ Config semantics are the sharpest UX question. If home config persists, the
 home team is a real durable workspace. If close resets config, the home team is
 a neutral landing pad. Mixing those behaviors would be surprising.
 
-## Migration Sketch If Adopted
+## Migration Sketch If Built
 
-Adopt only the store-level home first.
+Build only the store-level home first.
 
 1. Add an explicit team kind, or reserve `team-home` and wrap the reservation in
    helpers. A schema column such as `kind TEXT NOT NULL DEFAULT 'normal'` is
@@ -181,7 +181,7 @@ homes. Per-actor home should stay out of scope.
 
 ## Decision Gate
 
-Adopt later only if operator feedback shows that the neutral landing lane is
+Build later only if operator feedback shows that the neutral landing lane is
 used as durable workspace identity, not only as a drop target. Evidence should
 look like repeated confusion after closing the last lane, repeated reapplying
 of default team config, or requests to "go back to the same empty lane."
