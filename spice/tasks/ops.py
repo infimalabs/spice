@@ -247,7 +247,7 @@ def do_claim(uuid: str, actor: str, *, guard_unclaimed: bool = True) -> bool:
     """Atomic claim: set the `start` date AND the claim metadata in one modify.
 
     A single locked write means a crash can never leave an active-but-
-    unclaimed row (which would be orphaned: skipped by `next` yet resumable by
+    unclaimed row (which would be stranded: skipped by `next` yet resumable by
     no one). Idempotent — re-claiming (including a steal of an already-active
     row) just rewrites the owner and refreshes the deadline."""
     filters = (
@@ -537,20 +537,20 @@ def edit(
     return "\n".join(lines)
 
 
-# ---- adopt --------------------------------------------------------------
+# ---- capture ------------------------------------------------------------
 
 
-def _adopt_default_title() -> str:
-    """A task title derived from the most recent orphan commit subject."""
+def _capture_default_title() -> str:
+    """A task title derived from the most recent loose commit subject."""
     from spice.tasks import create
 
     subject = tw._git("log", "-1", "--format=%s").strip()
     if not subject:
-        return "Adopt orphan commit"
+        return "Capture loose commit"
     return subject[: create.TASK_TITLE_LIMIT].strip()
 
 
-def adopt(
+def capture(
     handle: str | None = None,
     *,
     title: str | None = None,
@@ -561,55 +561,55 @@ def adopt(
     validation: list[str] | None = None,
     origin: str | None = None,
 ) -> str:
-    """Fold orphan commit(s) into a task and capture them through the normal flow.
+    """Fold loose commit(s) into a task and capture them through the normal flow.
 
-    An orphan commit is one made while no task was claimed — before any claim,
+    A loose commit is one made while no task was claimed — before any claim,
     or after the previous `task done`. `task next` refuses to start new work
-    while an orphan sits ahead of the baseline. `adopt` claims a task — newly
-    minted, or the given handle — over those commits *without* the baseline
-    fast-forward a normal claim performs, so the work is preserved rather than
-    rejected and the agent finishes it through the usual `task done`/`review`
-    flow.
+    while a loose commit sits ahead of the baseline. `capture` claims a task —
+    newly minted, or the given handle — over those commits *without* the
+    baseline fast-forward a normal claim performs, so the work is preserved
+    rather than rejected and the agent finishes it through the usual `task
+    done`/`review` flow.
     """
     validation = list(validation or [])
     if validation and not complete:
-        raise SpiceError("task adopt --validation requires --done")
+        raise SpiceError("task capture --validation requires --done")
     if complete and not validation:
-        raise SpiceError("task adopt --done requires --validation")
-    tw.require_clean_worktree("task adopt")
+        raise SpiceError("task capture --done requires --validation")
+    tw.require_clean_worktree("task capture")
     ahead = gitsync.commits_ahead_of_baseline()
     if ahead == 0:
         raise SpiceError(
-            "nothing to adopt: no local commits ahead of the baseline; "
-            "task adopt folds an existing orphan commit into a task"
+            "nothing to capture: no local commits ahead of the baseline; "
+            "task capture folds an existing loose commit into a task"
         )
     actor = tw.current_actor()
-    _require_single_active_slot(actor, action="task adopt")
+    _require_single_active_slot(actor, action="task capture")
     if handle is not None:
         if title or project or description or origin:
             raise SpiceError(
-                "task adopt takes either an existing <handle> or new-task fields "
+                "task capture takes either an existing <handle> or new-task fields "
                 "(--title/--project/--description/--origin), not both"
             )
         row = identity.resolve(handle)
-        _require_pending(row, "adopt")
+        _require_pending(row, "capture")
         _require_manual_claim_allowed(row, actor)
         owner = str(row.get("claim_by") or "")
         if owner and owner != actor:
             raise SpiceError(
-                f"task already claimed by {owner}; unclaim it before adopting"
+                f"task already claimed by {owner}; unclaim it before capturing"
             )
     else:
         if not project:
             raise SpiceError(
-                "task adopt requires --project when minting a new task; adopted "
+                "task capture requires --project when minting a new task; captured "
                 "work auto-claims regardless of lifetime, so there is no private "
                 "fallback here"
             )
         from spice.tasks import create
 
         created = create.add_one(
-            title=(title or "").strip() or _adopt_default_title(),
+            title=(title or "").strip() or _capture_default_title(),
             description=description,
             project=project,
             priority=priority,
@@ -618,7 +618,7 @@ def adopt(
             after=[],
             acceptance=[],
             wait=None,
-            # Claim below without prepare_for_claim; the orphan commits must not
+            # Claim below without prepare_for_claim; the loose commits must not
             # be fast-forwarded away before the claim records them.
             claim=False,
             origin=origin,
@@ -626,13 +626,13 @@ def adopt(
         row = identity.resolve(created)
     handle_text = identity.render_handle(row)
     # Deliberately skip gitsync.prepare_for_claim: its baseline fast-forward
-    # would discard the very orphan commits adopt exists to capture.
+    # would discard the very loose commits capture exists to preserve.
     do_claim(identity.uuid_of(row), actor, guard_unclaimed=False)
     noun = "commit" if ahead == 1 else "commits"
-    adopted = f"adopted {ahead} orphan {noun} into {handle_text}"
+    captured = f"captured {ahead} loose {noun} into {handle_text}"
     if complete:
-        return f"{adopted}\n{done(handle_text, validation=validation)}"
-    return f'{adopted}\nnext: spice task done {handle_text} --validation "..."'
+        return f"{captured}\n{done(handle_text, validation=validation)}"
+    return f'{captured}\nnext: spice task done {handle_text} --validation "..."'
 
 
 # ---- done / advance -----------------------------------------------------

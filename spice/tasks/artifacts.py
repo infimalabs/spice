@@ -433,11 +433,11 @@ def _task_status_for_dir(task_dir: Path, task_label: str) -> str:
     try:
         incepted = identity.incepted_of_handle(task_dir.name)
     except SpiceError:
-        return "orphaned"
+        return "stranded"
     try:
         row = identity.resolve(incepted)
     except SpiceError:
-        return "orphaned"
+        return "stranded"
     return str(row.get("status") or "unknown")
 
 
