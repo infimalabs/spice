@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import json
+import math
 import os
 import select
 import shlex
@@ -71,6 +72,10 @@ RTK_REWRITE_MATCH_EXIT_CODES = frozenset((0, 3))
 RTK_DB_PATH_ENV = "RTK_DB_PATH"  # env-policy: allow
 
 AGENT_RUN_INBOX_REPEAT_SECONDS = 15.0
+# The working-state banner is a change notification, not a periodic meter: once a
+# given state has been shown it stays silent until the state itself changes, so
+# it never becomes repeated noise on each shell command.
+AGENT_RUN_WORKING_STATE_REPEAT_SECONDS = math.inf
 AGENT_RUN_CONTEXT_METER_CACHE_SECONDS = 15.0
 AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS = 15.0 * 60.0
 AGENT_RUN_SIDE_CHANNEL_READ_BYTES = 8192
@@ -80,7 +85,7 @@ COMMAND_NOT_FOUND_EXIT_CODE = 127
 InboxSignature = tuple[tuple[str, int, int], ...]
 ContextWarningSignature = tuple[str, str, int]
 ContextWarningKey = tuple[str]
-WorkingStateKey = tuple[int, str, str, int, str]
+WorkingStateKey = tuple[int, str, str, str]
 
 
 @dataclass(frozen=True)
@@ -89,15 +94,11 @@ class WorkingStateSnapshot:
     claim_handle: str = ""
     claim_phase: str = ""
     claim_elapsed_seconds: int | None = None
-    dirty_file_count: int = 0
     last_maxim_bag: str = ""
 
     def has_fields(self) -> bool:
         return bool(
-            self.pending_inbox_count
-            or self.claim_handle
-            or self.dirty_file_count
-            or self.last_maxim_bag
+            self.pending_inbox_count or self.claim_handle or self.last_maxim_bag
         )
 
 
@@ -737,7 +738,7 @@ class AgentWorkingStateInjector:
         repo_root: Path | None,
         *,
         stderr: TextIO,
-        repeat_interval_seconds: float = AGENT_RUN_INBOX_REPEAT_SECONDS,
+        repeat_interval_seconds: float = AGENT_RUN_WORKING_STATE_REPEAT_SECONDS,
         time_factory: TimeFactory = time.monotonic,
         snapshot_factory: Callable[[Path | None], WorkingStateSnapshot] | None = None,
     ) -> None:
@@ -923,7 +924,6 @@ def collect_working_state_snapshot(
         claim_handle=claim_handle,
         claim_phase=claim_phase,
         claim_elapsed_seconds=claim_elapsed_seconds,
-        dirty_file_count=_working_state_dirty_file_count(root),
         last_maxim_bag=_working_state_last_maxim_bag(root),
     )
 
@@ -948,9 +948,6 @@ def render_working_state_snapshot(snapshot: WorkingStateSnapshot) -> str:
         if snapshot.claim_elapsed_seconds is not None:
             claim += f" for {_working_state_duration(snapshot.claim_elapsed_seconds)}"
         parts.append(claim)
-    if snapshot.dirty_file_count:
-        dirty_label = "dirty file" if snapshot.dirty_file_count == 1 else "dirty files"
-        parts.append(f"{snapshot.dirty_file_count} {dirty_label}")
     if snapshot.last_maxim_bag:
         parts.append(f"last maxim {_working_state_clean_text(snapshot.last_maxim_bag)}")
     if not parts:
@@ -963,7 +960,6 @@ def working_state_key(snapshot: WorkingStateSnapshot) -> WorkingStateKey:
         max(0, int(snapshot.pending_inbox_count)),
         _working_state_clean_text(snapshot.claim_handle),
         _working_state_clean_text(snapshot.claim_phase),
-        max(0, int(snapshot.dirty_file_count)),
         _working_state_clean_text(snapshot.last_maxim_bag),
     )
 
@@ -998,22 +994,20 @@ def write_working_state_state(
 
 
 def _working_state_key_payload(value: Any) -> WorkingStateKey | None:
-    if not isinstance(value, list) or len(value) != 5:
+    if not isinstance(value, list) or len(value) != 4:
         return None
     pending = _int_payload_value(value[0])
     claim_handle = value[1]
     claim_phase = value[2]
-    dirty = _int_payload_value(value[3])
-    last_maxim = value[4]
+    last_maxim = value[3]
     if (
         pending is None
         or not isinstance(claim_handle, str)
         or not isinstance(claim_phase, str)
-        or dirty is None
         or not isinstance(last_maxim, str)
     ):
         return None
-    return (pending, claim_handle, claim_phase, dirty, last_maxim)
+    return (pending, claim_handle, claim_phase, last_maxim)
 
 
 def _working_state_duration(seconds: int) -> str:
@@ -1066,22 +1060,6 @@ def _claim_worktree_matches(row: dict[str, Any], repo_root: Path) -> bool:
         return Path(raw).expanduser().resolve() == repo_root.expanduser().resolve()
     except OSError:
         return False
-
-
-def _working_state_dirty_file_count(repo_root: Path) -> int:
-    try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=repo_root,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-    except OSError:
-        return 0
-    if result.returncode != 0:
-        return 0
-    return sum(1 for line in result.stdout.splitlines() if line.strip())
 
 
 def _working_state_last_maxim_bag(repo_root: Path) -> str:

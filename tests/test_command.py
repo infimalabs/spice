@@ -36,8 +36,6 @@ COMMAND_WORKING_STATE_PROCESS_PID = 123
 COMMAND_WORKING_STATE_EXIT_CODE = 0
 COMMAND_WORKING_STATE_ONE_PENDING = 1
 COMMAND_WORKING_STATE_TWO_PENDING = 2
-COMMAND_WORKING_STATE_ONE_DIRTY = 1
-COMMAND_WORKING_STATE_TWO_DIRTY = 2
 COMMAND_WORKING_STATE_SENTENCE_PERIODS = 1
 COMMAND_WORKING_STATE_INCEPTED = "00000001"
 COMMAND_WORKING_STATE_HANDLE = f"METER-{COMMAND_WORKING_STATE_INCEPTED}"
@@ -98,15 +96,14 @@ def _record_command_working_state_maxim(repo_root: Path, bag_name: str) -> None:
 
 
 def _assert_command_working_state(
-    text: str, *, pending: int, phase: str, dirty: int, maxim: str
+    text: str, *, pending: int, phase: str, maxim: str
 ) -> None:
     inbox_label = "pending inbox" if pending == 1 else "pending inboxes"
-    dirty_label = "dirty file" if dirty == 1 else "dirty files"
     assert _working_state_lines(text) == [
         (
             f"🌶️ Working state: {pending} {inbox_label}; claim "
             f"{COMMAND_WORKING_STATE_HANDLE} {phase} for "
-            f"{COMMAND_WORKING_STATE_ELAPSED_SECONDS}s; {dirty} {dirty_label}; "
+            f"{COMMAND_WORKING_STATE_ELAPSED_SECONDS}s; "
             f"last maxim {maxim}."
         )
     ]
@@ -284,7 +281,6 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
         "20260101T000000000010Z.txt",
         compose_inbox_text(body="pending command work", priority=None, stop=False),
     )
-    (tmp_path / "dirty-one.txt").write_text("dirty\n", encoding="utf-8")
     _record_command_working_state_maxim(tmp_path, "fallbacks")
 
     first = _run_working_state_command(tmp_path)
@@ -294,10 +290,11 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
         first,
         pending=COMMAND_WORKING_STATE_ONE_PENDING,
         phase="todo",
-        dirty=COMMAND_WORKING_STATE_ONE_DIRTY,
         maxim="fallbacks",
     )
 
+    # An unchanged state stays silent: the banner is a change notification, not a
+    # per-command meter.
     repeat = _run_working_state_command(tmp_path)
 
     write_inbox_item(
@@ -312,7 +309,6 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
         second_pending,
         pending=COMMAND_WORKING_STATE_TWO_PENDING,
         phase="todo",
-        dirty=COMMAND_WORKING_STATE_ONE_DIRTY,
         maxim="fallbacks",
     )
 
@@ -322,17 +318,6 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
         phase_changed,
         pending=COMMAND_WORKING_STATE_TWO_PENDING,
         phase="verify",
-        dirty=COMMAND_WORKING_STATE_ONE_DIRTY,
-        maxim="fallbacks",
-    )
-
-    (tmp_path / "dirty-two.txt").write_text("dirty\n", encoding="utf-8")
-    dirty_changed = _run_working_state_command(tmp_path)
-    _assert_command_working_state(
-        dirty_changed,
-        pending=COMMAND_WORKING_STATE_TWO_PENDING,
-        phase="verify",
-        dirty=COMMAND_WORKING_STATE_TWO_DIRTY,
         maxim="fallbacks",
     )
 
@@ -342,7 +327,6 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
         maxim_changed,
         pending=COMMAND_WORKING_STATE_TWO_PENDING,
         phase="verify",
-        dirty=COMMAND_WORKING_STATE_TWO_DIRTY,
         maxim="aliases",
     )
     assert _working_state_event_counts(
@@ -350,9 +334,8 @@ def test_run_agent_command_stderr_reflects_live_working_state_fields(
         repeat,
         second_pending,
         phase_changed,
-        dirty_changed,
         maxim_changed,
-    ) == [1, 0, 1, 1, 1, 1]
+    ) == [1, 0, 1, 1, 1]
 
 
 def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monkeypatch):
@@ -897,7 +880,6 @@ def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
         wrap,
         "collect_working_state_snapshot",
         lambda _repo: wrap.WorkingStateSnapshot(
-            dirty_file_count=1,
             last_maxim_bag="fallbacks",
         ),
     )
@@ -908,7 +890,7 @@ def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
     assert "payload steering" in payload
     assert context_meter_instruction("yellow") in payload
     working_lines = [line for line in payload.splitlines() if line.startswith("🌶️ ")]
-    assert working_lines == ["🌶️ Working state: 1 dirty file; last maxim fallbacks."]
+    assert working_lines == ["🌶️ Working state: last maxim fallbacks."]
     assert "\n" not in working_lines[0]
     assert working_lines[0].count(".") == 1
 
