@@ -520,14 +520,16 @@ def _tree_of(repo_root: Path, ref: str) -> str:
     return _read(repo_root, "rev-parse", f"{ref}^{{tree}}")
 
 
-def _adopt_no_op_first_parent(repo_root: Path, first_parent: str, *, label: str) -> str:
+def _collapse_to_first_parent(repo_root: Path, first_parent: str, *, label: str) -> str:
     """Advance the branch to ``first_parent`` without minting an empty merge.
 
     The caller has established that the phase result tree equals
     ``first_parent``'s, so no 2-parent merge is warranted. A fast-forward
-    covers the common case where the baseline is simply ahead; a diverged first
-    parent with an identical tree is adopted directly, which drops no committed
-    content because the trees already agree.
+    covers the common case where the baseline is simply ahead; when the branch
+    has diverged (neither side an ancestor) it is reset onto ``first_parent``
+    instead. That reset loses no committed work, because the caller's
+    tree-equality check proved this phase adds nothing the baseline lacks, and
+    it normalizes the worktree up to the baseline commit.
     """
     expected_head = _read(repo_root, "rev-parse", "HEAD")
     ff = _run(repo_root, "merge", "--ff-only", first_parent)
@@ -544,7 +546,7 @@ def _adopt_no_op_first_parent(repo_root: Path, first_parent: str, *, label: str)
         )
     reset = _run(repo_root, "reset", "--hard", first_parent)
     if reset.returncode != 0:
-        raise SpiceError(_fail("adopt no-op baseline", reset))
+        raise SpiceError(_fail("collapse no-op phase onto baseline", reset))
     return first_parent
 
 
@@ -563,7 +565,7 @@ def _synthesize_and_fast_forward(
     # onto the shared baseline. Collapse the no-op onto the first parent instead
     # so it stays a git no-op; only a differing tree earns a merge commit.
     if _tree_of(repo_root, treeish) == _tree_of(repo_root, first_parent):
-        return _adopt_no_op_first_parent(repo_root, first_parent, label=label)
+        return _collapse_to_first_parent(repo_root, first_parent, label=label)
     merge_head = _synthesize_merge(
         repo_root, treeish, first_parent, second_parent, message
     )
