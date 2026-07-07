@@ -68,6 +68,81 @@ def test_integrate_and_publish_creates_baseline_first_merge_and_pushes(tmp_path)
     )
 
 
+def test_integrate_and_publish_collapses_no_op_phase_without_empty_merge(tmp_path):
+    # A completion storm reproduction: the agent's phase edits nothing while a
+    # peer advances the baseline to a commit that adds no content (its tree
+    # equals the shared base). The old emitter minted an empty --no-ff merge
+    # here; the phase must instead collapse onto the advanced baseline as a git
+    # no-op, leaving zero empty merges in history.
+    repo = _repo_with_upstream(tmp_path)
+    base = _git(repo, "rev-parse", "HEAD")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(tmp_path / "remote.git"), str(peer))
+    _configure_git_identity(peer)
+    _run(peer, "git", "commit", "--allow-empty", "-m", "peer review marker")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+    assert upstream_head != base
+
+    result = gitsync.integrate_and_publish(
+        "TASK-1k98v0WX",
+        repo_root=repo,
+        meta={
+            "title": "No-edit review",
+            "actor": ACTOR_A,
+            "phase": "review",
+            "project": "task.unit",
+        },
+    )
+    captured = _uda_map(result.uda_args)
+
+    assert captured["done_head"] == base
+    assert captured["done_merge_head"] == upstream_head
+    assert captured["done_ref"] == upstream_head
+    assert _git(repo, "rev-parse", "HEAD") == upstream_head
+    assert _merge_parents(repo, "HEAD") == [base]
+    assert _git(repo, "rev-parse", "HEAD^{tree}") == _git(
+        repo, "rev-parse", f"{base}^{{tree}}"
+    )
+    assert (
+        _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == upstream_head
+    )
+    assert _git(repo, "status", "--porcelain") == ""
+    assert _empty_merges(repo, "HEAD") == []
+
+
+def test_integrate_and_publish_no_op_phase_fast_forwards_onto_peer_content(tmp_path):
+    # The common storm shape: the reviewer gets a strict descendant baseline
+    # carrying a peer's real content while editing nothing itself. The phase must
+    # fast-forward onto that content (picking it up) rather than mint a merge,
+    # because the merged result adds nothing over upstream.
+    repo = _repo_with_upstream(tmp_path)
+    base = _git(repo, "rev-parse", "HEAD")
+    _advance_upstream(tmp_path)
+    peer_clone = tmp_path / "peer"
+    upstream_head = _git(peer_clone, "rev-parse", "HEAD")
+
+    result = gitsync.integrate_and_publish(
+        "TASK-1k98v0WX",
+        repo_root=repo,
+        meta={
+            "title": "No-edit review over peer content",
+            "actor": ACTOR_A,
+            "phase": "review",
+            "project": "task.unit",
+        },
+    )
+    captured = _uda_map(result.uda_args)
+
+    assert captured["done_merge_head"] == upstream_head
+    assert _git(repo, "rev-parse", "HEAD") == upstream_head
+    assert (repo / "baseline.txt").read_text(encoding="utf-8") == "baseline work\n"
+    assert _merge_parents(repo, "HEAD") == [base]
+    assert _empty_merges(repo, "HEAD") == []
+    assert _git(repo, "status", "--porcelain") == ""
+
+
 def test_integrate_and_publish_retries_non_fast_forward_publish_race(
     tmp_path, monkeypatch
 ):
@@ -801,6 +876,18 @@ def _configure_git_identity(repo: Path) -> None:
 
 def _merge_parents(repo: Path, commit: str) -> list[str]:
     return _git(repo, "show", "-s", "--format=%P", commit).split()
+
+
+def _empty_merges(repo: Path, rev: str) -> list[str]:
+    """Merge commits reachable from ``rev`` whose tree equals their mainline's."""
+    merges = _git(repo, "rev-list", "--merges", rev).split()
+    empty = []
+    for merge in merges:
+        tree = _git(repo, "rev-parse", f"{merge}^{{tree}}")
+        first_parent_tree = _git(repo, "rev-parse", f"{merge}^1^{{tree}}")
+        if tree == first_parent_tree:
+            empty.append(merge)
+    return empty
 
 
 def _uda_map(args: list[str]) -> dict[str, str]:

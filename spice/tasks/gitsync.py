@@ -516,6 +516,38 @@ def _clear_temporary_merge_state(repo_root: Path, *, action: str) -> None:
         raise SpiceError(_fail(f"{action} after missing MERGE_HEAD", reset))
 
 
+def _tree_of(repo_root: Path, ref: str) -> str:
+    return _read(repo_root, "rev-parse", f"{ref}^{{tree}}")
+
+
+def _adopt_no_op_first_parent(repo_root: Path, first_parent: str, *, label: str) -> str:
+    """Advance the branch to ``first_parent`` without minting an empty merge.
+
+    The caller has established that the phase result tree equals
+    ``first_parent``'s, so no 2-parent merge is warranted. A fast-forward
+    covers the common case where the baseline is simply ahead; a diverged first
+    parent with an identical tree is adopted directly, which drops no committed
+    content because the trees already agree.
+    """
+    expected_head = _read(repo_root, "rev-parse", "HEAD")
+    ff = _run(repo_root, "merge", "--ff-only", first_parent)
+    if ff.returncode == 0:
+        return first_parent
+    if _is_head_ref_lock_race(ff):
+        raise SpiceError(
+            _head_ref_lock_race_recovery(
+                label,
+                expected_head=expected_head,
+                current_head=_read(repo_root, "rev-parse", "HEAD"),
+                completed=ff,
+            )
+        )
+    reset = _run(repo_root, "reset", "--hard", first_parent)
+    if reset.returncode != 0:
+        raise SpiceError(_fail("adopt no-op baseline", reset))
+    return first_parent
+
+
 def _synthesize_and_fast_forward(
     repo_root: Path,
     treeish: str,
@@ -525,6 +557,13 @@ def _synthesize_and_fast_forward(
     *,
     label: str,
 ) -> str:
+    # A phase whose result tree is identical to the first parent changed nothing
+    # against the baseline: minting a --no-ff merge would leave an empty 2-parent
+    # commit, and under a completion storm every no-edit review would pile one
+    # onto the shared baseline. Collapse the no-op onto the first parent instead
+    # so it stays a git no-op; only a differing tree earns a merge commit.
+    if _tree_of(repo_root, treeish) == _tree_of(repo_root, first_parent):
+        return _adopt_no_op_first_parent(repo_root, first_parent, label=label)
     merge_head = _synthesize_merge(
         repo_root, treeish, first_parent, second_parent, message
     )
@@ -731,7 +770,7 @@ def _synthesize_merge(
     message: str,
 ) -> str:
     """A uniform merge commit carrying ``treeish`` with explicit parent order."""
-    tree = _read(repo_root, "rev-parse", f"{treeish}^{{tree}}")
+    tree = _tree_of(repo_root, treeish)
     completed = _run(
         repo_root,
         "commit-tree",
