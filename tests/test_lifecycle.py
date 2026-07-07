@@ -54,7 +54,7 @@ def test_shipped_agent_defaults_are_current_high_effort():
     assert CODEX_DRIVER.default_model == "gpt-5.5"
     assert CODEX_DRIVER.default_reasoning_effort == "xhigh"
     assert CODEX_DRIVER.default_service_tier == ""
-    assert CLAUDE_DRIVER.default_model == "claude-sonnet-5"
+    assert CLAUDE_DRIVER.default_model == "claude-opus-4-8"
     assert CLAUDE_DRIVER.default_reasoning_effort == "xhigh"
 
 
@@ -328,14 +328,16 @@ def test_ensure_agent_applies_phase_model_for_claimed_task(tmp_path, monkeypatch
     )
     (tmp_path / "pyproject.toml").write_text(
         "[tool.spice.tasks.phase_models.claude.plan]\n"
-        'model = "claude-opus-4-8"\n'
+        'model = "claude-sonnet-5"\n'
         'effort = "high"\n',
         encoding="utf-8",
     )
 
     result = lifecycle.ensure_agent(tmp_path, dry_run=True)
 
-    assert result.command[result.command.index("--model") + 1] == "claude-opus-4-8"
+    # Mapped model is intentionally NOT the opus default, so this asserts the
+    # phase mapping is honored rather than coinciding with the fallback.
+    assert result.command[result.command.index("--model") + 1] == "claude-sonnet-5"
     assert result.command[result.command.index("--effort") + 1] == "high"
 
 
@@ -348,13 +350,15 @@ def test_ensure_agent_falls_back_when_claimed_phase_is_unmapped(tmp_path, monkey
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
     monkeypatch.setattr(ops, "active_claim_phase", lambda actor: "todo")
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.spice.tasks.phase_models.claude.plan]\nmodel = "claude-opus-4-8"\n',
+        '[tool.spice.tasks.phase_models.claude.plan]\nmodel = "claude-sonnet-5"\n',
         encoding="utf-8",
     )
 
     result = lifecycle.ensure_agent(tmp_path, dry_run=True)
 
-    assert result.command[result.command.index("--model") + 1] == "claude-sonnet-5"
+    # The claimed phase is unmapped, so it must fall back to the opus default --
+    # not silently pick up the (distinct) plan-phase mapping.
+    assert result.command[result.command.index("--model") + 1] == "claude-opus-4-8"
 
 
 def test_ensure_agent_skips_phase_lookup_without_a_thread_id(tmp_path, monkeypatch):
@@ -372,7 +376,7 @@ def test_ensure_agent_skips_phase_lookup_without_a_thread_id(tmp_path, monkeypat
 
     result = lifecycle.ensure_agent(tmp_path, dry_run=True)
 
-    assert result.command[result.command.index("--model") + 1] == "claude-sonnet-5"
+    assert result.command[result.command.index("--model") + 1] == "claude-opus-4-8"
 
 
 def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(

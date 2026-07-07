@@ -448,7 +448,7 @@ class CodexDriver(AgentDriver):
 # Claude Code's `--effort` vocabulary. The configured spice effort value is
 # Codex-shaped; Claude uses the same set, except for `max`, which we ignore.
 CLAUDE_EFFORT_CHOICES = frozenset({"low", "medium", "high", "xhigh"})
-CLAUDE_DEFAULT_MODEL = "claude-sonnet-5"
+CLAUDE_DEFAULT_MODEL = "claude-opus-4-8"
 # Claude reads CLAUDE.md but not skill files on its own (see
 # build_exec_command's --append-system-prompt use). This preamble is generic
 # — every launch gets the same text regardless of what the operator actually

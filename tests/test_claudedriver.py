@@ -128,13 +128,13 @@ def test_claude_command_writes_post_tool_hook_settings(tmp_path):
     assert hook["statusMessage"] == "Checking spice steering"
 
 
-def test_claude_command_uses_shipped_claude_sonnet_5_xhigh_defaults(tmp_path):
+def test_claude_command_uses_shipped_claude_opus_xhigh_defaults(tmp_path):
     command = CLAUDE_DRIVER.build_exec_command(
         repo_root=tmp_path,
         prompt="follow the skill",
     )
 
-    assert command[command.index("--model") + 1] == "claude-sonnet-5"
+    assert command[command.index("--model") + 1] == "claude-opus-4-8"
     assert command[command.index("--effort") + 1] == "xhigh"
 
 
