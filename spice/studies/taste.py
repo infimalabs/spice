@@ -16,7 +16,20 @@ from spice.studies.walk import is_excluded_path
 
 # Fallback map when no config is passed; keys match case-insensitively. Repos
 # add their own words via [tool.spice.policy.taste]; this stays minimal.
-DEFAULT_TASTE_WORDS: dict[str, str] = {"hallucinate": "confabulate"}
+DEFAULT_TASTE_WORDS: dict[str, str] = {
+    "hallucinate": "confabulate",
+    "adopt": "capture",
+    "adopts": "captures",
+    "adopted": "captured",
+    "adopting": "capturing",
+    "adoption": "capture",
+    "adopter": "integrator",
+    "adopters": "integrators",
+    "orphan": "loose",
+    "orphans": "loose",
+    "orphaned": "loose",
+    "orphaning": "",
+}
 
 TEXT_SUFFIXES = frozenset({".md", ".txt", ".rst"})
 
