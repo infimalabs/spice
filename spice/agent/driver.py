@@ -494,13 +494,14 @@ CLAUDE_DENIED_TOOLS = ("Task", "Agent")
 # `/config` auto-compact setting. Left unset, a session can run toward its
 # real (possibly ~1M-token overflow-tier) API ceiling before compacting --
 # matching the operator's own observation that auto-compact did not appear to
-# trigger before ~1M tokens. 140_000 gives a solid margin under the 200K
-# standard-tier ceiling context_snapshot_fields already meters pressure
-# against (see its "always meter against the standard tier" comment below),
-# so a long-running lane compacts well before that reported pressure reads
-# 100%, without operator intervention.
+# trigger before ~1M tokens. 200_000 is the 200K standard-tier ceiling that
+# context_snapshot_fields already meters pressure against (see its "always
+# meter against the standard tier" comment below): the goal is only to cap the
+# 1M overflow tier back down to that standard window, not to compact early, so
+# a long-running lane compacts at the tier ceiling without operator
+# intervention.
 CLAUDE_AUTO_COMPACT_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"  # env-policy: allow
-CLAUDE_AUTO_COMPACT_WINDOW_TOKENS = 140_000
+CLAUDE_AUTO_COMPACT_WINDOW_TOKENS = 200_000
 OUT_OF_CREDITS_PATTERNS = (
     re.compile(r"\busage limit\b", re.IGNORECASE),
     re.compile(r"\b(?:out of|insufficient)\s+credits?\b", re.IGNORECASE),
