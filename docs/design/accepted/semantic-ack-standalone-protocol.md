@@ -44,7 +44,7 @@ checker to audit.
 The protocol also gives useful failure modes:
 
 - ignored directive: it remains pending and is shown again;
-- stale or hallucinated key: the system says it retired nothing;
+- stale or confabulated key: the system says it retired nothing;
 - duplicate resend: the same durable record gains resend lineage and still
   requires one closure;
 - ambiguous closure: the summary can be reviewed against the directive.

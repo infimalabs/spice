@@ -115,7 +115,7 @@ def test_policy_resolver_merges_taste_words_over_defaults(tmp_path):
 
     resolved = resolve_policy(tmp_path)
 
-    assert resolved.taste.words["hallucinate"] == "confabulate"  # default kept
+    assert resolved.taste.words["hallucinat*"] == "confabulate"  # default kept
     assert resolved.taste.words["smell"] == ""  # merged, lowercased
     assert resolved.taste.words["just"] == "reword"
 
