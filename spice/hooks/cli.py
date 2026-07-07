@@ -13,7 +13,7 @@ from spice.paths import repo_root_from_cwd, require_repo_root
 def configure_dev_parser(subparsers: Any) -> None:
     init = subparsers.add_parser(
         "init",
-        help="Adopt this repo: install hooks, materialize skill, exclude state.",
+        help="Set up this repo: install hooks, materialize skill, exclude state.",
     )
     init.set_defaults(func=handle_init)
 
