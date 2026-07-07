@@ -304,7 +304,7 @@ def test_team_command_service_imports_agent_into_empty_team(tmp_path):
     ]
 
 
-def test_create_team_adopts_open_shell_instead_of_minting_sibling(tmp_path):
+def test_create_team_reuses_open_shell_instead_of_minting_sibling(tmp_path):
     """The ensure-open-team shell is recycled by the next createTeam so the
     operator never has to close a leftover empty team by hand."""
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
@@ -337,7 +337,7 @@ def test_create_team_adopts_open_shell_instead_of_minting_sibling(tmp_path):
     assert str(reuse_events[0]["kind"]) == "createTeam"
 
 
-def test_create_team_with_explicit_id_never_adopts_shell(tmp_path):
+def test_create_team_with_explicit_id_never_reuses_shell(tmp_path):
     store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     shell = store.team_snapshot().teams[0]
 

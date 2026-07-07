@@ -383,7 +383,7 @@ class ServeTeamStore(
                 f"cannot create a team of {len(member_list)}"
             )
         if team_id is None:
-            reused = self._adopt_open_shell_team_locked(connection, config, member_list)
+            reused = self._reuse_open_shell_team_locked(connection, config, member_list)
             if reused is not None:
                 return reused
         resolved_team_id = team_id or f"team-{uuidlib.uuid4().hex[:TEAM_ID_HEX_CHARS]}"
@@ -411,7 +411,7 @@ class ServeTeamStore(
         )
         return self._team_state_locked(connection, resolved_team_id)
 
-    def _adopt_open_shell_team_locked(
+    def _reuse_open_shell_team_locked(
         self,
         connection: sqlite3.Connection,
         config: TeamConfig,
@@ -419,7 +419,7 @@ class ServeTeamStore(
     ) -> TeamState | None:
         # The ensure-open-team affordance keeps one member-less shell around
         # so the operator can import an agent with a single click. A fresh
-        # team request adopts the oldest shell instead of minting a sibling,
+        # team request reuses the oldest shell instead of minting a sibling,
         # so shells never accumulate next to deliberately created teams.
         row = connection.execute(
             "SELECT teams.team_id FROM teams "
