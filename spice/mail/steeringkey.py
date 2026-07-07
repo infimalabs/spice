@@ -23,8 +23,12 @@ STEERING_TOKEN_FILENAME = "steering-token"
 
 def _mint_token() -> str:
     # The base52 stamp spice already uses for task handles: a moment-derived,
-    # vowel-free code that never spells a word.
-    return identity.mint_incepted()
+    # vowel-free code that never spells a word. Pass an empty collision set so
+    # this stays a pure moment stamp -- a recognition aid needs no task-id
+    # uniqueness, and the default set would run a full `tw.export()` against the
+    # task backend on the inbox-readout hot path (and drag its failure surface
+    # into a cosmetic token).
+    return identity.mint_incepted(existing=set())
 
 
 def steering_token(repo_root: Path | None) -> str:
@@ -45,7 +49,10 @@ def steering_token(repo_root: Path | None) -> str:
         existing = ""
     if existing:
         return existing
-    token = _mint_token()
+    try:
+        token = _mint_token()
+    except Exception:
+        return ""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
