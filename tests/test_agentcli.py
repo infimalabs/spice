@@ -476,7 +476,6 @@ def test_working_state_snapshot_collects_live_fields(tmp_path, monkeypatch):
         "20260101T000000000009Z.txt",
         compose_inbox_text(body="pending work", priority=None, stop=False),
     )
-    (tmp_path / "dirty.txt").write_text("dirty\n", encoding="utf-8")
     record_maxim_metric_events(
         tmp_path,
         [
@@ -498,7 +497,6 @@ def test_working_state_snapshot_collects_live_fields(tmp_path, monkeypatch):
     assert snapshot.claim_handle == "METER-00000001"
     assert snapshot.claim_phase == "todo"
     assert snapshot.claim_elapsed_seconds == WORKING_STATE_ELAPSED_SECONDS
-    assert snapshot.dirty_file_count >= 1
     assert snapshot.last_maxim_bag == "fallbacks"
     assert snapshot.has_fields()
 
@@ -524,49 +522,52 @@ def test_working_state_injector_renders_and_suppresses_one_line_sentence(tmp_pat
             claim_handle="METER-00000001",
             claim_phase="todo",
             claim_elapsed_seconds=90,
-            dirty_file_count=2,
             last_maxim_bag="fallbacks",
         )
     ]
     stderr = io.StringIO()
 
-    first = wrap.AgentWorkingStateInjector(
-        tmp_path,
-        stderr=stderr,
-        repeat_interval_seconds=15.0,
-        time_factory=lambda: now[0],
-        snapshot_factory=lambda _repo: snapshot[0],
-    )
-    first.inject(force=True)
-    now[0] = 5.0
-    second = wrap.AgentWorkingStateInjector(
-        tmp_path,
-        stderr=stderr,
-        repeat_interval_seconds=15.0,
-        time_factory=lambda: now[0],
-        snapshot_factory=lambda _repo: snapshot[0],
-    )
-    second.inject(force=True)
-    now[0] = 6.0
+    def new_injector() -> wrap.AgentWorkingStateInjector:
+        return wrap.AgentWorkingStateInjector(
+            tmp_path,
+            stderr=stderr,
+            time_factory=lambda: now[0],
+            snapshot_factory=lambda _repo: snapshot[0],
+        )
+
+    new_injector().inject(force=True)
+    # A fresh command far beyond any repeat interval with the identical state must
+    # stay silent: the banner is a change notification, not a periodic meter. Only
+    # the elapsed seconds (not part of the change key) advanced.
+    now[0] = 100_000.0
     snapshot[0] = wrap.WorkingStateSnapshot(
         pending_inbox_count=1,
         claim_handle="METER-00000001",
         claim_phase="todo",
-        claim_elapsed_seconds=96,
-        dirty_file_count=3,
+        claim_elapsed_seconds=93,
         last_maxim_bag="fallbacks",
     )
-    second.inject(force=True)
+    new_injector().inject(force=True)
+    # A real state change (a second pending inbox) re-emits.
+    now[0] = 100_006.0
+    snapshot[0] = wrap.WorkingStateSnapshot(
+        pending_inbox_count=2,
+        claim_handle="METER-00000001",
+        claim_phase="todo",
+        claim_elapsed_seconds=96,
+        last_maxim_bag="fallbacks",
+    )
+    new_injector().inject(force=True)
 
     lines = stderr.getvalue().splitlines()
     assert lines == [
         (
             "🌶️ Working state: 1 pending inbox; claim METER-00000001 todo "
-            "for 90s; 2 dirty files; last maxim fallbacks."
+            "for 90s; last maxim fallbacks."
         ),
         (
-            "🌶️ Working state: 1 pending inbox; claim METER-00000001 todo "
-            "for 96s; 3 dirty files; last maxim fallbacks."
+            "🌶️ Working state: 2 pending inboxes; claim METER-00000001 todo "
+            "for 96s; last maxim fallbacks."
         ),
     ]
     for line in lines:
