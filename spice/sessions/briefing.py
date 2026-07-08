@@ -19,20 +19,21 @@ from spice.agent.identity import uuid_thread_id
 from spice.errors import SpiceError
 from spice.mail.ackstate import AckStateRecord, ack_state_records
 from spice.mail.inbox import (
-    INBOX_RESPONSE_ROW,
-    collect_deadlettered_inbox_items,
     collect_inbox_items,
-    collect_refused_inbox_items,
-    inbox_ack_state_context_rows,
-    inbox_deadletter_context_rows,
     inbox_item_key,
     parse_inbox_payload,
-    relative_time_for_path,
 )
 from spice.paths import repo_root_from_cwd
 from spice.sessions import learnings as session_learnings
 from spice.sessions import records
 from spice.sessions.briefingpressure import dirty_path_count, git_posture_lines
+from spice.sessions.briefingrender import (
+    active_filter_lines,
+    apply_output_budget,
+    drop_human_ask_duplicates,
+    filter_compactions,
+    inbox_lines,
+)
 from spice.sessions.briefingtaskplane import collect_task_plane_candidates
 from spice.sessions.meter import (
     ContextMeter,
@@ -115,6 +116,44 @@ class RehydrationCandidate:
 
 
 @dataclass(frozen=True)
+class BriefingFilters:
+    start: str | None
+    end: str | None
+    contains: str | None
+    turn_ids: tuple[str, ...]
+    tools: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SweepWindowPayload:
+    index: int
+    label: str
+    turns: tuple[TurnRecord, ...]
+    asks: tuple[RehydrationCandidate, ...]
+    finals: tuple[RehydrationCandidate, ...]
+
+
+@dataclass(frozen=True)
+class BriefingPayload:
+    files: tuple[Path, ...]
+    filters: BriefingFilters
+    horizon: ResolvedHorizon
+    turns: tuple[TurnRecord, ...]
+    compactions: tuple[CompactionRecord, ...]
+    meter: ContextMeter
+    commits: tuple[CommitRecord, ...]
+    asks: tuple[RehydrationCandidate, ...]
+    finals: tuple[RehydrationCandidate, ...]
+    commit_candidates: tuple[RehydrationCandidate, ...]
+    compaction_intents: tuple[RehydrationCandidate, ...]
+    command_candidates: tuple[RehydrationCandidate, ...]
+    file_candidates: tuple[RehydrationCandidate, ...]
+    task_plane: tuple[RehydrationCandidate, ...]
+    recovery_first: bool
+    sweep_windows: tuple[SweepWindowPayload, ...]
+
+
+@dataclass(frozen=True)
 class ResolvedHorizon:
     start: str | None
     basis: str
@@ -190,7 +229,7 @@ def collect_ask_candidates(
             for record in ack_state_records(repo_root)
             if _ack_state_record_matches_subject(record, subject_thread_ids)
         )
-    candidates = _drop_human_ask_duplicates(candidates)
+    candidates = drop_human_ask_duplicates(candidates)
     return [
         candidate
         for candidate in candidates
@@ -206,22 +245,6 @@ def _human_ask_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]
         for turn in turns
         for message in turn.user_messages
         if message.shape is records.MessageShape.HUMAN
-    ]
-
-
-def _drop_human_ask_duplicates(
-    candidates: list[RehydrationCandidate],
-) -> list[RehydrationCandidate]:
-    real_asks = {
-        (candidate.timestamp, candidate.text)
-        for candidate in candidates
-        if candidate.label != "human"
-    }
-    return [
-        candidate
-        for candidate in candidates
-        if candidate.label != "human"
-        or (candidate.timestamp, candidate.text) not in real_asks
     ]
 
 
@@ -388,6 +411,96 @@ def collect_compaction_intent_candidates(
     ]
 
 
+def build_briefing_payload(
+    files: list[Path],
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    contains: str | None = None,
+    turn_ids: list[str] | None = None,
+    tools: list[str] | None = None,
+    sweep_count: int | None = None,
+) -> BriefingPayload:
+    file_tuple = tuple(files)
+    all_turns = collect_turns(list(file_tuple))
+    all_compactions = collect_compactions(list(file_tuple))
+    horizon = _resolve_horizon(
+        all_turns,
+        all_compactions,
+        count=sweep_count if sweep_count is not None else DEFAULT_HORIZON_COMPACTIONS,
+        end=end,
+    )
+    effective_start = _effective_start(start, horizon.start)
+    filters = BriefingFilters(
+        start=start,
+        end=end,
+        contains=contains,
+        turn_ids=tuple(turn_ids or ()),
+        tools=tuple(tools or ()),
+    )
+    turns = records.filter_turns(
+        all_turns,
+        start=effective_start,
+        end=end,
+        contains=contains,
+        turn_ids=list(filters.turn_ids) or None,
+        tools=list(filters.tools) or None,
+    )
+    compactions = filter_compactions(
+        all_compactions, start=effective_start, end=end, contains=contains
+    )
+    turn_tuple = tuple(turns)
+    compaction_tuple = tuple(compactions)
+    commits = tuple(collect_commit_records(list(turn_tuple)))
+    asks = tuple(
+        collect_ask_candidates(
+            turns=list(turn_tuple),
+            start=effective_start,
+            end=end,
+            contains=contains,
+            subject_thread_ids=_subject_thread_ids(list(file_tuple)),
+        )
+    )
+    finals = tuple(collect_final_candidates(list(turn_tuple)))
+    commit_candidates = tuple(collect_commit_candidates(list(commits)))
+    compaction_intents = tuple(
+        collect_compaction_intent_candidates(list(compaction_tuple))
+    )
+    command_candidates = tuple(collect_command_candidates(list(turn_tuple)))
+    file_candidates = tuple(collect_file_touch_candidates(list(turn_tuple)))
+    task_plane = tuple(collect_task_plane_candidates())
+    return BriefingPayload(
+        files=file_tuple,
+        filters=filters,
+        horizon=horizon,
+        turns=turn_tuple,
+        compactions=compaction_tuple,
+        meter=collect_context_meter(list(file_tuple)),
+        commits=commits,
+        asks=asks,
+        finals=finals,
+        commit_candidates=commit_candidates,
+        compaction_intents=compaction_intents,
+        command_candidates=command_candidates,
+        file_candidates=file_candidates,
+        task_plane=task_plane,
+        recovery_first=_latest_event_is_compaction(
+            list(turn_tuple), list(compaction_tuple)
+        ),
+        sweep_windows=(
+            _build_sweep_windows(
+                turns=turn_tuple,
+                asks=asks,
+                horizon=horizon,
+                start=effective_start,
+                end=end,
+            )
+            if sweep_count is not None
+            else ()
+        ),
+    )
+
+
 def render_briefing(
     files: list[Path],
     *,
@@ -400,66 +513,62 @@ def render_briefing(
     max_bytes: int | None = DEFAULT_BRIEFING_MAX_BYTES,
     explain_pruning: bool = False,
 ) -> str:
-    all_turns = collect_turns(files)
-    all_compactions = collect_compactions(files)
-    horizon = _resolve_horizon(
-        all_turns,
-        all_compactions,
-        count=DEFAULT_HORIZON_COMPACTIONS,
-        end=end,
-    )
-    effective_start = _effective_start(start, horizon.start)
-    turns = records.filter_turns(
-        all_turns,
-        start=effective_start,
+    payload = build_briefing_payload(
+        files,
+        start=start,
         end=end,
         contains=contains,
         turn_ids=turn_ids,
         tools=tools,
     )
-    compactions = _filter_compactions(
-        all_compactions, start=effective_start, end=end, contains=contains
+    return render_briefing_payload(
+        payload,
+        max_lines=max_lines,
+        max_bytes=max_bytes,
+        explain_pruning=explain_pruning,
     )
-    meter = collect_context_meter(files)
-    commits = collect_commit_records(turns)
-    asks = collect_ask_candidates(
-        turns=turns,
-        start=effective_start,
-        end=end,
-        contains=contains,
-        subject_thread_ids=_subject_thread_ids(files),
-    )
-    finals = collect_final_candidates(turns)
-    commit_candidates = collect_commit_candidates(commits)
-    compaction_intents = collect_compaction_intent_candidates(compactions)
-    command_candidates = collect_command_candidates(turns)
-    file_candidates = collect_file_touch_candidates(turns)
-    task_plane = collect_task_plane_candidates()
-    recovery = _recovery_lines(compaction_intents, asks)
-    recovery_first = _latest_event_is_compaction(turns, compactions)
+
+
+def render_briefing_payload(
+    payload: BriefingPayload,
+    *,
+    max_lines: int | None = DEFAULT_BRIEFING_MAX_LINES,
+    max_bytes: int | None = DEFAULT_BRIEFING_MAX_BYTES,
+    explain_pruning: bool = False,
+) -> str:
+    recovery = _recovery_lines(list(payload.compaction_intents), list(payload.asks))
     lines: list[str] = []
-    lines.extend(_briefing_header_lines(files, turns))
-    lines.extend(_horizon_lines(horizon))
-    filter_lines = _active_filter_lines(
-        start=start, end=end, contains=contains, turn_ids=turn_ids, tools=tools
+    lines.extend(_briefing_header_lines(list(payload.files), list(payload.turns)))
+    lines.extend(_horizon_lines(payload.horizon))
+    filter_lines = active_filter_lines(
+        start=payload.filters.start,
+        end=payload.filters.end,
+        contains=payload.filters.contains,
+        turn_ids=payload.filters.turn_ids,
+        tools=payload.filters.tools,
     )
     if filter_lines:
         lines.append("Filters")
         lines.extend(filter_lines)
-    if recovery_first:
+    if payload.recovery_first:
         lines.extend(recovery)
-    lines.extend(_guidance_lines(meter))
+    lines.extend(_guidance_lines(payload.meter))
     lines.extend(_learning_lines())
-    lines.extend(_task_plane_lines(task_plane))
-    lines.extend(_asks_lines(asks))
-    lines.extend(_finals_lines(finals))
-    if not recovery_first:
+    lines.extend(_task_plane_lines(list(payload.task_plane)))
+    lines.extend(_asks_lines(list(payload.asks)))
+    lines.extend(_finals_lines(list(payload.finals)))
+    if not payload.recovery_first:
         lines.extend(recovery)
     lines.extend(
-        _activity_lines(turns, command_candidates, file_candidates, commit_candidates)
+        _activity_lines(
+            list(payload.turns),
+            list(payload.command_candidates),
+            list(payload.file_candidates),
+            list(payload.commit_candidates),
+        )
     )
     lines.extend(git_posture_lines())
-    lines.extend(_inbox_lines())
+    lines.extend(inbox_lines())
     return apply_output_budget(
         "\n".join(lines),
         max_lines=max_lines,
@@ -698,13 +807,14 @@ def _finals_lines(finals: list[RehydrationCandidate]) -> list[str]:
 
 
 def _recovery_lines(
-    compactions: list[RehydrationCandidate], asks: list[RehydrationCandidate]
+    compactions: list[RehydrationCandidate],
+    asks: list[RehydrationCandidate] | None = None,
 ) -> list[str]:
     ranked = sort_rehydration_candidates(compactions)
     if not ranked:
         return []
     latest = ranked[0]
-    steering = _latest_steering_before(asks, latest.timestamp)
+    steering = _latest_steering_before(asks or [], latest.timestamp)
     lines = [
         "Recovery",
         f"  latest_compaction={latest.timestamp}",
@@ -725,7 +835,7 @@ def _recovery_lines(
 def _latest_steering_before(
     asks: list[RehydrationCandidate], timestamp: str
 ) -> RehydrationCandidate | None:
-    before = [ask for ask in asks if ask.timestamp <= timestamp]
+    before = [ask for ask in asks if ask.key and ask.timestamp <= timestamp]
     return max(before, key=lambda ask: (ask.timestamp, ask.key), default=None)
 
 
@@ -784,132 +894,57 @@ def active_file_order(turns: list[TurnRecord]) -> list[tuple[str, int]]:
     ]
 
 
-def _active_filter_lines(
+def _build_sweep_windows(
     *,
+    turns: tuple[TurnRecord, ...],
+    asks: tuple[RehydrationCandidate, ...],
+    horizon: ResolvedHorizon,
     start: str | None,
     end: str | None,
-    contains: str | None,
-    turn_ids: list[str] | None,
-    tools: list[str] | None,
-) -> list[str]:
-    rows: list[str] = []
-    if start:
-        rows.append(f"  start={start}")
-    if end:
-        rows.append(f"  end={end}")
-    if contains:
-        rows.append(f"  contains={contains}")
-    if turn_ids:
-        rows.append(f"  turn_ids={', '.join(turn_ids)}")
-    if tools:
-        rows.append(f"  tools={', '.join(tools)}")
-    return rows
-
-
-def _filter_compactions(
-    compactions: list[records.CompactionRecord],
-    *,
-    start: str | None,
-    end: str | None,
-    contains: str | None,
-) -> list[records.CompactionRecord]:
-    needle = (contains or "").lower()
-    kept: list[records.CompactionRecord] = []
-    for record in compactions:
-        if start and record.ts < start:
-            continue
-        if end and record.ts > end:
-            continue
-        if needle:
-            haystack = "\n".join(
+) -> tuple[SweepWindowPayload, ...]:
+    window_start = start or horizon.start
+    if not window_start:
+        return ()
+    boundaries = [
+        boundary
+        for boundary in horizon.selected_boundaries
+        if (not window_start or boundary > window_start)
+        and (not end or boundary <= end)
+    ]
+    windows: list[SweepWindowPayload] = []
+    edges = [window_start, *boundaries, HORIZON_END_SENTINEL]
+    for index in range(len(edges) - 1):
+        window_start, window_end = edges[index], edges[index + 1]
+        window_turns = tuple(
+            turn
+            for turn in turns
+            if (not window_start or turn.start_ts >= window_start)
+            and turn.start_ts < window_end
+        )
+        window_asks = tuple(
+            sort_rehydration_candidates(
                 [
-                    record.last_assistant_before_text or "",
-                    record.intent_text or "",
-                    record.summary_after_text or "",
-                    record.first_user_after_text or "",
+                    ask
+                    for ask in asks
+                    if (not window_start or ask.timestamp >= window_start)
+                    and ask.timestamp < window_end
                 ]
-            ).lower()
-            if needle not in haystack:
-                continue
-        kept.append(record)
-    return kept
-
-
-def apply_output_budget(
-    text: str,
-    *,
-    max_lines: int | None,
-    max_bytes: int | None,
-    explain: bool,
-) -> str:
-    lines = text.splitlines()
-    original_lines = len(lines)
-    original_bytes = len(text.encode("utf-8"))
-    pruned = False
-    line_budget = max_lines if max_lines and max_lines > 0 else None
-    byte_budget = max_bytes if max_bytes and max_bytes > 0 else None
-    reserve = 1 if explain else 0
-    if line_budget and len(lines) > line_budget:
-        keep = max(1, line_budget - reserve)
-        lines = lines[:keep]
-        pruned = True
-
-    def pruning_note(retained_lines: int, retained_bytes: int) -> str:
-        return (
-            "Pruning "
-            f"original_lines={original_lines} original_bytes={original_bytes} "
-            f"max_lines={line_budget or '-'} max_bytes={byte_budget or '-'} "
-            f"retained_lines={retained_lines} retained_content_bytes={retained_bytes}"
+            )
         )
-
-    def rendered(with_note: bool) -> str:
-        out = list(lines)
-        if with_note:
-            text_without_note = "\n".join(out)
-            retained_bytes = len(text_without_note.encode("utf-8"))
-            out.append(pruning_note(len(lines) + 1, retained_bytes))
-        return "\n".join(out)
-
-    if byte_budget:
-        while lines and len(rendered(explain and pruned).encode("utf-8")) > byte_budget:
-            lines.pop()
-            pruned = True
-        if (
-            not lines
-            and len(rendered(explain and pruned).encode("utf-8")) > byte_budget
-        ):
-            return _truncate_to_bytes(rendered(explain and pruned), byte_budget)
-    if pruned and explain:
-        return rendered(True)
-    return "\n".join(lines)
-
-
-def _truncate_to_bytes(text: str, max_bytes: int) -> str:
-    return text.encode("utf-8")[: max(0, max_bytes)].decode("utf-8", errors="ignore")
-
-
-def _inbox_lines() -> list[str]:
-    repo_root = repo_root_from_cwd()
-    if repo_root is None:
-        return []
-    items = collect_inbox_items(str(repo_root))
-    deadletters = collect_deadlettered_inbox_items(str(repo_root))
-    refused = collect_refused_inbox_items(str(repo_root))
-    lines = ["Inbox", f"  pending={len(items)}"]
-    for item in items:
-        lines.append(
-            f"  key={inbox_item_key(item.name)} "
-            f"age={relative_time_for_path(item.source_path)}"
+        windows.append(
+            SweepWindowPayload(
+                index=index,
+                label=window_start or "session start",
+                turns=window_turns,
+                asks=window_asks,
+                finals=tuple(
+                    sort_rehydration_candidates(
+                        collect_final_candidates(list(window_turns))
+                    )
+                ),
+            )
         )
-    if items:
-        lines.append(f"  {INBOX_RESPONSE_ROW}")
-    if deadletters:
-        lines.append(f"  deadlettered={len(deadletters)}")
-        lines.extend(f"  {line}" for line in inbox_deadletter_context_rows(deadletters))
-    if refused:
-        lines.append(f"  refused={len(refused)}")
-        lines.extend(f"  {line}" for line in inbox_ack_state_context_rows(refused))
-    return lines
+    return tuple(windows)
 
 
 def render_sweep(
@@ -928,70 +963,33 @@ def render_sweep(
     and the final that closed it. A renewed agent reads these to recover not
     just the latest state but the trajectory.
     """
-    all_turns = collect_turns(files)
-    all_compactions = collect_compactions(files)
-    horizon = _resolve_horizon(all_turns, all_compactions, count=count, end=end)
-    effective_start = _effective_start(start, horizon.start)
-    turns = records.filter_turns(
-        all_turns,
-        start=effective_start,
+    payload = build_briefing_payload(
+        files,
+        start=start,
         end=end,
         contains=contains,
         turn_ids=turn_ids,
         tools=tools,
+        sweep_count=count,
     )
-    window_start = effective_start or horizon.start
-    boundaries = [
-        boundary
-        for boundary in horizon.selected_boundaries
-        if (not window_start or boundary > window_start)
-        and (not end or boundary <= end)
-    ]
-    if not window_start:
-        return render_briefing(
-            files,
-            start=start,
-            end=end,
-            contains=contains,
-            turn_ids=turn_ids,
-            tools=tools,
-        )
+    return render_sweep_payload(payload)
+
+
+def render_sweep_payload(payload: BriefingPayload) -> str:
+    if not payload.sweep_windows:
+        return render_briefing_payload(payload)
     lines: list[str] = [
         "Sweep",
-        f"  windows={len(boundaries) + 1} files={len(files)}",
+        f"  windows={len(payload.sweep_windows)} files={len(payload.files)}",
     ]
-    lines.extend(_horizon_lines(horizon))
-    edges = [window_start, *boundaries, HORIZON_END_SENTINEL]
-    sweep_asks = collect_ask_candidates(
-        turns=turns,
-        start=effective_start,
-        end=end,
-        contains=contains,
-        subject_thread_ids=_subject_thread_ids(files),
-    )
-    for index in range(len(edges) - 1):
-        window_start, window_end = edges[index], edges[index + 1]
-        window_turns = [
-            turn
-            for turn in turns
-            if (not window_start or turn.start_ts >= window_start)
-            and turn.start_ts < window_end
-        ]
-        label = window_start or "session start"
-        lines.append(f"Window {index} (from {label})")
-        asks = [
-            ask
-            for ask in sweep_asks
-            if (not window_start or ask.timestamp >= window_start)
-            and ask.timestamp < window_end
-        ]
-        asks = sort_rehydration_candidates(asks)
-        for candidate in asks[:SWEEP_WINDOW_ASKS]:
+    lines.extend(_horizon_lines(payload.horizon))
+    for window in payload.sweep_windows:
+        lines.append(f"Window {window.index} (from {window.label})")
+        for candidate in window.asks[:SWEEP_WINDOW_ASKS]:
             lines.append(f"  ask {_ask_line(candidate).strip()}")
-        finals = sort_rehydration_candidates(collect_final_candidates(window_turns))
-        if finals:
-            latest = finals[0]
+        if window.finals:
+            latest = window.finals[0]
             lines.append(f"  final {latest.timestamp} {clip(latest.text)}")
-        if not asks and not finals:
+        if not window.asks and not window.finals:
             lines.append("  (no dialogue in this window)")
     return "\n".join(lines)
