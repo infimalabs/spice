@@ -47,11 +47,11 @@ from spice.sessions.util import parse_iso_ts
 from spice.sessions.records import (
     CommitRecord,
     CompactionRecord,
+    MessageShape,
     TurnRecord,
     collect_commit_records,
     collect_compactions,
     collect_turns,
-    is_scaffolding_text,
 )
 from spice.studies import complexity, fileloc, magicnums, repodocs, shape
 from spice.studies.walk import is_excluded_path
@@ -215,9 +215,9 @@ def ask_candidate(
 def collect_ask_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
     candidates: list[RehydrationCandidate] = []
     for turn in turns:
-        for text in turn.user_messages:
-            if not is_scaffolding_text(text):
-                candidates.append(ask_candidate(turn.start_ts, text))
+        for message in turn.user_messages:
+            if message.shape is MessageShape.HUMAN:
+                candidates.append(ask_candidate(turn.start_ts, message.text))
     return candidates
 
 
@@ -299,6 +299,7 @@ def collect_compaction_intent_candidates(
             kind="compaction_intent",
             timestamp=record.ts,
             text=record.first_user_after_text
+            or record.summary_after_text
             or record.last_assistant_before_text
             or "",
             rank_name=RECENCY_RANK_NAME,
@@ -883,6 +884,7 @@ def _filter_compactions(
             haystack = "\n".join(
                 [
                     record.last_assistant_before_text or "",
+                    record.summary_after_text or "",
                     record.first_user_after_text or "",
                 ]
             ).lower()

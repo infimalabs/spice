@@ -135,6 +135,22 @@ def test_task_wake_parser_rejects_claim_flag():
     assert exc_info.value.code == 2
 
 
+def test_task_delete_parser_accepts_force_claimed():
+    args = build_parser().parse_args(
+        [
+            "task",
+            "delete",
+            "TASK-20260101T000000000001Z",
+            "--reason",
+            "duplicate",
+            "--force-claimed",
+        ]
+    )
+
+    assert args.task_action == "delete"
+    assert args.force_claimed is True
+
+
 def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
     args = build_parser().parse_args(
         [
@@ -657,6 +673,7 @@ def test_task_show_prints_merge_aware_diff_command_for_task_merge(monkeypatch):
             "done_ref": "merge-head",
             "done_merge_head": "merge-head",
             "done_head": "agent-head",
+            "done_upstream_head": "upstream-head",
         }
     )
 
@@ -667,14 +684,50 @@ def test_task_show_prints_merge_aware_diff_command_for_task_merge(monkeypatch):
     output = render.render_show("TASK-test")
 
     assert "review_commit merge-head (task merge; agent_head agent-head)" in output
+    assert "review_diff_base upstream-head (done_upstream_head)" in output
     assert (
-        "review_diff_command git show -m --first-parent --stat --patch merge-head"
-        in output
+        "review_diff_command git diff --stat --patch upstream-head agent-head" in output
     )
     assert (
-        "review_diff_note task merge commits need merge-aware diff; "
-        "plain git show can omit the agent patch"
+        "review_fallback_diff_command "
+        "git show -m --first-parent --stat --patch merge-head" in output
+    )
+    assert (
+        "review_diff_note agent-head diff isolates the reviewed patch; "
+        "fallback merge diff shows the integrated tree and can include later overlap"
     ) in output
+
+
+def test_task_show_merge_diff_command_falls_back_to_first_parent(monkeypatch):
+    row = _row(
+        "Review merge",
+        project="task.render",
+        incepted="1k4yrMDR",
+        status="pending",
+        phase="review",
+    )
+    row.update(
+        {
+            "task_description": "",
+            "phase_i": "1",
+            "urgency": "9.2",
+            "claim_by": "actor-a",
+            "done_ref": "merge-head",
+            "done_merge_head": "merge-head",
+            "done_head": "agent-head",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+
+    output = render.render_show("TASK-test")
+
+    assert "review_diff_base merge-head^1 (merge first parent)" in output
+    assert (
+        "review_diff_command git diff --stat --patch merge-head^1 agent-head" in output
+    )
 
 
 def test_task_show_omits_merge_aware_diff_command_for_task_head(monkeypatch):

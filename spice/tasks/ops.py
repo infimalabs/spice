@@ -153,6 +153,35 @@ def _claimed_task_capture_recovery_message(row: dict[str, Any], owner: str) -> s
     )
 
 
+@dataclass(frozen=True)
+class LiveClaim:
+    claim_by: str
+    claim_thread: str
+    claim_until: str
+
+
+def _live_claim(row: dict[str, Any]) -> LiveClaim | None:
+    until = str(row.get("claim_until") or "")
+    if not until or until < tw.now_iso():
+        return None
+    claim_by = str(row.get("claim_by") or "")
+    claim_thread = str(row.get("claim_thread") or "")
+    if not claim_by and not claim_thread:
+        return None
+    return LiveClaim(
+        claim_by=claim_by or "-",
+        claim_thread=claim_thread or "-",
+        claim_until=until,
+    )
+
+
+def _live_claim_text(claim: LiveClaim) -> str:
+    return (
+        f"claim_by={claim.claim_by} claim_thread={claim.claim_thread} "
+        f"claim_until={claim.claim_until}"
+    )
+
+
 def _require_owner(row: dict[str, Any], actor: str, action: str) -> None:
     owner = str(row.get("claim_by") or "")
     active = bool(row.get("start"))
@@ -1245,13 +1274,28 @@ def _require_plan_phase_board_populated(row: dict[str, Any]) -> None:
         )
 
 
-def delete(handle: str, reason: str) -> str:
+def delete(handle: str, reason: str, *, force_claimed: bool = False) -> str:
     row = identity.resolve(handle)
     _require_pending(row, "delete")
+    live_claim = _live_claim(row)
+    rendered = identity.render_handle(row)
+    if live_claim and not force_claimed:
+        raise SpiceError(
+            f"cannot delete {rendered}: live claim held by "
+            f"{_live_claim_text(live_claim)}; rerun with --force-claimed to "
+            "override"
+        )
     uuid = identity.uuid_of(row)
     project = str(row.get("project") or "")
+    if live_claim:
+        annotate(uuid, f"forced delete of live claim: {_live_claim_text(live_claim)}")
     annotate(uuid, f"deleted: {reason}")
     tw.run([uuid, "modify", f"delete_reason:{reason}"])
     tw.run([uuid, "delete"])
     _gc_empty_project_task_filters(project)
-    return identity.render_handle(row)
+    if live_claim:
+        return (
+            f"warning: deleted {rendered} despite live claim "
+            f"{_live_claim_text(live_claim)}\n{rendered}"
+        )
+    return rendered

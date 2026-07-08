@@ -3,9 +3,10 @@
 The transcript is an append-only JSONL of timestamped events. This module
 folds it into the shapes every forensic view shares:
 
-* :class:`TurnRecord` — one operator ask: the user messages that opened it,
-  the assistant commentary and final answers inside it, and activity counts
-  (commands, patches, errors, web searches, compactions, touched files).
+* :class:`TurnRecord` — one operator ask: the user messages that opened it
+  (each classified with a :class:`MessageShape`), the assistant commentary and
+  final answers inside it, and activity counts (commands, patches, errors,
+  web searches, compactions, touched files).
 * :class:`CompactionRecord` — a context compaction with the prose around it.
 * :class:`TokenUsage` — cumulative token accounting from token_count events.
 * :class:`CommitRecord` — commit declarations harvested from assistant prose.
@@ -18,6 +19,7 @@ import re
 from collections.abc import Callable, Iterator
 from collections import Counter
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +32,73 @@ COMMIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
 COMMIT_LINE_RE = re.compile(
     r"(?:^|\n)[^\n]*\b(?:commit(?:ted)?|sha)\b[^\n]*", re.IGNORECASE
 )
-SCAFFOLDING_PREFIXES = ("<user_instructions>", "<environment_context>", "<ENVIRONMENT")
+
+
+class MessageShape(StrEnum):
+    """Deterministic class of one user-role transcript message."""
+
+    HUMAN = "human"
+    SKILL_MANTRA = "skill-mantra"
+    COMPACTION_SUMMARY = "compaction-summary"
+    TASK_NOTIFICATION = "task-notification"
+    ENVIRONMENT_SCAFFOLD = "environment-scaffold"
+
+
+# Each known non-human shape maps to exactly one class by its opening.
+_SHAPE_PREFIXES: tuple[tuple[str, MessageShape], ...] = (
+    # The spice bootstrap prompt: the full preamble, or the bare skill link
+    # the wrapper sends on its own line.
+    ("The linked skill below carries the full authority", MessageShape.SKILL_MANTRA),
+    ("[$spice](", MessageShape.SKILL_MANTRA),
+    # Claude's post-compaction rehydration summary.
+    (
+        "This session is being continued from a previous conversation",
+        MessageShape.COMPACTION_SUMMARY,
+    ),
+    # Claude's background-task completion notice.
+    ("<task-notification>", MessageShape.TASK_NOTIFICATION),
+    # Codex session-scaffolding envelopes.
+    ("<user_instructions>", MessageShape.ENVIRONMENT_SCAFFOLD),
+    ("<environment_context>", MessageShape.ENVIRONMENT_SCAFFOLD),
+    ("<ENVIRONMENT", MessageShape.ENVIRONMENT_SCAFFOLD),
+    # Harness-injected retry nudges: no operator typed these.
+    ("Your tool call was malformed", MessageShape.ENVIRONMENT_SCAFFOLD),
+    (
+        "[Your previous response had no visible output",
+        MessageShape.ENVIRONMENT_SCAFFOLD,
+    ),
+)
+
+# Harness injections open with a tag-like block; operator prose does not.
+_TAG_OPENING_RE = re.compile(r"^<[A-Za-z][\w-]*")
+_SHAPE_ERROR_PREVIEW_CHARS = 80
+
+
+def classify_user_message(text: str) -> MessageShape:
+    """Classify a user-role message by its opening shape.
+
+    One deterministic path: a known scaffold prefix maps to its class, an
+    unrecognized tag-like opening fails loud (a new harness injection must be
+    classified deliberately, never silently counted as an operator ask), and
+    everything else is a human message.
+    """
+    stripped = text.lstrip()
+    for prefix, shape in _SHAPE_PREFIXES:
+        if stripped.startswith(prefix):
+            return shape
+    if _TAG_OPENING_RE.match(stripped):
+        raise SpiceError(
+            "unrecognized scaffold-shaped user message: opens with "
+            f"{stripped[:_SHAPE_ERROR_PREVIEW_CHARS]!r}. Add its shape to "
+            "spice.sessions.records before it can be classified."
+        )
+    return MessageShape.HUMAN
+
+
+@dataclass(slots=True)
+class UserMessage:
+    text: str
+    shape: MessageShape
 
 
 @dataclass(slots=True)
@@ -41,7 +109,7 @@ class TurnRecord:
     end_ts: str | None = None
     last_activity_ts: str | None = None
     completed: bool = False
-    user_messages: list[str] = field(default_factory=list)
+    user_messages: list[UserMessage] = field(default_factory=list)
     assistant_commentary: list[str] = field(default_factory=list)
     final_answers: list[str] = field(default_factory=list)
     ordered_messages: list[tuple[str, str]] = field(default_factory=list)
@@ -59,6 +127,7 @@ class CompactionRecord:
     source_file: str
     ts: str
     last_assistant_before_text: str | None = None
+    summary_after_text: str | None = None
     first_user_after_text: str | None = None
 
 
@@ -97,11 +166,6 @@ def iter_events(path: Path) -> Iterator[dict[str, Any]]:
         event = driver.normalize_transcript_line(obj)
         if event is not None:
             yield event
-
-
-def is_scaffolding_text(text: str) -> bool:
-    stripped = text.lstrip()
-    return stripped.startswith(SCAFFOLDING_PREFIXES)
 
 
 def collect_turns(files: list[Path]) -> list[TurnRecord]:
@@ -194,7 +258,9 @@ def _apply_response_item(current: TurnRecord, ts: str, payload: dict[str, Any]) 
             return
         role = payload.get("role")
         if role == "user":
-            current.user_messages.append(text)
+            current.user_messages.append(
+                UserMessage(text=text, shape=classify_user_message(text))
+            )
             current.ordered_messages.append(("user", text))
             return
         if role == "assistant":
@@ -267,7 +333,11 @@ def collect_compactions(files: list[Path]) -> list[CompactionRecord]:
             if payload.get("role") == "assistant":
                 last_assistant = text
             elif payload.get("role") == "user" and pending is not None:
-                if not is_scaffolding_text(text):
+                shape = classify_user_message(text)
+                if shape is MessageShape.COMPACTION_SUMMARY:
+                    if pending.summary_after_text is None:
+                        pending.summary_after_text = text
+                elif shape is MessageShape.HUMAN:
                     pending.first_user_after_text = text
                     pending = None
     records.sort(key=lambda record: (record.ts, record.source_file))
@@ -341,7 +411,11 @@ def collect_commit_records(turns: list[TurnRecord]) -> list[CommitRecord]:
                             source_file=turn.source_file,
                             sha=sha,
                             line=" ".join(line.split()),
-                            user=turn.user_messages[0] if turn.user_messages else None,
+                            user=(
+                                turn.user_messages[0].text
+                                if turn.user_messages
+                                else None
+                            ),
                         )
                     )
     return records
@@ -442,5 +516,9 @@ def _turn_end_ts(turn: TurnRecord) -> str:
 
 def _turn_text(turn: TurnRecord) -> str:
     return "\n".join(
-        [*turn.user_messages, *turn.assistant_commentary, *turn.final_answers]
+        [
+            *(message.text for message in turn.user_messages),
+            *turn.assistant_commentary,
+            *turn.final_answers,
+        ]
     ).lower()

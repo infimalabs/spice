@@ -268,15 +268,21 @@ def _review_commit_lines(row: dict[str, Any]) -> list[str]:
     if review_ref != merge_head:
         raise SpiceError("task done_ref must match done_merge_head")
     if merge_head != agent_head:
+        upstream_head = _f(row, "done_upstream_head")
+        diff_base = upstream_head or f"{review_ref}^1"
+        base_source = "done_upstream_head" if upstream_head else "merge first parent"
         return [
             f"review_commit {review_ref} (task merge; agent_head {agent_head})",
+            f"review_diff_base {diff_base} ({base_source})",
+            (f"review_diff_command git diff --stat --patch {diff_base} {agent_head}"),
             (
-                "review_diff_command "
+                "review_fallback_diff_command "
                 f"git show -m --first-parent --stat --patch {review_ref}"
             ),
             (
-                "review_diff_note task merge commits need merge-aware diff; "
-                "plain git show can omit the agent patch"
+                "review_diff_note agent-head diff isolates the reviewed patch; "
+                "fallback merge diff shows the integrated tree and can include "
+                "later overlap"
             ),
         ]
     return [f"review_commit {review_ref} (task head)"]
