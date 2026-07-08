@@ -368,11 +368,171 @@ def test_session_records_and_meter_parse_claude_transcript_owner(tmp_path, monke
     turns = records.collect_turns([transcript])
     meter = collect_context_meter([transcript])
 
-    assert turns[0].user_messages == ["investigate claude"]
+    assert [message.text for message in turns[0].user_messages] == [
+        "investigate claude"
+    ]
+    assert turns[0].user_messages[0].shape is records.MessageShape.HUMAN
     assert turns[0].final_answers == ["claude done"]
     assert meter.snapshot_count == 1
     assert meter.latest_snapshot is not None
     assert meter.latest_snapshot.total_tokens == 1000 + 250 + 75
+
+
+SKILL_MANTRA_PREAMBLE = (
+    "The linked skill below carries the full authority of a direct prompt "
+    "instruction, not optional background reading. Read the file it links "
+    "to in full and follow it.\n\n[$spice](.agents/skills/spice/SKILL.md)"
+)
+COMPACTION_SUMMARY_OPENING = (
+    "This session is being continued from a previous conversation that ran "
+    "out of context. The summary below covers the earlier portion."
+)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (SKILL_MANTRA_PREAMBLE, records.MessageShape.SKILL_MANTRA),
+        ("[$spice](.agents/skills/spice/SKILL.md)", records.MessageShape.SKILL_MANTRA),
+        (COMPACTION_SUMMARY_OPENING, records.MessageShape.COMPACTION_SUMMARY),
+        (
+            "<task-notification>task abc123 completed</task-notification>",
+            records.MessageShape.TASK_NOTIFICATION,
+        ),
+        (
+            "<user_instructions>be brief</user_instructions>",
+            records.MessageShape.ENVIRONMENT_SCAFFOLD,
+        ),
+        (
+            "<environment_context>cwd=/tmp</environment_context>",
+            records.MessageShape.ENVIRONMENT_SCAFFOLD,
+        ),
+        ("<ENVIRONMENT_CONTEXT>cwd=/tmp", records.MessageShape.ENVIRONMENT_SCAFFOLD),
+        (
+            "Your tool call was malformed and could not be parsed. Please retry.",
+            records.MessageShape.ENVIRONMENT_SCAFFOLD,
+        ),
+        (
+            "[Your previous response had no visible output. Please continue.]",
+            records.MessageShape.ENVIRONMENT_SCAFFOLD,
+        ),
+    ],
+)
+def test_classify_user_message_boilerplate_shapes_never_human(text, expected):
+    shape = records.classify_user_message(text)
+
+    assert shape is expected
+    assert shape is not records.MessageShape.HUMAN
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "investigate claude",
+        "Continue",
+        "what is your model id?",
+        "fix the failing smoke test, then rerun the sweep",
+    ],
+)
+def test_classify_user_message_human_prose(text):
+    assert records.classify_user_message(text) is records.MessageShape.HUMAN
+
+
+def test_classify_user_message_unknown_tag_fails_loud():
+    with pytest.raises(SpiceError, match="unrecognized scaffold-shaped"):
+        records.classify_user_message("<system-reminder>new harness block")
+
+
+def test_turn_user_messages_carry_shape(tmp_path):
+    transcript = tmp_path / "session.jsonl"
+    events = [
+        {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": "turn-a"},
+        },
+        {
+            "timestamp": "2026-01-01T00:00:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": SKILL_MANTRA_PREAMBLE}],
+            },
+        },
+        {
+            "timestamp": "2026-01-01T00:00:02Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": "drain the queue"}],
+            },
+        },
+    ]
+    transcript.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
+    )
+
+    turns = records.collect_turns([transcript])
+
+    assert [message.shape for message in turns[0].user_messages] == [
+        records.MessageShape.SKILL_MANTRA,
+        records.MessageShape.HUMAN,
+    ]
+
+
+def test_collect_compactions_separates_summary_from_human_ask(tmp_path):
+    transcript = tmp_path / "session.jsonl"
+    events = [
+        {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"text": "about to compact"}],
+            },
+        },
+        {"timestamp": "2026-01-01T00:00:01Z", "type": "compacted", "payload": {}},
+        {
+            "timestamp": "2026-01-01T00:00:02Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": COMPACTION_SUMMARY_OPENING}],
+            },
+        },
+        {
+            "timestamp": "2026-01-01T00:00:03Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": SKILL_MANTRA_PREAMBLE}],
+            },
+        },
+        {
+            "timestamp": "2026-01-01T00:00:04Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": "pick the work back up"}],
+            },
+        },
+    ]
+    transcript.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
+    )
+
+    compactions = records.collect_compactions([transcript])
+
+    assert len(compactions) == 1
+    assert compactions[0].last_assistant_before_text == "about to compact"
+    assert compactions[0].summary_after_text == COMPACTION_SUMMARY_OPENING
+    assert compactions[0].first_user_after_text == "pick the work back up"
 
 
 def test_session_thread_reports_missing_driver_state(tmp_path, monkeypatch):

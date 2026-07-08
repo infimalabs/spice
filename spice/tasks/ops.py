@@ -119,11 +119,9 @@ def claim_meta(actor: str) -> list[str]:
 
 def _require_pending(row: dict[str, Any], action: str) -> None:
     status = str(row.get("status") or "")
-    if status == "deleted":
-        raise SpiceError(_deleted_task_recovery_message(row, action))
-    if status == "completed":
+    if status in ("completed", "deleted"):
         raise SpiceError(
-            f"cannot {action} a completed task: {identity.render_handle(row)}"
+            f"cannot {action} a {status} task: {identity.render_handle(row)}"
         )
 
 
@@ -628,6 +626,7 @@ def capture(
             "task capture folds an existing loose commit into a task"
         )
     actor = tw.current_actor()
+    _require_single_active_slot(actor, action="task capture")
     if handle is not None:
         if title or project or description or origin:
             raise SpiceError(
@@ -642,9 +641,7 @@ def capture(
             raise SpiceError(
                 f"task already claimed by {owner}; unclaim it before capturing"
             )
-        _require_single_active_slot(actor, action="task capture", target=row)
     else:
-        _require_single_active_slot(actor, action="task capture")
         if not project:
             raise SpiceError(
                 "task capture requires --project when minting a new task; captured "
