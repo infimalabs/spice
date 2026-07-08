@@ -22,7 +22,7 @@ from spice.mail.inbox import (
     write_inbox_item,
 )
 from spice.sessions import briefing as briefing_module
-from spice.sessions.briefing import render_briefing
+from spice.sessions.briefing import render_briefing, render_sweep
 from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions.meter import (
     ActiveContextSnapshot,
@@ -36,8 +36,10 @@ from spice.sessions.meter import (
 from spice.sessions import learnings, records
 from spice.sessions.util import first_text, normalize_timestamp
 from spice.errors import SpiceError
+from spice.tasks import alloc as task_alloc
 from spice.tasks import config as task_config
 from spice.tasks import create, identity as task_identity, ops
+from spice.tasks import tw as task_tw
 from spice.tasks.identity import (
     BASE,
     INCEPTED_RE,
@@ -522,6 +524,314 @@ def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
     assert "Git\n  branch=main upstream=- ahead=- behind=-\n  dirty=clean" in briefing
 
 
+def test_rehydration_ask_candidates_order_by_disposition_then_recency():
+    candidates = [
+        briefing_module.ask_candidate(
+            "2026-01-01T00:00:04.000Z",
+            "acked newest",
+            disposition="acked",
+        ),
+        briefing_module.ask_candidate(
+            "2026-01-01T00:00:01.000Z",
+            "pending older",
+            disposition="pending",
+        ),
+        briefing_module.ask_candidate(
+            "2026-01-01T00:00:02.000Z",
+            "pending newer",
+            disposition="pending",
+        ),
+        briefing_module.ask_candidate(
+            "2026-01-01T00:00:03.000Z",
+            "refused latest",
+            disposition="refused",
+        ),
+    ]
+
+    ordered = briefing_module.sort_rehydration_candidates(candidates)
+
+    assert [(candidate.rank_name, candidate.text) for candidate in ordered] == [
+        (briefing_module.ASK_RANK_NAME, "pending newer"),
+        (briefing_module.ASK_RANK_NAME, "pending older"),
+        (briefing_module.ASK_RANK_NAME, "refused latest"),
+        (briefing_module.ASK_RANK_NAME, "acked newest"),
+    ]
+
+
+def test_rehydration_file_candidates_order_by_last_touch_then_hotspot():
+    older_hot = records.TurnRecord(
+        source_file="session.jsonl",
+        start_ts="2026-01-01T00:00:00.000Z",
+        last_activity_ts="2026-01-01T00:00:05.000Z",
+    )
+    older_hot.touched_files["older_hot.py"] = 10
+    newer_cool = records.TurnRecord(
+        source_file="session.jsonl",
+        start_ts="2026-01-01T00:00:10.000Z",
+        last_activity_ts="2026-01-01T00:00:10.000Z",
+    )
+    newer_cool.touched_files["newer_cool.py"] = 1
+    newer_hot = records.TurnRecord(
+        source_file="session.jsonl",
+        start_ts="2026-01-01T00:00:11.000Z",
+        last_activity_ts="2026-01-01T00:00:10.000Z",
+    )
+    newer_hot.touched_files["newer_hot.py"] = 3
+
+    ordered = briefing_module.sort_rehydration_candidates(
+        briefing_module.collect_file_touch_candidates(
+            [older_hot, newer_cool, newer_hot]
+        )
+    )
+
+    assert [
+        (candidate.rank_name, candidate.label, candidate.count) for candidate in ordered
+    ] == [
+        (briefing_module.FILE_RANK_NAME, "newer_hot.py", 3),
+        (briefing_module.FILE_RANK_NAME, "newer_cool.py", 1),
+        (briefing_module.FILE_RANK_NAME, "older_hot.py", 10),
+    ]
+
+
+def test_rehydration_command_candidates_order_by_failures_then_recency():
+    older_failed = records.TurnRecord(
+        source_file="session.jsonl",
+        start_ts="2026-01-01T00:00:01.000Z",
+        turn_id="older-failed",
+        command_count=1,
+        error_count=1,
+    )
+    newer_clean = records.TurnRecord(
+        source_file="session.jsonl",
+        start_ts="2026-01-01T00:00:03.000Z",
+        turn_id="newer-clean",
+        command_count=1,
+        error_count=0,
+    )
+    newer_failed = records.TurnRecord(
+        source_file="session.jsonl",
+        start_ts="2026-01-01T00:00:02.000Z",
+        turn_id="newer-failed",
+        command_count=1,
+        error_count=1,
+    )
+
+    ordered = briefing_module.sort_rehydration_candidates(
+        briefing_module.collect_command_candidates(
+            [older_failed, newer_clean, newer_failed]
+        )
+    )
+
+    assert [(candidate.rank_name, candidate.label) for candidate in ordered] == [
+        (briefing_module.COMMAND_RANK_NAME, "newer-failed"),
+        (briefing_module.COMMAND_RANK_NAME, "older-failed"),
+        (briefing_module.COMMAND_RANK_NAME, "newer-clean"),
+    ]
+
+
+def test_rehydration_recency_candidates_order_finals_commits_and_intents():
+    older_turn = records.TurnRecord(
+        source_file="session.jsonl",
+        start_ts="2026-01-01T00:00:01.000Z",
+        final_answers=["older final"],
+    )
+    newer_turn = records.TurnRecord(
+        source_file="session.jsonl",
+        start_ts="2026-01-01T00:00:02.000Z",
+        final_answers=["newer final"],
+    )
+    commits = [
+        records.CommitRecord(
+            start_ts="2026-01-01T00:00:01.000Z",
+            turn_id="older",
+            source_file="session.jsonl",
+            sha="1111111",
+            line="commit 1111111 older",
+            user=None,
+        ),
+        records.CommitRecord(
+            start_ts="2026-01-01T00:00:02.000Z",
+            turn_id="newer",
+            source_file="session.jsonl",
+            sha="2222222",
+            line="commit 2222222 newer",
+            user=None,
+        ),
+    ]
+    compactions = [
+        records.CompactionRecord(
+            source_file="session.jsonl",
+            ts="2026-01-01T00:00:01.000Z",
+            first_user_after_text="older intent",
+        ),
+        records.CompactionRecord(
+            source_file="session.jsonl",
+            ts="2026-01-01T00:00:02.000Z",
+            first_user_after_text="newer intent",
+        ),
+    ]
+
+    finals = briefing_module.sort_rehydration_candidates(
+        briefing_module.collect_final_candidates([older_turn, newer_turn])
+    )
+    ranked_commits = briefing_module.sort_rehydration_candidates(
+        briefing_module.collect_commit_candidates(commits)
+    )
+    intents = briefing_module.sort_rehydration_candidates(
+        briefing_module.collect_compaction_intent_candidates(compactions)
+    )
+
+    assert [(candidate.rank_name, candidate.text) for candidate in finals] == [
+        (briefing_module.RECENCY_RANK_NAME, "newer final"),
+        (briefing_module.RECENCY_RANK_NAME, "older final"),
+    ]
+    assert [(candidate.rank_name, candidate.label) for candidate in ranked_commits] == [
+        (briefing_module.RECENCY_RANK_NAME, "2222222"),
+        (briefing_module.RECENCY_RANK_NAME, "1111111"),
+    ]
+    assert [(candidate.rank_name, candidate.text) for candidate in intents] == [
+        (briefing_module.RECENCY_RANK_NAME, "newer intent"),
+        (briefing_module.RECENCY_RANK_NAME, "older intent"),
+    ]
+
+
+def test_task_plane_candidates_collect_lane_board_rows(tmp_path, monkeypatch):
+    actor = ACTOR_A
+    active = {
+        "handle": "ACTIVE-1",
+        "description": "Current implementation",
+        "project": "session.briefing",
+        "phase": "todo",
+        "claim_by": actor,
+        "claim_at": "2026-01-01T00:00:05.000Z",
+        "acceptance": "render claimed work",
+        "urgency": 1.0,
+    }
+    ready_high = {
+        "handle": "READY-2",
+        "description": "Higher ready item",
+        "phase": "todo",
+        "urgency": 12.5,
+        "entry": "2026-01-01T00:00:02.000Z",
+    }
+    ready_low = {
+        "handle": "READY-1",
+        "description": "Lower ready item",
+        "phase": "todo",
+        "urgency": 7.0,
+        "entry": "2026-01-01T00:00:03.000Z",
+    }
+    review = {
+        "handle": "REVIEW-1",
+        "description": "Review item",
+        "phase": "review",
+        "urgency": 9.0,
+        "entry": "2026-01-01T00:00:04.000Z",
+    }
+    completed = {
+        "handle": "DONE-1",
+        "validation": "validated current behavior",
+        "end": "2026-01-01T00:00:06.000Z",
+    }
+    oops = {
+        "handle": "OOPS-1",
+        "description": "Known tooling friction",
+        "urgency": 2.0,
+        "entry": "2026-01-01T00:00:01.000Z",
+    }
+
+    monkeypatch.setattr(briefing_module, "repo_root_from_cwd", lambda: tmp_path)
+    monkeypatch.setattr(task_tw, "current_actor", lambda: actor)
+    monkeypatch.setattr(task_identity, "render_handle", lambda row: row["handle"])
+    monkeypatch.setattr(task_alloc, "is_hidden", lambda _row: False)
+    monkeypatch.setattr(task_alloc, "visible_active_rows", lambda _actor: [active])
+    monkeypatch.setattr(
+        task_alloc,
+        "visible_ready_rows",
+        lambda _actor: [ready_low, ready_high, review],
+    )
+
+    def visible_rows(_actor, filters):
+        if filters == ["status:pending", "phase:review"]:
+            return [review]
+        if filters == ["status:pending", "+BLOCKED"]:
+            return [{"handle": "BLOCKED-1"}]
+        if filters == ["status:completed"]:
+            return [completed]
+        return []
+
+    monkeypatch.setattr(task_alloc, "visible_rows", visible_rows)
+    monkeypatch.setattr(task_alloc, "oops_rows", lambda: [oops])
+
+    ordered = briefing_module.sort_rehydration_candidates(
+        briefing_module.collect_task_plane_candidates()
+    )
+
+    assert [(candidate.rank_name, candidate.text) for candidate in ordered] == [
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "claim ACTIVE-1 phase=todo project=session.briefing "
+            "acceptance=render claimed work",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "posture active=1 ready=2 review=1 blocked=1 oops=1",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "ready READY-2 urgency=12.50 Higher ready item",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "ready READY-1 urgency=7.00 Lower ready item",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "review REVIEW-1 urgency=9.00 Review item",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "completed DONE-1 validation=validated current behavior",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "oops OOPS-1 Known tooling friction",
+        ),
+    ]
+
+
+def test_briefing_renders_task_plane_section_with_explicit_overflow(monkeypatch):
+    candidates = [
+        briefing_module.RehydrationCandidate(
+            kind="task_plane",
+            timestamp=f"2026-01-01T00:00:{index:02d}.000Z",
+            text=f"completed TASK-{index} validation=ok",
+            rank_name=briefing_module.TASK_PLANE_RANK_NAME,
+            rank_key=briefing_module.task_plane_rank_key(
+                "completed", timestamp=f"2026-01-01T00:00:{index:02d}.000Z"
+            ),
+        )
+        for index in range(briefing_module.TASK_PLANE_ROW_LIMIT + 2)
+    ]
+    monkeypatch.setattr(
+        briefing_module, "collect_task_plane_candidates", lambda: candidates
+    )
+
+    briefing = render_briefing([], max_lines=200, max_bytes=20000)
+
+    expected = ["Task Plane"]
+    expected.extend(
+        f"  completed TASK-{index} validation=ok"
+        for index in range(
+            briefing_module.TASK_PLANE_ROW_LIMIT + 1,
+            1,
+            -1,
+        )
+    )
+    expected.append("  +2 more task-plane rows")
+    assert _section_lines(briefing, "Task Plane") == expected
+
+
 def test_briefing_learnings_use_active_stem_top_five(session_task_repo):
     repo = session_task_repo
     for index in range(6):
@@ -845,6 +1155,91 @@ def test_sweep_and_timeline_parser_share_filter_flags():
     assert timeline.tools == ["apply_patch"]
 
 
+def test_briefing_default_horizon_is_count_bound(tmp_path):
+    transcript = tmp_path / "horizon.jsonl"
+    _write_horizon_transcript(
+        transcript,
+        asks=[
+            ("2026-01-01T01:00:00Z", "before count horizon"),
+            ("2026-01-01T07:00:00Z", "inside first count window"),
+            ("2026-01-01T13:00:00Z", "inside second count window"),
+            ("2026-01-01T19:00:00Z", "inside current count window"),
+        ],
+        compactions=[
+            "2026-01-01T06:00:00Z",
+            "2026-01-01T12:00:00Z",
+            "2026-01-01T18:00:00Z",
+        ],
+    )
+
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+
+    assert "files=horizon.jsonl turns=3" in briefing
+    assert (
+        "horizon_basis=compaction_count start=2026-01-01T06:00:00.000Z compactions=3/3"
+    ) in briefing
+    assert "Latest Ask\n  inside current count window" in briefing
+
+
+def test_sweep_horizon_extends_to_wall_clock_floor(tmp_path):
+    transcript = tmp_path / "horizon.jsonl"
+    _write_horizon_transcript(
+        transcript,
+        asks=[
+            ("2026-01-01T01:00:00Z", "floor request"),
+            ("2026-01-01T10:05:00Z", "recent request one"),
+            ("2026-01-01T10:15:00Z", "recent request two"),
+            ("2026-01-01T10:30:00Z", "recent request three"),
+        ],
+        compactions=[
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T10:00:00Z",
+            "2026-01-01T10:10:00Z",
+            "2026-01-01T10:20:00Z",
+        ],
+    )
+
+    sweep = render_sweep([transcript], count=3)
+
+    assert "Sweep\n  windows=4 files=1" in sweep
+    assert (
+        "horizon_basis=wall_clock_floor start=2026-01-01T00:00:00.000Z compactions=4/3"
+    ) in sweep
+    assert "Window 0 (from 2026-01-01T00:00:00.000Z)" in sweep
+    assert "ask 2026-01-01T01:00:00.000Z floor request" in sweep
+
+
+def test_sweep_horizon_caps_requested_count(tmp_path):
+    transcript = tmp_path / "horizon.jsonl"
+    _write_horizon_transcript(
+        transcript,
+        asks=[
+            ("2026-01-01T01:30:00Z", "cap window one"),
+            ("2026-01-01T02:30:00Z", "cap window two"),
+            ("2026-01-01T03:30:00Z", "cap window three"),
+            ("2026-01-01T04:30:00Z", "cap window four"),
+            ("2026-01-01T05:30:00Z", "cap current window"),
+        ],
+        compactions=[
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T01:00:00Z",
+            "2026-01-01T02:00:00Z",
+            "2026-01-01T03:00:00Z",
+            "2026-01-01T04:00:00Z",
+            "2026-01-01T05:00:00Z",
+        ],
+    )
+
+    sweep = render_sweep([transcript], count=9)
+
+    assert "Sweep\n  windows=5 files=1" in sweep
+    assert (
+        "horizon_basis=hard_cap start=2026-01-01T01:00:00.000Z compactions=5/9"
+    ) in sweep
+    assert "Window 4 (from 2026-01-01T05:00:00.000Z)" in sweep
+    assert "ask 2026-01-01T05:30:00.000Z cap current window" in sweep
+
+
 def test_mint_incepted_shape_and_collision_advance():
     first = mint_incepted(set())
     assert INCEPTED_RE.match(first) is not None
@@ -1067,6 +1462,53 @@ def _write_filter_transcript(path) -> None:
             "payload": {"type": "task_complete"},
         },
     ]
+    path.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
+    )
+
+
+def _write_horizon_transcript(path, *, asks, compactions) -> None:
+    events = []
+    for index, (timestamp, text) in enumerate(asks):
+        turn_id = f"turn-horizon-{index}"
+        events.extend(
+            [
+                {
+                    "timestamp": timestamp,
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": turn_id},
+                },
+                {
+                    "timestamp": timestamp,
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"text": text}],
+                    },
+                },
+                {
+                    "timestamp": timestamp,
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "phase": "final_answer",
+                        "content": [{"text": f"completed {text}"}],
+                    },
+                },
+                {
+                    "timestamp": timestamp,
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete"},
+                },
+            ]
+        )
+    events.extend(
+        {"timestamp": timestamp, "type": "compacted", "payload": {}}
+        for timestamp in compactions
+    )
+    events.sort(key=lambda event: event["timestamp"])
     path.write_text(
         "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
     )

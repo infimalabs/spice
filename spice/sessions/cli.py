@@ -34,7 +34,7 @@ from spice.sessions.meter import (
 from spice.sessions.resolve import resolve_files, resolve_thread_transcript
 from spice.sessions.util import format_int, normalize_timestamp
 
-DEFAULT_SWEEP_WINDOWS = 4
+DEFAULT_SWEEP_WINDOWS = 3
 DEFAULT_SUMMARY_RECENT = 8
 DEFAULT_TIMELINE_LIMIT = 50
 DEFAULT_TIMELINE_TEXT_CHARS = 180
