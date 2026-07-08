@@ -121,6 +121,7 @@ class RehydrationCandidate:
     label: str = ""
     count: int = 0
     key: str = ""
+    user_after_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -365,6 +366,7 @@ def collect_compaction_intent_candidates(
             rank_name=RECENCY_RANK_NAME,
             rank_key=recency_rank_key(record.ts),
             label=clip(record.last_assistant_before_text),
+            user_after_text=record.first_user_after_text or "",
         )
         for record in compactions
     ]
@@ -870,7 +872,7 @@ def _recovery_lines(compactions: list[RehydrationCandidate]) -> list[str]:
         "Recovery",
         f"  latest_compaction={latest.timestamp}",
         f"  assistant_before={latest.label}",
-        f"  user_after={clip(latest.text)}",
+        f"  user_after={clip(latest.user_after_text)}",
     ]
 
 
