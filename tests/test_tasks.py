@@ -370,6 +370,31 @@ def test_task_capture_deleted_handle_points_to_new_capture_task(remote_task_repo
     assert f"spice task capture --project task.unit --origin task:{handle}" in message
 
 
+def test_task_capture_other_claimed_handle_points_to_new_capture_task(
+    remote_task_repo, monkeypatch
+):
+    handle = create.add(
+        "Peer claimed task with loose work",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["peer claimed task recovery is explicit"],
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(handle)
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    _make_loose_commit(remote_task_repo)
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.capture(handle)
+
+    message = str(exc_info.value)
+    assert f"cannot capture {handle}: task already claimed by {PEER_ACTOR}" in message
+    assert "discard local work" in message
+    assert "hand off" in message
+    assert f"spice task capture --project task.unit --origin task:{handle}" in message
+
+
 def test_task_done_deleted_claim_points_to_recovery_paths(remote_task_repo):
     handle = create.add(
         "Deleted claimed task with loose work",

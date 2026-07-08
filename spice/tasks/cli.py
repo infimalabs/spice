@@ -437,6 +437,9 @@ def _configure_capture_parser(actions: Any) -> None:
             "If the original claimed task was deleted, do not pass that deleted "
             "handle. Discard the local work, hand it off, or mint a new capture "
             "task with --project and --origin task:<deleted-handle>.\n\n"
+            "If the canonical task is actively claimed by another actor, use the "
+            "same discard, hand-off, or new capture task path instead of waiting "
+            "on that claim.\n\n"
             "Examples:\n"
             '  spice task capture --project task.cli --title "Capture loose fix"\n'
             '  spice task capture --project task.cli --done --validation "tests passed"\n'
