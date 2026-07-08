@@ -62,6 +62,8 @@ WORKING_SET_LIMIT = 10
 DEFAULT_BRIEFING_MAX_LINES = 120
 DEFAULT_BRIEFING_MAX_BYTES = 20_000
 DIRTY_PRESSURE_PREVIEW_LIMIT = 6
+TASK_PLANE_ROW_LIMIT = 8
+TASK_PLANE_PREVIEW_CHARS = 180
 
 RehydrationCandidateKind: TypeAlias = Literal[
     "ask",
@@ -70,8 +72,9 @@ RehydrationCandidateKind: TypeAlias = Literal[
     "command",
     "file",
     "compaction_intent",
+    "task_plane",
 ]
-RankKey: TypeAlias = tuple[int | str, ...]
+RankKey: TypeAlias = tuple[int | float | str, ...]
 
 ASK_DISPOSITION_RANK: dict[str, int] = {
     "pending": 30,
@@ -88,6 +91,15 @@ ASK_RANK_NAME = "ask_disposition_then_recency"
 FILE_RANK_NAME = "file_last_touch_then_hotspot"
 COMMAND_RANK_NAME = "command_failures_then_recency"
 RECENCY_RANK_NAME = "recency"
+TASK_PLANE_RANK_NAME = "task_plane_state_then_urgency_recency"
+TASK_PLANE_WEIGHTS = {
+    "claim": 60,
+    "posture": 55,
+    "ready": 50,
+    "review": 45,
+    "completed": 30,
+    "oops": 20,
+}
 
 
 @dataclass(frozen=True)
@@ -159,6 +171,12 @@ def file_touch_rank_key(timestamp: str, touch_count: int) -> RankKey:
 
 def command_rank_key(timestamp: str, error_count: int) -> RankKey:
     return (error_count, timestamp)
+
+
+def task_plane_rank_key(
+    kind: str, urgency: float = 0.0, timestamp: str = ""
+) -> RankKey:
+    return (TASK_PLANE_WEIGHTS[kind], urgency, timestamp)
 
 
 def ask_candidate(
@@ -271,6 +289,191 @@ def collect_compaction_intent_candidates(
     ]
 
 
+def collect_task_plane_candidates() -> list[RehydrationCandidate]:
+    if repo_root_from_cwd() is None:
+        return []
+    try:
+        from spice.tasks import alloc, identity, tw
+
+        actor = tw.current_actor()
+        active = alloc.visible_active_rows(actor)
+        ready = [
+            row
+            for row in alloc.visible_ready_rows(actor)
+            if _task_field(row, "phase") != "review"
+        ]
+        review = [
+            row
+            for row in alloc.visible_rows(actor, ["status:pending", "phase:review"])
+            if not alloc.is_hidden(row) and not str(row.get("claim_by") or "")
+        ]
+        blocked = [
+            row
+            for row in alloc.visible_rows(actor, ["status:pending", "+BLOCKED"])
+            if not alloc.is_hidden(row)
+        ]
+        completed = [
+            row
+            for row in alloc.visible_rows(actor, ["status:completed"])
+            if not alloc.is_hidden(row)
+        ]
+        oops = alloc.oops_rows()
+    except (OSError, RuntimeError, SpiceError, SystemExit):
+        return []
+
+    candidates: list[RehydrationCandidate] = []
+    own_active = [row for row in active if str(row.get("claim_by") or "") == actor]
+    if own_active:
+        claimed = max(own_active, key=_task_row_timestamp)
+        candidates.append(
+            _task_claim_candidate(claimed, identity.render_handle(claimed))
+        )
+    if active or ready or review or blocked or oops:
+        candidates.append(
+            _task_posture_candidate(
+                active=len(active),
+                ready=len(ready),
+                review=len(review),
+                blocked=len(blocked),
+                oops=len(oops),
+            )
+        )
+    candidates.extend(
+        _task_queue_candidate("ready", row, identity.render_handle(row))
+        for row in ready
+    )
+    candidates.extend(
+        _task_queue_candidate("review", row, identity.render_handle(row))
+        for row in review
+    )
+    candidates.extend(
+        _task_completed_candidate(row, identity.render_handle(row)) for row in completed
+    )
+    if oops:
+        top = max(oops, key=_task_urgency)
+        candidates.append(
+            _task_oops_candidate(top, identity.render_handle(top), len(oops))
+        )
+    return candidates
+
+
+def _task_claim_candidate(row: dict[str, object], handle: str) -> RehydrationCandidate:
+    timestamp = _task_row_timestamp(row)
+    return RehydrationCandidate(
+        kind="task_plane",
+        timestamp=timestamp,
+        text=(
+            f"claim {handle} phase={_task_field(row, 'phase') or '-'} "
+            f"project={_task_field(row, 'project') or '-'} "
+            f"acceptance={clip(_task_field(row, 'acceptance'), TASK_PLANE_PREVIEW_CHARS)}"
+        ),
+        rank_name=TASK_PLANE_RANK_NAME,
+        rank_key=task_plane_rank_key("claim", _task_urgency(row), timestamp),
+        label=handle,
+    )
+
+
+def _task_posture_candidate(
+    *, active: int, ready: int, review: int, blocked: int, oops: int
+) -> RehydrationCandidate:
+    return RehydrationCandidate(
+        kind="task_plane",
+        timestamp=tw_nowish_rank_timestamp(),
+        text=(
+            f"posture active={active} ready={ready} review={review} "
+            f"blocked={blocked} oops={oops}"
+        ),
+        rank_name=TASK_PLANE_RANK_NAME,
+        rank_key=task_plane_rank_key("posture"),
+        label="posture",
+    )
+
+
+def _task_queue_candidate(
+    state: Literal["ready", "review"], row: dict[str, object], handle: str
+) -> RehydrationCandidate:
+    timestamp = _task_row_timestamp(row)
+    urgency = _task_urgency(row)
+    return RehydrationCandidate(
+        kind="task_plane",
+        timestamp=timestamp,
+        text=(
+            f"{state} {handle} urgency={urgency:.2f} "
+            f"{clip(_task_field(row, 'description'), TASK_PLANE_PREVIEW_CHARS)}"
+        ),
+        rank_name=TASK_PLANE_RANK_NAME,
+        rank_key=task_plane_rank_key(state, urgency, timestamp),
+        label=handle,
+    )
+
+
+def _task_completed_candidate(
+    row: dict[str, object], handle: str
+) -> RehydrationCandidate:
+    timestamp = _task_row_timestamp(row)
+    return RehydrationCandidate(
+        kind="task_plane",
+        timestamp=timestamp,
+        text=(
+            f"completed {handle} validation="
+            f"{clip(_task_field(row, 'validation'), TASK_PLANE_PREVIEW_CHARS)}"
+        ),
+        rank_name=TASK_PLANE_RANK_NAME,
+        rank_key=task_plane_rank_key("completed", timestamp=timestamp),
+        label=handle,
+    )
+
+
+def _task_oops_candidate(
+    row: dict[str, object], handle: str, total: int
+) -> RehydrationCandidate:
+    timestamp = _task_row_timestamp(row)
+    overflow = f" total={total}" if total > 1 else ""
+    return RehydrationCandidate(
+        kind="task_plane",
+        timestamp=timestamp,
+        text=(
+            f"oops {handle}{overflow} "
+            f"{clip(_task_field(row, 'description'), TASK_PLANE_PREVIEW_CHARS)}"
+        ),
+        rank_name=TASK_PLANE_RANK_NAME,
+        rank_key=task_plane_rank_key("oops", _task_urgency(row), timestamp),
+        label=handle,
+    )
+
+
+def _task_field(row: dict[str, object], key: str) -> str:
+    value = row.get(key)
+    return "" if value is None else str(value)
+
+
+def _task_row_timestamp(row: dict[str, object]) -> str:
+    for key in ("claim_at", "end", "modified", "entry", "incepted"):
+        value = _task_field(row, key)
+        if value:
+            return value
+    return ""
+
+
+def tw_nowish_rank_timestamp() -> str:
+    try:
+        from spice.tasks import tw
+
+        return tw.now_iso()
+    except (OSError, RuntimeError, SpiceError, SystemExit):
+        return ""
+
+
+def _task_urgency(row: dict[str, object]) -> float:
+    value = row.get("urgency")
+    if not isinstance(value, int | float | str):
+        return 0.0
+    try:
+        return float(value or 0.0)
+    except ValueError:
+        return 0.0
+
+
 def render_briefing(
     files: list[Path],
     *,
@@ -302,6 +505,7 @@ def render_briefing(
     compaction_intents = collect_compaction_intent_candidates(compactions)
     command_candidates = collect_command_candidates(turns)
     file_candidates = collect_file_touch_candidates(turns)
+    task_plane = collect_task_plane_candidates()
     lines: list[str] = []
     lines.extend(_briefing_header_lines(files, turns))
     filter_lines = _active_filter_lines(
@@ -312,6 +516,7 @@ def render_briefing(
         lines.extend(filter_lines)
     lines.extend(_guidance_lines(meter))
     lines.extend(_learning_lines())
+    lines.extend(_task_plane_lines(task_plane))
     lines.extend(_asks_lines(asks))
     lines.extend(_finals_lines(finals))
     lines.extend(_recovery_lines(compaction_intents))
@@ -389,6 +594,21 @@ def _learning_record_line(record: session_learnings.LearningRecord) -> str:
         f"  - {clip(record.statement, COMMIT_PREVIEW_CHARS)} "
         f"(confirmed={record.confirmation_count}, source={source})"
     )
+
+
+def _task_plane_lines(candidates: list[RehydrationCandidate]) -> list[str]:
+    ranked = sort_rehydration_candidates(candidates)
+    if not ranked:
+        return []
+    shown = ranked[:TASK_PLANE_ROW_LIMIT]
+    overflow = len(ranked) - len(shown)
+    lines = ["Task Plane"]
+    lines.extend(
+        f"  {clip(candidate.text, TASK_PLANE_PREVIEW_CHARS)}" for candidate in shown
+    )
+    if overflow:
+        lines.append(f"  +{overflow} more task-plane rows")
+    return lines
 
 
 def _asks_lines(asks: list[RehydrationCandidate]) -> list[str]:

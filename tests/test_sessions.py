@@ -35,8 +35,10 @@ from spice.sessions.meter import (
 from spice.sessions import learnings, records
 from spice.sessions.util import first_text, normalize_timestamp
 from spice.errors import SpiceError
+from spice.tasks import alloc as task_alloc
 from spice.tasks import config as task_config
 from spice.tasks import create, identity as task_identity, ops
+from spice.tasks import tw as task_tw
 from spice.tasks.identity import (
     BASE,
     INCEPTED_RE,
@@ -606,6 +608,143 @@ def test_rehydration_recency_candidates_order_finals_commits_and_intents():
         (briefing_module.RECENCY_RANK_NAME, "newer intent"),
         (briefing_module.RECENCY_RANK_NAME, "older intent"),
     ]
+
+
+def test_task_plane_candidates_collect_lane_board_rows(tmp_path, monkeypatch):
+    actor = ACTOR_A
+    active = {
+        "handle": "ACTIVE-1",
+        "description": "Current implementation",
+        "project": "session.briefing",
+        "phase": "todo",
+        "claim_by": actor,
+        "claim_at": "2026-01-01T00:00:05.000Z",
+        "acceptance": "render claimed work",
+        "urgency": 1.0,
+    }
+    ready_high = {
+        "handle": "READY-2",
+        "description": "Higher ready item",
+        "phase": "todo",
+        "urgency": 12.5,
+        "entry": "2026-01-01T00:00:02.000Z",
+    }
+    ready_low = {
+        "handle": "READY-1",
+        "description": "Lower ready item",
+        "phase": "todo",
+        "urgency": 7.0,
+        "entry": "2026-01-01T00:00:03.000Z",
+    }
+    review = {
+        "handle": "REVIEW-1",
+        "description": "Review item",
+        "phase": "review",
+        "urgency": 9.0,
+        "entry": "2026-01-01T00:00:04.000Z",
+    }
+    completed = {
+        "handle": "DONE-1",
+        "validation": "validated current behavior",
+        "end": "2026-01-01T00:00:06.000Z",
+    }
+    oops = {
+        "handle": "OOPS-1",
+        "description": "Known tooling friction",
+        "urgency": 2.0,
+        "entry": "2026-01-01T00:00:01.000Z",
+    }
+
+    monkeypatch.setattr(briefing_module, "repo_root_from_cwd", lambda: tmp_path)
+    monkeypatch.setattr(task_tw, "current_actor", lambda: actor)
+    monkeypatch.setattr(task_identity, "render_handle", lambda row: row["handle"])
+    monkeypatch.setattr(task_alloc, "is_hidden", lambda _row: False)
+    monkeypatch.setattr(task_alloc, "visible_active_rows", lambda _actor: [active])
+    monkeypatch.setattr(
+        task_alloc,
+        "visible_ready_rows",
+        lambda _actor: [ready_low, ready_high, review],
+    )
+
+    def visible_rows(_actor, filters):
+        if filters == ["status:pending", "phase:review"]:
+            return [review]
+        if filters == ["status:pending", "+BLOCKED"]:
+            return [{"handle": "BLOCKED-1"}]
+        if filters == ["status:completed"]:
+            return [completed]
+        return []
+
+    monkeypatch.setattr(task_alloc, "visible_rows", visible_rows)
+    monkeypatch.setattr(task_alloc, "oops_rows", lambda: [oops])
+
+    ordered = briefing_module.sort_rehydration_candidates(
+        briefing_module.collect_task_plane_candidates()
+    )
+
+    assert [(candidate.rank_name, candidate.text) for candidate in ordered] == [
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "claim ACTIVE-1 phase=todo project=session.briefing "
+            "acceptance=render claimed work",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "posture active=1 ready=2 review=1 blocked=1 oops=1",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "ready READY-2 urgency=12.50 Higher ready item",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "ready READY-1 urgency=7.00 Lower ready item",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "review REVIEW-1 urgency=9.00 Review item",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "completed DONE-1 validation=validated current behavior",
+        ),
+        (
+            briefing_module.TASK_PLANE_RANK_NAME,
+            "oops OOPS-1 Known tooling friction",
+        ),
+    ]
+
+
+def test_briefing_renders_task_plane_section_with_explicit_overflow(monkeypatch):
+    candidates = [
+        briefing_module.RehydrationCandidate(
+            kind="task_plane",
+            timestamp=f"2026-01-01T00:00:{index:02d}.000Z",
+            text=f"completed TASK-{index} validation=ok",
+            rank_name=briefing_module.TASK_PLANE_RANK_NAME,
+            rank_key=briefing_module.task_plane_rank_key(
+                "completed", timestamp=f"2026-01-01T00:00:{index:02d}.000Z"
+            ),
+        )
+        for index in range(briefing_module.TASK_PLANE_ROW_LIMIT + 2)
+    ]
+    monkeypatch.setattr(
+        briefing_module, "collect_task_plane_candidates", lambda: candidates
+    )
+
+    briefing = render_briefing([], max_lines=200, max_bytes=20000)
+
+    expected = ["Task Plane"]
+    expected.extend(
+        f"  completed TASK-{index} validation=ok"
+        for index in range(
+            briefing_module.TASK_PLANE_ROW_LIMIT + 1,
+            1,
+            -1,
+        )
+    )
+    expected.append("  +2 more task-plane rows")
+    assert _section_lines(briefing, "Task Plane") == expected
 
 
 def test_briefing_learnings_use_active_stem_top_five(session_task_repo):
