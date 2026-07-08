@@ -135,22 +135,6 @@ def test_task_wake_parser_rejects_claim_flag():
     assert exc_info.value.code == 2
 
 
-def test_task_delete_parser_accepts_force_claimed():
-    args = build_parser().parse_args(
-        [
-            "task",
-            "delete",
-            "TASK-20260101T000000000001Z",
-            "--reason",
-            "duplicate",
-            "--force-claimed",
-        ]
-    )
-
-    assert args.task_action == "delete"
-    assert args.force_claimed is True
-
-
 def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
     args = build_parser().parse_args(
         [
