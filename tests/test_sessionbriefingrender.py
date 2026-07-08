@@ -4,17 +4,21 @@ import json
 import time
 
 from spice.mail.ackstate import (
+    ACK_DISPOSITION_ACKED,
     ACK_DISPOSITION_REFUSED,
     AckStateWrite,
     record_acked_inbox_items,
 )
-from spice.mail.inbox import compose_inbox_text
+from spice.mail.inbox import compose_inbox_text, write_inbox_item
 from spice.sessions import briefing as briefing_module
 from spice.sessions.briefing import render_briefing, render_sweep
 from tests.test_sessionbriefing import (
     _init_git_repo,
+    _record_ack_state_ask,
     _record_ack_state_asks,
+    _section_headers,
     _section_lines,
+    _write_filter_transcript,
     _write_horizon_transcript,
 )
 
@@ -61,15 +65,23 @@ def test_briefing_deduplicates_identical_asks_and_finals(tmp_path, monkeypatch):
     transcript.write_text(
         "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
     )
+    _record_ack_state_asks(
+        repo,
+        [
+            ("2026-01-01T00:00:00Z", "repeat request"),
+            ("2026-01-01T00:05:00Z", "repeat request"),
+        ],
+    )
     monkeypatch.chdir(repo)
 
     briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
 
     assert briefing.count("repeat request") == 1
     assert briefing.count("repeat final") == 1
-    assert _section_lines(briefing, "Latest Ask") == [
-        "Latest Ask",
-        "  human 2026-01-01T00:05:00.000Z repeat_count=2 repeat request",
+    assert _section_lines(briefing, "Steering") == [
+        "Steering",
+        "  2026-01-01T00:05:00.000Z disposition=acked "
+        "key=20260101T000500000000Z repeat_count=2 text=repeat request",
     ]
     assert _section_lines(briefing, "Latest Final") == [
         "Latest Final",
@@ -108,7 +120,14 @@ def test_briefing_skill_mantra_leaves_latest_ask_empty(tmp_path, monkeypatch):
 
     briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
 
-    assert _section_lines(briefing, "Latest Ask") == ["Latest Ask", "  -"]
+    assert _section_headers(briefing) == [
+        "Briefing",
+        "Horizon",
+        "Guidance",
+        "Activity",
+        "Git",
+        "Inbox",
+    ]
 
 
 def test_briefing_renders_only_recent_consumed_ack_state_trailers(
@@ -167,10 +186,423 @@ def test_briefing_renders_only_recent_consumed_ack_state_trailers(
     assert len(inbox) == 5
     assert inbox[4].startswith("  refused_inbox key=20260708T054409667615Z age=")
     assert inbox[4].endswith(" text=recent refusal")
-    assert _section_lines(briefing, "Latest Ask") == [
-        "Latest Ask",
-        "  refused 2026-07-08T05:44:09.667Z key=20260708T054409667615Z recent refusal",
+    assert _section_lines(briefing, "Steering") == [
+        "Steering",
+        "  2026-07-08T05:44:09.667Z disposition=refused "
+        "key=20260708T054409667615Z text=recent refusal",
     ]
+
+
+def test_briefing_renders_steering_before_live_task_state(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    key = "20260101T000001000000Z"
+    record_acked_inbox_items(
+        repo,
+        [
+            AckStateWrite(
+                key=key,
+                inbox_name=f"{key}.txt",
+                text=compose_inbox_text(
+                    body="operator steering", priority=None, stop=False
+                ),
+                ack_content="agent acknowledged",
+                disposition=ACK_DISPOSITION_ACKED,
+            )
+        ],
+        now=0.0,
+    )
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(
+        briefing_module,
+        "collect_task_plane_candidates",
+        lambda: [
+            briefing_module.RehydrationCandidate(
+                kind="task_plane",
+                timestamp="2026-01-01T00:00:02.000Z",
+                text="claim TASK-1 phase=todo project=session.render acceptance=accept",
+                rank_name="task_plane",
+                rank_key=(1,),
+            )
+        ],
+    )
+
+    briefing = render_briefing(
+        [],
+        end="2026-01-01T00:10:00.000Z",
+        max_lines=200,
+        max_bytes=20000,
+    )
+    lines = briefing.splitlines()
+
+    assert _section_lines(briefing, "Steering") == [
+        "Steering",
+        "  2026-01-01T00:00:01.000Z disposition=acked "
+        "key=20260101T000001000000Z text=operator steering "
+        "response=agent acknowledged",
+    ]
+    assert lines.index("Steering") < lines.index("Task Plane")
+    assert lines.index("Task Plane") < lines.index("Guidance")
+    assert lines.index("Guidance") < lines.index("Activity")
+    assert lines.index("Git") < lines.index("Inbox")
+
+
+def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "filtered.jsonl"
+    _write_filter_transcript(transcript)
+    _record_ack_state_ask(
+        repo,
+        "20260101T000005000000Z",
+        "needle request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:05Z",
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing(
+        [transcript],
+        contains="needle",
+        turn_ids=["turn-b"],
+        tools=["apply_patch"],
+        max_lines=80,
+        max_bytes=10_000,
+    )
+
+    assert "Filters" in briefing
+    assert "contains=needle" in briefing
+    assert "turn_ids=turn-b" in briefing
+    assert "tools=apply_patch" in briefing
+    assert _section_lines(briefing, "Steering") == [
+        "Steering",
+        "  2026-01-01T00:00:05.000Z disposition=acked "
+        "key=20260101T000005000000Z text=needle request",
+    ]
+    assert "Working Set\n  spice/sessions/briefing.py touches=1" in briefing
+    assert "Git\n  branch=main upstream=- ahead=- behind=-\n  dirty=clean" in briefing
+
+
+def test_briefing_payload_renders_filtered_briefing(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "filtered.jsonl"
+    _write_filter_transcript(transcript)
+    _record_ack_state_ask(
+        repo,
+        "20260101T000005000000Z",
+        "needle request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:05Z",
+    )
+    monkeypatch.chdir(repo)
+
+    payload = briefing_module.build_briefing_payload(
+        [transcript],
+        contains="needle",
+        turn_ids=["turn-b"],
+        tools=["apply_patch"],
+    )
+    rendered = briefing_module.render_briefing_payload(
+        payload,
+        max_lines=80,
+        max_bytes=10_000,
+    )
+
+    assert payload.filters.turn_ids == ("turn-b",)
+    assert payload.filters.tools == ("apply_patch",)
+    assert _section_lines(rendered, "Steering") == [
+        "Steering",
+        "  2026-01-01T00:00:05.000Z disposition=acked "
+        "key=20260101T000005000000Z text=needle request",
+    ]
+    assert rendered == render_briefing(
+        [transcript],
+        contains="needle",
+        turn_ids=["turn-b"],
+        tools=["apply_patch"],
+        max_lines=80,
+        max_bytes=10_000,
+    )
+
+
+def test_sweep_payload_renders_precomputed_windows(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "sweep.jsonl"
+    transcript.write_text(
+        "".join(
+            f"{json.dumps(event)}\n"
+            for event in [
+                {
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-before"},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:01Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"text": "before compaction"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:02Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "phase": "final_answer",
+                        "content": [{"text": "before final"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:04Z",
+                    "type": "compacted",
+                    "payload": {},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:05Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete"},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:06Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-after"},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:07Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"text": "after compaction"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:08Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "phase": "final_answer",
+                        "content": [{"text": "after final"}],
+                    },
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _record_ack_state_ask(
+        repo,
+        "20260101T000006000000Z",
+        "after compaction",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:06Z",
+    )
+    monkeypatch.chdir(repo)
+
+    payload = briefing_module.build_briefing_payload(
+        [transcript], start="2026-01-01T00:00:04.000Z", sweep_count=1
+    )
+    rendered = briefing_module.render_sweep_payload(payload)
+
+    assert [window.label for window in payload.sweep_windows] == [
+        "2026-01-01T00:00:04.000Z",
+    ]
+    assert [
+        (candidate.timestamp, candidate.text)
+        for candidate in payload.sweep_windows[0].asks
+    ] == [("2026-01-01T00:00:06.000Z", "after compaction")]
+    assert rendered == render_sweep(
+        [transcript], count=1, start="2026-01-01T00:00:04.000Z"
+    )
+
+
+def test_briefing_ranks_ack_db_asks_by_recency_then_disposition(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "human.jsonl"
+    transcript.write_text(
+        "".join(
+            f"{json.dumps(event)}\n"
+            for event in [
+                {
+                    "timestamp": "2026-01-01T00:00:04Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-human"},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:04Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"text": "human request"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:04Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete"},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    pending_key = "20260101T000001000000Z"
+    pending = write_inbox_item(
+        repo,
+        f"{pending_key}.txt",
+        compose_inbox_text(body="pending request", priority=None, stop=False),
+    )
+    assert pending.name == f"{pending_key}.txt"
+    _record_ack_state_ask(
+        repo,
+        "20260101T000002000000Z",
+        "refused request",
+        ACK_DISPOSITION_REFUSED,
+        "2026-01-01T00:00:02Z",
+    )
+    _record_ack_state_ask(
+        repo,
+        "20260101T000003000000Z",
+        "acked request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:03Z",
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+
+    assert _section_lines(briefing, "Steering") == [
+        "Steering",
+        "  2026-01-01T00:00:03.000Z disposition=acked "
+        "key=20260101T000003000000Z text=acked request",
+        "  2026-01-01T00:00:02.000Z disposition=refused "
+        "key=20260101T000002000000Z text=refused request",
+        "  2026-01-01T00:00:01.000Z disposition=pending "
+        "key=20260101T000001000000Z text=pending request",
+    ]
+
+
+def test_briefing_ack_asks_include_response_and_scope_by_thread(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    current_actor = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    other_actor = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    transcript = tmp_path / f"{current_actor}.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    _record_scoped_ack_state_ask(
+        repo,
+        "20260101T000001000000Z",
+        "current lane request",
+        ACK_DISPOSITION_ACKED,
+        ack_content="captured current lane request",
+        lineage={"thread_id": current_actor},
+    )
+    _record_scoped_ack_state_ask(
+        repo,
+        "20260101T000002000000Z",
+        "other lane request",
+        ACK_DISPOSITION_ACKED,
+        ack_content="captured other lane request",
+        lineage={"thread_id": other_actor},
+    )
+    _record_scoped_ack_state_ask(
+        repo,
+        "20260101T000003000000Z",
+        "legacy unscoped request",
+        ACK_DISPOSITION_ACKED,
+        ack_content="captured legacy request",
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing(
+        [transcript],
+        end="2026-01-01T00:04:00.000Z",
+        max_lines=200,
+        max_bytes=20000,
+    )
+
+    assert _section_lines(briefing, "Steering") == [
+        "Steering",
+        "  2026-01-01T00:00:01.000Z disposition=acked "
+        "key=20260101T000001000000Z text=current lane request "
+        "response=captured current lane request",
+    ]
+
+
+def test_sweep_renders_ack_db_asks_inside_compaction_windows(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "sweep.jsonl"
+    transcript.write_text(
+        "".join(
+            f"{json.dumps(event)}\n"
+            for event in [
+                {
+                    "timestamp": "2025-12-31T20:00:00Z",
+                    "type": "compacted",
+                    "payload": {},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-a"},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:10Z",
+                    "type": "compacted",
+                    "payload": {},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _record_ack_state_ask(
+        repo,
+        "20260101T000005000000Z",
+        "pre-compaction request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:05Z",
+    )
+    _record_ack_state_ask(
+        repo,
+        "20260101T000015000000Z",
+        "post-compaction request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:15Z",
+    )
+    monkeypatch.chdir(repo)
+
+    sweep = render_sweep([transcript], count=1)
+
+    assert (
+        "  ask acked 2026-01-01T00:00:15.000Z key=20260101T000015000000Z post-compaction request"
+        in sweep
+    )
+
+
+def _record_scoped_ack_state_ask(
+    repo,
+    key: str,
+    body: str,
+    disposition: str,
+    *,
+    ack_content: str = "",
+    lineage: dict | None = None,
+) -> None:
+    record_acked_inbox_items(
+        repo,
+        [
+            AckStateWrite(
+                key=key,
+                inbox_name=f"{key}.txt",
+                text=compose_inbox_text(body=body, priority=None, stop=False),
+                lineage=lineage,
+                ack_content=ack_content,
+                disposition=disposition,
+            )
+        ],
+        now=0.0,
+    )
 
 
 def test_briefing_renders_recent_asks_and_finals_inside_recency_floor(
@@ -191,9 +623,14 @@ def test_briefing_renders_recent_asks_and_finals_inside_recency_floor(
     briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
 
     assert "files=recency.jsonl turns=1" in briefing
-    assert _section_lines(briefing, "Latest Ask") == [
-        "Latest Ask",
-        "  human 2026-01-01T05:00:00.000Z recent request",
+    assert _section_headers(briefing) == [
+        "Briefing",
+        "Horizon",
+        "Guidance",
+        "Latest Final",
+        "Activity",
+        "Git",
+        "Inbox",
     ]
     assert _section_lines(briefing, "Latest Final") == [
         "Latest Final",
@@ -228,10 +665,14 @@ def test_briefing_default_horizon_is_count_bound(tmp_path, monkeypatch):
     assert (
         "horizon_basis=compaction_count start=2026-01-01T16:00:00.000Z compactions=3/3"
     ) in briefing
-    assert _section_lines(briefing, "Latest Ask") == [
-        "Latest Ask",
-        "  acked 2026-01-01T18:30:00.000Z "
-        "key=20260101T183000000000Z inside current count window",
+    assert _section_lines(briefing, "Steering") == [
+        "Steering",
+        "  2026-01-01T18:30:00.000Z disposition=acked "
+        "key=20260101T183000000000Z text=inside current count window",
+        "  2026-01-01T17:30:00.000Z disposition=acked "
+        "key=20260101T173000000000Z text=inside second count window",
+        "  2026-01-01T16:30:00.000Z disposition=acked "
+        "key=20260101T163000000000Z text=inside first count window",
     ]
 
 
@@ -261,10 +702,10 @@ def test_briefing_default_horizon_starts_at_oldest_selected_window(
     assert (
         "horizon_basis=compaction_count start=2026-01-01T10:00:00.000Z compactions=2/3"
     ) in briefing
-    assert _section_lines(briefing, "Latest Ask") == [
-        "Latest Ask",
-        "  acked 2026-01-01T10:30:00.000Z "
-        "key=20260101T103000000000Z young current request",
+    assert _section_lines(briefing, "Steering") == [
+        "Steering",
+        "  2026-01-01T10:30:00.000Z disposition=acked "
+        "key=20260101T103000000000Z text=young current request",
     ]
 
 
@@ -346,9 +787,14 @@ def test_briefing_parses_only_the_selected_compaction_tail(tmp_path, monkeypatch
     assert (
         "horizon_basis=compaction_count start=2026-01-01T02:00:00.000Z compactions=3/3"
     ) in briefing
-    assert _section_lines(briefing, "Latest Ask") == [
-        "Latest Ask",
-        "  human 2026-01-01T04:10:00.000Z tail request three",
+    assert _section_headers(briefing) == [
+        "Briefing",
+        "Horizon",
+        "Guidance",
+        "Recovery",
+        "Activity",
+        "Git",
+        "Inbox",
     ]
 
 
@@ -477,6 +923,10 @@ def test_sweep_deduplicates_and_interleaves_window_rows(tmp_path, monkeypatch):
     transcript.write_text(
         "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
     )
+    _record_ack_state_asks(
+        repo,
+        [(timestamp, ask) for timestamp, _turn_id, ask, _final in rows],
+    )
     monkeypatch.chdir(repo)
 
     sweep = render_sweep([transcript], count=1)
@@ -485,9 +935,11 @@ def test_sweep_deduplicates_and_interleaves_window_rows(tmp_path, monkeypatch):
 
     assert sum("repeat request" in line for line in row_lines) == 1
     assert row_lines == [
-        "  ask human 2026-01-01T00:03:00.000Z distinct request",
+        "  ask acked 2026-01-01T00:03:00.000Z "
+        "key=20260101T000300000000Z distinct request",
         "  final 2026-01-01T00:03:00.000Z third final",
-        "  ask human 2026-01-01T00:02:00.000Z repeat_count=2 repeat request",
+        "  ask acked 2026-01-01T00:02:00.000Z "
+        "key=20260101T000200000000Z repeat_count=2 repeat request",
     ]
 
 

@@ -300,7 +300,7 @@ def test_briefing_recovery_leads_when_latest_event_is_compaction(tmp_path, monke
     briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
     lines = briefing.splitlines()
 
-    assert lines.index("Recovery") < lines.index("Guidance")
+    assert lines.index("Guidance") < lines.index("Recovery")
     assert _section_lines(briefing, "Recovery") == [
         "Recovery",
         "  latest_compaction=2026-01-01T00:00:10.000Z",
@@ -970,6 +970,10 @@ def _section_lines(output: str, header: str) -> list[str]:
             break
         section.append(line)
     return section
+
+
+def _section_headers(output: str) -> list[str]:
+    return [line for line in output.splitlines() if line and not line.startswith(" ")]
 
 
 def _init_git_repo(path) -> None:
