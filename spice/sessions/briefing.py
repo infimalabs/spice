@@ -14,7 +14,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypedDict
+from typing import Callable, Literal, TypeAlias, TypedDict
 
 from spice.errors import SpiceError
 from spice.mail.inbox import (
@@ -63,6 +63,43 @@ DEFAULT_BRIEFING_MAX_LINES = 120
 DEFAULT_BRIEFING_MAX_BYTES = 20_000
 DIRTY_PRESSURE_PREVIEW_LIMIT = 6
 
+RehydrationCandidateKind: TypeAlias = Literal[
+    "ask",
+    "final",
+    "commit",
+    "command",
+    "file",
+    "compaction_intent",
+]
+RankKey: TypeAlias = tuple[int | str, ...]
+
+ASK_DISPOSITION_RANK: dict[str, int] = {
+    "pending": 30,
+    "open": 30,
+    "refused": 20,
+    "nack": 20,
+    "acked": 10,
+    "acknowledged": 10,
+    "responded": 10,
+    "human": 10,
+    "": 0,
+}
+ASK_RANK_NAME = "ask_disposition_then_recency"
+FILE_RANK_NAME = "file_last_touch_then_hotspot"
+COMMAND_RANK_NAME = "command_failures_then_recency"
+RECENCY_RANK_NAME = "recency"
+
+
+@dataclass(frozen=True)
+class RehydrationCandidate:
+    kind: RehydrationCandidateKind
+    timestamp: str
+    text: str
+    rank_name: str
+    rank_key: RankKey
+    label: str = ""
+    count: int = 0
+
 
 @dataclass(frozen=True)
 class DirtyComplexityRegression:
@@ -102,14 +139,136 @@ def clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
     return flat[: limit - 1].rstrip() + "…"
 
 
-def operator_asks(turns: list[TurnRecord]) -> list[tuple[str, str]]:
-    """(start_ts, text) for every non-scaffolding user message, oldest first."""
-    asks: list[tuple[str, str]] = []
+def sort_rehydration_candidates(
+    candidates: list[RehydrationCandidate],
+) -> list[RehydrationCandidate]:
+    return sorted(candidates, key=lambda candidate: candidate.rank_key, reverse=True)
+
+
+def ask_rank_key(timestamp: str, disposition: str) -> RankKey:
+    return (ASK_DISPOSITION_RANK.get(disposition.lower(), 0), timestamp)
+
+
+def recency_rank_key(timestamp: str) -> RankKey:
+    return (timestamp,)
+
+
+def file_touch_rank_key(timestamp: str, touch_count: int) -> RankKey:
+    return (timestamp, touch_count)
+
+
+def command_rank_key(timestamp: str, error_count: int) -> RankKey:
+    return (error_count, timestamp)
+
+
+def ask_candidate(
+    timestamp: str, text: str, *, disposition: str = "human"
+) -> RehydrationCandidate:
+    return RehydrationCandidate(
+        kind="ask",
+        timestamp=timestamp,
+        text=text,
+        rank_name=ASK_RANK_NAME,
+        rank_key=ask_rank_key(timestamp, disposition),
+        label=disposition,
+    )
+
+
+def collect_ask_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
+    candidates: list[RehydrationCandidate] = []
     for turn in turns:
         for text in turn.user_messages:
             if not is_scaffolding_text(text):
-                asks.append((turn.start_ts, text))
-    return asks
+                candidates.append(ask_candidate(turn.start_ts, text))
+    return candidates
+
+
+def collect_final_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
+    return [
+        RehydrationCandidate(
+            kind="final",
+            timestamp=turn.start_ts,
+            text=text,
+            rank_name=RECENCY_RANK_NAME,
+            rank_key=recency_rank_key(turn.start_ts),
+        )
+        for turn in turns
+        for text in turn.final_answers
+    ]
+
+
+def collect_commit_candidates(
+    commits: list[CommitRecord],
+) -> list[RehydrationCandidate]:
+    return [
+        RehydrationCandidate(
+            kind="commit",
+            timestamp=record.start_ts,
+            text=record.line,
+            rank_name=RECENCY_RANK_NAME,
+            rank_key=recency_rank_key(record.start_ts),
+            label=record.sha,
+        )
+        for record in commits
+    ]
+
+
+def collect_command_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
+    return [
+        RehydrationCandidate(
+            kind="command",
+            timestamp=turn.start_ts,
+            text=f"commands={turn.command_count} errors={turn.error_count}",
+            rank_name=COMMAND_RANK_NAME,
+            rank_key=command_rank_key(turn.start_ts, turn.error_count),
+            label=turn.turn_id or turn.source_file,
+            count=turn.command_count,
+        )
+        for turn in turns
+        if turn.command_count
+    ]
+
+
+def collect_file_touch_candidates(
+    turns: list[TurnRecord],
+) -> list[RehydrationCandidate]:
+    counts: Counter[str] = Counter()
+    last_touch: dict[str, str] = {}
+    for turn in turns:
+        timestamp = turn.last_activity_ts or turn.end_ts or turn.start_ts
+        for path, count in turn.touched_files.items():
+            counts[path] += count
+            last_touch[path] = max(last_touch.get(path, ""), timestamp)
+    return [
+        RehydrationCandidate(
+            kind="file",
+            timestamp=last_touch[path],
+            text=path,
+            rank_name=FILE_RANK_NAME,
+            rank_key=file_touch_rank_key(last_touch[path], counts[path]),
+            label=path,
+            count=counts[path],
+        )
+        for path in counts
+    ]
+
+
+def collect_compaction_intent_candidates(
+    compactions: list[CompactionRecord],
+) -> list[RehydrationCandidate]:
+    return [
+        RehydrationCandidate(
+            kind="compaction_intent",
+            timestamp=record.ts,
+            text=record.first_user_after_text
+            or record.last_assistant_before_text
+            or "",
+            rank_name=RECENCY_RANK_NAME,
+            rank_key=recency_rank_key(record.ts),
+            label=clip(record.last_assistant_before_text),
+        )
+        for record in compactions
+    ]
 
 
 def render_briefing(
@@ -137,8 +296,12 @@ def render_briefing(
     )
     meter = collect_context_meter(files)
     commits = collect_commit_records(turns)
-    asks = operator_asks(turns)
-    finals = [(turn.start_ts, text) for turn in turns for text in turn.final_answers]
+    asks = collect_ask_candidates(turns)
+    finals = collect_final_candidates(turns)
+    commit_candidates = collect_commit_candidates(commits)
+    compaction_intents = collect_compaction_intent_candidates(compactions)
+    command_candidates = collect_command_candidates(turns)
+    file_candidates = collect_file_touch_candidates(turns)
     lines: list[str] = []
     lines.extend(_briefing_header_lines(files, turns))
     filter_lines = _active_filter_lines(
@@ -151,8 +314,10 @@ def render_briefing(
     lines.extend(_learning_lines())
     lines.extend(_asks_lines(asks))
     lines.extend(_finals_lines(finals))
-    lines.extend(_recovery_lines(compactions))
-    lines.extend(_activity_lines(turns, commits))
+    lines.extend(_recovery_lines(compaction_intents))
+    lines.extend(
+        _activity_lines(turns, command_candidates, file_candidates, commit_candidates)
+    )
     lines.extend(_git_posture_lines())
     lines.extend(_inbox_lines())
     return apply_output_budget(
@@ -226,56 +391,66 @@ def _learning_record_line(record: session_learnings.LearningRecord) -> str:
     )
 
 
-def _asks_lines(asks: list[tuple[str, str]]) -> list[str]:
-    lines = ["Latest Ask", f"  {clip(asks[-1][1]) if asks else '-'}"]
-    if len(asks) > 1:
+def _asks_lines(asks: list[RehydrationCandidate]) -> list[str]:
+    ranked = sort_rehydration_candidates(asks)
+    lines = ["Latest Ask", f"  {clip(ranked[0].text) if ranked else '-'}"]
+    if len(ranked) > 1:
         lines.append("Recent Asks")
-        for ts, text in asks[-DEFAULT_RECENT_ASKS:-1]:
-            lines.append(f"  {ts} {clip(text)}")
+        for candidate in ranked[1 : DEFAULT_RECENT_ASKS + 1]:
+            lines.append(f"  {candidate.timestamp} {clip(candidate.text)}")
     return lines
 
 
-def _finals_lines(finals: list[tuple[str, str]]) -> list[str]:
-    lines = ["Latest Final", f"  {clip(finals[-1][1]) if finals else '-'}"]
-    if len(finals) > 1:
+def _finals_lines(finals: list[RehydrationCandidate]) -> list[str]:
+    ranked = sort_rehydration_candidates(finals)
+    lines = ["Latest Final", f"  {clip(ranked[0].text) if ranked else '-'}"]
+    if len(ranked) > 1:
         lines.append("Recent Finals")
-        for ts, text in finals[-DEFAULT_RECENT_FINALS - 1 : -1]:
-            lines.append(f"  {ts} {clip(text)}")
+        for candidate in ranked[1 : DEFAULT_RECENT_FINALS + 1]:
+            lines.append(f"  {candidate.timestamp} {clip(candidate.text)}")
     return lines
 
 
-def _recovery_lines(compactions: list[CompactionRecord]) -> list[str]:
-    if not compactions:
+def _recovery_lines(compactions: list[RehydrationCandidate]) -> list[str]:
+    ranked = sort_rehydration_candidates(compactions)
+    if not ranked:
         return []
-    latest = compactions[-1]
+    latest = ranked[0]
     return [
         "Recovery",
-        f"  latest_compaction={latest.ts}",
-        f"  assistant_before={clip(latest.last_assistant_before_text)}",
-        f"  user_after={clip(latest.first_user_after_text)}",
+        f"  latest_compaction={latest.timestamp}",
+        f"  assistant_before={latest.label}",
+        f"  user_after={clip(latest.text)}",
     ]
 
 
-def _activity_lines(turns: list[TurnRecord], commits: list[CommitRecord]) -> list[str]:
+def _activity_lines(
+    turns: list[TurnRecord],
+    command_candidates: list[RehydrationCandidate],
+    file_candidates: list[RehydrationCandidate],
+    commit_candidates: list[RehydrationCandidate],
+) -> list[str]:
     lines = [
         "Activity",
         "  commands={c} patches={p} errors={e} web_searches={w}".format(
-            c=sum(turn.command_count for turn in turns),
+            c=sum(candidate.count for candidate in command_candidates),
             p=sum(turn.patch_count for turn in turns),
             e=sum(turn.error_count for turn in turns),
             w=sum(turn.web_search_count for turn in turns),
         ),
     ]
-    working_set = active_file_order(turns)
+    working_set = sort_rehydration_candidates(file_candidates)
     if working_set:
         lines.append("Working Set")
-        for path, count in working_set[:WORKING_SET_LIMIT]:
-            lines.append(f"  {path} touches={count}")
-    if commits:
+        for candidate in working_set[:WORKING_SET_LIMIT]:
+            lines.append(f"  {candidate.label} touches={candidate.count}")
+    ranked_commits = sort_rehydration_candidates(commit_candidates)
+    if ranked_commits:
         lines.append("Recent Commits")
-        for record in commits[-RECENT_COMMITS_LIMIT:]:
+        for candidate in ranked_commits[:RECENT_COMMITS_LIMIT]:
             lines.append(
-                f"  {record.start_ts} {record.sha} {clip(record.line, COMMIT_PREVIEW_CHARS)}"
+                f"  {candidate.timestamp} {candidate.label} "
+                f"{clip(candidate.text, COMMIT_PREVIEW_CHARS)}"
             )
     return lines
 
@@ -286,15 +461,11 @@ def active_file_order(turns: list[TurnRecord]) -> list[tuple[str, int]]:
     Recency outranks raw frequency — the file an agent touched last is the
     file it was working on, however many times an older file was edited.
     """
-    counts: Counter[str] = Counter()
-    last_index: dict[str, int] = {}
-    for index, turn in enumerate(turns):
-        for path, count in turn.touched_files.items():
-            counts[path] += count
-            last_index[path] = index
     return [
-        (path, counts[path])
-        for path in sorted(last_index, key=lambda p: last_index[p], reverse=True)
+        (candidate.label, candidate.count)
+        for candidate in sort_rehydration_candidates(
+            collect_file_touch_candidates(turns)
+        )
     ]
 
 
@@ -1008,16 +1179,13 @@ def render_sweep(
         ]
         label = window_start or "session start"
         lines.append(f"Window {index} (from {label})")
-        asks = operator_asks(window_turns)
-        for ts, text in asks[-SWEEP_WINDOW_ASKS:]:
-            lines.append(f"  ask {ts} {clip(text)}")
-        finals = [
-            (turn.start_ts, text)
-            for turn in window_turns
-            for text in turn.final_answers
-        ]
+        asks = sort_rehydration_candidates(collect_ask_candidates(window_turns))
+        for candidate in asks[:SWEEP_WINDOW_ASKS]:
+            lines.append(f"  ask {candidate.timestamp} {clip(candidate.text)}")
+        finals = sort_rehydration_candidates(collect_final_candidates(window_turns))
         if finals:
-            lines.append(f"  final {finals[-1][0]} {clip(finals[-1][1])}")
+            latest = finals[0]
+            lines.append(f"  final {latest.timestamp} {clip(latest.text)}")
         if not asks and not finals:
             lines.append("  (no dialogue in this window)")
     return "\n".join(lines)
