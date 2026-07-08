@@ -119,9 +119,11 @@ def claim_meta(actor: str) -> list[str]:
 
 def _require_pending(row: dict[str, Any], action: str) -> None:
     status = str(row.get("status") or "")
-    if status in ("completed", "deleted"):
+    if status == "deleted":
+        raise SpiceError(_deleted_task_recovery_message(row, action))
+    if status == "completed":
         raise SpiceError(
-            f"cannot {action} a {status} task: {identity.render_handle(row)}"
+            f"cannot {action} a completed task: {identity.render_handle(row)}"
         )
 
 
@@ -133,6 +135,19 @@ def _deleted_task_recovery_message(row: dict[str, Any], action: str) -> str:
         "If deletion invalidated local work, discard local work or hand off the "
         "current state before continuing. If you already committed work, do not "
         "capture the deleted handle; capture into a new task with "
+        f"`spice task capture --project {project} --origin task:{handle} "
+        '--done --validation "..."`.'
+    )
+
+
+def _claimed_task_capture_recovery_message(row: dict[str, Any], owner: str) -> str:
+    handle = identity.render_handle(row)
+    project = str(row.get("project") or "").strip() or "<project>"
+    return (
+        f"cannot capture {handle}: task already claimed by {owner}. "
+        "If this is a duplicate or canonical task owned by another agent, discard "
+        "local work or hand off the current state before continuing. If you "
+        "already committed work, capture into a new task with "
         f"`spice task capture --project {project} --origin task:{handle} "
         '--done --validation "..."`.'
     )
@@ -626,7 +641,6 @@ def capture(
             "task capture folds an existing loose commit into a task"
         )
     actor = tw.current_actor()
-    _require_single_active_slot(actor, action="task capture")
     if handle is not None:
         if title or project or description or origin:
             raise SpiceError(
@@ -638,10 +652,10 @@ def capture(
         _require_manual_claim_allowed(row, actor)
         owner = str(row.get("claim_by") or "")
         if owner and owner != actor:
-            raise SpiceError(
-                f"task already claimed by {owner}; unclaim it before capturing"
-            )
+            raise SpiceError(_claimed_task_capture_recovery_message(row, owner))
+        _require_single_active_slot(actor, action="task capture", target=row)
     else:
+        _require_single_active_slot(actor, action="task capture")
         if not project:
             raise SpiceError(
                 "task capture requires --project when minting a new task; captured "
