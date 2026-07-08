@@ -424,12 +424,15 @@ def build_briefing_payload(
     file_tuple = tuple(files)
     all_turns = collect_turns(list(file_tuple))
     all_compactions = collect_compactions(list(file_tuple))
-    horizon = _resolve_horizon(
-        all_turns,
-        all_compactions,
-        count=sweep_count if sweep_count is not None else DEFAULT_HORIZON_COMPACTIONS,
-        end=end,
+    horizon_count = (
+        sweep_count if sweep_count is not None else DEFAULT_HORIZON_COMPACTIONS
     )
+    horizon = _resolve_horizon(all_turns, all_compactions, count=horizon_count, end=end)
+    sweep_falls_back = sweep_count is not None and not start and horizon.start is None
+    if sweep_falls_back:
+        horizon = _resolve_horizon(
+            all_turns, all_compactions, count=DEFAULT_HORIZON_COMPACTIONS, end=end
+        )
     effective_start = _effective_start(start, horizon.start)
     filters = BriefingFilters(
         start=start,
@@ -495,7 +498,7 @@ def build_briefing_payload(
                 start=effective_start,
                 end=end,
             )
-            if sweep_count is not None
+            if sweep_count is not None and not sweep_falls_back
             else ()
         ),
     )

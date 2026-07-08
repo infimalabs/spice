@@ -793,6 +793,24 @@ def test_explicit_start_wins_over_adaptive_horizon_in_briefing_and_sweep(
     ) in sweep
 
 
+def test_sweep_zero_windows_falls_back_to_public_briefing(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "horizon.jsonl"
+    _write_horizon_transcript(
+        transcript,
+        asks=[("2026-01-01T10:30:00Z", "young current request")],
+        compactions=["2026-01-01T10:00:00Z"],
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing([transcript])
+    payload = briefing_module.build_briefing_payload([transcript], sweep_count=0)
+
+    assert payload.sweep_windows == ()
+    assert briefing_module.render_sweep_payload(payload) == briefing
+    assert render_sweep([transcript], count=0) == briefing
+
+
 def test_sweep_horizon_extends_to_wall_clock_floor(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
     transcript = tmp_path / "horizon.jsonl"
