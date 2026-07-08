@@ -109,6 +109,40 @@ def test_lifetime_lens_reinterprets_same_stored_filters_without_writes(task_repo
     assert entries() == stored_entries
 
 
+def test_effective_filter_helpers_track_the_actor_route_per_lifetime(task_repo):
+    """The team-driven helpers the UI payload uses reproduce the actor route's
+    lifetime lens exactly, and expose bare project names for display."""
+    assert task_repo.is_dir()
+    store = ServeTeamStore()
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER],
+        config=TeamConfig(lifetime="Drive", task_filters=("serve.ui",)),
+    )
+    store.add_task_filter(
+        team.team_id, "task.unit", source=TASK_FILTER_SOURCE_AUTO_CLAIM
+    )
+
+    def check(lifetime: str, terms: list[str], projects: list[str]) -> None:
+        store.update_team_config(
+            team.team_id, TeamConfig(lifetime=lifetime), replace_task_filters=False
+        )
+        state = store.team_state(team.team_id)
+        route = lanes.team_route_for_actor(ACTOR_A)
+        assert route is not None
+        assert lanes.effective_filter_terms_for_team(state) == terms
+        assert lanes.effective_filter_terms_for_team(state) == (
+            lanes.effective_filter_terms(route)
+        )
+        assert lanes.effective_filter_projects_for_team(state) == projects
+
+    # Drive uses the durable pin plus the auto-claim subscription.
+    check("Drive", ["project:serve.ui", "project:task.unit"], ["serve.ui", "task.unit"])
+    # Steer narrows to the manual pin only, dropping the auto subscription.
+    check("Steer", ["project:serve.ui"], ["serve.ui"])
+    # Drain dissolves the boundary to every assignable stem.
+    check("Drain", ["project:serve", "project:task"], ["serve", "task"])
+
+
 def test_steer_next_task_ignores_auto_subscriptions_but_honors_pins(
     task_repo,
 ):

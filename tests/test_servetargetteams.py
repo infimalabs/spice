@@ -16,6 +16,7 @@ from spice.serve.workroutes import (
     work_tree_task_drain_response_payload,
 )
 from spice.serve.worktree.target import WorktreeTarget
+from spice.tasks import config
 
 THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ACTOR_A = f"thread:{THREAD_A}"
@@ -40,6 +41,9 @@ def test_unstarted_target_id_membership_is_visible_in_target_payload(
     assert work_tree["teamIdentity"]["teamId"] == created.team_id
     assert work_tree["lifetime"] == "Drain"
     assert work_tree["taskFilters"] == ["serve.ui"]
+    # Drain dissolves the boundary: the UI-facing effective set is every
+    # assignable stem, even though the durable pin is only serve.ui.
+    assert work_tree["effectiveTaskFilters"] == sorted(config.assignable_stems())
     assert [
         member.agent_id
         for member in state.team_store.team_state(created.team_id).members
@@ -65,6 +69,7 @@ def test_unstarted_target_id_membership_is_visible_in_lane_payload(
     assert result["teamIdentity"]["teamId"] == created.team_id
     assert result["lifetime"] == "Drain"
     assert result["taskFilters"] == ["serve.ui"]
+    assert result["effectiveTaskFilters"] == sorted(config.assignable_stems())
     assert signature.other[0] == created.team_id
 
 

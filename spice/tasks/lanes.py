@@ -95,26 +95,17 @@ def team_route_for_actor(actor: str) -> RouteEntry | None:
     if not actor:
         return None
     lookup_id = route_actor_id(actor)
-    from spice.serve.team.schema import TASK_FILTER_SOURCE_MANUAL
     from spice.serve.team.store import ServeTeamStore
 
     for team in ServeTeamStore().team_snapshot().teams:
         member_ids = [member.agent_id for member in team.members]
         if lookup_id not in member_ids:
             continue
-        filter_terms = [
-            f"project:{config.validate_assignable_project(task_filter)}"
-            for task_filter in team.config.task_filters
-        ]
-        manual_terms = [
-            f"project:{config.validate_assignable_project(entry.project)}"
-            for entry in team.config.task_filter_entries
-            if entry.source == TASK_FILTER_SOURCE_MANUAL
-        ]
+        filter_terms, manual_terms = _route_filters_from_team(team)
         entry: RouteEntry = {
             "agents": member_ids,
-            "filter": _clean_filter(filter_terms),
-            "manual": _clean_filter(manual_terms),
+            "filter": filter_terms,
+            "manual": manual_terms,
             "lifetime": team.config.lifetime,
         }
         rc_tokens = _team_rc_overrides(team.config.shell_settings)
@@ -122,6 +113,27 @@ def team_route_for_actor(actor: str) -> RouteEntry | None:
             entry["rc"] = rc_tokens
         return entry
     return None
+
+
+def _route_filters_from_team(team: Any) -> tuple[list[str], list[str]]:
+    """Build the (filter, manual) term lists for a team's stored filters.
+
+    Shared by the actor route lookup and the team-driven effective-term helper
+    so the payload the UI renders is constructed identically to the route the
+    allocator selects on -- one encoding, no drift.
+    """
+    from spice.serve.team.schema import TASK_FILTER_SOURCE_MANUAL
+
+    filter_terms = [
+        f"project:{config.validate_assignable_project(task_filter)}"
+        for task_filter in team.config.task_filters
+    ]
+    manual_terms = [
+        f"project:{config.validate_assignable_project(entry.project)}"
+        for entry in team.config.task_filter_entries
+        if entry.source == TASK_FILTER_SOURCE_MANUAL
+    ]
+    return _clean_filter(filter_terms), _clean_filter(manual_terms)
 
 
 def _team_rc_overrides(shell_settings: dict[str, Any]) -> list[str]:
@@ -149,6 +161,36 @@ def effective_filter_terms(route: RouteEntry | None) -> list[str]:
     if lifetime == "Steer":
         return _clean_filter(_route_list(route, "manual"))
     return _clean_filter(_route_list(route, "filter"))
+
+
+def effective_filter_terms_for_team(team: Any) -> list[str]:
+    """Lifetime-lensed effective filter terms for an already-loaded team.
+
+    Equivalent to ``effective_filter_terms(team_route_for_actor(actor))`` but
+    driven by a team state the caller already holds, so display/poll paths that
+    render the filter set avoid a second team snapshot.
+    """
+    filter_terms, manual_terms = _route_filters_from_team(team)
+    route: RouteEntry = {
+        "filter": filter_terms,
+        "manual": manual_terms,
+        "lifetime": team.config.lifetime,
+    }
+    return effective_filter_terms(route)
+
+
+def effective_filter_projects_for_team(team: Any) -> list[str]:
+    """Bare assignable project names for a team's effective filter set.
+
+    The presentation form the UI renders: the lifetime-lensed predicate the
+    allocator selects on, stripped of the ``project:`` prefix to match the
+    stored ``taskFilters`` naming. In Drain this is every assignable stem.
+    """
+    return [
+        term.split(":", 1)[1]
+        for term in effective_filter_terms_for_team(team)
+        if term.startswith("project:")
+    ]
 
 
 def filter_args(route: RouteEntry | None) -> list[str] | None:
