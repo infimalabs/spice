@@ -230,6 +230,26 @@ def test_rehydration_recency_candidates_order_finals_commits_and_intents():
     ]
 
 
+def test_compaction_intent_candidates_use_parsed_summary_intent():
+    compactions = [
+        records.CompactionRecord(
+            source_file="session.jsonl",
+            ts="2026-01-01T00:00:01.000Z",
+            last_assistant_before_text="assistant context",
+            summary_after_text=(
+                "This session is being continued from a previous conversation."
+            ),
+            intent_text="parsed recovered ask",
+        )
+    ]
+
+    candidates = briefing_module.collect_compaction_intent_candidates(compactions)
+
+    assert [(candidate.text, candidate.label) for candidate in candidates] == [
+        ("parsed recovered ask", "assistant context")
+    ]
+
+
 def test_briefing_renders_supervised_fixture_recovery(monkeypatch):
     for transcript in SUPERVISED_FIXTURES:
         with transcript_driver_for_fixture(monkeypatch, transcript):
