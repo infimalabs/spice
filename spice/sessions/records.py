@@ -26,7 +26,7 @@ from typing import Any
 
 from spice.agent.driver import driver_for_transcript
 from spice.errors import SpiceError
-from spice.sessions.jsonl import iter_jsonl_lines
+from spice.sessions.jsonl import iter_jsonl_lines, iter_jsonl_lines_reverse
 from spice.sessions.util import first_text, int_or_zero, normalize_timestamp
 
 COMMIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
@@ -174,9 +174,16 @@ class CommitRecord:
     user: str | None
 
 
-def iter_events(path: Path) -> Iterator[dict[str, Any]]:
+def iter_events(
+    path: Path,
+    *,
+    start: str | None = None,
+    context_lines_before_start: int = 0,
+) -> Iterator[dict[str, Any]]:
     driver = driver_for_transcript(path)
-    for line in iter_jsonl_lines(path):
+    for line in _iter_jsonl_lines_from_start(
+        path, start, context_lines_before_start=context_lines_before_start
+    ):
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:
@@ -188,18 +195,48 @@ def iter_events(path: Path) -> Iterator[dict[str, Any]]:
             yield event
 
 
-def collect_turns(files: list[Path]) -> list[TurnRecord]:
+def _iter_jsonl_lines_from_start(
+    path: Path, start: str | None, *, context_lines_before_start: int = 0
+) -> Iterator[str]:
+    if not start:
+        yield from iter_jsonl_lines(path)
+        return
+    lines: list[str] = []
+    context_count = 0
+    for line in iter_jsonl_lines_reverse(path):
+        ts = _line_timestamp(line)
+        if ts and ts < start:
+            if context_count >= context_lines_before_start:
+                break
+            lines.append(line)
+            context_count += 1
+            continue
+        lines.append(line)
+    yield from reversed(lines)
+
+
+def _line_timestamp(line: str) -> str | None:
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    return normalize_timestamp(obj.get("timestamp"))
+
+
+def collect_turns(files: list[Path], *, start: str | None = None) -> list[TurnRecord]:
     turns: list[TurnRecord] = []
     for path in files:
-        turns.extend(_collect_turns_for_file(path))
+        turns.extend(_collect_turns_for_file(path, start=start))
     turns.sort(key=lambda turn: (turn.start_ts, turn.source_file))
     return turns
 
 
-def _collect_turns_for_file(path: Path) -> list[TurnRecord]:
+def _collect_turns_for_file(path: Path, *, start: str | None) -> list[TurnRecord]:
     turns: list[TurnRecord] = []
     current: TurnRecord | None = None
-    for obj in iter_events(path):
+    for obj in iter_events(path, start=start):
         ts = normalize_timestamp(obj.get("timestamp")) or ""
         payload = obj.get("payload") or {}
         record_type = obj.get("type")
@@ -329,12 +366,14 @@ def _patch_paths(raw_arguments: Any) -> list[str]:
     ]
 
 
-def collect_compactions(files: list[Path]) -> list[CompactionRecord]:
+def collect_compactions(
+    files: list[Path], *, start: str | None = None
+) -> list[CompactionRecord]:
     records: list[CompactionRecord] = []
     for path in files:
         last_assistant: str | None = None
         pending: CompactionRecord | None = None
-        for obj in iter_events(path):
+        for obj in iter_events(path, start=start, context_lines_before_start=20):
             ts = normalize_timestamp(obj.get("timestamp")) or ""
             payload = obj.get("payload") or {}
             if obj.get("type") == "compacted":
