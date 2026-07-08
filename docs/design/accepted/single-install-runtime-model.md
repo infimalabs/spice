@@ -18,9 +18,10 @@ to be active.
   invocation in every worktree resolves to that one installation, so the
   allocator, steering socket, and serve process are all the same build
   regardless of which directory a shell sits in.
-- **Common-directory install stays supported as an opt-in.** Operators who
-  prefer a shared install location rather than the uv tool layout can still use
-  it; it is no longer the default, but it is not removed.
+- **Common-directory install is removed.** The uv tool layout is the only
+  supported install shape; no coherent load-bearing reason for the opt-in
+  common-dir variant surfaced, so it was dropped rather than kept as an
+  unused option (see `lifecycle.docs.install`, 2026-07-08).
 
 This mostly codifies how the operator already runs spice: one main tree deployed
 as the server, other trees operated as workers. The bare-repo multi-tree split —
@@ -65,8 +66,7 @@ This record is the root of the single-install battery. It states the target
 model; the implementing tasks remove the magic above and document/test the
 result:
 
-- `lifecycle.install` — make `uv tool` the default install; keep common-dir as
-  opt-in.
+- `lifecycle.install` — make `uv tool` the default install.
 - `cli.entry` — remove the worktree-spice reexec so spice always runs the
   installed runtime.
 - `cli.paths` — remove worktree `PYTHONPATH`/venv injection and the now-dead
@@ -87,7 +87,6 @@ chained.
 
 ## Non-Goals
 
-- Not removing common-directory install support; it stays as an opt-in.
 - Not changing how worktrees are created or how tasks/branches are organized.
 - Not introducing a build/bundle step; the install remains an editable uv tool
   pointed at source.

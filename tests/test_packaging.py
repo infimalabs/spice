@@ -113,11 +113,8 @@ def test_readme_documents_single_install_runtime_model():
     assert "uv tool install -e /path/to/spice-main" in install_section
     assert "uv tool install spice-harness" in install_section
     assert "pip install spice-harness" not in install_section
-    assert "UV_TOOL_DIR" in install_section
-    assert "UV_TOOL_BIN_DIR" in install_section
     assert "editable main tree is the server deployment" in install_text
     assert "worktrees remain operated trees" in install_text
-    assert "common-dir layout is opt-in" in install_text
 
 
 def test_design_documents_single_install_runtime_model():
@@ -131,7 +128,6 @@ def test_design_documents_single_install_runtime_model():
     assert "`uv tool install -e /path/to/spice-main`" in principle
     assert "editable main tree is the server deployment" in principle_text
     assert "Worker worktrees are operated trees" in principle_text
-    assert "common-dir layout remains an opt-in install shape" in principle_text
 
 
 def test_config_documents_runtime_model_as_non_configurable():
@@ -146,7 +142,6 @@ def test_config_documents_runtime_model_as_non_configurable():
     assert "`uv tool install -e /path/to/spice-main`" in runtime_section
     assert "editable main tree the server deployment" in runtime_text
     assert "Worker worktrees are operated trees" in runtime_text
-    assert "common-dir layout is opt-in" in runtime_text
 
 
 def test_primary_runtime_docs_do_not_describe_per_tree_runtime_magic():
