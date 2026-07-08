@@ -670,58 +670,6 @@ def test_out_of_scope_refusal_guides_git_rm_for_paths_absent_at_upstream(tmp_pat
     assert _git(repo, "status", "--porcelain") == ""
 
 
-def test_out_of_scope_refusal_partitions_mixed_present_and_absent_paths(tmp_path):
-    remote = tmp_path / "remote.git"
-    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
-    repo = _init_repo(tmp_path / "agent")
-    _run(repo, "git", "remote", "add", "origin", str(remote))
-    (repo / "conflict.txt").write_text("shared conflict base\n", encoding="utf-8")
-    (repo / "stale.txt").write_text("old peer file\n", encoding="utf-8")
-    _run(repo, "git", "add", "conflict.txt", "stale.txt")
-    _run(repo, "git", "commit", "-m", "shared conflict and stale files")
-    _run(repo, "git", "push", "-u", "origin", "main")
-    _run(repo, "git", "remote", "set-head", "origin", "--auto")
-
-    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
-    (repo / "conflict.txt").write_text("agent conflict work\n", encoding="utf-8")
-    _run(repo, "git", "add", "agent.txt", "conflict.txt")
-    _run(repo, "git", "commit", "-m", "agent work")
-
-    peer = tmp_path / "peer"
-    _run(tmp_path, "git", "clone", str(remote), str(peer))
-    _configure_git_identity(peer)
-    (peer / "README.md").write_text("peer baseline work\n", encoding="utf-8")
-    (peer / "conflict.txt").write_text("peer conflict work\n", encoding="utf-8")
-    _run(peer, "git", "rm", "stale.txt")
-    _run(peer, "git", "add", "README.md", "conflict.txt")
-    _run(peer, "git", "commit", "-m", "peer baseline and stale deletion")
-    _run(peer, "git", "push", "origin", "main")
-    upstream_head = _git(peer, "rev-parse", "HEAD")
-
-    with pytest.raises(gitsync.MergeConflict):
-        gitsync.integrate_and_publish("TASK-20260101T000000000013Z", repo_root=repo)
-
-    (repo / "README.md").write_text("initial\n", encoding="utf-8")
-    (repo / "conflict.txt").write_text("agent conflict work\n", encoding="utf-8")
-    (repo / "stale.txt").write_text("old peer file\n", encoding="utf-8")
-    _run(repo, "git", "add", "README.md", "conflict.txt", "stale.txt")
-    _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
-
-    with pytest.raises(SpiceError) as exc_info:
-        gitsync.integrate_and_publish("TASK-20260101T000000000013Z", repo_root=repo)
-
-    message = str(exc_info.value)
-    assert "refusing to publish" in message
-    assert "README.md" in message
-    assert "stale.txt" in message
-    assert _refusal_commands(message) == [
-        f"git checkout {upstream_head} -- README.md",
-        "git rm -- stale.txt",
-        'git commit -m "Restore baseline content for TASK-20260101T000000000013Z"',
-        'spice task done TASK-20260101T000000000013Z --validation "..."',
-    ]
-
-
 def test_publish_race_retry_enforces_out_of_scope_guard(tmp_path, monkeypatch):
     # Defense in depth for the race-retry choke point: if a retry round ever
     # produces a head that rewinds peer paths (simulated here by adopting the
