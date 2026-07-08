@@ -262,6 +262,51 @@ def test_briefing_renders_supervised_fixture_recovery(monkeypatch):
         assert "Latest Final" in briefing
 
 
+def test_recovery_lines_do_not_render_assistant_fallback_as_user_after():
+    [candidate] = briefing_module.collect_compaction_intent_candidates(
+        [
+            records.CompactionRecord(
+                source_file="session.jsonl",
+                ts="2026-01-01T00:00:01.000Z",
+                last_assistant_before_text="assistant fallback text",
+                first_user_after_text="",
+            )
+        ]
+    )
+
+    lines = briefing_module._recovery_lines([candidate])
+
+    assert candidate.text == "assistant fallback text"
+    assert lines == [
+        "Recovery",
+        "  latest_compaction=2026-01-01T00:00:01.000Z",
+        "  assistant_before=assistant fallback text",
+        "  user_after=-",
+    ]
+
+
+def test_recovery_lines_render_populated_first_user_after_text():
+    [candidate] = briefing_module.collect_compaction_intent_candidates(
+        [
+            records.CompactionRecord(
+                source_file="session.jsonl",
+                ts="2026-01-01T00:00:01.000Z",
+                last_assistant_before_text="assistant before",
+                first_user_after_text="operator resumes task",
+            )
+        ]
+    )
+
+    lines = briefing_module._recovery_lines([candidate])
+
+    assert lines == [
+        "Recovery",
+        "  latest_compaction=2026-01-01T00:00:01.000Z",
+        "  assistant_before=assistant before",
+        "  user_after=operator resumes task",
+    ]
+
+
 def test_briefing_learnings_use_active_stem_top_five(session_task_repo):
     repo = session_task_repo
     for index in range(6):
