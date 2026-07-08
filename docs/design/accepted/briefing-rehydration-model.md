@@ -112,11 +112,26 @@ with a shape and a domain rank key. The taxonomy is the ranked candidate model:
 | **Command** | command audit records | failures first, then recency (a failed command rehydrates more than a successful one) |
 | **File touch** | turn `touched_files` | last-touch recency + failure/complexity hotspot weight |
 | **Compaction intent** | `CompactionRecord` (`assistant_before` / `user_after`) | the intent that bracketed each window boundary |
+| **Coordination state** | claim/task board (claimed task + phase) | the live claim first; it is the single most rehydrating fact |
 
 Sections are the idiomatic *presentation* of these classes. Each section gets a
 named row-cap constant, ranks its candidates by the class key, renders the top
 rows, and emits an explicit overflow marker for the remainder. No section
 renders a placeholder (`-`, `unknown`, empty) row; an empty class is omitted.
+
+The ask signal draws from two planes, never from transcript user-messages: the
+**steering/ACK plane** (the ACK DB) and the **coordination plane** (the claimed
+task and phase). The claimed task/phase is not decoration around the asks — it
+is a first-class rehydration signal, often the highest-value one, because it
+states what this agent is doing right now.
+
+**Message-shape classification is one deterministic path.** Assigning a
+candidate to a signal class is not a fuzzy match. Each source shape maps to
+exactly one class by an explicit rule; an unknown or non-human shape **fails
+loud** rather than being silently bucketed as an ask. Per the
+single-deterministic-path maxim, a violated assumption about message shape must
+surface immediately, not degrade into a mislabeled row — the ask section must
+never fill with material that was never a steering ask.
 
 ### ACK DB as the ask source
 
@@ -124,13 +139,20 @@ The asks-of-record are the steering keys and their dispositions, not user
 messages scraped from turns. `operator_asks` +
 `is_scaffolding_text` (`briefing.py:105`) reconstruct "what the operator asked"
 by pattern-matching turn text; in a supervised, steering-driven session the
-authoritative record already exists in the ACK DB (`spice/mail/ackstate.py`,
-`spice/mail/acks.py`, surfaced today as the `Inbox` section via
-`inbox_ack_state_context_rows`). The decision: **source the ask class from the
-ACK DB.** A steering key carries its own text, timestamp, and disposition
-(pending / acked / nacked / refused / archived), which is exactly the rank key
-the ask section needs — no text heuristic, no scaffolding filter, no guessing
-which user message was a real ask.
+authoritative record already exists in the ACK DB (`spiceacks.sqlite3`, with
+`key`, `text`, `ack_content`, `disposition`, `archived_at`, and `lineage`
+columns — accessed via `spice/mail/ackstate.py`, `spice/mail/acks.py`, and
+surfaced today as the `Inbox` section through `inbox_ack_state_context_rows`).
+The decision: **source the ask class from the ACK DB.** A steering key carries
+its own `text`, timestamp, `disposition` (pending / acked / nacked / refused /
+archived), and `lineage`, which is exactly the rank key the ask section needs —
+no text heuristic, no scaffolding filter, no guessing which user message was a
+real ask.
+
+The **coordination plane is the second authoritative source**: the claimed task
+and phase come from the task board, not from transcript reconstruction. Together
+the ACK DB and the coordination plane fully supply the ask/coordination signal,
+which is why the turn-scraping path is deleted rather than kept as a fallback.
 
 ### Dual-axis horizon: 3-window default, 5-window cap
 
@@ -163,6 +185,10 @@ bound it (`horizon_basis`), recovering `adaptive_horizon_start_index`:
   above a refused one, which ranks above a long-consumed one. The briefing reads
   disposition from the ACK DB rather than inferring freshness from position in a
   turn list.
+- **Recency eviction.** Recency is king, so the surface is self-expiring:
+  asks and finals that fall out of the window horizon or lose the value-ordered
+  pack are simply not rendered. Nothing stale persists by inertia; an item stays
+  only by ranking high enough to earn its budget.
 
 ### Briefing / sweep convergence
 
@@ -232,9 +258,11 @@ arbitrarily chained.
   / 5 cap + wall-clock floor + `horizon_basis` label). **Replaces**
   `render_sweep`'s `boundaries[-count:]` edges and the briefing's unbounded time
   filters.
-- `session.asks` (`ASKS-1kBrS1T0`) — source the ask class from the ACK DB
-  (`spice/mail/ackstate.py`). **Deletes** `operator_asks` + the
-  `is_scaffolding_text` heuristic as the ask source.
+- `session.asks` (`ASKS-1kBrS1T0`) — source the ask/coordination class from the
+  ACK DB (`spiceacks.sqlite3` via `spice/mail/ackstate.py`) and the coordination
+  plane (claimed task/phase), with deterministic fail-loud shape classification.
+  **Deletes** `operator_asks` + the `is_scaffolding_text` heuristic as the ask
+  source.
 - `session.pack` (`PACK-1kBrS6sv`, after `RANK`) — rank-then-pack to a character
   budget with explicit overflow markers and placeholder suppression.
   **Replaces** `apply_output_budget`'s post-hoc whole-text clamp and the literal
