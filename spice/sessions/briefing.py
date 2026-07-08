@@ -479,6 +479,18 @@ def _resolve_horizon(
             selected_count += 1
         if basis != "hard_cap":
             start = eligible[-selected_count]
+            if (
+                start > floor
+                and selected_count == len(eligible)
+                and selected_count < MAX_HORIZON_COMPACTIONS
+            ):
+                selected_boundaries = tuple(eligible[-selected_count:])
+                return ResolvedHorizon(
+                    start=None,
+                    basis="wall_clock_floor",
+                    requested_compactions=requested,
+                    selected_boundaries=selected_boundaries,
+                )
             if start > floor and selected_count == MAX_HORIZON_COMPACTIONS:
                 basis = "hard_cap"
             elif selected_count > count_selected:
@@ -520,8 +532,6 @@ def _horizon_floor(end: str | None, *, min_seconds: int) -> str | None:
 
 
 def _effective_start(user_start: str | None, horizon_start: str | None) -> str | None:
-    if user_start and horizon_start:
-        return max(user_start, horizon_start)
     return user_start or horizon_start
 
 

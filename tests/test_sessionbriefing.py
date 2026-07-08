@@ -583,6 +583,81 @@ def test_briefing_default_horizon_is_count_bound(tmp_path, monkeypatch):
     ]
 
 
+def test_briefing_young_session_floor_extends_to_session_start(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "horizon.jsonl"
+    asks = [
+        ("2026-01-01T08:00:00Z", "before first young compaction"),
+        ("2026-01-01T10:30:00Z", "young current request"),
+    ]
+    _write_horizon_transcript(
+        transcript,
+        asks=asks,
+        compactions=[
+            "2026-01-01T10:00:00Z",
+            "2026-01-01T10:20:00Z",
+        ],
+    )
+    _record_ack_state_asks(repo, asks)
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+
+    assert "files=horizon.jsonl turns=2" in briefing
+    assert (
+        "horizon_basis=wall_clock_floor start=session start compactions=2/3"
+    ) in briefing
+    assert _section_lines(briefing, "Recent Asks") == [
+        "Recent Asks",
+        "  acked 2026-01-01T08:00:00.000Z "
+        "key=20260101T080000000000Z before first young compaction",
+    ]
+
+
+def test_explicit_start_wins_over_adaptive_horizon_in_briefing_and_sweep(
+    tmp_path, monkeypatch
+):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "horizon.jsonl"
+    asks = [
+        ("2026-01-01T01:00:00Z", "operator explicit start request"),
+        ("2026-01-01T07:00:00Z", "inside first count window"),
+        ("2026-01-01T13:00:00Z", "inside second count window"),
+        ("2026-01-01T19:00:00Z", "inside current count window"),
+    ]
+    _write_horizon_transcript(
+        transcript,
+        asks=asks,
+        compactions=[
+            "2026-01-01T06:00:00Z",
+            "2026-01-01T12:00:00Z",
+            "2026-01-01T18:00:00Z",
+        ],
+    )
+    _record_ack_state_asks(repo, asks)
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing(
+        [transcript],
+        start="2026-01-01T01:00:00.000Z",
+        max_lines=200,
+        max_bytes=20000,
+    )
+    sweep = render_sweep(
+        [transcript],
+        count=3,
+        start="2026-01-01T01:00:00.000Z",
+    )
+
+    assert "files=horizon.jsonl turns=4" in briefing
+    assert "Filters\n  start=2026-01-01T01:00:00.000Z" in briefing
+    assert "Window 0 (from 2026-01-01T01:00:00.000Z)" in sweep
+    assert (
+        "ask acked 2026-01-01T01:00:00.000Z "
+        "key=20260101T010000000000Z operator explicit start request"
+    ) in sweep
+
+
 def test_sweep_horizon_extends_to_wall_clock_floor(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
     transcript = tmp_path / "horizon.jsonl"

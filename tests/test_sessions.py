@@ -495,6 +495,11 @@ def test_sweep_renders_ack_db_asks_inside_compaction_windows(tmp_path, monkeypat
             f"{json.dumps(event)}\n"
             for event in [
                 {
+                    "timestamp": "2025-12-31T20:00:00Z",
+                    "type": "compacted",
+                    "payload": {},
+                },
+                {
                     "timestamp": "2026-01-01T00:00:00Z",
                     "type": "event_msg",
                     "payload": {"type": "task_started", "turn_id": "turn-a"},
