@@ -93,18 +93,23 @@ def test_serve_menu_smoke_uses_harness_for_interaction() -> None:
     assert "New team" not in smoke
 
 
-def test_serve_lane_reload_smoke_asserts_open_lane_restore() -> None:
+def test_serve_lane_reload_smoke_asserts_server_shell_persistence() -> None:
     smoke = (ROOT / "browser" / "serve_lane_reload_smoke.js").read_text(
         encoding="utf-8"
     )
 
     assert 'require("./serve_playwright_harness")' in smoke
     assert "withServePage(" in smoke
-    assert "laneReloadTargetCount = 3" in smoke
-    assert "addLane(target.id)" in smoke
+    # Reload persistence is server-side: the scratch backend's shell team
+    # rehydrates by teamId from the team snapshot -- no live targets, no
+    # localStorage hints.
+    assert "addLane(" not in smoke
+    assert "laneHintsByTargetId" not in smoke
+    assert 'teamCommandPayload("createTeam"' in smoke
     assert "page.reload" in smoke
-    assert "laneHintsByTargetId().get(targetId)?.open === true" in smoke
-    assert "not enough bound targets for lane reload smoke" in smoke
+    assert "lane.teamId === before.teamId" in smoke
+    assert "rehydrated lane changed teamId" in smoke
+    assert "stamped speechMode did not survive the reload" in smoke
 
 
 def test_serve_team_metrics_smoke_asserts_work_follows_agent() -> None:

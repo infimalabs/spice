@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 // Ack quote resolution riding the mosaic-stream-integration resolution
@@ -21,13 +22,7 @@ const MOSAIC_ACK_ORDER_SECOND_BLOCK_START = 46;
 const MOSAIC_ACK_ORDER_SECOND_BLOCK_END = 47;
 
 function mosaicAckResolveLane() {
-  let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-  if (!lane && targets.length) {
-    addLane(targets[0].id);
-    lane = laneStates.get(targets[0].id);
-  }
-  if (!lane) throw new Error("no lane available for mosaic ack resolution smoke");
-  return lane;
+  return resolveIsolatedLane("mosaic-ack-resolution-smoke-team");
 }
 
 function mosaicAckBuildPlainItem(index, lines) {
@@ -585,16 +580,13 @@ function assertOrderStability(result, fail) {
 }
 
 async function waitForMosaicAckGlobals(page) {
-  await page.waitForFunction(
-    () =>
-      typeof addLane === "function" &&
-      typeof renderMessagesIfChanged === "function" &&
-      typeof upsertKnownMessage === "function" &&
-      typeof mosaicReservationRows === "function" &&
-      Array.isArray(targets) &&
-      targets.length > 0,
-    { timeout: 10000 },
-  );
+  await installIsolatedLaneFixture(page, {
+    globals: [
+      "renderMessagesIfChanged",
+      "upsertKnownMessage",
+      "mosaicReservationRows",
+    ],
+  });
 }
 
 async function run() {

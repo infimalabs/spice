@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 // Mosaic scrollbar rule: the pack host must reserve its scrollbar gutter
@@ -18,20 +19,9 @@ async function run() {
       contextOptions: { viewport: { width: 1280, height: 500 } },
     },
     async ({ page, server }) => {
-      await page.waitForSelector(".lane", { timeout: 10000 });
-      await page.waitForFunction(
-        () => Array.isArray(targets) && targets.length > 0,
-        { timeout: 10000 },
-      );
+      await installIsolatedLaneFixture(page);
       const result = await page.evaluate(() => {
-        let lane = Array.from(laneStates.values()).find(
-          (item) => !item.emptyTeam,
-        );
-        if (!lane && targets.length) {
-          addLane(targets[0].id);
-          lane = laneStates.get(targets[0].id);
-        }
-        if (!lane) throw new Error("no lane available for scrollbar-gutter smoke");
+        const lane = resolveIsolatedLane("scrollbar-gutter-smoke-team");
         const host = lane.messagesEl;
         host.innerHTML = "";
 

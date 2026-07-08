@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 // Hidden-render deferral (freeze-hidden-guard): a lane whose host is
@@ -25,13 +26,7 @@ function hiddenRevealBuildItem(index, lines) {
 }
 
 function hiddenRevealResolveLane() {
-  let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-  if (!lane && targets.length) {
-    addLane(targets[0].id);
-    lane = laneStates.get(targets[0].id);
-  }
-  if (!lane) throw new Error("no lane available");
-  return lane;
+  return resolveIsolatedLane("mosaic-hidden-reveal-smoke-team");
 }
 
 function hiddenRevealSnapshot(lane) {
@@ -152,14 +147,9 @@ const hiddenRevealPageHelpers = [
 ];
 
 async function installHiddenRevealHelpers(page) {
-  await page.waitForFunction(
-    () =>
-      typeof renderMessagesIfChanged === "function" &&
-      typeof upsertKnownMessage === "function" &&
-      Array.isArray(targets) &&
-      targets.length > 0,
-    { timeout: 10000 },
-  );
+  await installIsolatedLaneFixture(page, {
+    globals: ["renderMessagesIfChanged", "upsertKnownMessage"],
+  });
   for (const helper of hiddenRevealPageHelpers) {
     await page.evaluate("window." + helper.name + " = " + helper.toString());
   }

@@ -1,5 +1,6 @@
 const os = require("os");
 const path = require("path");
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 // MESSAGE-1kBdGKyL: a NACK (reasoned refusal) must render in the mosaic exactly
@@ -97,12 +98,7 @@ const SEED_MESSAGES = [
 // Runs in the browser: seed the lane with the polarity fixtures, render, then
 // read back the polarity classes, badges, and resolved --warn quote accent.
 async function applySeedAndMeasure(seed) {
-  let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-  if (!lane && targets.length) {
-    addLane(targets[0].id);
-    lane = laneStates.get(targets[0].id);
-  }
-  if (!lane) throw new Error("no lane available for nack-render smoke");
+  const lane = resolveIsolatedLane("nack-render-smoke-team");
   for (const [key, text] of seed.contexts) {
     lane.ackContextByKey.set(key, {
       key,
@@ -172,15 +168,9 @@ async function run() {
       contextOptions: { viewport: { width: 1280, height: 900 } },
     },
     async ({ page }) => {
-      await page.waitForSelector(".lane", { timeout: 10000 });
-      await page.waitForFunction(
-        () =>
-          typeof renderMessagesIfChanged === "function" &&
-          typeof laneStates !== "undefined" &&
-          typeof addLane === "function" &&
-          Array.isArray(targets),
-        { timeout: 10000 },
-      );
+      await installIsolatedLaneFixture(page, {
+        globals: ["renderMessagesIfChanged"],
+      });
       const result = await page.evaluate(applySeedAndMeasure, {
         contexts: SEED_CONTEXTS,
         messages: SEED_MESSAGES,

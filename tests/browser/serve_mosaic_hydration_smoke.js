@@ -1,4 +1,5 @@
 const path = require("path");
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 // Load-stability smoke: staged bulk
@@ -19,13 +20,7 @@ const HYDRATION_MAX_REPLAYS = 5;
 const HYDRATION_SETTLE_TIMEOUT_MS = 8000;
 
 function hydrationResolveLane() {
-  let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-  if (!lane && targets.length) {
-    addLane(targets[0].id);
-    lane = laneStates.get(targets[0].id);
-  }
-  if (!lane) throw new Error("no lane available");
-  return lane;
+  return resolveIsolatedLane("mosaic-hydration-smoke-team");
 }
 
 function hydrationPurge(lane) {
@@ -123,28 +118,15 @@ async function installHydrationHelpers(page, context) {
     );
   });
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForFunction(
-    () =>
-      typeof renderMessagesIfChanged === "function" &&
-      typeof upsertKnownMessage === "function" &&
-      Array.isArray(targets) &&
-      targets.length > 1,
-    { timeout: 10000 },
-  );
+  // The fixture installs AFTER the reload (a reload wipes injected scripts
+  // and lane state); isolated lanes never receive real session messages, so
+  // no ingestion gating is needed for the purity assertions.
+  await installIsolatedLaneFixture(page, {
+    globals: ["renderMessagesIfChanged", "upsertKnownMessage"],
+  });
   for (const helper of hydrationPageHelpers) {
     await page.evaluate("window." + helper.name + " = " + helper.toString());
   }
-  // Deterministic replay/purity assertions need a noise-free lattice: the
-  // harness serve streams real session messages, so ingestion is gated to
-  // this smoke's keys for the page's lifetime (returns false = not added,
-  // which every caller already handles).
-  await page.evaluate(() => {
-    const original = window.upsertKnownMessage;
-    window.upsertKnownMessage = function (lane, item, position) {
-      if (!String(item.key).startsWith("hydration-")) return false;
-      return original(lane, item, position);
-    };
-  });
 }
 
 async function runStagedHydration(page) {
@@ -168,7 +150,7 @@ async function runStagedHydration(page) {
   // Second lane mounts mid-load: sibling width churn while lane 1 settles.
   await page.evaluate(
     ({ start, count }) => {
-      addLane(targets[1].id);
+      resolveIsolatedLane("mosaic-hydration-sibling-team");
       const lane = hydrationResolveLane();
       const kinds = { 2: "image" };
       hydrationPushBatch(lane, start, count, kinds);

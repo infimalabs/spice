@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 // Mosaic card sizing / interlock. Verifies against the live DOM: (a)
@@ -18,13 +19,7 @@ const SIZING_CONGRUENCE_TOLERANCE_PX = 1;
 const SIZING_RESCALED_ROOT_FONT_PX = 20;
 
 function mosaicSizingResolveLane() {
-  let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-  if (!lane && targets.length) {
-    addLane(targets[0].id);
-    lane = laneStates.get(targets[0].id);
-  }
-  if (!lane) throw new Error("no lane available for mosaic sizing smoke");
-  return lane;
+  return resolveIsolatedLane("mosaic-sizing-smoke-team");
 }
 
 function mosaicSizingBuildItem(key, html) {
@@ -208,16 +203,14 @@ function assertSpotChecks(result) {
 }
 
 async function waitForMosaicSizingGlobals(page) {
-  await page.waitForFunction(
-    () =>
-      typeof renderMessage === "function" &&
-      typeof mosaicGeometry === "function" &&
-      typeof mosaicRowsFor === "function" &&
-      typeof mosaicInteriorSlackPx === "function" &&
-      Array.isArray(targets) &&
-      targets.length > 0,
-    { timeout: 10000 },
-  );
+  await installIsolatedLaneFixture(page, {
+    globals: [
+      "renderMessage",
+      "mosaicGeometry",
+      "mosaicRowsFor",
+      "mosaicInteriorSlackPx",
+    ],
+  });
 }
 
 async function run() {
