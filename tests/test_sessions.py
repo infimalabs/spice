@@ -725,7 +725,8 @@ def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
     assert "tools=apply_patch" in briefing
     assert _section_lines(briefing, "Latest Ask") == [
         "Latest Ask",
-        "  acked 2026-01-01T00:00:05.000Z key=20260101T000005000000Z needle request",
+        "  acked 2026-01-01T00:00:05.000Z "
+        "key=20260101T000005000000Z repeat_count=2 needle request",
     ]
     assert "Working Set\n  spice/sessions/briefing.py touches=1" in briefing
     assert "Git\n  branch=main upstream=- ahead=- behind=-\n  dirty=clean" in briefing
@@ -760,7 +761,8 @@ def test_briefing_payload_renders_filtered_briefing(tmp_path, monkeypatch):
     assert payload.filters.tools == ("apply_patch",)
     assert _section_lines(rendered, "Latest Ask") == [
         "Latest Ask",
-        "  acked 2026-01-01T00:00:05.000Z key=20260101T000005000000Z needle request",
+        "  acked 2026-01-01T00:00:05.000Z "
+        "key=20260101T000005000000Z repeat_count=2 needle request",
     ]
     assert rendered == render_briefing(
         [transcript],
