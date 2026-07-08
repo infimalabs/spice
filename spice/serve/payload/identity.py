@@ -66,6 +66,8 @@ def team_facts_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
     if team_id is None:
         return {}
     team = store.team_state(team_id)
+    from spice.tasks import lanes
+
     return {
         "teamId": team.team_id,
         "teamRevision": team.revision,
@@ -74,6 +76,11 @@ def team_facts_for_actor(store: ServeTeamStore, actor: str) -> dict[str, Any]:
         "taskFilterEntries": [
             entry.to_payload() for entry in team.config.task_filter_entries
         ],
+        # The lifetime-lensed predicate the allocator actually selects on:
+        # Drain -> every assignable stem, Drive -> stored filters, Steer ->
+        # manual pins. The UI renders this so the board matches reality; the
+        # raw taskFilters/taskFilterEntries above stay for provenance/chips.
+        "effectiveTaskFilters": lanes.effective_filter_projects_for_team(team),
         "lifetime": team.config.lifetime,
         "renewalIntent": renewal_intent_for_actor(store, actor),
     }
