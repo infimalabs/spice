@@ -275,8 +275,10 @@ def integrate_and_publish(
     harvested task and git facts. A real content conflict raises
     :class:`MergeConflict` with the tree left mid-merge for the agent to
     resolve and commit. A resolution that still contains conflict markers is
-    refused before anything publishes. With no configured remote this records
-    the local HEAD and performs no network or history mutation.
+    refused before anything publishes, as is a landing whose first-parent
+    diff changes baseline paths outside the task's own commits. With no
+    configured remote this records the local HEAD and performs no network or
+    history mutation.
     """
     root = repo_root or config.repo_root()
     agent_head = _read(root, "rev-parse", "HEAD")
@@ -308,6 +310,7 @@ def integrate_and_publish(
         label=label,
         merge_head=merge_head,
         upstream_head=upstream_head,
+        agent_head=agent_head,
         message=message,
     )
     return SyncResult(
@@ -391,11 +394,19 @@ def _publish_integrated_task(
     label: str,
     merge_head: str,
     upstream_head: str,
+    agent_head: str,
     message: str,
 ) -> tuple[str, str]:
     flagged = _conflict_marker_paths(repo_root, upstream_head, merge_head)
     if flagged:
         raise SpiceError(_conflict_marker_refusal(label, flagged))
+    _refuse_out_of_scope_landing(
+        repo_root,
+        label=label,
+        upstream_head=upstream_head,
+        merge_head=merge_head,
+        agent_head=agent_head,
+    )
     branch = baseline.split("/", 1)[1]
     return _publish_task_merge(
         repo_root,
@@ -405,6 +416,7 @@ def _publish_integrated_task(
         label=label,
         merge_head=merge_head,
         upstream_head=upstream_head,
+        agent_head=agent_head,
         message=message,
     )
 
@@ -418,6 +430,7 @@ def _publish_task_merge(
     label: str,
     merge_head: str,
     upstream_head: str,
+    agent_head: str,
     message: str,
 ) -> tuple[str, str]:
     push = _run(repo_root, "push", remote, f"{merge_head}:{branch}")
@@ -433,6 +446,7 @@ def _publish_task_merge(
         label=label,
         merge_head=merge_head,
         previous_upstream_head=upstream_head,
+        agent_head=agent_head,
         message=message,
         first_push=push,
     )
@@ -447,6 +461,7 @@ def _retry_publish_after_race(
     label: str,
     merge_head: str,
     previous_upstream_head: str,
+    agent_head: str,
     message: str,
     first_push: subprocess.CompletedProcess[str],
 ) -> tuple[str, str]:
@@ -485,6 +500,13 @@ def _retry_publish_after_race(
         flagged = _conflict_marker_paths(repo_root, fresh_upstream_head, retry_head)
         if flagged:
             raise SpiceError(_conflict_marker_refusal(label, flagged))
+        _refuse_out_of_scope_landing(
+            repo_root,
+            label=label,
+            upstream_head=fresh_upstream_head,
+            merge_head=retry_head,
+            agent_head=agent_head,
+        )
         retry_push = _run(repo_root, "push", remote, f"{retry_head}:{branch}")
         if retry_push.returncode == 0:
             return retry_head, fresh_upstream_head
@@ -658,6 +680,71 @@ def _conflict_marker_refusal(label: str, paths: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _task_footprint_paths(
+    repo_root: Path, upstream_head: str, agent_head: str
+) -> set[str]:
+    """Paths touched by the lane's own non-merge commits since the baseline.
+
+    Merges are excluded on purpose: an overlap-resolution merge makes the
+    baseline an ancestor of the lane head, and its combined diff would
+    dissolve the footprint into every path the resolution happened to touch.
+    """
+    listing = _read(
+        repo_root,
+        "log",
+        "--no-merges",
+        "--format=",
+        "--name-only",
+        f"{upstream_head}..{agent_head}",
+    )
+    return {line for line in listing.splitlines() if line}
+
+
+def _refuse_out_of_scope_landing(
+    repo_root: Path,
+    *,
+    label: str,
+    upstream_head: str,
+    merge_head: str,
+    agent_head: str,
+) -> None:
+    """Refuse a landing whose first-parent diff leaves the task's footprint.
+
+    Every path the landing changes against the baseline must come from one of
+    the task's own commits; anything else is peer work on the shared branch
+    that a hand-made overlap resolution would silently overwrite.
+    """
+    landed = {
+        line
+        for line in _read(
+            repo_root, "diff", "--name-only", upstream_head, merge_head
+        ).splitlines()
+        if line
+    }
+    footprint = _task_footprint_paths(repo_root, upstream_head, agent_head)
+    drifted = sorted(landed - footprint)
+    if drifted:
+        raise SpiceError(_out_of_scope_refusal(label, upstream_head, drifted))
+
+
+def _out_of_scope_refusal(label: str, upstream_head: str, paths: list[str]) -> str:
+    joined = _shell_join(paths)
+    lines = [
+        "refusing to publish: the landing rewrites baseline paths outside "
+        f"the commits of {label}:",
+        *(f"  {path}" for path in paths),
+        "these paths carry peer work already landed on the shared branch; "
+        "publishing would silently overwrite it",
+        "next commands:",
+        f"  git checkout {upstream_head} -- {joined}",
+        f'  git commit -m "Restore baseline content for {label}"',
+        f'  spice task done {label} --validation "..."',
+        "an intentional change to any path above must land as its own commit "
+        "on this branch so the task owns it; then rerun spice task done",
+    ]
+    return "\n".join(lines)
+
+
 def _publish_race_recovery(
     label: str,
     remote: str,
@@ -694,6 +781,9 @@ def _merge_conflict_recovery(label: str, repo_root: Path) -> str:
     lines.extend(
         [
             "keep the merge state open; do not run `git merge --abort`",
+            "baseline-side hunks are peer work already landed on the shared "
+            "branch; fold them into the resolution — never keep only this "
+            "task's side",
             "commit while MERGE_HEAD exists so the baseline becomes a parent",
             "next commands:",
             "  git status --short",
@@ -727,6 +817,9 @@ def _merge_conflict_marker_recovery(
         [
             "do not use plain `git commit`; no MERGE_HEAD exists to supply the "
             "baseline parent",
+            "baseline-side hunks are peer work already landed on the shared "
+            "branch; fold them into the resolution — never keep only this "
+            "task's side",
             "next commands:",
             "  git status --short",
             "  git rev-parse --verify MERGE_HEAD  # expected to fail here",
