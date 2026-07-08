@@ -178,6 +178,7 @@ def test_maxim_reminder_gate_suppresses_same_combined_body_until_compaction(
     first_paths = watchdog.publish_maxim_hits_as_inbox(
         repo, "alpha beta", reminder_gate=gate
     )
+    first_body = first_paths[0].read_text(encoding="utf-8")
     first_judged = list(judged)
     duplicate_paths = watchdog.publish_maxim_hits_as_inbox(
         repo, "alpha beta again", reminder_gate=gate
@@ -203,6 +204,7 @@ def test_maxim_reminder_gate_suppresses_same_combined_body_until_compaction(
     assert after_ack_paths == []
     assert after_ack_judged == first_judged
     assert len(after_compaction_paths) == 1
+    assert after_compaction_paths[0].read_text(encoding="utf-8") == first_body
     assert judged == [
         ("FIRST reminder.", "alpha beta"),
         ("SECOND reminder.", "alpha beta"),
