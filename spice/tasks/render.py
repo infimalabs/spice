@@ -68,8 +68,14 @@ def _deps_lines(row: dict[str, Any]) -> list[str]:
     return out
 
 
-def _base_show_lines(row: dict[str, Any], rendered: str, flow: str) -> list[str]:
-    return [
+def _base_show_lines(
+    row: dict[str, Any],
+    rendered: str,
+    flow: str,
+    *,
+    include_recovery_context: bool,
+) -> list[str]:
+    lines = [
         f"handle {rendered}",
         f"title {_f(row, 'description')}",
         f"description {_f(row, 'task_description')}",
@@ -82,27 +88,37 @@ def _base_show_lines(row: dict[str, Any], rendered: str, flow: str) -> list[str]
         f"status {_f(row, 'status')}",
         f"claim {_f(row, 'claim_by') or '-'} until {_f(row, 'claim_until') or '-'}",
         f"claim_thread {_f(row, 'claim_thread') or '-'}",
-        (
-            f"claim_context {_f(row, 'claim_context_start') or '-'} -> "
-            f"{_f(row, 'claim_context_end') or '-'}"
-        ),
-        f"claim_context_link {_f(row, 'claim_context_link') or '-'}",
-        f"acceptance {_f(row, 'acceptance')}",
-        f"validation {_f(row, 'validation')}",
-        f"review_author {_f(row, 'review_author') or '-'}",
-        f"review_by {_f(row, 'review_by') or '-'}",
-        f"review_finding {_f(row, 'review_finding') or '-'}",
-        f"review_note {_f(row, 'review_note')}",
-        (
-            f"timing wait={_f(row, 'wait') or '-'} "
-            f"scheduled={_f(row, 'scheduled') or '-'} "
-            f"due={_f(row, 'due') or '-'} until={_f(row, 'until') or '-'}"
-        ),
-        (
-            f"origin {_f(row, 'origin_thread') or '-'} "
-            f"{_f(row, 'origin_branch') or '-'} {_f(row, 'origin_worktree') or '-'}"
-        ),
     ]
+    if include_recovery_context:
+        lines.extend(
+            [
+                (
+                    f"claim_context {_f(row, 'claim_context_start') or '-'} -> "
+                    f"{_f(row, 'claim_context_end') or '-'}"
+                ),
+                f"claim_context_link {_f(row, 'claim_context_link') or '-'}",
+            ]
+        )
+    lines.extend(
+        [
+            f"acceptance {_f(row, 'acceptance')}",
+            f"validation {_f(row, 'validation')}",
+            f"review_author {_f(row, 'review_author') or '-'}",
+            f"review_by {_f(row, 'review_by') or '-'}",
+            f"review_finding {_f(row, 'review_finding') or '-'}",
+            f"review_note {_f(row, 'review_note')}",
+            (
+                f"timing wait={_f(row, 'wait') or '-'} "
+                f"scheduled={_f(row, 'scheduled') or '-'} "
+                f"due={_f(row, 'due') or '-'} until={_f(row, 'until') or '-'}"
+            ),
+            (
+                f"origin {_f(row, 'origin_thread') or '-'} "
+                f"{_f(row, 'origin_branch') or '-'} {_f(row, 'origin_worktree') or '-'}"
+            ),
+        ]
+    )
+    return lines
 
 
 def _briefing_command(thread: str, *, start: str = "", end: str = "") -> str:
@@ -390,16 +406,31 @@ def _next_command_line(row: dict[str, Any], rendered: str) -> str:
     return f'next: spice task done {rendered} --validation "..."'
 
 
-def render_show(handle: str) -> str:
+def _should_show_recovery_context(row: dict[str, Any]) -> bool:
+    return _is_stale_claim(row, tw.now_iso())
+
+
+def render_show(handle: str, *, include_recovery_context: bool | None = None) -> str:
     row = identity.resolve(handle)
     flow = ",".join(ops.phases_of(row))
     rendered = identity.render_handle(row)
-    lines = _base_show_lines(row, rendered, flow)
+    show_recovery_context = (
+        _should_show_recovery_context(row)
+        if include_recovery_context is None
+        else include_recovery_context
+    )
+    lines = _base_show_lines(
+        row,
+        rendered,
+        flow,
+        include_recovery_context=show_recovery_context,
+    )
     lines.extend(_review_commit_lines(row))
     lines.extend(_phase_effort_lines(row))
-    rehydrate = _rehydrate_lines(row)
+    rehydrate = _rehydrate_lines(row) if show_recovery_context else []
     lines.extend(rehydrate)
-    lines.extend(_context_check_lines(row, has_rehydrate_commands=bool(rehydrate)))
+    if show_recovery_context:
+        lines.extend(_context_check_lines(row, has_rehydrate_commands=bool(rehydrate)))
     lines.extend(_phase_guidance_lines(row, rendered))
     deps = _deps_lines(row)
     if deps:
@@ -476,7 +507,7 @@ def render_next() -> str:
         "next task:",
         render_row(row),
         "",
-        render_show(rendered),
+        render_show(rendered, include_recovery_context=True),
         "",
         ops.claim_drive_line(rendered),
     ]
