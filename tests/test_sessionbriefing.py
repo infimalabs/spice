@@ -718,7 +718,9 @@ def test_briefing_default_horizon_is_count_bound(tmp_path, monkeypatch):
     ]
 
 
-def test_briefing_young_session_floor_extends_to_session_start(tmp_path, monkeypatch):
+def test_briefing_default_horizon_starts_at_oldest_selected_window(
+    tmp_path, monkeypatch
+):
     repo = _init_git_repo(tmp_path / "repo")
     transcript = tmp_path / "horizon.jsonl"
     asks = [
@@ -738,14 +740,98 @@ def test_briefing_young_session_floor_extends_to_session_start(tmp_path, monkeyp
 
     briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
 
-    assert "files=horizon.jsonl turns=2" in briefing
+    assert "files=horizon.jsonl turns=1" in briefing
     assert (
-        "horizon_basis=wall_clock_floor start=session start compactions=2/3"
+        "horizon_basis=compaction_count start=2026-01-01T10:00:00.000Z compactions=2/3"
     ) in briefing
-    assert _section_lines(briefing, "Recent Asks") == [
-        "Recent Asks",
-        "  acked 2026-01-01T08:00:00.000Z "
-        "key=20260101T080000000000Z before first young compaction",
+    assert _section_lines(briefing, "Latest Ask") == [
+        "Latest Ask",
+        "  acked 2026-01-01T10:30:00.000Z "
+        "key=20260101T103000000000Z young current request",
+    ]
+
+
+def test_briefing_parses_only_the_selected_compaction_tail(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "tail.jsonl"
+    events = [
+        {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": "old-turn"},
+        },
+        {
+            "timestamp": "2026-01-01T00:00:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"text": "<unknown-scaffold>old harness</unknown-scaffold>"}
+                ],
+            },
+        },
+        {"timestamp": "2026-01-01T01:00:00Z", "type": "compacted", "payload": {}},
+        {"timestamp": "2026-01-01T02:00:00Z", "type": "compacted", "payload": {}},
+        {
+            "timestamp": "2026-01-01T02:10:00Z",
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": "tail-a"},
+        },
+        {
+            "timestamp": "2026-01-01T02:10:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": "tail request one"}],
+            },
+        },
+        {"timestamp": "2026-01-01T03:00:00Z", "type": "compacted", "payload": {}},
+        {
+            "timestamp": "2026-01-01T03:10:00Z",
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": "tail-b"},
+        },
+        {
+            "timestamp": "2026-01-01T03:10:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": "tail request two"}],
+            },
+        },
+        {"timestamp": "2026-01-01T04:00:00Z", "type": "compacted", "payload": {}},
+        {
+            "timestamp": "2026-01-01T04:10:00Z",
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": "tail-c"},
+        },
+        {
+            "timestamp": "2026-01-01T04:10:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": "tail request three"}],
+            },
+        },
+    ]
+    transcript.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+
+    assert "files=tail.jsonl turns=3" in briefing
+    assert (
+        "horizon_basis=compaction_count start=2026-01-01T02:00:00.000Z compactions=3/3"
+    ) in briefing
+    assert _section_lines(briefing, "Latest Ask") == [
+        "Latest Ask",
+        "  human 2026-01-01T04:10:00.000Z tail request three",
     ]
 
 
@@ -793,25 +879,7 @@ def test_explicit_start_wins_over_adaptive_horizon_in_briefing_and_sweep(
     ) in sweep
 
 
-def test_sweep_zero_windows_falls_back_to_public_briefing(tmp_path, monkeypatch):
-    repo = _init_git_repo(tmp_path / "repo")
-    transcript = tmp_path / "horizon.jsonl"
-    _write_horizon_transcript(
-        transcript,
-        asks=[("2026-01-01T10:30:00Z", "young current request")],
-        compactions=["2026-01-01T10:00:00Z"],
-    )
-    monkeypatch.chdir(repo)
-
-    briefing = render_briefing([transcript])
-    payload = briefing_module.build_briefing_payload([transcript], sweep_count=0)
-
-    assert payload.sweep_windows == ()
-    assert briefing_module.render_sweep_payload(payload) == briefing
-    assert render_sweep([transcript], count=0) == briefing
-
-
-def test_sweep_horizon_extends_to_wall_clock_floor(tmp_path, monkeypatch):
+def test_sweep_uses_last_requested_compaction_windows(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
     transcript = tmp_path / "horizon.jsonl"
     asks = [
@@ -835,13 +903,14 @@ def test_sweep_horizon_extends_to_wall_clock_floor(tmp_path, monkeypatch):
 
     sweep = render_sweep([transcript], count=3)
 
-    assert "Sweep\n  windows=4 files=1" in sweep
+    assert "Sweep\n  windows=3 files=1" in sweep
     assert (
-        "horizon_basis=wall_clock_floor start=2026-01-01T00:00:00.000Z compactions=4/3"
+        "horizon_basis=compaction_count start=2026-01-01T10:00:00.000Z compactions=3/3"
     ) in sweep
-    assert "Window 0 (from 2026-01-01T00:00:00.000Z)" in sweep
+    assert "Window 0 (from 2026-01-01T10:00:00.000Z)" in sweep
     assert (
-        "ask acked 2026-01-01T01:00:00.000Z key=20260101T010000000000Z floor request"
+        "ask acked 2026-01-01T10:05:00.000Z "
+        "key=20260101T100500000000Z recent request one"
     ) in sweep
 
 

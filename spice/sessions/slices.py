@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
+from spice.sessions.jsonl import iter_jsonl_lines_reverse
+from spice.sessions import records as session_records
 from spice.sessions.records import CompactionRecord, TurnRecord
+from spice.sessions.util import normalize_timestamp
 
 
 @dataclass(slots=True)
@@ -23,6 +27,102 @@ class SliceRecord:
     ordered_messages: list[tuple[str, str]] = field(default_factory=list)
     crossing_turn_files: list[str] = field(default_factory=list)
     patch_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class CompactionWindowSelection:
+    start_ts: str | None
+    basis: str
+    requested_count: int
+    selected_boundaries: tuple[str, ...]
+
+    @property
+    def selected_count(self) -> int:
+        return len(self.selected_boundaries)
+
+
+def select_compaction_windows(
+    turns: Sequence[TurnRecord],
+    compactions: Sequence[CompactionRecord],
+    *,
+    count: int,
+    end: str | None = None,
+    hard_cap: int = 5,
+) -> CompactionWindowSelection:
+    requested = max(0, int(count))
+    capped = min(requested, max(0, int(hard_cap)))
+    eligible = tuple(record.ts for record in compactions if not end or record.ts <= end)
+    cap_excludes = requested > hard_cap and len(eligible) > hard_cap
+    if not eligible or capped == 0:
+        return CompactionWindowSelection(
+            start_ts=None,
+            basis="hard_cap" if cap_excludes else "compaction_count",
+            requested_count=requested,
+            selected_boundaries=(),
+        )
+    selected = eligible[-min(capped, len(eligible)) :]
+    return CompactionWindowSelection(
+        start_ts=selected[0],
+        basis="hard_cap" if cap_excludes else "compaction_count",
+        requested_count=requested,
+        selected_boundaries=selected,
+    )
+
+
+def select_compaction_windows_from_files(
+    files: Sequence[Path],
+    *,
+    count: int,
+    end: str | None = None,
+    hard_cap: int = 5,
+) -> CompactionWindowSelection:
+    requested = max(0, int(count))
+    capped = min(requested, max(0, int(hard_cap)))
+    if capped == 0:
+        return CompactionWindowSelection(
+            start_ts=None,
+            basis="compaction_count",
+            requested_count=requested,
+            selected_boundaries=(),
+        )
+    boundaries: list[str] = []
+    for path in files:
+        boundaries.extend(_latest_compaction_boundaries_for_file(path, capped, end=end))
+    boundaries.sort()
+    cap_excludes = requested > hard_cap and len(boundaries) >= hard_cap
+    selected = tuple(boundaries[-min(capped, len(boundaries)) :])
+    return CompactionWindowSelection(
+        start_ts=selected[0] if selected else None,
+        basis="hard_cap" if cap_excludes else "compaction_count",
+        requested_count=requested,
+        selected_boundaries=selected,
+    )
+
+
+def _latest_compaction_boundaries_for_file(
+    path: Path, limit: int, *, end: str | None
+) -> list[str]:
+    if limit <= 0:
+        return []
+    driver = session_records.driver_for_transcript(path)
+    boundaries: list[str] = []
+    for line in iter_jsonl_lines_reverse(path):
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        event = driver.normalize_transcript_line(obj)
+        if event is None or event.get("type") != "compacted":
+            continue
+        ts = normalize_timestamp(obj.get("timestamp"))
+        if not ts or (end and ts > end):
+            continue
+        boundaries.append(ts)
+        if len(boundaries) >= limit:
+            break
+    return list(reversed(boundaries))
 
 
 def build_compaction_slices(

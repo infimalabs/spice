@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
@@ -42,7 +42,7 @@ from spice.sessions.meter import (
     context_meter_instruction,
     meter_pressure_level,
 )
-from spice.sessions.util import parse_iso_ts
+from spice.sessions.slices import select_compaction_windows_from_files
 from spice.sessions.records import (
     CommitRecord,
     CompactionRecord,
@@ -66,7 +66,6 @@ TASK_PLANE_ROW_LIMIT = 8
 TASK_PLANE_PREVIEW_CHARS = 180
 DEFAULT_HORIZON_COMPACTIONS = 3
 MAX_HORIZON_COMPACTIONS = 5
-DEFAULT_HORIZON_MIN_SECONDS = 4 * 60 * 60
 HORIZON_END_SENTINEL = "￿"
 THREAD_ID_TOKEN_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
@@ -143,6 +142,7 @@ class BriefingPayload:
     meter: ContextMeter
     commits: tuple[CommitRecord, ...]
     asks: tuple[RehydrationCandidate, ...]
+    recovery_asks: tuple[RehydrationCandidate, ...]
     finals: tuple[RehydrationCandidate, ...]
     commit_candidates: tuple[RehydrationCandidate, ...]
     compaction_intents: tuple[RehydrationCandidate, ...]
@@ -422,18 +422,18 @@ def build_briefing_payload(
     sweep_count: int | None = None,
 ) -> BriefingPayload:
     file_tuple = tuple(files)
-    all_turns = collect_turns(list(file_tuple))
-    all_compactions = collect_compactions(list(file_tuple))
     horizon_count = (
         sweep_count if sweep_count is not None else DEFAULT_HORIZON_COMPACTIONS
     )
-    horizon = _resolve_horizon(all_turns, all_compactions, count=horizon_count, end=end)
+    horizon = _resolve_horizon(list(file_tuple), count=horizon_count, end=end)
     sweep_falls_back = sweep_count is not None and not start and horizon.start is None
     if sweep_falls_back:
         horizon = _resolve_horizon(
-            all_turns, all_compactions, count=DEFAULT_HORIZON_COMPACTIONS, end=end
+            list(file_tuple), count=DEFAULT_HORIZON_COMPACTIONS, end=end
         )
     effective_start = _effective_start(start, horizon.start)
+    all_turns = collect_turns(list(file_tuple), start=effective_start)
+    all_compactions = collect_compactions(list(file_tuple), start=effective_start)
     filters = BriefingFilters(
         start=start,
         end=end,
@@ -464,6 +464,15 @@ def build_briefing_payload(
             subject_thread_ids=_subject_thread_ids(list(file_tuple)),
         )
     )
+    recovery_asks = tuple(
+        collect_ask_candidates(
+            turns=list(turn_tuple),
+            start=start,
+            end=end,
+            contains=contains,
+            subject_thread_ids=_subject_thread_ids(list(file_tuple)),
+        )
+    )
     finals = tuple(collect_final_candidates(list(turn_tuple)))
     commit_candidates = tuple(collect_commit_candidates(list(commits)))
     compaction_intents = tuple(
@@ -478,9 +487,10 @@ def build_briefing_payload(
         horizon=horizon,
         turns=turn_tuple,
         compactions=compaction_tuple,
-        meter=collect_context_meter(list(file_tuple)),
+        meter=collect_context_meter(list(file_tuple), start=effective_start),
         commits=commits,
         asks=asks,
+        recovery_asks=recovery_asks,
         finals=finals,
         commit_candidates=commit_candidates,
         compaction_intents=compaction_intents,
@@ -539,7 +549,9 @@ def render_briefing_payload(
     max_bytes: int | None = DEFAULT_BRIEFING_MAX_BYTES,
     explain_pruning: bool = False,
 ) -> str:
-    recovery = _recovery_lines(list(payload.compaction_intents), list(payload.asks))
+    recovery = _recovery_lines(
+        list(payload.compaction_intents), list(payload.recovery_asks)
+    )
     lines: list[str] = []
     lines.extend(_briefing_header_lines(list(payload.files), list(payload.turns)))
     lines.extend(_horizon_lines(payload.horizon))
@@ -604,91 +616,27 @@ def _horizon_lines(horizon: ResolvedHorizon) -> list[str]:
 
 
 def _resolve_horizon(
-    turns: list[TurnRecord],
-    compactions: list[CompactionRecord],
+    files: list[Path],
     *,
     count: int,
     end: str | None,
-    min_seconds: int = DEFAULT_HORIZON_MIN_SECONDS,
 ) -> ResolvedHorizon:
-    requested = max(0, int(count))
-    capped = min(requested, MAX_HORIZON_COMPACTIONS)
-    eligible = [record.ts for record in compactions if not end or record.ts <= end]
-    cap_excludes_boundaries = (
-        requested > MAX_HORIZON_COMPACTIONS and len(eligible) > MAX_HORIZON_COMPACTIONS
+    selection = select_compaction_windows_from_files(
+        files,
+        count=count,
+        end=end,
+        hard_cap=MAX_HORIZON_COMPACTIONS,
     )
-    if not eligible or capped == 0:
-        basis = "hard_cap" if cap_excludes_boundaries else "compaction_count"
-        return ResolvedHorizon(
-            start=None,
-            basis=basis,
-            requested_compactions=requested,
-            selected_boundaries=(),
-        )
-
-    selected_count = min(capped, len(eligible))
-    count_selected = selected_count
-    basis = "hard_cap" if cap_excludes_boundaries else "compaction_count"
-    floor = _horizon_floor(
-        end or _latest_horizon_ts(turns=turns, compactions=compactions),
-        min_seconds=min_seconds,
-    )
-    if floor:
-        max_selectable = min(MAX_HORIZON_COMPACTIONS, len(eligible))
-        while selected_count < max_selectable and eligible[-selected_count] > floor:
-            selected_count += 1
-        if basis != "hard_cap":
-            start = eligible[-selected_count]
-            if (
-                start > floor
-                and selected_count == len(eligible)
-                and selected_count < MAX_HORIZON_COMPACTIONS
-            ):
-                selected_boundaries = tuple(eligible[-selected_count:])
-                return ResolvedHorizon(
-                    start=None,
-                    basis="wall_clock_floor",
-                    requested_compactions=requested,
-                    selected_boundaries=selected_boundaries,
-                )
-            if start > floor and selected_count == MAX_HORIZON_COMPACTIONS:
-                basis = "hard_cap"
-            elif selected_count > count_selected:
-                basis = "wall_clock_floor"
-
-    selected_boundaries = tuple(eligible[-selected_count:])
     return ResolvedHorizon(
-        start=selected_boundaries[0] if selected_boundaries else None,
-        basis=basis,
-        requested_compactions=requested,
-        selected_boundaries=selected_boundaries,
+        start=selection.start_ts,
+        basis=selection.basis,
+        requested_compactions=selection.requested_count,
+        selected_boundaries=selection.selected_boundaries,
     )
-
-
-def _latest_horizon_ts(
-    *, turns: list[TurnRecord], compactions: list[CompactionRecord]
-) -> str | None:
-    values = [
-        value
-        for value in [
-            *(_turn_activity_ts(turn) for turn in turns),
-            *(record.ts for record in compactions),
-        ]
-        if value
-    ]
-    return max(values) if values else None
 
 
 def _turn_activity_ts(turn: TurnRecord) -> str:
     return turn.end_ts or turn.last_activity_ts or turn.start_ts
-
-
-def _horizon_floor(end: str | None, *, min_seconds: int) -> str | None:
-    end_dt = parse_iso_ts(end)
-    if end_dt is None:
-        return None
-    floor_dt = end_dt - timedelta(seconds=max(0, min_seconds))
-    return floor_dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _effective_start(user_start: str | None, horizon_start: str | None) -> str | None:

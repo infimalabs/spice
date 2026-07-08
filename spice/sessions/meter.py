@@ -57,12 +57,14 @@ class ContextMeter:
     pre_compaction_max_percent: float | None
 
 
-def collect_context_meter(files: list[Path]) -> ContextMeter:
+def collect_context_meter(
+    files: list[Path], *, start: str | None = None
+) -> ContextMeter:
     events: list[tuple[str, int, str, ActiveContextSnapshot | None]] = []
     snapshots: list[ActiveContextSnapshot] = []
     order = 0
     for path in files:
-        for obj in _iter_jsonl_objects(path):
+        for obj in _iter_jsonl_objects(path, start=start):
             order += 1
             snapshot = active_context_snapshot_from_object(path, obj)
             if snapshot is not None:
@@ -113,14 +115,39 @@ def latest_active_context_snapshot_for_file(path: Path) -> ActiveContextSnapshot
     return None
 
 
-def _iter_jsonl_objects(path: Path) -> Iterator[dict[str, Any]]:
-    for line in iter_jsonl_lines(path):
+def _iter_jsonl_objects(
+    path: Path, *, start: str | None = None
+) -> Iterator[dict[str, Any]]:
+    for line in _iter_jsonl_lines_from_start(path, start):
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:
             continue
         if isinstance(obj, dict):
             yield obj
+
+
+def _iter_jsonl_lines_from_start(path: Path, start: str | None) -> Iterator[str]:
+    if not start:
+        yield from iter_jsonl_lines(path)
+        return
+    lines: list[str] = []
+    for line in iter_jsonl_lines_reverse(path):
+        ts = _line_timestamp(line)
+        if ts and ts < start:
+            break
+        lines.append(line)
+    yield from reversed(lines)
+
+
+def _line_timestamp(line: str) -> str | None:
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    return normalize_timestamp(obj.get("timestamp"))
 
 
 def active_context_snapshot_from_object(
