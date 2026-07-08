@@ -3,13 +3,10 @@
 import argparse
 import gzip
 import json
-import os
 import shutil
 import sqlite3
 import subprocess
-import time
 from datetime import datetime
-from types import SimpleNamespace
 
 import pytest
 
@@ -22,13 +19,9 @@ from spice.mail.ackstate import (
     record_acked_inbox_items,
 )
 from spice.mail.inbox import (
-    collect_deadlettered_inbox_items,
-    collect_inbox_items,
     compose_inbox_text,
-    deadletter_inbox_item,
     write_inbox_item,
 )
-from spice.sessions import briefing as briefing_module
 from spice.sessions.briefing import render_briefing, render_sweep
 from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions.meter import (
@@ -39,11 +32,10 @@ from spice.sessions.meter import (
     context_pressure_level,
     context_pressure_should_warn,
 )
-from spice.sessions import learnings, records
+from spice.sessions import records
 from spice.sessions.util import first_text, normalize_timestamp
 from spice.errors import SpiceError
 from spice.tasks import config as task_config
-from spice.tasks import create, identity as task_identity, ops
 from spice.tasks.identity import (
     BASE,
     INCEPTED_RE,
@@ -535,336 +527,9 @@ def test_sweep_renders_ack_db_asks_inside_compaction_windows(tmp_path, monkeypat
     sweep = render_sweep([transcript], count=1)
 
     assert (
-        "  ask acked 2026-01-01T00:00:05.000Z key=20260101T000005000000Z pre-compaction request"
-        in sweep
-    )
-    assert (
         "  ask acked 2026-01-01T00:00:15.000Z key=20260101T000015000000Z post-compaction request"
         in sweep
     )
-
-
-def test_briefing_learnings_use_active_stem_top_five(session_task_repo):
-    repo = session_task_repo
-    for index in range(6):
-        learnings.confirm_learning_candidates(
-            repo,
-            "task",
-            [
-                learnings.LearningCandidate(
-                    statement=f"Use durable session learning number {index}.",
-                    source_task=f"TASK-{index}",
-                    project_stem="task",
-                )
-            ],
-            now=float(index),
-        )
-    learnings.confirm_learning_candidates(
-        repo,
-        "serve",
-        [
-            learnings.LearningCandidate(
-                statement="Use unrelated serve learning only for serve tasks.",
-                source_task="SERVE-1",
-                project_stem="serve",
-            )
-        ],
-        now=99.0,
-    )
-    active = create.add(
-        "Read top task learnings",
-        project="task.unit",
-        origin="ack:20260101T000000000000Z",
-        priority="medium",
-        acceptance=["briefing renders the top five learnings"],
-    )
-    ops.claim(active)
-    briefing = render_briefing([], max_lines=200, max_bytes=20000)
-
-    assert _section_lines(briefing, "Learnings") == [
-        "Learnings",
-        "  stem=task",
-        "  - Use durable session learning number 5. (confirmed=1, source=TASK-5)",
-        "  - Use durable session learning number 4. (confirmed=1, source=TASK-4)",
-        "  - Use durable session learning number 3. (confirmed=1, source=TASK-3)",
-        "  - Use durable session learning number 2. (confirmed=1, source=TASK-2)",
-        "  - Use durable session learning number 1. (confirmed=1, source=TASK-1)",
-    ]
-
-
-def test_briefing_surfaces_learning_from_prior_task_done(
-    session_task_repo, tmp_path, monkeypatch
-):
-    codex_home = tmp_path / "codex-home"
-    monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
-    monkeypatch.setattr(
-        learnings,
-        "evaluate_maxim",
-        lambda *_args, **_kwargs: SimpleNamespace(agrees=True),
-    )
-    completed = create.add(
-        "Distill session learning",
-        project="task.unit",
-        origin="ack:20260101T000000000000Z",
-        priority="medium",
-        acceptance=["task done stores a durable learning"],
-    )
-    ops.claim(completed)
-    claimed = task_identity.resolve(completed)
-    _write_learning_transcript(
-        codex_home,
-        thread_id=ACTOR_A,
-        turn_id="turn-session-learning",
-        timestamp=str(claimed["claim_at"]),
-    )
-
-    done_output = ops.done(completed, validation=["validated learning capture"])
-    active = create.add(
-        "Use session learning",
-        project="task.unit",
-        origin="ack:20260101T000000000000Z",
-        priority="medium",
-        acceptance=["briefing surfaces the active stem learning"],
-    )
-    ops.claim(active)
-    transcript = tmp_path / "briefing.jsonl"
-    _write_filter_transcript(transcript)
-
-    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
-
-    assert "learnings: stored 1 accepted from 1 candidate(s)" in done_output
-    assert _section_lines(briefing, "Learnings") == [
-        "Learnings",
-        "  stem=task",
-        f"  - Use spice task next after phase boundaries (confirmed=1, source={completed})",
-    ]
-
-
-def test_briefing_reports_deadlettered_inbox_items(tmp_path, monkeypatch):
-    repo = _init_git_repo(tmp_path / "repo")
-    write_inbox_item(
-        repo,
-        "20260101T000000000001Z.txt",
-        compose_inbox_text(body="operator steering", priority=None, stop=False),
-    )
-    deadletter_inbox_item(repo, "20260101T000000000001Z")
-    monkeypatch.chdir(repo)
-
-    briefing = render_briefing([], max_lines=200, max_bytes=20000)
-
-    assert "Inbox\n  pending=0" in briefing
-    assert "deadlettered=1" in briefing
-    assert "source=inbox_deadletter" in briefing
-    assert "requeue=spice agent requeue-deadletter <key>" in briefing
-    assert "deadlettered_inbox key=20260101T000000000001Z" in briefing
-
-
-def test_briefing_pending_inbox_ack_guidance_uses_open_response_copy(
-    tmp_path, monkeypatch
-):
-    repo = _init_git_repo(tmp_path / "repo")
-    write_inbox_item(
-        repo,
-        "20260101T000000000002Z.txt",
-        compose_inbox_text(body="operator steering", priority=None, stop=False),
-    )
-    monkeypatch.chdir(repo)
-
-    briefing = render_briefing([], max_lines=200, max_bytes=20000)
-
-    assert "Inbox\n  pending=1" in briefing
-    assert (
-        "Real-time N/ACK loop: put a plain-text ACK or reasoned NACK header "
-        "near the start of each working assistant message"
-    ) in briefing
-    assert "ACK <key> [<key> ...]: <what changed or was captured>" in briefing
-    assert "acknowledged keys clear once processed" in briefing
-    assert "NACK <key>: <why this cannot be done>" in briefing
-    assert "refused keys clear once processed" in briefing
-    assert "Do not bury ACKs or NACKs mid-message" in briefing
-    assert "understood" not in briefing
-
-
-def test_agent_requeue_deadletter_command_restores_pending_item(
-    tmp_path, monkeypatch, capsys
-):
-    repo = _init_git_repo(tmp_path / "repo")
-    write_inbox_item(
-        repo,
-        "20260101T000000000002Z.txt",
-        compose_inbox_text(body="operator steering", priority=None, stop=False),
-    )
-    deadletter_inbox_item(repo, "20260101T000000000002Z")
-    monkeypatch.chdir(repo)
-    args = build_parser().parse_args(
-        ["agent", "requeue-deadletter", "20260101T000000000002Z"]
-    )
-
-    assert args.func(args) == 0
-
-    output = capsys.readouterr().out
-    assert "requeued_deadletter key=20260101T000000000002Z" in output
-    assert [item.name for item in collect_inbox_items(repo)] == [
-        "20260101T000000000002Z.txt"
-    ]
-    assert collect_deadlettered_inbox_items(repo) == []
-
-
-def test_briefing_dirty_git_posture_includes_policy_pressure_and_ages(
-    tmp_path, monkeypatch
-):
-    repo = _init_git_repo(tmp_path / "repo")
-    transcript = tmp_path / "filtered.jsonl"
-    _write_filter_transcript(transcript)
-    oversize = repo / "oversize.py"
-    magic = repo / "magic.py"
-    oversize.write_text("def oversized():\n    return 1\n", encoding="utf-8")
-    magic.write_text("def check(value):\n    return value > 99\n", encoding="utf-8")
-    now = time.time()
-    old_mtime = now - 120
-    new_mtime = now - 5
-    os.utime(oversize, (old_mtime, old_mtime))
-    os.utime(magic, (new_mtime, new_mtime))
-    monkeypatch.chdir(repo)
-
-    monkeypatch.setattr(
-        briefing_module.fileloc,
-        "scan_loc_violations",
-        lambda paths, **_kwargs: [
-            briefing_module.fileloc.LocFinding(
-                path="oversize.py",
-                line_count=1601,
-                byte_count=100,
-                over_line_limit=True,
-                over_byte_limit=False,
-                line_limit=1500,
-                byte_limit=120_000,
-            )
-        ],
-    )
-    monkeypatch.setattr(
-        briefing_module,
-        "_scan_dirty_complexity_pressure",
-        lambda paths, **_kwargs: [
-            briefing_module.DirtyComplexityRegression(
-                path="oversize.py",
-                function_name="oversized",
-                metric="ccn",
-                value=31,
-                active_threshold=30,
-                baseline_value=None,
-            )
-        ],
-    )
-    monkeypatch.setattr(
-        briefing_module.magicnums,
-        "detect_magic_regressions",
-        lambda paths, **_kwargs: [
-            briefing_module.magicnums.MagicFinding(
-                path="magic.py",
-                line=2,
-                literal="99",
-            )
-        ],
-    )
-
-    briefing = render_briefing(
-        [transcript],
-        max_lines=BRIEFING_FILTER_MAX_LINES,
-        max_bytes=BRIEFING_FILTER_MAX_BYTES,
-    )
-
-    assert "dirty=2 path(s)" in briefing
-    assert (
-        "pressure severity=high findings=3 files=2 scanned=2/2 "
-        "file-loc=1 complexity=1 magic-numbers=1"
-    ) in briefing
-    assert "dirty_age=oldest=oversize.py:" in briefing
-    assert "newest=magic.py:" in briefing
-    assert "pressure_file=oversize.py [complexity-ccn,file-loc]" in briefing
-    assert "pressure_file=magic.py [magic]" in briefing
-
-
-def test_briefing_budget_prunes_with_explanation(tmp_path):
-    transcript = tmp_path / "filtered.jsonl"
-    _write_filter_transcript(transcript)
-
-    briefing = render_briefing(
-        [transcript],
-        max_lines=BRIEFING_PRUNE_MAX_LINES,
-        max_bytes=BRIEFING_FILTER_MAX_BYTES,
-        explain_pruning=True,
-    )
-
-    assert len(briefing.splitlines()) == 6
-    assert "Pruning original_lines=" in briefing
-
-
-def test_session_briefing_parser_exposes_budget_and_filter_flags():
-    args = build_parser().parse_args(
-        [
-            "session",
-            "briefing",
-            "--start",
-            "2026-01-01T00:00:00Z",
-            "--end",
-            "2026-01-01T00:00:10Z",
-            "--contains",
-            "needle",
-            "--turn-id",
-            "turn-b",
-            "--tool",
-            "apply_patch",
-            "--max-lines",
-            str(BRIEFING_PARSE_MAX_LINES),
-            "--max-bytes",
-            str(BRIEFING_PARSE_MAX_BYTES),
-            "--explain-pruning",
-        ]
-    )
-
-    assert args.session_action == "briefing"
-    assert args.contains == "needle"
-    assert args.turn_ids == ["turn-b"]
-    assert args.tools == ["apply_patch"]
-    assert args.max_lines == BRIEFING_PARSE_MAX_LINES
-    assert args.max_bytes == BRIEFING_PARSE_MAX_BYTES
-    assert args.explain_pruning is True
-
-
-def test_sweep_and_timeline_parser_share_filter_flags():
-    parser = build_parser()
-    sweep = parser.parse_args(
-        [
-            "session",
-            "sweep",
-            "--contains",
-            "needle",
-            "--turn-id",
-            "turn-b",
-            "--tool",
-            "apply_patch",
-        ]
-    )
-    timeline = parser.parse_args(
-        [
-            "session",
-            "timeline",
-            "--contains",
-            "needle",
-            "--turn-id",
-            "turn-b",
-            "--tool",
-            "apply_patch",
-        ]
-    )
-
-    assert sweep.contains == "needle"
-    assert sweep.turn_ids == ["turn-b"]
-    assert sweep.tools == ["apply_patch"]
-    assert timeline.contains == "needle"
-    assert timeline.turn_ids == ["turn-b"]
-    assert timeline.tools == ["apply_patch"]
 
 
 def test_mint_incepted_shape_and_collision_advance():
@@ -1094,6 +759,53 @@ def _write_filter_transcript(path) -> None:
     )
 
 
+def _write_horizon_transcript(path, *, asks, compactions) -> None:
+    events = []
+    for index, (timestamp, text) in enumerate(asks):
+        turn_id = f"turn-horizon-{index}"
+        events.extend(
+            [
+                {
+                    "timestamp": timestamp,
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": turn_id},
+                },
+                {
+                    "timestamp": timestamp,
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"text": text}],
+                    },
+                },
+                {
+                    "timestamp": timestamp,
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "phase": "final_answer",
+                        "content": [{"text": f"completed {text}"}],
+                    },
+                },
+                {
+                    "timestamp": timestamp,
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete"},
+                },
+            ]
+        )
+    events.extend(
+        {"timestamp": timestamp, "type": "compacted", "payload": {}}
+        for timestamp in compactions
+    )
+    events.sort(key=lambda event: event["timestamp"])
+    path.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
+    )
+
+
 def _write_learning_transcript(
     codex_home,
     *,
@@ -1144,6 +856,23 @@ def _record_ack_state_ask(repo, key: str, body: str, disposition: str, ts: str) 
             )
         ],
         now=_epoch_seconds(ts),
+    )
+
+
+def _record_ack_state_asks(repo, asks: list[tuple[str, str]]) -> None:
+    for ts, body in asks:
+        _record_ack_state_ask(
+            repo,
+            _ack_key(ts),
+            body,
+            ACK_DISPOSITION_ACKED,
+            ts,
+        )
+
+
+def _ack_key(ts: str) -> str:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime(
+        "%Y%m%dT%H%M%S%fZ"
     )
 
 

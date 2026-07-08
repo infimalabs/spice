@@ -50,6 +50,8 @@ INBOX_COLLISION_MAX = 1000
 INBOX_PUBLISH_LOCK_NAME = ".publish.lock"
 _PREVIEW_ELLIPSIS_CHARS = 3
 SECONDS_PER_MINUTE = 60
+MINUTES_PER_HOUR = 60
+HOURS_PER_DAY = 24
 INBOX_MAX_ITEM_AGE_SECONDS = 24 * 60 * 60
 INBOX_DIRECT_STEERING_ROW = "Direct operator steering: read before planning."
 INBOX_STEERING_ROW = (
@@ -115,6 +117,13 @@ class InboxItem:
     text: str
     attachments: tuple[InboxAttachment, ...] = ()
     disposition: str = ""
+    age_epoch: float | None = None
+    """Authoritative age anchor (epoch seconds); falls back to source_path mtime.
+
+    Ack-state rows share one sqlite store as their source_path, so its mtime is
+    not the row's own age. Records carry their own ``archived_at`` (or a key
+    timestamp), which is pinned here so age reflects the record, not the store.
+    """
 
 
 @dataclass(frozen=True)
@@ -193,6 +202,7 @@ def _collect_ack_state_inbox_items(
             text=record.text,
             attachments=_ack_state_record_attachments(record),
             disposition=record.disposition,
+            age_epoch=_ack_state_record_age_epoch(record),
         )
         for record in ack_state_records(repo_root)
         if disposition is None or record.disposition == disposition
@@ -343,18 +353,27 @@ def inbox_ack_format_hint_row(items: Sequence[InboxItem]) -> str:
 
 def _inbox_item_age_seconds(item: InboxItem) -> float:
     try:
-        return inbox_path_age_seconds(item.source_path)
+        return inbox_item_age_seconds(item)
     except OSError:
         return 0.0
+
+
+def inbox_item_age_seconds(item: InboxItem) -> float:
+    if item.age_epoch is not None:
+        return datetime.now().astimezone().timestamp() - item.age_epoch
+    return inbox_path_age_seconds(item.source_path)
+
+
+def inbox_item_relative_time(item: InboxItem) -> str:
+    if item.age_epoch is not None:
+        return format_relative_seconds(inbox_item_age_seconds(item))
+    return relative_time_for_path(item.source_path)
 
 
 def inbox_item_readout_rows(item: InboxItem) -> list[str]:
     payload = parse_inbox_payload(item.text)
     resend_label = inbox_item_resend_label(payload)
-    header = (
-        f"key={inbox_item_key(item.name)}: "
-        f"age={relative_time_for_path(item.source_path)}"
-    )
+    header = f"key={inbox_item_key(item.name)}: age={inbox_item_relative_time(item)}"
     if resend_label:
         header = f"{header} {resend_label}"
     rows = [
@@ -396,7 +415,7 @@ def inbox_item_summary_row(item: InboxItem) -> str:
     resend = f" {resend_label}" if resend_label else ""
     return (
         f"key={inbox_item_key(item.name)}: "
-        f"age={relative_time_for_path(item.source_path)}{priority}{resend} "
+        f"age={inbox_item_relative_time(item)}{priority}{resend} "
         "(shown earlier; ACK to clear)"
     )
 
@@ -443,10 +462,30 @@ def inbox_ack_state_context_rows(items: Sequence[InboxItem]) -> list[str]:
         )
         rows.append(
             f"{label} key={inbox_item_key(item.name)} "
-            f"age={relative_time_for_path(item.source_path)}{priority}"
+            f"age={inbox_item_relative_time(item)}{priority}"
             f"{attachments} text={text or '-'}"
         )
     return rows
+
+
+def _ack_state_record_age_epoch(record: Any) -> float | None:
+    """The record's own age anchor: archived_at, or its key timestamp.
+
+    A positive ``archived_at`` records when the row entered ack state. Legacy
+    rows migrated in without one (default 0) fall back to the inbox key, which
+    is itself a UTC timestamp. Either beats the shared store file's mtime.
+    """
+    if record.archived_at > 0:
+        return float(record.archived_at)
+    return _inbox_key_epoch(record.inbox_name)
+
+
+def _inbox_key_epoch(name: str) -> float | None:
+    try:
+        parsed = datetime.strptime(inbox_item_key(name), "%Y%m%dT%H%M%S%fZ")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC).timestamp()
 
 
 def _ack_state_record_attachments(record: Any) -> tuple[InboxAttachment, ...]:
@@ -489,7 +528,7 @@ def inbox_deadletter_context_rows(items: Sequence[InboxItem]) -> list[str]:
         )
         rows.append(
             f"deadlettered_inbox key={inbox_item_key(item.name)} "
-            f"age={relative_time_for_path(item.source_path)}{priority}"
+            f"age={inbox_item_relative_time(item)}{priority}"
             f"{attachments} text={text or '-'}"
         )
     return rows
@@ -909,12 +948,17 @@ def format_relative_seconds(seconds: float) -> str:
     if total < SECONDS_PER_MINUTE:
         return f"{total}s ago"
     minutes, _ = divmod(total, SECONDS_PER_MINUTE)
-    if minutes < SECONDS_PER_MINUTE:
+    if minutes < MINUTES_PER_HOUR:
         return f"{minutes}m ago"
-    hours, minute = divmod(minutes, SECONDS_PER_MINUTE)
-    if minute:
-        return f"{hours}h{minute:02d}m ago"
-    return f"{hours}h ago"
+    hours, minute = divmod(minutes, MINUTES_PER_HOUR)
+    if hours < HOURS_PER_DAY:
+        if minute:
+            return f"{hours}h{minute:02d}m ago"
+        return f"{hours}h ago"
+    days, hour = divmod(hours, HOURS_PER_DAY)
+    if hour:
+        return f"{days}d{hour:02d}h ago"
+    return f"{days}d ago"
 
 
 def relative_time_for_path(path: Path) -> str:
