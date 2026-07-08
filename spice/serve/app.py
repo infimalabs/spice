@@ -30,6 +30,7 @@ from spice.mail.inbox import (
     inbox_dir,
     pending_inbox_count,
 )
+from spice.mail.replies import ensure_reply_log
 from spice.paths import repo_root_from_cwd, shared_attachment_root
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, message, metric
@@ -555,7 +556,7 @@ def lane_watch_paths_for_target(
     thread_id: str | None,
     transcript: TranscriptResolution | None,
 ) -> tuple[Path, ...]:
-    del thread_id, state
+    del state
     target_inbox = inbox_dir(target.repo_root)
     target_inbox.mkdir(parents=True, exist_ok=True)
     # The team store is deliberately NOT watched: connect-per-op checkpoints the
@@ -569,6 +570,14 @@ def lane_watch_paths_for_target(
     ]
     if transcript is not None:
         paths.append(transcript.path)
+    # `spice agent reply` appends a lane card to the reply log without touching
+    # the transcript, so an idle agent's ACK surfaces only if the log itself is
+    # watched. Reply writes are rare, explicit submissions — unlike the team
+    # store's metric churn — so watching the file honors the cost note above.
+    if thread_id:
+        reply_log = ensure_reply_log(target.repo_root, thread_id)
+        if reply_log is not None:
+            paths.append(reply_log)
     return tuple(paths)
 
 
@@ -602,8 +611,25 @@ def lane_signature_for_target(
                 )
             ),
             _path_signature(task_config.ensure_task_event_file()),
+            # Reply-log appends must change the signature — and land in
+            # `other`, not `inbox`, so a reply that also archives a pending key
+            # is never classified as a pending-only change (which would push a
+            # composer update and skip the messages payload carrying the card).
+            _reply_log_signature(target.repo_root, thread_id),
         ),
     )
+
+
+def _reply_log_signature(
+    repo_root: Path, thread_id: str | None
+) -> tuple[str, int, int]:
+    if not thread_id:
+        return ("", 0, 0)
+    # Ensure (not just resolve) so the subscribe-time seed signature matches
+    # the stat the watcher sees once it arms the freshly created log —
+    # otherwise the first wake after subscribe would misread creation as a
+    # content change. Mirrors the ensure_task_event_file component above.
+    return _path_signature(ensure_reply_log(repo_root, thread_id))
 
 
 def _path_signature(path: Path | None) -> tuple[str, int, int]:
