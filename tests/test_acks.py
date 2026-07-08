@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
+from spice.agent.driver import DRIVER
 from spice.agent import sidechannelnotify, watchdog
 from spice.mail.attachments import prepare_inbox_attachments
 from spice.mail.feedback import supervisor_feedback_line
@@ -56,6 +57,7 @@ KEY_A = "20260513T184251491561Z"
 KEY_B = "20260513T184252000000Z"
 KEY_C = "20260513T184253000000Z"
 KEY_D = "20260513T184254000000Z"
+THREAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def _init_repo(path):
@@ -455,8 +457,10 @@ def test_archive_ackd_inbox_items_records_durable_ack_state(tmp_path):
 
 def test_summarize_ack_archival_retires_lineage_record_with_dropped_z_alias(
     tmp_path,
+    monkeypatch,
 ):
     _init_repo(tmp_path)
+    monkeypatch.setenv(DRIVER.thread_id_env, THREAD_A)
     name = f"{KEY_A}.txt"
     text = compose_inbox_text(
         body="lineage ack state",
@@ -498,6 +502,7 @@ def test_summarize_ack_archival_retires_lineage_record_with_dropped_z_alias(
             name,
             "handled after retry.",
             {
+                "thread_id": THREAD_A,
                 "resend_count": 2,
                 "resend_attempts": [
                     {
@@ -557,8 +562,10 @@ def test_summarize_nack_archival_records_refused_state(tmp_path):
 
 def test_summarize_nack_archival_retires_lineage_record_with_stable_key(
     tmp_path,
+    monkeypatch,
 ):
     _init_repo(tmp_path)
+    monkeypatch.setenv(DRIVER.thread_id_env, THREAD_A)
     name = f"{KEY_B}.txt"
     text = compose_inbox_text(
         body="lineage refusal state",
@@ -602,6 +609,7 @@ def test_summarize_nack_archival_retires_lineage_record_with_stable_key(
             "refusing after retry.",
             ACK_DISPOSITION_REFUSED,
             {
+                "thread_id": THREAD_A,
                 "resend_count": 1,
                 "resend_attempts": [
                     {
@@ -815,8 +823,9 @@ def test_owned_nack_utterance_requires_reason_for_matching_key():
     assert extract_owned_nack_utterance(f"NACK {KEY_B}", KEY_B) is None
 
 
-def test_resend_lineage_end_to_end_contract(tmp_path):
+def test_resend_lineage_end_to_end_contract(tmp_path, monkeypatch):
     _init_repo(tmp_path)
+    monkeypatch.setenv(DRIVER.thread_id_env, THREAD_A)
     original_key = "20260101T000000000001Z"
     name = f"{original_key}.txt"
     original_text = compose_inbox_text(
@@ -894,6 +903,7 @@ def test_resend_lineage_end_to_end_contract(tmp_path):
             name,
             "handled the lineage once.",
             {
+                "thread_id": THREAD_A,
                 "resend_count": 2,
                 "resend_attempts": [
                     {

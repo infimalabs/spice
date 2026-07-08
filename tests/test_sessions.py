@@ -645,6 +645,51 @@ def test_briefing_ranks_ack_db_asks_by_disposition_then_recency(tmp_path, monkey
     ]
 
 
+def test_briefing_ack_asks_include_response_and_scope_by_thread(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    other_actor = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    transcript = tmp_path / f"{ACTOR_A}.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    _record_ack_state_ask(
+        repo,
+        "20260101T000001000000Z",
+        "current lane request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:01Z",
+        ack_content="captured current lane request",
+        lineage={"thread_id": ACTOR_A},
+    )
+    _record_ack_state_ask(
+        repo,
+        "20260101T000002000000Z",
+        "other lane request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:02Z",
+        ack_content="captured other lane request",
+        lineage={"thread_id": other_actor},
+    )
+    _record_ack_state_ask(
+        repo,
+        "20260101T000003000000Z",
+        "legacy unscoped request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:03Z",
+        ack_content="captured legacy request",
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+
+    assert _section_lines(briefing, "Latest Ask") == [
+        "Latest Ask",
+        "  acked 2026-01-01T00:00:01.000Z "
+        "key=20260101T000001000000Z current lane request | "
+        "response: captured current lane request",
+    ]
+    assert "other lane request" not in briefing
+    assert "legacy unscoped request" not in briefing
+
+
 def test_sweep_renders_ack_db_asks_inside_compaction_windows(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
     transcript = tmp_path / "sweep.jsonl"
@@ -1007,7 +1052,16 @@ def _write_learning_transcript(
     )
 
 
-def _record_ack_state_ask(repo, key: str, body: str, disposition: str, ts: str) -> None:
+def _record_ack_state_ask(
+    repo,
+    key: str,
+    body: str,
+    disposition: str,
+    ts: str,
+    *,
+    ack_content: str = "",
+    lineage: dict | None = None,
+) -> None:
     record_acked_inbox_items(
         repo,
         [
@@ -1015,6 +1069,8 @@ def _record_ack_state_ask(repo, key: str, body: str, disposition: str, ts: str) 
                 key=key,
                 inbox_name=f"{key}.txt",
                 text=compose_inbox_text(body=body, priority=None, stop=False),
+                lineage=lineage,
+                ack_content=ack_content,
                 disposition=disposition,
             )
         ],
