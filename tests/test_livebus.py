@@ -17,6 +17,8 @@ import pytest
 
 from spice.agent.driver import CODEX_DRIVER
 from spice.mail.inbox import inbox_dir
+from spice.mail.replies import append_reply_record, reply_log_path
+from spice.tasks import config as task_config
 from spice.serve import agentapi, app, livebus
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
@@ -497,6 +499,117 @@ def test_metrics_series_replies_from_worker_off_the_dispatch_loop(tmp_path):
     assert len(results) == 1
     assert results[0]["requestId"] == "r1"
     assert results[0]["result"]["echo"] == "burndown"
+
+
+def test_lane_subscription_pushes_reply_card_without_a_followup_message(
+    tmp_path, monkeypatch
+):
+    """`spice agent reply` while the agent is idle must surface immediately.
+
+    The reply log is the only path that changes when an idle agent replies —
+    no transcript append follows — so the lane watcher must wake on it and
+    push the full messages payload carrying the reply card (UI-1kBrG3Lw).
+    """
+    monkeypatch.setattr(livebus, "LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S", 0.05)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = WorktreeTarget(id="lane", repo_root=repo, name="repo", branch="main")
+    state = ServeState(anchor_root=tmp_path)
+    state.cached_targets = [target]
+    state.team_store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    status = SimpleNamespace(
+        running=True,
+        thread_id=THREAD_ID,
+        process_status="idle",
+        pid=123,
+        process_group_id=123,
+        model="gpt-test",
+        reasoning_effort="low",
+        service_tier="",
+        started_at="",
+        log_path=None,
+        prompt_skill_path=None,
+    )
+    for module in (agentapi, identity, lane, message, inventory):
+        monkeypatch.setattr(module, "agent_status", lambda *_args, **_kwargs: status)
+    connection = _Connection()
+    watcher_ready = Event()
+    change_written = Event()
+    reply_log = reply_log_path(repo, THREAD_ID)
+
+    def observed_wait(paths: tuple[Path, ...], stop, watch=None) -> bool:
+        assert reply_log in paths
+        watcher_ready.set()
+        change_written.wait(timeout=1.0)
+        return change_written.is_set() and not stop.is_set()
+
+    monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
+    task_config.set_backend(str(tmp_path / "task-backend"))
+    session = LiveBusSession(
+        connection,
+        LiveBusCallbacks(
+            resolve_target=lambda selector: target if selector == target.id else None,
+            work_trees_payload=lambda: {},
+            messages_payload=lambda bus_target, **kwargs: (
+                message.messages_payload_for_worktree(state, bus_target, **kwargs)
+            ),
+            send_payload=lambda _target, _payload: ({}, None),
+            task_drain_payload=lambda _target, _payload: ({}, None),
+            team_snapshot_payload=lambda _since_revision: {},
+            team_command_payload=lambda _payload: ({}, None),
+            metric_series_payload=lambda _query: {"ok": True, "points": []},
+            thread_id=lambda _target: THREAD_ID,
+            transcript_resolution=lambda _thread_id: _transcript_resolution(
+                THREAD_ID, transcript
+            ),
+            lane_watch_paths=lambda bus_target, thread_id, transcript_path: (
+                app.lane_watch_paths_for_target(
+                    state, bus_target, thread_id, transcript_path
+                )
+            ),
+            lane_signature=lambda bus_target, thread_id, transcript_path: (
+                app.lane_signature_for_target(
+                    state, bus_target, thread_id, transcript_path
+                )
+            ),
+        ),
+    )
+
+    try:
+        session._handle_lane_subscribe(
+            {"type": "lane.subscribe", "targetId": target.id, "query": {"limit": 5}}
+        )
+        assert watcher_ready.wait(timeout=1.0)
+
+        append_reply_record(
+            repo,
+            THREAD_ID,
+            timestamp="2026-01-01T00:00:01.000000Z",
+            text="ACK 20260101T000000000001Z: applied",
+            ack_keys=["20260101T000000000001Z"],
+            nack_keys=[],
+        )
+        change_written.set()
+
+        pushed = _wait_for_watch_push(connection)
+        assert pushed["type"] == "lane.payload"
+        reply_cards = [
+            item
+            for item in pushed["payload"]["messages"]
+            if item.get("kind") == "reply"
+        ]
+        assert len(reply_cards) == 1
+        assert "applied" in reply_cards[0]["text"]
+        # The agent emitted nothing after the reply: the card surfaced with no
+        # follow-up transcript append.
+        assert transcript.read_text(encoding="utf-8") == ""
+    finally:
+        change_written.set()
+        session._teardown()
+        task_config.set_backend(None)
 
 
 def _callbacks(
