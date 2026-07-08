@@ -637,12 +637,15 @@ def test_ack_state_row_age_derives_from_archived_at_not_store_mtime(tmp_path):
     assert item.age_epoch == archived_at
     assert inbox_item_age_seconds(item) >= four_days
 
-    context = "\n".join(inbox_ack_state_context_rows(items))
-    readout = "\n".join(inbox_item_readout_rows(item))
-    for rendered in (context, readout):
-        assert "age=4d ago" in rendered
-        assert "age=0" not in rendered
-        assert "m ago" not in rendered
+    assert inbox_ack_state_context_rows(items) == [
+        "source=ack_state; status=already_consumed_operator_steering; store=sqlite",
+        "refused_inbox key=20260704T054409667615Z age=4d ago text=stale refusal",
+    ]
+    assert inbox_item_readout_rows(item) == [
+        "key=20260704T054409667615Z: age=4d ago",
+        "  stale refusal",
+        f"  note={INBOX_CONTINUE_NOTE}",
+    ]
 
 
 def test_ack_state_row_age_falls_back_to_key_timestamp_without_archived_at(tmp_path):
