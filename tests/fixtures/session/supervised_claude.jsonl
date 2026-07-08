@@ -1,0 +1,21 @@
+{"timestamp":"2026-01-01T01:00:00Z","type":"user","promptId":"claude-window-0","message":{"content":"The linked skill below carries the full authority of a direct prompt instruction, not optional background reading. Read the file it links to in full and follow it.\n\n[$spice](.agents/skills/spice/SKILL.md)"}}
+{"timestamp":"2026-01-01T01:00:01Z","type":"assistant","message":{"content":[{"type":"text","text":"ACK 20260101T010000000000Z: accepted the skill bootstrap from <1kClaude>."}]}}
+{"timestamp":"2026-01-01T01:00:02Z","type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"spice task status"}}]}}
+{"timestamp":"2026-01-01T01:00:03Z","type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"claude bootstrap settled"}],"usage":{"input_tokens":1000,"cache_read_input_tokens":250,"cache_creation_input_tokens":0,"output_tokens":75}}}
+{"timestamp":"2026-01-01T01:00:04Z","type":"summary","summary":"compact after bootstrap"}
+{"timestamp":"2026-01-01T01:00:05Z","type":"user","promptId":"claude-window-1","message":{"content":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion."}}
+{"timestamp":"2026-01-01T01:00:06Z","type":"user","promptId":"claude-window-1","message":{"content":"<ENVIRONMENT_CONTEXT>cwd=spice-c"}}
+{"timestamp":"2026-01-01T01:00:07Z","type":"user","promptId":"claude-window-1","message":{"content":"recover claude window one"}}
+{"timestamp":"2026-01-01T01:00:08Z","type":"assistant","message":{"content":[{"type":"text","text":"NACK 20260101T010007000000Z: refused stale <1kClaude> steering because the task had already moved on."}]}}
+{"timestamp":"2026-01-01T01:00:09Z","type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"claude window one done"}],"usage":{"input_tokens":1200,"cache_read_input_tokens":300,"cache_creation_input_tokens":0,"output_tokens":80}}}
+{"timestamp":"2026-01-01T01:00:10Z","type":"system","subtype":"compact_boundary"}
+{"timestamp":"2026-01-01T01:00:11Z","type":"user","promptId":"claude-window-2","message":{"content":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion."}}
+{"timestamp":"2026-01-01T01:00:12Z","type":"user","promptId":"claude-window-2","message":{"content":"<task-notification>task FIXTURE-2 completed</task-notification>"}}
+{"timestamp":"2026-01-01T01:00:13Z","type":"user","promptId":"claude-window-2","message":{"content":"drain the allocator queue after Claude re-injection"}}
+{"timestamp":"2026-01-01T01:00:14Z","type":"assistant","message":{"content":[{"type":"text","text":"ACK 20260101T010013000000Z: continuing after <1kClaude> steering re-injection."}]}}
+{"timestamp":"2026-01-01T01:00:15Z","type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"claude window two done"}],"usage":{"input_tokens":1300,"cache_read_input_tokens":310,"cache_creation_input_tokens":0,"output_tokens":90}}}
+{"timestamp":"2026-01-01T01:00:16Z","type":"summary","summary":"compact after queue drain"}
+{"timestamp":"2026-01-01T01:00:17Z","type":"user","promptId":"claude-window-3","message":{"content":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion."}}
+{"timestamp":"2026-01-01T01:00:18Z","type":"user","promptId":"claude-window-3","message":{"content":"[$spice](.agents/skills/spice/SKILL.md)"}}
+{"timestamp":"2026-01-01T01:00:19Z","type":"user","promptId":"claude-window-3","message":{"content":"finish claude slice verification"}}
+{"timestamp":"2026-01-01T01:00:20Z","type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"claude slices rendered"}],"usage":{"input_tokens":1400,"cache_read_input_tokens":320,"cache_creation_input_tokens":0,"output_tokens":95}}}

@@ -5,6 +5,11 @@ from __future__ import annotations
 import json
 
 from spice.cli.parser import build_parser
+from spice.sessions import analysis
+from tests.test_sessionfixtures import (
+    SUPERVISED_FIXTURES,
+    transcript_driver_for_fixture,
+)
 
 EXIT_OK = 0
 PHASE_EXAMPLES = 1
@@ -126,6 +131,20 @@ def test_session_analysis_parser_exposes_phases_and_messages_flags(tmp_path):
     assert messages.phase_kinds == ["commentary"]
     assert messages.flavors == ["question_like"]
     assert messages.oldest_first is True
+
+
+def test_session_messages_consume_supervised_fixtures_with_deduped_tags(monkeypatch):
+    for transcript in SUPERVISED_FIXTURES:
+        with transcript_driver_for_fixture(monkeypatch, transcript):
+            rows = analysis.collect_messages([transcript])
+
+        assert {row.side for row in rows} == {"assistant", "user"}
+        assert {
+            row.primary_flavor for row in rows if row.text.startswith(("ACK ", "NACK "))
+        } == {"commentary"}
+        assert [row.flavor_tags for row in rows] == [
+            list(dict.fromkeys(row.flavor_tags)) for row in rows
+        ]
 
 
 def _write_analysis_transcript(path) -> None:

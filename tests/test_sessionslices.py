@@ -7,6 +7,10 @@ from spice.cli.parser import build_parser
 from spice.sessions import records
 from spice.sessions.cli import handle_session
 from spice.sessions.slices import build_compaction_slices
+from tests.test_sessionfixtures import (
+    SUPERVISED_FIXTURES,
+    transcript_driver_for_fixture,
+)
 
 PARSER_MAX_TEXT = 40
 
@@ -85,6 +89,27 @@ def test_session_slices_parser_exposes_current_flag_surface(tmp_path):
     assert args.slice_id == ["compaction-1", "compaction-2"]
     assert args.view == "full"
     assert args.max_text == PARSER_MAX_TEXT
+
+
+def test_supervised_session_fixtures_build_three_compaction_windows(monkeypatch):
+    for transcript in SUPERVISED_FIXTURES:
+        with transcript_driver_for_fixture(monkeypatch, transcript):
+            rows = build_compaction_slices(
+                records.collect_turns([transcript]),
+                records.collect_compactions([transcript]),
+            )
+
+        assert [row.slice_id for row in rows] == [
+            "compaction-1",
+            "compaction-2",
+            "compaction-3",
+        ]
+        assert [row.compaction_count for row in rows] == [1, 1, 1]
+        assert [row.ordered_messages[-1][0] for row in rows] == [
+            "user_after",
+            "user_after",
+            "user_after",
+        ]
 
 
 def _slice_fixture(tmp_path):
