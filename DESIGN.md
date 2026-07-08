@@ -88,5 +88,6 @@ spice is an operations console for a fleet of agents.
 
 ## Dependencies
 
-Runtime: `watchfiles`, `ruff`, and `lizard`; optional binaries degrade loudly.
-Development uses `pytest`, `ruff`, and `lizard`.
+Runtime: `lizard`, `ruff`, `tree-sitter`, `tree-sitter-c-sharp`,
+`tree-sitter-javascript`, and `watchfiles`; optional binaries degrade loudly.
+Development adds `pyright` and `pytest`.
