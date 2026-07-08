@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 // UI-1kBNL1Rs: a command-path reply card (kind "reply") must render in a live
@@ -13,22 +14,11 @@ async function run() {
       contextOptions: { viewport: { width: 1280, height: 720 } },
     },
     async ({ page }) => {
-      await page.waitForSelector(".lane", { timeout: 10000 });
-      await page.waitForFunction(
-        () =>
-          typeof renderMessagesIfChanged === "function" &&
-          typeof laneStates !== "undefined" &&
-          typeof addLane === "function" &&
-          Array.isArray(targets),
-        { timeout: 10000 },
-      );
+      await installIsolatedLaneFixture(page, {
+        globals: ["renderMessagesIfChanged"],
+      });
       return page.evaluate(async () => {
-        let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-        if (!lane && targets.length) {
-          addLane(targets[0].id);
-          lane = laneStates.get(targets[0].id);
-        }
-        if (!lane) throw new Error("no lane available for reply-card smoke");
+        const lane = resolveIsolatedLane("reply-card-smoke-team");
 
         const timestamp = "2027-01-01T00:00:00.000000Z";
         lane.knownMessages = [

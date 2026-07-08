@@ -214,7 +214,12 @@ async function run() {
     },
     async ({ page }) => {
       await page.waitForFunction(
-        () => typeof applyTeamSnapshotPayload === "function",
+        // Braced body: lizard (the complexity gate) misparses a braceless
+        // arrow followed by an object-literal argument, misattributing
+        // function spans to the end of the file.
+        () => {
+          return typeof applyTeamSnapshotPayload === "function";
+        },
         { timeout: 10000 },
       );
       await installTeamSnapshotHelper(page);

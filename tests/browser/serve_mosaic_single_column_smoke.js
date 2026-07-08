@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 // Mosaic single-column degeneration (mosaic-single-column): at L=1 the
@@ -18,23 +19,8 @@ const MOSAIC_SINGLE_COLUMN_NARROW_WIDTH = 380;
 const MOSAIC_SINGLE_COLUMN_WIDE_WIDTH = 1280;
 const MOSAIC_SINGLE_COLUMN_FULL_SPAN = 12;
 
-// Deliberately bypasses addLane()/targets: those attach to a REAL target's
-// live-bus (subscribeLaneToLiveBus), which in a dev sandbox running
-// alongside other live agents pulls in real, independently-growing
-// conversation data -- exactly the kind of background noise this smoke
-// must not be exposed to. addEmptyTeamLane() builds the same lane shape
-// (messagesEl, knownMessages, etc.) without ever subscribing to a backend;
-// flipping emptyTeam off afterward is enough to route it through the
-// normal (non-empty-team) renderMessagesIfChanged path under full control
-// of this smoke's own upsertKnownMessage calls only.
 function mosaicSingleColumnResolveLane() {
-  const teamId = "mosaic-single-column-smoke-team";
-  const targetId = emptyTeamTargetId(teamId);
-  if (!laneStates.has(targetId)) addEmptyTeamLane({ teamId, revision: 1, config: {} });
-  const lane = laneStates.get(targetId);
-  if (!lane) throw new Error("failed to create isolated lane for mosaic single-column smoke");
-  lane.emptyTeam = false;
-  return lane;
+  return resolveIsolatedLane("mosaic-single-column-smoke-team");
 }
 
 function mosaicSingleColumnBuildItem(index, lines) {
@@ -204,22 +190,14 @@ function assertResizeResult(label, result, expectedFullReplayCallCount, expectFu
   }
 }
 
-async function waitForMosaicSingleColumnGlobals(page) {
-  await page.waitForFunction(
-    () =>
-      typeof addEmptyTeamLane === "function" &&
-      typeof emptyTeamTargetId === "function" &&
-      typeof renderMessagesIfChanged === "function" &&
-      typeof upsertKnownMessage === "function" &&
-      typeof trimKnownMessages === "function" &&
-      typeof mosaicFullReplay === "function",
-    { timeout: 10000 },
-  );
-}
-
 async function waitForFullReplayCallCount(page, expectedCount) {
   await page.waitForFunction(
-    (expected) => window.__mosaicFullReplayCallCount >= expected,
+    // Braced body: lizard (the complexity gate) misparses a braceless
+    // arrow followed by an object-literal argument, misattributing
+    // function spans to the end of the file.
+    (expected) => {
+      return window.__mosaicFullReplayCallCount >= expected;
+    },
     expectedCount,
     { timeout: 5000 },
   );
@@ -232,7 +210,14 @@ async function run() {
       contextOptions: { viewport: { width: MOSAIC_SINGLE_COLUMN_NARROW_WIDTH, height: 900 } },
     },
     async ({ page, server }) => {
-      await waitForMosaicSingleColumnGlobals(page);
+      await installIsolatedLaneFixture(page, {
+        globals: [
+          "renderMessagesIfChanged",
+          "upsertKnownMessage",
+          "trimKnownMessages",
+          "mosaicFullReplay",
+        ],
+      });
       await installMosaicSingleColumnHelpers(page);
 
       const narrowResult = await page.evaluate(mosaicSingleColumnRunAtNarrowWidth);

@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 // Mosaic live text rule: per-tick text (relative ages) must sit in a
@@ -7,12 +8,7 @@ const { withServePage } = require("./serve_playwright_harness");
 // rather than waiting on the wall-clock interval.
 
 function measureLiveTextSlotTick(label, beforeIso, afterIso) {
-  let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-  if (!lane && targets.length) {
-    addLane(targets[0].id);
-    lane = laneStates.get(targets[0].id);
-  }
-  if (!lane) throw new Error("no lane available for live-text-slot smoke");
+  const lane = resolveIsolatedLane("live-text-slot-smoke-team");
 
   const item = {
     ack_count: 0,
@@ -108,14 +104,9 @@ async function run() {
       contextOptions: { viewport: { width: 1280, height: 900 } },
     },
     async ({ page, server }) => {
-      await page.waitForFunction(
-        () =>
-          typeof renderMessagesIfChanged === "function" &&
-          typeof setRelativeTimeText === "function" &&
-          Array.isArray(targets) &&
-          targets.length > 0,
-        { timeout: 10000 },
-      );
+      await installIsolatedLaneFixture(page, {
+        globals: ["renderMessagesIfChanged", "setRelativeTimeText"],
+      });
       await page.addScriptTag({
         content: [measureLiveTextSlotTick, runLiveTextSlotSmokePage]
           .map((helper) => helper.toString())

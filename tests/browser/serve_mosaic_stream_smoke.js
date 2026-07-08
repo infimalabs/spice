@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 // Mosaic stream integration:
@@ -28,13 +29,7 @@ const MOSAIC_STREAM_SCROLL_EPSILON_PX = 2;
 const MOSAIC_STREAM_CLOBBER_MIN_CARDS = 10;
 
 function mosaicStreamResolveLane() {
-  let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-  if (!lane && targets.length) {
-    addLane(targets[0].id);
-    lane = laneStates.get(targets[0].id);
-  }
-  if (!lane) throw new Error("no lane available for mosaic stream smoke");
-  return lane;
+  return resolveIsolatedLane("mosaic-stream-smoke-team");
 }
 
 function mosaicStreamBuildItem(index, lines) {
@@ -1022,18 +1017,15 @@ function assertMosaicStreamResult(result) {
 }
 
 async function waitForMosaicStreamGlobals(page) {
-  await page.waitForFunction(
-    () =>
-      typeof addLane === "function" &&
-      typeof renderMessagesIfChanged === "function" &&
-      typeof upsertKnownMessage === "function" &&
-      typeof trimKnownMessages === "function" &&
-      typeof mosaicReplayEventLog === "function" &&
-      typeof mosaicEventLogLayout === "function" &&
-      Array.isArray(targets) &&
-      targets.length > 0,
-    { timeout: 10000 },
-  );
+  await installIsolatedLaneFixture(page, {
+    globals: [
+      "renderMessagesIfChanged",
+      "upsertKnownMessage",
+      "trimKnownMessages",
+      "mosaicReplayEventLog",
+      "mosaicEventLogLayout",
+    ],
+  });
 }
 
 async function run() {

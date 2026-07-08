@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 const LARGE_MESSAGE_COUNT = 5000;
@@ -37,16 +38,14 @@ async function run() {
 }
 
 async function waitForPendingSmokePage(page) {
-  await page.waitForFunction(
-    () =>
-      typeof submitLaneForm === "function" &&
-      typeof handleLiveBusMessage === "function" &&
-      typeof lanePendingDisplayCount === "function" &&
-      typeof renderLaneViewShell === "function" &&
-      Array.isArray(targets) &&
-      targets.length > 0,
-    { timeout: 10000 },
-  );
+  await installIsolatedLaneFixture(page, {
+    globals: [
+      "submitLaneForm",
+      "handleLiveBusMessage",
+      "lanePendingDisplayCount",
+      "renderLaneViewShell",
+    ],
+  });
 }
 
 async function installPendingSmokeHelpers(page) {
@@ -181,12 +180,7 @@ function cleanupPendingSmokePage() {
 }
 
 function pendingSmokeLane() {
-  let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-  if (!lane && targets.length) {
-    addLane(targets[0].id);
-    lane = laneStates.get(targets[0].id);
-  }
-  if (!lane) throw new Error("no lane available for pending smoke");
+  const lane = resolveIsolatedLane("pending-badge-smoke-team");
   syncComposerShards(laneGroupHost(lane), laneGroupMemberLanes(laneGroupHost(lane)));
   return lane;
 }

@@ -1,16 +1,11 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 const MOSAIC_RESERVATIONS_IMAGE_HEIGHT_PX = 140;
 const MOSAIC_RESERVATIONS_IMAGE_LARGE_HEIGHT_PX = 252;
 
 function mosaicReservationsResolveLane() {
-  let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-  if (!lane && targets.length) {
-    addLane(targets[0].id);
-    lane = laneStates.get(targets[0].id);
-  }
-  if (!lane) throw new Error("no lane available for mosaic reservations smoke");
-  return lane;
+  return resolveIsolatedLane("mosaic-reservations-smoke-team");
 }
 
 function mosaicReservationsBuildAckItem(key, ackKey) {
@@ -234,17 +229,15 @@ async function installMosaicReservationsHelpers(page) {
 }
 
 async function waitForMosaicReservationsGlobals(page) {
-  await page.waitForFunction(
-    () =>
-      typeof renderMessagesIfChanged === "function" &&
-      typeof mosaicReservationPriorPx === "function" &&
-      typeof mosaicReservationRows === "function" &&
-      typeof mosaicWetReplay === "function" &&
-      typeof mosaicResolveFrozenResize === "function" &&
-      Array.isArray(targets) &&
-      targets.length > 0,
-    { timeout: 10000 },
-  );
+  await installIsolatedLaneFixture(page, {
+    globals: [
+      "renderMessagesIfChanged",
+      "mosaicReservationPriorPx",
+      "mosaicReservationRows",
+      "mosaicWetReplay",
+      "mosaicResolveFrozenResize",
+    ],
+  });
 }
 
 async function run() {

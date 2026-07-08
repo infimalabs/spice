@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 const typingLatencyLaneCount = 4;
@@ -13,15 +14,9 @@ async function run() {
       contextOptions: { viewport: { width: 1440, height: 900 } },
     },
     async ({ page, server }) => {
-      await page.waitForFunction(
-        () =>
-          typeof addLane === "function" &&
-          typeof mosaicRenderMessageStream === "function" &&
-          typeof renderMessagesIfChanged === "function" &&
-          Array.isArray(targets) &&
-          targets.length >= 4,
-        { timeout: 10000 },
-      );
+      await installIsolatedLaneFixture(page, {
+        globals: ["mosaicRenderMessageStream", "renderMessagesIfChanged"],
+      });
       await page.addScriptTag({
         content: [
           runTypingLatencySmokePage,
@@ -43,14 +38,9 @@ async function run() {
 }
 
 async function runTypingLatencySmokePage(config) {
-  const targetIds = targets
-    .filter((target) => target.targetIdentity?.thread?.state === "bound")
-    .slice(0, config.laneCount)
-    .map((target) => target.id);
-  if (targetIds.length < config.laneCount)
-    throw new Error("not enough bound targets for typing latency smoke");
-  for (const targetId of targetIds) addLane(targetId);
-  const lanes = targetIds.map((targetId) => laneStates.get(targetId));
+  const lanes = Array.from({ length: config.laneCount }, (_, index) =>
+    resolveIsolatedLane("composer-typing-latency-smoke-team-" + index),
+  );
   for (const lane of lanes) {
     const items = typingLatencySmokeItems(lane, config.cardCount);
     lane.knownMessages = items.slice();

@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 function pendingIdentity(count = 0) {
@@ -118,17 +119,9 @@ async function run() {
       contextOptions: { viewport: { width: 1280, height: 720 } },
     },
     async ({ page, server }) => {
-      await page.waitForSelector(".lane", { timeout: 10000 });
-      await page.waitForFunction(() => Array.isArray(targets) && targets.length > 0, {
-        timeout: 10000,
-      });
+      await installIsolatedLaneFixture(page, { globals: ["renderLaneChrome"] });
       const result = await page.evaluate((payload) => {
-        let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-        if (!lane && targets.length) {
-          addLane(targets[0].id);
-          lane = laneStates.get(targets[0].id);
-        }
-        if (!lane) throw new Error("no lane available for identity smoke");
+        const lane = resolveIsolatedLane("identity-smoke-team");
         renderLaneChrome(lane, {
           ...payload,
           targetIdentity: { ...payload.targetIdentity, targetId: lane.targetId },

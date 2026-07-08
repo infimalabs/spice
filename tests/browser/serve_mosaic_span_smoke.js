@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 // Mosaic candidate-span generation against the live DOM: (a) short
@@ -16,13 +17,7 @@ const SPAN_SMOKE_TALL_LINES = 20;
 const SPAN_SMOKE_EXPECTED_TALL_THRESHOLD_PX = 230;
 
 function mosaicSpanResolveLane() {
-  let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-  if (!lane && targets.length) {
-    addLane(targets[0].id);
-    lane = laneStates.get(targets[0].id);
-  }
-  if (!lane) throw new Error("no lane available for mosaic span smoke");
-  return lane;
+  return resolveIsolatedLane("mosaic-span-smoke-team");
 }
 
 function mosaicSpanBuildItem(key, html) {
@@ -152,19 +147,17 @@ function assertMosaicSpanResult(result) {
 }
 
 async function waitForMosaicSpanGlobals(page) {
-  await page.waitForFunction(
-    () =>
-      typeof renderMessage === "function" &&
-      typeof mosaicGeometry === "function" &&
-      typeof mosaicCandidates === "function" &&
-      typeof mosaicWideSpan === "function" &&
-      typeof mosaicDecide === "function" &&
-      typeof mosaicCardWidthPx === "function" &&
-      typeof MOSAIC_TALL_THRESHOLD_PX === "number" &&
-      Array.isArray(targets) &&
-      targets.length > 0,
-    { timeout: 10000 },
-  );
+  await installIsolatedLaneFixture(page, {
+    globals: [
+      "renderMessage",
+      "mosaicGeometry",
+      "mosaicCandidates",
+      "mosaicWideSpan",
+      "mosaicDecide",
+      "mosaicCardWidthPx",
+      "MOSAIC_TALL_THRESHOLD_PX",
+    ],
+  });
 }
 
 async function run() {

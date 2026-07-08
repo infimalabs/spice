@@ -1,3 +1,4 @@
+const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 const typingMosaicInitialMessageCount = 72;
@@ -16,16 +17,22 @@ async function run() {
       contextOptions: { viewport: { width: 1280, height: 720 } },
     },
     async ({ page, server }) => {
+      await installIsolatedLaneFixture(page, {
+        globals: [
+          "submitLaneForm",
+          "renderMessage",
+          "renderMessagesIfChanged",
+          "mosaicRenderMessageStream",
+          "liveBusIsOpen",
+        ],
+      });
       await page.waitForFunction(
-        () =>
-          typeof submitLaneForm === "function" &&
-          typeof renderMessage === "function" &&
-          typeof renderMessagesIfChanged === "function" &&
-          typeof mosaicRenderMessageStream === "function" &&
-          typeof liveBusIsOpen === "function" &&
-          Array.isArray(window.__spiceSubmitLatencySamples) &&
-          Array.isArray(targets) &&
-          targets.length > 0,
+        // Braced body: lizard (the complexity gate) misparses a braceless
+        // arrow followed by an object-literal argument, misattributing
+        // function spans to the end of the file.
+        () => {
+          return Array.isArray(window.__spiceSubmitLatencySamples);
+        },
         { timeout: 10000 },
       );
       await installSubmitLatencySmokeHelpers(page);
@@ -198,12 +205,7 @@ function waitForSubmitTypingFrame() {
 }
 
 function submitLatencySmokeLane() {
-  let lane = Array.from(laneStates.values()).find((item) => !item.emptyTeam);
-  if (!lane && targets.length) {
-    addLane(targets[0].id);
-    lane = laneStates.get(targets[0].id);
-  }
-  if (!lane) throw new Error("no lane available for submit latency smoke");
+  const lane = resolveIsolatedLane("submit-latency-smoke-team");
   syncComposerShards(laneGroupHost(lane), laneGroupMemberLanes(laneGroupHost(lane)));
   return lane;
 }
