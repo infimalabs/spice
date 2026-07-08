@@ -14,7 +14,7 @@ from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions.meter import (
     ActiveContextSnapshot,
     active_context_percent,
-    collect_context_meter,
+    collect_latest_context_meter,
     context_pressure_level,
     context_pressure_should_warn,
 )
@@ -211,14 +211,13 @@ def test_session_briefing_reads_direct_gzip_jsonl_path(tmp_path, monkeypatch, ca
         ]
     )
     handle_session(args)
-    meter = collect_context_meter([transcript])
+    meter = collect_latest_context_meter([transcript])
 
     output = capsys.readouterr().out
     assert "files=session.jsonl.gz turns=1" in output
     assert _section_headers(output) == [
         "Briefing",
         "Horizon",
-        "Guidance",
         "Latest Final",
         "Activity",
         "Git",
@@ -295,7 +294,6 @@ def test_session_briefing_excludes_non_human_transcript_messages(tmp_path, monke
     assert _section_headers(briefing) == [
         "Briefing",
         "Horizon",
-        "Guidance",
         "Activity",
         "Git",
         "Inbox",
@@ -347,6 +345,24 @@ def test_session_timeline_contains_keeps_turn_when_match_is_not_latest(
     assert "user=later request" in output
 
 
+def test_session_summary_keeps_activity_shape_without_pressure_guidance(
+    tmp_path, capsys
+):
+    transcript = tmp_path / "summary.jsonl"
+    _write_thread_transcript(transcript)
+
+    handle_session(_summary_args(transcript, recent=3))
+
+    output = capsys.readouterr().out
+    assert output.splitlines()[:4] == [
+        "Summary",
+        "  turns=1 completed=1 compactions=0",
+        "  commands=1 patches=0 errors=0 web_searches=0",
+        "Recent Prompts",
+    ]
+    assert "  2026-01-01T00:00:00.000Z investigate thread" in output
+
+
 def _timeline_args(transcript, **overrides):
     values = {
         "session_action": "timeline",
@@ -363,6 +379,16 @@ def _timeline_args(transcript, **overrides):
     return argparse.Namespace(**values)
 
 
+def _summary_args(transcript, **overrides):
+    values = {
+        "session_action": "summary",
+        "recent": 8,
+    }
+    values.update(overrides)
+    values["files"] = [str(transcript)]
+    return argparse.Namespace(**values)
+
+
 def test_session_thread_resolves_state_db_and_summarizes_activity(
     tmp_path, monkeypatch
 ):
@@ -373,6 +399,7 @@ def test_session_thread_resolves_state_db_and_summarizes_activity(
     monkeypatch.setenv(CODEX_HOME_ENV, str(codex_home))
 
     summary = render_thread_summary(THREAD_CANONICAL)
+    lines = summary.splitlines()
 
     assert "Thread" in summary
     assert f"id={THREAD_CANONICAL}" in summary
@@ -383,6 +410,8 @@ def test_session_thread_resolves_state_db_and_summarizes_activity(
     assert "latest_assistant=thread done" in summary
     assert "latest_final=thread done" in summary
     assert "commands=1 patches=0 errors=0 web_searches=0" in summary
+    assert lines[4].startswith("  turns=1 compactions=0 ")
+    assert lines[5] == "Latest Activity"
 
 
 def test_session_thread_falls_back_to_session_index(tmp_path, monkeypatch):
@@ -430,7 +459,7 @@ def test_session_records_and_meter_parse_claude_transcript_owner(tmp_path, monke
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
 
     turns = records.collect_turns([transcript])
-    meter = collect_context_meter([transcript])
+    meter = collect_latest_context_meter([transcript])
 
     assert [message.text for message in turns[0].user_messages] == [
         "investigate claude"
@@ -757,6 +786,24 @@ def _write_thread_transcript(path) -> None:
                 "type": "function_call",
                 "name": "exec_command",
                 "arguments": "{}",
+            },
+        },
+        {
+            "timestamp": "2026-01-01T00:00:02.500Z",
+            "type": "response_item",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {
+                        "input_tokens": 80_000,
+                        "cached_input_tokens": 0,
+                        "output_tokens": 0,
+                        "reasoning_output_tokens": 0,
+                        "total_tokens": 80_000,
+                    },
+                    "total_token_usage": {"total_tokens": 80_000},
+                    "model_context_window": 100_000,
+                },
             },
         },
         {

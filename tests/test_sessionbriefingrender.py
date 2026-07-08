@@ -123,7 +123,6 @@ def test_briefing_skill_mantra_leaves_latest_ask_empty(tmp_path, monkeypatch):
     assert _section_headers(briefing) == [
         "Briefing",
         "Horizon",
-        "Guidance",
         "Activity",
         "Git",
         "Inbox",
@@ -241,8 +240,7 @@ def test_briefing_renders_steering_before_live_task_state(tmp_path, monkeypatch)
         "response=agent acknowledged",
     ]
     assert lines.index("Steering") < lines.index("Task Plane")
-    assert lines.index("Task Plane") < lines.index("Guidance")
-    assert lines.index("Guidance") < lines.index("Activity")
+    assert lines.index("Task Plane") < lines.index("Activity")
     assert lines.index("Git") < lines.index("Inbox")
 
 
@@ -626,7 +624,6 @@ def test_briefing_renders_recent_asks_and_finals_inside_recency_floor(
     assert _section_headers(briefing) == [
         "Briefing",
         "Horizon",
-        "Guidance",
         "Latest Final",
         "Activity",
         "Git",
@@ -790,7 +787,6 @@ def test_briefing_parses_only_the_selected_compaction_tail(tmp_path, monkeypatch
     assert _section_headers(briefing) == [
         "Briefing",
         "Horizon",
-        "Guidance",
         "Recovery",
         "Trajectory",
         "Activity",

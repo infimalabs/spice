@@ -300,7 +300,7 @@ def test_briefing_recovery_leads_when_latest_event_is_compaction(tmp_path, monke
     briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
     lines = briefing.splitlines()
 
-    assert lines.index("Guidance") < lines.index("Recovery")
+    assert lines.index("Horizon") < lines.index("Recovery")
     assert _section_lines(briefing, "Recovery") == [
         "Recovery",
         "  latest_compaction=2026-01-01T00:00:10.000Z",
