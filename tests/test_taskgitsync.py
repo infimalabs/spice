@@ -487,6 +487,129 @@ def test_integrate_and_publish_conflict_guides_resolution_and_retry(tmp_path):
     assert _git(repo, "status", "--porcelain") == ""
 
 
+def test_integrate_and_publish_refuses_landing_that_rewinds_peer_paths(tmp_path):
+    # The merge-storm shape: a conflicted lane resolves the baseline overlap
+    # by keeping its own side wholesale, silently dropping peer work its task
+    # never touched. The landing must be refused before anything publishes,
+    # and the refusal recipe must lead to a clean republish.
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
+    (peer / "peer.txt").write_text("peer feature\n", encoding="utf-8")
+    _run(peer, "git", "add", "README.md", "peer.txt")
+    _run(peer, "git", "commit", "-m", "peer feature")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    with pytest.raises(gitsync.MergeConflict):
+        gitsync.integrate_and_publish("TASK-20260101T000000000008Z", repo_root=repo)
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "rm", "-f", "peer.txt")
+    _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
+
+    with pytest.raises(SpiceError) as exc_info:
+        gitsync.integrate_and_publish("TASK-20260101T000000000008Z", repo_root=repo)
+
+    message = str(exc_info.value)
+    assert "refusing to publish" in message
+    assert "peer.txt" in message
+    assert f"git checkout {upstream_head} -- peer.txt" in message
+    assert "peer work already landed on the shared branch" in message
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == (
+        upstream_head
+    )
+
+    _run(repo, "git", "checkout", upstream_head, "--", "peer.txt")
+    _run(repo, "git", "commit", "-m", "Restore baseline content")
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000008Z", repo_root=repo
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert _merge_parents(repo, merge_head)[0] == upstream_head
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert (repo / "peer.txt").read_text(encoding="utf-8") == "peer feature\n"
+    assert (repo / "README.md").read_text(encoding="utf-8") == "agent work\n"
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_publish_race_retry_enforces_out_of_scope_guard(tmp_path, monkeypatch):
+    # Defense in depth for the race-retry choke point: if a retry round ever
+    # produces a head that rewinds peer paths (simulated here by adopting the
+    # prior merge head's tree instead of the freshly merged tree), the push
+    # must be refused just like the primary publish path.
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    real_run = gitsync._run
+    push_attempts = 0
+
+    def racing_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        nonlocal push_attempts
+        if args and args[0] == "push" and repo_root == repo:
+            push_attempts += 1
+            if push_attempts == 1:
+                (peer / "raced.txt").write_text("peer raced ahead\n", encoding="utf-8")
+                _run(peer, "git", "add", "raced.txt")
+                _run(peer, "git", "commit", "-m", "peer raced ahead")
+                _run(peer, "git", "push", "origin", "main")
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", racing_run)
+    real_synth = gitsync._synthesize_and_fast_forward
+    synth_calls = 0
+
+    def adopting_synth(repo_root, treeish, first_parent, second_parent, message, **kw):
+        nonlocal synth_calls
+        synth_calls += 1
+        if synth_calls == 2:
+            treeish = second_parent
+        return real_synth(
+            repo_root, treeish, first_parent, second_parent, message, **kw
+        )
+
+    monkeypatch.setattr(gitsync, "_synthesize_and_fast_forward", adopting_synth)
+
+    with pytest.raises(SpiceError) as exc_info:
+        gitsync.integrate_and_publish("TASK-20260101T000000000009Z", repo_root=repo)
+
+    message = str(exc_info.value)
+    raced_upstream = _git(peer, "rev-parse", "HEAD")
+    assert "refusing to publish" in message
+    assert "raced.txt" in message
+    assert push_attempts == 1
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == (
+        raced_upstream
+    )
+
+
 def test_integrate_and_publish_treats_missing_merge_head_abort_as_cleared(
     tmp_path, monkeypatch
 ):
