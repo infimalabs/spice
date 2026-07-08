@@ -13,10 +13,17 @@ import tempfile
 import time
 from collections import Counter
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, TypedDict
 
 from spice.errors import SpiceError
+from spice.mail.ackstate import (
+    ACK_DISPOSITION_ACKED,
+    ACK_DISPOSITION_REFUSED,
+    AckStateRecord,
+    ack_state_records,
+)
 from spice.mail.inbox import (
     INBOX_RESPONSE_ROW,
     collect_deadlettered_inbox_items,
@@ -26,6 +33,7 @@ from spice.mail.inbox import (
     inbox_ack_state_context_rows,
     inbox_deadletter_context_rows,
     inbox_item_key,
+    parse_inbox_payload,
     relative_time_for_path,
 )
 from spice.paths import repo_root_from_cwd
@@ -47,7 +55,6 @@ from spice.sessions.records import (
     collect_commit_records,
     collect_compactions,
     collect_turns,
-    is_scaffolding_text,
 )
 from spice.studies import complexity, fileloc, magicnums, repodocs, shape
 from spice.studies.walk import is_excluded_path
@@ -62,6 +69,12 @@ WORKING_SET_LIMIT = 10
 DEFAULT_BRIEFING_MAX_LINES = 120
 DEFAULT_BRIEFING_MAX_BYTES = 20_000
 DIRTY_PRESSURE_PREVIEW_LIMIT = 6
+ASK_DISPOSITION_PENDING = "pending"
+_ASK_DISPOSITION_RANK = {
+    ASK_DISPOSITION_PENDING: 0,
+    ACK_DISPOSITION_REFUSED: 1,
+    ACK_DISPOSITION_ACKED: 2,
+}
 
 
 @dataclass(frozen=True)
@@ -93,6 +106,15 @@ class DirtyWorktreePressure(TypedDict, total=False):
     newestDirtyPath: str
 
 
+@dataclass(frozen=True)
+class BriefingAsk:
+    key: str
+    timestamp: str
+    sort_time: float
+    disposition: str
+    text: str
+
+
 def clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
     if not text:
         return "-"
@@ -100,16 +122,6 @@ def clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
     if len(flat) <= limit:
         return flat
     return flat[: limit - 1].rstrip() + "…"
-
-
-def operator_asks(turns: list[TurnRecord]) -> list[tuple[str, str]]:
-    """(start_ts, text) for every non-scaffolding user message, oldest first."""
-    asks: list[tuple[str, str]] = []
-    for turn in turns:
-        for text in turn.user_messages:
-            if not is_scaffolding_text(text):
-                asks.append((turn.start_ts, text))
-    return asks
 
 
 def render_briefing(
@@ -137,7 +149,7 @@ def render_briefing(
     )
     meter = collect_context_meter(files)
     commits = collect_commit_records(turns)
-    asks = operator_asks(turns)
+    asks = briefing_asks(start=start, end=end, contains=contains)
     finals = [(turn.start_ts, text) for turn in turns for text in turn.final_answers]
     lines: list[str] = []
     lines.extend(_briefing_header_lines(files, turns))
@@ -160,6 +172,106 @@ def render_briefing(
         max_lines=max_lines,
         max_bytes=max_bytes,
         explain=explain_pruning,
+    )
+
+
+def briefing_asks(
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    contains: str | None = None,
+) -> list[BriefingAsk]:
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        return []
+    asks = [
+        *(_pending_briefing_ask(item) for item in collect_inbox_items(str(repo_root))),
+        *(_ack_state_briefing_ask(record) for record in ack_state_records(repo_root)),
+    ]
+    filtered = [
+        ask
+        for ask in asks
+        if _ask_matches_filters(ask, start=start, end=end, contains=contains)
+    ]
+    return sorted(filtered, key=_ask_sort_key)
+
+
+def _pending_briefing_ask(item) -> BriefingAsk:
+    key = inbox_item_key(item.name)
+    timestamp, sort_time = _ask_timestamp(key, _safe_path_mtime(item.source_path))
+    return BriefingAsk(
+        key=key,
+        timestamp=timestamp,
+        sort_time=sort_time,
+        disposition=ASK_DISPOSITION_PENDING,
+        text=parse_inbox_payload(item.text).body,
+    )
+
+
+def _ack_state_briefing_ask(record: AckStateRecord) -> BriefingAsk:
+    timestamp, sort_time = _ask_timestamp(record.key, float(record.archived_at))
+    return BriefingAsk(
+        key=record.key,
+        timestamp=timestamp,
+        sort_time=sort_time,
+        disposition=record.disposition,
+        text=parse_inbox_payload(record.text).body,
+    )
+
+
+def _ask_matches_filters(
+    ask: BriefingAsk,
+    *,
+    start: str | None,
+    end: str | None,
+    contains: str | None,
+) -> bool:
+    if start and ask.timestamp < start:
+        return False
+    if end and ask.timestamp > end:
+        return False
+    needle = (contains or "").lower()
+    if needle and needle not in ask.text.lower() and needle not in ask.key.lower():
+        return False
+    return True
+
+
+def _ask_sort_key(ask: BriefingAsk) -> tuple[int, float, str]:
+    return (
+        _ASK_DISPOSITION_RANK.get(ask.disposition, len(_ASK_DISPOSITION_RANK)),
+        -ask.sort_time,
+        ask.key,
+    )
+
+
+def _ask_timestamp(key: str, fallback_sort_time: float) -> tuple[str, float]:
+    sort_time = _inbox_key_timestamp(key)
+    if sort_time is None:
+        sort_time = fallback_sort_time
+    return _epoch_timestamp(sort_time), sort_time
+
+
+def _inbox_key_timestamp(key: str) -> float | None:
+    raw = key[:-1] if key.endswith("Z") else key
+    try:
+        parsed = datetime.strptime(raw, "%Y%m%dT%H%M%S%f").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    return parsed.timestamp()
+
+
+def _safe_path_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _epoch_timestamp(value: float) -> str:
+    return (
+        datetime.fromtimestamp(value, UTC)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
     )
 
 
@@ -226,13 +338,16 @@ def _learning_record_line(record: session_learnings.LearningRecord) -> str:
     )
 
 
-def _asks_lines(asks: list[tuple[str, str]]) -> list[str]:
-    lines = ["Latest Ask", f"  {clip(asks[-1][1]) if asks else '-'}"]
+def _asks_lines(asks: list[BriefingAsk]) -> list[str]:
+    lines = ["Latest Ask", _ask_line(asks[0]) if asks else "  -"]
     if len(asks) > 1:
         lines.append("Recent Asks")
-        for ts, text in asks[-DEFAULT_RECENT_ASKS:-1]:
-            lines.append(f"  {ts} {clip(text)}")
+        lines.extend(_ask_line(ask) for ask in asks[1:DEFAULT_RECENT_ASKS])
     return lines
+
+
+def _ask_line(ask: BriefingAsk) -> str:
+    return f"  {ask.disposition} {ask.timestamp} key={ask.key} {clip(ask.text)}"
 
 
 def _finals_lines(finals: list[tuple[str, str]]) -> list[str]:
@@ -998,6 +1113,7 @@ def render_sweep(
         )
     lines: list[str] = ["Sweep", f"  windows={len(boundaries) + 1} files={len(files)}"]
     edges = ["", *boundaries, "￿"]
+    sweep_asks = briefing_asks(start=start, end=end, contains=contains)
     for index in range(len(edges) - 1):
         window_start, window_end = edges[index], edges[index + 1]
         window_turns = [
@@ -1008,9 +1124,14 @@ def render_sweep(
         ]
         label = window_start or "session start"
         lines.append(f"Window {index} (from {label})")
-        asks = operator_asks(window_turns)
-        for ts, text in asks[-SWEEP_WINDOW_ASKS:]:
-            lines.append(f"  ask {ts} {clip(text)}")
+        asks = [
+            ask
+            for ask in sweep_asks
+            if (not window_start or ask.timestamp >= window_start)
+            and ask.timestamp < window_end
+        ]
+        for ask in asks[:SWEEP_WINDOW_ASKS]:
+            lines.append(f"  ask {_ask_line(ask).strip()}")
         finals = [
             (turn.start_ts, text)
             for turn in window_turns

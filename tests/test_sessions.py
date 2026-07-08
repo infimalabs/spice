@@ -8,12 +8,19 @@ import shutil
 import sqlite3
 import subprocess
 import time
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
 
 from spice.agent.driver import DRIVER
 from spice.cli.parser import build_parser
+from spice.mail.ackstate import (
+    ACK_DISPOSITION_ACKED,
+    ACK_DISPOSITION_REFUSED,
+    AckStateWrite,
+    record_acked_inbox_items,
+)
 from spice.mail.inbox import (
     collect_deadlettered_inbox_items,
     collect_inbox_items,
@@ -22,7 +29,7 @@ from spice.mail.inbox import (
     write_inbox_item,
 )
 from spice.sessions import briefing as briefing_module
-from spice.sessions.briefing import render_briefing
+from spice.sessions.briefing import render_briefing, render_sweep
 from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions.meter import (
     ActiveContextSnapshot,
@@ -164,7 +171,10 @@ def test_session_timeline_prints_turn_and_compaction(tmp_path, capsys):
     assert "user_after=after compaction" in output
 
 
-def test_session_briefing_reads_direct_gzip_jsonl_path(tmp_path, capsys):
+def test_session_briefing_reads_direct_gzip_jsonl_path(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    monkeypatch.chdir(repo)
     transcript = tmp_path / "session.jsonl.gz"
     _write_gzip_jsonl(
         transcript,
@@ -230,7 +240,7 @@ def test_session_briefing_reads_direct_gzip_jsonl_path(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert "files=session.jsonl.gz turns=1" in output
-    assert "Latest Ask\n  compressed request" in output
+    assert _section_lines(output, "Latest Ask") == ["Latest Ask", "  -"]
     assert "Latest Final\n  compressed done" in output
     assert meter.snapshot_count == 1
     assert meter.latest_snapshot is not None
@@ -417,6 +427,13 @@ def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
     transcript = tmp_path / "filtered.jsonl"
     _write_filter_transcript(transcript)
+    _record_ack_state_ask(
+        repo,
+        "20260101T000005000000Z",
+        "needle request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:05Z",
+    )
     monkeypatch.chdir(repo)
 
     briefing = render_briefing(
@@ -432,9 +449,99 @@ def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
     assert "contains=needle" in briefing
     assert "turn_ids=turn-b" in briefing
     assert "tools=apply_patch" in briefing
-    assert "Latest Ask\n  needle request" in briefing
+    assert _section_lines(briefing, "Latest Ask") == [
+        "Latest Ask",
+        "  acked 2026-01-01T00:00:05.000Z key=20260101T000005000000Z needle request",
+    ]
     assert "Working Set\n  spice/sessions/briefing.py touches=1" in briefing
     assert "Git\n  branch=main upstream=- ahead=- behind=-\n  dirty=clean" in briefing
+
+
+def test_briefing_ranks_ack_db_asks_by_disposition_then_recency(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    pending_key = "20260101T000001000000Z"
+    pending = write_inbox_item(
+        repo,
+        f"{pending_key}.txt",
+        compose_inbox_text(body="pending request", priority=None, stop=False),
+    )
+    assert pending.name == f"{pending_key}.txt"
+    _record_ack_state_ask(
+        repo,
+        "20260101T000002000000Z",
+        "refused request",
+        ACK_DISPOSITION_REFUSED,
+        "2026-01-01T00:00:02Z",
+    )
+    _record_ack_state_ask(
+        repo,
+        "20260101T000003000000Z",
+        "acked request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:03Z",
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing([], max_lines=200, max_bytes=20000)
+
+    assert _section_lines(briefing, "Latest Ask") == [
+        "Latest Ask",
+        "  pending 2026-01-01T00:00:01.000Z key=20260101T000001000000Z pending request",
+    ]
+    assert _section_lines(briefing, "Recent Asks") == [
+        "Recent Asks",
+        "  refused 2026-01-01T00:00:02.000Z key=20260101T000002000000Z refused request",
+        "  acked 2026-01-01T00:00:03.000Z key=20260101T000003000000Z acked request",
+    ]
+
+
+def test_sweep_renders_ack_db_asks_inside_compaction_windows(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "sweep.jsonl"
+    transcript.write_text(
+        "".join(
+            f"{json.dumps(event)}\n"
+            for event in [
+                {
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-a"},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:10Z",
+                    "type": "compacted",
+                    "payload": {},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _record_ack_state_ask(
+        repo,
+        "20260101T000005000000Z",
+        "pre-compaction request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:05Z",
+    )
+    _record_ack_state_ask(
+        repo,
+        "20260101T000015000000Z",
+        "post-compaction request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:15Z",
+    )
+    monkeypatch.chdir(repo)
+
+    sweep = render_sweep([transcript], count=1)
+
+    assert (
+        "  ask acked 2026-01-01T00:00:05.000Z key=20260101T000005000000Z pre-compaction request"
+        in sweep
+    )
+    assert (
+        "  ask acked 2026-01-01T00:00:15.000Z key=20260101T000015000000Z post-compaction request"
+        in sweep
+    )
 
 
 def test_briefing_learnings_use_active_stem_top_five(session_task_repo):
@@ -1023,6 +1130,25 @@ def _write_learning_transcript(
         "".join(f"{json.dumps(event)}\n" for event in events),
         encoding="utf-8",
     )
+
+
+def _record_ack_state_ask(repo, key: str, body: str, disposition: str, ts: str) -> None:
+    record_acked_inbox_items(
+        repo,
+        [
+            AckStateWrite(
+                key=key,
+                inbox_name=f"{key}.txt",
+                text=compose_inbox_text(body=body, priority=None, stop=False),
+                disposition=disposition,
+            )
+        ],
+        now=_epoch_seconds(ts),
+    )
+
+
+def _epoch_seconds(ts: str) -> float:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
 
 
 def _section_lines(output: str, header: str) -> list[str]:
