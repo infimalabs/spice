@@ -549,6 +549,7 @@ function stopActivePlayback() {
   }
 }
 
+/** @returns {Promise<void>} */
 function playAudioBuffer(buffer) {
   return new Promise((resolve) => {
     // Claim ownership before creating the clip: any in-flight clip is stopped,
