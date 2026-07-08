@@ -339,9 +339,6 @@ def _phase_effort_transcript_files_by_thread(
 def _phase_effort_row_line(usage: effort.PhaseEffortUsage) -> str:
     parts = [
         f"  {usage.phase}[{usage.phase_index}]",
-        f"driver={_label(usage.driver)}",
-        f"model={_label(usage.model)}",
-        f"effort={_label(usage.effort)}",
         *_phase_effort_token_parts(usage),
         f"turns={usage.turn_count}",
         f"msgs={usage.message_count}",
@@ -373,10 +370,6 @@ def _phase_effort_token_parts(usage: effort.PhaseEffortUsage) -> list[str]:
 
 def _phase_effort_has_model_tags(usage: effort.PhaseEffortUsage) -> bool:
     return bool(usage.driver and usage.model and usage.effort)
-
-
-def _label(value: str) -> str:
-    return value or "-"
 
 
 def _format_wall_seconds(seconds: float | None) -> str:

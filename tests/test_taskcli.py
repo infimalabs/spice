@@ -836,7 +836,7 @@ def test_task_show_omits_merge_aware_diff_command_for_task_head(monkeypatch):
     assert "plain git show" not in output
 
 
-def test_task_show_renders_phase_effort_as_model_tagged_phase_rows(monkeypatch):
+def test_task_show_renders_phase_effort_as_aggregate_phase_rows(monkeypatch):
     row = _row(
         "Render effort",
         project="task.render",
@@ -879,19 +879,16 @@ def test_task_show_renders_phase_effort_as_model_tagged_phase_rows(monkeypatch):
     assert _section_lines(output, "phase_effort:") == [
         "phase_effort:",
         (
-            "  todo[0] driver=codex model=gpt-5.5 effort=xhigh tokens=135 "
-            "input=100 cached=10 output=20 reasoning=5 turns=1 msgs=2 "
-            "renewals=0 wall=20s"
+            "  todo[0] tokens=135 input=100 cached=10 output=20 reasoning=5 "
+            "turns=1 msgs=2 renewals=0 wall=20s"
         ),
         (
-            "  verify[1] driver=codex model=gpt-5.5 effort=xhigh tokens=267 "
-            "input=207 cached=20 output=30 reasoning=10 turns=1 msgs=2 "
-            "renewals=1 wall=1m15s partial=missing_transcript"
+            "  verify[1] tokens=267 input=207 cached=20 output=30 reasoning=10 "
+            "turns=1 msgs=2 renewals=1 wall=1m15s partial=missing_transcript"
         ),
         (
-            "  review[2] driver=codex model=- effort=xhigh "
-            "tokens=unattributed input=- cached=- output=- reasoning=- "
-            "turns=3 msgs=4 renewals=0 wall=30s partial=missing_end"
+            "  review[2] tokens=unattributed input=- cached=- output=- "
+            "reasoning=- turns=3 msgs=4 renewals=0 wall=30s partial=missing_end"
         ),
     ]
 
