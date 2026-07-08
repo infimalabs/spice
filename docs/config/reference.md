@@ -205,6 +205,11 @@ Bag names are case-folded. Trigger phrases are normalized to lowercase words.
 Configured bags merge with built-ins, so a repo can tune existing bags or add
 new curated near-universal preferences.
 
+Watchdog reminders are deduped by content-derived reminder key within one
+compaction epoch. A later compaction can make the same key eligible to publish
+again because the agent may have lost the earlier inbox steering, but the
+compaction count never changes the configured `message` text.
+
 ## `[tool.spice.tasks]`
 
 | Key | Default | Meaning |

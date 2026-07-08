@@ -38,10 +38,15 @@ checklist.
 ## Watchdog And Maxims
 
 - Assistant prose scanning is keyed on driver-specific transcript markers.
-- Maxims are deduped across compaction epochs.
+- Maxims are deduped by content-derived reminder key within a compaction epoch.
+  Compaction may make the same reminder eligible to reappear because the agent
+  may have lost the earlier steering; it never changes the reminder text.
 - Judge text excludes generated diff/patch/tool-output bodies.
 - `[MAXIM]` and watchdog echoes are suppressed so the system does not judge
   itself for quoting itself.
+- Built-in maxims stay near-universal engineering preferences. They do not
+  encode context runway or pressure policy; calm handoff behavior belongs in
+  task and rehydration surfaces, not in maxim text.
 
 ## Tasks
 

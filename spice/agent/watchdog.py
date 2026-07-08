@@ -9,8 +9,8 @@ Every message gets two treatments:
 * the assistant-authored prose (clipped at generated tool-output boundaries)
   is trigger-scanned against the configured maxims and, on a hit, adjudicated
   by the local judge — violations are published back into the agent's inbox
-  as `[MAXIM]` reminders, at most once per compaction epoch, with self-echo
-  suppressed.
+  as `[MAXIM]` reminders, at most once per content-derived reminder key per
+  compaction epoch, with self-echo suppressed.
 """
 
 from __future__ import annotations
@@ -71,11 +71,13 @@ class MaximReminderGate:
     """Dedupe reminders within one compaction epoch.
 
     The same reminder key publishes at most once until the agent's context
-    compacts; after a compaction the agent has lost the earlier reminder, so
-    it becomes eligible again. The key is derived from the triggered maxim bags
-    before judging, while cleanup stores the final inbox body separately so it
-    only discards reminders whose file text still matches this supervisor's
-    rendered reminder.
+    compacts; after a compaction the agent may have lost the earlier reminder,
+    so it becomes eligible again. The compaction index never changes the
+    reminder key or body: content determines text, compaction only resets
+    eligibility. The key is derived from the triggered maxim bags before
+    judging, while cleanup stores the final inbox body separately so it only
+    discards reminders whose file text still matches this supervisor's rendered
+    reminder.
     """
 
     def __init__(self) -> None:
