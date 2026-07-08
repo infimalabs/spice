@@ -113,9 +113,9 @@ def apply_output_budget(
     pruned = False
     line_budget = max_lines if max_lines and max_lines > 0 else None
     byte_budget = max_bytes if max_bytes and max_bytes > 0 else None
-    reserve = 1 if explain else 0
+    reserve = 1
     if line_budget and len(lines) > line_budget:
-        keep = max(1, line_budget - reserve)
+        keep = max(0, line_budget - reserve)
         lines = lines[:keep]
         pruned = True
 
@@ -136,15 +136,12 @@ def apply_output_budget(
         return "\n".join(out)
 
     if byte_budget:
-        while lines and len(rendered(explain and pruned).encode("utf-8")) > byte_budget:
+        while lines and len(rendered(pruned).encode("utf-8")) > byte_budget:
             lines.pop()
             pruned = True
-        if (
-            not lines
-            and len(rendered(explain and pruned).encode("utf-8")) > byte_budget
-        ):
-            return truncate_to_bytes(rendered(explain and pruned), byte_budget)
-    if pruned and explain:
+        if not lines and len(rendered(pruned).encode("utf-8")) > byte_budget:
+            return truncate_to_bytes(rendered(pruned), byte_budget)
+    if pruned:
         return rendered(True)
     return "\n".join(lines)
 

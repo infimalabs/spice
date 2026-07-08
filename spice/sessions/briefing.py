@@ -933,17 +933,25 @@ def _activity_lines(
     ]
     working_set = sort_rehydration_candidates(file_candidates)
     if working_set:
+        shown_working_set = working_set[:WORKING_SET_LIMIT]
+        overflow = len(working_set) - len(shown_working_set)
         lines.append("Working Set")
-        for candidate in working_set[:WORKING_SET_LIMIT]:
+        for candidate in shown_working_set:
             lines.append(f"  {candidate.label} touches={candidate.count}")
+        if overflow:
+            lines.append(f"  +{overflow} more working-set rows")
     ranked_commits = sort_rehydration_candidates(commit_candidates)
     if ranked_commits:
+        shown_commits = ranked_commits[:RECENT_COMMITS_LIMIT]
+        overflow = len(ranked_commits) - len(shown_commits)
         lines.append("Recent Commits")
-        for candidate in ranked_commits[:RECENT_COMMITS_LIMIT]:
+        for candidate in shown_commits:
             lines.append(
                 f"  {candidate.timestamp} {candidate.label} "
                 f"{clip(candidate.text, COMMIT_PREVIEW_CHARS)}"
             )
+        if overflow:
+            lines.append(f"  +{overflow} more commit rows")
     return lines
 
 
