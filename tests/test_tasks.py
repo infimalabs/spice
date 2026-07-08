@@ -123,6 +123,65 @@ def test_task_edit_requires_at_least_one_field(task_repo):
         ops.edit(handle)
 
 
+def test_task_delete_allows_unclaimed_task(task_repo):
+    handle = create.add(
+        "Delete unclaimed task",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+    )
+    uuid = identity.uuid_of(identity.resolve(handle))
+
+    output = ops.delete(handle, "duplicate")
+    row = tw.export([uuid])[0]
+
+    assert output == handle
+    assert row["status"] == "deleted"
+    assert row["delete_reason"] == "duplicate"
+
+
+def test_task_delete_refuses_live_claim_without_override(task_repo):
+    handle = create.add(
+        "Delete claimed task",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+    )
+    ops.claim(handle)
+
+    with pytest.raises(SpiceError, match=f"cannot delete {handle}: live claim held"):
+        ops.delete(handle, "duplicate")
+
+    row = identity.resolve(handle)
+    assert row["status"] == "pending"
+    assert row["claim_by"] == ACTOR_A
+
+
+def test_task_delete_force_claimed_logs_holder(task_repo):
+    handle = create.add(
+        "Force delete claimed task",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+    )
+    ops.claim(handle)
+    claimed = identity.resolve(handle)
+    uuid = identity.uuid_of(claimed)
+    holder = (
+        f"claim_by={ACTOR_A} claim_thread={ACTOR_A} "
+        f"claim_until={claimed['claim_until']}"
+    )
+
+    output = ops.delete(handle, "duplicate", force_claimed=True)
+    row = tw.export([uuid])[0]
+    annotations = [str(item.get("description") or "") for item in row["annotations"]]
+
+    assert output == f"warning: deleted {handle} despite live claim {holder}\n{handle}"
+    assert row["status"] == "deleted"
+    assert f"forced delete of live claim: {holder}" in annotations
+    assert "deleted: duplicate" in annotations
+
+
 def test_task_wake_clears_multiple_waits_and_makes_tasks_current(task_repo):
     handles = [
         create.add(
@@ -326,6 +385,70 @@ def test_task_capture_claims_existing_handle_over_loose(remote_task_repo):
     assert row["claim_by"] == ACTOR_A
     assert bool(row["start"])
     assert _git(remote_task_repo, "rev-parse", "HEAD") == loose
+
+
+def test_task_capture_claims_existing_active_handle_over_loose(remote_task_repo):
+    handle = create.add(
+        "Active task awaiting loose commit",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["loose commit is folded into the active task"],
+        claim=True,
+    )
+    loose = _make_loose_commit(remote_task_repo)
+
+    output = ops.capture(handle)
+    row = identity.resolve(handle)
+
+    assert f"captured 1 loose commit into {handle}" in output
+    assert row["claim_by"] == ACTOR_A
+    assert bool(row["start"])
+    assert row["claim_head"] == loose
+
+
+def test_task_capture_deleted_handle_points_to_new_capture_task(remote_task_repo):
+    handle = create.add(
+        "Deleted task with loose work",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["deleted task recovery is explicit"],
+    )
+    ops.delete(handle, reason="duplicate")
+    _make_loose_commit(remote_task_repo)
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.capture(handle)
+
+    message = str(exc_info.value)
+    assert f"cannot capture a deleted task: {handle}" in message
+    assert "discard local work" in message
+    assert "hand off" in message
+    assert "do not capture the deleted handle" in message
+    assert f"spice task capture --project task.unit --origin task:{handle}" in message
+
+
+def test_task_done_deleted_claim_points_to_recovery_paths(remote_task_repo):
+    handle = create.add(
+        "Deleted claimed task with loose work",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["deleted task done recovery is explicit"],
+        claim=True,
+    )
+    ops.delete(handle, reason="duplicate")
+    _make_loose_commit(remote_task_repo)
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.done(handle, validation=["loose work validated"])
+
+    message = str(exc_info.value)
+    assert f"cannot complete a deleted task: {handle}" in message
+    assert "discard local work" in message
+    assert "hand off" in message
+    assert f"spice task capture --project task.unit --origin task:{handle}" in message
 
 
 def test_task_capture_refuses_when_no_loose_commit(remote_task_repo):

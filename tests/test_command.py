@@ -25,6 +25,7 @@ from spice.mail.inbox import InboxResendAttempt, compose_inbox_text, write_inbox
 from spice.sessions.meter import (
     ActiveContextSnapshot,
     ContextMeter,
+    GuidanceState,
     context_meter_instruction,
 )
 
@@ -859,7 +860,7 @@ def test_context_meter_injector_repeats_warning_after_interval(tmp_path):
     injector.inject(force=False)
 
     output = stderr.getvalue()
-    guidance = context_meter_instruction("yellow")
+    guidance = context_meter_instruction(GuidanceState(level="yellow"))
     assert output.strip().splitlines() == [guidance, guidance]
 
 
@@ -888,7 +889,7 @@ def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
 
     assert "Inbox Steering" in payload
     assert "payload steering" in payload
-    assert context_meter_instruction("yellow") in payload
+    assert context_meter_instruction(GuidanceState(level="yellow")) in payload
     working_lines = [line for line in payload.splitlines() if line.startswith("🌶️ ")]
     assert working_lines == ["🌶️ Working state: last maxim fallbacks."]
     assert "\n" not in working_lines[0]
