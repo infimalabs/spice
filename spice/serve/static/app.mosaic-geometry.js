@@ -79,11 +79,3 @@ function mosaicContainerWidthPx(host) {
     Number.parseFloat(style.paddingRight || "0")
   );
 }
-
-function laneMosaicGeometry(lane) {
-  const host = lane.messagesEl;
-  return mosaicGeometry(
-    mosaicRootFontSizePx(),
-    host ? mosaicContainerWidthPx(host) : 0,
-  );
-}

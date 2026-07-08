@@ -201,7 +201,6 @@ function laneBackendState() {
     optimisticPendingInboxFloor: 0,
     pendingSubmissionCount: 0,
     sendAwaitingBackendCount: 0,
-    refreshInFlight: false,
     liveBusSubscribed: false,
     serverReachable: true,
     serverCloseRequested: false,
@@ -406,10 +405,6 @@ function teamImportPanel(lane, options = {}) {
   return panel;
 }
 
-function emptyTeamImportChoice(lane, target) {
-  return teamImportChoice(lane, target);
-}
-
 function teamImportChoice(lane, target, options = {}) {
   const button = targetChoiceButton(
     target,
@@ -431,10 +426,6 @@ function teamImportChoice(lane, target, options = {}) {
   return button;
 }
 
-async function importTargetIntoEmptyTeam(lane, targetId) {
-  return importTargetIntoTeam(lane, targetId);
-}
-
 async function importTargetIntoTeam(lane, targetId) {
   const host = laneGroupHost(lane);
   const target = targetById.get(targetId);
@@ -449,10 +440,6 @@ async function importTargetIntoTeam(lane, targetId) {
     }),
   );
   await refreshTeamSnapshot({ force: true });
-}
-
-function emptyTeamImportAliases(target) {
-  return teamImportAliases(target);
 }
 
 function teamImportAliases(target) {

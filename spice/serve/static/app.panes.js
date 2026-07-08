@@ -29,10 +29,6 @@ function laneFilterInventory(lane) {
   return laneGroupHost(lane).taskFilterInventory;
 }
 
-function laneEffectiveAssignedFilterNames(inventory, assignedFilters) {
-  return taskFilterEffectiveAssignedNames(inventory, assignedFilters);
-}
-
 function laneFilterAvailableOpenTaskCount(lane, assignedFilters) {
   return availableTaskFilterOpenTaskCount(
     laneFilterInventory(lane),

@@ -864,7 +864,6 @@ def test_static_empty_team_importer_renders_message_stream_choices():
     empty_team_sync = app_shell[empty_team_sync_start:empty_team_sync_end]
     assert "function emptyTeamImportPanel(lane)" in app_shell
     assert "function teamImportPanel(lane, options = {})" in app_shell
-    assert "function emptyTeamImportChoice(lane, target)" in app_shell
     assert "function teamImportChoice(lane, target, options = {})" in app_shell
     assert "lane.shardsEl.replaceChildren();" in empty_team_sync
     assert "renderMessagesIfChanged(lane);" in empty_team_sync
