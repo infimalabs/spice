@@ -47,6 +47,10 @@ from spice.tasks.identity import (
     mint_incepted,
     render_handle,
 )
+from tests.test_sessionfixtures import (
+    SUPERVISED_FIXTURES,
+    transcript_driver_for_fixture,
+)
 
 CODEX_HOME_ENV = "CODEX_HOME"  # env-policy: allow
 THREAD_DASHED = "11111111-2222-3333-4444-555555555555"
@@ -480,6 +484,22 @@ def test_turn_user_messages_carry_shape(tmp_path):
         records.MessageShape.SKILL_MANTRA,
         records.MessageShape.HUMAN,
     ]
+
+
+def test_supervised_session_fixtures_cover_all_user_message_shapes(monkeypatch):
+    for transcript in SUPERVISED_FIXTURES:
+        with transcript_driver_for_fixture(monkeypatch, transcript):
+            turns = records.collect_turns([transcript])
+            compactions = records.collect_compactions([transcript])
+
+        shapes = {message.shape for turn in turns for message in turn.user_messages}
+        assert shapes == set(records.MessageShape)
+        assert len(compactions) == 3
+        assert [record.summary_after_text for record in compactions] == [
+            COMPACTION_SUMMARY_OPENING,
+            COMPACTION_SUMMARY_OPENING,
+            COMPACTION_SUMMARY_OPENING,
+        ]
 
 
 def test_collect_compactions_separates_summary_from_human_ask(tmp_path):
