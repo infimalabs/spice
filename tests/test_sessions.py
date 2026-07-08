@@ -22,6 +22,7 @@ from spice.mail.inbox import (
     compose_inbox_text,
     write_inbox_item,
 )
+from spice.sessions import briefing as briefing_module
 from spice.sessions.briefing import render_briefing, render_sweep
 from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions.meter import (
@@ -663,6 +664,135 @@ def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
     ]
     assert "Working Set\n  spice/sessions/briefing.py touches=1" in briefing
     assert "Git\n  branch=main upstream=- ahead=- behind=-\n  dirty=clean" in briefing
+
+
+def test_briefing_payload_renders_filtered_briefing(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "filtered.jsonl"
+    _write_filter_transcript(transcript)
+    _record_ack_state_ask(
+        repo,
+        "20260101T000005000000Z",
+        "needle request",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:05Z",
+    )
+    monkeypatch.chdir(repo)
+
+    payload = briefing_module.build_briefing_payload(
+        [transcript],
+        contains="needle",
+        turn_ids=["turn-b"],
+        tools=["apply_patch"],
+    )
+    rendered = briefing_module.render_briefing_payload(
+        payload,
+        max_lines=BRIEFING_FILTER_MAX_LINES,
+        max_bytes=BRIEFING_FILTER_MAX_BYTES,
+    )
+
+    assert payload.filters.turn_ids == ("turn-b",)
+    assert payload.filters.tools == ("apply_patch",)
+    assert _section_lines(rendered, "Latest Ask") == [
+        "Latest Ask",
+        "  acked 2026-01-01T00:00:05.000Z key=20260101T000005000000Z needle request",
+    ]
+    assert rendered == render_briefing(
+        [transcript],
+        contains="needle",
+        turn_ids=["turn-b"],
+        tools=["apply_patch"],
+        max_lines=BRIEFING_FILTER_MAX_LINES,
+        max_bytes=BRIEFING_FILTER_MAX_BYTES,
+    )
+
+
+def test_sweep_payload_renders_precomputed_windows(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "sweep.jsonl"
+    transcript.write_text(
+        "".join(
+            f"{json.dumps(event)}\n"
+            for event in [
+                {
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-before"},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:01Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"text": "before compaction"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:02Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "phase": "final_answer",
+                        "content": [{"text": "before final"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:04Z",
+                    "type": "compacted",
+                    "payload": {},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:05Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete"},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:06Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-after"},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:07Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"text": "after compaction"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:08Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "phase": "final_answer",
+                        "content": [{"text": "after final"}],
+                    },
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    payload = briefing_module.build_briefing_payload(
+        [transcript], start="2026-01-01T00:00:04.000Z", sweep_count=1
+    )
+    rendered = briefing_module.render_sweep_payload(payload)
+
+    assert [window.label for window in payload.sweep_windows] == [
+        "2026-01-01T00:00:04.000Z",
+    ]
+    assert [
+        (candidate.timestamp, candidate.text)
+        for candidate in payload.sweep_windows[0].asks
+    ] == [("2026-01-01T00:00:06.000Z", "after compaction")]
+    assert rendered == render_sweep(
+        [transcript], count=1, start="2026-01-01T00:00:04.000Z"
+    )
 
 
 def test_briefing_ranks_ack_db_asks_by_disposition_then_recency(tmp_path, monkeypatch):
