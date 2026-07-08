@@ -66,6 +66,11 @@ INBOX_RESPONSE_ROW = (
 INBOX_ACK_REMINDER_SECONDS = 15
 INBOX_ACK_ESCALATED_SECONDS = 60
 INBOX_ACK_OVERDUE_SECONDS = 5 * 60
+INBOX_ACK_REPLY_FALLBACK_SENTENCE = (
+    "Two paths retire keys: the inline header, or "
+    '`spice agent reply "ACK <key>: ..."` from the shell when inline '
+    "headers are not reaching the surface."
+)
 INBOX_TASK_HINT_ROW = (
     "Task offload: capture in the moment with a standalone TASK line: "
     "`TASK title=... | project=<stem.child> | acceptance=...`; if ACKing "
@@ -310,21 +315,24 @@ def inbox_ack_format_hint_row(items: Sequence[InboxItem]) -> str:
             "ACK required now: "
             f"pending for {format_relative_seconds(age_seconds)}; include an ACK "
             "or reasoned NACK header near the start of the next working "
-            f"assistant message, e.g. `{ack_example}` or `{nack_example}`."
+            f"assistant message, e.g. `{ack_example}` or `{nack_example}`. "
+            f"{INBOX_ACK_REPLY_FALLBACK_SENTENCE}"
         )
     if age_seconds >= INBOX_ACK_ESCALATED_SECONDS:
         return (
             "ACK reminder: "
             f"pending for {format_relative_seconds(age_seconds)}; include an ACK "
             "or reasoned NACK header near the start of your next working "
-            f"assistant message, e.g. `{ack_example}` or `{nack_example}`."
+            f"assistant message, e.g. `{ack_example}` or `{nack_example}`. "
+            f"{INBOX_ACK_REPLY_FALLBACK_SENTENCE}"
         )
     if age_seconds >= INBOX_ACK_REMINDER_SECONDS:
         return (
             "ACK hint: "
             "this will keep redisplaying until an assistant message includes "
             "an ACK or reasoned NACK header near the start, like "
-            f"`{ack_example}` or `{nack_example}`."
+            f"`{ack_example}` or `{nack_example}`. "
+            f"{INBOX_ACK_REPLY_FALLBACK_SENTENCE}"
         )
     return (
         "N/ACK example: lead the next working assistant message with a concise "

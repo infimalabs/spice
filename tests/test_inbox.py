@@ -266,6 +266,24 @@ def test_aged_inbox_ack_hint_avoids_literal_response_script(tmp_path):
     assert "understood" not in row
 
 
+def test_aged_inbox_ack_nag_names_both_reply_paths(tmp_path):
+    written = write_inbox_item(
+        tmp_path,
+        "20260101T000000000005Z.txt",
+        compose_inbox_text(body="please respond", priority=None, stop=False),
+    )
+    fresh_row = inbox_ack_format_hint_row(collect_inbox_items(str(tmp_path)))
+    assert "spice agent reply" not in fresh_row
+
+    for age_seconds in (20, 2 * 60, 6 * 60):
+        old = time.time() - age_seconds
+        os.utime(written, (old, old))
+        row = inbox_ack_format_hint_row(collect_inbox_items(str(tmp_path)))
+        assert "Two paths retire keys" in row
+        assert 'spice agent reply "ACK <key>: ..."' in row
+        assert "not reaching the surface" in row
+
+
 def test_parse_preserves_non_note_parenthetical_suffix():
     parsed = parse_inbox_payload(
         "keep draining\n(DRAIN QUEUE ASAP: spice task next)\n"
