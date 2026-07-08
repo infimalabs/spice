@@ -792,10 +792,20 @@ def test_briefing_parses_only_the_selected_compaction_tail(tmp_path, monkeypatch
         "Horizon",
         "Guidance",
         "Recovery",
+        "Trajectory",
         "Activity",
         "Git",
         "Inbox",
     ]
+    assert _section_lines(briefing, "Trajectory") == [
+        "Trajectory",
+        "  window=0 from=2026-01-01T02:00:00.000Z activity=turns=1 commands=0 patches=0",
+        "  window=1 from=2026-01-01T03:00:00.000Z activity=turns=1 commands=0 patches=0",
+        "  window=2 from=2026-01-01T04:00:00.000Z activity=turns=1 commands=0 patches=0",
+    ]
+    assert "trajectory activity=turns=1 commands=0 patches=0" in render_sweep(
+        [transcript], count=3
+    )
 
 
 def test_explicit_start_wins_over_adaptive_horizon_in_briefing_and_sweep(
