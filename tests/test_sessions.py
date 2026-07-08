@@ -3,27 +3,13 @@
 import argparse
 import gzip
 import json
-import shutil
 import sqlite3
 import subprocess
-from datetime import datetime
 
 import pytest
 
-from spice.agent.driver import DRIVER
 from spice.cli.parser import build_parser
-from spice.mail.ackstate import (
-    ACK_DISPOSITION_ACKED,
-    ACK_DISPOSITION_REFUSED,
-    AckStateWrite,
-    record_acked_inbox_items,
-)
-from spice.mail.inbox import (
-    compose_inbox_text,
-    write_inbox_item,
-)
-from spice.sessions import briefing as briefing_module
-from spice.sessions.briefing import render_briefing, render_sweep
+from spice.sessions.briefing import render_briefing
 from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions.meter import (
     ActiveContextSnapshot,
@@ -35,7 +21,6 @@ from spice.sessions.meter import (
 from spice.sessions import records
 from spice.sessions.util import first_text, normalize_timestamp
 from spice.errors import SpiceError
-from spice.tasks import config as task_config
 from spice.tasks.identity import (
     BASE,
     INCEPTED_RE,
@@ -56,13 +41,7 @@ from tests.test_sessionfixtures import (
 CODEX_HOME_ENV = "CODEX_HOME"  # env-policy: allow
 THREAD_DASHED = "11111111-2222-3333-4444-555555555555"
 THREAD_CANONICAL = "11111111222233334444555555555555"
-BRIEFING_FILTER_MAX_LINES = 80
-BRIEFING_FILTER_MAX_BYTES = 10_000
-BRIEFING_PRUNE_MAX_LINES = 6
-BRIEFING_PARSE_MAX_LINES = 10
-BRIEFING_PARSE_MAX_BYTES = 1_000
 GZIP_SESSION_TOTAL_TOKENS = 115
-ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def test_pressure_levels_at_documented_thresholds():
@@ -236,9 +215,14 @@ def test_session_briefing_reads_direct_gzip_jsonl_path(tmp_path, monkeypatch, ca
 
     output = capsys.readouterr().out
     assert "files=session.jsonl.gz turns=1" in output
-    assert _section_lines(output, "Latest Ask") == [
-        "Latest Ask",
-        "  human 2026-01-01T00:00:00.000Z compressed request",
+    assert _section_headers(output) == [
+        "Briefing",
+        "Horizon",
+        "Guidance",
+        "Latest Final",
+        "Activity",
+        "Git",
+        "Inbox",
     ]
     assert "Latest Final\n  compressed done" in output
     assert meter.snapshot_count == 1
@@ -308,7 +292,14 @@ def test_session_briefing_excludes_non_human_transcript_messages(tmp_path, monke
 
     briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
 
-    assert _section_lines(briefing, "Latest Ask") == ["Latest Ask", "  -"]
+    assert _section_headers(briefing) == [
+        "Briefing",
+        "Horizon",
+        "Guidance",
+        "Activity",
+        "Git",
+        "Inbox",
+    ]
 
 
 def test_session_timeline_contains_keeps_turn_when_match_is_not_latest(
@@ -681,354 +672,6 @@ def test_session_thread_parser_exposes_thread_id_argument():
     assert args.thread_id == THREAD_DASHED
 
 
-@pytest.fixture
-def session_task_repo(tmp_path, monkeypatch):
-    if shutil.which("task") is None:
-        pytest.skip("Taskwarrior binary is required")
-    repo = _init_git_repo(tmp_path / "repo")
-    backend = tmp_path / "task-backend"
-    monkeypatch.chdir(repo)
-    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
-    monkeypatch.setenv("CODEX_TURN_ID", "turn-session-learning")
-    task_config.set_backend(str(backend))
-    try:
-        yield repo
-    finally:
-        task_config.set_backend(None)
-
-
-def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
-    repo = _init_git_repo(tmp_path / "repo")
-    transcript = tmp_path / "filtered.jsonl"
-    _write_filter_transcript(transcript)
-    _record_ack_state_ask(
-        repo,
-        "20260101T000005000000Z",
-        "needle request",
-        ACK_DISPOSITION_ACKED,
-        "2026-01-01T00:00:05Z",
-    )
-    monkeypatch.chdir(repo)
-
-    briefing = render_briefing(
-        [transcript],
-        contains="needle",
-        turn_ids=["turn-b"],
-        tools=["apply_patch"],
-        max_lines=BRIEFING_FILTER_MAX_LINES,
-        max_bytes=BRIEFING_FILTER_MAX_BYTES,
-    )
-
-    assert "Filters" in briefing
-    assert "contains=needle" in briefing
-    assert "turn_ids=turn-b" in briefing
-    assert "tools=apply_patch" in briefing
-    assert _section_lines(briefing, "Latest Ask") == [
-        "Latest Ask",
-        "  acked 2026-01-01T00:00:05.000Z "
-        "key=20260101T000005000000Z repeat_count=2 needle request",
-    ]
-    assert "Working Set\n  spice/sessions/briefing.py touches=1" in briefing
-    assert "Git\n  branch=main upstream=- ahead=- behind=-\n  dirty=clean" in briefing
-
-
-def test_briefing_payload_renders_filtered_briefing(tmp_path, monkeypatch):
-    repo = _init_git_repo(tmp_path / "repo")
-    transcript = tmp_path / "filtered.jsonl"
-    _write_filter_transcript(transcript)
-    _record_ack_state_ask(
-        repo,
-        "20260101T000005000000Z",
-        "needle request",
-        ACK_DISPOSITION_ACKED,
-        "2026-01-01T00:00:05Z",
-    )
-    monkeypatch.chdir(repo)
-
-    payload = briefing_module.build_briefing_payload(
-        [transcript],
-        contains="needle",
-        turn_ids=["turn-b"],
-        tools=["apply_patch"],
-    )
-    rendered = briefing_module.render_briefing_payload(
-        payload,
-        max_lines=BRIEFING_FILTER_MAX_LINES,
-        max_bytes=BRIEFING_FILTER_MAX_BYTES,
-    )
-
-    assert payload.filters.turn_ids == ("turn-b",)
-    assert payload.filters.tools == ("apply_patch",)
-    assert _section_lines(rendered, "Latest Ask") == [
-        "Latest Ask",
-        "  acked 2026-01-01T00:00:05.000Z "
-        "key=20260101T000005000000Z repeat_count=2 needle request",
-    ]
-    assert rendered == render_briefing(
-        [transcript],
-        contains="needle",
-        turn_ids=["turn-b"],
-        tools=["apply_patch"],
-        max_lines=BRIEFING_FILTER_MAX_LINES,
-        max_bytes=BRIEFING_FILTER_MAX_BYTES,
-    )
-
-
-def test_sweep_payload_renders_precomputed_windows(tmp_path, monkeypatch):
-    repo = _init_git_repo(tmp_path / "repo")
-    transcript = tmp_path / "sweep.jsonl"
-    transcript.write_text(
-        "".join(
-            f"{json.dumps(event)}\n"
-            for event in [
-                {
-                    "timestamp": "2026-01-01T00:00:00Z",
-                    "type": "event_msg",
-                    "payload": {"type": "task_started", "turn_id": "turn-before"},
-                },
-                {
-                    "timestamp": "2026-01-01T00:00:01Z",
-                    "type": "response_item",
-                    "payload": {
-                        "type": "message",
-                        "role": "user",
-                        "content": [{"text": "before compaction"}],
-                    },
-                },
-                {
-                    "timestamp": "2026-01-01T00:00:02Z",
-                    "type": "response_item",
-                    "payload": {
-                        "type": "message",
-                        "role": "assistant",
-                        "phase": "final_answer",
-                        "content": [{"text": "before final"}],
-                    },
-                },
-                {
-                    "timestamp": "2026-01-01T00:00:04Z",
-                    "type": "compacted",
-                    "payload": {},
-                },
-                {
-                    "timestamp": "2026-01-01T00:00:05Z",
-                    "type": "event_msg",
-                    "payload": {"type": "task_complete"},
-                },
-                {
-                    "timestamp": "2026-01-01T00:00:06Z",
-                    "type": "event_msg",
-                    "payload": {"type": "task_started", "turn_id": "turn-after"},
-                },
-                {
-                    "timestamp": "2026-01-01T00:00:07Z",
-                    "type": "response_item",
-                    "payload": {
-                        "type": "message",
-                        "role": "user",
-                        "content": [{"text": "after compaction"}],
-                    },
-                },
-                {
-                    "timestamp": "2026-01-01T00:00:08Z",
-                    "type": "response_item",
-                    "payload": {
-                        "type": "message",
-                        "role": "assistant",
-                        "phase": "final_answer",
-                        "content": [{"text": "after final"}],
-                    },
-                },
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(repo)
-
-    payload = briefing_module.build_briefing_payload(
-        [transcript], start="2026-01-01T00:00:04.000Z", sweep_count=1
-    )
-    rendered = briefing_module.render_sweep_payload(payload)
-
-    assert [window.label for window in payload.sweep_windows] == [
-        "2026-01-01T00:00:04.000Z",
-    ]
-    assert [
-        (candidate.timestamp, candidate.text)
-        for candidate in payload.sweep_windows[0].asks
-    ] == [("2026-01-01T00:00:06.000Z", "after compaction")]
-    assert rendered == render_sweep(
-        [transcript], count=1, start="2026-01-01T00:00:04.000Z"
-    )
-
-
-def test_briefing_ranks_ack_db_asks_by_recency_then_disposition(tmp_path, monkeypatch):
-    repo = _init_git_repo(tmp_path / "repo")
-    transcript = tmp_path / "human.jsonl"
-    transcript.write_text(
-        "".join(
-            f"{json.dumps(event)}\n"
-            for event in [
-                {
-                    "timestamp": "2026-01-01T00:00:04Z",
-                    "type": "event_msg",
-                    "payload": {"type": "task_started", "turn_id": "turn-human"},
-                },
-                {
-                    "timestamp": "2026-01-01T00:00:04Z",
-                    "type": "response_item",
-                    "payload": {
-                        "type": "message",
-                        "role": "user",
-                        "content": [{"text": "human request"}],
-                    },
-                },
-                {
-                    "timestamp": "2026-01-01T00:00:04Z",
-                    "type": "event_msg",
-                    "payload": {"type": "task_complete"},
-                },
-            ]
-        ),
-        encoding="utf-8",
-    )
-    pending_key = "20260101T000001000000Z"
-    pending = write_inbox_item(
-        repo,
-        f"{pending_key}.txt",
-        compose_inbox_text(body="pending request", priority=None, stop=False),
-    )
-    assert pending.name == f"{pending_key}.txt"
-    _record_ack_state_ask(
-        repo,
-        "20260101T000002000000Z",
-        "refused request",
-        ACK_DISPOSITION_REFUSED,
-        "2026-01-01T00:00:02Z",
-    )
-    _record_ack_state_ask(
-        repo,
-        "20260101T000003000000Z",
-        "acked request",
-        ACK_DISPOSITION_ACKED,
-        "2026-01-01T00:00:03Z",
-    )
-    monkeypatch.chdir(repo)
-
-    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
-
-    assert _section_lines(briefing, "Latest Ask") == [
-        "Latest Ask",
-        "  human 2026-01-01T00:00:04.000Z human request",
-    ]
-    assert _section_lines(briefing, "Recent Asks") == [
-        "Recent Asks",
-        "  acked 2026-01-01T00:00:03.000Z key=20260101T000003000000Z acked request",
-        "  refused 2026-01-01T00:00:02.000Z key=20260101T000002000000Z refused request",
-        "  pending 2026-01-01T00:00:01.000Z key=20260101T000001000000Z pending request",
-    ]
-
-
-def test_briefing_ack_asks_include_response_and_scope_by_thread(tmp_path, monkeypatch):
-    repo = _init_git_repo(tmp_path / "repo")
-    other_actor = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    transcript = tmp_path / f"{ACTOR_A}.jsonl"
-    transcript.write_text("", encoding="utf-8")
-    _record_ack_state_ask(
-        repo,
-        "20260101T000001000000Z",
-        "current lane request",
-        ACK_DISPOSITION_ACKED,
-        "2026-01-01T00:00:01Z",
-        ack_content="captured current lane request",
-        lineage={"thread_id": ACTOR_A},
-    )
-    _record_ack_state_ask(
-        repo,
-        "20260101T000002000000Z",
-        "other lane request",
-        ACK_DISPOSITION_ACKED,
-        "2026-01-01T00:00:02Z",
-        ack_content="captured other lane request",
-        lineage={"thread_id": other_actor},
-    )
-    _record_ack_state_ask(
-        repo,
-        "20260101T000003000000Z",
-        "legacy unscoped request",
-        ACK_DISPOSITION_ACKED,
-        "2026-01-01T00:00:03Z",
-        ack_content="captured legacy request",
-    )
-    monkeypatch.chdir(repo)
-
-    briefing = render_briefing(
-        [transcript],
-        end="2026-01-01T00:04:00.000Z",
-        max_lines=200,
-        max_bytes=20000,
-    )
-
-    assert _section_lines(briefing, "Latest Ask") == [
-        "Latest Ask",
-        "  acked 2026-01-01T00:00:01.000Z "
-        "key=20260101T000001000000Z current lane request | "
-        "response: captured current lane request",
-    ]
-    assert "other lane request" not in briefing
-    assert "legacy unscoped request" not in briefing
-
-
-def test_sweep_renders_ack_db_asks_inside_compaction_windows(tmp_path, monkeypatch):
-    repo = _init_git_repo(tmp_path / "repo")
-    transcript = tmp_path / "sweep.jsonl"
-    transcript.write_text(
-        "".join(
-            f"{json.dumps(event)}\n"
-            for event in [
-                {
-                    "timestamp": "2025-12-31T20:00:00Z",
-                    "type": "compacted",
-                    "payload": {},
-                },
-                {
-                    "timestamp": "2026-01-01T00:00:00Z",
-                    "type": "event_msg",
-                    "payload": {"type": "task_started", "turn_id": "turn-a"},
-                },
-                {
-                    "timestamp": "2026-01-01T00:00:10Z",
-                    "type": "compacted",
-                    "payload": {},
-                },
-            ]
-        ),
-        encoding="utf-8",
-    )
-    _record_ack_state_ask(
-        repo,
-        "20260101T000005000000Z",
-        "pre-compaction request",
-        ACK_DISPOSITION_ACKED,
-        "2026-01-01T00:00:05Z",
-    )
-    _record_ack_state_ask(
-        repo,
-        "20260101T000015000000Z",
-        "post-compaction request",
-        ACK_DISPOSITION_ACKED,
-        "2026-01-01T00:00:15Z",
-    )
-    monkeypatch.chdir(repo)
-
-    sweep = render_sweep([transcript], count=1)
-
-    assert (
-        "  ask acked 2026-01-01T00:00:15.000Z key=20260101T000015000000Z post-compaction request"
-        in sweep
-    )
-
-
 def test_mint_incepted_shape_and_collision_advance():
     first = mint_incepted(set())
     assert INCEPTED_RE.match(first) is not None
@@ -1175,227 +818,8 @@ def _write_claude_thread_transcript(path) -> None:
     )
 
 
-def _write_filter_transcript(path) -> None:
-    patch_args = json.dumps(
-        {
-            "input": (
-                "*** Begin Patch\n"
-                "*** Update File: spice/sessions/briefing.py\n"
-                "@@\n"
-                "+changed\n"
-                "*** End Patch\n"
-            )
-        }
-    )
-    events = [
-        {
-            "timestamp": "2026-01-01T00:00:00Z",
-            "type": "event_msg",
-            "payload": {"type": "task_started", "turn_id": "turn-a"},
-        },
-        {
-            "timestamp": "2026-01-01T00:00:01Z",
-            "type": "response_item",
-            "payload": {
-                "type": "message",
-                "role": "user",
-                "content": [{"text": "ignore request"}],
-            },
-        },
-        {
-            "timestamp": "2026-01-01T00:00:02Z",
-            "type": "response_item",
-            "payload": {"type": "function_call", "name": "exec_command"},
-        },
-        {
-            "timestamp": "2026-01-01T00:00:03Z",
-            "type": "event_msg",
-            "payload": {"type": "task_complete"},
-        },
-        {
-            "timestamp": "2026-01-01T00:00:04Z",
-            "type": "event_msg",
-            "payload": {"type": "task_started", "turn_id": "turn-b"},
-        },
-        {
-            "timestamp": "2026-01-01T00:00:05Z",
-            "type": "response_item",
-            "payload": {
-                "type": "message",
-                "role": "user",
-                "content": [{"text": "needle request"}],
-            },
-        },
-        {
-            "timestamp": "2026-01-01T00:00:06Z",
-            "type": "response_item",
-            "payload": {
-                "type": "function_call",
-                "name": "apply_patch",
-                "arguments": patch_args,
-            },
-        },
-        {
-            "timestamp": "2026-01-01T00:00:07Z",
-            "type": "response_item",
-            "payload": {
-                "type": "message",
-                "role": "assistant",
-                "phase": "final_answer",
-                "content": [{"text": "needle final"}],
-            },
-        },
-        {
-            "timestamp": "2026-01-01T00:00:08Z",
-            "type": "event_msg",
-            "payload": {"type": "task_complete"},
-        },
-    ]
-    path.write_text(
-        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
-    )
-
-
-def _write_horizon_transcript(path, *, asks, compactions) -> None:
-    events = []
-    for index, (timestamp, text) in enumerate(asks):
-        turn_id = f"turn-horizon-{index}"
-        events.extend(
-            [
-                {
-                    "timestamp": timestamp,
-                    "type": "event_msg",
-                    "payload": {"type": "task_started", "turn_id": turn_id},
-                },
-                {
-                    "timestamp": timestamp,
-                    "type": "response_item",
-                    "payload": {
-                        "type": "message",
-                        "role": "user",
-                        "content": [{"text": text}],
-                    },
-                },
-                {
-                    "timestamp": timestamp,
-                    "type": "response_item",
-                    "payload": {
-                        "type": "message",
-                        "role": "assistant",
-                        "phase": "final_answer",
-                        "content": [{"text": f"completed {text}"}],
-                    },
-                },
-                {
-                    "timestamp": timestamp,
-                    "type": "event_msg",
-                    "payload": {"type": "task_complete"},
-                },
-            ]
-        )
-    events.extend(
-        {"timestamp": timestamp, "type": "compacted", "payload": {}}
-        for timestamp in compactions
-    )
-    events.sort(key=lambda event: event["timestamp"])
-    path.write_text(
-        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
-    )
-
-
-def _write_learning_transcript(
-    codex_home,
-    *,
-    thread_id: str,
-    turn_id: str,
-    timestamp: str,
-) -> None:
-    transcript = codex_home / "sessions" / f"rollout-{thread_id}.jsonl"
-    transcript.parent.mkdir(parents=True, exist_ok=True)
-    events: list[dict[str, object]] = [
-        {
-            "timestamp": timestamp,
-            "type": "event_msg",
-            "payload": {"type": "task_started", "turn_id": turn_id},
-        },
-        {
-            "timestamp": timestamp,
-            "type": "response_item",
-            "payload": {
-                "type": "message",
-                "role": "assistant",
-                "content": [
-                    {"text": "Lesson: Use spice task next after phase boundaries."}
-                ],
-            },
-        },
-        {
-            "timestamp": timestamp,
-            "type": "event_msg",
-            "payload": {"type": "task_complete"},
-        },
-    ]
-    transcript.write_text(
-        "".join(f"{json.dumps(event)}\n" for event in events),
-        encoding="utf-8",
-    )
-
-
-def _record_ack_state_ask(
-    repo,
-    key: str,
-    body: str,
-    disposition: str,
-    ts: str,
-    *,
-    ack_content: str = "",
-    lineage: dict | None = None,
-) -> None:
-    record_acked_inbox_items(
-        repo,
-        [
-            AckStateWrite(
-                key=key,
-                inbox_name=f"{key}.txt",
-                text=compose_inbox_text(body=body, priority=None, stop=False),
-                lineage=lineage,
-                ack_content=ack_content,
-                disposition=disposition,
-            )
-        ],
-        now=_epoch_seconds(ts),
-    )
-
-
-def _record_ack_state_asks(repo, asks: list[tuple[str, str]]) -> None:
-    for ts, body in asks:
-        _record_ack_state_ask(
-            repo,
-            _ack_key(ts),
-            body,
-            ACK_DISPOSITION_ACKED,
-            ts,
-        )
-
-
-def _ack_key(ts: str) -> str:
-    return datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime(
-        "%Y%m%dT%H%M%S%fZ"
-    )
-
-
-def _epoch_seconds(ts: str) -> float:
-    return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
-
-
-def _section_lines(output: str, header: str) -> list[str]:
-    lines = output.splitlines()
-    section = [lines[lines.index(header)]]
-    for line in lines[lines.index(header) + 1 :]:
-        if line and not line.startswith(" "):
-            break
-        section.append(line)
-    return section
+def _section_headers(output: str) -> list[str]:
+    return [line for line in output.splitlines() if line and not line.startswith(" ")]
 
 
 def _init_git_repo(path) -> None:

@@ -30,7 +30,6 @@ from spice.sessions.briefingpressure import dirty_path_count, git_posture_lines
 from spice.sessions.briefingrender import (
     active_filter_lines,
     apply_output_budget,
-    drop_human_ask_duplicates,
     filter_compactions,
     inbox_lines,
 )
@@ -53,8 +52,10 @@ from spice.sessions.records import (
     collect_turns,
 )
 
-DEFAULT_RECENT_ASKS = 6
-DEFAULT_RECENT_FINALS = 3
+STEERING_ROW_LIMIT = 6
+STEERING_TEXT_PREVIEW_CHARS = 200
+STEERING_RESPONSE_PREVIEW_CHARS = 120
+FINAL_ROW_LIMIT = 4
 PREVIEW_CHARS = 200
 RECENT_COMMITS_LIMIT = 5
 COMMIT_PREVIEW_CHARS = 120
@@ -112,6 +113,7 @@ class RehydrationCandidate:
     label: str = ""
     count: int = 0
     key: str = ""
+    response_text: str = ""
     user_after_text: str = ""
     intent_text: str = ""
 
@@ -222,7 +224,12 @@ def command_rank_key(timestamp: str, error_count: int) -> RankKey:
 
 
 def ask_candidate(
-    timestamp: str, text: str, *, disposition: str = "human", key: str = ""
+    timestamp: str,
+    text: str,
+    *,
+    disposition: str = "human",
+    key: str = "",
+    response_text: str = "",
 ) -> RehydrationCandidate:
     return RehydrationCandidate(
         kind="ask",
@@ -232,6 +239,7 @@ def ask_candidate(
         rank_key=ask_rank_key(timestamp, disposition),
         label=disposition,
         key=key,
+        response_text=response_text,
     )
 
 
@@ -244,7 +252,7 @@ def collect_ask_candidates(
     subject_thread_ids: frozenset[str] = frozenset(),
 ) -> list[RehydrationCandidate]:
     repo_root = repo_root_from_cwd()
-    candidates = _human_ask_candidates(turns or [])
+    candidates: list[RehydrationCandidate] = []
     if repo_root is not None:
         candidates.extend(
             _pending_ask_candidate(item) for item in collect_inbox_items(str(repo_root))
@@ -254,7 +262,6 @@ def collect_ask_candidates(
             for record in ack_state_records(repo_root)
             if _ack_state_record_matches_subject(record, subject_thread_ids)
         )
-    candidates = drop_human_ask_duplicates(candidates)
     return dedupe_rehydration_candidates(
         [
             candidate
@@ -264,15 +271,6 @@ def collect_ask_candidates(
             )
         ]
     )
-
-
-def _human_ask_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
-    return [
-        ask_candidate(turn.start_ts, message.text, disposition="human")
-        for turn in turns
-        for message in turn.user_messages
-        if message.shape is records.MessageShape.HUMAN
-    ]
 
 
 def _pending_ask_candidate(item) -> RehydrationCandidate:
@@ -288,18 +286,15 @@ def _pending_ask_candidate(item) -> RehydrationCandidate:
 def _ack_state_ask_candidate(record: AckStateRecord) -> RehydrationCandidate:
     return ask_candidate(
         _ask_timestamp_from_key(record.key),
-        _ack_state_ask_text(record),
+        _ack_state_ask_request(record),
         disposition=record.disposition,
         key=record.key,
+        response_text=record.ack_content.strip(),
     )
 
 
-def _ack_state_ask_text(record: AckStateRecord) -> str:
-    request = parse_inbox_payload(record.text).body
-    response = record.ack_content.strip()
-    if not response:
-        return request
-    return f"{request} | response: {response}"
+def _ack_state_ask_request(record: AckStateRecord) -> str:
+    return parse_inbox_payload(record.text).body
 
 
 def _ack_state_record_matches_subject(
@@ -334,7 +329,9 @@ def _ask_candidate_matches_filters(
     if end and candidate.timestamp > end:
         return False
     needle = (contains or "").lower()
-    haystack = "\n".join([candidate.text, candidate.key]).lower()
+    haystack = "\n".join(
+        [candidate.text, candidate.response_text, candidate.key]
+    ).lower()
     return not needle or needle in haystack
 
 
@@ -602,15 +599,12 @@ def render_briefing_payload(
     if filter_lines:
         lines.append("Filters")
         lines.extend(filter_lines)
-    if payload.recovery_first:
-        lines.extend(recovery)
+    lines.extend(_steering_lines(list(payload.asks)))
+    lines.extend(_task_plane_lines(list(payload.task_plane)))
     lines.extend(_guidance_lines(payload.meter))
     lines.extend(_learning_lines())
-    lines.extend(_task_plane_lines(list(payload.task_plane)))
-    lines.extend(_asks_lines(list(payload.asks)))
+    lines.extend(recovery)
     lines.extend(_finals_lines(list(payload.finals)))
-    if not payload.recovery_first:
-        lines.extend(recovery)
     lines.extend(
         _activity_lines(
             list(payload.turns),
@@ -808,14 +802,39 @@ def _task_plane_lines(candidates: list[RehydrationCandidate]) -> list[str]:
     return lines
 
 
-def _asks_lines(asks: list[RehydrationCandidate]) -> list[str]:
-    ranked = sort_rehydration_candidates(asks)
-    lines = ["Latest Ask", _ask_line(ranked[0]) if ranked else "  -"]
-    if len(ranked) > 1:
-        lines.append("Recent Asks")
-        for candidate in ranked[1 : DEFAULT_RECENT_ASKS + 1]:
-            lines.append(_ask_line(candidate))
+def _steering_lines(asks: list[RehydrationCandidate]) -> list[str]:
+    ranked = sort_rehydration_candidates(
+        [candidate for candidate in asks if _is_steering_candidate(candidate)]
+    )
+    if not ranked:
+        return []
+    shown = ranked[:STEERING_ROW_LIMIT]
+    overflow = len(ranked) - len(shown)
+    lines = ["Steering"]
+    lines.extend(_steering_line(candidate) for candidate in shown)
+    if overflow:
+        lines.append(f"  +{overflow} more steering rows")
     return lines
+
+
+def _is_steering_candidate(candidate: RehydrationCandidate) -> bool:
+    return bool(candidate.key and candidate.text.strip())
+
+
+def _steering_line(candidate: RehydrationCandidate) -> str:
+    key = f" key={candidate.key}" if candidate.key else ""
+    repeat = _repeat_count_fragment(candidate).strip()
+    repeat_fragment = f" {repeat}" if repeat else ""
+    response = (
+        f" response={clip(candidate.response_text, STEERING_RESPONSE_PREVIEW_CHARS)}"
+        if candidate.response_text.strip()
+        else ""
+    )
+    return (
+        f"  {candidate.timestamp} disposition={candidate.label}{key}"
+        f"{repeat_fragment} "
+        f"text={clip(candidate.text, STEERING_TEXT_PREVIEW_CHARS)}{response}"
+    )
 
 
 def _ask_line(candidate: RehydrationCandidate) -> str:
@@ -828,14 +847,17 @@ def _ask_line(candidate: RehydrationCandidate) -> str:
 
 def _finals_lines(finals: list[RehydrationCandidate]) -> list[str]:
     ranked = sort_rehydration_candidates(finals)
-    lines = [
-        "Latest Final",
-        _final_line(ranked[0], include_timestamp=False) if ranked else "  -",
-    ]
-    if len(ranked) > 1:
+    if not ranked:
+        return []
+    shown = ranked[:FINAL_ROW_LIMIT]
+    overflow = len(ranked) - len(shown)
+    lines = ["Latest Final", _final_line(shown[0], include_timestamp=False)]
+    if len(shown) > 1:
         lines.append("Recent Finals")
-        for candidate in ranked[1 : DEFAULT_RECENT_FINALS + 1]:
+        for candidate in shown[1:]:
             lines.append(_final_line(candidate, include_timestamp=True))
+    if overflow:
+        lines.append(f"  +{overflow} more final rows")
     return lines
 
 
