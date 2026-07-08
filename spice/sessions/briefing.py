@@ -134,6 +134,7 @@ class SweepWindowPayload:
     turns: tuple[TurnRecord, ...]
     asks: tuple[RehydrationCandidate, ...]
     finals: tuple[RehydrationCandidate, ...]
+    commits: tuple[RehydrationCandidate, ...]
 
 
 @dataclass(frozen=True)
@@ -542,7 +543,7 @@ def build_briefing_payload(
                 start=effective_start,
                 end=end,
             )
-            if sweep_count is not None and not sweep_falls_back
+            if not sweep_falls_back
             else ()
         ),
     )
@@ -604,6 +605,7 @@ def render_briefing_payload(
     lines.extend(_guidance_lines(payload.meter))
     lines.extend(_learning_lines())
     lines.extend(recovery)
+    lines.extend(_trajectory_lines(list(payload.sweep_windows)))
     lines.extend(_finals_lines(list(payload.finals)))
     lines.extend(
         _activity_lines(
@@ -916,6 +918,60 @@ def _latest_event_is_compaction(
     return latest_compaction >= latest_turn
 
 
+def _trajectory_lines(windows: list[SweepWindowPayload]) -> list[str]:
+    summaries = [
+        (window, summary)
+        for window in windows
+        if (summary := _window_trajectory_summary(window))
+    ]
+    if not summaries:
+        return []
+    lines = ["Trajectory"]
+    lines.extend(
+        f"  window={window.index} from={window.label} {summary}"
+        for window, summary in summaries
+    )
+    return lines
+
+
+def _window_trajectory_summary(window: SweepWindowPayload) -> str:
+    parts: list[str] = []
+    if window.finals:
+        latest_final = window.finals[0]
+        parts.append(f"final={clip(latest_final.text, COMMIT_PREVIEW_CHARS)}")
+    if window.asks:
+        latest_ask = window.asks[0]
+        response = (
+            f" response={clip(latest_ask.response_text, COMMIT_PREVIEW_CHARS)}"
+            if latest_ask.response_text.strip()
+            else ""
+        )
+        parts.append(
+            f"steering={latest_ask.label} {latest_ask.timestamp} "
+            f"{clip(latest_ask.text, COMMIT_PREVIEW_CHARS)}{response}"
+        )
+    if window.commits:
+        latest_commit = window.commits[0]
+        parts.append(
+            f"commit={latest_commit.label} "
+            f"{clip(latest_commit.text, COMMIT_PREVIEW_CHARS)}"
+        )
+    if parts:
+        return "; ".join(parts)
+    if _window_has_work(window):
+        command_count = sum(turn.command_count for turn in window.turns)
+        patch_count = sum(turn.patch_count for turn in window.turns)
+        return (
+            f"activity=turns={len(window.turns)} "
+            f"commands={command_count} patches={patch_count}"
+        )
+    return ""
+
+
+def _window_has_work(window: SweepWindowPayload) -> bool:
+    return bool(window.turns or window.asks or window.finals or window.commits)
+
+
 def _activity_lines(
     turns: list[TurnRecord],
     command_candidates: list[RehydrationCandidate],
@@ -1021,6 +1077,13 @@ def _build_sweep_windows(
                         )
                     )
                 ),
+                commits=tuple(
+                    sort_rehydration_candidates(
+                        collect_commit_candidates(
+                            collect_commit_records(list(window_turns))
+                        )
+                    )
+                ),
             )
         )
     return tuple(windows)
@@ -1074,7 +1137,11 @@ def render_sweep_payload(payload: BriefingPayload) -> str:
                     f"  final {candidate.timestamp}{repeat} {clip(candidate.text)}"
                 )
         if not entries:
-            lines.append("  (no dialogue in this window)")
+            summary = _window_trajectory_summary(window)
+            if summary:
+                lines.append(f"  trajectory {summary}")
+            else:
+                lines.append("  (no dialogue in this window)")
     return "\n".join(lines)
 
 
