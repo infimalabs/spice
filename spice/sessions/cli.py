@@ -601,6 +601,7 @@ def _timeline_compaction_rows(
             f"{Path(record.source_file).name} compaction "
             f"assistant_before={clip(record.last_assistant_before_text, max_text)} "
             f"summary_after={clip(record.summary_after_text, max_text)} "
+            f"intent={clip(record.intent_text, max_text)} "
             f"user_after={clip(record.first_user_after_text, max_text)}",
         )
         for record in compactions
@@ -668,6 +669,7 @@ def _print_compactions(files: list, *, limit: int) -> None:
         print(
             f"{record.ts} assistant_before={clip(record.last_assistant_before_text)} "
             f"summary_after={clip(record.summary_after_text)} "
+            f"intent={clip(record.intent_text)} "
             f"user_after={clip(record.first_user_after_text)}"
         )
 

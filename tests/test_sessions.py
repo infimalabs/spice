@@ -391,6 +391,18 @@ COMPACTION_SUMMARY_OPENING = (
     "This session is being continued from a previous conversation that ran "
     "out of context. The summary below covers the earlier portion."
 )
+COMPACTION_INTENT_TEXT = (
+    "Keep draining allocator-selected tasks.\n\nValidate before completion."
+)
+COMPACTION_SUMMARY_TEXT = (
+    f"{COMPACTION_SUMMARY_OPENING}\n\n"
+    "Summary:\n"
+    "1. Primary Request and Intent:\n"
+    "   Keep draining allocator-selected tasks.\n\n"
+    "   Validate before completion.\n\n"
+    "2. Key Technical Concepts:\n"
+    "   - spice task allocator\n"
+)
 
 
 @pytest.mark.parametrize(
@@ -521,7 +533,7 @@ def test_collect_compactions_separates_summary_from_human_ask(tmp_path):
             "payload": {
                 "type": "message",
                 "role": "user",
-                "content": [{"text": COMPACTION_SUMMARY_OPENING}],
+                "content": [{"text": COMPACTION_SUMMARY_TEXT}],
             },
         },
         {
@@ -551,8 +563,32 @@ def test_collect_compactions_separates_summary_from_human_ask(tmp_path):
 
     assert len(compactions) == 1
     assert compactions[0].last_assistant_before_text == "about to compact"
-    assert compactions[0].summary_after_text == COMPACTION_SUMMARY_OPENING
+    assert compactions[0].summary_after_text == COMPACTION_SUMMARY_TEXT
+    assert compactions[0].intent_text == COMPACTION_INTENT_TEXT
     assert compactions[0].first_user_after_text == "pick the work back up"
+
+
+def test_collect_compactions_marks_unparseable_summary_intent(tmp_path):
+    transcript = tmp_path / "session.jsonl"
+    events = [
+        {"timestamp": "2026-01-01T00:00:00Z", "type": "compacted", "payload": {}},
+        {
+            "timestamp": "2026-01-01T00:00:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": COMPACTION_SUMMARY_OPENING}],
+            },
+        },
+    ]
+    transcript.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
+    )
+
+    compactions = records.collect_compactions([transcript])
+
+    assert compactions[0].intent_text == records.UNPARSEABLE_COMPACTION_INTENT
 
 
 def test_session_thread_reports_missing_driver_state(tmp_path, monkeypatch):

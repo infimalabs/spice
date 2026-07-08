@@ -359,8 +359,8 @@ def collect_compaction_intent_candidates(
         RehydrationCandidate(
             kind="compaction_intent",
             timestamp=record.ts,
-            text=record.first_user_after_text
-            or record.summary_after_text
+            text=record.intent_text
+            or record.first_user_after_text
             or record.last_assistant_before_text
             or "",
             rank_name=RECENCY_RANK_NAME,
@@ -961,6 +961,7 @@ def _filter_compactions(
             haystack = "\n".join(
                 [
                     record.last_assistant_before_text or "",
+                    record.intent_text or "",
                     record.summary_after_text or "",
                     record.first_user_after_text or "",
                 ]

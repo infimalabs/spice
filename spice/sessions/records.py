@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+import textwrap
 from collections.abc import Callable, Iterator
 from collections import Counter
 from dataclasses import dataclass, field
@@ -32,6 +33,7 @@ COMMIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
 COMMIT_LINE_RE = re.compile(
     r"(?:^|\n)[^\n]*\b(?:commit(?:ted)?|sha)\b[^\n]*", re.IGNORECASE
 )
+UNPARSEABLE_COMPACTION_INTENT = "[unparseable compaction-summary intent]"
 
 
 class MessageShape(StrEnum):
@@ -72,6 +74,10 @@ _SHAPE_PREFIXES: tuple[tuple[str, MessageShape], ...] = (
 # Harness injections open with a tag-like block; operator prose does not.
 _TAG_OPENING_RE = re.compile(r"^<[A-Za-z][\w-]*")
 _SHAPE_ERROR_PREVIEW_CHARS = 80
+_COMPACTION_INTENT_SECTION_RE = re.compile(
+    r"(?im)^\s*\d+[.)]\s+\*{0,2}Primary Request and Intent\*{0,2}\s*:\s*(.*)$"
+)
+_COMPACTION_NEXT_SECTION_RE = re.compile(r"(?m)^\s*\d+[.)]\s+\S.*:\s*$")
 
 
 def classify_user_message(text: str) -> MessageShape:
@@ -93,6 +99,19 @@ def classify_user_message(text: str) -> MessageShape:
             "spice.sessions.records before it can be classified."
         )
     return MessageShape.HUMAN
+
+
+def parse_compaction_summary_intent(text: str) -> str:
+    match = _COMPACTION_INTENT_SECTION_RE.search(text)
+    if match is None:
+        return UNPARSEABLE_COMPACTION_INTENT
+    section_start = match.end()
+    next_match = _COMPACTION_NEXT_SECTION_RE.search(text, section_start)
+    section_end = next_match.start() if next_match else len(text)
+    inline = match.group(1).strip()
+    body = textwrap.dedent(text[section_start:section_end]).strip()
+    intent = "\n\n".join(piece for piece in [inline, body] if piece).strip()
+    return intent or UNPARSEABLE_COMPACTION_INTENT
 
 
 @dataclass(slots=True)
@@ -128,6 +147,7 @@ class CompactionRecord:
     ts: str
     last_assistant_before_text: str | None = None
     summary_after_text: str | None = None
+    intent_text: str | None = None
     first_user_after_text: str | None = None
 
 
@@ -337,6 +357,7 @@ def collect_compactions(files: list[Path]) -> list[CompactionRecord]:
                 if shape is MessageShape.COMPACTION_SUMMARY:
                     if pending.summary_after_text is None:
                         pending.summary_after_text = text
+                        pending.intent_text = parse_compaction_summary_intent(text)
                 elif shape is MessageShape.HUMAN:
                     pending.first_user_after_text = text
                     pending = None
