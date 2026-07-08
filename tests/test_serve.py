@@ -24,8 +24,9 @@ from spice.mail.inbox import (
     pending_inbox_count,
     write_inbox_item,
 )
+from spice.mail.replies import append_reply_record, reply_log_path
 from spice.paths import shared_attachment_root
-from spice.serve import agentapi, app
+from spice.serve import agentapi, app, livebus
 from spice.serve.payload import identity, message
 from spice.serve.workroutes import work_tree_send_response_payload
 from spice.tasks import config as task_config
@@ -207,11 +208,50 @@ def test_lane_watch_paths_use_exact_live_bus_sources(tmp_path):
         task_config.set_backend(None)
 
     assert inbox_dir(repo).is_dir()
+    reply_log = reply_log_path(repo, THREAD_A)
+    assert reply_log.is_file()
     assert paths == (
         inbox_dir(repo),
         event_path,
         transcript,
+        reply_log,
     )
+
+
+def test_lane_signature_reply_log_append_is_not_a_pending_only_change(tmp_path):
+    repo = _repo(tmp_path)
+    target = _target(repo)
+    state = _serve_state(tmp_path, target)
+    backend = tmp_path / "task-backend"
+
+    task_config.set_backend(str(backend))
+    try:
+        base = app.lane_signature_for_target(state, target, THREAD_A, None)
+        write_inbox_item(
+            repo,
+            "20260101T000000000001Z.txt",
+            compose_inbox_text(body="steer", priority=None, stop=False),
+        )
+        inbox_only = app.lane_signature_for_target(state, target, THREAD_A, None)
+        append_reply_record(
+            repo,
+            THREAD_A,
+            timestamp="2026-01-01T00:00:01.000000Z",
+            text="ACK 20260101T000000000001Z: applied",
+            ack_keys=["20260101T000000000001Z"],
+            nack_keys=[],
+        )
+        with_reply = app.lane_signature_for_target(state, target, THREAD_A, None)
+    finally:
+        task_config.set_backend(None)
+
+    assert livebus.pending_only_signature_change(base, inbox_only) is True
+    assert with_reply != inbox_only
+    # A reply retiring a pending key changes the inbox AND the reply log; it
+    # must push the full messages payload carrying the reply card, never the
+    # composer-only pending frame.
+    assert livebus.pending_only_signature_change(inbox_only, with_reply) is False
+    assert livebus.pending_only_signature_change(base, with_reply) is False
 
 
 def test_work_tree_send_writes_inbox_and_returns_attachment_payload(

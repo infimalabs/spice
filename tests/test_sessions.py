@@ -22,7 +22,7 @@ from spice.mail.inbox import (
     write_inbox_item,
 )
 from spice.sessions import briefing as briefing_module
-from spice.sessions.briefing import render_briefing
+from spice.sessions.briefing import render_briefing, render_sweep
 from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions.meter import (
     ActiveContextSnapshot,
@@ -1070,6 +1070,91 @@ def test_sweep_and_timeline_parser_share_filter_flags():
     assert timeline.tools == ["apply_patch"]
 
 
+def test_briefing_default_horizon_is_count_bound(tmp_path):
+    transcript = tmp_path / "horizon.jsonl"
+    _write_horizon_transcript(
+        transcript,
+        asks=[
+            ("2026-01-01T01:00:00Z", "before count horizon"),
+            ("2026-01-01T07:00:00Z", "inside first count window"),
+            ("2026-01-01T13:00:00Z", "inside second count window"),
+            ("2026-01-01T19:00:00Z", "inside current count window"),
+        ],
+        compactions=[
+            "2026-01-01T06:00:00Z",
+            "2026-01-01T12:00:00Z",
+            "2026-01-01T18:00:00Z",
+        ],
+    )
+
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+
+    assert "files=horizon.jsonl turns=3" in briefing
+    assert (
+        "horizon_basis=compaction_count start=2026-01-01T06:00:00.000Z compactions=3/3"
+    ) in briefing
+    assert "Latest Ask\n  inside current count window" in briefing
+
+
+def test_sweep_horizon_extends_to_wall_clock_floor(tmp_path):
+    transcript = tmp_path / "horizon.jsonl"
+    _write_horizon_transcript(
+        transcript,
+        asks=[
+            ("2026-01-01T01:00:00Z", "floor request"),
+            ("2026-01-01T10:05:00Z", "recent request one"),
+            ("2026-01-01T10:15:00Z", "recent request two"),
+            ("2026-01-01T10:30:00Z", "recent request three"),
+        ],
+        compactions=[
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T10:00:00Z",
+            "2026-01-01T10:10:00Z",
+            "2026-01-01T10:20:00Z",
+        ],
+    )
+
+    sweep = render_sweep([transcript], count=3)
+
+    assert "Sweep\n  windows=4 files=1" in sweep
+    assert (
+        "horizon_basis=wall_clock_floor start=2026-01-01T00:00:00.000Z compactions=4/3"
+    ) in sweep
+    assert "Window 0 (from 2026-01-01T00:00:00.000Z)" in sweep
+    assert "ask 2026-01-01T01:00:00.000Z floor request" in sweep
+
+
+def test_sweep_horizon_caps_requested_count(tmp_path):
+    transcript = tmp_path / "horizon.jsonl"
+    _write_horizon_transcript(
+        transcript,
+        asks=[
+            ("2026-01-01T01:30:00Z", "cap window one"),
+            ("2026-01-01T02:30:00Z", "cap window two"),
+            ("2026-01-01T03:30:00Z", "cap window three"),
+            ("2026-01-01T04:30:00Z", "cap window four"),
+            ("2026-01-01T05:30:00Z", "cap current window"),
+        ],
+        compactions=[
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T01:00:00Z",
+            "2026-01-01T02:00:00Z",
+            "2026-01-01T03:00:00Z",
+            "2026-01-01T04:00:00Z",
+            "2026-01-01T05:00:00Z",
+        ],
+    )
+
+    sweep = render_sweep([transcript], count=9)
+
+    assert "Sweep\n  windows=5 files=1" in sweep
+    assert (
+        "horizon_basis=hard_cap start=2026-01-01T01:00:00.000Z compactions=5/9"
+    ) in sweep
+    assert "Window 4 (from 2026-01-01T05:00:00.000Z)" in sweep
+    assert "ask 2026-01-01T05:30:00.000Z cap current window" in sweep
+
+
 def test_mint_incepted_shape_and_collision_advance():
     first = mint_incepted(set())
     assert INCEPTED_RE.match(first) is not None
@@ -1292,6 +1377,53 @@ def _write_filter_transcript(path) -> None:
             "payload": {"type": "task_complete"},
         },
     ]
+    path.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
+    )
+
+
+def _write_horizon_transcript(path, *, asks, compactions) -> None:
+    events = []
+    for index, (timestamp, text) in enumerate(asks):
+        turn_id = f"turn-horizon-{index}"
+        events.extend(
+            [
+                {
+                    "timestamp": timestamp,
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": turn_id},
+                },
+                {
+                    "timestamp": timestamp,
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"text": text}],
+                    },
+                },
+                {
+                    "timestamp": timestamp,
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "phase": "final_answer",
+                        "content": [{"text": f"completed {text}"}],
+                    },
+                },
+                {
+                    "timestamp": timestamp,
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete"},
+                },
+            ]
+        )
+    events.extend(
+        {"timestamp": timestamp, "type": "compacted", "payload": {}}
+        for timestamp in compactions
+    )
+    events.sort(key=lambda event: event["timestamp"])
     path.write_text(
         "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
     )

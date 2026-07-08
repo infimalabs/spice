@@ -24,6 +24,25 @@ def reply_log_path(repo_root: Path, thread_id: str) -> Path:
     return agent_thread_state_dir(repo_root, thread_id) / REPLY_LOG_FILENAME
 
 
+def ensure_reply_log(repo_root: Path, thread_id: str) -> Path | None:
+    """Best-effort create-and-return the reply log so watchers can arm it.
+
+    The serve lane watcher arms file descriptors, and an append to a file never
+    wakes a watch on its parent directory, so the log must exist before the
+    first reply lands. Created only when missing — an unconditional touch would
+    churn the mtime the lane signature reads. Returns None when worktree state
+    is unresolvable (e.g. a synthetic target).
+    """
+    try:
+        path = reply_log_path(repo_root, thread_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.touch()
+    except Exception:
+        return None
+    return path
+
+
 def append_reply_record(
     repo_root: Path,
     thread_id: str,
