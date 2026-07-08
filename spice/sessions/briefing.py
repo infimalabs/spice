@@ -190,6 +190,7 @@ def collect_ask_candidates(
             for record in ack_state_records(repo_root)
             if _ack_state_record_matches_subject(record, subject_thread_ids)
         )
+    candidates = _drop_human_ask_duplicates(candidates)
     return [
         candidate
         for candidate in candidates
@@ -205,6 +206,22 @@ def _human_ask_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]
         for turn in turns
         for message in turn.user_messages
         if message.shape is records.MessageShape.HUMAN
+    ]
+
+
+def _drop_human_ask_duplicates(
+    candidates: list[RehydrationCandidate],
+) -> list[RehydrationCandidate]:
+    real_asks = {
+        (candidate.timestamp, candidate.text)
+        for candidate in candidates
+        if candidate.label != "human"
+    }
+    return [
+        candidate
+        for candidate in candidates
+        if candidate.label != "human"
+        or (candidate.timestamp, candidate.text) not in real_asks
     ]
 
 

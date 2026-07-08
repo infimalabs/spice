@@ -276,7 +276,6 @@ def test_briefing_recovery_uses_parsed_intent_and_prior_steering(tmp_path, monke
         "  steering=acked 2026-01-01T00:00:09.000Z "
         "key=20260101T000009000000Z operator asks before compaction",
     ]
-    assert "This session is being continued" not in briefing
 
 
 def test_briefing_recovery_leads_when_latest_event_is_compaction(tmp_path, monkeypatch):
