@@ -111,6 +111,7 @@ class RehydrationCandidate:
     count: int = 0
     key: str = ""
     user_after_text: str = ""
+    intent_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -364,6 +365,7 @@ def collect_compaction_intent_candidates(
             rank_key=recency_rank_key(record.ts),
             label=clip(record.last_assistant_before_text),
             user_after_text=record.first_user_after_text or "",
+            intent_text=record.intent_text or "",
         )
         for record in compactions
     ]
@@ -690,8 +692,10 @@ def _recovery_lines(
         "Recovery",
         f"  latest_compaction={latest.timestamp}",
         f"  assistant_before={latest.label}",
-        f"  user_after={clip(latest.user_after_text)}",
     ]
+    if latest.intent_text:
+        lines.append(f"  intent={clip(latest.intent_text)}")
+    lines.append(f"  user_after={clip(latest.user_after_text)}")
     if steering is not None:
         key = f" key={steering.key}" if steering.key else ""
         lines.append(
