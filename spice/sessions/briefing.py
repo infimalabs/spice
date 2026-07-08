@@ -405,6 +405,8 @@ def render_briefing(
     command_candidates = collect_command_candidates(turns)
     file_candidates = collect_file_touch_candidates(turns)
     task_plane = collect_task_plane_candidates()
+    recovery = _recovery_lines(compaction_intents, asks)
+    recovery_first = _latest_event_is_compaction(turns, compactions)
     lines: list[str] = []
     lines.extend(_briefing_header_lines(files, turns))
     lines.extend(_horizon_lines(horizon))
@@ -414,12 +416,15 @@ def render_briefing(
     if filter_lines:
         lines.append("Filters")
         lines.extend(filter_lines)
+    if recovery_first:
+        lines.extend(recovery)
     lines.extend(_guidance_lines(meter))
     lines.extend(_learning_lines())
     lines.extend(_task_plane_lines(task_plane))
     lines.extend(_asks_lines(asks))
     lines.extend(_finals_lines(finals))
-    lines.extend(_recovery_lines(compaction_intents))
+    if not recovery_first:
+        lines.extend(recovery)
     lines.extend(
         _activity_lines(turns, command_candidates, file_candidates, commit_candidates)
     )
@@ -662,17 +667,44 @@ def _finals_lines(finals: list[RehydrationCandidate]) -> list[str]:
     return lines
 
 
-def _recovery_lines(compactions: list[RehydrationCandidate]) -> list[str]:
+def _recovery_lines(
+    compactions: list[RehydrationCandidate], asks: list[RehydrationCandidate]
+) -> list[str]:
     ranked = sort_rehydration_candidates(compactions)
     if not ranked:
         return []
     latest = ranked[0]
-    return [
+    steering = _latest_steering_before(asks, latest.timestamp)
+    lines = [
         "Recovery",
         f"  latest_compaction={latest.timestamp}",
         f"  assistant_before={latest.label}",
         f"  user_after={clip(latest.user_after_text)}",
     ]
+    if steering is not None:
+        key = f" key={steering.key}" if steering.key else ""
+        lines.append(
+            f"  steering={steering.label} {steering.timestamp}{key} "
+            f"{clip(steering.text)}"
+        )
+    return lines
+
+
+def _latest_steering_before(
+    asks: list[RehydrationCandidate], timestamp: str
+) -> RehydrationCandidate | None:
+    before = [ask for ask in asks if ask.timestamp <= timestamp]
+    return max(before, key=lambda ask: (ask.timestamp, ask.key), default=None)
+
+
+def _latest_event_is_compaction(
+    turns: list[records.TurnRecord], compactions: list[records.CompactionRecord]
+) -> bool:
+    if not compactions:
+        return False
+    latest_compaction = max(record.ts for record in compactions)
+    latest_turn = max((_turn_activity_ts(turn) for turn in turns), default="")
+    return latest_compaction >= latest_turn
 
 
 def _activity_lines(

@@ -251,6 +251,60 @@ def test_compaction_intent_candidates_use_parsed_summary_intent():
     ]
 
 
+def test_briefing_recovery_uses_parsed_intent_and_prior_steering(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "recovery.jsonl"
+    _write_recovery_transcript(transcript, include_summary=True)
+    _record_ack_state_asks(
+        repo,
+        [
+            ("2026-01-01T00:00:08Z", "older steering before compaction"),
+            ("2026-01-01T00:00:09Z", "operator asks before compaction"),
+            ("2026-01-01T00:00:13Z", "newer steering after compaction"),
+        ],
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+
+    assert _section_lines(briefing, "Recovery") == [
+        "Recovery",
+        "  latest_compaction=2026-01-01T00:00:10.000Z",
+        "  assistant_before=ready to compact",
+        "  user_after=Keep draining allocator-selected tasks. "
+        "Validate before completion.",
+        "  steering=acked 2026-01-01T00:00:09.000Z "
+        "key=20260101T000009000000Z operator asks before compaction",
+    ]
+
+
+def test_briefing_recovery_leads_when_latest_event_is_compaction(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "freshly-compacted.jsonl"
+    _write_recovery_transcript(transcript, include_summary=False)
+    _record_ack_state_ask(
+        repo,
+        "20260101T000009000000Z",
+        "operator asks before compaction",
+        ACK_DISPOSITION_ACKED,
+        "2026-01-01T00:00:09Z",
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+    lines = briefing.splitlines()
+
+    assert lines.index("Recovery") < lines.index("Guidance")
+    assert _section_lines(briefing, "Recovery") == [
+        "Recovery",
+        "  latest_compaction=2026-01-01T00:00:10.000Z",
+        "  assistant_before=ready to compact",
+        "  user_after=ready to compact",
+        "  steering=acked 2026-01-01T00:00:09.000Z "
+        "key=20260101T000009000000Z operator asks before compaction",
+    ]
+
+
 def test_briefing_renders_supervised_fixture_recovery(monkeypatch):
     for transcript in SUPERVISED_FIXTURES:
         with transcript_driver_for_fixture(monkeypatch, transcript):
@@ -934,6 +988,76 @@ def _write_horizon_transcript(path, *, asks, compactions) -> None:
         for timestamp in compactions
     )
     events.sort(key=lambda event: event["timestamp"])
+    path.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
+    )
+
+
+def _write_recovery_transcript(path, *, include_summary: bool) -> None:
+    summary = (
+        "This session is being continued from a previous conversation that ran "
+        "out of context. The summary below covers the earlier portion.\n\n"
+        "Summary:\n"
+        "1. Primary Request and Intent:\n"
+        "   Keep draining allocator-selected tasks.\n\n"
+        "   Validate before completion.\n\n"
+        "2. Key Technical Concepts:\n"
+        "   - briefing recovery\n"
+    )
+    events = [
+        {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": "turn-recovery"},
+        },
+        {
+            "timestamp": "2026-01-01T00:00:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": "prepare recovery"}],
+            },
+        },
+        {
+            "timestamp": "2026-01-01T00:00:02Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"text": "ready to compact"}],
+            },
+        },
+        {
+            "timestamp": "2026-01-01T00:00:03Z",
+            "type": "event_msg",
+            "payload": {"type": "task_complete"},
+        },
+        {"timestamp": "2026-01-01T00:00:10Z", "type": "compacted", "payload": {}},
+    ]
+    if include_summary:
+        events.extend(
+            [
+                {
+                    "timestamp": "2026-01-01T00:00:11Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"text": summary}],
+                    },
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:12Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"text": "continue with recovery"}],
+                    },
+                },
+            ]
+        )
     path.write_text(
         "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
     )
