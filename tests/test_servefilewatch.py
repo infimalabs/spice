@@ -33,7 +33,7 @@ class FakeServer:
         self.closed = True
 
 
-def test_start_exit_file_watch_uses_exact_existing_path(
+def test_start_exit_file_watch_exits_on_content_change(
     monkeypatch, tmp_path: Path
 ) -> None:
     watched_path = tmp_path / "serve.stop"
@@ -52,6 +52,7 @@ def test_start_exit_file_watch_uses_exact_existing_path(
         recursive_values.append(recursive)
         filter_results.append(watch_filter(object(), str(watched_path)))
         filter_results.append(watch_filter(object(), str(tmp_path / "other.stop")))
+        watched_path.write_text("changed\n", encoding="utf-8")
         yield {
             (object(), str(tmp_path / "other.stop")),
             (object(), str(watched_path)),
@@ -67,13 +68,71 @@ def test_start_exit_file_watch_uses_exact_existing_path(
     assert isinstance(thread, threading.Thread)
     thread.join(timeout=1.0)
 
-    assert watch_roots == [watched_path]
+    assert watch_roots == [watched_path.resolve().parent]
     assert recursive_values == [False]
     assert filter_results == [True, False]
     assert fake_server.shutdown_count == 1
 
 
-def test_start_exit_file_watch_creates_missing_until_path(
+def test_start_exit_file_watch_ignores_events_without_content_change(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # macOS FSEvents replays pre-watch writes and fires on metadata churn;
+    # events whose bytes match the at-watch-start baseline must not exit.
+    watched_path = tmp_path / "serve.stop"
+    watched_path.write_text("initial\n", encoding="utf-8")
+    fake_server = FakeServer()
+    stop_event = threading.Event()
+
+    def fake_watch(
+        root, *, watch_filter, force_polling, debounce, stop_event, recursive
+    ):
+        del root, watch_filter, force_polling, debounce, stop_event, recursive
+        yield {(object(), str(watched_path))}
+        yield {(object(), str(watched_path))}
+
+    monkeypatch.setattr(serve_filewatch, "_import_watch", lambda: fake_watch)
+
+    thread = start_exit_file_watch(
+        fake_server,
+        Namespace(until=watched_path),
+        stop_event=stop_event,
+    )
+    assert isinstance(thread, threading.Thread)
+    thread.join(timeout=1.0)
+
+    assert fake_server.shutdown_count == 0
+
+
+def test_start_exit_file_watch_exits_when_file_removed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    watched_path = tmp_path / "serve.stop"
+    watched_path.write_text("initial\n", encoding="utf-8")
+    fake_server = FakeServer()
+    stop_event = threading.Event()
+
+    def fake_watch(
+        root, *, watch_filter, force_polling, debounce, stop_event, recursive
+    ):
+        del root, watch_filter, force_polling, debounce, stop_event, recursive
+        watched_path.unlink()
+        yield {(object(), str(watched_path))}
+
+    monkeypatch.setattr(serve_filewatch, "_import_watch", lambda: fake_watch)
+
+    thread = start_exit_file_watch(
+        fake_server,
+        Namespace(until=watched_path),
+        stop_event=stop_event,
+    )
+    assert isinstance(thread, threading.Thread)
+    thread.join(timeout=1.0)
+
+    assert fake_server.shutdown_count == 1
+
+
+def test_start_exit_file_watch_watches_parent_until_file_appears(
     monkeypatch, tmp_path: Path
 ) -> None:
     watched_path = tmp_path / "serve.stop"
@@ -88,6 +147,7 @@ def test_start_exit_file_watch_creates_missing_until_path(
         del watch_filter, force_polling, debounce, stop_event, recursive
         watch_roots.append(root)
         exists_at_watch.append(watched_path.exists())
+        watched_path.write_text("created\n", encoding="utf-8")
         yield {(object(), str(watched_path))}
 
     monkeypatch.setattr(serve_filewatch, "_import_watch", lambda: fake_watch)
@@ -100,13 +160,41 @@ def test_start_exit_file_watch_creates_missing_until_path(
     assert isinstance(thread, threading.Thread)
     thread.join(timeout=1.0)
 
-    assert watched_path.is_file()
-    assert watch_roots == [watched_path]
-    assert exists_at_watch == [True]
+    assert exists_at_watch == [False]
+    assert watch_roots == [watched_path.parent.resolve()]
     assert fake_server.shutdown_count == 1
 
 
-def test_serve_creates_missing_until_path_before_serving(monkeypatch, tmp_path: Path):
+def test_start_exit_file_watch_rejects_missing_parent_directory(
+    tmp_path: Path,
+) -> None:
+    watched_path = tmp_path / "missing" / "serve.stop"
+    fake_server = FakeServer()
+
+    with pytest.raises(SpiceError) as exc_info:
+        start_exit_file_watch(
+            fake_server,
+            Namespace(until=watched_path),
+            stop_event=threading.Event(),
+        )
+
+    assert "parent directory is missing" in str(exc_info.value)
+    assert not watched_path.parent.exists()
+    assert fake_server.shutdown_count == 0
+
+
+def test_start_exit_file_watch_rejects_directory_path(tmp_path: Path) -> None:
+    with pytest.raises(SpiceError) as exc_info:
+        start_exit_file_watch(
+            FakeServer(),
+            Namespace(until=tmp_path),
+            stop_event=threading.Event(),
+        )
+
+    assert "is a directory" in str(exc_info.value)
+
+
+def test_serve_leaves_missing_until_path_uncreated(monkeypatch, tmp_path: Path):
     watched_path = tmp_path / "serve.stop"
     fake_server = FakeServer()
     watch_roots: list[Path] = []
@@ -119,6 +207,7 @@ def test_serve_creates_missing_until_path_before_serving(monkeypatch, tmp_path: 
         del watch_filter, force_polling, debounce, stop_event, recursive
         watch_roots.append(root)
         exists_at_watch.append(watched_path.exists())
+        watched_path.write_text("created\n", encoding="utf-8")
         yield {(object(), str(watched_path))}
 
     monkeypatch.setattr(serve_filewatch, "_import_watch", lambda: fake_watch)
@@ -133,9 +222,8 @@ def test_serve_creates_missing_until_path_before_serving(monkeypatch, tmp_path: 
     )
 
     assert result == 0
-    assert watched_path.is_file()
-    assert watch_roots == [watched_path]
-    assert exists_at_watch == [True]
+    assert watch_roots == [watched_path.parent.resolve()]
+    assert exists_at_watch == [False]
     assert fake_server.shutdown_count == 1
     assert fake_server.closed is True
 
@@ -236,6 +324,7 @@ def test_serve_exits_after_watched_file_changes(monkeypatch, tmp_path: Path) -> 
     ):
         del watch_filter, force_polling, debounce, stop_event, recursive
         watch_roots.append(root)
+        watched_path.write_text("changed\n", encoding="utf-8")
         yield {(object(), str(watched_path))}
 
     monkeypatch.setattr(serve_filewatch, "_import_watch", lambda: fake_watch)
@@ -250,7 +339,7 @@ def test_serve_exits_after_watched_file_changes(monkeypatch, tmp_path: Path) -> 
     )
 
     assert result == 0
-    assert watch_roots == [watched_path]
+    assert watch_roots == [watched_path.resolve().parent]
     assert fake_server.shutdown_count == 1
     assert fake_server.closed is True
 

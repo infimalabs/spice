@@ -56,7 +56,11 @@ def configure_serve_parser(subparsers: Any) -> None:
         "--until",
         type=Path,
         metavar="PATH",
-        help="Watch PATH and stop the server after it is touched or changed.",
+        help=(
+            "Watch PATH and stop the server when it appears, disappears, or "
+            "its content changes. PATH is never created; only the final path "
+            "component may be missing (the parent directory must exist)."
+        ),
     )
     parser.add_argument(
         "--task-backend",
