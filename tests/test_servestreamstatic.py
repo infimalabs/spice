@@ -228,6 +228,47 @@ def test_static_filter_pane_uses_pure_filter_model_helpers():
     )
 
 
+def test_static_filter_pane_renders_server_effective_filters_not_durable_rows():
+    # The filter pane must reflect the lifetime-lensed set the allocator
+    # actually routes on (Drain -> every assignable stem), which the server
+    # ships as effectiveTaskFilters. Rendering the raw durable taskFilters here
+    # is what desynced the chips/counts from in-flight work, so lock the pane's
+    # source to effectiveTaskFilters and lock the plumbing that feeds it.
+    app_panes = (STATIC_ROOT / "app.panes.js").read_text(encoding="utf-8")
+    app_render = (STATIC_ROOT / "app.render.js").read_text(encoding="utf-8")
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
+    app_shell = (STATIC_ROOT / "app.shell.js").read_text(encoding="utf-8")
+
+    # The chip/count source is the server lens, never the durable rows.
+    assert "function laneAssignedTaskFilters(lane) {" in app_panes
+    assert "for (const filter of member.effectiveTaskFilters || []) {" in app_panes
+
+    # The lens rides in on every route/config path that seeds a lane or target.
+    assert "payload.effectiveTaskFilters || lane.effectiveTaskFilters" in app_render
+    assert (
+        "lane.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);"
+        in app_stream
+    )
+    assert (
+        "target.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);"
+        in app_stream
+    )
+    assert (
+        "lane.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);"
+        in app_lanes
+    )
+    assert "effectiveTaskFilters: target.effectiveTaskFilters || []," in app_lanes
+    assert (
+        "effectiveTaskFilters: uniqueStringList(target.effectiveTaskFilters || []),"
+        in app_shell
+    )
+    assert (
+        "lane.effectiveTaskFilters = uniqueStringList(config.effectiveTaskFilters);"
+        in app_shell
+    )
+
+
 def test_static_filter_model_helpers_are_pure_and_covered():
     script = Path(__file__).with_name("fixtures") / "filter_model.js"
 

@@ -2,10 +2,15 @@
 
 // ---- filters pane -----------------------------------------------------------------------
 
+// The set the lane actually routes on, as the server resolved it through the
+// lifetime lens (effectiveTaskFilters): Drive -> stored pins+auto, Steer ->
+// manual pins, Drain -> every assignable stem. Rendering this keeps the chips
+// and counts synchronized with the allocator instead of the stale durable
+// rows; the lens lives on the server, never re-derived here.
 function laneAssignedTaskFilters(lane) {
   const filters = [];
   for (const member of laneGroupMemberLanes(laneGroupHost(lane))) {
-    for (const filter of member.taskFilters || []) {
+    for (const filter of member.effectiveTaskFilters || []) {
       if (filter && !filters.includes(filter)) filters.push(filter);
     }
   }
