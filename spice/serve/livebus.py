@@ -436,7 +436,7 @@ class LiveBusSession:
             if signature == previous_signature:
                 continue
             subscription.last_signature = signature
-            if _pending_only_signature_change(previous_signature, signature):
+            if pending_only_signature_change(previous_signature, signature):
                 try:
                     self._send(
                         {
@@ -489,7 +489,7 @@ class LiveBusSession:
         return self.callbacks.lane_signature(subscription.target, thread_id, transcript)
 
 
-def _pending_only_signature_change(previous: Any, current: Any) -> bool:
+def pending_only_signature_change(previous: Any, current: Any) -> bool:
     if not isinstance(previous, LaneSignature) or not isinstance(
         current, LaneSignature
     ):
