@@ -148,6 +148,8 @@ def _slice_ordered_messages(
     messages: list[tuple[str, str]] = []
     if latest.last_assistant_before_text:
         messages.append(("assistant_before", latest.last_assistant_before_text))
+    if latest.intent_text:
+        messages.append(("intent", latest.intent_text))
     if latest.summary_after_text:
         messages.append(("summary_after", latest.summary_after_text))
     if latest.first_user_after_text:
