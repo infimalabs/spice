@@ -389,7 +389,7 @@ def phase_payload(phase: PhaseRecord, example_count: int) -> dict[str, Any]:
                 "turn_id": short_turn_id(turn.turn_id),
                 "archetype": classify_turn(turn)[0],
                 "path": _turn_path_signature(turn),
-                "user": turn.user_messages[0] if turn.user_messages else None,
+                "user": turn.user_messages[0].text if turn.user_messages else None,
                 "final": turn.final_answers[-1] if turn.final_answers else None,
             }
             for turn in examples

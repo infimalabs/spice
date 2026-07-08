@@ -43,11 +43,11 @@ from spice.sessions.meter import (
 from spice.sessions.records import (
     CommitRecord,
     CompactionRecord,
+    MessageShape,
     TurnRecord,
     collect_commit_records,
     collect_compactions,
     collect_turns,
-    is_scaffolding_text,
 )
 from spice.studies import complexity, fileloc, magicnums, repodocs, shape
 from spice.studies.walk import is_excluded_path
@@ -103,12 +103,12 @@ def clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
 
 
 def operator_asks(turns: list[TurnRecord]) -> list[tuple[str, str]]:
-    """(start_ts, text) for every non-scaffolding user message, oldest first."""
+    """(start_ts, text) for every human-shaped user message, oldest first."""
     asks: list[tuple[str, str]] = []
     for turn in turns:
-        for text in turn.user_messages:
-            if not is_scaffolding_text(text):
-                asks.append((turn.start_ts, text))
+        for message in turn.user_messages:
+            if message.shape is MessageShape.HUMAN:
+                asks.append((turn.start_ts, message.text))
     return asks
 
 
@@ -252,6 +252,7 @@ def _recovery_lines(compactions: list[CompactionRecord]) -> list[str]:
         "Recovery",
         f"  latest_compaction={latest.ts}",
         f"  assistant_before={clip(latest.last_assistant_before_text)}",
+        f"  summary_after={clip(latest.summary_after_text)}",
         f"  user_after={clip(latest.first_user_after_text)}",
     ]
 
@@ -338,6 +339,7 @@ def _filter_compactions(
             haystack = "\n".join(
                 [
                     record.last_assistant_before_text or "",
+                    record.summary_after_text or "",
                     record.first_user_after_text or "",
                 ]
             ).lower()

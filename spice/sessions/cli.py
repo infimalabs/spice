@@ -398,7 +398,7 @@ def render_thread_summary(thread_id: str) -> str:
         f"  ts={activity_ts} turn={latest_turn.turn_id or '-'} "
         f"completed={latest_turn.completed}"
     )
-    user = _latest_text(latest_turn.user_messages)
+    user = _latest_text([message.text for message in latest_turn.user_messages])
     assistant = _latest_text(
         [*latest_turn.assistant_commentary, *latest_turn.final_answers]
     )
@@ -468,10 +468,10 @@ def _print_summary(files: list, *, recent: int) -> None:
     if snapshot:
         print(f"  keep_working={context_meter_instruction('available')}")
     asks = [
-        (turn.start_ts, text)
+        (turn.start_ts, message.text)
         for turn in turns
-        for text in turn.user_messages
-        if not records.is_scaffolding_text(text)
+        for message in turn.user_messages
+        if message.shape is records.MessageShape.HUMAN
     ]
     print("Recent Prompts")
     for ts, text in asks[-recent:]:
@@ -564,7 +564,12 @@ def _timeline_turn_rows(
             f"errors={turn.error_count}",
         ]
         user = next(
-            (text for text in reversed(turn.user_messages) if text.strip()), None
+            (
+                message.text
+                for message in reversed(turn.user_messages)
+                if message.text.strip()
+            ),
+            None,
         )
         if user:
             pieces.append(f"user={clip(user, max_text)}")
@@ -585,6 +590,7 @@ def _timeline_compaction_rows(
             1,
             f"{Path(record.source_file).name} compaction "
             f"assistant_before={clip(record.last_assistant_before_text, max_text)} "
+            f"summary_after={clip(record.summary_after_text, max_text)} "
             f"user_after={clip(record.first_user_after_text, max_text)}",
         )
         for record in compactions
@@ -651,6 +657,7 @@ def _print_compactions(files: list, *, limit: int) -> None:
     for record in rows:
         print(
             f"{record.ts} assistant_before={clip(record.last_assistant_before_text)} "
+            f"summary_after={clip(record.summary_after_text)} "
             f"user_after={clip(record.first_user_after_text)}"
         )
 
