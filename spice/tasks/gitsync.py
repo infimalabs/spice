@@ -692,6 +692,7 @@ def _task_footprint_paths(
     listing = _read(
         repo_root,
         "log",
+        "--no-renames",
         "--no-merges",
         "--format=",
         "--name-only",
@@ -717,18 +718,31 @@ def _refuse_out_of_scope_landing(
     landed = {
         line
         for line in _read(
-            repo_root, "diff", "--name-only", upstream_head, merge_head
+            repo_root,
+            "diff",
+            "--no-renames",
+            "--name-only",
+            upstream_head,
+            merge_head,
         ).splitlines()
         if line
     }
     footprint = _task_footprint_paths(repo_root, upstream_head, agent_head)
     drifted = sorted(landed - footprint)
     if drifted:
-        raise SpiceError(_out_of_scope_refusal(label, upstream_head, drifted))
+        raise SpiceError(
+            _out_of_scope_refusal(repo_root, label, upstream_head, drifted)
+        )
 
 
-def _out_of_scope_refusal(label: str, upstream_head: str, paths: list[str]) -> str:
-    joined = _shell_join(paths)
+def _out_of_scope_refusal(
+    repo_root: Path, label: str, upstream_head: str, paths: list[str]
+) -> str:
+    present = [
+        path for path in paths if _path_exists_at(repo_root, upstream_head, path)
+    ]
+    present_set = set(present)
+    absent = [path for path in paths if path not in present_set]
     lines = [
         "refusing to publish: the landing rewrites baseline paths outside "
         f"the commits of {label}:",
@@ -736,13 +750,24 @@ def _out_of_scope_refusal(label: str, upstream_head: str, paths: list[str]) -> s
         "these paths carry peer work already landed on the shared branch; "
         "publishing would silently overwrite it",
         "next commands:",
-        f"  git checkout {upstream_head} -- {joined}",
-        f'  git commit -m "Restore baseline content for {label}"',
-        f'  spice task done {label} --validation "..."',
-        "an intentional change to any path above must land as its own commit "
-        "on this branch so the task owns it; then rerun spice task done",
     ]
+    if present:
+        lines.append(f"  git checkout {upstream_head} -- {_shell_join(present)}")
+    if absent:
+        lines.append(f"  git rm -- {_shell_join(absent)}")
+    lines.extend(
+        [
+            f'  git commit -m "Restore baseline content for {label}"',
+            f'  spice task done {label} --validation "..."',
+            "an intentional change to any path above must land as its own commit "
+            "on this branch so the task owns it; then rerun spice task done",
+        ]
+    )
     return "\n".join(lines)
+
+
+def _path_exists_at(repo_root: Path, treeish: str, path: str) -> bool:
+    return _run(repo_root, "cat-file", "-e", f"{treeish}:{path}").returncode == 0
 
 
 def _publish_race_recovery(

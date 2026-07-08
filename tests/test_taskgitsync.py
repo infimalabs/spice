@@ -549,6 +549,125 @@ def test_integrate_and_publish_refuses_landing_that_rewinds_peer_paths(tmp_path)
     assert _git(repo, "status", "--porcelain") == ""
 
 
+def test_integrate_and_publish_refuses_rename_detected_peer_deletion(tmp_path):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+
+    similar = "".join(f"shared line {index}\n" for index in range(80))
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    (repo / "replacement.txt").write_text(similar, encoding="utf-8")
+    _run(repo, "git", "add", "README.md", "replacement.txt")
+    _run(repo, "git", "commit", "-m", "agent adds replacement file")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
+    (peer / "peer.txt").write_text(similar, encoding="utf-8")
+    _run(peer, "git", "add", "README.md", "peer.txt")
+    _run(peer, "git", "commit", "-m", "peer adds similar file")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    with pytest.raises(gitsync.MergeConflict):
+        gitsync.integrate_and_publish("TASK-20260101T000000000010Z", repo_root=repo)
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "rm", "-f", "peer.txt")
+    _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
+
+    with pytest.raises(SpiceError) as exc_info:
+        gitsync.integrate_and_publish("TASK-20260101T000000000010Z", repo_root=repo)
+
+    message = str(exc_info.value)
+    assert "refusing to publish" in message
+    assert "peer.txt" in message
+    assert f"git checkout {upstream_head} -- peer.txt" in message
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == (
+        upstream_head
+    )
+
+
+def test_integrate_and_publish_allows_task_owned_rename(tmp_path):
+    repo = _repo_with_upstream(tmp_path)
+    _run(repo, "git", "mv", "README.md", "NOTES.md")
+    _run(repo, "git", "commit", "-m", "rename readme")
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000011Z", repo_root=repo
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert not (repo / "README.md").exists()
+    assert (repo / "NOTES.md").read_text(encoding="utf-8") == "initial\n"
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_out_of_scope_refusal_guides_git_rm_for_paths_absent_at_upstream(tmp_path):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+
+    (repo / "stale.txt").write_text("old peer file\n", encoding="utf-8")
+    _run(repo, "git", "add", "stale.txt")
+    _run(repo, "git", "commit", "-m", "shared stale file")
+    _run(repo, "git", "push", "origin", "main")
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
+    _run(peer, "git", "rm", "stale.txt")
+    _run(peer, "git", "add", "README.md")
+    _run(peer, "git", "commit", "-m", "peer deletes stale file")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    with pytest.raises(gitsync.MergeConflict):
+        gitsync.integrate_and_publish("TASK-20260101T000000000012Z", repo_root=repo)
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    (repo / "stale.txt").write_text("old peer file\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md", "stale.txt")
+    _run(repo, "git", "commit", "-m", "Resolve baseline overlap sloppily")
+
+    with pytest.raises(SpiceError) as exc_info:
+        gitsync.integrate_and_publish("TASK-20260101T000000000012Z", repo_root=repo)
+
+    message = str(exc_info.value)
+    assert "refusing to publish" in message
+    assert "stale.txt" in message
+    assert f"git checkout {upstream_head} -- stale.txt" not in message
+    assert "git rm -- stale.txt" in message
+
+    _run(repo, "git", "rm", "stale.txt")
+    _run(repo, "git", "commit", "-m", "Restore baseline deletion")
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000012Z", repo_root=repo
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
+    assert not (repo / "stale.txt").exists()
+    assert _git(repo, "status", "--porcelain") == ""
+
+
 def test_publish_race_retry_enforces_out_of_scope_guard(tmp_path, monkeypatch):
     # Defense in depth for the race-retry choke point: if a retry round ever
     # produces a head that rewinds peer paths (simulated here by adopting the
