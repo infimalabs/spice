@@ -474,6 +474,8 @@ def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
             "urgency": "9.2",
             "origin_thread": "origin-thread",
             "origin_worktree": "/tmp/origin",
+            "claim_by": "actor-a",
+            "claim_until": "2026-06-12T07:00:00Z",
             "claim_thread": "claim-thread",
             "claim_worktree": "/tmp/claim",
         }
@@ -482,6 +484,7 @@ def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
     monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.tw, "now_iso", lambda: "2026-06-12T08:00:00Z")
 
     output = render.render_show("TASK-test")
 
@@ -491,6 +494,40 @@ def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
     )
     assert "--start 2026-06-12T06:53:25.463000Z" in output
     assert "--end 2026-06-12T07:03:25.463000Z" in output
+
+
+def test_task_show_hides_recovery_context_for_current_task(monkeypatch):
+    row = _row(
+        "Current context hidden",
+        project="task.render",
+        incepted="1k4yrMDR",
+        status="pending",
+        phase="todo",
+    )
+    row.update(
+        {
+            "task_description": "",
+            "phase_i": "0",
+            "urgency": "9.2",
+            "origin_thread": "origin-thread",
+            "origin_worktree": "/tmp/origin",
+            "claim_thread": "claim-thread",
+            "claim_context_start": "2026-06-12T08:15:18.621994Z",
+            "claim_context_end": "2026-06-12T08:25:18.621994Z",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+
+    lines = render.render_show("TASK-test").splitlines()
+
+    assert lines[lines.index("claim_thread claim-thread") + 1] == "acceptance "
+    assert (
+        lines[lines.index("origin origin-thread - /tmp/origin") + 1]
+        == 'next: spice task done TASK-test --validation "..."'
+    )
 
 
 def test_task_show_requires_context_check_before_implementation(monkeypatch):
@@ -517,11 +554,47 @@ def test_task_show_requires_context_check_before_implementation(monkeypatch):
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
     monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
 
-    output = render.render_show("TASK-test")
+    output = render.render_show("TASK-test", include_recovery_context=True)
 
     assert "context_check:" in output
     assert "Before editing, run the rehydrate command(s) above" in output
     assert "assert the task description/acceptance still match" in output
+
+
+def test_task_next_includes_recovery_context_for_assignment(monkeypatch):
+    row = _row(
+        "Assigned context",
+        project="task.render",
+        incepted="1k4yrMDR",
+        status="pending",
+        phase="todo",
+    )
+    row.update(
+        {
+            "task_description": "Implement only after assignment context",
+            "phase_i": "0",
+            "urgency": "9.2",
+            "origin_thread": "origin-thread",
+            "claim_thread": "claim-thread",
+            "claim_context_start": "2026-06-12T08:15:18.621994Z",
+            "claim_context_end": "2026-06-12T08:25:18.621994Z",
+        }
+    )
+
+    monkeypatch.setattr(render.alloc, "next_task", lambda: row)
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(
+        render.ops, "claim_drive_line", lambda _handle: "drive: continue TASK-test"
+    )
+
+    output = render.render_next()
+
+    assert "next task:\nTASK-test [todo] P:M task.render Assigned context" in output
+    assert "claim_context 2026-06-12T08:15:18.621994Z ->" in output
+    assert "rehydrate:" in output
+    assert "context_check:" in output
 
 
 def test_task_show_context_check_names_stale_or_shifted_context(monkeypatch):
@@ -544,7 +617,7 @@ def test_task_show_context_check_names_stale_or_shifted_context(monkeypatch):
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
     monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "verify"])
 
-    output = render.render_show("TASK-test")
+    output = render.render_show("TASK-test", include_recovery_context=True)
 
     assert "context_check:" in output
     assert "no transcript rehydrate command is available" in output
@@ -574,7 +647,7 @@ def test_task_show_does_not_add_implementation_context_check_to_review(monkeypat
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
     monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
 
-    output = render.render_show("TASK-test")
+    output = render.render_show("TASK-test", include_recovery_context=True)
 
     assert "context_check:" not in output
     assert (
@@ -609,7 +682,7 @@ def test_task_show_keeps_creator_rehydrate_for_same_claim_thread(monkeypatch):
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
     monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
 
-    output = render.render_show("TASK-test")
+    output = render.render_show("TASK-test", include_recovery_context=True)
 
     assert "creator context, run: spice session briefing same-thread" in output
     assert "--start 2026-06-12T06:53:25.463000Z" in output
@@ -647,7 +720,7 @@ def test_task_show_replaces_sentinel_rehydrate_commands(monkeypatch):
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
     monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
 
-    output = render.render_show("TASK-test")
+    output = render.render_show("TASK-test", include_recovery_context=True)
 
     assert "rehydrate:" in output
     assert "creator context: unavailable (sentinel thread has no transcript)" in output
