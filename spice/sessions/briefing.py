@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, TypedDict
@@ -65,6 +66,37 @@ DIRTY_PRESSURE_PREVIEW_LIMIT = 6
 
 
 @dataclass(frozen=True)
+class BriefingFilters:
+    start: str | None
+    end: str | None
+    contains: str | None
+    turn_ids: tuple[str, ...]
+    tools: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SweepWindowPayload:
+    index: int
+    label: str
+    turns: tuple[TurnRecord, ...]
+    asks: tuple[tuple[str, str], ...]
+    finals: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class BriefingPayload:
+    files: tuple[Path, ...]
+    filters: BriefingFilters
+    turns: tuple[TurnRecord, ...]
+    compactions: tuple[CompactionRecord, ...]
+    meter: ContextMeter
+    commits: tuple[CommitRecord, ...]
+    asks: tuple[tuple[str, str], ...]
+    finals: tuple[tuple[str, str], ...]
+    sweep_windows: tuple[SweepWindowPayload, ...]
+
+
+@dataclass(frozen=True)
 class DirtyComplexityRegression:
     path: str
     function_name: str
@@ -102,7 +134,7 @@ def clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
     return flat[: limit - 1].rstrip() + "…"
 
 
-def operator_asks(turns: list[TurnRecord]) -> list[tuple[str, str]]:
+def operator_asks(turns: Sequence[TurnRecord]) -> list[tuple[str, str]]:
     """(start_ts, text) for every non-scaffolding user message, oldest first."""
     asks: list[tuple[str, str]] = []
     for turn in turns:
@@ -110,6 +142,60 @@ def operator_asks(turns: list[TurnRecord]) -> list[tuple[str, str]]:
             if not is_scaffolding_text(text):
                 asks.append((turn.start_ts, text))
     return asks
+
+
+def build_briefing_payload(
+    files: list[Path],
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    contains: str | None = None,
+    turn_ids: list[str] | None = None,
+    tools: list[str] | None = None,
+    sweep_count: int | None = None,
+) -> BriefingPayload:
+    file_tuple = tuple(files)
+    filters = BriefingFilters(
+        start=start,
+        end=end,
+        contains=contains,
+        turn_ids=tuple(turn_ids or ()),
+        tools=tuple(tools or ()),
+    )
+    turns = records.filter_turns(
+        collect_turns(list(file_tuple)),
+        start=filters.start,
+        end=filters.end,
+        contains=filters.contains,
+        turn_ids=list(filters.turn_ids) or None,
+        tools=list(filters.tools) or None,
+    )
+    compactions = _filter_compactions(
+        collect_compactions(list(file_tuple)),
+        start=filters.start,
+        end=filters.end,
+        contains=filters.contains,
+    )
+    turn_tuple = tuple(turns)
+    compaction_tuple = tuple(compactions)
+    sweep_windows = (
+        _build_sweep_windows(turn_tuple, compaction_tuple, count=sweep_count)
+        if sweep_count is not None
+        else ()
+    )
+    return BriefingPayload(
+        files=file_tuple,
+        filters=filters,
+        turns=turn_tuple,
+        compactions=compaction_tuple,
+        meter=collect_context_meter(list(file_tuple)),
+        commits=tuple(collect_commit_records(turns)),
+        asks=tuple(operator_asks(turn_tuple)),
+        finals=tuple(
+            (turn.start_ts, text) for turn in turn_tuple for text in turn.final_answers
+        ),
+        sweep_windows=sweep_windows,
+    )
 
 
 def render_briefing(
@@ -124,35 +210,47 @@ def render_briefing(
     max_bytes: int | None = DEFAULT_BRIEFING_MAX_BYTES,
     explain_pruning: bool = False,
 ) -> str:
-    turns = records.filter_turns(
-        collect_turns(files),
+    payload = build_briefing_payload(
+        files,
         start=start,
         end=end,
         contains=contains,
         turn_ids=turn_ids,
         tools=tools,
     )
-    compactions = _filter_compactions(
-        collect_compactions(files), start=start, end=end, contains=contains
+    return render_briefing_payload(
+        payload,
+        max_lines=max_lines,
+        max_bytes=max_bytes,
+        explain_pruning=explain_pruning,
     )
-    meter = collect_context_meter(files)
-    commits = collect_commit_records(turns)
-    asks = operator_asks(turns)
-    finals = [(turn.start_ts, text) for turn in turns for text in turn.final_answers]
+
+
+def render_briefing_payload(
+    payload: BriefingPayload,
+    *,
+    max_lines: int | None = DEFAULT_BRIEFING_MAX_LINES,
+    max_bytes: int | None = DEFAULT_BRIEFING_MAX_BYTES,
+    explain_pruning: bool = False,
+) -> str:
     lines: list[str] = []
-    lines.extend(_briefing_header_lines(files, turns))
+    lines.extend(_briefing_header_lines(payload.files, payload.turns))
     filter_lines = _active_filter_lines(
-        start=start, end=end, contains=contains, turn_ids=turn_ids, tools=tools
+        start=payload.filters.start,
+        end=payload.filters.end,
+        contains=payload.filters.contains,
+        turn_ids=payload.filters.turn_ids,
+        tools=payload.filters.tools,
     )
     if filter_lines:
         lines.append("Filters")
         lines.extend(filter_lines)
-    lines.extend(_guidance_lines(meter))
+    lines.extend(_guidance_lines(payload.meter))
     lines.extend(_learning_lines())
-    lines.extend(_asks_lines(asks))
-    lines.extend(_finals_lines(finals))
-    lines.extend(_recovery_lines(compactions))
-    lines.extend(_activity_lines(turns, commits))
+    lines.extend(_asks_lines(list(payload.asks)))
+    lines.extend(_finals_lines(list(payload.finals)))
+    lines.extend(_recovery_lines(list(payload.compactions)))
+    lines.extend(_activity_lines(payload.turns, payload.commits))
     lines.extend(_git_posture_lines())
     lines.extend(_inbox_lines())
     return apply_output_budget(
@@ -163,7 +261,9 @@ def render_briefing(
     )
 
 
-def _briefing_header_lines(files: list[Path], turns: list[TurnRecord]) -> list[str]:
+def _briefing_header_lines(
+    files: Sequence[Path], turns: Sequence[TurnRecord]
+) -> list[str]:
     window_start = turns[0].start_ts if turns else "-"
     window_end = (
         (turns[-1].end_ts or turns[-1].last_activity_ts or turns[-1].start_ts)
@@ -256,7 +356,9 @@ def _recovery_lines(compactions: list[CompactionRecord]) -> list[str]:
     ]
 
 
-def _activity_lines(turns: list[TurnRecord], commits: list[CommitRecord]) -> list[str]:
+def _activity_lines(
+    turns: Sequence[TurnRecord], commits: Sequence[CommitRecord]
+) -> list[str]:
     lines = [
         "Activity",
         "  commands={c} patches={p} errors={e} web_searches={w}".format(
@@ -280,7 +382,7 @@ def _activity_lines(turns: list[TurnRecord], commits: list[CommitRecord]) -> lis
     return lines
 
 
-def active_file_order(turns: list[TurnRecord]) -> list[tuple[str, int]]:
+def active_file_order(turns: Sequence[TurnRecord]) -> list[tuple[str, int]]:
     """The current working set: most-recently-touched first, count attached.
 
     Recency outranks raw frequency — the file an agent touched last is the
@@ -303,8 +405,8 @@ def _active_filter_lines(
     start: str | None,
     end: str | None,
     contains: str | None,
-    turn_ids: list[str] | None,
-    tools: list[str] | None,
+    turn_ids: Sequence[str] | None,
+    tools: Sequence[str] | None,
 ) -> list[str]:
     rows: list[str] = []
     if start:
@@ -959,6 +1061,41 @@ def _inbox_lines() -> list[str]:
     return lines
 
 
+def _build_sweep_windows(
+    turns: Sequence[TurnRecord],
+    compactions: Sequence[CompactionRecord],
+    *,
+    count: int,
+) -> tuple[SweepWindowPayload, ...]:
+    boundaries = [record.ts for record in compactions][-max(0, count) :]
+    if not boundaries:
+        return ()
+    windows: list[SweepWindowPayload] = []
+    edges = ["", *boundaries, "￿"]
+    for index in range(len(edges) - 1):
+        window_start, window_end = edges[index], edges[index + 1]
+        window_turns = tuple(
+            turn
+            for turn in turns
+            if (not window_start or turn.start_ts >= window_start)
+            and turn.start_ts < window_end
+        )
+        windows.append(
+            SweepWindowPayload(
+                index=index,
+                label=window_start or "session start",
+                turns=window_turns,
+                asks=tuple(operator_asks(window_turns)),
+                finals=tuple(
+                    (turn.start_ts, text)
+                    for turn in window_turns
+                    for text in turn.final_answers
+                ),
+            )
+        )
+    return tuple(windows)
+
+
 def render_sweep(
     files: list[Path],
     *,
@@ -975,49 +1112,32 @@ def render_sweep(
     and the final that closed it. A renewed agent reads these to recover not
     just the latest state but the trajectory.
     """
-    turns = records.filter_turns(
-        collect_turns(files),
+    payload = build_briefing_payload(
+        files,
         start=start,
         end=end,
         contains=contains,
         turn_ids=turn_ids,
         tools=tools,
+        sweep_count=count,
     )
-    compactions = _filter_compactions(
-        collect_compactions(files), start=start, end=end, contains=contains
-    )
-    boundaries = [record.ts for record in compactions][-max(0, count) :]
-    if not boundaries:
-        return render_briefing(
-            files,
-            start=start,
-            end=end,
-            contains=contains,
-            turn_ids=turn_ids,
-            tools=tools,
-        )
-    lines: list[str] = ["Sweep", f"  windows={len(boundaries) + 1} files={len(files)}"]
-    edges = ["", *boundaries, "￿"]
-    for index in range(len(edges) - 1):
-        window_start, window_end = edges[index], edges[index + 1]
-        window_turns = [
-            turn
-            for turn in turns
-            if (not window_start or turn.start_ts >= window_start)
-            and turn.start_ts < window_end
-        ]
-        label = window_start or "session start"
-        lines.append(f"Window {index} (from {label})")
-        asks = operator_asks(window_turns)
-        for ts, text in asks[-SWEEP_WINDOW_ASKS:]:
+    return render_sweep_payload(payload)
+
+
+def render_sweep_payload(payload: BriefingPayload) -> str:
+    if not payload.sweep_windows:
+        return render_briefing_payload(payload)
+    lines: list[str] = [
+        "Sweep",
+        f"  windows={len(payload.sweep_windows)} files={len(payload.files)}",
+    ]
+    for window in payload.sweep_windows:
+        lines.append(f"Window {window.index} (from {window.label})")
+        for ts, text in list(window.asks)[-SWEEP_WINDOW_ASKS:]:
             lines.append(f"  ask {ts} {clip(text)}")
-        finals = [
-            (turn.start_ts, text)
-            for turn in window_turns
-            for text in turn.final_answers
-        ]
-        if finals:
-            lines.append(f"  final {finals[-1][0]} {clip(finals[-1][1])}")
-        if not asks and not finals:
+        if window.finals:
+            final_ts, final_text = window.finals[-1]
+            lines.append(f"  final {final_ts} {clip(final_text)}")
+        if not window.asks and not window.finals:
             lines.append("  (no dialogue in this window)")
     return "\n".join(lines)
