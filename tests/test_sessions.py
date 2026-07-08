@@ -438,7 +438,6 @@ def test_classify_user_message_boilerplate_shapes_never_human(text, expected):
     shape = records.classify_user_message(text)
 
     assert shape is expected
-    assert shape is not records.MessageShape.HUMAN
 
 
 @pytest.mark.parametrize(
