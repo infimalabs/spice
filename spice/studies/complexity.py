@@ -257,10 +257,10 @@ def scan_staged_complexity_violations(
     """
     records = collect_complexity_records(paths, root=root, suffixes=suffixes)
     renames = staged_renames(root)
-    ccn_sticky = sticky_function_keys_after_renames(
+    loaded_ccn_sticky = sticky_function_keys_after_renames(
         _load_sticky(root, COMPLEXITY_CCN_STICKY_GIT_PATH), renames
     )
-    length_sticky = sticky_function_keys_after_renames(
+    loaded_length_sticky = sticky_function_keys_after_renames(
         _load_sticky(root, COMPLEXITY_LENGTH_STICKY_GIT_PATH), renames
     )
     ccn_flex = (
@@ -281,6 +281,22 @@ def scan_staged_complexity_violations(
     )
     resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
     ccn_breaches, length_breaches = _complexity_breach_sets(records, resolve_bounds)
+    ccn_sticky = _retained_over_base_sticky(
+        loaded_ccn_sticky,
+        root=root,
+        attribute="ccn",
+        fallback_limit=max_ccn,
+        resolve_bounds=resolve_bounds,
+        suffixes=suffixes,
+    )
+    length_sticky = _retained_over_base_sticky(
+        loaded_length_sticky,
+        root=root,
+        attribute="length",
+        fallback_limit=max_length,
+        resolve_bounds=resolve_bounds,
+        suffixes=suffixes,
+    )
     updated_ccn_sticky = sticky_items_after_flex_breaches(
         records,
         ccn_sticky,
@@ -294,10 +310,12 @@ def scan_staged_complexity_violations(
         is_breach=lambda record: record in length_breaches,
     )
     if persist:
-        if updated_ccn_sticky != ccn_sticky:
-            _save_sticky(updated_ccn_sticky, root, COMPLEXITY_CCN_STICKY_GIT_PATH)
-        if updated_length_sticky != length_sticky:
-            _save_sticky(updated_length_sticky, root, COMPLEXITY_LENGTH_STICKY_GIT_PATH)
+        if updated_ccn_sticky != loaded_ccn_sticky:
+            _persist_sticky(updated_ccn_sticky, root, COMPLEXITY_CCN_STICKY_GIT_PATH)
+        if updated_length_sticky != loaded_length_sticky:
+            _persist_sticky(
+                updated_length_sticky, root, COMPLEXITY_LENGTH_STICKY_GIT_PATH
+            )
     peer_claims = _peer_flex_slice_claims(
         {Path(record.path) for record in ccn_breaches | length_breaches},
         root=root,
@@ -398,47 +416,49 @@ def _complexity_findings(
     return findings
 
 
-def clear_complexity_sticky_state(
+def _retained_over_base_sticky(
+    sticky: set[tuple[str, str]],
     *,
     root: Path,
-    max_ccn: int = COMPLEXITY_MAX_CCN,
-    max_length: int = COMPLEXITY_MAX_LENGTH,
-    bounds_for_path: Callable[[Path], ComplexityBounds] | None = None,
-    suffixes: tuple[str, ...] = COMPLEXITY_SUFFIXES,
-) -> None:
-    default_bounds = _DefaultComplexityBounds(
-        max_ccn=max_ccn,
-        ccn_flex_limit=flex_limit(max_ccn),
-        max_length=max_length,
-        length_flex_limit=flex_limit(max_length),
-    )
-    resolve_bounds = bounds_for_path or (lambda _path: default_bounds)
-    for git_path, attribute, limit in (
-        (COMPLEXITY_CCN_STICKY_GIT_PATH, "ccn", max_ccn),
-        (COMPLEXITY_LENGTH_STICKY_GIT_PATH, "length", max_length),
-    ):
-        state_path = git_state_path(git_path, root=root)
-        if not state_path.exists():
-            continue
-        sticky = _load_sticky(root, git_path)
-        live_paths = sorted({Path(path) for path, _name in sticky})
-        records = collect_complexity_records(live_paths, root=root, suffixes=suffixes)
-        by_key = {record.key: record for record in records}
-        retained = {
-            key
-            for key in sticky
-            if key in by_key
-            and _complexity_bound_is_retained(
-                by_key[key],
-                attribute=attribute,
-                fallback_limit=limit,
-                bounds=resolve_bounds(Path(by_key[key].path)),
-            )
-        }
-        if retained:
-            _save_sticky(retained, root, git_path)
-        else:
-            state_path.unlink()
+    attribute: str,
+    fallback_limit: int,
+    resolve_bounds: Callable[[Path], ComplexityBounds],
+    suffixes: tuple[str, ...],
+) -> set[tuple[str, str]]:
+    """The still-latched subset: routines still over their base limit.
+
+    A latch only records that a routine once breached flex; it is retired the
+    moment the routine is back at or under its base limit. Evaluating that here
+    on every scan — not only after a fully clean commit — is what lets a latch
+    recorded in one (now-idle) worktree heal as soon as any scan sees the
+    routine under base again.
+    """
+    if not sticky:
+        return set()
+    live_paths = sorted({Path(path) for path, _name in sticky})
+    records = collect_complexity_records(live_paths, root=root, suffixes=suffixes)
+    by_key = {record.key: record for record in records}
+    return {
+        key
+        for key in sticky
+        if key in by_key
+        and _complexity_bound_is_retained(
+            by_key[key],
+            attribute=attribute,
+            fallback_limit=fallback_limit,
+            bounds=resolve_bounds(Path(by_key[key].path)),
+        )
+    }
+
+
+def _persist_sticky(keys: set[tuple[str, str]], root: Path, git_path: str) -> None:
+    """Write the latch set, or delete the state file once nothing stays latched."""
+    if keys:
+        _save_sticky(keys, root, git_path)
+        return
+    state_path = git_state_path(git_path, root=root)
+    if state_path.exists():
+        state_path.unlink()
 
 
 def _complexity_bound_is_retained(

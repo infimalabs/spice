@@ -40,13 +40,12 @@ dataclasses plus `scan_*`, `detect_*`, and `render_*_board` helpers for
 project-specific studies.
 
 The flex and sticky scans
-(`scan_staged_loc_violations`, `scan_staged_complexity_violations`) are pure
-queries by default. Only a committing gate passes `persist=True` to advance the
-sticky floor. The file-shape scan also self-heals: a `persist=True` scan retires
-any latch whose file is back at or under its base limit, so no separate clear
-call is needed. The complexity scan still pairs `persist=True` with
-`clear_complexity_sticky_state` on gate success; running one half without the
-other causes permanent ratcheting or no release at all.
+(`scan_staged_loc_violations`, `scan_staged_complexity_violations`,
+`repo_truth_doc_findings`) are pure queries by default. Only a committing gate
+passes `persist=True` to advance the sticky floor. Every one of these scans
+self-heals in-scan: a `persist=True` scan retires any latch whose file, routine,
+or doc is back at or under its base limit — on any gate run, even a failing one —
+so no separate post-success clear call is needed.
 
 Everything else is an internal implementation detail unless this document names
 it. A repo tool that needs an unlisted helper should vendor that helper or first
