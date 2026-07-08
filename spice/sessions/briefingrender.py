@@ -7,11 +7,13 @@ from typing import Protocol, TypeVar
 
 from spice.mail.inbox import (
     INBOX_RESPONSE_ROW,
+    InboxItem,
     collect_deadlettered_inbox_items,
     collect_inbox_items,
     collect_refused_inbox_items,
     inbox_ack_state_context_rows,
     inbox_deadletter_context_rows,
+    inbox_item_age_seconds,
     inbox_item_key,
     relative_time_for_path,
 )
@@ -151,13 +153,19 @@ def truncate_to_bytes(text: str, max_bytes: int) -> str:
     return text.encode("utf-8")[: max(0, max_bytes)].decode("utf-8", errors="ignore")
 
 
-def inbox_lines() -> list[str]:
+def inbox_lines(*, max_consumed_age_seconds: int | None = None) -> list[str]:
     repo_root = repo_root_from_cwd()
     if repo_root is None:
         return []
     items = collect_inbox_items(str(repo_root))
-    deadletters = collect_deadlettered_inbox_items(str(repo_root))
-    refused = collect_refused_inbox_items(str(repo_root))
+    deadletters = _filter_consumed_by_age(
+        collect_deadlettered_inbox_items(str(repo_root)),
+        max_age_seconds=max_consumed_age_seconds,
+    )
+    refused = _filter_consumed_by_age(
+        collect_refused_inbox_items(str(repo_root)),
+        max_age_seconds=max_consumed_age_seconds,
+    )
     lines = ["Inbox", f"  pending={len(items)}"]
     for item in items:
         lines.append(
@@ -173,3 +181,20 @@ def inbox_lines() -> list[str]:
         lines.append(f"  refused={len(refused)}")
         lines.extend(f"  {line}" for line in inbox_ack_state_context_rows(refused))
     return lines
+
+
+def _filter_consumed_by_age(
+    items: Sequence[InboxItem], *, max_age_seconds: int | None
+) -> list[InboxItem]:
+    if max_age_seconds is None:
+        return list(items)
+    return [
+        item for item in items if _item_age_seconds(item) <= max(0, max_age_seconds)
+    ]
+
+
+def _item_age_seconds(item: InboxItem) -> float:
+    try:
+        return inbox_item_age_seconds(item)
+    except OSError:
+        return 0.0

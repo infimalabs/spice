@@ -860,7 +860,7 @@ def test_sweep_payload_renders_precomputed_windows(tmp_path, monkeypatch):
     )
 
 
-def test_briefing_ranks_ack_db_asks_by_disposition_then_recency(tmp_path, monkeypatch):
+def test_briefing_ranks_ack_db_asks_by_recency_then_disposition(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
     transcript = tmp_path / "human.jsonl"
     transcript.write_text(
@@ -917,13 +917,13 @@ def test_briefing_ranks_ack_db_asks_by_disposition_then_recency(tmp_path, monkey
 
     assert _section_lines(briefing, "Latest Ask") == [
         "Latest Ask",
-        "  pending 2026-01-01T00:00:01.000Z key=20260101T000001000000Z pending request",
+        "  human 2026-01-01T00:00:04.000Z human request",
     ]
     assert _section_lines(briefing, "Recent Asks") == [
         "Recent Asks",
-        "  refused 2026-01-01T00:00:02.000Z key=20260101T000002000000Z refused request",
         "  acked 2026-01-01T00:00:03.000Z key=20260101T000003000000Z acked request",
-        "  human 2026-01-01T00:00:04.000Z human request",
+        "  refused 2026-01-01T00:00:02.000Z key=20260101T000002000000Z refused request",
+        "  pending 2026-01-01T00:00:01.000Z key=20260101T000001000000Z pending request",
     ]
 
 
@@ -960,7 +960,12 @@ def test_briefing_ack_asks_include_response_and_scope_by_thread(tmp_path, monkey
     )
     monkeypatch.chdir(repo)
 
-    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+    briefing = render_briefing(
+        [transcript],
+        end="2026-01-01T00:04:00.000Z",
+        max_lines=200,
+        max_bytes=20000,
+    )
 
     assert _section_lines(briefing, "Latest Ask") == [
         "Latest Ask",

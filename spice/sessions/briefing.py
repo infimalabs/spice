@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
@@ -43,6 +43,7 @@ from spice.sessions.meter import (
     meter_pressure_level,
 )
 from spice.sessions.slices import select_compaction_windows_from_files
+from spice.sessions.util import parse_iso_ts
 from spice.sessions.records import (
     CommitRecord,
     CompactionRecord,
@@ -61,6 +62,7 @@ SWEEP_WINDOW_ASKS = 3
 WORKING_SET_LIMIT = 10
 DEFAULT_BRIEFING_MAX_LINES = 120
 DEFAULT_BRIEFING_MAX_BYTES = 20_000
+DEFAULT_RECENCY_MAX_SECONDS = 4 * 60 * 60
 DIRTY_PRESSURE_PREVIEW_LIMIT = 6
 TASK_PLANE_ROW_LIMIT = 8
 TASK_PLANE_PREVIEW_CHARS = 180
@@ -94,7 +96,7 @@ ASK_DISPOSITION_RANK: dict[str, int] = {
     "human": 0,
     "": 0,
 }
-ASK_RANK_NAME = "ask_disposition_then_recency"
+ASK_RANK_NAME = "ask_recency_then_disposition"
 FILE_RANK_NAME = "file_last_touch_then_hotspot"
 COMMAND_RANK_NAME = "command_failures_then_recency"
 RECENCY_RANK_NAME = "recency"
@@ -181,7 +183,7 @@ def sort_rehydration_candidates(
 
 
 def ask_rank_key(timestamp: str, disposition: str) -> RankKey:
-    return (ASK_DISPOSITION_RANK.get(disposition.lower(), 0), timestamp)
+    return (timestamp, ASK_DISPOSITION_RANK.get(disposition.lower(), 0))
 
 
 def recency_rank_key(timestamp: str) -> RankKey:
@@ -434,6 +436,14 @@ def build_briefing_payload(
     effective_start = _effective_start(start, horizon.start)
     all_turns = collect_turns(list(file_tuple), start=effective_start)
     all_compactions = collect_compactions(list(file_tuple), start=effective_start)
+    recency_floor = _recency_floor(
+        end=end,
+        turns=all_turns,
+        compactions=all_compactions,
+        max_seconds=DEFAULT_RECENCY_MAX_SECONDS,
+    )
+    candidate_start = _latest_start(effective_start, recency_floor)
+    recovery_start = _latest_start(start, recency_floor)
     filters = BriefingFilters(
         start=start,
         end=end,
@@ -443,14 +453,14 @@ def build_briefing_payload(
     )
     turns = records.filter_turns(
         all_turns,
-        start=effective_start,
+        start=candidate_start,
         end=end,
         contains=contains,
         turn_ids=list(filters.turn_ids) or None,
         tools=list(filters.tools) or None,
     )
     compactions = filter_compactions(
-        all_compactions, start=effective_start, end=end, contains=contains
+        all_compactions, start=candidate_start, end=end, contains=contains
     )
     turn_tuple = tuple(turns)
     compaction_tuple = tuple(compactions)
@@ -458,7 +468,7 @@ def build_briefing_payload(
     asks = tuple(
         collect_ask_candidates(
             turns=list(turn_tuple),
-            start=effective_start,
+            start=candidate_start,
             end=end,
             contains=contains,
             subject_thread_ids=_subject_thread_ids(list(file_tuple)),
@@ -467,7 +477,7 @@ def build_briefing_payload(
     recovery_asks = tuple(
         collect_ask_candidates(
             turns=list(turn_tuple),
-            start=start,
+            start=recovery_start,
             end=end,
             contains=contains,
             subject_thread_ids=_subject_thread_ids(list(file_tuple)),
@@ -583,7 +593,7 @@ def render_briefing_payload(
         )
     )
     lines.extend(git_posture_lines())
-    lines.extend(inbox_lines())
+    lines.extend(inbox_lines(max_consumed_age_seconds=DEFAULT_RECENCY_MAX_SECONDS))
     return apply_output_budget(
         "\n".join(lines),
         max_lines=max_lines,
@@ -641,6 +651,45 @@ def _turn_activity_ts(turn: TurnRecord) -> str:
 
 def _effective_start(user_start: str | None, horizon_start: str | None) -> str | None:
     return user_start or horizon_start
+
+
+def _latest_start(*values: str | None) -> str | None:
+    present = [value for value in values if value]
+    return max(present) if present else None
+
+
+def _recency_floor(
+    *,
+    end: str | None,
+    turns: list[TurnRecord],
+    compactions: list[CompactionRecord],
+    max_seconds: int,
+) -> str | None:
+    reference = _recency_reference_ts(end=end, turns=turns, compactions=compactions)
+    reference_dt = parse_iso_ts(reference)
+    if reference_dt is None:
+        reference_dt = datetime.now(UTC)
+    floor = reference_dt.astimezone(UTC) - timedelta(seconds=max(0, max_seconds))
+    return floor.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _recency_reference_ts(
+    *,
+    end: str | None,
+    turns: list[TurnRecord],
+    compactions: list[CompactionRecord],
+) -> str | None:
+    if end:
+        return end
+    values = [
+        value
+        for value in [
+            *(_turn_activity_ts(turn) for turn in turns),
+            *(record.ts for record in compactions),
+        ]
+        if value
+    ]
+    return max(values) if values else None
 
 
 def _guidance_lines(meter: ContextMeter) -> list[str]:
