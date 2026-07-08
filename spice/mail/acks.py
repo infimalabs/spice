@@ -606,6 +606,8 @@ def _ack_state_attachments(item: Any) -> tuple[dict[str, Any], ...]:
 
 
 def _ack_state_lineage(item: Any) -> dict[str, Any]:
+    from spice.agent.identity import ambient_thread_id
+
     payload = parse_inbox_payload(item.text)
     attempts = [
         {
@@ -615,12 +617,14 @@ def _ack_state_lineage(item: Any) -> dict[str, Any]:
         }
         for attempt in payload.resend_attempts
     ]
-    if payload.resend_count == 0 and not attempts:
-        return {}
-    return {
-        "resend_count": payload.resend_count,
-        "resend_attempts": attempts,
-    }
+    lineage: dict[str, Any] = {}
+    thread_id = ambient_thread_id()
+    if thread_id:
+        lineage["thread_id"] = thread_id
+    if payload.resend_count or attempts:
+        lineage["resend_count"] = payload.resend_count
+        lineage["resend_attempts"] = attempts
+    return lineage
 
 
 def _ack_content_for_item(

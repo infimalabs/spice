@@ -25,6 +25,7 @@ from spice.mail.inbox import (
     write_inbox_item,
 )
 from spice.sessions import briefing as briefing_module
+from spice.sessions import briefingpressure
 from spice.sessions.briefing import render_briefing, render_sweep
 from spice.sessions import learnings, records
 from spice.tasks import config as task_config
@@ -445,10 +446,10 @@ def test_briefing_dirty_git_posture_includes_policy_pressure_and_ages(
     monkeypatch.chdir(repo)
 
     monkeypatch.setattr(
-        briefing_module.fileloc,
+        briefingpressure.fileloc,
         "scan_loc_violations",
         lambda paths, **_kwargs: [
-            briefing_module.fileloc.LocFinding(
+            briefingpressure.fileloc.LocFinding(
                 path="oversize.py",
                 line_count=1601,
                 byte_count=100,
@@ -460,10 +461,10 @@ def test_briefing_dirty_git_posture_includes_policy_pressure_and_ages(
         ],
     )
     monkeypatch.setattr(
-        briefing_module,
+        briefingpressure,
         "_scan_dirty_complexity_pressure",
         lambda paths, **_kwargs: [
-            briefing_module.DirtyComplexityRegression(
+            briefingpressure.DirtyComplexityRegression(
                 path="oversize.py",
                 function_name="oversized",
                 metric="ccn",
@@ -474,10 +475,10 @@ def test_briefing_dirty_git_posture_includes_policy_pressure_and_ages(
         ],
     )
     monkeypatch.setattr(
-        briefing_module.magicnums,
+        briefingpressure.magicnums,
         "detect_magic_regressions",
         lambda paths, **_kwargs: [
-            briefing_module.magicnums.MagicFinding(
+            briefingpressure.magicnums.MagicFinding(
                 path="magic.py",
                 line=2,
                 literal="99",

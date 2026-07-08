@@ -8,15 +8,14 @@ and what steering is pending.
 
 from __future__ import annotations
 
-import subprocess
-import tempfile
-import time
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Literal, TypeAlias, TypedDict
+from typing import Any, Literal, TypeAlias
 
+from spice.agent.identity import uuid_thread_id
 from spice.errors import SpiceError
 from spice.mail.ackstate import AckStateRecord, ack_state_records
 from spice.mail.inbox import (
@@ -24,7 +23,6 @@ from spice.mail.inbox import (
     collect_deadlettered_inbox_items,
     collect_inbox_items,
     collect_refused_inbox_items,
-    format_relative_seconds,
     inbox_ack_state_context_rows,
     inbox_deadletter_context_rows,
     inbox_item_key,
@@ -32,12 +30,10 @@ from spice.mail.inbox import (
     relative_time_for_path,
 )
 from spice.paths import repo_root_from_cwd
-from spice.policy import (
-    MAGIC_BASELINE_REF,
-)
-from spice.policyconfig import ComplexityPolicy, resolve_policy
 from spice.sessions import learnings as session_learnings
 from spice.sessions import records
+from spice.sessions.briefingpressure import dirty_path_count, git_posture_lines
+from spice.sessions.briefingtaskplane import collect_task_plane_candidates
 from spice.sessions.meter import (
     ContextMeter,
     GuidanceState,
@@ -54,8 +50,6 @@ from spice.sessions.records import (
     collect_compactions,
     collect_turns,
 )
-from spice.studies import complexity, fileloc, magicnums, repodocs, shape
-from spice.studies.walk import is_excluded_path
 
 DEFAULT_RECENT_ASKS = 6
 DEFAULT_RECENT_FINALS = 3
@@ -73,6 +67,10 @@ DEFAULT_HORIZON_COMPACTIONS = 3
 MAX_HORIZON_COMPACTIONS = 5
 DEFAULT_HORIZON_MIN_SECONDS = 4 * 60 * 60
 HORIZON_END_SENTINEL = "￿"
+THREAD_ID_TOKEN_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32}"
+)
 
 RehydrationCandidateKind: TypeAlias = Literal[
     "ask",
@@ -100,15 +98,6 @@ ASK_RANK_NAME = "ask_disposition_then_recency"
 FILE_RANK_NAME = "file_last_touch_then_hotspot"
 COMMAND_RANK_NAME = "command_failures_then_recency"
 RECENCY_RANK_NAME = "recency"
-TASK_PLANE_RANK_NAME = "task_plane_state_then_urgency_recency"
-TASK_PLANE_WEIGHTS = {
-    "claim": 60,
-    "posture": 55,
-    "ready": 50,
-    "review": 45,
-    "completed": 30,
-    "oops": 20,
-}
 
 
 @dataclass(frozen=True)
@@ -124,16 +113,6 @@ class RehydrationCandidate:
 
 
 @dataclass(frozen=True)
-class DirtyComplexityRegression:
-    path: str
-    function_name: str
-    metric: str
-    value: int
-    active_threshold: int
-    baseline_value: int | None
-
-
-@dataclass(frozen=True)
 class ResolvedHorizon:
     start: str | None
     basis: str
@@ -143,25 +122,6 @@ class ResolvedHorizon:
     @property
     def selected_compactions(self) -> int:
         return len(self.selected_boundaries)
-
-
-class DirtyWorktreePressure(TypedDict, total=False):
-    available: bool
-    dirtyPathCount: int
-    scannedPathCount: int
-    fileCountWithPressure: int
-    totalFindings: int
-    fileLocFindingCount: int
-    complexityRegressionCount: int
-    magicRegressionCount: int
-    severity: str
-    summary: list[str]
-    summaryOverflow: int
-    errors: list[str]
-    oldestDirtyAgeSeconds: int
-    oldestDirtyPath: str
-    newestDirtyAgeSeconds: int
-    newestDirtyPath: str
 
 
 def clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
@@ -195,12 +155,6 @@ def command_rank_key(timestamp: str, error_count: int) -> RankKey:
     return (error_count, timestamp)
 
 
-def task_plane_rank_key(
-    kind: str, urgency: float = 0.0, timestamp: str = ""
-) -> RankKey:
-    return (TASK_PLANE_WEIGHTS[kind], urgency, timestamp)
-
-
 def ask_candidate(
     timestamp: str, text: str, *, disposition: str = "human", key: str = ""
 ) -> RehydrationCandidate:
@@ -220,13 +174,18 @@ def collect_ask_candidates(
     start: str | None = None,
     end: str | None = None,
     contains: str | None = None,
+    subject_thread_ids: frozenset[str] = frozenset(),
 ) -> list[RehydrationCandidate]:
     repo_root = repo_root_from_cwd()
     if repo_root is None:
         return []
     candidates = [
         *(_pending_ask_candidate(item) for item in collect_inbox_items(str(repo_root))),
-        *(_ack_state_ask_candidate(record) for record in ack_state_records(repo_root)),
+        *(
+            _ack_state_ask_candidate(record)
+            for record in ack_state_records(repo_root)
+            if _ack_state_record_matches_subject(record, subject_thread_ids)
+        ),
     ]
     return [
         candidate
@@ -250,10 +209,38 @@ def _pending_ask_candidate(item) -> RehydrationCandidate:
 def _ack_state_ask_candidate(record: AckStateRecord) -> RehydrationCandidate:
     return ask_candidate(
         _ask_timestamp_from_key(record.key),
-        parse_inbox_payload(record.text).body,
+        _ack_state_ask_text(record),
         disposition=record.disposition,
         key=record.key,
     )
+
+
+def _ack_state_ask_text(record: AckStateRecord) -> str:
+    request = parse_inbox_payload(record.text).body
+    response = record.ack_content.strip()
+    if not response:
+        return request
+    return f"{request} | response: {response}"
+
+
+def _ack_state_record_matches_subject(
+    record: AckStateRecord, subject_thread_ids: frozenset[str]
+) -> bool:
+    if not subject_thread_ids:
+        return True
+    return (
+        uuid_thread_id(str(record.lineage.get("thread_id") or "")) in subject_thread_ids
+    )
+
+
+def _subject_thread_ids(files: list[Path]) -> frozenset[str]:
+    thread_ids: set[str] = set()
+    for path in files:
+        for match in THREAD_ID_TOKEN_RE.finditer(path.name):
+            thread_id = uuid_thread_id(match.group(0))
+            if thread_id:
+                thread_ids.add(thread_id)
+    return frozenset(thread_ids)
 
 
 def _ask_candidate_matches_filters(
@@ -370,191 +357,6 @@ def collect_compaction_intent_candidates(
     ]
 
 
-def collect_task_plane_candidates() -> list[RehydrationCandidate]:
-    if repo_root_from_cwd() is None:
-        return []
-    try:
-        from spice.tasks import alloc, identity, tw
-
-        actor = tw.current_actor()
-        active = alloc.visible_active_rows(actor)
-        ready = [
-            row
-            for row in alloc.visible_ready_rows(actor)
-            if _task_field(row, "phase") != "review"
-        ]
-        review = [
-            row
-            for row in alloc.visible_rows(actor, ["status:pending", "phase:review"])
-            if not alloc.is_hidden(row) and not str(row.get("claim_by") or "")
-        ]
-        blocked = [
-            row
-            for row in alloc.visible_rows(actor, ["status:pending", "+BLOCKED"])
-            if not alloc.is_hidden(row)
-        ]
-        completed = [
-            row
-            for row in alloc.visible_rows(actor, ["status:completed"])
-            if not alloc.is_hidden(row)
-        ]
-        oops = alloc.oops_rows()
-    except (OSError, RuntimeError, SpiceError, SystemExit):
-        return []
-
-    candidates: list[RehydrationCandidate] = []
-    own_active = [row for row in active if str(row.get("claim_by") or "") == actor]
-    if own_active:
-        claimed = max(own_active, key=_task_row_timestamp)
-        candidates.append(
-            _task_claim_candidate(claimed, identity.render_handle(claimed))
-        )
-    if active or ready or review or blocked or oops:
-        candidates.append(
-            _task_posture_candidate(
-                active=len(active),
-                ready=len(ready),
-                review=len(review),
-                blocked=len(blocked),
-                oops=len(oops),
-            )
-        )
-    candidates.extend(
-        _task_queue_candidate("ready", row, identity.render_handle(row))
-        for row in ready
-    )
-    candidates.extend(
-        _task_queue_candidate("review", row, identity.render_handle(row))
-        for row in review
-    )
-    candidates.extend(
-        _task_completed_candidate(row, identity.render_handle(row)) for row in completed
-    )
-    if oops:
-        top = max(oops, key=_task_urgency)
-        candidates.append(
-            _task_oops_candidate(top, identity.render_handle(top), len(oops))
-        )
-    return candidates
-
-
-def _task_claim_candidate(row: dict[str, object], handle: str) -> RehydrationCandidate:
-    timestamp = _task_row_timestamp(row)
-    return RehydrationCandidate(
-        kind="task_plane",
-        timestamp=timestamp,
-        text=(
-            f"claim {handle} phase={_task_field(row, 'phase') or '-'} "
-            f"project={_task_field(row, 'project') or '-'} "
-            f"acceptance={clip(_task_field(row, 'acceptance'), TASK_PLANE_PREVIEW_CHARS)}"
-        ),
-        rank_name=TASK_PLANE_RANK_NAME,
-        rank_key=task_plane_rank_key("claim", _task_urgency(row), timestamp),
-        label=handle,
-    )
-
-
-def _task_posture_candidate(
-    *, active: int, ready: int, review: int, blocked: int, oops: int
-) -> RehydrationCandidate:
-    return RehydrationCandidate(
-        kind="task_plane",
-        timestamp=tw_nowish_rank_timestamp(),
-        text=(
-            f"posture active={active} ready={ready} review={review} "
-            f"blocked={blocked} oops={oops}"
-        ),
-        rank_name=TASK_PLANE_RANK_NAME,
-        rank_key=task_plane_rank_key("posture"),
-        label="posture",
-    )
-
-
-def _task_queue_candidate(
-    state: Literal["ready", "review"], row: dict[str, object], handle: str
-) -> RehydrationCandidate:
-    timestamp = _task_row_timestamp(row)
-    urgency = _task_urgency(row)
-    return RehydrationCandidate(
-        kind="task_plane",
-        timestamp=timestamp,
-        text=(
-            f"{state} {handle} urgency={urgency:.2f} "
-            f"{clip(_task_field(row, 'description'), TASK_PLANE_PREVIEW_CHARS)}"
-        ),
-        rank_name=TASK_PLANE_RANK_NAME,
-        rank_key=task_plane_rank_key(state, urgency, timestamp),
-        label=handle,
-    )
-
-
-def _task_completed_candidate(
-    row: dict[str, object], handle: str
-) -> RehydrationCandidate:
-    timestamp = _task_row_timestamp(row)
-    return RehydrationCandidate(
-        kind="task_plane",
-        timestamp=timestamp,
-        text=(
-            f"completed {handle} validation="
-            f"{clip(_task_field(row, 'validation'), TASK_PLANE_PREVIEW_CHARS)}"
-        ),
-        rank_name=TASK_PLANE_RANK_NAME,
-        rank_key=task_plane_rank_key("completed", timestamp=timestamp),
-        label=handle,
-    )
-
-
-def _task_oops_candidate(
-    row: dict[str, object], handle: str, total: int
-) -> RehydrationCandidate:
-    timestamp = _task_row_timestamp(row)
-    overflow = f" total={total}" if total > 1 else ""
-    return RehydrationCandidate(
-        kind="task_plane",
-        timestamp=timestamp,
-        text=(
-            f"oops {handle}{overflow} "
-            f"{clip(_task_field(row, 'description'), TASK_PLANE_PREVIEW_CHARS)}"
-        ),
-        rank_name=TASK_PLANE_RANK_NAME,
-        rank_key=task_plane_rank_key("oops", _task_urgency(row), timestamp),
-        label=handle,
-    )
-
-
-def _task_field(row: dict[str, object], key: str) -> str:
-    value = row.get(key)
-    return "" if value is None else str(value)
-
-
-def _task_row_timestamp(row: dict[str, object]) -> str:
-    for key in ("claim_at", "end", "modified", "entry", "incepted"):
-        value = _task_field(row, key)
-        if value:
-            return value
-    return ""
-
-
-def tw_nowish_rank_timestamp() -> str:
-    try:
-        from spice.tasks import tw
-
-        return tw.now_iso()
-    except (OSError, RuntimeError, SpiceError, SystemExit):
-        return ""
-
-
-def _task_urgency(row: dict[str, object]) -> float:
-    value = row.get("urgency")
-    if not isinstance(value, int | float | str):
-        return 0.0
-    try:
-        return float(value or 0.0)
-    except ValueError:
-        return 0.0
-
-
 def render_briefing(
     files: list[Path],
     *,
@@ -589,7 +391,12 @@ def render_briefing(
     )
     meter = collect_context_meter(files)
     commits = collect_commit_records(turns)
-    asks = collect_ask_candidates(start=effective_start, end=end, contains=contains)
+    asks = collect_ask_candidates(
+        start=effective_start,
+        end=end,
+        contains=contains,
+        subject_thread_ids=_subject_thread_ids(files),
+    )
     finals = collect_final_candidates(turns)
     commit_candidates = collect_commit_candidates(commits)
     compaction_intents = collect_compaction_intent_candidates(compactions)
@@ -614,7 +421,7 @@ def render_briefing(
     lines.extend(
         _activity_lines(turns, command_candidates, file_candidates, commit_candidates)
     )
-    lines.extend(_git_posture_lines())
+    lines.extend(git_posture_lines())
     lines.extend(_inbox_lines())
     return apply_output_budget(
         "\n".join(lines),
@@ -746,20 +553,12 @@ def _guidance_lines(meter: ContextMeter) -> list[str]:
         claim_known=True,
         claim_handle=handle,
         claim_phase=phase,
-        dirty_path_count=_dirty_path_count(),
+        dirty_path_count=dirty_path_count(),
     )
     instruction = context_meter_instruction(state)
     if not instruction:
         return []
     return ["Guidance", f"  keep_working={instruction}"]
-
-
-def _dirty_path_count() -> int:
-    repo_root = repo_root_from_cwd()
-    if repo_root is None:
-        return 0
-    pressure = _build_dirty_worktree_pressure(repo_root=repo_root)
-    return int(pressure.get("dirtyPathCount") or 0)
 
 
 def _learning_lines() -> list[str]:
@@ -970,541 +769,6 @@ def _filter_compactions(
     return kept
 
 
-def _git_posture_lines() -> list[str]:
-    repo_root = repo_root_from_cwd()
-    if repo_root is None:
-        return ["Git", "  repo=-"]
-    branch = _git_read(repo_root, "branch", "--show-current") or "-"
-    upstream = _git_read(
-        repo_root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"
-    )
-    ahead = behind = "0"
-    if upstream:
-        delta = _git_read(
-            repo_root, "rev-list", "--left-right", "--count", "HEAD...@{u}"
-        )
-        parts = delta.split()
-        if len(parts) == 2:
-            ahead, behind = parts
-    else:
-        upstream = "-"
-        ahead = behind = "-"
-    dirty_pressure = _build_dirty_worktree_pressure(repo_root=repo_root)
-    dirty_count = int(dirty_pressure.get("dirtyPathCount") or 0)
-    dirty_text = "clean" if dirty_count == 0 else f"{dirty_count} path(s)"
-    lines = [
-        "Git",
-        f"  branch={branch} upstream={upstream} ahead={ahead} behind={behind}",
-        f"  dirty={dirty_text}",
-    ]
-    if dirty_count:
-        lines.extend(_dirty_pressure_lines(dirty_pressure))
-    return lines
-
-
-def _empty_dirty_worktree_pressure() -> DirtyWorktreePressure:
-    return {
-        "available": True,
-        "dirtyPathCount": 0,
-        "scannedPathCount": 0,
-        "fileCountWithPressure": 0,
-        "totalFindings": 0,
-        "fileLocFindingCount": 0,
-        "complexityRegressionCount": 0,
-        "magicRegressionCount": 0,
-        "severity": "none",
-        "summary": [],
-        "summaryOverflow": 0,
-        "errors": [],
-    }
-
-
-def _build_dirty_worktree_pressure(*, repo_root: Path) -> DirtyWorktreePressure:
-    dirty = _dirty_paths(repo_root)
-    if not dirty:
-        return _empty_dirty_worktree_pressure()
-    relevant_paths = [
-        path
-        for path in dirty
-        if not is_excluded_path(path, repo_root=repo_root)
-        and (repo_root / path).exists()
-    ]
-    file_loc_findings, complexity_regressions, magic_regressions, errors = (
-        _collect_dirty_pressure_findings(relevant_paths, repo_root=repo_root)
-    )
-    per_file_rules, ordered_summary = _dirty_pressure_summary(
-        file_loc_findings,
-        complexity_regressions,
-        magic_regressions,
-    )
-    total_findings = (
-        len(file_loc_findings) + len(complexity_regressions) + len(magic_regressions)
-    )
-    return {
-        "available": True,
-        "dirtyPathCount": len(dirty),
-        "scannedPathCount": len(relevant_paths),
-        "fileCountWithPressure": len(per_file_rules),
-        "totalFindings": total_findings,
-        "fileLocFindingCount": len(file_loc_findings),
-        "complexityRegressionCount": len(complexity_regressions),
-        "magicRegressionCount": len(magic_regressions),
-        "severity": _dirty_pressure_severity(
-            file_loc_findings=file_loc_findings,
-            complexity_regressions=complexity_regressions,
-            magic_regressions=magic_regressions,
-            errors=errors,
-        ),
-        "summary": ordered_summary[:DIRTY_PRESSURE_PREVIEW_LIMIT],
-        "summaryOverflow": max(0, len(ordered_summary) - DIRTY_PRESSURE_PREVIEW_LIMIT),
-        "errors": errors,
-        **_dirty_path_ages(dirty, repo_root=repo_root),
-    }
-
-
-def _dirty_paths(repo_root: Path) -> list[Path]:
-    raw_paths: set[Path] = set()
-    command_specs = (
-        ("diff", "--name-only", "-z", "--diff-filter=ACMRD"),
-        ("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRD"),
-        ("ls-files", "--others", "--exclude-standard", "-z"),
-    )
-    for args in command_specs:
-        for raw_path in _git_read_z(repo_root, *args):
-            candidate = Path(raw_path)
-            if candidate.parts:
-                raw_paths.add(candidate)
-    return sorted(raw_paths)
-
-
-def _collect_dirty_pressure_findings(
-    relevant_paths: list[Path], *, repo_root: Path
-) -> tuple[
-    list[fileloc.LocFinding],
-    list[DirtyComplexityRegression],
-    list[magicnums.MagicFinding],
-    list[str],
-]:
-    errors: list[str] = []
-    file_loc_findings: list[fileloc.LocFinding] = []
-    complexity_regressions: list[DirtyComplexityRegression] = []
-    magic_regressions: list[magicnums.MagicFinding] = []
-    resolved = resolve_policy(repo_root)
-    file_shape = resolved.file_shape
-    complexity_bounds = resolved.complexity
-    generated_patterns = (
-        *resolved.file_shape_paths.generated_patterns,
-        *shape.generated_path_patterns(repo_root),
-    )
-
-    try:
-        file_loc_findings = fileloc.scan_loc_violations(
-            relevant_paths,
-            limit=file_shape.line_limit,
-            flex_limit_value=file_shape.line_flex_limit,
-            byte_limit=file_shape.byte_limit,
-            byte_flex_limit_value=file_shape.byte_flex_limit,
-            root=repo_root,
-            source_suffixes=resolved.file_shape_paths.source_suffixes,
-            generated_patterns=generated_patterns,
-            repo_doc_paths=set(
-                repodocs.repo_truth_doc_candidate_paths(repo_root, resolved)
-            ),
-            lockfile_suffixes=resolved.lockfiles.suffixes,
-            lockfile_names=resolved.lockfiles.names,
-            bounds_for_path=resolved.jittered_file_shape_for_path,
-        )
-    except (OSError, SpiceError) as exc:
-        errors.append(_dirty_pressure_error("file-loc", exc))
-
-    try:
-        complexity_regressions = _scan_dirty_complexity_pressure(
-            relevant_paths,
-            repo_root=repo_root,
-            suffixes=resolved.languages.complexity,
-            ccn_threshold=complexity_bounds.ccn_flex_limit,
-            length_threshold=complexity_bounds.length_flex_limit,
-            bounds_for_path=resolved.jittered_complexity_for_path,
-        )
-    except (OSError, SpiceError) as exc:
-        errors.append(_dirty_pressure_error("complexity", exc))
-
-    try:
-        magic_regressions = magicnums.detect_magic_regressions(
-            relevant_paths,
-            root=repo_root,
-            baseline_ref=resolved.magic.baseline_ref,
-            examine_threshold=resolved.magic.examine_threshold,
-            examine_threshold_for_path=resolved.magic_examine_threshold_for_path,
-            suffixes=resolved.languages.magic,
-            c_grammar_suffixes=resolved.languages.c_grammar,
-        )
-    except (OSError, SpiceError) as exc:
-        errors.append(_dirty_pressure_error("magic-numbers", exc))
-
-    return file_loc_findings, complexity_regressions, magic_regressions, errors
-
-
-def _scan_dirty_complexity_pressure(
-    paths: list[Path],
-    *,
-    repo_root: Path,
-    suffixes: tuple[str, ...],
-    ccn_threshold: int,
-    length_threshold: int,
-    bounds_for_path: Callable[[Path], ComplexityPolicy] | None = None,
-) -> list[DirtyComplexityRegression]:
-    current_paths = [path for path in paths if (repo_root / path).exists()]
-    if not current_paths:
-        return []
-    current_records = complexity.collect_complexity_records(
-        current_paths, root=repo_root, suffixes=suffixes
-    )
-    with tempfile.TemporaryDirectory(prefix="spice-complexity-baseline-") as temp_dir:
-        temp_root = Path(temp_dir)
-        baseline_paths = _materialize_complexity_baseline_paths(
-            current_paths,
-            repo_root=repo_root,
-            temp_root=temp_root,
-        )
-        baseline_records = complexity.collect_complexity_records(
-            baseline_paths,
-            root=temp_root,
-            suffixes=suffixes,
-        )
-    return _detect_dirty_complexity_regressions(
-        current_records,
-        baseline_records,
-        ccn_threshold=ccn_threshold,
-        length_threshold=length_threshold,
-        bounds_for_path=bounds_for_path,
-    )
-
-
-def _materialize_complexity_baseline_paths(
-    paths: list[Path], *, repo_root: Path, temp_root: Path
-) -> list[Path]:
-    materialized: list[Path] = []
-    for path in paths:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo_root),
-                "show",
-                f"{MAGIC_BASELINE_REF}:{path.as_posix()}",
-            ],
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            continue
-        target = temp_root / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(result.stdout)
-        materialized.append(path)
-    return materialized
-
-
-def _detect_dirty_complexity_regressions(
-    current_records: list[complexity.ComplexityRecord],
-    baseline_records: list[complexity.ComplexityRecord],
-    *,
-    ccn_threshold: int,
-    length_threshold: int,
-    bounds_for_path: Callable[[Path], ComplexityPolicy] | None = None,
-) -> list[DirtyComplexityRegression]:
-    baseline_index = _complexity_record_index(baseline_records)
-    regressions: list[DirtyComplexityRegression] = []
-    for record in sorted(
-        current_records,
-        key=lambda item: (item.path, item.function_name),
-    ):
-        baseline = baseline_index.get(record.key)
-        bounds = bounds_for_path(Path(record.path)) if bounds_for_path else None
-        active_ccn_threshold = (
-            bounds.ccn_flex_limit if bounds is not None else ccn_threshold
-        )
-        active_length_threshold = (
-            bounds.length_flex_limit if bounds is not None else length_threshold
-        )
-        ccn_unlimited = bounds.ccn_unlimited if bounds is not None else False
-        length_unlimited = bounds.length_unlimited if bounds is not None else False
-        if (
-            not ccn_unlimited
-            and record.ccn > active_ccn_threshold
-            and (baseline is None or record.ccn > baseline.ccn)
-        ):
-            regressions.append(
-                DirtyComplexityRegression(
-                    path=record.path,
-                    function_name=record.function_name,
-                    metric="ccn",
-                    value=record.ccn,
-                    active_threshold=active_ccn_threshold,
-                    baseline_value=baseline.ccn if baseline is not None else None,
-                )
-            )
-        if not length_unlimited and record.length > active_length_threshold:
-            regressions.append(
-                DirtyComplexityRegression(
-                    path=record.path,
-                    function_name=record.function_name,
-                    metric="length",
-                    value=record.length,
-                    active_threshold=active_length_threshold,
-                    baseline_value=baseline.length if baseline is not None else None,
-                )
-            )
-    return regressions
-
-
-def _complexity_record_index(
-    records: list[complexity.ComplexityRecord],
-) -> dict[tuple[str, str], complexity.ComplexityRecord]:
-    index: dict[tuple[str, str], complexity.ComplexityRecord] = {}
-    for record in records:
-        incumbent = index.get(record.key)
-        if incumbent is None or (record.ccn, record.length) > (
-            incumbent.ccn,
-            incumbent.length,
-        ):
-            index[record.key] = record
-    return index
-
-
-def _dirty_pressure_summary(
-    file_loc_findings: list[fileloc.LocFinding],
-    complexity_regressions: list[DirtyComplexityRegression],
-    magic_regressions: list[magicnums.MagicFinding],
-) -> tuple[dict[str, set[str]], list[str]]:
-    per_file_rules, file_loc_index, complexity_index, magic_index = (
-        _index_dirty_pressure_rules(
-            file_loc_findings,
-            complexity_regressions,
-            magic_regressions,
-        )
-    )
-    ordered_summary = [
-        f"{path} [{' ,'.join(sorted(labels))}]".replace(" ,", ",")
-        for path, labels in sorted(
-            per_file_rules.items(),
-            key=lambda item: _dirty_pressure_severity_key(
-                item[0],
-                item[1],
-                file_loc_index=file_loc_index,
-                complexity_index=complexity_index,
-                magic_index=magic_index,
-            ),
-        )
-    ]
-    return per_file_rules, ordered_summary
-
-
-def _index_dirty_pressure_rules(
-    file_loc_findings: list[fileloc.LocFinding],
-    complexity_regressions: list[DirtyComplexityRegression],
-    magic_regressions: list[magicnums.MagicFinding],
-) -> tuple[
-    dict[str, set[str]],
-    dict[str, list[fileloc.LocFinding]],
-    dict[str, list[DirtyComplexityRegression]],
-    dict[str, list[magicnums.MagicFinding]],
-]:
-    per_file_rules: dict[str, set[str]] = {}
-    file_loc_index: dict[str, list[fileloc.LocFinding]] = {}
-    complexity_index: dict[str, list[DirtyComplexityRegression]] = {}
-    magic_index: dict[str, list[magicnums.MagicFinding]] = {}
-
-    def mark(path: str, label: str) -> None:
-        per_file_rules.setdefault(path, set()).add(label)
-
-    for finding in file_loc_findings:
-        file_loc_index.setdefault(finding.path, []).append(finding)
-        mark(finding.path, "file-loc")
-    for regression in complexity_regressions:
-        complexity_index.setdefault(regression.path, []).append(regression)
-        mark(regression.path, f"complexity-{regression.metric}")
-    for finding in magic_regressions:
-        magic_index.setdefault(finding.path, []).append(finding)
-        mark(finding.path, "magic")
-    return per_file_rules, file_loc_index, complexity_index, magic_index
-
-
-def _dirty_pressure_severity_key(
-    path: str,
-    labels: set[str],
-    *,
-    file_loc_index: dict[str, list[fileloc.LocFinding]],
-    complexity_index: dict[str, list[DirtyComplexityRegression]],
-    magic_index: dict[str, list[magicnums.MagicFinding]],
-) -> tuple[object, ...]:
-    loc_findings = file_loc_index.get(path, [])
-    complexity_findings = complexity_index.get(path, [])
-    magic_findings = magic_index.get(path, [])
-    max_line_over = max(
-        (
-            max(0, finding.line_count - finding.line_limit)
-            for finding in loc_findings
-            if finding.over_line_limit
-        ),
-        default=0,
-    )
-    max_byte_over = max(
-        (
-            max(0, finding.byte_count - finding.byte_limit)
-            for finding in loc_findings
-            if finding.over_byte_limit
-        ),
-        default=0,
-    )
-    max_complexity_over = max(
-        (
-            max(0, regression.value - regression.active_threshold)
-            for regression in complexity_findings
-        ),
-        default=0,
-    )
-    max_magic_value = max(
-        (_magic_literal_abs(finding.literal) for finding in magic_findings),
-        default=0.0,
-    )
-    return (
-        -len(loc_findings),
-        -len(labels),
-        -max_line_over,
-        -len(complexity_findings),
-        -max_complexity_over,
-        -len(magic_findings),
-        -max_magic_value,
-        -max_byte_over,
-        path,
-    )
-
-
-def _dirty_pressure_severity(
-    *,
-    file_loc_findings: list[fileloc.LocFinding],
-    complexity_regressions: list[DirtyComplexityRegression],
-    magic_regressions: list[magicnums.MagicFinding],
-    errors: list[str],
-) -> str:
-    if errors:
-        return "unknown"
-    if file_loc_findings or complexity_regressions:
-        return "high"
-    if magic_regressions:
-        return "medium"
-    return "none"
-
-
-def _dirty_path_ages(paths: list[Path], *, repo_root: Path) -> DirtyWorktreePressure:
-    now = time.time()
-    rows: list[tuple[float, str]] = []
-    for path in paths:
-        try:
-            mtime = (repo_root / path).stat().st_mtime
-        except OSError:
-            continue
-        rows.append((max(0.0, now - mtime), path.as_posix()))
-    if not rows:
-        return {}
-    oldest_age, oldest_path = max(rows, key=lambda row: (row[0], row[1]))
-    newest_age, newest_path = min(rows, key=lambda row: (row[0], row[1]))
-    return {
-        "oldestDirtyAgeSeconds": int(oldest_age),
-        "oldestDirtyPath": oldest_path,
-        "newestDirtyAgeSeconds": int(newest_age),
-        "newestDirtyPath": newest_path,
-    }
-
-
-def _dirty_pressure_lines(pressure: DirtyWorktreePressure) -> list[str]:
-    if not pressure.get("available"):
-        return ["  pressure=unavailable"]
-    dirty_paths = int(pressure.get("dirtyPathCount") or 0)
-    scanned_paths = int(pressure.get("scannedPathCount") or 0)
-    lines = [
-        "  pressure "
-        f"severity={pressure.get('severity') or 'unknown'} "
-        f"findings={int(pressure.get('totalFindings') or 0)} "
-        f"files={int(pressure.get('fileCountWithPressure') or 0)} "
-        f"scanned={scanned_paths}/{dirty_paths} "
-        f"file-loc={int(pressure.get('fileLocFindingCount') or 0)} "
-        f"complexity={int(pressure.get('complexityRegressionCount') or 0)} "
-        f"magic-numbers={int(pressure.get('magicRegressionCount') or 0)}"
-    ]
-    age_line = _dirty_pressure_age_line(pressure)
-    if age_line:
-        lines.append(f"  {age_line}")
-    errors = pressure.get("errors") or []
-    lines.extend(f"  pressure_error={error}" for error in errors if error)
-    summary_rows = pressure.get("summary") or []
-    lines.extend(
-        f"  pressure_file={summary}"
-        for summary in summary_rows[:3]
-        if isinstance(summary, str)
-    )
-    overflow = int(pressure.get("summaryOverflow") or 0)
-    if overflow:
-        lines.append(
-            f"  pressure_more={overflow} additional dirty files carry findings"
-        )
-    return lines
-
-
-def _dirty_pressure_age_line(pressure: DirtyWorktreePressure) -> str | None:
-    oldest = pressure.get("oldestDirtyAgeSeconds")
-    newest = pressure.get("newestDirtyAgeSeconds")
-    if oldest is None or newest is None:
-        return None
-    return (
-        "dirty_age="
-        f"oldest={pressure.get('oldestDirtyPath') or '-'}:"
-        f"{_format_dirty_age(oldest)} "
-        f"newest={pressure.get('newestDirtyPath') or '-'}:"
-        f"{_format_dirty_age(newest)}"
-    )
-
-
-def _format_dirty_age(raw_seconds: int | float) -> str:
-    seconds = float(raw_seconds)
-    return format_relative_seconds(seconds).removesuffix(" ago")
-
-
-def _dirty_pressure_error(label: str, exc: BaseException) -> str:
-    return f"{label}: {clip(str(exc), 120)}"
-
-
-def _magic_literal_abs(literal: str) -> float:
-    try:
-        return abs(float(literal.replace("_", "")))
-    except ValueError:
-        return 0.0
-
-
-def _git_read(repo_root: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
-def _git_read_z(repo_root: Path, *args: str) -> list[str]:
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return []
-    raw = result.stdout.decode("utf-8", errors="surrogateescape")
-    return [part for part in raw.split("\0") if part]
-
-
 def apply_output_budget(
     text: str,
     *,
@@ -1633,7 +897,10 @@ def render_sweep(
     lines.extend(_horizon_lines(horizon))
     edges = [window_start, *boundaries, HORIZON_END_SENTINEL]
     sweep_asks = collect_ask_candidates(
-        start=effective_start, end=end, contains=contains
+        start=effective_start,
+        end=end,
+        contains=contains,
+        subject_thread_ids=_subject_thread_ids(files),
     )
     for index in range(len(edges) - 1):
         window_start, window_end = edges[index], edges[index + 1]
