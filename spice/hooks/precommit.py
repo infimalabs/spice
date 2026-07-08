@@ -670,16 +670,40 @@ def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
         persist=True,
         flex_actor=resolved.flex_actor_id,
     )
-    if findings:
-        raise SpiceError(
-            fileloc.render_loc_board(
-                findings,
-                limit=bounds.line_limit,
-                flex_limit_value=bounds.line_flex_limit,
-                byte_limit=bounds.byte_limit,
-                byte_flex_limit_value=bounds.byte_flex_limit,
-            )
-        )
+    _raise_or_inform_flex_findings(
+        findings,
+        render=lambda subset: fileloc.render_loc_board(
+            subset,
+            limit=bounds.line_limit,
+            flex_limit_value=bounds.line_flex_limit,
+            byte_limit=bounds.byte_limit,
+            byte_flex_limit_value=bounds.byte_flex_limit,
+        ),
+    )
+
+
+def _raise_or_inform_flex_findings(
+    findings: list[fileloc.LocFinding],
+    *,
+    render: Callable[[list[fileloc.LocFinding]], str],
+) -> None:
+    """Fail only on findings this worktree must fix; inform on peer-held ones.
+
+    A finding annotated with a peer-held flex-slice claim means another worktree
+    already holds the split for that path. Per the flex-slice contract that is
+    informational, not a gate failure: surface the redirect and let this commit
+    through, so the first worktree to land the fix clears the breach for all.
+    """
+    if not findings:
+        return
+    blocking = [finding for finding in findings if finding.flex_slice_claim is None]
+    redirects = [
+        finding for finding in findings if finding.flex_slice_claim is not None
+    ]
+    if redirects:
+        print(render(redirects))
+    if blocking:
+        raise SpiceError(render(blocking))
 
 
 def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
@@ -855,26 +879,12 @@ def quality_gate_failures_for_tags(repo_root: Path, tags: list[str]) -> list[str
 
 
 def clear_successful_sticky_state(repo_root: Path) -> None:
+    # The file-shape latch self-heals in-scan (fileloc drops any path back under
+    # base on every gate run), so only complexity and repo-truth-doc sticky state
+    # still need a post-success prune here.
     resolved = resolve_policy(repo_root)
-    file_shape = resolved.file_shape
     routine = resolved.complexity
-    repo_doc_paths = set(repo_truth_doc_candidate_paths(repo_root, resolved))
-    generated_patterns = (
-        *resolved.file_shape_paths.generated_patterns,
-        *shape.generated_path_patterns(repo_root),
-    )
     clear_repo_truth_doc_sticky_state(repo_root, resolved=resolved)
-    fileloc.clear_file_loc_sticky_state(
-        root=repo_root,
-        limit=file_shape.line_limit,
-        byte_limit=file_shape.byte_limit,
-        bounds_for_path=resolved.file_shape_for_path,
-        source_suffixes=resolved.file_shape_paths.source_suffixes,
-        generated_patterns=generated_patterns,
-        repo_doc_paths=repo_doc_paths,
-        lockfile_suffixes=resolved.lockfiles.suffixes,
-        lockfile_names=resolved.lockfiles.names,
-    )
     complexity.clear_complexity_sticky_state(
         root=repo_root,
         max_ccn=routine.max_ccn,

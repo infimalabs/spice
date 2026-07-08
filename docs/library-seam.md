@@ -42,10 +42,11 @@ project-specific studies.
 The flex and sticky scans
 (`scan_staged_loc_violations`, `scan_staged_complexity_violations`) are pure
 queries by default. Only a committing gate passes `persist=True` to advance the
-sticky floor, and it must pair that with the matching
-`clear_file_loc_sticky_state` or `clear_complexity_sticky_state` on gate
-success. Running one half without the other causes permanent ratcheting or no
-release at all.
+sticky floor. The file-shape scan also self-heals: a `persist=True` scan retires
+any latch whose file is back at or under its base limit, so no separate clear
+call is needed. The complexity scan still pairs `persist=True` with
+`clear_complexity_sticky_state` on gate success; running one half without the
+other causes permanent ratcheting or no release at all.
 
 Everything else is an internal implementation detail unless this document names
 it. A repo tool that needs an unlisted helper should vendor that helper or first

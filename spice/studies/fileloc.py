@@ -4,7 +4,9 @@ A file may grow to the flex limit (base ×1.5), but a file that ever breached
 flex stays held to the base limit until it shrinks back under it. Breach
 state persists in the git dir (`spice/file-loc-sticky.json`,
 `spice/file-byte-sticky.json`), follows staged renames, and is re-evaluated
-(and pruned) by every fully passing pre-commit gate.
+(and pruned) on every gate scan: a latch retires the moment any scan sees the
+file back at or under its base limit, so a latch first recorded in one
+(now-idle) worktree heals as soon as the fix lands on the shared baseline.
 
 Library seam: target-repo tools may import the public finding dataclass,
 scan helpers, counters, and `render_loc_board`; underscored names remain
@@ -209,29 +211,45 @@ def _is_file_shape_candidate(
     return _is_text_blob(abs_path.read_bytes())
 
 
-def _drop_unscanned_file_shape_paths(
+def _retained_over_base_sticky(
     paths: set[Path],
     *,
     root: Path,
+    measure: Callable[[Path], int],
+    limit_for_path: Callable[[Path], int],
+    unlimited_for_path: Callable[[Path], bool],
     source_suffixes: tuple[str, ...],
     generated_patterns: tuple[str, ...],
     repo_doc_paths: set[Path],
     lockfile_suffixes: tuple[str, ...],
     lockfile_names: tuple[str, ...],
 ) -> set[Path]:
-    return {
-        _repo_path(path)
-        for path in paths
-        if _is_file_shape_candidate(
-            path,
+    """The still-latched subset: candidates still over their base limit.
+
+    A latch only records that a file once breached flex; it is retired the
+    moment the file is back at or under its base limit. Evaluating that here on
+    every scan — not only after a fully clean commit — is what lets a latch
+    recorded in one (now-idle) worktree heal as soon as any scan sees the file
+    under base again.
+    """
+    retained: set[Path] = set()
+    for path in paths:
+        rel_path = _repo_path(path)
+        if not _is_file_shape_candidate(
+            rel_path,
             root=root,
             source_suffixes=source_suffixes,
             generated_patterns=generated_patterns,
             repo_doc_paths=repo_doc_paths,
             lockfile_suffixes=lockfile_suffixes,
             lockfile_names=lockfile_names,
-        )
-    }
+        ):
+            continue
+        if not unlimited_for_path(rel_path) and measure(root / rel_path) > (
+            limit_for_path(rel_path)
+        ):
+            retained.add(rel_path)
+    return retained
 
 
 def scan_staged_loc_violations(
@@ -405,18 +423,24 @@ def _current_file_shape_sticky(
     loaded_byte_sticky = sticky_paths_after_renames(
         _load_sticky(root, FILE_BYTE_STICKY_STATE_GIT_PATH), renames
     )
-    line_sticky = _drop_unscanned_file_shape_paths(
+    line_sticky = _retained_over_base_sticky(
         loaded_line_sticky,
         root=root,
+        measure=count_file_lines,
+        limit_for_path=lambda path: config.resolve_bounds(path).line_limit,
+        unlimited_for_path=lambda path: config.resolve_bounds(path).line_unlimited,
         source_suffixes=config.source_suffixes,
         generated_patterns=config.generated_patterns,
         repo_doc_paths=config.repo_doc_paths,
         lockfile_suffixes=config.lockfile_suffixes,
         lockfile_names=config.lockfile_names,
     )
-    byte_sticky = _drop_unscanned_file_shape_paths(
+    byte_sticky = _retained_over_base_sticky(
         loaded_byte_sticky,
         root=root,
+        measure=count_file_bytes,
+        limit_for_path=lambda path: config.resolve_bounds(path).byte_limit,
+        unlimited_for_path=lambda path: config.resolve_bounds(path).byte_unlimited,
         source_suffixes=config.source_suffixes,
         generated_patterns=config.generated_patterns,
         repo_doc_paths=config.repo_doc_paths,
@@ -435,9 +459,19 @@ def _save_file_shape_sticky(
     updated_byte_sticky: set[Path],
 ) -> None:
     if updated_line_sticky != loaded_line_sticky:
-        _save_sticky(updated_line_sticky, root, FILE_LOC_STICKY_STATE_GIT_PATH)
+        _persist_sticky(updated_line_sticky, root, FILE_LOC_STICKY_STATE_GIT_PATH)
     if updated_byte_sticky != loaded_byte_sticky:
-        _save_sticky(updated_byte_sticky, root, FILE_BYTE_STICKY_STATE_GIT_PATH)
+        _persist_sticky(updated_byte_sticky, root, FILE_BYTE_STICKY_STATE_GIT_PATH)
+
+
+def _persist_sticky(paths: set[Path], root: Path, git_path: str) -> None:
+    """Write the latch set, or delete the state file once nothing stays latched."""
+    if paths:
+        _save_sticky(paths, root, git_path)
+        return
+    state_path = git_state_path(git_path, root=root)
+    if state_path.exists():
+        state_path.unlink()
 
 
 def _file_shape_breach_sets(
@@ -616,105 +650,6 @@ def scan_loc_violations(
             )
         )
     return findings
-
-
-def clear_file_loc_sticky_state(
-    *,
-    root: Path,
-    limit: int = FILE_LOC_LIMIT,
-    byte_limit: int = FILE_BYTE_LIMIT,
-    bounds_for_path: Callable[[Path], FileShapeBounds] | None = None,
-    source_suffixes: tuple[str, ...] = FILE_SHAPE_SOURCE_SUFFIXES,
-    generated_patterns: tuple[str, ...] = FILE_SHAPE_GENERATED_SOURCE_PATTERNS,
-    repo_doc_paths: set[Path] | frozenset[Path] | None = None,
-    lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
-    lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
-) -> None:
-    repo_doc_path_set = {_repo_path(path) for path in repo_doc_paths or set()}
-    _clear_sticky(
-        root,
-        FILE_LOC_STICKY_STATE_GIT_PATH,
-        limit=limit,
-        measure=count_file_lines,
-        limit_for_path=(
-            (lambda path: bounds_for_path(path).line_limit)
-            if bounds_for_path is not None
-            else None
-        ),
-        unlimited_for_path=(
-            (lambda path: bounds_for_path(path).line_unlimited)
-            if bounds_for_path is not None
-            else None
-        ),
-        source_suffixes=source_suffixes,
-        generated_patterns=generated_patterns,
-        repo_doc_paths=repo_doc_path_set,
-        lockfile_suffixes=lockfile_suffixes,
-        lockfile_names=lockfile_names,
-    )
-    _clear_sticky(
-        root,
-        FILE_BYTE_STICKY_STATE_GIT_PATH,
-        limit=byte_limit,
-        measure=count_file_bytes,
-        limit_for_path=(
-            (lambda path: bounds_for_path(path).byte_limit)
-            if bounds_for_path is not None
-            else None
-        ),
-        unlimited_for_path=(
-            (lambda path: bounds_for_path(path).byte_unlimited)
-            if bounds_for_path is not None
-            else None
-        ),
-        source_suffixes=source_suffixes,
-        generated_patterns=generated_patterns,
-        repo_doc_paths=repo_doc_path_set,
-        lockfile_suffixes=lockfile_suffixes,
-        lockfile_names=lockfile_names,
-    )
-
-
-def _clear_sticky(
-    root: Path,
-    git_path: str,
-    *,
-    limit: int,
-    measure: Callable[[Path], int],
-    limit_for_path: Callable[[Path], int] | None = None,
-    unlimited_for_path: Callable[[Path], bool] | None = None,
-    source_suffixes: tuple[str, ...] = FILE_SHAPE_SOURCE_SUFFIXES,
-    generated_patterns: tuple[str, ...] = FILE_SHAPE_GENERATED_SOURCE_PATTERNS,
-    repo_doc_paths: set[Path] | None = None,
-    lockfile_suffixes: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES,
-    lockfile_names: tuple[str, ...] = FILE_SHAPE_GENERATED_LOCKFILE_NAMES,
-) -> None:
-    state_path = git_state_path(git_path, root=root)
-    if not state_path.exists():
-        return
-    sticky = _load_sticky(root, git_path)
-    retained = {
-        rel_path
-        for rel_path in sticky
-        if _is_file_shape_candidate(
-            rel_path,
-            root=root,
-            source_suffixes=source_suffixes,
-            generated_patterns=generated_patterns,
-            repo_doc_paths=repo_doc_paths or set(),
-            lockfile_suffixes=lockfile_suffixes,
-            lockfile_names=lockfile_names,
-        )
-        and not (
-            unlimited_for_path(rel_path) if unlimited_for_path is not None else False
-        )
-        and measure(root / rel_path)
-        > (limit_for_path(rel_path) if limit_for_path is not None else limit)
-    }
-    if retained:
-        _save_sticky(retained, root, git_path)
-    else:
-        state_path.unlink()
 
 
 def render_loc_board(
