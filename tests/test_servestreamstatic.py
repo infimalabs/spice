@@ -222,9 +222,6 @@ def test_static_filter_pane_uses_pure_filter_model_helpers():
     assert "function availableTaskFilterNames(" in app_filter_model
     assert "function availableTaskFilterOpenTaskCount(" in app_filter_model
     assert "function taskFilterOpenCount(" in app_filter_model
-    assert "return taskFilterEffectiveAssignedNames(inventory, assignedFilters);" in (
-        app_panes
-    )
     assert "return availableTaskFilterNames(laneFilterInventory(lane)" in app_panes
     assert "return taskFilterOpenCount(laneFilterInventory(lane), filter);" in (
         app_panes
@@ -774,7 +771,7 @@ def test_static_team_stream_history_sentinels_track_each_member_lane():
         "return laneIsFusedHost(lane) ? laneGroupMemberLanes(lane) : [lane];"
         in app_stream
     )
-    assert "nodes.push(historySentinelForLane(member));" in app_stream
+    assert "card.append(historySentinelForLane(member));" in app_stream
     assert "lane.historySentinelEl.dataset.historyTargetId = lane.targetId;" in (
         app_stream
     )

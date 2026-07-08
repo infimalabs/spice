@@ -247,26 +247,6 @@ function unsubscribeLaneFromLiveBus(lane) {
   );
 }
 
-async function refreshLane(lane) {
-  if (lane.refreshInFlight || !isLaneOpen(lane)) return;
-  lane.refreshInFlight = true;
-  try {
-    const response = await liveBusRequest("lane.refresh", {
-      targetId: lane.targetId,
-      query: laneMessageQuery(lane),
-    });
-    if (!isLaneOpen(lane)) return;
-    lane.serverReachable = true;
-    await applyLaneBusPayload(lane, response.payload || {}, "refresh");
-  } catch (error) {
-    if (!isLaneOpen(lane)) return;
-    lane.serverReachable = false;
-    setLaneTransientStatus(lane, "server unreachable");
-  } finally {
-    lane.refreshInFlight = false;
-  }
-}
-
 // ---- payload application ------------------------------------------------------
 
 async function applyLaneBusPayload(lane, payload, source) {

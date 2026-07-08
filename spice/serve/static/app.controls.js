@@ -143,12 +143,6 @@ function laneLifetimeCommitMatches(host, lifetime, options = {}) {
   );
 }
 
-function clearLaneLifetimeCommit(lane, lifetime, options = {}) {
-  const host = laneGroupHost(lane);
-  if (laneLifetimeCommitMatches(host, lifetime, options))
-    clearLaneLifetimeCommitState(host);
-}
-
 function rollbackLaneLifetimeCommit(
   lane,
   lifetime,

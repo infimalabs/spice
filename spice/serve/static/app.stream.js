@@ -447,28 +447,6 @@ function renderEmptyTeamMessages(lane) {
   lane.renderedMessageFingerprint = fingerprint;
 }
 
-function messageStreamNodesWithHistorySentinels(lane, visibleItems, existingNodes) {
-  const sentinelMembersByMessageKey = historySentinelMembersByMessageKey(
-    lane,
-    visibleItems,
-  );
-  const nodes = [];
-  let previousItem = null;
-  for (const item of visibleItems) {
-    const node = renderOrReuseMessageNode(lane, item, existingNodes);
-    if (!node) continue;
-    const rule = timeRuleBetween(previousItem, item);
-    if (rule) nodes.push(rule);
-    previousItem = item;
-    nodes.push(node);
-    for (const member of sentinelMembersByMessageKey.get(item.key) || []) {
-      nodes.push(historySentinelForLane(member));
-    }
-  }
-  if (!nodes.length) nodes.push(historySentinelForLane(lane));
-  return nodes;
-}
-
 // Absolute-time rules re-baseline the masonry: one rule per crossed hour
 // bucket run, labeled with the bucket start, so a multi-hour idle gap costs a
 // single line instead of whitespace. Compaction dividers already carry their
@@ -566,15 +544,6 @@ function restoreMessageViewportAnchor(lane, anchor) {
     node.getBoundingClientRect().top - scrollerTop - anchor.offsetTop;
   if (!Number.isFinite(delta) || Math.abs(delta) < 1) return;
   setLaneScrollTopWithoutPaneIntent(lane, lane.messagesEl.scrollTop + delta);
-}
-
-function existingMessageNodesByKey(lane) {
-  const nodes = new Map();
-  for (const node of lane.messagesEl.children) {
-    const key = node.dataset ? node.dataset.messageKey || "" : "";
-    if (key) nodes.set(key, node);
-  }
-  return nodes;
 }
 
 function renderOrReuseMessageNode(lane, item, existingNodes) {

@@ -40,7 +40,6 @@ const defaultAgentLifetime = agentLifetimeLabels.includes(
 )
   ? spiceServeBranding.defaultLifetime
   : "Drive";
-const defaultAgentLifetimeIndex = agentLifetimeLabels.indexOf(defaultAgentLifetime);
 const agentLifetimeHelp = {
   Steer: "Manual filters only",
   Drive: "Auto-subscribe to projects this team creates or claims",

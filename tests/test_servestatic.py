@@ -970,7 +970,6 @@ def test_static_lifetime_slider_tracks_pending_state_in_controls():
             "host.pendingLifetimeConfigRevision = 0;",
             "host.pendingLifetimeRequestId = 0;",
             "function laneLifetimeCommitMatches(host, lifetime, options = {})",
-            "function clearLaneLifetimeCommit(lane, lifetime, options = {})",
             "function rollbackLaneLifetimeCommit(",
             'serverLifetime = "",',
             "options = {},",

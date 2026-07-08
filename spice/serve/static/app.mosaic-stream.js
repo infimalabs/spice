@@ -216,10 +216,9 @@ function mosaicItemIsBarrier(item) {
   return Boolean(item.display_html && item.display_html.includes("task-directive-stack"));
 }
 
-// Mirrors app.stream.js's messageStreamNodesWithHistorySentinels ordering
-// exactly (same timeRuleBetween calls against the same visible sequence) so
-// a rule appears in the lattice iff. it would have appeared in the legacy
-// flow, keyed by the message it precedes rather than by array position.
+// Uses the same timeRuleBetween calls against the same visible sequence as
+// the message stream, keyed by the message it precedes rather than by array
+// position.
 function mosaicStreamEntries(visibleItems) {
   const entries = [];
   let previousItem = null;
@@ -284,34 +283,6 @@ function mosaicExistingNodesByKey(lane) {
     if (key) nodes.set(key, node);
   }
   return nodes;
-}
-
-// ---- reservation classification ---------------------------------------------------
-
-// Two different lifetimes share this one lookup: an ack/quote reservation is
-// genuinely pending -- real content hasn't hydrated yet, and shrink-on-
-// resolve is the common case -- while an image reservation is
-// permanent: images letterbox to their named cap regardless of load state
-// (messages.css), so the reservation never needs to give way to a measured
-// height, whether the image is loading, loaded, or broken. Both read the
-// single reservation type app.render.js already computes once, at node-
-// creation time (messageReservationType: "ack" while any ack_segments key
-// has no resolved context yet via ackContextForKey, "imageLarge" for
-// image_only items, an "image" fallback for any other card containing
-// .message-image), stamped onto the node as data-mosaic-reservation-type --
-// no reservation logic scattered per-call-site, and no second,
-// divergent check here (an earlier version of this function re-derived the
-// ack case from lane.missingAckContextKeys, which only tracks confirmed-
-// missing keys, not "not yet resolved", so a genuinely-pending ack fell
-// through to real measurement instead of reserving). A fresh node built once
-// its content resolves has no reservation type at all (messageReservationType
-// returns "" once ackContextForKey finds a context), so resolution falls
-// through to real measurement with no extra branching needed here. Barrier
-// entries (dividers, rules) are never reserved -- their content is fixed at
-// creation.
-function mosaicPendingReservationType(lane, entry, node) {
-  if (entry.kind === "barrier") return null;
-  return node.dataset.mosaicReservationType || null;
 }
 
 // ---- measurement ------------------------------------------------------------------
@@ -759,6 +730,39 @@ function mosaicRenderMessageStream(lane, visibleItems) {
   lane.mosaicGeometry = geometry;
   const plane = mosaicPlane(lane, geometry);
 
+  const reconciled = mosaicReconcileStreamEntries(
+    lane,
+    plane,
+    visibleItems,
+    geometry,
+    geometryChanged,
+  );
+
+  // Motion suppression unions three sources: reveal corrections, the
+  // settled-board gate (nothing animates until first settle), and -- inside
+  // the apply -- prefers-reduced-motion. Layout is identical either way.
+  mosaicApplyRender(lane, lane.mosaicCards, geometry, reconciled.nodesByKey, {
+    replaying: reconciled.replaying,
+    snap: revealing || !lane.mosaicSettled,
+  });
+  mosaicSyncResizeObserver(lane);
+  mosaicSyncImageLoadHandlers(lane);
+  mosaicArmSettleInteraction(lane);
+  mosaicSyncSettle(lane, reconciled.changed);
+  return { backfillViewport: reconciled.backfillViewport };
+}
+
+// Reconciles the desired entry set against existing DOM nodes: builds/reuses
+// nodes, marks content-dirty, and picks the cheapest sufficient render
+// strategy (content-diff, insert, backfill, or full replay) for whatever
+// changed since the last render.
+function mosaicReconcileStreamEntries(
+  lane,
+  plane,
+  visibleItems,
+  geometry,
+  geometryChanged,
+) {
   const entries = mosaicStreamEntries(visibleItems);
   const desiredKeys = entries.map((entry) => entry.key);
   const desiredKeySet = new Set(desiredKeys);
@@ -824,24 +828,16 @@ function mosaicRenderMessageStream(lane, visibleItems) {
     mosaicRunFullReplay(lane, entries, nodesByKey, geometry);
   }
 
-  // Motion suppression unions three sources: reveal corrections, the
-  // settled-board gate (nothing animates until first settle), and -- inside
-  // the apply -- prefers-reduced-motion. Layout is identical either way.
-  mosaicApplyRender(lane, lane.mosaicCards, geometry, nodesByKey, {
+  return {
+    nodesByKey,
     replaying,
-    snap: revealing || !lane.mosaicSettled,
-  });
-  mosaicSyncResizeObserver(lane);
-  mosaicSyncImageLoadHandlers(lane);
-  mosaicArmSettleInteraction(lane);
-  mosaicSyncSettle(
-    lane,
-    geometryChanged ||
+    backfillViewport,
+    changed:
+      geometryChanged ||
       addedKeys.length > 0 ||
       removedKeys.length > 0 ||
       Boolean(backfillEntries),
-  );
-  return { backfillViewport };
+  };
 }
 
 // ---- resize + image-load wiring (mirrors the legacy grid packer's resize
@@ -941,11 +937,11 @@ function mosaicMarkImageResolved(lane, image) {
   lane.mosaicResolvedImages.add(image);
   // The node is never replaced by a load/error event (the item's
   // fingerprint doesn't change), so data-mosaic-reservation-type would
-  // otherwise stay stamped forever and mosaicPendingReservationType would
-  // keep returning the reservation instead of ever measuring the real
-  // (possibly text+image) content -- clear it so the content-diff pass this
-  // triggers takes the real-measurement path. Already-complete images take
-  // this same path because no future load event is guaranteed.
+  // otherwise stay stamped forever, keeping the reservation instead of ever
+  // measuring the real (possibly text+image) content -- clear it so the
+  // content-diff pass this triggers takes the real-measurement path.
+  // Already-complete images take this same path because no future load
+  // event is guaranteed.
   delete card.dataset.mosaicReservationType;
   card.dataset.mosaicContentDirty = "1";
   return true;
