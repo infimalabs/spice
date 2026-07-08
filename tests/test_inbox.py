@@ -3,8 +3,15 @@
 import os
 import subprocess
 import time
+from datetime import UTC, datetime
 
 from spice.mail.acks import archive_ackd_inbox_items
+from spice.mail.ackstate import (
+    ACK_DISPOSITION_REFUSED,
+    AckStateWrite,
+    ack_state_database_path,
+    record_acked_inbox_items,
+)
 from spice.mail.attachments import (
     prepare_inbox_attachments,
 )
@@ -16,8 +23,12 @@ from spice.mail.inbox import (
     INBOX_TASK_HINT_ROW,
     collect_acked_inbox_items,
     collect_inbox_items,
+    collect_refused_inbox_items,
     compose_inbox_text,
     deadletter_inbox_item,
+    inbox_ack_state_context_rows,
+    inbox_item_age_seconds,
+    inbox_item_readout_rows,
     InboxResendAttempt,
     inbox_ack_format_hint_row,
     inbox_attachment_dir,
@@ -37,6 +48,8 @@ from spice.paths import shared_attachment_root
 from spice.serve.markdown import render_message_html
 
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
+_ONE_DAY_SECONDS = 24 * 60 * 60
+_STORE_FRESH_MAX_SECONDS = 60
 
 
 def test_write_then_collect_round_trip(tmp_path):
@@ -590,3 +603,76 @@ def test_inbox_payload_rows_keep_task_offload_for_mixed_user_steering(tmp_path):
     rows = inbox_payload_rows(collect_inbox_items(str(tmp_path)))
 
     assert INBOX_TASK_HINT_ROW in rows
+
+
+def test_ack_state_row_age_derives_from_archived_at_not_store_mtime(tmp_path):
+    _init_repo(tmp_path)
+    name = "20260704T054409667615Z.txt"
+    four_days = 4 * _ONE_DAY_SECONDS
+    archived_at = time.time() - four_days
+    record_acked_inbox_items(
+        tmp_path,
+        [
+            AckStateWrite(
+                key=inbox_item_key(name),
+                inbox_name=name,
+                text=compose_inbox_text(
+                    body="stale refusal", priority=None, stop=False
+                ),
+                disposition=ACK_DISPOSITION_REFUSED,
+            )
+        ],
+        now=archived_at,
+    )
+
+    # The shared sqlite store was just written, so its mtime looks fresh — the
+    # exact divergence that made 4-day-old rows read as minutes old.
+    store_path = ack_state_database_path(tmp_path)
+    assert time.time() - store_path.stat().st_mtime < _STORE_FRESH_MAX_SECONDS
+
+    items = collect_refused_inbox_items(tmp_path)
+    assert len(items) == 1
+    item = items[0]
+    assert item.source_path == store_path
+    assert item.age_epoch == archived_at
+    assert inbox_item_age_seconds(item) >= four_days
+
+    assert inbox_ack_state_context_rows(items) == [
+        "source=ack_state; status=already_consumed_operator_steering; store=sqlite",
+        "refused_inbox key=20260704T054409667615Z age=4d ago text=stale refusal",
+    ]
+    assert inbox_item_readout_rows(item) == [
+        "key=20260704T054409667615Z: age=4d ago",
+        "  stale refusal",
+        f"  note={INBOX_CONTINUE_NOTE}",
+    ]
+
+
+def test_ack_state_row_age_falls_back_to_key_timestamp_without_archived_at(tmp_path):
+    _init_repo(tmp_path)
+    name = "20260704T054409667615Z.txt"
+    record_acked_inbox_items(
+        tmp_path,
+        [
+            AckStateWrite(
+                key=inbox_item_key(name),
+                inbox_name=name,
+                text=compose_inbox_text(
+                    body="legacy refusal", priority=None, stop=False
+                ),
+                disposition=ACK_DISPOSITION_REFUSED,
+            )
+        ],
+        now=0.0,
+    )
+
+    item = collect_refused_inbox_items(tmp_path)[0]
+    # archived_at is 0 (legacy migration default); the key's UTC timestamp
+    # (2026-07-04) anchors age instead of falling back to the store mtime.
+    key_epoch = (
+        datetime.strptime(inbox_item_key(name), "%Y%m%dT%H%M%S%fZ")
+        .replace(tzinfo=UTC)
+        .timestamp()
+    )
+    assert item.age_epoch == key_epoch
+    assert inbox_item_age_seconds(item) >= _ONE_DAY_SECONDS
