@@ -51,7 +51,9 @@ def test_serve_parser_exposes_until_path_help(capsys):
     help_text = capsys.readouterr().out
     flat_help = " ".join(help_text.split())
     expected_until_help = (
-        "Watch PATH and stop the server after it is touched or changed."
+        "Watch PATH and stop the server when it appears, disappears, or its "
+        "content changes. PATH is never created; only the final path "
+        "component may be missing (the parent directory must exist)."
     )
     assert "--until PATH" in help_text
     assert "--allow-insecure-bind" in help_text
