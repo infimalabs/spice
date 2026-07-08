@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import cast
@@ -245,15 +245,19 @@ class ResolvedPolicy:
         )
 
     def jittered_file_shape_for_path(self, path: Path) -> FileShapePolicy:
-        line = self.jittered_bound_for_path("file_loc", self.limits.file_loc, path)
-        byte = self.jittered_bound_for_path("file_bytes", self.limits.file_bytes, path)
-        return FileShapePolicy(
-            line_limit=line.limit,
-            line_flex_limit=line.flex_limit,
-            byte_limit=byte.limit,
-            byte_flex_limit=byte.flex_limit,
-            line_unlimited=line.unlimited,
-            byte_unlimited=byte.unlimited,
+        shape = self.file_shape_for_path(path)
+        return replace(
+            shape,
+            line_flex_limit=shape.line_flex_limit
+            if shape.line_unlimited
+            else jittered_flex_limit(
+                shape.line_limit, shape.line_flex_limit, path, self.flex_actor_id
+            ),
+            byte_flex_limit=shape.byte_flex_limit
+            if shape.byte_unlimited
+            else jittered_flex_limit(
+                shape.byte_limit, shape.byte_flex_limit, path, self.flex_actor_id
+            ),
         )
 
     def complexity_for_path(self, path: Path) -> ComplexityPolicy:

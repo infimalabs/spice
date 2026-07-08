@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from spice.errors import SpiceError
+from spice.flexstate import FLEX_SLICE_CLAIM_TTL_SECONDS, FlexSliceClaim
 from spice.hooks import precommit
+from spice.studies.fileloc import LocFinding
 from spice.studies.repodocs import (
     render_repo_truth_doc_lines,
     repo_doc_char_sticky_state_path,
@@ -335,6 +337,48 @@ def test_repo_doc_guard_ignores_assets_and_binary_markdown_candidates(tmp_path):
     violations = repo_truth_doc_violations(repo)
     assert len(violations) == 1
     assert "README.md" in violations[0]
+
+
+def _loc_finding(path: str, claim: FlexSliceClaim | None) -> LocFinding:
+    return LocFinding(
+        path=path,
+        line_count=8,
+        byte_count=80,
+        over_line_limit=True,
+        over_byte_limit=False,
+        line_limit=5,
+        byte_limit=1000,
+        flex_slice_claim=claim,
+    )
+
+
+def test_file_loc_guard_informs_peer_held_and_blocks_only_owned(capsys):
+    peer = _loc_finding(
+        "peer.py",
+        FlexSliceClaim(
+            path=Path("peer.py"),
+            actor="actor-a",
+            created_at=100.0,
+            expires_at=100.0 + FLEX_SLICE_CLAIM_TTL_SECONDS,
+        ),
+    )
+    owned = _loc_finding("mine.py", None)
+
+    # Peer-held only: informational redirect, commit proceeds (no raise).
+    precommit._raise_or_inform_flex_findings(
+        [peer], render=lambda subset: f"board:{[finding.path for finding in subset]}"
+    )
+    assert "board:['peer.py']" in capsys.readouterr().out
+
+    # A blocking (locally owned) finding fails the gate; the peer redirect still
+    # informs, but only the blocking finding raises.
+    with pytest.raises(SpiceError) as excinfo:
+        precommit._raise_or_inform_flex_findings(
+            [peer, owned],
+            render=lambda subset: f"board:{[finding.path for finding in subset]}",
+        )
+    assert "board:['mine.py']" in str(excinfo.value)
+    assert "board:['peer.py']" in capsys.readouterr().out
 
 
 def test_file_shape_guard_leaves_tracked_markdown_to_repo_doc_budget(tmp_path):

@@ -48,6 +48,73 @@ def test_fileloc_gate_scan_persists_sticky(tmp_path):
     assert git_state_path(fileloc.FILE_LOC_STICKY_STATE_GIT_PATH, root=repo).exists()
 
 
+def test_fileloc_sticky_latch_self_heals_when_file_drops_under_base(tmp_path):
+    repo = _init_repo(tmp_path)
+    big = repo / "big.py"
+    big.write_text("x = 1\n" * 8, encoding="utf-8")
+    state = git_state_path(fileloc.FILE_LOC_STICKY_STATE_GIT_PATH, root=repo)
+
+    fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+    )
+    assert state.exists()  # 8 lines > flex 7 -> latched
+
+    big.write_text("x = 1\n" * 4, encoding="utf-8")  # 4 <= base 5
+    healed = fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+    )
+
+    # The latch retires the moment any scan sees the file back under base, even
+    # though no fully clean commit ran between the two scans.
+    assert healed == []
+    assert not state.exists()
+
+
+def test_fileloc_sticky_latch_holds_in_flex_band_until_under_base(tmp_path):
+    repo = _init_repo(tmp_path)
+    big = repo / "big.py"
+    big.write_text("x = 1\n" * 8, encoding="utf-8")
+
+    fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+    )
+
+    big.write_text("x = 1\n" * 6, encoding="utf-8")  # base 5 < 6 <= flex 7
+    findings = fileloc.scan_staged_loc_violations(
+        [Path("big.py")],
+        root=repo,
+        limit=5,
+        flex_limit_value=7,
+        byte_limit=1000,
+        byte_flex_limit_value=1000,
+        persist=True,
+    )
+
+    # A fresh 6-line file passes in the flex band, but a latched one is held to
+    # base until it drops under base -- self-heal must not clear early.
+    assert [finding.path for finding in findings] == ["big.py"]
+    assert findings[0].line_limit == 5
+    assert git_state_path(fileloc.FILE_LOC_STICKY_STATE_GIT_PATH, root=repo).exists()
+
+
 def test_complexity_reporting_scan_does_not_persist_sticky(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path)
     record = complexity.ComplexityRecord(
