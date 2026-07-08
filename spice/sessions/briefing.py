@@ -14,7 +14,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypedDict
+from typing import Any, Callable, TypedDict
 
 from spice.errors import SpiceError
 from spice.mail.inbox import (
@@ -37,8 +37,10 @@ from spice.sessions import learnings as session_learnings
 from spice.sessions import records
 from spice.sessions.meter import (
     ContextMeter,
+    GuidanceState,
     collect_context_meter,
     context_meter_instruction,
+    meter_pressure_level,
 )
 from spice.sessions.records import (
     CommitRecord,
@@ -178,8 +180,26 @@ def _briefing_header_lines(files: list[Path], turns: list[TurnRecord]) -> list[s
 
 
 def _guidance_lines(meter: ContextMeter) -> list[str]:
-    state = "available" if meter.latest_snapshot is not None else "unknown"
-    return ["Guidance", f"  keep_working={context_meter_instruction(state)}"]
+    handle, phase = _active_claim_handle_phase()
+    state = GuidanceState(
+        level=meter_pressure_level(meter),
+        claim_known=True,
+        claim_handle=handle,
+        claim_phase=phase,
+        dirty_path_count=_dirty_path_count(),
+    )
+    instruction = context_meter_instruction(state)
+    if not instruction:
+        return []
+    return ["Guidance", f"  keep_working={instruction}"]
+
+
+def _dirty_path_count() -> int:
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        return 0
+    pressure = _build_dirty_worktree_pressure(repo_root=repo_root)
+    return int(pressure.get("dirtyPathCount") or 0)
 
 
 def _learning_lines() -> list[str]:
@@ -200,9 +220,9 @@ def _learning_lines() -> list[str]:
     return lines
 
 
-def _active_task_project_stem() -> str | None:
+def _active_claim_row() -> dict[str, Any] | None:
     try:
-        from spice.tasks import alloc, config, tw
+        from spice.tasks import alloc, tw
 
         actor = tw.current_actor()
         active = [
@@ -210,12 +230,27 @@ def _active_task_project_stem() -> str | None:
             for row in alloc.visible_active_rows(actor)
             if str(row.get("claim_by") or "") == actor
         ]
-        if not active:
-            return None
-        project = str(active[0].get("project") or "").strip()
-        return config.project_stem(project)
+        return active[0] if active else None
     except (OSError, RuntimeError, SpiceError, SystemExit):
         return None
+
+
+def _active_task_project_stem() -> str | None:
+    row = _active_claim_row()
+    if row is None:
+        return None
+    from spice.tasks import config
+
+    return config.project_stem(str(row.get("project") or "").strip())
+
+
+def _active_claim_handle_phase() -> tuple[str | None, str | None]:
+    row = _active_claim_row()
+    if row is None:
+        return None, None
+    handle = str(row.get("id") or "").strip() or None
+    phase = str(row.get("phase") or "").strip() or None
+    return handle, phase
 
 
 def _learning_record_line(record: session_learnings.LearningRecord) -> str:
