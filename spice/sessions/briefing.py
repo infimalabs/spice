@@ -13,6 +13,7 @@ import tempfile
 import time
 from collections import Counter
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Callable, TypedDict
 
@@ -40,6 +41,7 @@ from spice.sessions.meter import (
     collect_context_meter,
     context_meter_instruction,
 )
+from spice.sessions.util import parse_iso_ts
 from spice.sessions.records import (
     CommitRecord,
     CompactionRecord,
@@ -62,6 +64,10 @@ WORKING_SET_LIMIT = 10
 DEFAULT_BRIEFING_MAX_LINES = 120
 DEFAULT_BRIEFING_MAX_BYTES = 20_000
 DIRTY_PRESSURE_PREVIEW_LIMIT = 6
+DEFAULT_HORIZON_COMPACTIONS = 3
+MAX_HORIZON_COMPACTIONS = 5
+DEFAULT_HORIZON_MIN_SECONDS = 4 * 60 * 60
+HORIZON_END_SENTINEL = "￿"
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,18 @@ class DirtyComplexityRegression:
     value: int
     active_threshold: int
     baseline_value: int | None
+
+
+@dataclass(frozen=True)
+class ResolvedHorizon:
+    start: str | None
+    basis: str
+    requested_compactions: int
+    selected_boundaries: tuple[str, ...]
+
+    @property
+    def selected_compactions(self) -> int:
+        return len(self.selected_boundaries)
 
 
 class DirtyWorktreePressure(TypedDict, total=False):
@@ -124,16 +142,25 @@ def render_briefing(
     max_bytes: int | None = DEFAULT_BRIEFING_MAX_BYTES,
     explain_pruning: bool = False,
 ) -> str:
+    all_turns = collect_turns(files)
+    all_compactions = collect_compactions(files)
+    horizon = _resolve_horizon(
+        all_turns,
+        all_compactions,
+        count=DEFAULT_HORIZON_COMPACTIONS,
+        end=end,
+    )
+    effective_start = _effective_start(start, horizon.start)
     turns = records.filter_turns(
-        collect_turns(files),
-        start=start,
+        all_turns,
+        start=effective_start,
         end=end,
         contains=contains,
         turn_ids=turn_ids,
         tools=tools,
     )
     compactions = _filter_compactions(
-        collect_compactions(files), start=start, end=end, contains=contains
+        all_compactions, start=effective_start, end=end, contains=contains
     )
     meter = collect_context_meter(files)
     commits = collect_commit_records(turns)
@@ -141,6 +168,7 @@ def render_briefing(
     finals = [(turn.start_ts, text) for turn in turns for text in turn.final_answers]
     lines: list[str] = []
     lines.extend(_briefing_header_lines(files, turns))
+    lines.extend(_horizon_lines(horizon))
     filter_lines = _active_filter_lines(
         start=start, end=end, contains=contains, turn_ids=turn_ids, tools=tools
     )
@@ -175,6 +203,97 @@ def _briefing_header_lines(files: list[Path], turns: list[TurnRecord]) -> list[s
         f"  files={', '.join(Path(f).name for f in files)} turns={len(turns)} "
         f"window={window_start} -> {window_end}",
     ]
+
+
+def _horizon_lines(horizon: ResolvedHorizon) -> list[str]:
+    start = horizon.start or "session start"
+    return [
+        "Horizon",
+        f"  horizon_basis={horizon.basis} start={start} "
+        f"compactions={horizon.selected_compactions}/{horizon.requested_compactions}",
+    ]
+
+
+def _resolve_horizon(
+    turns: list[TurnRecord],
+    compactions: list[CompactionRecord],
+    *,
+    count: int,
+    end: str | None,
+    min_seconds: int = DEFAULT_HORIZON_MIN_SECONDS,
+) -> ResolvedHorizon:
+    requested = max(0, int(count))
+    capped = min(requested, MAX_HORIZON_COMPACTIONS)
+    eligible = [record.ts for record in compactions if not end or record.ts <= end]
+    cap_excludes_boundaries = (
+        requested > MAX_HORIZON_COMPACTIONS and len(eligible) > MAX_HORIZON_COMPACTIONS
+    )
+    if not eligible or capped == 0:
+        basis = "hard_cap" if cap_excludes_boundaries else "compaction_count"
+        return ResolvedHorizon(
+            start=None,
+            basis=basis,
+            requested_compactions=requested,
+            selected_boundaries=(),
+        )
+
+    selected_count = min(capped, len(eligible))
+    count_selected = selected_count
+    basis = "hard_cap" if cap_excludes_boundaries else "compaction_count"
+    floor = _horizon_floor(
+        end or _latest_horizon_ts(turns=turns, compactions=compactions),
+        min_seconds=min_seconds,
+    )
+    if floor:
+        max_selectable = min(MAX_HORIZON_COMPACTIONS, len(eligible))
+        while selected_count < max_selectable and eligible[-selected_count] > floor:
+            selected_count += 1
+        if basis != "hard_cap":
+            start = eligible[-selected_count]
+            if start > floor and selected_count == MAX_HORIZON_COMPACTIONS:
+                basis = "hard_cap"
+            elif selected_count > count_selected:
+                basis = "wall_clock_floor"
+
+    selected_boundaries = tuple(eligible[-selected_count:])
+    return ResolvedHorizon(
+        start=selected_boundaries[0] if selected_boundaries else None,
+        basis=basis,
+        requested_compactions=requested,
+        selected_boundaries=selected_boundaries,
+    )
+
+
+def _latest_horizon_ts(
+    *, turns: list[TurnRecord], compactions: list[CompactionRecord]
+) -> str | None:
+    values = [
+        value
+        for value in [
+            *(_turn_activity_ts(turn) for turn in turns),
+            *(record.ts for record in compactions),
+        ]
+        if value
+    ]
+    return max(values) if values else None
+
+
+def _turn_activity_ts(turn: TurnRecord) -> str:
+    return turn.end_ts or turn.last_activity_ts or turn.start_ts
+
+
+def _horizon_floor(end: str | None, *, min_seconds: int) -> str | None:
+    end_dt = parse_iso_ts(end)
+    if end_dt is None:
+        return None
+    floor_dt = end_dt - timedelta(seconds=max(0, min_seconds))
+    return floor_dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _effective_start(user_start: str | None, horizon_start: str | None) -> str | None:
+    if user_start and horizon_start:
+        return max(user_start, horizon_start)
+    return user_start or horizon_start
 
 
 def _guidance_lines(meter: ContextMeter) -> list[str]:
@@ -975,19 +1094,26 @@ def render_sweep(
     and the final that closed it. A renewed agent reads these to recover not
     just the latest state but the trajectory.
     """
+    all_turns = collect_turns(files)
+    all_compactions = collect_compactions(files)
+    horizon = _resolve_horizon(all_turns, all_compactions, count=count, end=end)
+    effective_start = _effective_start(start, horizon.start)
     turns = records.filter_turns(
-        collect_turns(files),
-        start=start,
+        all_turns,
+        start=effective_start,
         end=end,
         contains=contains,
         turn_ids=turn_ids,
         tools=tools,
     )
-    compactions = _filter_compactions(
-        collect_compactions(files), start=start, end=end, contains=contains
-    )
-    boundaries = [record.ts for record in compactions][-max(0, count) :]
-    if not boundaries:
+    window_start = effective_start or horizon.start
+    boundaries = [
+        boundary
+        for boundary in horizon.selected_boundaries
+        if (not window_start or boundary > window_start)
+        and (not end or boundary <= end)
+    ]
+    if not window_start:
         return render_briefing(
             files,
             start=start,
@@ -996,8 +1122,12 @@ def render_sweep(
             turn_ids=turn_ids,
             tools=tools,
         )
-    lines: list[str] = ["Sweep", f"  windows={len(boundaries) + 1} files={len(files)}"]
-    edges = ["", *boundaries, "￿"]
+    lines: list[str] = [
+        "Sweep",
+        f"  windows={len(boundaries) + 1} files={len(files)}",
+    ]
+    lines.extend(_horizon_lines(horizon))
+    edges = [window_start, *boundaries, HORIZON_END_SENTINEL]
     for index in range(len(edges) - 1):
         window_start, window_end = edges[index], edges[index + 1]
         window_turns = [
