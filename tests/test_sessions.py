@@ -26,6 +26,7 @@ from spice.sessions.briefing import render_briefing, render_sweep
 from spice.sessions.cli import handle_session, render_thread_summary
 from spice.sessions.meter import (
     ActiveContextSnapshot,
+    GuidanceState,
     active_context_percent,
     collect_context_meter,
     context_meter_instruction,
@@ -77,6 +78,91 @@ def test_pressure_warns_from_yellow_up():
     assert context_pressure_should_warn("orange") is True
     assert context_pressure_should_warn("red") is True
     assert context_pressure_should_warn("green") is False
+
+
+DISTINCT_PRESSURE_LEVELS = 4
+DISTINCT_CLAIM_STATES = 3
+DISTINCT_REFERENCE_LANES = 3
+SAMPLE_DIRTY_PATHS = 3
+
+
+def test_guidance_instruction_differs_across_pressure_levels():
+    green = context_meter_instruction(GuidanceState(level="green", claim_known=True))
+    yellow = context_meter_instruction(GuidanceState(level="yellow", claim_known=True))
+    orange = context_meter_instruction(GuidanceState(level="orange", claim_known=True))
+    red = context_meter_instruction(GuidanceState(level="red", claim_known=True))
+    assert "YELLOW" in yellow
+    assert "ORANGE" in orange
+    assert "RED" in red
+    assert len({green, yellow, orange, red}) == DISTINCT_PRESSURE_LEVELS
+
+
+def test_guidance_instruction_differs_across_claim_states():
+    idle = context_meter_instruction(GuidanceState(level="green", claim_known=True))
+    driving = context_meter_instruction(
+        GuidanceState(
+            level="green", claim_known=True, claim_handle="TASK-1", claim_phase="todo"
+        )
+    )
+    reviewing = context_meter_instruction(
+        GuidanceState(
+            level="green", claim_known=True, claim_handle="TASK-1", claim_phase="review"
+        )
+    )
+    assert "No task claimed" in idle
+    assert "Driving TASK-1" in driving
+    assert "Holding TASK-1 in review" in reviewing
+    assert len({idle, driving, reviewing}) == DISTINCT_CLAIM_STATES
+
+
+def test_guidance_instruction_three_reference_lanes_read_differently():
+    green_idle = context_meter_instruction(
+        GuidanceState(level="green", claim_known=True)
+    )
+    red_driving = context_meter_instruction(
+        GuidanceState(
+            level="red", claim_known=True, claim_handle="TASK-2", claim_phase="todo"
+        )
+    )
+    review_hold = context_meter_instruction(
+        GuidanceState(
+            level="green", claim_known=True, claim_handle="TASK-3", claim_phase="review"
+        )
+    )
+    assert len({green_idle, red_driving, review_hold}) == DISTINCT_REFERENCE_LANES
+
+
+def test_guidance_instruction_dirty_tree_appends_commit_nudge():
+    clean = context_meter_instruction(
+        GuidanceState(
+            level="green", claim_known=True, claim_handle="TASK-4", claim_phase="todo"
+        )
+    )
+    dirty = context_meter_instruction(
+        GuidanceState(
+            level="green",
+            claim_known=True,
+            claim_handle="TASK-4",
+            claim_phase="todo",
+            dirty_path_count=SAMPLE_DIRTY_PATHS,
+        )
+    )
+    assert "uncommitted path(s)" in dirty
+    assert dirty != clean
+
+
+def test_guidance_instruction_claim_clause_only_when_evaluated():
+    not_evaluated = context_meter_instruction(GuidanceState(level="orange"))
+    known_idle = context_meter_instruction(
+        GuidanceState(level="orange", claim_known=True)
+    )
+    assert "ORANGE" in not_evaluated
+    assert "No task claimed" in known_idle
+    assert not_evaluated != known_idle
+
+
+def test_guidance_instruction_empty_when_green_and_claim_unevaluated():
+    assert context_meter_instruction(GuidanceState(level="green")) == ""
 
 
 QUARTER_PERCENT = 25.0
@@ -356,7 +442,6 @@ def test_session_thread_resolves_claude_transcript_by_driver_owner(
     assert "latest_user=investigate claude" in summary
     assert "latest_assistant=claude done" in summary
     assert "latest_final=claude done" in summary
-    assert f"keep_working={context_meter_instruction('available')}" in summary
 
 
 def test_session_records_and_meter_parse_claude_transcript_owner(tmp_path, monkeypatch):

@@ -2,9 +2,10 @@
 
 A `token_count` payload in the transcript carries the latest turn's usage and
 the model context window. The meter folds those snapshots together with
-`compacted` events. The harness uses the meter to decide when to repeat a
-simple keep-working instruction; user-facing output does not expose the
-underlying thresholds.
+`compacted` events. The harness folds the meter's pressure level together with
+the claimed task/phase and dirty-tree posture into a `GuidanceState` so the
+guidance line reflects real lane state instead of a fixed keep-working mantra;
+user-facing output does not expose the underlying thresholds.
 """
 
 from __future__ import annotations
@@ -311,5 +312,67 @@ def _optional_int_payload_value(value: Any) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def context_meter_instruction(level: str) -> str:
-    return "Keep working. Continue the claimed task with normal validation."
+def meter_pressure_level(meter: ContextMeter) -> str:
+    return context_pressure_level(active_context_percent(meter.latest_snapshot))
+
+
+@dataclass(slots=True, frozen=True)
+class GuidanceState:
+    """Real lane state the guidance line reflects, instead of a fixed mantra.
+
+    ``claim_known`` separates "this surface checked and there is no claim" from
+    "this surface did not evaluate the claim"; only the former speaks to the
+    claim. Session-scoped surfaces (session show/summary) and the live in-stream
+    warning leave it False so they never assert a claim they did not read.
+    """
+
+    level: str = "unknown"
+    claim_known: bool = False
+    claim_handle: str | None = None
+    claim_phase: str | None = None
+    dirty_path_count: int = 0
+
+
+def context_meter_instruction(state: GuidanceState) -> str:
+    parts = [
+        _guidance_pressure_clause(state.level),
+        _guidance_claim_clause(state),
+        _guidance_dirty_clause(state.dirty_path_count),
+    ]
+    return " ".join(part for part in parts if part)
+
+
+def _guidance_pressure_clause(level: str) -> str:
+    if level == "red":
+        return (
+            "Context near compaction (RED): reach a committable checkpoint and "
+            "hand off the current phase cleanly."
+        )
+    if level == "orange":
+        return (
+            "Context high (ORANGE): land the current phase and commit before it "
+            "tightens."
+        )
+    if level == "yellow":
+        return "Context filling (YELLOW): keep momentum and commit at checkpoints."
+    return ""
+
+
+def _guidance_claim_clause(state: GuidanceState) -> str:
+    if not state.claim_known:
+        return ""
+    handle = state.claim_handle
+    if not handle:
+        return "No task claimed — run spice task next to pull allocator work."
+    if (state.claim_phase or "").lower() == "review":
+        return f"Holding {handle} in review — verify acceptance and record a finding."
+    return f"Driving {handle} — continue to completion with normal validation."
+
+
+def _guidance_dirty_clause(dirty_path_count: int) -> str:
+    if dirty_path_count <= 0:
+        return ""
+    return (
+        f"{dirty_path_count} uncommitted path(s) — commit or revert before "
+        "switching tasks."
+    )

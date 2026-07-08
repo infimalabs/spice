@@ -26,8 +26,10 @@ from spice.sessions.briefing import (
     render_sweep,
 )
 from spice.sessions.meter import (
+    GuidanceState,
     collect_context_meter,
     context_meter_instruction,
+    meter_pressure_level,
 )
 from spice.sessions.resolve import resolve_files, resolve_thread_transcript
 from spice.sessions.util import format_int, normalize_timestamp
@@ -386,7 +388,11 @@ def render_thread_summary(thread_id: str) -> str:
     )
     snapshot = meter.latest_snapshot
     if snapshot:
-        lines.append(f"  keep_working={context_meter_instruction('available')}")
+        instruction = context_meter_instruction(
+            GuidanceState(level=meter_pressure_level(meter))
+        )
+        if instruction:
+            lines.append(f"  keep_working={instruction}")
     lines.append("Latest Activity")
     if latest_turn is None:
         lines.append("  none")
@@ -466,7 +472,11 @@ def _print_summary(files: list, *, recent: int) -> None:
     )
     snapshot = meter.latest_snapshot
     if snapshot:
-        print(f"  keep_working={context_meter_instruction('available')}")
+        instruction = context_meter_instruction(
+            GuidanceState(level=meter_pressure_level(meter))
+        )
+        if instruction:
+            print(f"  keep_working={instruction}")
     asks = [
         (turn.start_ts, message.text)
         for turn in turns

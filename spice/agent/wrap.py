@@ -58,6 +58,7 @@ from spice.sessions.meter import (
     collect_latest_context_meter,
     context_meter_cache_payload,
     context_meter_from_cache_payload,
+    GuidanceState,
     context_meter_instruction,
     context_pressure_level,
     context_pressure_should_warn,
@@ -1271,4 +1272,5 @@ def render_agent_context_warning(
     if not context_pressure_should_warn(level):
         return None
     signature = (level, snapshot.ts, snapshot.total_tokens)
-    return signature, context_meter_instruction(level) + "\n"
+    instruction = context_meter_instruction(GuidanceState(level=level))
+    return signature, instruction + "\n"
