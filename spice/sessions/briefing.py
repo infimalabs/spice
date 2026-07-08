@@ -13,11 +13,12 @@ import tempfile
 import time
 from collections import Counter
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Literal, TypeAlias, TypedDict
 
 from spice.errors import SpiceError
+from spice.mail.ackstate import AckStateRecord, ack_state_records
 from spice.mail.inbox import (
     INBOX_RESPONSE_ROW,
     collect_deadlettered_inbox_items,
@@ -27,6 +28,7 @@ from spice.mail.inbox import (
     inbox_ack_state_context_rows,
     inbox_deadletter_context_rows,
     inbox_item_key,
+    parse_inbox_payload,
     relative_time_for_path,
 )
 from spice.paths import repo_root_from_cwd
@@ -47,7 +49,6 @@ from spice.sessions.util import parse_iso_ts
 from spice.sessions.records import (
     CommitRecord,
     CompactionRecord,
-    MessageShape,
     TurnRecord,
     collect_commit_records,
     collect_compactions,
@@ -119,6 +120,7 @@ class RehydrationCandidate:
     rank_key: RankKey
     label: str = ""
     count: int = 0
+    key: str = ""
 
 
 @dataclass(frozen=True)
@@ -200,7 +202,7 @@ def task_plane_rank_key(
 
 
 def ask_candidate(
-    timestamp: str, text: str, *, disposition: str = "human"
+    timestamp: str, text: str, *, disposition: str = "human", key: str = ""
 ) -> RehydrationCandidate:
     return RehydrationCandidate(
         kind="ask",
@@ -209,16 +211,74 @@ def ask_candidate(
         rank_name=ASK_RANK_NAME,
         rank_key=ask_rank_key(timestamp, disposition),
         label=disposition,
+        key=key,
     )
 
 
-def collect_ask_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
-    candidates: list[RehydrationCandidate] = []
-    for turn in turns:
-        for message in turn.user_messages:
-            if message.shape is MessageShape.HUMAN:
-                candidates.append(ask_candidate(turn.start_ts, message.text))
-    return candidates
+def collect_ask_candidates(
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    contains: str | None = None,
+) -> list[RehydrationCandidate]:
+    repo_root = repo_root_from_cwd()
+    if repo_root is None:
+        return []
+    candidates = [
+        *(_pending_ask_candidate(item) for item in collect_inbox_items(str(repo_root))),
+        *(_ack_state_ask_candidate(record) for record in ack_state_records(repo_root)),
+    ]
+    return [
+        candidate
+        for candidate in candidates
+        if _ask_candidate_matches_filters(
+            candidate, start=start, end=end, contains=contains
+        )
+    ]
+
+
+def _pending_ask_candidate(item) -> RehydrationCandidate:
+    key = inbox_item_key(item.name)
+    return ask_candidate(
+        _ask_timestamp_from_key(key),
+        parse_inbox_payload(item.text).body,
+        disposition="pending",
+        key=key,
+    )
+
+
+def _ack_state_ask_candidate(record: AckStateRecord) -> RehydrationCandidate:
+    return ask_candidate(
+        _ask_timestamp_from_key(record.key),
+        parse_inbox_payload(record.text).body,
+        disposition=record.disposition,
+        key=record.key,
+    )
+
+
+def _ask_candidate_matches_filters(
+    candidate: RehydrationCandidate,
+    *,
+    start: str | None,
+    end: str | None,
+    contains: str | None,
+) -> bool:
+    if start and candidate.timestamp < start:
+        return False
+    if end and candidate.timestamp > end:
+        return False
+    needle = (contains or "").lower()
+    haystack = "\n".join([candidate.text, candidate.key]).lower()
+    return not needle or needle in haystack
+
+
+def _ask_timestamp_from_key(key: str) -> str:
+    raw = key[:-1] if key.endswith("Z") else key
+    try:
+        parsed = datetime.strptime(raw, "%Y%m%dT%H%M%S%f").replace(tzinfo=UTC)
+    except ValueError as exc:
+        raise SpiceError(f"invalid ACK steering key timestamp: {key or '-'}") from exc
+    return parsed.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def collect_final_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
@@ -529,7 +589,7 @@ def render_briefing(
     )
     meter = collect_context_meter(files)
     commits = collect_commit_records(turns)
-    asks = collect_ask_candidates(turns)
+    asks = collect_ask_candidates(start=effective_start, end=end, contains=contains)
     finals = collect_final_candidates(turns)
     commit_candidates = collect_commit_candidates(commits)
     compaction_intents = collect_compaction_intent_candidates(compactions)
@@ -623,6 +683,18 @@ def _resolve_horizon(
             selected_count += 1
         if basis != "hard_cap":
             start = eligible[-selected_count]
+            if (
+                start > floor
+                and selected_count == len(eligible)
+                and selected_count < MAX_HORIZON_COMPACTIONS
+            ):
+                selected_boundaries = tuple(eligible[-selected_count:])
+                return ResolvedHorizon(
+                    start=None,
+                    basis="wall_clock_floor",
+                    requested_compactions=requested,
+                    selected_boundaries=selected_boundaries,
+                )
             if start > floor and selected_count == MAX_HORIZON_COMPACTIONS:
                 basis = "hard_cap"
             elif selected_count > count_selected:
@@ -664,8 +736,6 @@ def _horizon_floor(end: str | None, *, min_seconds: int) -> str | None:
 
 
 def _effective_start(user_start: str | None, horizon_start: str | None) -> str | None:
-    if user_start and horizon_start:
-        return max(user_start, horizon_start)
     return user_start or horizon_start
 
 
@@ -768,12 +838,17 @@ def _task_plane_lines(candidates: list[RehydrationCandidate]) -> list[str]:
 
 def _asks_lines(asks: list[RehydrationCandidate]) -> list[str]:
     ranked = sort_rehydration_candidates(asks)
-    lines = ["Latest Ask", f"  {clip(ranked[0].text) if ranked else '-'}"]
+    lines = ["Latest Ask", _ask_line(ranked[0]) if ranked else "  -"]
     if len(ranked) > 1:
         lines.append("Recent Asks")
         for candidate in ranked[1 : DEFAULT_RECENT_ASKS + 1]:
-            lines.append(f"  {candidate.timestamp} {clip(candidate.text)}")
+            lines.append(_ask_line(candidate))
     return lines
+
+
+def _ask_line(candidate: RehydrationCandidate) -> str:
+    key = f" key={candidate.key}" if candidate.key else ""
+    return f"  {candidate.label} {candidate.timestamp}{key} {clip(candidate.text)}"
 
 
 def _finals_lines(finals: list[RehydrationCandidate]) -> list[str]:
@@ -1556,6 +1631,9 @@ def render_sweep(
     ]
     lines.extend(_horizon_lines(horizon))
     edges = [window_start, *boundaries, HORIZON_END_SENTINEL]
+    sweep_asks = collect_ask_candidates(
+        start=effective_start, end=end, contains=contains
+    )
     for index in range(len(edges) - 1):
         window_start, window_end = edges[index], edges[index + 1]
         window_turns = [
@@ -1566,9 +1644,15 @@ def render_sweep(
         ]
         label = window_start or "session start"
         lines.append(f"Window {index} (from {label})")
-        asks = sort_rehydration_candidates(collect_ask_candidates(window_turns))
+        asks = [
+            ask
+            for ask in sweep_asks
+            if (not window_start or ask.timestamp >= window_start)
+            and ask.timestamp < window_end
+        ]
+        asks = sort_rehydration_candidates(asks)
         for candidate in asks[:SWEEP_WINDOW_ASKS]:
-            lines.append(f"  ask {candidate.timestamp} {clip(candidate.text)}")
+            lines.append(f"  ask {_ask_line(candidate).strip()}")
         finals = sort_rehydration_candidates(collect_final_candidates(window_turns))
         if finals:
             latest = finals[0]
