@@ -337,7 +337,8 @@ def _ask_candidate_matches_filters(
 
 
 def _ask_timestamp_from_key(key: str) -> str:
-    raw = key[:-1] if key.endswith("Z") else key
+    raw = key.split("-", 1)[0]
+    raw = raw[:-1] if raw.endswith("Z") else raw
     try:
         parsed = datetime.strptime(raw, "%Y%m%dT%H%M%S%f").replace(tzinfo=UTC)
     except ValueError as exc:
