@@ -159,6 +159,91 @@ def test_complexity_gate_scan_persists_sticky(tmp_path, monkeypatch):
     ).exists()
 
 
+def test_complexity_sticky_latch_self_heals_when_routine_drops_under_base(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path)
+    current = {
+        "record": complexity.ComplexityRecord(
+            path="big.py", function_name="f", ccn=1, length=20, nloc=20
+        )
+    }
+    monkeypatch.setattr(
+        complexity,
+        "collect_complexity_records",
+        lambda _paths, *, root, suffixes: [current["record"]],
+    )
+    state = git_state_path(complexity.COMPLEXITY_LENGTH_STICKY_GIT_PATH, root=repo)
+
+    complexity.scan_staged_complexity_violations(
+        [Path("big.py")],
+        root=repo,
+        max_length=3,
+        length_flex_limit_value=4,
+        persist=True,
+    )
+    assert state.exists()  # length 20 > flex 4 -> latched
+
+    current["record"] = complexity.ComplexityRecord(
+        path="big.py", function_name="f", ccn=1, length=2, nloc=2
+    )  # 2 <= base 3
+    healed = complexity.scan_staged_complexity_violations(
+        [Path("big.py")],
+        root=repo,
+        max_length=3,
+        length_flex_limit_value=4,
+        persist=True,
+    )
+
+    # The latch retires the moment any scan re-measures the routine back under
+    # base, even without a fully clean commit between the two scans.
+    assert healed == []
+    assert not state.exists()
+
+
+def test_complexity_sticky_latch_holds_in_flex_band_until_under_base(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path)
+    current = {
+        "record": complexity.ComplexityRecord(
+            path="big.py", function_name="f", ccn=1, length=20, nloc=20
+        )
+    }
+    monkeypatch.setattr(
+        complexity,
+        "collect_complexity_records",
+        lambda _paths, *, root, suffixes: [current["record"]],
+    )
+
+    complexity.scan_staged_complexity_violations(
+        [Path("big.py")],
+        root=repo,
+        max_length=3,
+        length_flex_limit_value=4,
+        persist=True,
+    )
+
+    current["record"] = complexity.ComplexityRecord(
+        path="big.py", function_name="f", ccn=1, length=4, nloc=4
+    )  # base 3 < 4 <= flex 4
+    findings = complexity.scan_staged_complexity_violations(
+        [Path("big.py")],
+        root=repo,
+        max_length=3,
+        length_flex_limit_value=4,
+        persist=True,
+    )
+
+    # A fresh 4-length routine passes in the flex band, but a latched one is held
+    # to base until it drops under base -- self-heal must not clear early.
+    assert [finding.record.function_name for finding in findings] == ["f"]
+    assert findings[0].length_limit == 3
+    assert git_state_path(
+        complexity.COMPLEXITY_LENGTH_STICKY_GIT_PATH, root=repo
+    ).exists()
+
+
 def test_flex_slice_claim_round_trips_live_claim(tmp_path):
     repo = _init_repo(tmp_path)
     (repo / "src").mkdir()
@@ -661,6 +746,61 @@ def test_repo_doc_peer_claim_redirects_guard_error(tmp_path):
             "move to another seam)",
         ]
     )
+
+
+def test_repo_doc_sticky_latch_self_heals_when_doc_drops_under_base(tmp_path):
+    repo = _init_repo_with_doc_policy(tmp_path)
+    doc = repo / "AGENTS.md"
+    doc.write_text("x" * 8, encoding="utf-8")  # 8 > flex 7 -> latched
+
+    repodocs.repo_truth_doc_findings(repo, persist=True)
+    state = repodocs.repo_doc_char_sticky_state_path(repo)
+    assert state is not None and state.exists()
+
+    doc.write_text("x" * 4, encoding="utf-8")  # 4 <= base 5
+    healed = repodocs.repo_truth_doc_findings(repo, persist=True)
+
+    # The latch retires the moment any scan re-measures the doc back under base,
+    # even without a fully clean commit between the two scans.
+    assert healed == []
+    assert not state.exists()
+
+
+def test_repo_doc_sticky_latch_holds_in_flex_band_until_under_base(tmp_path):
+    repo = _init_repo_with_doc_policy(tmp_path)
+    doc = repo / "AGENTS.md"
+    doc.write_text("x" * 8, encoding="utf-8")
+
+    repodocs.repo_truth_doc_findings(repo, persist=True)
+
+    doc.write_text("x" * 6, encoding="utf-8")  # base 5 < 6 <= flex 7
+    findings = repodocs.repo_truth_doc_findings(repo, persist=True)
+
+    # A fresh 6-char doc passes in the flex band, but a latched one is held to
+    # base until it drops under base -- self-heal must not clear early.
+    assert [finding.path.as_posix() for finding in findings] == ["AGENTS.md"]
+    assert findings[0].limit == 5
+    state = repodocs.repo_doc_char_sticky_state_path(repo)
+    assert state is not None and state.exists()
+
+
+def _init_repo_with_doc_policy(tmp_path: Path) -> Path:
+    repo = _init_repo(tmp_path)
+    (repo / "pyproject.toml").write_text(
+        "[tool.spice.policy]\n"
+        'repo_truth_docs = ["AGENTS.md"]\n'
+        "\n"
+        "[tool.spice.policy.limits]\n"
+        "repo_truth_doc_chars = 5\n"
+        "\n"
+        "[tool.spice.policy.flex]\n"
+        "ratio = 1.5\n"
+        "\n"
+        "[tool.spice.policy.markdown_depth_budget]\n"
+        "extensions = []\n",
+        encoding="utf-8",
+    )
+    return repo
 
 
 def _flex_slice_claims_payload(repo: Path) -> dict:

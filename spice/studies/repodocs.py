@@ -51,12 +51,17 @@ def repo_truth_doc_findings(
         _load_repo_doc_char_sticky(repo_root),
         renames,
     )
+    retained_sticky = {
+        rel_path
+        for rel_path in loaded_sticky
+        if _repo_doc_path_exceeds_base(rel_path, repo_root=repo_root, resolved=resolved)
+    }
     flex_breaches = {
         path
         for path in paths
         if _repo_doc_path_breaches_flex(path, repo_root=repo_root, resolved=resolved)
     }
-    updated_sticky = loaded_sticky | flex_breaches
+    updated_sticky = retained_sticky | flex_breaches
     if persist and updated_sticky != loaded_sticky:
         _save_repo_doc_char_sticky(updated_sticky, repo_root)
     claim_decisions = claim_flex_slice_paths(
@@ -119,27 +124,6 @@ def render_repo_truth_doc_guard_error(findings: list[RepoTruthDocFinding]) -> st
     return header + "\n" + "\n".join(render_repo_truth_doc_lines(findings))
 
 
-def clear_repo_truth_doc_sticky_state(
-    repo_root: Path, *, resolved: ResolvedPolicy | None = None
-) -> None:
-    state_path = repo_doc_char_sticky_state_path(repo_root)
-    if state_path is None or not state_path.exists():
-        return
-    active_policy = resolved or resolve_policy(repo_root)
-    sticky = _load_repo_doc_char_sticky(repo_root)
-    retained = {
-        rel_path
-        for rel_path in sticky
-        if _repo_doc_path_exceeds_base(
-            rel_path, repo_root=repo_root, resolved=active_policy
-        )
-    }
-    if retained:
-        _save_repo_doc_char_sticky(retained, repo_root)
-    else:
-        state_path.unlink()
-
-
 def repo_doc_char_sticky_state_path(repo_root: Path) -> Path | None:
     try:
         return git_state_path(REPO_DOC_CHAR_STICKY_STATE_GIT_PATH, root=repo_root)
@@ -198,6 +182,12 @@ def _load_repo_doc_char_sticky(repo_root: Path) -> set[Path]:
 
 
 def _save_repo_doc_char_sticky(paths: set[Path], repo_root: Path) -> None:
+    """Write the latch set, or delete the state file once nothing stays latched."""
+    if not paths:
+        state_path = repo_doc_char_sticky_state_path(repo_root)
+        if state_path is not None and state_path.exists():
+            state_path.unlink()
+        return
     try:
         save_sticky_items(
             paths,
@@ -232,7 +222,7 @@ def _repo_doc_path_exceeds_base(
     count = _doc_char_count(repo_root / path)
     if count is None:
         return False
-    scoped = resolved.bound_for_path(
+    scoped = resolved.jittered_bound_for_path(
         "repo_truth_doc_chars",
         resolved.limits.repo_truth_doc_chars,
         path,

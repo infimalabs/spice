@@ -802,9 +802,6 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
 
     monkeypatch.setattr(precommit, "staged_paths", lambda repo_root: [])
     monkeypatch.setattr(
-        precommit, "clear_successful_sticky_state", lambda repo_root: None
-    )
-    monkeypatch.setattr(
         precommit, "_run_shape_guards", lambda repo_root: record("repo shape")
     )
     monkeypatch.setattr(
@@ -882,9 +879,6 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
 
 
 def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
-    monkeypatch.setattr(
-        precommit, "clear_successful_sticky_state", lambda repo_root: None
-    )
     monkeypatch.setattr(precommit, "_run_shape_guards", lambda repo_root: None)
     monkeypatch.setattr(precommit, "_run_repo_truth_doc_guard", lambda repo_root: None)
     monkeypatch.setattr(

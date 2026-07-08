@@ -17,8 +17,9 @@ attempt reports the whole picture:
 9. shape pressure — file LOC/bytes, routine complexity, magic-number
    regressions, all against staged paths with flex + sticky semantics.
 
-A fully passing gate prunes sticky state that no longer measures over the
-base limit — the gate forgives exactly when the code earns it.
+Flex + sticky latches self-heal in-scan: every gate run drops any file,
+routine, or doc that measures back at or under its base limit — the gate
+forgives exactly when the code earns it, even on an otherwise failing run.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ import subprocess
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, TypeVar
 
 from spice.cli.mounts import (
     MOUNTED_COMMAND_ENV,
@@ -38,6 +39,7 @@ from spice.cli.mounts import (
     mounted_commands,
 )
 from spice.errors import SpiceError
+from spice.flexstate import FlexSliceClaim
 from spice.paths import find_tool
 from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
 from spice.policyconfig import resolve_policy
@@ -55,7 +57,6 @@ from spice.studies import (
     testquality,
 )
 from spice.studies.repodocs import (
-    clear_repo_truth_doc_sticky_state,
     render_repo_truth_doc_guard_error,
     repo_truth_doc_candidate_paths,
     repo_truth_doc_findings,
@@ -110,7 +111,6 @@ def handle_pre_commit(repo_root: Path) -> int:
         _run_step(success_failures, step.label, step.action)
     if success_failures:
         raise _pre_commit_failure_error(success_failures)
-    clear_successful_sticky_state(repo_root)
     return 0
 
 
@@ -550,8 +550,10 @@ def _run_repo_truth_doc_guard(repo_root: Path) -> None:
         persist=True,
         flex_actor=resolved.flex_actor_id,
     )
-    if findings:
-        raise SpiceError(render_repo_truth_doc_guard_error(findings))
+    _raise_or_inform_flex_findings(
+        findings,
+        render=render_repo_truth_doc_guard_error,
+    )
 
 
 def _run_python_format_guard(repo_root: Path, paths: list[Path]) -> None:
@@ -682,10 +684,18 @@ def _run_file_loc_guard(repo_root: Path, paths: list[Path]) -> None:
     )
 
 
+class _FlexClaimFinding(Protocol):
+    @property
+    def flex_slice_claim(self) -> FlexSliceClaim | None: ...
+
+
+_FlexClaimFindingT = TypeVar("_FlexClaimFindingT", bound=_FlexClaimFinding)
+
+
 def _raise_or_inform_flex_findings(
-    findings: list[fileloc.LocFinding],
+    findings: list[_FlexClaimFindingT],
     *,
-    render: Callable[[list[fileloc.LocFinding]], str],
+    render: Callable[[list[_FlexClaimFindingT]], str],
 ) -> None:
     """Fail only on findings this worktree must fix; inform on peer-held ones.
 
@@ -721,14 +731,14 @@ def _run_complexity_guard(repo_root: Path, paths: list[Path]) -> None:
         persist=True,
         flex_actor=resolved.flex_actor_id,
     )
-    if findings:
-        raise SpiceError(
-            complexity.render_complexity_board(
-                findings,
-                max_ccn=bounds.max_ccn,
-                max_length=bounds.max_length,
-            )
-        )
+    _raise_or_inform_flex_findings(
+        findings,
+        render=lambda subset: complexity.render_complexity_board(
+            subset,
+            max_ccn=bounds.max_ccn,
+            max_length=bounds.max_length,
+        ),
+    )
 
 
 def _run_magic_numbers_guard(repo_root: Path, paths: list[Path]) -> None:
@@ -876,19 +886,3 @@ def quality_gate_failures_for_tags(repo_root: Path, tags: list[str]) -> list[str
         if message:
             failures.append(f"[{tag}]\n{message}")
     return failures
-
-
-def clear_successful_sticky_state(repo_root: Path) -> None:
-    # The file-shape latch self-heals in-scan (fileloc drops any path back under
-    # base on every gate run), so only complexity and repo-truth-doc sticky state
-    # still need a post-success prune here.
-    resolved = resolve_policy(repo_root)
-    routine = resolved.complexity
-    clear_repo_truth_doc_sticky_state(repo_root, resolved=resolved)
-    complexity.clear_complexity_sticky_state(
-        root=repo_root,
-        max_ccn=routine.max_ccn,
-        max_length=routine.max_length,
-        bounds_for_path=resolved.complexity_for_path,
-        suffixes=resolved.languages.complexity,
-    )
