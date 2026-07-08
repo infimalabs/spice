@@ -91,7 +91,7 @@ ASK_DISPOSITION_RANK: dict[str, int] = {
     "acked": 10,
     "acknowledged": 10,
     "responded": 10,
-    "human": 10,
+    "human": 0,
     "": 0,
 }
 ASK_RANK_NAME = "ask_disposition_then_recency"
@@ -172,28 +172,38 @@ def ask_candidate(
 
 def collect_ask_candidates(
     *,
+    turns: list[TurnRecord] | None = None,
     start: str | None = None,
     end: str | None = None,
     contains: str | None = None,
     subject_thread_ids: frozenset[str] = frozenset(),
 ) -> list[RehydrationCandidate]:
     repo_root = repo_root_from_cwd()
-    if repo_root is None:
-        return []
-    candidates = [
-        *(_pending_ask_candidate(item) for item in collect_inbox_items(str(repo_root))),
-        *(
+    candidates = _human_ask_candidates(turns or [])
+    if repo_root is not None:
+        candidates.extend(
+            _pending_ask_candidate(item) for item in collect_inbox_items(str(repo_root))
+        )
+        candidates.extend(
             _ack_state_ask_candidate(record)
             for record in ack_state_records(repo_root)
             if _ack_state_record_matches_subject(record, subject_thread_ids)
-        ),
-    ]
+        )
     return [
         candidate
         for candidate in candidates
         if _ask_candidate_matches_filters(
             candidate, start=start, end=end, contains=contains
         )
+    ]
+
+
+def _human_ask_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
+    return [
+        ask_candidate(turn.start_ts, message.text, disposition="human")
+        for turn in turns
+        for message in turn.user_messages
+        if message.shape is records.MessageShape.HUMAN
     ]
 
 
@@ -394,6 +404,7 @@ def render_briefing(
     meter = collect_context_meter(files)
     commits = collect_commit_records(turns)
     asks = collect_ask_candidates(
+        turns=turns,
         start=effective_start,
         end=end,
         contains=contains,
@@ -899,6 +910,7 @@ def render_sweep(
     lines.extend(_horizon_lines(horizon))
     edges = [window_start, *boundaries, HORIZON_END_SENTINEL]
     sweep_asks = collect_ask_candidates(
+        turns=turns,
         start=effective_start,
         end=end,
         contains=contains,

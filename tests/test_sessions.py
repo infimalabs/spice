@@ -235,7 +235,10 @@ def test_session_briefing_reads_direct_gzip_jsonl_path(tmp_path, monkeypatch, ca
 
     output = capsys.readouterr().out
     assert "files=session.jsonl.gz turns=1" in output
-    assert _section_lines(output, "Latest Ask") == ["Latest Ask", "  -"]
+    assert _section_lines(output, "Latest Ask") == [
+        "Latest Ask",
+        "  human 2026-01-01T00:00:00.000Z compressed request",
+    ]
     assert "Latest Final\n  compressed done" in output
     assert meter.snapshot_count == 1
     assert meter.latest_snapshot is not None
@@ -664,6 +667,34 @@ def test_briefing_filters_turns_and_renders_git_posture(tmp_path, monkeypatch):
 
 def test_briefing_ranks_ack_db_asks_by_disposition_then_recency(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "human.jsonl"
+    transcript.write_text(
+        "".join(
+            f"{json.dumps(event)}\n"
+            for event in [
+                {
+                    "timestamp": "2026-01-01T00:00:04Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-human"},
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:04Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"text": "human request"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:04Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete"},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
     pending_key = "20260101T000001000000Z"
     pending = write_inbox_item(
         repo,
@@ -687,7 +718,7 @@ def test_briefing_ranks_ack_db_asks_by_disposition_then_recency(tmp_path, monkey
     )
     monkeypatch.chdir(repo)
 
-    briefing = render_briefing([], max_lines=200, max_bytes=20000)
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
 
     assert _section_lines(briefing, "Latest Ask") == [
         "Latest Ask",
@@ -697,6 +728,7 @@ def test_briefing_ranks_ack_db_asks_by_disposition_then_recency(tmp_path, monkey
         "Recent Asks",
         "  refused 2026-01-01T00:00:02.000Z key=20260101T000002000000Z refused request",
         "  acked 2026-01-01T00:00:03.000Z key=20260101T000003000000Z acked request",
+        "  human 2026-01-01T00:00:04.000Z human request",
     ]
 
 
