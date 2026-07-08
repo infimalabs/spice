@@ -414,6 +414,14 @@ def _configure_delete_parser(actions: Any) -> None:
     )
     delete.add_argument("handle")
     delete.add_argument("--reason", required=True)
+    delete.add_argument(
+        "--force-claimed",
+        action="store_true",
+        help=(
+            "Delete even when the task carries an unexpired claim; output and "
+            "annotations name the claim holder."
+        ),
+    )
     delete.set_defaults(func=handle)
 
 
@@ -762,7 +770,7 @@ _DISPATCH = {
     "claim": lambda a: ops.claim(a.handle, steal=a.steal),
     "unclaim": lambda a: ops.unclaim(a.handle),
     "edit": lambda a: ops.edit(a.handle, priority=a.priority, project=a.project),
-    "delete": lambda a: ops.delete(a.handle, a.reason),
+    "delete": lambda a: ops.delete(a.handle, a.reason, force_claimed=a.force_claimed),
     "capture": lambda a: ops.capture(
         a.handle,
         title=a.title,
