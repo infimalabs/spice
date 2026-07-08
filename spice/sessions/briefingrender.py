@@ -136,14 +136,11 @@ def apply_output_budget(
         return "\n".join(out)
 
     if byte_budget:
-        while lines and len(rendered(explain and pruned).encode("utf-8")) > byte_budget:
+        while lines and len(rendered(pruned).encode("utf-8")) > byte_budget:
             lines.pop()
             pruned = True
-        if (
-            not lines
-            and len(rendered(explain and pruned).encode("utf-8")) > byte_budget
-        ):
-            return truncate_to_bytes(rendered(explain and pruned), byte_budget)
+        if not lines and len(rendered(pruned).encode("utf-8")) > byte_budget:
+            return truncate_to_bytes(rendered(pruned), byte_budget)
     if pruned:
         return rendered(True)
     return "\n".join(lines)
