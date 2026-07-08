@@ -25,12 +25,6 @@ from spice.sessions.briefing import (
     render_briefing,
     render_sweep,
 )
-from spice.sessions.meter import (
-    GuidanceState,
-    collect_context_meter,
-    context_meter_instruction,
-    meter_pressure_level,
-)
 from spice.sessions.resolve import resolve_files, resolve_thread_transcript
 from spice.sessions.util import format_int, normalize_timestamp
 
@@ -368,7 +362,6 @@ def render_thread_summary(thread_id: str) -> str:
     driver = driver_for_transcript(transcript)
     turns = records.collect_turns([transcript])
     compactions = records.collect_compactions([transcript])
-    meter = collect_context_meter([transcript])
     latest_turn = _latest_activity_turn(turns)
     lines = [
         "Thread",
@@ -386,13 +379,6 @@ def render_thread_summary(thread_id: str) -> str:
         f"  turns={len(turns)} compactions={len(compactions)} "
         f"window={window_start} -> {window_end}"
     )
-    snapshot = meter.latest_snapshot
-    if snapshot:
-        instruction = context_meter_instruction(
-            GuidanceState(level=meter_pressure_level(meter))
-        )
-        if instruction:
-            lines.append(f"  keep_working={instruction}")
     lines.append("Latest Activity")
     if latest_turn is None:
         lines.append("  none")
@@ -456,7 +442,6 @@ def _clean_list(values: list[str] | None) -> list[str]:
 def _print_summary(files: list, *, recent: int) -> None:
     turns = records.collect_turns(files)
     compactions = records.collect_compactions(files)
-    meter = collect_context_meter(files)
     print("Summary")
     print(
         f"  turns={len(turns)} completed={sum(1 for t in turns if t.completed)} "
@@ -470,13 +455,6 @@ def _print_summary(files: list, *, recent: int) -> None:
             w=sum(t.web_search_count for t in turns),
         )
     )
-    snapshot = meter.latest_snapshot
-    if snapshot:
-        instruction = context_meter_instruction(
-            GuidanceState(level=meter_pressure_level(meter))
-        )
-        if instruction:
-            print(f"  keep_working={instruction}")
     asks = [
         (turn.start_ts, message.text)
         for turn in turns

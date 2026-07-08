@@ -2,8 +2,8 @@
 
 The `spice session briefing` output. It answers, mechanically, the questions
 a freshly compacted or freshly renewed agent must not guess at: what was
-asked, what was last delivered, what to keep doing, what the working set was,
-and what steering is pending.
+asked, what was last delivered, what the working set was, and what steering is
+pending.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from spice.mail.inbox import (
 from spice.paths import repo_root_from_cwd
 from spice.sessions import learnings as session_learnings
 from spice.sessions import records
-from spice.sessions.briefingpressure import dirty_path_count, git_posture_lines
+from spice.sessions.briefingpressure import git_posture_lines
 from spice.sessions.briefingrender import (
     active_filter_lines,
     apply_output_budget,
@@ -34,13 +34,6 @@ from spice.sessions.briefingrender import (
     inbox_lines,
 )
 from spice.sessions.briefingtaskplane import collect_task_plane_candidates
-from spice.sessions.meter import (
-    ContextMeter,
-    GuidanceState,
-    collect_context_meter,
-    context_meter_instruction,
-    meter_pressure_level,
-)
 from spice.sessions.slices import select_compaction_windows_from_files
 from spice.sessions.util import parse_iso_ts
 from spice.sessions.records import (
@@ -144,7 +137,6 @@ class BriefingPayload:
     horizon: ResolvedHorizon
     turns: tuple[TurnRecord, ...]
     compactions: tuple[CompactionRecord, ...]
-    meter: ContextMeter
     commits: tuple[CommitRecord, ...]
     asks: tuple[RehydrationCandidate, ...]
     recovery_asks: tuple[RehydrationCandidate, ...]
@@ -523,7 +515,6 @@ def build_briefing_payload(
         horizon=horizon,
         turns=turn_tuple,
         compactions=compaction_tuple,
-        meter=collect_context_meter(list(file_tuple), start=effective_start),
         commits=commits,
         asks=asks,
         recovery_asks=recovery_asks,
@@ -603,7 +594,6 @@ def render_briefing_payload(
         lines.extend(filter_lines)
     lines.extend(_steering_lines(list(payload.asks)))
     lines.extend(_task_plane_lines(list(payload.task_plane)))
-    lines.extend(_guidance_lines(payload.meter))
     lines.extend(_learning_lines())
     lines.extend(recovery)
     lines.extend(_trajectory_lines(list(payload.sweep_windows)))
@@ -714,21 +704,6 @@ def _recency_reference_ts(
         if value
     ]
     return max(values) if values else None
-
-
-def _guidance_lines(meter: ContextMeter) -> list[str]:
-    handle, phase = _active_claim_handle_phase()
-    state = GuidanceState(
-        level=meter_pressure_level(meter),
-        claim_known=True,
-        claim_handle=handle,
-        claim_phase=phase,
-        dirty_path_count=dirty_path_count(),
-    )
-    instruction = context_meter_instruction(state)
-    if not instruction:
-        return []
-    return ["Guidance", f"  keep_working={instruction}"]
 
 
 def _learning_lines() -> list[str]:
