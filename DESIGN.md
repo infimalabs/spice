@@ -44,10 +44,8 @@ That thesis gives spice five planes.
    runtime state under `.spice/`, generated `.spice/hooks` shims, and the
    worktree skill under `.agents/skills/spice`. Worker worktrees are operated
    trees: tasks, branches, and files live there, but the running code remains
-   the installed tool. The common-dir layout remains an opt-in install shape
-   for operators who deliberately set uv's tool directories before installing.
-   The worktree skill ships as package data; every operator- and agent-facing
-   command string is `spice ...`.
+   the installed tool. The worktree skill ships as package data; every
+   operator- and agent-facing command string is `spice ...`.
 
 1. **The driver seam.** Agent CLI specifics live in concrete driver records:
    binary, argv, thread-id env, transcript grammar, and session-id parsing. A

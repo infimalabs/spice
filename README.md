@@ -67,18 +67,6 @@ use the editable form so the installed `spice` command resolves to that tree;
 that editable main tree is the server deployment. Other worktrees remain
 operated trees and do not supply their own runtime.
 
-The common-dir layout is opt-in. Set uv's tool directories before installing if
-you deliberately want the tool environment and executable under a repository's
-shared git directory:
-
-```sh
-repo=/path/to/your/repo
-common_dir=$(cd "$repo" && git rev-parse --path-format=absolute --git-common-dir)
-UV_TOOL_DIR="$common_dir/spice/tools" \
-UV_TOOL_BIN_DIR="$common_dir/spice/bin" \
-uv tool install -e /path/to/spice-main
-```
-
 ### Graceful degradation
 
 RTK, the local judge, and speech synthesis are optional companions. When they
