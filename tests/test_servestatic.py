@@ -46,6 +46,20 @@ def test_static_initial_bootstrap_waits_for_server_topology():
     ) in app
 
 
+def test_static_fresh_startup_keeps_import_shell_with_stale_restore_hints():
+    app_lanes = STATIC_ROOT / "app.lanes.js"
+    script = Path(__file__).with_name("fixtures") / "fresh_startup_import_shell.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(app_lanes)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_static_team_command_failure_forces_snapshot_refresh():
     app_lanes = (STATIC_ROOT / "app.lanes.js").read_text(encoding="utf-8")
     body = _between(

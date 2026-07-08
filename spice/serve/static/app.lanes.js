@@ -654,6 +654,10 @@ function openLaneRestoreHintsByTargetId() {
 
 async function restoreOpenTargetTeams(hints) {
   if (!hints.size) return;
+  if (serverTopologyIsOnlyEmptyImportTeams()) {
+    persistLaneHints();
+    return;
+  }
   for (const [targetId, hint] of hints) {
     if (laneStates.has(targetId)) continue;
     const target = targetById.get(targetId);
@@ -670,6 +674,15 @@ async function restoreOpenTargetTeams(hints) {
     );
   }
   persistLaneHints();
+}
+
+function serverTopologyIsOnlyEmptyImportTeams() {
+  let emptyTeamCount = 0;
+  for (const lane of laneStates.values()) {
+    if (!lane.emptyTeam) return false;
+    emptyTeamCount += 1;
+  }
+  return emptyTeamCount > 0;
 }
 
 function persistLaneHints() {

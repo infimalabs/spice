@@ -112,6 +112,22 @@ def test_serve_lane_reload_smoke_asserts_server_shell_persistence() -> None:
     assert "stamped speechMode did not survive the reload" in smoke
 
 
+def test_serve_fresh_startup_import_shell_smoke_asserts_stale_hint_reset() -> None:
+    smoke = (ROOT / "browser" / "serve_fresh_startup_import_shell_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert "installStaleOpenLaneHints" in smoke
+    assert "page.reload" in smoke
+    assert "waitForImportShell(page)" in smoke
+    assert "assertEqual(\n        afterReload.storedConfig," in smoke
+    assert '"[]"' in smoke
+    assert "fresh startup topology must settle on the import shell" in smoke
+    assert "fresh startup must rewrite stale lane config" in smoke
+
+
 def test_serve_team_metrics_smoke_asserts_work_follows_agent() -> None:
     smoke = (ROOT / "browser" / "serve_team_metrics_smoke.js").read_text(
         encoding="utf-8"
