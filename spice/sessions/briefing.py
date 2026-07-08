@@ -30,6 +30,7 @@ from spice.sessions.briefingpressure import dirty_path_count, git_posture_lines
 from spice.sessions.briefingrender import (
     active_filter_lines,
     apply_output_budget,
+    drop_human_ask_duplicates,
     filter_compactions,
     inbox_lines,
 )
@@ -111,6 +112,7 @@ class RehydrationCandidate:
     count: int = 0
     key: str = ""
     user_after_text: str = ""
+    intent_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -227,6 +229,7 @@ def collect_ask_candidates(
             for record in ack_state_records(repo_root)
             if _ack_state_record_matches_subject(record, subject_thread_ids)
         )
+    candidates = drop_human_ask_duplicates(candidates)
     return [
         candidate
         for candidate in candidates
@@ -402,6 +405,7 @@ def collect_compaction_intent_candidates(
             rank_key=recency_rank_key(record.ts),
             label=clip(record.last_assistant_before_text),
             user_after_text=record.first_user_after_text or "",
+            intent_text=record.intent_text or "",
         )
         for record in compactions
     ]
@@ -811,13 +815,14 @@ def _recovery_lines(
         return []
     latest = ranked[0]
     steering = _latest_steering_before(asks or [], latest.timestamp)
-    user_after = latest.text if latest.text != latest.label else latest.user_after_text
     lines = [
         "Recovery",
         f"  latest_compaction={latest.timestamp}",
         f"  assistant_before={latest.label}",
-        f"  user_after={clip(user_after)}",
     ]
+    if latest.intent_text:
+        lines.append(f"  intent={clip(latest.intent_text)}")
+    lines.append(f"  user_after={clip(latest.user_after_text)}")
     if steering is not None:
         key = f" key={steering.key}" if steering.key else ""
         lines.append(

@@ -246,6 +246,71 @@ def test_session_briefing_reads_direct_gzip_jsonl_path(tmp_path, monkeypatch, ca
     assert meter.latest_snapshot.total_tokens == GZIP_SESSION_TOTAL_TOKENS
 
 
+def test_session_briefing_excludes_non_human_transcript_messages(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+    transcript = tmp_path / "scaffold.jsonl"
+    events = [
+        {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "type": "event_msg",
+            "payload": {"type": "task_started", "turn_id": "turn-scaffold"},
+        },
+        {
+            "timestamp": "2026-01-01T00:00:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": SKILL_MANTRA_PREAMBLE}],
+            },
+        },
+        {
+            "timestamp": "2026-01-01T00:00:02Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"text": COMPACTION_SUMMARY_OPENING}],
+            },
+        },
+        {
+            "timestamp": "2026-01-01T00:00:03Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"text": "<task-notification>task done</task-notification>"}
+                ],
+            },
+        },
+        {
+            "timestamp": "2026-01-01T00:00:04Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"text": "<environment_context>cwd=repo</environment_context>"}
+                ],
+            },
+        },
+        {
+            "timestamp": "2026-01-01T00:00:05Z",
+            "type": "event_msg",
+            "payload": {"type": "task_complete"},
+        },
+    ]
+    transcript.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events), encoding="utf-8"
+    )
+
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+
+    assert _section_lines(briefing, "Latest Ask") == ["Latest Ask", "  -"]
+
+
 def test_session_timeline_contains_keeps_turn_when_match_is_not_latest(
     tmp_path, capsys
 ):

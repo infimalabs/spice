@@ -271,8 +271,8 @@ def test_briefing_recovery_uses_parsed_intent_and_prior_steering(tmp_path, monke
         "Recovery",
         "  latest_compaction=2026-01-01T00:00:10.000Z",
         "  assistant_before=ready to compact",
-        "  user_after=Keep draining allocator-selected tasks. "
-        "Validate before completion.",
+        "  intent=Keep draining allocator-selected tasks. Validate before completion.",
+        "  user_after=continue with recovery",
         "  steering=acked 2026-01-01T00:00:09.000Z "
         "key=20260101T000009000000Z operator asks before compaction",
     ]
@@ -328,7 +328,7 @@ def test_recovery_lines_do_not_render_assistant_fallback_as_user_after():
         ]
     )
 
-    lines = briefing_module._recovery_lines([candidate])
+    lines = briefing_module._recovery_lines([candidate], [])
 
     assert candidate.text == "assistant fallback text"
     assert lines == [
@@ -351,7 +351,7 @@ def test_recovery_lines_render_populated_first_user_after_text():
         ]
     )
 
-    lines = briefing_module._recovery_lines([candidate])
+    lines = briefing_module._recovery_lines([candidate], [])
 
     assert lines == [
         "Recovery",
@@ -746,8 +746,6 @@ def test_briefing_young_session_floor_extends_to_session_start(tmp_path, monkeyp
         "Recent Asks",
         "  acked 2026-01-01T08:00:00.000Z "
         "key=20260101T080000000000Z before first young compaction",
-        "  human 2026-01-01T10:30:00.000Z young current request",
-        "  human 2026-01-01T08:00:00.000Z before first young compaction",
     ]
 
 

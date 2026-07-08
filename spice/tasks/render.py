@@ -274,7 +274,7 @@ def _review_commit_lines(row: dict[str, Any]) -> list[str]:
         return [
             f"review_commit {review_ref} (task merge; agent_head {agent_head})",
             f"review_diff_base {diff_base} ({base_source})",
-            (f"review_diff_command git diff --stat --patch {diff_base} {agent_head}"),
+            f"review_diff_command {_review_diff_command(diff_base, agent_head)}",
             (
                 "review_fallback_diff_command "
                 f"git show -m --first-parent --stat --patch {review_ref}"
@@ -286,6 +286,12 @@ def _review_commit_lines(row: dict[str, Any]) -> list[str]:
             ),
         ]
     return [f"review_commit {review_ref} (task head)"]
+
+
+def _review_diff_command(diff_base: str, agent_head: str) -> str:
+    base = shlex.quote(diff_base)
+    head = shlex.quote(agent_head)
+    return f"git diff --stat --patch $(git merge-base {base} {head}) {head}"
 
 
 def _phase_effort_lines(row: dict[str, Any]) -> list[str]:

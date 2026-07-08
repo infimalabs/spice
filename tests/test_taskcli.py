@@ -686,7 +686,8 @@ def test_task_show_prints_merge_aware_diff_command_for_task_merge(monkeypatch):
     assert "review_commit merge-head (task merge; agent_head agent-head)" in output
     assert "review_diff_base upstream-head (done_upstream_head)" in output
     assert (
-        "review_diff_command git diff --stat --patch upstream-head agent-head" in output
+        "review_diff_command git diff --stat --patch "
+        "$(git merge-base upstream-head agent-head) agent-head" in output
     )
     assert (
         "review_fallback_diff_command "
@@ -726,7 +727,8 @@ def test_task_show_merge_diff_command_falls_back_to_first_parent(monkeypatch):
 
     assert "review_diff_base merge-head^1 (merge first parent)" in output
     assert (
-        "review_diff_command git diff --stat --patch merge-head^1 agent-head" in output
+        "review_diff_command git diff --stat --patch "
+        "$(git merge-base 'merge-head^1' agent-head) agent-head" in output
     )
 
 
