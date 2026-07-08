@@ -22,12 +22,7 @@ from spice.agent.maximmetrics import (
 from spice.agent.shadow import shadow_environment
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import InboxResendAttempt, compose_inbox_text, write_inbox_item
-from spice.sessions.meter import (
-    ActiveContextSnapshot,
-    ContextMeter,
-    GuidanceState,
-    context_meter_instruction,
-)
+from spice.sessions.meter import ActiveContextSnapshot, ContextMeter
 
 COMMAND_WORKING_STATE_ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 COMMAND_WORKING_STATE_NOW = 1_767_225_600.0
@@ -114,7 +109,6 @@ def _configure_command_working_state(tmp_path: Path, monkeypatch) -> list[str]:
     monkeypatch.setenv(agent_driver.DRIVER.thread_id_env, COMMAND_WORKING_STATE_ACTOR)
     monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
     monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
-    monkeypatch.setattr(sidechannel, "agent_context_meter", lambda _repo: None)
     monkeypatch.setattr(wrap.time, "time", lambda: COMMAND_WORKING_STATE_NOW)
     monkeypatch.setattr(wrap.time, "monotonic", lambda: COMMAND_WORKING_STATE_MONOTONIC)
     monkeypatch.setattr(
@@ -841,29 +835,6 @@ def test_inbox_injector_suppresses_task_offload_for_maxim_guidance(tmp_path):
     assert "Task offload: capture in the moment" not in output
 
 
-def test_context_meter_injector_repeats_warning_after_interval(tmp_path):
-    now = [100.0]
-    stderr = io.StringIO()
-    meter = _context_meter(total_tokens=80_000, window=100_000)
-    injector = wrap.AgentContextMeterInjector(
-        tmp_path,
-        stderr=stderr,
-        repeat_interval_seconds=15.0,
-        time_factory=lambda: now[0],
-        meter_factory=lambda _repo: meter,
-    )
-
-    injector.inject(force=False)
-    now[0] = 110.0
-    injector.inject(force=False)
-    now[0] = 116.0
-    injector.inject(force=False)
-
-    output = stderr.getvalue()
-    guidance = context_meter_instruction(GuidanceState(level="yellow"))
-    assert output.strip().splitlines() == [guidance, guidance]
-
-
 def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
     tmp_path, monkeypatch
 ):
@@ -875,7 +846,8 @@ def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
     monkeypatch.setattr(
         sidechannel,
         "agent_context_meter",
-        lambda _repo: _context_meter(total_tokens=80_000, window=100_000),
+        lambda _repo: _pressure_context_meter(),
+        raising=False,
     )
     monkeypatch.setattr(
         wrap,
@@ -887,19 +859,42 @@ def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
 
     payload = sidechannel.render_side_channel_payload(tmp_path)
 
-    assert "Inbox Steering" in payload
+    assert payload.splitlines()[0].startswith("Inbox Steering")
     assert "payload steering" in payload
-    assert context_meter_instruction(GuidanceState(level="yellow")) in payload
     working_lines = [line for line in payload.splitlines() if line.startswith("🌶️ ")]
     assert working_lines == ["🌶️ Working state: last maxim fallbacks."]
     assert "\n" not in working_lines[0]
     assert working_lines[0].count(".") == 1
+    assert payload.splitlines()[-2].startswith("  </")
+    assert payload.splitlines()[-1] == "🌶️ Working state: last maxim fallbacks."
+
+
+def test_post_tool_hook_payload_keeps_inbox_without_context_pressure(
+    tmp_path, monkeypatch
+):
+    write_inbox_item(
+        tmp_path,
+        "20260101T000000000008Z.txt",
+        compose_inbox_text(body="post-tool steering", priority=None, stop=False),
+    )
+    monkeypatch.setattr(
+        sidechannel,
+        "agent_context_meter",
+        lambda _repo: _pressure_context_meter(),
+        raising=False,
+    )
+
+    payload = sidechannel.render_post_tool_hook_payload(tmp_path)
+
+    lines = payload.splitlines()
+    assert lines[0].startswith("Inbox Steering")
+    assert "post-tool steering" in payload
+    assert lines[-1].startswith("  </")
 
 
 def test_side_channel_working_state_suppresses_repeats_and_post_tool_omits(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(sidechannel, "agent_context_meter", lambda _repo: None)
     snapshot = wrap.WorkingStateSnapshot(
         claim_handle="METER-00000002",
         claim_phase="todo",
@@ -1237,17 +1232,17 @@ def _contains(value, needle: str) -> bool:
     return any(needle in item for item in value)
 
 
-def _context_meter(*, total_tokens: int, window: int) -> ContextMeter:
+def _pressure_context_meter() -> ContextMeter:
     snapshot = ActiveContextSnapshot(
         source_file="rollout.jsonl",
         ts="2026-01-01T00:00:00.000Z",
-        input_tokens=total_tokens,
+        input_tokens=80_000,
         cached_input_tokens=0,
         output_tokens=0,
         reasoning_output_tokens=0,
-        total_tokens=total_tokens,
-        model_context_window=window,
-        cumulative_total_tokens=total_tokens,
+        total_tokens=80_000,
+        model_context_window=100_000,
+        cumulative_total_tokens=80_000,
     )
     return ContextMeter(
         source_files=("rollout.jsonl",),

@@ -23,13 +23,10 @@ from typing import TextIO, cast
 
 from spice.agent.sidechannelnotify import SIDE_CHANNEL_NOTIFY_EVENT
 from spice.agent.wrap import (
-    AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
     AGENT_RUN_INBOX_REPEAT_SECONDS,
-    AgentContextMeterInjector,
     AgentInboxInjector,
     AgentSideChannelNoticeInjector,
     AgentWorkingStateInjector,
-    agent_context_meter,
     post_tool_hook_inbox_state_path,
     side_channel_marker_path,
 )
@@ -159,12 +156,6 @@ class AgentSideChannelServer:
             stderr=writer,
             repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
         )
-        context_injector = AgentContextMeterInjector(
-            self.repo_root,
-            stderr=writer,
-            repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
-            meter_factory=agent_context_meter,
-        )
         working_state_injector = AgentWorkingStateInjector(
             self.repo_root,
             stderr=writer,
@@ -180,7 +171,6 @@ class AgentSideChannelServer:
                 if not include_regular_payload:
                     return
                 inbox_injector.inject(force=False)
-                context_injector.inject(force=False)
                 working_state_injector.inject(force=False)
 
         try:
@@ -298,12 +288,6 @@ def render_side_channel_payload(repo_root: Path) -> str:
         stderr=stderr,
         repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
     ).inject(force=True)
-    AgentContextMeterInjector(
-        repo_root,
-        stderr=stderr,
-        repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
-        meter_factory=agent_context_meter,
-    ).inject(force=True)
     AgentWorkingStateInjector(
         repo_root,
         stderr=stderr,
@@ -320,12 +304,6 @@ def render_post_tool_hook_payload(repo_root: Path) -> str:
         time_factory=time.monotonic,
         state_path=post_tool_hook_inbox_state_path(repo_root),
     ).inject(force=False)
-    AgentContextMeterInjector(
-        repo_root,
-        stderr=stderr,
-        repeat_interval_seconds=AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS,
-        meter_factory=agent_context_meter,
-    ).inject(force=True)
     return stderr.getvalue()
 
 
