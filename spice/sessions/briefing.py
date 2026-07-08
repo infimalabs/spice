@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -108,6 +109,42 @@ class RehydrationCandidate:
 
 
 @dataclass(frozen=True)
+class BriefingFilters:
+    start: str | None
+    end: str | None
+    contains: str | None
+    turn_ids: tuple[str, ...]
+    tools: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SweepWindowPayload:
+    index: int
+    label: str
+    turns: tuple[TurnRecord, ...]
+    asks: tuple[RehydrationCandidate, ...]
+    finals: tuple[RehydrationCandidate, ...]
+
+
+@dataclass(frozen=True)
+class BriefingPayload:
+    files: tuple[Path, ...]
+    filters: BriefingFilters
+    horizon: ResolvedHorizon
+    turns: tuple[TurnRecord, ...]
+    compactions: tuple[CompactionRecord, ...]
+    meter: ContextMeter
+    commits: tuple[CommitRecord, ...]
+    asks: tuple[RehydrationCandidate, ...]
+    finals: tuple[RehydrationCandidate, ...]
+    commit_candidates: tuple[RehydrationCandidate, ...]
+    compaction_intents: tuple[RehydrationCandidate, ...]
+    command_candidates: tuple[RehydrationCandidate, ...]
+    file_candidates: tuple[RehydrationCandidate, ...]
+    sweep_windows: tuple[SweepWindowPayload, ...]
+
+
+@dataclass(frozen=True)
 class DirtyComplexityRegression:
     path: str
     function_name: str
@@ -158,7 +195,7 @@ def clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
 
 
 def sort_rehydration_candidates(
-    candidates: list[RehydrationCandidate],
+    candidates: Sequence[RehydrationCandidate],
 ) -> list[RehydrationCandidate]:
     return sorted(candidates, key=lambda candidate: candidate.rank_key, reverse=True)
 
@@ -192,7 +229,7 @@ def ask_candidate(
     )
 
 
-def collect_ask_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
+def collect_ask_candidates(turns: Sequence[TurnRecord]) -> list[RehydrationCandidate]:
     candidates: list[RehydrationCandidate] = []
     for turn in turns:
         for text in turn.user_messages:
@@ -201,7 +238,7 @@ def collect_ask_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate
     return candidates
 
 
-def collect_final_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
+def collect_final_candidates(turns: Sequence[TurnRecord]) -> list[RehydrationCandidate]:
     return [
         RehydrationCandidate(
             kind="final",
@@ -216,7 +253,7 @@ def collect_final_candidates(turns: list[TurnRecord]) -> list[RehydrationCandida
 
 
 def collect_commit_candidates(
-    commits: list[CommitRecord],
+    commits: Sequence[CommitRecord],
 ) -> list[RehydrationCandidate]:
     return [
         RehydrationCandidate(
@@ -231,7 +268,9 @@ def collect_commit_candidates(
     ]
 
 
-def collect_command_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
+def collect_command_candidates(
+    turns: Sequence[TurnRecord],
+) -> list[RehydrationCandidate]:
     return [
         RehydrationCandidate(
             kind="command",
@@ -248,7 +287,7 @@ def collect_command_candidates(turns: list[TurnRecord]) -> list[RehydrationCandi
 
 
 def collect_file_touch_candidates(
-    turns: list[TurnRecord],
+    turns: Sequence[TurnRecord],
 ) -> list[RehydrationCandidate]:
     counts: Counter[str] = Counter()
     last_touch: dict[str, str] = {}
@@ -272,7 +311,7 @@ def collect_file_touch_candidates(
 
 
 def collect_compaction_intent_candidates(
-    compactions: list[CompactionRecord],
+    compactions: Sequence[CompactionRecord],
 ) -> list[RehydrationCandidate]:
     return [
         RehydrationCandidate(
@@ -289,6 +328,80 @@ def collect_compaction_intent_candidates(
     ]
 
 
+def build_briefing_payload(
+    files: list[Path],
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    contains: str | None = None,
+    turn_ids: list[str] | None = None,
+    tools: list[str] | None = None,
+    sweep_count: int | None = None,
+) -> BriefingPayload:
+    file_tuple = tuple(files)
+    all_turns = collect_turns(list(file_tuple))
+    all_compactions = collect_compactions(list(file_tuple))
+    horizon = _resolve_horizon(
+        all_turns,
+        all_compactions,
+        count=sweep_count if sweep_count is not None else DEFAULT_HORIZON_COMPACTIONS,
+        end=end,
+    )
+    effective_start = _effective_start(start, horizon.start)
+    filters = BriefingFilters(
+        start=start,
+        end=end,
+        contains=contains,
+        turn_ids=tuple(turn_ids or ()),
+        tools=tuple(tools or ()),
+    )
+    turns = records.filter_turns(
+        all_turns,
+        start=effective_start,
+        end=end,
+        contains=contains,
+        turn_ids=list(filters.turn_ids) or None,
+        tools=list(filters.tools) or None,
+    )
+    compactions = _filter_compactions(
+        all_compactions,
+        start=effective_start,
+        end=end,
+        contains=contains,
+    )
+    commits = collect_commit_records(turns)
+    turn_tuple = tuple(turns)
+    compaction_tuple = tuple(compactions)
+    commit_tuple = tuple(commits)
+    asks = tuple(collect_ask_candidates(turn_tuple))
+    finals = tuple(collect_final_candidates(turn_tuple))
+    commit_candidates = tuple(collect_commit_candidates(commit_tuple))
+    compaction_intents = tuple(collect_compaction_intent_candidates(compaction_tuple))
+    command_candidates = tuple(collect_command_candidates(turn_tuple))
+    file_candidates = tuple(collect_file_touch_candidates(turn_tuple))
+    sweep_windows = (
+        _build_sweep_windows(turn_tuple, horizon, start=effective_start, end=end)
+        if sweep_count is not None
+        else ()
+    )
+    return BriefingPayload(
+        files=file_tuple,
+        filters=filters,
+        horizon=horizon,
+        turns=turn_tuple,
+        compactions=compaction_tuple,
+        meter=collect_context_meter(list(file_tuple)),
+        commits=commit_tuple,
+        asks=asks,
+        finals=finals,
+        commit_candidates=commit_candidates,
+        compaction_intents=compaction_intents,
+        command_candidates=command_candidates,
+        file_candidates=file_candidates,
+        sweep_windows=sweep_windows,
+    )
+
+
 def render_briefing(
     files: list[Path],
     *,
@@ -301,50 +414,54 @@ def render_briefing(
     max_bytes: int | None = DEFAULT_BRIEFING_MAX_BYTES,
     explain_pruning: bool = False,
 ) -> str:
-    all_turns = collect_turns(files)
-    all_compactions = collect_compactions(files)
-    horizon = _resolve_horizon(
-        all_turns,
-        all_compactions,
-        count=DEFAULT_HORIZON_COMPACTIONS,
-        end=end,
-    )
-    effective_start = _effective_start(start, horizon.start)
-    turns = records.filter_turns(
-        all_turns,
-        start=effective_start,
+    payload = build_briefing_payload(
+        files,
+        start=start,
         end=end,
         contains=contains,
         turn_ids=turn_ids,
         tools=tools,
     )
-    compactions = _filter_compactions(
-        all_compactions, start=effective_start, end=end, contains=contains
+    return render_briefing_payload(
+        payload,
+        max_lines=max_lines,
+        max_bytes=max_bytes,
+        explain_pruning=explain_pruning,
     )
-    meter = collect_context_meter(files)
-    commits = collect_commit_records(turns)
-    asks = collect_ask_candidates(turns)
-    finals = collect_final_candidates(turns)
-    commit_candidates = collect_commit_candidates(commits)
-    compaction_intents = collect_compaction_intent_candidates(compactions)
-    command_candidates = collect_command_candidates(turns)
-    file_candidates = collect_file_touch_candidates(turns)
+
+
+def render_briefing_payload(
+    payload: BriefingPayload,
+    *,
+    max_lines: int | None = DEFAULT_BRIEFING_MAX_LINES,
+    max_bytes: int | None = DEFAULT_BRIEFING_MAX_BYTES,
+    explain_pruning: bool = False,
+) -> str:
     lines: list[str] = []
-    lines.extend(_briefing_header_lines(files, turns))
-    lines.extend(_horizon_lines(horizon))
+    lines.extend(_briefing_header_lines(payload.files, payload.turns))
+    lines.extend(_horizon_lines(payload.horizon))
     filter_lines = _active_filter_lines(
-        start=start, end=end, contains=contains, turn_ids=turn_ids, tools=tools
+        start=payload.filters.start,
+        end=payload.filters.end,
+        contains=payload.filters.contains,
+        turn_ids=payload.filters.turn_ids,
+        tools=payload.filters.tools,
     )
     if filter_lines:
         lines.append("Filters")
         lines.extend(filter_lines)
-    lines.extend(_guidance_lines(meter))
+    lines.extend(_guidance_lines(payload.meter))
     lines.extend(_learning_lines())
-    lines.extend(_asks_lines(asks))
-    lines.extend(_finals_lines(finals))
-    lines.extend(_recovery_lines(compaction_intents))
+    lines.extend(_asks_lines(list(payload.asks)))
+    lines.extend(_finals_lines(list(payload.finals)))
+    lines.extend(_recovery_lines(list(payload.compaction_intents)))
     lines.extend(
-        _activity_lines(turns, command_candidates, file_candidates, commit_candidates)
+        _activity_lines(
+            payload.turns,
+            payload.command_candidates,
+            payload.file_candidates,
+            payload.commit_candidates,
+        )
     )
     lines.extend(_git_posture_lines())
     lines.extend(_inbox_lines())
@@ -356,7 +473,9 @@ def render_briefing(
     )
 
 
-def _briefing_header_lines(files: list[Path], turns: list[TurnRecord]) -> list[str]:
+def _briefing_header_lines(
+    files: Sequence[Path], turns: Sequence[TurnRecord]
+) -> list[str]:
     window_start = turns[0].start_ts if turns else "-"
     window_end = (
         (turns[-1].end_ts or turns[-1].last_activity_ts or turns[-1].start_ts)
@@ -544,10 +663,10 @@ def _recovery_lines(compactions: list[RehydrationCandidate]) -> list[str]:
 
 
 def _activity_lines(
-    turns: list[TurnRecord],
-    command_candidates: list[RehydrationCandidate],
-    file_candidates: list[RehydrationCandidate],
-    commit_candidates: list[RehydrationCandidate],
+    turns: Sequence[TurnRecord],
+    command_candidates: Sequence[RehydrationCandidate],
+    file_candidates: Sequence[RehydrationCandidate],
+    commit_candidates: Sequence[RehydrationCandidate],
 ) -> list[str]:
     lines = [
         "Activity",
@@ -574,7 +693,7 @@ def _activity_lines(
     return lines
 
 
-def active_file_order(turns: list[TurnRecord]) -> list[tuple[str, int]]:
+def active_file_order(turns: Sequence[TurnRecord]) -> list[tuple[str, int]]:
     """The current working set: most-recently-touched first, count attached.
 
     Recency outranks raw frequency — the file an agent touched last is the
@@ -593,8 +712,8 @@ def _active_filter_lines(
     start: str | None,
     end: str | None,
     contains: str | None,
-    turn_ids: list[str] | None,
-    tools: list[str] | None,
+    turn_ids: Sequence[str] | None,
+    tools: Sequence[str] | None,
 ) -> list[str]:
     rows: list[str] = []
     if start:
@@ -1249,6 +1368,48 @@ def _inbox_lines() -> list[str]:
     return lines
 
 
+def _build_sweep_windows(
+    turns: Sequence[TurnRecord],
+    horizon: ResolvedHorizon,
+    *,
+    start: str | None,
+    end: str | None,
+) -> tuple[SweepWindowPayload, ...]:
+    window_start = start or horizon.start
+    if not window_start:
+        return ()
+    boundaries = [
+        boundary
+        for boundary in horizon.selected_boundaries
+        if (not window_start or boundary > window_start)
+        and (not end or boundary <= end)
+    ]
+    windows: list[SweepWindowPayload] = []
+    edges = [window_start, *boundaries, HORIZON_END_SENTINEL]
+    for index in range(len(edges) - 1):
+        window_start, window_end = edges[index], edges[index + 1]
+        window_turns = tuple(
+            turn
+            for turn in turns
+            if (not window_start or turn.start_ts >= window_start)
+            and turn.start_ts < window_end
+        )
+        windows.append(
+            SweepWindowPayload(
+                index=index,
+                label=window_start or "session start",
+                turns=window_turns,
+                asks=tuple(
+                    sort_rehydration_candidates(collect_ask_candidates(window_turns))
+                ),
+                finals=tuple(
+                    sort_rehydration_candidates(collect_final_candidates(window_turns))
+                ),
+            )
+        )
+    return tuple(windows)
+
+
 def render_sweep(
     files: list[Path],
     *,
@@ -1265,57 +1426,33 @@ def render_sweep(
     and the final that closed it. A renewed agent reads these to recover not
     just the latest state but the trajectory.
     """
-    all_turns = collect_turns(files)
-    all_compactions = collect_compactions(files)
-    horizon = _resolve_horizon(all_turns, all_compactions, count=count, end=end)
-    effective_start = _effective_start(start, horizon.start)
-    turns = records.filter_turns(
-        all_turns,
-        start=effective_start,
+    payload = build_briefing_payload(
+        files,
+        start=start,
         end=end,
         contains=contains,
         turn_ids=turn_ids,
         tools=tools,
+        sweep_count=count,
     )
-    window_start = effective_start or horizon.start
-    boundaries = [
-        boundary
-        for boundary in horizon.selected_boundaries
-        if (not window_start or boundary > window_start)
-        and (not end or boundary <= end)
-    ]
-    if not window_start:
-        return render_briefing(
-            files,
-            start=start,
-            end=end,
-            contains=contains,
-            turn_ids=turn_ids,
-            tools=tools,
-        )
+    return render_sweep_payload(payload)
+
+
+def render_sweep_payload(payload: BriefingPayload) -> str:
+    if not payload.sweep_windows:
+        return render_briefing_payload(payload)
     lines: list[str] = [
         "Sweep",
-        f"  windows={len(boundaries) + 1} files={len(files)}",
+        f"  windows={len(payload.sweep_windows)} files={len(payload.files)}",
     ]
-    lines.extend(_horizon_lines(horizon))
-    edges = [window_start, *boundaries, HORIZON_END_SENTINEL]
-    for index in range(len(edges) - 1):
-        window_start, window_end = edges[index], edges[index + 1]
-        window_turns = [
-            turn
-            for turn in turns
-            if (not window_start or turn.start_ts >= window_start)
-            and turn.start_ts < window_end
-        ]
-        label = window_start or "session start"
-        lines.append(f"Window {index} (from {label})")
-        asks = sort_rehydration_candidates(collect_ask_candidates(window_turns))
-        for candidate in asks[:SWEEP_WINDOW_ASKS]:
+    lines.extend(_horizon_lines(payload.horizon))
+    for window in payload.sweep_windows:
+        lines.append(f"Window {window.index} (from {window.label})")
+        for candidate in window.asks[:SWEEP_WINDOW_ASKS]:
             lines.append(f"  ask {candidate.timestamp} {clip(candidate.text)}")
-        finals = sort_rehydration_candidates(collect_final_candidates(window_turns))
-        if finals:
-            latest = finals[0]
+        if window.finals:
+            latest = window.finals[0]
             lines.append(f"  final {latest.timestamp} {clip(latest.text)}")
-        if not asks and not finals:
+        if not window.asks and not window.finals:
             lines.append("  (no dialogue in this window)")
     return "\n".join(lines)
