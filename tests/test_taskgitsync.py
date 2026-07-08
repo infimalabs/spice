@@ -605,7 +605,7 @@ def test_integrate_and_publish_allows_task_owned_rename(tmp_path):
     merge_head = captured["done_merge_head"]
 
     assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
-    assert not (repo / "README.md").exists()
+    assert _git(repo, "ls-files") == "NOTES.md"
     assert (repo / "NOTES.md").read_text(encoding="utf-8") == "initial\n"
     assert _git(repo, "status", "--porcelain") == ""
 
@@ -635,7 +635,6 @@ def test_out_of_scope_refusal_guides_git_rm_for_paths_absent_at_upstream(tmp_pat
     _run(peer, "git", "add", "README.md")
     _run(peer, "git", "commit", "-m", "peer deletes stale file")
     _run(peer, "git", "push", "origin", "main")
-    upstream_head = _git(peer, "rev-parse", "HEAD")
 
     with pytest.raises(gitsync.MergeConflict):
         gitsync.integrate_and_publish("TASK-20260101T000000000012Z", repo_root=repo)
@@ -651,8 +650,11 @@ def test_out_of_scope_refusal_guides_git_rm_for_paths_absent_at_upstream(tmp_pat
     message = str(exc_info.value)
     assert "refusing to publish" in message
     assert "stale.txt" in message
-    assert f"git checkout {upstream_head} -- stale.txt" not in message
-    assert "git rm -- stale.txt" in message
+    assert _refusal_commands(message) == [
+        "git rm -- stale.txt",
+        'git commit -m "Restore baseline content for TASK-20260101T000000000012Z"',
+        'spice task done TASK-20260101T000000000012Z --validation "..."',
+    ]
 
     _run(repo, "git", "rm", "stale.txt")
     _run(repo, "git", "commit", "-m", "Restore baseline deletion")
@@ -664,7 +666,7 @@ def test_out_of_scope_refusal_guides_git_rm_for_paths_absent_at_upstream(tmp_pat
     merge_head = captured["done_merge_head"]
 
     assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
-    assert not (repo / "stale.txt").exists()
+    assert _git(repo, "ls-files") == "README.md"
     assert _git(repo, "status", "--porcelain") == ""
 
 
@@ -1134,6 +1136,18 @@ def _empty_merges(repo: Path, rev: str) -> list[str]:
 
 def _uda_map(args: list[str]) -> dict[str, str]:
     return dict(item.split(":", 1) for item in args)
+
+
+def _refusal_commands(message: str) -> list[str]:
+    lines = message.splitlines()
+    start = lines.index("next commands:") + 1
+    commands: list[str] = []
+    for line in lines[start:]:
+        if line.startswith("  "):
+            commands.append(line.strip())
+            continue
+        break
+    return commands
 
 
 def _merge_head_missing(repo: Path) -> bool:
