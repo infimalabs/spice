@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
@@ -182,6 +182,29 @@ def sort_rehydration_candidates(
     return sorted(candidates, key=lambda candidate: candidate.rank_key, reverse=True)
 
 
+def dedupe_rehydration_candidates(
+    candidates: list[RehydrationCandidate],
+) -> list[RehydrationCandidate]:
+    groups: dict[str, list[RehydrationCandidate]] = {}
+    unique: list[RehydrationCandidate] = []
+    for candidate in candidates:
+        key = _candidate_dedupe_key(candidate)
+        if not key:
+            unique.append(candidate)
+            continue
+        groups.setdefault(key, []).append(candidate)
+    for group in groups.values():
+        kept = max(
+            group, key=lambda candidate: (candidate.timestamp, candidate.rank_key)
+        )
+        unique.append(replace(kept, count=len(group)) if len(group) > 1 else kept)
+    return unique
+
+
+def _candidate_dedupe_key(candidate: RehydrationCandidate) -> str:
+    return " ".join(candidate.text.split()).casefold()
+
+
 def ask_rank_key(timestamp: str, disposition: str) -> RankKey:
     return (timestamp, ASK_DISPOSITION_RANK.get(disposition.lower(), 0))
 
@@ -232,13 +255,15 @@ def collect_ask_candidates(
             if _ack_state_record_matches_subject(record, subject_thread_ids)
         )
     candidates = drop_human_ask_duplicates(candidates)
-    return [
-        candidate
-        for candidate in candidates
-        if _ask_candidate_matches_filters(
-            candidate, start=start, end=end, contains=contains
-        )
-    ]
+    return dedupe_rehydration_candidates(
+        [
+            candidate
+            for candidate in candidates
+            if _ask_candidate_matches_filters(
+                candidate, start=start, end=end, contains=contains
+            )
+        ]
+    )
 
 
 def _human_ask_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
@@ -323,17 +348,19 @@ def _ask_timestamp_from_key(key: str) -> str:
 
 
 def collect_final_candidates(turns: list[TurnRecord]) -> list[RehydrationCandidate]:
-    return [
-        RehydrationCandidate(
-            kind="final",
-            timestamp=turn.start_ts,
-            text=text,
-            rank_name=RECENCY_RANK_NAME,
-            rank_key=recency_rank_key(turn.start_ts),
-        )
-        for turn in turns
-        for text in turn.final_answers
-    ]
+    return dedupe_rehydration_candidates(
+        [
+            RehydrationCandidate(
+                kind="final",
+                timestamp=turn.start_ts,
+                text=text,
+                rank_name=RECENCY_RANK_NAME,
+                rank_key=recency_rank_key(turn.start_ts),
+            )
+            for turn in turns
+            for text in turn.final_answers
+        ]
+    )
 
 
 def collect_commit_candidates(
@@ -793,17 +820,35 @@ def _asks_lines(asks: list[RehydrationCandidate]) -> list[str]:
 
 def _ask_line(candidate: RehydrationCandidate) -> str:
     key = f" key={candidate.key}" if candidate.key else ""
-    return f"  {candidate.label} {candidate.timestamp}{key} {clip(candidate.text)}"
+    repeat = _repeat_count_fragment(candidate)
+    return (
+        f"  {candidate.label} {candidate.timestamp}{key}{repeat} {clip(candidate.text)}"
+    )
 
 
 def _finals_lines(finals: list[RehydrationCandidate]) -> list[str]:
     ranked = sort_rehydration_candidates(finals)
-    lines = ["Latest Final", f"  {clip(ranked[0].text) if ranked else '-'}"]
+    lines = [
+        "Latest Final",
+        _final_line(ranked[0], include_timestamp=False) if ranked else "  -",
+    ]
     if len(ranked) > 1:
         lines.append("Recent Finals")
         for candidate in ranked[1 : DEFAULT_RECENT_FINALS + 1]:
-            lines.append(f"  {candidate.timestamp} {clip(candidate.text)}")
+            lines.append(_final_line(candidate, include_timestamp=True))
     return lines
+
+
+def _final_line(candidate: RehydrationCandidate, *, include_timestamp: bool) -> str:
+    repeat = _repeat_count_fragment(candidate).strip()
+    prefix = f"{candidate.timestamp} " if include_timestamp else ""
+    if repeat:
+        prefix = f"{prefix}{repeat} "
+    return f"  {prefix}{clip(candidate.text)}"
+
+
+def _repeat_count_fragment(candidate: RehydrationCandidate) -> str:
+    return f" repeat_count={candidate.count}" if candidate.count > 1 else ""
 
 
 def _recovery_lines(
@@ -923,12 +968,14 @@ def _build_sweep_windows(
         )
         window_asks = tuple(
             sort_rehydration_candidates(
-                [
-                    ask
-                    for ask in asks
-                    if (not window_start or ask.timestamp >= window_start)
-                    and ask.timestamp < window_end
-                ]
+                dedupe_rehydration_candidates(
+                    [
+                        ask
+                        for ask in asks
+                        if (not window_start or ask.timestamp >= window_start)
+                        and ask.timestamp < window_end
+                    ]
+                )
             )
         )
         windows.append(
@@ -939,7 +986,9 @@ def _build_sweep_windows(
                 asks=window_asks,
                 finals=tuple(
                     sort_rehydration_candidates(
-                        collect_final_candidates(list(window_turns))
+                        dedupe_rehydration_candidates(
+                            collect_final_candidates(list(window_turns))
+                        )
                     )
                 ),
             )
@@ -985,11 +1034,46 @@ def render_sweep_payload(payload: BriefingPayload) -> str:
     lines.extend(_horizon_lines(payload.horizon))
     for window in payload.sweep_windows:
         lines.append(f"Window {window.index} (from {window.label})")
-        for candidate in window.asks[:SWEEP_WINDOW_ASKS]:
-            lines.append(f"  ask {_ask_line(candidate).strip()}")
-        if window.finals:
-            latest = window.finals[0]
-            lines.append(f"  final {latest.timestamp} {clip(latest.text)}")
-        if not window.asks and not window.finals:
+        entries = _diverse_sweep_entries(window)
+        for kind, candidate in entries:
+            if kind == "ask":
+                lines.append(f"  ask {_ask_line(candidate).strip()}")
+            else:
+                repeat = _repeat_count_fragment(candidate)
+                lines.append(
+                    f"  final {candidate.timestamp}{repeat} {clip(candidate.text)}"
+                )
+        if not entries:
             lines.append("  (no dialogue in this window)")
     return "\n".join(lines)
+
+
+def _diverse_sweep_entries(
+    window: SweepWindowPayload,
+) -> list[tuple[str, RehydrationCandidate]]:
+    entries = [("ask", candidate) for candidate in window.asks[:SWEEP_WINDOW_ASKS]]
+    entries.extend(("final", candidate) for candidate in window.finals[:1])
+    return _avoid_consecutive_kinds(entries)
+
+
+def _avoid_consecutive_kinds(
+    entries: list[tuple[str, RehydrationCandidate]],
+) -> list[tuple[str, RehydrationCandidate]]:
+    remaining = list(entries)
+    ordered: list[tuple[str, RehydrationCandidate]] = []
+    while remaining:
+        previous_kind = ordered[-1][0] if ordered else None
+        index = 0
+        if previous_kind is not None:
+            alternate_index = next(
+                (
+                    candidate_index
+                    for candidate_index, (kind, _candidate) in enumerate(remaining)
+                    if kind != previous_kind
+                ),
+                None,
+            )
+            if alternate_index is not None:
+                index = alternate_index
+        ordered.append(remaining.pop(index))
+    return ordered
