@@ -12,6 +12,7 @@
  * @property {TargetIdentity} targetIdentity
  * @property {ServeAgentIdentity=} serveAgentIdentity
  * @property {string[]=} taskFilters
+ * @property {string[]=} effectiveTaskFilters
  * @property {TaskFilterEntry[]=} taskFilterEntries
  * @property {string=} laneFilterVersion
  * @property {TaskFilterInventory=} taskFilterInventory

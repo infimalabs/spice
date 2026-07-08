@@ -29,6 +29,9 @@ function renderLaneChrome(lane, payload) {
   applyLaneServeAgentIdentity(lane, payload);
   if (!staleTeamConfig) {
     lane.taskFilters = uniqueStringList(payload.taskFilters || lane.taskFilters);
+    lane.effectiveTaskFilters = uniqueStringList(
+      payload.effectiveTaskFilters || lane.effectiveTaskFilters,
+    );
     if (payloadHasField(payload, "laneFilterVersion"))
       lane.laneFilterVersion = String(payload.laneFilterVersion || "");
     applyLaneTeamIdentity(lane, payload);
