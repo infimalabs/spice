@@ -14,6 +14,7 @@ from spice.agent.driver import DRIVER
 from spice.cli.parser import build_parser
 from spice.mail.ackstate import (
     ACK_DISPOSITION_ACKED,
+    ACK_DISPOSITION_REFUSED,
     AckStateWrite,
     record_acked_inbox_items,
 )
@@ -60,7 +61,7 @@ def session_task_repo(tmp_path, monkeypatch):
         task_config.set_backend(None)
 
 
-def test_rehydration_ask_candidates_order_by_disposition_then_recency():
+def test_rehydration_ask_candidates_order_by_recency_then_disposition():
     candidates = [
         briefing_module.ask_candidate(
             "2026-01-01T00:00:04.000Z",
@@ -78,6 +79,11 @@ def test_rehydration_ask_candidates_order_by_disposition_then_recency():
             disposition="pending",
         ),
         briefing_module.ask_candidate(
+            "2026-01-01T00:00:02.000Z",
+            "acked same timestamp",
+            disposition="acked",
+        ),
+        briefing_module.ask_candidate(
             "2026-01-01T00:00:03.000Z",
             "refused latest",
             disposition="refused",
@@ -87,10 +93,11 @@ def test_rehydration_ask_candidates_order_by_disposition_then_recency():
     ordered = briefing_module.sort_rehydration_candidates(candidates)
 
     assert [(candidate.rank_name, candidate.text) for candidate in ordered] == [
-        (briefing_module.ASK_RANK_NAME, "pending newer"),
-        (briefing_module.ASK_RANK_NAME, "pending older"),
-        (briefing_module.ASK_RANK_NAME, "refused latest"),
         (briefing_module.ASK_RANK_NAME, "acked newest"),
+        (briefing_module.ASK_RANK_NAME, "refused latest"),
+        (briefing_module.ASK_RANK_NAME, "pending newer"),
+        (briefing_module.ASK_RANK_NAME, "acked same timestamp"),
+        (briefing_module.ASK_RANK_NAME, "pending older"),
     ]
 
 
@@ -476,6 +483,88 @@ def test_briefing_reports_deadlettered_inbox_items(tmp_path, monkeypatch):
     assert "deadlettered_inbox key=20260101T000000000001Z" in briefing
 
 
+def test_briefing_omits_stale_consumed_ack_state_trailers(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    stale_key = "20260704T054409667615Z"
+    recent_key = "20260708T054409667615Z"
+    stale_name = f"{stale_key}.txt"
+    recent_name = f"{recent_key}.txt"
+    stale_age = briefing_module.DEFAULT_RECENCY_MAX_SECONDS + 60
+    record_acked_inbox_items(
+        repo,
+        [
+            AckStateWrite(
+                key=stale_key,
+                inbox_name=stale_name,
+                text=compose_inbox_text(
+                    body="stale refusal", priority=None, stop=False
+                ),
+                disposition=ACK_DISPOSITION_REFUSED,
+            )
+        ],
+        now=time.time() - stale_age,
+    )
+    record_acked_inbox_items(
+        repo,
+        [
+            AckStateWrite(
+                key=recent_key,
+                inbox_name=recent_name,
+                text=compose_inbox_text(
+                    body="recent refusal", priority=None, stop=False
+                ),
+                disposition=ACK_DISPOSITION_REFUSED,
+            )
+        ],
+        now=time.time(),
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing(
+        [],
+        end="2026-07-08T06:00:00.000Z",
+        max_lines=200,
+        max_bytes=20000,
+    )
+
+    assert "stale refusal" not in briefing
+    assert "refused_inbox key=20260704T054409667615Z" not in briefing
+    assert "refused=1" in briefing
+    assert "refused_inbox key=20260708T054409667615Z" in briefing
+    assert _section_lines(briefing, "Latest Ask") == [
+        "Latest Ask",
+        "  refused 2026-07-08T05:44:09.667Z key=20260708T054409667615Z recent refusal",
+    ]
+
+
+def test_briefing_omits_asks_and_finals_older_than_recency_floor(tmp_path, monkeypatch):
+    repo = _init_git_repo(tmp_path / "repo")
+    transcript = tmp_path / "recency.jsonl"
+    _write_horizon_transcript(
+        transcript,
+        asks=[
+            ("2026-01-01T00:00:00Z", "old request"),
+            ("2026-01-01T05:00:00Z", "recent request"),
+        ],
+        compactions=[],
+    )
+    monkeypatch.chdir(repo)
+
+    briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+
+    assert "files=recency.jsonl turns=1" in briefing
+    assert "old request" not in briefing
+    assert "completed old request" not in briefing
+    assert _section_lines(briefing, "Latest Ask") == [
+        "Latest Ask",
+        "  human 2026-01-01T05:00:00.000Z recent request",
+    ]
+    assert _section_lines(briefing, "Latest Final") == [
+        "Latest Final",
+        "  completed recent request",
+    ]
+
+
 def test_briefing_pending_inbox_ack_guidance_uses_open_response_copy(
     tmp_path, monkeypatch
 ):
@@ -688,17 +777,17 @@ def test_briefing_default_horizon_is_count_bound(tmp_path, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo")
     transcript = tmp_path / "horizon.jsonl"
     asks = [
-        ("2026-01-01T01:00:00Z", "before count horizon"),
-        ("2026-01-01T07:00:00Z", "inside first count window"),
-        ("2026-01-01T13:00:00Z", "inside second count window"),
-        ("2026-01-01T19:00:00Z", "inside current count window"),
+        ("2026-01-01T15:00:00Z", "before count horizon"),
+        ("2026-01-01T16:30:00Z", "inside first count window"),
+        ("2026-01-01T17:30:00Z", "inside second count window"),
+        ("2026-01-01T18:30:00Z", "inside current count window"),
     ]
     _write_horizon_transcript(
         transcript,
         asks=asks,
         compactions=[
-            "2026-01-01T06:00:00Z",
-            "2026-01-01T12:00:00Z",
+            "2026-01-01T16:00:00Z",
+            "2026-01-01T17:00:00Z",
             "2026-01-01T18:00:00Z",
         ],
     )
@@ -709,12 +798,12 @@ def test_briefing_default_horizon_is_count_bound(tmp_path, monkeypatch):
 
     assert "files=horizon.jsonl turns=3" in briefing
     assert (
-        "horizon_basis=compaction_count start=2026-01-01T06:00:00.000Z compactions=3/3"
+        "horizon_basis=compaction_count start=2026-01-01T16:00:00.000Z compactions=3/3"
     ) in briefing
     assert _section_lines(briefing, "Latest Ask") == [
         "Latest Ask",
-        "  acked 2026-01-01T19:00:00.000Z "
-        "key=20260101T190000000000Z inside current count window",
+        "  acked 2026-01-01T18:30:00.000Z "
+        "key=20260101T183000000000Z inside current count window",
     ]
 
 
@@ -841,17 +930,17 @@ def test_explicit_start_wins_over_adaptive_horizon_in_briefing_and_sweep(
     repo = _init_git_repo(tmp_path / "repo")
     transcript = tmp_path / "horizon.jsonl"
     asks = [
-        ("2026-01-01T01:00:00Z", "operator explicit start request"),
-        ("2026-01-01T07:00:00Z", "inside first count window"),
-        ("2026-01-01T13:00:00Z", "inside second count window"),
-        ("2026-01-01T19:00:00Z", "inside current count window"),
+        ("2026-01-01T15:00:00Z", "operator explicit start request"),
+        ("2026-01-01T16:30:00Z", "inside first count window"),
+        ("2026-01-01T17:30:00Z", "inside second count window"),
+        ("2026-01-01T18:30:00Z", "inside current count window"),
     ]
     _write_horizon_transcript(
         transcript,
         asks=asks,
         compactions=[
-            "2026-01-01T06:00:00Z",
-            "2026-01-01T12:00:00Z",
+            "2026-01-01T16:00:00Z",
+            "2026-01-01T17:00:00Z",
             "2026-01-01T18:00:00Z",
         ],
     )
@@ -860,22 +949,22 @@ def test_explicit_start_wins_over_adaptive_horizon_in_briefing_and_sweep(
 
     briefing = render_briefing(
         [transcript],
-        start="2026-01-01T01:00:00.000Z",
+        start="2026-01-01T15:00:00.000Z",
         max_lines=200,
         max_bytes=20000,
     )
     sweep = render_sweep(
         [transcript],
         count=3,
-        start="2026-01-01T01:00:00.000Z",
+        start="2026-01-01T15:00:00.000Z",
     )
 
     assert "files=horizon.jsonl turns=4" in briefing
-    assert "Filters\n  start=2026-01-01T01:00:00.000Z" in briefing
-    assert "Window 0 (from 2026-01-01T01:00:00.000Z)" in sweep
+    assert "Filters\n  start=2026-01-01T15:00:00.000Z" in briefing
+    assert "Window 0 (from 2026-01-01T15:00:00.000Z)" in sweep
     assert (
-        "ask acked 2026-01-01T01:00:00.000Z "
-        "key=20260101T010000000000Z operator explicit start request"
+        "ask acked 2026-01-01T15:00:00.000Z "
+        "key=20260101T150000000000Z operator explicit start request"
     ) in sweep
 
 
