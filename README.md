@@ -37,7 +37,7 @@ See [docs/overview.md](docs/overview.md) for the operating model and
 
 | Surface | Command |
 | --- | --- |
-| Prepare a repo | `spice init` / `spice dev doctor` |
+| Prepare a repo | `spice init` / `spice doctor` |
 | Run through the agent wrapper | `spice agent run -- <cmd>` |
 | Maintain a worktree-bound agent | `spice agent ensure` / `spice agent supervise` |
 | Pull allocator work | `spice task next` |
@@ -59,7 +59,7 @@ uv tool install spice-harness
 
 cd /path/to/your/repo
 spice init
-spice dev doctor
+spice doctor
 ```
 
 The default install is a uv tool. Operators who deploy from a main tree should
