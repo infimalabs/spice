@@ -29,6 +29,10 @@ from spice.sessions.briefing import render_briefing, render_sweep
 from spice.sessions import learnings, records
 from spice.tasks import config as task_config
 from spice.tasks import create, identity as task_identity, ops
+from tests.test_sessionfixtures import (
+    SUPERVISED_FIXTURES,
+    transcript_driver_for_fixture,
+)
 
 CODEX_HOME_ENV = "CODEX_HOME"  # env-policy: allow
 BRIEFING_FILTER_MAX_LINES = 80
@@ -224,6 +228,17 @@ def test_rehydration_recency_candidates_order_finals_commits_and_intents():
         (briefing_module.RECENCY_RANK_NAME, "newer intent"),
         (briefing_module.RECENCY_RANK_NAME, "older intent"),
     ]
+
+
+def test_briefing_renders_supervised_fixture_recovery(monkeypatch):
+    for transcript in SUPERVISED_FIXTURES:
+        with transcript_driver_for_fixture(monkeypatch, transcript):
+            briefing = render_briefing([transcript], max_lines=200, max_bytes=20000)
+
+        assert f"files={transcript.name}" in briefing
+        assert "compactions=3/3" in briefing
+        assert "Recovery" in briefing
+        assert "Latest Final" in briefing
 
 
 def test_briefing_learnings_use_active_stem_top_five(session_task_repo):
