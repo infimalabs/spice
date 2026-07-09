@@ -22,6 +22,7 @@ TASK_ORIGIN_REQUIRED_ERROR = (
     "task it descends from (--origin task:<handle>); work created while "
     "holding an active claim inherits that claim automatically"
 )
+MISSING_ACCEPTANCE_PLAN_PHASE = "plan"
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,31 @@ def _resolved_task_origin(origin: str | None, actor: str) -> str:
     if claim is not None:
         return f"task:{identity.render_handle(claim)}"
     raise SpiceError(TASK_ORIGIN_REQUIRED_ERROR)
+
+
+def _creation_flow_policy(
+    *,
+    flow: list[str] | None,
+    acceptance: list[str],
+    resolved_project: str,
+    creation_surface: str | None,
+    system_project: bool,
+) -> list[str] | None:
+    if flow or acceptance:
+        return flow
+    if system_project:
+        return flow
+    if creation_surface != config.TASK_CREATION_SURFACE_CLI:
+        return flow
+    if config.is_internal_or_hidden_project(resolved_project):
+        return flow
+    default_flow = config.resolve_flow(None, resolved_project)
+    if default_flow[0] == MISSING_ACCEPTANCE_PLAN_PHASE:
+        return default_flow
+    return [
+        MISSING_ACCEPTANCE_PLAN_PHASE,
+        *(phase for phase in default_flow if phase != MISSING_ACCEPTANCE_PLAN_PHASE),
+    ]
 
 
 def _resolve_add_project(actor: str, project: str | None, system_project: bool) -> str:
@@ -266,7 +292,14 @@ def _add_result(
         # Match a normal claim's baseline check before creating the task row.
         # If this fails, task add --claim must not leave unclaimed work behind.
         gitsync.prepare_for_claim()
-    phases = config.resolve_flow(flow, resolved_project)
+    routed_flow = _creation_flow_policy(
+        flow=flow,
+        acceptance=acceptance,
+        resolved_project=resolved_project,
+        creation_surface=creation_surface,
+        system_project=system_project,
+    )
+    phases = config.resolve_flow(routed_flow, resolved_project)
     incepted = identity.mint_incepted(existing)
     if existing is not None:
         existing.add(incepted)
@@ -419,7 +452,7 @@ def _parse_batch_fields(raw: str, index: int) -> tuple[dict[str, str], list[str]
 
 def _batch_field_errors(fields: dict[str, str], index: int) -> list[str]:
     errors: list[str] = []
-    for req in ("title", "project", "acceptance"):
+    for req in ("title", "project"):
         if not fields.get(req):
             errors.append(f"line {index}: missing required field {req!r}")
     if fields.get("title"):
@@ -467,7 +500,7 @@ def _batch_request_from_fields(fields: dict[str, str]) -> TaskAddBatchRequest:
         flow=_batch_csv(fields.get("flow", "")),
         tags=_batch_csv(fields.get("tags", "")),
         after=_batch_csv(fields.get("after", "")),
-        acceptance=(fields["acceptance"],),
+        acceptance=(fields["acceptance"],) if fields.get("acceptance") else (),
         due=fields.get("due") or None,
         deferred=_batch_bool(fields.get("deferred", "")),
         origin=fields.get("origin") or None,

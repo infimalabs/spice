@@ -98,9 +98,10 @@ def activation_command_surface_lines() -> list[str]:
             "task_capture_contract=operator requests to create or capture tasks "
             "are captured immediately with a TASK directive that starts on its "
             "own line; when ACKing, write ACK <key>: captured the request. "
-            "then put TASK title=... | project=<stem.child> | acceptance=... "
-            "on the next line using the same key=value batch format as task "
-            "add, or use spice task add before continuing other work; "
+            "then put TASK title=... | project=<stem.child> "
+            "[| acceptance=...] on the next line using the same key=value "
+            "batch format as task add; omitted acceptance with no flow starts "
+            "in plan, or use spice task add before continuing other work; "
             "immediate task capture is not allocator selection, so do not "
             "claim or switch tasks unless spice task next assigns it or live "
             "steering explicitly says to"
@@ -109,9 +110,10 @@ def activation_command_surface_lines() -> list[str]:
         "tasks=spice task list",
         'task_done=spice task done <handle> --validation "..."',
         (
-            "task_add_public=TASK title=... | project=<stem.child> | "
-            "acceptance=... must start on its own line and uses the same "
-            "task-add batch format, or use spice task add ... --project "
+            "task_add_public=TASK title=... | project=<stem.child> "
+            "[| acceptance=...] must start on its own line and uses the same "
+            "task-add batch format; omitted acceptance with no flow creates "
+            "a plan-phase task, or use spice task add ... --project "
             "<stem.child>; omitting --project creates private agent scratch "
             "work, allowed only in Steer lifetime"
         ),

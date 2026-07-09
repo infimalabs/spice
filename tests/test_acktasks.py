@@ -27,7 +27,7 @@ from spice.serve.team.store import (
     ServeTeamStore,
     TeamConfig,
 )
-from spice.tasks import alloc, config, identity, tw
+from spice.tasks import alloc, config, identity, ops, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -138,6 +138,38 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert identity.render_handle(assigned or {}) == handle
     assert store.current_team_for_agent(ACTOR) is None
     assert sidechannelnotify.consume_side_channel_notices(task_repo) == []
+
+
+def test_supervised_ack_missing_acceptance_routes_inline_task_to_plan(
+    task_repo, quiet_supervisor
+):
+    write_inbox_item(
+        task_repo,
+        f"{INBOX_KEY}.txt",
+        compose_inbox_text(body="capture this", priority=None, stop=False),
+    )
+    log = io.StringIO()
+
+    watchdog.process_supervised_assistant_message(
+        task_repo,
+        (
+            f"ACK {INBOX_KEY}: captured.\n"
+            "TASK title=Inline plan follow-up | project=task.unit"
+        ),
+        log,
+        watchdog.MaximReminderGate(),
+    )
+
+    rows = tw.export(["status:pending"])
+    assert collect_inbox_items(task_repo) == []
+    assert len(rows) == 1
+    assert rows[0]["description"] == "Inline plan follow-up"
+    assert rows[0]["project"] == "task.unit"
+    assert rows[0]["phase"] == "plan"
+    assert ops.phases_of(rows[0]) == ["plan", "todo", "review"]
+    assert not str(rows[0].get("acceptance") or "")
+    assert rows[0]["origin"] == f"ack:{INBOX_KEY}"
+    assert rows[0][config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
 
 
 def test_claude_stdout_scanner_archives_ack_and_task_after_thinking_block(

@@ -217,6 +217,59 @@ def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
     assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
 
 
+def test_task_add_missing_acceptance_routes_to_plan(task_repo, capsys):
+    args = build_parser().parse_args(
+        [
+            "task",
+            "add",
+            "Plan routed CLI task",
+            "--project",
+            "task.unit",
+            "--due",
+            "2026-08-01",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
+    )
+
+    assert args.func(args) == 0
+    created = capsys.readouterr().out.split()[1]
+    row = identity.resolve(created)
+
+    assert row["description"] == "Plan routed CLI task"
+    assert row["project"] == "task.unit"
+    assert row["phase"] == "plan"
+    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert not str(row.get("acceptance") or "")
+    assert row["origin"] == "ack:20260101T000000000000Z"
+    assert str(row.get("due") or "").startswith("20260801")
+
+
+def test_task_add_missing_acceptance_honors_explicit_flow(task_repo, capsys):
+    args = build_parser().parse_args(
+        [
+            "task",
+            "add",
+            "Explicit flow CLI task",
+            "--project",
+            "task.unit",
+            "--flow",
+            "todo,review",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
+    )
+
+    assert args.func(args) == 0
+    created = capsys.readouterr().out.split()[1]
+    row = identity.resolve(created)
+
+    assert row["description"] == "Explicit flow CLI task"
+    assert row["phase"] == "todo"
+    assert ops.phases_of(row) == ["todo", "review"]
+    assert not str(row.get("acceptance") or "")
+
+
 def test_task_add_deferred_flag_creates_waiting_task(task_repo, capsys):
     args = build_parser().parse_args(
         [

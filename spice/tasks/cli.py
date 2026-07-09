@@ -506,6 +506,10 @@ def _configure_add_parser(actions: Any) -> None:
         help="Create a task (positional title, or batch from stdin).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
+            "Routing:\n"
+            "  Public CLI tasks with no --acceptance and no --flow start in "
+            "plan, then continue through the project's default flow. Pass "
+            "--flow for an intentional non-default route.\n\n"
             "Private work:\n"
             "  Use --private, or omit --project, to create this agent's "
             "private task. Only allowed in Steer lifetime; Drive and Drain "
@@ -564,7 +568,13 @@ def _configure_add_parser(actions: Any) -> None:
         default=config.DEFAULT_PRIORITY,
         help="Native Taskwarrior priority: high/medium/low/none or H/M/L.",
     )
-    add.add_argument("--flow")
+    add.add_argument(
+        "--flow",
+        help=(
+            "Comma-separated phase route. Supplying --flow is explicit and is "
+            "not rewritten when --acceptance is omitted."
+        ),
+    )
     add.add_argument("--tag", action="append", default=[], dest="tags")
     add.add_argument(
         "--after",
@@ -573,7 +583,15 @@ def _configure_add_parser(actions: Any) -> None:
         metavar="HANDLE",
         help="Dependency handle; repeat --after for multiple dependencies.",
     )
-    add.add_argument("--acceptance", action="append", default=[])
+    add.add_argument(
+        "--acceptance",
+        action="append",
+        default=[],
+        help=(
+            "Acceptance criterion; repeat for multiple criteria. Omit only "
+            "when the task should start in plan unless --flow is explicit."
+        ),
+    )
     add.add_argument("--wait")
     add.add_argument(
         "--deferred",

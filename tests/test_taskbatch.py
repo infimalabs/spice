@@ -16,7 +16,7 @@ from spice.serve.team.store import (
     ServeTeamStore,
     TeamConfig,
 )
-from spice.tasks import config, create, identity, tw
+from spice.tasks import config, create, identity, ops, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -87,6 +87,24 @@ def test_parse_add_batch_accepts_task_directive_prefix(task_repo):
     assert tw.export(["status:pending"]) == []
 
 
+def test_parse_add_batch_accepts_missing_acceptance(task_repo):
+    requests = create.parse_add_batch(
+        [
+            "TASK title=Plan batch | project=task.unit | origin=ack:20260101T000000000000Z"
+        ]
+    )
+
+    assert requests == [
+        create.TaskAddBatchRequest(
+            title="Plan batch",
+            project="task.unit",
+            acceptance=(),
+            origin="ack:20260101T000000000000Z",
+        )
+    ]
+    assert tw.export(["status:pending"]) == []
+
+
 def test_parse_add_batch_accepts_deferred_field(task_repo):
     requests = create.parse_add_batch(
         [
@@ -136,6 +154,41 @@ def test_add_batch_creates_from_parsed_requests(task_repo):
     assert row["project"] == "task.unit"
     assert row["priority"] == "L"
     assert row["acceptance"] == "Batch creation still works"
+
+
+def test_cli_surface_batch_missing_acceptance_routes_to_plan(task_repo):
+    handles = create.add_batch(
+        [
+            "title=Plan routed batch | project=task.unit | due=2026-08-01 | "
+            "origin=ack:20260101T000000000000Z"
+        ],
+        creation_surface=config.TASK_CREATION_SURFACE_CLI,
+    )
+    row = identity.resolve(handles[0])
+
+    assert row["description"] == "Plan routed batch"
+    assert row["project"] == "task.unit"
+    assert row["phase"] == "plan"
+    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert not str(row.get("acceptance") or "")
+    assert row["origin"] == "ack:20260101T000000000000Z"
+    assert str(row.get("due") or "").startswith("20260801")
+
+
+def test_cli_surface_batch_missing_acceptance_honors_explicit_flow(task_repo):
+    handles = create.add_batch(
+        [
+            "title=Explicit flow batch | project=task.unit | flow=todo,review | "
+            "origin=ack:20260101T000000000000Z"
+        ],
+        creation_surface=config.TASK_CREATION_SURFACE_CLI,
+    )
+    row = identity.resolve(handles[0])
+
+    assert row["description"] == "Explicit flow batch"
+    assert row["phase"] == "todo"
+    assert ops.phases_of(row) == ["todo", "review"]
+    assert not str(row.get("acceptance") or "")
 
 
 def test_add_batch_deferred_field_creates_waiting_task(task_repo):

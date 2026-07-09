@@ -31,7 +31,8 @@ TASK_CAPTURE_IMMEDIATE = (
 )
 TASK_CAPTURE_NOT_ALLOCATOR = "immediate task capture is not allocator selection"
 TASK_CAPTURE_ACK_EXAMPLE = "ACK <key>: captured the request."
-TASK_CAPTURE_LINE_EXAMPLE = "TASK title=... | project=<stem.child> | acceptance=..."
+TASK_CAPTURE_LINE_EXAMPLE = "TASK title=... | project=<stem.child> [| acceptance=...]"
+TASK_CAPTURE_PLAN_HINT = "omitted acceptance with no flow starts in plan"
 TASK_CAPTURE_ORIGIN_HINT = "the captured task inherits origin=ack:<key> from your ACK"
 
 
@@ -121,6 +122,7 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert TASK_CAPTURE_IMMEDIATE in done_output
     assert TASK_CAPTURE_ACK_EXAMPLE in done_output
     assert TASK_CAPTURE_LINE_EXAMPLE in done_output
+    assert TASK_CAPTURE_PLAN_HINT in done_output
     assert TASK_CAPTURE_ORIGIN_HINT in done_output
     assert TASK_CAPTURE_NOT_ALLOCATOR in done_output
     assert STEER_MANUAL_CLAIM in done_output
@@ -131,6 +133,7 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert TASK_CAPTURE_IMMEDIATE in shown
     assert TASK_CAPTURE_ACK_EXAMPLE in shown
     assert TASK_CAPTURE_LINE_EXAMPLE in shown
+    assert TASK_CAPTURE_PLAN_HINT in shown
     assert TASK_CAPTURE_NOT_ALLOCATOR in shown
     assert STEER_MANUAL_CLAIM in shown
 
@@ -146,6 +149,7 @@ def test_steer_task_done_and_review_outputs_make_continuation_explicit(
     assert TASK_CAPTURE_IMMEDIATE in review_output
     assert TASK_CAPTURE_ACK_EXAMPLE in review_output
     assert TASK_CAPTURE_LINE_EXAMPLE in review_output
+    assert TASK_CAPTURE_PLAN_HINT in review_output
     assert TASK_CAPTURE_NOT_ALLOCATOR in review_output
     assert STEER_MANUAL_CLAIM in review_output
 
