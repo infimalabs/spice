@@ -21,6 +21,7 @@ function pageTopology() {
     laneCount: laneStates.size,
     lanes,
     storedConfig: localStorage.getItem(laneStorageKey),
+    snapshotRevision: teamSnapshotRevision,
     targetIds: targets.map((target) => target.id),
   };
 }
@@ -53,6 +54,7 @@ async function run() {
     },
     async ({ page, server }) => {
       await waitForImportShell(page);
+      const beforeReload = await page.evaluate(pageTopology);
       const hintedCount = await page.evaluate(installStaleOpenLaneHints);
       if (hintedCount < 1)
         throw new Error("fresh startup smoke needs at least one target hint");
@@ -78,7 +80,13 @@ async function run() {
         "fresh startup must rewrite stale lane config",
         afterReload,
       );
-      return { afterReload, hintedCount, url: server.url };
+      assertEqual(
+        afterReload.snapshotRevision,
+        beforeReload.snapshotRevision,
+        "stale open-lane hints must not mutate the team store revision",
+        { beforeReload, afterReload },
+      );
+      return { afterReload, beforeReload, hintedCount, url: server.url };
     },
   );
 }
