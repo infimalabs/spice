@@ -76,10 +76,10 @@ INBOX_ACK_REPLY_FALLBACK_SENTENCE = (
 INBOX_TASK_HINT_ROW = (
     "Task offload: capture in the moment with a standalone TASK line: "
     "`TASK title=... | project=<stem.child> [| acceptance=...]`; omitted "
-    "acceptance with no flow starts in plan. If ACKing steering, put ACK "
-    "prose first and then the TASK line on its own line. Use the same "
-    "task-add batch format, or use spice task add; then resume allocator "
-    "flow."
+    "acceptance with no flow starts in plan; repeat acceptance=... for "
+    "multiple criteria. If ACKing steering, put ACK prose first and then the "
+    "TASK line on its own line. Use the same task-add batch format, or use "
+    "spice task add; then resume allocator flow."
 )
 INBOX_PEEK_PERSISTENCE_ROW = (
     "Persistence: acknowledged or refused keys clear once processed; "

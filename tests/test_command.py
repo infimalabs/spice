@@ -749,6 +749,7 @@ def test_inbox_injector_repeats_pending_steering_after_interval(tmp_path):
     assert "standalone TASK line" in output
     assert "TASK title=... | project=<stem.child> [| acceptance=...]" in output
     assert "omitted acceptance with no flow starts in plan" in output
+    assert "repeat acceptance=... for multiple criteria" in output
     assert "ACK prose first and then the TASK line on its own line" in output
     assert "same task-add batch format" in output
 

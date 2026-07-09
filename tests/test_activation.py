@@ -34,6 +34,7 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "TASK title=... | project=<stem.child> [| acceptance=...]" in text
     assert "omitted acceptance with no flow starts in plan" in text
     assert "same key=value batch format as task add" in text
+    assert "repeat acceptance=... for multiple criteria" in text
     assert "immediate task capture is not allocator selection" in text
     assert "ack_inline=spice is a real-time interactive loop" in text
     assert "lead each working assistant message with ACK <key>" in text
@@ -44,6 +45,7 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "omitted acceptance with no flow creates a plan-phase task" in text
     assert "must start on its own line" in text
     assert "same task-add batch format" in text
+    assert "repeat acceptance=... for multiple criteria" in text
     assert "task_project_depth=public task project depth bounds" in text
 
 
