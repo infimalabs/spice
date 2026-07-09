@@ -8,9 +8,6 @@ state persists in the git dir (`spice/file-loc-sticky.json`,
 file back at or under its base limit, so a latch first recorded in one
 (now-idle) worktree heals as soon as the fix lands on the shared baseline.
 
-Library seam: target-repo tools may import the public finding dataclass,
-scan helpers, counters, and `render_loc_board`; underscored names remain
-private.
 """
 
 from __future__ import annotations

@@ -1,8 +1,4 @@
-"""Process-group spawn, liveness, and termination across POSIX and Windows.
-
-Library seam: target-repo tools may import the public process-group helpers;
-underscored names remain private.
-"""
+"""Process-group spawn, liveness, and termination across POSIX and Windows."""
 
 from __future__ import annotations
 

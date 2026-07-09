@@ -8,9 +8,6 @@ gate is a ratchet, not an amnesty: only literals absent from the same file at
 the baseline ref fail, so existing debt does not block unrelated commits
 while new debt cannot land.
 
-Library seam: target-repo tools may import the public finding dataclass,
-scan/detect helpers, and `render_magic_board`; underscored names remain
-private.
 """
 
 from __future__ import annotations

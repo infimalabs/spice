@@ -5,8 +5,6 @@ this module; changing a value here changes the enforced opinion everywhere at
 once. Direct study commands may accept flags for focused investigation, but
 the commit gates intentionally run the defaults here.
 
-Library seam: target-repo tools may import the public constants and
-`flex_limit`; underscored names remain private.
 """
 
 from __future__ import annotations

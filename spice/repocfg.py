@@ -6,8 +6,6 @@ and every agent sees the same opinions. Operator-local state (speech voice,
 judge binary, personality, worktree agent overrides) is *worktree truth* and
 lives in `.spice/config/`.
 
-Library seam: target-repo tools may import the public tracked-config table
-readers and `string_list`; underscored names remain private.
 """
 
 from __future__ import annotations

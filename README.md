@@ -51,8 +51,8 @@ See [docs/overview.md](docs/overview.md) for the operating model and
 
 Configuration lives in [CONFIG.md](CONFIG.md). The design contract lives in
 [DESIGN.md](DESIGN.md). Wrapper command behavior is detailed in
-[docs/cli/wrapper-commands.md](docs/cli/wrapper-commands.md), and the public
-repo-tool library seam is in [docs/library-seam.md](docs/library-seam.md).
+[docs/cli/wrapper-commands.md](docs/cli/wrapper-commands.md). Stability
+expectations for extensions and command coupling live in [STABILITY.md](STABILITY.md).
 
 ## Install
 

@@ -8,7 +8,8 @@ and assume anything unlisted is internal unless another document says otherwise.
 | --- | --- | --- |
 | Inbox file format and ACK protocol | Stable | Durable inbox items, UTC keys, priority/note fields, pending readout, and transcript `ACK <key>: ...` retirement are core protocol. Integrators can build tooling that writes operator steering and watches semantic ACKs. |
 | Constitution constants and hook policy | Stable | Policy limits, flex/sticky behavior, repo-shape checks, env-literal inventory, magic-number ratchet, and commit-message rules are executable doctrine. Changes should be explicit contract changes, not silent drift. |
-| Public library seam | Stable | Modules documented in [docs/library-seam.md](docs/library-seam.md) are intended for repo tools, including `spice.errors`, `spice.policy`, `spice.flexstate`, `spice.locking`, `spice.paths`, `spice.procs`, `spice.repocfg`, and named study helpers. Underscored names remain private. |
+| Extension import surface | Stable | Entry points in `spice.drivers`, `spice.studies`, and `spice.wrappers` run in the installed spice process and may use spice modules needed to implement those extension contracts. Underscored names remain private. |
+| Command coupling channel | Stable | Repository tools couple to spice through mounted commands, tracked `[tool.spice.*]` config, `spice lock`, and JSON study/task/session command output instead of importing spice from an operated repository environment. |
 | Agent bootstrap contract | Stable | Worktree skill invocation, `spice agent activation`, `spice session briefing`, and task-board rehydration are the supported prompt-boundary path. |
 | Release commands | Stable enough | `spice release prepare`, `notes`, `publish`, and `github` are operator-facing commands. Minor output changes are possible, but the workflow contract should remain intact. |
 | Task allocator CLI | Settling | Handles, phases, claims, review flow, and `spice task next` are real operating surfaces. Script against command output cautiously; prefer the CLI over direct Taskwarrior storage. |
@@ -18,6 +19,6 @@ and assume anything unlisted is internal unless another document says otherwise.
 | Static browser modules | Internal | `spice/serve/static/app.*.js` files are frameworkless implementation modules. Tests document invariants, but module boundaries are not public APIs. |
 | Supervisor internals | Internal | Watchdog, side-channel, lifecycle state files, and process supervision details may change as long as the public agent/session/task contracts remain true. |
 
-When in doubt, prefer commands and documented library seams over internal files.
+When in doubt, prefer commands, tracked config, and extension entry points over internal files.
 Stable means compatibility matters; in motion means the idea is real, but the
 shape is still allowed to improve.
