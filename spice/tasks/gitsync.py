@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from spice.errors import SpiceError
-from spice.tasks import config, identity
+from spice.tasks import config, identity, wordingreview
 
 GIT_NETWORK_TIMEOUT_SECONDS = 30
 TASK_GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
@@ -281,6 +281,7 @@ def integrate_and_publish(
     history mutation.
     """
     root = repo_root or config.repo_root()
+    wordingreview.require_integrate_allowed(label, meta)
     agent_head = _read(root, "rev-parse", "HEAD")
     resolved = _resolve_target(root)
     if resolved is None:
