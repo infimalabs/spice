@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, replace
 from http import HTTPStatus
 from pathlib import Path
-from threading import Event, Lock
+from threading import Barrier, Event, Lock
 from types import SimpleNamespace
 from typing import Any
 
@@ -532,6 +532,179 @@ def test_metrics_series_replies_from_worker_off_the_dispatch_loop(tmp_path):
     assert results[0]["result"]["echo"] == "burndown"
 
 
+def test_lanes_subscribe_replies_once_with_field_parity_per_lane(tmp_path, monkeypatch):
+    monkeypatch.setattr(livebus, "_wait_for_change", _idle_wait)
+    targets, transcripts = _two_lane_fixture(tmp_path)
+    batch_connection = _Connection()
+    batch_session = LiveBusSession(
+        batch_connection, _multi_lane_callbacks(targets, transcripts)
+    )
+    single_connection = _Connection()
+    single_session = LiveBusSession(
+        single_connection, _multi_lane_callbacks(targets, transcripts)
+    )
+
+    try:
+        batch_session._handle_lanes_subscribe(
+            {
+                "type": "lanes.subscribe",
+                "requestId": "batch-1",
+                "entries": [
+                    {"targetId": "lane-a", "query": {"limit": 5}},
+                    {"targetId": "lane-b", "query": {"limit": 5}},
+                ],
+            }
+        )
+        with batch_connection.lock:
+            assert len(batch_connection.sent) == 1
+            frame = batch_connection.sent[0]
+        assert frame["type"] == "lanes.payload"
+        assert frame["requestId"] == "batch-1"
+        lane_ids = [lane_entry["targetId"] for lane_entry in frame["lanes"]]
+        assert lane_ids == ["lane-a", "lane-b"]
+        for lane_entry in frame["lanes"]:
+            single_session._handle_lane_subscribe(
+                {
+                    "type": "lane.subscribe",
+                    "targetId": lane_entry["targetId"],
+                    "query": {"limit": 5},
+                }
+            )
+            with single_connection.lock:
+                single_frame = single_connection.sent[-1]
+            assert single_frame["type"] == "lane.payload"
+            assert lane_entry["payload"] == single_frame["payload"]
+        # ackContexts and task cards ride the same payload fields both ways.
+        assert frame["lanes"][0]["payload"]["ackContexts"] == [
+            {"key": "20260101T000000000001Z", "targetId": "lane-a"}
+        ]
+        assert frame["lanes"][0]["payload"]["messages"][0]["kind"] == "task"
+        assert set(batch_session.subscriptions) == {"lane-a", "lane-b"}
+    finally:
+        batch_session._teardown()
+        single_session._teardown()
+
+
+def test_lanes_subscribe_watch_pushes_exactly_the_changed_lane(tmp_path, monkeypatch):
+    targets, transcripts = _two_lane_fixture(tmp_path)
+    repo_a = targets[0].repo_root
+    transcript_a = transcripts["thread-lane-a"]
+    connection = _Connection()
+    change_a = Event()
+
+    def observed_wait(paths: tuple[Path, ...], stop, watch=None) -> bool:
+        if inbox_dir(repo_a) in paths and not change_a.is_set():
+            changed = change_a.wait(timeout=2.0)
+            return changed and not stop.is_set()
+        stop.wait(timeout=2.0)
+        return False
+
+    monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
+    session = LiveBusSession(connection, _multi_lane_callbacks(targets, transcripts))
+
+    try:
+        session._handle_lanes_subscribe(
+            {
+                "type": "lanes.subscribe",
+                "requestId": "batch-1",
+                "entries": [
+                    {"targetId": "lane-a", "query": {"limit": 5}},
+                    {"targetId": "lane-b", "query": {"limit": 5}},
+                ],
+            }
+        )
+        transcript_a.write_text('{"kind":"message"}\n', encoding="utf-8")
+        change_a.set()
+
+        pushed = _wait_for_watch_push(connection)
+        assert pushed["type"] == "lane.payload"
+        assert pushed["targetId"] == "lane-a"
+        time.sleep(0.15)
+        with connection.lock:
+            watch_targets = [
+                payload["targetId"]
+                for payload in connection.sent
+                if payload.get("source") == "watch"
+            ]
+        assert watch_targets == ["lane-a"]
+    finally:
+        change_a.set()
+        session._teardown()
+
+
+def test_lanes_subscribe_computes_payloads_concurrently(tmp_path, monkeypatch):
+    monkeypatch.setattr(livebus, "_wait_for_change", _idle_wait)
+    targets, transcripts = _two_lane_fixture(tmp_path)
+    connection = _Connection()
+    barrier = Barrier(2)
+
+    def overlapping_payload(bus_target, **_kwargs):
+        # Each compute blocks until the other arrives: only overlapping
+        # execution passes the barrier; serial execution breaks it and the
+        # error payload below fails the equality assertion.
+        barrier.wait(timeout=2.0)
+        return {"messages": [], "statusLine": {"targetId": bus_target.id}}
+
+    session = LiveBusSession(
+        connection,
+        _multi_lane_callbacks(
+            targets, transcripts, messages_payload=overlapping_payload
+        ),
+    )
+
+    try:
+        started = time.perf_counter()
+        session._handle_lanes_subscribe(
+            {
+                "type": "lanes.subscribe",
+                "requestId": "batch-1",
+                "entries": [
+                    {"targetId": "lane-a", "query": {"limit": 5}},
+                    {"targetId": "lane-b", "query": {"limit": 5}},
+                ],
+            }
+        )
+        elapsed = time.perf_counter() - started
+        with connection.lock:
+            assert len(connection.sent) == 1
+            frame = connection.sent[0]
+        assert [entry["payload"] for entry in frame["lanes"]] == [
+            {"messages": [], "statusLine": {"targetId": "lane-a"}},
+            {"messages": [], "statusLine": {"targetId": "lane-b"}},
+        ]
+        assert elapsed < 2.0  # one overlapped rendezvous, well inside 2x the wait
+    finally:
+        session._teardown()
+
+
+def test_lanes_subscribe_rejects_duplicate_target_ids(tmp_path):
+    targets, transcripts = _two_lane_fixture(tmp_path)
+    connection = _Connection()
+    session = LiveBusSession(connection, _multi_lane_callbacks(targets, transcripts))
+
+    try:
+        session._handle_lanes_subscribe(
+            {
+                "type": "lanes.subscribe",
+                "requestId": "dup-1",
+                "entries": [
+                    {"targetId": "lane-a", "query": {"limit": 5}},
+                    {"targetId": "lane-a", "query": {"limit": 5}},
+                ],
+            }
+        )
+        assert connection.sent == [
+            {
+                "type": "bus.error",
+                "error": "duplicate targetId 'lane-a' in lanes.subscribe",
+                "requestId": "dup-1",
+            }
+        ]
+        assert session.subscriptions == {}
+    finally:
+        session._teardown()
+
+
 def test_lane_subscription_pushes_reply_card_without_a_followup_message(
     tmp_path, monkeypatch
 ):
@@ -691,6 +864,68 @@ def _callbacks(
         ),
         lane_watch_paths=watch_paths,
         lane_signature=lane_signature or signature,
+    )
+
+
+def _idle_wait(_paths: tuple[Path, ...], stop, watch=None) -> bool:
+    stop.wait(0.05)
+    return False
+
+
+def _two_lane_fixture(tmp_path: Path) -> tuple[list[_Target], dict[str, Path]]:
+    targets: list[_Target] = []
+    transcripts: dict[str, Path] = {}
+    for name in ("lane-a", "lane-b"):
+        repo = tmp_path / f"repo-{name}"
+        repo.mkdir()
+        transcript = tmp_path / f"{name}.jsonl"
+        transcript.write_text("", encoding="utf-8")
+        targets.append(_Target(id=name, repo_root=repo))
+        transcripts[f"thread-{name}"] = transcript
+    return targets, transcripts
+
+
+def _multi_lane_callbacks(
+    targets: list[_Target],
+    transcripts: dict[str, Path],
+    messages_payload=None,
+) -> LiveBusCallbacks:
+    by_id = {target.id: target for target in targets}
+
+    def default_messages_payload(bus_target, **_kwargs):
+        return {
+            "messages": [{"key": bus_target.id + "-m1", "kind": "task"}],
+            "ackContexts": [
+                {"key": "20260101T000000000001Z", "targetId": bus_target.id}
+            ],
+            "statusLine": {"targetId": bus_target.id},
+        }
+
+    def watch_paths(bus_target, _thread_id, transcript):
+        paths = [inbox_dir(bus_target.repo_root)]
+        if transcript is not None:
+            paths.append(transcript.path)
+        return tuple(paths)
+
+    def signature(_bus_target, _thread_id, transcript):
+        transcript_size = transcript.path.stat().st_size if transcript else 0
+        return LaneSignature(transcript=transcript_size, inbox=(), other=())
+
+    return LiveBusCallbacks(
+        resolve_target=lambda selector: by_id.get(str(selector or "")),
+        work_trees_payload=lambda: {},
+        messages_payload=messages_payload or default_messages_payload,
+        send_payload=lambda _target, _payload: ({}, None),
+        task_drain_payload=lambda _target, _payload: ({}, None),
+        team_snapshot_payload=lambda _since_revision: {},
+        team_command_payload=lambda _payload: ({}, None),
+        metric_series_payload=lambda _query: {"ok": True, "points": []},
+        thread_id=lambda bus_target: "thread-" + bus_target.id,
+        transcript_resolution=lambda thread_id: _transcript_resolution(
+            thread_id, transcripts[thread_id]
+        ),
+        lane_watch_paths=watch_paths,
+        lane_signature=signature,
     )
 
 
