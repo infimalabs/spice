@@ -160,6 +160,15 @@ class LiveClaim:
     claim_until: str
 
 
+@dataclass(frozen=True)
+class ClaimRenewalResult:
+    renewed: bool
+    reason: str
+    handle: str = ""
+    claim_until: str = ""
+    detail: str = ""
+
+
 def _live_claim(row: dict[str, Any]) -> LiveClaim | None:
     until = str(row.get("claim_until") or "")
     if not until or until < tw.now_iso():
@@ -320,6 +329,115 @@ def do_claim(uuid: str, actor: str, *, guard_unclaimed: bool = True) -> bool:
         raise
     _record_task_lifecycle_event(uuid, "claim", actor)
     return True
+
+
+def _renewal_claim_meta(actor: str) -> list[str]:
+    return [
+        arg
+        for arg in claim_meta(actor)
+        if not arg.startswith(("claim_by:", "claim_at:"))
+    ]
+
+
+def _claim_worktree_matches(row: dict[str, Any], repo_root: Path) -> bool:
+    raw = str(row.get("claim_worktree") or "").strip()
+    if not raw:
+        return False
+    try:
+        return Path(raw).expanduser().resolve() == repo_root.expanduser().resolve()
+    except OSError:
+        return False
+
+
+def _claim_renewal_block(row: dict[str, Any], actor: str) -> ClaimRenewalResult | None:
+    handle = identity.render_handle(row)
+    status = str(row.get("status") or "")
+    if status == "deleted":
+        return ClaimRenewalResult(False, "deleted", handle=handle)
+    if status == "completed":
+        return ClaimRenewalResult(False, "completed", handle=handle)
+    owner = str(row.get("claim_by") or "")
+    if owner and owner != actor:
+        return ClaimRenewalResult(
+            False,
+            "claimed_by_other",
+            handle=handle,
+            claim_until=str(row.get("claim_until") or ""),
+            detail=owner,
+        )
+    if not owner or not row.get("start"):
+        return ClaimRenewalResult(False, "no_active_claim", handle=handle)
+    if not _claim_worktree_matches(row, config.repo_root()):
+        return ClaimRenewalResult(False, "different_worktree", handle=handle)
+    return None
+
+
+def _claim_renewal_missing_result(
+    handle: str | None, exc: SpiceError
+) -> ClaimRenewalResult:
+    detail = str(exc)
+    if detail.startswith("unknown task:"):
+        return ClaimRenewalResult(
+            False, "missing", handle=(handle or ""), detail=detail
+        )
+    return ClaimRenewalResult(
+        False, "backend_error", handle=(handle or ""), detail=detail
+    )
+
+
+def renew_claim(
+    handle: str | None = None, *, actor: str | None = None
+) -> ClaimRenewalResult:
+    """Refresh the current actor/worktree's existing active claim.
+
+    Renewal deliberately is not a claim operation: it never starts an unclaimed
+    task, steals a peer claim, repairs ownership, or advances phase state.
+    """
+    resolved_actor = tw.canonical_actor(actor or tw.current_actor())
+    try:
+        row = identity.resolve(handle) if handle else active_claim(resolved_actor)
+    except SpiceError as exc:
+        return _claim_renewal_missing_result(handle, exc)
+    if row is None:
+        return ClaimRenewalResult(False, "no_active_claim")
+    blocked = _claim_renewal_block(row, resolved_actor)
+    if blocked is not None:
+        return blocked
+    uuid = identity.uuid_of(row)
+    handle_text = identity.render_handle(row)
+    try:
+        tw.run(
+            [
+                uuid,
+                "status:pending",
+                "+ACTIVE",
+                f"claim_by.is:{resolved_actor}",
+                f"claim_worktree.is:{config.repo_root()}",
+                "modify",
+                *_renewal_claim_meta(resolved_actor),
+            ]
+        )
+    except SpiceError as exc:
+        try:
+            fresh = identity.resolve(handle_text)
+        except SpiceError as resolve_exc:
+            return _claim_renewal_missing_result(handle_text, resolve_exc)
+        blocked = _claim_renewal_block(fresh, resolved_actor)
+        if blocked is not None:
+            return blocked
+        return ClaimRenewalResult(
+            False, "backend_error", handle=handle_text, detail=str(exc)
+        )
+    try:
+        fresh = identity.resolve(handle_text)
+    except SpiceError as exc:
+        return _claim_renewal_missing_result(handle_text, exc)
+    return ClaimRenewalResult(
+        True,
+        "renewed",
+        handle=identity.render_handle(fresh),
+        claim_until=str(fresh.get("claim_until") or ""),
+    )
 
 
 # ---- claim --------------------------------------------------------------

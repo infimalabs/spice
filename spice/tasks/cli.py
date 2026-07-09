@@ -284,6 +284,7 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     _configure_depends_parser(actions)
     _configure_wake_parser(actions)
     _configure_claim_parser(actions)
+    _configure_renew_parser(actions)
     _configure_unclaim_parser(actions)
     _configure_edit_parser(actions)
     _configure_delete_parser(actions)
@@ -381,6 +382,23 @@ def _configure_claim_parser(actions: Any) -> None:
     claim.add_argument("handle")
     claim.add_argument("--steal", action="store_true")
     claim.set_defaults(func=handle)
+
+
+def _configure_renew_parser(actions: Any) -> None:
+    renew = actions.add_parser(
+        "renew",
+        help="Renew this actor/worktree's active claim without claiming new work.",
+        recovery_examples=(
+            "spice task renew",
+            "spice task renew TASK-1k4Q5gJw",
+        ),
+    )
+    renew.add_argument(
+        "handle",
+        nargs="?",
+        help="Task handle; omit to renew your latest active claim.",
+    )
+    renew.set_defaults(func=handle)
 
 
 def _configure_unclaim_parser(actions: Any) -> None:
@@ -777,6 +795,7 @@ _DISPATCH = {
     "depends": lambda a: ops.depends(a.handle, list(a.after)),
     "wake": lambda a: ops.wake(list(a.handles)),
     "claim": lambda a: ops.claim(a.handle, steal=a.steal),
+    "renew": lambda a: _renew(a),
     "unclaim": lambda a: ops.unclaim(a.handle),
     "edit": lambda a: ops.edit(a.handle, priority=a.priority, project=a.project),
     "delete": lambda a: ops.delete(a.handle, a.reason, force_claimed=a.force_claimed),
@@ -818,6 +837,14 @@ def _artifact(args: argparse.Namespace) -> str:
             apply=args.apply,
         )
     raise SpiceError(f"unknown task artifact action {action!r}")
+
+
+def _renew(args: argparse.Namespace) -> str:
+    result = ops.renew_claim(args.handle)
+    if result.renewed:
+        return f"renewed {result.handle} until {result.claim_until}"
+    suffix = f" {result.handle}" if result.handle else ""
+    return f"renew skipped {result.reason}{suffix}"
 
 
 def handle(args: argparse.Namespace) -> int:
