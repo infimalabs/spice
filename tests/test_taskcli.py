@@ -763,6 +763,26 @@ def test_task_next_reports_no_claim_renewal_when_no_task_available(monkeypatch):
     )
 
 
+def test_task_next_reports_failed_claim_renewal_detail(monkeypatch):
+    monkeypatch.setattr(
+        render.ops,
+        "renew_claim",
+        lambda: ops.ClaimRenewalResult(
+            False, "backend_error", detail="backend offline"
+        ),
+    )
+    monkeypatch.setattr(render.alloc, "next_task", lambda: None)
+
+    output = render.render_next()
+
+    assert output == "\n".join(
+        [
+            "claim_renewal=failed backend_error detail=backend offline",
+            "no available tasks; run spice task status",
+        ]
+    )
+
+
 def test_task_show_context_check_names_stale_or_shifted_context(monkeypatch):
     row = _row(
         "No transcript context",

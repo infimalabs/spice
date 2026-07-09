@@ -566,16 +566,18 @@ def _renew_supervised_claim(
     if reported.get("claim_renewal") == report_key:
         return
     reported["claim_renewal"] = report_key
+    state = ops.claim_renewal_state(result)
+    detail = f" detail={result.detail}" if result.detail else ""
     with log_path.open("a", encoding="utf-8") as log_handle:
         log_handle.write(
-            "spice claim renewal skipped: "
-            f"reason={result.reason} handle={result.handle or '-'}\n"
+            f"spice claim renewal {state}: "
+            f"reason={result.reason} handle={result.handle or '-'}{detail}\n"
         )
         log_handle.flush()
         publish_supervisor_feedback(
             repo_root,
             log_handle,
-            "claim.renewal-skipped",
+            f"claim.renewal-{state}",
             reason=result.reason,
             handle=result.handle,
             detail=result.detail,
