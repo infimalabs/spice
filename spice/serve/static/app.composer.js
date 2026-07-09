@@ -314,7 +314,8 @@ function laneComposePlaceholderStatus(member) {
   const parts = [];
   const pending = lanePendingDisplayCount(member);
   parts.push(pending + " pending");
-  const status = (member.lastRenderedStatusLine || {}).agentProcessStatus || "";
+  const statusLine = member.lastRenderedStatusLine || {};
+  const status = statusLine.agentVisualStatus || statusLine.agentProcessStatus || "";
   if (status) parts.push(status);
   return parts.join(", ");
 }
