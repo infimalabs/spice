@@ -2,15 +2,22 @@
 
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from spice.agent import cli as agent_cli
 from spice.agent.activation import (
     activation_browser_validation_lines,
     activation_command_surface_lines,
 )
-from spice.tasks import ops
+from spice.agent.driver import DRIVER
+from spice.tasks import config, create, identity, ops
+
+ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
@@ -112,8 +119,88 @@ def test_activation_packet_reports_claim_renewal(tmp_path, monkeypatch):
     assert "baseline_refresh=current" in packet
 
 
+def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeypatch):
+    if shutil.which("task") is None:
+        pytest.skip("Taskwarrior binary is required")
+    repo = _repo_with_upstream(tmp_path)
+    backend = tmp_path / "task-backend"
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR)
+    config.set_backend(str(backend))
+    try:
+        handle = create.add(
+            "Activation claim follows fast-forward",
+            project="task.unit",
+            origin="ack:20260101T000000000000Z",
+            acceptance=["claim metadata reflects post-refresh HEAD"],
+            claim=True,
+        )
+        old_head = _git(repo, "rev-parse", "HEAD")
+        _advance_upstream(tmp_path)
+
+        monkeypatch.setattr(
+            "spice.agent.lifecycle.bind_ambient_agent_activation",
+            lambda _repo: SimpleNamespace(thread_id=ACTOR),
+        )
+        monkeypatch.setattr(
+            "spice.hooks.install.install_hooks_for_repo", lambda _repo: []
+        )
+        monkeypatch.setattr(
+            "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
+        )
+        monkeypatch.setattr(
+            "spice.mail.steeringkey.steering_token", lambda _repo: "tok"
+        )
+
+        packet = agent_cli.render_activation_packet(repo)
+        row = identity.resolve(handle)
+        refreshed_head = _git(repo, "rev-parse", "HEAD")
+
+        assert old_head != refreshed_head
+        assert "baseline_refresh=updated working tree to the current baseline" in packet
+        assert f"claim_renewal=renewed {handle} until " in packet
+        assert row["claim_head"] == refreshed_head
+    finally:
+        config.set_backend(None)
+
+
 def test_package_json_makes_node_playwright_available():
     package = json.loads(Path("package.json").read_text(encoding="utf-8"))
 
     assert package["private"] is True
     assert package["devDependencies"]["playwright"] == "1.61.0"
+
+
+def _repo_with_upstream(tmp_path: Path) -> Path:
+    remote = tmp_path / "remote.git"
+    repo = tmp_path / "repo"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    _run(tmp_path, "git", "clone", str(remote), str(repo))
+    _run(repo, "git", "config", "user.email", "spice@example.test")
+    _run(repo, "git", "config", "user.name", "Spice Tests")
+    repo.joinpath("README.md").write_text("initial\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "initial")
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+    return repo
+
+
+def _advance_upstream(tmp_path: Path) -> None:
+    remote = tmp_path / "remote.git"
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _run(peer, "git", "config", "user.email", "spice@example.test")
+    _run(peer, "git", "config", "user.name", "Spice Tests")
+    peer.joinpath("README.md").write_text("advanced\n", encoding="utf-8")
+    _run(peer, "git", "add", "README.md")
+    _run(peer, "git", "commit", "-m", "advance upstream")
+    _run(peer, "git", "push", "origin", "main")
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return _run(cwd, "git", *args).stdout.strip()
+
+
+def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
