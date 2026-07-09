@@ -70,6 +70,11 @@ def commands_table(repo_root: Path) -> dict[str, Any]:
     return flattened
 
 
+def locks_table(repo_root: Path) -> dict[str, Any]:
+    value = read_tool_table(repo_root).get("locks")
+    return value if isinstance(value, dict) else {}
+
+
 def _flatten_commands_table(
     source: dict[str, Any], destination: dict[str, Any], *, prefix: str = ""
 ) -> None:
