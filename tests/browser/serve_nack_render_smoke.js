@@ -14,7 +14,7 @@ const { withServePage } = require("./serve_playwright_harness");
 const SCREENSHOT_PATH = path.join(os.tmpdir(), "spice-nack-render.png");
 
 // Pre-resolved steering contexts so the quote blocks render as content rather
-// than pending skeletons (the /acks fetch is bypassed in the smoke).
+// than pending skeletons.
 const SEED_CONTEXTS = [
   ["ack-key", "Please add the doctor rollup."],
   ["nack-key", "Do not weaken the quality gate."],

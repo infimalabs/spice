@@ -19,7 +19,6 @@ from spice.serve.messages import AssistantMessage
 from spice.serve import messages as message_reader
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
-from spice.serve.payload.message import ack_context_payload_for_worktree
 from spice.serve.steering import submit_steering_message
 from spice.serve.team.store import ServeTeamStore
 from spice.tasks import config as task_config
@@ -56,6 +55,7 @@ def _message(
     *,
     kind: str = "assistant",
     ack_count: int = 0,
+    ack_keys: list[str] | None = None,
     preview: str = "",
 ):
     return AssistantMessage(
@@ -66,7 +66,7 @@ def _message(
         display_text="hello",
         display_html="<p>hello</p>",
         ack_count=ack_count,
-        ack_keys=[],
+        ack_keys=ack_keys or [],
         ack_utterances=[],
         kind=kind,
         preview=preview,
@@ -84,6 +84,38 @@ def _message_read(
         error=error,
         transcript=transcript,
     )
+
+
+def _stub_messages_payload(
+    monkeypatch,
+    items: list[AssistantMessage],
+    *,
+    thread_id: str = "thread-a",
+) -> None:
+    monkeypatch.setattr(
+        message, "resolve_thread_id_for_target", lambda _state, _target: thread_id
+    )
+    monkeypatch.setattr(
+        message,
+        "_ensure_work_tree_agent",
+        lambda _state, _target, resolved_thread: (
+            resolved_thread,
+            "",
+            False,
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        message.message_reader,
+        "assistant_messages_for_thread_id",
+        lambda *_args, **_kwargs: _message_read(items),
+    )
+    monkeypatch.setattr(
+        message,
+        "agent_status",
+        lambda _repo: _Status(running=False, started_at=""),
+    )
+    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
 
 
 @dataclass(frozen=True)
@@ -1015,9 +1047,10 @@ def test_sent_steering_payload_includes_image_attachments(tmp_path):
     )
 
 
-def test_ack_context_payload_round_trips_inbox_attachments(tmp_path):
+def test_messages_payload_round_trips_ack_context_attachments(monkeypatch, tmp_path):
     _init_repo(tmp_path)
     name = "20260104T000000000004Z.txt"
+    key = inbox_item_key(name)
     composed = compose_inbox_text(
         body=f"look here\n{RENEWAL_HANDOFF_REQUEST_SUFFIX}",
         priority=None,
@@ -1033,16 +1066,23 @@ def test_ack_context_payload_round_trips_inbox_attachments(tmp_path):
         ]
     )
     write_inbox_item(tmp_path, name, composed, attachments=attachments)
-
-    payload = ack_context_payload_for_worktree(
-        _State(sends=0),
-        _Target(id="wt", repo_root=tmp_path),
-        keys=[inbox_item_key(name)],
+    _stub_messages_payload(
+        monkeypatch,
+        [_message("2026-01-04T00:00:01.000000Z", ack_count=1, ack_keys=[key])],
     )
 
-    attachment = payload["acks"][0]["attachments"][0]
-    assert payload["acks"][0]["text"] == "look here"
-    assert payload["acks"][0]["html"] == "<p>look here</p>"
+    payload = message.messages_payload_for_worktree(
+        _State(),
+        _Target(id="wt", repo_root=tmp_path),
+        limit=5,
+    )
+
+    context = payload["ackContexts"][0]
+    attachment = context["attachments"][0]
+    assert context["key"] == key
+    assert context["found"] is True
+    assert context["text"] == "look here"
+    assert context["html"] == "<p>look here</p>"
     assert attachment["name"] == "upload.png"
     assert attachment["contentType"] == "image/png"
     attachment_path = Path(attachment["path"])
@@ -1092,6 +1132,7 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     )
     assert set(payload) == {
         "messages",
+        "ackContexts",
         "targetWorktreeName",
         "targetBranch",
         "targetIdentity",
@@ -1138,62 +1179,49 @@ def test_messages_payload_reports_inbox_status_without_streaming_requests(
     )
 
 
-def test_ack_context_payload_finds_acked_inbox_item_by_dropped_z_alias(tmp_path):
+def test_messages_payload_finds_ack_context_by_dropped_z_alias(monkeypatch, tmp_path):
     _init_repo(tmp_path)
     name = "20260104T000000000005Z.txt"
     bare_key = "20260104T000000000005"
     composed = compose_inbox_text(body="operator original", priority=None, stop=False)
     write_inbox_item(tmp_path, name, composed)
     archive_ackd_inbox_items(tmp_path, [bare_key])
-
-    payload = ack_context_payload_for_worktree(
-        _State(sends=0),
-        _Target(id="wt", repo_root=tmp_path),
-        keys=[bare_key],
+    _stub_messages_payload(
+        monkeypatch,
+        [
+            _message(
+                "2026-01-04T00:00:01.000000Z",
+                ack_count=1,
+                ack_keys=[bare_key],
+            )
+        ],
     )
 
-    assert payload["acks"][0]["key"] == bare_key
-    assert payload["acks"][0]["found"] is True
-    assert payload["acks"][0]["text"] == "operator original"
+    payload = message.messages_payload_for_worktree(
+        _State(),
+        _Target(id="wt", repo_root=tmp_path),
+        limit=5,
+    )
+
+    assert payload["ackContexts"][0]["key"] == bare_key
+    assert payload["ackContexts"][0]["found"] is True
+    assert payload["ackContexts"][0]["text"] == "operator original"
 
 
-def test_ack_context_payload_does_not_quote_assistant_ack_when_inbox_missing(
+def test_messages_payload_does_not_quote_assistant_ack_when_inbox_missing(
     monkeypatch, tmp_path
 ):
     _init_repo(tmp_path)
     key = "20260104T000000000005Z"
-    transcript = tmp_path / "rollout.jsonl"
-    transcript.write_text(
-        json.dumps(
-            {
-                "timestamp": "2026-01-04T00:00:01.000000Z",
-                "type": "response_item",
-                "payload": {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "output_text",
-                            "text": f"ACK {key}: assistant-only acknowledgment",
-                        }
-                    ],
-                },
-            },
-            separators=(",", ":"),
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        identity,
-        "resolve_thread_id_for_target",
-        lambda _state, _target: "thread-a",
+    _stub_messages_payload(
+        monkeypatch,
+        [_message("2026-01-04T00:00:01.000000Z", ack_count=1, ack_keys=[key])],
     )
 
-    payload = ack_context_payload_for_worktree(
-        _State(sends=0),
+    payload = message.messages_payload_for_worktree(
+        _State(),
         _Target(id="wt", repo_root=tmp_path),
-        keys=[key],
+        limit=5,
     )
 
-    assert payload["acks"] == [{"key": key, "found": False}]
+    assert payload["ackContexts"] == [{"key": key, "found": False}]

@@ -270,7 +270,6 @@ async function applyLaneBusPayload(lane, payload, source) {
   mergePayloadMessages(lane, payload);
   renderLaneChrome(lane, payload);
   cacheLaneLatestPayload(lane, payload);
-  await hydrateAckContextsForMessages(lane, lane.knownMessages);
   renderMessagesIfChanged(lane);
   if (source === "watch" && (payload.messages || []).length)
     refreshServerTopology().catch(() => {});
@@ -324,7 +323,6 @@ async function applyLaneAppendBusPayload(lane, payload) {
   lane.serverReachable = true;
   removePayloadMessages(lane, payload);
   mergePayloadMessages(lane, { ...payload, messages });
-  await hydrateAckContextsForMessages(lane, lane.knownMessages);
   renderMessagesIfChanged(lane);
   if (!lane.speechPrimed) {
     queueSpeechForMessages(lane, initialSpeechMessages);

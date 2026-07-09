@@ -10,6 +10,7 @@ function syncLaneThreadId(lane, payload) {
 }
 
 function mergePayloadMessages(lane, payload) {
+  applyPayloadAckContexts(lane, payload);
   const threadId = payloadHasField(payload, "targetIdentity")
     ? targetIdentityThreadId(payload.targetIdentity)
     : lane.activeThreadId || "";
@@ -28,6 +29,7 @@ function removePayloadMessages(lane, payload) {
 }
 
 function mergeOlderPayloadMessages(lane, payload) {
+  applyPayloadAckContexts(lane, payload);
   const threadId = payloadHasField(payload, "targetIdentity")
     ? targetIdentityThreadId(payload.targetIdentity)
     : lane.activeThreadId || "";
@@ -251,7 +253,6 @@ async function hydrateOlderMessages(lane) {
     if (!isLaneOpen(lane)) return;
     const added = mergeOlderPayloadMessages(lane, response.payload || {});
     if (!added) lane.olderHistoryExhausted = true;
-    await hydrateAckContextsForMessages(lane, lane.knownMessages);
     renderMessagesIfChanged(lane);
   } catch (error) {
     return;
@@ -317,34 +318,20 @@ function ackKeysForMessages(messages) {
   return keys;
 }
 
-async function hydrateAckContextsForMessages(lane, messages) {
-  const keys = ackKeysForMessages(messages).filter(
-    (key) =>
-      !lane.ackContextByKey.has(key) && !lane.missingAckContextKeys.has(key),
-  );
-  if (!keys.length) return;
-  const query = keys.map((key) => "key=" + encodeURIComponent(key)).join("&");
-  try {
-    const response = await fetch(targetApi(lane.targetId, "/acks") + "?" + query, {
-      cache: "no-store",
-    });
-    const payload = await response.json();
-    for (const ack of payload.acks || []) {
-      if (ack.found && ack.text) {
-        lane.ackContextByKey.set(ack.key, {
-          key: ack.key,
-          text: ack.text,
-          html: ack.html || "",
-          priority: ack.priority || "",
-          attachments: ack.attachments || [],
-        });
-        lane.missingAckContextKeys.delete(ack.key);
-      } else if (ack.key) {
-        lane.missingAckContextKeys.add(ack.key);
-      }
+function applyPayloadAckContexts(lane, payload) {
+  for (const ack of payload?.ackContexts || []) {
+    if (ack.found && ack.text) {
+      lane.ackContextByKey.set(ack.key, {
+        key: ack.key,
+        text: ack.text,
+        html: ack.html || "",
+        priority: ack.priority || "",
+        attachments: ack.attachments || [],
+      });
+      lane.missingAckContextKeys.delete(ack.key);
+    } else if (ack.key) {
+      lane.missingAckContextKeys.add(ack.key);
     }
-  } catch (error) {
-    return;
   }
 }
 

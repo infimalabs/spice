@@ -584,8 +584,12 @@ def _messages_worktree_payload(
         transcript_owner=transcript_owner,
         store=state.team_store,
     )
+    ack_contexts = _ack_contexts_for_worktree(
+        target, keys=_ack_keys_for_messages(items)
+    )
     payload = {
         "messages": [item.to_payload() for item in items],
+        "ackContexts": ack_contexts,
         "targetWorktreeName": target.name,
         "targetBranch": target.branch or target.name,
         "targetIdentity": target_identity_payload(
@@ -625,10 +629,19 @@ def _messages_worktree_payload(
     return payload
 
 
-def ack_context_payload_for_worktree(
-    state: Any, target: WorktreeTarget, *, keys: list[str]
-) -> dict[str, Any]:
-    """Resolve sent-steering context for ACK keys the UI wants to quote.
+def _ack_keys_for_messages(items: list[message_reader.AssistantMessage]) -> list[str]:
+    keys: list[str] = []
+    for item in items:
+        for key in item.ack_keys:
+            if key and key not in keys:
+                keys.append(key)
+    return keys
+
+
+def _ack_contexts_for_worktree(
+    target: WorktreeTarget, *, keys: list[str]
+) -> list[dict[str, Any]]:
+    """Resolve sent-steering context for ACK keys message payloads quote.
 
     Pending inbox items are live input. Once consumed, `spiceacks.sqlite3` is
     the source of truth for the operator's steering text and durable attachment
@@ -636,6 +649,8 @@ def ack_context_payload_for_worktree(
     be quoted back as if the operator wrote it.
     """
     wanted = [key for key in keys if key]
+    if not wanted:
+        return []
     by_key: dict[str, dict[str, Any]] = {}
     acked = collect_acked_inbox_items(
         str(target.repo_root), limit=ACK_CONTEXT_ARCHIVE_LIMIT
@@ -670,5 +685,4 @@ def ack_context_payload_for_worktree(
                     "disposition": item.disposition,
                     "attachments": attachments,
                 }
-    acks = [by_key.get(key, {"key": key, "found": False}) for key in wanted]
-    return {"ok": True, "acks": acks}
+    return [by_key.get(key, {"key": key, "found": False}) for key in wanted]

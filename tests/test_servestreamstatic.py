@@ -861,6 +861,7 @@ def test_static_stream_uses_message_payload_merge_shape():
 
     assert app_stream[merge_start:merge_end] == (
         "function mergePayloadMessages(lane, payload) {\n"
+        "  applyPayloadAckContexts(lane, payload);\n"
         '  const threadId = payloadHasField(payload, "targetIdentity")\n'
         "    ? targetIdentityThreadId(payload.targetIdentity)\n"
         '    : lane.activeThreadId || "";\n'
@@ -879,6 +880,7 @@ def test_static_stream_uses_message_payload_merge_shape():
         "}\n"
         "\n"
         "function mergeOlderPayloadMessages(lane, payload) {\n"
+        "  applyPayloadAckContexts(lane, payload);\n"
         '  const threadId = payloadHasField(payload, "targetIdentity")\n'
         "    ? targetIdentityThreadId(payload.targetIdentity)\n"
         '    : lane.activeThreadId || "";\n'
@@ -893,6 +895,17 @@ def test_static_stream_uses_message_payload_merge_shape():
         "}\n"
         "\n"
     )
+
+
+def test_static_stream_uses_server_supplied_ack_contexts():
+    app_stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    app_live_bus = (STATIC_ROOT / "app.live-bus.js").read_text(encoding="utf-8")
+
+    assert "function applyPayloadAckContexts(lane, payload)" in app_stream
+    assert "payload?.ackContexts || []" in app_stream
+    assert "function hydrateAckContextsForMessages" not in app_stream
+    assert 'targetApi(lane.targetId, "/acks")' not in app_stream
+    assert "hydrateAckContextsForMessages" not in app_live_bus
 
 
 _KNOWN_MESSAGE_ORDER_SCRIPT = """
