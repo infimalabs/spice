@@ -247,6 +247,24 @@ def test_add_batch_results_update_drive_task_filter_with_visible_route(task_repo
     ]
 
 
+def test_add_batch_results_carry_suspect_wording_matches(task_repo):
+    results = create.add_batch_results(
+        [
+            "TASK title=Adopting batch | project=task.unit | "
+            "origin=ack:20260101T000000000000Z"
+        ]
+    )
+
+    assert results[0].wording_matches == (
+        create.TaskWordingMatch(
+            source="title",
+            matched="adopting",
+            trigger_family="taste",
+            reason="consider 'capture'",
+        ),
+    )
+
+
 def _init_repo(path: Path) -> Path:
     path.mkdir()
     _run(path, "git", "init", "-b", "main")

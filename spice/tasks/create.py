@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Sequence
 
 from spice.errors import SpiceError
 from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
-from spice.tasks import config, gitsync, identity, ops, tw
+from spice.tasks import config, gitsync, identity, ops, tw, wording
 
 TASK_TITLE_LIMIT = COMMIT_MESSAGE_WRAP_LIMIT
 TASK_BATCH_DIRECTIVE_TOKEN = "TASK"
@@ -40,11 +41,36 @@ class TaskAddBatchRequest:
     origin: str | None = None
 
 
+TaskWordingMatch = wording.TaskWordingMatch
+
+
 @dataclass(frozen=True)
 class TaskAddResult:
     handle: str
     project: str
     route_feedback: str
+    wording_matches: tuple[TaskWordingMatch, ...] = ()
+
+
+def detect_suspect_wording(
+    *,
+    title: str,
+    description: str | None = None,
+    acceptance: Sequence[str] = (),
+    project: str | None = None,
+    flow: Sequence[str] = (),
+    repo_root: Path | None = None,
+    driver_name: str | None = None,
+) -> tuple[TaskWordingMatch, ...]:
+    return wording.detect_task_creation_wording(
+        title=title,
+        description=description,
+        acceptance=acceptance,
+        project=project,
+        flow=flow,
+        repo_root=repo_root,
+        driver_name=driver_name,
+    )
 
 
 def _task_title(title: str, *, context: str = "") -> str:
@@ -300,6 +326,13 @@ def _add_result(
         system_project=system_project,
     )
     phases = config.resolve_flow(routed_flow, resolved_project)
+    wording_matches = detect_suspect_wording(
+        title=title,
+        description=body,
+        acceptance=acceptance,
+        project=resolved_project,
+        flow=phases,
+    )
     incepted = identity.mint_incepted(existing)
     if existing is not None:
         existing.add(incepted)
@@ -333,6 +366,7 @@ def _add_result(
         handle=f"{key}-{incepted}",
         project=resolved_project,
         route_feedback=route_feedback,
+        wording_matches=wording_matches,
     )
     return result
 
