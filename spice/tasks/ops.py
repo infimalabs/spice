@@ -91,7 +91,7 @@ def claim_meta(actor: str) -> list[str]:
     end = _iso(at_dt + timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
     ambient = ambient_thread()
     if ambient is None:
-        thread = tw.canonical_actor(config.SENTINEL_ACTOR)
+        thread = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
         turn = thread
     else:
         thread, driver = ambient

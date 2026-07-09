@@ -497,11 +497,15 @@ def agent_state_matches_startup_log(
 # notice ~every 30-60s when its bound agent is holding no task yet the worktree
 # is dirty -- uncaptured work that cannot land until a task is claimed.
 SUPERVISOR_LANE_WATCH_SECONDS = 45.0
+# Claim TTL is one hour; renewing every 15 minutes gives long-running agents a
+# wide safety margin without turning the task backend into a heartbeat log.
+SUPERVISOR_CLAIM_RENEWAL_SECONDS = 15.0 * 60.0
 LANE_UNCAPTURED_NUDGE = (
     "your worktree has uncommitted or uncaptured changes but you hold no "
     "claimed task -- work cannot land without one. Claim a task before "
     "editing further, or fold the changes in with spice task capture."
 )
+CLAIM_RENEWAL_QUIET_REASONS = frozenset({"no_active_claim"})
 
 
 def _worktree_dirty(repo_root: Path) -> bool:
@@ -529,17 +533,72 @@ def _flag_uncaptured_lane(repo_root: Path, thread_id: str, log_path: Path) -> No
         )
 
 
-def _watch_uncaptured_lane(
+def _claim_renewal_report_key(result: Any) -> str:
+    return "\0".join(
+        str(part)
+        for part in (
+            getattr(result, "reason", ""),
+            getattr(result, "handle", ""),
+            getattr(result, "detail", ""),
+        )
+    )
+
+
+def _renew_supervised_claim(
+    repo_root: Path,
+    thread_id: str,
+    log_path: Path,
+    reported: dict[str, str],
+) -> None:
+    """Best-effort claim TTL renewal for the agent this supervisor owns."""
+    if not thread_id:
+        return
+    from spice.agent.watchdog import publish_supervisor_feedback
+    from spice.tasks import ops
+
+    result = ops.renew_claim(actor=thread_id)
+    if result.renewed:
+        reported.pop("claim_renewal", None)
+        return
+    if result.reason in CLAIM_RENEWAL_QUIET_REASONS:
+        return
+    report_key = _claim_renewal_report_key(result)
+    if reported.get("claim_renewal") == report_key:
+        return
+    reported["claim_renewal"] = report_key
+    with log_path.open("a", encoding="utf-8") as log_handle:
+        log_handle.write(
+            "spice claim renewal skipped: "
+            f"reason={result.reason} handle={result.handle or '-'}\n"
+        )
+        log_handle.flush()
+        publish_supervisor_feedback(
+            repo_root,
+            log_handle,
+            "claim.renewal-skipped",
+            reason=result.reason,
+            handle=result.handle,
+            detail=result.detail,
+        )
+
+
+def _watch_supervised_lane(
     repo_root: Path,
     thread_id: str,
     log_path: Path,
     process: subprocess.Popen[str],
     stop: Event,
 ) -> None:
+    next_renewal = time.monotonic()
+    reported: dict[str, str] = {}
     while not stop.wait(SUPERVISOR_LANE_WATCH_SECONDS):
         if process.poll() is not None:
             return
+        now = time.monotonic()
         try:
+            if now >= next_renewal:
+                _renew_supervised_claim(repo_root, thread_id, log_path, reported)
+                next_renewal = now + SUPERVISOR_CLAIM_RENEWAL_SECONDS
             _flag_uncaptured_lane(repo_root, thread_id, log_path)
         except Exception:  # best-effort watch: never take down the supervisor
             pass
@@ -584,7 +643,7 @@ def run_agent_supervisor(args: argparse.Namespace) -> int:
         write_agent_state(repo_root, state)
         stop_watch = Event()
         lane_watch = Thread(
-            target=_watch_uncaptured_lane,
+            target=_watch_supervised_lane,
             args=(repo_root, started_thread_id, log_path, process, stop_watch),
             name=f"spice-lane-watch-{started_thread_id or process.pid}",
             daemon=True,
