@@ -61,7 +61,45 @@ def test_top_level_mount_shadowing_builtin_fails_loudly(tmp_path):
         mounted_commands(repo)
 
 
-def test_builtin_nested_mounts_are_allowed(tmp_path):
+def test_study_mount_shadowing_builtin_action_fails_loudly(tmp_path):
+    repo = _repo_with_commands(
+        tmp_path, '"study.csharp-members" = "./scripts/csharp-members.sh"'
+    )
+    with pytest.raises(SpiceError) as exc_info:
+        mounted_commands(repo)
+
+    message = str(exc_info.value)
+    assert "[tool.spice.commands] entry 'study.csharp-members'" in message
+    assert "spice action 'spice study csharp-members'" in message
+
+
+def test_dev_mount_shadowing_builtin_action_fails_loudly(tmp_path):
+    repo = _repo_with_commands(tmp_path, '"dev.pre-commit" = "./scripts/pre-commit.sh"')
+    with pytest.raises(SpiceError) as exc_info:
+        mounted_commands(repo)
+
+    message = str(exc_info.value)
+    assert "[tool.spice.commands] entry 'dev.pre-commit'" in message
+    assert "spice action 'spice dev pre-commit'" in message
+
+
+def test_dotted_mount_under_builtin_with_novel_action_dispatches(tmp_path, monkeypatch):
+    _repo_with_commands(
+        tmp_path,
+        '"study.repo-tool" = ["project-tool", "study", "repo-tool"]',
+    )
+    monkeypatch.setattr("spice.cli.mounts.repo_root_from_cwd", lambda: tmp_path)
+
+    resolved = find_mounted_command(["study", "repo-tool", "--limit", "20"])
+
+    assert resolved is not None
+    mount, remainder = resolved
+    assert mount.path == ("study", "repo-tool")
+    assert mount.argv == ("project-tool", "study", "repo-tool")
+    assert remainder == ["--limit", "20"]
+
+
+def test_non_builtin_nested_mounts_are_allowed(tmp_path):
     repo = _repo_with_commands(tmp_path, 'report.inspect = ["project-tool", "inspect"]')
     assert mounted_commands(repo) == {
         ("report", "inspect"): ("project-tool", "inspect")

@@ -23,7 +23,7 @@ BUILTIN_COMMANDS = (
 )
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(*, include_mounted_epilog: bool = True) -> argparse.ArgumentParser:
     parser = RecoveringArgumentParser(
         prog="spice",
         description=(
@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
             "session forensics, the supervisor web UI, maxim judging, "
             "code-health studies, and git hooks."
         ),
-        epilog=_mounted_commands_epilog(),
+        epilog=_mounted_commands_epilog() if include_mounted_epilog else None,
     )
     set_recovery(
         parser,
@@ -73,6 +73,25 @@ def build_parser() -> argparse.ArgumentParser:
     configure_doctor_parser(subparsers)
     configure_dev_parser(subparsers)
     return parser
+
+
+def builtin_command_paths() -> frozenset[tuple[str, ...]]:
+    parser = build_parser(include_mounted_epilog=False)
+    return frozenset(_parser_command_paths(parser))
+
+
+def _parser_command_paths(
+    parser: argparse.ArgumentParser, prefix: tuple[str, ...] = ()
+) -> set[tuple[str, ...]]:
+    paths: set[tuple[str, ...]] = set()
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for name, child in action.choices.items():
+            path = (*prefix, name)
+            paths.add(path)
+            paths.update(_parser_command_paths(child, path))
+    return paths
 
 
 def _mounted_commands_epilog() -> str | None:
