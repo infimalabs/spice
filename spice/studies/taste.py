@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 from spice.studies.walk import is_excluded_path
 
@@ -31,6 +32,13 @@ TEXT_SUFFIXES = frozenset({".md", ".txt", ".rst"})
 class TasteFinding:
     path: str
     line: int
+    word: str
+    suggestion: str
+
+
+@dataclass(frozen=True)
+class TasteTextFinding:
+    source: str
     word: str
     suggestion: str
 
@@ -104,6 +112,29 @@ def scan_taste(
                         suggestion=_suggestion_for(word, rules),
                     )
                 )
+    return findings
+
+
+def scan_taste_texts(
+    items: Sequence[tuple[str, str]],
+    *,
+    words: dict[str, str] | None = None,
+) -> list[TasteTextFinding]:
+    source = words or DEFAULT_TASTE_WORDS
+    if not source:
+        return []
+    pattern, rules = _compile_words(source)
+    findings: list[TasteTextFinding] = []
+    for source_name, text in items:
+        for match in pattern.finditer(text):
+            word = match.group(0).lower()
+            findings.append(
+                TasteTextFinding(
+                    source=source_name,
+                    word=word,
+                    suggestion=_suggestion_for(word, rules),
+                )
+            )
     return findings
 
 

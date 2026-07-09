@@ -66,6 +66,13 @@ class MaximBag:
 
 
 @dataclass(frozen=True)
+class MaximTriggerMatch:
+    bag_name: str
+    trigger: str
+    message: str
+
+
+@dataclass(frozen=True)
 class MaximProposalEvidence:
     field: str
     text: str
@@ -1161,6 +1168,44 @@ def triggered_maxims(
         bag
         for bag in (bags[name] for name in sorted(seen, key=bag_order.__getitem__))
         if _maxim_bag_matches_driver(bag, driver_scope)
+    ]
+
+
+def triggered_maxim_matches(
+    statements: Sequence[str],
+    *,
+    repo_root: Path | None = None,
+    driver_name: str | None = None,
+) -> list[MaximTriggerMatch]:
+    """Return matched maxim trigger keys with their owning bag."""
+    bags, key_to_name, bag_order = _resolved_lookup(repo_root)
+    driver_scope = _normalized_driver_scope_name(driver_name)
+    trigger_parts = {key: tuple(key.split()) for key in key_to_name}
+    seen: set[tuple[str, str]] = set()
+    for statement in statements:
+        words = [match.group(0).casefold() for match in _WORD_REGEX.finditer(statement)]
+        if not words:
+            continue
+        word_set = set(words)
+        for key, parts in trigger_parts.items():
+            if len(parts) == 1:
+                matched = parts[0] in word_set
+            else:
+                matched = _contains_word_phrase(words, parts)
+            if not matched:
+                continue
+            bag_name = key_to_name[key]
+            if _maxim_bag_matches_driver(bags[bag_name], driver_scope):
+                seen.add((bag_name, key))
+    return [
+        MaximTriggerMatch(
+            bag_name=bag_name,
+            trigger=key,
+            message=bags[bag_name].message,
+        )
+        for bag_name, key in sorted(
+            seen, key=lambda item: (bag_order[item[0]], item[1])
+        )
     ]
 
 
