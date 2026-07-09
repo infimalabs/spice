@@ -24,6 +24,7 @@ from spice.policyconfig import resolve_policy
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 BUILTIN_PRE_COMMIT_LABELS = [
+    "plan phase",
     "repo shape",
     "staging",
     "repo docs",
@@ -43,6 +44,7 @@ BUILTIN_PRE_COMMIT_LABELS = [
 ]
 
 EXPECTED_BUILTIN_PRE_COMMIT_KEYS = [
+    "plan-phase",
     "repo-shape",
     "staging",
     "repo-docs",
@@ -464,6 +466,7 @@ def test_policy_pre_commit_builtin_steps_can_be_disabled_and_replaced(
 
     assert precommit.handle_pre_commit(tmp_path) == 0
     assert events.read_text(encoding="utf-8").splitlines() == [
+        "plan phase",
         "repo shape",
         "staging",
         "repo docs",
@@ -802,6 +805,11 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
 
     monkeypatch.setattr(precommit, "staged_paths", lambda repo_root: [])
     monkeypatch.setattr(
+        precommit,
+        "_run_plan_phase_mutation_guard",
+        lambda repo_root: record("plan phase"),
+    )
+    monkeypatch.setattr(
         precommit, "_run_shape_guards", lambda repo_root: record("repo shape")
     )
     monkeypatch.setattr(
@@ -879,6 +887,9 @@ def _patch_pre_commit_builtin_recorders(tmp_path, monkeypatch):
 
 
 def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
+    monkeypatch.setattr(
+        precommit, "_run_plan_phase_mutation_guard", lambda repo_root: None
+    )
     monkeypatch.setattr(precommit, "_run_shape_guards", lambda repo_root: None)
     monkeypatch.setattr(precommit, "_run_repo_truth_doc_guard", lambda repo_root: None)
     monkeypatch.setattr(

@@ -751,6 +751,9 @@ def _patch_pre_commit_builtin_noops_except_local_paths(tmp_path, monkeypatch) ->
 
 
 def _patch_pre_commit_builtin_noops_except_staging(monkeypatch) -> None:
+    monkeypatch.setattr(
+        precommit, "_run_plan_phase_mutation_guard", lambda repo_root: None
+    )
     monkeypatch.setattr(precommit, "_run_shape_guards", lambda repo_root: None)
     monkeypatch.setattr(precommit, "_run_repo_truth_doc_guard", lambda repo_root: None)
     monkeypatch.setattr(

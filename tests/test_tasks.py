@@ -13,6 +13,7 @@ import pytest
 from spice.cli.parser import build_parser
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
+from spice.hooks import precommit
 from spice.paths import shared_attachment_root
 from spice.serve.team.store import (
     TASK_FILTER_SOURCE_AUTO_CREATE,
@@ -866,6 +867,72 @@ def test_plan_phase_done_advances_after_board_population(task_repo):
     assert identity.uuid_of(identity.resolve(child)) in row["depends"]
 
 
+def test_pre_commit_blocks_active_plan_phase_claim(task_repo):
+    handle = _plan_task_with_accepted_child()
+    ops.claim(handle)
+
+    with pytest.raises(SpiceError) as exc_info:
+        precommit._run_plan_phase_mutation_guard(task_repo)
+
+    message = str(exc_info.value)
+    assert "git commit blocked" in message
+    assert f"{handle} is in plan phase" in message
+    assert "Plan phase output is board state" in message
+
+
+def test_task_capture_blocks_plan_phase_loose_commit(remote_task_repo):
+    handle = _plan_task_with_accepted_child()
+    ops.claim(handle)
+    _make_loose_commit(remote_task_repo, subject="plan implementation commit")
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.capture(project="task.unit", origin="ack:20260101T000000000000Z")
+
+    message = str(exc_info.value)
+    assert "task capture blocked" in message
+    assert f"{handle} is in plan phase" in message
+    assert "Claim an implementation child task" in message
+
+
+def test_task_done_blocks_plan_phase_local_commits(remote_task_repo):
+    handle = _plan_task_with_accepted_child()
+    ops.claim(handle)
+    _make_loose_commit(remote_task_repo, subject="plan implementation commit")
+
+    with pytest.raises(SpiceError) as exc_info:
+        ops.done(handle, validation=["plan board populated"])
+
+    row = identity.resolve(handle)
+    message = str(exc_info.value)
+    assert "task done blocked" in message
+    assert "Found 1 local commit ahead of the task baseline" in message
+    assert row["phase"] == "plan"
+    assert not str(row.get("validation") or "")
+
+
+def test_plan_phase_done_allows_clean_baseline_fast_forward(remote_task_repo, tmp_path):
+    handle = _plan_task_with_accepted_child()
+    ops.claim(handle)
+    remote_url = _git(remote_task_repo, "remote", "get-url", "origin")
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", remote_url, str(peer))
+    _configure_git_identity(peer)
+    (peer / "baseline.txt").write_text("baseline work\n", encoding="utf-8")
+    _run(peer, "git", "add", "baseline.txt")
+    _run(peer, "git", "commit", "-m", "baseline work")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    output = ops.done(handle, validation=["plan board populated"])
+    row = identity.resolve(handle)
+
+    assert f"advanced {handle} -> todo" in output
+    assert row["phase"] == "todo"
+    assert row["validation"] == "plan board populated"
+    assert row["done_merge_head"] == upstream_head
+    assert _git(remote_task_repo, "rev-parse", "HEAD") == upstream_head
+
+
 def test_task_next_repairs_active_claim_missing_owner(task_repo, monkeypatch):
     handle = create.add(
         "Repair partial active claim",
@@ -1184,6 +1251,24 @@ def test_unclean_review_links_existing_followup(task_repo, monkeypatch):
     assert reviewed_uuid in followup.get("depends", [])
     assert reviewed["status"] == "completed"
     assert reviewed["review_finding"] == "changes"
+
+
+def _plan_task_with_accepted_child() -> str:
+    handle = create.add(
+        "Plan mutation gate parent",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        flow=["plan", "todo", "review"],
+        acceptance=["parent bookend acceptance exists"],
+    )
+    child = create.add(
+        "Plan mutation gate child",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        acceptance=["child node has acceptance"],
+    )
+    ops.depends(handle, [child])
+    return handle
 
 
 def _row(
