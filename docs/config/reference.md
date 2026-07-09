@@ -129,7 +129,7 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `internal_couplings` | Named private-internals allowlist entries `{ path, test, target }`. |
 | `pre_commit` | Extra gate steps that run after built-in pre-commit gates. |
 | `pre_commit_success` | Success-only steps that run after the gate passes. |
-| `pre_commit_builtins` | Per gate-only pre-commit built-in overrides for `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `taste`, `serve-web-typecheck`, `python-typecheck`, `env-policy`, `env-name-ledger`, `file-shape`, `complexity`, `magic-numbers`, `markdown-links`, `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals`. |
+| `pre_commit_builtins` | Per gate-only pre-commit built-in overrides for `plan-phase`, `repo-shape`, `staging`, `repo-docs`, `formatters`, `local-paths`, `taste`, `serve-web-typecheck`, `python-typecheck`, `env-policy`, `env-name-ledger`, `file-shape`, `complexity`, `magic-numbers`, `markdown-links`, `reachability`, `symbol-reachability`, `assertion-free-tests`, and `private-internals`. |
 | `limits`, `flex`, `scopes` | Base bounds, sticky headroom, and per-path overrides. |
 | `languages`, `lockfiles`, `file_shape`, `env_access` | Suffix/pattern families for grammar-aware gates. |
 | `complexity`, `taste`, `magic`, `debt`, `commit_message` | Gate-specific knobs. |

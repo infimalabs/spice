@@ -262,6 +262,42 @@ def active_claim_phase(actor: str) -> str:
     return str(claims[0].get("phase") or "") if claims else ""
 
 
+def require_no_active_plan_phase_implementation(action: str) -> None:
+    """Refuse implementation work while the actor holds a plan-phase claim."""
+    row = active_claim(tw.current_actor())
+    if row is None or str(row.get("phase") or "") != "plan":
+        return
+    _raise_plan_phase_implementation_block(action, row)
+
+
+def _raise_plan_phase_implementation_block(
+    action: str, row: dict[str, Any], detail: str = ""
+) -> None:
+    handle = identity.render_handle(row)
+    suffix = f" {detail}" if detail else ""
+    raise SpiceError(
+        f"{action} blocked: {handle} is in plan phase.{suffix} "
+        "Plan phase output is board state: add child tasks with acceptance and "
+        "native dependencies, then run `spice task done` with a clean tree and "
+        "zero local implementation commits. Claim an implementation child task "
+        "before creating, capturing, or landing code."
+    )
+
+
+def _require_plan_phase_done_has_no_local_commits(row: dict[str, Any]) -> None:
+    if str(row.get("phase") or "") != "plan":
+        return
+    ahead = gitsync.commits_ahead_of_baseline()
+    if ahead <= 0:
+        return
+    noun = "commit" if ahead == 1 else "commits"
+    _raise_plan_phase_implementation_block(
+        "task done",
+        row,
+        f"Found {ahead} local {noun} ahead of the task baseline.",
+    )
+
+
 def resolve_claim_target(handle: str | None, *, action: str) -> dict[str, Any]:
     """Resolve an explicit handle, or infer the current actor's sole active claim.
 
@@ -758,6 +794,7 @@ def capture(
             "nothing to capture: no local commits ahead of the baseline; "
             "task capture folds an existing loose commit into a task"
         )
+    require_no_active_plan_phase_implementation("task capture")
     actor = tw.current_actor()
     if handle is not None:
         if title or project or description or origin:
@@ -898,6 +935,7 @@ def done(
     _require_owner(row, actor, "complete")
     _require_bound_quality_gates_clean(row)
     _require_plan_phase_board_populated(row)
+    _require_plan_phase_done_has_no_local_commits(row)
     uuid = identity.uuid_of(row)
     # Integrate and publish this agent's work before any task state changes; a
     # real conflict raises here, leaving the task claimed for the agent to fix.

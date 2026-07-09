@@ -159,6 +159,11 @@ def _builtin_pre_commit_steps(
     repo_root: Path, paths: list[Path]
 ) -> list[PreCommitStep]:
     return [
+        PreCommitStep(
+            "plan-phase",
+            "plan phase",
+            lambda: _run_plan_phase_mutation_guard(repo_root),
+        ),
         PreCommitStep("repo-shape", "repo shape", lambda: _run_shape_guards(repo_root)),
         PreCommitStep("staging", "staging", lambda: _run_staging_guard(repo_root)),
         PreCommitStep(
@@ -240,6 +245,17 @@ def _builtin_pre_commit_steps(
             lambda: _run_private_internal_coupling_guard(repo_root),
         ),
     ]
+
+
+def _run_plan_phase_mutation_guard(repo_root: Path) -> None:
+    from spice.tasks import ops
+
+    cwd = Path.cwd()
+    try:
+        os.chdir(repo_root)
+        ops.require_no_active_plan_phase_implementation("git commit")
+    finally:
+        os.chdir(cwd)
 
 
 def _configured_builtin_steps(
