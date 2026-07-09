@@ -7,8 +7,6 @@ from typing import Any
 
 from spice.serve.team.schema import (
     DEFAULT_LIFETIME,
-    DEFAULT_SELECTED_VIEW,
-    DEFAULT_SPEECH_MODE,
     RENEWAL_STATE_REQUESTED,
     TASK_FILTER_SOURCE_MANUAL,
 )
@@ -33,22 +31,20 @@ class TeamTaskFilter:
 
 @dataclass(frozen=True)
 class TeamConfig:
+    # Team-scoped facts only. Interface preferences (narration, selected view)
+    # are browser-local lane hints, never shared store state.
     lifetime: str = DEFAULT_LIFETIME
-    speech_mode: str = DEFAULT_SPEECH_MODE
     task_filters: tuple[str, ...] = ()
     task_filter_entries: tuple[TeamTaskFilter, ...] = ()
-    selected_view: str = DEFAULT_SELECTED_VIEW
     shell_settings: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self, revision: int) -> dict[str, Any]:
         return {
             "lifetime": self.lifetime,
-            "speechMode": self.speech_mode,
             "taskFilters": list(self.task_filters),
             "taskFilterEntries": [
                 entry.to_payload() for entry in self.task_filter_entries
             ],
-            "selectedView": self.selected_view,
             "shellSettings": dict(self.shell_settings),
             "revision": revision,
         }

@@ -540,11 +540,7 @@ async function updateLaneGroupConfigOnServer(host) {
   await requestTeamCommand(
     teamCommandPayload("updateTeamConfig", {
       teamId: host.teamId,
-      configPatch: {
-        speechMode: laneEffectiveSpeechMode(host),
-        lifetime: laneEffectiveLifetime(host),
-        selectedView: host.selectedView,
-      },
+      configPatch: { lifetime: laneEffectiveLifetime(host) },
     }),
   );
 }

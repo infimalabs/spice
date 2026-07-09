@@ -67,8 +67,6 @@ from spice.serve.team.renewals import (
 )
 from spice.serve.team.schema import (
     DEFAULT_LIFETIME as DEFAULT_LIFETIME,
-    DEFAULT_SELECTED_VIEW as DEFAULT_SELECTED_VIEW,
-    DEFAULT_SPEECH_MODE as DEFAULT_SPEECH_MODE,
     TASK_FILTER_SOURCE_AUTO_CLAIM as TASK_FILTER_SOURCE_AUTO_CLAIM,
     TASK_FILTER_SOURCE_AUTO_CREATE as TASK_FILTER_SOURCE_AUTO_CREATE,
     TASK_FILTER_SOURCE_MANUAL as TASK_FILTER_SOURCE_MANUAL,
@@ -389,14 +387,12 @@ class ServeTeamStore(
         resolved_team_id = team_id or f"team-{uuidlib.uuid4().hex[:TEAM_ID_HEX_CHARS]}"
         connection.execute(
             "INSERT INTO teams (team_id, status, created_at, revision, "
-            "config_revision, lifetime, speech_mode, selected_view, "
-            "task_filters, shell_settings) VALUES (?, 'open', ?, 0, 0, ?, ?, ?, ?, ?)",
+            "config_revision, lifetime, "
+            "task_filters, shell_settings) VALUES (?, 'open', ?, 0, 0, ?, ?, ?)",
             (
                 resolved_team_id,
                 time.time(),
                 config.lifetime,
-                config.speech_mode,
-                config.selected_view,
                 json.dumps(list(config.task_filters)),
                 json.dumps(config.shell_settings),
             ),
@@ -431,13 +427,11 @@ class ServeTeamStore(
             return None
         shell_team_id = str(row["team_id"])
         connection.execute(
-            "UPDATE teams SET lifetime = ?, speech_mode = ?, selected_view = ?, "
+            "UPDATE teams SET lifetime = ?, "
             "shell_settings = ?, "
             "config_revision = config_revision + 1 WHERE team_id = ?",
             (
                 config.lifetime,
-                config.speech_mode,
-                config.selected_view,
                 json.dumps(config.shell_settings),
                 shell_team_id,
             ),

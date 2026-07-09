@@ -331,8 +331,6 @@ function syncEmptyTeamLane(lane, team = {}, options = {}) {
     applyServerLaneLifetime(lane, config.lifetime, {
       configRevision: config.revision,
     });
-  if (config.speechMode && speechModes.includes(config.speechMode))
-    lane.speechMode = config.speechMode;
   if (Array.isArray(config.taskFilters))
     lane.taskFilters = uniqueStringList(config.taskFilters);
   if (Array.isArray(config.effectiveTaskFilters))

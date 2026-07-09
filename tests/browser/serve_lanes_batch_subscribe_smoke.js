@@ -58,8 +58,6 @@ function batchTeam(ids, configRevision) {
     config: {
       revision: configRevision,
       lifetime: "Drive",
-      speechMode: "speak",
-      selectedView: "compose",
       taskFilters: [],
       taskFilterEntries: [],
     },

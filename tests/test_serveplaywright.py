@@ -109,7 +109,7 @@ def test_serve_lane_reload_smoke_asserts_server_shell_persistence() -> None:
     assert "page.reload" in smoke
     assert "lane.teamId === before.teamId" in smoke
     assert "rehydrated lane changed teamId" in smoke
-    assert "stamped speechMode did not survive the reload" in smoke
+    assert "stamped lifetime did not survive the reload" in smoke
 
 
 def test_serve_fresh_startup_import_shell_smoke_asserts_stale_hint_reset() -> None:
@@ -268,6 +268,30 @@ def test_serve_lanes_batch_subscribe_smoke_asserts_coalesced_single_render() -> 
     # A failed lane keeps its batch slot; siblings render normally.
     assert '"boom from batch"' in smoke
     assert "result.siblingFreshRenderCount !== 1" in smoke
+
+
+def test_serve_lane_prefs_local_smoke_asserts_hint_scoped_interface_prefs() -> None:
+    smoke = (ROOT / "browser" / "serve_lane_prefs_local_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    # Mount branches: stored hint wins for the hinted lane, defaults for the
+    # other, and the two lanes differentiate on real mounted values.
+    assert '"narrate"' in smoke
+    assert "hinted lane did not mount with its stored interface prefs" in smoke
+    assert "unhinted lane did not mount with interface defaults" in smoke
+    assert "result.hintSpeechMode === result.unhintedSpeechMode" in smoke
+    # Setters persist per-target browser-local hints only.
+    assert "setLaneSpeechMode(" in smoke
+    assert "setLaneSelectedView(" in smoke
+    assert "setter did not persist the browser-local hint" in smoke
+    # Interface prefs never touch the shared store: config revision holds and
+    # zero team commands leave the browser.
+    assert "result.revisionAfter !== result.revisionBefore" in smoke
+    assert "result.teamCommandCount !== 0" in smoke
+    assert "local prefs did not survive the following snapshot read" in smoke
 
 
 def test_serve_mosaic_single_settle_smoke_asserts_single_settle() -> None:

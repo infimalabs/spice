@@ -5,19 +5,22 @@ const { withServePage } = require("./serve_playwright_harness");
 // backend's ensure-open-team affordance persists one member-less shell team
 // in sqlite, and applyTeamSnapshotPayload rehydrates it as an empty-team
 // lane on every boot. This smoke stamps that shell with a non-default
-// speechMode (createTeam with no members reuses the oldest shell instead of
-// minting a sibling), records its server-assigned teamId, reloads, and
-// asserts the SAME teamId and config come back from the team snapshot.
-// Team ids are random hex per creation, so identity across the reload
-// proves the lane came from the store -- no real targets, no localStorage.
+// lifetime -- a team-scoped config fact (createTeam with no members reuses
+// the oldest shell instead of minting a sibling), records its
+// server-assigned teamId, reloads, and asserts the SAME teamId and config
+// come back from the team snapshot. Team ids are random hex per creation,
+// so identity across the reload proves the lane came from the store -- no
+// real targets, no localStorage.
 
 async function laneReloadSetupPage() {
-  const speechMode = speechModes.find((mode) => mode !== defaultSpeechMode);
-  if (!speechMode) throw new Error("no non-default speech mode available");
+  const lifetime = agentLifetimeLabels.find(
+    (label) => label !== defaultAgentLifetime,
+  );
+  if (!lifetime) throw new Error("no non-default lifetime available");
   await requestTeamCommand(
     teamCommandPayload("createTeam", {
       members: [],
-      config: { ...defaultTeamConfig(), speechMode },
+      config: { ...defaultTeamConfig(), lifetime },
     }),
   );
   const shells = Array.from(laneStates.values()).filter(
@@ -30,8 +33,8 @@ async function laneReloadSetupPage() {
   const lane = shells[0];
   return {
     laneCount: laneStates.size,
-    requestedSpeechMode: speechMode,
-    speechMode: lane.speechMode,
+    requestedLifetime: lifetime,
+    lifetime: lane.lifetime,
     targetId: lane.targetId,
     teamId: lane.teamId,
   };
@@ -43,7 +46,7 @@ function laneReloadVerifyPage(before) {
     emptyTeam: Boolean(lane && lane.emptyTeam),
     laneCount: laneStates.size,
     present: Boolean(lane),
-    speechMode: lane ? lane.speechMode : "",
+    lifetime: lane ? lane.lifetime : "",
     teamId: lane ? lane.teamId : "",
   };
 }
@@ -53,8 +56,8 @@ const laneReloadFixtureOptions = {
     "requestTeamCommand",
     "teamCommandPayload",
     "defaultTeamConfig",
-    "speechModes",
-    "defaultSpeechMode",
+    "agentLifetimeLabels",
+    "defaultAgentLifetime",
   ],
 };
 
@@ -71,9 +74,9 @@ async function run() {
         throw new Error(
           "shell team has no server teamId: " + JSON.stringify(beforeReload),
         );
-      if (beforeReload.speechMode !== beforeReload.requestedSpeechMode)
+      if (beforeReload.lifetime !== beforeReload.requestedLifetime)
         throw new Error(
-          "shell lane did not take the stamped speechMode: " +
+          "shell lane did not take the stamped lifetime: " +
             JSON.stringify(beforeReload),
         );
       await page.reload({ waitUntil: "domcontentloaded" });
@@ -97,9 +100,9 @@ async function run() {
           "rehydrated lane changed teamId: " +
             JSON.stringify({ afterReload, beforeReload }),
         );
-      if (afterReload.speechMode !== beforeReload.speechMode)
+      if (afterReload.lifetime !== beforeReload.lifetime)
         throw new Error(
-          "stamped speechMode did not survive the reload: " +
+          "stamped lifetime did not survive the reload: " +
             JSON.stringify({ afterReload, beforeReload }),
         );
       return { afterReload, beforeReload, url: server.url };

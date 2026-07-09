@@ -61,8 +61,6 @@ function team(memberIds, revision) {
     config: {
       revision,
       lifetime: "Drive",
-      speechMode: "speak",
-      selectedView: "compose",
       taskFilters: [],
       taskFilterEntries: [],
     },

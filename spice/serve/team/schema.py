@@ -2,8 +2,6 @@
 
 TEAM_DATABASE_FILENAME = "spiceteams.sqlite3"
 DEFAULT_LIFETIME = "Drive"
-DEFAULT_SPEECH_MODE = "speak"
-DEFAULT_SELECTED_VIEW = "compose"
 TEAM_ID_HEX_CHARS = 12
 RENEWAL_STATE_REQUESTED = "requested"
 RENEWAL_STATE_PENDING = "pending"
@@ -46,8 +44,6 @@ CREATE TABLE IF NOT EXISTS teams (
     revision INTEGER NOT NULL,
     config_revision INTEGER NOT NULL DEFAULT 0,
     lifetime TEXT NOT NULL,
-    speech_mode TEXT NOT NULL,
-    selected_view TEXT NOT NULL,
     task_filters TEXT NOT NULL DEFAULT '[]',
     shell_settings TEXT NOT NULL DEFAULT '{}'
 );

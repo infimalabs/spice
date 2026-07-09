@@ -57,8 +57,6 @@ function accentTeam(ids, revision) {
     config: {
       revision,
       lifetime: "Drive",
-      speechMode: "speak",
-      selectedView: "compose",
       taskFilters: [],
       taskFilterEntries: [],
     },
