@@ -551,9 +551,10 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
     assert "const pending = lanePendingDisplayCount(member);" in app_shell
     assert 'parts.push(pending + " pending");' in app_shell
     assert 'if (pending > 0) parts.push(pending + " pending");' not in app_shell
+    assert "const statusLine = member.lastRenderedStatusLine || {};" in app_shell
     assert (
-        'const status = (member.lastRenderedStatusLine || {}).agentProcessStatus || "";'
-        in app_shell
+        "const status = statusLine.agentVisualStatus || "
+        'statusLine.agentProcessStatus || "";' in app_shell
     )
     assert "if (status) parts.push(status);" in app_shell
     assert 'return "Steer " + laneMemberTargetLabel(lane);' not in app_shell
@@ -564,6 +565,21 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
     assert (
         app_shell.count("textarea.placeholder = laneComposePlaceholder(member);") >= 3
     )
+
+
+def test_static_composer_terminal_status_placeholder_uses_idle_visual_status():
+    app_render = STATIC_ROOT / "app.render.js"
+    app_composer = STATIC_ROOT / "app.composer.js"
+    script = Path(__file__).with_name("fixtures") / "composer_terminal_status.js"
+
+    result = subprocess.run(
+        ["node", str(script), str(app_render), str(app_composer)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_static_target_choice_labels_show_agent_name_on_branch():

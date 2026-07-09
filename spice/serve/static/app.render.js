@@ -346,6 +346,8 @@ function liveAgentVisualStatus(statusLine) {
   const processStatus = statusLine.agentProcessStatus || "";
   const backendStatus =
     statusLine.agentVisualStatus || processStatus || "unknown";
+  if (processStatus === "running" && terminalActivityPreview(statusLine))
+    return "idle";
   if (processStatus !== "running") return backendStatus;
   if (
     statusLine.activityStatus === "active-ish" ||
@@ -356,6 +358,13 @@ function liveAgentVisualStatus(statusLine) {
   if (ageSeconds !== null && ageSeconds >= activeAssistantSeconds)
     return "running-stale";
   return backendStatus;
+}
+
+function terminalActivityPreview(statusLine) {
+  const preview = String(
+    statusLine.latestActivityPreview || statusLine.preview || "",
+  );
+  return preview.startsWith("Drain complete.");
 }
 
 function setAgentStatusPip(lane, status) {
