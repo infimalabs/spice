@@ -24,6 +24,8 @@ TASK_ORIGIN_REQUIRED_ERROR = (
     "holding an active claim inherits that claim automatically"
 )
 MISSING_ACCEPTANCE_PLAN_PHASE = "plan"
+TASK_WORDING_REVIEW_MARKER = "required"
+TASK_WORDING_REVIEW_ANNOTATION_PREFIX = "suspect wording:"
 
 
 @dataclass(frozen=True)
@@ -191,6 +193,45 @@ def _creation_flow_policy(
     ]
 
 
+def _suspect_wording_flow_policy(
+    phases: list[str],
+    matches: Sequence[TaskWordingMatch],
+    *,
+    system_project: bool,
+) -> list[str]:
+    if not matches or system_project:
+        return phases
+    if MISSING_ACCEPTANCE_PLAN_PHASE in phases:
+        return phases
+    return [
+        MISSING_ACCEPTANCE_PLAN_PHASE,
+        *(phase for phase in phases if phase != MISSING_ACCEPTANCE_PLAN_PHASE),
+    ]
+
+
+def _suspect_wording_extra_args(
+    matches: Sequence[TaskWordingMatch],
+    *,
+    system_project: bool,
+) -> list[str]:
+    if not matches or system_project:
+        return []
+    return [f"{config.TASK_WORDING_REVIEW_UDA}:{TASK_WORDING_REVIEW_MARKER}"]
+
+
+def _suspect_wording_annotation(
+    matches: Sequence[TaskWordingMatch],
+) -> str:
+    details = "; ".join(
+        f"{match.source} {match.trigger_family} {match.matched!r}: {match.reason}"
+        for match in matches
+    )
+    return (
+        f"{TASK_WORDING_REVIEW_ANNOTATION_PREFIX} self-correction required "
+        f"before implementation; matches: {details}"
+    )
+
+
 def _resolve_add_project(actor: str, project: str | None, system_project: bool) -> str:
     if project is None:
         _require_steer_lifetime(actor, action="creating a private task")
@@ -333,9 +374,21 @@ def _add_result(
         project=resolved_project,
         flow=phases,
     )
+    phases = _suspect_wording_flow_policy(
+        phases,
+        wording_matches,
+        system_project=system_project,
+    )
     incepted = identity.mint_incepted(existing)
     if existing is not None:
         existing.add(incepted)
+    extra_args = [
+        *(extra or []),
+        *_suspect_wording_extra_args(
+            wording_matches,
+            system_project=system_project,
+        ),
+    ]
     args = _build_add_args(
         title=title,
         body=body,
@@ -351,14 +404,19 @@ def _add_result(
         scheduled=scheduled,
         until=until,
         due=due,
-        extra=extra,
+        extra=extra_args,
         creation_surface=creation_surface,
         origin=resolved_origin,
     )
     tw.run(args)
+    created = tw.export([f"incepted.is:{incepted}"]) if wording_matches or claim else []
+    if wording_matches and not system_project and created:
+        ops.annotate(
+            identity.uuid_of(created[0]),
+            _suspect_wording_annotation(wording_matches),
+        )
     route_feedback = ops._subscribe_created_project(resolved_project, actor)
     if claim:
-        created = tw.export([f"incepted.is:{incepted}"])
         if created:
             ops.do_claim(identity.uuid_of(created[0]), actor, guard_unclaimed=False)
     key = identity.key_for(resolved_project, title)

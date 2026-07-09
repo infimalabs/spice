@@ -198,6 +198,45 @@ def test_canonical_markdown_missing_acceptance_honors_explicit_flow(task_repo):
     assert not str(row.get("acceptance") or "")
 
 
+def test_canonical_markdown_suspect_wording_routes_and_marks_node(task_repo):
+    dag = markdown.MarkdownTaskDag(
+        root="root",
+        nodes=(
+            markdown.MarkdownTaskNode(
+                id="root",
+                title="Adopting markdown task",
+                project="task.unit",
+                acceptance=("Markdown accepted task still self-corrects",),
+            ),
+        ),
+    )
+
+    output = markdown.create_task_dag(
+        dag,
+        origin="ack:20260101T000000000000Z",
+        creation_surface=config.TASK_CREATION_SURFACE_CLI,
+    )
+    root_handle = next(
+        line.split()[1] for line in output.splitlines() if line.startswith("root ")
+    )
+    row = identity.resolve(root_handle)
+    annotations = [ann.get("description", "") for ann in row.get("annotations") or []]
+
+    assert row["description"] == "Adopting markdown task"
+    assert row["phase"] == "plan"
+    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
+    assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
+    assert row["origin"] == "ack:20260101T000000000000Z"
+    assert any(
+        "adopting" in ann and "self-correction required" in ann for ann in annotations
+    )
+    assert any(
+        ann.get("description") == "markdown-id: root"
+        for ann in row.get("annotations") or []
+    )
+
+
 def test_task_ingest_reuses_existing_markdown_ids_without_creating_rows(task_repo):
     dag = markdown.MarkdownTaskDag(
         root="root",
