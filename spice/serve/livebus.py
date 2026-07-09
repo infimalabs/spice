@@ -2,8 +2,9 @@
 
 Requests carry a `requestId` the response echoes; pushes carry none. Verbs:
 `bus.ping`, `targets.refresh`, `teams.refresh`, `teams.command`,
-`lane.subscribe`, `lane.configure`, `lane.unsubscribe`, `lane.refresh`,
-`lane.history`, `lane.send`, `lane.taskDrain`, `metrics.series`. A subscription tails the
+`lane.subscribe`, `lanes.subscribe`, `lane.configure`, `lane.unsubscribe`,
+`lane.refresh`, `lane.history`, `lane.send`, `lane.taskDrain`,
+`metrics.series`. A subscription tails the
 agent's transcript and pushes `lane.payload` frames the moment new lines
 land — kqueue watches the open file descriptor on macOS (FSEvents misses
 appends through a held-open handle), watchfiles covers Linux/Windows.
@@ -15,6 +16,7 @@ import os
 import select
 import time
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
@@ -33,6 +35,10 @@ from spice.serve.websocket import (
 
 DEFAULT_BUS_MESSAGE_LIMIT = 50
 INITIAL_BUS_MESSAGE_LIMIT = 25
+# Batch payload fan-out width per session. Lane payload reads are already safe
+# to overlap (per-client rollout cursors, locked team store); the bound keeps
+# one browser from monopolizing transcript parsing when it opens many lanes.
+LIVE_BUS_PAYLOAD_WORKERS = 8
 PENDING_LANE_PAYLOAD_KEYS = (
     "pendingInboxCount",
     "pendingInboxKeys",
@@ -137,6 +143,9 @@ class LiveBusSession:
         self._metrics_worker: Thread | None = None
         self._send_followup_queue: Queue[tuple[Any, dict[str, Any]] | None] = Queue()
         self._send_followup_worker: Thread | None = None
+        # Batched subscribes fan their payload computes out here so N lanes
+        # arrive together in one reply frame instead of trickling in serially.
+        self._payload_pool: ThreadPoolExecutor | None = None
 
     def run(self) -> None:
         self.connection.set_read_timeout(LIVE_BUS_READ_TIMEOUT_S)
@@ -167,6 +176,12 @@ class LiveBusSession:
             self._send_followup_queue.put(None)
             self._send_followup_worker.join(timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
             self._send_followup_worker = None
+        if self._payload_pool is not None:
+            # The dispatch thread awaits batch results inline, so nothing is in
+            # flight here on a clean close; cancel_futures covers a mid-batch
+            # disconnect without blocking teardown on a slow transcript parse.
+            self._payload_pool.shutdown(wait=False, cancel_futures=True)
+            self._payload_pool = None
 
     def _send(self, payload: dict[str, Any]) -> None:
         with self.send_lock:
@@ -187,6 +202,7 @@ class LiveBusSession:
                 "teams.refresh": self._handle_teams_refresh,
                 "teams.command": self._handle_teams_command,
                 "lane.subscribe": self._handle_lane_subscribe,
+                "lanes.subscribe": self._handle_lanes_subscribe,
                 "lane.configure": self._handle_lane_configure,
                 "lane.unsubscribe": self._handle_lane_unsubscribe,
                 "lane.refresh": self._handle_lane_refresh,
@@ -243,7 +259,9 @@ class LiveBusSession:
         return target
 
     def _query_kwargs(self, message: dict[str, Any]) -> dict[str, Any]:
-        query = message.get("query") or {}
+        return self._query_kwargs_from(message.get("query") or {})
+
+    def _query_kwargs_from(self, query: dict[str, Any]) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "limit": _bounded_int(query.get("limit"), DEFAULT_BUS_MESSAGE_LIMIT),
             "client_id": self.client_id,
@@ -262,17 +280,94 @@ class LiveBusSession:
         target = self._require_target(message)
         if target is None:
             return
-        previous = self.subscriptions.pop(target.id, None)
-        if previous is not None:
-            self._stop_subscription(previous)
-        subscription = _LaneSubscription(
-            target=target, query=dict(message.get("query") or {})
+        subscription = self._replace_subscription(
+            target, dict(message.get("query") or {})
         )
-        self.subscriptions[target.id] = subscription
-        subscription.last_signature = self._lane_signature(subscription)
         payload = self.callbacks.messages_payload(target, **self._query_kwargs(message))
         self._reply(message, {"type": "lane.payload", "payload": payload})
         self._start_watcher(subscription)
+
+    def _handle_lanes_subscribe(self, message: dict[str, Any]) -> None:
+        raw_entries = message.get("entries")
+        if not isinstance(raw_entries, list) or not raw_entries:
+            self._reply(
+                message,
+                {"type": "bus.error", "error": "lanes.subscribe requires entries"},
+            )
+            return
+        # Validate the whole batch before touching subscription state so a bad
+        # entry never leaves siblings half-replaced.
+        entries: list[tuple[Any, dict[str, Any]]] = []
+        seen_target_ids: set[str] = set()
+        for raw_entry in raw_entries:
+            entry = raw_entry if isinstance(raw_entry, dict) else {}
+            target = self.callbacks.resolve_target(str(entry.get("targetId") or ""))
+            if target is None:
+                self._reply(
+                    message, {"type": "bus.error", "error": "work tree not found"}
+                )
+                return
+            if target.id in seen_target_ids:
+                self._reply(
+                    message,
+                    {
+                        "type": "bus.error",
+                        "error": f"duplicate targetId {target.id!r} in lanes.subscribe",
+                    },
+                )
+                return
+            seen_target_ids.add(target.id)
+            entries.append((target, dict(entry.get("query") or {})))
+        # Bookkeeping stays inline on the dispatch thread: replace/stop and the
+        # signature snapshot keep single-subscribe ordering per lane, and every
+        # snapshot lands before its payload compute so a change racing the
+        # batch compares newer on the first watch wake.
+        subscriptions = [
+            self._replace_subscription(target, query) for target, query in entries
+        ]
+        futures: list[tuple[_LaneSubscription, Future[dict[str, Any]]]] = [
+            (
+                subscription,
+                self._payload_executor().submit(
+                    self._subscription_payload, subscription
+                ),
+            )
+            for subscription in subscriptions
+        ]
+        lanes = [
+            {"targetId": subscription.target.id, "payload": future.result()}
+            for subscription, future in futures
+        ]
+        self._reply(message, {"type": "lanes.payload", "lanes": lanes})
+        for subscription in subscriptions:
+            self._start_watcher(subscription)
+
+    def _replace_subscription(
+        self, target: Any, query: dict[str, Any]
+    ) -> _LaneSubscription:
+        previous = self.subscriptions.pop(target.id, None)
+        if previous is not None:
+            self._stop_subscription(previous)
+        subscription = _LaneSubscription(target=target, query=query)
+        self.subscriptions[target.id] = subscription
+        subscription.last_signature = self._lane_signature(subscription)
+        return subscription
+
+    def _subscription_payload(self, subscription: _LaneSubscription) -> dict[str, Any]:
+        try:
+            return self.callbacks.messages_payload(
+                subscription.target, **self._query_kwargs_from(subscription.query)
+            )
+        except Exception as exc:  # a failed lane stays inside its batch slot
+            return {"error": str(exc), "messages": [], "statusLine": {}}
+
+    def _payload_executor(self) -> ThreadPoolExecutor:
+        if self._payload_pool is None:
+            self._payload_pool = ThreadPoolExecutor(
+                max_workers=LIVE_BUS_PAYLOAD_WORKERS,
+                thread_name_prefix="spice-live-bus-payload",
+            )
+        return self._payload_pool
 
     def _handle_lane_configure(self, message: dict[str, Any]) -> None:
         target = self._require_target(message)
