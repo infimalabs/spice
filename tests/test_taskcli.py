@@ -135,19 +135,26 @@ def test_task_wake_parser_rejects_claim_flag():
     assert exc_info.value.code == 2
 
 
-def test_task_renew_parser_accepts_optional_handle():
-    bare = build_parser().parse_args(["task", "renew"])
+def test_task_reclaim_parser_accepts_optional_handle():
+    bare = build_parser().parse_args(["task", "reclaim"])
     explicit = build_parser().parse_args(
-        ["task", "renew", "TASK-20260101T000000000001Z"]
+        ["task", "reclaim", "TASK-20260101T000000000001Z"]
     )
 
-    assert bare.task_action == "renew"
+    assert bare.task_action == "reclaim"
     assert bare.handle is None
-    assert explicit.task_action == "renew"
+    assert explicit.task_action == "reclaim"
     assert explicit.handle == "TASK-20260101T000000000001Z"
 
 
-def test_task_renew_renders_result(monkeypatch):
+def test_task_reclaim_parser_rejects_renew_alias():
+    with pytest.raises(SystemExit) as exc_info:
+        build_parser().parse_args(["task", "renew"])
+
+    assert exc_info.value.code == 2
+
+
+def test_task_reclaim_renders_result(monkeypatch):
     monkeypatch.setattr(
         ops,
         "renew_claim",
@@ -159,24 +166,24 @@ def test_task_renew_renders_result(monkeypatch):
         ),
     )
 
-    output = task_cli._renew(argparse.Namespace(handle="TASK-20260101T000000000001Z"))
+    output = task_cli._reclaim(argparse.Namespace(handle="TASK-20260101T000000000001Z"))
 
     assert (
-        output == "renewed TASK-20260101T000000000001Z until "
+        output == "reclaimed TASK-20260101T000000000001Z until "
         "2026-07-09T06:00:00.000000Z"
     )
 
 
-def test_task_renew_renders_noop(monkeypatch):
+def test_task_reclaim_renders_noop(monkeypatch):
     monkeypatch.setattr(
         ops,
         "renew_claim",
         lambda _handle: ops.ClaimRenewalResult(False, "no_active_claim"),
     )
 
-    output = task_cli._renew(argparse.Namespace(handle=None))
+    output = task_cli._reclaim(argparse.Namespace(handle=None))
 
-    assert output == "renew skipped no_active_claim"
+    assert output == "reclaim skipped no_active_claim"
 
 
 def test_task_delete_parser_accepts_force_claimed():
