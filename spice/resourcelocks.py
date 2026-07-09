@@ -101,7 +101,12 @@ def configure_lock_parser(subparsers: Any) -> None:
         type=int,
         help="Exit code when every pool shard is already held.",
     )
-    run.add_argument("child", nargs="+", help=argparse.SUPPRESS)
+    run.add_argument(
+        "child",
+        nargs="+",
+        metavar="COMMAND",
+        help="Child command argv to run while the lock is held.",
+    )
     run.set_defaults(func=handle_lock)
 
     status = actions.add_parser(
