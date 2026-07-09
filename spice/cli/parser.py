@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
+from typing import Literal
 
 from spice.cli.recovery import RecoveringArgumentParser, set_recovery
 
@@ -21,6 +23,13 @@ BUILTIN_COMMANDS = (
     "init",
     "dev",
 )
+
+
+@dataclass(frozen=True)
+class CommandPathRegistration:
+    path: tuple[str, ...]
+    source: Literal["builtin", "extension"]
+    provider: str = ""
 
 
 def build_parser(*, include_mounted_epilog: bool = True) -> argparse.ArgumentParser:
@@ -75,9 +84,24 @@ def build_parser(*, include_mounted_epilog: bool = True) -> argparse.ArgumentPar
     return parser
 
 
-def builtin_command_paths() -> frozenset[tuple[str, ...]]:
+def command_path_registry() -> dict[tuple[str, ...], CommandPathRegistration]:
     parser = build_parser(include_mounted_epilog=False)
-    return frozenset(_parser_command_paths(parser))
+    registry = {
+        path: CommandPathRegistration(path=path, source="builtin")
+        for path in _parser_command_paths(parser)
+    }
+    from spice.studies.cli import extension_study_actions
+
+    for entry in extension_study_actions():
+        path = ("study", entry.name)
+        registry[path] = CommandPathRegistration(
+            path=path, source="extension", provider=entry.distribution
+        )
+    return registry
+
+
+def builtin_command_paths() -> frozenset[tuple[str, ...]]:
+    return frozenset(command_path_registry())
 
 
 def _parser_command_paths(

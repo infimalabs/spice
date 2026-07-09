@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from spice import extensions as extension_loader
 from spice.cli import entry as cli_entry
 from spice.cli.mounts import (
     MOUNT_SEGMENT_RE,
@@ -17,6 +18,10 @@ from spice.cli.mounts import (
 )
 from spice.cli.parser import BUILTIN_COMMANDS, build_parser
 from spice.errors import SpiceError
+from tests.test_extensionhelpers import (
+    FilteredExtensionDistribution,
+    build_fixture_distribution,
+)
 
 
 def _repo_with_commands(tmp_path, body: str):
@@ -81,6 +86,29 @@ def test_dev_mount_shadowing_builtin_action_fails_loudly(tmp_path):
     message = str(exc_info.value)
     assert "[tool.spice.commands] entry 'dev.pre-commit'" in message
     assert "spice action 'spice dev pre-commit'" in message
+
+
+def test_mount_shadowing_extension_study_action_fails_loudly(tmp_path, monkeypatch):
+    _, distribution = build_fixture_distribution(tmp_path)
+    monkeypatch.setattr(
+        extension_loader.metadata,
+        "distributions",
+        lambda: [
+            FilteredExtensionDistribution(
+                distribution,
+                {extension_loader.SPICE_STUDY_ENTRY_POINT_GROUP: {"toy-study"}},
+            )
+        ],
+    )
+    repo = _repo_with_commands(tmp_path, '"study.toy-study" = "./scripts/toy-study.sh"')
+
+    with pytest.raises(SpiceError) as exc_info:
+        mounted_commands(repo)
+
+    message = str(exc_info.value)
+    assert "[tool.spice.commands] entry 'study.toy-study'" in message
+    assert "extension-provided spice action 'spice study toy-study'" in message
+    assert "spice-extension-fixture" in message
 
 
 def test_dotted_mount_under_builtin_with_novel_action_dispatches(tmp_path, monkeypatch):
