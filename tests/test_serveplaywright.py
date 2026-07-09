@@ -270,6 +270,34 @@ def test_serve_lanes_batch_subscribe_smoke_asserts_coalesced_single_render() -> 
     assert "result.siblingFreshRenderCount !== 1" in smoke
 
 
+def test_serve_mosaic_single_settle_smoke_asserts_single_settle() -> None:
+    smoke = (ROOT / "browser" / "serve_mosaic_single_settle_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    # Cold load comes solely from the server team snapshot and rides one
+    # batched subscribe covering every lane.
+    assert "applyTeamSnapshotPayload(" in smoke
+    assert '"lanes.subscribe"' in smoke
+    assert "result.subscribeFrameCount !== 1" in smoke
+    # Every lane's initial messages present at the first settled paint (fused
+    # team of two members plus a solo lane), including hydrated ack contexts.
+    assert "result.fusedPresentCount !== result.fusedExpectedCount" in smoke
+    assert "result.soloPresentCount !== result.soloExpectedCount" in smoke
+    assert "result.fusedMessageRenderCount !== 1" in smoke
+    assert "result.ackContextPresent !== true" in smoke
+    # The per-host mosaic full-replay counter is a positive observable read from
+    # the live event log, and equals its initial-mount value across a quiet
+    # window (no post-settle reshuffle).
+    assert "mosaicEventLog" in smoke
+    assert '"full-replay"' in smoke
+    assert "result.fusedReplayInitial < 1" in smoke
+    assert "result.fusedReplayFinal !== result.fusedReplayInitial" in smoke
+    assert "result.soloReplayFinal !== result.soloReplayInitial" in smoke
+
+
 def test_serve_nack_render_smoke_asserts_warn_polarity() -> None:
     smoke = (ROOT / "browser" / "serve_nack_render_smoke.js").read_text(
         encoding="utf-8"
