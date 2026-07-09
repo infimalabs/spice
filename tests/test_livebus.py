@@ -136,7 +136,7 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
         session._handle_lane_subscribe(
             {"type": "lane.subscribe", "targetId": target.id, "query": {"limit": 5}}
         )
-        assert connection.sent[0]["payload"]["pendingInboxCount"] == 0
+        assert _wait_for_reply(connection)["payload"]["pendingInboxCount"] == 0
         assert watcher_ready.wait(timeout=1.0)
 
         _write_inbox_item_from_subprocess(repo)
@@ -249,7 +249,7 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
         session._handle_lane_subscribe(
             {"type": "lane.subscribe", "targetId": target.id, "query": {"limit": 5}}
         )
-        assert connection.sent[0]["payload"]["pendingInboxCount"] == 0
+        assert _wait_for_reply(connection)["payload"]["pendingInboxCount"] == 0
         assert watcher_ready.wait(timeout=1.0)
 
         _write_inbox_item_from_subprocess(repo)
@@ -452,6 +452,9 @@ def test_lane_subscription_watch_requests_append_only_payload(tmp_path, monkeypa
             {"type": "lane.subscribe", "targetId": target.id, "query": {"limit": 5}}
         )
         assert watcher_ready.wait(timeout=1.0)
+        # The subscribe payload computes on the read chain; await its reply so its
+        # kwargs land first, before the reconfigure drives the append-only read.
+        _wait_for_reply(connection)
         session._handle_lane_configure(
             {
                 "type": "lane.configure",
@@ -476,6 +479,204 @@ def test_lane_subscription_watch_requests_append_only_payload(tmp_path, monkeypa
         "append_only": True,
         "after": "newest-key",
     }
+
+
+def test_ping_pongs_while_a_slow_lane_refresh_is_still_computing(tmp_path):
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=tmp_path)
+    connection = _Connection()
+    refresh_started = Event()
+    refresh_release = Event()
+
+    def slow_payload(_target, **_kwargs):
+        refresh_started.set()
+        refresh_release.wait(timeout=2.0)
+        return {"messages": [], "statusLine": {}}
+
+    session = LiveBusSession(
+        connection,
+        _callbacks(target=target, transcript=transcript, messages_payload=slow_payload),
+    )
+
+    try:
+        session._handle_lane_refresh(
+            {
+                "type": "lane.refresh",
+                "requestId": "refresh-1",
+                "targetId": target.id,
+                "query": {"limit": 5},
+            }
+        )
+        # The refresh is now parked on the pool thread inside slow_payload; the
+        # dispatch thread is free, so a ping issued now pongs before the refresh
+        # unblocks -- head-of-line blocking is gone.
+        assert refresh_started.wait(timeout=1.0)
+        session._handle_ping({"type": "bus.ping", "requestId": "ping-1"})
+        pong = _wait_for_reply(connection, request_id="ping-1")
+        assert pong["type"] == "bus.pong"
+
+        refresh_release.set()
+        refresh_reply = _wait_for_reply(connection, request_id="refresh-1")
+        assert refresh_reply["type"] == "lane.payload"
+        # The pong landed ahead of the refresh reply it was racing.
+        with connection.lock:
+            reply_order = [
+                payload.get("requestId")
+                for payload in connection.sent
+                if payload.get("requestId")
+            ]
+        assert reply_order.index("ping-1") < reply_order.index("refresh-1")
+    finally:
+        refresh_release.set()
+        session._teardown()
+
+
+def test_two_refreshes_for_one_target_reply_in_request_order(tmp_path):
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=tmp_path)
+    connection = _Connection()
+    first_started = Event()
+    release_first = Event()
+    compute_order: list[str] = []
+
+    def staggered_payload(_target, **kwargs):
+        after = str(kwargs.get("after") or "")
+        if after == "first":
+            first_started.set()
+            release_first.wait(timeout=2.0)
+        compute_order.append(after)
+        return {"messages": [], "statusLine": {"after": after}}
+
+    session = LiveBusSession(
+        connection,
+        _callbacks(
+            target=target, transcript=transcript, messages_payload=staggered_payload
+        ),
+    )
+
+    try:
+        session._handle_lane_refresh(
+            {
+                "type": "lane.refresh",
+                "requestId": "r-first",
+                "targetId": target.id,
+                "query": {"limit": 5, "after": "first"},
+            }
+        )
+        # Queue the second read for the same target while the first is still
+        # stuck; per-target FIFO must hold it behind the first rather than let
+        # the fast second compute overtake it.
+        assert first_started.wait(timeout=1.0)
+        session._handle_lane_refresh(
+            {
+                "type": "lane.refresh",
+                "requestId": "r-second",
+                "targetId": target.id,
+                "query": {"limit": 5, "after": "second"},
+            }
+        )
+        release_first.set()
+        _wait_for_reply(connection, request_id="r-first")
+        _wait_for_reply(connection, request_id="r-second")
+
+        assert compute_order == ["first", "second"]
+        with connection.lock:
+            reply_order = [
+                payload.get("requestId")
+                for payload in connection.sent
+                if payload.get("requestId")
+            ]
+        assert reply_order == ["r-first", "r-second"]
+    finally:
+        release_first.set()
+        session._teardown()
+
+
+def test_teardown_drains_an_inflight_read_before_shutting_the_pool(tmp_path):
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=tmp_path)
+    connection = _Connection()
+    compute_started = Event()
+    compute_release = Event()
+
+    def gated_payload(_target, **_kwargs):
+        compute_started.set()
+        compute_release.wait(timeout=2.0)
+        return {"messages": [], "statusLine": {}}
+
+    session = LiveBusSession(
+        connection,
+        _callbacks(
+            target=target, transcript=transcript, messages_payload=gated_payload
+        ),
+    )
+
+    session._handle_lane_refresh(
+        {
+            "type": "lane.refresh",
+            "requestId": "read-1",
+            "targetId": target.id,
+            "query": {"limit": 5},
+        }
+    )
+    assert compute_started.wait(timeout=1.0)
+    # Release the compute, then tear down: teardown joins the read chain within
+    # the watcher join budget, so the reply is delivered synchronously -- it is
+    # already present the instant teardown returns, no post-teardown polling.
+    compute_release.set()
+    session._teardown()
+    with connection.lock:
+        replies = [
+            payload
+            for payload in connection.sent
+            if payload.get("requestId") == "read-1"
+        ]
+    assert len(replies) == 1
+    assert replies[0]["type"] == "lane.payload"
+
+
+def test_teardown_abandons_a_stuck_read_within_the_join_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(livebus, "LIVE_BUS_WATCHER_JOIN_TIMEOUT_S", 0.2)
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=tmp_path)
+    connection = _Connection()
+    compute_started = Event()
+    compute_release = Event()
+
+    def stuck_payload(_target, **_kwargs):
+        compute_started.set()
+        compute_release.wait(timeout=2.0)
+        return {"messages": [], "statusLine": {}}
+
+    session = LiveBusSession(
+        connection,
+        _callbacks(
+            target=target, transcript=transcript, messages_payload=stuck_payload
+        ),
+    )
+
+    try:
+        session._handle_lane_refresh(
+            {
+                "type": "lane.refresh",
+                "requestId": "read-1",
+                "targetId": target.id,
+                "query": {"limit": 5},
+            }
+        )
+        assert compute_started.wait(timeout=1.0)
+        started_at = time.monotonic()
+        session._teardown()
+        elapsed = time.monotonic() - started_at
+        # The compute would block a full 2s; teardown returns within the bounded
+        # join budget instead of waiting it out.
+        assert elapsed < 1.0
+    finally:
+        compute_release.set()
 
 
 def test_kqueue_watch_rearms_only_when_watched_paths_change(tmp_path):
@@ -563,15 +764,18 @@ def test_lanes_subscribe_replies_once_with_field_parity_per_lane(tmp_path, monke
         lane_ids = [lane_entry["targetId"] for lane_entry in frame["lanes"]]
         assert lane_ids == ["lane-a", "lane-b"]
         for lane_entry in frame["lanes"]:
+            request_id = "single-" + lane_entry["targetId"]
             single_session._handle_lane_subscribe(
                 {
                     "type": "lane.subscribe",
+                    "requestId": request_id,
                     "targetId": lane_entry["targetId"],
                     "query": {"limit": 5},
                 }
             )
-            with single_connection.lock:
-                single_frame = single_connection.sent[-1]
+            # Distinct targets drain on separate chains, so match the reply by
+            # requestId rather than assuming arrival order.
+            single_frame = _wait_for_reply(single_connection, request_id=request_id)
             assert single_frame["type"] == "lane.payload"
             assert lane_entry["payload"] == single_frame["payload"]
         # ackContexts and task cards ride the same payload fields both ways.
@@ -975,3 +1179,27 @@ def _wait_for_watch_push(
             return pushes[0]
         time.sleep(0.02)
     pytest.fail(f"timed out waiting for watch push; sent={connection.sent!r}")
+
+
+def _wait_for_reply(
+    connection: _Connection,
+    *,
+    request_id: str | None = None,
+    timeout_seconds: float = 3.0,
+) -> dict[str, Any]:
+    """Await a direct reply frame (no push `source`), optionally by requestId.
+
+    Read-only verbs now compute their payload off the dispatch thread, so their
+    reply lands asynchronously; tests await it here instead of reading sent[0].
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        with connection.lock:
+            for payload in connection.sent:
+                if payload.get("source") is not None:
+                    continue
+                if request_id is not None and payload.get("requestId") != request_id:
+                    continue
+                return payload
+        time.sleep(0.02)
+    pytest.fail(f"timed out waiting for reply; sent={connection.sent!r}")
