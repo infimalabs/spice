@@ -1,9 +1,4 @@
-"""Shared walking rules: what the studies look at and what they never touch.
-
-Library seam: target-repo tools may import public walkers, policy-exclusion
-helpers, staged rename reads, and `git_blob_text`; underscored names remain
-private.
-"""
+"""Shared walking rules: what the studies look at and what they never touch."""
 
 from __future__ import annotations
 

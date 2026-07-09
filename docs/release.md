@@ -32,7 +32,7 @@ artifacts from the current worktree before creating the GitHub release.
 
 Use a minor release when users can do something new or observe changed
 behavior: new commands or flags, new configuration, new `spice serve` or task
-workflow behavior, additions to the public library seam, changed output or
+workflow behavior, extension entry-point surface changes, changed output or
 artifacts, or any compatibility break while the project only has patch/minor
 release lanes. If a release contains both patch-level fixes and minor-level
 surface changes, choose minor.
@@ -40,4 +40,5 @@ surface changes, choose minor.
 Use a patch release only when the shipped contract is unchanged: bug fixes,
 documentation clarifications, packaging fixes, or internal test/build/tooling
 changes that do not give operators a new capability and do not alter CLI,
-configuration, UI, task/session semantics, or the public library seam.
+configuration, UI, task/session semantics, extension entry points, or command
+coupling behavior.

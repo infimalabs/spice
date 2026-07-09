@@ -1,9 +1,4 @@
-"""Repo roots, the `.spice/` state directory, and atomic file writes.
-
-Library seam: target-repo tools may import the public repo-root, state-dir,
-atomic write, JSON read, and tool-resolution helpers; underscored names remain
-private.
-"""
+"""Repo roots, the `.spice/` state directory, and atomic file writes."""
 
 from __future__ import annotations
 

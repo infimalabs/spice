@@ -12,9 +12,6 @@ by requiring a waiver on every known env-access site too. It is on by default
 (the strongest audit with no configuration); a repo opts *out* with
 `[tool.spice.policy] env_access_gate = false`.
 
-Library seam: target-repo tools may import the public finding dataclass,
-pattern/matcher helpers, scan helper, and `render_env_policy_board`;
-underscored names remain private.
 """
 
 from __future__ import annotations

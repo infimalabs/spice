@@ -15,10 +15,6 @@ underlying primitive, not a spice choice:
 POSIX is the load-bearing platform; Windows is aspirational. Callers that need a
 bounded wait on POSIX must pass ``blocking=False`` and retry themselves rather
 than assume ``blocking=True`` ever times out.
-
-Library seam: target-repo tools may import `exclusive_lock`,
-`lock_fd_exclusive`, `unlock_fd`, and `FileLockUnavailable`; underscored names
-remain private.
 """
 
 from __future__ import annotations

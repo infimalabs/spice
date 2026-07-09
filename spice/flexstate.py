@@ -4,9 +4,6 @@ Shape guards allow headroom (`flex_limit`) over a base limit, but a file that
 ever breached keeps its base limit until it shrinks back under it. The breach
 set persists in the git dir so it survives checkouts and rebases without
 touching the working tree.
-
-Library seam: target-repo tools may import the public sticky-state helpers in
-this module; underscored names remain private.
 """
 
 from __future__ import annotations

@@ -30,8 +30,6 @@ production symbol from being flagged, and the first is strongly preferred:
     the exception in ``SYMBOL_REACHABILITY_ALLOWLIST`` (or the ``allowlist``
     argument). Prefer (a) wherever it is possible.
 
-Library seam: public dataclasses and scan/render helpers are importable by
-target-repo tools; underscored names remain private.
 """
 
 from __future__ import annotations

@@ -12,8 +12,6 @@ Requires a .coverage file recorded with per-test context. Generate one with:
 The --cov-branch flag records arc (branch) coverage so that two tests covering
 the same lines but distinct branches are not incorrectly flagged as subsumed.
 
-Library seam: public dataclasses and scan/render helpers are importable by
-target-repo tools; underscored names remain private.
 """
 
 from __future__ import annotations

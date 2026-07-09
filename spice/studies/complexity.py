@@ -5,9 +5,6 @@ ever breached stays held to the base limit (per `(path, routine)` key) until
 it shrinks back under. lizard is the single measurement backend; its absence
 fails the gate loudly rather than miscounting.
 
-Library seam: target-repo tools may import the public finding/record
-dataclasses, scan/collect helpers, lizard requirement helper, and
-`render_complexity_board`; underscored names remain private.
 """
 
 from __future__ import annotations
