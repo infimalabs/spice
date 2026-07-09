@@ -244,6 +244,30 @@ def test_serve_identity_smoke_uses_harness_for_mismatch() -> None:
     assert "driver actual" in smoke
 
 
+def test_serve_lanes_batch_subscribe_smoke_asserts_coalesced_single_render() -> None:
+    smoke = (ROOT / "browser" / "serve_lanes_batch_subscribe_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    # One frame per microtask tick, one message-bearing render per fused host.
+    assert "liveBusRequest = async (type, fields = {}) =>" in smoke
+    assert '"lanes.subscribe"' in smoke
+    assert "result.initialFrameCount !== 1" in smoke
+    assert "result.initialHostRenderCount !== 1" in smoke
+    assert "single host render did not cover every member's initial messages" in smoke
+    # Reconnect resync covers every open lane in exactly one frame.
+    assert "resubscribeLiveBusLanes();" in smoke
+    assert "result.resyncFrameCount !== 1" in smoke
+    # Thread-change and config-revision resubscribes coalesce into one flush.
+    assert "ensureTeamMemberLane(" in smoke
+    assert "result.coalescedFrameCount !== 1" in smoke
+    # A failed lane keeps its batch slot; siblings render normally.
+    assert '"boom from batch"' in smoke
+    assert "result.siblingFreshRenderCount !== 1" in smoke
+
+
 def test_serve_nack_render_smoke_asserts_warn_polarity() -> None:
     smoke = (ROOT / "browser" / "serve_nack_render_smoke.js").read_text(
         encoding="utf-8"

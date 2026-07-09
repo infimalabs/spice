@@ -1,7 +1,9 @@
 // Live bus client: one WebSocket, request/response plus push, with heartbeat,
 // liveness, exponential reconnect, and full resync after reconnect. Lane
 // payloads merge into a known-message cache keyed by message key; rendering is
-// fingerprint-gated so unchanged streams never repaint.
+// fingerprint-gated so unchanged streams never repaint. Lane subscribes
+// coalesce per microtask tick into one lanes.subscribe frame whose payloads
+// apply state-first, then each fused host renders exactly once.
 
 let liveBusSocket = null;
 let liveBusOpenPromise = null;
@@ -201,20 +203,71 @@ function laneMessageQuery(lane) {
   };
 }
 
-async function subscribeLaneToLiveBus(lane) {
+// Every subscribe path — snapshot mount, reconnect resync, thread change,
+// config revision — marks its lane here; the marks flush once per microtask
+// tick as ONE lanes.subscribe frame, so payloads arrive together instead of
+// trickling in and reshuffling fused mosaics per member.
+const pendingSubscribeLanes = new Set();
+let subscribeFlushQueued = false;
+
+function subscribeLaneToLiveBus(lane) {
   if (!isLaneOpen(lane)) return;
   if (lane.emptyTeam) return;
   lane.liveBusSubscribed = true;
-  try {
-    const response = await liveBusRequest("lane.subscribe", {
-      targetId: lane.targetId,
-      query: laneMessageQuery(lane),
+  pendingSubscribeLanes.add(lane);
+  if (subscribeFlushQueued) return;
+  subscribeFlushQueued = true;
+  queueMicrotask(() => {
+    subscribeFlushQueued = false;
+    flushPendingLaneSubscribes().catch((error) => {
+      setGlobalTransientError(String(error || "lane subscribe failed"));
     });
-    if (response.payload)
-      await applyLaneBusPayload(lane, response.payload, "bus");
+  });
+}
+
+async function flushPendingLaneSubscribes() {
+  const lanes = [...pendingSubscribeLanes].filter(
+    (lane) => isLaneOpen(lane) && !lane.emptyTeam,
+  );
+  pendingSubscribeLanes.clear();
+  if (!lanes.length) return;
+  const entries = lanes.map((lane) => {
+    return { targetId: lane.targetId, query: laneMessageQuery(lane) };
+  });
+  let response;
+  try {
+    response = await liveBusRequest("lanes.subscribe", { entries });
   } catch (error) {
-    if (isLaneOpen(lane)) setLaneTransientStatus(lane, "live bus unavailable");
+    for (const lane of lanes) {
+      if (isLaneOpen(lane)) setLaneTransientStatus(lane, "live bus unavailable");
+    }
+    return;
   }
+  applyLanesSubscribePayloads(lanes, (response && response.lanes) || []);
+}
+
+function applyLanesSubscribePayloads(lanes, laneFrames) {
+  const payloadByTargetId = new Map(
+    laneFrames.map((frame) => {
+      return [frame.targetId, frame.payload || {}];
+    }),
+  );
+  const hostsToRender = new Map();
+  for (const lane of lanes) {
+    if (!isLaneOpen(lane)) continue;
+    const payload = payloadByTargetId.get(lane.targetId);
+    if (!payload) continue;
+    if (payload.error) {
+      // A failed lane keeps its batch slot: it surfaces its own status while
+      // sibling lanes apply and render normally.
+      setLaneTransientStatus(lane, payload.error);
+      continue;
+    }
+    applyLaneBusPayloadState(lane, payload, "bus");
+    const host = laneGroupHost(lane);
+    hostsToRender.set(host.targetId, host);
+  }
+  for (const host of hostsToRender.values()) renderMessagesIfChanged(host);
 }
 
 function resubscribeLiveBusLanes() {
@@ -250,6 +303,14 @@ function unsubscribeLaneFromLiveBus(lane) {
 // ---- payload application ------------------------------------------------------
 
 async function applyLaneBusPayload(lane, payload, source) {
+  applyLaneBusPayloadState(lane, payload, source);
+  renderMessagesIfChanged(lane);
+}
+
+// The render-free half of payload application: batch subscribes run this per
+// lane, then render each fused host once so the merged stream paints its
+// final interleaving in a single lattice insertion sequence.
+function applyLaneBusPayloadState(lane, payload, source) {
   const wasSpeechPrimed = lane.speechPrimed;
   const knownBefore = new Set(lane.knownMessageKeys);
   // Auto-narration is gated in queueSpeechForMessages against the lane's UI
@@ -270,7 +331,6 @@ async function applyLaneBusPayload(lane, payload, source) {
   mergePayloadMessages(lane, payload);
   renderLaneChrome(lane, payload);
   cacheLaneLatestPayload(lane, payload);
-  renderMessagesIfChanged(lane);
   if (source === "watch" && (payload.messages || []).length)
     refreshServerTopology().catch(() => {});
   if (!lane.speechPrimed) {
