@@ -398,6 +398,11 @@ def test_release_notes_group_edited_highlights_by_project():
                 project="serve.ui",
             ),
             ReleaseRecord(
+                commit="7777777ffff",
+                subject="review(serve.ui): Fix menu MODEL-abc",
+                project="serve.ui",
+            ),
+            ReleaseRecord(
                 commit="5555555eeee",
                 subject="Implement dynamic agent shell-hook surfaces",
                 project="task.cli",
@@ -436,6 +441,7 @@ def test_release_notes_group_edited_highlights_by_project():
         "### Serve UI\n"
         "\n"
         "- Fixed narration media session retention. (`4444444`)\n"
+        "- Fixed menu MODEL-abc. (`7777777`)\n"
         "\n"
         "### Task CLI\n"
         "\n"

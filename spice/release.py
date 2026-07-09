@@ -26,6 +26,10 @@ PROJECT_HEADINGS = {
     "cli": "CLI",
     "ui": "UI",
 }
+TASK_PHASE_SUBJECT_PREFIX_RE = re.compile(
+    r"^(?:design|plan|todo|verify|review)\([^)]+\):\s*",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -510,7 +514,7 @@ def render_release_notes(
             release_project_key(record.project), OrderedDict()
         )
         project_subjects.setdefault(
-            edited_release_highlight(record.subject), []
+            edited_release_highlight(release_note_subject(record.subject)), []
         ).append(shortish_commit(record.commit))
 
     lines = [
@@ -585,6 +589,10 @@ def edited_release_highlight(subject: str) -> str:
         if lower.startswith(prefix):
             return punctuate(replacement + raw[len(prefix) :])
     return punctuate(capitalize_first(raw))
+
+
+def release_note_subject(subject: str) -> str:
+    return TASK_PHASE_SUBJECT_PREFIX_RE.sub("", subject, count=1)
 
 
 def release_project_heading(project: str) -> str:
