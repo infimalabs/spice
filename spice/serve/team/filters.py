@@ -153,13 +153,11 @@ class TeamFilterStoreMixin:
     ) -> int:
         self._require_team(connection, team_id)
         connection.execute(
-            "UPDATE teams SET lifetime = ?, speech_mode = ?, selected_view = ?, "
+            "UPDATE teams SET lifetime = ?, "
             "shell_settings = ?, "
             "config_revision = config_revision + 1 WHERE team_id = ?",
             (
                 config.lifetime,
-                config.speech_mode,
-                config.selected_view,
                 json.dumps(config.shell_settings),
                 team_id,
             ),
@@ -318,10 +316,8 @@ def config_from_row(
     shell_settings = shell_settings_from_json(row["shell_settings"])
     return TeamConfig(
         lifetime=str(row["lifetime"]),
-        speech_mode=str(row["speech_mode"]),
         task_filters=task_filters,
         task_filter_entries=task_filter_entries,
-        selected_view=str(row["selected_view"]),
         shell_settings=shell_settings,
     )
 

@@ -792,7 +792,7 @@ def test_team_command_service_keeps_revisioned_config_history(tmp_path):
         {
             "command": "createTeam",
             "members": ["agent-a"],
-            "config": {"lifetime": "Steer", "selectedView": "compose"},
+            "config": {"lifetime": "Steer"},
         }
     )
     team = created.snapshot.teams[0]
@@ -810,7 +810,7 @@ def test_team_command_service_keeps_revisioned_config_history(tmp_path):
             {
                 "command": "updateTeamConfig",
                 "teamId": team.team_id,
-                "configPatch": {"selectedView": "metrics"},
+                "configPatch": {"lifetime": "Steer"},
                 "expectedRevision": created.revision,
             }
         )
@@ -819,7 +819,21 @@ def test_team_command_service_keeps_revisioned_config_history(tmp_path):
     assert first_update.revision > created.revision
     assert state.config_revision == 1
     assert state.config.lifetime == "Drive"
-    assert state.config.selected_view == "compose"
+
+
+def test_team_config_payload_carries_only_team_scoped_fields():
+    # Interface preferences (narration, selected view) are browser-local lane
+    # hints; the shared config payload enumerates exactly the team facts.
+    payload = TeamConfig().to_payload(7)
+
+    assert sorted(payload) == [
+        "lifetime",
+        "revision",
+        "shellSettings",
+        "taskFilterEntries",
+        "taskFilters",
+    ]
+    assert payload["revision"] == 7
 
 
 def test_team_task_filter_api_tracks_sources_and_projection(tmp_path):
@@ -1053,9 +1067,7 @@ def test_team_config_replace_preserves_existing_filter_sources(tmp_path):
         team.team_id,
         TeamConfig(
             lifetime=current.lifetime,
-            speech_mode=current.speech_mode,
             task_filters=("serve.ui", "task.extra"),
-            selected_view=current.selected_view,
             shell_settings=current.shell_settings,
         ),
         replace_task_filters=True,

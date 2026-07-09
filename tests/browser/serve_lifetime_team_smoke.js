@@ -58,8 +58,6 @@ async function run() {
             config: {
               revision,
               lifetime,
-              speechMode: "speak",
-              selectedView: "compose",
               taskFilters: [],
               taskFilterEntries: [],
             },

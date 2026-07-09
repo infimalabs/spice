@@ -78,7 +78,7 @@ def _event_rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
 def _team_rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = connection.execute(
         "SELECT team_id, status, created_at, revision, config_revision, lifetime, "
-        "speech_mode, selected_view, task_filters, shell_settings "
+        "task_filters, shell_settings "
         "FROM teams ORDER BY created_at"
     ).fetchall()
     return [_team_row(row) for row in rows]
@@ -93,8 +93,6 @@ def _team_row(row: sqlite3.Row) -> dict[str, Any]:
         "configRevision": int(row["config_revision"]),
         "config": {
             "lifetime": str(row["lifetime"]),
-            "speechMode": str(row["speech_mode"]),
-            "selectedView": str(row["selected_view"]),
             "taskFilters": json.loads(row["task_filters"]),
             "shellSettings": json.loads(row["shell_settings"]),
         },
@@ -251,15 +249,13 @@ def _render_teams(teams: list[dict[str, Any]]) -> list[str]:
     return [
         "  team {teamId} status={status} revision={revision} "
         "configRevision={configRevision} lifetime={lifetime} "
-        "speech={speech} view={view} taskFilters={taskFilters} "
+        "taskFilters={taskFilters} "
         "shellSettings={shellSettings}".format(
             teamId=team["teamId"],
             status=team["status"],
             revision=team["revision"],
             configRevision=team["configRevision"],
             lifetime=team["config"]["lifetime"],
-            speech=team["config"]["speechMode"],
-            view=team["config"]["selectedView"],
             taskFilters=_csv(team["config"]["taskFilters"]),
             shellSettings=json.dumps(team["config"]["shellSettings"], sort_keys=True),
         )

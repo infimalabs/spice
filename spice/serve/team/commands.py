@@ -214,8 +214,6 @@ def _patched_config(current: Any, patch: dict[str, Any]) -> Any:
         shell_settings = dict(patch["shellSettings"])
     return TeamConfig(
         lifetime=str(patch.get("lifetime") or current.lifetime),
-        speech_mode=str(patch.get("speechMode") or current.speech_mode),
         task_filters=task_filters,
-        selected_view=str(patch.get("selectedView") or current.selected_view),
         shell_settings=shell_settings,
     )

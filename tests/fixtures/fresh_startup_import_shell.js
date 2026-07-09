@@ -68,12 +68,7 @@ const context = {
     return "target:" + target.id;
   },
   defaultTeamConfig() {
-    return {
-      lifetime: "Drive",
-      speechMode: "speak",
-      selectedView: "compose",
-      taskFilters: [],
-    };
+    return { lifetime: "Drive" };
   },
 };
 

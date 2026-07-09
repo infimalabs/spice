@@ -473,8 +473,6 @@ function ensureTeamMemberLane(targetId, team, hint = null) {
     applyServerLaneLifetime(lane, config.lifetime, {
       configRevision: config.revision,
     });
-  if (!hint && config.speechMode && speechModes.includes(config.speechMode))
-    lane.speechMode = config.speechMode;
   syncLaneEffectiveControls(lane);
   // The server no longer wakes lanes on a team config change (it would reflow
   // every team). Instead, a lane whose OWN team config revision advanced
@@ -536,15 +534,10 @@ async function openTargetTeam(targetId, options = {}) {
   if (!target) throw new Error("open team requires a known target");
   await refreshTeamSnapshot({ force: true });
   if (!laneStates.has(targetId)) {
-    const hint = laneHintsByTargetId().get(targetId);
     await requestTeamCommand(
       teamCommandPayload("createTeam", {
         members: [targetTeamAgentId(target)],
-        config: {
-          ...defaultTeamConfig(),
-          speechMode: hint ? hint.speechMode : defaultSpeechMode,
-          selectedView: hint ? hint.selectedView : defaultLaneViewMode,
-        },
+        config: defaultTeamConfig(),
       }),
     );
     if (keepMenuOpen) await refreshTargets();

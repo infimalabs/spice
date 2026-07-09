@@ -416,11 +416,7 @@ function syncFastModeButtonState() {
 }
 
 function defaultTeamConfig() {
-  return {
-    speechMode: defaultSpeechMode,
-    lifetime: defaultAgentLifetime,
-    selectedView: defaultLaneViewMode,
-  };
+  return { lifetime: defaultAgentLifetime };
 }
 
 function renderTargetChoice(target, group = null) {

@@ -299,7 +299,7 @@ def test_team_command_payloads_reject_stale_expected_revision(
         {
             "command": "updateTeamConfig",
             "teamId": team_id,
-            "configPatch": {"selectedView": "metrics"},
+            "configPatch": {"lifetime": "Steer"},
             "expectedRevision": first_revision,
         },
     )
@@ -315,7 +315,13 @@ def test_team_command_payloads_reject_stale_expected_revision(
     assert fresh_snapshot["revision"] == advanced["revision"]
     current = team_snapshot_response_payload(state, since_revision=None)
     assert current["snapshot"]["teams"][0]["config"]["lifetime"] == "Drive"
-    assert current["snapshot"]["teams"][0]["config"]["selectedView"] == "compose"
+    assert sorted(current["snapshot"]["teams"][0]["config"]) == [
+        "lifetime",
+        "revision",
+        "shellSettings",
+        "taskFilterEntries",
+        "taskFilters",
+    ]
     unchanged = team_snapshot_response_payload(
         state, since_revision=advanced["revision"]
     )

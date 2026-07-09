@@ -284,9 +284,7 @@ def _apply_lifetime_to_team(
         team_id,
         TeamConfig(
             lifetime=lifetime,
-            speech_mode=current.speech_mode,
             task_filters=current.task_filters,
-            selected_view=current.selected_view,
             shell_settings=current.shell_settings,
         ),
         replace_task_filters=False,
@@ -328,9 +326,7 @@ def work_tree_task_drain_response_payload(
             team_id,
             TeamConfig(
                 lifetime=str(payload.get("lifetime") or current.lifetime),
-                speech_mode=current.speech_mode,
                 task_filters=validated,
-                selected_view=current.selected_view,
                 shell_settings=current.shell_settings,
             ),
             replace_task_filters=True,

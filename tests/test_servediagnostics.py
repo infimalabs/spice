@@ -43,7 +43,6 @@ def test_team_diagnostics_include_events_routes_and_taskdrain_filters(tmp_path):
         config=TeamConfig(
             lifetime="Drive",
             task_filters=TASK_FILTERS,
-            selected_view="queue",
         ),
     )
     _record_identity(store)
