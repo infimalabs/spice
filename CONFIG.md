@@ -37,8 +37,9 @@ Reference: [wrapper groups](docs/config/reference.md#toolspicewrappersgroup).
 ## `[tool.spice.commands]`
 
 Mounted commands put repo tooling under the `spice` namespace without letting
-repo tools shadow built-in verbs. Values are command strings or argv lists, and
-remaining CLI arguments pass through verbatim.
+repo tools shadow built-in or extension-provided actions at any depth. Dotted
+mounts may extend built-in verbs with novel action names. Values are command
+strings or argv lists, and remaining CLI arguments pass through verbatim.
 
 Reference: [mounted commands](docs/config/reference.md#toolspicecommands).
 
