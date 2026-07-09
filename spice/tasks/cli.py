@@ -293,7 +293,10 @@ def _configure_task_edit_parsers(actions: Any) -> None:
 def _configure_ingest_parser(actions: Any) -> None:
     ingest = actions.add_parser(
         "ingest",
-        help="Import canonical or freeform markdown into task DAG rows.",
+        help=(
+            "Import canonical or freeform markdown into task DAG rows; refuses "
+            "node ids already present as markdown-id annotations."
+        ),
         recovery_examples=("spice task ingest backlog.md --project task.plan",),
     )
     ingest.add_argument("path")

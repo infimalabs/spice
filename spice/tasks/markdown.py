@@ -121,6 +121,7 @@ def create_task_dag(
     creation_surface: str | None = None,
 ) -> str:
     _validate_dag(dag)
+    _refuse_existing_markdown_ids(dag)
     nodes = {node.id: node for node in dag.nodes}
     created: dict[str, str] = {}
     order: list[str] = []
@@ -410,10 +411,41 @@ def _annotation_descriptions(row: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _markdown_id(annotations: tuple[str, ...]) -> str:
+    ids = _markdown_ids(annotations)
+    return ids[0] if ids else ""
+
+
+def _markdown_ids(annotations: tuple[str, ...]) -> tuple[str, ...]:
+    ids: list[str] = []
     for annotation in annotations:
         if annotation.startswith(MARKDOWN_ID_PREFIX):
-            return annotation[len(MARKDOWN_ID_PREFIX) :].strip()
-    return ""
+            markdown_id = annotation[len(MARKDOWN_ID_PREFIX) :].strip()
+            if markdown_id:
+                ids.append(markdown_id)
+    return tuple(ids)
+
+
+def _refuse_existing_markdown_ids(dag: MarkdownTaskDag) -> None:
+    node_ids = {node.id for node in dag.nodes}
+    duplicates: dict[str, list[str]] = {}
+    for row in tw.export():
+        handle = identity.render_handle(row)
+        for markdown_id in _markdown_ids(_annotation_descriptions(row)):
+            if markdown_id in node_ids:
+                duplicates.setdefault(markdown_id, []).append(handle)
+    if not duplicates:
+        return
+    lines = [
+        "markdown ingest refuses duplicate markdown-id annotations",
+        "existing task rows already carry markdown ids from this DAG:",
+        *(
+            f"  {markdown_id}: {', '.join(sorted(handles))}"
+            for markdown_id, handles in sorted(duplicates.items())
+        ),
+        "rename the incoming node id or remove the existing markdown-id annotation "
+        "before ingesting",
+    ]
+    raise SpiceError("\n".join(lines))
 
 
 def _acceptance_items(raw: str) -> tuple[str, ...]:

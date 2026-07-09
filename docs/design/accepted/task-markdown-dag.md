@@ -32,6 +32,11 @@ export uses that annotation as the node id, which gives canonical imports a
 stable projection identity even though Taskwarrior handles are minted at import
 time.
 
+`ingest` refuses a DAG before creating any task rows when an incoming node id
+already exists as a `markdown-id:` annotation on the board. The duplicate report
+names the markdown id and existing handle(s); callers must rename the incoming
+node id or remove the existing annotation before retrying.
+
 ## Freeform Dialect
 
 | Markdown construct | V1 mapping |
