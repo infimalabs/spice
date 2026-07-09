@@ -10,7 +10,7 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
-from spice.tasks import config, create, identity, ops, wordingreview
+from spice.tasks import config, create, identity, ops, render, wordingreview
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -49,6 +49,83 @@ def test_plan_phase_done_blocks_suspect_wording_marker(task_repo):
     assert row["phase"] == "plan"
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     assert not str(row.get("validation") or "")
+
+
+def test_inline_task_batch_suspect_wording_routes_without_claiming(task_repo):
+    results = create.add_batch_results(
+        [
+            "TASK title=Adopting inline task | project=task.unit | "
+            "acceptance=Inline task still needs self-correction | "
+            "origin=ack:20260101T000000000000Z"
+        ],
+        creation_surface=config.TASK_CREATION_SURFACE_CLI,
+    )
+    row = identity.resolve(results[0].handle)
+    annotations = [
+        str(item.get("description") or "") for item in row.get("annotations") or []
+    ]
+
+    assert row["description"] == "Adopting inline task"
+    assert row["phase"] == "plan"
+    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
+    assert not str(row.get("claim_by") or "")
+    assert not str(row.get("start") or "")
+    assert any(item.startswith("suspect wording:") for item in annotations)
+    assert results[0].wording_matches
+
+
+def test_review_followup_suspect_wording_routes_without_claiming(task_repo):
+    reviewed = create.add(
+        "Review target for suspect follow-up",
+        project="task.unit",
+        flow=["review"],
+        acceptance=["review can spawn a requested-change task"],
+        origin="ack:20260101T000000000000Z",
+        claim=True,
+    )
+
+    output = ops.review(
+        reviewed,
+        finding="changes",
+        note="description current; needs a follow-up",
+        then=[
+            "title=Adopting review follow-up | project=task.unit | "
+            "acceptance=Follow-up must self-correct before implementation"
+        ],
+        creation_surface=config.TASK_CREATION_SURFACE_CLI,
+    )
+    spawned = next(
+        line.split()[1] for line in output.splitlines() if line.startswith("spawned ")
+    )
+    row = identity.resolve(spawned)
+    annotations = [
+        str(item.get("description") or "") for item in row.get("annotations") or []
+    ]
+
+    assert identity.resolve(reviewed)["status"] == "completed"
+    assert row["description"] == "Adopting review follow-up"
+    assert row["phase"] == "plan"
+    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
+    assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
+    assert not str(row.get("claim_by") or "")
+    assert not str(row.get("start") or "")
+    assert identity.uuid_of(identity.resolve(reviewed)) in row.get("depends", [])
+    assert any(item.startswith("suspect wording:") for item in annotations)
+
+
+def test_task_show_renders_suspect_wording_policy_and_clear_step(task_repo):
+    handle = _suspect_plan_task_with_accepted_child()
+
+    shown = render.render_show(handle)
+
+    assert "wording_review required" in shown
+    assert "suspect wording automatically prepended plan" in shown
+    assert "matched wording remains in annotations" in shown
+    assert f'spice task resolve-wording {handle} --reason "..."' in shown
+    assert "suspect wording:" in shown
+    assert "self-correction required" in shown
 
 
 def test_resolve_wording_review_clears_marker_and_allows_plan_done(task_repo):

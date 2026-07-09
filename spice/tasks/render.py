@@ -273,6 +273,21 @@ def _phase_guidance_lines(row: dict[str, Any], rendered: str) -> list[str]:
     return []
 
 
+def _wording_review_lines(row: dict[str, Any], rendered: str) -> list[str]:
+    marker = _f(row, config.TASK_WORDING_REVIEW_UDA)
+    if not marker:
+        return []
+    return [
+        f"wording_review {marker}",
+        (
+            "wording_review_guidance suspect wording automatically prepended "
+            "plan; matched wording remains in annotations. After enriching "
+            "child tasks and acceptance, clear with "
+            f'spice task resolve-wording {rendered} --reason "..."'
+        ),
+    ]
+
+
 def _review_commit_lines(row: dict[str, Any]) -> list[str]:
     review_ref = _f(row, "done_ref")
     if not review_ref:
@@ -424,6 +439,7 @@ def render_show(handle: str, *, include_recovery_context: bool | None = None) ->
     lines.extend(rehydrate)
     if show_recovery_context:
         lines.extend(_context_check_lines(row, has_rehydrate_commands=bool(rehydrate)))
+    lines.extend(_wording_review_lines(row, rendered))
     lines.extend(_phase_guidance_lines(row, rendered))
     deps = _deps_lines(row)
     if deps:
