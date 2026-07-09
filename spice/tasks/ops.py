@@ -973,7 +973,7 @@ def review(
     if finding.casefold() != "clean" and not then and not followup:
         raise SpiceError(
             "unclean task review requires follow-up tracking; "
-            'use --then "title=... | project=... | acceptance=..." '
+            'use --then "title=... | project=... [| acceptance=...]" '
             "or --followup HANDLE"
         )
     tw.require_clean_worktree("task review")
@@ -1049,9 +1049,10 @@ def next_task_drain_line(
             "allocator work; capture operator task-creation requests "
             "immediately with a TASK directive that starts on its own line; "
             "when ACKing, write ACK <key>: captured the request. then put TASK "
-            "title=... | project=<stem.child> | acceptance=... on the next "
-            "line using the same task-add batch format, or spice task add "
-            "before continuing other work; the captured task inherits "
+            "title=... | project=<stem.child> [| acceptance=...] on the next "
+            "line using the same task-add batch format; omitted acceptance "
+            "with no flow starts in plan, or spice task add before continuing "
+            "other work; the captured task inherits "
             "origin=ack:<key> from your ACK (prefer that; set origin= only "
             "when the provenance differs); immediate task capture is not "
             "allocator selection; manual task claims are exceptional and "

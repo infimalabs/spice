@@ -138,6 +138,66 @@ def test_task_ingest_creates_tasks_edges_and_annotations(task_repo, tmp_path, ca
     )
 
 
+def test_task_ingest_missing_acceptance_routes_node_to_plan(
+    task_repo, tmp_path, capsys
+):
+    source = tmp_path / "backlog.md"
+    source.write_text("# Under specified task\n\nNeeds planning.\n", encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "task",
+            "ingest",
+            str(source),
+            "--project",
+            "task.unit",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
+    )
+    args.backend = str(config.backend_root())
+
+    assert args.func(args) == 0
+    output = capsys.readouterr().out
+    root_handle = next(
+        line.split()[1] for line in output.splitlines() if line.startswith("root ")
+    )
+    row = identity.resolve(root_handle)
+
+    assert row["description"] == "Under specified task"
+    assert row["phase"] == "plan"
+    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert not str(row.get("acceptance") or "")
+
+
+def test_canonical_markdown_missing_acceptance_honors_explicit_flow(task_repo):
+    dag = markdown.MarkdownTaskDag(
+        root="root",
+        nodes=(
+            markdown.MarkdownTaskNode(
+                id="root",
+                title="Explicit flow import",
+                project="task.unit",
+                flow=("todo", "review"),
+            ),
+        ),
+    )
+
+    output = markdown.create_task_dag(
+        dag,
+        origin="ack:20260101T000000000000Z",
+        creation_surface=config.TASK_CREATION_SURFACE_CLI,
+    )
+    root_handle = next(
+        line.split()[1] for line in output.splitlines() if line.startswith("root ")
+    )
+    row = identity.resolve(root_handle)
+
+    assert row["description"] == "Explicit flow import"
+    assert row["phase"] == "todo"
+    assert ops.phases_of(row) == ["todo", "review"]
+    assert not str(row.get("acceptance") or "")
+
+
 def test_task_ingest_reuses_existing_markdown_ids_without_creating_rows(task_repo):
     dag = markdown.MarkdownTaskDag(
         root="root",

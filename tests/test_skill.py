@@ -23,7 +23,10 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
     assert "same key=value batch format as task-add batch input" in text
     assert "starts on its own line" in text
     assert "`ACK <key>: captured the request.`" in text
-    assert "`TASK title=... | project=<stem.child> | acceptance=...`" in text
+    assert "`TASK title=... | project=<stem.child> [| acceptance=...]`" in text
+    assert (
+        "Omitting acceptance with no explicit flow starts public tasks in plan" in text
+    )
     assert "immediate task capture, not allocator selection" in text
     assert "on its own line with the task-add batch format" in text
     assert "`spice task status` and `spice task doctor` report" in text
