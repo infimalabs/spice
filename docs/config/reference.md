@@ -68,6 +68,7 @@ The policy table extends the constitution. Defaults come from `spice/policy.py`.
 | `repo_truth_docs` | Doctrine docs checked because they ride in agent context. |
 | `env_name_patterns`, `env_names`, `env_access_gate` | Env literal watchlist, exact manifest, and access-waiver gate. |
 | `reachability_providers` | Extra language-aware dead-code providers. |
+| `csharp_unused_retention` | C# unused-candidate declarations for framework-retained base types, interfaces, and attribute names. |
 | `python_typecheck_interpreter` | Optional interpreter for `python-typecheck`; otherwise repo venv/uv is resolved. |
 | `assertion_helpers` | Callable names that count as test assertions. |
 | `internal_couplings` | Named private-internals allowlist entries `{ path, test, target }`. |
@@ -103,6 +104,30 @@ outputs.
 families to env-access regexes; custom pattern families must have suffixes.
 `baseline` points at existing `env-policy` findings. The env-name ledger only
 accounts for extractable literal names and scans tests like production.
+
+### `[tool.spice.policy.csharp_unused_retention]`
+
+Tracked declarations for C# members that are reached by framework convention
+rather than by direct C# references. The table only adds retained findings; the
+built-in partial-declaration and attribute-retention defaults still apply when
+the table is absent or when no declaration matches.
+
+```toml
+[tool.spice.policy.csharp_unused_retention]
+base_types = ["HostedServiceBase"]
+interfaces = ["IPluginModule"]
+attribute_names = ["ServiceEntryPointAttribute"]
+```
+
+For example, a dependency-injection container may instantiate every class
+derived from `HostedServiceBase`, while a plugin host may discover classes that
+implement `IPluginModule`. Private methods and fields inside those types are
+reported as retained with reasons such as
+`configured_base_type:HostedServiceBase` or
+`configured_interface:IPluginModule`. Attribute names match with or without the
+`Attribute` suffix, so `[ServiceEntryPoint]` can match
+`ServiceEntryPointAttribute` and records
+`configured_attribute:ServiceEntryPointAttribute`.
 
 Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 `1.5x` flex, routines CCN `20` / length `80`, commit text wrap `100`,

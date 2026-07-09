@@ -89,6 +89,71 @@ namespace Demo
     )
 
 
+def test_csharp_unused_retention_policy_keeps_configured_surfaces(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+[tool.spice.policy.csharp_unused_retention]
+base_types = ["RetainedBase"]
+interfaces = ["IActivatedService"]
+attribute_names = ["ActivatorEntryPoint", "SerializedMemberAttribute"]
+""",
+    )
+    _write(
+        tmp_path / "src" / "Sample.cs",
+        """
+namespace Demo
+{
+    class BaseManagedService : RetainedBase<ServiceMarker>
+    {
+        private void BaseHook() {}
+    }
+
+    class InterfaceManagedService : Demo.Hosting.IActivatedService
+    {
+        private int interfaceCounter;
+    }
+
+    class AttributeManagedService
+    {
+        [ActivatorEntryPoint]
+        private void AttributeHook() {}
+
+        [SerializedMember]
+        private int serializedCounter;
+
+        [AnyAttribute]
+        private int defaultAttributeCounter;
+    }
+}
+""",
+    )
+
+    entries = collect_csharp_unused_entries([Path("src/Sample.cs")], root=tmp_path)
+    by_key = _entries_by_key(entries)
+
+    assert by_key[("method", "BaseHook")].status == STATUS_RETAINED
+    assert by_key[("method", "BaseHook")].reason == (
+        "configured_base_type:RetainedBase"
+    )
+    assert by_key[("private_field", "interfaceCounter")].status == STATUS_RETAINED
+    assert by_key[("private_field", "interfaceCounter")].reason == (
+        "configured_interface:IActivatedService"
+    )
+    assert by_key[("method", "AttributeHook")].status == STATUS_RETAINED
+    assert by_key[("method", "AttributeHook")].reason == (
+        "configured_attribute:ActivatorEntryPoint"
+    )
+    assert by_key[("private_field", "serializedCounter")].reason == (
+        "configured_attribute:SerializedMemberAttribute"
+    )
+    assert by_key[("private_field", "defaultAttributeCounter")].reason == (
+        "attribute_retained"
+    )
+
+
 def test_custom_return_type_method_reports_method_identifier(tmp_path: Path) -> None:
     _write(
         tmp_path / "src" / "Sample.cs",
