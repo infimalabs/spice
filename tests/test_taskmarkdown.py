@@ -10,7 +10,6 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.cli.parser import build_parser
-from spice.errors import SpiceError
 from spice.tasks import config, create, identity, markdown, ops, tw
 
 pytestmark = pytest.mark.skipif(
@@ -139,7 +138,7 @@ def test_task_ingest_creates_tasks_edges_and_annotations(task_repo, tmp_path, ca
     )
 
 
-def test_task_ingest_refuses_existing_markdown_ids_before_creating_rows(task_repo):
+def test_task_ingest_reuses_existing_markdown_ids_without_creating_rows(task_repo):
     dag = markdown.MarkdownTaskDag(
         root="root",
         nodes=(
@@ -156,16 +155,19 @@ def test_task_ingest_refuses_existing_markdown_ids_before_creating_rows(task_rep
             ),
         ),
     )
-    markdown.create_task_dag(dag, origin="ack:20260101T000000000000Z")
+    first_output = markdown.create_task_dag(dag, origin="ack:20260101T000000000000Z")
+    root_handle = next(
+        line.split()[1]
+        for line in first_output.splitlines()
+        if line.startswith("root ")
+    )
     existing_count = len(tw.export())
 
-    with pytest.raises(SpiceError) as exc_info:
-        markdown.create_task_dag(dag, origin="ack:20260101T000000000000Z")
+    second_output = markdown.create_task_dag(dag, origin="ack:20260101T000000000000Z")
 
-    message = str(exc_info.value)
-    assert "markdown ingest refuses duplicate markdown-id annotations" in message
-    assert "child:" in message
-    assert "root:" in message
+    assert f"root {root_handle}" in second_output
+    assert "reused child " in second_output
+    assert "reused root " in second_output
     assert len(tw.export()) == existing_count
 
 
