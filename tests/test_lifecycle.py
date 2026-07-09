@@ -17,6 +17,7 @@ from spice.agent import (
     renewal,
     sidechannel,
     sidechannelnotify,
+    watchdog,
     wrap,
 )
 from spice.agent.driver import (
@@ -119,6 +120,20 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
 
     assert command == ["zsh", "-c", "third:rtk third inner"]
     assert calls == [("third:third inner",), ("third inner",)]
+
+
+def test_claim_meta_uses_actor_as_fallback_thread_without_ambient(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(ops, "ambient_thread", lambda: None)
+    monkeypatch.setattr(ops.config, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(ops.tw, "current_branch", lambda: "main")
+    monkeypatch.setattr(ops.tw, "claim_head", lambda: "head-third")
+
+    claim = ops.claim_meta("actor-third")
+
+    assert "claim_thread:actorthird" in claim
+    assert "claim_context_turn:actorthird" in claim
 
 
 def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_mcp(
@@ -504,7 +519,9 @@ def test_start_agent_direct_path_writes_started_state_under_fakes(
         lambda _log_path, *, repo_root, fallback_thread_id: thread_id,
     )
     monkeypatch.setattr(
-        lifecycle, "reap_process_when_done", lambda proc: reaped.append(proc.pid)
+        lifecycle,
+        "reap_process_when_done",
+        lambda proc, **_kwargs: reaped.append(proc.pid),
     )
 
     returned = lifecycle.start_agent(
@@ -556,7 +573,9 @@ def test_start_agent_supervised_path_uses_supervisor_and_reaper(tmp_path, monkey
         ),
     )
     monkeypatch.setattr(
-        lifecycle, "reap_process_when_done", lambda proc: reaped.append(proc.pid)
+        lifecycle,
+        "reap_process_when_done",
+        lambda proc, **_kwargs: reaped.append(proc.pid),
     )
 
     returned = lifecycle.start_agent(
@@ -689,6 +708,114 @@ def test_run_agent_supervisor_writes_state_under_fakes(tmp_path, monkeypatch):
     assert state["prompt_skill_path"] == str(skill_path)
     assert state["fast_mode"] is True
     assert thread.joined_timeouts == [1.0]
+
+
+def test_supervisor_lane_watch_periodically_renews_claim(tmp_path, monkeypatch):
+    log_path = tmp_path / "supervisor.log"
+    renewals: list[tuple[Path, str, Path]] = []
+    nudges: list[tuple[Path, str, Path]] = []
+    stop = _StopAfterOneIteration()
+    process = _FakeProcess(pid=SUPERVISED_AGENT_PID, returncode=None)
+    monkeypatch.setattr(
+        lifecycle,
+        "_renew_supervised_claim",
+        lambda repo_root, thread_id, log_path, _reported: renewals.append(
+            (repo_root, thread_id, log_path)
+        ),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_flag_uncaptured_lane",
+        lambda repo_root, thread_id, log_path: nudges.append(
+            (repo_root, thread_id, log_path)
+        ),
+    )
+
+    lifecycle._watch_supervised_lane(tmp_path, "thread-a", log_path, process, stop)
+
+    assert renewals == [(tmp_path, "thread-a", log_path)]
+    assert nudges == [(tmp_path, "thread-a", log_path)]
+    assert stop.waits[0] == lifecycle.SUPERVISOR_LANE_WATCH_SECONDS
+
+
+def test_supervisor_claim_renewal_uses_owned_actor(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_renew_claim(handle=None, *, actor=None):
+        calls.append({"handle": handle, "actor": actor})
+        return ops.ClaimRenewalResult(
+            True,
+            "renewed",
+            handle="TASK-00000000",
+            claim_until="2026-07-09T06:00:00.000000Z",
+        )
+
+    monkeypatch.setattr(ops, "renew_claim", fake_renew_claim)
+
+    lifecycle._renew_supervised_claim(
+        tmp_path, "thread-a", tmp_path / "supervisor.log", {}
+    )
+
+    assert calls == [{"handle": None, "actor": "thread-a"}]
+
+
+def test_supervisor_claim_renewal_is_silent_without_active_claim(tmp_path, monkeypatch):
+    feedback: list[tuple[str, dict[str, object]]] = []
+    log_path = tmp_path / "supervisor.log"
+    monkeypatch.setattr(
+        ops,
+        "renew_claim",
+        lambda **_kwargs: ops.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(
+        watchdog,
+        "publish_supervisor_feedback",
+        lambda _repo, _log, kind, **fields: feedback.append((kind, fields)),
+    )
+
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, {})
+
+    assert feedback == []
+    assert not log_path.exists()
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        ops.ClaimRenewalResult(False, "claimed_by_other", "TASK-peer", detail="peer"),
+        ops.ClaimRenewalResult(False, "missing", "TASK-missing"),
+        ops.ClaimRenewalResult(False, "deleted", "TASK-deleted"),
+        ops.ClaimRenewalResult(False, "backend_error", detail="backend offline"),
+    ],
+)
+def test_supervisor_claim_renewal_reports_bounded_noop_reasons(
+    tmp_path, monkeypatch, result
+):
+    feedback: list[tuple[str, dict[str, object]]] = []
+    log_path = tmp_path / "supervisor.log"
+    reported: dict[str, str] = {}
+    monkeypatch.setattr(ops, "renew_claim", lambda **_kwargs: result)
+    monkeypatch.setattr(
+        watchdog,
+        "publish_supervisor_feedback",
+        lambda _repo, _log, kind, **fields: feedback.append((kind, fields)),
+    )
+
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported)
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported)
+
+    log_text = log_path.read_text(encoding="utf-8")
+    assert log_text.count(f"reason={result.reason}") == 1
+    assert feedback == [
+        (
+            "claim.renewal-skipped",
+            {
+                "reason": result.reason,
+                "handle": result.handle,
+                "detail": result.detail,
+            },
+        )
+    ]
 
 
 def test_require_supervisor_started_accepts_thread_settled_log_path(
@@ -849,6 +976,15 @@ class _FakeThread:
 
     def join(self, timeout: float | None = None) -> None:
         self.joined_timeouts.append(timeout)
+
+
+class _StopAfterOneIteration:
+    def __init__(self) -> None:
+        self.waits: list[float] = []
+
+    def wait(self, seconds: float) -> bool:
+        self.waits.append(seconds)
+        return len(self.waits) > 1
 
 
 class _FakeSideChannel:
