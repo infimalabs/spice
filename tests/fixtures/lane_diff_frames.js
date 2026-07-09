@@ -82,9 +82,6 @@ context.renderLaneViewShell = (item) => {
 context.syncComposerPlaceholders = (item) => {
   item.placeholderSyncs += 1;
 };
-context.hydrateAckContextsForMessages = async (item, messages) => {
-  item.hydratedMessageCount = messages.length;
-};
 context.renderMessagesIfChanged = (item) => {
   item.messageRenders += 1;
 };

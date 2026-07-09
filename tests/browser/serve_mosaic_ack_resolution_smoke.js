@@ -247,7 +247,7 @@ function mosaicAckMissingResolutionCheck() {
   const beforeHasSkeleton = Boolean(beforeNode.querySelector(".ack-quote--pending"));
   const beforeRows = beforeCard.n;
 
-  // Simulate the found:false branch of hydrateAckContextsForMessages.
+  // Simulate the found:false branch of server-supplied ackContexts.
   lane.missingAckContextKeys.add("ack-key-missing");
   renderMessagesIfChanged(lane);
   const afterCard = lane.mosaicCards.find((c) => c.key === "ack-card-15");

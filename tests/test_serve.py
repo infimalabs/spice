@@ -27,6 +27,7 @@ from spice.mail.inbox import (
 from spice.mail.replies import append_reply_record, reply_log_path
 from spice.paths import shared_attachment_root
 from spice.serve import agentapi, app, livebus
+from spice.serve.messages import AssistantMessage, AssistantMessageRead
 from spice.serve.payload import identity, message
 from spice.serve.workroutes import work_tree_send_response_payload
 from spice.tasks import config as task_config
@@ -42,6 +43,20 @@ from tests.test_servehelpers import (
     _target,
     _transcript_resolution,
 )
+
+
+def _assistant_ack_message(key: str) -> AssistantMessage:
+    return AssistantMessage(
+        key="2026-01-01T00:00:01.000000Z#0",
+        index=0,
+        timestamp="2026-01-01T00:00:01.000000Z",
+        text=f"ACK {key}: applied",
+        display_text=f"ACK {key}: applied",
+        display_html=f"<p>ACK {key}: applied</p>",
+        ack_count=1,
+        ack_keys=[key],
+        ack_utterances=["applied"],
+    )
 
 
 def test_serve_parser_exposes_until_path_help(capsys):
@@ -293,17 +308,35 @@ def test_work_tree_send_writes_inbox_and_returns_attachment_payload(
     assert live_attachment["url"].startswith(
         f"/api/work/trees/{target.id}/files/image?path="
     )
-    refresh_payload = message.ack_context_payload_for_worktree(
-        state, target, keys=[payload["key"]]
+    monkeypatch.setattr(
+        message, "resolve_thread_id_for_target", lambda _state, _target: THREAD_A
     )
-    assert refresh_payload["acks"][0]["found"] is True
-    assert refresh_payload["acks"][0]["attachments"][0] == live_attachment
+    monkeypatch.setattr(
+        message,
+        "_ensure_work_tree_agent",
+        lambda _state, _target, thread_id: (thread_id, "", False, None),
+    )
+    monkeypatch.setattr(
+        message.message_reader,
+        "assistant_messages_for_thread_id",
+        lambda *_args, **_kwargs: AssistantMessageRead(
+            items=[_assistant_ack_message(payload["key"])],
+            error=None,
+            transcript=None,
+        ),
+    )
+    monkeypatch.setattr(message, "task_filter_inventory", lambda: {})
+    refresh_payload = message.messages_payload_for_worktree(state, target, limit=5)
+    assert refresh_payload["ackContexts"][0]["found"] is True
+    assert refresh_payload["ackContexts"][0]["attachments"][0] == live_attachment
     assert archive_ackd_inbox_items(repo, [payload["key"]]) == [payload["key"]]
-    archived_refresh_payload = message.ack_context_payload_for_worktree(
-        state, target, keys=[payload["key"]]
+    archived_refresh_payload = message.messages_payload_for_worktree(
+        state, target, limit=5
     )
-    assert archived_refresh_payload["acks"][0]["found"] is True
-    assert archived_refresh_payload["acks"][0]["attachments"][0] == live_attachment
+    assert archived_refresh_payload["ackContexts"][0]["found"] is True
+    assert archived_refresh_payload["ackContexts"][0]["attachments"][0] == (
+        live_attachment
+    )
     assert state.team_store.lane_metric_summary(ACTOR_A, bucket_count=12).sends == 1
     assert pending_inbox_count(repo) == 0
     assert inbox_request_body(items[0].text) == "inspect this image"
@@ -503,7 +536,7 @@ def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkey
         lambda _thread, _repo_root: _transcript_resolution(THREAD_A, rollout),
     )
     state.record_http_request("GET", "/")
-    state.record_http_request("GET", f"/api/work/trees/{target.id}/acks")
+    state.record_http_request("GET", f"/api/work/trees/{target.id}/messages")
     state.record_http_request("GET", f"/api/work/trees/{target.id}/not-a-route")
     state.record_http_request("POST", "/api/teams/command")
     state.record_http_request("GET", "/unmatched")
@@ -516,7 +549,7 @@ def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkey
     assert "spice_serve_pending_inbox_items 1\n" in text
     assert "spice_serve_rollout_present 1\n" in text
     assert (
-        'spice_serve_http_requests_total{method="GET",path="/api/work/trees/{id}/acks"} 1'
+        'spice_serve_http_requests_total{method="GET",path="/api/work/trees/{id}/messages"} 1'
         in text
     )
     assert (

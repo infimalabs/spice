@@ -87,7 +87,6 @@ TASK_DISTRIBUTION_MAX_BUCKET_COUNT = 1440
 WORK_TREE_API_METRIC_ACTIONS = frozenset(
     {
         "",
-        "acks",
         "agent/ensure",
         "agent/status",
         "files/image",
@@ -922,13 +921,6 @@ class _ServeHandler(BaseHTTPRequestHandler):
                     after=_query_str(query, "after"),
                     before=_query_str(query, "before"),
                     expected_thread_id=_query_str(query, "threadId"),
-                )
-            )
-            return
-        if action == "acks":
-            self._send_json(
-                message.ack_context_payload_for_worktree(
-                    self.state, target, keys=query.get("key", [])
                 )
             )
             return
