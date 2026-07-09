@@ -54,6 +54,43 @@ Keys are dot-separated command paths with lowercase/digit/hyphen segments.
 Top-level mounts cannot shadow built-in `spice` commands. Values are command
 strings or argv lists; remaining CLI arguments are passed through verbatim.
 
+## `[tool.spice.locks]`
+
+Resource locks coordinate exclusive local resources such as editor instances,
+emulators, databases, license seats, or a fixed pool of sandbox shards. The
+tracked table declares the resources; `spice lock run` holds one while a child
+command runs and releases it when that child exits.
+
+```toml
+[tool.spice.locks]
+lock_contention_exit_code = 75
+chosen_shard_contention_exit_code = 76
+pool_exhaustion_exit_code = 77
+
+[tool.spice.locks.named.editor]
+path = ".spice/locks/editor.lock"
+contention_exit_code = 75
+
+[tool.spice.locks.pools.android]
+directory = ".spice/locks/android"
+shards = 3
+chosen_shard_contention_exit_code = 76
+pool_exhaustion_exit_code = 77
+```
+
+`spice lock run editor -- project-tool edit` acquires the single named lock.
+`spice lock run android --pool -- project-tool test` acquires the first free
+pool shard. `spice lock run android --pool --shard 1 -- project-tool test`
+requires a specific zero-based shard.
+
+Default state paths live under `.spice/locks/` when a resource omits `path` or
+`directory`. Each held lock writes JSON holder metadata into its lock file with
+`pid`, `cwd`, and `started_at`; `spice lock status --json` lists configured
+locks and pool shards with that metadata. Per-invocation flags such as
+`--path`, `--directory`, `--shards`, `--lock-contention-exit-code`,
+`--chosen-shard-contention-exit-code`, and `--pool-exhaustion-exit-code`
+override the tracked defaults for that one run.
+
 ## `[tool.spice.policy]`
 
 The policy table extends the constitution. Defaults come from `spice/policy.py`.
