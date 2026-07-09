@@ -169,12 +169,31 @@ class ClaimRenewalResult:
     detail: str = ""
 
 
+CLAIM_RENEWAL_FAILED_REASONS = frozenset({"backend_error"})
+
+
+def claim_renewal_state(result: ClaimRenewalResult) -> str:
+    if result.renewed:
+        return "renewed"
+    if result.reason in CLAIM_RENEWAL_FAILED_REASONS:
+        return "failed"
+    return "skipped"
+
+
 def claim_renewal_status_line(result: ClaimRenewalResult) -> str:
     """A concise status line for surfaces that opportunistically renew claims."""
     if result.renewed:
         return f"claim_renewal=renewed {result.handle} until {result.claim_until}"
-    suffix = f" {result.handle}" if result.handle else ""
-    return f"claim_renewal=skipped {result.reason}{suffix}"
+    parts = [f"claim_renewal={claim_renewal_state(result)}", result.reason]
+    if result.handle:
+        parts.append(result.handle)
+    if result.detail:
+        parts.append(f"detail={_compact_claim_renewal_detail(result.detail)}")
+    return " ".join(parts)
+
+
+def _compact_claim_renewal_detail(detail: str) -> str:
+    return " ".join(detail.split())
 
 
 def _live_claim(row: dict[str, Any]) -> LiveClaim | None:

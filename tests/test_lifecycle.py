@@ -785,7 +785,6 @@ def test_supervisor_claim_renewal_is_silent_without_active_claim(tmp_path, monke
         ops.ClaimRenewalResult(False, "claimed_by_other", "TASK-peer", detail="peer"),
         ops.ClaimRenewalResult(False, "missing", "TASK-missing"),
         ops.ClaimRenewalResult(False, "deleted", "TASK-deleted"),
-        ops.ClaimRenewalResult(False, "backend_error", detail="backend offline"),
     ],
 )
 def test_supervisor_claim_renewal_reports_bounded_noop_reasons(
@@ -813,6 +812,39 @@ def test_supervisor_claim_renewal_reports_bounded_noop_reasons(
                 "reason": result.reason,
                 "handle": result.handle,
                 "detail": result.detail,
+            },
+        )
+    ]
+
+
+def test_supervisor_claim_renewal_reports_backend_failure(tmp_path, monkeypatch):
+    feedback: list[tuple[str, dict[str, object]]] = []
+    log_path = tmp_path / "supervisor.log"
+    reported: dict[str, str] = {}
+    result = ops.ClaimRenewalResult(
+        False, "backend_error", handle="TASK-failed", detail="backend offline"
+    )
+    monkeypatch.setattr(ops, "renew_claim", lambda **_kwargs: result)
+    monkeypatch.setattr(
+        watchdog,
+        "publish_supervisor_feedback",
+        lambda _repo, _log, kind, **fields: feedback.append((kind, fields)),
+    )
+
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported)
+    lifecycle._renew_supervised_claim(tmp_path, "thread-a", log_path, reported)
+
+    assert log_path.read_text(encoding="utf-8") == (
+        "spice claim renewal failed: "
+        "reason=backend_error handle=TASK-failed detail=backend offline\n"
+    )
+    assert feedback == [
+        (
+            "claim.renewal-failed",
+            {
+                "reason": "backend_error",
+                "handle": "TASK-failed",
+                "detail": "backend offline",
             },
         )
     ]

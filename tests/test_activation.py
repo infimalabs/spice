@@ -164,6 +164,33 @@ def test_activation_packet_renews_claim_after_baseline_refresh(tmp_path, monkeyp
         config.set_backend(None)
 
 
+def test_activation_packet_reports_failed_claim_renewal(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "spice.agent.lifecycle.bind_ambient_agent_activation",
+        lambda _repo: SimpleNamespace(thread_id="actor-a"),
+    )
+    monkeypatch.setattr("spice.hooks.install.install_hooks_for_repo", lambda _repo: [])
+    monkeypatch.setattr(
+        "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
+    )
+    monkeypatch.setattr(
+        "spice.tasks.gitsync.fast_forward_if_safe",
+        lambda _repo: SimpleNamespace(notes=["current"]),
+    )
+    monkeypatch.setattr("spice.mail.steeringkey.steering_token", lambda _repo: "tok")
+    monkeypatch.setattr(
+        "spice.tasks.ops.renew_claim",
+        lambda *, actor=None: ops.ClaimRenewalResult(
+            False, "backend_error", detail="backend offline"
+        ),
+    )
+
+    packet = agent_cli.render_activation_packet(tmp_path)
+
+    assert "claim_renewal=failed backend_error detail=backend offline" in packet
+    assert "baseline_refresh=current" in packet
+
+
 def test_package_json_makes_node_playwright_available():
     package = json.loads(Path("package.json").read_text(encoding="utf-8"))
 

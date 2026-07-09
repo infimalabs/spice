@@ -270,6 +270,37 @@ def test_task_add_missing_acceptance_honors_explicit_flow(task_repo, capsys):
     assert not str(row.get("acceptance") or "")
 
 
+def test_task_add_suspect_wording_routes_to_plan_and_marks_row(task_repo, capsys):
+    args = build_parser().parse_args(
+        [
+            "task",
+            "add",
+            "Adopting CLI task",
+            "--project",
+            "task.unit",
+            "--acceptance",
+            "Accepted tasks still route through plan when wording is suspect",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
+    )
+
+    assert args.func(args) == 0
+    created = capsys.readouterr().out.split()[1]
+    row = identity.resolve(created)
+    annotations = [ann.get("description", "") for ann in row.get("annotations") or []]
+
+    assert row["description"] == "Adopting CLI task"
+    assert row["phase"] == "plan"
+    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
+    assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
+    assert row["origin"] == "ack:20260101T000000000000Z"
+    assert any(
+        "adopting" in ann and "self-correction required" in ann for ann in annotations
+    )
+
+
 def test_task_add_deferred_flag_creates_waiting_task(task_repo, capsys):
     args = build_parser().parse_args(
         [
@@ -758,6 +789,26 @@ def test_task_next_reports_no_claim_renewal_when_no_task_available(monkeypatch):
     assert output == "\n".join(
         [
             "claim_renewal=skipped no_active_claim",
+            "no available tasks; run spice task status",
+        ]
+    )
+
+
+def test_task_next_reports_failed_claim_renewal_detail(monkeypatch):
+    monkeypatch.setattr(
+        render.ops,
+        "renew_claim",
+        lambda: ops.ClaimRenewalResult(
+            False, "backend_error", detail="backend offline"
+        ),
+    )
+    monkeypatch.setattr(render.alloc, "next_task", lambda: None)
+
+    output = render.render_next()
+
+    assert output == "\n".join(
+        [
+            "claim_renewal=failed backend_error detail=backend offline",
             "no available tasks; run spice task status",
         ]
     )

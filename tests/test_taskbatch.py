@@ -191,6 +191,28 @@ def test_cli_surface_batch_missing_acceptance_honors_explicit_flow(task_repo):
     assert not str(row.get("acceptance") or "")
 
 
+def test_cli_surface_batch_suspect_wording_preserves_existing_plan_flow(task_repo):
+    handles = create.add_batch(
+        [
+            "title=Adopting explicit plan batch | project=task.unit | "
+            "flow=todo,plan,review | acceptance=Explicit flow is intentional | "
+            "origin=ack:20260101T000000000000Z"
+        ],
+        creation_surface=config.TASK_CREATION_SURFACE_CLI,
+    )
+    row = identity.resolve(handles[0])
+    annotations = [ann.get("description", "") for ann in row.get("annotations") or []]
+
+    assert row["description"] == "Adopting explicit plan batch"
+    assert row["phase"] == "todo"
+    assert ops.phases_of(row) == ["todo", "plan", "review"]
+    assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
+    assert row["origin"] == "ack:20260101T000000000000Z"
+    assert any(
+        "adopting" in ann and "self-correction required" in ann for ann in annotations
+    )
+
+
 def test_add_batch_deferred_field_creates_waiting_task(task_repo):
     handles = create.add_batch(
         [

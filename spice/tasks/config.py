@@ -51,6 +51,7 @@ PRIVATE_DEFAULT_FLOW = ("todo",)
 PER_STEM_FLOWS: dict[str, tuple[str, ...]] = {}
 TASK_CREATION_SURFACE_UDA = "creation_surface"
 TASK_CREATION_SURFACE_CLI = "cli"
+TASK_WORDING_REVIEW_UDA = "wording_review"
 PROJECT_HIDDEN_UDA = "project_hidden"
 HIDDEN_TASK_TAG = "hidden"
 
@@ -297,6 +298,7 @@ _EVIDENCE = [
     "delete_reason",
     "origin",
     TASK_CREATION_SURFACE_UDA,
+    TASK_WORDING_REVIEW_UDA,
     "origin_thread",
     "origin_worktree",
     "origin_branch",
