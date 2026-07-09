@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV, all_drivers
+from spice.agent.lifecycle import agent_state_path
 from spice.errors import SpiceError
 from spice.mail.attachments import resolve_shared_attachment_ref
 from spice.mail.inbox import (
@@ -568,6 +569,9 @@ def lane_watch_paths_for_target(
         target_inbox,
         task_config.ensure_task_event_file(),
     ]
+    agent_state = _agent_state_signature_path(target.repo_root)
+    if agent_state is not None:
+        paths.append(agent_state)
     if transcript is not None:
         paths.append(transcript.path)
     # `spice agent reply` appends a lane card to the reply log without touching
@@ -616,8 +620,16 @@ def lane_signature_for_target(
             # is never classified as a pending-only change (which would push a
             # composer update and skip the messages payload carrying the card).
             _reply_log_signature(target.repo_root, thread_id),
+            _path_signature(_agent_state_signature_path(target.repo_root)),
         ),
     )
+
+
+def _agent_state_signature_path(repo_root: Path) -> Path | None:
+    try:
+        return agent_state_path(repo_root)
+    except SpiceError:
+        return None
 
 
 def _reply_log_signature(

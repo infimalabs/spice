@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from spice.agent import lifecycle
 from spice.agent.driver import CODEX_DRIVER
 from spice.mail.inbox import inbox_dir
 from spice.mail.replies import append_reply_record, reply_log_path
@@ -55,6 +56,36 @@ def test_existing_watch_paths_returns_existing_input_paths(tmp_path):
     missing = parent / "missing.txt"
 
     assert livebus._existing_watch_paths((parent, missing)) == (parent,)
+
+
+def test_lane_watch_paths_include_agent_state_file(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    target = WorktreeTarget(id="lane", repo_root=repo, name="repo", branch="main")
+    state = ServeState(anchor_root=tmp_path)
+
+    paths = app.lane_watch_paths_for_target(state, target, THREAD_ID, None)
+
+    assert lifecycle.agent_state_path(repo) in paths
+
+
+def test_lane_signature_changes_when_agent_state_file_changes(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    target = WorktreeTarget(id="lane", repo_root=repo, name="repo", branch="main")
+    state = ServeState(anchor_root=tmp_path)
+    state.team_store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    state_path = lifecycle.agent_state_path(repo)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text("{}", encoding="utf-8")
+
+    before = app.lane_signature_for_target(state, target, THREAD_ID, None)
+    os.utime(state_path, ns=(2_000_000_000, 2_000_000_000))
+    after = app.lane_signature_for_target(state, target, THREAD_ID, None)
+
+    assert before != after
 
 
 def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_count(
