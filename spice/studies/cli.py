@@ -350,7 +350,7 @@ def _add_study_action(actions: Any, name: str, helptext: str) -> Any:
 
 
 def _configure_extension_study_parsers(actions: Any) -> None:
-    for entry in _extension_study_entry_points():
+    for entry in extension_study_actions():
         _add_study_action(
             actions,
             entry.name,
@@ -1014,6 +1014,10 @@ def _extension_study_entry_points() -> tuple[SpiceExtensionEntryPoint, ...]:
         SPICE_STUDY_ENTRY_POINT_GROUP,
         built_in_names=_STUDY_ACTIONS,
     )
+
+
+def extension_study_actions() -> tuple[SpiceExtensionEntryPoint, ...]:
+    return _extension_study_entry_points()
 
 
 def _study_action_registry() -> dict[str, StudyHandler | SpiceExtensionEntryPoint]:

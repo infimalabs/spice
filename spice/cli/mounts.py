@@ -10,7 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from spice.cli.parser import BUILTIN_COMMANDS, builtin_command_paths
+from spice.cli.parser import (
+    BUILTIN_COMMANDS,
+    CommandPathRegistration,
+    command_path_registry,
+)
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
 from spice.repocfg import commands_table
@@ -38,7 +42,7 @@ class MountedCommand:
 def mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]:
     """The validated mount table; any malformed entry fails the whole read."""
     mounts: dict[tuple[str, ...], tuple[str, ...]] = {}
-    builtin_paths = builtin_command_paths()
+    command_paths = command_path_registry()
     for raw_name, raw_argv in commands_table(repo_root).items():
         path = mount_command_path(str(raw_name))
         if len(path) == 1 and path[0] in BUILTIN_COMMANDS:
@@ -46,13 +50,25 @@ def mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]:
                 f"[tool.spice.commands] entry {raw_name!r} shadows a built-in "
                 "spice command; pick another name"
             )
-        if path in builtin_paths:
-            raise SpiceError(
-                f"[tool.spice.commands] entry {raw_name!r} shadows built-in "
-                f"spice action {'spice ' + ' '.join(path)!r}; pick another name"
-            )
+        registration = command_paths.get(path)
+        if registration is not None:
+            raise _mount_shadow_error(str(raw_name), registration)
         mounts[path] = _mount_argv(str(raw_name), raw_argv)
     return mounts
+
+
+def _mount_shadow_error(name: str, registration: CommandPathRegistration) -> SpiceError:
+    action = "spice " + " ".join(registration.path)
+    if registration.source == "extension":
+        return SpiceError(
+            f"[tool.spice.commands] entry {name!r} shadows extension-provided "
+            f"spice action {action!r} from {registration.provider!r}; "
+            "pick another name"
+        )
+    return SpiceError(
+        f"[tool.spice.commands] entry {name!r} shadows built-in "
+        f"spice action {action!r}; pick another name"
+    )
 
 
 def mount_command_path(raw_name: str) -> tuple[str, ...]:
