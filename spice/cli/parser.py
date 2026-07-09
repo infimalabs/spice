@@ -103,10 +103,6 @@ def command_path_registry() -> dict[tuple[str, ...], CommandPathRegistration]:
     return registry
 
 
-def builtin_command_paths() -> frozenset[tuple[str, ...]]:
-    return frozenset(command_path_registry())
-
-
 def _parser_command_paths(
     parser: argparse.ArgumentParser, prefix: tuple[str, ...] = ()
 ) -> set[tuple[str, ...]]:
