@@ -904,6 +904,148 @@ def test_active_claim_phase_reports_claimed_task_phase(task_repo):
     assert ops.active_claim_phase("") == ""
 
 
+def test_renew_claim_refreshes_stale_own_active_claim(task_repo):
+    handle = create.add(
+        "Renew my active claim",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["same-actor renewal refreshes the claim deadline and context"],
+    )
+    ops.claim(handle)
+    claimed = identity.resolve(handle)
+    uuid = identity.uuid_of(claimed)
+    tw.run(
+        [
+            uuid,
+            "modify",
+            "claim_until:2020-01-01T00:00:00.000000Z",
+            "claim_context_start:2020-01-01T00:00:00.000000Z",
+            "claim_context_end:2020-01-01T00:00:00.000000Z",
+            "claim_context_link:stale",
+            "claim_context_turn:stale",
+        ]
+    )
+    stale = identity.resolve(handle)
+
+    result = ops.renew_claim(handle)
+    fresh = identity.resolve(handle)
+
+    assert result.renewed is True
+    assert result.reason == "renewed"
+    assert result.handle == handle
+    assert result.claim_until == fresh["claim_until"]
+    assert fresh["claim_until"] > stale["claim_until"]
+    assert fresh["claim_by"] == ACTOR_A
+    assert fresh["claim_at"] == claimed["claim_at"]
+    assert fresh["phase"] == claimed["phase"]
+    assert fresh["claim_context_turn"] == "turn-a"
+    assert fresh["claim_context_link"].startswith(f"spice-session://{ACTOR_A}?")
+
+
+def test_renew_claim_without_active_claim_reports_no_active_claim(task_repo):
+    handle = create.add(
+        "Leave renewal unclaimed",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["renewal without an active claim is a no-op"],
+    )
+
+    result = ops.renew_claim()
+    row = identity.resolve(handle)
+
+    assert result == ops.ClaimRenewalResult(False, "no_active_claim")
+    assert str(row.get("claim_by") or "") == ""
+    assert str(row.get("claim_until") or "") == ""
+
+
+def test_renew_claim_refuses_stale_peer_claim_without_stealing(task_repo, monkeypatch):
+    handle = create.add(
+        "Do not renew peer claim",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["renewal refuses peer claims even when stale"],
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(handle)
+    claimed = identity.resolve(handle)
+    uuid = identity.uuid_of(claimed)
+    tw.run([uuid, "modify", "claim_until:2020-01-01T00:00:00.000000Z"])
+
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    result = ops.renew_claim(handle)
+    fresh = identity.resolve(handle)
+
+    assert result.reason == "claimed_by_other"
+    assert result.detail == PEER_ACTOR
+    assert fresh["claim_by"] == PEER_ACTOR
+    assert fresh["claim_until"] == "2020-01-01T00:00:00.000000Z"
+
+
+def test_renew_claim_refuses_same_actor_different_worktree(task_repo):
+    handle = create.add(
+        "Do not renew another worktree",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["renewal requires matching actor and worktree"],
+    )
+    ops.claim(handle)
+    claimed = identity.resolve(handle)
+    uuid = identity.uuid_of(claimed)
+    tw.run([uuid, "modify", "claim_worktree:/tmp/spice-other-worktree"])
+
+    result = ops.renew_claim(handle)
+    fresh = identity.resolve(handle)
+
+    assert result.reason == "different_worktree"
+    assert fresh["claim_by"] == ACTOR_A
+    assert fresh["claim_worktree"] == "/tmp/spice-other-worktree"
+    assert fresh["claim_until"] == claimed["claim_until"]
+
+
+def test_renew_claim_reports_missing_and_terminal_rows(task_repo):
+    missing = ops.renew_claim("TASK-00000000")
+    assert missing.reason == "missing"
+
+    deleted = create.add(
+        "Deleted renewal row",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["deleted rows report a renewal reason"],
+    )
+    ops.delete(deleted, "obsolete")
+    deleted_result = ops.renew_claim(deleted)
+    assert deleted_result.reason == "deleted"
+
+    completed = create.add(
+        "Completed renewal row",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["completed rows report a renewal reason"],
+    )
+    completed_uuid = identity.uuid_of(identity.resolve(completed))
+    tw.run([completed_uuid, "done"])
+    completed_result = ops.renew_claim(completed)
+    assert completed_result.reason == "completed"
+
+
+def test_renew_claim_reports_backend_failure(monkeypatch):
+    def fail_export(*_args, **_kwargs):
+        raise SpiceError("backend offline")
+
+    monkeypatch.setattr(ops.tw, "export", fail_export)
+
+    result = ops.renew_claim("TASK-00000000")
+
+    assert result.reason == "backend_error"
+    assert result.detail == "backend offline"
+
+
 def test_task_add_stores_description_and_caps_title(task_repo):
     overlong = "A" * (create.TASK_TITLE_LIMIT + 1)
     with pytest.raises(SpiceError, match="move detail into --description"):
