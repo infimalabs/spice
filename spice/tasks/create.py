@@ -515,6 +515,10 @@ def add(
     )
 
 
+BatchFields = dict[str, list[str]]
+REPEATABLE_BATCH_FIELDS = frozenset({"acceptance"})
+
+
 def _parse_add_batch_request(
     raw: str, index: int
 ) -> tuple[TaskAddBatchRequest | None, list[str]]:
@@ -530,73 +534,88 @@ def _parse_add_batch_request(
     return _batch_request_from_fields(fields), []
 
 
-def _parse_batch_fields(raw: str, index: int) -> tuple[dict[str, str], list[str]]:
-    fields: dict[str, str] = {}
+def _parse_batch_fields(raw: str, index: int) -> tuple[BatchFields, list[str]]:
+    fields: BatchFields = {}
     errors: list[str] = []
     for part in raw.split("|"):
         if "=" not in part:
-            errors.append(f"line {index}: field without '=': {part.strip()!r}")
+            errors.append(
+                f"line {index}: field without '=': {part.strip()!r} "
+                "(use key=value segments; repeat acceptance=... for "
+                "multiple acceptance criteria)"
+            )
             continue
         key, value = part.split("=", 1)
-        fields[key.strip()] = value.strip()
+        fields.setdefault(key.strip(), []).append(value.strip())
     return fields, errors
 
 
-def _batch_field_errors(fields: dict[str, str], index: int) -> list[str]:
+def _batch_field_errors(fields: BatchFields, index: int) -> list[str]:
     errors: list[str] = []
     for req in ("title", "project"):
-        if not fields.get(req):
+        if not _batch_field(fields, req):
             errors.append(f"line {index}: missing required field {req!r}")
-    if fields.get("title"):
+    for key, values in fields.items():
+        if len(values) > 1 and key not in REPEATABLE_BATCH_FIELDS:
+            errors.append(
+                f"line {index}: duplicate field {key!r}; only acceptance "
+                "may be repeated"
+            )
+    if _batch_field(fields, "title"):
         try:
-            _task_title(fields["title"], context=f"line {index}: ")
+            _task_title(_batch_field(fields, "title"), context=f"line {index}: ")
         except SpiceError as exc:
             errors.append(str(exc))
-    if fields.get("project"):
+    if _batch_field(fields, "project"):
         try:
-            config.validate_manual_creation_project(fields["project"])
+            config.validate_manual_creation_project(_batch_field(fields, "project"))
         except SpiceError as exc:
             errors.append(f"line {index}: {exc}")
     if "priority" in fields:
         try:
-            config.map_priority(fields["priority"])
+            config.map_priority(_batch_field(fields, "priority"))
         except SpiceError as exc:
             errors.append(f"line {index}: {exc}")
-    if "deferred" in fields and not _batch_bool_field(fields["deferred"]):
+    if "deferred" in fields and not _batch_bool_field(_batch_field(fields, "deferred")):
         errors.append(f"line {index}: deferred must be true/false")
-    flow = _batch_csv(fields.get("flow", ""))
-    if flow and fields.get("project"):
+    flow = _batch_csv(_batch_field(fields, "flow"))
+    if flow and _batch_field(fields, "project"):
         try:
-            config.resolve_flow(list(flow), fields["project"])
+            config.resolve_flow(list(flow), _batch_field(fields, "project"))
         except SpiceError as exc:
             errors.append(f"line {index}: {exc}")
-    for dep in _batch_csv(fields.get("after", "")):
+    for dep in _batch_csv(_batch_field(fields, "after")):
         try:
             identity.resolve(dep)
         except SpiceError:
             errors.append(f"line {index}: unknown after handle {dep!r}")
-    if fields.get("origin"):
+    if _batch_field(fields, "origin"):
         try:
-            validated_task_origin(fields["origin"])
+            validated_task_origin(_batch_field(fields, "origin"))
         except SpiceError as exc:
             errors.append(f"line {index}: {exc}")
     return errors
 
 
-def _batch_request_from_fields(fields: dict[str, str]) -> TaskAddBatchRequest:
+def _batch_request_from_fields(fields: BatchFields) -> TaskAddBatchRequest:
     return TaskAddBatchRequest(
-        title=fields["title"],
-        description=fields.get("description") or None,
-        project=fields["project"],
-        priority=fields.get("priority", config.DEFAULT_PRIORITY),
-        flow=_batch_csv(fields.get("flow", "")),
-        tags=_batch_csv(fields.get("tags", "")),
-        after=_batch_csv(fields.get("after", "")),
-        acceptance=(fields["acceptance"],) if fields.get("acceptance") else (),
-        due=fields.get("due") or None,
-        deferred=_batch_bool(fields.get("deferred", "")),
-        origin=fields.get("origin") or None,
+        title=_batch_field(fields, "title"),
+        description=_batch_field(fields, "description") or None,
+        project=_batch_field(fields, "project"),
+        priority=_batch_field(fields, "priority") or config.DEFAULT_PRIORITY,
+        flow=_batch_csv(_batch_field(fields, "flow")),
+        tags=_batch_csv(_batch_field(fields, "tags")),
+        after=_batch_csv(_batch_field(fields, "after")),
+        acceptance=tuple(item for item in fields.get("acceptance", ()) if item),
+        due=_batch_field(fields, "due") or None,
+        deferred=_batch_bool(_batch_field(fields, "deferred")),
+        origin=_batch_field(fields, "origin") or None,
     )
+
+
+def _batch_field(fields: BatchFields, key: str) -> str:
+    values = fields.get(key) or []
+    return values[0] if values else ""
 
 
 def _batch_csv(raw: str) -> tuple[str, ...]:

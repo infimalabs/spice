@@ -202,6 +202,16 @@ def test_task_delete_parser_accepts_force_claimed():
     assert args.force_claimed is True
 
 
+def test_task_add_help_documents_repeatable_batch_acceptance(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        build_parser().parse_args(["task", "add", "--help"])
+
+    assert exc_info.value.code == 0
+    assert "Repeat acceptance=... for multiple acceptance criteria." in (
+        capsys.readouterr().out
+    )
+
+
 def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
     args = build_parser().parse_args(
         [

@@ -64,6 +64,49 @@ def test_parse_add_batch_returns_typed_requests_without_creating_tasks(task_repo
     assert tw.export(["status:pending"]) == []
 
 
+def test_parse_add_batch_accepts_repeated_acceptance_fields(task_repo):
+    requests = create.parse_add_batch(
+        [
+            "title=Multi-accept batch | project=task.unit | "
+            "acceptance=First criterion | acceptance=Second criterion"
+        ]
+    )
+
+    assert requests == [
+        create.TaskAddBatchRequest(
+            title="Multi-accept batch",
+            project="task.unit",
+            acceptance=("First criterion", "Second criterion"),
+        )
+    ]
+    assert tw.export(["status:pending"]) == []
+
+
+def test_parse_add_batch_rejects_duplicate_non_repeatable_field(task_repo):
+    with pytest.raises(SpiceError, match="duplicate field 'title'"):
+        create.parse_add_batch(
+            [
+                "title=First | title=Second | project=task.unit | "
+                "acceptance=Duplicate title is ambiguous"
+            ]
+        )
+
+    assert tw.export(["status:pending"]) == []
+
+
+def test_parse_add_batch_reports_actionable_bare_segment_error(task_repo):
+    with pytest.raises(SpiceError) as exc_info:
+        create.parse_add_batch(
+            ["title=Bare segment | project=task.unit | acceptance=ok | missing equals"]
+        )
+
+    message = str(exc_info.value)
+    assert "field without '='" in message
+    assert "use key=value segments" in message
+    assert "repeat acceptance=..." in message
+    assert tw.export(["status:pending"]) == []
+
+
 def test_parse_add_batch_accepts_task_directive_prefix(task_repo):
     requests = create.parse_add_batch(
         [
@@ -154,6 +197,20 @@ def test_add_batch_creates_from_parsed_requests(task_repo):
     assert row["project"] == "task.unit"
     assert row["priority"] == "L"
     assert row["acceptance"] == "Batch creation still works"
+
+
+def test_add_batch_creates_multiple_acceptance_criteria(task_repo):
+    handles = create.add_batch(
+        [
+            "title=Created multi-accept batch | project=task.unit | "
+            "acceptance=First criterion | acceptance=Second criterion | "
+            "origin=ack:20260101T000000000000Z"
+        ]
+    )
+    row = identity.resolve(handles[0])
+
+    assert row["description"] == "Created multi-accept batch"
+    assert row["acceptance"] == "First criterion | Second criterion"
 
 
 def test_cli_surface_batch_missing_acceptance_routes_to_plan(task_repo):

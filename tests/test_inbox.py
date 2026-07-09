@@ -459,6 +459,7 @@ def test_inbox_payload_rows_prompt_immediate_task_offload(tmp_path):
         INBOX_TASK_HINT_ROW
     )
     assert "omitted acceptance with no flow starts in plan" in INBOX_TASK_HINT_ROW
+    assert "repeat acceptance=... for multiple criteria" in INBOX_TASK_HINT_ROW
     assert "ACK prose first and then the TASK line on its own line" in (
         INBOX_TASK_HINT_ROW
     )
