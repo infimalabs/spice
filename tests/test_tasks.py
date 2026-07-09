@@ -1027,6 +1027,37 @@ def test_renew_claim_without_active_claim_reports_no_active_claim(task_repo):
     assert str(row.get("claim_until") or "") == ""
 
 
+def test_task_next_renewal_does_not_touch_peer_claim(task_repo, monkeypatch):
+    peer_handle = create.add(
+        "Peer claim stays untouched",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["task next renewal does not refresh another actor"],
+    )
+    monkeypatch.setenv(DRIVER.thread_id_env, PEER_ACTOR)
+    ops.claim(peer_handle)
+    peer_before = identity.resolve(peer_handle)
+
+    monkeypatch.setenv(DRIVER.thread_id_env, ACTOR_A)
+    candidate = create.add(
+        "Candidate for current actor",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["current actor can still claim ready work"],
+    )
+
+    output = render.render_next()
+    peer_after = identity.resolve(peer_handle)
+    candidate_after = identity.resolve(candidate)
+
+    assert output.startswith("claim_renewal=skipped no_active_claim\n")
+    assert peer_after["claim_by"] == PEER_ACTOR
+    assert peer_after["claim_until"] == peer_before["claim_until"]
+    assert candidate_after["claim_by"] == ACTOR_A
+
+
 def test_renew_claim_refuses_stale_peer_claim_without_stealing(task_repo, monkeypatch):
     handle = create.add(
         "Do not renew peer claim",

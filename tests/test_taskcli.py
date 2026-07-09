@@ -683,15 +683,84 @@ def test_task_next_includes_recovery_context_for_assignment(monkeypatch):
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
     monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
     monkeypatch.setattr(
+        render.ops,
+        "renew_claim",
+        lambda: ops.ClaimRenewalResult(
+            True,
+            "renewed",
+            handle="TASK-test",
+            claim_until="2026-07-09T06:00:00.000000Z",
+        ),
+    )
+    monkeypatch.setattr(
         render.ops, "claim_drive_line", lambda _handle: "drive: continue TASK-test"
     )
 
     output = render.render_next()
 
+    assert output.startswith(
+        "claim_renewal=renewed TASK-test until 2026-07-09T06:00:00.000000Z\n"
+    )
     assert "next task:\nTASK-test [todo] P:M task.render Assigned context" in output
     assert "claim_context 2026-06-12T08:15:18.621994Z ->" in output
     assert "rehydrate:" in output
     assert "context_check:" in output
+
+
+def test_task_next_renews_before_allocating(monkeypatch):
+    calls: list[str] = []
+    row = _row(
+        "Assigned after renewal",
+        project="task.render",
+        incepted="1k4yrMDR",
+        status="pending",
+    )
+    row.update({"phase": "todo", "phase_i": "0", "urgency": "9.2"})
+
+    def fake_renew():
+        calls.append("renew")
+        return ops.ClaimRenewalResult(
+            True,
+            "renewed",
+            handle="TASK-test",
+            claim_until="2026-07-09T06:00:00.000000Z",
+        )
+
+    def fake_next():
+        calls.append("next")
+        return row
+
+    monkeypatch.setattr(render.ops, "renew_claim", fake_renew)
+    monkeypatch.setattr(render.alloc, "next_task", fake_next)
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(
+        render.ops, "claim_drive_line", lambda _handle: "drive: continue TASK-test"
+    )
+
+    output = render.render_next()
+
+    assert calls == ["renew", "next"]
+    assert output.startswith("claim_renewal=renewed TASK-test until ")
+
+
+def test_task_next_reports_no_claim_renewal_when_no_task_available(monkeypatch):
+    monkeypatch.setattr(
+        render.ops,
+        "renew_claim",
+        lambda: ops.ClaimRenewalResult(False, "no_active_claim"),
+    )
+    monkeypatch.setattr(render.alloc, "next_task", lambda: None)
+
+    output = render.render_next()
+
+    assert output == "\n".join(
+        [
+            "claim_renewal=skipped no_active_claim",
+            "no available tasks; run spice task status",
+        ]
+    )
 
 
 def test_task_show_context_check_names_stale_or_shifted_context(monkeypatch):
