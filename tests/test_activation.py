@@ -3,11 +3,14 @@
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
+from spice.agent import cli as agent_cli
 from spice.agent.activation import (
     activation_browser_validation_lines,
     activation_command_surface_lines,
 )
+from spice.tasks import ops
 
 
 def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
@@ -70,6 +73,43 @@ def test_activation_browser_validation_uses_repo_local_node_playwright():
     assert ".spice/agent/playwright-mcp.json browser.contextOptions" in text
     assert "matches the operator's system appearance" in text
     assert "distinguish missing Node dependencies" in text
+
+
+def test_activation_packet_reports_claim_renewal(tmp_path, monkeypatch):
+    seen: dict[str, str | None] = {}
+
+    monkeypatch.setattr(
+        "spice.agent.lifecycle.bind_ambient_agent_activation",
+        lambda _repo: SimpleNamespace(thread_id="actor-a"),
+    )
+    monkeypatch.setattr("spice.hooks.install.install_hooks_for_repo", lambda _repo: [])
+    monkeypatch.setattr(
+        "spice.agent.lifecycle.materialize_worktree_skill", lambda _repo: None
+    )
+    monkeypatch.setattr(
+        "spice.tasks.gitsync.fast_forward_if_safe",
+        lambda _repo: SimpleNamespace(notes=["current"]),
+    )
+    monkeypatch.setattr("spice.mail.steeringkey.steering_token", lambda _repo: "tok")
+
+    def fake_renew_claim(*, actor=None):
+        seen["actor"] = actor
+        return ops.ClaimRenewalResult(
+            True,
+            "renewed",
+            handle="TASK-1k4Q5gJw",
+            claim_until="2026-07-09T06:00:00.000000Z",
+        )
+
+    monkeypatch.setattr("spice.tasks.ops.renew_claim", fake_renew_claim)
+
+    packet = agent_cli.render_activation_packet(tmp_path)
+
+    assert seen == {"actor": "actor-a"}
+    assert (
+        "claim_renewal=renewed TASK-1k4Q5gJw until 2026-07-09T06:00:00.000000Z"
+    ) in packet
+    assert "baseline_refresh=current" in packet
 
 
 def test_package_json_makes_node_playwright_available():

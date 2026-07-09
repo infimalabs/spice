@@ -492,11 +492,18 @@ def render_status() -> str:
 
 
 def render_next() -> str:
+    renewal = ops.renew_claim()
     row = alloc.next_task()
     if not row:
-        return "no available tasks; run spice task status"
+        return "\n".join(
+            [
+                ops.claim_renewal_status_line(renewal),
+                "no available tasks; run spice task status",
+            ]
+        )
     rendered = identity.render_handle(row)
     lines = [
+        ops.claim_renewal_status_line(renewal),
         "next task:",
         render_row(row),
         "",

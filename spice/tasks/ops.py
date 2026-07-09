@@ -169,6 +169,14 @@ class ClaimRenewalResult:
     detail: str = ""
 
 
+def claim_renewal_status_line(result: ClaimRenewalResult) -> str:
+    """A concise status line for surfaces that opportunistically renew claims."""
+    if result.renewed:
+        return f"claim_renewal=renewed {result.handle} until {result.claim_until}"
+    suffix = f" {result.handle}" if result.handle else ""
+    return f"claim_renewal=skipped {result.reason}{suffix}"
+
+
 def _live_claim(row: dict[str, Any]) -> LiveClaim | None:
     until = str(row.get("claim_until") or "")
     if not until or until < tw.now_iso():
