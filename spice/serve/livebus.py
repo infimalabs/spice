@@ -16,7 +16,8 @@ import os
 import select
 import time
 import uuid
-from concurrent.futures import Future, ThreadPoolExecutor
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
@@ -146,6 +147,16 @@ class LiveBusSession:
         # Batched subscribes fan their payload computes out here so N lanes
         # arrive together in one reply frame instead of trickling in serially.
         self._payload_pool: ThreadPoolExecutor | None = None
+        # Single read-only verbs (lane.subscribe/refresh/history) route their
+        # heavy messages_payload compute + reply onto that pool, one FIFO chain
+        # per target: two queued reads for a lane apply in request order while
+        # distinct lanes overlap up to the pool's width. Only one chain runs
+        # per target at a time (guarded by _read_active), so the queue never
+        # needs cross-thread reordering.
+        self._read_lock = Lock()
+        self._read_queues: dict[str, deque[Callable[[], None]]] = {}
+        self._read_active: set[str] = set()
+        self._read_futures: set[Future[None]] = set()
 
     def run(self) -> None:
         self.connection.set_read_timeout(LIVE_BUS_READ_TIMEOUT_S)
@@ -177,9 +188,16 @@ class LiveBusSession:
             self._send_followup_worker.join(timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
             self._send_followup_worker = None
         if self._payload_pool is not None:
-            # The dispatch thread awaits batch results inline, so nothing is in
-            # flight here on a clean close; cancel_futures covers a mid-batch
-            # disconnect without blocking teardown on a slow transcript parse.
+            # Batch subscribes await their results inline, but single read chains
+            # run detached — one may be mid-compute at close. Drop the queued-but-
+            # unstarted jobs, then wait out the running chains within the same
+            # bounded budget the watcher joins use, so a slow transcript parse
+            # cannot hang teardown. cancel_futures reaps anything still queued.
+            with self._read_lock:
+                self._read_queues.clear()
+                pending = list(self._read_futures)
+            if pending:
+                wait(pending, timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
             self._payload_pool.shutdown(wait=False, cancel_futures=True)
             self._payload_pool = None
 
@@ -280,11 +298,15 @@ class LiveBusSession:
         target = self._require_target(message)
         if target is None:
             return
+        # Bookkeeping (replace/stop + signature snapshot) and watcher start stay
+        # inline for their existing thread-safety; only the heavy payload compute
+        # and reply move onto the target's read chain. The watcher wakes only
+        # after _wait_for_change sees a real edit, so it never overtakes the
+        # initial reply the chain sends promptly on the pool.
         subscription = self._replace_subscription(
             target, dict(message.get("query") or {})
         )
-        payload = self.callbacks.messages_payload(target, **self._query_kwargs(message))
-        self._reply(message, {"type": "lane.payload", "payload": payload})
+        self._dispatch_read(target, message)
         self._start_watcher(subscription)
 
     def _handle_lanes_subscribe(self, message: dict[str, Any]) -> None:
@@ -369,6 +391,55 @@ class LiveBusSession:
             )
         return self._payload_pool
 
+    def _dispatch_read(self, target: Any, message: dict[str, Any]) -> None:
+        """Queue a lane payload compute + reply on the target's FIFO read chain.
+
+        The query is parsed inline (cheap, on the dispatch thread) and captured;
+        only the heavy messages_payload read runs on the pool so one slow lane
+        never blocks bus.ping or a sibling lane on the single dispatch thread.
+        """
+        kwargs = self._query_kwargs(message)
+
+        def job() -> None:
+            try:
+                payload = self.callbacks.messages_payload(target, **kwargs)
+                frame: dict[str, Any] = {"type": "lane.payload", "payload": payload}
+            except Exception as exc:  # mirror _dispatch: surface, never wedge
+                frame = {"type": "bus.error", "error": str(exc)}
+            try:
+                self._reply(message, frame)
+            except (OSError, WebSocketProtocolError, WebSocketDisconnect):
+                pass  # peer vanished mid-read; the chain still drains cleanly
+
+        self._enqueue_read_job(target.id, job)
+
+    def _enqueue_read_job(self, target_id: str, job: Callable[[], None]) -> None:
+        with self._read_lock:
+            self._read_queues.setdefault(target_id, deque()).append(job)
+            if target_id in self._read_active:
+                return  # a chain is already draining this target FIFO
+            self._read_active.add(target_id)
+            # The chain blocks on _read_lock on entry, so it cannot finish (and
+            # fire the done callback inline) while this call still holds the lock.
+            future = self._payload_executor().submit(self._drain_read_chain, target_id)
+            self._read_futures.add(future)
+            future.add_done_callback(self._forget_read_future)
+
+    def _drain_read_chain(self, target_id: str) -> None:
+        while True:
+            with self._read_lock:
+                queue = self._read_queues.get(target_id)
+                if not queue:
+                    self._read_queues.pop(target_id, None)
+                    self._read_active.discard(target_id)
+                    return
+                job = queue.popleft()
+            job()  # self-contained: computes, replies, swallows send errors
+
+    def _forget_read_future(self, future: Future[None]) -> None:
+        with self._read_lock:
+            self._read_futures.discard(future)
+
     def _handle_lane_configure(self, message: dict[str, Any]) -> None:
         target = self._require_target(message)
         if target is None:
@@ -390,8 +461,7 @@ class LiveBusSession:
         target = self._require_target(message)
         if target is None:
             return
-        payload = self.callbacks.messages_payload(target, **self._query_kwargs(message))
-        self._reply(message, {"type": "lane.payload", "payload": payload})
+        self._dispatch_read(target, message)
 
     def _handle_lane_history(self, message: dict[str, Any]) -> None:
         self._handle_lane_refresh(message)
