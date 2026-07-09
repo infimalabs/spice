@@ -318,6 +318,43 @@ def test_task_add_suspect_wording_routes_to_plan_and_marks_row(task_repo, capsys
     )
 
 
+def test_task_resolve_wording_clears_active_claim_marker(task_repo, capsys):
+    handle = create.add(
+        "Adopting CLI resolve",
+        project="task.unit",
+        acceptance=["parent bookend acceptance exists"],
+        origin="ack:20260101T000000000000Z",
+    )
+    child = create.add(
+        "Concrete CLI child",
+        project="task.unit",
+        acceptance=["child node has acceptance"],
+        origin="ack:20260101T000000000000Z",
+    )
+    ops.depends(handle, [child])
+    ops.claim(handle)
+    args = _with_backend(
+        build_parser().parse_args(
+            [
+                "task",
+                "resolve-wording",
+                "--reason",
+                "accepted child board exists",
+            ]
+        )
+    )
+
+    assert args.func(args) == 0
+    output = capsys.readouterr().out
+    row = identity.resolve(handle)
+    annotations = [ann.get("description", "") for ann in row.get("annotations") or []]
+
+    assert f"resolved wording review for {handle}" in output
+    assert not str(row.get(config.TASK_WORDING_REVIEW_UDA) or "")
+    assert any(item.startswith("suspect wording:") for item in annotations)
+    assert "wording review resolved: accepted child board exists" in annotations
+
+
 def test_task_add_deferred_flag_creates_waiting_task(task_repo, capsys):
     args = build_parser().parse_args(
         [

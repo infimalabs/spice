@@ -18,6 +18,7 @@ from spice.tasks import (
     ops,
     render,
     sizing,
+    wordingreview,
 )
 
 _TASK_LIST_STATUSES = ("pending", "waiting", "completed", "deleted")
@@ -281,6 +282,7 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     _configure_ingest_parser(actions)
     _configure_oops_parser(actions)
     _configure_note_parser(actions)
+    _configure_resolve_wording_parser(actions)
     _configure_depends_parser(actions)
     _configure_wake_parser(actions)
     _configure_claim_parser(actions)
@@ -332,6 +334,23 @@ def _configure_note_parser(actions: Any) -> None:
     note.add_argument("handle")
     note.add_argument("text", nargs="?")
     note.set_defaults(func=handle)
+
+
+def _configure_resolve_wording_parser(actions: Any) -> None:
+    resolve = actions.add_parser(
+        "resolve-wording",
+        help="Clear a suspect-wording review marker after plan self-correction.",
+        recovery_examples=(
+            'spice task resolve-wording TASK-1k4Q5gJw --reason "acceptance refined"',
+        ),
+    )
+    resolve.add_argument(
+        "handle",
+        nargs="?",
+        help="Task handle; omit to resolve your sole active claim.",
+    )
+    resolve.add_argument("--reason", required=True)
+    resolve.set_defaults(func=handle)
 
 
 def _configure_depends_parser(actions: Any) -> None:
@@ -813,6 +832,10 @@ _DISPATCH = {
     ),
     "oops": _oops,
     "note": _note,
+    "resolve-wording": lambda a: wordingreview.resolve_wording_review(
+        a.handle,
+        reason=a.reason,
+    ),
     "depends": lambda a: ops.depends(a.handle, list(a.after)),
     "wake": lambda a: ops.wake(list(a.handles)),
     "claim": lambda a: ops.claim(a.handle, steal=a.steal),
