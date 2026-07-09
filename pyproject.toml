@@ -66,6 +66,7 @@ namespaces = true
 dev = [
     "pyright>=1.1",
     "pytest>=8.0",
+    "pytest-xdist>=3.6",
 ]
 
 [tool.pyright]
@@ -79,6 +80,7 @@ line-length = 88
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["-n", "auto", "--dist=loadfile"]
 
 [tool.spice.agent]
 wrappers = ["common", "spice-dev"]
@@ -112,6 +114,7 @@ env_names = [
     "PATH",
     "FAKEENV_PORT",
     "PYTHONPATH",
+    "PYTEST_XDIST_WORKER",
     "RTK_DB_PATH",
     "SPICE_AGENT_BIN",
     "SPICE_AGENT_DRIVER",

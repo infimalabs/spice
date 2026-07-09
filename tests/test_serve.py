@@ -213,6 +213,7 @@ def test_lane_watch_paths_use_exact_live_bus_sources(tmp_path):
     assert paths == (
         inbox_dir(repo),
         event_path,
+        app.agent_state_path(repo),
         transcript,
         reply_log,
     )
