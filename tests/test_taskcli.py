@@ -1030,17 +1030,55 @@ def test_task_show_prints_merge_aware_diff_command_for_task_merge(monkeypatch):
     assert "review_commit merge-head (task merge; agent_head agent-head)" in output
     assert "review_diff_base upstream-head (done_upstream_head)" in output
     assert (
-        "review_diff_command git diff --stat --patch "
-        "$(git merge-base upstream-head agent-head) agent-head" in output
-    )
-    assert (
-        "review_fallback_diff_command "
+        "review_diff_command "
         "git show -m --first-parent --stat --patch merge-head" in output
     )
     assert (
-        "review_diff_note agent-head diff isolates the reviewed patch; "
-        "fallback merge diff shows the integrated tree and can include later overlap"
+        "review_diff_note primary merge diff shows the integrated reviewed patch; "
+        "agent_head agent-head is provenance only because its ancestry can include "
+        "already-integrated overlap"
     ) in output
+    assert "review_agent_diff_command" not in output
+
+
+def test_task_show_steers_overlap_reviews_to_integrated_merge_patch(monkeypatch):
+    row = _row(
+        "Review overlap",
+        project="task.render",
+        incepted="1k4yrMDR",
+        status="pending",
+        phase="review",
+    )
+    row.update(
+        {
+            "task_description": "",
+            "phase_i": "1",
+            "urgency": "9.2",
+            "claim_by": "actor-a",
+            "done_ref": "reviewed-merge",
+            "done_merge_head": "reviewed-merge",
+            "done_head": "agent-head-with-overlap",
+            "done_upstream_head": "upstream-already-has-overlap",
+        }
+    )
+
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+
+    output = render.render_show("TASK-test")
+
+    assert (
+        "review_diff_command "
+        "git show -m --first-parent --stat --patch reviewed-merge" in output
+    )
+    assert (
+        "agent_head agent-head-with-overlap is provenance only because its "
+        "ancestry can include already-integrated overlap"
+    ) in output
+    assert "git diff --stat --patch" not in output
+    assert "review_fallback_diff_command" not in output
+    assert "review_agent_diff_command" not in output
 
 
 def test_task_show_merge_diff_command_falls_back_to_first_parent(monkeypatch):
@@ -1071,9 +1109,10 @@ def test_task_show_merge_diff_command_falls_back_to_first_parent(monkeypatch):
 
     assert "review_diff_base merge-head^1 (merge first parent)" in output
     assert (
-        "review_diff_command git diff --stat --patch "
-        "$(git merge-base 'merge-head^1' agent-head) agent-head" in output
+        "review_diff_command "
+        "git show -m --first-parent --stat --patch merge-head" in output
     )
+    assert "review_agent_diff_command" not in output
 
 
 def test_task_show_omits_merge_aware_diff_command_for_task_head(monkeypatch):
