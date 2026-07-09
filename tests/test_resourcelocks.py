@@ -36,12 +36,17 @@ def test_lock_parser_exposes_run_and_status_commands():
     args = parser.parse_args(["lock", "status"])
     choices = parser._subparsers._group_actions[0].choices
     help_text = choices["lock"].format_help()
+    run_help_text = (
+        choices["lock"]._subparsers._group_actions[0].choices["run"].format_help()
+    )
 
     assert args.lock_action == "status"
     assert args.func == handle_lock
     assert "run" in help_text
     assert "status" in help_text
     assert "Hold configured resource locks" in help_text
+    assert "COMMAND" in run_help_text
+    assert "Child command argv to run while the lock is held." in run_help_text
 
 
 def test_lock_run_holds_configured_named_lock_for_child_lifetime(tmp_path, monkeypatch):
