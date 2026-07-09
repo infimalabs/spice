@@ -121,7 +121,9 @@ def create_task_dag(
     creation_surface: str | None = None,
 ) -> str:
     _validate_dag(dag)
-    _refuse_existing_markdown_ids(dag)
+    existing_rows = _existing_markdown_id_rows({node.id for node in dag.nodes})
+    if existing_rows:
+        return _reuse_or_refuse_existing_dag(dag, existing_rows)
     nodes = {node.id: node for node in dag.nodes}
     created: dict[str, str] = {}
     order: list[str] = []
@@ -425,25 +427,63 @@ def _markdown_ids(annotations: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(ids)
 
 
-def _refuse_existing_markdown_ids(dag: MarkdownTaskDag) -> None:
-    node_ids = {node.id for node in dag.nodes}
-    duplicates: dict[str, list[str]] = {}
+def _existing_markdown_id_rows(
+    node_ids: set[str],
+) -> dict[str, list[dict[str, Any]]]:
+    existing: dict[str, list[dict[str, Any]]] = {}
     for row in tw.export():
-        handle = identity.render_handle(row)
         for markdown_id in _markdown_ids(_annotation_descriptions(row)):
             if markdown_id in node_ids:
-                duplicates.setdefault(markdown_id, []).append(handle)
-    if not duplicates:
-        return
+                existing.setdefault(markdown_id, []).append(row)
+    return existing
+
+
+def _reuse_or_refuse_existing_dag(
+    dag: MarkdownTaskDag,
+    existing_rows: dict[str, list[dict[str, Any]]],
+) -> str:
+    node_ids = {node.id for node in dag.nodes}
+    if set(existing_rows) != node_ids or any(
+        len(rows) != 1 for rows in existing_rows.values()
+    ):
+        _refuse_existing_markdown_ids(existing_rows)
+    rows_by_id = {markdown_id: rows[0] for markdown_id, rows in existing_rows.items()}
+    _validate_existing_dag_edges(dag, rows_by_id)
+    lines = [f"root {identity.render_handle(rows_by_id[dag.root])}"]
+    lines.extend(
+        f"reused {node.id} {identity.render_handle(rows_by_id[node.id])}"
+        for node in dag.nodes
+    )
+    return "\n".join(lines)
+
+
+def _validate_existing_dag_edges(
+    dag: MarkdownTaskDag,
+    rows_by_id: dict[str, dict[str, Any]],
+) -> None:
+    for node in dag.nodes:
+        expected = {identity.uuid_of(rows_by_id[dep_id]) for dep_id in node.after}
+        actual = set(_dependency_uuids(rows_by_id[node.id]))
+        if actual != expected:
+            raise SpiceError(
+                "markdown ingest found existing markdown-id rows with different "
+                f"dependencies for {node.id!r}"
+            )
+
+
+def _refuse_existing_markdown_ids(
+    existing_rows: dict[str, list[dict[str, Any]]],
+) -> None:
     lines = [
-        "markdown ingest refuses duplicate markdown-id annotations",
-        "existing task rows already carry markdown ids from this DAG:",
+        "markdown ingest cannot safely reuse existing markdown-id annotations",
+        "existing task rows already carry some incoming markdown ids:",
         *(
-            f"  {markdown_id}: {', '.join(sorted(handles))}"
-            for markdown_id, handles in sorted(duplicates.items())
+            f"  {markdown_id}: "
+            + ", ".join(sorted(identity.render_handle(row) for row in rows))
+            for markdown_id, rows in sorted(existing_rows.items())
         ),
-        "rename the incoming node id or remove the existing markdown-id annotation "
-        "before ingesting",
+        "re-ingest the complete existing DAG, rename the incoming node id, or "
+        "remove the existing markdown-id annotation before retrying",
     ]
     raise SpiceError("\n".join(lines))
 
