@@ -114,18 +114,22 @@ release = ["uv", "run", "python", "-m", "spice.release"]
 pass their argv exactly.
 
 Mounted names are dot-separated segment paths whose segments match
-`^[a-z][a-z0-9-]*$`. Top-level mounts that shadow built-in spice verbs fail
-loudly. Nested mounts under built-ins are allowed:
+`^[a-z][a-z0-9-]*$`. Mounts that shadow built-in or extension-provided spice
+actions fail loudly at any depth. Dotted mounts under built-in verbs are allowed
+only when the full path is a novel action name:
 
 ```toml
 [tool.spice.commands]
 toolbox = ["uv", "run", "toolbox"]
 report.inspect = ["project-tool", "report", "inspect"]
+"study.repo-tool" = ["project-tool", "study", "repo-tool"]
 ```
 
 `spice toolbox lint css --fix` then passes `lint css --fix` to `toolbox`.
 `spice report inspect --limit 40` then passes `--limit 40` to the mounted nested
-path backend.
+path backend. `spice study repo-tool --limit 40` does the same for a novel
+action under the built-in `study` verb, while `study.csharp-members` would fail
+because that full path is already registered.
 
 Mounted commands can import the public repo-tool seam documented in the README.
 They should not rely on private spice modules unless the seam is deliberately

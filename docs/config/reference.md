@@ -51,8 +51,26 @@ report.inspect = ["project-tool", "report", "inspect"]
 ```
 
 Keys are dot-separated command paths with lowercase/digit/hyphen segments.
-Top-level mounts cannot shadow built-in `spice` commands. Values are command
-strings or argv lists; remaining CLI arguments are passed through verbatim.
+Mounts cannot shadow built-in or extension-provided `spice` actions at any
+depth. Dotted mounts under built-in verbs are allowed when the full command path
+is a novel action name. For example, these fail because the full paths already
+resolve to registered actions:
+
+```toml
+[tool.spice.commands]
+"study.csharp-members" = "./scripts/csharp-members.sh"
+"dev.pre-commit" = "./scripts/pre-commit.sh"
+```
+
+This is allowed when no `spice study repo-tool` action is registered:
+
+```toml
+[tool.spice.commands]
+"study.repo-tool" = ["project-tool", "study", "repo-tool"]
+```
+
+Values are command strings or argv lists; remaining CLI arguments are passed
+through verbatim.
 
 ## `[tool.spice.locks]`
 

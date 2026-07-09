@@ -74,8 +74,9 @@ That thesis gives spice five planes.
    badges, and speech share one protocol and visual language.
 
 9. **Mounted commands unify repo tooling.** `[tool.spice.commands]` mounts
-   repo commands under `spice <name> ...`; built-in verbs win and shadowing
-   fails loudly.
+   repo commands under `spice <name> ...`; built-in verbs and registered
+   actions win at every depth, shadowing fails loudly, and dotted mounts extend
+   built-in verbs only with novel action names.
 
 ## What Spice Is Not
 
