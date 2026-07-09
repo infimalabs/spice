@@ -329,7 +329,7 @@ def start_agent(
             fast_mode=fast_mode,
         )
         require_supervisor_started(supervisor, repo_root=repo_root, log_path=log_path)
-        reap_process_when_done(supervisor)
+        reap_process_when_done(supervisor, repo_root=repo_root)
         return log_path
     process = spawn_agent(command, cwd=repo_root, log_path=log_path)
     require_started_process(process, log_path, repo_root=repo_root)
@@ -353,7 +353,7 @@ def start_agent(
             fast_mode=fast_mode,
         ),
     )
-    reap_process_when_done(process)
+    reap_process_when_done(process, repo_root=repo_root)
     return log_path
 
 
@@ -689,12 +689,28 @@ def agent_process_failure_kind(
     )
 
 
-def reap_process_when_done(process: subprocess.Popen[str]) -> None:
+def reap_process_when_done(
+    process: subprocess.Popen[str], *, repo_root: Path | None = None
+) -> None:
+    def reap() -> None:
+        process.wait()
+        if repo_root is not None:
+            touch_agent_state(repo_root)
+
     Thread(
-        target=process.wait,
+        target=reap,
         name=f"spice-agent-reaper-{process.pid}",
         daemon=True,
     ).start()
+
+
+def touch_agent_state(repo_root: Path) -> None:
+    try:
+        path = agent_state_path(repo_root)
+        if path.exists():
+            path.touch()
+    except (OSError, SpiceError):
+        pass
 
 
 def tail_text(path: Path, limit: int) -> str:

@@ -4,9 +4,12 @@ import argparse
 from datetime import UTC, datetime
 import io
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
+import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -618,6 +621,27 @@ def test_agent_import_binds_external_thread_from_either_uuid_form(tmp_path):
 
     # The dashless form of the same UUID is the same binding.
     assert lifecycle.import_agent(repo, dashless).thread_id == dashless
+
+
+def test_reaper_touches_agent_state_file_on_process_exit(tmp_path):
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    state_path = lifecycle.agent_state_path(repo)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text("{}", encoding="utf-8")
+    os.utime(state_path, ns=(1_000_000_000, 1_000_000_000))
+    original_mtime = state_path.stat().st_mtime_ns
+    process = subprocess.Popen([sys.executable, "-c", ""])
+
+    lifecycle.reap_process_when_done(process, repo_root=repo)
+
+    deadline = time.monotonic() + 2.0
+    while (
+        time.monotonic() < deadline and state_path.stat().st_mtime_ns == original_mtime
+    ):
+        time.sleep(0.01)
+    assert process.wait(timeout=1.0) == 0
+    assert state_path.stat().st_mtime_ns != original_mtime
 
 
 def test_agent_import_rejects_non_uuid(tmp_path):
