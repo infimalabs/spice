@@ -15,6 +15,10 @@ It is built for agents moving fast in parallel: every correction is durable,
 every task boundary is observable, and the gate catches structural drift before
 it lands.
 
+spice is building itself, but it was not created in a vacuum: the loop was born
+from a harsher polyglot environment where many languages, conventions, and
+agent lanes had to survive contact with one another.
+
 ![Live steering and semantic ACK loop](docs/screenshots/spice-live-review-steering.png)
 
 <sub>Operator steering arrives in the live stream; an assistant ACK retires the
