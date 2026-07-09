@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from spice.cli.parser import BUILTIN_COMMANDS
+from spice.cli.parser import BUILTIN_COMMANDS, builtin_command_paths
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
 from spice.repocfg import commands_table
@@ -38,12 +38,18 @@ class MountedCommand:
 def mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]:
     """The validated mount table; any malformed entry fails the whole read."""
     mounts: dict[tuple[str, ...], tuple[str, ...]] = {}
+    builtin_paths = builtin_command_paths()
     for raw_name, raw_argv in commands_table(repo_root).items():
         path = mount_command_path(str(raw_name))
         if len(path) == 1 and path[0] in BUILTIN_COMMANDS:
             raise SpiceError(
                 f"[tool.spice.commands] entry {raw_name!r} shadows a built-in "
                 "spice command; pick another name"
+            )
+        if path in builtin_paths:
+            raise SpiceError(
+                f"[tool.spice.commands] entry {raw_name!r} shadows built-in "
+                f"spice action {'spice ' + ' '.join(path)!r}; pick another name"
             )
         mounts[path] = _mount_argv(str(raw_name), raw_argv)
     return mounts
