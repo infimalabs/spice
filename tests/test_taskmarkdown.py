@@ -10,6 +10,7 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.cli.parser import build_parser
+from spice.errors import SpiceError
 from spice.tasks import config, create, identity, markdown, ops, tw
 
 pytestmark = pytest.mark.skipif(
@@ -136,6 +137,36 @@ def test_task_ingest_creates_tasks_edges_and_annotations(task_repo, tmp_path, ca
         ann.get("description") == "> child note"
         for ann in child.get("annotations") or []
     )
+
+
+def test_task_ingest_refuses_existing_markdown_ids_before_creating_rows(task_repo):
+    dag = markdown.MarkdownTaskDag(
+        root="root",
+        nodes=(
+            markdown.MarkdownTaskNode(
+                id="child",
+                title="Reusable child",
+                project="task.unit",
+            ),
+            markdown.MarkdownTaskNode(
+                id="root",
+                title="Reusable root",
+                project="task.unit",
+                after=("child",),
+            ),
+        ),
+    )
+    markdown.create_task_dag(dag, origin="ack:20260101T000000000000Z")
+    existing_count = len(tw.export())
+
+    with pytest.raises(SpiceError) as exc_info:
+        markdown.create_task_dag(dag, origin="ack:20260101T000000000000Z")
+
+    message = str(exc_info.value)
+    assert "markdown ingest refuses duplicate markdown-id annotations" in message
+    assert "child:" in message
+    assert "root:" in message
+    assert len(tw.export()) == existing_count
 
 
 def test_task_ledger_exports_dependency_closure(task_repo, capsys):
