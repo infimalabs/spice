@@ -50,15 +50,14 @@ DEFAULT_FLOW = ("todo", "review")
 PRIVATE_DEFAULT_FLOW = ("todo",)
 # The hidden .oops triage project defaults to a lone plan phase: an oops item is
 # a deferred speed bump a human triages by planning follow-up work, so it starts
-# in plan and decomposes into dependent tasks. "oops" stays a tag, never an
+# in plan and decomposes into dependent tasks. Oops identity rides the .oops
+# project stem (.oops and its .oops.* descendants), never a tag or an
 # APPROVED_PHASES entry.
 OOPS_DEFAULT_FLOW = ("plan",)
 PER_STEM_FLOWS: dict[str, tuple[str, ...]] = {}
 TASK_CREATION_SURFACE_UDA = "creation_surface"
 TASK_CREATION_SURFACE_CLI = "cli"
 TASK_WORDING_REVIEW_UDA = "wording_review"
-PROJECT_HIDDEN_UDA = "project_hidden"
-HIDDEN_TASK_TAG = "hidden"
 
 SENTINEL_ACTOR = "00000000-0000-0000-0000-000000000000"
 OOPS_WAIT = "2099-01-01T00:00:00"
@@ -446,7 +445,6 @@ def uda_schema() -> dict[str, dict[str, str]]:
     schema["phase_i"] = {"type": "numeric", "label": "PhaseIndex"}
     for i in range(PHASE_SLOT_COUNT):
         schema[f"phase_{i}"] = {"type": _STRING, "label": f"Phase{i}", "values": enum}
-    schema[PROJECT_HIDDEN_UDA] = {"type": _STRING, "label": "ProjectHidden"}
     for name in (*_CLAIM, *_REVIEW, *_EVIDENCE):
         schema[name] = {"type": _STRING, "label": name}
     return schema
