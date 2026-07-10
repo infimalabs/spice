@@ -195,9 +195,7 @@ class LiveBusSession:
             # cannot hang teardown. cancel_futures reaps anything still queued.
             with self._read_lock:
                 self._read_queues.clear()
-                pending = list(self._read_futures)
-            if pending:
-                wait(pending, timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
+            self._await_pending_reads(LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
             self._payload_pool.shutdown(wait=False, cancel_futures=True)
             self._payload_pool = None
 
@@ -439,6 +437,19 @@ class LiveBusSession:
     def _forget_read_future(self, future: Future[None]) -> None:
         with self._read_lock:
             self._read_futures.discard(future)
+
+    def _await_pending_reads(self, timeout: float) -> None:
+        """Block until the detached read chains finish or `timeout` elapses.
+
+        Snapshots the live futures under the read lock — each chain's done
+        callback removes itself from the set, so waiting on a copy stays
+        stable while they retire. An empty snapshot means every queued read
+        already replied.
+        """
+        with self._read_lock:
+            pending = list(self._read_futures)
+        if pending:
+            wait(pending, timeout=timeout)
 
     def _handle_lane_configure(self, message: dict[str, Any]) -> None:
         target = self._require_target(message)
