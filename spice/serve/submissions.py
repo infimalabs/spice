@@ -14,7 +14,7 @@ from spice.mail.ackstate import ack_state_records
 from spice.mail.inbox import inbox_item_key_aliases
 
 SUBMISSION_STAGES = ("accepted", "received", "completed")
-MAX_COMPLETED_SUBMISSIONS = 200
+MAX_TRACKED_SUBMISSIONS = 200
 _FINAL_MESSAGE_KINDS = frozenset({"final", "reply"})
 _MILLISECONDS_PER_SECOND = 1000
 
@@ -108,7 +108,7 @@ class SubmissionLifecycleTracker:
                 evidence=evidence or key,
             )
             self._items[item_key] = lifecycle
-            self._prune_completed()
+            self._enforce_total_limit()
             return lifecycle.event_payload("accepted")
 
     def advance(
@@ -156,6 +156,11 @@ class SubmissionLifecycleTracker:
                 events.append(lifecycle.event_payload("completed"))
             return events
 
+    def tracked_keys(self) -> tuple[tuple[str, str], ...]:
+        """Return retained target/key pairs in oldest-to-newest acceptance order."""
+        with self._lock:
+            return tuple(self._items)
+
     def _active_for_target(self, target_id: str) -> list[SubmissionLifecycle]:
         return [
             item
@@ -163,13 +168,10 @@ class SubmissionLifecycleTracker:
             if item_target_id == target_id and "completed" not in item.stages
         ]
 
-    def _prune_completed(self) -> None:
-        completed_keys = [
-            item_key
-            for item_key, item in self._items.items()
-            if "completed" in item.stages
-        ]
-        for item_key in completed_keys[:-MAX_COMPLETED_SUBMISSIONS]:
+    def _enforce_total_limit(self) -> None:
+        """Keep newest rows across every state; dict order is acceptance order."""
+        overflow = len(self._items) - MAX_TRACKED_SUBMISSIONS
+        for item_key in list(self._items)[: max(0, overflow)]:
             del self._items[item_key]
 
     def _record_received_from_message(
