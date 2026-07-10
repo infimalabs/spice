@@ -133,6 +133,62 @@ def test_agent_wrapper_lines_renders_match_route_guards(tmp_path):
     ]
 
 
+def test_agent_wrapper_lines_renders_absent_route_guard(tmp_path):
+    _write_match_wrapper_config(
+        tmp_path,
+        argv='["toolbox"]',
+        match=(
+            '[{ head = "scan", absent = ["-E", "-F"],'
+            ' argv = ["toolbox", "scan", "-E"] }]'
+        ),
+    )
+
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
+        "",
+        "toolbox() {",
+        '  if [ "${1-}" = scan ]; then',
+        "    _spice_route=absent",
+        '    for _spice_word in "$@"; do',
+        '      case "$_spice_word" in',
+        "        -E|-F)",
+        "          _spice_route=",
+        "          break",
+        "          ;;",
+        "      esac",
+        "    done",
+        '    if [ -n "$_spice_route" ]; then',
+        "      shift",
+        '      command toolbox scan -E "$@"',
+        "      return",
+        "    fi",
+        "  fi",
+        '  command toolbox "$@"',
+        "}",
+    ]
+
+
+def test_agent_wrapper_lines_rejects_route_with_flags_and_absent(tmp_path):
+    _write_match_wrapper_config(
+        tmp_path,
+        argv='["toolbox"]',
+        match='[{ flags = ["-raw"], absent = ["-E"], argv = ["viewer"] }]',
+    )
+
+    with pytest.raises(SpiceError, match=r"match\[0\] takes flags or absent"):
+        shellhook.render_agent_wrapper_lines(tmp_path)
+
+
+def test_agent_wrapper_lines_rejects_absent_route_lacking_entries(tmp_path):
+    _write_match_wrapper_config(
+        tmp_path,
+        argv='["toolbox"]',
+        match='[{ absent = [], argv = ["viewer"] }]',
+    )
+
+    with pytest.raises(SpiceError, match=r"match\[0\].absent has no entries"):
+        shellhook.render_agent_wrapper_lines(tmp_path)
+
+
 def test_agent_wrapper_lines_rejects_self_intercepting_wrapper_lacking_match(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
@@ -218,6 +274,8 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
             *shellhook.render_agent_wrapper_lines(tmp_path),
             "rtk grep --files src",
             "rtk grep needle src",
+            "rtk grep -F 'a|b' src",
+            "rtk grep -E 'a|b' src",
             "rtk find src -name '*.py' -print",
             "rtk find src \\( -name '*.py' -o -name '*.md' \\)",
             "rtk",
@@ -241,7 +299,9 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
     lines = _trace_lines(trace, expected_prefix="rg:")
     assert lines == [
         "rg:--files src",
-        "rtk:grep needle src",
+        "rtk:grep -E needle src",
+        "rtk:grep -F a|b src",
+        "rtk:grep -E a|b src",
         "find:src -name *.py -print",
         "find:src ( -name *.py -o -name *.md )",
         "rtk:",
