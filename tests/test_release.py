@@ -442,39 +442,43 @@ def test_release_notes_group_edited_highlights_by_project():
 
     assert notes == (
         "> [!IMPORTANT]\n"
-        "> **Draft release notes — curate before publishing.** The list under\n"
-        "> _Changes by project_ is a raw per-task export, not the final release\n"
-        "> body. Fold it into the highlights below, then delete this banner and the\n"
-        "> placeholder line. Keep the raw list only as a collapsed `<details>`\n"
-        "> appendix if useful. Publishing this file unedited ships the raw export.\n"
+        "> **Draft release notes — curate Highlights before publishing.** Replace\n"
+        "> the placeholder under _Highlights_ with a short summary, then delete this\n"
+        "> banner. The generated task inventory is already wrapped in the collapsed\n"
+        "> _Task-level changes_ section below; keep that section intact.\n"
         "\n"
         "## Highlights\n"
         "\n"
         "_Replace this line with a short, curated set of highlights folded from "
         "the changes below._\n"
         "\n"
+        "<details>\n"
+        "<summary>Task-level changes</summary>\n"
+        "\n"
         "## Changes by project\n"
         "\n"
         "### Serve\n"
         "\n"
-        "- Fixed speech excerpts for final ACK messages. (`1111111`, `3333333`)\n"
+        "- Fixed speech excerpts for final ACK messages. (1111111, 3333333)\n"
         "\n"
         "### CLI\n"
         "\n"
-        "- Added release tooling as spice command. (`2222222`)\n"
+        "- Added release tooling as spice command. (2222222)\n"
         "\n"
         "### Serve UI\n"
         "\n"
-        "- Fixed narration media session retention. (`4444444`)\n"
-        "- Fixed menu MODEL-abc. (`7777777`)\n"
+        "- Fixed narration media session retention. (4444444)\n"
+        "- Fixed menu MODEL-abc. (7777777)\n"
         "\n"
         "### Task CLI\n"
         "\n"
-        "- Implement dynamic agent shell-hook surfaces. (`5555555`)\n"
+        "- Implement dynamic agent shell-hook surfaces. (5555555)\n"
         "\n"
         "### General\n"
         "\n"
-        "- Show agent stem in active header pills. (`6666666`)\n"
+        "- Show agent stem in active header pills. (6666666)\n"
+        "\n"
+        "</details>\n"
         "\n"
         "## Package Notes\n"
         "\n"
@@ -503,16 +507,29 @@ def test_release_notes_open_with_a_draft_curation_scaffold():
     )
 
     # The generated notes are a draft to curate, not a finished body: they lead
-    # with a visible banner and an empty Highlights placeholder above the raw
-    # per-task export, so a raw publish is self-evidently uncurated.
+    # with a visible banner and an empty Highlights placeholder, while the raw
+    # per-task export is already preserved in its final collapsed structure.
     assert notes.startswith("> [!IMPORTANT]\n")
-    assert "Draft release notes — curate before publishing." in notes
+    assert "Draft release notes — curate Highlights before publishing." in notes
     banner = notes.index("> [!IMPORTANT]")
     highlights = notes.index("## Highlights")
     placeholder = notes.index("_Replace this line with a short, curated set")
+    details = notes.index("<details>")
+    summary = notes.index("<summary>Task-level changes</summary>")
     changes = notes.index("## Changes by project")
-    assert banner < highlights < placeholder < changes
-    # The raw grouped export sits under Changes by project, not under Highlights.
+    details_end = notes.index("</details>")
+    package_notes = notes.index("## Package Notes")
+    assert (
+        banner
+        < highlights
+        < placeholder
+        < details
+        < summary
+        < changes
+        < details_end
+        < package_notes
+    )
+    # The raw grouped export sits inside the collapsed task-level appendix.
     assert "### CLI" in notes and notes.index("### CLI") > changes
 
 
