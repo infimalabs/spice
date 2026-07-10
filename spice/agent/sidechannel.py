@@ -127,9 +127,6 @@ class AgentSideChannelServer:
                 if "streamUntilParentExit" in payload:
                     self._stream_payloads(
                         connection,
-                        initial_payload_already_rendered=bool(
-                            payload.get("initialPayloadAlreadyRendered")
-                        ),
                         initial_inbox_signature=inbox_signature_from_payload(
                             payload.get("initialInboxSignature")
                         ),
@@ -145,7 +142,6 @@ class AgentSideChannelServer:
         self,
         connection: socket.socket,
         *,
-        initial_payload_already_rendered: bool = False,
         initial_inbox_signature: InboxSignature | None = None,
     ) -> None:
         try:
@@ -162,7 +158,7 @@ class AgentSideChannelServer:
             stderr=writer,
             repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
         )
-        if initial_payload_already_rendered and initial_inbox_signature is not None:
+        if initial_inbox_signature is not None:
             inbox_injector.prime_displayed_signature(initial_inbox_signature)
         working_state_injector = AgentWorkingStateInjector(
             self.repo_root,
@@ -173,13 +169,9 @@ class AgentSideChannelServer:
             stderr=writer,
         )
 
-        def emit(
-            *, include_regular_payload: bool, emit_suppressed_summary: bool = True
-        ) -> None:
+        def emit(*, emit_suppressed_summary: bool = True) -> None:
             with self._payload_lock:
                 notice_injector.inject(force=False)
-                if not include_regular_payload:
-                    return
                 inbox_injector.inject(
                     force=False,
                     emit_suppressed_summary=emit_suppressed_summary,
@@ -187,22 +179,10 @@ class AgentSideChannelServer:
                 working_state_injector.inject(force=False)
 
         try:
-            if (
-                not initial_payload_already_rendered
-                or initial_inbox_signature is not None
-            ):
-                try:
-                    emit(
-                        include_regular_payload=True,
-                        emit_suppressed_summary=False,
-                    )
-                except OSError:
-                    return
-            else:
-                try:
-                    emit(include_regular_payload=False)
-                except OSError:
-                    return
+            try:
+                emit(emit_suppressed_summary=False)
+            except OSError:
+                return
             while not self._stopping.is_set():
                 try:
                     readable, _, _ = select.select([connection, wake_reader], [], [])
@@ -213,7 +193,7 @@ class AgentSideChannelServer:
                 if wake_reader in readable:
                     _drain_wakeup(wake_reader)
                     try:
-                        emit(include_regular_payload=True)
+                        emit()
                     except OSError:
                         return
         finally:

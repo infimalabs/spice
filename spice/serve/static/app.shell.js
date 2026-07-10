@@ -204,6 +204,9 @@ function laneBackendState() {
     submissionLifecycleByKey: new Map(),
     sendAwaitingBackendCount: 0,
     liveBusSubscribed: false,
+    liveBusSubscribePending: false,
+    liveBusSubscriptionGeneration: "",
+    liveBusWatcherActive: false,
     serverReachable: true,
     serverCloseRequested: false,
   };

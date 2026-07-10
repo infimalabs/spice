@@ -177,14 +177,13 @@ def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
         *,
         parent_pid,
         stderr,
-        initial_payload_already_rendered,
-        initial_inbox_signature=(),
+        initial_inbox_signature=None,
     ):
         events.append(
             (
                 "watch",
                 repo_root,
-                (parent_pid, stderr, initial_payload_already_rendered),
+                (parent_pid, stderr, initial_inbox_signature),
             )
         )
         return watch_thread
@@ -205,7 +204,7 @@ def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
     assert exit_code == 7
     assert events == [
         ("popen", ["find", ".", "-maxdepth", "0", "-print"], None),
-        ("watch", tmp_path, (123, stderr, True)),
+        ("watch", tmp_path, (123, stderr, ())),
         ("wait", None, None),
         ("join", watch_thread, None),
     ]
@@ -244,14 +243,13 @@ def test_run_agent_command_initial_stderr_includes_working_state(tmp_path, monke
         *,
         parent_pid,
         stderr,
-        initial_payload_already_rendered,
-        initial_inbox_signature=(),
+        initial_inbox_signature=None,
     ):
         events.append(
             (
                 "watch",
                 repo_root,
-                (parent_pid, stderr, initial_payload_already_rendered),
+                (parent_pid, stderr, initial_inbox_signature),
             )
         )
         return watch_thread
@@ -275,7 +273,7 @@ def test_run_agent_command_initial_stderr_includes_working_state(tmp_path, monke
     ]
     assert events == [
         ("popen", ["true"], None),
-        ("watch", tmp_path, (123, stderr, True)),
+        ("watch", tmp_path, (123, stderr, ())),
         ("wait", None, None),
         ("join", watch_thread, None),
     ]
@@ -378,14 +376,13 @@ def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monke
         *,
         parent_pid,
         stderr,
-        initial_payload_already_rendered,
-        initial_inbox_signature=(),
+        initial_inbox_signature=None,
     ):
         events.append(
             (
                 "watch",
                 repo_root,
-                (parent_pid, stderr, initial_payload_already_rendered),
+                (parent_pid, stderr, initial_inbox_signature),
             )
         )
         return watch_thread
@@ -413,7 +410,7 @@ def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monke
             ["zsh", "-c", "rtk git status --short"],
             (str(static_hook_dir), str(static_hook_dir / wrap.BASH_HOOK_NAME)),
         ),
-        ("watch", tmp_path, (321, stderr, True)),
+        ("watch", tmp_path, (321, stderr, ())),
         ("wait", None, None),
         ("join", watch_thread, None),
     ]
@@ -582,14 +579,13 @@ def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
         *,
         parent_pid,
         stderr,
-        initial_payload_already_rendered,
-        initial_inbox_signature=(),
+        initial_inbox_signature=None,
     ):
         events.append(
             (
                 "watch",
                 repo_root,
-                (parent_pid, stderr, initial_payload_already_rendered),
+                (parent_pid, stderr, initial_inbox_signature),
             )
         )
         return watch_thread
@@ -610,7 +606,7 @@ def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
     assert exit_code == 0
     assert events == [
         ("popen", ["find", ".", "-name", "*.py"], None),
-        ("watch", tmp_path, (321, stderr, True)),
+        ("watch", tmp_path, (321, stderr, ())),
         ("wait", None, None),
         ("join", watch_thread, None),
     ]
@@ -649,14 +645,13 @@ def test_agent_run_direct_git_inherits_ambient_shadow_environment(
         *,
         parent_pid,
         stderr,
-        initial_payload_already_rendered,
-        initial_inbox_signature=(),
+        initial_inbox_signature=None,
     ):
         events.append(
             (
                 "watch",
                 repo_root,
-                (parent_pid, stderr, initial_payload_already_rendered),
+                (parent_pid, stderr, initial_inbox_signature),
             )
         )
         return watch_thread
@@ -677,7 +672,7 @@ def test_agent_run_direct_git_inherits_ambient_shadow_environment(
     assert exit_code == 0
     assert events == [
         ("popen", ["git", "status"], ("ambient", "shadow-system")),
-        ("watch", tmp_path, (321, stderr, True)),
+        ("watch", tmp_path, (321, stderr, ())),
         ("wait", None, None),
         ("join", watch_thread, None),
     ]
@@ -987,6 +982,28 @@ def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch)
     assert not thread.is_alive()
 
 
+def test_side_channel_stream_hello_uses_inbox_signature_shape(tmp_path):
+    signature = (("20260101T000000000001Z.txt", 123, 45),)
+
+    hello = wrap.agent_side_channel_hello(
+        tmp_path,
+        runner="agent.run.watch",
+        stream_until_parent_exit=321,
+        initial_inbox_signature=signature,
+    )
+
+    assert hello == {
+        "type": "hello",
+        "pid": os.getpid(),
+        "ppid": os.getppid(),
+        "runner": "agent.run.watch",
+        "cwd": os.getcwd(),
+        "repoRoot": str(tmp_path),
+        "streamUntilParentExit": 321,
+        "initialInboxSignature": [["20260101T000000000001Z.txt", 123, 45]],
+    }
+
+
 def test_side_channel_notice_queue_consumes_once(tmp_path):
     notice = supervisor_feedback_line(
         "task.created", handles=["ACKS-20260101T000000000001Z"]
@@ -1021,7 +1038,7 @@ def test_side_channel_watch_streams_queued_notice_after_initial_payload(
                 "repo_root": tmp_path,
                 "parent_pid": os.getpid(),
                 "stderr": stderr,
-                "initial_payload_already_rendered": True,
+                "initial_inbox_signature": (),
             },
         )
         thread.start()

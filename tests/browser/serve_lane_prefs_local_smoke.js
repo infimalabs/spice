@@ -91,6 +91,9 @@ function prefsInstallStubs(state) {
       lanes: (fields.entries || []).map((entry) => {
         return {
           targetId: entry.targetId,
+          subscriptionGeneration: "lane-prefs:" + entry.targetId,
+          watcherActive: true,
+          watcherError: "",
           payload: {
             messages: [],
             statusLine: window.__prefsStatusLine(entry.targetId),
