@@ -150,10 +150,8 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
     Bare wake un-defers in place and refuses hidden oops triage rows. With
     ``into``, promotion becomes explicit: the same wait-clear plus a project
     move into the named public project, which is how a deferred hidden-board
-    task (.oops) enters the active public queue. Hidden boards mark rows
-    three ways (hidden project, oops/hidden tags, project_hidden UDA), so
-    promotion scrubs all of them — a bare project move would leave the row
-    allocator-invisible.
+    task (.oops) enters the active public queue. Identity rides on the
+    project string alone, so the project move is the whole promotion.
     """
     if not handles:
         raise SpiceError("task wake requires at least one handle")
@@ -174,12 +172,7 @@ def wake(handles: Sequence[str], *, into: str | None = None) -> str:
 
     mods = ["wait:"]
     if target is not None:
-        mods += [
-            f"project:{target}",
-            "-oops",
-            f"-{config.HIDDEN_TASK_TAG}",
-            f"{config.PROJECT_HIDDEN_UDA}:",
-        ]
+        mods.append(f"project:{target}")
     tw.run([*(identity.uuid_of(row) for row in rows), "modify", *mods])
     fresh = [identity.render_handle(row) for row in rows]
     actor = tw.current_actor()
@@ -825,16 +818,19 @@ def oops(
     tags: list[str] | None = None,
 ) -> str:
     severity = config.map_severity(severity)
-    oops_tags = ["oops", severity, *([kind] if kind else []), *(tags or [])]
+    # Identity is the project string: a kind files under the .oops.<kind>
+    # child board, and severity rides native priority alone.
+    kind = kind.strip().lower()
+    project = f"{config.OOPS_PROJECT}.{kind}" if kind else config.OOPS_PROJECT
     from spice.tasks import create
 
     handle = create.add_one(
         title=text,
         description=description or None,
-        project=config.OOPS_PROJECT,
+        project=project,
         priority=config.SEVERITY_PRIORITY[severity],
         flow=None,
-        tags=oops_tags,
+        tags=list(tags or []),
         after=[],
         acceptance=[],
         wait=config.OOPS_WAIT,

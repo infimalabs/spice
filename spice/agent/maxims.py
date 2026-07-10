@@ -43,7 +43,6 @@ DISABLED_MAXIM_BAGS_KEY = "disabled_bags"
 MAXIM_PROPOSAL_MIN_RECURRENCE = 2
 MAXIM_PROPOSAL_DRAFT_MAX_WORDS = 8
 MAXIM_PROPOSAL_TASK_CREATION_SURFACE = "maxim_proposal"
-MAXIM_PROPOSAL_TASK_TAG = "maxim_proposal"
 _TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 DEFAULT_PROMPT_LINES = (
     'IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".',
@@ -234,7 +233,7 @@ def file_maxim_proposal_tasks(
             project=task_config.MAXIM_PROPOSAL_PROJECT,
             priority="medium",
             flow=None,
-            tags=[MAXIM_PROPOSAL_TASK_TAG],
+            tags=[],
             after=[],
             acceptance=[
                 (

@@ -274,15 +274,12 @@ def _build_add_args(
     origin: str = "",
 ) -> list[str]:
     mapped_priority = config.map_priority(priority)
-    hidden_project = config.is_hidden_project(resolved_project)
     args = [
         "add",
         f"incepted:{incepted}",
         f"project:{resolved_project}",
         *claimstate.flow_args(phases),
     ]
-    if hidden_project:
-        args.append(f"{config.PROJECT_HIDDEN_UDA}:1")
     if mapped_priority:
         args.append(f"priority:{mapped_priority}")
     if due:
@@ -315,8 +312,6 @@ def _build_add_args(
         )
         if norm:
             args.append(f"+{norm}")
-    if hidden_project:
-        args.append(f"+{config.HIDDEN_TASK_TAG}")
     for handle in after:
         dep = identity.resolve(handle)
         args.append(f"depends:{identity.uuid_of(dep)}")

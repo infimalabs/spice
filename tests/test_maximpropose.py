@@ -487,9 +487,8 @@ def test_maxim_propose_cli_files_and_reports_inspectable_hidden_task(
     assert match.group(2) == task_config.MAXIM_PROPOSAL_PROJECT
     assert match.group(3) == handle
     assert row["project"] == task_config.MAXIM_PROPOSAL_PROJECT
-    assert row[task_config.PROJECT_HIDDEN_UDA] == "1"
     assert str(row.get("wait") or "").startswith("2099")
-    assert sorted(row["tags"]) == ["hidden", "maxim_proposal"]
+    assert row.get("tags", []) == []
     assert row[task_config.TASK_CREATION_SURFACE_UDA] == (
         MAXIM_PROPOSAL_TASK_CREATION_SURFACE
     )
@@ -577,16 +576,12 @@ def test_maxim_file_proposals_cli_creates_deferred_hidden_triage_task(
     hidden_list.backend = str(task_config.backend_root())
 
     assert row["project"] == task_config.MAXIM_PROPOSAL_PROJECT
-    assert row[task_config.PROJECT_HIDDEN_UDA] == "1"
     assert row[task_config.TASK_CREATION_SURFACE_UDA] == (
         MAXIM_PROPOSAL_TASK_CREATION_SURFACE
     )
     assert row["phase"] == "todo"
     assert str(row.get("wait") or "").startswith("2099")
-    assert sorted(row["tags"]) == [
-        "hidden",
-        "maxim_proposal",
-    ]
+    assert row.get("tags", []) == []
     assert "Human triage decides whether to merge" in row["acceptance"]
     assert "[tool.spice.maxims.fallbacks]" in row["task_description"]
     assert (
