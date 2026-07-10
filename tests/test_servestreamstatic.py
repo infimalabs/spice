@@ -300,6 +300,15 @@ def test_static_mosaic_geometry_is_wired_before_app_stream():
     assert geometry_index < app_stream_index
 
 
+def test_static_submission_lifecycle_is_wired_after_stream_before_lane_consumers():
+    app_js = (STATIC_ROOT.parent / "web.py").read_text(encoding="utf-8")
+    stream_index = app_js.index('src="/static/app.stream.js"')
+    submissions_index = app_js.index('src="/static/app.submissions.js"')
+    lanes_index = app_js.index('src="/static/app.lanes.js"')
+
+    assert stream_index < submissions_index < lanes_index
+
+
 def test_static_mosaic_engine_helpers_are_pure_and_covered():
     script = Path(__file__).with_name("fixtures") / "mosaic_engine.js"
 

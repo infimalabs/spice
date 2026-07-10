@@ -58,6 +58,7 @@ async function installSubmitLatencySmokeHelpers(page) {
       runSubmitLatencySmokePage,
       submitLatencySmokeLane,
       submitLatencySmokeTextarea,
+      submitLatencyAcceptedSubmission,
       submitLatencySmokeLiveBusRequest,
       cleanupSubmitLatencySmokePage,
       runSubmitTypingDuringMosaicSmokePage,
@@ -250,6 +251,9 @@ function submitLatencySmokeLiveBusRequest(smoke, type, fields, timing) {
           pendingInboxRevision: "submit-latency-smoke",
           pendingInboxVersion: Date.now(),
           requestText: payload.text || "",
+          submission: submitLatencyAcceptedSubmission(
+            "submit-latency-smoke-key",
+          ),
           serverTiming: {
             targetResolveMs: 0,
             sendPayloadMs: 5,
@@ -259,6 +263,17 @@ function submitLatencySmokeLiveBusRequest(smoke, type, fields, timing) {
       });
     }, 5);
   });
+}
+
+function submitLatencyAcceptedSubmission(key) {
+  const at = new Date().toISOString();
+  return {
+    key,
+    stage: "accepted",
+    disposition: "",
+    stages: { accepted: { at, source: "inbox-write", evidence: key } },
+    durationsMs: {},
+  };
 }
 
 function cleanupSubmitLatencySmokePage() {

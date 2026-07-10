@@ -789,6 +789,8 @@ function applyLaneSendResult(
     result.requestPriority || "",
     result.attachments || [],
   );
+  applyLaneSubmissionLifecycle(lane, result.submission);
+  syncLaneSubmissionLifecycleUi(lane);
   const ensure = result.agentEnsure || {};
   if (ensure.ok === false)
     setLaneTransientStatus(sourceLane, agentEnsureFailureStatus(ensure));

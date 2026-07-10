@@ -2,7 +2,8 @@ const fs = require("fs");
 const vm = require("vm");
 
 const renderPath = process.argv[2];
-const composerPath = process.argv[3];
+const submissionsPath = process.argv[3];
+const composerPath = process.argv[4];
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -23,6 +24,9 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(renderPath, "utf8"), context, {
   filename: "app.render.js",
 });
+vm.runInContext(fs.readFileSync(submissionsPath, "utf8"), context, {
+  filename: "app.submissions.js",
+});
 vm.runInContext(fs.readFileSync(composerPath, "utf8"), context, {
   filename: "app.composer.js",
 });
@@ -42,6 +46,7 @@ assert(
 assert(
   context.laneComposePlaceholderStatus({
     pendingInboxCount: 0,
+    submissionLifecycleByKey: new Map(),
     lastRenderedStatusLine: {
       ...terminalStatus,
       agentVisualStatus: terminalVisual,
@@ -61,6 +66,7 @@ assert(activeVisual === "running", "active running status remains running");
 assert(
   context.laneComposePlaceholderStatus({
     pendingInboxCount: 0,
+    submissionLifecycleByKey: new Map(),
     lastRenderedStatusLine: {
       ...activeStatus,
       agentVisualStatus: activeVisual,

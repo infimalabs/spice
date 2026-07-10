@@ -217,6 +217,23 @@ def test_serve_structural_status_smoke_asserts_watcher_driven_completion() -> No
     assert "Confirmed fixed." in smoke
 
 
+def test_serve_submission_lifecycle_smoke_asserts_keyed_progress() -> None:
+    smoke = (ROOT / "browser" / "serve_submission_lifecycle_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "sendLanePayload" in smoke
+    assert "handleLiveBusMessage" in smoke
+    assert 'type: "lane.submission"' in smoke
+    assert 'source: "watch"' in smoke
+    assert "accepted" in smoke
+    assert "received" in smoke
+    assert "completed" in smoke
+    assert "maxLifecycleTransitionMs" in smoke
+    assert "submissionResponseKey" in smoke
+
+
 def test_serve_composer_typing_latency_smoke_asserts_no_layout_work() -> None:
     smoke = (ROOT / "browser" / "serve_composer_typing_latency_smoke.js").read_text(
         encoding="utf-8"

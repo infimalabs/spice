@@ -201,6 +201,7 @@ function laneBackendState() {
     optimisticSubmittedInboxKeys: new Set(),
     optimisticPendingInboxFloor: 0,
     pendingSubmissionCount: 0,
+    submissionLifecycleByKey: new Map(),
     sendAwaitingBackendCount: 0,
     liveBusSubscribed: false,
     serverReachable: true,
