@@ -633,7 +633,7 @@ def test_drive_oops_creation_skips_subscription(task_repo):
     row = identity.resolve(handle)
 
     assert row["project"] == config.OOPS_PROJECT
-    assert row["phase"] == "todo"
+    assert row["phase"] == "plan"
     assert row[config.PROJECT_HIDDEN_UDA] == "1"
     assert config.HIDDEN_TASK_TAG in row["tags"]
     assert store.global_revision() == before

@@ -120,7 +120,9 @@ def test_hidden_oops_project_is_addressable_but_not_publicly_assignable(
     assert config.is_hidden_project(config.MAXIM_PROPOSAL_PROJECT)
     assert config.project_stem(".oops.triage") == "oops"
     assert config.is_hidden_project(".oops.triage")
-    assert config.resolve_flow(None, ".oops") == ["todo"]
+    assert config.resolve_flow(None, ".oops") == ["plan"]
+    assert config.resolve_flow(None, ".oops.triage") == ["plan"]
+    assert config.resolve_flow(None, config.MAXIM_PROPOSAL_PROJECT) == ["todo"]
     assert "oops" not in config.approved_stems()
     assert "oops" not in config.APPROVED_PHASES
 

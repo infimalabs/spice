@@ -562,7 +562,7 @@ def test_agent_created_hidden_oops_and_private_rows_render_full_task_cards(
             "task_description": "Full oops diagnostic stays visible.",
             "project": task_config.OOPS_PROJECT,
             "status": "waiting",
-            "phase": "todo",
+            "phase": "plan",
             "origin_thread": actor,
             task_config.PROJECT_HIDDEN_UDA: "1",
             "tags": ["oops", task_config.HIDDEN_TASK_TAG],
@@ -609,7 +609,7 @@ def test_agent_created_hidden_oops_and_private_rows_render_full_task_cards(
         oops_card.display_html
     )
     assert "<dt>status</dt><dd>waiting</dd>" in oops_card.display_html
-    assert "<dt>phase</dt><dd>todo</dd>" in oops_card.display_html
+    assert "<dt>phase</dt><dd>plan</dd>" in oops_card.display_html
     assert private_card.source_kind == "task_created"
     assert 'class="task-directive-quote task-directive-quote--private"' in (
         private_card.display_html
