@@ -625,6 +625,29 @@ def test_alloc_classifies_oops_and_hidden_by_project_stem_alone():
     assert alloc.is_oops(public) != alloc.is_oops(oops_kind)
 
 
+def test_oops_rows_returns_the_oops_project_hierarchy_against_a_real_backend(
+    task_repo,
+):
+    # oops_rows fetches by the .oops project stem alone: the deferred triage
+    # root and any .oops.<kind> descendant belong to it, while an ordinary
+    # public task in its own project is a distinct, separately-resolved row.
+    ops.oops("Root triage", origin="ack:20260101T000000000000Z")
+    ops.oops("Kind triage", kind="Tooling", origin="ack:20260101T000000000000Z")
+    public = create.add(
+        "Ordinary work",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+
+    oops_projects = sorted(row["project"] for row in alloc.oops_rows())
+
+    assert oops_projects == [
+        config.OOPS_PROJECT,
+        f"{config.OOPS_PROJECT}.tooling",
+    ]
+    assert identity.resolve(public)["project"] == "task.unit"
+
+
 def test_task_review_help_requires_description_check(capsys):
     parser = build_parser()
 

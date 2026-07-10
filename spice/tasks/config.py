@@ -93,12 +93,20 @@ _DURATION_UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 # Named reports so a maintainer can explain the allocator with raw
 # Taskwarrior. name -> (description, filter, sort).
 REPORTS = {
-    "oready": ("spice ready queue", "status:pending +READY -oops", "urgency-"),
+    "oready": (
+        "spice ready queue",
+        f"status:pending +READY project.not:{OOPS_PROJECT}",
+        "urgency-",
+    ),
     "oreview": ("spice review queue", "status:pending phase:review", "urgency-"),
     "oactive": ("spice active claims", "status:pending +ACTIVE", "claim_at+"),
     "oblocked": ("spice blocked", "status:pending +BLOCKED", "urgency-"),
     "owaiting": ("spice waiting/deferred", "+WAITING", "wait+"),
-    "ooops": ("spice oops triage", "+oops -COMPLETED -DELETED", "urgency-"),
+    "ooops": (
+        "spice oops triage",
+        f"project:{OOPS_PROJECT} -COMPLETED -DELETED",
+        "urgency-",
+    ),
 }
 ANALYTICS_COMMANDS = ("history", "burndown.daily", "burndown.weekly")
 _REPORT_COLUMNS = "id,project,phase,priority,urgency,claim_by,description"

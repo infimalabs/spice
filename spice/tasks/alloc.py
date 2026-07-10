@@ -93,17 +93,7 @@ def oops_rows() -> list[dict[str, Any]]:
     """Deferred oops items carry a far-future wait, so they are `waiting`."""
     return [
         r
-        for r in tw.export(
-            [
-                "(",
-                "+oops",
-                "or",
-                f"project:{config.OOPS_PROJECT}",
-                "or",
-                f"project:{config.OOPS_PROJECT.lstrip(config.HIDDEN_PROJECT_PREFIX)}",
-                ")",
-            ]
-        )
+        for r in tw.export([f"project:{config.OOPS_PROJECT}"])
         if str(r.get("status")) in ("pending", "waiting") and is_oops(r)
     ]
 

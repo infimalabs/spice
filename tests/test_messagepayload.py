@@ -564,8 +564,6 @@ def test_agent_created_hidden_oops_and_private_rows_render_full_task_cards(
             "status": "waiting",
             "phase": "plan",
             "origin_thread": actor,
-            task_config.PROJECT_HIDDEN_UDA: "1",
-            "tags": ["oops", task_config.HIDDEN_TASK_TAG],
         },
         {
             "id": 43,

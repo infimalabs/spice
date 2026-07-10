@@ -582,7 +582,6 @@ def test_task_list_explicit_hidden_project_uses_raw_export(monkeypatch):
             project=config.OOPS_PROJECT,
             incepted="20260612T000000000001Z",
         )
-        | {config.PROJECT_HIDDEN_UDA: "1", "tags": ["oops", config.HIDDEN_TASK_TAG]}
     ]
     seen: dict[str, object] = {}
 
