@@ -18,10 +18,9 @@ BAND_WIDTH = 5.0  # urgency window treated as "top band" for tie-breaks
 
 
 @dataclass(frozen=True)
-class BriefingRows:
-    inventory: tuple[dict[str, Any], ...]
-    ready: tuple[dict[str, Any], ...]
-    blocked: tuple[dict[str, Any], ...]
+class BriefingTaskSnapshot:
+    rows: tuple[dict[str, Any], ...]
+    visible_uuids: frozenset[str]
 
 
 def actor_overrides(actor: str, route: dict[str, Any] | None) -> list[str]:
@@ -181,34 +180,47 @@ def visible_pending_rows(actor: str) -> list[dict[str, Any]]:
     return [r for r in rows if not is_hidden(r)]
 
 
-def briefing_rows(actor: str) -> BriefingRows:
-    """Export briefing task rows with one bootstrap and exact virtual states."""
+def briefing_snapshot(actor: str) -> BriefingTaskSnapshot:
+    """Export one board snapshot and mark rows visible through the actor's route."""
     route = lanes.team_route_for_actor(actor)
-    scope = effective_route_filter_args(actor, route)
-    taskrc = config.bootstrap()
-    # Completed dependency UUIDs remain on rows, so READY/BLOCKED must come
-    # from Taskwarrior rather than being reconstructed from the inventory.
-    return BriefingRows(
-        inventory=tuple(
-            tw.export(
-                [
-                    "(",
-                    "(",
-                    "status.any:",
-                    *scope,
-                    ")",
-                    "or",
-                    f"project:{config.OOPS_PROJECT}",
-                    ")",
-                ],
-                taskrc=taskrc,
-            )
-        ),
-        ready=tuple(
-            tw.export(["status:pending", "+READY", "-ACTIVE", *scope], taskrc=taskrc)
-        ),
-        blocked=tuple(tw.export(["status:pending", "+BLOCKED", *scope], taskrc=taskrc)),
+    rows = tuple(tw.export(["status.any:"]))
+    visible_uuids = frozenset(
+        str(row.get("uuid") or "")
+        for row in rows
+        if _briefing_scope_matches(row, actor=actor, route=route)
     )
+    return BriefingTaskSnapshot(rows=rows, visible_uuids=visible_uuids)
+
+
+def _briefing_scope_matches(
+    row: dict[str, Any], *, actor: str, route: dict[str, Any] | None
+) -> bool:
+    project = str(row.get("project") or "")
+    if _project_filter_matches(project, config.private_project(actor)):
+        return True
+    if _route_includes_origin(route) and str(row.get("origin_thread") or "") == actor:
+        return True
+    return any(
+        _briefing_filter_term_matches(row, term)
+        for term in lanes.effective_filter_terms(route)
+    )
+
+
+def _briefing_filter_term_matches(row: dict[str, Any], term: str) -> bool:
+    if term.startswith("project:"):
+        return _project_filter_matches(
+            str(row.get("project") or ""), term.split(":", 1)[1]
+        )
+    if term.startswith("phase:"):
+        return str(row.get("phase") or "") == term.split(":", 1)[1]
+    if term.startswith("+"):
+        tags = row.get("tags") or []
+        return term[1:] in tags if isinstance(tags, list) else False
+    return False
+
+
+def _project_filter_matches(project: str, expected: str) -> bool:
+    return project == expected or project.startswith(f"{expected}.")
 
 
 def _candidate_rows(
