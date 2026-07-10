@@ -26,6 +26,7 @@ ACTOR_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 ACTOR_A_MEMBER = thread_actor_id(ACTOR_A)
 ACTOR_B_MEMBER = thread_actor_id(ACTOR_B)
 BASE_TS = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
+USAGE_TRANSCRIPT_TOTAL_TOKENS = 402
 
 
 @pytest.fixture
@@ -329,6 +330,38 @@ def test_phase_effort_usage_aggregates_transcript_spend_by_window(tmp_path):
             (),
         ),
     ]
+
+
+def test_phase_effort_usage_resolves_driver_once_per_transcript(tmp_path, monkeypatch):
+    transcript = tmp_path / "thread-a.jsonl"
+    _write_usage_transcript(transcript)
+    resolved: list[Path] = []
+
+    def resolve_driver(path: Path):
+        resolved.append(path)
+        return DRIVER
+
+    monkeypatch.setattr(effort, "driver_for_transcript", resolve_driver)
+    window = effort.PhaseEffortWindow(
+        task_id="task-1",
+        handle="EFFORT-00000001",
+        title="Resolve driver once",
+        phase="todo",
+        phase_index=0,
+        actor_id=ACTOR_A_MEMBER,
+        thread_id=ACTOR_A,
+        team_id="team-a",
+        driver="codex",
+        model="gpt-5.5",
+        effort="xhigh",
+        started_at=_epoch(0),
+        ended_at=_epoch(40),
+    )
+
+    usage = effort.phase_effort_usage_for_windows((window,), {ACTOR_A: [transcript]})
+
+    assert resolved == [transcript]
+    assert usage[0].total_tokens == USAGE_TRANSCRIPT_TOTAL_TOKENS
 
 
 def test_metric_series_phase_effort_matches_task_effort_api(task_repo, monkeypatch):

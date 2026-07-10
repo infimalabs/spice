@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol
 
+from spice.agent.driver import driver_for_transcript
 from spice.serve.team.ids import thread_id_for_actor
 from spice.serve.team.store import ServeTeamStore
 from spice.sessions import records
@@ -539,6 +540,7 @@ def _active_context_snapshots(
 ) -> tuple[ActiveContextSnapshot, ...]:
     snapshots: list[ActiveContextSnapshot] = []
     for path in paths:
+        driver = driver_for_transcript(path)
         with path.open(encoding="utf-8", errors="replace") as handle:
             for line in handle:
                 try:
@@ -547,7 +549,7 @@ def _active_context_snapshots(
                     continue
                 if not isinstance(raw, dict):
                     continue
-                snapshot = active_context_snapshot_from_object(path, raw)
+                snapshot = active_context_snapshot_from_object(path, raw, driver)
                 if snapshot is not None:
                     snapshots.append(snapshot)
     return tuple(sorted(snapshots, key=lambda item: (item.ts, item.source_file)))

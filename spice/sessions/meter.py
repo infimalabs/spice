@@ -16,7 +16,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterator
 
-from spice.agent.driver import driver_for_transcript
+from spice.agent.driver import AgentDriver, driver_for_transcript
 from spice.sessions.jsonl import iter_jsonl_lines, iter_jsonl_lines_reverse
 from spice.sessions.util import (
     normalize_timestamp,
@@ -64,14 +64,15 @@ def collect_context_meter(
     snapshots: list[ActiveContextSnapshot] = []
     order = 0
     for path in files:
+        driver = driver_for_transcript(path)
         for obj in _iter_jsonl_objects(path, start=start):
             order += 1
-            snapshot = active_context_snapshot_from_object(path, obj)
+            snapshot = active_context_snapshot_from_object(path, obj, driver)
             if snapshot is not None:
                 snapshots.append(snapshot)
                 events.append((snapshot.ts, order, "snapshot", snapshot))
                 continue
-            compaction_ts = compaction_ts_from_object(path, obj)
+            compaction_ts = compaction_ts_from_object(obj, driver)
             if compaction_ts is not None:
                 events.append((compaction_ts, order, "compaction", None))
     return _build_context_meter(files, sorted(events), snapshots)
@@ -103,13 +104,14 @@ def collect_latest_context_meter(files: list[Path]) -> ContextMeter:
 
 
 def latest_active_context_snapshot_for_file(path: Path) -> ActiveContextSnapshot | None:
+    driver = driver_for_transcript(path)
     for line in iter_jsonl_lines_reverse(path):
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:
             continue
         if isinstance(obj, dict):
-            snapshot = active_context_snapshot_from_object(path, obj)
+            snapshot = active_context_snapshot_from_object(path, obj, driver)
             if snapshot is not None:
                 return snapshot
     return None
@@ -151,9 +153,9 @@ def _line_timestamp(line: str) -> str | None:
 
 
 def active_context_snapshot_from_object(
-    path: Path, obj: dict[str, Any]
+    path: Path, obj: dict[str, Any], driver: AgentDriver
 ) -> ActiveContextSnapshot | None:
-    fields = driver_for_transcript(path).context_snapshot_fields(obj)
+    fields = driver.context_snapshot_fields(obj)
     if fields is None:
         return None
     ts = normalize_timestamp(obj.get("timestamp"))
@@ -162,8 +164,8 @@ def active_context_snapshot_from_object(
     return ActiveContextSnapshot(source_file=str(path), ts=ts, **fields)
 
 
-def compaction_ts_from_object(path: Path, obj: dict[str, Any]) -> str | None:
-    event = driver_for_transcript(path).normalize_transcript_line(obj)
+def compaction_ts_from_object(obj: dict[str, Any], driver: AgentDriver) -> str | None:
+    event = driver.normalize_transcript_line(obj)
     if event is None or event.get("type") != "compacted":
         return None
     ts = normalize_timestamp(obj.get("timestamp"))
