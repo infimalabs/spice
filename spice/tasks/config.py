@@ -48,6 +48,11 @@ PHASE_SLOT_COUNT = 7  # phase_0 .. phase_6
 TASK_EVENT_FILENAME = "events"
 DEFAULT_FLOW = ("todo", "review")
 PRIVATE_DEFAULT_FLOW = ("todo",)
+# The hidden .oops triage project defaults to a lone plan phase: an oops item is
+# a deferred speed bump a human triages by planning follow-up work, so it starts
+# in plan and decomposes into dependent tasks. "oops" stays a tag, never an
+# APPROVED_PHASES entry.
+OOPS_DEFAULT_FLOW = ("plan",)
 PER_STEM_FLOWS: dict[str, tuple[str, ...]] = {}
 TASK_CREATION_SURFACE_UDA = "creation_surface"
 TASK_CREATION_SURFACE_CLI = "cli"
@@ -654,7 +659,11 @@ def resolve_flow(flow: list[str] | None, project: str | None) -> list[str]:
     if flow:
         phases = [p.strip() for p in flow if p.strip()]
     elif project and is_hidden_project(project):
-        phases = list(PRIVATE_DEFAULT_FLOW)
+        phases = (
+            list(OOPS_DEFAULT_FLOW)
+            if stem == project_stem(OOPS_PROJECT)
+            else list(PRIVATE_DEFAULT_FLOW)
+        )
     elif stem in INTERNAL_STEMS:
         phases = list(PRIVATE_DEFAULT_FLOW)
     else:
