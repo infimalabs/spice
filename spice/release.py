@@ -183,6 +183,11 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
         return 0
 
     if mode == "range":
+        if args.version is None and args.release_commit is None:
+            release_commit = git("rev-parse", "HEAD")
+            output = release_range_for_unreleased(release_commit)
+            print(output, end="" if output.endswith("\n") else "\n")
+            return 0
         version = str(args.version or current_version())
         release_commit = release_commit_for_target(
             version, getattr(args, "release_commit", None)
@@ -369,6 +374,23 @@ def release_range_for_version(version: str, release_commit: str) -> str:
         previous_tag=previous_tag,
         records=records,
     )
+
+
+def release_range_for_unreleased(release_commit: str) -> str:
+    previous_tag = latest_release_tag_merged_into(release_commit)
+    records = commit_records(previous_tag, release_commit)
+    return render_release_range(
+        version="unreleased",
+        release_short=short_commit(release_commit),
+        current_tag="unreleased",
+        previous_tag=previous_tag,
+        records=records,
+    )
+
+
+def latest_release_tag_merged_into(commit: str) -> str:
+    raw = git("tag", "--merged", commit, "--list", "v*", "--sort=-v:refname")
+    return raw.splitlines()[0] if raw else ""
 
 
 def render_release_range(
