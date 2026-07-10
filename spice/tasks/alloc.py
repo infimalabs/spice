@@ -186,6 +186,8 @@ def briefing_rows(actor: str) -> BriefingRows:
     route = lanes.team_route_for_actor(actor)
     scope = effective_route_filter_args(actor, route)
     taskrc = config.bootstrap()
+    # Completed dependency UUIDs remain on rows, so READY/BLOCKED must come
+    # from Taskwarrior rather than being reconstructed from the inventory.
     return BriefingRows(
         inventory=tuple(
             tw.export(
