@@ -8,6 +8,7 @@ import shlex
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import NamedTuple
 
 from spice.errors import SpiceError
 from spice.extensions import (
@@ -28,8 +29,45 @@ STATIC_SHELL_HOOK_DIR_NAME = "staticshellhooks"
 AGENT_WRAPPERS_KEY = "wrappers"
 DEFAULT_AGENT_WRAPPER_GROUP = "common"
 WRAPPER_ENTRY_POINT_GROUP = SPICE_WRAPPER_ENTRY_POINT_GROUP
+# rtk's grep/find frontends emulate a subset of rg/find; argv words outside
+# that subset reroute to the native tool before rtk mangles them.
+RTK_GREP_REROUTE_FLAGS = (
+    "--files",
+    "--type",
+    "--type=*",
+    "--no-heading",
+)
+RTK_FIND_REROUTE_WORDS = (
+    "-print",
+    "-print0",
+    "-prune",
+    "-exec",
+    "-execdir",
+    "-delete",
+    "(",
+    ")",
+    "!",
+    "-o",
+    "-a",
+)
 BUILTIN_AGENT_WRAPPER_GROUPS = {
-    DEFAULT_AGENT_WRAPPER_GROUP: {},
+    DEFAULT_AGENT_WRAPPER_GROUP: {
+        "rtk": {
+            "argv": ["rtk"],
+            "match": [
+                {
+                    "head": "grep",
+                    "flags": list(RTK_GREP_REROUTE_FLAGS),
+                    "argv": ["rg"],
+                },
+                {
+                    "head": "find",
+                    "flags": list(RTK_FIND_REROUTE_WORDS),
+                    "argv": ["find"],
+                },
+            ],
+        },
+    },
 }
 SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
 SHELL_HOOK_REPO_ROOT_ENV = "SPICE_SHELL_HOOK_REPO_ROOT"  # env-policy: allow
@@ -358,7 +396,7 @@ def render_agent_direct_wrapper_lines(
 ) -> list[str]:
     config_path = f"tool.spice.wrappers.{group_name}.{selector}"
     require_shell_function_name(selector, label=f"{config_path} command")
-    extra = sorted(set(entry) - {"argv"})
+    extra = sorted(set(entry) - {"argv", "match"})
     if extra:
         raise SpiceError(
             f"spice shell hook: {config_path} has unsupported keys: {', '.join(extra)}"
@@ -367,7 +405,8 @@ def render_agent_direct_wrapper_lines(
         entry.get("argv"),
         label=f"{config_path}.argv",
     )
-    if selector == command_words[0]:
+    routes = agent_wrapper_match_routes(entry.get("match"), config_path=config_path)
+    if not routes and selector == command_words[0]:
         raise SpiceError(
             "spice shell hook: wrapper "
             f"{selector!r} cannot intercept itself in {config_path}.argv"
@@ -377,6 +416,8 @@ def render_agent_direct_wrapper_lines(
         config_path,
         seen_selectors=seen_selectors,
     )
+    if routes:
+        return render_agent_match_wrapper_lines(selector, command_words, routes)
     command = " ".join(shell_command_word(word) for word in command_words)
     return [
         "",
@@ -384,6 +425,95 @@ def render_agent_direct_wrapper_lines(
         f'  {command} "$@"',
         "}",
     ]
+
+
+class WrapperMatchRoute(NamedTuple):
+    head: str | None
+    flags: tuple[str, ...]
+    argv: tuple[str, ...]
+
+
+def render_agent_match_wrapper_lines(
+    selector: str,
+    command_words: Sequence[str],
+    routes: Sequence[WrapperMatchRoute],
+) -> list[str]:
+    lines = ["", f"{selector}() {{"]
+    for route in routes:
+        lines.extend(match_route_guard_lines(route))
+    command = " ".join(shell_command_word(word) for word in command_words)
+    lines.append(f'  command {command} "$@"')
+    lines.append("}")
+    return lines
+
+
+def match_route_guard_lines(route: WrapperMatchRoute) -> list[str]:
+    argv = " ".join(shell_command_word(word) for word in route.argv)
+    pattern = "|".join(match_route_pattern(flag) for flag in route.flags)
+    scan = [
+        'for _spice_word in "$@"; do',
+        '  case "$_spice_word" in',
+        f"    {pattern})",
+        *(["      shift"] if route.head is not None else []),
+        f'      command {argv} "$@"',
+        "      return",
+        "      ;;",
+        "  esac",
+        "done",
+    ]
+    if route.head is None:
+        return ["  " + line for line in scan]
+    return [
+        f'  if [ "$1" = {shell_quote(route.head)} ]; then',
+        *("    " + line for line in scan),
+        "  fi",
+    ]
+
+
+def agent_wrapper_match_routes(
+    raw: object, *, config_path: str
+) -> tuple[WrapperMatchRoute, ...]:
+    if raw is None:
+        return ()
+    label = f"{config_path}.match"
+    if not isinstance(raw, list) or not raw:
+        raise SpiceError(f"spice shell hook: {label} must be a non-empty list")
+    return tuple(
+        agent_wrapper_match_route(item, label=f"{label}[{index}]")
+        for index, item in enumerate(raw)
+    )
+
+
+def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
+    if not isinstance(raw, Mapping):
+        raise SpiceError(f"spice shell hook: {label} must be a table")
+    extra = sorted(set(raw) - {"head", "flags", "argv"})
+    if extra:
+        raise SpiceError(
+            f"spice shell hook: {label} has unsupported keys: {', '.join(extra)}"
+        )
+    head = raw.get("head")
+    if head is not None:
+        head = match_route_word(head, label=f"{label}.head")
+    flags = config_string_list(raw.get("flags"), label=f"{label}.flags")
+    if not flags:
+        raise SpiceError(f"spice shell hook: {label}.flags has no entries")
+    for flag in flags:
+        match_route_word(flag, label=f"{label}.flags")
+    argv = command_words_from_config(raw.get("argv"), label=f"{label}.argv")
+    return WrapperMatchRoute(head=head, flags=tuple(flags), argv=tuple(argv))
+
+
+def match_route_word(value: object, *, label: str) -> str:
+    if isinstance(value, str) and value and not any(ch.isspace() for ch in value):
+        return value
+    raise SpiceError(f"spice shell hook: {label} {value!r} must be a single word")
+
+
+def match_route_pattern(flag: str) -> str:
+    if flag.endswith("*") and len(flag) > 1:
+        return shell_quote(flag[:-1]) + "*"
+    return shell_quote(flag)
 
 
 def render_agent_wrapper_selector_lines(
@@ -435,6 +565,8 @@ def record_agent_wrapper_selector(
 
 def command_words_from_config(raw: object, *, label: str) -> list[str]:
     words = config_string_list(raw, label=label)
+    if not words:
+        raise SpiceError(f"spice shell hook: {label} has no entries")
     for word in words:
         if "/" in word:
             raise SpiceError(
