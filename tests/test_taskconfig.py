@@ -145,6 +145,22 @@ def test_hidden_oops_project_is_addressable_but_not_publicly_assignable(
         config.validate_manual_creation_project(".oops")
 
 
+def test_report_filters_scope_oops_triage_by_project_stem():
+    # The oready and ooops reports scope oops by the .oops project hierarchy,
+    # not the retired oops tag: project.not:.oops excludes the whole subtree
+    # from the ready queue and project:.oops selects exactly that subtree.
+    lines = config._report_lines()
+
+    assert (
+        "report.oready.filter=status:pending +READY "
+        f"project.not:{config.OOPS_PROJECT}" in lines
+    )
+    assert (
+        f"report.ooops.filter=project:{config.OOPS_PROJECT} -COMPLETED -DELETED"
+        in lines
+    )
+
+
 def test_configured_hidden_project_stems_are_addressable_not_assignable(
     tmp_path, monkeypatch
 ):
