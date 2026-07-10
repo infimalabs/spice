@@ -175,9 +175,9 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
         else:
             print(output, end="" if output.endswith("\n") else "\n")
         print(
-            f"draft notes for {version} are a raw per-task export — fold them into "
-            "curated highlights (edit the Highlights section, drop the draft "
-            "banner) before publishing; do not ship the raw export",
+            f"draft notes for {version} include a collapsed task-level export — "
+            "replace the Highlights placeholder with curated highlights and drop "
+            "the draft banner before publishing; keep the generated details section",
             file=sys.stderr,
         )
         return 0
@@ -546,16 +546,18 @@ def render_release_notes(
 
     lines = [
         "> [!IMPORTANT]",
-        "> **Draft release notes — curate before publishing.** The list under",
-        "> _Changes by project_ is a raw per-task export, not the final release",
-        "> body. Fold it into the highlights below, then delete this banner and the",
-        "> placeholder line. Keep the raw list only as a collapsed `<details>`",
-        "> appendix if useful. Publishing this file unedited ships the raw export.",
+        "> **Draft release notes — curate Highlights before publishing.** Replace",
+        "> the placeholder under _Highlights_ with a short summary, then delete this",
+        "> banner. The generated task inventory is already wrapped in the collapsed",
+        "> _Task-level changes_ section below; keep that section intact.",
         "",
         "## Highlights",
         "",
         "_Replace this line with a short, curated set of highlights folded from "
         "the changes below._",
+        "",
+        "<details>",
+        "<summary>Task-level changes</summary>",
         "",
         "## Changes by project",
         "",
@@ -564,7 +566,8 @@ def render_release_notes(
         for project, subjects in groups.items():
             lines.extend([f"### {release_project_heading(project)}", ""])
             for highlight, commits in subjects.items():
-                refs = ", ".join(f"`{commit}`" for commit in commits)
+                # GitHub release pages turn bare repository SHAs into commit links.
+                refs = ", ".join(commits)
                 lines.append(f"- {highlight} ({refs})")
             lines.append("")
     else:
@@ -572,6 +575,8 @@ def render_release_notes(
 
     lines.extend(
         [
+            "</details>",
+            "",
             "## Package Notes",
             "",
             f"- PyPI release: `spice-harness=={version}`",
@@ -776,8 +781,9 @@ def print_prepare_instructions(version: str) -> None:
         f"spice release notes > /tmp/spice-release-{version}-notes.md"
     )
     print(
-        "the draft is a raw per-task export — fold it into curated highlights "
-        "(edit the Highlights section, drop the draft banner), then run "
+        "the draft already includes collapsed task-level details — replace the "
+        "Highlights placeholder, drop the draft banner, keep the details section, "
+        "then run "
         f"spice release publish --notes-file /tmp/spice-release-{version}-notes.md"
     )
 
