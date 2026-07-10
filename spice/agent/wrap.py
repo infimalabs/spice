@@ -149,7 +149,9 @@ def run_agent_command(
     popen_factory: ProcessFactory = subprocess.Popen,
     stderr: TextIO = sys.stderr,
 ) -> int:
-    emit_initial_side_channel_payload(repo_root, stderr=stderr)
+    initial_inbox_signature = emit_initial_side_channel_payload(
+        repo_root, stderr=stderr
+    )
     command = build_agent_run_command(raw_args, repo_root=repo_root, rewrite_rtk=True)
     environment = build_agent_run_environment(
         raw_args,
@@ -170,6 +172,7 @@ def run_agent_command(
         parent_pid=int(getattr(process, "pid", 0) or 0),
         stderr=stderr,
         initial_payload_already_rendered=True,
+        initial_inbox_signature=initial_inbox_signature,
     )
     try:
         wait = getattr(process, "wait", None)
@@ -184,20 +187,22 @@ def run_agent_command(
 
 def emit_initial_side_channel_payload(
     repo_root: Path | None, *, stderr: TextIO = sys.stderr
-) -> None:
+) -> InboxSignature:
     if repo_root is None:
-        return
+        return ()
     from spice.agent.sidechannel import render_side_channel_payload
 
+    initial_inbox_signature = inbox_pending_signature(repo_root)
     try:
         payload = render_side_channel_payload(repo_root)
     except Exception as exc:  # side-channel render failure is non-fatal
         stderr.write(f"spice side-channel unavailable: {exc}\n")
         stderr.flush()
-        return
+        return initial_inbox_signature
     if payload:
         stderr.write(payload)
         stderr.flush()
+    return initial_inbox_signature
 
 
 def build_agent_run_command(
@@ -392,6 +397,7 @@ def start_agent_side_channel_watch(
     parent_pid: int,
     stderr: TextIO,
     initial_payload_already_rendered: bool = False,
+    initial_inbox_signature: InboxSignature = (),
 ) -> Thread | None:
     if parent_pid <= 0 or active_agent_side_channel_socket_path(repo_root) is None:
         return None
@@ -402,6 +408,7 @@ def start_agent_side_channel_watch(
             "parent_pid": parent_pid,
             "stderr": stderr,
             "initial_payload_already_rendered": initial_payload_already_rendered,
+            "initial_inbox_signature": initial_inbox_signature,
         },
         daemon=True,
     )
@@ -420,6 +427,7 @@ def watch_agent_side_channel(
     parent_pid: int,
     stderr: TextIO = sys.stderr,
     initial_payload_already_rendered: bool = False,
+    initial_inbox_signature: InboxSignature = (),
 ) -> None:
     socket_path = active_agent_side_channel_socket_path(repo_root)
     if socket_path is None:
@@ -437,6 +445,7 @@ def watch_agent_side_channel(
                     runner="agent.run.watch",
                     stream_until_parent_exit=parent_pid,
                     initial_payload_already_rendered=initial_payload_already_rendered,
+                    initial_inbox_signature=initial_inbox_signature,
                 ),
                 separators=(",", ":"),
             ).encode("utf-8")
@@ -470,6 +479,7 @@ def agent_side_channel_hello(
     runner: str = "agent.run",
     stream_until_parent_exit: int | None = None,
     initial_payload_already_rendered: bool = False,
+    initial_inbox_signature: InboxSignature = (),
 ) -> dict[str, object]:
     hello: dict[str, object] = {
         "type": "hello",
@@ -482,6 +492,10 @@ def agent_side_channel_hello(
     if stream_until_parent_exit is not None:
         hello["streamUntilParentExit"] = stream_until_parent_exit
         hello["initialPayloadAlreadyRendered"] = initial_payload_already_rendered
+        if initial_payload_already_rendered:
+            hello["initialInboxSignature"] = [
+                list(row) for row in initial_inbox_signature
+            ]
     return hello
 
 
@@ -600,7 +614,7 @@ class AgentInboxInjector:
             self.signature,
         ) = read_inbox_display_state(self.state_path)
 
-    def inject(self, *, force: bool) -> None:
+    def inject(self, *, force: bool, emit_suppressed_summary: bool = True) -> None:
         signature = inbox_pending_signature(self.repo_root)
         now = self.time_factory()
         suppressed_keys = self._suppressed_keys(signature, now=now)
@@ -618,7 +632,8 @@ class AgentInboxInjector:
             and signature == self.signature
             and pending_keys <= suppressed_keys
         ):
-            self._emit_pending_summary(len(pending_keys))
+            if emit_suppressed_summary:
+                self._emit_pending_summary(len(pending_keys))
             return
         # Always pass the recently-shown keys as the suppression filter, even
         # when a new key forced this readout: the new key renders full (real
@@ -648,6 +663,12 @@ class AgentInboxInjector:
         self._record_displayed_keys(displayed_signature, displayed_keys, now=now)
         self._prune_display_state(displayed_pending_keys)
         self._persist_display_state()
+
+    def prime_displayed_signature(self, signature: InboxSignature) -> None:
+        """Seed suppression with inbox rows rendered before stream registration."""
+        self.signature = signature
+        displayed_keys = [key for key, _row_signature in _signature_rows(signature)]
+        self._record_displayed_keys(signature, displayed_keys, now=self.time_factory())
 
     def _emit_pending_summary(self, count: int) -> None:
         # Every pending item is inside its repeat-suppression window, so the full
@@ -888,6 +909,10 @@ def _inbox_signature_payload(value: Any) -> InboxSignature | None:
             return None
         rows.append((name, mtime_ns, size))
     return tuple(sorted(rows))
+
+
+def inbox_signature_from_payload(value: Any) -> InboxSignature | None:
+    return _inbox_signature_payload(value)
 
 
 def _inbox_row_signature_payload(value: Any) -> tuple[int, int] | None:
