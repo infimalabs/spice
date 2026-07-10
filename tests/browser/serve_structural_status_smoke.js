@@ -29,6 +29,7 @@ async function run() {
 
 async function runStructuralStatusSmokePage() {
   const lane = resolveIsolatedLane("structural-status-smoke-team");
+  activateIsolatedLaneWatch(lane, "structural-status-smoke");
   const host = laneGroupHost(lane);
   syncComposerShards(host, laneGroupMemberLanes(host));
   const textarea =
@@ -82,6 +83,7 @@ async function runStructuralStatusSmokePage() {
       JSON.stringify({
         payload,
         source: "watch",
+        subscriptionGeneration: lane.liveBusSubscriptionGeneration,
         targetId: lane.targetId,
         type: "lane.payload",
       }),

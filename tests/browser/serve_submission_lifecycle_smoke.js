@@ -268,6 +268,7 @@ async function submissionSmokePushSubmission(state, lane, submission) {
       type: "lane.submission",
       targetId: lane.targetId,
       source: "watch",
+      subscriptionGeneration: lane.liveBusSubscriptionGeneration,
       submission,
     }),
   );
@@ -284,6 +285,7 @@ async function submissionSmokePushPayload(state, lane, messages, processStatus) 
       type: "lane.payload",
       targetId: lane.targetId,
       source: "watch",
+      subscriptionGeneration: lane.liveBusSubscriptionGeneration,
       payload: submissionSmokeLanePayload(messages, processStatus),
     }),
   );
@@ -301,6 +303,7 @@ function setupSubmissionLifecycleSmokePage() {
     [idle, "idle", desktopComposerWidthPx],
   ];
   for (const [lane, state, widthPx] of laneConfigs) {
+    activateIsolatedLaneWatch(lane, "submission-lifecycle:" + lane.targetId);
     lane.lastRenderedStatusLine = {
       agentProcessStatus: state,
       agentVisualStatus: state,
