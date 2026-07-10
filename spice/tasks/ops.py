@@ -144,30 +144,67 @@ def unclaim(handle: str | None = None) -> str:
     return identity.render_handle(row)
 
 
-def wake(handles: Sequence[str]) -> str:
-    """Clear delayed task waits so the allocator can see them as current."""
+def wake(handles: Sequence[str], *, into: str | None = None) -> str:
+    """Clear delayed task waits so the allocator can see them as current.
+
+    Bare wake un-defers in place and refuses hidden oops triage rows. With
+    ``into``, promotion becomes explicit: the same wait-clear plus a project
+    move into the named public project, which is how a deferred hidden-board
+    task (.oops) enters the active public queue. Hidden boards mark rows
+    three ways (hidden project, oops/hidden tags, project_hidden UDA), so
+    promotion scrubs all of them — a bare project move would leave the row
+    allocator-invisible.
+    """
     if not handles:
         raise SpiceError("task wake requires at least one handle")
+    target = None
+    if into is not None:
+        target = config.validate_manual_creation_project(into)
     rows = [identity.resolve(handle) for handle in handles]
     for row in rows:
         _require_pending(row, "wake")
         rendered = identity.render_handle(row)
-        if alloc.is_oops(row):
-            raise SpiceError(f"cannot wake deferred oops triage task: {rendered}")
+        if target is None and alloc.is_oops(row):
+            raise SpiceError(
+                f"cannot wake deferred oops triage task: {rendered}; "
+                "promote it with wake --into <public-project>"
+            )
         if row.get("start") or str(row.get("claim_by") or ""):
             raise SpiceError(f"cannot wake active or claimed task: {rendered}")
 
-    tw.run([*(identity.uuid_of(row) for row in rows), "modify", "wait:"])
+    mods = ["wait:"]
+    if target is not None:
+        mods += [
+            f"project:{target}",
+            "-oops",
+            f"-{config.HIDDEN_TASK_TAG}",
+            f"{config.PROJECT_HIDDEN_UDA}:",
+        ]
+    tw.run([*(identity.uuid_of(row) for row in rows), "modify", *mods])
     fresh = [identity.render_handle(row) for row in rows]
     actor = tw.current_actor()
-    projects = tuple(
-        dict.fromkeys(str(row.get("project") or "").strip() for row in rows)
-    )
+    if target is None:
+        projects = tuple(
+            dict.fromkeys(str(row.get("project") or "").strip() for row in rows)
+        )
+        woke_lines = [f"woke {handle}: wait:" for handle in fresh]
+    else:
+        projects = (target,)
+        # The handle prefix tracks the project, so promotion renames the
+        # task; re-export to report the identity the operator uses next.
+        promoted = [
+            identity.render_handle(tw.export([identity.uuid_of(row)])[0])
+            for row in rows
+        ]
+        woke_lines = [
+            f"promoted {old} -> {new}: wait: project:{target}"
+            for old, new in zip(fresh, promoted, strict=True)
+        ]
     route_feedback = [
         _subscribe_woken_project(project, actor) for project in projects if project
     ]
     lines = [
-        *(f"woke {handle}: wait:" for handle in fresh),
+        *woke_lines,
         *route_feedback,
         "next: spice task next",
     ]

@@ -295,8 +295,69 @@ def test_task_wake_refuses_deferred_oops_triage(task_repo):
     )
     handle = created.split()[1]
 
-    with pytest.raises(SpiceError, match="oops triage"):
+    with pytest.raises(SpiceError, match="oops triage") as exc:
         ops.wake([handle])
+
+    assert "wake --into <public-project>" in str(exc.value)
+
+
+def test_task_wake_into_promotes_deferred_oops_into_public_project(task_repo):
+    store = ServeTeamStore()
+    team = store.create_team(
+        members=[ACTOR_A_MEMBER], config=TeamConfig(lifetime="Drive")
+    )
+    created = ops.oops(
+        "Promote this oops into the queue",
+        description="promotion candidate",
+        origin="ack:20260101T000000000000Z",
+    )
+    handle = created.split()[1]
+    assert identity.resolve(handle).get("wait")
+
+    output = ops.wake([handle], into="task.unit")
+    row = identity.resolve(handle)
+    fresh = identity.render_handle(row)
+    team_config = store.team_config(team.team_id)
+
+    assert row["project"] == "task.unit"
+    assert not str(row.get("wait") or "")
+    assert row.get("tags") == ["medium"]
+    assert fresh != handle
+    assert f"promoted {handle} -> {fresh}: wait: project:task.unit" in output
+    assert "route_filter=added:task.unit:auto:create" in output
+    assert team_config.task_filters == ("task.unit",)
+    assert fresh in _ready_handles()
+
+
+def test_task_wake_into_rejects_hidden_or_malformed_target_and_keeps_wait(task_repo):
+    created = ops.oops(
+        "Hidden target keeps deferral",
+        description="triage only",
+        origin="ack:20260101T000000000000Z",
+    )
+    handle = created.split()[1]
+    project_before = str(identity.resolve(handle)["project"])
+
+    with pytest.raises(SpiceError, match="hidden project stem"):
+        ops.wake([handle], into=".oops.triage")
+    with pytest.raises(SpiceError, match="at least"):
+        ops.wake([handle], into="task")
+
+    row = identity.resolve(handle)
+    assert row.get("wait")
+    assert str(row["project"]) == project_before
+
+
+def test_task_wake_into_still_refuses_active_or_claimed(task_repo):
+    claimed = create.add(
+        "Promotion refuses claimed task",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        claim=True,
+    )
+
+    with pytest.raises(SpiceError, match="active or claimed"):
+        ops.wake([claimed], into="task.unit")
 
 
 def test_drive_wake_auto_subscribes_woken_project(task_repo):

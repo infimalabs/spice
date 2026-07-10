@@ -133,6 +133,22 @@ def test_task_wake_parser_rejects_claim_flag():
     assert exc_info.value.code == 2
 
 
+def test_task_wake_parser_accepts_into_project():
+    args = build_parser().parse_args(
+        ["task", "wake", "OOPS-20260101T000000000001Z", "--into", "task.cli"]
+    )
+
+    assert args.task_action == "wake"
+    assert args.handles == ["OOPS-20260101T000000000001Z"]
+    assert args.into == "task.cli"
+
+
+def test_task_wake_parser_defaults_into_to_none():
+    args = build_parser().parse_args(["task", "wake", "TASK-20260101T000000000001Z"])
+
+    assert args.into is None
+
+
 def test_task_reclaim_parser_accepts_optional_handle():
     bare = build_parser().parse_args(["task", "reclaim"])
     explicit = build_parser().parse_args(
