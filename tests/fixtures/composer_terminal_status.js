@@ -29,11 +29,16 @@ vm.runInContext(fs.readFileSync(composerPath, "utf8"), context, {
 
 const terminalStatus = {
   agentProcessStatus: "running",
-  latestActivityPreview: "Drain complete. Completed `PERF-1kC57CKH`",
-  lastAssistantAt: new Date().toISOString(),
+  latestActivityKind: "final",
+  latestActivityPreview: "Confirmed fixed.",
+  lastAssistantAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
 };
 const terminalVisual = context.liveAgentVisualStatus(terminalStatus);
-assert(terminalVisual === "idle", "drain-complete running status becomes idle");
+assert(terminalVisual === "idle", "structural final running status becomes idle");
+assert(
+  context.relativeTime(terminalStatus.lastAssistantAt) === "20m",
+  "relative age remains independent from structural activity state",
+);
 assert(
   context.laneComposePlaceholderStatus({
     pendingInboxCount: 0,
@@ -47,6 +52,7 @@ assert(
 
 const activeStatus = {
   agentProcessStatus: "running",
+  latestActivityKind: "presence:function_call",
   latestActivityPreview: "Bash: pytest",
   lastAssistantAt: new Date().toISOString(),
 };
@@ -61,4 +67,13 @@ assert(
     },
   }) === "0 pending, running",
   "composer placeholder preserves active running status",
+);
+
+const retainedStatus = context.statusLineWithRetainedSummary(
+  { lastRenderedStatusLine: terminalStatus },
+  { agentProcessStatus: "running" },
+);
+assert(
+  retainedStatus.latestActivityKind === "final",
+  "partial status updates retain the structural activity kind",
 );

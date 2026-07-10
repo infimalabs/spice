@@ -726,6 +726,12 @@ function targetChoiceStatusLine(target) {
     target.lastAssistantAt ||
     statusLine.lastAssistantAt ||
     "";
+  merged.latestActivityKind = payloadHasField(
+    laneStatusLine,
+    "latestActivityKind",
+  )
+    ? String(laneStatusLine.latestActivityKind || "")
+    : String(statusLine.latestActivityKind || "");
   merged.agentProcessStatus =
     laneStatusLine.agentProcessStatus ||
     target.agentProcessStatus ||

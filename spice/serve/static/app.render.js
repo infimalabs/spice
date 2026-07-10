@@ -326,6 +326,9 @@ function statusLineWithRetainedSummary(lane, statusLine) {
     ...statusLine,
     lastAssistantAt:
       statusLine.lastAssistantAt || previous.lastAssistantAt || "",
+    latestActivityKind: payloadHasField(statusLine, "latestActivityKind")
+      ? String(statusLine.latestActivityKind || "")
+      : String(previous.latestActivityKind || ""),
     preview: statusLine.preview || previous.preview || "",
   };
 }
@@ -346,7 +349,8 @@ function liveAgentVisualStatus(statusLine) {
   const processStatus = statusLine.agentProcessStatus || "";
   const backendStatus =
     statusLine.agentVisualStatus || processStatus || "unknown";
-  if (processStatus === "running" && terminalActivityPreview(statusLine))
+  const latestActivityKind = String(statusLine.latestActivityKind || "");
+  if (processStatus === "running" && latestActivityKind === "final")
     return "idle";
   if (processStatus !== "running") return backendStatus;
   if (
@@ -358,13 +362,6 @@ function liveAgentVisualStatus(statusLine) {
   if (ageSeconds !== null && ageSeconds >= activeAssistantSeconds)
     return "running-stale";
   return backendStatus;
-}
-
-function terminalActivityPreview(statusLine) {
-  const preview = String(
-    statusLine.latestActivityPreview || statusLine.preview || "",
-  );
-  return preview.startsWith("Drain complete.");
 }
 
 function setAgentStatusPip(lane, status) {
