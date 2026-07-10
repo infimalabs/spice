@@ -683,6 +683,7 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
     # observed in send order regardless of pool timing.
     session._await_pending_reads(LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
     send_timing = connection.sent[0]["result"].pop("serverTiming")
+    submission = connection.sent[0]["result"].pop("submission")
     assert list(send_timing) == [
         "targetResolveMs",
         "sendPayloadMs",
@@ -690,6 +691,8 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
     ]
     assert all(isinstance(value, float) for value in send_timing.values())
     assert all(value >= 0.0 for value in send_timing.values())
+    assert submission["stage"] == "accepted"
+    assert submission["stages"]["accepted"]["source"] == "inbox-write"
     assert connection.sent == [
         {
             "type": "lane.sendResult",
