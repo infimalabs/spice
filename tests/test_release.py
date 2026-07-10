@@ -259,6 +259,19 @@ def test_publish_mode_with_head_target_runs_gates_before_publish(tmp_path, monke
     ]
 
 
+def test_release_constitution_runs_executable_browser_gate(monkeypatch):
+    calls = []
+    monkeypatch.setattr(release, "run", lambda command: calls.append(command))
+
+    release.run_constitution_gate()
+
+    assert calls == [
+        ["uv", "run", "pytest"],
+        ["uv", "run", "ruff", "check", "."],
+        ["node", "tests/browser/run_release_smokes.js"],
+    ]
+
+
 def test_publish_release_with_head_commit_uses_current_artifacts(monkeypatch):
     calls = []
 

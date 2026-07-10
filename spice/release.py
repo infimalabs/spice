@@ -267,6 +267,11 @@ def ensure_notes_file(path: Path | None) -> None:
 def run_constitution_gate() -> None:
     run(["uv", "run", "pytest"])
     run(["uv", "run", "ruff", "check", "."])
+    run_browser_gate()
+
+
+def run_browser_gate() -> None:
+    run(["node", "tests/browser/run_release_smokes.js"])
 
 
 def run_artifact_gate(version: str) -> None:

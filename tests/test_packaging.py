@@ -20,6 +20,8 @@ PRIMARY_RUNTIME_DOCS = ("README.md", "DESIGN.md", "CONFIG.md")
 BROWSER_VALIDATION_FILES = (
     "package.json",
     "package-lock.json",
+    "tests/browser/release_smoke_manifest.js",
+    "tests/browser/run_release_smokes.js",
     "tests/browser/serve_composer_reorder_smoke.js",
     "tests/browser/serve_identity_smoke.js",
     "tests/browser/serve_lifetime_team_smoke.js",
