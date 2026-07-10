@@ -71,6 +71,11 @@ function connectLiveBus() {
     if (liveBusSocket !== socket) return;
     liveBusSocket = null;
     liveBusOpenPromise = null;
+    for (const lane of laneStates.values()) {
+      lane.liveBusSubscribed = false;
+      lane.liveBusSubscribePending = false;
+      lane.liveBusWatcherActive = false;
+    }
     stopLiveBusHeartbeat();
     rejectLiveBusRequests("live bus closed");
     scheduleLiveBusReconnect();
@@ -170,7 +175,7 @@ async function handleLiveBusMessage(data) {
     applyTeamSnapshotPayload(message.payload || {});
   } else if (message.type === "lane.payload") {
     const lane = laneStates.get(message.targetId);
-    if (lane && isLaneOpen(lane))
+    if (lane && isLaneOpen(lane) && liveBusPushMatchesSubscription(lane, message))
       await applyLaneBusPayload(
         lane,
         message.payload || {},
@@ -178,11 +183,15 @@ async function handleLiveBusMessage(data) {
       );
   } else if (message.type === "lane.pending") {
     const lane = laneStates.get(message.targetId);
-    if (lane && isLaneOpen(lane))
+    if (lane && isLaneOpen(lane) && liveBusPushMatchesSubscription(lane, message))
       applyLanePendingBusPayload(lane, message.payload || {});
   } else if (message.type === "lane.submission") {
     const lane = laneStates.get(message.targetId);
-    if (lane && isLaneOpen(lane)) {
+    if (
+      lane &&
+      isLaneOpen(lane) &&
+      liveBusPushMatchesSubscription(lane, message)
+    ) {
       applyLaneSubmissionLifecycle(lane, message.submission);
       syncLaneSubmissionLifecycleUi(lane);
     }
@@ -197,6 +206,16 @@ async function handleLiveBusMessage(data) {
 
 function isLaneOpen(lane) {
   return !lane.closed && laneStates.get(lane.targetId) === lane;
+}
+
+function liveBusPushMatchesSubscription(lane, message) {
+  if (message.source !== "watch") return true;
+  const generation = String(message.subscriptionGeneration || "");
+  return (
+    Boolean(generation) &&
+    lane.liveBusWatcherActive === true &&
+    generation === String(lane.liveBusSubscriptionGeneration || "")
+  );
 }
 
 // ---- lane subscription ------------------------------------------------------
@@ -219,7 +238,9 @@ let subscribeFlushQueued = false;
 function subscribeLaneToLiveBus(lane) {
   if (!isLaneOpen(lane)) return;
   if (lane.emptyTeam) return;
-  lane.liveBusSubscribed = true;
+  lane.liveBusSubscribed = false;
+  lane.liveBusSubscribePending = true;
+  lane.liveBusWatcherActive = false;
   pendingSubscribeLanes.add(lane);
   if (subscribeFlushQueued) return;
   subscribeFlushQueued = true;
@@ -245,7 +266,10 @@ async function flushPendingLaneSubscribes() {
     response = await liveBusRequest("lanes.subscribe", { entries });
   } catch (error) {
     for (const lane of lanes) {
-      if (isLaneOpen(lane)) setLaneTransientStatus(lane, "live bus unavailable");
+      if (isLaneOpen(lane)) {
+        lane.liveBusSubscribePending = false;
+        setLaneTransientStatus(lane, "live bus unavailable");
+      }
     }
     return;
   }
@@ -253,16 +277,29 @@ async function flushPendingLaneSubscribes() {
 }
 
 function applyLanesSubscribePayloads(lanes, laneFrames) {
-  const payloadByTargetId = new Map(
-    laneFrames.map((frame) => {
-      return [frame.targetId, frame.payload || {}];
-    }),
+  const frameByTargetId = new Map(
+    laneFrames.map((frame) => [frame.targetId, frame]),
   );
   const hostsToRender = new Map();
   for (const lane of lanes) {
     if (!isLaneOpen(lane)) continue;
-    const payload = payloadByTargetId.get(lane.targetId);
-    if (!payload) continue;
+    const frame = frameByTargetId.get(lane.targetId);
+    if (!frame) {
+      lane.liveBusSubscribePending = false;
+      setLaneTransientStatus(lane, "subscription reply missing");
+      continue;
+    }
+    const payload = frame.payload || {};
+    lane.liveBusSubscriptionGeneration = String(
+      frame.subscriptionGeneration || "",
+    );
+    lane.liveBusWatcherActive = frame.watcherActive === true;
+    lane.liveBusSubscribed = lane.liveBusWatcherActive;
+    lane.liveBusSubscribePending = false;
+    if (!lane.liveBusWatcherActive && frame.watcherError) {
+      setLaneTransientStatus(lane, frame.watcherError);
+      continue;
+    }
     if (payload.error) {
       // A failed lane keeps its batch slot: it surfaces its own status while
       // sibling lanes apply and render normally.
@@ -299,8 +336,10 @@ function configureLiveBusLanes() {
 }
 
 function unsubscribeLaneFromLiveBus(lane) {
-  if (!lane.liveBusSubscribed) return;
+  if (!lane.liveBusSubscribed && !lane.liveBusSubscribePending) return;
   lane.liveBusSubscribed = false;
+  lane.liveBusSubscribePending = false;
+  lane.liveBusWatcherActive = false;
   liveBusRequest("lane.unsubscribe", { targetId: lane.targetId }).catch(
     () => {},
   );

@@ -3,8 +3,8 @@ const { withServePage } = require("./serve_playwright_harness");
 // Lane subscribes coalesce into ONE lanes.subscribe frame per microtask tick,
 // and the batch payloads apply state-first so each fused host paints its
 // merged interleaved stream in a single render pass. Guards the per-member
-// arrival reshuffle the operator saw on load: N open lanes used to send N
-// lane.subscribe frames and every arrival re-sorted the fused mosaic.
+// arrival reshuffle the operator saw on load: N open lanes used to subscribe
+// independently, and every arrival re-sorted the fused mosaic.
 
 const BATCH_MEMBER_IDS = ["bsub-a", "bsub-b"];
 const BATCH_MESSAGES_PER_MEMBER = 3;
@@ -136,6 +136,9 @@ function batchInstallStubs(state, config) {
       lanes: (fields.entries || []).map((entry) => {
         return {
           targetId: entry.targetId,
+          subscriptionGeneration: "batch:" + entry.targetId,
+          watcherActive: true,
+          watcherError: "",
           payload:
             state.payloadOverrides[entry.targetId] ||
             {

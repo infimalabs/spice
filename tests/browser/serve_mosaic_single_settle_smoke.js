@@ -155,7 +155,13 @@ function ssInstallStubs(state, config) {
     return {
       type: "lanes.payload",
       lanes: (fields.entries || []).map((entry) => {
-        return { targetId: entry.targetId, payload: state.payloadByTargetId[entry.targetId] };
+        return {
+          targetId: entry.targetId,
+          subscriptionGeneration: "single-settle:" + entry.targetId,
+          watcherActive: true,
+          watcherError: "",
+          payload: state.payloadByTargetId[entry.targetId],
+        };
       }),
     };
   };

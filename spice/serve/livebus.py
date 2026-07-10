@@ -2,7 +2,7 @@
 
 Requests carry a `requestId` the response echoes; pushes carry none. Verbs:
 `bus.ping`, `targets.refresh`, `teams.refresh`, `teams.command`,
-`lane.subscribe`, `lanes.subscribe`, `lane.configure`, `lane.unsubscribe`,
+`lanes.subscribe`, `lane.configure`, `lane.unsubscribe`,
 `lane.refresh`, `lane.history`, `lane.send`, `lane.taskDrain`,
 `metrics.series`. A subscription tails the
 agent's transcript and pushes `lane.payload` frames the moment new lines
@@ -120,10 +120,14 @@ class LaneSignature:
 class _LaneSubscription:
     target: Any
     query: dict[str, Any]
+    generation: str
     stop: Event = field(default_factory=Event)
+    watcher_activated: Event = field(default_factory=Event)
+    initial_payload_sent: Event = field(default_factory=Event)
     thread: Thread | None = None
     lock: Lock = field(default_factory=Lock)
     last_signature: Any = None
+    watcher_error: str | None = None
 
 
 class LiveBusSession:
@@ -135,6 +139,7 @@ class LiveBusSession:
         # Per-connection identity so each client owns its rollout cursor; a
         # shared per-thread cursor let one tab/machine starve another's stream.
         self.client_id = uuid.uuid4().hex
+        self._subscription_sequence = 0
         self.subscriptions: dict[str, _LaneSubscription] = {}
         self.send_lock = Lock()
         # Metrics are read-only display data whose queries can be heavy; running
@@ -148,7 +153,7 @@ class LiveBusSession:
         # Batched subscribes fan their payload computes out here so N lanes
         # arrive together in one reply frame instead of trickling in serially.
         self._payload_pool: ThreadPoolExecutor | None = None
-        # Single read-only verbs (lane.subscribe/refresh/history) route their
+        # Single read-only verbs (refresh/history) route their
         # heavy messages_payload compute + reply onto that pool, one FIFO chain
         # per target: two queued reads for a lane apply in request order while
         # distinct lanes overlap up to the pool's width. Only one chain runs
@@ -219,7 +224,6 @@ class LiveBusSession:
                 "targets.refresh": self._handle_targets_refresh,
                 "teams.refresh": self._handle_teams_refresh,
                 "teams.command": self._handle_teams_command,
-                "lane.subscribe": self._handle_lane_subscribe,
                 "lanes.subscribe": self._handle_lanes_subscribe,
                 "lane.configure": self._handle_lane_configure,
                 "lane.unsubscribe": self._handle_lane_unsubscribe,
@@ -294,21 +298,6 @@ class LiveBusSession:
                 kwargs[kwarg] = value
         return kwargs
 
-    def _handle_lane_subscribe(self, message: dict[str, Any]) -> None:
-        target = self._require_target(message)
-        if target is None:
-            return
-        # Bookkeeping (replace/stop + signature snapshot) and watcher start stay
-        # inline for their existing thread-safety; only the heavy payload compute
-        # and reply move onto the target's read chain. The watcher wakes only
-        # after _wait_for_change sees a real edit, so it never overtakes the
-        # initial reply the chain sends promptly on the pool.
-        subscription = self._replace_subscription(
-            target, dict(message.get("query") or {})
-        )
-        self._dispatch_read(target, message)
-        self._start_watcher(subscription)
-
     def _handle_lanes_subscribe(self, message: dict[str, Any]) -> None:
         raw_entries = message.get("entries")
         if not isinstance(raw_entries, list) or not raw_entries:
@@ -340,13 +329,18 @@ class LiveBusSession:
                 return
             seen_target_ids.add(target.id)
             entries.append((target, dict(entry.get("query") or {})))
-        # Bookkeeping stays inline on the dispatch thread: replace/stop and the
-        # signature snapshot keep single-subscribe ordering per lane, and every
-        # snapshot lands before its payload compute so a change racing the
-        # batch compares newer on the first watch wake.
+        # Bookkeeping stays inline on the dispatch thread: replacement and the
+        # baseline signature precede watcher activation. Every watcher arms
+        # before its initial payload read; watch pushes then wait behind the
+        # reply gate, so a setup-racing edit is delivered by either that read or
+        # the queued append-only push without overtaking the initial frame.
         subscriptions = [
             self._replace_subscription(target, query) for target, query in entries
         ]
+        for subscription in subscriptions:
+            self._start_watcher(subscription)
+        for subscription in subscriptions:
+            subscription.watcher_activated.wait()
         futures: list[tuple[_LaneSubscription, Future[dict[str, Any]]]] = [
             (
                 subscription,
@@ -357,12 +351,20 @@ class LiveBusSession:
             for subscription in subscriptions
         ]
         lanes = [
-            {"targetId": subscription.target.id, "payload": future.result()}
+            {
+                "targetId": subscription.target.id,
+                "payload": future.result(),
+                "subscriptionGeneration": subscription.generation,
+                "watcherActive": subscription.watcher_error is None,
+                "watcherError": subscription.watcher_error or "",
+            }
             for subscription, future in futures
         ]
-        self._reply(message, {"type": "lanes.payload", "lanes": lanes})
-        for subscription in subscriptions:
-            self._start_watcher(subscription)
+        try:
+            self._reply(message, {"type": "lanes.payload", "lanes": lanes})
+        finally:
+            for subscription in subscriptions:
+                subscription.initial_payload_sent.set()
 
     def _replace_subscription(
         self, target: Any, query: dict[str, Any]
@@ -370,7 +372,12 @@ class LiveBusSession:
         previous = self.subscriptions.pop(target.id, None)
         if previous is not None:
             self._stop_subscription(previous)
-        subscription = _LaneSubscription(target=target, query=query)
+        self._subscription_sequence += 1
+        subscription = _LaneSubscription(
+            target=target,
+            query=query,
+            generation=f"{self.client_id}:{self._subscription_sequence}",
+        )
         self.subscriptions[target.id] = subscription
         subscription.last_signature = self._lane_signature(subscription)
         return subscription
@@ -600,6 +607,7 @@ class LiveBusSession:
 
     def _stop_subscription(self, subscription: _LaneSubscription) -> None:
         subscription.stop.set()
+        subscription.initial_payload_sent.set()
         if subscription.thread is not None:
             subscription.thread.join(timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
 
@@ -608,7 +616,10 @@ class LiveBusSession:
         watch = _KqueueWatch()
         try:
             self._run_watch_loop(subscription, target, watch)
+        except Exception as exc:
+            subscription.watcher_error = str(exc)
         finally:
+            subscription.watcher_activated.set()
             watch.close()
 
     def _run_watch_loop(
@@ -617,11 +628,19 @@ class LiveBusSession:
         while not subscription.stop.is_set():
             thread_id, transcript = self._lane_context(target)
             watch_paths = self.callbacks.lane_watch_paths(target, thread_id, transcript)
-            changed = _wait_for_change(watch_paths, subscription.stop, watch)
+            changed = _wait_for_change(
+                watch_paths,
+                subscription.stop,
+                watch,
+                activated=subscription.watcher_activated,
+            )
             if subscription.stop.is_set():
                 return
             if not changed:
                 continue
+            subscription.initial_payload_sent.wait()
+            if subscription.stop.is_set():
+                return
             signature = self.callbacks.lane_signature(target, thread_id, transcript)
             previous_signature = subscription.last_signature
             if signature == previous_signature:
@@ -635,11 +654,15 @@ class LiveBusSession:
                             "type": "lane.pending",
                             "targetId": target.id,
                             "source": "watch",
+                            "subscriptionGeneration": subscription.generation,
                             "payload": payload,
                         }
                     )
                     self._push_submission_updates(
-                        target, payload, include_ack_state=True
+                        target,
+                        payload,
+                        subscription_generation=subscription.generation,
+                        include_ack_state=True,
                     )
                 except (OSError, WebSocketProtocolError):
                     return
@@ -664,10 +687,15 @@ class LiveBusSession:
                         "type": "lane.payload",
                         "targetId": target.id,
                         "source": "watch",
+                        "subscriptionGeneration": subscription.generation,
                         "payload": payload,
                     }
                 )
-                self._push_submission_updates(target, payload)
+                self._push_submission_updates(
+                    target,
+                    payload,
+                    subscription_generation=subscription.generation,
+                )
             except (OSError, WebSocketProtocolError):
                 return
 
@@ -676,6 +704,7 @@ class LiveBusSession:
         target: Any,
         payload: dict[str, Any],
         *,
+        subscription_generation: str,
         include_ack_state: bool = False,
     ) -> None:
         events = self._submission_tracker.advance(
@@ -690,6 +719,7 @@ class LiveBusSession:
                     "type": "lane.submission",
                     "targetId": target.id,
                     "source": "watch",
+                    "subscriptionGeneration": subscription_generation,
                     "submission": submission,
                 }
             )
@@ -750,24 +780,28 @@ def _elapsed_ms(start: float, end: float) -> float:
 
 
 def _wait_for_change(
-    paths: tuple[Path, ...], stop: Event, watch: _KqueueWatch | None = None
+    paths: tuple[Path, ...],
+    stop: Event,
+    watch: _KqueueWatch | None = None,
+    *,
+    activated: Event | None = None,
 ) -> bool:
     """Block until a watched path changes or `stop` is set.
 
     A `watch` keeps the kqueue armed across calls so a change that fires
     between calls — e.g. while the caller is pushing a payload — is kernel
     queued and delivered on the next call instead of being lost in a reopen
-    gap. Without one (or off kqueue) the watch is opened per call.
+    gap. Without one (or off kqueue) the watch is opened per call. `activated`
+    is published only after the selected watcher has accepted observable paths.
     """
     watch_paths = _existing_watch_paths(paths)
     if not watch_paths:
-        stop.wait(LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S)
-        return False
+        raise RuntimeError("lane watcher has no observable paths")
     if _HAVE_KQUEUE:
         if watch is not None:
-            return watch.wait(watch_paths, stop)
-        return _wait_for_change_kqueue(watch_paths, stop)
-    return _wait_for_change_watchfiles(watch_paths, stop)
+            return watch.wait(watch_paths, stop, activated=activated)
+        return _wait_for_change_kqueue(watch_paths, stop, activated=activated)
+    return _wait_for_change_watchfiles(watch_paths, stop, activated=activated)
 
 
 class _KqueueWatch:
@@ -785,11 +819,14 @@ class _KqueueWatch:
         self._kqueue: Any = None
         self._events: list[Any] = []
 
-    def wait(self, paths: tuple[Path, ...], stop: Event) -> bool:
+    def wait(
+        self, paths: tuple[Path, ...], stop: Event, *, activated: Event | None = None
+    ) -> bool:
         self._arm(paths)
         if not self._events:
-            stop.wait(LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S)
-            return False
+            raise RuntimeError("lane watcher could not open observable paths")
+        if activated is not None:
+            activated.set()
         while not stop.is_set():
             triggered = self._kqueue.control(
                 self._events, len(self._events), LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
@@ -848,7 +885,9 @@ def _existing_watch_paths(paths: tuple[Path, ...]) -> tuple[Path, ...]:
     return tuple(result)
 
 
-def _wait_for_change_kqueue(paths: tuple[Path, ...], stop: Event) -> bool:
+def _wait_for_change_kqueue(
+    paths: tuple[Path, ...], stop: Event, *, activated: Event | None = None
+) -> bool:
     import os
 
     descriptors: list[int] = []
@@ -859,8 +898,7 @@ def _wait_for_change_kqueue(paths: tuple[Path, ...], stop: Event) -> bool:
             except OSError:
                 continue
         if not descriptors:
-            stop.wait(LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S)
-            return False
+            raise RuntimeError("lane watcher could not open observable paths")
         kqueue = _select_attr("kqueue")()
         try:
             events = [
@@ -872,6 +910,8 @@ def _wait_for_change_kqueue(paths: tuple[Path, ...], stop: Event) -> bool:
                 )
                 for descriptor in descriptors
             ]
+            if activated is not None:
+                activated.set()
             while not stop.is_set():
                 triggered = kqueue.control(
                     events, len(events), LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
@@ -886,10 +926,14 @@ def _wait_for_change_kqueue(paths: tuple[Path, ...], stop: Event) -> bool:
             os.close(descriptor)
 
 
-def _wait_for_change_watchfiles(paths: tuple[Path, ...], stop: Event) -> bool:
+def _wait_for_change_watchfiles(
+    paths: tuple[Path, ...], stop: Event, *, activated: Event | None = None
+) -> bool:
     module = import_module("watchfiles")
     watch = cast(Callable[..., Any], getattr(module, "watch"))
 
+    if activated is not None:
+        activated.set()
     for _changes in watch(
         *paths,
         stop_event=stop,
