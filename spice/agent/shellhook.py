@@ -50,20 +50,6 @@ RTK_FIND_REROUTE_WORDS = (
     "-o",
     "-a",
 )
-# rg patterns assume rust-regex, where | + ? ( ) are metacharacters; BSD grep
-# defaults to BASIC regex, where they are literals, so a delegated pattern
-# silently matches nothing. Injecting -E when the caller chose no matcher
-# keeps rg-authored alternations working through the rtk grep delegation.
-RTK_GREP_MATCHER_FLAGS = (
-    "-E",
-    "-F",
-    "-G",
-    "-P",
-    "--extended-regexp",
-    "--fixed-strings",
-    "--basic-regexp",
-    "--perl-regexp",
-)
 BUILTIN_AGENT_WRAPPER_GROUPS = {
     DEFAULT_AGENT_WRAPPER_GROUP: {
         "rtk": {
@@ -78,11 +64,6 @@ BUILTIN_AGENT_WRAPPER_GROUPS = {
                     "head": "find",
                     "flags": list(RTK_FIND_REROUTE_WORDS),
                     "argv": ["find"],
-                },
-                {
-                    "head": "grep",
-                    "absent": list(RTK_GREP_MATCHER_FLAGS),
-                    "argv": ["rtk", "grep", "-E"],
                 },
             ],
         },
@@ -450,7 +431,6 @@ class WrapperMatchRoute(NamedTuple):
     head: str | None
     flags: tuple[str, ...]
     argv: tuple[str, ...]
-    absent: tuple[str, ...] = ()
 
 
 def render_agent_match_wrapper_lines(
@@ -469,37 +449,27 @@ def render_agent_match_wrapper_lines(
 
 def match_route_guard_lines(route: WrapperMatchRoute) -> list[str]:
     argv = " ".join(shell_command_word(word) for word in route.argv)
-    if route.absent:
-        pattern = "|".join(match_route_pattern(word) for word in route.absent)
-        scan = [
-            "_spice_route=absent",
-            'for _spice_word in "$@"; do',
-            '  case "$_spice_word" in',
-            f"    {pattern})",
-            "      _spice_route=",
-            "      break",
-            "      ;;",
-            "  esac",
-            "done",
-            'if [ -n "$_spice_route" ]; then',
-            *(["  shift"] if route.head is not None else []),
-            f'  command {argv} "$@"',
-            "  return",
-            "fi",
+    if not route.flags:
+        assert route.head is not None
+        return [
+            f'  if [ "${{1-}}" = {shell_quote(route.head)} ]; then',
+            "    shift",
+            f'    command {argv} "$@"',
+            "    return",
+            "  fi",
         ]
-    else:
-        pattern = "|".join(match_route_pattern(flag) for flag in route.flags)
-        scan = [
-            'for _spice_word in "$@"; do',
-            '  case "$_spice_word" in',
-            f"    {pattern})",
-            *(["      shift"] if route.head is not None else []),
-            f'      command {argv} "$@"',
-            "      return",
-            "      ;;",
-            "  esac",
-            "done",
-        ]
+    pattern = "|".join(match_route_pattern(flag) for flag in route.flags)
+    scan = [
+        'for _spice_word in "$@"; do',
+        '  case "$_spice_word" in',
+        f"    {pattern})",
+        *(["      shift"] if route.head is not None else []),
+        f'      command {argv} "$@"',
+        "      return",
+        "      ;;",
+        "  esac",
+        "done",
+    ]
     if route.head is None:
         return ["  " + line for line in scan]
     return [
@@ -526,7 +496,7 @@ def agent_wrapper_match_routes(
 def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
     if not isinstance(raw, Mapping):
         raise SpiceError(f"spice shell hook: {label} must be a table")
-    extra = sorted(set(raw) - {"head", "flags", "absent", "argv"})
+    extra = sorted(set(raw) - {"head", "flags", "argv"})
     if extra:
         raise SpiceError(
             f"spice shell hook: {label} has unsupported keys: {', '.join(extra)}"
@@ -534,25 +504,19 @@ def agent_wrapper_match_route(raw: object, *, label: str) -> WrapperMatchRoute:
     head = raw.get("head")
     if head is not None:
         head = match_route_word(head, label=f"{label}.head")
-    if raw.get("flags") is not None and raw.get("absent") is not None:
-        raise SpiceError(f"spice shell hook: {label} takes flags or absent, not both")
-    if raw.get("absent") is not None:
-        words_label = f"{label}.absent"
-        absent = config_string_list(raw.get("absent"), label=words_label)
+    if raw.get("flags") is None:
+        # A head-only route reroutes every argv under that head unconditionally.
+        if head is None:
+            raise SpiceError(f"spice shell hook: {label} needs a head or flags")
         flags: list[str] = []
     else:
-        words_label = f"{label}.flags"
-        absent = []
-        flags = config_string_list(raw.get("flags"), label=words_label)
-    words = absent or flags
-    if not words:
-        raise SpiceError(f"spice shell hook: {words_label} has no entries")
-    for word in words:
-        match_route_word(word, label=words_label)
+        flags = config_string_list(raw.get("flags"), label=f"{label}.flags")
+        if not flags:
+            raise SpiceError(f"spice shell hook: {label}.flags has no entries")
+        for word in flags:
+            match_route_word(word, label=f"{label}.flags")
     argv = command_words_from_config(raw.get("argv"), label=f"{label}.argv")
-    return WrapperMatchRoute(
-        head=head, flags=tuple(flags), argv=tuple(argv), absent=tuple(absent)
-    )
+    return WrapperMatchRoute(head=head, flags=tuple(flags), argv=tuple(argv))
 
 
 def match_route_word(value: object, *, label: str) -> str:

@@ -88,6 +88,19 @@ wrappers = ["common", "spice-dev"]
 [tool.spice.wrappers.spice-dev]
 pre-commit = { argv = ["spice", "dev", "pre-commit"] }
 
+# Replaces the builtin "common" group wholesale, so the rg/find reroutes must
+# ride along. The final head-only route appends -E unconditionally: rtk grep
+# delegates to BSD grep, whose default BASIC dialect reads rg-authored
+# | + ? ( ) as literals; a caller's explicit -F/-G later in argv still wins
+# because BSD grep honors the last matcher flag.
+[tool.spice.wrappers.common.rtk]
+argv = ["rtk"]
+match = [
+    { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading"], argv = ["rg"] },
+    { head = "find", flags = ["-print", "-print0", "-prune", "-exec", "-execdir", "-delete", "(", ")", "!", "-o", "-a"], argv = ["find"] },
+    { head = "grep", argv = ["rtk", "grep", "-E"] },
+]
+
 [tool.spice.tasks]
 stems = ["session", "mail", "hooks", "studies", "cli", "lifecycle", "tests"]
 

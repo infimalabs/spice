@@ -133,59 +133,34 @@ def test_agent_wrapper_lines_renders_match_route_guards(tmp_path):
     ]
 
 
-def test_agent_wrapper_lines_renders_absent_route_guard(tmp_path):
+def test_agent_wrapper_lines_renders_head_only_route_guard(tmp_path):
     _write_match_wrapper_config(
         tmp_path,
         argv='["toolbox"]',
-        match=(
-            '[{ head = "scan", absent = ["-E", "-F"],'
-            ' argv = ["toolbox", "scan", "-E"] }]'
-        ),
+        match='[{ head = "scan", argv = ["toolbox", "scan", "-E"] }]',
     )
 
     assert shellhook.render_agent_wrapper_lines(tmp_path) == [
         "",
         "toolbox() {",
         '  if [ "${1-}" = scan ]; then',
-        "    _spice_route=absent",
-        '    for _spice_word in "$@"; do',
-        '      case "$_spice_word" in',
-        "        -E|-F)",
-        "          _spice_route=",
-        "          break",
-        "          ;;",
-        "      esac",
-        "    done",
-        '    if [ -n "$_spice_route" ]; then',
-        "      shift",
-        '      command toolbox scan -E "$@"',
-        "      return",
-        "    fi",
+        "    shift",
+        '    command toolbox scan -E "$@"',
+        "    return",
         "  fi",
         '  command toolbox "$@"',
         "}",
     ]
 
 
-def test_agent_wrapper_lines_rejects_route_with_flags_and_absent(tmp_path):
+def test_agent_wrapper_lines_rejects_route_lacking_head_and_flags(tmp_path):
     _write_match_wrapper_config(
         tmp_path,
         argv='["toolbox"]',
-        match='[{ flags = ["-raw"], absent = ["-E"], argv = ["viewer"] }]',
+        match='[{ argv = ["viewer"] }]',
     )
 
-    with pytest.raises(SpiceError, match=r"match\[0\] takes flags or absent"):
-        shellhook.render_agent_wrapper_lines(tmp_path)
-
-
-def test_agent_wrapper_lines_rejects_absent_route_lacking_entries(tmp_path):
-    _write_match_wrapper_config(
-        tmp_path,
-        argv='["toolbox"]',
-        match='[{ absent = [], argv = ["viewer"] }]',
-    )
-
-    with pytest.raises(SpiceError, match=r"match\[0\].absent has no entries"):
+    with pytest.raises(SpiceError, match=r"match\[0\] needs a head or flags"):
         shellhook.render_agent_wrapper_lines(tmp_path)
 
 
@@ -274,8 +249,6 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
             *shellhook.render_agent_wrapper_lines(tmp_path),
             "rtk grep --files src",
             "rtk grep needle src",
-            "rtk grep -F 'a|b' src",
-            "rtk grep -E 'a|b' src",
             "rtk find src -name '*.py' -print",
             "rtk find src \\( -name '*.py' -o -name '*.md' \\)",
             "rtk",
@@ -299,12 +272,59 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
     lines = _trace_lines(trace, expected_prefix="rg:")
     assert lines == [
         "rg:--files src",
-        "rtk:grep -E needle src",
-        "rtk:grep -F a|b src",
-        "rtk:grep -E a|b src",
+        "rtk:grep needle src",
         "find:src -name *.py -print",
         "find:src ( -name *.py -o -name *.md )",
         "rtk:",
+    ]
+    assert lines[0] != lines[1]
+
+
+def test_pyproject_head_only_route_dispatches_in_live_zsh(tmp_path):
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    _write_match_wrapper_config(
+        tmp_path,
+        argv='["toolbox"]',
+        match='[{ head = "scan", argv = ["toolbox", "scan", "-E"] }]',
+    )
+    trace = tmp_path / "trace.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    tool = bin_dir / "toolbox"
+    tool.write_text(
+        f'#!/bin/sh\nprintf \'toolbox:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+        encoding="utf-8",
+    )
+    tool.chmod(0o755)
+    script = "\n".join(
+        [
+            "set -u",
+            *shellhook.render_agent_wrapper_lines(tmp_path),
+            "toolbox scan 'a|b' src",
+            "toolbox status",
+        ]
+    )
+
+    completed = subprocess.run(
+        [zsh, "-c", script],
+        check=False,
+        env={
+            "PATH": str(bin_dir)
+            + os.pathsep
+            + os.environ.get("PATH", ""),  # env-policy: allow
+            SHELL_TRACE_ENV: str(trace),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, _completed_process_detail(completed, trace)
+    lines = _trace_lines(trace, expected_prefix="toolbox:")
+    assert lines == [
+        "toolbox:scan -E a|b src",
+        "toolbox:status",
     ]
     assert lines[0] != lines[1]
 
