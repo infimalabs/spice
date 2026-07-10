@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from spice.errors import SpiceError
@@ -24,6 +25,18 @@ TASK_PLANE_WEIGHTS = {
     "completed": 30,
     "oops": 20,
 }
+TaskRow = dict[str, object]
+
+
+@dataclass(frozen=True)
+class TaskPlaneRows:
+    actor: str
+    active: tuple[TaskRow, ...]
+    ready: tuple[TaskRow, ...]
+    review: tuple[TaskRow, ...]
+    blocked: tuple[TaskRow, ...]
+    completed: tuple[TaskRow, ...]
+    oops: tuple[TaskRow, ...]
 
 
 def task_plane_rank_key(
@@ -42,6 +55,7 @@ def _candidate(
     label: str = "",
     count: int = 0,
     key: str = "",
+    project: str = "",
 ) -> "RehydrationCandidate":
     from spice.sessions.briefing import RehydrationCandidate
 
@@ -54,6 +68,7 @@ def _candidate(
         label=label,
         count=count,
         key=key,
+        project=project,
     )
 
 
@@ -67,68 +82,119 @@ def collect_task_plane_candidates() -> list["RehydrationCandidate"]:
     if repo_root_from_cwd() is None:
         return []
     try:
-        from spice.tasks import alloc, identity, tw
+        from spice.tasks import identity
 
-        actor = tw.current_actor()
-        active = alloc.visible_active_rows(actor)
-        ready = [
-            row
-            for row in alloc.visible_ready_rows(actor)
-            if _task_field(row, "phase") != "review"
-        ]
-        review = [
-            row
-            for row in alloc.visible_rows(actor, ["status:pending", "phase:review"])
-            if not alloc.is_hidden(row) and not str(row.get("claim_by") or "")
-        ]
-        blocked = [
-            row
-            for row in alloc.visible_rows(actor, ["status:pending", "+BLOCKED"])
-            if not alloc.is_hidden(row)
-        ]
-        completed = [
-            row
-            for row in alloc.visible_rows(actor, ["status:completed"])
-            if not alloc.is_hidden(row)
-        ]
-        oops = alloc.oops_rows()
+        rows = _collect_task_plane_rows()
     except (OSError, RuntimeError, SpiceError, SystemExit):
         return []
 
     candidates: list[RehydrationCandidate] = []
-    own_active = [row for row in active if str(row.get("claim_by") or "") == actor]
+    own_active = [
+        row for row in rows.active if _task_field(row, "claim_by") == rows.actor
+    ]
     if own_active:
         claimed = max(own_active, key=_task_row_timestamp)
         candidates.append(
             _task_claim_candidate(claimed, identity.render_handle(claimed))
         )
-    if active or ready or review or blocked or oops:
+    if rows.active or rows.ready or rows.review or rows.blocked or rows.oops:
         candidates.append(
             _task_posture_candidate(
-                active=len(active),
-                ready=len(ready),
-                review=len(review),
-                blocked=len(blocked),
-                oops=len(oops),
+                active=len(rows.active),
+                ready=len(rows.ready),
+                review=len(rows.review),
+                blocked=len(rows.blocked),
+                oops=len(rows.oops),
             )
         )
     candidates.extend(
         _task_queue_candidate("ready", row, identity.render_handle(row))
-        for row in ready
+        for row in rows.ready
     )
     candidates.extend(
         _task_queue_candidate("review", row, identity.render_handle(row))
-        for row in review
+        for row in rows.review
     )
     candidates.extend(
-        _task_completed_candidate(row, identity.render_handle(row)) for row in completed
+        _task_completed_candidate(row, identity.render_handle(row))
+        for row in rows.completed
     )
-    if oops:
-        top = max(oops, key=_task_urgency)
+    if rows.oops:
+        top = max(rows.oops, key=_task_urgency)
         candidates.append(
-            _task_oops_candidate(top, identity.render_handle(top), len(oops))
+            _task_oops_candidate(top, identity.render_handle(top), len(rows.oops))
         )
     return candidates
+
+
+def _collect_task_plane_rows() -> TaskPlaneRows:
+    from spice.tasks import alloc, config, lanes, tw
+
+    actor = tw.current_actor()
+    route = lanes.team_route_for_actor(actor)
+    scope = alloc.effective_route_filter_args(actor, route)
+    taskrc = config.bootstrap()
+    inventory = tw.export(
+        [
+            "(",
+            "(",
+            *scope,
+            ")",
+            "or",
+            f"project:{config.OOPS_PROJECT}",
+            ")",
+        ],
+        taskrc=taskrc,
+    )
+    ready = tw.export(["status:pending", "+READY", "-ACTIVE", *scope], taskrc=taskrc)
+    blocked = tw.export(["status:pending", "+BLOCKED", *scope], taskrc=taskrc)
+    visible = [row for row in inventory if not alloc.is_hidden(row)]
+    return TaskPlaneRows(
+        actor=actor,
+        active=tuple(row for row in visible if _is_active(row)),
+        ready=tuple(row for row in ready if _is_ready(row)),
+        review=tuple(row for row in visible if _is_review(row)),
+        blocked=tuple(row for row in blocked if not alloc.is_hidden(row)),
+        completed=tuple(row for row in visible if _is_completed(row)),
+        oops=tuple(row for row in inventory if _is_open_oops(row)),
+    )
+
+
+def _is_active(row: TaskRow) -> bool:
+    return _task_field(row, "status") == "pending" and bool(
+        _task_field(row, "claim_by")
+    )
+
+
+def _is_ready(row: TaskRow) -> bool:
+    from spice.tasks import alloc
+
+    return (
+        not alloc.is_hidden(row)
+        and not _task_field(row, "claim_by")
+        and _task_field(row, "phase") != "review"
+    )
+
+
+def _is_review(row: TaskRow) -> bool:
+    return (
+        _task_field(row, "status") == "pending"
+        and _task_field(row, "phase") == "review"
+        and not _task_field(row, "claim_by")
+    )
+
+
+def _is_completed(row: TaskRow) -> bool:
+    return _task_field(row, "status") == "completed"
+
+
+def _is_open_oops(row: TaskRow) -> bool:
+    from spice.tasks import alloc
+
+    return alloc.is_oops(row) and _task_field(row, "status") in (
+        "pending",
+        "waiting",
+    )
 
 
 def _task_claim_candidate(
@@ -146,6 +212,7 @@ def _task_claim_candidate(
         rank_name=TASK_PLANE_RANK_NAME,
         rank_key=task_plane_rank_key("claim", _task_urgency(row), timestamp),
         label=handle,
+        project=_task_field(row, "project"),
     )
 
 
