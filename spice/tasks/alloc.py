@@ -8,12 +8,19 @@ smallest move from the actor's last cell (stick).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from spice.tasks import config, gitsync, identity, lanes, tw
 
 ANTI_SELF_REVIEW = -100.0  # make self-authored reviews lose to ordinary work
 BAND_WIDTH = 5.0  # urgency window treated as "top band" for tie-breaks
+
+
+@dataclass(frozen=True)
+class BriefingTaskSnapshot:
+    rows: tuple[dict[str, Any], ...]
+    visible_uuids: frozenset[str]
 
 
 def actor_overrides(actor: str, route: dict[str, Any] | None) -> list[str]:
@@ -173,22 +180,47 @@ def visible_pending_rows(actor: str) -> list[dict[str, Any]]:
     return [r for r in rows if not is_hidden(r)]
 
 
-def briefing_rows(actor: str) -> list[dict[str, Any]]:
-    """Export the visible task plane and deferred oops rows in one snapshot."""
+def briefing_snapshot(actor: str) -> BriefingTaskSnapshot:
+    """Export one board snapshot and mark rows visible through the actor's route."""
     route = lanes.team_route_for_actor(actor)
-    scope = effective_route_filter_args(actor, route)
-    return tw.export(
-        [
-            "(",
-            "(",
-            "status.any:",
-            *scope,
-            ")",
-            "or",
-            f"project:{config.OOPS_PROJECT}",
-            ")",
-        ]
+    rows = tuple(tw.export(["status.any:"]))
+    visible_uuids = frozenset(
+        str(row.get("uuid") or "")
+        for row in rows
+        if _briefing_scope_matches(row, actor=actor, route=route)
     )
+    return BriefingTaskSnapshot(rows=rows, visible_uuids=visible_uuids)
+
+
+def _briefing_scope_matches(
+    row: dict[str, Any], *, actor: str, route: dict[str, Any] | None
+) -> bool:
+    project = str(row.get("project") or "")
+    if _project_filter_matches(project, config.private_project(actor)):
+        return True
+    if _route_includes_origin(route) and str(row.get("origin_thread") or "") == actor:
+        return True
+    return any(
+        _briefing_filter_term_matches(row, term)
+        for term in lanes.effective_filter_terms(route)
+    )
+
+
+def _briefing_filter_term_matches(row: dict[str, Any], term: str) -> bool:
+    if term.startswith("project:"):
+        return _project_filter_matches(
+            str(row.get("project") or ""), term.split(":", 1)[1]
+        )
+    if term.startswith("phase:"):
+        return str(row.get("phase") or "") == term.split(":", 1)[1]
+    if term.startswith("+"):
+        tags = row.get("tags") or []
+        return term[1:] in tags if isinstance(tags, list) else False
+    return False
+
+
+def _project_filter_matches(project: str, expected: str) -> bool:
+    return project == expected or project.startswith(f"{expected}.")
 
 
 def _candidate_rows(

@@ -82,8 +82,10 @@ def collect_task_plane_candidates() -> list["RehydrationCandidate"]:
         from spice.tasks import alloc, identity, tw
 
         actor = tw.current_actor()
+        snapshot = alloc.briefing_snapshot(actor)
         rows = classify_task_plane_rows(
-            alloc.briefing_rows(actor),
+            list(snapshot.rows),
+            visible_uuids=snapshot.visible_uuids,
             is_hidden=alloc.is_hidden,
             is_oops=alloc.is_oops,
         )
@@ -130,11 +132,19 @@ def collect_task_plane_candidates() -> list["RehydrationCandidate"]:
 def classify_task_plane_rows(
     rows: list[dict[str, object]],
     *,
+    visible_uuids: frozenset[str],
     is_hidden: Callable[[dict[str, object]], bool],
     is_oops: Callable[[dict[str, object]], bool],
 ) -> TaskPlaneRows:
     now = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    visible = [row for row in rows if not is_hidden(row)]
+    status_by_uuid = {
+        _task_field(row, "uuid"): _task_field(row, "status") for row in rows
+    }
+    visible = [
+        row
+        for row in rows
+        if _task_field(row, "uuid") in visible_uuids and not is_hidden(row)
+    ]
     pending = [row for row in visible if _task_field(row, "status") == "pending"]
     active = [
         row
@@ -146,14 +156,16 @@ def classify_task_plane_rows(
         for row in pending
         if _task_field(row, "phase") != "review"
         and not _task_field(row, "claim_by")
-        and _task_is_ready(row, now=now)
+        and _task_is_ready(row, now=now, status_by_uuid=status_by_uuid)
     ]
     review = [
         row
         for row in pending
         if _task_field(row, "phase") == "review" and not _task_field(row, "claim_by")
     ]
-    blocked = [row for row in pending if row.get("depends")]
+    blocked = [
+        row for row in pending if _task_is_blocked(row, status_by_uuid=status_by_uuid)
+    ]
     completed = [row for row in visible if _task_field(row, "status") == "completed"]
     oops = [
         row
@@ -170,13 +182,24 @@ def classify_task_plane_rows(
     )
 
 
-def _task_is_ready(row: dict[str, object], *, now: str) -> bool:
+def _task_is_ready(
+    row: dict[str, object], *, now: str, status_by_uuid: dict[str, str]
+) -> bool:
     return bool(
         _task_field(row, "status") == "pending"
         and not _task_field(row, "start")
-        and not row.get("depends")
+        and not _task_is_blocked(row, status_by_uuid=status_by_uuid)
         and _task_time_has_arrived(row, "wait", now=now)
         and _task_time_has_arrived(row, "scheduled", now=now)
+    )
+
+
+def _task_is_blocked(row: dict[str, object], *, status_by_uuid: dict[str, str]) -> bool:
+    depends = row.get("depends") or []
+    dependency_uuids = depends if isinstance(depends, list) else [depends]
+    return any(
+        status_by_uuid.get(str(dependency_uuid)) not in ("completed", "deleted")
+        for dependency_uuid in dependency_uuids
     )
 
 
