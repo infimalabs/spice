@@ -1,6 +1,7 @@
 """Shell startup-file reexec behavior for the steering hooks."""
 
 import os
+from pathlib import Path
 import shutil
 import subprocess
 
@@ -15,6 +16,35 @@ from tests.test_shellhook import (
     _trace_lines,
     _write_agent_wrapper_config,
 )
+
+INTERACTIVE_ZSH_TIMEOUT_SECONDS = 15
+
+
+def _run_interactive_zsh(
+    zsh: str, *, input_text: str, env: dict[str, str], trace: Path
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            [zsh, "-i"],
+            input=input_text,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=env,
+            start_new_session=True,
+            timeout=INTERACTIVE_ZSH_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        trace_text = (
+            trace.read_text(encoding="utf-8") if trace.exists() else "<missing>"
+        )
+        pytest.fail(
+            f"detached interactive zsh exceeded {error.timeout}s\n"
+            f"stdout={error.stdout!r}\n"
+            f"stderr={error.stderr!r}\n"
+            f"trace={trace_text!r}",
+            pytrace=False,
+        )
 
 
 def test_zshenv_hook_reexec_restores_for_nested_shells(tmp_path):
@@ -146,18 +176,15 @@ def test_zshrc_hook_sources_real_interactive_zshrc_and_loads_wrappers(tmp_path):
         ),
     }
 
-    completed = subprocess.run(
-        [zsh, "-i"],
-        input=(
+    completed = _run_interactive_zsh(
+        zsh,
+        input_text=(
             f'print -r -- "histfile:$HISTFILE" >> "${{{SHELL_TRACE_ENV}}}"\n'
             "grep needle /dev/null\n"
             "exit\n"
         ),
-        text=True,
-        capture_output=True,
-        check=False,
         env=env,
-        timeout=3,
+        trace=trace,
     )
 
     assert completed.returncode == 0, _completed_process_detail(completed, trace)
@@ -207,14 +234,11 @@ def test_zshrc_hook_interactive_shell_loads_bare_pre_commit_wrapper(tmp_path):
         ),
     }
 
-    completed = subprocess.run(
-        [zsh, "-i"],
-        input="pre-commit --all-files\nexit\n",
-        text=True,
-        capture_output=True,
-        check=False,
+    completed = _run_interactive_zsh(
+        zsh,
+        input_text="pre-commit --all-files\nexit\n",
         env=env,
-        timeout=3,
+        trace=trace,
     )
 
     assert completed.returncode == 0, _completed_process_detail(completed, trace)
