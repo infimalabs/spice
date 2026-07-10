@@ -27,6 +27,8 @@ from spice.agent.wrap import (
     AgentInboxInjector,
     AgentSideChannelNoticeInjector,
     AgentWorkingStateInjector,
+    InboxSignature,
+    inbox_signature_from_payload,
     post_tool_hook_inbox_state_path,
     side_channel_marker_path,
 )
@@ -128,6 +130,9 @@ class AgentSideChannelServer:
                         initial_payload_already_rendered=bool(
                             payload.get("initialPayloadAlreadyRendered")
                         ),
+                        initial_inbox_signature=inbox_signature_from_payload(
+                            payload.get("initialInboxSignature")
+                        ),
                     )
                     return
                 return
@@ -141,6 +146,7 @@ class AgentSideChannelServer:
         connection: socket.socket,
         *,
         initial_payload_already_rendered: bool = False,
+        initial_inbox_signature: InboxSignature | None = None,
     ) -> None:
         try:
             wake_reader, wake_writer = socket.socketpair()
@@ -156,6 +162,8 @@ class AgentSideChannelServer:
             stderr=writer,
             repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
         )
+        if initial_payload_already_rendered and initial_inbox_signature is not None:
+            inbox_injector.prime_displayed_signature(initial_inbox_signature)
         working_state_injector = AgentWorkingStateInjector(
             self.repo_root,
             stderr=writer,
@@ -165,18 +173,29 @@ class AgentSideChannelServer:
             stderr=writer,
         )
 
-        def emit(*, include_regular_payload: bool) -> None:
+        def emit(
+            *, include_regular_payload: bool, emit_suppressed_summary: bool = True
+        ) -> None:
             with self._payload_lock:
                 notice_injector.inject(force=False)
                 if not include_regular_payload:
                     return
-                inbox_injector.inject(force=False)
+                inbox_injector.inject(
+                    force=False,
+                    emit_suppressed_summary=emit_suppressed_summary,
+                )
                 working_state_injector.inject(force=False)
 
         try:
-            if not initial_payload_already_rendered:
+            if (
+                not initial_payload_already_rendered
+                or initial_inbox_signature is not None
+            ):
                 try:
-                    emit(include_regular_payload=True)
+                    emit(
+                        include_regular_payload=True,
+                        emit_suppressed_summary=False,
+                    )
                 except OSError:
                     return
             else:
