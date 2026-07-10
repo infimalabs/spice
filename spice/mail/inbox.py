@@ -128,6 +128,12 @@ class InboxItem:
 
 
 @dataclass(frozen=True)
+class InboxSnapshot:
+    items: tuple[InboxItem, ...]
+    signature: tuple[tuple[str, int, int], ...]
+
+
+@dataclass(frozen=True)
 class InboxResendAttempt:
     attempt: int
     at: str
@@ -139,20 +145,27 @@ def inbox_dir(repo_root: Path | str) -> Path:
 
 
 def collect_inbox_items(repo_root: str | Path | None) -> list[InboxItem]:
+    return list(collect_inbox_snapshot(repo_root).items)
+
+
+def collect_inbox_snapshot(repo_root: str | Path | None) -> InboxSnapshot:
     if not repo_root:
-        return []
+        return InboxSnapshot(items=(), signature=())
     root = Path(repo_root)
     prune_stale_inbox_artifacts(repo_root)
     directory = inbox_dir(root)
     if not directory.is_dir():
-        return []
+        return InboxSnapshot(items=(), signature=())
     archive_dir = directory / INBOX_ARCHIVE_DIRNAME
     items: list[InboxItem] = []
+    signature: list[tuple[str, int, int]] = []
     for path in sorted(_file_paths(directory), key=lambda item: item.name):
         if path.name.endswith(".tmp") or path.suffix != ".txt":
             continue
         try:
-            text = path.read_text(errors="replace")
+            with path.open(encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+                stat_result = os.fstat(handle.fileno())
         except FileNotFoundError:
             continue
         items.append(
@@ -164,7 +177,8 @@ def collect_inbox_items(repo_root: str | Path | None) -> list[InboxItem]:
                 attachments=collect_inbox_attachments(path, repo_root=root),
             )
         )
-    return items
+        signature.append((path.name, stat_result.st_mtime_ns, stat_result.st_size))
+    return InboxSnapshot(items=tuple(items), signature=tuple(signature))
 
 
 def collect_acked_inbox_items(

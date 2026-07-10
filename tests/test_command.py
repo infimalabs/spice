@@ -22,6 +22,7 @@ from spice.agent.maximmetrics import (
 from spice.agent.shadow import shadow_environment
 from spice.mail.feedback import supervisor_feedback_line
 from spice.mail.inbox import InboxResendAttempt, compose_inbox_text, write_inbox_item
+from spice.mail import readout as inbox_readout
 from spice.sessions.meter import ActiveContextSnapshot, ContextMeter
 
 COMMAND_WORKING_STATE_ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -889,7 +890,7 @@ def test_side_channel_payload_keeps_inbox_context_and_working_state_single_line(
         ),
     )
 
-    payload = sidechannel.render_side_channel_payload(tmp_path)
+    payload, _signature = sidechannel.render_side_channel_payload(tmp_path)
 
     assert payload.splitlines()[0].startswith("Inbox Steering")
     assert "payload steering" in payload
@@ -938,8 +939,8 @@ def test_side_channel_working_state_suppresses_repeats_and_post_tool_omits(
         lambda _repo: snapshot,
     )
 
-    first = sidechannel.render_side_channel_payload(tmp_path)
-    second = sidechannel.render_side_channel_payload(tmp_path)
+    first, _first_signature = sidechannel.render_side_channel_payload(tmp_path)
+    second, _second_signature = sidechannel.render_side_channel_payload(tmp_path)
     post_tool = sidechannel.render_post_tool_hook_payload(tmp_path)
 
     assert first.splitlines() == ["🌶️ Working state: claim METER-00000002 todo for 5s."]
@@ -950,7 +951,8 @@ def test_side_channel_working_state_suppresses_repeats_and_post_tool_omits(
         "collect_working_state_snapshot",
         lambda _repo: wrap.WorkingStateSnapshot(),
     )
-    assert sidechannel.render_side_channel_payload(tmp_path) == ""
+    empty_payload, empty_signature = sidechannel.render_side_channel_payload(tmp_path)
+    assert (empty_payload, empty_signature) == ("", ())
 
 
 def test_side_channel_watch_streams_later_inbox_to_stderr(tmp_path, monkeypatch):
@@ -1230,6 +1232,64 @@ def test_run_agent_command_does_not_duplicate_initial_side_channel_with_watch(
     assert exit_code == 0
     assert "initial steering" in output
     assert output.count("Inbox Steering") == 1
+
+
+def test_run_agent_command_delivers_interleaved_initial_inbox_row_once(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    initial = write_inbox_item(
+        tmp_path,
+        "20260101T000000000005Z.txt",
+        compose_inbox_text(body="initial snapshot steering", priority=None, stop=False),
+    )
+    initial_stat = initial.stat()
+    late_name = "20260101T000000000006Z.txt"
+    original_print = inbox_readout.print_inbox_readout
+    original_start = wrap.start_agent_side_channel_watch
+    injected = False
+    stream_signatures = []
+
+    def print_with_interleaved_row(*args, **kwargs):
+        nonlocal injected
+        if kwargs.get("items") is not None and not injected:
+            injected = True
+            write_inbox_item(
+                tmp_path,
+                late_name,
+                compose_inbox_text(
+                    body="interleaved snapshot steering", priority=None, stop=False
+                ),
+            )
+        return original_print(*args, **kwargs)
+
+    def start_with_signature(*args, initial_inbox_signature=None, **kwargs):
+        stream_signatures.append(initial_inbox_signature)
+        return original_start(
+            *args,
+            initial_inbox_signature=initial_inbox_signature,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        inbox_readout, "print_inbox_readout", print_with_interleaved_row
+    )
+    monkeypatch.setattr(wrap, "start_agent_side_channel_watch", start_with_signature)
+    stderr = io.StringIO()
+
+    with sidechannel.AgentSideChannelServer(tmp_path):
+        exit_code = wrap.run_agent_command(
+            tmp_path,
+            [sys.executable, "-c", "import time; time.sleep(0.4)"],
+            stderr=stderr,
+        )
+
+    output = stderr.getvalue()
+    assert exit_code == 0
+    assert stream_signatures == [
+        ((initial.name, initial_stat.st_mtime_ns, initial_stat.st_size),)
+    ]
+    assert output.count("interleaved snapshot steering") == 1
 
 
 def test_run_agent_command_dumps_initial_inbox_without_side_channel_server(

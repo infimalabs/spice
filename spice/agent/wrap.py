@@ -191,13 +191,12 @@ def emit_initial_side_channel_payload(
         return ()
     from spice.agent.sidechannel import render_side_channel_payload
 
-    initial_inbox_signature = inbox_pending_signature(repo_root)
     try:
-        payload = render_side_channel_payload(repo_root)
+        payload, initial_inbox_signature = render_side_channel_payload(repo_root)
     except Exception as exc:  # side-channel render failure is non-fatal
         stderr.write(f"spice side-channel unavailable: {exc}\n")
         stderr.flush()
-        return initial_inbox_signature
+        return ()
     if payload:
         stderr.write(payload)
         stderr.flush()
@@ -607,8 +606,13 @@ class AgentInboxInjector:
             self.signature,
         ) = read_inbox_display_state(self.state_path)
 
-    def inject(self, *, force: bool, emit_suppressed_summary: bool = True) -> None:
-        signature = inbox_pending_signature(self.repo_root)
+    def inject(
+        self, *, force: bool, emit_suppressed_summary: bool = True
+    ) -> InboxSignature:
+        from spice.mail import inbox
+
+        snapshot = inbox.collect_inbox_snapshot(self.repo_root)
+        signature = snapshot.signature
         now = self.time_factory()
         suppressed_keys = self._suppressed_keys(signature, now=now)
         pending_keys = {
@@ -627,7 +631,7 @@ class AgentInboxInjector:
         ):
             if emit_suppressed_summary:
                 self._emit_pending_summary(len(pending_keys))
-            return
+            return signature
         # Always pass the recently-shown keys as the suppression filter, even
         # when a new key forced this readout: the new key renders full (real
         # time preserved) while keys still inside their window collapse to one
@@ -641,21 +645,22 @@ class AgentInboxInjector:
                 quiet=True,
                 displayed_keys=display_filter,
                 file=self.stderr,
+                items=snapshot.items,
             )
         except Exception as exc:  # pragma: no cover - conflicted worktree recovery
             self.stderr.write(f"Inbox Steering\n  unavailable={exc}\n")
             self.stderr.flush()
             displayed_keys = []
         self.stderr.flush()
-        displayed_signature = inbox_pending_signature(self.repo_root)
-        displayed_pending_keys = {
-            inbox_key
-            for inbox_key, _row_signature in _signature_rows(displayed_signature)
-        }
-        self.signature = displayed_signature
-        self._record_displayed_keys(displayed_signature, displayed_keys, now=now)
-        self._prune_display_state(displayed_pending_keys)
+        rendered_keys = set(displayed_keys)
+        rendered_signature = tuple(
+            row for row in signature if _inbox_item_key(row[0]) in rendered_keys
+        )
+        self.signature = signature
+        self._record_displayed_keys(signature, displayed_keys, now=now)
+        self._prune_display_state(pending_keys)
         self._persist_display_state()
+        return rendered_signature
 
     def prime_displayed_signature(self, signature: InboxSignature) -> None:
         """Seed suppression with inbox rows rendered before stream registration."""

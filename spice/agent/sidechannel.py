@@ -280,9 +280,9 @@ def _hello_path(value: object) -> Path | None:
     return Path(value).expanduser()
 
 
-def render_side_channel_payload(repo_root: Path) -> str:
+def render_side_channel_payload(repo_root: Path) -> tuple[str, InboxSignature]:
     stderr = io.StringIO()
-    AgentInboxInjector(
+    inbox_signature = AgentInboxInjector(
         repo_root,
         stderr=stderr,
         repeat_interval_seconds=AGENT_RUN_INBOX_REPEAT_SECONDS,
@@ -291,7 +291,7 @@ def render_side_channel_payload(repo_root: Path) -> str:
         repo_root,
         stderr=stderr,
     ).inject(force=True)
-    return stderr.getvalue()
+    return stderr.getvalue(), inbox_signature
 
 
 def render_post_tool_hook_payload(repo_root: Path) -> str:
