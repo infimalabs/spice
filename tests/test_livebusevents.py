@@ -585,25 +585,101 @@ def test_lane_subscription_watch_requests_append_only_payload(tmp_path, monkeypa
     }
 
 
-def test_kqueue_watch_rearms_only_when_watched_paths_change(tmp_path):
-    if not livebus._HAVE_KQUEUE:
-        pytest.skip("kqueue-only behavior")
+def test_kqueue_watch_rearms_only_when_watched_paths_change(tmp_path, monkeypatch):
     (tmp_path / "a").write_text("", encoding="utf-8")
     (tmp_path / "b").write_text("", encoding="utf-8")
+    activated = Event()
+    stop = Event()
+    queues = []
+
+    class RecordingKqueue:
+        def __init__(self):
+            self.calls = []
+            self.closed = False
+
+        def control(self, changelist, max_events, timeout):
+            self.calls.append(
+                {
+                    "changelist": list(changelist),
+                    "maxEvents": max_events,
+                    "timeout": timeout,
+                    "activated": activated.is_set(),
+                }
+            )
+            if max_events:
+                stop.set()
+            return []
+
+        def close(self):
+            self.closed = True
+
+    def select_attr(name):
+        if name == "kqueue":
+            return lambda: queues.append(RecordingKqueue()) or queues[-1]
+        if name == "kevent":
+            return lambda descriptor, **_kwargs: ("watch", descriptor)
+        if name.startswith("KQ_"):
+            return 1
+        raise AssertionError(f"unexpected select attribute {name}")
+
+    monkeypatch.setattr(livebus, "_select_attr", select_attr)
     watch = livebus._KqueueWatch()
     try:
-        watch._arm((tmp_path / "a",))
+        assert watch.wait((tmp_path / "a",), stop, activated=activated) is False
         armed = watch._kqueue
         assert armed is not None
+        assert [
+            (
+                len(call["changelist"]),
+                call["maxEvents"],
+                call["timeout"],
+                call["activated"],
+            )
+            for call in queues[0].calls
+        ] == [
+            (1, 0, 0, False),
+            (0, 1, livebus.LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S, True),
+        ]
 
         watch._arm((tmp_path / "a",))
         assert watch._kqueue is armed  # unchanged paths keep the same kqueue
 
         watch._arm((tmp_path / "a", tmp_path / "b"))
         assert watch._kqueue is not armed  # changed paths rebuild it
+        assert queues[0].closed is True
+        assert queues[1].calls[0]["maxEvents"] == 0
     finally:
         watch.close()
     assert watch._kqueue is None
+
+
+def test_watchfiles_activation_follows_native_ready_yield(tmp_path, monkeypatch):
+    watched = tmp_path / "watched"
+    watched.mkdir()
+    activated = Event()
+    activation_during_yields = []
+    received_options = []
+
+    def watch(*paths, **options):
+        received_options.append({"paths": paths, **options})
+        activation_during_yields.append(activated.is_set())
+        yield set()
+        activation_during_yields.append(activated.is_set())
+        yield {(1, str(watched / "task-event"))}
+
+    monkeypatch.setattr(
+        livebus,
+        "import_module",
+        lambda name: SimpleNamespace(watch=watch) if name == "watchfiles" else None,
+    )
+
+    assert (
+        livebus._wait_for_change_watchfiles((watched,), Event(), activated=activated)
+        is True
+    )
+    assert activation_during_yields == [False, True]
+    assert received_options[0]["paths"] == (watched,)
+    assert received_options[0]["yield_on_timeout"] is True
 
 
 def test_lane_subscription_pushes_reply_card_without_a_followup_message(
