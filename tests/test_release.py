@@ -73,12 +73,23 @@ def test_release_docs_show_lane_release_workflow():
         "`origin/main`."
     )
     assert release_commands == [
-        "spice release range           # preview the prior-tag..release-commit landed tasks",
+        "spice release range           # preview latest-release-tag..HEAD before prepare",
         "spice release prepare minor   # bump, validate, commit, stop before publish",
         "spice release notes > /tmp/spice-release-notes.md",
         "spice release publish --notes-file /tmp/spice-release-notes.md",
         "spice release minor           # one-pass bump, validate, commit, publish",
     ]
+    assert (
+        "Before `prepare`, the bare `spice release range` command resolves the "
+        "highest version tag merged into the current `HEAD` and previews "
+        "`latest-tag..HEAD` without requiring a future version literal."
+        in normalized_section
+    )
+    assert (
+        "When release history is unusual, pass `--release-commit <rev>` to "
+        "choose the commit used for `spice release range`, `spice release "
+        "notes`, or `spice release github`." in normalized_section
+    )
     assert release_section.index("Use a minor release") < release_section.index(
         "Use a patch release"
     )
