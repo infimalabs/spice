@@ -5,12 +5,16 @@ mounted `spice release` command. Lane branches are allowed; the release command
 pushes the prepared release commit to `origin/main`.
 
 ```sh
-spice release range           # preview the prior-tag..release-commit landed tasks
+spice release range           # preview latest-release-tag..HEAD before prepare
 spice release prepare minor   # bump, validate, commit, stop before publish
 spice release notes > /tmp/spice-release-notes.md
 spice release publish --notes-file /tmp/spice-release-notes.md
 spice release minor           # one-pass bump, validate, commit, publish
 ```
+
+Before `prepare`, the bare `spice release range` command resolves the highest
+version tag merged into the current `HEAD` and previews `latest-tag..HEAD`
+without requiring a future version literal.
 
 For curated GitHub release notes, generate the draft after `prepare` and edit
 from that file instead of relying on session memory. The draft is built from
@@ -24,11 +28,12 @@ collapsed `<details>` appendix if useful. Do not publish the raw export — a
 release that still shows the draft banner was shipped uncurated.
 
 When release history is unusual, pass `--release-commit <rev>` to choose the
-commit used for `spice release notes` or `spice release github`. Use it for tag
-repair, delayed publication, or a prepared version whose correct release target
-is not the default resolver. `spice release publish --release-commit` is
-stricter: the commit must resolve to `HEAD`, because publish builds and uploads
-artifacts from the current worktree before creating the GitHub release.
+commit used for `spice release range`, `spice release notes`, or
+`spice release github`. Use it for tag repair, delayed publication, or a
+prepared version whose correct release target is not the default resolver.
+`spice release publish --release-commit` is stricter: the commit must resolve
+to `HEAD`, because publish builds and uploads artifacts from the current
+worktree before creating the GitHub release.
 
 Use a minor release when users can do something new or observe changed
 behavior: new commands or flags, new configuration, new `spice serve` or task
