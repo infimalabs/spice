@@ -166,6 +166,22 @@ def test_serve_pending_badge_smoke_asserts_differential_ack() -> None:
     assert "lane.pending ack triggered an unexpected refresh" in smoke
 
 
+def test_watch_frame_smokes_authenticate_subscription_generation() -> None:
+    watch_smokes = {
+        path.name: source
+        for path in (ROOT / "browser").glob("*_smoke.js")
+        if 'source: "watch"' in (source := path.read_text(encoding="utf-8"))
+    }
+
+    assert watch_smokes
+    for name, source in watch_smokes.items():
+        assert "activateIsolatedLaneWatch(" in source, name
+        assert source.count('source: "watch"') == source.count(
+            "subscriptionGeneration:"
+        ), name
+        assert "lane.liveBusSubscriptionGeneration" in source, name
+
+
 def test_serve_task_card_live_smoke_asserts_task_add_without_reload() -> None:
     smoke = (ROOT / "browser" / "serve_task_card_live_smoke.js").read_text(
         encoding="utf-8"

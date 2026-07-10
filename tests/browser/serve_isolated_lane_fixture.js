@@ -59,6 +59,18 @@ function resolveIsolatedLane(teamId) {
   return lane;
 }
 
+// Page-side: model an active live-bus subscription for smokes that inject
+// watch-origin frames through the production message handler.
+function activateIsolatedLaneWatch(lane, generation) {
+  const value = String(generation || "");
+  if (!value) throw new Error("isolated lane watch requires a generation");
+  lane.liveBusSubscriptionGeneration = value;
+  lane.liveBusWatcherActive = true;
+  lane.liveBusSubscribed = true;
+  lane.liveBusSubscribePending = false;
+  return value;
+}
+
 // Waits for app boot (first team-snapshot lane plus the fixture's page
 // globals, and any extra globals the smoke needs), then injects
 // resolveIsolatedLane into the page. app globals declared with const/let
@@ -79,7 +91,14 @@ async function installIsolatedLaneFixture(page, options = {}) {
     null,
     { timeout },
   );
-  await page.addScriptTag({ content: resolveIsolatedLane.toString() });
+  await page.addScriptTag({
+    content:
+      resolveIsolatedLane.toString() + "\n" + activateIsolatedLaneWatch.toString(),
+  });
 }
 
-module.exports = { installIsolatedLaneFixture, resolveIsolatedLane };
+module.exports = {
+  activateIsolatedLaneWatch,
+  installIsolatedLaneFixture,
+  resolveIsolatedLane,
+};

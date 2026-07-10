@@ -66,6 +66,7 @@ async function installPendingSmokeHelpers(page) {
 
 function setupPendingSmokePage(config) {
   const lane = pendingSmokeLane();
+  activateIsolatedLaneWatch(lane, "pending-badge-smoke");
   const textarea = pendingSmokeTextarea(lane);
   const messages = largePendingSmokeMessages(
     config.largeMessageCount,
@@ -168,6 +169,7 @@ async function applyPendingAckSmokePage(config) {
     JSON.stringify({
       payload: pendingSmokePayload(0, [], "rev-ack", config.ackVersion),
       source: "watch",
+      subscriptionGeneration: lane.liveBusSubscriptionGeneration,
       targetId: lane.targetId,
       type: "lane.pending",
     }),
