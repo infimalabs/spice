@@ -438,13 +438,17 @@ class LiveBusSession:
         with self._read_lock:
             self._read_futures.discard(future)
 
-    def _await_pending_reads(self, timeout: float) -> None:
+    def _await_pending_reads(self, timeout: float | None = None) -> None:
         """Block until the detached read chains finish or `timeout` elapses.
 
         Snapshots the live futures under the read lock — each chain's done
         callback removes itself from the set, so waiting on a copy stays
         stable while they retire. An empty snapshot means every queued read
-        already replied.
+        already replied. With the default ``timeout=None`` the wait is
+        unbounded and returns exactly when the futures complete, so callers
+        that need the reply in hand block on the completion itself rather than
+        a fixed deadline; ``_teardown`` still passes a bounded timeout so it
+        cannot hang on a wedged pool thread.
         """
         with self._read_lock:
             pending = list(self._read_futures)
