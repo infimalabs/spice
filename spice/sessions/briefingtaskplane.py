@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
@@ -30,7 +30,6 @@ TaskRow = dict[str, object]
 
 @dataclass(frozen=True)
 class TaskPlaneRows:
-    actor: str
     active: tuple[TaskRow, ...]
     ready: tuple[TaskRow, ...]
     review: tuple[TaskRow, ...]
@@ -82,16 +81,22 @@ def collect_task_plane_candidates() -> list["RehydrationCandidate"]:
     if repo_root_from_cwd() is None:
         return []
     try:
-        from spice.tasks import identity
+        from spice.tasks import alloc, identity, tw
 
-        rows = _collect_task_plane_rows()
+        actor = tw.current_actor()
+        snapshot = alloc.briefing_rows(actor)
+        rows = classify_task_plane_rows(
+            list(snapshot.inventory),
+            ready_rows=list(snapshot.ready),
+            blocked_rows=list(snapshot.blocked),
+            is_hidden=alloc.is_hidden,
+            is_oops=alloc.is_oops,
+        )
     except (OSError, RuntimeError, SpiceError, SystemExit):
         return []
 
     candidates: list[RehydrationCandidate] = []
-    own_active = [
-        row for row in rows.active if _task_field(row, "claim_by") == rows.actor
-    ]
+    own_active = [row for row in rows.active if str(row.get("claim_by") or "") == actor]
     if own_active:
         claimed = max(own_active, key=_task_row_timestamp)
         candidates.append(
@@ -127,73 +132,47 @@ def collect_task_plane_candidates() -> list["RehydrationCandidate"]:
     return candidates
 
 
-def _collect_task_plane_rows() -> TaskPlaneRows:
-    from spice.tasks import alloc, config, lanes, tw
-
-    actor = tw.current_actor()
-    route = lanes.team_route_for_actor(actor)
-    scope = alloc.effective_route_filter_args(actor, route)
-    taskrc = config.bootstrap()
-    inventory = tw.export(
-        [
-            "(",
-            "(",
-            *scope,
-            ")",
-            "or",
-            f"project:{config.OOPS_PROJECT}",
-            ")",
-        ],
-        taskrc=taskrc,
-    )
-    ready = tw.export(["status:pending", "+READY", "-ACTIVE", *scope], taskrc=taskrc)
-    blocked = tw.export(["status:pending", "+BLOCKED", *scope], taskrc=taskrc)
-    visible = [row for row in inventory if not alloc.is_hidden(row)]
+def classify_task_plane_rows(
+    rows: list[TaskRow],
+    *,
+    ready_rows: list[TaskRow],
+    blocked_rows: list[TaskRow],
+    is_hidden: Callable[[TaskRow], bool],
+    is_oops: Callable[[TaskRow], bool],
+) -> TaskPlaneRows:
+    visible = [row for row in rows if not is_hidden(row)]
+    pending = [row for row in visible if _task_field(row, "status") == "pending"]
+    active = [
+        row
+        for row in pending
+        if _task_field(row, "start") and _task_field(row, "claim_by")
+    ]
+    ready = [
+        row
+        for row in ready_rows
+        if _task_field(row, "phase") != "review"
+        and not _task_field(row, "claim_by")
+        and not is_hidden(row)
+    ]
+    review = [
+        row
+        for row in pending
+        if _task_field(row, "phase") == "review" and not _task_field(row, "claim_by")
+    ]
+    blocked = [row for row in blocked_rows if not is_hidden(row)]
+    completed = [row for row in visible if _task_field(row, "status") == "completed"]
+    oops = [
+        row
+        for row in rows
+        if _task_field(row, "status") in ("pending", "waiting") and is_oops(row)
+    ]
     return TaskPlaneRows(
-        actor=actor,
-        active=tuple(row for row in visible if _is_active(row)),
-        ready=tuple(row for row in ready if _is_ready(row)),
-        review=tuple(row for row in visible if _is_review(row)),
-        blocked=tuple(row for row in blocked if not alloc.is_hidden(row)),
-        completed=tuple(row for row in visible if _is_completed(row)),
-        oops=tuple(row for row in inventory if _is_open_oops(row)),
-    )
-
-
-def _is_active(row: TaskRow) -> bool:
-    return _task_field(row, "status") == "pending" and bool(
-        _task_field(row, "claim_by")
-    )
-
-
-def _is_ready(row: TaskRow) -> bool:
-    from spice.tasks import alloc
-
-    return (
-        not alloc.is_hidden(row)
-        and not _task_field(row, "claim_by")
-        and _task_field(row, "phase") != "review"
-    )
-
-
-def _is_review(row: TaskRow) -> bool:
-    return (
-        _task_field(row, "status") == "pending"
-        and _task_field(row, "phase") == "review"
-        and not _task_field(row, "claim_by")
-    )
-
-
-def _is_completed(row: TaskRow) -> bool:
-    return _task_field(row, "status") == "completed"
-
-
-def _is_open_oops(row: TaskRow) -> bool:
-    from spice.tasks import alloc
-
-    return alloc.is_oops(row) and _task_field(row, "status") in (
-        "pending",
-        "waiting",
+        active=tuple(active),
+        ready=tuple(ready),
+        review=tuple(review),
+        blocked=tuple(blocked),
+        completed=tuple(completed),
+        oops=tuple(oops),
     )
 
 

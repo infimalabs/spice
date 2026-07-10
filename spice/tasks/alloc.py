@@ -8,12 +8,20 @@ smallest move from the actor's last cell (stick).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from spice.tasks import config, gitsync, identity, lanes, tw
 
 ANTI_SELF_REVIEW = -100.0  # make self-authored reviews lose to ordinary work
 BAND_WIDTH = 5.0  # urgency window treated as "top band" for tie-breaks
+
+
+@dataclass(frozen=True)
+class BriefingRows:
+    inventory: tuple[dict[str, Any], ...]
+    ready: tuple[dict[str, Any], ...]
+    blocked: tuple[dict[str, Any], ...]
 
 
 def actor_overrides(actor: str, route: dict[str, Any] | None) -> list[str]:
@@ -171,6 +179,34 @@ def visible_active_rows(actor: str) -> list[dict[str, Any]]:
 def visible_pending_rows(actor: str) -> list[dict[str, Any]]:
     rows = visible_rows(actor, ["status:pending"])
     return [r for r in rows if not is_hidden(r)]
+
+
+def briefing_rows(actor: str) -> BriefingRows:
+    """Export briefing task rows with one bootstrap and exact virtual states."""
+    route = lanes.team_route_for_actor(actor)
+    scope = effective_route_filter_args(actor, route)
+    taskrc = config.bootstrap()
+    return BriefingRows(
+        inventory=tuple(
+            tw.export(
+                [
+                    "(",
+                    "(",
+                    "status.any:",
+                    *scope,
+                    ")",
+                    "or",
+                    f"project:{config.OOPS_PROJECT}",
+                    ")",
+                ],
+                taskrc=taskrc,
+            )
+        ),
+        ready=tuple(
+            tw.export(["status:pending", "+READY", "-ACTIVE", *scope], taskrc=taskrc)
+        ),
+        blocked=tuple(tw.export(["status:pending", "+BLOCKED", *scope], taskrc=taskrc)),
+    )
 
 
 def _candidate_rows(

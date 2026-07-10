@@ -582,6 +582,164 @@ def test_release_range_mode_is_read_only_and_prints_listing(
     assert capsys.readouterr().out == "range for 0.3.0 at resolved-main\n"
 
 
+def test_bare_release_range_mode_uses_head_and_unreleased_renderer(
+    tmp_path, monkeypatch, capsys
+):
+    parser = build_release_parser()
+    args = parser.parse_args(["range"])
+    seen = []
+
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        release,
+        "git",
+        lambda *args: seen.append(("git", args)) or "head-commit",
+    )
+    monkeypatch.setattr(
+        release,
+        "release_range_for_unreleased",
+        lambda commit: seen.append(("unreleased", commit)) or "unreleased range\n",
+    )
+
+    result = release.handle_release(args)
+
+    assert result == 0
+    assert seen == [
+        ("git", ("rev-parse", "HEAD")),
+        ("unreleased", "head-commit"),
+    ]
+    assert capsys.readouterr().out == "unreleased range\n"
+
+
+def test_range_with_explicit_commit_keeps_versioned_resolver(
+    tmp_path, monkeypatch, capsys
+):
+    parser = build_release_parser()
+    args = parser.parse_args(["range", "--release-commit", "main"])
+    seen = []
+
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(release, "current_version", lambda: "0.20.0")
+    monkeypatch.setattr(
+        release,
+        "release_commit_for_target",
+        lambda version, target: (
+            seen.append(("target", version, target)) or "resolved-main"
+        ),
+    )
+    monkeypatch.setattr(
+        release,
+        "release_range_for_version",
+        lambda version, commit: (
+            seen.append(("range", version, commit)) or "versioned range\n"
+        ),
+    )
+
+    result = release.handle_release(args)
+
+    assert result == 0
+    assert seen == [
+        ("target", "0.20.0", "main"),
+        ("range", "0.20.0", "resolved-main"),
+    ]
+    assert capsys.readouterr().out == "versioned range\n"
+
+
+def test_unreleased_range_uses_latest_merged_tag_and_lists_records(monkeypatch):
+    calls = []
+
+    def fake_git(*args):
+        calls.append(args)
+        if args == (
+            "tag",
+            "--merged",
+            "head-commit",
+            "--list",
+            "v*",
+            "--sort=-v:refname",
+        ):
+            return "v0.20.0\nv0.19.0"
+        if args == ("rev-parse", "--short", "head-commit"):
+            return "head123"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release, "git", fake_git)
+    monkeypatch.setattr(
+        release,
+        "commit_records",
+        lambda previous, commit: (
+            calls.append(("records", previous, commit))
+            or [
+                ReleaseRecord(
+                    commit="abcdef123456",
+                    subject="Ship unreleased work",
+                    project="lifecycle.release",
+                )
+            ]
+        ),
+    )
+
+    output = release.release_range_for_unreleased("head-commit")
+
+    assert calls == [
+        (
+            "tag",
+            "--merged",
+            "head-commit",
+            "--list",
+            "v*",
+            "--sort=-v:refname",
+        ),
+        ("records", "v0.20.0", "head-commit"),
+        ("rev-parse", "--short", "head-commit"),
+    ]
+    assert output == (
+        "Release range for unreleased\n"
+        "Range: refs/tags/v0.20.0..head123\n"
+        "Release tag: unreleased\n"
+        "Landed commits: 1\n"
+        "\n"
+        "abcdef1  lifecycle.release  Ship unreleased work\n"
+    )
+
+
+def test_unreleased_range_without_tags_renders_empty_head_span(monkeypatch):
+    seen = []
+
+    def fake_git(*args):
+        if args == (
+            "tag",
+            "--merged",
+            "head-commit",
+            "--list",
+            "v*",
+            "--sort=-v:refname",
+        ):
+            return ""
+        if args == ("rev-parse", "--short", "head-commit"):
+            return "head123"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release, "git", fake_git)
+    monkeypatch.setattr(
+        release,
+        "commit_records",
+        lambda previous, commit: seen.append((previous, commit)) or [],
+    )
+
+    output = release.release_range_for_unreleased("head-commit")
+
+    assert seen == [("", "head-commit")]
+    assert output == (
+        "Release range for unreleased\n"
+        "Range: latest first-parent commits ending at head123\n"
+        "Release tag: unreleased\n"
+        "Landed commits: 0\n"
+        "\n"
+        "No non-release commits found.\n"
+    )
+
+
 def test_commit_records_addresses_previous_tag_by_full_ref(monkeypatch):
     seen = []
 
