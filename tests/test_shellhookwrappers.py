@@ -81,6 +81,14 @@ def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
     )
 
 
+def test_repository_common_wrapper_preserves_native_git_fidelity_routes():
+    lines = shellhook.render_agent_wrapper_lines(Path.cwd())
+
+    assert '  if [ "${1-}" = git ]; then' in lines
+    assert "        --first-parent|--check|--name-status|--name-only)" in lines
+    assert '          command git "$@"' in lines
+
+
 def test_agent_wrapper_lines_accepts_direct_argv_wrapper(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
@@ -236,7 +244,7 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
     trace = tmp_path / "trace.log"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("rtk", "rg", "find"):
+    for name in ("rtk", "rg", "find", "git"):
         tool = bin_dir / name
         tool.write_text(
             f'#!/bin/sh\nprintf \'{name}:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
@@ -251,6 +259,10 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
             "rtk grep needle src",
             "rtk find src -name '*.py' -print",
             "rtk find src \\( -name '*.py' -o -name '*.md' \\)",
+            "rtk git log --first-parent v1..HEAD",
+            "rtk git show --name-status HEAD",
+            "rtk git diff --check",
+            "rtk git diff --name-only HEAD~1 HEAD",
             "rtk",
         ]
     )
@@ -275,6 +287,10 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
         "rtk:grep needle src",
         "find:src -name *.py -print",
         "find:src ( -name *.py -o -name *.md )",
+        "git:log --first-parent v1..HEAD",
+        "git:show --name-status HEAD",
+        "git:diff --check",
+        "git:diff --name-only HEAD~1 HEAD",
         "rtk:",
     ]
     assert lines[0] != lines[1]

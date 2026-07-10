@@ -29,8 +29,8 @@ STATIC_SHELL_HOOK_DIR_NAME = "staticshellhooks"
 AGENT_WRAPPERS_KEY = "wrappers"
 DEFAULT_AGENT_WRAPPER_GROUP = "common"
 WRAPPER_ENTRY_POINT_GROUP = SPICE_WRAPPER_ENTRY_POINT_GROUP
-# rtk's grep/find frontends emulate a subset of rg/find; argv words outside
-# that subset reroute to the native tool before rtk mangles them.
+# Reroute command shapes whose native semantics or diagnostics rtk's frontends
+# cannot preserve before rtk compacts or mangles them.
 RTK_GREP_REROUTE_FLAGS = (
     "--files",
     "--type",
@@ -50,6 +50,12 @@ RTK_FIND_REROUTE_WORDS = (
     "-o",
     "-a",
 )
+RTK_GIT_REROUTE_FLAGS = (
+    "--first-parent",
+    "--check",
+    "--name-status",
+    "--name-only",
+)
 BUILTIN_AGENT_WRAPPER_GROUPS = {
     DEFAULT_AGENT_WRAPPER_GROUP: {
         "rtk": {
@@ -64,6 +70,11 @@ BUILTIN_AGENT_WRAPPER_GROUPS = {
                     "head": "find",
                     "flags": list(RTK_FIND_REROUTE_WORDS),
                     "argv": ["find"],
+                },
+                {
+                    "head": "git",
+                    "flags": list(RTK_GIT_REROUTE_FLAGS),
+                    "argv": ["git"],
                 },
             ],
         },
