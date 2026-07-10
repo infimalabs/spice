@@ -171,7 +171,6 @@ def run_agent_command(
         repo_root,
         parent_pid=int(getattr(process, "pid", 0) or 0),
         stderr=stderr,
-        initial_payload_already_rendered=True,
         initial_inbox_signature=initial_inbox_signature,
     )
     try:
@@ -396,8 +395,7 @@ def start_agent_side_channel_watch(
     *,
     parent_pid: int,
     stderr: TextIO,
-    initial_payload_already_rendered: bool = False,
-    initial_inbox_signature: InboxSignature = (),
+    initial_inbox_signature: InboxSignature | None = None,
 ) -> Thread | None:
     if parent_pid <= 0 or active_agent_side_channel_socket_path(repo_root) is None:
         return None
@@ -407,7 +405,6 @@ def start_agent_side_channel_watch(
             "repo_root": repo_root,
             "parent_pid": parent_pid,
             "stderr": stderr,
-            "initial_payload_already_rendered": initial_payload_already_rendered,
             "initial_inbox_signature": initial_inbox_signature,
         },
         daemon=True,
@@ -426,8 +423,7 @@ def watch_agent_side_channel(
     *,
     parent_pid: int,
     stderr: TextIO = sys.stderr,
-    initial_payload_already_rendered: bool = False,
-    initial_inbox_signature: InboxSignature = (),
+    initial_inbox_signature: InboxSignature | None = None,
 ) -> None:
     socket_path = active_agent_side_channel_socket_path(repo_root)
     if socket_path is None:
@@ -444,7 +440,6 @@ def watch_agent_side_channel(
                     repo_root,
                     runner="agent.run.watch",
                     stream_until_parent_exit=parent_pid,
-                    initial_payload_already_rendered=initial_payload_already_rendered,
                     initial_inbox_signature=initial_inbox_signature,
                 ),
                 separators=(",", ":"),
@@ -478,8 +473,7 @@ def agent_side_channel_hello(
     *,
     runner: str = "agent.run",
     stream_until_parent_exit: int | None = None,
-    initial_payload_already_rendered: bool = False,
-    initial_inbox_signature: InboxSignature = (),
+    initial_inbox_signature: InboxSignature | None = None,
 ) -> dict[str, object]:
     hello: dict[str, object] = {
         "type": "hello",
@@ -491,8 +485,7 @@ def agent_side_channel_hello(
     }
     if stream_until_parent_exit is not None:
         hello["streamUntilParentExit"] = stream_until_parent_exit
-        hello["initialPayloadAlreadyRendered"] = initial_payload_already_rendered
-        if initial_payload_already_rendered:
+        if initial_inbox_signature is not None:
             hello["initialInboxSignature"] = [
                 list(row) for row in initial_inbox_signature
             ]
