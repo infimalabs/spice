@@ -136,6 +136,12 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
         session._handle_lane_subscribe(
             {"type": "lane.subscribe", "targetId": target.id, "query": {"limit": 5}}
         )
+        # subscribe's initial reply is computed on the detached read chain, so
+        # it lands asynchronously; block on that chain's completion future
+        # (unbounded) before reading the frame, so the assertion resolves on the
+        # real completion rather than a fixed deadline that starves under
+        # full-suite xdist load.
+        session._await_pending_reads()
         assert _wait_for_reply(connection)["payload"]["pendingInboxCount"] == 0
         assert watcher_ready.wait(timeout=1.0)
 
@@ -249,6 +255,12 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
         session._handle_lane_subscribe(
             {"type": "lane.subscribe", "targetId": target.id, "query": {"limit": 5}}
         )
+        # subscribe's initial reply is computed on the detached read chain, so
+        # it lands asynchronously; block on that chain's completion future
+        # (unbounded) before reading the frame, so the assertion resolves on the
+        # real completion rather than a fixed deadline that starves under
+        # full-suite xdist load.
+        session._await_pending_reads()
         assert _wait_for_reply(connection)["payload"]["pendingInboxCount"] == 0
         assert watcher_ready.wait(timeout=1.0)
 
