@@ -29,7 +29,11 @@ from spice.serve.app import (
     team_command_response_payload,
     team_snapshot_response_payload,
 )
-from spice.serve.livebus import LiveBusCallbacks, LiveBusSession
+from spice.serve.livebus import (
+    LIVE_BUS_WATCHER_JOIN_TIMEOUT_S,
+    LiveBusCallbacks,
+    LiveBusSession,
+)
 from spice.serve.web import STATIC_ROOT, render_index_html, send_static_asset
 from spice.serve.workroutes import (
     work_tree_send_response_payload,
@@ -674,6 +678,10 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
             "query": {"limit": 9, "before": "oldest", "threadId": "thread"},
         }
     )
+    # lane.history replies on the read pool, unlike the three synchronous
+    # handlers above; drain the detached chain so its lane.payload frame is
+    # observed in send order regardless of pool timing.
+    session._await_pending_reads(LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
     send_timing = connection.sent[0]["result"].pop("serverTiming")
     assert list(send_timing) == [
         "targetResolveMs",
