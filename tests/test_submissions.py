@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import json
 import subprocess
-import time
 from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
-from threading import Event, Semaphore
+from threading import Condition, Event, Semaphore
 from typing import Any, Callable
 
 import pytest
@@ -27,12 +26,55 @@ from spice.mail.replies import (
     ensure_reply_log,
     read_reply_records,
 )
-from spice.serve import livebus, messages as message_reader
+from spice.serve import livebus, messages as message_reader, submissions
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.pending import pending_inbox_identity_payload
-from tests.test_livebus import _Connection, _Target, _transcript_resolution
+from spice.serve.submissions import SubmissionLifecycleTracker
+from tests.test_livebus import _Target, _transcript_resolution
 
 THREAD_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+
+def test_submission_tracker_caps_mixed_lifecycle_states(monkeypatch) -> None:
+    monkeypatch.setattr(submissions, "MAX_TRACKED_SUBMISSIONS", 3)
+    tracker = SubmissionLifecycleTracker(now=lambda: "2026-07-10T07:00:00.000000Z")
+
+    tracker.accept(target_id="lane", key="completed-old", evidence="old")
+    tracker.advance(
+        target_id="lane",
+        repo_root=None,
+        payload={
+            "messages": [
+                {
+                    "ack_keys": ["completed-old"],
+                    "key": "message-completed",
+                    "kind": "final",
+                }
+            ]
+        },
+    )
+    tracker.accept(target_id="lane", key="received-middle", evidence="middle")
+    tracker.advance(
+        target_id="lane",
+        repo_root=None,
+        payload={
+            "messages": [
+                {
+                    "ack_keys": ["received-middle"],
+                    "key": "message-received",
+                    "kind": "assistant",
+                }
+            ]
+        },
+    )
+    tracker.accept(target_id="lane", key="accepted-new", evidence="new")
+    tracker.accept(target_id="lane", key="newest", evidence="newest")
+
+    assert tracker.tracked_keys() == (
+        ("lane", "received-middle"),
+        ("lane", "accepted-new"),
+        ("lane", "newest"),
+    )
 
 
 @pytest.mark.parametrize("lane_state", ["running", "idle"])
@@ -47,7 +89,7 @@ def test_submission_lifecycle_follows_real_watcher_events(
     reply_log = ensure_reply_log(repo, THREAD_ID)
     assert reply_log is not None
     target = _Target(id="lane", repo_root=repo)
-    connection = _Connection()
+    connection = _FrameConnection()
     gate = _WatchGate()
     monkeypatch.setattr(livebus, "_wait_for_change", gate.wait)
     session = LiveBusSession(
@@ -167,6 +209,17 @@ class _WatchGate:
         self._changes.release()
 
 
+class _FrameConnection:
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
+        self.lock = Condition()
+
+    def send_json(self, payload: dict[str, Any]) -> None:
+        with self.lock:
+            self.sent.append(payload)
+            self.lock.notify_all()
+
+
 def _submission_callbacks(
     *, target: _Target, transcript: Path, reply_log: Path
 ) -> LiveBusCallbacks:
@@ -263,7 +316,9 @@ def _path_signature(path: Path) -> tuple[int, int]:
     return stat.st_mtime_ns, stat.st_size
 
 
-def _wait_for_submission_stage(connection: _Connection, stage: str) -> dict[str, Any]:
+def _wait_for_submission_stage(
+    connection: _FrameConnection, stage: str
+) -> dict[str, Any]:
     return _wait_for_frame(
         connection,
         lambda frame: (
@@ -274,23 +329,26 @@ def _wait_for_submission_stage(connection: _Connection, stage: str) -> dict[str,
 
 
 def _wait_for_frame(
-    connection: _Connection,
+    connection: _FrameConnection,
     predicate: Callable[[dict[str, Any]], bool],
     *,
     timeout: float = 2.0,
 ) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        with connection.lock:
-            for frame in connection.sent:
-                if predicate(frame):
-                    return frame
-        time.sleep(0.01)
-    pytest.fail(f"timed out waiting for livebus frame; sent={connection.sent!r}")
+    matched: list[dict[str, Any]] = []
+
+    def frame_delivered() -> bool:
+        matched[:] = [frame for frame in connection.sent if predicate(frame)]
+        return bool(matched)
+
+    with connection.lock:
+        if connection.lock.wait_for(frame_delivered, timeout=timeout):
+            return matched[0]
+        sent = list(connection.sent)
+    pytest.fail(f"timed out waiting for livebus frame; sent={sent!r}")
 
 
 def _frame_positions(
-    connection: _Connection, frames: list[dict[str, Any]]
+    connection: _FrameConnection, frames: list[dict[str, Any]]
 ) -> list[int]:
     with connection.lock:
         return [connection.sent.index(frame) for frame in frames]
