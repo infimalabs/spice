@@ -213,6 +213,58 @@ def test_task_next_renews_before_allocating(monkeypatch):
     assert output.startswith("claim_renewal=renewed TASK-test until ")
 
 
+def test_task_next_renders_active_review_claim_packet(monkeypatch):
+    row = _row(
+        "Review assigned packet",
+        project="task.render",
+        incepted="1k4yrMDR",
+        status="pending",
+        phase="review",
+    )
+    row.update(
+        {
+            "task_description": "Review the completed implementation",
+            "phase_i": "1",
+            "urgency": "9.2",
+            "claim_by": "actor-a",
+        }
+    )
+
+    monkeypatch.setattr(render.alloc, "next_task", lambda: row)
+    monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
+    monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(
+        render.effort, "phase_effort_windows_for_tasks", lambda _rows: ()
+    )
+    monkeypatch.setattr(
+        render.claimstate,
+        "renew_claim",
+        lambda: claimstate.ClaimRenewalResult(
+            True,
+            "renewed",
+            handle="TASK-test",
+            claim_until="2026-07-09T06:00:00.000000Z",
+        ),
+    )
+    monkeypatch.setattr(
+        render.ops, "claim_drive_line", lambda _handle: "drive: continue TASK-test"
+    )
+
+    output = render.render_next()
+
+    assert (
+        "next task:\nTASK-test [review] P:M task.render Review assigned packet"
+        in output
+    )
+    assert "phase review (i=1)" in output
+    assert (
+        "next: spice task review TASK-test --finding clean "
+        '--note "description current; ..."' in output
+    )
+    assert output.endswith("drive: continue TASK-test")
+
+
 def test_task_next_reports_no_claim_renewal_when_no_task_available(monkeypatch):
     monkeypatch.setattr(
         render.claimstate,
