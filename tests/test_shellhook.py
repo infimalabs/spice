@@ -730,7 +730,7 @@ def _builtin_rtk_wrapper_lines() -> list[str]:
     return [
         "",
         "rtk() {",
-        '  if [ "$1" = grep ]; then',
+        '  if [ "${1-}" = grep ]; then',
         '    for _spice_word in "$@"; do',
         '      case "$_spice_word" in',
         "        --files|--type|--type=*|--no-heading)",
@@ -741,7 +741,7 @@ def _builtin_rtk_wrapper_lines() -> list[str]:
         "      esac",
         "    done",
         "  fi",
-        '  if [ "$1" = find ]; then',
+        '  if [ "${1-}" = find ]; then',
         '    for _spice_word in "$@"; do',
         '      case "$_spice_word" in',
         "        -print|-print0|-prune|-exec|-execdir|-delete|'('|')'|'!'|-o|-a)",

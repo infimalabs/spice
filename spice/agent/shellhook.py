@@ -464,7 +464,7 @@ def match_route_guard_lines(route: WrapperMatchRoute) -> list[str]:
     if route.head is None:
         return ["  " + line for line in scan]
     return [
-        f'  if [ "$1" = {shell_quote(route.head)} ]; then',
+        f'  if [ "${{1-}}" = {shell_quote(route.head)} ]; then',
         *("    " + line for line in scan),
         "  fi",
     ]

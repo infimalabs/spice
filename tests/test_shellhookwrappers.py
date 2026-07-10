@@ -109,7 +109,7 @@ def test_agent_wrapper_lines_renders_match_route_guards(tmp_path):
     assert shellhook.render_agent_wrapper_lines(tmp_path) == [
         "",
         "toolbox() {",
-        '  if [ "$1" = scan ]; then',
+        '  if [ "${1-}" = scan ]; then',
         '    for _spice_word in "$@"; do',
         '      case "$_spice_word" in',
         "        --fast|--mode=*)",
@@ -214,11 +214,13 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
         tool.chmod(0o755)
     script = "\n".join(
         [
+            "set -u",
             *shellhook.render_agent_wrapper_lines(tmp_path),
             "rtk grep --files src",
             "rtk grep needle src",
             "rtk find src -name '*.py' -print",
             "rtk find src \\( -name '*.py' -o -name '*.md' \\)",
+            "rtk",
         ]
     )
 
@@ -242,6 +244,7 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
         "rtk:grep needle src",
         "find:src -name *.py -print",
         "find:src ( -name *.py -o -name *.md )",
+        "rtk:",
     ]
     assert lines[0] != lines[1]
 
