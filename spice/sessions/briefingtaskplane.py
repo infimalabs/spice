@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Callable, Literal
 
 from spice.errors import SpiceError
@@ -84,11 +85,10 @@ def collect_task_plane_candidates() -> list["RehydrationCandidate"]:
         from spice.tasks import alloc, identity, tw
 
         actor = tw.current_actor()
-        snapshot = alloc.briefing_rows(actor)
+        snapshot = alloc.briefing_snapshot(actor)
         rows = classify_task_plane_rows(
-            list(snapshot.inventory),
-            ready_rows=list(snapshot.ready),
-            blocked_rows=list(snapshot.blocked),
+            list(snapshot.rows),
+            visible_uuids=snapshot.visible_uuids,
             is_hidden=alloc.is_hidden,
             is_oops=alloc.is_oops,
         )
@@ -135,12 +135,19 @@ def collect_task_plane_candidates() -> list["RehydrationCandidate"]:
 def classify_task_plane_rows(
     rows: list[TaskRow],
     *,
-    ready_rows: list[TaskRow],
-    blocked_rows: list[TaskRow],
+    visible_uuids: frozenset[str],
     is_hidden: Callable[[TaskRow], bool],
     is_oops: Callable[[TaskRow], bool],
 ) -> TaskPlaneRows:
-    visible = [row for row in rows if not is_hidden(row)]
+    now = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    status_by_uuid = {
+        _task_field(row, "uuid"): _task_field(row, "status") for row in rows
+    }
+    visible = [
+        row
+        for row in rows
+        if _task_field(row, "uuid") in visible_uuids and not is_hidden(row)
+    ]
     pending = [row for row in visible if _task_field(row, "status") == "pending"]
     active = [
         row
@@ -149,17 +156,19 @@ def classify_task_plane_rows(
     ]
     ready = [
         row
-        for row in ready_rows
+        for row in pending
         if _task_field(row, "phase") != "review"
         and not _task_field(row, "claim_by")
-        and not is_hidden(row)
+        and _task_is_ready(row, now=now, status_by_uuid=status_by_uuid)
     ]
     review = [
         row
         for row in pending
         if _task_field(row, "phase") == "review" and not _task_field(row, "claim_by")
     ]
-    blocked = [row for row in blocked_rows if not is_hidden(row)]
+    blocked = [
+        row for row in pending if _task_is_blocked(row, status_by_uuid=status_by_uuid)
+    ]
     completed = [row for row in visible if _task_field(row, "status") == "completed"]
     oops = [
         row
@@ -174,6 +183,30 @@ def classify_task_plane_rows(
         completed=tuple(completed),
         oops=tuple(oops),
     )
+
+
+def _task_is_ready(row: TaskRow, *, now: str, status_by_uuid: dict[str, str]) -> bool:
+    return bool(
+        _task_field(row, "status") == "pending"
+        and not _task_field(row, "start")
+        and not _task_is_blocked(row, status_by_uuid=status_by_uuid)
+        and _task_time_has_arrived(row, "wait", now=now)
+        and _task_time_has_arrived(row, "scheduled", now=now)
+    )
+
+
+def _task_is_blocked(row: TaskRow, *, status_by_uuid: dict[str, str]) -> bool:
+    depends = row.get("depends") or []
+    dependency_uuids = depends if isinstance(depends, list) else [depends]
+    return any(
+        status_by_uuid.get(str(dependency_uuid)) not in ("completed", "deleted")
+        for dependency_uuid in dependency_uuids
+    )
+
+
+def _task_time_has_arrived(row: TaskRow, key: str, *, now: str) -> bool:
+    value = _task_field(row, key)
+    return not value or value <= now
 
 
 def _task_claim_candidate(

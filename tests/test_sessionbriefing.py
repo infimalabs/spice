@@ -26,6 +26,7 @@ from spice.mail.inbox import (
 )
 from spice.sessions import briefing as briefing_module
 from spice.sessions import briefingpressure
+from spice.sessions import rehydrationview
 from spice.sessions.briefing import render_briefing
 from spice.sessions import learnings, records
 from spice.tasks import config as task_config
@@ -334,7 +335,7 @@ def test_recovery_lines_do_not_render_assistant_fallback_as_user_after():
         ]
     )
 
-    lines = briefing_module._recovery_lines([candidate], [])
+    lines = rehydrationview.recovery_lines([candidate], [])
 
     assert candidate.text == "assistant fallback text"
     assert lines == [
@@ -357,7 +358,7 @@ def test_recovery_lines_render_populated_first_user_after_text():
         ]
     )
 
-    lines = briefing_module._recovery_lines([candidate], [])
+    lines = rehydrationview.recovery_lines([candidate], [])
 
     assert lines == [
         "Recovery",
