@@ -481,6 +481,7 @@ def test_lanes_subscribe_orders_initial_payload_before_setup_race_push(
     initial_read_started = Event()
     release_initial_read = Event()
     change_written = Event()
+    watch_registered = Event()
     watch_push_sent = Event()
     wait_calls = 0
 
@@ -494,6 +495,7 @@ def test_lanes_subscribe_orders_initial_payload_before_setup_race_push(
         _paths: tuple[Path, ...], stop, watch=None, *, activated=None
     ) -> bool:
         nonlocal wait_calls
+        watch_registered.set()
         if activated is not None:
             activated.set()
         with wait_lock:
@@ -549,6 +551,7 @@ def test_lanes_subscribe_orders_initial_payload_before_setup_race_push(
     try:
         subscribe_thread.start()
         assert initial_read_started.wait(timeout=1.0)
+        assert watch_registered.is_set() is True
         with state_lock:
             task_keys.append("task-racing-setup")
         change_written.set()

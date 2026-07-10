@@ -192,6 +192,13 @@ path = "tests/test_livebusevents.py"
 test = "test_kqueue_watch_rearms_only_when_watched_paths_change"
 target = "_kqueue"
 
+# The watchfiles adapter owns the activation callback around the public
+# generator; this white-box test pins activation after its native-ready yield.
+[[tool.spice.policy.internal_couplings]]
+path = "tests/test_livebusevents.py"
+test = "test_watchfiles_activation_follows_native_ready_yield"
+target = "_wait_for_change_watchfiles"
+
 # The dev-gate worktree-checkout re-exec has no public observable besides its
 # subprocess side effect; these assert directly on the private resolver/gate
 # functions to pin the no-op vs. relaunch decision white-box.

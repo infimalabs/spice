@@ -829,7 +829,7 @@ class _KqueueWatch:
             activated.set()
         while not stop.is_set():
             triggered = self._kqueue.control(
-                self._events, len(self._events), LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
+                [], len(self._events), LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
             )
             if triggered:
                 return True
@@ -859,6 +859,10 @@ class _KqueueWatch:
             )
             for descriptor in descriptors
         ]
+        # Submit the changelist separately from the first blocking wait. Only
+        # after this call returns can the activation marker truthfully promise
+        # that subsequent filesystem edits are observable by the kernel queue.
+        self._kqueue.control(self._events, 0, 0)
 
     def close(self) -> None:
         if self._kqueue is not None:
@@ -910,11 +914,12 @@ def _wait_for_change_kqueue(
                 )
                 for descriptor in descriptors
             ]
+            kqueue.control(events, 0, 0)
             if activated is not None:
                 activated.set()
             while not stop.is_set():
                 triggered = kqueue.control(
-                    events, len(events), LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
+                    [], len(events), LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
                 )
                 if triggered:
                     return True
@@ -932,14 +937,22 @@ def _wait_for_change_watchfiles(
     module = import_module("watchfiles")
     watch = cast(Callable[..., Any], getattr(module, "watch"))
 
-    if activated is not None:
-        activated.set()
-    for _changes in watch(
+    changes = watch(
         *paths,
         stop_event=stop,
         rust_timeout=int(LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S * _MS_PER_SECOND),
-    ):
-        return True
+        yield_on_timeout=True,
+    )
+    for observed in changes:
+        if activated is not None and not activated.is_set():
+            # The generator creates RustNotify before its first event/timeout;
+            # it stays open across yields, so this is a native-ready signal and
+            # does not introduce a reopen interval before subsequent changes.
+            activated.set()
+        if observed:
+            return True
+    if activated is not None and not activated.is_set():
+        raise RuntimeError("lane watcher stopped before native registration")
     return False
 
 
