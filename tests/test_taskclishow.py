@@ -6,8 +6,8 @@ from pathlib import Path
 
 
 from spice.tasks import (
+    claimstate,
     effort,
-    ops,
     render,
 )
 
@@ -48,7 +48,7 @@ def test_task_show_surfaces_creator_rehydrate_action(monkeypatch):
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
     monkeypatch.setattr(render.tw, "now_iso", lambda: "2026-06-12T08:00:00Z")
 
     output = render.render_show("TASK-test")
@@ -84,7 +84,7 @@ def test_task_show_hides_recovery_context_for_current_task(monkeypatch):
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
 
     lines = render.render_show("TASK-test").splitlines()
 
@@ -117,7 +117,7 @@ def test_task_show_requires_context_check_before_implementation(monkeypatch):
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
 
     output = render.render_show("TASK-test", include_recovery_context=True)
 
@@ -149,11 +149,11 @@ def test_task_next_includes_recovery_context_for_assignment(monkeypatch):
     monkeypatch.setattr(render.alloc, "next_task", lambda: row)
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
     monkeypatch.setattr(
-        render.ops,
+        render.claimstate,
         "renew_claim",
-        lambda: ops.ClaimRenewalResult(
+        lambda: claimstate.ClaimRenewalResult(
             True,
             "renewed",
             handle="TASK-test",
@@ -187,7 +187,7 @@ def test_task_next_renews_before_allocating(monkeypatch):
 
     def fake_renew():
         calls.append("renew")
-        return ops.ClaimRenewalResult(
+        return claimstate.ClaimRenewalResult(
             True,
             "renewed",
             handle="TASK-test",
@@ -198,11 +198,11 @@ def test_task_next_renews_before_allocating(monkeypatch):
         calls.append("next")
         return row
 
-    monkeypatch.setattr(render.ops, "renew_claim", fake_renew)
+    monkeypatch.setattr(render.claimstate, "renew_claim", fake_renew)
     monkeypatch.setattr(render.alloc, "next_task", fake_next)
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
     monkeypatch.setattr(
         render.ops, "claim_drive_line", lambda _handle: "drive: continue TASK-test"
     )
@@ -215,9 +215,9 @@ def test_task_next_renews_before_allocating(monkeypatch):
 
 def test_task_next_reports_no_claim_renewal_when_no_task_available(monkeypatch):
     monkeypatch.setattr(
-        render.ops,
+        render.claimstate,
         "renew_claim",
-        lambda: ops.ClaimRenewalResult(False, "no_active_claim"),
+        lambda: claimstate.ClaimRenewalResult(False, "no_active_claim"),
     )
     monkeypatch.setattr(render.alloc, "next_task", lambda: None)
 
@@ -233,9 +233,9 @@ def test_task_next_reports_no_claim_renewal_when_no_task_available(monkeypatch):
 
 def test_task_next_reports_failed_claim_renewal_detail(monkeypatch):
     monkeypatch.setattr(
-        render.ops,
+        render.claimstate,
         "renew_claim",
-        lambda: ops.ClaimRenewalResult(
+        lambda: claimstate.ClaimRenewalResult(
             False, "backend_error", detail="backend offline"
         ),
     )
@@ -269,7 +269,7 @@ def test_task_show_context_check_names_stale_or_shifted_context(monkeypatch):
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "verify"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "verify"])
 
     output = render.render_show("TASK-test", include_recovery_context=True)
 
@@ -299,7 +299,7 @@ def test_task_show_does_not_add_implementation_context_check_to_review(monkeypat
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
 
     output = render.render_show("TASK-test", include_recovery_context=True)
 
@@ -334,7 +334,7 @@ def test_task_show_keeps_creator_rehydrate_for_same_claim_thread(monkeypatch):
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
 
     output = render.render_show("TASK-test", include_recovery_context=True)
 
@@ -372,7 +372,7 @@ def test_task_show_replaces_sentinel_rehydrate_commands(monkeypatch):
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
 
     output = render.render_show("TASK-test", include_recovery_context=True)
 
@@ -406,7 +406,7 @@ def test_task_show_prints_merge_aware_diff_command_for_task_merge(monkeypatch):
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
 
     output = render.render_show("TASK-test")
 
@@ -447,7 +447,7 @@ def test_task_show_steers_overlap_reviews_to_integrated_merge_patch(monkeypatch)
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
 
     output = render.render_show("TASK-test")
 
@@ -486,7 +486,7 @@ def test_task_show_merge_diff_command_falls_back_to_first_parent(monkeypatch):
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
 
     output = render.render_show("TASK-test")
 
@@ -520,7 +520,7 @@ def test_task_show_omits_merge_aware_diff_command_for_task_head(monkeypatch):
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
 
     output = render.render_show("TASK-test")
 
@@ -551,7 +551,7 @@ def test_task_show_renders_phase_effort_as_aggregate_phase_rows(monkeypatch):
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
     monkeypatch.setattr(
-        render.ops, "phases_of", lambda _row: ["todo", "verify", "review"]
+        render.claimstate, "phases_of", lambda _row: ["todo", "verify", "review"]
     )
     monkeypatch.setattr(
         render.effort, "phase_effort_windows_for_tasks", lambda _rows: windows
@@ -607,7 +607,7 @@ def test_task_show_surfaces_review_note_artifact_citation(monkeypatch):
 
     monkeypatch.setattr(render.identity, "resolve", lambda _handle: row)
     monkeypatch.setattr(render.identity, "render_handle", lambda _row: "TASK-test")
-    monkeypatch.setattr(render.ops, "phases_of", lambda _row: ["todo", "review"])
+    monkeypatch.setattr(render.claimstate, "phases_of", lambda _row: ["todo", "review"])
     monkeypatch.setattr(
         render.artifacts,
         "render_artifact_lines",

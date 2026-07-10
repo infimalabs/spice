@@ -11,6 +11,7 @@ from spice.errors import SpiceError
 from spice.tasks import (
     alloc,
     artifacts,
+    claimstate,
     config,
     create,
     identity,
@@ -891,7 +892,7 @@ def _artifact(args: argparse.Namespace) -> str:
 
 
 def _reclaim(args: argparse.Namespace) -> str:
-    result = ops.renew_claim(args.handle)
+    result = claimstate.renew_claim(args.handle)
     if result.renewed:
         return f"reclaimed {result.handle} until {result.claim_until}"
     suffix = f" {result.handle}" if result.handle else ""
