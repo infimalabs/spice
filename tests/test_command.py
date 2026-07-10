@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 
 import pytest
 
@@ -172,7 +172,14 @@ def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
         )
         return FakeProcess()
 
-    def fake_watch(repo_root, *, parent_pid, stderr, initial_payload_already_rendered):
+    def fake_watch(
+        repo_root,
+        *,
+        parent_pid,
+        stderr,
+        initial_payload_already_rendered,
+        initial_inbox_signature=(),
+    ):
         events.append(
             (
                 "watch",
@@ -232,7 +239,14 @@ def test_run_agent_command_initial_stderr_includes_working_state(tmp_path, monke
         events.append(("popen", command, env))
         return FakeProcess()
 
-    def fake_watch(repo_root, *, parent_pid, stderr, initial_payload_already_rendered):
+    def fake_watch(
+        repo_root,
+        *,
+        parent_pid,
+        stderr,
+        initial_payload_already_rendered,
+        initial_inbox_signature=(),
+    ):
         events.append(
             (
                 "watch",
@@ -359,7 +373,14 @@ def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monke
         events.append(("popen", command, env_snapshot))
         return FakeProcess()
 
-    def fake_watch(repo_root, *, parent_pid, stderr, initial_payload_already_rendered):
+    def fake_watch(
+        repo_root,
+        *,
+        parent_pid,
+        stderr,
+        initial_payload_already_rendered,
+        initial_inbox_signature=(),
+    ):
         events.append(
             (
                 "watch",
@@ -556,7 +577,14 @@ def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
         )
         return FakeProcess()
 
-    def fake_watch(repo_root, *, parent_pid, stderr, initial_payload_already_rendered):
+    def fake_watch(
+        repo_root,
+        *,
+        parent_pid,
+        stderr,
+        initial_payload_already_rendered,
+        initial_inbox_signature=(),
+    ):
         events.append(
             (
                 "watch",
@@ -616,7 +644,14 @@ def test_agent_run_direct_git_inherits_ambient_shadow_environment(
         events.append(("popen", command, (source, shadow)))
         return FakeProcess()
 
-    def fake_watch(repo_root, *, parent_pid, stderr, initial_payload_already_rendered):
+    def fake_watch(
+        repo_root,
+        *,
+        parent_pid,
+        stderr,
+        initial_payload_already_rendered,
+        initial_inbox_signature=(),
+    ):
         events.append(
             (
                 "watch",
@@ -1110,6 +1145,8 @@ def test_run_agent_command_streams_later_side_channel_while_child_runs(
     stderr = io.StringIO()
     ready = tmp_path / "ready"
     results: list[int] = []
+    registration_started = Event()
+    allow_registration = Event()
     script = (
         "from pathlib import Path; "
         "import sys, time; "
@@ -1117,7 +1154,17 @@ def test_run_agent_command_streams_later_side_channel_while_child_runs(
         "time.sleep(0.4)"
     )
 
-    with sidechannel.AgentSideChannelServer(tmp_path):
+    with sidechannel.AgentSideChannelServer(tmp_path) as server:
+        register_stream_wakeup = server._register_stream_wakeup
+
+        def register_after_notification(wake_writer):
+            registration_started.set()
+            assert allow_registration.wait(timeout=2.0)
+            register_stream_wakeup(wake_writer)
+
+        monkeypatch.setattr(
+            server, "_register_stream_wakeup", register_after_notification
+        )
         thread = Thread(
             target=lambda: results.append(
                 wrap.run_agent_command(
@@ -1129,11 +1176,13 @@ def test_run_agent_command_streams_later_side_channel_while_child_runs(
         )
         thread.start()
         _eventually(lambda: "ready" if ready.exists() else "", contains="ready")
+        assert registration_started.wait(timeout=1.0)
         write_inbox_item(
             tmp_path,
             "20260101T000000000004Z.txt",
             compose_inbox_text(body="runner steering", priority=None, stop=False),
         )
+        allow_registration.set()
         output = _eventually(lambda: stderr.getvalue(), contains="runner steering")
         thread.join(timeout=2.0)
 

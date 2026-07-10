@@ -26,16 +26,17 @@ TASK_PLANE_WEIGHTS = {
     "completed": 30,
     "oops": 20,
 }
+TaskRow = dict[str, object]
 
 
 @dataclass(frozen=True)
 class TaskPlaneRows:
-    active: tuple[dict[str, object], ...]
-    ready: tuple[dict[str, object], ...]
-    review: tuple[dict[str, object], ...]
-    blocked: tuple[dict[str, object], ...]
-    completed: tuple[dict[str, object], ...]
-    oops: tuple[dict[str, object], ...]
+    active: tuple[TaskRow, ...]
+    ready: tuple[TaskRow, ...]
+    review: tuple[TaskRow, ...]
+    blocked: tuple[TaskRow, ...]
+    completed: tuple[TaskRow, ...]
+    oops: tuple[TaskRow, ...]
 
 
 def task_plane_rank_key(
@@ -54,6 +55,7 @@ def _candidate(
     label: str = "",
     count: int = 0,
     key: str = "",
+    project: str = "",
 ) -> "RehydrationCandidate":
     from spice.sessions.briefing import RehydrationCandidate
 
@@ -66,6 +68,7 @@ def _candidate(
         label=label,
         count=count,
         key=key,
+        project=project,
     )
 
 
@@ -130,11 +133,11 @@ def collect_task_plane_candidates() -> list["RehydrationCandidate"]:
 
 
 def classify_task_plane_rows(
-    rows: list[dict[str, object]],
+    rows: list[TaskRow],
     *,
     visible_uuids: frozenset[str],
-    is_hidden: Callable[[dict[str, object]], bool],
-    is_oops: Callable[[dict[str, object]], bool],
+    is_hidden: Callable[[TaskRow], bool],
+    is_oops: Callable[[TaskRow], bool],
 ) -> TaskPlaneRows:
     now = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     status_by_uuid = {
@@ -182,9 +185,7 @@ def classify_task_plane_rows(
     )
 
 
-def _task_is_ready(
-    row: dict[str, object], *, now: str, status_by_uuid: dict[str, str]
-) -> bool:
+def _task_is_ready(row: TaskRow, *, now: str, status_by_uuid: dict[str, str]) -> bool:
     return bool(
         _task_field(row, "status") == "pending"
         and not _task_field(row, "start")
@@ -194,7 +195,7 @@ def _task_is_ready(
     )
 
 
-def _task_is_blocked(row: dict[str, object], *, status_by_uuid: dict[str, str]) -> bool:
+def _task_is_blocked(row: TaskRow, *, status_by_uuid: dict[str, str]) -> bool:
     depends = row.get("depends") or []
     dependency_uuids = depends if isinstance(depends, list) else [depends]
     return any(
@@ -203,7 +204,7 @@ def _task_is_blocked(row: dict[str, object], *, status_by_uuid: dict[str, str]) 
     )
 
 
-def _task_time_has_arrived(row: dict[str, object], key: str, *, now: str) -> bool:
+def _task_time_has_arrived(row: TaskRow, key: str, *, now: str) -> bool:
     value = _task_field(row, key)
     return not value or value <= now
 
@@ -223,6 +224,7 @@ def _task_claim_candidate(
         rank_name=TASK_PLANE_RANK_NAME,
         rank_key=task_plane_rank_key("claim", _task_urgency(row), timestamp),
         label=handle,
+        project=_task_field(row, "project"),
     )
 
 

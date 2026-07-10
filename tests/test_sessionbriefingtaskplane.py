@@ -1,11 +1,14 @@
 """Session briefing task-plane snapshot tests."""
 
+from __future__ import annotations
+
 import shutil
 
 import pytest
 
+from spice.sessions import briefingtaskplane
 from spice.sessions.briefingtaskplane import classify_task_plane_rows
-from spice.tasks import alloc, config, tw
+from spice.tasks import alloc, config, identity, tw
 
 
 def test_briefing_snapshot_exports_once_and_marks_route_visibility(monkeypatch):
@@ -195,6 +198,33 @@ def test_snapshot_categories_match_live_taskwarrior_virtual_tags(tmp_path):
         config.set_backend(None)
 
 
+def test_task_plane_candidate_carries_active_project(tmp_path, monkeypatch):
+    actor = "actor-a"
+    active = _row(
+        "active",
+        uuid="active",
+        start="20260710T120000Z",
+        claim_by=actor,
+        project="session.briefing",
+        acceptance="active accepted",
+    )
+    monkeypatch.setattr(briefingtaskplane, "repo_root_from_cwd", lambda: tmp_path)
+    monkeypatch.setattr(tw, "current_actor", lambda: actor)
+    monkeypatch.setattr(
+        alloc,
+        "briefing_snapshot",
+        lambda _actor: alloc.BriefingTaskSnapshot(
+            rows=(active,),
+            visible_uuids=frozenset({"active"}),
+        ),
+    )
+    monkeypatch.setattr(identity, "render_handle", lambda _row: "ACTIVE-1")
+
+    candidates = briefingtaskplane.collect_task_plane_candidates()
+
+    assert candidates[0].project == "session.briefing"
+
+
 def _add_task(
     description: str,
     *,
@@ -222,6 +252,8 @@ def _row(description: str, **fields: object) -> dict[str, object]:
         "status": "pending",
         "project": "session.briefing",
         "phase": "todo",
+        "entry": "20260101T000000Z",
+        "urgency": 1.0,
         **fields,
     }
 
