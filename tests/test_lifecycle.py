@@ -35,7 +35,7 @@ from spice.agent.driver import (
     write_playwright_mcp_config,
 )
 from spice.errors import SpiceError
-from spice.tasks import ops
+from spice.tasks import claimstate, ops
 
 DIRECT_AGENT_PID = 2222
 SUPERVISOR_PID = 3333
@@ -95,12 +95,14 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
         session_id_pattern=re.compile(r"^third-session$"),
     )
     monkeypatch.setenv("FAKEENV_THIRD_TURN_ID", "turn-third")
-    monkeypatch.setattr(ops, "ambient_thread", lambda: ("thread-third", third_driver))
+    monkeypatch.setattr(
+        claimstate, "ambient_thread", lambda: ("thread-third", third_driver)
+    )
     monkeypatch.setattr(ops.config, "repo_root", lambda: tmp_path)
     monkeypatch.setattr(ops.tw, "current_branch", lambda: "main")
     monkeypatch.setattr(ops.tw, "claim_head", lambda: "head-third")
 
-    claim = ops.claim_meta("actor-third")
+    claim = claimstate.claim_meta("actor-third")
 
     assert "claim_thread:thread-third" in claim
     assert "claim_context_turn:turn-third" in claim
@@ -125,12 +127,12 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
 def test_claim_meta_uses_actor_as_fallback_thread_without_ambient(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(ops, "ambient_thread", lambda: None)
+    monkeypatch.setattr(claimstate, "ambient_thread", lambda: None)
     monkeypatch.setattr(ops.config, "repo_root", lambda: tmp_path)
     monkeypatch.setattr(ops.tw, "current_branch", lambda: "main")
     monkeypatch.setattr(ops.tw, "claim_head", lambda: "head-third")
 
-    claim = ops.claim_meta("actor-third")
+    claim = claimstate.claim_meta("actor-third")
 
     assert "claim_thread:actorthird" in claim
     assert "claim_context_turn:actorthird" in claim
@@ -337,7 +339,7 @@ def test_ensure_agent_applies_phase_model_for_claimed_task(tmp_path, monkeypatch
     )
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
     monkeypatch.setattr(
-        ops,
+        claimstate,
         "active_claim_phase",
         lambda actor: "plan" if actor == "claimed-thread" else "",
     )
@@ -363,7 +365,7 @@ def test_ensure_agent_falls_back_when_claimed_phase_is_unmapped(tmp_path, monkey
         lambda *_args, **_kwargs: _status(thread_id="claimed-thread"),
     )
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
-    monkeypatch.setattr(ops, "active_claim_phase", lambda actor: "todo")
+    monkeypatch.setattr(claimstate, "active_claim_phase", lambda actor: "todo")
     (tmp_path / "pyproject.toml").write_text(
         '[tool.spice.tasks.phase_models.claude.plan]\nmodel = "claude-sonnet-5"\n',
         encoding="utf-8",
@@ -387,7 +389,7 @@ def test_ensure_agent_skips_phase_lookup_without_a_thread_id(tmp_path, monkeypat
     def _unexpected_call(actor):
         raise AssertionError("active_claim_phase should not run without a thread id")
 
-    monkeypatch.setattr(ops, "active_claim_phase", _unexpected_call)
+    monkeypatch.setattr(claimstate, "active_claim_phase", _unexpected_call)
 
     result = lifecycle.ensure_agent(tmp_path, dry_run=True)
 
@@ -743,14 +745,14 @@ def test_supervisor_claim_renewal_uses_owned_actor(tmp_path, monkeypatch):
 
     def fake_renew_claim(handle=None, *, actor=None):
         calls.append({"handle": handle, "actor": actor})
-        return ops.ClaimRenewalResult(
+        return claimstate.ClaimRenewalResult(
             True,
             "renewed",
             handle="TASK-00000000",
             claim_until="2026-07-09T06:00:00.000000Z",
         )
 
-    monkeypatch.setattr(ops, "renew_claim", fake_renew_claim)
+    monkeypatch.setattr(claimstate, "renew_claim", fake_renew_claim)
 
     lifecycle._renew_supervised_claim(
         tmp_path, "thread-a", tmp_path / "supervisor.log", {}
@@ -763,9 +765,9 @@ def test_supervisor_claim_renewal_is_silent_without_active_claim(tmp_path, monke
     feedback: list[tuple[str, dict[str, object]]] = []
     log_path = tmp_path / "supervisor.log"
     monkeypatch.setattr(
-        ops,
+        claimstate,
         "renew_claim",
-        lambda **_kwargs: ops.ClaimRenewalResult(False, "no_active_claim"),
+        lambda **_kwargs: claimstate.ClaimRenewalResult(False, "no_active_claim"),
     )
     monkeypatch.setattr(
         watchdog,
@@ -782,9 +784,11 @@ def test_supervisor_claim_renewal_is_silent_without_active_claim(tmp_path, monke
 @pytest.mark.parametrize(
     "result",
     [
-        ops.ClaimRenewalResult(False, "claimed_by_other", "TASK-peer", detail="peer"),
-        ops.ClaimRenewalResult(False, "missing", "TASK-missing"),
-        ops.ClaimRenewalResult(False, "deleted", "TASK-deleted"),
+        claimstate.ClaimRenewalResult(
+            False, "claimed_by_other", "TASK-peer", detail="peer"
+        ),
+        claimstate.ClaimRenewalResult(False, "missing", "TASK-missing"),
+        claimstate.ClaimRenewalResult(False, "deleted", "TASK-deleted"),
     ],
 )
 def test_supervisor_claim_renewal_reports_bounded_noop_reasons(
@@ -793,7 +797,7 @@ def test_supervisor_claim_renewal_reports_bounded_noop_reasons(
     feedback: list[tuple[str, dict[str, object]]] = []
     log_path = tmp_path / "supervisor.log"
     reported: dict[str, str] = {}
-    monkeypatch.setattr(ops, "renew_claim", lambda **_kwargs: result)
+    monkeypatch.setattr(claimstate, "renew_claim", lambda **_kwargs: result)
     monkeypatch.setattr(
         watchdog,
         "publish_supervisor_feedback",
@@ -821,10 +825,10 @@ def test_supervisor_claim_renewal_reports_backend_failure(tmp_path, monkeypatch)
     feedback: list[tuple[str, dict[str, object]]] = []
     log_path = tmp_path / "supervisor.log"
     reported: dict[str, str] = {}
-    result = ops.ClaimRenewalResult(
+    result = claimstate.ClaimRenewalResult(
         False, "backend_error", handle="TASK-failed", detail="backend offline"
     )
-    monkeypatch.setattr(ops, "renew_claim", lambda **_kwargs: result)
+    monkeypatch.setattr(claimstate, "renew_claim", lambda **_kwargs: result)
     monkeypatch.setattr(
         watchdog,
         "publish_supervisor_feedback",

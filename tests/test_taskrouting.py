@@ -11,7 +11,7 @@ from spice.serve.team.store import (
     ServeTeamStore,
     TeamConfig,
 )
-from spice.tasks import alloc, config, create, identity, lanes, ops, render
+from spice.tasks import alloc, config, create, identity, lanes, ops, projectsubs, render
 
 from tests.test_tasks import (
     ACTOR_A,
@@ -391,7 +391,7 @@ def test_delete_gcs_empty_auto_create_filter_after_project_subtree_empties(
     ops.delete(child, "child abandoned")
     emptied = store.team_config(team.team_id)
     after_empty_revision = store.global_revision()
-    ops._gc_empty_project_task_filters("task.unit")
+    projectsubs._gc_empty_project_task_filters("task.unit")
 
     assert emptied.task_filters == ()
     assert emptied.task_filter_entries == ()

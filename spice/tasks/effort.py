@@ -18,7 +18,7 @@ from spice.sessions.meter import (
 )
 from spice.sessions.slices import turn_activity_ts
 from spice.sessions.util import parse_iso_ts
-from spice.tasks import identity, ops
+from spice.tasks import claimstate, identity
 
 PARTIAL_MISSING_START = "missing_start"
 PARTIAL_MISSING_END = "missing_end"
@@ -393,7 +393,7 @@ def _task_shapes(task_rows: Iterable[Mapping[str, Any]]) -> dict[str, _TaskShape
         task_id = str(row.get("uuid") or "").strip()
         if not task_id:
             continue
-        phases = tuple(ops.phases_of(row))
+        phases = tuple(claimstate.phases_of(row))
         if not phases and str(row.get("phase") or "").strip():
             phases = (str(row.get("phase") or "").strip(),)
         shapes[task_id] = _TaskShape(

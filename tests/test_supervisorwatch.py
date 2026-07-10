@@ -4,7 +4,7 @@ import subprocess
 
 from spice.agent import lifecycle
 from spice.agent import watchdog
-from spice.tasks import ops
+from spice.tasks import claimstate
 
 
 def _init_git_repo(path):
@@ -22,7 +22,7 @@ def _capture_feedback(monkeypatch):
 def test_flag_uncaptured_lane_nudges_when_dirty_and_unclaimed(tmp_path, monkeypatch):
     _init_git_repo(tmp_path)
     (tmp_path / "dirty.txt").write_text("uncommitted", encoding="utf-8")
-    monkeypatch.setattr(ops, "active_claim", lambda _actor: None)
+    monkeypatch.setattr(claimstate, "active_claim", lambda _actor: None)
     calls = _capture_feedback(monkeypatch)
 
     lifecycle._flag_uncaptured_lane(tmp_path, "thread-x", tmp_path / "log.txt")
@@ -35,7 +35,7 @@ def test_flag_uncaptured_lane_nudges_when_dirty_and_unclaimed(tmp_path, monkeypa
 def test_flag_uncaptured_lane_silent_when_a_task_is_claimed(tmp_path, monkeypatch):
     _init_git_repo(tmp_path)
     (tmp_path / "dirty.txt").write_text("uncommitted", encoding="utf-8")
-    monkeypatch.setattr(ops, "active_claim", lambda _actor: {"uuid": "held"})
+    monkeypatch.setattr(claimstate, "active_claim", lambda _actor: {"uuid": "held"})
     calls = _capture_feedback(monkeypatch)
 
     lifecycle._flag_uncaptured_lane(tmp_path, "thread-x", tmp_path / "log.txt")
@@ -45,7 +45,7 @@ def test_flag_uncaptured_lane_silent_when_a_task_is_claimed(tmp_path, monkeypatc
 
 def test_flag_uncaptured_lane_silent_when_tree_is_clean(tmp_path, monkeypatch):
     _init_git_repo(tmp_path)
-    monkeypatch.setattr(ops, "active_claim", lambda _actor: None)
+    monkeypatch.setattr(claimstate, "active_claim", lambda _actor: None)
     calls = _capture_feedback(monkeypatch)
 
     lifecycle._flag_uncaptured_lane(tmp_path, "thread-x", tmp_path / "log.txt")

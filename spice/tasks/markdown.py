@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.tasks import config, create, identity, ops, tw
+from spice.tasks import claimstate, config, create, identity, ops, tw
 
 CANONICAL_FENCE = "spice.task-dag.v1"
 MARKDOWN_ID_PREFIX = "markdown-id:"
@@ -389,7 +389,7 @@ def _node_from_row(row: dict[str, Any]) -> MarkdownTaskNode:
         title=str(row.get("description") or ""),
         project=str(row.get("project") or ""),
         priority=str(row.get("priority") or ""),
-        flow=tuple(ops.phases_of(row)),
+        flow=tuple(claimstate.phases_of(row)),
         acceptance=_acceptance_items(str(row.get("acceptance") or "")),
         description=str(row.get("task_description") or ""),
         annotations=visible_annotations,

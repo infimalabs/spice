@@ -301,13 +301,13 @@ def render_activation_packet(repo_root: Path) -> str:
     )
     from spice.hooks.install import install_hooks_for_repo
     from spice.mail.steeringkey import steering_token
-    from spice.tasks import gitsync, ops
+    from spice.tasks import claimstate, gitsync
 
     status = bind_ambient_agent_activation(repo_root)
     hook_rows = install_hooks_for_repo(repo_root)
     skill = materialize_worktree_skill(repo_root)
     refresh = gitsync.fast_forward_if_safe(repo_root)
-    claim_renewal = ops.renew_claim(actor=status.thread_id or None)
+    claim_renewal = claimstate.renew_claim(actor=status.thread_id or None)
     token = steering_token(repo_root)
     return "\n".join(
         [
@@ -325,7 +325,7 @@ def render_activation_packet(repo_root: Path) -> str:
             "dev_hooks=configured",
             *(f"dev_hooks_detail={row}" for row in hook_rows),
             *((f"skill={skill}",) if skill else ()),
-            ops.claim_renewal_status_line(claim_renewal),
+            claimstate.claim_renewal_status_line(claim_renewal),
             *(f"baseline_refresh={note}" for note in refresh.notes),
             *activation_git_hygiene_lines(),
             *activation_source_root_lines(repo_root),

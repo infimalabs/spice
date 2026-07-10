@@ -10,7 +10,7 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.cli.parser import build_parser
-from spice.tasks import config, create, identity, markdown, ops, tw
+from spice.tasks import claimstate, config, create, identity, markdown, ops, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -165,7 +165,7 @@ def test_task_ingest_missing_acceptance_routes_node_to_plan(
 
     assert row["description"] == "Under specified task"
     assert row["phase"] == "plan"
-    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert not str(row.get("acceptance") or "")
 
 
@@ -194,7 +194,7 @@ def test_canonical_markdown_missing_acceptance_honors_explicit_flow(task_repo):
 
     assert row["description"] == "Explicit flow import"
     assert row["phase"] == "todo"
-    assert ops.phases_of(row) == ["todo", "review"]
+    assert claimstate.phases_of(row) == ["todo", "review"]
     assert not str(row.get("acceptance") or "")
 
 
@@ -224,7 +224,7 @@ def test_canonical_markdown_suspect_wording_routes_and_marks_node(task_repo):
 
     assert row["description"] == "Adopting markdown task"
     assert row["phase"] == "plan"
-    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
     assert row["origin"] == "ack:20260101T000000000000Z"

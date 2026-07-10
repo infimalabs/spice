@@ -27,7 +27,7 @@ from spice.serve.team.store import (
     ServeTeamStore,
     TeamConfig,
 )
-from spice.tasks import alloc, config, identity, ops, tw
+from spice.tasks import alloc, claimstate, config, identity, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -166,7 +166,7 @@ def test_supervised_ack_missing_acceptance_routes_inline_task_to_plan(
     assert rows[0]["description"] == "Inline plan follow-up"
     assert rows[0]["project"] == "task.unit"
     assert rows[0]["phase"] == "plan"
-    assert ops.phases_of(rows[0]) == ["plan", "todo", "review"]
+    assert claimstate.phases_of(rows[0]) == ["plan", "todo", "review"]
     assert not str(rows[0].get("acceptance") or "")
     assert rows[0]["origin"] == f"ack:{INBOX_KEY}"
     assert rows[0][config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
@@ -625,8 +625,6 @@ def test_retired_ack_without_active_claim_skips_annotation(task_repo, quiet_supe
 def test_ack_annotation_failure_never_blocks_retirement(
     task_repo, quiet_supervisor, monkeypatch
 ):
-    from spice.tasks import ops
-
     _claimed_task("Active work with failing annotate")
     write_inbox_item(
         task_repo,
@@ -634,7 +632,9 @@ def test_ack_annotation_failure_never_blocks_retirement(
         compose_inbox_text(body="steering survives failure", priority=None, stop=False),
     )
     monkeypatch.setattr(
-        ops, "annotate", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom"))
+        claimstate,
+        "annotate",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     log = io.StringIO()
 

@@ -1,0 +1,514 @@
+"""Claim state, phase slots, and guard rails shared by task mutations.
+
+Leaf module: ops (and anything else) imports from here; nothing here
+imports ops, so guards stay usable from any task surface without cycles.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from spice.agent.identity import ambient_thread
+from spice.errors import SpiceError
+from spice.tasks import config, gitsync, identity, tw
+
+
+def annotate(target: str, text: str) -> None:
+    """Annotate via `-- ` so attribute-like text (e.g. "depends: X") stays
+    literal."""
+    text = _task_text(text)
+    tw.run([target, "annotate", "--", text])
+
+
+def _task_text(text: str) -> str:
+    return text
+
+
+# ---- flow / phase slots -------------------------------------------------
+
+
+def flow_args(phases: list[str]) -> list[str]:
+    args = [f"phase_{i}:{phase}" for i, phase in enumerate(phases)]
+    args.append(f"phase:{phases[0]}")
+    args.append("phase_i:0")
+    return args
+
+
+def phases_of(row: dict[str, Any]) -> list[str]:
+    phases: list[str] = []
+    for i in range(config.PHASE_SLOT_COUNT):
+        value = str(row.get(f"phase_{i}") or "").strip()
+        if not value:
+            break
+        phases.append(value)
+    return phases
+
+
+def phase_index(row: dict[str, Any]) -> int:
+    return int(row.get("phase_i") or 0)
+
+
+CLAIM_CLEAR = [
+    f"{name}:"
+    for name in (
+        "claim_by",
+        "claim_at",
+        "claim_until",
+        "claim_thread",
+        "claim_worktree",
+        "claim_branch",
+        "claim_head",
+        "claim_context_start",
+        "claim_context_end",
+        "claim_context_link",
+        "claim_context_turn",
+    )
+]
+
+
+def _iso(when: datetime) -> str:
+    return when.isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def claim_meta(actor: str) -> list[str]:
+    at_dt = datetime.now(UTC)
+    at = _iso(at_dt)
+    until = _iso(at_dt + timedelta(seconds=config.CLAIM_TTL_SECONDS))
+    start = _iso(at_dt - timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
+    end = _iso(at_dt + timedelta(seconds=config.CLAIM_CONTEXT_SECONDS))
+    ambient = ambient_thread()
+    if ambient is None:
+        thread = tw.canonical_actor(actor or config.SENTINEL_ACTOR)
+        turn = thread
+    else:
+        thread, driver = ambient
+        # Per-turn granularity is a driver capability. Drivers that cannot see
+        # turn ids from the command environment intentionally fall back to the
+        # thread id, so claim_context_turn equals claim_thread for them.
+        turn = (
+            driver.current_turn_id(os.environ) or thread
+        ).strip()  # env-policy: allow
+    link = f"spice-session://{thread}?start={start}&end={end}"
+    return [
+        f"claim_by:{actor}",
+        f"claim_at:{at}",
+        f"claim_until:{until}",
+        f"claim_thread:{thread}",
+        f"claim_worktree:{config.repo_root()}",
+        f"claim_branch:{tw.current_branch()}",
+        f"claim_head:{tw.claim_head()}",
+        f"claim_context_start:{start}",
+        f"claim_context_end:{end}",
+        f"claim_context_link:{link}",
+        f"claim_context_turn:{turn}",
+    ]
+
+
+def _require_pending(row: dict[str, Any], action: str) -> None:
+    status = str(row.get("status") or "")
+    if status == "deleted":
+        raise SpiceError(_deleted_task_recovery_message(row, action))
+    if status == "completed":
+        raise SpiceError(
+            f"cannot {action} a completed task: {identity.render_handle(row)}"
+        )
+
+
+def _deleted_task_recovery_message(row: dict[str, Any], action: str) -> str:
+    handle = identity.render_handle(row)
+    project = str(row.get("project") or "").strip() or "<project>"
+    return (
+        f"cannot {action} a deleted task: {handle}. "
+        "If deletion invalidated local work, discard local work or hand off the "
+        "current state before continuing. If you already committed work, do not "
+        "capture the deleted handle; capture into a new task with "
+        f"`spice task capture --project {project} --origin task:{handle} "
+        '--done --validation "..."`.'
+    )
+
+
+def _claimed_task_capture_recovery_message(row: dict[str, Any], owner: str) -> str:
+    handle = identity.render_handle(row)
+    project = str(row.get("project") or "").strip() or "<project>"
+    return (
+        f"cannot capture {handle}: task already claimed by {owner}. "
+        "If this is a duplicate or canonical task owned by another agent, discard "
+        "local work or hand off the current state before continuing. If you "
+        "already committed work, capture into a new task with "
+        f"`spice task capture --project {project} --origin task:{handle} "
+        '--done --validation "..."`.'
+    )
+
+
+@dataclass(frozen=True)
+class LiveClaim:
+    claim_by: str
+    claim_thread: str
+    claim_until: str
+
+
+@dataclass(frozen=True)
+class ClaimRenewalResult:
+    renewed: bool
+    reason: str
+    handle: str = ""
+    claim_until: str = ""
+    detail: str = ""
+
+
+CLAIM_RENEWAL_FAILED_REASONS = frozenset({"backend_error"})
+
+
+def claim_renewal_state(result: ClaimRenewalResult) -> str:
+    if result.renewed:
+        return "renewed"
+    if result.reason in CLAIM_RENEWAL_FAILED_REASONS:
+        return "failed"
+    return "skipped"
+
+
+def claim_renewal_status_line(result: ClaimRenewalResult) -> str:
+    """A concise status line for surfaces that opportunistically renew claims."""
+    if result.renewed:
+        return f"claim_renewal=renewed {result.handle} until {result.claim_until}"
+    parts = [f"claim_renewal={claim_renewal_state(result)}", result.reason]
+    if result.handle:
+        parts.append(result.handle)
+    if result.detail:
+        parts.append(f"detail={_compact_claim_renewal_detail(result.detail)}")
+    return " ".join(parts)
+
+
+def _compact_claim_renewal_detail(detail: str) -> str:
+    return " ".join(detail.split())
+
+
+def _live_claim(row: dict[str, Any]) -> LiveClaim | None:
+    until = str(row.get("claim_until") or "")
+    if not until or until < tw.now_iso():
+        return None
+    claim_by = str(row.get("claim_by") or "")
+    claim_thread = str(row.get("claim_thread") or "")
+    if not claim_by and not claim_thread:
+        return None
+    return LiveClaim(
+        claim_by=claim_by or "-",
+        claim_thread=claim_thread or "-",
+        claim_until=until,
+    )
+
+
+def _live_claim_text(claim: LiveClaim) -> str:
+    return (
+        f"claim_by={claim.claim_by} claim_thread={claim.claim_thread} "
+        f"claim_until={claim.claim_until}"
+    )
+
+
+def _require_owner(row: dict[str, Any], actor: str, action: str) -> None:
+    owner = str(row.get("claim_by") or "")
+    active = bool(row.get("start"))
+    if owner == actor and active:
+        return
+    handle = identity.render_handle(row)
+    if owner == actor:
+        raise SpiceError(
+            f"{action} requires native ACTIVE state on {handle}; "
+            "run `spice task claim <handle>` to repair the claim"
+        )
+    if active and not owner:
+        raise SpiceError(
+            f"{action} blocked: {handle} is ACTIVE but has no claim_by; "
+            "run `spice task claim <handle> --steal` to repair ownership"
+        )
+    if owner:
+        raise SpiceError(f"task claimed by {owner}; not yours to {action}")
+    raise SpiceError(
+        f"{action} requires a claim; run `spice task next` (or `task claim`) first"
+    )
+
+
+def _is_same_author_review(row: dict[str, Any], actor: str) -> bool:
+    return (
+        str(row.get("phase") or "") == "review"
+        and str(row.get("review_author") or "") == actor
+    )
+
+
+def _require_manual_claim_allowed(row: dict[str, Any], actor: str) -> None:
+    if not _is_same_author_review(row, actor):
+        return
+    handle = identity.render_handle(row)
+    raise SpiceError(
+        f"cannot manually claim {handle}: this thread authored the review; "
+        "leave it for another actor"
+    )
+
+
+def _active_claims_for(actor: str) -> list[dict[str, Any]]:
+    return [
+        r
+        for r in tw.export(["status:pending", "+ACTIVE"])
+        if str(r.get("claim_by") or "") == actor
+    ]
+
+
+def has_active_claim() -> bool:
+    """Whether the current actor holds an active task claim."""
+    return bool(_active_claims_for(tw.current_actor()))
+
+
+def active_claim(actor: str) -> dict[str, Any] | None:
+    """The actor's active task claim (latest claim_at), or None."""
+    if not actor:
+        return None
+    claims = _active_claims_for(actor)
+    if not claims:
+        return None
+    return max(claims, key=lambda r: str(r.get("claim_at") or ""))
+
+
+def active_claim_phase(actor: str) -> str:
+    """The phase of `actor`'s active task claim, or "" when none is held."""
+    if not actor:
+        return ""
+    claims = _active_claims_for(actor)
+    return str(claims[0].get("phase") or "") if claims else ""
+
+
+def require_no_active_plan_phase_implementation(action: str) -> None:
+    """Refuse implementation work while the actor holds a plan-phase claim."""
+    row = active_claim(tw.current_actor())
+    if row is None or str(row.get("phase") or "") != "plan":
+        return
+    _raise_plan_phase_implementation_block(action, row)
+
+
+def _raise_plan_phase_implementation_block(
+    action: str, row: dict[str, Any], detail: str = ""
+) -> None:
+    handle = identity.render_handle(row)
+    suffix = f" {detail}" if detail else ""
+    raise SpiceError(
+        f"{action} blocked: {handle} is in plan phase.{suffix} "
+        "Plan phase output is board state: add child tasks with acceptance and "
+        "native dependencies, then run `spice task done` with a clean tree and "
+        "zero local implementation commits. Claim an implementation child task "
+        "before creating, capturing, or landing code."
+    )
+
+
+def _require_plan_phase_done_has_no_local_commits(row: dict[str, Any]) -> None:
+    if str(row.get("phase") or "") != "plan":
+        return
+    ahead = gitsync.commits_ahead_of_baseline()
+    if ahead <= 0:
+        return
+    noun = "commit" if ahead == 1 else "commits"
+    _raise_plan_phase_implementation_block(
+        "task done",
+        row,
+        f"Found {ahead} local {noun} ahead of the task baseline.",
+    )
+
+
+def resolve_claim_target(handle: str | None, *, action: str) -> dict[str, Any]:
+    """Resolve an explicit handle, or infer the current actor's sole active claim.
+
+    Subcommands that act on the task you are actively working (`done`, `review`,
+    `unclaim`) accept an omitted handle and fill it from the single claim you
+    hold. With no claim, or more than one, the handle stays required so the
+    target is never guessed.
+    """
+    if handle and handle.strip():
+        return identity.resolve(handle)
+    claims = _active_claims_for(tw.current_actor())
+    if len(claims) == 1:
+        return claims[0]
+    if not claims:
+        raise SpiceError(
+            f"task {action} requires a handle: no active claim to infer one from"
+        )
+    held = ", ".join(sorted(identity.render_handle(r) for r in claims))
+    raise SpiceError(
+        f"task {action} requires an explicit handle: you hold "
+        f"{len(claims)} active claims ({held})"
+    )
+
+
+def _require_single_active_slot(
+    actor: str, *, action: str, target: dict[str, Any] | None = None
+) -> None:
+    target_uuid = identity.uuid_of(target) if target else ""
+    conflicts = [
+        r for r in _active_claims_for(actor) if identity.uuid_of(r) != target_uuid
+    ]
+    if not conflicts:
+        return
+    active = max(conflicts, key=lambda r: str(r.get("claim_at") or ""))
+    active_handle = identity.render_handle(active)
+    if target:
+        target_handle = identity.render_handle(target)
+        raise SpiceError(
+            f"{action} would create multiple active claims for {actor}; "
+            f"complete or unclaim {active_handle} before claiming {target_handle}"
+        )
+    raise SpiceError(
+        f"{action} would create multiple active claims for {actor}; "
+        f"complete or unclaim {active_handle} before claiming new work"
+    )
+
+
+def do_claim(uuid: str, actor: str, *, guard_unclaimed: bool = True) -> bool:
+    """Atomic claim: set the `start` date AND the claim metadata in one modify.
+
+    A single locked write means a crash can never leave an active-but-
+    unclaimed row (which would be stranded: skipped by `next` yet resumable by
+    no one). Idempotent — re-claiming (including a steal of an already-active
+    row) just rewrites the owner and refreshes the deadline."""
+    filters = (
+        ["(", "status:pending", "or", "status:waiting", ")", "-ACTIVE"]
+        if guard_unclaimed
+        else []
+    )
+    try:
+        tw.run([uuid, *filters, "modify", *claim_meta(actor), "wait:", "start:now"])
+    except SpiceError:
+        if guard_unclaimed:
+            return False
+        raise
+    _record_task_lifecycle_event(uuid, "claim", actor)
+    return True
+
+
+def _renewal_claim_meta(actor: str) -> list[str]:
+    return [
+        arg
+        for arg in claim_meta(actor)
+        if not arg.startswith(("claim_by:", "claim_at:"))
+    ]
+
+
+def _claim_worktree_matches(row: dict[str, Any], repo_root: Path) -> bool:
+    raw = str(row.get("claim_worktree") or "").strip()
+    if not raw:
+        return False
+    try:
+        return Path(raw).expanduser().resolve() == repo_root.expanduser().resolve()
+    except OSError:
+        return False
+
+
+def _claim_renewal_block(row: dict[str, Any], actor: str) -> ClaimRenewalResult | None:
+    handle = identity.render_handle(row)
+    status = str(row.get("status") or "")
+    if status == "deleted":
+        return ClaimRenewalResult(False, "deleted", handle=handle)
+    if status == "completed":
+        return ClaimRenewalResult(False, "completed", handle=handle)
+    owner = str(row.get("claim_by") or "")
+    if owner and owner != actor:
+        return ClaimRenewalResult(
+            False,
+            "claimed_by_other",
+            handle=handle,
+            claim_until=str(row.get("claim_until") or ""),
+            detail=owner,
+        )
+    if not owner or not row.get("start"):
+        return ClaimRenewalResult(False, "no_active_claim", handle=handle)
+    if not _claim_worktree_matches(row, config.repo_root()):
+        return ClaimRenewalResult(False, "different_worktree", handle=handle)
+    return None
+
+
+def _claim_renewal_missing_result(
+    handle: str | None, exc: SpiceError
+) -> ClaimRenewalResult:
+    detail = str(exc)
+    if detail.startswith("unknown task:"):
+        return ClaimRenewalResult(
+            False, "missing", handle=(handle or ""), detail=detail
+        )
+    return ClaimRenewalResult(
+        False, "backend_error", handle=(handle or ""), detail=detail
+    )
+
+
+def renew_claim(
+    handle: str | None = None, *, actor: str | None = None
+) -> ClaimRenewalResult:
+    """Refresh the current actor/worktree's existing active claim.
+
+    Renewal deliberately is not a claim operation: it never starts an unclaimed
+    task, steals a peer claim, repairs ownership, or advances phase state.
+    """
+    resolved_actor = tw.canonical_actor(actor or tw.current_actor())
+    try:
+        row = identity.resolve(handle) if handle else active_claim(resolved_actor)
+    except SpiceError as exc:
+        return _claim_renewal_missing_result(handle, exc)
+    if row is None:
+        return ClaimRenewalResult(False, "no_active_claim")
+    blocked = _claim_renewal_block(row, resolved_actor)
+    if blocked is not None:
+        return blocked
+    uuid = identity.uuid_of(row)
+    handle_text = identity.render_handle(row)
+    try:
+        tw.run(
+            [
+                uuid,
+                "status:pending",
+                "+ACTIVE",
+                f"claim_by.is:{resolved_actor}",
+                f"claim_worktree.is:{config.repo_root()}",
+                "modify",
+                *_renewal_claim_meta(resolved_actor),
+            ]
+        )
+    except SpiceError as exc:
+        try:
+            fresh = identity.resolve(handle_text)
+        except SpiceError as resolve_exc:
+            return _claim_renewal_missing_result(handle_text, resolve_exc)
+        blocked = _claim_renewal_block(fresh, resolved_actor)
+        if blocked is not None:
+            return blocked
+        return ClaimRenewalResult(
+            False, "backend_error", handle=handle_text, detail=str(exc)
+        )
+    try:
+        fresh = identity.resolve(handle_text)
+    except SpiceError as exc:
+        return _claim_renewal_missing_result(handle_text, exc)
+    return ClaimRenewalResult(
+        True,
+        "renewed",
+        handle=identity.render_handle(fresh),
+        claim_until=str(fresh.get("claim_until") or ""),
+    )
+
+
+def _record_task_lifecycle_event(task_id: str, kind: str, actor: str) -> None:
+    from spice.serve.team.store import ServeTeamStore
+    from spice.tasks import lanes
+
+    agent_id = lanes.route_actor_id(actor or tw.current_actor())
+    ServeTeamStore().record_task_lifecycle_event(
+        kind,
+        task_id=task_id,
+        agent_id=agent_id,
+    )
+
+
+def _task_continuation_contract(actor: str | None = None):
+    from spice.tasks import lanes
+
+    actor = actor or tw.current_actor()
+    route = lanes.team_route_for_actor(actor)
+    return lanes.task_continuation_contract(route)

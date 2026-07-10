@@ -34,16 +34,16 @@ def resolve_wording_review(handle: str | None, *, reason: str) -> str:
     reason = reason.strip()
     if not reason:
         raise SpiceError("task resolve-wording requires --reason")
-    from spice.tasks import ops
+    from spice.tasks import claimstate
 
-    row = ops.resolve_claim_target(handle, action="resolve wording review")
+    row = claimstate.resolve_claim_target(handle, action="resolve wording review")
     handle_text = identity.render_handle(row)
-    ops._require_pending(row, "resolve wording review")
+    claimstate._require_pending(row, "resolve wording review")
     actor = tw.current_actor()
-    ops._require_owner(row, actor, "resolve wording review")
+    claimstate._require_owner(row, actor, "resolve wording review")
     if not str(row.get(config.TASK_WORDING_REVIEW_UDA) or "").strip():
         raise SpiceError(f"{handle_text} has no suspect-wording review marker")
     uuid = identity.uuid_of(row)
     tw.run([uuid, "modify", f"{config.TASK_WORDING_REVIEW_UDA}:"])
-    ops.annotate(uuid, f"wording review resolved: {reason}")
+    claimstate.annotate(uuid, f"wording review resolved: {reason}")
     return f"resolved wording review for {handle_text}"

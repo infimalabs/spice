@@ -16,7 +16,7 @@ from spice.serve.team.store import (
     ServeTeamStore,
     TeamConfig,
 )
-from spice.tasks import config, create, identity, ops, tw
+from spice.tasks import claimstate, config, create, identity, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -226,7 +226,7 @@ def test_cli_surface_batch_missing_acceptance_routes_to_plan(task_repo):
     assert row["description"] == "Plan routed batch"
     assert row["project"] == "task.unit"
     assert row["phase"] == "plan"
-    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert not str(row.get("acceptance") or "")
     assert row["origin"] == "ack:20260101T000000000000Z"
     assert str(row.get("due") or "").startswith("20260801")
@@ -244,7 +244,7 @@ def test_cli_surface_batch_missing_acceptance_honors_explicit_flow(task_repo):
 
     assert row["description"] == "Explicit flow batch"
     assert row["phase"] == "todo"
-    assert ops.phases_of(row) == ["todo", "review"]
+    assert claimstate.phases_of(row) == ["todo", "review"]
     assert not str(row.get("acceptance") or "")
 
 
@@ -262,7 +262,7 @@ def test_cli_surface_batch_suspect_wording_preserves_existing_plan_flow(task_rep
 
     assert row["description"] == "Adopting explicit plan batch"
     assert row["phase"] == "todo"
-    assert ops.phases_of(row) == ["todo", "plan", "review"]
+    assert claimstate.phases_of(row) == ["todo", "plan", "review"]
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     assert row["origin"] == "ack:20260101T000000000000Z"
     assert any(

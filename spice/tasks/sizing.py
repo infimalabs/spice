@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from spice.tasks import config, identity, ops, tw
+from spice.tasks import claimstate, config, identity, tw
 
 MINUTE_SECONDS = 60
 HOUR_SECONDS = 60 * MINUTE_SECONDS
@@ -324,7 +324,7 @@ def _metadata_component(row: dict[str, Any]) -> SizingComponent:
     if len(depends) >= DEPENDENCY_COMPLEXITY_MIN:
         points += 1
         details.append(f"depends:{len(depends)}")
-    phases = ops.phases_of(row)
+    phases = claimstate.phases_of(row)
     if "verify" in phases:
         points += 1
         details.append("phase:verify")

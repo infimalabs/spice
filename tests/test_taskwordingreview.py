@@ -10,7 +10,7 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
-from spice.tasks import config, create, identity, ops, render, wordingreview
+from spice.tasks import claimstate, config, create, identity, ops, render, wordingreview
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -67,7 +67,7 @@ def test_inline_task_batch_suspect_wording_routes_without_claiming(task_repo):
 
     assert row["description"] == "Adopting inline task"
     assert row["phase"] == "plan"
-    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     assert not str(row.get("claim_by") or "")
     assert not str(row.get("start") or "")
@@ -106,7 +106,7 @@ def test_review_followup_suspect_wording_routes_without_claiming(task_repo):
     assert identity.resolve(reviewed)["status"] == "completed"
     assert row["description"] == "Adopting review follow-up"
     assert row["phase"] == "plan"
-    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
     assert not str(row.get("claim_by") or "")
@@ -194,6 +194,25 @@ def test_resolve_wording_review_rejects_inactive_task(task_repo):
 
     row = identity.resolve(handle)
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
+
+
+def test_task_edit_acceptance_suspect_wording_sets_review_marker(task_repo):
+    handle = create.add(
+        "Edit gains suspect acceptance",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        acceptance=["clean criterion"],
+    )
+
+    ops.edit(handle, acceptance=["adopting the legacy rows"])
+
+    row = identity.resolve(handle)
+    assert row["acceptance"] == "adopting the legacy rows"
+    assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
+    annotations = [
+        str(entry.get("description") or "") for entry in row.get("annotations") or []
+    ]
+    assert any("self-correction required" in note for note in annotations)
 
 
 def _suspect_plan_task_with_accepted_child() -> str:
