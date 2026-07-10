@@ -525,6 +525,20 @@ def is_hidden_project(project: str) -> bool:
     return hidden and segments[0] in hidden_stems()
 
 
+def is_oops_project(project: str) -> bool:
+    """The hidden `.oops` triage project and its `.oops.*` descendants.
+
+    The oops stem acts as a trailing-wildcard prefix: a row classifies as oops
+    from its project alone when its stem is `oops`, whether it sits at `.oops`
+    itself or at any `.oops.<kind>` descendant.
+    """
+    try:
+        hidden, segments = _project_parts(project)
+    except SpiceError:
+        return False
+    return hidden and segments[0] == project_stem(OOPS_PROJECT)
+
+
 def validate_project(project: str) -> str:
     hidden, segments = _project_parts(project)
     if hidden:

@@ -706,16 +706,13 @@ def test_task_filter_inventory_reports_open_assignable_tasks(monkeypatch):
             {"project": ".oops", "start": "2026-06-16T23:00:00Z"},
             {"project": "serve.ui", "status": "waiting", "wait": "2099-01-01"},
             {
-                "project": ".oops",
+                "project": ".oops.correctness",
                 "status": "waiting",
-                "tags": ["oops"],
                 "wait": "2099-01-01",
             },
             {
-                "project": "serve.ui",
+                "project": ".maxim_proposal",
                 "status": "waiting",
-                "tags": "hidden",
-                "project_hidden": "1",
                 "wait": "2099-01-01",
             },
         ]

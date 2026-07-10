@@ -585,6 +585,28 @@ def test_allocator_spreads_from_peer_cell_then_sticks_to_last_cell():
     ]
 
 
+def test_alloc_classifies_oops_and_hidden_by_project_stem_alone():
+    # Rows carry a project and nothing else -- no oops/hidden tags, no UDA.
+    # Identity must ride the project stem alone.
+    oops_kind = _row(
+        "triage kind", project=".oops.correctness", phase="plan", urgency=1
+    )
+    maxim = _row(
+        "proposal", project=config.MAXIM_PROPOSAL_PROJECT, phase="todo", urgency=1
+    )
+    public = _row("ordinary", project="task.alpha", phase="todo", urgency=1)
+
+    # A .oops.<kind> descendant classifies as oops, and therefore hidden.
+    assert alloc.is_oops(oops_kind)
+    assert alloc.is_hidden(oops_kind)
+    # .maxim_proposal is hidden but a distinct stem: its oops verdict differs.
+    assert alloc.is_hidden(maxim)
+    assert alloc.is_oops(maxim) != alloc.is_oops(oops_kind)
+    # An ordinary public row differs from the hidden ones on both axes.
+    assert alloc.is_hidden(public) != alloc.is_hidden(oops_kind)
+    assert alloc.is_oops(public) != alloc.is_oops(oops_kind)
+
+
 def test_task_review_help_requires_description_check(capsys):
     parser = build_parser()
 

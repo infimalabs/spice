@@ -120,6 +120,13 @@ def test_hidden_oops_project_is_addressable_but_not_publicly_assignable(
     assert config.is_hidden_project(config.MAXIM_PROPOSAL_PROJECT)
     assert config.project_stem(".oops.triage") == "oops"
     assert config.is_hidden_project(".oops.triage")
+    assert config.is_oops_project(".oops")
+    assert config.is_oops_project(".oops.triage")
+    # oops and maxim_proposal are both hidden, but only the oops stem subtree
+    # is oops: the trailing-wildcard oops verdict distinguishes them.
+    assert config.is_oops_project(".oops.triage") != config.is_oops_project(
+        config.MAXIM_PROPOSAL_PROJECT
+    )
     assert config.resolve_flow(None, ".oops") == ["plan"]
     assert config.resolve_flow(None, ".oops.triage") == ["plan"]
     assert config.resolve_flow(None, config.MAXIM_PROPOSAL_PROJECT) == ["todo"]

@@ -48,17 +48,7 @@ def task_filter_inventory() -> dict[str, Any]:
     oops_count = 0
     for row in rows:
         project = str(row.get("project") or "")
-        raw_tags = row.get("tags") or []
-        tags = {raw_tags} if isinstance(raw_tags, str) else set(raw_tags)
-        is_oops = (
-            str(row.get(task_config.PROJECT_HIDDEN_UDA) or "") == "1"
-            or task_config.is_hidden_project(project)
-            or task_config.HIDDEN_TASK_TAG in tags
-            or "oops" in tags
-            or project
-            == task_config.OOPS_PROJECT.lstrip(task_config.HIDDEN_PROJECT_PREFIX)
-        )
-        if is_oops:
+        if task_config.is_hidden_project(project):
             oops_count += 1
             continue
         if str(row.get("status") or "pending") == "waiting":
