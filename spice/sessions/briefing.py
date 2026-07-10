@@ -577,6 +577,7 @@ def render_briefing_payload(
     max_bytes: int | None = DEFAULT_BRIEFING_MAX_BYTES,
     explain_pruning: bool = False,
 ) -> str:
+    # Keep the extracted renderer import lazy so either module can be imported first.
     from spice.sessions.rehydrationview import (
         activity_lines,
         finals_lines,

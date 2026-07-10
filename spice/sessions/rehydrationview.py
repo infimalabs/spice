@@ -1,4 +1,4 @@
-"""Candidate-to-text rendering for session rehydration views."""
+"""Candidate-to-text rendering shared by briefing and sweep rehydration views."""
 
 from __future__ import annotations
 
