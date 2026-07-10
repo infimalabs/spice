@@ -9,7 +9,16 @@ from typing import Any
 
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
-from spice.tasks import alloc, artifacts, config, effort, identity, lanes, ops, tw
+from spice.tasks import (
+    alloc,
+    artifacts,
+    config,
+    effort,
+    identity,
+    lanes,
+    ops,
+    tw,
+)
 
 
 SHOW_ANNOTATIONS_LIMIT = 6

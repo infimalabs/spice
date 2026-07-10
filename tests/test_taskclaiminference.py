@@ -16,7 +16,7 @@ import pytest
 from spice.agent.driver import DRIVER
 from spice.cli.parser import build_parser
 from spice.errors import SpiceError
-from spice.tasks import config, create, ops
+from spice.tasks import claimstate, config, create, ops
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -45,47 +45,49 @@ def test_explicit_handle_still_parses(action):
 
 def test_resolve_prefers_explicit_handle_over_the_claim(monkeypatch):
     explicit = {"uuid": "explicit"}
-    monkeypatch.setattr(ops.identity, "resolve", lambda handle: explicit)
-    monkeypatch.setattr(ops, "_active_claims_for", lambda _actor: [{"uuid": "claimed"}])
+    monkeypatch.setattr(claimstate.identity, "resolve", lambda handle: explicit)
+    monkeypatch.setattr(
+        claimstate, "_active_claims_for", lambda _actor: [{"uuid": "claimed"}]
+    )
 
-    assert ops.resolve_claim_target("CLI-1k4Q5gJw", action="done") is explicit
+    assert claimstate.resolve_claim_target("CLI-1k4Q5gJw", action="done") is explicit
 
 
 def test_resolve_infers_the_sole_active_claim(monkeypatch):
     claim = {"uuid": "claimed"}
-    monkeypatch.setattr(ops.tw, "current_actor", lambda: ACTOR_A)
-    monkeypatch.setattr(ops, "_active_claims_for", lambda actor: [claim])
+    monkeypatch.setattr(claimstate.tw, "current_actor", lambda: ACTOR_A)
+    monkeypatch.setattr(claimstate, "_active_claims_for", lambda actor: [claim])
 
-    assert ops.resolve_claim_target(None, action="done") is claim
-    assert ops.resolve_claim_target("   ", action="done") is claim
+    assert claimstate.resolve_claim_target(None, action="done") is claim
+    assert claimstate.resolve_claim_target("   ", action="done") is claim
 
 
 def test_resolve_without_a_claim_requires_the_handle(monkeypatch):
-    monkeypatch.setattr(ops.tw, "current_actor", lambda: ACTOR_A)
-    monkeypatch.setattr(ops, "_active_claims_for", lambda _actor: [])
+    monkeypatch.setattr(claimstate.tw, "current_actor", lambda: ACTOR_A)
+    monkeypatch.setattr(claimstate, "_active_claims_for", lambda _actor: [])
 
     with pytest.raises(SpiceError) as exc:
-        ops.resolve_claim_target(None, action="done")
+        claimstate.resolve_claim_target(None, action="done")
 
     assert "requires a handle" in str(exc.value)
     assert "no active claim" in str(exc.value)
 
 
 def test_resolve_with_multiple_claims_requires_an_explicit_handle(monkeypatch):
-    monkeypatch.setattr(ops.tw, "current_actor", lambda: ACTOR_A)
+    monkeypatch.setattr(claimstate.tw, "current_actor", lambda: ACTOR_A)
     monkeypatch.setattr(
-        ops,
+        claimstate,
         "_active_claims_for",
         lambda _actor: [{"uuid": "one"}, {"uuid": "two"}],
     )
     monkeypatch.setattr(
-        ops.identity,
+        claimstate.identity,
         "render_handle",
         lambda row: "CLI-aaa" if row["uuid"] == "one" else "CLI-bbb",
     )
 
     with pytest.raises(SpiceError) as exc:
-        ops.resolve_claim_target(None, action="unclaim")
+        claimstate.resolve_claim_target(None, action="unclaim")
 
     message = str(exc.value)
     assert "requires an explicit handle" in message

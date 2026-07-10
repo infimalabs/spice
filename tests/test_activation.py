@@ -15,7 +15,7 @@ from spice.agent.activation import (
     activation_command_surface_lines,
 )
 from spice.agent.driver import DRIVER
-from spice.tasks import config, create, identity, ops
+from spice.tasks import claimstate, config, create, identity
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -103,14 +103,14 @@ def test_activation_packet_reports_claim_renewal(tmp_path, monkeypatch):
 
     def fake_renew_claim(*, actor=None):
         seen["actor"] = actor
-        return ops.ClaimRenewalResult(
+        return claimstate.ClaimRenewalResult(
             True,
             "renewed",
             handle="TASK-1k4Q5gJw",
             claim_until="2026-07-09T06:00:00.000000Z",
         )
 
-    monkeypatch.setattr("spice.tasks.ops.renew_claim", fake_renew_claim)
+    monkeypatch.setattr("spice.tasks.claimstate.renew_claim", fake_renew_claim)
 
     packet = agent_cli.render_activation_packet(tmp_path)
 
@@ -181,8 +181,8 @@ def test_activation_packet_reports_failed_claim_renewal(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("spice.mail.steeringkey.steering_token", lambda _repo: "tok")
     monkeypatch.setattr(
-        "spice.tasks.ops.renew_claim",
-        lambda *, actor=None: ops.ClaimRenewalResult(
+        "spice.tasks.claimstate.renew_claim",
+        lambda *, actor=None: claimstate.ClaimRenewalResult(
             False, "backend_error", detail="backend offline"
         ),
     )

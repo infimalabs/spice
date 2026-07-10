@@ -248,12 +248,12 @@ def _builtin_pre_commit_steps(
 
 
 def _run_plan_phase_mutation_guard(repo_root: Path) -> None:
-    from spice.tasks import ops
+    from spice.tasks import claimstate
 
     cwd = Path.cwd()
     try:
         os.chdir(repo_root)
-        ops.require_no_active_plan_phase_implementation("git commit")
+        claimstate.require_no_active_plan_phase_implementation("git commit")
     finally:
         os.chdir(cwd)
 

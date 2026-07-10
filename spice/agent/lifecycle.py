@@ -206,7 +206,7 @@ def _claimed_task_phase_launch(
     if not status.thread_id:
         return {}
     try:
-        from spice.tasks.ops import active_claim_phase
+        from spice.tasks.claimstate import active_claim_phase
 
         phase = active_claim_phase(status.thread_id)
     except SpiceError:
@@ -521,7 +521,7 @@ def _worktree_dirty(repo_root: Path) -> bool:
 def _flag_uncaptured_lane(repo_root: Path, thread_id: str, log_path: Path) -> None:
     """Surface a nudge when the bound agent holds no task but the tree is dirty."""
     from spice.agent.watchdog import publish_supervisor_feedback
-    from spice.tasks.ops import active_claim
+    from spice.tasks.claimstate import active_claim
 
     if not thread_id or active_claim(thread_id) is not None:
         return
@@ -554,9 +554,9 @@ def _renew_supervised_claim(
     if not thread_id:
         return
     from spice.agent.watchdog import publish_supervisor_feedback
-    from spice.tasks import ops
+    from spice.tasks import claimstate
 
-    result = ops.renew_claim(actor=thread_id)
+    result = claimstate.renew_claim(actor=thread_id)
     if result.renewed:
         reported.pop("claim_renewal", None)
         return
@@ -566,7 +566,7 @@ def _renew_supervised_claim(
     if reported.get("claim_renewal") == report_key:
         return
     reported["claim_renewal"] = report_key
-    state = ops.claim_renewal_state(result)
+    state = claimstate.claim_renewal_state(result)
     detail = f" detail={result.detail}" if result.detail else ""
     with log_path.open("a", encoding="utf-8") as log_handle:
         log_handle.write(

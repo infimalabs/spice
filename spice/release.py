@@ -236,9 +236,9 @@ def ensure_release_preconditions(root: Path) -> None:
     # stray uncaptured commit can never be folded into the release bump: a task
     # must be claimed, and there can be no local commits the task system has not
     # yet recorded (the dirty-tree case is handled by ensure_clean_worktree).
-    from spice.tasks import gitsync, ops
+    from spice.tasks import claimstate, gitsync
 
-    if not ops.has_active_claim():
+    if not claimstate.has_active_claim():
         raise SpiceError(
             "refusing to release with no task claimed; claim a release task "
             "first (e.g. `spice task add --project lifecycle.release ...` then "

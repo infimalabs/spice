@@ -309,12 +309,12 @@ def _annotate_active_task_with_acks(
         parse_inbox_payload,
     )
     from spice.tasks import identity as task_identity
-    from spice.tasks import ops, tw
+    from spice.tasks import claimstate, tw
 
     thread_id = _supervised_inline_task_actor(repo_root)
     if not thread_id:
         return
-    claim = ops.active_claim(tw.canonical_actor(thread_id))
+    claim = claimstate.active_claim(tw.canonical_actor(thread_id))
     if claim is None:
         log_handle.write(
             "spice ack annotate: no active claim; retired ack not mirrored\n"
@@ -339,7 +339,7 @@ def _annotate_active_task_with_acks(
         if not content:
             content = payload.body.strip() if payload is not None else ""
         content = " ".join(content.split())[:ACK_ANNOTATION_CONTENT_LIMIT]
-        ops.annotate(uuid, f"ack {key}: {content or '(acknowledged)'}")
+        claimstate.annotate(uuid, f"ack {key}: {content or '(acknowledged)'}")
 
 
 def _acked_state_records_by_aliases(

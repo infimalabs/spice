@@ -224,10 +224,10 @@ def _claim_first(
     *,
     guard_unclaimed: bool,
 ) -> dict[str, Any] | None:
-    from spice.tasks import ops
+    from spice.tasks import claimstate
 
     for chosen in order(candidates, actor, claimed_rows, active_rows):
-        if not ops.do_claim(
+        if not claimstate.do_claim(
             identity.uuid_of(chosen), actor, guard_unclaimed=guard_unclaimed
         ):
             # lost the race to a concurrent agent; fall through to the next one
@@ -313,16 +313,16 @@ def _take_over_stale(
     actor: str,
     active_rows: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    from spice.tasks import ops
+    from spice.tasks import claimstate
 
     for chosen in order(candidates, actor, [], active_rows):
         previous = str(chosen.get("claim_by") or "")
-        ops.do_claim(identity.uuid_of(chosen), actor, guard_unclaimed=False)
+        claimstate.do_claim(identity.uuid_of(chosen), actor, guard_unclaimed=False)
         fresh = identity.resolve(identity.render_handle(chosen))
         if str(fresh.get("claim_by") or "") != actor:
             # lost the takeover race to a concurrent agent; try the next one
             continue
-        ops.annotate(
+        claimstate.annotate(
             identity.uuid_of(fresh),
             f"stale claim reassigned: {previous} -> {actor}",
         )

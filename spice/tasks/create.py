@@ -9,7 +9,7 @@ from typing import Sequence
 
 from spice.errors import SpiceError
 from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
-from spice.tasks import config, gitsync, identity, ops, tw, wording
+from spice.tasks import claimstate, config, gitsync, identity, projectsubs, tw, wording
 
 TASK_TITLE_LIMIT = COMMIT_MESSAGE_WRAP_LIMIT
 TASK_BATCH_DIRECTIVE_TOKEN = "TASK"
@@ -162,7 +162,7 @@ def _resolved_task_origin(origin: str | None, actor: str) -> str:
     # context-free names the acknowledgment or task that prompted it.
     if origin:
         return validated_task_origin(origin)
-    claim = ops.active_claim(actor)
+    claim = claimstate.active_claim(actor)
     if claim is not None:
         return f"task:{identity.render_handle(claim)}"
     raise SpiceError(TASK_ORIGIN_REQUIRED_ERROR)
@@ -279,7 +279,7 @@ def _build_add_args(
         "add",
         f"incepted:{incepted}",
         f"project:{resolved_project}",
-        *ops.flow_args(phases),
+        *claimstate.flow_args(phases),
     ]
     if hidden_project:
         args.append(f"{config.PROJECT_HIDDEN_UDA}:1")
@@ -355,7 +355,7 @@ def _add_result(
     resolved_project = _resolve_add_project(actor, project, system_project)
     resolved_origin = _resolved_task_origin(origin, actor)
     if claim:
-        ops._require_single_active_slot(actor, action="task add --claim")
+        claimstate._require_single_active_slot(actor, action="task add --claim")
         # Match a normal claim's baseline check before creating the task row.
         # If this fails, task add --claim must not leave unclaimed work behind.
         gitsync.prepare_for_claim()
@@ -411,14 +411,16 @@ def _add_result(
     tw.run(args)
     created = tw.export([f"incepted.is:{incepted}"]) if wording_matches or claim else []
     if wording_matches and not system_project and created:
-        ops.annotate(
+        claimstate.annotate(
             identity.uuid_of(created[0]),
             _suspect_wording_annotation(wording_matches),
         )
-    route_feedback = ops._subscribe_created_project(resolved_project, actor)
+    route_feedback = projectsubs._subscribe_created_project(resolved_project, actor)
     if claim:
         if created:
-            ops.do_claim(identity.uuid_of(created[0]), actor, guard_unclaimed=False)
+            claimstate.do_claim(
+                identity.uuid_of(created[0]), actor, guard_unclaimed=False
+            )
     key = identity.key_for(resolved_project, title)
     result = TaskAddResult(
         handle=f"{key}-{incepted}",
