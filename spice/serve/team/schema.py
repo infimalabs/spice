@@ -1,5 +1,7 @@
 """SQLite schema and defaults for serve team storage."""
 
+import zlib
+
 TEAM_DATABASE_FILENAME = "spiceteams.sqlite3"
 DEFAULT_LIFETIME = "Drive"
 TEAM_ID_HEX_CHARS = 12
@@ -156,3 +158,14 @@ CREATE INDEX IF NOT EXISTS task_events_by_agent_team_ts
 CREATE INDEX IF NOT EXISTS directives_by_sent_at
     ON directives (sent_at);
 """
+
+# Fingerprint of the current schema, stamped into each database's
+# `PRAGMA user_version`. There are no migrations: the team database is
+# disposable and recreated from the current TEAM_SCHEMA. Any edit here -- a
+# column added or dropped in place -- changes this fingerprint, so a database
+# carrying an older shape no longer matches and is rebuilt on its next open
+# instead of retaining stale columns that later INSERTs cannot satisfy. A
+# whitespace-only edit also bumps it and forces a harmless rebuild; that is the
+# safe direction for a disposable store. `| 1` keeps the value non-zero so it
+# never collides with the 0 that a freshly created database reports.
+TEAM_SCHEMA_FINGERPRINT = (zlib.crc32(TEAM_SCHEMA.encode("utf-8")) & 0x7FFFFFFF) | 1

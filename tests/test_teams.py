@@ -1,3 +1,4 @@
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -346,6 +347,57 @@ def test_create_team_with_explicit_id_never_reuses_shell(tmp_path):
     assert explicit.team_id == "team-explicit"
     open_ids = {team.team_id for team in store.team_snapshot().teams}
     assert open_ids == {shell.team_id, "team-explicit"}
+
+
+def test_create_team_rebuilds_a_database_with_a_drifted_schema(tmp_path):
+    # A team database created before speech_mode/selected_view were dropped from
+    # the schema keeps those NOT NULL columns. Every createTeam INSERT omits
+    # them, so the global menu's team commands failed with an IntegrityError
+    # (surfacing as a 500 -- "It keeps failing") until the store learned to
+    # rebuild a database whose shape drifted from the current TEAM_SCHEMA.
+    db_path = tmp_path / "teams.sqlite3"
+    stale = sqlite3.connect(db_path)
+    stale.executescript(
+        """
+        CREATE TABLE teams (
+            team_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'open',
+            created_at REAL NOT NULL,
+            revision INTEGER NOT NULL,
+            config_revision INTEGER NOT NULL DEFAULT 0,
+            lifetime TEXT NOT NULL,
+            speech_mode TEXT NOT NULL,
+            selected_view TEXT NOT NULL,
+            task_filters TEXT NOT NULL DEFAULT '[]',
+            shell_settings TEXT NOT NULL DEFAULT '{}'
+        );
+        """
+    )
+    stale.commit()
+    stale.close()
+
+    store = ServeTeamStore(path=db_path)
+    service = TeamCommandService(store)
+
+    created = service.apply({"command": "createTeam", "members": ["agent-a"]})
+
+    assert created.revision > 0
+    created_id = created.snapshot.teams[0].team_id
+    open_ids = {team.team_id for team in store.team_snapshot().teams}
+    assert created_id in open_ids
+    rebuilt_columns = {
+        row[1] for row in sqlite3.connect(db_path).execute("PRAGMA table_info(teams)")
+    }
+    assert rebuilt_columns == {
+        "team_id",
+        "status",
+        "created_at",
+        "revision",
+        "config_revision",
+        "lifetime",
+        "task_filters",
+        "shell_settings",
+    }
 
 
 def test_team_command_service_reorders_team_agents(tmp_path):

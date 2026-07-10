@@ -74,6 +74,7 @@ from spice.serve.team.schema import (
     TEAM_DATABASE_FILENAME as TEAM_DATABASE_FILENAME,
     TEAM_ID_HEX_CHARS as TEAM_ID_HEX_CHARS,
     TEAM_SCHEMA,
+    TEAM_SCHEMA_FINGERPRINT,
     TEAM_SQLITE_BUSY_TIMEOUT_MS as TEAM_SQLITE_BUSY_TIMEOUT_MS,
 )
 
@@ -116,7 +117,8 @@ class ServeTeamStore(
     # every connect took an exclusive lock each time, serializing all access
     # (reads included) and stalling on `busy_timeout` under concurrency. There
     # are no migrations: the database is disposable and recreated from the
-    # current TEAM_SCHEMA, so the schema is edited in place.
+    # current TEAM_SCHEMA, so the schema is edited in place and a database whose
+    # shape no longer matches is rebuilt (see `_sync_schema_locked`).
     _init_lock = Lock()
     _initialized_paths: set[Path] = set()
 
@@ -134,11 +136,31 @@ class ServeTeamStore(
             connection = sqlite3.connect(self.path)
             try:
                 connection.execute("PRAGMA journal_mode = WAL")
-                connection.executescript(TEAM_SCHEMA)
+                self._sync_schema_locked(connection)
                 connection.commit()
             finally:
                 connection.close()
             self._initialized_paths.add(self.path)
+
+    def _sync_schema_locked(self, connection: sqlite3.Connection) -> None:
+        # Reconcile the on-disk database with the current TEAM_SCHEMA. The
+        # stamped `user_version` fingerprint changes with every schema edit, so
+        # a database created under an older shape (or by pre-fingerprint code,
+        # which reports 0) no longer matches and is rebuilt from scratch. This
+        # is deliberate: `CREATE TABLE IF NOT EXISTS` alone leaves a stale table
+        # in place, so an in-place column change would otherwise strand old
+        # NOT NULL columns that new INSERTs cannot satisfy. Rebuilding drops the
+        # disposable team state once on drift rather than serving 500s forever.
+        stored = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if stored != TEAM_SCHEMA_FINGERPRINT:
+            stale_tables = connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+            for (name,) in stale_tables:
+                connection.execute(f'DROP TABLE IF EXISTS "{name}"')
+        connection.executescript(TEAM_SCHEMA)
+        connection.execute(f"PRAGMA user_version = {TEAM_SCHEMA_FINGERPRINT}")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
