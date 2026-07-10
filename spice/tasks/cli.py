@@ -386,10 +386,18 @@ def _configure_wake_parser(actions: Any) -> None:
         help="Make a waiting task current.",
         recovery_examples=(
             "spice task wake TASK-1k4Q5gJw",
-            "spice task wake TASK-1k4Q5gJw TASK-1k4Q5h3N",
+            "spice task wake OOPS-1k4Q5gJw --into task.cli",
         ),
     )
     wake.add_argument("handles", nargs="+", metavar="handle")
+    wake.add_argument(
+        "--into",
+        metavar="project",
+        help=(
+            "Promote the woken task(s) into this public project; required to "
+            "lift a deferred hidden-board task (.oops) into the active queue."
+        ),
+    )
     wake.set_defaults(func=handle)
 
 
@@ -843,7 +851,7 @@ _DISPATCH = {
         reason=a.reason,
     ),
     "depends": lambda a: ops.depends(a.handle, list(a.after)),
-    "wake": lambda a: ops.wake(list(a.handles)),
+    "wake": lambda a: ops.wake(list(a.handles), into=a.into),
     "claim": lambda a: ops.claim(a.handle, steal=a.steal),
     "reclaim": lambda a: _reclaim(a),
     "unclaim": lambda a: ops.unclaim(a.handle),
