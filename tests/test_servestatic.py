@@ -674,12 +674,30 @@ def test_static_submission_lifecycle_uses_current_keyed_event_shape():
     submissions = (STATIC_ROOT / "app.submissions.js").read_text(encoding="utf-8")
     live_bus = (STATIC_ROOT / "app.live-bus.js").read_text(encoding="utf-8")
     stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+    composer = (STATIC_ROOT / "app.composer.js").read_text(encoding="utf-8")
 
     assert "function applyLaneSubmissionLifecycle(lane, rawSubmission)" in submissions
     assert "function reconcileLaneSubmissionMessages(lane, messages)" in submissions
     assert "function latestLaneSubmission(lane)" in submissions
     assert 'message.type === "lane.submission"' in live_bus
     assert "applyLaneSubmissionLifecycle(lane, result.submission);" in stream
+    before_menu_start = composer.index("function composerPrimaryHeaderBeforeMenu(")
+    before_menu_end = (
+        composer.index(
+            "\n}\n\nfunction composerPrimaryLatestMessageLink", before_menu_start
+        )
+        + 2
+    )
+    before_menu = composer[before_menu_start:before_menu_end]
+    assert before_menu == (
+        "function composerPrimaryHeaderBeforeMenu(latest, member) {\n"
+        "  return [\n"
+        "    latest\n"
+        "      ? composerPrimaryLatestMessageLink(latest, member)\n"
+        "      : composerPrimaryLatestMessageNote(member),\n"
+        "  ];\n"
+        "}"
+    )
 
 
 def test_static_sync_composer_placeholders_refreshes_existing_quote_textareas():

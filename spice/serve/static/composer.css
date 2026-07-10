@@ -262,40 +262,6 @@
   color: var(--muted);
   text-decoration: none;
 }
-.composer-primary-meta {
-  align-items: center;
-  display: flex;
-  gap: 5px;
-  min-width: 0;
-}
-.composer-submission-status {
-  border: 1px solid color-mix(in srgb, currentColor 58%, transparent);
-  border-radius: 3px;
-  color: var(--accent-strong);
-  flex: 0 1 auto;
-  font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0;
-  max-width: 78px;
-  overflow: hidden;
-  padding: 1px 4px;
-  text-decoration: none;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.composer-submission-status[data-submission-stage="accepted"] {
-  color: var(--muted);
-}
-.composer-submission-status[data-submission-stage="received"] {
-  color: var(--accent-strong);
-}
-.composer-submission-status[data-submission-stage="completed"] {
-  color: var(--final-accent);
-}
-a.composer-submission-status:hover,
-a.composer-submission-status:focus-visible {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
 .composer-band-menu-button,
 .composer-band-close-button {
   align-items: center;
