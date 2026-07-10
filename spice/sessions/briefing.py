@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, TypeAlias
+from typing import Literal, TypeAlias
 
 from spice.agent.identity import uuid_thread_id
 from spice.errors import SpiceError
@@ -109,6 +109,7 @@ class RehydrationCandidate:
     response_text: str = ""
     user_after_text: str = ""
     intent_text: str = ""
+    project: str = ""
 
 
 @dataclass(frozen=True)
@@ -594,7 +595,7 @@ def render_briefing_payload(
         lines.extend(filter_lines)
     lines.extend(_steering_lines(list(payload.asks)))
     lines.extend(_task_plane_lines(list(payload.task_plane)))
-    lines.extend(_learning_lines())
+    lines.extend(_learning_lines(list(payload.task_plane)))
     lines.extend(recovery)
     lines.extend(_trajectory_lines(list(payload.sweep_windows)))
     lines.extend(_finals_lines(list(payload.finals)))
@@ -706,11 +707,11 @@ def _recency_reference_ts(
     return max(values) if values else None
 
 
-def _learning_lines() -> list[str]:
+def _learning_lines(task_plane: list[RehydrationCandidate]) -> list[str]:
     repo_root = repo_root_from_cwd()
     if repo_root is None:
         return []
-    stem = _active_task_project_stem()
+    stem = _active_task_project_stem(task_plane)
     if stem is None:
         return []
     try:
@@ -724,37 +725,17 @@ def _learning_lines() -> list[str]:
     return lines
 
 
-def _active_claim_row() -> dict[str, Any] | None:
-    try:
-        from spice.tasks import alloc, tw
-
-        actor = tw.current_actor()
-        active = [
-            row
-            for row in alloc.visible_active_rows(actor)
-            if str(row.get("claim_by") or "") == actor
-        ]
-        return active[0] if active else None
-    except (OSError, RuntimeError, SpiceError, SystemExit):
-        return None
-
-
-def _active_task_project_stem() -> str | None:
-    row = _active_claim_row()
-    if row is None:
+def _active_task_project_stem(
+    task_plane: list[RehydrationCandidate],
+) -> str | None:
+    project = next(
+        (candidate.project for candidate in task_plane if candidate.project), ""
+    )
+    if not project:
         return None
     from spice.tasks import config
 
-    return config.project_stem(str(row.get("project") or "").strip())
-
-
-def _active_claim_handle_phase() -> tuple[str | None, str | None]:
-    row = _active_claim_row()
-    if row is None:
-        return None, None
-    handle = str(row.get("id") or "").strip() or None
-    phase = str(row.get("phase") or "").strip() or None
-    return handle, phase
+    return config.project_stem(project)
 
 
 def _learning_record_line(record: session_learnings.LearningRecord) -> str:
