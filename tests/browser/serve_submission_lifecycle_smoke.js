@@ -2,6 +2,10 @@ const { installIsolatedLaneFixture } = require("./serve_isolated_lane_fixture");
 const { withServePage } = require("./serve_playwright_harness");
 
 const maxLifecycleTransitionMs = 500;
+const narrowComposerWidthPx = 280;
+const desktopComposerWidthPx = 560;
+const maxCompactStatusFontPx = 12;
+const maxComposerWidthDeltaPx = 3;
 
 async function run() {
   return withServePage(
@@ -28,27 +32,36 @@ async function run() {
 }
 
 async function installSubmissionLifecycleSmokeHelpers(page) {
+  const pageConstants = [
+    "const narrowComposerWidthPx = " + narrowComposerWidthPx + ";",
+    "const desktopComposerWidthPx = " + desktopComposerWidthPx + ";",
+  ].join("\n");
+  const pageHelpers = [
+    submissionSmokeStage,
+    submissionSmokeLifecycle,
+    submissionSmokeAcceptedLifecycle,
+    submissionSmokeReceivedLifecycle,
+    submissionSmokeCompletedLifecycle,
+    submissionSmokeLaneMessage,
+    submissionSmokeLanePayload,
+    submissionSmokeSetComposerWidth,
+    submissionSmokeHeaderElements,
+    submissionSmokeHeaderLayout,
+    submissionSmokeHeaderSnapshot,
+    submissionSmokeSnapshot,
+    submissionSmokeSend,
+    submissionSmokePushSubmission,
+    submissionSmokePushPayload,
+    setupSubmissionLifecycleSmokePage,
+    cleanupSubmissionLifecycleSmokePage,
+    runSubmissionRunningScenario,
+    runSubmissionIdleScenario,
+    runSubmissionLifecycleSmokePage,
+  ]
+    .map((helper) => helper.toString())
+    .join("\n");
   await page.addScriptTag({
-    content: [
-      submissionSmokeStage,
-      submissionSmokeLifecycle,
-      submissionSmokeAcceptedLifecycle,
-      submissionSmokeReceivedLifecycle,
-      submissionSmokeCompletedLifecycle,
-      submissionSmokeLaneMessage,
-      submissionSmokeLanePayload,
-      submissionSmokeSnapshot,
-      submissionSmokeSend,
-      submissionSmokePushSubmission,
-      submissionSmokePushPayload,
-      setupSubmissionLifecycleSmokePage,
-      cleanupSubmissionLifecycleSmokePage,
-      runSubmissionRunningScenario,
-      runSubmissionIdleScenario,
-      runSubmissionLifecycleSmokePage,
-    ]
-      .map((helper) => helper.toString())
-      .join("\n"),
+    content: pageConstants + "\n" + pageHelpers,
   });
 }
 
@@ -162,26 +175,81 @@ function submissionSmokeLanePayload(messages, processStatus) {
 
 function submissionSmokeSnapshot(lane, key) {
   const submission = lane.submissionLifecycleByKey.get(key);
-  const status = lane.element.querySelector(
-    '.composer-submission-status[data-submission-key="' + key + '"]',
+  const badge = lane.element.querySelector(
+    '[data-lane-view-button="compose"] [data-lane-view-badge]',
   );
-  const header = status ? status.closest(".composer-band-header") : null;
-  const body = header ? header.querySelector(".composer-band-body") : null;
-  const statusRect = status ? status.getBoundingClientRect() : null;
-  const bodyRect = body ? body.getBoundingClientRect() : null;
+  const badgeVisible = Boolean(badge && !badge.hidden);
   return {
+    ...submissionSmokeHeaderSnapshot(lane),
+    completionMessageKey: submission
+      ? laneSubmissionCompletionMessageKey(lane, submission)
+      : "",
     disposition: submission ? submission.disposition : "",
-    href: status && status.href ? status.getAttribute("href") : "",
-    headerGapPx: statusRect && bodyRect ? bodyRect.left - statusRect.right : 0,
-    key: status ? status.dataset.submissionKey || "" : "",
+    key: submission ? submission.key : "",
     mapSize: lane.submissionLifecycleByKey.size,
     ownKeyPresent: lane.submissionLifecycleByKey.has(key),
+    pendingBadgeFontSizePx: badge
+      ? Number.parseFloat(getComputedStyle(badge).fontSize)
+      : 0,
+    pendingBadgeText: badgeVisible ? badge.textContent || "" : "",
+    pendingCount: lanePendingDisplayCount(lane),
     placeholder: Array.from(lane.shardTextareas.values())[0]?.placeholder || "",
-    responseKey: status ? status.dataset.submissionResponseKey || "" : "",
-    stage: status ? status.dataset.submissionStage || "" : "",
-    statusFits: status ? status.scrollWidth <= status.clientWidth : false,
-    tagName: status ? status.tagName : "",
+    stage: submission ? submission.stage : "",
   };
+}
+
+function submissionSmokeHeaderSnapshot(lane) {
+  const elements = submissionSmokeHeaderElements(lane);
+  const { header, time, title } = elements;
+  return {
+    ...submissionSmokeHeaderLayout(elements),
+    state: time.dataset.agentStatus || "",
+    stateFontSizePx: Number.parseFloat(getComputedStyle(time).fontSize),
+    timeHref: time.tagName === "A" ? time.getAttribute("href") || "" : "",
+    timeTagName: time.tagName,
+    timeText: time.textContent || "",
+    titleText: title.textContent || "",
+    titleWidthPx: title.getBoundingClientRect().width,
+  };
+}
+
+function submissionSmokeHeaderElements(lane) {
+  const header = lane.element.querySelector(".composer-band-header--primary");
+  if (!header) throw new Error("submission smoke header is missing");
+  const body = header.querySelector(".composer-band-body");
+  const title = body && body.querySelector(".composer-band-title");
+  const time = header.querySelector(".composer-latest-time");
+  const menu = header.querySelector(".composer-band-menu-button");
+  if (!body || !title || !time || !menu)
+    throw new Error("submission smoke header structure is incomplete");
+  return { body, header, menu, time, title };
+}
+
+function submissionSmokeHeaderLayout({ body, header, menu, time }) {
+  const headerRect = header.getBoundingClientRect();
+  const timeRect = time.getBoundingClientRect();
+  const bodyRect = body.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  return {
+    headerDoesNotOverlap:
+      timeRect.right <= bodyRect.left && bodyRect.right <= menuRect.left,
+    headerWidthPx: headerRect.width,
+    restoredHeaderStructure:
+      header.children.length === 3 &&
+      header.children[0] === time &&
+      header.children[1] === body &&
+      header.children[2] === menu,
+  };
+}
+
+function submissionSmokeSetComposerWidth(lane, widthPx) {
+  const primary = lane.element.querySelector(
+    '[data-composer-primary-target-id="' + lane.targetId + '"]',
+  );
+  if (!primary) throw new Error("submission smoke composer is missing");
+  primary.style.inlineSize = widthPx + "px";
+  primary.style.minInlineSize = widthPx + "px";
+  primary.style.maxInlineSize = widthPx + "px";
 }
 
 async function submissionSmokeSend(state, lane, text) {
@@ -228,9 +296,18 @@ async function submissionSmokePushPayload(state, lane, messages, processStatus) 
 function setupSubmissionLifecycleSmokePage() {
   const running = resolveIsolatedLane("submission-running-smoke-team");
   const idle = resolveIsolatedLane("submission-idle-smoke-team");
-  for (const lane of [running, idle]) {
+  const laneConfigs = [
+    [running, "running", narrowComposerWidthPx],
+    [idle, "idle", desktopComposerWidthPx],
+  ];
+  for (const [lane, state, widthPx] of laneConfigs) {
+    lane.lastRenderedStatusLine = {
+      agentProcessStatus: state,
+      agentVisualStatus: state,
+    };
     const host = laneGroupHost(lane);
     syncComposerShards(host, laneGroupMemberLanes(host));
+    submissionSmokeSetComposerWidth(lane, widthPx);
   }
   const state = {
     idle,
@@ -359,24 +436,25 @@ async function runSubmissionLifecycleSmokePage() {
 }
 
 function assertSubmissionLifecycleResult(result) {
-  for (const lane of [result.running, result.idle]) {
+  const laneCases = [
+    [result.running, narrowComposerWidthPx, "running"],
+    [result.idle, desktopComposerWidthPx, "idle"],
+  ];
+  for (const [lane, expectedWidthPx, initialState] of laneCases) {
     for (const stage of ["accepted", "received", "completed"]) {
       const transition = lane[stage];
       if (transition.elapsedMs > maxLifecycleTransitionMs)
         throw new Error(stage + " transition exceeded bound: " + transition.elapsedMs);
       if (transition.snapshot.stage !== stage)
         throw new Error(stage + " progress mismatch: " + JSON.stringify(transition));
-      if (!transition.snapshot.placeholder.includes("steer " + stage))
-        throw new Error(stage + " composer feedback mismatch: " + JSON.stringify(transition));
-      if (!transition.snapshot.statusFits || transition.snapshot.headerGapPx < 0)
-        throw new Error(stage + " composer status layout mismatch: " + JSON.stringify(transition));
+      assertSubmissionHeaderIsClean(transition, expectedWidthPx, initialState, stage);
     }
-    if (lane.completed.snapshot.tagName !== "A")
-      throw new Error("completed progress must link to its response");
-    if (lane.completed.snapshot.responseKey === "")
-      throw new Error("completed progress is missing response identity");
-    if (!lane.completed.snapshot.href.endsWith(lane.completed.snapshot.responseKey))
-      throw new Error("completed response link mismatch: " + JSON.stringify(lane.completed));
+    if (lane.completed.snapshot.completionMessageKey === "")
+      throw new Error("completed lifecycle is missing response identity");
+    if (lane.completed.snapshot.timeTagName !== "A")
+      throw new Error("existing latest-message link was not preserved");
+    if (!lane.completed.snapshot.timeHref.endsWith(lane.completed.snapshot.completionMessageKey))
+      throw new Error("latest-message link mismatch: " + JSON.stringify(lane.completed));
     if (!lane.completed.snapshot.placeholder.includes("0 pending, idle"))
       throw new Error("completed lane feedback mismatch: " + JSON.stringify(lane.completed));
     if (lane.replay.snapshot.stage !== "completed")
@@ -388,6 +466,33 @@ function assertSubmissionLifecycleResult(result) {
     throw new Error("running completion disposition mismatch");
   if (result.idle.completed.snapshot.disposition !== "refused")
     throw new Error("idle completion disposition mismatch");
+}
+
+function assertSubmissionHeaderIsClean(
+  transition,
+  expectedWidthPx,
+  initialState,
+  stage,
+) {
+  const snapshot = transition.snapshot;
+  if (!snapshot.restoredHeaderStructure)
+    throw new Error(stage + " header structure mismatch: " + JSON.stringify(transition));
+  if (!snapshot.headerDoesNotOverlap || snapshot.titleWidthPx <= 0)
+    throw new Error(stage + " header layout mismatch: " + JSON.stringify(transition));
+  if (Math.abs(snapshot.headerWidthPx - expectedWidthPx) > maxComposerWidthDeltaPx)
+    throw new Error(stage + " header width mismatch: " + JSON.stringify(transition));
+  if (snapshot.stateFontSizePx > maxCompactStatusFontPx)
+    throw new Error(stage + " state indicator is not compact: " + JSON.stringify(transition));
+  const pending = stage === "completed" ? 0 : 1;
+  const badge = pending ? String(pending) : "";
+  const state = stage === "completed" ? "idle" : initialState;
+  const placeholder = "empty team\n" + pending + " pending, " + state;
+  if (snapshot.placeholder !== placeholder)
+    throw new Error(stage + " placeholder mismatch: " + JSON.stringify(transition));
+  if (snapshot.pendingCount !== pending || snapshot.pendingBadgeText !== badge)
+    throw new Error(stage + " pending signal mismatch: " + JSON.stringify(transition));
+  if (badge && snapshot.pendingBadgeFontSizePx > maxCompactStatusFontPx)
+    throw new Error(stage + " pending badge is not compact: " + JSON.stringify(transition));
 }
 
 if (require.main === module) {

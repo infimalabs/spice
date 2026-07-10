@@ -231,7 +231,9 @@ def test_serve_submission_lifecycle_smoke_asserts_keyed_progress() -> None:
     assert "received" in smoke
     assert "completed" in smoke
     assert "maxLifecycleTransitionMs" in smoke
-    assert "submissionResponseKey" in smoke
+    assert "completionMessageKey" in smoke
+    assert "restoredHeaderStructure" in smoke
+    assert "narrowComposerWidthPx" in smoke
 
 
 def test_serve_composer_typing_latency_smoke_asserts_no_layout_work() -> None:
