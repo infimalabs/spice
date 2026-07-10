@@ -27,6 +27,7 @@ from typing import Any, Callable, cast
 
 from spice.serve.messages import TranscriptResolution
 from spice.serve.pending import pending_inbox_identity_payload
+from spice.serve.submissions import SubmissionLifecycleTracker
 from spice.serve.websocket import (
     WebSocketConnection,
     WebSocketDisconnect,
@@ -157,6 +158,7 @@ class LiveBusSession:
         self._read_queues: dict[str, deque[Callable[[], None]]] = {}
         self._read_active: set[str] = set()
         self._read_futures: set[Future[None]] = set()
+        self._submission_tracker = SubmissionLifecycleTracker()
 
     def run(self) -> None:
         self.connection.set_read_timeout(LIVE_BUS_READ_TIMEOUT_S)
@@ -500,6 +502,13 @@ class LiveBusSession:
                 send_payload_finished_at=send_payload_finished_at,
             ),
         }
+        submission_key = str(result.get("key") or "")
+        if result.get("ok") is True and submission_key:
+            result["submission"] = self._submission_tracker.accept(
+                target_id=target.id,
+                key=submission_key,
+                evidence=str(result.get("path") or submission_key),
+            )
         self._reply(message, {"type": "lane.sendResult", "result": result})
         if result.get("ok") is True:
             self._queue_lane_send_followup(target, payload)
@@ -619,14 +628,18 @@ class LiveBusSession:
                 continue
             subscription.last_signature = signature
             if pending_only_signature_change(previous_signature, signature):
+                payload = _pending_lane_payload(target)
                 try:
                     self._send(
                         {
                             "type": "lane.pending",
                             "targetId": target.id,
                             "source": "watch",
-                            "payload": _pending_lane_payload(target),
+                            "payload": payload,
                         }
+                    )
+                    self._push_submission_updates(
+                        target, payload, include_ack_state=True
                     )
                 except (OSError, WebSocketProtocolError):
                     return
@@ -654,8 +667,32 @@ class LiveBusSession:
                         "payload": payload,
                     }
                 )
+                self._push_submission_updates(target, payload)
             except (OSError, WebSocketProtocolError):
                 return
+
+    def _push_submission_updates(
+        self,
+        target: Any,
+        payload: dict[str, Any],
+        *,
+        include_ack_state: bool = False,
+    ) -> None:
+        events = self._submission_tracker.advance(
+            target_id=target.id,
+            repo_root=getattr(target, "repo_root", None),
+            payload=payload,
+            include_ack_state=include_ack_state,
+        )
+        for submission in events:
+            self._send(
+                {
+                    "type": "lane.submission",
+                    "targetId": target.id,
+                    "source": "watch",
+                    "submission": submission,
+                }
+            )
 
     def _lane_context(
         self, target: Any
