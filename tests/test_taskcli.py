@@ -15,6 +15,7 @@ from spice.agent.driver import DRIVER
 from spice.errors import SpiceError
 from spice.tasks import (
     artifacts,
+    claimstate,
     cli as task_cli,
     config,
     create,
@@ -153,9 +154,9 @@ def test_task_reclaim_parser_rejects_renew_alias():
 
 def test_task_reclaim_renders_result(monkeypatch):
     monkeypatch.setattr(
-        ops,
+        claimstate,
         "renew_claim",
-        lambda _handle: ops.ClaimRenewalResult(
+        lambda _handle: claimstate.ClaimRenewalResult(
             True,
             "renewed",
             handle="TASK-20260101T000000000001Z",
@@ -173,9 +174,9 @@ def test_task_reclaim_renders_result(monkeypatch):
 
 def test_task_reclaim_renders_noop(monkeypatch):
     monkeypatch.setattr(
-        ops,
+        claimstate,
         "renew_claim",
-        lambda _handle: ops.ClaimRenewalResult(False, "no_active_claim"),
+        lambda _handle: claimstate.ClaimRenewalResult(False, "no_active_claim"),
     )
 
     output = task_cli._reclaim(argparse.Namespace(handle=None))
@@ -253,7 +254,7 @@ def test_task_add_missing_acceptance_routes_to_plan(task_repo, capsys):
     assert row["description"] == "Plan routed CLI task"
     assert row["project"] == "task.unit"
     assert row["phase"] == "plan"
-    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert not str(row.get("acceptance") or "")
     assert row["origin"] == "ack:20260101T000000000000Z"
     assert str(row.get("due") or "").startswith("20260801")
@@ -280,7 +281,7 @@ def test_task_add_missing_acceptance_honors_explicit_flow(task_repo, capsys):
 
     assert row["description"] == "Explicit flow CLI task"
     assert row["phase"] == "todo"
-    assert ops.phases_of(row) == ["todo", "review"]
+    assert claimstate.phases_of(row) == ["todo", "review"]
     assert not str(row.get("acceptance") or "")
 
 
@@ -306,7 +307,7 @@ def test_task_add_suspect_wording_routes_to_plan_and_marks_row(task_repo, capsys
 
     assert row["description"] == "Adopting CLI task"
     assert row["phase"] == "plan"
-    assert ops.phases_of(row) == ["plan", "todo", "review"]
+    assert claimstate.phases_of(row) == ["plan", "todo", "review"]
     assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
     assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
     assert row["origin"] == "ack:20260101T000000000000Z"

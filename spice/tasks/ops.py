@@ -23,9 +23,6 @@ from spice.sessions import resolve as session_resolve
 from spice.tasks import alloc, config, gitsync, identity, reviewfeedback, tw
 from spice.tasks.claimstate import (
     CLAIM_CLEAR,
-    ClaimRenewalResult as ClaimRenewalResult,
-    claim_renewal_status_line as claim_renewal_status_line,
-    renew_claim as renew_claim,
     _claimed_task_capture_recovery_message,
     _live_claim,
     _live_claim_text,

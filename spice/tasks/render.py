@@ -12,6 +12,7 @@ from spice.paths import repo_root_from_cwd
 from spice.tasks import (
     alloc,
     artifacts,
+    claimstate,
     config,
     effort,
     identity,
@@ -422,7 +423,7 @@ def _should_show_recovery_context(row: dict[str, Any]) -> bool:
 
 def render_show(handle: str, *, include_recovery_context: bool | None = None) -> str:
     row = identity.resolve(handle)
-    flow = ",".join(ops.phases_of(row))
+    flow = ",".join(claimstate.phases_of(row))
     rendered = identity.render_handle(row)
     show_recovery_context = (
         _should_show_recovery_context(row)
@@ -510,18 +511,18 @@ def render_status() -> str:
 
 
 def render_next() -> str:
-    renewal = ops.renew_claim()
+    renewal = claimstate.renew_claim()
     row = alloc.next_task()
     if not row:
         return "\n".join(
             [
-                ops.claim_renewal_status_line(renewal),
+                claimstate.claim_renewal_status_line(renewal),
                 "no available tasks; run spice task status",
             ]
         )
     rendered = identity.render_handle(row)
     lines = [
-        ops.claim_renewal_status_line(renewal),
+        claimstate.claim_renewal_status_line(renewal),
         "next task:",
         render_row(row),
         "",
@@ -537,8 +538,8 @@ def _row_problems(r: dict[str, Any]) -> list[str]:
     found: list[str] = []
     if not r.get("phase"):
         found.append(f"{handle} missing phase")
-    phases = ops.phases_of(r)
-    idx = ops.phase_index(r)
+    phases = claimstate.phases_of(r)
+    idx = claimstate.phase_index(r)
     if phases and idx < len(phases) and str(r.get("phase")) != phases[idx]:
         found.append(f"{handle} phase != slot[{idx}]")
     for label in _row_claim_problem_labels(r):
