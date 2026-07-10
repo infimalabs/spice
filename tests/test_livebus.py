@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -20,7 +21,7 @@ from spice.agent.driver import CODEX_DRIVER
 from spice.mail.inbox import inbox_dir
 from spice.mail.replies import append_reply_record, reply_log_path
 from spice.tasks import config as task_config
-from spice.serve import agentapi, app, livebus
+from spice.serve import agentapi, app, livebus, messages as message_reader
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
@@ -86,6 +87,106 @@ def test_lane_signature_changes_when_agent_state_file_changes(tmp_path):
     after = app.lane_signature_for_target(state, target, THREAD_ID, None)
 
     assert before != after
+
+
+def test_lane_subscription_pushes_structural_final_status(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=repo)
+    status = SimpleNamespace(
+        repo_root=repo,
+        running=True,
+        thread_id="thread",
+        process_status="running",
+        pid=123,
+        process_group_id=123,
+        model="gpt-test",
+        reasoning_effort="low",
+        service_tier="",
+        started_at="",
+        log_path=None,
+        prompt_skill_path=None,
+        command=(),
+    )
+    monkeypatch.setattr(lane, "agent_status", lambda _repo: status)
+    connection = _Connection()
+    watcher_ready = Event()
+    change_written = Event()
+
+    def observed_wait(paths: tuple[Path, ...], stop, watch=None) -> bool:
+        assert transcript in paths
+        watcher_ready.set()
+        change_written.wait(timeout=1.0)
+        return change_written.is_set() and not stop.is_set()
+
+    def messages_payload(_target, **_kwargs):
+        items = message_reader.read_assistant_messages(
+            transcript, limit=5, driver=CODEX_DRIVER
+        )
+        pending = pending_inbox_identity_payload(repo)
+        return {
+            "messages": [item.to_payload() for item in items],
+            **pending,
+            "statusLine": lane.status_line_payload(
+                SimpleNamespace(),
+                target,
+                items=items,
+                error=None,
+                pending_identity=pending,
+            ),
+        }
+
+    monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
+    session = LiveBusSession(
+        connection,
+        _callbacks(
+            target=target,
+            transcript=transcript,
+            messages_payload=messages_payload,
+        ),
+    )
+
+    try:
+        session._handle_lane_subscribe(
+            {"type": "lane.subscribe", "targetId": target.id, "query": {"limit": 5}}
+        )
+        session._await_pending_reads()
+        assert watcher_ready.wait(timeout=1.0)
+
+        transcript.write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-01-01T00:00:01.000000Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "phase": "final_answer",
+                        "content": [
+                            {"type": "output_text", "text": "Confirmed fixed."}
+                        ],
+                    },
+                },
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        change_written.set()
+
+        pushed = _wait_for_watch_push(connection)
+        status_line = pushed["payload"]["statusLine"]
+        assert pushed["type"] == "lane.payload"
+        assert status_line["latestActivityKind"] == "final"
+        assert status_line["latestActivityPreview"] == "Confirmed fixed."
+        assert status_line["agentProcessStatus"] == "running"
+        assert status_line["agentVisualStatus"] == "idle"
+        assert status_line["pendingInboxCount"] == 0
+    finally:
+        change_written.set()
+        session._teardown()
 
 
 def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_count(
