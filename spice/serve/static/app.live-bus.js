@@ -180,6 +180,12 @@ async function handleLiveBusMessage(data) {
     const lane = laneStates.get(message.targetId);
     if (lane && isLaneOpen(lane))
       applyLanePendingBusPayload(lane, message.payload || {});
+  } else if (message.type === "lane.submission") {
+    const lane = laneStates.get(message.targetId);
+    if (lane && isLaneOpen(lane)) {
+      applyLaneSubmissionLifecycle(lane, message.submission);
+      syncLaneSubmissionLifecycleUi(lane);
+    }
   } else if (message.type === "lane.append") {
     const lane = laneStates.get(message.targetId);
     if (lane && isLaneOpen(lane))
@@ -329,6 +335,7 @@ function applyLaneBusPayloadState(lane, payload, source) {
   }
   removePayloadMessages(lane, payload);
   mergePayloadMessages(lane, payload);
+  reconcileLaneSubmissionMessages(lane, lane.knownMessages);
   renderLaneChrome(lane, payload);
   cacheLaneLatestPayload(lane, payload);
   if (source === "watch" && (payload.messages || []).length)
@@ -383,7 +390,12 @@ async function applyLaneAppendBusPayload(lane, payload) {
   lane.serverReachable = true;
   removePayloadMessages(lane, payload);
   mergePayloadMessages(lane, { ...payload, messages });
+  const lifecycleChanged = reconcileLaneSubmissionMessages(
+    lane,
+    lane.knownMessages,
+  );
   renderMessagesIfChanged(lane);
+  if (lifecycleChanged) syncLaneSubmissionLifecycleUi(lane);
   if (!lane.speechPrimed) {
     queueSpeechForMessages(lane, initialSpeechMessages);
     primeSpeechBoundary(lane);

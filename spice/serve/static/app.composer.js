@@ -229,11 +229,33 @@ function composerPrimaryHeaderTitle(latest) {
 }
 
 function composerPrimaryHeaderBeforeMenu(latest, member) {
-  return [
+  const meta = document.createElement("div");
+  meta.className = "composer-primary-meta";
+  meta.append(
     latest
       ? composerPrimaryLatestMessageLink(latest, member)
       : composerPrimaryLatestMessageNote(member),
-  ];
+  );
+  const submission = latestLaneSubmission(member);
+  if (submission) meta.append(composerSubmissionStatus(member, submission));
+  return [meta];
+}
+
+function composerSubmissionStatus(member, submission) {
+  const responseKey = laneSubmissionCompletionMessageKey(member, submission);
+  const status = responseKey ? document.createElement("a") : document.createElement("span");
+  status.className = "composer-submission-status";
+  status.dataset.submissionKey = submission.key;
+  status.dataset.submissionStage = submission.stage;
+  if (responseKey) {
+    status.dataset.submissionResponseKey = responseKey;
+    status.setAttribute("href", "#" + messageDomId(responseKey));
+  }
+  status.textContent = submission.stage;
+  const context = ackContextForKey(member, submission.key);
+  const request = context ? ": " + context.text : "";
+  status.title = "Steering " + submission.stage + request;
+  return status;
 }
 
 function composerPrimaryLatestMessageLink(latest, member) {
@@ -317,6 +339,8 @@ function laneComposePlaceholderStatus(member) {
   const statusLine = member.lastRenderedStatusLine || {};
   const status = statusLine.agentVisualStatus || statusLine.agentProcessStatus || "";
   if (status) parts.push(status);
+  const submission = latestLaneSubmission(member);
+  if (submission) parts.push("steer " + submission.stage);
   return parts.join(", ");
 }
 

@@ -4,8 +4,11 @@ const vm = require("vm");
 const renderPath = process.argv[2];
 const liveBusPath = process.argv[3];
 const streamPath = process.argv[4];
+const submissionsPath = process.argv[5];
 const context = {
   console,
+  Map,
+  Set,
   WebSocket: { OPEN: 1, CONNECTING: 0 },
   window: { location: { protocol: "http:", host: "localhost" } },
 };
@@ -19,6 +22,9 @@ vm.runInContext(fs.readFileSync(liveBusPath, "utf8"), context, {
 });
 vm.runInContext(fs.readFileSync(streamPath, "utf8"), context, {
   filename: "app.stream.js",
+});
+vm.runInContext(fs.readFileSync(submissionsPath, "utf8"), context, {
+  filename: "app.submissions.js",
 });
 
 function assert(condition, message) {
@@ -58,6 +64,7 @@ function lane() {
     optimisticPendingInboxFloor: 0,
     pendingSubmissionCount: 0,
     sendAwaitingBackendCount: 0,
+    submissionLifecycleByKey: new Map(),
     ackContextByKey: new Map(),
     missingAckContextKeys: new Set(),
     recentSentAckKeys: [],

@@ -55,6 +55,7 @@ async function installPendingSmokeHelpers(page) {
       pendingSmokeTextarea,
       pendingSmokeBadgeText,
       pendingSmokePayload,
+      pendingSmokeSubmission,
       pendingSmokeLiveBusRequest,
       largePendingSmokeMessages,
     ]
@@ -115,10 +116,22 @@ function pendingSmokeLiveBusRequest(smoke, config, type, fields) {
         pendingInboxKeys: [config.pendingKey],
         pendingInboxRevision: "rev-send",
         pendingInboxVersion: config.sendVersion,
+        submission: pendingSmokeSubmission(config.pendingKey),
         agentEnsure: { ok: true, threadId: smoke.lane.targetThreadId || "" },
       },
     });
   return smoke.originalLiveBusRequest(type, fields);
+}
+
+function pendingSmokeSubmission(key) {
+  const at = new Date().toISOString();
+  return {
+    key,
+    stage: "accepted",
+    disposition: "",
+    stages: { accepted: { at, source: "inbox-write", evidence: key } },
+    durationsMs: {},
+  };
 }
 
 async function runPendingSmokeSubmissionPage() {

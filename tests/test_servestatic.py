@@ -569,11 +569,18 @@ def test_static_composer_placeholders_use_uniform_agent_status_copy():
 
 def test_static_composer_terminal_status_placeholder_uses_idle_visual_status():
     app_render = STATIC_ROOT / "app.render.js"
+    app_submissions = STATIC_ROOT / "app.submissions.js"
     app_composer = STATIC_ROOT / "app.composer.js"
     script = Path(__file__).with_name("fixtures") / "composer_terminal_status.js"
 
     result = subprocess.run(
-        ["node", str(script), str(app_render), str(app_composer)],
+        [
+            "node",
+            str(script),
+            str(app_render),
+            str(app_submissions),
+            str(app_composer),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -634,13 +641,45 @@ def test_static_lane_differential_frames_update_pending_and_messages():
     app_render = STATIC_ROOT / "app.render.js"
     app_live_bus = STATIC_ROOT / "app.live-bus.js"
     app_stream = STATIC_ROOT / "app.stream.js"
+    app_submissions = STATIC_ROOT / "app.submissions.js"
     script = Path(__file__).with_name("fixtures") / "lane_diff_frames.js"
 
     result = subprocess.run(
-        ["node", str(script), str(app_render), str(app_live_bus), str(app_stream)],
+        [
+            "node",
+            str(script),
+            str(app_render),
+            str(app_live_bus),
+            str(app_stream),
+            str(app_submissions),
+        ],
         check=True,
     )
     assert result.returncode == 0
+
+
+def test_static_submission_lifecycle_is_monotonic_and_member_scoped():
+    script = Path(__file__).with_name("fixtures") / "submission_lifecycle.js"
+    result = subprocess.run(
+        ["node", str(script), str(STATIC_ROOT / "app.submissions.js")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_static_submission_lifecycle_uses_current_keyed_event_shape():
+    submissions = (STATIC_ROOT / "app.submissions.js").read_text(encoding="utf-8")
+    live_bus = (STATIC_ROOT / "app.live-bus.js").read_text(encoding="utf-8")
+    stream = (STATIC_ROOT / "app.stream.js").read_text(encoding="utf-8")
+
+    assert "function applyLaneSubmissionLifecycle(lane, rawSubmission)" in submissions
+    assert "function reconcileLaneSubmissionMessages(lane, messages)" in submissions
+    assert "function latestLaneSubmission(lane)" in submissions
+    assert 'message.type === "lane.submission"' in live_bus
+    assert "applyLaneSubmissionLifecycle(lane, result.submission);" in stream
 
 
 def test_static_sync_composer_placeholders_refreshes_existing_quote_textareas():
