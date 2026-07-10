@@ -220,6 +220,53 @@ def test_status_line_pairs_activity_preview_with_activity_timestamp(
     assert line["latestMessagePreview"] == ""
 
 
+def test_status_line_derives_visual_status_from_structural_activity_kind(
+    tmp_path, monkeypatch
+):
+    timestamp = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
+    target = _Target(id="wt", repo_root=tmp_path)
+    monkeypatch.setattr(
+        lane,
+        "agent_status",
+        lambda _repo: _Status(
+            running=True,
+            started_at="",
+            process_status="running",
+            thread_id="thread",
+        ),
+    )
+    monkeypatch.setattr(
+        lane,
+        "pending_inbox_identity_payload",
+        lambda _repo: _pending_identity(),
+    )
+    cases = (
+        [_message(timestamp, kind="final", preview="Confirmed fixed.")],
+        [_message(timestamp, kind="assistant", preview="Working")],
+        [_message(timestamp, kind="presence:function_call", preview="Bash: test")],
+        [],
+    )
+
+    observed = []
+    for items in cases:
+        line = lane.status_line_payload(_State(), target, items=items, error=None)
+        observed.append(
+            (
+                line["latestActivityKind"],
+                line["agentProcessStatus"],
+                line["agentVisualStatus"],
+                line["pendingInboxCount"],
+            )
+        )
+
+    assert observed == [
+        ("final", "running", "idle", 0),
+        ("assistant", "running", "running", 0),
+        ("presence:function_call", "running", "running", 0),
+        ("", "running", "running", 0),
+    ]
+
+
 def test_inline_task_supervisor_success_updates_presence_preview(tmp_path, monkeypatch):
     latest = _stamp(datetime(2026, 6, 10, 12, 0, tzinfo=UTC))
     transcript = tmp_path / "rollout.jsonl"

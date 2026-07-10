@@ -158,6 +158,7 @@ def _status_line_payload_from_status(
     latest_activity = items[0] if items else None
     binding_status = _binding_status(thread_id, binding_error)
     latest_status = latest_activity or latest
+    latest_activity_kind = latest_status.kind if latest_status else ""
     return {
         "bindingStatus": binding_status,
         "bound": bool(thread_id),
@@ -165,14 +166,23 @@ def _status_line_payload_from_status(
         "rolloutStatus": "error" if binding_error or error else "ok",
         "activityStatus": message_reader.activity_status(items),
         "lastAssistantAt": latest_status.timestamp if latest_status else "",
+        "latestActivityKind": latest_activity_kind,
         "latestMessagePreview": latest.preview if latest else "",
         "latestActivityPreview": (latest_activity.preview if latest_activity else ""),
         "preview": latest_status.preview if latest_status else "",
         **pending_identity,
         "agentProcessStatus": status.process_status,
-        "agentVisualStatus": status.process_status,
+        "agentVisualStatus": _agent_visual_status(
+            status.process_status, latest_activity_kind
+        ),
         "error": binding_error or error or "",
     }
+
+
+def _agent_visual_status(process_status: str, latest_activity_kind: str) -> str:
+    if process_status == "running" and latest_activity_kind == "final":
+        return "idle"
+    return process_status
 
 
 def _lane_info_payload(
