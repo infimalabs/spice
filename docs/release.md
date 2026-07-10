@@ -12,6 +12,14 @@ spice release publish --notes-file /tmp/spice-release-notes.md
 spice release minor           # one-pass bump, validate, commit, publish
 ```
 
+Release validation runs every scratch-safe served-UI Playwright scenario from
+`tests/browser/release_smoke_manifest.js` using the repository's pinned
+`playwright` dependency. Run `npm ci` in the repository before releasing. The
+manifest classifies every `tests/browser/*_smoke.js` file: scratch-server and
+page-local fixtures are mandatory, while scenarios that create or depend on
+live external state are listed explicitly with a reason and must be run in a
+suitable live lane.
+
 Before `prepare`, the bare `spice release range` command resolves the highest
 version tag merged into the current `HEAD` and previews `latest-tag..HEAD`
 without requiring a future version literal.
