@@ -733,6 +733,78 @@ def test_metrics_series_replies_from_worker_off_the_dispatch_loop(tmp_path):
     assert results[0]["result"]["echo"] == "burndown"
 
 
+class _DeadConnection:
+    """Peer that vanished: every write raises like a closed socket."""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+        self.lock = Lock()
+
+    def send_json(self, payload: dict[str, Any]) -> None:
+        with self.lock:
+            self.attempts += 1
+        raise BrokenPipeError("Broken pipe")
+
+
+def test_metrics_worker_ends_quietly_when_peer_vanishes_mid_reply(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=repo)
+    connection = _DeadConnection()
+    seen: list[dict[str, Any]] = []
+
+    def metric_series(query):
+        seen.append(query)
+        return {"ok": True, "points": []}
+
+    callbacks = replace(
+        _callbacks(target=target, transcript=transcript),
+        metric_series_payload=metric_series,
+    )
+    session = LiveBusSession(connection, callbacks)
+
+    session._handle_metrics_series(
+        {"type": "metrics.series", "requestId": "r1", "query": {"series": "burndown"}}
+    )
+    session._teardown()
+
+    assert seen == [{"series": "burndown"}]
+    # One reply attempt, then the worker returns. The pre-guard shape wrote a
+    # second bus.error frame to the same dead socket, so attempts would be 2
+    # and the escaping raise would kill the thread with a printed stack.
+    assert connection.attempts == 1
+
+
+def test_metrics_worker_surfaces_compute_errors_as_bus_error(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=repo)
+    connection = _Connection()
+
+    def metric_series(query):
+        raise ValueError("boom")
+
+    callbacks = replace(
+        _callbacks(target=target, transcript=transcript),
+        metric_series_payload=metric_series,
+    )
+    session = LiveBusSession(connection, callbacks)
+
+    session._handle_metrics_series(
+        {"type": "metrics.series", "requestId": "r1", "query": {"series": "burndown"}}
+    )
+    session._teardown()
+
+    errors = [m for m in connection.sent if m.get("type") == "bus.error"]
+    assert len(errors) == 1
+    assert errors[0]["error"] == "boom"
+    assert errors[0]["requestId"] == "r1"
+
+
 def test_lanes_subscribe_replies_once_with_field_parity_per_lane(tmp_path, monkeypatch):
     monkeypatch.setattr(livebus, "_wait_for_change", _idle_wait)
     targets, transcripts = _two_lane_fixture(tmp_path)

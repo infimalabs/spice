@@ -554,11 +554,13 @@ class LiveBusSession:
                 result = self.callbacks.metric_series_payload(
                     message.get("query") or {}
                 )
-                self._reply(message, {"type": "metrics.seriesResult", "result": result})
-            except WebSocketDisconnect:
-                return
+                frame = {"type": "metrics.seriesResult", "result": result}
             except Exception as exc:  # surface, never kill the worker silently
-                self._reply(message, {"type": "bus.error", "error": str(exc)})
+                frame = {"type": "bus.error", "error": str(exc)}
+            try:
+                self._reply(message, frame)
+            except (OSError, WebSocketProtocolError, WebSocketDisconnect):
+                return
 
     # ---- watchers ------------------------------------------------------
 
