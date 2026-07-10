@@ -173,6 +173,24 @@ def visible_pending_rows(actor: str) -> list[dict[str, Any]]:
     return [r for r in rows if not is_hidden(r)]
 
 
+def briefing_rows(actor: str) -> list[dict[str, Any]]:
+    """Export the visible task plane and deferred oops rows in one snapshot."""
+    route = lanes.team_route_for_actor(actor)
+    scope = effective_route_filter_args(actor, route)
+    return tw.export(
+        [
+            "(",
+            "(",
+            "status.any:",
+            *scope,
+            ")",
+            "or",
+            f"project:{config.OOPS_PROJECT}",
+            ")",
+        ]
+    )
+
+
 def _candidate_rows(
     actor: str,
     lane_filter: list[str] | None,
