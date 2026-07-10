@@ -178,10 +178,51 @@ def test_serve_task_card_live_smoke_asserts_task_add_without_reload() -> None:
     assert "--origin" in smoke
     assert "liveTaskCardSmokeOrigin" in smoke
     assert "liveTaskCardTargetOffset" in smoke
+    assert "waitForTaskCardStage" in smoke
+    assert "liveTaskCardStageTimeoutMs" in smoke
+    for stage in (
+        "server-lane",
+        "targets-ready",
+        "bound-lane-selected",
+        "socket-open",
+        "subscription-generation",
+        "watcher-activation",
+        "initial-payload",
+        "watch-delivery",
+        "card-visible",
+    ):
+        assert f'"{stage}"' in smoke
+    for marker in (
+        "liveBusRequestSequence",
+        "liveBusSubscriptionGeneration",
+        "liveBusWatcherActive",
+        "latestPayloadMessageKeys",
+        "observedMessageKeys",
+        "socketReadyState",
+        "subscribePending",
+    ):
+        assert marker in smoke
     assert 'thread?.state === "bound"' in smoke
     assert "Task capture: " in smoke
     assert "framenavigated" in smoke
     assert "task card appeared after page navigation/reload" in smoke
+
+
+def test_task_card_live_repeat_runner_adds_concurrent_manifest_load() -> None:
+    runner = (ROOT / "browser" / "run_task_card_live_repeat.js").read_text(
+        encoding="utf-8"
+    )
+    manifest = (ROOT / "browser" / "task_card_live_load_manifest.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "repeatCount(countValue)" in runner
+    assert "manifestValue ||" in runner
+    assert 'runChild("browser-manifest-load"' in runner
+    assert '"serve_task_card_live_smoke.js"' in runner
+    assert "const results = await Promise.all(jobs);" in runner
+    assert 'path: "serve_lanes_batch_subscribe_smoke.js"' in manifest
+    assert 'path: "serve_mosaic_single_settle_smoke.js"' in manifest
 
 
 def test_serve_submit_latency_smoke_asserts_timing_buckets() -> None:
