@@ -30,7 +30,7 @@ from spice.serve import livebus, messages as message_reader, submissions
 from spice.serve.livebus import LaneSignature, LiveBusCallbacks, LiveBusSession
 from spice.serve.pending import pending_inbox_identity_payload
 from spice.serve.submissions import SubmissionLifecycleTracker
-from tests.test_livebus import _Target, _transcript_resolution
+from tests.test_livebus import _Target, _subscribe_lane, _transcript_resolution
 
 THREAD_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -100,10 +100,7 @@ def test_submission_lifecycle_follows_real_watcher_events(
     )
 
     try:
-        session._handle_lane_subscribe(
-            {"type": "lane.subscribe", "targetId": target.id, "query": {"limit": 10}}
-        )
-        session._await_pending_reads()
+        _subscribe_lane(session, target.id, limit=10)
         assert gate.ready.wait(timeout=1.0)
 
         session._handle_lane_send(
@@ -198,7 +195,16 @@ class _WatchGate:
         self.ready = Event()
         self._changes = Semaphore(0)
 
-    def wait(self, _paths: tuple[Path, ...], stop: Event, watch: Any = None) -> bool:
+    def wait(
+        self,
+        _paths: tuple[Path, ...],
+        stop: Event,
+        watch: Any = None,
+        *,
+        activated: Event | None = None,
+    ) -> bool:
+        if activated is not None:
+            activated.set()
         self.ready.set()
         while not stop.is_set():
             if self._changes.acquire(timeout=0.05):

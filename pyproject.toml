@@ -181,14 +181,14 @@ target = "_dispatch"
 # _existing_watch_paths is the pre-registration filter to paths that exist on
 # disk; the live bus exposes no public accessor for that intermediate set.
 [[tool.spice.policy.internal_couplings]]
-path = "tests/test_livebus.py"
+path = "tests/test_livebusevents.py"
 test = "test_existing_watch_paths_returns_existing_input_paths"
 target = "_existing_watch_paths"
 
 # _kqueue is the OS-level kevent handle; verifying it re-registers only when
 # the watched-path set changes is inherently white-box.
 [[tool.spice.policy.internal_couplings]]
-path = "tests/test_livebus.py"
+path = "tests/test_livebusevents.py"
 test = "test_kqueue_watch_rearms_only_when_watched_paths_change"
 target = "_kqueue"
 
