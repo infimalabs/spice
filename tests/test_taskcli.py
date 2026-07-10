@@ -462,9 +462,7 @@ def test_task_oops_description_records_triage_context(task_repo, capsys):
     assert row["task_description"] == "Longer triage context for the board."
     assert row["project"] == config.OOPS_PROJECT
     assert row["phase"] == "plan"
-    assert row[config.PROJECT_HIDDEN_UDA] == "1"
-    assert config.HIDDEN_TASK_TAG in row["tags"]
-    assert "oops" in row["tags"]
+    assert row.get("tags", []) == []
     assert str(row.get(config.TASK_CREATION_SURFACE_UDA) or "") == ""
 
 
@@ -489,11 +487,9 @@ def test_task_oops_accepts_priority_style_severity_shorthand(task_repo, capsys):
 
     assert "[high]" in out
     assert row["priority"] == "H"
-    assert "high" in row["tags"]
     assert row["project"] == config.OOPS_PROJECT
     assert row["phase"] == "plan"
-    assert row[config.PROJECT_HIDDEN_UDA] == "1"
-    assert config.HIDDEN_TASK_TAG in row["tags"]
+    assert row.get("tags", []) == []
 
 
 def test_task_add_rejects_oops_system_project(task_repo):

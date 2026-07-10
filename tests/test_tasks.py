@@ -301,6 +301,24 @@ def test_task_wake_refuses_deferred_oops_triage(task_repo):
     assert "wake --into <public-project>" in str(exc.value)
 
 
+def test_task_oops_kind_routes_to_child_board_with_caller_tags_only(task_repo):
+    created = ops.oops(
+        "Kind routes to a child board",
+        description="triage only",
+        kind="Tooling",
+        tags=["repro"],
+        origin="ack:20260101T000000000000Z",
+    )
+    handle = created.split()[1]
+    row = identity.resolve(handle)
+
+    assert row["project"] == f"{config.OOPS_PROJECT}.tooling"
+    assert row["phase"] == "plan"
+    assert handle.startswith("TOOLING-")
+    assert row.get("tags") == ["repro"]
+    assert row.get("wait")
+
+
 def test_task_wake_into_promotes_deferred_oops_into_public_project(task_repo):
     store = ServeTeamStore()
     team = store.create_team(
@@ -321,7 +339,7 @@ def test_task_wake_into_promotes_deferred_oops_into_public_project(task_repo):
 
     assert row["project"] == "task.unit"
     assert not str(row.get("wait") or "")
-    assert row.get("tags") == ["medium"]
+    assert row.get("tags", []) == []
     assert fresh != handle
     assert f"promoted {handle} -> {fresh}: wait: project:task.unit" in output
     assert "route_filter=added:task.unit:auto:create" in output

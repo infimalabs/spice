@@ -634,8 +634,7 @@ def test_drive_oops_creation_skips_subscription(task_repo):
 
     assert row["project"] == config.OOPS_PROJECT
     assert row["phase"] == "plan"
-    assert row[config.PROJECT_HIDDEN_UDA] == "1"
-    assert config.HIDDEN_TASK_TAG in row["tags"]
+    assert row.get("tags", []) == []
     assert store.global_revision() == before
     assert store.team_config(team.team_id).task_filters == ()
 
