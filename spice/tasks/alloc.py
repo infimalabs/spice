@@ -82,23 +82,11 @@ def order(
 
 
 def is_oops(row: dict[str, Any]) -> bool:
-    project = str(row.get("project") or "")
-    tags = row.get("tags") or []
-    return (
-        config.is_hidden_project(project)
-        or "oops" in tags
-        or project == config.OOPS_PROJECT.lstrip(config.HIDDEN_PROJECT_PREFIX)
-    )
+    return config.is_oops_project(str(row.get("project") or ""))
 
 
 def is_hidden(row: dict[str, Any]) -> bool:
-    tags = row.get("tags") or []
-    return (
-        str(row.get(config.PROJECT_HIDDEN_UDA) or "") == "1"
-        or config.is_hidden_project(str(row.get("project") or ""))
-        or config.HIDDEN_TASK_TAG in tags
-        or is_oops(row)
-    )
+    return config.is_hidden_project(str(row.get("project") or ""))
 
 
 def oops_rows() -> list[dict[str, Any]]:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from spice.cli.parser import build_parser
-from spice.tasks import sizing
+from spice.tasks import config, sizing
 
 
 def test_task_sizing_cli_parser_accepts_limit_and_project():
@@ -154,21 +154,26 @@ def test_task_sizing_rows_filter_and_render_raw_components():
     assert "metadata=+1(phase:verify)" in output
 
 
-def test_task_sizing_hidden_oops_uses_project_hidden_signal():
-    row = _completed_row(
+def test_task_sizing_classifies_oops_and_maxim_by_project_stem_alone():
+    # Rows carry no identity tags and no UDA: the blocker signal rides the
+    # hidden project stem alone. A .oops.<kind> descendant and a .maxim_proposal
+    # row both fold to the shared project:.oops signal.
+    oops_row = _completed_row(
         title="Completed triage",
-        uuid="task-hidden-oops",
-        project=".oops",
-        tags=["oops", "hidden"],
+        uuid="task-oops-kind",
+        project=".oops.correctness",
     )
-    row["project_hidden"] = "1"
-
-    report = sizing.size_completed_task(row)
-    components = _components(report)
-
-    assert components["blocked"] == sizing.SizingComponent(
-        "blocked", 2, "tag:oops,project:.oops,uda:project_hidden,tag:hidden"
+    maxim_row = _completed_row(
+        title="Completed proposal",
+        uuid="task-maxim",
+        project=config.MAXIM_PROPOSAL_PROJECT,
     )
+
+    oops_blocked = _components(sizing.size_completed_task(oops_row))["blocked"]
+    maxim_blocked = _components(sizing.size_completed_task(maxim_row))["blocked"]
+
+    assert oops_blocked == sizing.SizingComponent("blocked", 2, "project:.oops")
+    assert maxim_blocked == sizing.SizingComponent("blocked", 2, "project:.oops")
 
 
 def test_task_sizing_cli_renders_completed_rows(monkeypatch, capsys):

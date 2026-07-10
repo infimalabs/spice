@@ -258,13 +258,8 @@ def _task_card_source_kind(row: dict[str, Any]) -> str:
 
 def _task_card_presentation(row: dict[str, Any]) -> tuple[list[str], str]:
     project = str(row.get("project") or "").strip()
-    tags = _task_card_tags(row)
-    is_oops = project == task_config.OOPS_PROJECT or "oops" in tags
-    is_hidden = (
-        task_config.is_hidden_project(project)
-        or str(row.get(task_config.PROJECT_HIDDEN_UDA) or "") == "1"
-        or task_config.HIDDEN_TASK_TAG in tags
-    )
+    is_oops = task_config.is_oops_project(project)
+    is_hidden = task_config.is_hidden_project(project)
     is_private = _task_card_is_private_project(project)
     classes: list[str] = []
     if is_oops:
@@ -280,17 +275,6 @@ def _task_card_presentation(row: dict[str, Any]) -> tuple[list[str], str]:
     if is_hidden:
         return classes, "Hidden task"
     return classes, "Task capture"
-
-
-def _task_card_tags(row: dict[str, Any]) -> set[str]:
-    raw_tags = row.get("tags")
-    if isinstance(raw_tags, list):
-        return {str(tag).strip() for tag in raw_tags if str(tag).strip()}
-    if isinstance(raw_tags, str):
-        return {
-            tag.strip() for tag in raw_tags.replace(",", " ").split() if tag.strip()
-        }
-    return set()
 
 
 def _task_card_is_private_project(project: str) -> bool:

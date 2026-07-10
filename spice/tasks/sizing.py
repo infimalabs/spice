@@ -292,29 +292,15 @@ def _review_component(row: dict[str, Any]) -> SizingComponent:
 
 
 def _blocked_component(row: dict[str, Any]) -> SizingComponent:
-    tags = {str(tag).casefold() for tag in row.get("tags") or []}
     signals: list[str] = []
-    for tag in ("blocked", "stale", "oops"):
-        if tag in tags:
-            signals.append(f"tag:{tag}")
     status = str(row.get("status") or "").casefold()
     if status in {"blocked", "stale", "waiting"}:
         signals.append(f"status:{status}")
-    project = str(row.get("project") or "")
-    project_folded = project.casefold()
-    hidden_project = config.is_hidden_project(project)
-    legacy_oops_project = project_folded == config.OOPS_PROJECT.lstrip(
-        config.HIDDEN_PROJECT_PREFIX
-    )
-    if hidden_project or legacy_oops_project:
+    if config.is_hidden_project(str(row.get("project") or "")):
         signals.append(f"project:{config.OOPS_PROJECT}")
-    if str(row.get(config.PROJECT_HIDDEN_UDA) or "") == "1":
-        signals.append(f"uda:{config.PROJECT_HIDDEN_UDA}")
-    if config.HIDDEN_TASK_TAG in tags:
-        signals.append(f"tag:{config.HIDDEN_TASK_TAG}")
     if not signals:
         return SizingComponent("blocked", 0, "no_structured_blocker_signal")
-    return SizingComponent("blocked", 2, ",".join(dict.fromkeys(signals)))
+    return SizingComponent("blocked", 2, ",".join(signals))
 
 
 def _metadata_component(row: dict[str, Any]) -> SizingComponent:
