@@ -6,6 +6,7 @@ const execFileAsync = promisify(execFile);
 const liveTaskCardSmokeOrigin = "ack:20260101T000000000000Z";
 // Later bound scratch targets avoid unrelated historical image fixtures.
 const liveTaskCardTargetOffset = 2;
+const liveTaskCardStageTimeoutMs = 10000;
 
 async function run() {
   return withServePage(
@@ -14,39 +15,70 @@ async function run() {
       contextOptions: { viewport: { width: 1280, height: 720 } },
     },
     async ({ page, server }) => {
-      await page.waitForSelector(".lane", { timeout: 10000 });
-      await page.waitForFunction(
+      await waitForTaskCardStage(
+        page,
+        "server-lane",
+        () => Boolean(document.querySelector(".lane")),
+      );
+      await waitForTaskCardStage(
+        page,
+        "targets-ready",
         () =>
+          typeof targets !== "undefined" &&
           Array.isArray(targets) &&
           targets.length > 0 &&
           typeof addLane === "function" &&
           typeof laneStates !== "undefined",
-        { timeout: 10000 },
       );
       const lane = await ensureLiveTaskCardLane(page);
-      await waitForLiveTaskCardSubscription(page, lane.targetId);
+      await waitForTaskCardStage(
+        page,
+        "bound-lane-selected",
+        ({ targetId, threadId }) => {
+          const selected = laneStates.get(targetId);
+          return Boolean(
+            selected &&
+              selected.targetId === targetId &&
+              (selected.targetThreadId || selected.activeThreadId || "") ===
+                threadId,
+          );
+        },
+        lane,
+        lane.targetId,
+      );
+      const subscription = await waitForLiveTaskCardSubscription(page, lane);
       const title = "Live task card smoke " + Date.now();
       let navigationsAfterCreate = 0;
       page.on("framenavigated", (frame) => {
         if (frame === page.mainFrame()) navigationsAfterCreate += 1;
       });
       await createTaskForLane(server.backendDir, lane.threadId, title);
-      try {
-        await page.getByText("Task capture: " + title + " (serve.ui)").waitFor({
-          state: "visible",
-          timeout: 10000,
-        });
-      } catch (error) {
-        throw new Error(
-          "timed out waiting for live task card: " +
-            JSON.stringify(await taskCardDiagnostics(page, lane.targetId)) +
-            "\n" +
-            (error.stack || error.message),
-        );
-      }
+      await waitForTaskCardStage(
+        page,
+        "watch-delivery",
+        ({ targetId, title, generation }) => {
+          const selected = laneStates.get(targetId);
+          return Boolean(
+            selected &&
+              selected.liveBusSubscriptionGeneration === generation &&
+              selected.knownMessages.some((item) =>
+                String(item.display_text || item.text || "").includes(title),
+              ),
+          );
+        },
+        {
+          targetId: lane.targetId,
+          title,
+          generation: subscription.generation,
+        },
+        lane.targetId,
+      );
+      await waitForTaskCardVisible(page, lane.targetId, title);
       if (navigationsAfterCreate !== 0)
         throw new Error("task card appeared after page navigation/reload");
       return {
+        requestSequence: subscription.requestSequence,
+        subscriptionGeneration: subscription.generation,
         targetId: lane.targetId,
         threadId: lane.threadId,
         title,
@@ -56,22 +88,69 @@ async function run() {
   );
 }
 
-async function waitForLiveTaskCardSubscription(page, targetId) {
-  await page.waitForFunction(
-    (id) => {
-      const lane = laneStates.get(id);
+async function waitForLiveTaskCardSubscription(page, lane) {
+  await waitForTaskCardStage(
+    page,
+    "socket-open",
+    () => typeof liveBusIsOpen === "function" && liveBusIsOpen(),
+    undefined,
+    lane.targetId,
+  );
+  await waitForTaskCardStage(
+    page,
+    "subscription-generation",
+    (targetId) => {
+      const selected = laneStates.get(targetId);
+      return Boolean(selected && selected.liveBusSubscriptionGeneration);
+    },
+    lane.targetId,
+    lane.targetId,
+  );
+  await waitForTaskCardStage(
+    page,
+    "watcher-activation",
+    (targetId) => {
+      const selected = laneStates.get(targetId);
       return Boolean(
-        lane &&
-          lane.liveBusSubscribed &&
-          lane.latestPayload &&
-          typeof liveBusIsOpen === "function" &&
-          liveBusIsOpen(),
+        selected &&
+          selected.liveBusSubscribed &&
+          selected.liveBusWatcherActive &&
+          selected.liveBusSubscriptionGeneration,
       );
     },
-    targetId,
-    { timeout: 10000 },
+    lane.targetId,
+    lane.targetId,
   );
-  await page.waitForTimeout(250);
+  const activeGeneration = await page.evaluate((targetId) => {
+    return String(
+      laneStates.get(targetId)?.liveBusSubscriptionGeneration || "",
+    );
+  }, lane.targetId);
+  await waitForTaskCardStage(
+    page,
+    "initial-payload",
+    ({ targetId, generation }) => {
+      const selected = laneStates.get(targetId);
+      return Boolean(
+        selected &&
+          selected.liveBusSubscriptionGeneration === generation &&
+          selected.liveBusSubscribePending === false &&
+          selected.latestPayload,
+      );
+    },
+    { targetId: lane.targetId, generation: activeGeneration },
+    lane.targetId,
+  );
+  return page.evaluate(
+    (value) => ({
+      generation: value,
+      requestSequence:
+        typeof liveBusRequestSequence === "number"
+          ? liveBusRequestSequence
+          : null,
+    }),
+    activeGeneration,
+  );
 }
 
 async function ensureLiveTaskCardLane(page) {
@@ -79,9 +158,9 @@ async function ensureLiveTaskCardLane(page) {
     const boundTargets = targets.filter(
       (target) => target.targetIdentity?.thread?.state === "bound",
     );
-    const choices = boundTargets.length ? boundTargets : targets;
-    const target = choices[Math.min(targetOffset, choices.length - 1)];
-    if (!target) throw new Error("no target available for task-card smoke");
+    const target =
+      boundTargets[Math.min(targetOffset, boundTargets.length - 1)];
+    if (!target) throw new Error("no bound target available for task-card smoke");
     let lane = laneStates.get(target.id);
     if (!lane) {
       addLane(target.id);
@@ -94,24 +173,88 @@ async function ensureLiveTaskCardLane(page) {
   }, liveTaskCardTargetOffset);
 }
 
-async function taskCardDiagnostics(page, targetId) {
-  return page.evaluate((id) => {
-    const lane = laneStates.get(id);
-    const messages = lane
-      ? lane.knownMessages.map((item) => ({
-          display: item.display_text || item.text || "",
-          kind: item.kind || "",
-          source: item.source_kind || "",
-        }))
+async function waitForTaskCardStage(
+  page,
+  stage,
+  predicate,
+  argument = undefined,
+  targetId = "",
+) {
+  try {
+    await page.waitForFunction(predicate, argument, {
+      timeout: liveTaskCardStageTimeoutMs,
+    });
+  } catch (error) {
+    throw new Error(
+      "task-card stage " +
+        stage +
+        " timed out: " +
+        JSON.stringify(await taskCardDiagnostics(page, targetId, stage)) +
+        "\n" +
+        (error.stack || error.message),
+    );
+  }
+}
+
+async function waitForTaskCardVisible(page, targetId, title) {
+  try {
+    await page.getByText("Task capture: " + title + " (serve.ui)").waitFor({
+      state: "visible",
+      timeout: liveTaskCardStageTimeoutMs,
+    });
+  } catch (error) {
+    throw new Error(
+      "task-card stage card-visible timed out: " +
+        JSON.stringify(
+          await taskCardDiagnostics(page, targetId, "card-visible"),
+        ) +
+        "\n" +
+        (error.stack || error.message),
+    );
+  }
+}
+
+async function taskCardDiagnostics(page, targetId, stage) {
+  return page.evaluate(({ id, stageName }) => {
+    const stateMap =
+      typeof laneStates !== "undefined" && laneStates instanceof Map
+        ? laneStates
+        : null;
+    const lane = stateMap ? stateMap.get(id) : null;
+    const observedMessageKeys = lane
+      ? lane.knownMessages.map((item) => item.key || "")
+      : [];
+    const latestPayloadMessageKeys = Array.isArray(lane?.latestPayload?.messages)
+      ? lane.latestPayload.messages.map((item) => item.key || "")
       : [];
     return {
+      initialPayloadApplied: Boolean(lane && lane.latestPayload),
+      latestPayloadMessageKeys,
       liveBusOpen: typeof liveBusIsOpen === "function" && liveBusIsOpen(),
-      messages,
+      observedMessageKeys,
+      requestSequence:
+        typeof liveBusRequestSequence === "number"
+          ? liveBusRequestSequence
+          : null,
+      socketReadyState:
+        typeof liveBusSocket !== "undefined" && liveBusSocket
+          ? liveBusSocket.readyState
+          : null,
+      stage: stageName,
+      subscribePending: Boolean(lane && lane.liveBusSubscribePending),
       subscribed: Boolean(lane && lane.liveBusSubscribed),
+      subscriptionGeneration: lane
+        ? lane.liveBusSubscriptionGeneration || ""
+        : "",
       targetId: id,
+      targetCount:
+        typeof targets !== "undefined" && Array.isArray(targets)
+          ? targets.length
+          : 0,
       threadId: lane ? lane.targetThreadId || lane.activeThreadId || "" : "",
+      watcherActive: Boolean(lane && lane.liveBusWatcherActive),
     };
-  }, targetId);
+  }, { id: targetId, stageName: stage });
 }
 
 async function createTaskForLane(backendDir, threadId, title) {
