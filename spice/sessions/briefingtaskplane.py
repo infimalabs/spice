@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Callable, Literal
 
 from spice.errors import SpiceError
@@ -26,16 +25,17 @@ TASK_PLANE_WEIGHTS = {
     "completed": 30,
     "oops": 20,
 }
+TaskRow = dict[str, object]
 
 
 @dataclass(frozen=True)
 class TaskPlaneRows:
-    active: tuple[dict[str, object], ...]
-    ready: tuple[dict[str, object], ...]
-    review: tuple[dict[str, object], ...]
-    blocked: tuple[dict[str, object], ...]
-    completed: tuple[dict[str, object], ...]
-    oops: tuple[dict[str, object], ...]
+    active: tuple[TaskRow, ...]
+    ready: tuple[TaskRow, ...]
+    review: tuple[TaskRow, ...]
+    blocked: tuple[TaskRow, ...]
+    completed: tuple[TaskRow, ...]
+    oops: tuple[TaskRow, ...]
 
 
 def task_plane_rank_key(
@@ -54,6 +54,7 @@ def _candidate(
     label: str = "",
     count: int = 0,
     key: str = "",
+    project: str = "",
 ) -> "RehydrationCandidate":
     from spice.sessions.briefing import RehydrationCandidate
 
@@ -66,6 +67,7 @@ def _candidate(
         label=label,
         count=count,
         key=key,
+        project=project,
     )
 
 
@@ -82,8 +84,11 @@ def collect_task_plane_candidates() -> list["RehydrationCandidate"]:
         from spice.tasks import alloc, identity, tw
 
         actor = tw.current_actor()
+        snapshot = alloc.briefing_rows(actor)
         rows = classify_task_plane_rows(
-            alloc.briefing_rows(actor),
+            list(snapshot.inventory),
+            ready_rows=list(snapshot.ready),
+            blocked_rows=list(snapshot.blocked),
             is_hidden=alloc.is_hidden,
             is_oops=alloc.is_oops,
         )
@@ -128,12 +133,13 @@ def collect_task_plane_candidates() -> list["RehydrationCandidate"]:
 
 
 def classify_task_plane_rows(
-    rows: list[dict[str, object]],
+    rows: list[TaskRow],
     *,
-    is_hidden: Callable[[dict[str, object]], bool],
-    is_oops: Callable[[dict[str, object]], bool],
+    ready_rows: list[TaskRow],
+    blocked_rows: list[TaskRow],
+    is_hidden: Callable[[TaskRow], bool],
+    is_oops: Callable[[TaskRow], bool],
 ) -> TaskPlaneRows:
-    now = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     visible = [row for row in rows if not is_hidden(row)]
     pending = [row for row in visible if _task_field(row, "status") == "pending"]
     active = [
@@ -143,17 +149,17 @@ def classify_task_plane_rows(
     ]
     ready = [
         row
-        for row in pending
+        for row in ready_rows
         if _task_field(row, "phase") != "review"
         and not _task_field(row, "claim_by")
-        and _task_is_ready(row, now=now)
+        and not is_hidden(row)
     ]
     review = [
         row
         for row in pending
         if _task_field(row, "phase") == "review" and not _task_field(row, "claim_by")
     ]
-    blocked = [row for row in pending if row.get("depends")]
+    blocked = [row for row in blocked_rows if not is_hidden(row)]
     completed = [row for row in visible if _task_field(row, "status") == "completed"]
     oops = [
         row
@@ -168,21 +174,6 @@ def classify_task_plane_rows(
         completed=tuple(completed),
         oops=tuple(oops),
     )
-
-
-def _task_is_ready(row: dict[str, object], *, now: str) -> bool:
-    return bool(
-        _task_field(row, "status") == "pending"
-        and not _task_field(row, "start")
-        and not row.get("depends")
-        and _task_time_has_arrived(row, "wait", now=now)
-        and _task_time_has_arrived(row, "scheduled", now=now)
-    )
-
-
-def _task_time_has_arrived(row: dict[str, object], key: str, *, now: str) -> bool:
-    value = _task_field(row, key)
-    return not value or value <= now
 
 
 def _task_claim_candidate(
@@ -200,6 +191,7 @@ def _task_claim_candidate(
         rank_name=TASK_PLANE_RANK_NAME,
         rank_key=task_plane_rank_key("claim", _task_urgency(row), timestamp),
         label=handle,
+        project=_task_field(row, "project"),
     )
 
 
