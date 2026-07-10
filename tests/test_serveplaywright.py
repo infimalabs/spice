@@ -203,6 +203,20 @@ def test_serve_submit_latency_smoke_asserts_timing_buckets() -> None:
     assert 'stubbed: type === "lane.send"' in smoke
 
 
+def test_serve_structural_status_smoke_asserts_watcher_driven_completion() -> None:
+    smoke = (ROOT / "browser" / "serve_structural_status_smoke.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "handleLiveBusMessage" in smoke
+    assert 'source: "watch"' in smoke
+    assert "latestActivityKind" in smoke
+    assert "targetChoiceStatus" in smoke
+    assert "maxStatusTransitionMs" in smoke
+    assert "Confirmed fixed." in smoke
+
+
 def test_serve_composer_typing_latency_smoke_asserts_no_layout_work() -> None:
     smoke = (ROOT / "browser" / "serve_composer_typing_latency_smoke.js").read_text(
         encoding="utf-8"

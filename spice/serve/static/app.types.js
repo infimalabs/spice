@@ -124,6 +124,7 @@
  * @property {string=} error
  * @property {string=} preview
  * @property {string=} lastAssistantAt
+ * @property {string=} latestActivityKind
  * @property {string=} agentProcessStatus
  * @property {string=} agentVisualStatus
  * @property {string=} activityStatus

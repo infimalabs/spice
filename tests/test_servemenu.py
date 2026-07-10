@@ -908,9 +908,13 @@ def test_static_empty_team_importer_renders_message_stream_choices():
     assert "targetIdentityThreadId(target.targetIdentity)," in app_stream
     assert 'target.lastAssistantAt || "",' in app_stream
     assert 'statusLine.lastAssistantAt || "",' in app_stream
+    assert 'statusLine.latestActivityKind || "",' in app_stream
     assert "target.pendingCount || 0," in app_stream
     assert "target.pendingInboxCount || 0," in app_stream
     assert 'target.agentProcessStatus || "",' in app_stream
+    assert (
+        'target.agentVisualStatus || statusLine.agentVisualStatus || "",' in app_stream
+    )
     assert "targetIdentityThreadState(target.targetIdentity)," in app_stream
     assert (
         "lane.messagesEl.replaceChildren(\n"

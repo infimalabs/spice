@@ -497,9 +497,11 @@ function emptyTeamTargetFingerprint(target) {
     targetIdentityThreadId(target.targetIdentity),
     target.lastAssistantAt || "",
     statusLine.lastAssistantAt || "",
+    statusLine.latestActivityKind || "",
     target.pendingCount || 0,
     target.pendingInboxCount || 0,
     target.agentProcessStatus || "",
+    target.agentVisualStatus || statusLine.agentVisualStatus || "",
     targetIdentityThreadState(target.targetIdentity),
   ];
 }
