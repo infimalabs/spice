@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TextIO
+from typing import Sequence, TextIO
 
 from spice.mail import inbox
 
@@ -15,6 +15,7 @@ def print_inbox_readout(
     quiet: bool = False,
     displayed_keys: set[str] | None = None,
     file: TextIO | None = None,
+    items: Sequence[inbox.InboxItem] | None = None,
 ) -> list[str]:
     """Print pending inbox steering; return the keys displayed.
 
@@ -26,7 +27,7 @@ def print_inbox_readout(
     from spice.mail.steeringkey import steering_token
 
     out = file or sys.stdout
-    items = inbox.collect_inbox_items(str(repo_root) if repo_root else None)
+    items = list(items) if items is not None else inbox.collect_inbox_items(repo_root)
 
     # Bracket everything spice delivers with this worktree's steering token, so
     # the agent can connect a real steering block back to the token it saw at
@@ -64,7 +65,7 @@ def print_inbox_readout(
     for row in renewal_rows:
         print(f"  {row}", file=out)
     if renewal_rows:
-        return _sealed(shown_full)
+        return _sealed([])
     if not items:
         print("  pending=none", file=out)
         return _sealed(shown_full)
