@@ -17,6 +17,14 @@ server deployment. Worker worktrees are operated trees: config can shape agent
 defaults and policy in those trees, but it does not choose a different spice
 source checkout, import path, or virtualenv for the running code.
 
+## Worktree Speech
+
+Speech playback is an operator-local preference configured through
+`spice config say`. macOS uses `say` by default. Linux operators can use the
+documented [`espeak-ng` preset](docs/config/reference.md#linux-speech-with-espeak-ng),
+which reads speech text from stdin and returns browser-playable WAV audio on
+stdout.
+
 ## `[tool.spice.agent]`
 
 Project-wide agent launch defaults: driver, model, effort, and selected wrapper
