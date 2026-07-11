@@ -42,12 +42,27 @@ The wrapper does this before running the requested command:
 
 - prints pending operator steering and keep-working guidance on stderr;
 - preserves ACK semantics by leaving inbox retirement to transcript ACK lines;
-- asks `rtk rewrite` for the rewritten shell command string or direct argv
-  replacement when RTK is installed;
+- requires [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer and asks
+  `rtk rewrite` for the rewritten shell command string or direct argv;
 - routes git through the worktree shadow environment;
 - routes `spice` and `python` commands to the correct worktree source checkout
   or target repository virtual environment;
 - makes configured shell wrapper functions available.
+
+### RTK Rewrite Protocol
+
+Spice invokes `rtk rewrite -- <command...>`. Exit `3` with non-empty stdout
+replaces the command with stdout. Exit `1` with empty stdout means the command
+is unmatched and runs unchanged. Every other exit/stdout combination is an
+integration error; exit `0` is not accepted by the current protocol. Missing,
+older, or protocol-invalid RTK stops the agent path with the official install
+guidance instead of silently selecting a native-command path.
+
+RTK is the sole owner of rewrite selection. Spice sets `RTK_DB_PATH` to the
+current agent thread's `.git/spice/agents/<thread>/rtk/history.db` and owns only
+that history location plus the finite command-shape transformations below.
+The complete install, verification, and ownership contract is in
+[CONFIG.md](../../CONFIG.md#rtk-rewrite-companion).
 
 ## Wrapper Groups
 
@@ -56,12 +71,18 @@ The selected groups come from `[tool.spice.agent] wrappers = [...]`. When no
 list is configured, spice selects the built-in `common` group. An explicit empty
 list disables wrapper generation.
 
-The built-in `common` group is intentionally empty. RTK command coverage comes
-from the `rtk rewrite` handoff inside `spice agent run`, so RTK remains the
-single source of truth for which raw commands become `rtk ...` telemetry. Spice
-does not carry per-command semantic shims after the rewrite; if RTK maps a
-command shape to a non-equivalent `rtk ...` argv, the fix belongs in RTK's
-rewrite model.
+The built-in `common` group contains one `rtk` wrapper. It does not choose
+commands for RTK; it preserves native semantics after RTK selection by routing:
+
+- rg-only grep flags (`--files`, `--type`, `--type=*`, `--no-heading`) to `rg`;
+- native find predicates and actions to `find`;
+- diagnostic git flags such as `--check` and `--name-status` to `git`.
+
+This repository replaces `common` with the same three transformations plus one
+head-only `rtk grep -E` route for BSD grep's extended-expression mode. Any new
+transformation belongs in the published contract and its executable tests; it
+is not an alternate rewrite selector.
+
 Repos that need exact shell-function control can override or extend groups:
 
 ```toml
