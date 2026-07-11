@@ -1,6 +1,7 @@
 """Pre-commit hook installation, execution, and runtime integration tests."""
 
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -453,6 +454,28 @@ def test_init_gates_cli_is_a_standalone_entry(tmp_path):
     gate = _run([str(hooks_dir(repo) / "pre-commit")], cwd=repo)
 
     assert gate.returncode == 0
+
+
+def test_init_gates_first_commit_passes_without_taskwarrior(tmp_path):
+    repo = _git_init(tmp_path / "repo")
+    init_gates_repo(repo)
+    executable_dir = tmp_path / "gate-bin"
+    executable_dir.mkdir()
+    for name in ("git", "sh", "spice"):
+        source = shutil.which(name)
+        assert source
+        (executable_dir / name).symlink_to(source)
+    _write_repo_file(repo, "README.md", "Concrete repository documentation.\n")
+    _git(repo, "add", "README.md")
+
+    commit = _run(
+        ["git", "commit", "-m", "first commit"],
+        cwd=repo,
+        path=str(executable_dir),
+    )
+
+    assert commit.returncode == 0
+    assert _git(repo, "log", "-1", "--format=%s").stdout.strip() == "first commit"
 
 
 def test_init_repo_generates_state_gitignore(tmp_path):
@@ -946,12 +969,18 @@ def _git(
 
 
 def _run(
-    args: list[str], *, check: bool = True, cwd: Path | None = None
+    args: list[str],
+    *,
+    check: bool = True,
+    cwd: Path | None = None,
+    path: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()  # env-policy: allow
     env["PYTHONPATH"] = os.pathsep.join(
         entry for entry in (str(PROJECT_ROOT), env.get("PYTHONPATH", "")) if entry
     )
+    if path is not None:
+        env["PATH"] = path
     result = subprocess.run(
         args,
         capture_output=True,
