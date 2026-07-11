@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shlex
+import subprocess
+
+import pytest
 
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.cli.parser import build_parser
+from spice.errors import SpiceError
 from spice.serve import demo
 from spice.serve.app import ServeState
 from spice.serve.demo import CANNED_TRANSCRIPT, seed_demo_environment
@@ -97,3 +103,67 @@ def test_demo_command_is_registered_with_zero_setup_help():
         "no model calls",
     ):
         assert phrase in description
+
+
+def test_demo_root_gate_preserves_existing_content(tmp_path):
+    nonempty = tmp_path / "operator-worktree"
+    nonempty.mkdir()
+    sentinel = nonempty / "sentinel.txt"
+    sentinel.write_text("operator data\n", encoding="utf-8")
+    git_dir = nonempty / ".git"
+    git_dir.mkdir()
+    root_file = tmp_path / "not-a-directory"
+    root_file.write_text("operator file\n", encoding="utf-8")
+
+    for protected in (nonempty, root_file):
+        with pytest.raises(SpiceError):
+            seed_demo_environment(root=protected)
+
+    assert sentinel.read_text(encoding="utf-8") == "operator data\n"
+    assert git_dir.is_dir()
+    assert root_file.read_text(encoding="utf-8") == "operator file\n"
+
+
+def test_seed_only_command_is_quoted_and_anchors_the_demo_repo(
+    tmp_path, monkeypatch, capsys
+):
+    demo_root = tmp_path / "demo root"
+    fake_bin = tmp_path / "fake bin"
+    fake_bin.mkdir()
+    probe = tmp_path / "serve probe.json"
+    fake_spice = fake_bin / "spice"
+    fake_spice.write_text(
+        "#!/bin/sh\n"
+        'printf \'%s\\n\' "$PWD" "$CLAUDE_CONFIG_DIR" "$@" > '
+        f"{shlex.quote(str(probe))}\n",
+        encoding="utf-8",
+    )
+    fake_spice.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake_bin), prepend=os.pathsep)
+
+    args = argparse.Namespace(
+        root=demo_root,
+        host="127.0.0.1",
+        port=8765,
+        seed_only=True,
+    )
+    assert demo.run_demo(args) == 0
+    output = capsys.readouterr().out
+    command = output.split("spice demo: start the server with:\n  ", 1)[1].strip()
+    caller = tmp_path / "caller cwd"
+    caller.mkdir()
+
+    subprocess.run(command, shell=True, cwd=caller, check=True)
+
+    lines = probe.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == str(demo_root.resolve())
+    assert lines[1] == str(demo_root.resolve() / "driver-home")
+    assert lines[2:] == [
+        "serve",
+        "--task-backend",
+        str(demo_root.resolve() / "task-backend"),
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8765",
+    ]

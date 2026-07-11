@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from typing import Any
 from spice.agent.driver import dashed_uuid
 from spice.agent.lifecycle import write_agent_state
 from spice.config import update_section
+from spice.errors import SpiceError
 from spice.serve.app import DEFAULT_SERVE_HOST, DEFAULT_SERVE_PORT, run_serve
 
 # A fixed, obviously-synthetic thread id keeps the seeded transcript path and
@@ -128,8 +130,7 @@ def run_demo(args: argparse.Namespace) -> int:
     if args.seed_only:
         print(
             "spice demo: start the server with:\n"
-            f"  CLAUDE_CONFIG_DIR={env.driver_home} spice serve "
-            f"--task-backend {env.task_backend} --host {args.host} --port {args.port}"
+            f"  {demo_serve_command(env, host=args.host, port=args.port)}"
         )
         return 0
     # The demo boots serve in-process; serve resolves the lane transcript from
@@ -150,10 +151,7 @@ def run_demo(args: argparse.Namespace) -> int:
 
 def seed_demo_environment(root: Path | None = None) -> DemoEnvironment:
     """Materialize a self-contained demo lane under one throwaway directory."""
-    demo_root = (
-        root if root is not None else Path(tempfile.mkdtemp(prefix="spice-demo-"))
-    ).resolve()
-    demo_root.mkdir(parents=True, exist_ok=True)
+    demo_root = _prepare_demo_root(root)
     repo_root = demo_root
     _git_init_demo_repo(repo_root)
     update_section(repo_root, "agent", {"driver": "claude"})
@@ -171,6 +169,42 @@ def seed_demo_environment(root: Path | None = None) -> DemoEnvironment:
         task_backend=task_backend,
         transcript_path=transcript_path,
     )
+
+
+def demo_serve_command(env: DemoEnvironment, *, host: str, port: int) -> str:
+    """Render the seed-only launch command with its repo anchor and environment."""
+    serve = shlex.join(
+        [
+            "env",
+            f"CLAUDE_CONFIG_DIR={env.driver_home}",
+            "spice",
+            "serve",
+            "--task-backend",
+            str(env.task_backend),
+            "--host",
+            host,
+            "--port",
+            str(port),
+        ]
+    )
+    return f"cd {shlex.quote(str(env.repo_root))} && {serve}"
+
+
+def _prepare_demo_root(root: Path | None) -> Path:
+    if root is None:
+        return Path(tempfile.mkdtemp(prefix="spice-demo-")).resolve()
+    candidate = root.resolve()
+    if candidate.exists():
+        if not candidate.is_dir():
+            raise SpiceError(f"spice demo root is not a directory: {candidate}")
+        if any(candidate.iterdir()):
+            raise SpiceError(
+                "spice demo refuses to modify a nonempty directory; "
+                f"choose a new or empty disposable root: {candidate}"
+            )
+        return candidate
+    candidate.mkdir(parents=True)
+    return candidate
 
 
 def _git_init_demo_repo(repo_root: Path) -> None:
