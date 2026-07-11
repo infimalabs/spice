@@ -1,10 +1,12 @@
-# spice
+# Spice Harness
 
 [![PyPI version](https://img.shields.io/pypi/v/spice-harness.svg)](https://pypi.org/project/spice-harness/)
 [![Python versions](https://img.shields.io/pypi/pyversions/spice-harness.svg)](https://pypi.org/project/spice-harness/)
 [![License](https://img.shields.io/pypi/l/spice-harness.svg)](https://github.com/infimalabs/spice/blob/main/LICENSE)
 
-**Simultaneous Production, Integration, and Control Environment.**
+**Spice Harness is an agent harness / fleet operations console.**
+
+_Simultaneous Production, Integration, and Control Environment._
 
 spice is an installed, repo-native harness for operating coding agents. It
 treats the agent transcript as the source of truth and the repository
