@@ -67,6 +67,52 @@ def test_no_match_returns_empty_tuple(repo):
     )
 
 
+def test_positive_occurrence_after_negated_occurrence_still_matches(repo):
+    _write_pyproject(
+        repo,
+        """
+        [tool.spice.maxims.routes]
+        words = ["quiet route"]
+        message = "Do not take the quiet route."
+        """,
+    )
+
+    matches = create.detect_suspect_wording(
+        title="Clear task",
+        description=(
+            "Do not use the master label or take the quiet route. "
+            "The master label and quiet route remain elsewhere."
+        ),
+        repo_root=repo,
+    )
+
+    assert {(match.matched, match.trigger_family) for match in matches} == {
+        ("master", "taste"),
+        ("quiet route", "routes"),
+    }
+
+
+def test_hypothetical_trigger_word_remains_suspect(repo):
+    _write_pyproject(
+        repo,
+        """
+        [tool.spice.maxims.routes]
+        words = ["quiet route"]
+        message = "Do not take the quiet route."
+        """,
+    )
+
+    matches = create.detect_suspect_wording(
+        title="Clear task",
+        description="Could this take the quiet route?",
+        repo_root=repo,
+    )
+
+    assert [(match.matched, match.trigger_family) for match in matches] == [
+        ("quiet route", "routes")
+    ]
+
+
 def test_title_only_match_does_not_scan_clean_body_or_acceptance(repo):
     matches = create.detect_suspect_wording(
         title="Recover orphaned notes",

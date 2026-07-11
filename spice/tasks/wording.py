@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from spice import policy
+from spice import policy, textcontext
 from spice.agent import maxims
 from spice.paths import repo_root_from_cwd
 from spice.policyconfig import resolve_policy
@@ -50,7 +50,11 @@ def detect_task_creation_wording(
         if root is not None
         else dict(policy.TASTE_WORD_SUGGESTIONS)
     )
-    for finding in taste.scan_taste_texts(items, words=words):
+    for finding in taste.scan_taste_texts(
+        items,
+        words=words,
+        match_filter=_is_not_explicitly_negated,
+    ):
         matches.append(
             TaskWordingMatch(
                 source=finding.source,
@@ -64,6 +68,7 @@ def detect_task_creation_wording(
             [text],
             repo_root=root,
             driver_name=driver_name,
+            match_filter=_is_not_explicitly_negated,
         ):
             matches.append(
                 TaskWordingMatch(
@@ -74,6 +79,10 @@ def detect_task_creation_wording(
                 )
             )
     return tuple(matches)
+
+
+def _is_not_explicitly_negated(text: str, match_start: int) -> bool:
+    return not textcontext.has_explicit_negation_before(text, match_start)
 
 
 def _task_creation_text_items(

@@ -1175,6 +1175,7 @@ def triggered_maxim_matches(
     *,
     repo_root: Path | None = None,
     driver_name: str | None = None,
+    match_filter: Callable[[str, int], bool] | None = None,
 ) -> list[MaximTriggerMatch]:
     """Return matched maxim trigger keys with their owning bag."""
     bags, key_to_name, bag_order = _resolved_lookup(repo_root)
@@ -1182,16 +1183,17 @@ def triggered_maxim_matches(
     trigger_parts = {key: tuple(key.split()) for key in key_to_name}
     seen: set[tuple[str, str]] = set()
     for statement in statements:
-        words = [match.group(0).casefold() for match in _WORD_REGEX.finditer(statement)]
-        if not words:
+        word_matches = list(_WORD_REGEX.finditer(statement))
+        words = [match.group(0).casefold() for match in word_matches]
+        if not word_matches:
             continue
-        word_set = set(words)
         for key, parts in trigger_parts.items():
-            if len(parts) == 1:
-                matched = parts[0] in word_set
-            else:
-                matched = _contains_word_phrase(words, parts)
-            if not matched:
+            starts = _trigger_starts(word_matches, words, parts)
+            if match_filter is not None:
+                starts = tuple(
+                    start for start in starts if match_filter(statement, start)
+                )
+            if not starts:
                 continue
             bag_name = key_to_name[key]
             if _maxim_bag_matches_driver(bags[bag_name], driver_scope):
@@ -1206,6 +1208,19 @@ def triggered_maxim_matches(
             seen, key=lambda item: (bag_order[item[0]], item[1])
         )
     ]
+
+
+def _trigger_starts(
+    word_matches: Sequence[re.Match[str]],
+    words: Sequence[str],
+    parts: tuple[str, ...],
+) -> tuple[int, ...]:
+    size = len(parts)
+    return tuple(
+        word_matches[index].start()
+        for index in range(0, len(words) - size + 1)
+        if tuple(words[index : index + size]) == parts
+    )
 
 
 def _normalized_driver_scope_name(driver_name: str | None) -> str:

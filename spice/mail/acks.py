@@ -53,6 +53,7 @@ from spice.mail.inbox import (
     parse_inbox_payload,
 )
 from spice.sessions.util import first_text, normalize_timestamp
+from spice import textcontext
 
 ACK_TOKEN = "ACK"
 NACK_TOKEN = "NACK"
@@ -79,37 +80,10 @@ _ACK_HEADER_SEPARATOR_CHARS = ":—–.-,;!?"
 # is the wrapper's opening delimiter and its close is consumed with it.
 _EMPHASIS_CHARS = "*_"
 _TASK_DIRECTIVE_SEPARATOR_CHARS = " \t:-"
-_ACK_CONTEXT_BREAK_CHARS = "\r\n.!?;"
-_ACK_CONTEXT_WORD_EXTRA_CHARS = frozenset({"'", "-"})
-_ACK_CONTEXT_WINDOW = 6
 _SOURCE_CONTEXT_LINE_RE = re.compile(r"^\s*(?:[./\w-]+/)*[\w.-]+:\d+(?::\d+)?:")
-_ACK_NEGATION_WORDS = frozenset(
-    {
-        "can't",
-        "cannot",
-        "cant",
-        "not",
-        "refuse",
-        "refused",
-        "refuses",
-        "refusing",
-        "will-not",
-        "won't",
-        "wont",
-    }
-)
-_ACK_NEGATION_PHRASES = (
-    ("instead", "of"),
-    ("instead-of",),
-    ("refuse", "to"),
-    ("refused", "to"),
-    ("refuses", "to"),
-    ("refusing", "to"),
-)
 _ACK_HYPOTHETICAL_WORDS = frozenset(
     {"could", "hypothetically", "if", "should", "whether", "would"}
 )
-_ACK_TURNING_WORDS = frozenset({"but", "hence", "so", "therefore", "thus"})
 _ACK_NARRATION_WORDS = frozenset(
     {
         "example",
@@ -724,14 +698,13 @@ def _has_guarded_ack_context(text: str, ack_pos: int) -> bool:
     """True when surrounding prose is talking about an ACK, not making one."""
     if _ack_token_is_quoted(text, ack_pos):
         return True
-    words = _ack_prefix_words(text, ack_pos)
+    words = textcontext.clause_prefix_words(text, ack_pos)
     if not words:
         return False
-    context = _words_after_last_turn(words)
-    recent = context[-_ACK_CONTEXT_WINDOW:]
+    context = textcontext.words_after_last_turn(words)
+    recent = context[-textcontext.CONTEXT_WINDOW :]
     return (
-        bool(_ACK_NEGATION_WORDS & set(recent))
-        or _contains_phrase(recent, _ACK_NEGATION_PHRASES)
+        textcontext.has_explicit_negation_before(text, ack_pos)
         or bool(_ACK_HYPOTHETICAL_WORDS & set(recent))
         or bool(_ACK_NARRATION_WORDS & set(recent))
     )
@@ -756,47 +729,6 @@ def _ack_token_is_quoted(text: str, ack_pos: int) -> bool:
         return True
     line_start = text.rfind("\n", 0, ack_pos) + 1
     return text[line_start:ack_pos].count("`") % 2 == 1
-
-
-def _ack_prefix_words(text: str, ack_pos: int) -> tuple[str, ...]:
-    start = ack_pos
-    while start > 0 and text[start - 1] not in _ACK_CONTEXT_BREAK_CHARS:
-        start -= 1
-    words: list[str] = []
-    cursor = start
-    while cursor < ack_pos:
-        char = text[cursor]
-        if char.isalnum():
-            word_start = cursor
-            cursor += 1
-            while cursor < ack_pos and (
-                text[cursor].isalnum() or text[cursor] in _ACK_CONTEXT_WORD_EXTRA_CHARS
-            ):
-                cursor += 1
-            words.append(text[word_start:cursor].lower())
-            continue
-        cursor += 1
-    return tuple(words)
-
-
-def _words_after_last_turn(words: tuple[str, ...]) -> tuple[str, ...]:
-    for index in range(len(words) - 1, -1, -1):
-        if words[index] in _ACK_TURNING_WORDS:
-            return words[index + 1 :]
-    return words
-
-
-def _contains_phrase(
-    words: tuple[str, ...], phrases: tuple[tuple[str, ...], ...]
-) -> bool:
-    for phrase in phrases:
-        size = len(phrase)
-        if size > len(words):
-            continue
-        for index in range(0, len(words) - size + 1):
-            if words[index : index + size] == phrase:
-                return True
-    return False
 
 
 def _parse_ack_header(text: str, ack_pos: int) -> tuple[int, tuple[str, ...]] | None:
