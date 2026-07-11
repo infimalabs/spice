@@ -39,10 +39,11 @@ any such controls are front-door additions, not part of this model.
 ## Context
 
 `studies.posture` / POSTURE-1kCXTyHP asks how one human reaches their own agent
-fleet remotely without becoming multi-tenant. Remote reach is currently unbuilt;
-this record fixes the direction so an implementation task does not invent
-transport or auth on the fly. The posture umbrella (POSTURE-1kCXR4K7) is
-complete, and this is its remote-reach growth vector.
+fleet remotely without becoming multi-tenant. The transport works with today's
+Serve flags; only dedicated first-class packaging is unbuilt. This record fixes
+the direction so future packaging does not invent transport or auth on the fly.
+The posture umbrella (POSTURE-1kCXR4K7) is complete, and this is its remote-reach
+growth vector.
 
 ## Evaluation
 
@@ -78,7 +79,7 @@ spice deliberately does not. Both keep exactly one shared token.
 
 ```
 # SSH (default): serve stays on loopback
-spice serve                                   # 127.0.0.1:8765
+spice serve --auth-token "$SPICE_SERVE_TOKEN" # 127.0.0.1:8765
 ssh -L 8080:127.0.0.1:8765 serve-host         # from the remote device
 # browse http://127.0.0.1:8080, present the shared token
 
@@ -89,8 +90,8 @@ spice serve --host <tailnet-addr> --auth-token "$SPICE_SERVE_TOKEN"
 
 ## Follow-Ups
 
-None required. Both transports work against today's serve with no code change, so
-this record spawns no implementation task — fabricating a speculative tree for an
-unbuilt direction would be premature. If worktrees ever genuinely cannot be
-co-located with serve, reopen remote target addressing against that concrete
+None required. Both transports work against today's serve with no code change,
+so this record spawns no implementation task. Dedicated packaging may be added
+when it removes observed operator friction. If worktrees ever genuinely cannot
+be co-located with serve, reopen remote target addressing against that concrete
 need, not speculatively.
