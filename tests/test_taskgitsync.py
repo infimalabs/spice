@@ -140,6 +140,59 @@ def test_integrate_and_publish_no_op_phase_fast_forwards_onto_peer_content(tmp_p
     assert (repo / "baseline.txt").read_text(encoding="utf-8") == "baseline work\n"
     assert _merge_parents(repo, "HEAD") == [base]
     assert _empty_merges(repo, "HEAD") == []
+
+
+def test_integrate_and_publish_preserves_divergent_tree_same_commits(tmp_path):
+    repo = _repo_with_upstream(tmp_path)
+    shared = repo / "shared.txt"
+    shared.write_text("base\n", encoding="utf-8")
+    _run(repo, "git", "add", "shared.txt")
+    _run(repo, "git", "commit", "-m", "shared base")
+    _run(repo, "git", "push", "origin", "main")
+
+    peer = tmp_path / "tree-same-peer"
+    _run(tmp_path, "git", "clone", str(tmp_path / "remote.git"), str(peer))
+    _configure_git_identity(peer)
+
+    shared.write_text("identical result\n", encoding="utf-8")
+    _run(repo, "git", "add", "shared.txt")
+    _run(repo, "git", "commit", "-m", "agent result")
+    agent_head = _git(repo, "rev-parse", "HEAD")
+
+    (peer / "shared.txt").write_text("identical result\n", encoding="utf-8")
+    _run(peer, "git", "add", "shared.txt")
+    _run(peer, "git", "commit", "-m", "peer identical result")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    result = gitsync.integrate_and_publish(
+        "TASK-1k98v0TS",
+        repo_root=repo,
+        meta={
+            "title": "Preserve tree-same ancestry",
+            "actor": ACTOR_A,
+            "phase": "todo",
+            "project": "task.boundary",
+        },
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert result.notes == [
+        "task tree already integrated on baseline; preserved divergent commits "
+        "in a tree-same merge"
+    ]
+    assert _merge_parents(repo, merge_head) == [upstream_head, agent_head]
+    assert _git(repo, "rev-parse", f"{merge_head}^{{tree}}") == _git(
+        repo, "rev-parse", f"{upstream_head}^{{tree}}"
+    )
+    assert (
+        _run(
+            repo, "git", "merge-base", "--is-ancestor", agent_head, merge_head
+        ).returncode
+        == 0
+    )
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == merge_head
     assert _git(repo, "status", "--porcelain") == ""
 
 
