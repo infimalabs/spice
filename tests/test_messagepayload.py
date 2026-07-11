@@ -232,7 +232,8 @@ def test_inline_task_directive_renders_quote_like_block_in_message(tmp_path):
                     "text": (
                         "Queued the follow-up.\n"
                         "TASK title=Inline follow-up | project=task.unit | "
-                        "acceptance=Tracked from UI\n"
+                        "acceptance=Tracked from UI | "
+                        "acceptance=Rendered on another row\n"
                         "Continuing."
                     ),
                 }
@@ -256,7 +257,11 @@ def test_inline_task_directive_renders_quote_like_block_in_message(tmp_path):
     assert '<div class="task-directive-kicker">Task capture</div>' in item.display_html
     assert "<dt>title</dt><dd>Inline follow-up</dd>" in item.display_html
     assert "<dt>project</dt><dd>task.unit</dd>" in item.display_html
-    assert "<dt>acceptance</dt><dd>Tracked from UI</dd>" in item.display_html
+    assert (
+        "<dt>acceptance</dt><dd>Tracked from UI</dd></div>"
+        '<div class="task-directive-property">'
+        "<dt>acceptance</dt><dd>Rendered on another row</dd>" in item.display_html
+    )
 
 
 def test_malformed_task_like_progress_update_remains_plain_message(tmp_path):
@@ -447,7 +452,7 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
         "incepted": "20260610T120001000001Z",
         "description": "CLI follow-up",
         "project": "serve.ui",
-        "acceptance": "Task card comes from the backend",
+        "acceptance": ("Task card comes from the backend | Second backend criterion"),
         "origin_thread": actor,
         "creation_surface": "cli",
         "status": "pending",
@@ -543,8 +548,9 @@ def test_cli_created_task_row_renders_standalone_task_card(tmp_path, monkeypatch
     assert "<dt>project</dt><dd>serve.ui</dd>" in item["display_html"]
     assert "<dt>status</dt><dd>pending</dd>" in item["display_html"]
     assert (
-        "<dt>acceptance</dt><dd>Task card comes from the backend</dd>"
-        in item["display_html"]
+        "<dt>acceptance</dt><dd>Task card comes from the backend</dd></div>"
+        '<div class="task-directive-property">'
+        "<dt>acceptance</dt><dd>Second backend criterion</dd>" in item["display_html"]
     )
     assert "<dt>handle</dt><dd>UI-20260610T120001000001Z</dd>" in item["display_html"]
 
