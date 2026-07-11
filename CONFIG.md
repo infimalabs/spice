@@ -54,9 +54,10 @@ spice config judge --bin /path/to/judge
 ```
 
 Spice launches it without arguments, sends a prompt on stdin, and requires an
-exit-`0` plain-text `YES` or `NO` on stdout. The default is `afm-cli`; prompt
-schema, retries, exits, and supervisor degradation are specified in the
-[judge reference](docs/config/reference.md#maxim-judge-binary).
+exit-`0` plain-text `YES` or `NO` on stdout. The default is platform-keyed:
+`afm-cli` on macOS and the portable `spice-judge` adapter elsewhere. The prompt
+schema, portable adapter, retries, exits, and supervisor degradation are
+specified in the [judge reference](docs/config/reference.md#maxim-judge-binary).
 
 ## `[tool.spice.agent]`
 
