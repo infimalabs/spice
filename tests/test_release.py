@@ -490,6 +490,51 @@ def test_release_notes_group_edited_highlights_by_project():
     )
 
 
+def test_release_notes_drop_task_handle_named_by_its_own_task_key():
+    # A real KEY-INCEPTED handle trailing the subject is redundant on GitHub,
+    # which already links the bare short SHA. Notes strip the handle -- but only
+    # the one this commit's own Task-Key names, never a handle-shaped guess.
+    task_key = "1kCXrHTm"
+    kwargs = dict(
+        version="0.5.0",
+        release_commit="abcdef1234567890",
+        release_short="abcdef1",
+        current_tag="v0.5.0",
+        previous_tag="v0.4.0",
+    )
+    with_handle = render_release_notes(
+        **kwargs,
+        records=[
+            ReleaseRecord(
+                commit="9999999abcd",
+                subject=(
+                    "todo(lifecycle.notes): Add release-notes trimming "
+                    f"NOTES-{task_key}"
+                ),
+                project="lifecycle.notes",
+                task_key=task_key,
+            )
+        ],
+    )
+    without_handle = render_release_notes(
+        **kwargs,
+        records=[
+            ReleaseRecord(
+                commit="9999999abcd",
+                subject="todo(lifecycle.notes): Add release-notes trimming",
+                project="lifecycle.notes",
+                task_key=task_key,
+            )
+        ],
+    )
+
+    # The rendered entry carries the edited highlight and the auto-linkable short
+    # SHA, and reads identically whether or not the subject still carried the
+    # handle -- proof the trailing NOTES-<key> token contributed nothing.
+    assert "- Added release-notes trimming. (9999999)" in with_handle
+    assert with_handle == without_handle
+
+
 def test_release_notes_open_with_a_draft_curation_scaffold():
     notes = render_release_notes(
         version="0.4.0",
@@ -834,6 +879,7 @@ def test_commit_records_dedupes_todo_and_review_merges_by_task_key(monkeypatch):
             commit="2222222bbbb",
             subject="review(serve.ui): Fix menu MODEL-abc",
             project="serve.ui",
+            task_key="abc",
         ),
         ReleaseRecord(
             commit="3333333cccc",
