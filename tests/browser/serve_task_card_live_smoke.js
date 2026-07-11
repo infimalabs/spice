@@ -48,11 +48,20 @@ async function run() {
       );
       const subscription = await waitForLiveTaskCardSubscription(page, lane);
       const title = "Live task card smoke " + Date.now();
+      const acceptanceCriteria = [
+        "Live task card appears without page reload",
+        "Each acceptance criterion renders on its own row",
+      ];
       let navigationsAfterCreate = 0;
       page.on("framenavigated", (frame) => {
         if (frame === page.mainFrame()) navigationsAfterCreate += 1;
       });
-      await createTaskForLane(server.backendDir, lane.threadId, title);
+      await createTaskForLane(
+        server.backendDir,
+        lane.threadId,
+        title,
+        acceptanceCriteria,
+      );
       await waitForTaskCardStage(
         page,
         "watch-delivery",
@@ -73,7 +82,12 @@ async function run() {
         },
         lane.targetId,
       );
-      await waitForTaskCardVisible(page, lane.targetId, title);
+      await waitForTaskCardVisible(
+        page,
+        lane.targetId,
+        title,
+        acceptanceCriteria,
+      );
       if (navigationsAfterCreate !== 0)
         throw new Error("task card appeared after page navigation/reload");
       return {
@@ -196,12 +210,26 @@ async function waitForTaskCardStage(
   }
 }
 
-async function waitForTaskCardVisible(page, targetId, title) {
+async function waitForTaskCardVisible(
+  page,
+  targetId,
+  title,
+  acceptanceCriteria,
+) {
   try {
     await page.getByText("Task capture: " + title + " (serve.ui)").waitFor({
       state: "visible",
       timeout: liveTaskCardStageTimeoutMs,
     });
+    const card = page
+      .locator("blockquote.task-directive-quote")
+      .filter({ hasText: title });
+    for (const criterion of acceptanceCriteria) {
+      await card.getByText(criterion, { exact: true }).waitFor({
+        state: "visible",
+        timeout: liveTaskCardStageTimeoutMs,
+      });
+    }
   } catch (error) {
     throw new Error(
       "task-card stage card-visible timed out: " +
@@ -257,8 +285,17 @@ async function taskCardDiagnostics(page, targetId, stage) {
   }, { id: targetId, stageName: stage });
 }
 
-async function createTaskForLane(backendDir, threadId, title) {
+async function createTaskForLane(
+  backendDir,
+  threadId,
+  title,
+  acceptanceCriteria,
+) {
   const command = process.env.SPICE_SERVE_BIN || "spice"; // env-policy: allow
+  const acceptanceArgs = acceptanceCriteria.flatMap((criterion) => [
+    "--acceptance",
+    criterion,
+  ]);
   const { stdout, stderr } = await execFileAsync(
     command,
     [
@@ -267,8 +304,7 @@ async function createTaskForLane(backendDir, threadId, title) {
       title,
       "--project",
       "serve.ui",
-      "--acceptance",
-      "Live task card appears without page reload",
+      ...acceptanceArgs,
       "--origin",
       liveTaskCardSmokeOrigin,
     ],

@@ -166,13 +166,20 @@ def _task_directive_extra_classes(directive: dict[str, Any]) -> list[str]:
 def _ordered_task_directive_fields(
     fields: list[tuple[str, str]],
 ) -> list[tuple[str, str]]:
-    remaining = list(fields)
+    remaining = _expanded_task_directive_fields(fields)
     ordered: list[tuple[str, str]] = []
     for wanted in _TASK_DIRECTIVE_PRIMARY_FIELDS:
-        for index, (key, value) in enumerate(remaining):
-            if key == wanted:
-                ordered.append((key, value))
-                remaining.pop(index)
-                break
+        ordered.extend(field for field in remaining if field[0] == wanted)
+        remaining = [field for field in remaining if field[0] != wanted]
     ordered.extend(remaining)
     return ordered
+
+
+def _expanded_task_directive_fields(
+    fields: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    expanded: list[tuple[str, str]] = []
+    for key, value in fields:
+        values = value.split(" | ") if key == "acceptance" else [value]
+        expanded.extend((key, item.strip()) for item in values if item.strip())
+    return expanded
