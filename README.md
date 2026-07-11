@@ -43,14 +43,24 @@ exact inbox key from the durable filesystem queue.</sub>
 See [docs/overview.md](docs/overview.md) for the operating model and
 [docs/interface.md](docs/interface.md) for the serve UI.
 
+## Start Small
+
+Spice Harness is a progressive-disclosure product: **watch**, then **gates**,
+then **steer**, then **fleet**. Start by observing existing agent sessions with
+no repository changes; add constitution gates when the team wants enforceable
+hygiene; bind one agent when direct intervention becomes necessary; move to the
+task-backed fleet only when work needs multiple coordinated lanes. The full
+prerequisite and graduation path is the [entry ladder](docs/overview.md#entry-ladder).
+
 ## Commands
 
 | Surface | Command |
 | --- | --- |
-| Prepare a full fleet repo | `spice init` / `spice doctor` |
+| Watch existing agent sessions | `spice watch <session-dir>...` |
 | Install constitution gates only | `spice init --gates` |
+| Prepare steering and fleet surfaces | `spice init` / `spice doctor` |
+| Open a manually steered lane | `spice agent ensure` / `spice serve` |
 | Run through the agent wrapper | `spice agent run -- <cmd>` |
-| Maintain a worktree-bound agent | `spice agent ensure` / `spice agent supervise` |
 | Pull allocator work | `spice task next` |
 | Rehydrate context | `spice session briefing` |
 | Open the operator UI | `spice serve` |
