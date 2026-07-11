@@ -33,6 +33,15 @@ const defaultSpeechMode = "speak";
 const maximPriority = "maxim";
 const agentLifetimeLabels = ["Steer", "Drive", "Drain"];
 const serveBrandName = String(spiceServeBranding.name || "spice").trim() || "spice";
+const observerModeEnabled = Boolean(
+  spiceServeInitialGlobalSettings &&
+    spiceServeInitialGlobalSettings.observerMode === true,
+);
+if (observerModeEnabled) {
+  openLaneButton.title = "Observed sessions";
+  openLaneButton.setAttribute("aria-label", "Observed sessions");
+  filterStripEl.hidden = true;
+}
 // Default startup lifetime from [tool.spice.serve] default_lifetime; falls back to
 // "Drive" so autonomy-on-startup is a stated config choice, not a hidden constant.
 const defaultAgentLifetime = agentLifetimeLabels.includes(

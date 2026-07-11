@@ -212,7 +212,9 @@ class AckWatchState:
 
 
 def _line_might_carry_assistant_message(line: str) -> bool:
-    return '"role":"assistant"' in line and '"message"' in line
+    return '"message"' in line and (
+        '"role":"assistant"' in line or '"type":"assistant"' in line
+    )
 
 
 def _safe_loads(line: str) -> dict[str, Any] | None:

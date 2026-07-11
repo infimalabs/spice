@@ -16,6 +16,7 @@ BUILTIN_COMMANDS = (
     "task",
     "session",
     "serve",
+    "watch",
     "maxim",
     "config",
     "lock",
@@ -69,7 +70,7 @@ def build_parser(*, include_mounted_epilog: bool = True) -> argparse.ArgumentPar
     from spice.doctor import configure_doctor_parser
     from spice.hooks.cli import configure_dev_parser
     from spice.resourcelocks import configure_lock_parser
-    from spice.serve.cli import configure_serve_parser
+    from spice.serve.cli import configure_serve_parser, configure_watch_parser
     from spice.sessions.cli import configure_session_parser
     from spice.studies.cli import configure_study_parser
     from spice.tasks.cli import configure_task_parser
@@ -78,6 +79,7 @@ def build_parser(*, include_mounted_epilog: bool = True) -> argparse.ArgumentPar
     configure_task_parser(subparsers)
     configure_session_parser(subparsers)
     configure_serve_parser(subparsers)
+    configure_watch_parser(subparsers)
     configure_maxim_parser(subparsers)
     configure_config_parser(subparsers)
     configure_lock_parser(subparsers)

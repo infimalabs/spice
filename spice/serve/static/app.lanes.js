@@ -54,6 +54,7 @@ function applyTargetsPayload(payload) {
   targets = payload.workTrees || [];
   targetById = new Map(targets.map((target) => [target.id, target]));
   targetsLoaded = true;
+  syncObserverNotice(payload.observerErrors || []);
   clearGlobalActivityStatus("loading teams");
   applyTaskFilterInventory(payload.taskFilterInventory || {});
   for (const lane of [...laneStates.values()]) {
@@ -69,6 +70,23 @@ function applyTargetsPayload(payload) {
       );
   }
   if (spiceMenuEl) renderSpiceMenuIfAvailable();
+}
+
+function syncObserverNotice(errors) {
+  if (!observerModeEnabled) return;
+  let notice = lanesEl.querySelector(".observer-notice");
+  if (!errors.length) {
+    if (notice) notice.remove();
+    return;
+  }
+  if (!notice) {
+    notice = document.createElement("p");
+    notice.className = "observer-notice";
+    notice.setAttribute("role", "alert");
+    lanesEl.prepend(notice);
+  }
+  notice.classList.toggle("observer-notice--empty", targets.length === 0);
+  notice.textContent = errors.join("; ");
 }
 
 // Targets carry statusLine and route facts in the same field names the lane
