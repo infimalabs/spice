@@ -43,6 +43,24 @@ exact inbox key from the durable filesystem queue.</sub>
 See [docs/overview.md](docs/overview.md) for the operating model and
 [docs/interface.md](docs/interface.md) for the serve UI.
 
+## Posture: a single-operator console
+
+`spice serve` is a **single-operator console**, and that is a deliberate
+identity — not a limitation to grow out of:
+
+- **SQLite, localhost, one shared token.** The server is a stdlib process backed
+  by SQLite, bound to `127.0.0.1` by default; when it is reached beyond loopback
+  it is gated by a single shared `--auth-token`. There are no accounts,
+  sessions, or per-user identities.
+- **The growth vector is remote reach for one operator**, not multi-user auth.
+  Reaching your own fleet from elsewhere is a transport choice — an SSH tunnel
+  or a tailnet bind over the same one-token surface (see
+  [single-operator remote reach](docs/design/experimental/single-operator-remote-reach.md)).
+- **Multi-user auth is an explicit non-goal.** Do not grow a multi-operator team
+  product out of the stdlib server. Many humans may steer one lane, but only
+  through the same durable filesystem queue — never privileged per-user channels
+  (see [no-privileged-channel](docs/design/accepted/no-privileged-channel-multi-human.md)).
+
 ## Start Small
 
 Spice Harness is a progressive-disclosure product: **watch**, then **gates**,
