@@ -56,17 +56,19 @@ function spawnServeProcess(options, scratch) {
   const stderr = [];
   const command =
     options.serveCommand || process.env.SPICE_SERVE_BIN || defaultServeCommand(); // env-policy: allow
-  const args = [
-    "serve",
-    "--host",
-    options.host || "127.0.0.1",
-    "--port",
-    String(options.port ?? 0),
-    "--until",
-    scratch.stopFile,
-    "--task-backend",
-    scratch.backendDir,
-  ];
+  const args = options.args
+    ? options.args(scratch)
+    : [
+        "serve",
+        "--host",
+        options.host || "127.0.0.1",
+        "--port",
+        String(options.port ?? 0),
+        "--until",
+        scratch.stopFile,
+        "--task-backend",
+        scratch.backendDir,
+      ];
   const child = spawn(command, args, {
     cwd: options.cwd || repoRoot,
     env: { ...process.env, PYTHONUNBUFFERED: "1", ...(options.env || {}) }, // env-policy: allow

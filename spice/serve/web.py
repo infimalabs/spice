@@ -134,7 +134,12 @@ def render_index_html(
                 initial_global_settings.get("fastMode") is True
                 if initial_global_settings
                 else False
-            )
+            ),
+            "observerMode": (
+                initial_global_settings.get("observerMode") is True
+                if initial_global_settings
+                else False
+            ),
         },
         ensure_ascii=False,
     ).replace("</", "<\\/")

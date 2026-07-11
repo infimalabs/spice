@@ -77,11 +77,48 @@ function renderSpiceMenu() {
   }
   spiceMenuRenderPending = false;
   clearSpiceMenuTargetDrag();
+  if (observerModeEnabled) {
+    spiceMenuEl.replaceChildren(
+      renderObserverSessionMenu(),
+      renderSpiceMenuVersion(),
+    );
+    return;
+  }
   spiceMenuEl.replaceChildren(
     renderSpiceMenuActions(),
     renderSpiceMenuTargets(),
     renderSpiceMenuVersion(),
   );
+}
+
+function renderObserverSessionMenu() {
+  const section = document.createElement("section");
+  section.className = "spice-menu-section spice-menu-targets";
+  const heading = document.createElement("div");
+  heading.className = "spice-menu-heading";
+  heading.textContent = "sessions";
+  const list = document.createElement("div");
+  list.className = "spice-menu-target-list";
+  const choices = targets.slice().sort(compareSpiceMenuTargetChoices);
+  list.replaceChildren(
+    ...choices.map((target) =>
+      targetChoiceButton(target, "View session", () => {
+        const lane = laneStates.get(target.id);
+        if (lane) {
+          lane.element.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+            inline: "center",
+          });
+          lane.element.focus({ preventScroll: true });
+        }
+        closeSpiceMenu();
+      }),
+    ),
+  );
+  if (!choices.length) list.textContent = "no sessions available";
+  section.append(heading, list);
+  return section;
 }
 
 function spiceMenuRuntimeVersion() {
@@ -408,6 +445,11 @@ async function setFastModeEnabled(enabled) {
 
 function syncFastModeButtonState() {
   if (typeof openLaneButton === "undefined" || !openLaneButton) return;
+  if (observerModeEnabled) {
+    openLaneButton.classList.remove("spice-menu-button--fast");
+    openLaneButton.title = "Observed sessions";
+    return;
+  }
   const fastModeActive = currentFastModeEnabled();
   openLaneButton.classList.toggle("spice-menu-button--fast", fastModeActive);
   openLaneButton.title = fastModeActive

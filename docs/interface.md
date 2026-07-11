@@ -15,6 +15,20 @@ authority match used for loopback or explicit binds. Use `--auth-token`; on
 wildcard binds the supplied token, not the Origin authority match, is the
 operative defense.
 
+## Observer Mode
+
+`spice watch <session-dir>...` opens the same live transcript renderer over
+existing Codex and Claude JSONL sessions. It recursively discovers recognized
+transcripts, presents each session as a switchable lane, and follows file
+appends as they arrive. Multiple directories or individual transcript paths may
+be supplied in one invocation.
+
+Observer mode is read-only. It does not initialize a repository or worktree,
+create team state, claim tasks, install hooks, open a supervisor socket, or
+expose steering and lifecycle controls. Unrecognized files are skipped and
+unreadable or empty inputs are reported in the UI and process log. Use
+`--until PATH` for fixture-driven or otherwise bounded runs.
+
 ## Lanes And Teams
 
 The UI model is the lane: an operator-owned container over a worktree target.

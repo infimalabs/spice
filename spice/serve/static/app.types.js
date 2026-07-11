@@ -160,6 +160,7 @@ var spiceServeBranding;
 /**
  * @typedef {Object} ServeInitialGlobalSettings
  * @property {boolean=} fastMode
+ * @property {boolean=} observerMode
  */
 
 /** @type {ServeInitialGlobalSettings} */

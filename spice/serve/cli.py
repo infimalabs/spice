@@ -98,6 +98,31 @@ def configure_serve_parser(subparsers: Any) -> None:
     browser_artifact.set_defaults(func=run_serve_browser_artifact_path)
 
 
+def configure_watch_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "watch",
+        help="Observe existing Codex or Claude session directories read-only.",
+    )
+    parser.add_argument(
+        "session_dirs",
+        nargs="+",
+        type=Path,
+        metavar="SESSION_DIR",
+        help="Directory or transcript file to observe; repeat for multiple roots.",
+    )
+    parser.add_argument("--host", default=DEFAULT_SERVE_HOST)
+    parser.add_argument("--port", type=int, default=DEFAULT_SERVE_PORT)
+    parser.add_argument("--allow-insecure-bind", action="store_true")
+    parser.add_argument("--auth-token", metavar="TOKEN")
+    parser.add_argument(
+        "--until",
+        type=Path,
+        metavar="PATH",
+        help="Stop when PATH appears, disappears, or changes.",
+    )
+    parser.set_defaults(func=run_serve, serve_action=None, observer_mode=True)
+
+
 def run_serve_team_diagnostics(args: Any) -> int:
     _apply_task_backend(args)
     payload = team_diagnostics_payload()

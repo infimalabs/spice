@@ -531,8 +531,7 @@ def test_serve_metrics_text_reports_gauges_and_request_counters(tmp_path, monkey
         identity, "resolve_thread_id_for_target", lambda *_args: THREAD_A
     )
     monkeypatch.setattr(
-        app,
-        "resolve_thread_transcript",
+        "spice.serve.httpapi.resolve_thread_transcript",
         lambda _thread, _repo_root: _transcript_resolution(THREAD_A, rollout),
     )
     state.record_http_request("GET", "/")

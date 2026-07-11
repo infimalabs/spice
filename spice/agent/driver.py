@@ -596,7 +596,9 @@ class ClaudeDriver(AgentDriver):
         return rewrite_claude_eval_envelope_command(command_text, rewrite_command)
 
     def owns_transcript(self, path: Path) -> bool:
-        return self.projects_root() in path.parents
+        return self.projects_root() in path.parents or bool(
+            ROLLOUT_THREAD_ID_RE.fullmatch(path.name)
+        )
 
     def thread_transcript_path(
         self, thread_id: str, *, must_exist: bool = True

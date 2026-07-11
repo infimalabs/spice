@@ -284,6 +284,7 @@ function createLaneState(targetId, hint = null, options = {}) {
   };
   lane.historySentinelEl.dataset.historyTargetId = targetId;
   wireLaneShell(lane);
+  if (observerModeEnabled) configureObserverLane(lane);
   if (emptyTeam) syncEmptyTeamLane(lane, options.team || {}, options);
   else {
     syncComposerShards(lane, [lane]);
@@ -291,6 +292,14 @@ function createLaneState(targetId, hint = null, options = {}) {
     renderLaneChrome(lane, targetPayloadShim(target));
   }
   return lane;
+}
+
+function configureObserverLane(lane) {
+  lane.element.classList.add("lane--observer");
+  lane.element.tabIndex = -1;
+  lane.viewStackEl.remove();
+  lane.teamMenuButtonEl.remove();
+  lane.modeRailEl.remove();
 }
 
 function ensureEmptyTeamLane(team, options = {}) {

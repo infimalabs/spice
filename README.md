@@ -39,6 +39,8 @@ exact inbox key from the durable filesystem queue.</sub>
   internals, and commit-message rules.
 - **Serve UI:** `spice serve` exposes lanes, teams, live transcripts, steering,
   attachments, task routing, and browser-visible diagnostics.
+- **Observer UI:** `spice watch <session-dir>...` follows existing Codex and
+  Claude transcripts without initializing or modifying their directories.
 
 See [docs/overview.md](docs/overview.md) for the operating model and
 [docs/interface.md](docs/interface.md) for the serve UI.
@@ -82,6 +84,7 @@ prerequisite and graduation path is the [entry ladder](docs/overview.md#entry-la
 | Pull allocator work | `spice task next` |
 | Rehydrate context | `spice session briefing` |
 | Open the operator UI | `spice serve` |
+| Observe foreign sessions read-only | `spice watch <session-dir>...` |
 | Run studies and gates | `spice study ...` / git pre-commit hook |
 
 Configuration lives in [CONFIG.md](CONFIG.md). The design contract lives in

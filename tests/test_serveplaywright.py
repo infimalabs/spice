@@ -20,6 +20,22 @@ def test_serve_playwright_harness_starts_short_lived_scratch_server() -> None:
     assert "backendDir" in harness
     assert "stopFile" in harness
     assert "waitForProcessExit" in harness
+    assert "options.args(scratch)" in harness
+
+
+def test_serve_watch_smoke_uses_real_cli_and_live_fixture_append() -> None:
+    smoke = (ROOT / "browser" / "serve_watch_smoke.js").read_text(encoding="utf-8")
+
+    assert 'require("./serve_playwright_harness")' in smoke
+    assert "withServePage(" in smoke
+    assert '"watch"' in smoke
+    assert "supervised_codex.jsonl" in smoke
+    assert "supervised_claude.jsonl" in smoke
+    assert 'document.querySelectorAll(".lane--observer")' in smoke
+    assert 'document.querySelectorAll(".lane-composer")' in smoke
+    assert ".observer-notice--empty" in smoke
+    assert "fs.appendFile" in smoke
+    assert "observer append visible" in smoke
 
 
 def test_serve_playwright_harness_loads_shared_agent_context() -> None:
