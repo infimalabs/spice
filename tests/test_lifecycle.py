@@ -109,7 +109,7 @@ def test_new_driver_value_supplies_turn_id_and_tool_rewrite_to_consumers(
 
     calls: list[tuple[str, ...]] = []
 
-    def fake_rewrite(*args: str) -> str | None:
+    def fake_rewrite(*args: str, **_kwargs) -> str | None:
         calls.append(args)
         return "rtk third inner" if args == ("third inner",) else None
 

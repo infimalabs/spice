@@ -109,7 +109,7 @@ def _assert_command_working_state(
 def _configure_command_working_state(tmp_path: Path, monkeypatch) -> list[str]:
     monkeypatch.setenv(agent_driver.DRIVER.thread_id_env, COMMAND_WORKING_STATE_ACTOR)
     monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
-    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args, **_kwargs: None)
     monkeypatch.setattr(wrap.time, "time", lambda: COMMAND_WORKING_STATE_NOW)
     monkeypatch.setattr(wrap.time, "monotonic", lambda: COMMAND_WORKING_STATE_MONOTONIC)
     monkeypatch.setattr(
@@ -151,7 +151,7 @@ def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
     monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
-    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args, **_kwargs: None)
     events: list[tuple[str, object, object | None]] = []
     stderr = io.StringIO()
     watch_thread = object()
@@ -214,7 +214,7 @@ def test_wrapper_plain_exec_starts_side_channel_watch(tmp_path, monkeypatch):
 def test_run_agent_command_initial_stderr_includes_working_state(tmp_path, monkeypatch):
     monkeypatch.delenv(agent_driver.DRIVER.thread_id_env, raising=False)
     monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
-    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args, **_kwargs: None)
     monkeypatch.setattr(
         wrap,
         "collect_working_state_snapshot",
@@ -354,7 +354,7 @@ def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monke
     stderr = io.StringIO()
     watch_thread = object()
 
-    def fake_rewrite(*args: str) -> str | None:
+    def fake_rewrite(*args: str, **_kwargs) -> str | None:
         calls.append(args)
         return "rtk git status --short"
 
@@ -420,7 +420,7 @@ def test_run_agent_command_rewrites_stage_one_shell_before_popen(tmp_path, monke
 def test_run_agent_command_reports_missing_command_without_traceback(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args, **_kwargs: None)
     stderr = io.StringIO()
 
     def fake_popen(command, env=None):
@@ -481,7 +481,7 @@ CLAUDE_EVAL_ENVELOPE = (
 def test_wrapper_rewrites_claude_eval_envelope_inner_command(monkeypatch):
     calls: list[tuple[str, ...]] = []
 
-    def fake_rewrite(*args: str) -> str | None:
+    def fake_rewrite(*args: str, **_kwargs) -> str | None:
         calls.append(args)
         return "rtk git show HEAD" if args == ("git show HEAD",) else None
 
@@ -510,7 +510,7 @@ def test_wrapper_eval_envelope_preserves_embedded_single_quotes(monkeypatch):
     envelope = "x=1 && eval 'echo '\\''hi there'\\''' < /dev/null && pwd"
     seen: list[tuple[str, ...]] = []
 
-    def fake_rewrite(*args: str) -> str | None:
+    def fake_rewrite(*args: str, **_kwargs) -> str | None:
         seen.append(args)
         return None
 
@@ -553,7 +553,7 @@ def test_wrapper_runs_plain_find_natively(tmp_path, monkeypatch):
     monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
     monkeypatch.setenv("ZDOTDIR", "hook")
     monkeypatch.setenv("BASH_ENV", "hook")
-    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args, **_kwargs: None)
     events: list[tuple[str, object, object | None]] = []
     stderr = io.StringIO()
     watch_thread = object()
@@ -619,7 +619,7 @@ def test_agent_run_direct_git_inherits_ambient_shadow_environment(
     monkeypatch.delenv(agent_driver.DRIVER.thread_id_env, raising=False)
     monkeypatch.delenv(agent_driver.CLAUDE_DRIVER.thread_id_env, raising=False)
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", "shadow-system")
-    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args, **_kwargs: None)
     events: list[tuple[str, object, object | None]] = []
     stderr = io.StringIO()
     watch_thread = object()
