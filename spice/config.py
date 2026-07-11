@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,7 @@ AGENT_LAUNCH_KEYS = (AGENT_MODEL_KEY, AGENT_EFFORT_KEY, AGENT_DRIVER_KEY)
 JUDGE_KEY = "judge"
 JUDGE_BIN_KEY = "bin"
 DEFAULT_JUDGE_BIN = "afm-cli"
+PORTABLE_JUDGE_BIN = "spice-judge"
 PROJECT_AGENT_TABLE = "tool.spice.agent"
 _TOML_TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
 _TOML_ASSIGN_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
@@ -312,12 +314,22 @@ def _toml_assignment(key: str, value: str) -> str:
     return f"{key} = {json.dumps(value)}"
 
 
+def default_judge_bin() -> str:
+    """Return the built-in judge bin for this platform.
+
+    macOS keeps the Apple Foundation Models ``afm-cli`` default; every other
+    platform, where ``afm-cli`` does not exist, defaults to the portable
+    ``spice-judge`` adapter so the conscience works out of the box off macOS.
+    """
+    return DEFAULT_JUDGE_BIN if sys.platform == "darwin" else PORTABLE_JUDGE_BIN
+
+
 def configured_judge_bin(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
     if root is None:
-        return DEFAULT_JUDGE_BIN
+        return default_judge_bin()
     raw = str(_section(root, JUDGE_KEY).get(JUDGE_BIN_KEY) or "").strip()
-    return raw or DEFAULT_JUDGE_BIN
+    return raw or default_judge_bin()
 
 
 def say_command_args(

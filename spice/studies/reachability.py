@@ -57,6 +57,7 @@ PRODUCTION_ROOTS = (
     "spice/hooks/refguard.py",
     "spice/hooks/install.py",
     "spice/agent/cli.py",
+    "spice/agent/judgeadapter.py",  # spice-judge console script
 )
 
 # Allowlist for modules that are only test-reachable but are legitimately
