@@ -369,6 +369,32 @@ def test_task_resolve_wording_clears_active_claim_marker(task_repo, capsys):
     assert "wording review resolved: accepted child board exists" in annotations
 
 
+def test_task_undepends_cli_drops_edge(task_repo, capsys):
+    handle = create.add(
+        "Plan holding a CLI dependency edge",
+        project="task.unit",
+        acceptance=["parent bookend acceptance exists"],
+        origin="ack:20260101T000000000000Z",
+    )
+    child = create.add(
+        "Dependency dropped through the CLI",
+        project="task.unit",
+        acceptance=["child node has acceptance"],
+        origin="ack:20260101T000000000000Z",
+    )
+    ops.depends(handle, [child])
+
+    args = _with_backend(
+        build_parser().parse_args(["task", "undepends", handle, "--after", child])
+    )
+
+    assert args.func(args) == 0
+    output = capsys.readouterr().out
+    row = identity.resolve(handle)
+    assert handle in output
+    assert row.get("depends", []) == []
+
+
 def test_task_add_deferred_flag_creates_waiting_task(task_repo, capsys):
     args = build_parser().parse_args(
         [

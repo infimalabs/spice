@@ -34,6 +34,7 @@ from spice.tasks.claimstate import (
     _require_single_active_slot,
     _task_continuation_contract,
     annotate,
+    denotate,
     do_claim,
     phase_index,
     phases_of,
@@ -873,6 +874,36 @@ def depends(handle: str, after: list[str]) -> str:
             ) from exc
         annotate(uuid, f"depends: {identity.render_handle(dep_row)}")
     return identity.render_handle(row)
+
+
+def undepends(handle: str, after: list[str]) -> str:
+    row = identity.resolve(handle)
+    uuid = identity.uuid_of(row)
+    rendered = identity.render_handle(row)
+    existing = set(_dependency_uuids(row))
+    annotations = _annotation_descriptions(row)
+    for dep in dict.fromkeys(after):
+        dep_row = identity.resolve(dep)
+        dep_uuid = identity.uuid_of(dep_row)
+        rendered_dep = identity.render_handle(dep_row)
+        if dep_uuid not in existing:
+            raise SpiceError(f"{rendered} does not depend on {rendered_dep}")
+        tw.run([uuid, "modify", f"depends:-{dep_uuid}"])
+        note = f"depends: {rendered_dep}"
+        if note in annotations:
+            denotate(uuid, note)
+    return rendered
+
+
+def _annotation_descriptions(row: dict[str, Any]) -> set[str]:
+    annotations = row.get("annotations") or []
+    if not isinstance(annotations, list):
+        return set()
+    return {
+        str(item.get("description") or "")
+        for item in annotations
+        if isinstance(item, dict)
+    }
 
 
 def _dependency_uuids(row: dict[str, Any]) -> list[str]:

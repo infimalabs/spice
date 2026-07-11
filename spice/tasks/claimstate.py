@@ -24,6 +24,15 @@ def annotate(target: str, text: str) -> None:
     tw.run([target, "annotate", "--", text])
 
 
+def denotate(target: str, text: str) -> None:
+    """Remove an annotation written by annotate(); the inverse operation.
+
+    Uses `-- ` for the same literal-text reason, so "depends: X" matches the
+    stored annotation rather than parsing as an attribute filter."""
+    text = _task_text(text)
+    tw.run([target, "denotate", "--", text])
+
+
 def _task_text(text: str) -> str:
     return text
 
