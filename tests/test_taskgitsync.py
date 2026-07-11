@@ -140,6 +140,7 @@ def test_integrate_and_publish_no_op_phase_fast_forwards_onto_peer_content(tmp_p
     assert (repo / "baseline.txt").read_text(encoding="utf-8") == "baseline work\n"
     assert _merge_parents(repo, "HEAD") == [base]
     assert _empty_merges(repo, "HEAD") == []
+    assert _git(repo, "status", "--porcelain") == ""
 
 
 def test_integrate_and_publish_preserves_divergent_tree_same_commits(tmp_path):
