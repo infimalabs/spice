@@ -263,6 +263,24 @@ def _phase_guidance_lines(row: dict[str, Any], rendered: str) -> list[str]:
             ),
         ]
     if phase == "plan":
+        if claimstate.phases_of(row) == ["plan"]:
+            return [
+                "phase_guidance:",
+                (
+                    "  phase:plan is this task's entire flow, so the task must "
+                    "decompose into at least one dependency-connected child; "
+                    "acceptance on this task alone is insufficient."
+                ),
+                (
+                    "  At least one connected child needs acceptance. Additional "
+                    "children may omit it and enter their own plan phase."
+                ),
+                (
+                    "  Record out-of-place discoveries as task notes, then "
+                    "complete this planning bookend: "
+                    f'spice task done {rendered} --validation "..."'
+                ),
+            ]
         return [
             "phase_guidance:",
             (

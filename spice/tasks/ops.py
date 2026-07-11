@@ -902,12 +902,18 @@ def _pending_plan_child_rows(row: dict[str, Any]) -> list[dict[str, Any]]:
 def _require_plan_phase_board_populated(row: dict[str, Any]) -> None:
     if str(row.get("phase") or "") != "plan":
         return
-    if str(row.get("acceptance") or "").strip():
+    plan_only = phases_of(row) == ["plan"]
+    if not plan_only and str(row.get("acceptance") or "").strip():
         return
     handle = identity.render_handle(row)
     children = _pending_plan_child_rows(row)
     if any(str(child.get("acceptance") or "").strip() for child in children):
         return
+    if plan_only:
+        raise SpiceError(
+            f"cannot complete plan-only flow for {handle}: connect at least one "
+            "pending child task with acceptance"
+        )
     raise SpiceError(
         f"cannot advance plan phase for {handle}: add acceptance to the current "
         "task or connect at least one pending child task with acceptance"

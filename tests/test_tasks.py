@@ -141,15 +141,14 @@ def test_task_edit_acceptance_unsticks_plan_phase(task_repo):
         flow=["plan", "todo", "review"],
     )
     child = create.add(
-        "Accepted child for edited plan",
+        "Unaccepted child for edited plan",
         project="task.unit",
         origin="ack:20260101T000000000000Z",
-        acceptance=["child node has acceptance"],
     )
     ops.depends(handle, [child])
     ops.claim(handle)
-    with pytest.raises(SpiceError, match="bookend acceptance"):
-        ops.done(handle, validation=["plan attempted without bookend"])
+    with pytest.raises(SpiceError, match="current task or connect at least one"):
+        ops.done(handle, validation=["plan attempted without acceptance"])
 
     ops.edit(handle, acceptance=["plan bookend added via edit"])
     output = ops.done(handle, validation=["plan board populated"])
