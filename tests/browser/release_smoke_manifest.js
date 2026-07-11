@@ -14,6 +14,7 @@ const releaseSafe = [
   { path: "serve_lifetime_team_smoke.js" },
   { path: "serve_live_text_slot_smoke.js" },
   { path: "serve_menu_smoke.js" },
+  { path: "serve_mobile_layout_smoke.js" },
   { path: "serve_mosaic_ack_resolution_smoke.js" },
   { path: "serve_mosaic_capacity_smoke.js" },
   { path: "serve_mosaic_hidden_reveal_smoke.js" },
@@ -39,6 +40,7 @@ const releaseSafe = [
   { path: "serve_submission_lifecycle_smoke.js", serial: true },
   { path: "serve_submit_latency_smoke.js", serial: true },
   { path: "serve_team_metrics_smoke.js" },
+  { path: "serve_watch_smoke.js" },
 ];
 
 const externalState = [
