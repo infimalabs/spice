@@ -248,6 +248,8 @@ def _builtin_pre_commit_steps(
 
 
 def _run_plan_phase_mutation_guard(repo_root: Path) -> None:
+    if find_tool("task") is None:
+        return
     from spice.tasks import claimstate
 
     cwd = Path.cwd()

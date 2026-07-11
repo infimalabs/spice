@@ -43,14 +43,42 @@ exact inbox key from the durable filesystem queue.</sub>
 See [docs/overview.md](docs/overview.md) for the operating model and
 [docs/interface.md](docs/interface.md) for the serve UI.
 
+## Posture: a single-operator console
+
+`spice serve` is a **single-operator console**, and that is a deliberate
+identity — not a limitation to grow out of:
+
+- **SQLite, localhost, one shared token.** The server is a stdlib process backed
+  by SQLite, bound to `127.0.0.1` by default; when it is reached beyond loopback
+  it is gated by a single shared `--auth-token`. There are no accounts,
+  sessions, or per-user identities.
+- **The growth vector is remote reach for one operator**, not multi-user auth.
+  Reaching your own fleet from elsewhere is a transport choice — an SSH tunnel
+  or a tailnet bind over the same one-token surface (see
+  [single-operator remote reach](docs/design/experimental/single-operator-remote-reach.md)).
+- **Multi-user auth is an explicit non-goal.** Do not grow a multi-operator team
+  product out of the stdlib server. Many humans may steer one lane, but only
+  through the same durable filesystem queue — never privileged per-user channels
+  (see [no-privileged-channel](docs/design/accepted/no-privileged-channel-multi-human.md)).
+
+## Start Small
+
+Spice Harness is a progressive-disclosure product: **watch**, then **gates**,
+then **steer**, then **fleet**. Start by observing existing agent sessions with
+no repository changes; add constitution gates when the team wants enforceable
+hygiene; bind one agent when direct intervention becomes necessary; move to the
+task-backed fleet only when work needs multiple coordinated lanes. The full
+prerequisite and graduation path is the [entry ladder](docs/overview.md#entry-ladder).
+
 ## Commands
 
 | Surface | Command |
 | --- | --- |
-| Prepare a full fleet repo | `spice init` / `spice doctor` |
+| Watch existing agent sessions | `spice watch <session-dir>...` |
 | Install constitution gates only | `spice init --gates` |
+| Prepare steering and fleet surfaces | `spice init` / `spice doctor` |
+| Open a manually steered lane | `spice agent ensure` / `spice serve` |
 | Run through the agent wrapper | `spice agent run -- <cmd>` |
-| Maintain a worktree-bound agent | `spice agent ensure` / `spice agent supervise` |
 | Pull allocator work | `spice task next` |
 | Rehydrate context | `spice session briefing` |
 | Open the operator UI | `spice serve` |
@@ -67,6 +95,10 @@ expectations for extensions and command coupling live in [STABILITY.md](STABILIT
 uv tool install -e /path/to/spice-main
 # or, for the released package:
 uv tool install spice-harness
+
+# RTK is required for the agent shell (version 0.42.4 or newer):
+brew install rtk
+# or: cargo install --git https://github.com/rtk-ai/rtk
 
 cd /path/to/your/repo
 spice init
@@ -93,10 +125,13 @@ operated trees and do not supply their own runtime.
 
 ### Graceful degradation
 
-RTK, the local judge, and speech synthesis are optional companions. When they
-are unavailable, spice keeps the transcript, steering, task board, and
-constitution working; only compaction, maxim feedback, or audio narration
-degrade. Runtime and configuration details are in [CONFIG.md](CONFIG.md).
+[RTK](https://github.com/rtk-ai/rtk) is a required companion for the agent
+shell: `spice agent run` delegates command selection to `rtk rewrite`, and
+`spice doctor` verifies the supported protocol before agents work. The local
+judge and speech synthesis are degradable companions; when either is
+unavailable, transcript capture, steering, tasks, and the constitution keep
+working while maxim feedback or audio narration is skipped. Runtime,
+verification, and protocol details are in [CONFIG.md](CONFIG.md).
 
 ## Release
 

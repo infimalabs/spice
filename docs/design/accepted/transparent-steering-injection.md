@@ -32,6 +32,11 @@ counter to read.
 The native harness or shell startup hook must hand the complete top-level shell
 command string to `spice agent run` exactly once. `agent run` owns RTK rewrite
 because it is the only layer that sees the full shell string before execution.
+[RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer is required: exit `3`
+with non-empty stdout rewrites, exit `1` with empty stdout leaves the command
+unmatched, and every other rewrite result stops execution. The complete
+protocol and agent-scoped `RTK_DB_PATH` ownership are in
+[CONFIG.md](../../../CONFIG.md#rtk-rewrite-companion).
 
 ## Shells
 
@@ -53,12 +58,12 @@ environment variables are missing or the command shell cannot be resolved.
 Repos may define wrapper groups under `[tool.spice.wrappers.<group>]` and let
 agents select groups with `[tool.spice.agent] wrappers = [...]`. When the agent
 does not set `wrappers`, the built-in `common` group is selected. The built-in
-`common` group is intentionally empty because RTK coverage comes from the
-`rtk rewrite` handoff inside `spice agent run`, not from generated shell
-functions. Repos can override `common` for generic selector control, and
-repo-specific direct-command wrappers such as code generators belong in their
-own selected extension groups. An explicit empty list disables wrapper
-generation.
+`common` group contains the finite post-selection RTK command-shape
+transformations for rg-only grep flags, native find predicates, and diagnostic
+git flags. RTK rewrite selection remains wholly inside `spice agent run`. Repos
+can override `common` for their own command-shape contract, and repo-specific
+direct-command wrappers such as code generators belong in their own selected
+extension groups. An explicit empty list disables wrapper generation.
 
 Example:
 

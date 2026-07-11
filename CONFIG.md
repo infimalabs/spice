@@ -17,90 +17,47 @@ server deployment. Worker worktrees are operated trees: config can shape agent
 defaults and policy in those trees, but it does not choose a different spice
 source checkout, import path, or virtualenv for the running code.
 
+## RTK Rewrite Companion
+
+The agent shell requires [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or
+newer. Install it before starting agents:
+
+```sh
+brew install rtk
+rtk --version
+rtk rewrite -- git status
+```
+
+`spice agent run` passes the command after `--`. Exit `3` with non-empty stdout
+rewrites; Exit `1` with empty stdout leaves it unmatched. Every other
+exit/stdout combination errors. Upstream RTK uses Exit `0` for an auto-allowed
+rewrite; Spice deliberately rejects it to preserve the agent permission
+boundary. RTK owns command-selection policy. Spice owns the finite `common`
+command-shape layer and the agent-scoped
+`.git/spice/agents/<thread>/rtk/history.db` supplied through `RTK_DB_PATH`.
+Missing or protocol-invalid RTK stops the agent path. Cargo installation and
+the complete protocol live in the
+[wrapper contract](docs/cli/wrapper-commands.md#rtk-rewrite-protocol).
+
 ## Worktree Speech
 
-Speech playback is an operator-local preference configured through
-`spice config say`. macOS uses `say` by default. Linux operators can use the
-documented [`espeak-ng` preset](docs/config/reference.md#linux-speech-with-espeak-ng),
-which reads speech text from stdin and returns browser-playable WAV audio on
-stdout.
+Speech is operator-local through `spice config say`; macOS defaults to `say`.
+The Linux [`espeak-ng` preset](docs/config/reference.md#linux-speech-with-espeak-ng)
+reads text from stdin and returns browser-playable WAV on stdout.
 
 ## Maxim Judge Binary
 
-The maxim judge is a worktree-local executable configured with:
+The maxim judge is a worktree-local executable:
 
 ```console
 spice config judge --bin /path/to/judge
 ```
 
-This stores the logical `[judge].bin` value in `.spice/config/state.json`.
-`bin` is one executable path or `PATH` name, not a shell command or argv list.
-
-When `bin` is unset, spice resolves a built-in default keyed to the platform:
-macOS uses the Apple Foundation Models `afm-cli` binary; every other platform,
-where `afm-cli` does not exist, uses the portable `spice-judge` adapter that
-ships with spice. An explicit `bin` overrides this default on every platform,
-and `spice doctor` reports the resolved judge for the current platform.
-
-### Portable judge with `spice-judge`
-
-`spice-judge` is spice's own console script and conforms to the contract above:
-it is launched as the exact argv `[spice-judge]`, reads the prompt on stdin, and
-writes `YES`/`NO` to stdout. It delegates the judgement to a portable local
-model command, obtainable off macOS. The default command runs a small local
-model through [Ollama](https://ollama.com); install it and pull the model once:
-
-```console
-ollama pull llama3.2
-```
-
-`SPICE_JUDGE_MODEL_CMD` overrides the default with any argv that reads a prompt
-on stdin and writes an answer to stdout (for example
-`SPICE_JUDGE_MODEL_CMD="ollama run mistral"`). `SPICE_JUDGE_TIMEOUT` sets the
-per-verdict deadline in seconds (default 60; a non-positive value disables it).
-
-There is no silent no-op: when the model command is absent, exits non-zero, or
-exceeds its deadline, `spice-judge` exits non-zero with an actionable message on
-stderr, which spice surfaces as its judge error detail. Bring your own judge by
-setting `[judge].bin` to any conforming executable instead.
-
-For each verdict, spice launches the exact argv `[configured_bin]`: there are no
-command-line arguments. The judge receives one prompt on stdin and must write
-its verdict to stdout. The default prompt contains these four lines in a random
-order on every attempt:
-
-```text
-IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".
-IFF "{maxim}" DISAGREES WITH "{statement}": ANSWER ONLY "NO".
-IFF "{statement}" AGREES WITH "{maxim}": ANSWER ONLY "YES".
-IFF "{statement}" DISAGREES WITH "{maxim}": ANSWER ONLY "NO".
-```
-
-Before interpolation, spice collapses whitespace in `maxim` and `statement`
-and strips trailing punctuation and whitespace. The `--prompt-file` option on
-`spice maxim agree` or `spice maxim disagree` replaces the default template;
-only `{maxim}` and `{statement}` fields are accepted.
-
-The output schema is plain text, not JSON. Spice uppercases stdout, removes
-characters other than `Y`, `E`, `S`, `N`, `O`, and spaces, and accepts the
-result only when its deduplicated token set is exactly `{"YES"}` or `{"NO"}`.
-`YES` means the statement agrees with the maxim; `NO` means it disagrees. An
-ambiguous reply is retried, with two attempts by default. If both replies are
-ambiguous, judging fails.
-
-The judge process must exit `0`. A launch failure or nonzero exit is an
-immediate error; stderr is included in the error detail for a nonzero exit.
-Spice does not currently impose a subprocess timeout, so a conforming wrapper
-should enforce its own deadline if its model can hang. Direct
-`spice maxim agree` and `spice maxim disagree` calls return `0` when their
-requested condition is met, `1` when it is unmet, and `2` for judge or prompt
-errors.
-
-During supervised agent operation, judge errors are caught at the conscience
-boundary and logged as `spice maxim supervisor error`; transcript capture,
-steering, tasks, and other supervision continue, but that maxim feedback is
-skipped. Learning distillation likewise records a judge failure as a skipped
-candidate instead of stopping the session.
+Spice launches it without arguments, sends a prompt on stdin, and requires an
+exit-`0` plain-text `YES` or `NO` on stdout. The default is platform-keyed:
+`afm-cli` on macOS and the portable `spice-judge` adapter elsewhere. The prompt
+schema, portable adapter, retries, exits, and supervisor degradation are
+specified in the [judge reference](docs/config/reference.md#maxim-judge-binary).
 
 ## `[tool.spice.agent]`
 
@@ -113,9 +70,9 @@ Reference: [agent table](docs/config/reference.md#toolspiceagent).
 ## `[tool.spice.wrappers.<group>]`
 
 Wrapper groups define shell functions for agent-owned commands. Select groups
-with `[tool.spice.agent] wrappers = [...]`. The built-in `common` group is
-intentionally empty; RTK rewrite routing happens inside `spice agent run`, not
-through a per-command wrapper.
+with `[tool.spice.agent] wrappers = [...]`. The built-in `common` group contains
+the finite RTK command-shape transformations described above; `rtk rewrite`
+inside `spice agent run` remains the sole command selector.
 
 Reference: [wrapper groups](docs/config/reference.md#toolspicewrappersgroup).
 

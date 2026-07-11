@@ -23,11 +23,20 @@ RATIO_FALLBACK_CCN_FLEX = 10
 RATIO_FALLBACK_LENGTH_FLEX = 20
 JITTER_BASE_LIMIT = 100
 JITTER_STATIC_FLEX = 200
+DEFAULT_REPO_TRUTH_DOC_CHARS = 10_000
+DEFAULT_MARKDOWN_DEPTH_BASE_CHARS = 10_000
+DEFAULT_MARKDOWN_DEPTH_MAX_BOUNDED_CHARS = 30_000
 
 
 def test_policy_resolver_defaults_match_policy_constants(tmp_path):
     resolved = resolve_policy(tmp_path)
 
+    assert policy.REPO_TRUTH_DOC_LIMIT == DEFAULT_REPO_TRUTH_DOC_CHARS
+    assert policy.MARKDOWN_DEPTH_BASE_CHAR_BUDGET == DEFAULT_MARKDOWN_DEPTH_BASE_CHARS
+    assert (
+        policy.MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET
+        == DEFAULT_MARKDOWN_DEPTH_MAX_BOUNDED_CHARS
+    )
     assert resolved.limits.file_loc == policy.FILE_LOC_LIMIT
     assert resolved.limits.file_bytes == policy.FILE_BYTE_LIMIT
     assert resolved.limits.routine_ccn == policy.COMPLEXITY_MAX_CCN
