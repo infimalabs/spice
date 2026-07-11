@@ -15,9 +15,24 @@ from spice.agent.activation import (
     activation_command_surface_lines,
 )
 from spice.agent.driver import DRIVER
+from spice.errors import SpiceError
 from spice.tasks import claimstate, config, create, identity
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+
+def test_activation_validates_rtk_before_binding_agent(tmp_path, monkeypatch):
+    def invalid_rtk():
+        raise SpiceError("RTK protocol invalid")
+
+    monkeypatch.setattr("spice.agent.wrap.validate_rtk_companion", invalid_rtk)
+    monkeypatch.setattr(
+        "spice.agent.lifecycle.bind_ambient_agent_activation",
+        lambda _repo: pytest.fail("activation must validate RTK before binding"),
+    )
+
+    with pytest.raises(SpiceError, match="RTK protocol invalid"):
+        agent_cli.render_activation_packet(tmp_path)
 
 
 def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
@@ -28,6 +43,7 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
     assert "descendant shells use static hooks and precomputed wrappers" in text
     assert "agent-run child shells enter the static hook stage" in text
     assert "snapshot/descendant state is captured" in text
+    assert "rtk_contract=RTK >= 0.42.4 is required" in text
     assert "session=spice session briefing" in text
     assert (
         "task_drain_contract=drive/drain lanes are not done after a task phase boundary"

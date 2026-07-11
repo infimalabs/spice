@@ -9,6 +9,7 @@ from spice import config
 from spice.hooks import doctor
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
 from spice.studies.walk import staged_paths, tracked_paths
+from spice.errors import SpiceError
 
 
 def test_doctor_reports_missing_hooks_and_fix_installs_them(tmp_path, monkeypatch):
@@ -100,6 +101,28 @@ def test_dev_doctor_parser_exposes_fix_flag():
 
     assert args.dev_command == "doctor"
     assert args.fix
+
+
+def test_doctor_rtk_check_uses_the_runtime_protocol_validator(monkeypatch):
+    monkeypatch.setattr(doctor, "validate_rtk_companion", lambda: "0.42.4")
+
+    check = doctor._rtk_check()
+
+    assert check.status == "ok"
+    assert check.detail == "rtk 0.42.4; rewrite protocol valid"
+
+
+def test_doctor_rtk_check_returns_actionable_protocol_failure(monkeypatch):
+    def invalid():
+        raise SpiceError(f"invalid RTK protocol; {doctor.RTK_INSTALL_GUIDANCE}")
+
+    monkeypatch.setattr(doctor, "validate_rtk_companion", invalid)
+
+    check = doctor._rtk_check()
+
+    assert check.status == "fail"
+    assert "invalid RTK protocol" in check.detail
+    assert "github.com/rtk-ai/rtk" in check.command
 
 
 def test_doctor_reports_installed_runtime_for_spice_checkout(tmp_path, monkeypatch):

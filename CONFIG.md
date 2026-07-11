@@ -30,9 +30,10 @@ rtk rewrite -- git status
 
 `spice agent run` passes the command after `--`. Exit `3` with non-empty stdout
 rewrites; Exit `1` with empty stdout leaves it unmatched. Every other
-exit/stdout combination errors; Exit `0` is invalid. RTK owns
-command-selection policy. Spice owns the finite `common` command-shape layer and
-the agent-scoped
+exit/stdout combination errors. Upstream RTK uses Exit `0` for an auto-allowed
+rewrite; Spice deliberately rejects it to preserve the agent permission
+boundary. RTK owns command-selection policy. Spice owns the finite `common`
+command-shape layer and the agent-scoped
 `.git/spice/agents/<thread>/rtk/history.db` supplied through `RTK_DB_PATH`.
 Missing or protocol-invalid RTK stops the agent path. Cargo installation and
 the complete protocol live in the
