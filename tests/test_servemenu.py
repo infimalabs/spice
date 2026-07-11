@@ -55,7 +55,10 @@ def test_header_spice_menu_button_replaces_plus_and_fast_toggle():
         'const spiceServeBranding = {"name": "spice", "defaultLifetime": "Drive", '
         '"version":' in html
     )
-    assert 'const spiceServeInitialGlobalSettings = {"fastMode": false};' in html
+    assert (
+        "const spiceServeInitialGlobalSettings = "
+        '{"fastMode": false, "observerMode": false};' in html
+    )
     assert "const serveBrandName = String(spiceServeBranding.name" in app_js
     assert "function serveBrandMenuTitle()" in app_js
     assert 'querySelector("#global-status")' not in app_js
@@ -247,7 +250,10 @@ def test_index_branding_defaults_to_project_name_and_allows_explicit_override(
 def test_index_injects_initial_global_settings():
     html = render_index_html(initial_global_settings={"fastMode": True})
 
-    assert 'const spiceServeInitialGlobalSettings = {"fastMode": true};' in html
+    assert (
+        "const spiceServeInitialGlobalSettings = "
+        '{"fastMode": true, "observerMode": false};' in html
+    )
 
 
 def test_static_branding_config_feeds_fast_mode_and_audio_titles():

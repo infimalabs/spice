@@ -18,7 +18,7 @@ from spice.serve import agentapi, workroutes
 from spice.serve.worktree import inventory
 from spice.serve.payload import identity, lane, message
 from spice.serve.app import ServeState
-from spice.serve.team.store import ServeTeamStore, TeamCommandService
+from spice.serve.team.store import ServeTeamStore
 from spice.serve.workroutes import work_tree_send_response_payload
 from spice.serve.worktree.target import WorktreeTarget
 
@@ -254,10 +254,11 @@ def _target(repo: Path) -> WorktreeTarget:
 
 
 def _serve_state(tmp_path: Path, target: WorktreeTarget) -> ServeState:
-    state = ServeState(anchor_root=tmp_path)
+    state = ServeState(
+        anchor_root=tmp_path,
+        team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
+    )
     state.cached_targets = [target]
-    state.team_store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
-    state.team_commands = TeamCommandService(state.team_store)
     return state
 
 
