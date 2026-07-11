@@ -126,7 +126,7 @@ def test_title_only_match_does_not_scan_clean_body_or_acceptance(repo):
     assert matches[0].reason == "consider 'loose'"
 
 
-def test_body_and_acceptance_only_matches_keep_source_fields(repo):
+def test_positive_body_match_survives_negated_acceptance(repo):
     matches = create.detect_suspect_wording(
         title="Clear task",
         description="The master plan is too vague.",
@@ -138,7 +138,6 @@ def test_body_and_acceptance_only_matches_keep_source_fields(repo):
         (match.source, match.matched, match.trigger_family) for match in matches
     } == {
         ("description", "master", "taste"),
-        ("acceptance", "hallucinating", "taste"),
     }
 
 
