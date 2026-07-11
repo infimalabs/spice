@@ -837,6 +837,80 @@ def test_unreleased_range_without_tags_renders_empty_head_span(monkeypatch):
     )
 
 
+def test_bare_release_notes_mode_uses_head_and_unreleased_renderer(
+    tmp_path, monkeypatch, capsys
+):
+    parser = build_release_parser()
+    args = parser.parse_args(["notes"])
+    seen = []
+
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        release,
+        "git",
+        lambda *args: seen.append(("git", args)) or "head-commit",
+    )
+    monkeypatch.setattr(
+        release,
+        "release_notes_for_unreleased",
+        lambda commit: seen.append(("unreleased", commit)) or "unreleased notes\n",
+    )
+
+    result = release.handle_release(args)
+
+    assert result == 0
+    assert seen == [
+        ("git", ("rev-parse", "HEAD")),
+        ("unreleased", "head-commit"),
+    ]
+    captured = capsys.readouterr()
+    assert captured.out == "unreleased notes\n"
+    assert "draft notes for unreleased" in captured.err
+
+
+def test_unreleased_notes_preview_markers_differ_from_versioned_notes(monkeypatch):
+    def fake_git(*args):
+        if args == (
+            "tag",
+            "--merged",
+            "head-commit",
+            "--list",
+            "v*",
+            "--sort=-v:refname",
+        ):
+            return "v0.20.0\nv0.19.0"
+        if args == ("tag", "--list", "v*", "--sort=-v:refname"):
+            return "v0.21.0\nv0.20.0\nv0.19.0"
+        if args == ("rev-parse", "--short", "head-commit"):
+            return "head123"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release, "git", fake_git)
+    monkeypatch.setattr(release, "current_version", lambda: "0.21.0")
+    monkeypatch.setattr(
+        release,
+        "commit_records",
+        lambda previous, commit: [
+            ReleaseRecord(
+                commit="abcdef123456",
+                subject="Ship unreleased work",
+                project="lifecycle.release",
+            )
+        ],
+    )
+
+    unreleased = release.release_notes_for_unreleased("head-commit")
+    versioned = release.release_notes_for_version(
+        release.current_version(), "head-commit"
+    )
+
+    assert "- PyPI release: `spice-harness==unreleased`" in unreleased
+    assert "- Release tag: `unreleased`" in unreleased
+    assert "- Commit range: `v0.20.0..head123`" in unreleased
+    assert "- PyPI release: `spice-harness==0.21.0`" in versioned
+    assert unreleased != versioned
+
+
 def test_commit_records_addresses_previous_tag_by_full_ref(monkeypatch):
     seen = []
 
