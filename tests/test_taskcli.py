@@ -70,33 +70,17 @@ def test_task_list_parse_error_points_to_limit_example(capsys):
     assert "spice task list --limit 20" in error
 
 
-def test_task_add_after_leaves_trailing_title_positional():
+def test_task_add_after_accepts_space_separated_dependencies():
     args = build_parser().parse_args(
         [
             "task",
             "add",
+            "Follow-up title",
             "--after",
             "TASK-20260101T000000000001Z",
-            "Follow-up title",
+            "TASK-20260101T000000000002Z",
             "--project",
             "task.unit",
-        ]
-    )
-
-    assert args.after == ["TASK-20260101T000000000001Z"]
-    assert args.title == "Follow-up title"
-
-
-def test_task_add_after_repeats_for_multiple_dependencies():
-    args = build_parser().parse_args(
-        [
-            "task",
-            "add",
-            "--after",
-            "TASK-20260101T000000000001Z",
-            "--after",
-            "TASK-20260101T000000000002Z",
-            "Follow-up title",
         ]
     )
 
@@ -105,6 +89,60 @@ def test_task_add_after_repeats_for_multiple_dependencies():
         "TASK-20260101T000000000002Z",
     ]
     assert args.title == "Follow-up title"
+
+
+def test_task_add_after_repeats_for_multiple_dependencies():
+    args = build_parser().parse_args(
+        [
+            "task",
+            "add",
+            "Follow-up title",
+            "--after",
+            "TASK-20260101T000000000001Z",
+            "--after",
+            "TASK-20260101T000000000002Z",
+        ]
+    )
+
+    assert args.after == [
+        "TASK-20260101T000000000001Z",
+        "TASK-20260101T000000000002Z",
+    ]
+    assert args.title == "Follow-up title"
+
+
+@pytest.mark.parametrize("repeated_flags", [False, True])
+def test_task_depends_after_accumulates_all_edges(task_repo, capsys, repeated_flags):
+    parent = create.add(
+        "Parent waiting on several dependencies",
+        project="task.unit",
+        acceptance=["parent acceptance"],
+        origin="ack:20260101T000000000000Z",
+    )
+    children = [
+        create.add(
+            f"Dependency {index}",
+            project="task.unit",
+            acceptance=[f"dependency {index} acceptance"],
+            origin="ack:20260101T000000000000Z",
+        )
+        for index in range(3)
+    ]
+    after_args = (
+        [value for child in children for value in ("--after", child)]
+        if repeated_flags
+        else ["--after", *children]
+    )
+    args = _with_backend(
+        build_parser().parse_args(["task", "depends", parent, *after_args])
+    )
+
+    assert args.func(args) == 0
+    capsys.readouterr()
+    row = identity.resolve(parent)
+    assert set(row.get("depends", [])) == {
+        identity.uuid_of(identity.resolve(child)) for child in children
+    }
 
 
 def test_task_wake_parser_accepts_multiple_handles():

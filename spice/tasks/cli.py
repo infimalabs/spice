@@ -373,10 +373,14 @@ def _configure_depends_parser(actions: Any) -> None:
     )
     depends.add_argument(
         "--after",
+        action="extend",
         nargs="+",
         required=True,
         metavar="dependency",
-        help="Prerequisite task handle(s) that must complete first.",
+        help=(
+            "Prerequisite task handle(s); repeat --after or pass multiple "
+            "handles after one flag."
+        ),
     )
     depends.set_defaults(func=handle)
 
@@ -401,10 +405,14 @@ def _configure_undepends_parser(actions: Any) -> None:
     )
     undepends.add_argument(
         "--after",
+        action="extend",
         nargs="+",
         required=True,
         metavar="dependency",
-        help="Prerequisite task handle(s) to stop waiting on.",
+        help=(
+            "Prerequisite task handle(s) to remove; repeat --after or pass "
+            "multiple handles after one flag."
+        ),
     )
     undepends.set_defaults(func=handle)
 
@@ -643,10 +651,14 @@ def _configure_add_parser(actions: Any) -> None:
     add.add_argument("--tag", action="append", default=[], dest="tags")
     add.add_argument(
         "--after",
-        action="append",
+        action="extend",
+        nargs="+",
         default=[],
         metavar="HANDLE",
-        help="Dependency handle; repeat --after for multiple dependencies.",
+        help=(
+            "Dependency handle(s); repeat --after or pass multiple handles "
+            "after one flag."
+        ),
     )
     add.add_argument(
         "--acceptance",
