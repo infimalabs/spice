@@ -37,6 +37,7 @@ class ReleaseRecord:
     commit: str
     subject: str
     project: str
+    task_key: str = ""
 
 
 SIGINT_EXIT_CODE = 130
@@ -513,7 +514,9 @@ def commit_records(previous_tag: str, release_commit: str) -> list[ReleaseRecord
     for commit, subject, project, task_key, _body in rows:
         if commit in suppressed_commits:
             continue
-        record = ReleaseRecord(commit=commit, subject=subject, project=project)
+        record = ReleaseRecord(
+            commit=commit, subject=subject, project=project, task_key=task_key
+        )
         # A task's todo-phase and review-phase merges carry the same
         # Task-Key; keep one highlight per task, at its first position, with
         # the latest (most final) subject.
@@ -541,7 +544,10 @@ def render_release_notes(
             release_project_key(record.project), OrderedDict()
         )
         project_subjects.setdefault(
-            edited_release_highlight(release_note_subject(record.subject)), []
+            edited_release_highlight(
+                release_note_subject(record.subject, record.task_key)
+            ),
+            [],
         ).append(shortish_commit(record.commit))
 
     lines = [
@@ -623,8 +629,16 @@ def edited_release_highlight(subject: str) -> str:
     return punctuate(capitalize_first(raw))
 
 
-def release_note_subject(subject: str) -> str:
-    return TASK_PHASE_SUBJECT_PREFIX_RE.sub("", subject, count=1)
+def release_note_subject(subject: str, task_key: str = "") -> str:
+    trimmed = TASK_PHASE_SUBJECT_PREFIX_RE.sub("", subject, count=1)
+    if task_key:
+        head, sep, last = trimmed.rpartition(" ")
+        if sep and head and last.endswith(f"-{task_key}"):
+            # Drop the trailing KEY-INCEPTED handle: GitHub already renders each
+            # entry's bare short SHA as a commit link, so the handle token is
+            # redundant. Keyed on this commit's own Task-Key, never a guess.
+            trimmed = head
+    return trimmed
 
 
 def release_project_heading(project: str) -> str:
