@@ -283,6 +283,17 @@ def test_release_constitution_runs_executable_browser_gate(monkeypatch):
     ]
 
 
+def test_release_browser_manifest_completeness_is_fast_and_executable():
+    completed = subprocess.run(
+        ["node", "tests/browser/run_release_smokes.js", "--check-manifest"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.stdout.strip() == "PASS release browser manifest completeness"
+
+
 def test_publish_release_with_head_commit_uses_current_artifacts(monkeypatch):
     calls = []
 

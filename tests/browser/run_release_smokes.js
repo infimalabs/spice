@@ -134,12 +134,25 @@ async function run(manifestPath = defaultManifestPath) {
   throw new Error("release browser gate failed");
 }
 
+function checkDefaultManifest() {
+  assertDefaultManifestComplete(loadManifest(defaultManifestPath));
+  console.log("PASS release browser manifest completeness");
+}
+
+async function main() {
+  if (process.argv[2] === "--check-manifest") {
+    checkDefaultManifest();
+    return;
+  }
+  await run(process.argv[2]);
+}
+
 if (require.main === module) {
-  run(process.argv[2])
+  main()
     .catch((error) => {
       console.error(error.stack || error.message);
       process.exit(1);
     });
 }
 
-module.exports = { run };
+module.exports = { checkDefaultManifest, run };
