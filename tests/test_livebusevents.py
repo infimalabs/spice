@@ -66,8 +66,10 @@ def test_lane_signature_changes_when_agent_state_file_changes(tmp_path):
     repo.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
     target = WorktreeTarget(id="lane", repo_root=repo, name="repo", branch="main")
-    state = ServeState(anchor_root=tmp_path)
-    state.team_store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
+    state = ServeState(
+        anchor_root=tmp_path,
+        team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
+    )
     state_path = lifecycle.agent_state_path(repo)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text("{}", encoding="utf-8")
@@ -266,9 +268,11 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text("", encoding="utf-8")
     target = WorktreeTarget(id="lane", repo_root=repo, name="repo", branch="main")
-    state = ServeState(anchor_root=tmp_path)
+    state = ServeState(
+        anchor_root=tmp_path,
+        team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
+    )
     state.cached_targets = [target]
-    state.team_store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     status = SimpleNamespace(
         running=False,
         thread_id=THREAD_ID,
@@ -698,9 +702,11 @@ def test_lane_subscription_pushes_reply_card_without_a_followup_message(
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text("", encoding="utf-8")
     target = WorktreeTarget(id="lane", repo_root=repo, name="repo", branch="main")
-    state = ServeState(anchor_root=tmp_path)
+    state = ServeState(
+        anchor_root=tmp_path,
+        team_store=ServeTeamStore(path=tmp_path / "teams.sqlite3"),
+    )
     state.cached_targets = [target]
-    state.team_store = ServeTeamStore(path=tmp_path / "teams.sqlite3")
     status = SimpleNamespace(
         running=True,
         thread_id=THREAD_ID,
