@@ -80,6 +80,7 @@ def test_inline_task_batch_suspect_wording_routes_without_claiming(task_repo):
     [
         "Do not use the master label",
         "Do not add a fallback path",
+        "Delete the preserveLaneHints option threading",
     ],
 )
 def test_explicitly_negated_wording_starts_in_todo(task_repo, acceptance):
