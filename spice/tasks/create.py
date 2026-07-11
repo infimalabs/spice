@@ -31,7 +31,7 @@ TASK_WORDING_REVIEW_ANNOTATION_PREFIX = "suspect wording:"
 @dataclass(frozen=True)
 class TaskAddBatchRequest:
     title: str
-    project: str
+    project: str | None
     acceptance: tuple[str, ...]
     description: str | None = None
     priority: str = config.DEFAULT_PRIORITY
@@ -513,11 +513,14 @@ def add(
 
 
 BatchFields = dict[str, list[str]]
-REPEATABLE_BATCH_FIELDS = frozenset({"acceptance"})
+REPEATABLE_BATCH_FIELDS = frozenset({"acceptance", "after", "flow", "tags"})
+SCALAR_BATCH_FIELDS = frozenset(
+    {"deferred", "description", "due", "origin", "priority", "project", "title"}
+)
 
 
 def _parse_add_batch_request(
-    raw: str, index: int
+    raw: str, index: int, *, require_project: bool = True
 ) -> tuple[TaskAddBatchRequest | None, list[str]]:
     """Parse one `key=value | ...` line and collect its validation errors.
 
@@ -525,7 +528,7 @@ def _parse_add_batch_request(
     rejects the whole batch instead of creating earlier lines first.
     """
     fields, errors = _parse_batch_fields(_strip_task_batch_directive(raw), index)
-    errors.extend(_batch_field_errors(fields, index))
+    errors.extend(_batch_field_errors(fields, index, require_project=require_project))
     if errors:
         return None, errors
     return _batch_request_from_fields(fields), []
@@ -538,8 +541,8 @@ def _parse_batch_fields(raw: str, index: int) -> tuple[BatchFields, list[str]]:
         if "=" not in part:
             errors.append(
                 f"line {index}: field without '=': {part.strip()!r} "
-                "(use key=value segments; repeat acceptance=... for "
-                "multiple acceptance criteria)"
+                "(use key=value segments; collection fields acceptance, after, "
+                "flow, and tags may be repeated)"
             )
             continue
         key, value = part.split("=", 1)
@@ -547,16 +550,20 @@ def _parse_batch_fields(raw: str, index: int) -> tuple[BatchFields, list[str]]:
     return fields, errors
 
 
-def _batch_field_errors(fields: BatchFields, index: int) -> list[str]:
+def _batch_field_errors(
+    fields: BatchFields, index: int, *, require_project: bool
+) -> list[str]:
     errors: list[str] = []
-    for req in ("title", "project"):
+    required = ("title", "project") if require_project else ("title",)
+    for req in required:
         if not _batch_field(fields, req):
             errors.append(f"line {index}: missing required field {req!r}")
     for key, values in fields.items():
         if len(values) > 1 and key not in REPEATABLE_BATCH_FIELDS:
+            repeatable = ", ".join(sorted(REPEATABLE_BATCH_FIELDS))
             errors.append(
-                f"line {index}: duplicate field {key!r}; only acceptance "
-                "may be repeated"
+                f"line {index}: duplicate field {key!r}; repeatable fields are "
+                f"{repeatable}"
             )
     if _batch_field(fields, "title"):
         try:
@@ -575,13 +582,13 @@ def _batch_field_errors(fields: BatchFields, index: int) -> list[str]:
             errors.append(f"line {index}: {exc}")
     if "deferred" in fields and not _batch_bool_field(_batch_field(fields, "deferred")):
         errors.append(f"line {index}: deferred must be true/false")
-    flow = _batch_csv(_batch_field(fields, "flow"))
+    flow = _batch_csv_fields(fields, "flow")
     if flow and _batch_field(fields, "project"):
         try:
             config.resolve_flow(list(flow), _batch_field(fields, "project"))
         except SpiceError as exc:
             errors.append(f"line {index}: {exc}")
-    for dep in _batch_csv(_batch_field(fields, "after")):
+    for dep in _batch_csv_fields(fields, "after"):
         try:
             identity.resolve(dep)
         except SpiceError:
@@ -598,11 +605,11 @@ def _batch_request_from_fields(fields: BatchFields) -> TaskAddBatchRequest:
     return TaskAddBatchRequest(
         title=_batch_field(fields, "title"),
         description=_batch_field(fields, "description") or None,
-        project=_batch_field(fields, "project"),
+        project=_batch_field(fields, "project") or None,
         priority=_batch_field(fields, "priority") or config.DEFAULT_PRIORITY,
-        flow=_batch_csv(_batch_field(fields, "flow")),
-        tags=_batch_csv(_batch_field(fields, "tags")),
-        after=_batch_csv(_batch_field(fields, "after")),
+        flow=_batch_csv_fields(fields, "flow"),
+        tags=_batch_csv_fields(fields, "tags"),
+        after=_batch_csv_fields(fields, "after"),
         acceptance=tuple(item for item in fields.get("acceptance", ()) if item),
         due=_batch_field(fields, "due") or None,
         deferred=_batch_bool(_batch_field(fields, "deferred")),
@@ -617,6 +624,10 @@ def _batch_field(fields: BatchFields, key: str) -> str:
 
 def _batch_csv(raw: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _batch_csv_fields(fields: BatchFields, key: str) -> tuple[str, ...]:
+    return tuple(item for raw in fields.get(key, ()) for item in _batch_csv(raw))
 
 
 def _batch_bool_field(raw: str) -> bool:
@@ -667,6 +678,18 @@ def parse_add_batch(lines: Sequence[str]) -> list[TaskAddBatchRequest]:
     if errors:
         raise SpiceError("batch add rejected:\n" + "\n".join(errors))
     return parsed
+
+
+def parse_task_batch_request(
+    raw: str, *, require_project: bool = True
+) -> TaskAddBatchRequest:
+    """Parse one task field record for CLI, inline, or review-follow-up use."""
+    request, errors = _parse_add_batch_request(raw, 1, require_project=require_project)
+    if errors:
+        raise SpiceError("task field record rejected:\n" + "\n".join(errors))
+    if request is None:
+        raise SpiceError("task field record rejected")
+    return request
 
 
 def add_batch_results(

@@ -254,14 +254,16 @@ def test_task_delete_parser_accepts_force_claimed():
     assert args.force_claimed is True
 
 
-def test_task_add_help_documents_repeatable_batch_acceptance(capsys):
+def test_task_add_help_documents_every_repeatable_batch_field(capsys):
     with pytest.raises(SystemExit) as exc_info:
         build_parser().parse_args(["task", "add", "--help"])
 
     assert exc_info.value.code == 0
-    assert "Repeat acceptance=... for multiple acceptance criteria." in (
-        capsys.readouterr().out
-    )
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert (
+        "Repeat collection fields flow=..., tags=..., after=..., and acceptance=... "
+        "to accrue values in input order."
+    ) in help_text
 
 
 def test_task_add_title_flag_is_alias_for_positional(task_repo, capsys):
@@ -480,7 +482,9 @@ def test_task_review_then_marks_spawned_followup_as_cli_creation_surface(
             "description current; needs follow-up",
             "--then",
             "title=CLI spawned follow-up | project=task.unit | "
-            "acceptance=Spawned review follow-up can render as a task card",
+            "flow=todo | flow=review | tags=review | tags=accrual | "
+            "acceptance=Spawned review follow-up can render as a task card | "
+            "acceptance=Every review criterion accrues",
         ]
     )
     args.backend = str(config.backend_root())
@@ -491,6 +495,12 @@ def test_task_review_then_marks_spawned_followup_as_cli_creation_surface(
     row = identity.resolve(spawned)
 
     assert row["description"] == "CLI spawned follow-up"
+    assert claimstate.phases_of(row) == ["todo", "review"]
+    assert row["tags"] == ["accrual", "review"]
+    assert row["acceptance"] == (
+        "Spawned review follow-up can render as a task card | "
+        "Every review criterion accrues"
+    )
     assert row[config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
 
 

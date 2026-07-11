@@ -103,7 +103,8 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
         (
             f"ACK {INBOX_KEY}: captured.\n"
             "TASK title=Inline follow-up | project=task.unit | "
-            "acceptance=Inline task exists"
+            "flow=todo | flow=review | tags=inline | tags=accrual | "
+            "acceptance=Inline task exists | acceptance=Every criterion accrues"
         ),
         log,
         watchdog.MaximReminderGate(),
@@ -117,7 +118,9 @@ def test_supervised_ack_creates_inline_task_and_archives_inbox(
     assert len(rows) == 1
     assert rows[0]["description"] == "Inline follow-up"
     assert rows[0]["project"] == "task.unit"
-    assert rows[0]["acceptance"] == "Inline task exists"
+    assert claimstate.phases_of(rows[0]) == ["todo", "review"]
+    assert rows[0]["tags"] == ["accrual", "inline"]
+    assert rows[0]["acceptance"] == ("Inline task exists | Every criterion accrues")
     assert rows[0]["origin_thread"] == ACTOR
     assert rows[0][config.TASK_CREATION_SURFACE_UDA] == config.TASK_CREATION_SURFACE_CLI
     handle = identity.render_handle(rows[0])
