@@ -13,6 +13,13 @@ from spice.serve import filewatch as serve_filewatch
 from spice.serve.app import run_serve
 from spice.serve.filewatch import start_exit_file_watch
 
+_REAL_SERVE_UNTIL_USES_KQUEUE = serve_filewatch.serve_until_uses_kqueue
+
+
+@pytest.fixture(autouse=True)
+def _select_watchfiles_for_mocked_unit_watchers(monkeypatch) -> None:
+    monkeypatch.setattr(serve_filewatch, "serve_until_uses_kqueue", lambda: False)
+
 
 class FakeServer:
     server_address = ("127.0.0.1", 9999)
@@ -33,6 +40,43 @@ class FakeServer:
         self.closed = True
 
 
+@pytest.mark.parametrize("mutation", ["write", "create", "delete", "replace"])
+def test_real_until_watch_is_armed_before_start_returns(
+    monkeypatch, tmp_path: Path, mutation: str
+) -> None:
+    monkeypatch.setattr(
+        serve_filewatch,
+        "serve_until_uses_kqueue",
+        _REAL_SERVE_UNTIL_USES_KQUEUE,
+    )
+    watched_path = tmp_path / "serve.stop"
+    if mutation != "create":
+        watched_path.write_text("initial\n", encoding="utf-8")
+    fake_server = FakeServer()
+
+    thread = start_exit_file_watch(
+        fake_server,
+        Namespace(until=watched_path),
+        stop_event=threading.Event(),
+    )
+    assert isinstance(thread, threading.Thread)
+
+    if mutation == "write":
+        watched_path.write_text("changed\n", encoding="utf-8")
+    elif mutation == "create":
+        watched_path.write_text("created\n", encoding="utf-8")
+    elif mutation == "delete":
+        watched_path.unlink()
+    else:
+        replacement = watched_path.with_suffix(".replacement")
+        replacement.write_text("replaced\n", encoding="utf-8")
+        os.replace(replacement, watched_path)
+
+    assert fake_server.shutdown_event.wait(timeout=1.0)
+    thread.join(timeout=1.0)
+    assert fake_server.shutdown_count == 1
+
+
 def test_start_exit_file_watch_exits_on_content_change(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -45,9 +89,17 @@ def test_start_exit_file_watch_exits_on_content_change(
     filter_results: list[bool] = []
 
     def fake_watch(
-        root, *, watch_filter, force_polling, debounce, stop_event, recursive
+        root,
+        *,
+        watch_filter,
+        force_polling,
+        debounce,
+        stop_event,
+        recursive,
+        rust_timeout,
+        yield_on_timeout,
     ):
-        del force_polling, debounce, stop_event
+        del force_polling, debounce, stop_event, rust_timeout, yield_on_timeout
         watch_roots.append(root)
         recursive_values.append(recursive)
         filter_results.append(watch_filter(object(), str(watched_path)))
@@ -85,9 +137,26 @@ def test_start_exit_file_watch_ignores_events_without_content_change(
     stop_event = threading.Event()
 
     def fake_watch(
-        root, *, watch_filter, force_polling, debounce, stop_event, recursive
+        root,
+        *,
+        watch_filter,
+        force_polling,
+        debounce,
+        stop_event,
+        recursive,
+        rust_timeout,
+        yield_on_timeout,
     ):
-        del root, watch_filter, force_polling, debounce, stop_event, recursive
+        del (
+            root,
+            watch_filter,
+            force_polling,
+            debounce,
+            stop_event,
+            recursive,
+            rust_timeout,
+            yield_on_timeout,
+        )
         yield {(object(), str(watched_path))}
         yield {(object(), str(watched_path))}
 
@@ -113,9 +182,26 @@ def test_start_exit_file_watch_exits_when_file_removed(
     stop_event = threading.Event()
 
     def fake_watch(
-        root, *, watch_filter, force_polling, debounce, stop_event, recursive
+        root,
+        *,
+        watch_filter,
+        force_polling,
+        debounce,
+        stop_event,
+        recursive,
+        rust_timeout,
+        yield_on_timeout,
     ):
-        del root, watch_filter, force_polling, debounce, stop_event, recursive
+        del (
+            root,
+            watch_filter,
+            force_polling,
+            debounce,
+            stop_event,
+            recursive,
+            rust_timeout,
+            yield_on_timeout,
+        )
         watched_path.unlink()
         yield {(object(), str(watched_path))}
 
@@ -142,9 +228,25 @@ def test_start_exit_file_watch_watches_parent_until_file_appears(
     exists_at_watch: list[bool] = []
 
     def fake_watch(
-        root, *, watch_filter, force_polling, debounce, stop_event, recursive
+        root,
+        *,
+        watch_filter,
+        force_polling,
+        debounce,
+        stop_event,
+        recursive,
+        rust_timeout,
+        yield_on_timeout,
     ):
-        del watch_filter, force_polling, debounce, stop_event, recursive
+        del (
+            watch_filter,
+            force_polling,
+            debounce,
+            stop_event,
+            recursive,
+            rust_timeout,
+            yield_on_timeout,
+        )
         watch_roots.append(root)
         exists_at_watch.append(watched_path.exists())
         watched_path.write_text("created\n", encoding="utf-8")
@@ -202,9 +304,25 @@ def test_serve_leaves_missing_until_path_uncreated(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(serve_app, "_ServeHttpServer", lambda *_args: fake_server)
 
     def fake_watch(
-        root, *, watch_filter, force_polling, debounce, stop_event, recursive
+        root,
+        *,
+        watch_filter,
+        force_polling,
+        debounce,
+        stop_event,
+        recursive,
+        rust_timeout,
+        yield_on_timeout,
     ):
-        del watch_filter, force_polling, debounce, stop_event, recursive
+        del (
+            watch_filter,
+            force_polling,
+            debounce,
+            stop_event,
+            recursive,
+            rust_timeout,
+            yield_on_timeout,
+        )
         watch_roots.append(root)
         exists_at_watch.append(watched_path.exists())
         watched_path.write_text("created\n", encoding="utf-8")
@@ -320,9 +438,25 @@ def test_serve_exits_after_watched_file_changes(monkeypatch, tmp_path: Path) -> 
     monkeypatch.setattr(serve_app, "_ServeHttpServer", lambda *_args: fake_server)
 
     def fake_watch(
-        root, *, watch_filter, force_polling, debounce, stop_event, recursive
+        root,
+        *,
+        watch_filter,
+        force_polling,
+        debounce,
+        stop_event,
+        recursive,
+        rust_timeout,
+        yield_on_timeout,
     ):
-        del watch_filter, force_polling, debounce, stop_event, recursive
+        del (
+            watch_filter,
+            force_polling,
+            debounce,
+            stop_event,
+            recursive,
+            rust_timeout,
+            yield_on_timeout,
+        )
         watch_roots.append(root)
         watched_path.write_text("changed\n", encoding="utf-8")
         yield {(object(), str(watched_path))}
