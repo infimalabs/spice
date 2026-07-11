@@ -902,28 +902,16 @@ def _pending_plan_child_rows(row: dict[str, Any]) -> list[dict[str, Any]]:
 def _require_plan_phase_board_populated(row: dict[str, Any]) -> None:
     if str(row.get("phase") or "") != "plan":
         return
+    if str(row.get("acceptance") or "").strip():
+        return
     handle = identity.render_handle(row)
-    if not str(row.get("acceptance") or "").strip():
-        raise SpiceError(
-            f"cannot advance plan phase for {handle}: add bookend acceptance "
-            "to the plan task"
-        )
     children = _pending_plan_child_rows(row)
-    if not children:
-        raise SpiceError(
-            f"cannot advance plan phase for {handle}: populate the board with "
-            "at least one pending child task connected by native dependencies"
-        )
-    missing_acceptance = [
-        identity.render_handle(child)
-        for child in children
-        if not str(child.get("acceptance") or "").strip()
-    ]
-    if missing_acceptance:
-        raise SpiceError(
-            f"cannot advance plan phase for {handle}: child tasks missing "
-            f"acceptance: {', '.join(missing_acceptance)}"
-        )
+    if any(str(child.get("acceptance") or "").strip() for child in children):
+        return
+    raise SpiceError(
+        f"cannot advance plan phase for {handle}: add acceptance to the current "
+        "task or connect at least one pending child task with acceptance"
+    )
 
 
 def delete(handle: str, reason: str, *, force_claimed: bool = False) -> str:

@@ -266,17 +266,19 @@ def _phase_guidance_lines(row: dict[str, Any], rendered: str) -> list[str]:
         return [
             "phase_guidance:",
             (
-                "  phase:plan decomposes the goal into connected child tasks on "
-                "the board; it does not write repo docs."
+                "  phase:plan makes the execution contract explicit on the "
+                "current task or decomposes it into dependency-connected child "
+                "tasks; it does not write repo docs."
             ),
             (
-                "  Add bookend acceptance on this plan task, create child tasks "
-                "with per-node acceptance, and connect them with native "
-                "dependencies."
+                "  Add acceptance to this task when decomposition is unnecessary. "
+                "When decomposing, connect child tasks with native dependencies; "
+                "at least one child needs acceptance, and children without it "
+                "enter their own plan phase."
             ),
             (
-                "  Record out-of-place discoveries as task notes; advance only "
-                "after the board is populated: "
+                "  Record out-of-place discoveries as task notes; advance once "
+                "the current task or a connected child carries acceptance: "
                 f'spice task done {rendered} --validation "..."'
             ),
         ]

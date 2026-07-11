@@ -460,8 +460,9 @@ def test_plan_phase_show_injects_board_generation_guidance(task_repo):
     shown = render.render_show(handle)
 
     assert "phase_guidance:" in shown
-    assert "phase:plan decomposes the goal into connected child tasks" in shown
-    assert "Add bookend acceptance on this plan task" in shown
+    assert "phase:plan makes the execution contract explicit" in shown
+    assert "Add acceptance to this task when decomposition is unnecessary" in shown
+    assert "at least one child needs acceptance" in shown
     assert f'spice task done {handle} --validation "..."' in shown
 
 
@@ -484,9 +485,26 @@ def test_design_phase_show_injects_artifact_boundary_guidance(task_repo):
     assert f'spice task done {handle} --validation "..."' in shown
 
 
-def test_plan_phase_done_requires_connected_child_board(task_repo):
+def test_plan_phase_done_requires_parent_or_child_acceptance(task_repo):
     handle = create.add(
-        "Plan needs children",
+        "Plan needs acceptance",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        flow=["plan", "todo", "review"],
+    )
+    ops.claim(handle)
+
+    with pytest.raises(SpiceError, match="current task or connect at least one"):
+        ops.done(handle, validation=["plan attempted without acceptance"])
+
+    row = identity.resolve(handle)
+    assert row["phase"] == "plan"
+    assert not str(row.get("validation") or "")
+
+
+def test_plan_phase_done_advances_with_parent_acceptance_and_no_child(task_repo):
+    handle = create.add(
+        "Plan has parent acceptance",
         project="task.unit",
         origin="ack:20260101T000000000000Z",
         flow=["plan", "todo", "review"],
@@ -494,41 +512,19 @@ def test_plan_phase_done_requires_connected_child_board(task_repo):
     )
     ops.claim(handle)
 
-    with pytest.raises(SpiceError, match="populate the board"):
-        ops.done(handle, validation=["plan attempted without children"])
+    output = ops.done(handle, validation=["parent acceptance terminates plan"])
 
     row = identity.resolve(handle)
-    assert row["phase"] == "plan"
-    assert not str(row.get("validation") or "")
+    assert f"advanced {handle} -> todo" in output
+    assert row["phase"] == "todo"
+    assert row["validation"] == "parent acceptance terminates plan"
 
 
-def test_plan_phase_done_requires_child_acceptance(task_repo):
+def test_plan_phase_done_advances_with_accepted_child_and_no_parent_acceptance(
+    task_repo,
+):
     handle = create.add(
-        "Plan needs accepted children",
-        project="task.unit",
-        origin="ack:20260101T000000000000Z",
-        flow=["plan", "todo", "review"],
-        acceptance=["parent bookend acceptance exists"],
-    )
-    child = create.add(
-        "Unaccepted child",
-        project="task.unit",
-        origin="ack:20260101T000000000000Z",
-    )
-    ops.depends(handle, [child])
-    ops.claim(handle)
-
-    with pytest.raises(SpiceError, match="child tasks missing acceptance"):
-        ops.done(handle, validation=["plan attempted with incomplete child"])
-
-    row = identity.resolve(handle)
-    assert row["phase"] == "plan"
-    assert not str(row.get("validation") or "")
-
-
-def test_plan_phase_done_requires_bookend_acceptance(task_repo):
-    handle = create.add(
-        "Plan needs bookend acceptance",
+        "Plan delegates acceptance",
         project="task.unit",
         origin="ack:20260101T000000000000Z",
         flow=["plan", "todo", "review"],
@@ -542,12 +538,42 @@ def test_plan_phase_done_requires_bookend_acceptance(task_repo):
     ops.depends(handle, [child])
     ops.claim(handle)
 
-    with pytest.raises(SpiceError, match="bookend acceptance"):
-        ops.done(handle, validation=["plan attempted without bookend"])
+    output = ops.done(handle, validation=["accepted child terminates plan"])
 
     row = identity.resolve(handle)
-    assert row["phase"] == "plan"
-    assert not str(row.get("validation") or "")
+    assert f"advanced {handle} -> todo" in output
+    assert row["phase"] == "todo"
+    assert row["validation"] == "accepted child terminates plan"
+
+
+def test_plan_phase_done_ignores_additional_unaccepted_children(task_repo):
+    handle = create.add(
+        "Plan has mixed children",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        flow=["plan", "todo", "review"],
+    )
+    accepted_child = create.add(
+        "Accepted plan child",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        acceptance=["child node has acceptance"],
+    )
+    planning_child = create.add(
+        "Planning child",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        flow=["plan", "todo", "review"],
+    )
+    ops.depends(handle, [accepted_child, planning_child])
+    ops.claim(handle)
+
+    output = ops.done(handle, validation=["one accepted child terminates plan"])
+    row = identity.resolve(handle)
+
+    assert f"advanced {handle} -> todo" in output
+    assert row["phase"] == "todo"
+    assert identity.resolve(planning_child)["phase"] == "plan"
 
 
 def test_plan_phase_done_advances_after_board_population(task_repo):
