@@ -134,6 +134,22 @@ class InboxSnapshot:
 
 
 @dataclass(frozen=True)
+class PendingInboxEntry:
+    """Stat-only view of a pending inbox file, carrying no body text.
+
+    Pending identity (count, keys, revision, version) needs names plus stat
+    metadata only. Reading and parsing each body to build a full ``InboxItem``
+    would make hot callers such as steering submit scale with the number of
+    unacknowledged items queued.
+    """
+
+    name: str
+    source_path: Path
+    mtime_ns: int
+    size: int
+
+
+@dataclass(frozen=True)
 class InboxResendAttempt:
     attempt: int
     at: str
@@ -179,6 +195,48 @@ def collect_inbox_snapshot(repo_root: str | Path | None) -> InboxSnapshot:
         )
         signature.append((path.name, stat_result.st_mtime_ns, stat_result.st_size))
     return InboxSnapshot(items=tuple(items), signature=tuple(signature))
+
+
+def collect_pending_inbox_entries(
+    repo_root: str | Path | None,
+) -> list[PendingInboxEntry]:
+    """List pending inbox items from directory metadata alone (no body reads).
+
+    Mirrors the file selection of :func:`collect_inbox_snapshot` -- prune stale
+    artifacts, keep published ``.txt`` items, order by name -- but stops at
+    ``scandir``/``stat`` so identity callers never pay for reading and parsing
+    every queued body.
+    """
+    if not repo_root:
+        return []
+    prune_stale_inbox_artifacts(repo_root)
+    directory = inbox_dir(repo_root)
+    if not directory.is_dir():
+        return []
+    entries: list[PendingInboxEntry] = []
+    try:
+        with os.scandir(directory) as scanned:
+            for entry in scanned:
+                if entry.name.endswith(".tmp") or not entry.name.endswith(".txt"):
+                    continue
+                try:
+                    if not entry.is_file():
+                        continue
+                    stat_result = entry.stat()
+                except OSError:
+                    continue
+                entries.append(
+                    PendingInboxEntry(
+                        name=entry.name,
+                        source_path=Path(entry.path),
+                        mtime_ns=stat_result.st_mtime_ns,
+                        size=stat_result.st_size,
+                    )
+                )
+    except OSError:
+        return []
+    entries.sort(key=lambda item: item.name)
+    return entries
 
 
 def collect_acked_inbox_items(
@@ -714,8 +772,19 @@ def write_inbox_item(
 
 
 def _pending_inbox_path_with_text(directory: Path, text: str) -> Path | None:
+    # Dedup runs under the publish lock on every steering submit, so reading
+    # every pending file is exactly what makes submit slow once messages pile up
+    # unacknowledged. Only a byte-for-byte match can be the duplicate, so use the
+    # on-disk size as a cheap stat discriminator and read just the candidates
+    # that could still match.
+    expected_size = len(text.encode("utf-8"))
     for path in sorted(_file_paths(directory), key=lambda item: item.name):
         if path.suffix != ".txt":
+            continue
+        try:
+            if path.stat().st_size != expected_size:
+                continue
+        except OSError:
             continue
         if inbox_attachment_dir(path).is_dir():
             continue
