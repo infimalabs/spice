@@ -752,36 +752,25 @@ def _spawn_followup(
     after_handle: str,
     creation_surface: str | None = None,
 ) -> str:
-    fields: dict[str, str] = {}
-    for part in spec.split("|"):
-        if "=" in part:
-            key, value = part.split("=", 1)
-            fields[key.strip()] = value.strip()
-    if not fields.get("title"):
-        raise SpiceError(
-            "--then needs a follow-up title=... entry: "
-            f"{spec!r} (example: --then "
-            '"title=Add coverage | project=task.cli | '
-            "description=Why the follow-up matters | "
-            'acceptance=Focused tests cover it")'
-        )
     from spice.tasks import create
 
+    request = create.parse_task_batch_request(spec, require_project=False)
     return create.add_one(
-        title=fields["title"],
-        description=fields.get("description"),
-        project=fields.get("project"),
-        priority=fields.get("priority", config.DEFAULT_PRIORITY),
-        flow=[p for p in fields.get("flow", "").split(",") if p] or None,
-        tags=[t for t in fields.get("tags", "").split(",") if t],
-        after=[a for a in fields.get("after", "").split(",") if a],
-        acceptance=[fields["acceptance"]] if fields.get("acceptance") else [],
+        title=request.title,
+        description=request.description,
+        project=request.project,
+        priority=request.priority,
+        flow=list(request.flow) or None,
+        tags=list(request.tags),
+        after=list(request.after),
+        acceptance=list(request.acceptance),
         wait=None,
         claim=False,
-        due=fields.get("due"),
+        deferred=request.deferred,
+        due=request.due,
         # A review follow-up descends from the reviewed task; an explicit
         # origin= field in the spec wins.
-        origin=fields.get("origin") or f"task:{after_handle}",
+        origin=request.origin or f"task:{after_handle}",
         extra=[f"depends:{after_uuid}"],
         creation_surface=creation_surface,
     )

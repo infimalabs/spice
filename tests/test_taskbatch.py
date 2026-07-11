@@ -64,10 +64,25 @@ def test_parse_add_batch_returns_typed_requests_without_creating_tasks(task_repo
     assert tw.export(["status:pending"]) == []
 
 
-def test_parse_add_batch_accepts_repeated_acceptance_fields(task_repo):
+def test_parse_add_batch_accrues_every_collection_field_in_input_order(task_repo):
+    first_dep = create.add(
+        "First batch dependency",
+        project="task.unit",
+        acceptance=["first dependency exists"],
+        origin="ack:20260101T000000000000Z",
+    )
+    second_dep = create.add(
+        "Second batch dependency",
+        project="task.unit",
+        acceptance=["second dependency exists"],
+        origin="ack:20260101T000000000000Z",
+    )
+
     requests = create.parse_add_batch(
         [
             "title=Multi-accept batch | project=task.unit | "
+            "flow=todo | flow=review | tags=first,second | tags=third | "
+            f"after={first_dep} | after={second_dep} | "
             "acceptance=First criterion | acceptance=Second criterion"
         ]
     )
@@ -76,21 +91,62 @@ def test_parse_add_batch_accepts_repeated_acceptance_fields(task_repo):
         create.TaskAddBatchRequest(
             title="Multi-accept batch",
             project="task.unit",
+            flow=("todo", "review"),
+            tags=("first", "second", "third"),
+            after=(first_dep, second_dep),
             acceptance=("First criterion", "Second criterion"),
         )
     ]
-    assert tw.export(["status:pending"]) == []
+    assert create.REPEATABLE_BATCH_FIELDS == frozenset(
+        {"acceptance", "after", "flow", "tags"}
+    )
+    assert len(tw.export(["status:pending"])) == 2
 
 
-def test_parse_add_batch_rejects_duplicate_non_repeatable_field(task_repo):
-    with pytest.raises(SpiceError, match="duplicate field 'title'"):
-        create.parse_add_batch(
-            [
-                "title=First | title=Second | project=task.unit | "
-                "acceptance=Duplicate title is ambiguous"
-            ]
-        )
+@pytest.mark.parametrize(
+    ("field", "first", "second"),
+    [
+        ("deferred", "true", "false"),
+        ("description", "First paragraph", "Second paragraph"),
+        ("due", "2026-07-01", "2026-07-02"),
+        (
+            "origin",
+            "ack:20260101T000000000000Z",
+            "ack:20260101T000000000001Z",
+        ),
+        ("priority", "high", "low"),
+        ("project", "task.unit", "task.cli"),
+        ("title", "First", "Second"),
+    ],
+)
+def test_parse_add_batch_rejects_every_duplicate_scalar_field(
+    task_repo, field, first, second
+):
+    segments = [
+        "title=Scalar batch",
+        "project=task.unit",
+        "acceptance=Scalar fields stay singular",
+    ]
+    if field == "title":
+        segments.pop(0)
+    if field == "project":
+        segments.pop(1)
+    segments.extend((f"{field}={first}", f"{field}={second}"))
 
+    with pytest.raises(SpiceError, match=f"duplicate field '{field}'"):
+        create.parse_add_batch([" | ".join(segments)])
+
+    assert create.SCALAR_BATCH_FIELDS == frozenset(
+        {
+            "deferred",
+            "description",
+            "due",
+            "origin",
+            "priority",
+            "project",
+            "title",
+        }
+    )
     assert tw.export(["status:pending"]) == []
 
 
@@ -103,7 +159,7 @@ def test_parse_add_batch_reports_actionable_bare_segment_error(task_repo):
     message = str(exc_info.value)
     assert "field without '='" in message
     assert "use key=value segments" in message
-    assert "repeat acceptance=..." in message
+    assert "acceptance, after, flow, and tags may be repeated" in message
     assert tw.export(["status:pending"]) == []
 
 
