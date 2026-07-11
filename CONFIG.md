@@ -35,7 +35,34 @@ spice config judge --bin /path/to/judge
 
 This stores the logical `[judge].bin` value in `.spice/config/state.json`.
 `bin` is one executable path or `PATH` name, not a shell command or argv list.
-When it is unset, spice uses `afm-cli`.
+
+When `bin` is unset, spice resolves a built-in default keyed to the platform:
+macOS uses the Apple Foundation Models `afm-cli` binary; every other platform,
+where `afm-cli` does not exist, uses the portable `spice-judge` adapter that
+ships with spice. An explicit `bin` overrides this default on every platform,
+and `spice doctor` reports the resolved judge for the current platform.
+
+### Portable judge with `spice-judge`
+
+`spice-judge` is spice's own console script and conforms to the contract above:
+it is launched as the exact argv `[spice-judge]`, reads the prompt on stdin, and
+writes `YES`/`NO` to stdout. It delegates the judgement to a portable local
+model command, obtainable off macOS. The default command runs a small local
+model through [Ollama](https://ollama.com); install it and pull the model once:
+
+```console
+ollama pull llama3.2
+```
+
+`SPICE_JUDGE_MODEL_CMD` overrides the default with any argv that reads a prompt
+on stdin and writes an answer to stdout (for example
+`SPICE_JUDGE_MODEL_CMD="ollama run mistral"`). `SPICE_JUDGE_TIMEOUT` sets the
+per-verdict deadline in seconds (default 60; a non-positive value disables it).
+
+There is no silent no-op: when the model command is absent, exits non-zero, or
+exceeds its deadline, `spice-judge` exits non-zero with an actionable message on
+stderr, which spice surfaces as its judge error detail. Bring your own judge by
+setting `[judge].bin` to any conforming executable instead.
 
 For each verdict, spice launches the exact argv `[configured_bin]`: there are no
 command-line arguments. The judge receives one prompt on stdin and must write

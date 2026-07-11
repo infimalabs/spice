@@ -316,3 +316,23 @@ def test_config_say_rejects_external_backend_without_command(tmp_path, monkeypat
                 words_per_minute=None,
             )
         )
+
+
+def test_configured_judge_bin_defaults_to_platform_adapter(tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.platform", "darwin")
+    assert config.configured_judge_bin(tmp_path) == config.DEFAULT_JUDGE_BIN
+
+    monkeypatch.setattr("sys.platform", "linux")
+    assert config.configured_judge_bin(tmp_path) == config.PORTABLE_JUDGE_BIN
+
+
+def test_explicit_judge_bin_overrides_platform_default(tmp_path, monkeypatch):
+    config.update_section(
+        tmp_path, config.JUDGE_KEY, {config.JUDGE_BIN_KEY: "/opt/my-judge"}
+    )
+
+    monkeypatch.setattr("sys.platform", "linux")
+    assert config.configured_judge_bin(tmp_path) == "/opt/my-judge"
+
+    monkeypatch.setattr("sys.platform", "darwin")
+    assert config.configured_judge_bin(tmp_path) == "/opt/my-judge"
