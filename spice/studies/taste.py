@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 from spice.studies.walk import is_excluded_path
 
@@ -119,6 +119,7 @@ def scan_taste_texts(
     items: Sequence[tuple[str, str]],
     *,
     words: dict[str, str] | None = None,
+    match_filter: Callable[[str, int], bool] | None = None,
 ) -> list[TasteTextFinding]:
     source = words or DEFAULT_TASTE_WORDS
     if not source:
@@ -127,6 +128,8 @@ def scan_taste_texts(
     findings: list[TasteTextFinding] = []
     for source_name, text in items:
         for match in pattern.finditer(text):
+            if match_filter is not None and not match_filter(text, match.start()):
+                continue
             word = match.group(0).lower()
             findings.append(
                 TasteTextFinding(

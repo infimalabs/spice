@@ -75,6 +75,26 @@ def test_inline_task_batch_suspect_wording_routes_without_claiming(task_repo):
     assert results[0].wording_matches
 
 
+@pytest.mark.parametrize(
+    "acceptance",
+    [
+        "Do not use the master label",
+        "Do not add a fallback path",
+    ],
+)
+def test_explicitly_negated_wording_starts_in_todo(task_repo, acceptance):
+    handle = create.add(
+        "Concrete wording task",
+        project="task.unit",
+        acceptance=[acceptance],
+        origin="ack:20260101T000000000000Z",
+    )
+
+    row = identity.resolve(handle)
+    assert row["phase"] == "todo"
+    assert claimstate.phases_of(row) == ["todo", "review"]
+
+
 def test_review_followup_suspect_wording_routes_without_claiming(task_repo):
     reviewed = create.add(
         "Review target for suspect follow-up",
