@@ -61,12 +61,21 @@ function mobileLayoutSnapshot(targetId) {
   const panel = lane.element.querySelector(
     '[data-lane-view-panel="compose"]',
   );
+  const composerActionElements = {
+    speech: lane.element.querySelector("[data-speech]"),
+    lifetime: lane.element.querySelector("[data-lifetime]"),
+    submit: lane.element.querySelector("[data-submit]"),
+  };
+  for (const [name, element] of Object.entries(composerActionElements)) {
+    if (!element) throw new Error("missing composer action: " + name);
+  }
   return {
-    composerActions: [
-      ...lane.element.querySelectorAll(
-        "[data-speech], [data-lifetime], [data-submit]",
-      ),
-    ].map(rectSnapshot),
+    composerActions: Object.fromEntries(
+      Object.entries(composerActionElements).map(([name, element]) => [
+        name,
+        rectSnapshot(element),
+      ]),
+    ),
     composerControls: rectSnapshot(
       lane.element.querySelector(".composer-controls"),
     ),
@@ -138,8 +147,8 @@ async function run() {
         layout.panel,
         "composer control rail",
       );
-      for (const [index, action] of layout.composerActions.entries())
-        assertInside(action, layout.panel, "composer action " + index);
+      for (const [name, action] of Object.entries(layout.composerActions))
+        assertInside(action, layout.panel, "composer action " + name);
       for (const [index, button] of layout.modeButtons.entries()) {
         assertInside(button, layout.lane, "lane mode button " + index);
         if (button.height < MINIMUM_MODE_BUTTON_HEIGHT_PX)
