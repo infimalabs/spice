@@ -287,8 +287,8 @@ def test_repo_doc_guard_scans_tracked_markdown_with_depth_budget_and_sticky(
     tmp_path,
 ):
     repo = _git_init(tmp_path / "repo")
-    _write_repo_file(repo, "README.md", "x" * 8000)
-    _write_repo_file(repo, "docs/guide.md", "x" * 9000)
+    _write_repo_file(repo, "README.md", "x" * 16_000)
+    _write_repo_file(repo, "docs/guide.md", "x" * 19_000)
     _git(repo, "add", ".")
 
     with pytest.raises(SpiceError) as first_exc:
@@ -296,12 +296,12 @@ def test_repo_doc_guard_scans_tracked_markdown_with_depth_budget_and_sticky(
 
     first_message = str(first_exc.value)
     assert "README.md" in first_message
-    assert "cap 5000" in first_message
+    assert "cap 10000" in first_message
     state_path = repo_doc_char_sticky_state_path(repo)
     assert state_path is not None
     assert state_path.exists()
 
-    _write_repo_file(repo, "README.md", "x" * 6000)
+    _write_repo_file(repo, "README.md", "x" * 11_000)
     _git(repo, "add", "README.md")
 
     with pytest.raises(SpiceError) as sticky_exc:
@@ -309,7 +309,7 @@ def test_repo_doc_guard_scans_tracked_markdown_with_depth_budget_and_sticky(
 
     sticky_message = str(sticky_exc.value)
     assert "README.md" in sticky_message
-    assert "cap 5000" in sticky_message
+    assert "cap 10000" in sticky_message
 
 
 def test_repo_doc_guard_unbounds_markdown_past_depth_threshold(tmp_path):
@@ -329,7 +329,7 @@ def test_repo_doc_guard_unbounds_markdown_past_depth_threshold(tmp_path):
 
 def test_repo_doc_guard_ignores_assets_and_binary_markdown_candidates(tmp_path):
     repo = _git_init(tmp_path / "repo")
-    _write_repo_file(repo, "README.md", "x" * 8000)
+    _write_repo_file(repo, "README.md", "x" * 16_000)
     _write_repo_file(repo, "docs/image.png", "x" * 30000)
     binary_doc = repo / "docs" / "blob.md"
     binary_doc.parent.mkdir(parents=True, exist_ok=True)

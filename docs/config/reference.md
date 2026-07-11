@@ -13,6 +13,102 @@ server deployment. Worker worktrees are operated trees: config can shape agent
 defaults and policy in those trees, but it does not choose a different spice
 source checkout, import path, or virtualenv for the running code.
 
+The agent shell also requires
+[RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer. Install and protocol
+details live in [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion); this is a
+runtime companion requirement, not a tracked project setting.
+
+## Linux Speech with `espeak-ng`
+
+Speech configuration is worktree-local. On Debian or Ubuntu, install the
+`espeak-ng` package and verify the executable before configuring spice:
+
+```sh
+sudo apt-get update
+sudo apt-get install espeak-ng
+command -v espeak-ng
+espeak-ng --version
+```
+
+Other Linux distributions should install the package named `espeak-ng` with
+their system package manager. Configure its stdout WAV mode and matching audio
+content type exactly as follows:
+
+```sh
+spice config say --backend external --command "espeak-ng --stdout" --content-type audio/wav
+```
+
+`spice serve` sends prepared speech text to the command on stdin and serves the
+WAV bytes returned on stdout as `audio/wav`. Verify the same executable path
+independently with:
+
+```sh
+printf 'spice speech check' | espeak-ng --stdout > /tmp/spice-speech-check.wav
+file /tmp/spice-speech-check.wav
+```
+
+## Maxim Judge Binary
+
+Configure the worktree-local judge with:
+
+```console
+spice config judge --bin /path/to/judge
+```
+
+This stores `[judge].bin` in `.spice/config/state.json`. The value is one
+executable path or `PATH` name, not a shell command or argv list. When unset,
+the default is keyed to the platform: macOS uses the Apple Foundation Models
+`afm-cli` binary; every other platform, where `afm-cli` does not exist, uses the
+portable `spice-judge` adapter that ships with Spice. An explicit `bin`
+overrides this default on every platform. For each verdict Spice launches the
+exact argv `[configured_bin]`.
+
+### Portable judge with `spice-judge`
+
+`spice-judge` is Spice's own console script and conforms to the contract in this
+section: launched as the exact argv `[spice-judge]`, it reads the prompt on
+stdin and writes `YES`/`NO` to stdout. It delegates the judgement to a portable
+local model command, obtainable off macOS. The default command runs a small
+local model through [Ollama](https://ollama.com); install it and pull the model
+once with `ollama pull llama3.2`.
+
+`SPICE_JUDGE_MODEL_CMD` overrides the default with any argv that reads a prompt
+on stdin and writes an answer to stdout (for example
+`SPICE_JUDGE_MODEL_CMD="ollama run mistral"`). `SPICE_JUDGE_TIMEOUT` sets the
+per-verdict deadline in seconds (default `60`; a non-positive value disables
+it). There is no silent no-op: when the model command is absent, exits non-zero,
+or exceeds its deadline, `spice-judge` exits non-zero with an actionable message
+on stderr, which Spice surfaces as its judge error detail. Bring your own judge
+by setting `[judge].bin` to any conforming executable instead.
+
+The judge receives one prompt on stdin and writes its verdict to stdout. The
+default prompt contains these four lines in a random order on every attempt:
+
+```text
+IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".
+IFF "{maxim}" DISAGREES WITH "{statement}": ANSWER ONLY "NO".
+IFF "{statement}" AGREES WITH "{maxim}": ANSWER ONLY "YES".
+IFF "{statement}" DISAGREES WITH "{maxim}": ANSWER ONLY "NO".
+```
+
+Before interpolation, Spice collapses whitespace in `maxim` and `statement`
+and strips trailing punctuation and whitespace. `--prompt-file` on
+`spice maxim agree` or `spice maxim disagree` replaces the default template;
+only `{maxim}` and `{statement}` fields are accepted.
+
+The output schema is plain text, not JSON. Spice uppercases stdout, removes
+characters other than `Y`, `E`, `S`, `N`, `O`, and spaces, and accepts the
+result only when its deduplicated token set is exactly `{"YES"}` or `{"NO"}`.
+An ambiguous reply is retried, with two attempts by default.
+
+The process must exit `0`. Launch failure or nonzero exit is immediate; stderr
+is included for nonzero exits. Spice imposes no subprocess timeout, so wrappers
+for models that can hang must enforce one. Direct maxim checks return `0` when
+their requested condition is met, `1` when unmet, and `2` for judge or prompt
+errors. During supervision, judge errors are logged and skip that maxim
+feedback without stopping transcript capture, steering, or tasks. Learning
+distillation likewise skips candidates whose judge call fails.
+
 ## `[tool.spice.agent]`
 
 | Key | Default | Meaning |
@@ -35,9 +131,11 @@ with `[tool.spice.agent] wrappers = [...]`.
 | `wrapper = ["cmd1", "cmd2"]` | Create wrapper function `wrapper` and route each listed command selector through it. |
 | `selector = { argv = ["tool", "subcommand"] }` | Create a direct wrapper function named `selector` that runs the configured argv plus caller arguments. |
 
-The built-in `common` group is intentionally empty. RTK rewrite routing happens
-inside `spice agent run` - it is not a per-command wrapper. Repo groups should
-wrap stable repo-owned tools (see `docs/cli/wrapper-commands.md`).
+RTK rewrite selection happens inside `spice agent run`. The built-in `common`
+group supplies only the finite post-selection command-shape transformations
+for rg-only grep flags, native find predicates, and diagnostic git flags. Repo
+groups may replace or extend `common` and should otherwise wrap stable
+repo-owned tools (see [wrapper commands](../cli/wrapper-commands.md)).
 
 ## `[tool.spice.commands]`
 
@@ -186,8 +284,8 @@ reported as retained with reasons such as
 
 Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 `1.5x` flex, routines CCN `20` / length `80`, commit text wrap `100`,
-repo-root markdown `5000` chars plus `5000` per nested directory until
-`15000`, magic-number threshold `10`, and magic baselines against `HEAD`.
+repo-root markdown `10000` chars plus `10000` per nested directory until
+`30000`, magic-number threshold `10`, and magic baselines against `HEAD`.
 
 ### `[tool.spice.policy.limits]`
 
@@ -214,9 +312,9 @@ remove or rephrase. Configured words merge over built-ins.
 ### `[tool.spice.policy.markdown_depth_budget]`
 
 Generated `repo_truth_doc_chars` scopes for tracked markdown: repo root gets
-`5000` chars, one nested directory `10000`, two nested directories `15000`, and
-deeper docs are unlimited. `extensions` defaults to `[".md"]`; set it to `[]`
-to replace generated scopes with explicit `[tool.spice.policy.scopes]`.
+`10000` chars, one nested directory `20000`, two nested directories `30000`,
+and deeper docs are unlimited. `extensions` defaults to `[".md"]`; set it to
+`[]` to replace generated scopes with explicit `[tool.spice.policy.scopes]`.
 `stem_pattern` optionally full-matches file stems; binary files are skipped.
 
 ### `[tool.spice.policy.debt]`

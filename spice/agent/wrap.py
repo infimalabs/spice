@@ -24,6 +24,7 @@ import datetime
 import json
 import math
 import os
+import re
 import select
 import shlex
 import socket
@@ -68,8 +69,17 @@ PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
 SHELL_EXECUTION_COMMANDS = frozenset(("bash", "dash", "sh", "zsh"))
 SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
 RTK_REWRITE_COMMAND = ("rtk", "rewrite")
-# RTK prints a rewritten command and returns 3 from the hook path on this lane.
-RTK_REWRITE_MATCH_EXIT_CODES = frozenset((0, 3))
+RTK_MINIMUM_VERSION = (0, 42, 4)
+RTK_MINIMUM_VERSION_TEXT = ".".join(str(part) for part in RTK_MINIMUM_VERSION)
+RTK_UPSTREAM = "https://github.com/rtk-ai/rtk"
+RTK_INSTALL_GUIDANCE = (
+    f"install RTK >= {RTK_MINIMUM_VERSION_TEXT} from {RTK_UPSTREAM} "
+    "(`brew install rtk` or `cargo install --git https://github.com/rtk-ai/rtk`)"
+)
+RTK_REWRITE_MATCH_EXIT_CODE = 3
+RTK_REWRITE_NO_MATCH_EXIT_CODE = 1
+RTK_VERSION_PATTERN = re.compile(r"\brtk\s+(\d+)\.(\d+)\.(\d+)\b", re.IGNORECASE)
+RTK_PROTOCOL_PROBE = ("git", "status")
 RTK_DB_PATH_ENV = "RTK_DB_PATH"  # env-policy: allow
 
 AGENT_RUN_INBOX_REPEAT_SECONDS = 15.0
@@ -288,22 +298,67 @@ def rtk_rewrite_direct_args(args: Sequence[str]) -> list[str] | None:
         return None
 
 
-def rtk_rewrite_command_text(*args: str) -> str | None:
+def rtk_rewrite_command_text(
+    *args: str, run: Callable[..., subprocess.CompletedProcess[str]] | None = None
+) -> str | None:
+    runner = run or subprocess.run
     try:
-        completed = subprocess.run(
+        completed = runner(
             # `--` stops rtk option parsing so a flag-leading command (e.g.
             # `--help`) is rewritten as a command, not read as rtk's own option.
             [*RTK_REWRITE_COMMAND, "--", *args],
-            stdout=subprocess.PIPE,
+            capture_output=True,
             text=True,
             check=False,
         )
-    except FileNotFoundError:
+    except OSError as exc:
+        raise SpiceError(
+            f"RTK rewrite unavailable: {exc}; {RTK_INSTALL_GUIDANCE}"
+        ) from exc
+    rewritten = (completed.stdout or "").strip()
+    if completed.returncode == RTK_REWRITE_MATCH_EXIT_CODE and rewritten:
+        return rewritten
+    if completed.returncode == RTK_REWRITE_NO_MATCH_EXIT_CODE and not rewritten:
         return None
-    if completed.returncode not in RTK_REWRITE_MATCH_EXIT_CODES:
-        return None
-    rewritten = completed.stdout.strip()
-    return rewritten or None
+    detail = (completed.stderr or "").strip()
+    suffix = f"; stderr={detail}" if detail else ""
+    raise SpiceError(
+        "invalid RTK rewrite protocol result: "
+        f"exit={completed.returncode} stdout={rewritten!r}{suffix}; "
+        f"{RTK_INSTALL_GUIDANCE}"
+    )
+
+
+def validate_rtk_companion(
+    *, run: Callable[..., subprocess.CompletedProcess[str]] | None = None
+) -> str:
+    runner = run or subprocess.run
+    try:
+        completed = runner(
+            ["rtk", "--version"], capture_output=True, text=True, check=False
+        )
+    except OSError as exc:
+        raise SpiceError(f"RTK unavailable: {exc}; {RTK_INSTALL_GUIDANCE}") from exc
+    version_output = (completed.stdout or completed.stderr or "").strip()
+    match = RTK_VERSION_PATTERN.search(version_output)
+    if completed.returncode != 0 or match is None:
+        raise SpiceError(
+            f"could not validate RTK version from {version_output!r}; "
+            f"{RTK_INSTALL_GUIDANCE}"
+        )
+    version = tuple(int(part) for part in match.groups())
+    if version < RTK_MINIMUM_VERSION:
+        raise SpiceError(
+            f"RTK {'.'.join(str(part) for part in version)} is obsolete; "
+            f"{RTK_INSTALL_GUIDANCE}"
+        )
+    rewritten = rtk_rewrite_command_text(*RTK_PROTOCOL_PROBE, run=runner)
+    if rewritten is None:
+        raise SpiceError(
+            f"RTK rewrite probe did not rewrite {' '.join(RTK_PROTOCOL_PROBE)!r}; "
+            f"{RTK_INSTALL_GUIDANCE}"
+        )
+    return ".".join(str(part) for part in version)
 
 
 def shell_execution_command_index(args: Sequence[str]) -> int | None:

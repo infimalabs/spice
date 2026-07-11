@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import shlex
 import subprocess
+import sys
 from argparse import Namespace
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -157,6 +159,77 @@ def test_configured_stub_judge_drives_maxim_agree_end_to_end(tmp_path, monkeypat
     assert call["argv"] == []
     assert '"Prefer explicit contracts"' in call["prompt"]
     assert '"I will publish the executable contract"' in call["prompt"]
+
+
+def _wire_portable_judge(repo: Path, verdict: str) -> None:
+    """Point `[judge] bin` at the real spice-judge adapter over a fake model."""
+    model = repo / f"fake-model-{verdict.lower()}"
+    model.write_text(
+        "\n".join(
+            [
+                f"#!{sys.executable}",
+                "import sys",
+                "sys.stdin.read()",
+                f"print({verdict!r})",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    model.chmod(0o755)
+    adapter = repo / "spice-judge"
+    adapter.write_text(
+        "\n".join(
+            [
+                f"#!{sys.executable}",
+                "from spice.agent.judgeadapter import main",
+                "raise SystemExit(main())",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    adapter.chmod(0o755)
+    config.update_section(repo, config.JUDGE_KEY, {config.JUDGE_BIN_KEY: str(adapter)})
+    return shlex.join([str(model)])
+
+
+def test_portable_spice_judge_agrees_through_maxim_path(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    model_command = _wire_portable_judge(repo, "YES")
+    monkeypatch.setenv("SPICE_JUDGE_MODEL_CMD", model_command)  # env-policy: allow
+    monkeypatch.chdir(repo)
+
+    code = cli_entry.main(
+        [
+            "maxim",
+            "agree",
+            "Prefer explicit contracts.",
+            "I will publish the executable contract.",
+            "--quiet",
+        ]
+    )
+
+    assert code == maximcli.CONDITION_MET_EXIT_CODE
+
+
+def test_portable_spice_judge_disagrees_through_maxim_path(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    model_command = _wire_portable_judge(repo, "NO")
+    monkeypatch.setenv("SPICE_JUDGE_MODEL_CMD", model_command)  # env-policy: allow
+    monkeypatch.chdir(repo)
+
+    code = cli_entry.main(
+        [
+            "maxim",
+            "disagree",
+            "Prefer explicit contracts.",
+            "I will hide the mystery binary.",
+            "--quiet",
+        ]
+    )
+
+    assert code == maximcli.CONDITION_MET_EXIT_CODE
 
 
 def test_repo_config_declares_new_maxim_bag_for_scan_and_watchdog(
