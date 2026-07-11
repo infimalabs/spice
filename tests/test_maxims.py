@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import subprocess
 from argparse import Namespace
 from collections.abc import Callable, Sequence
@@ -12,9 +13,11 @@ from threading import Lock
 
 import pytest
 
+from spice import config
 from spice.agent import maximcli, maxims, watchdog
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV, driver_choices
 from spice.agent.maxims import MaximVerdict
+from spice.cli import entry as cli_entry
 from spice.errors import SpiceError
 from spice.flexstate import git_state_path
 from spice.mail.acks import archive_ackd_inbox_items
@@ -115,6 +118,45 @@ _LABELED_MAXIM_CORPUS = (
         False,
     ),
 )
+
+
+def test_configured_stub_judge_drives_maxim_agree_end_to_end(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path / "repo")
+    record_path = repo / "judge-call.json"
+    judge_path = repo / "judge-stub"
+    judge_path.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json",
+                "import sys",
+                "from pathlib import Path",
+                f"record_path = Path({str(record_path)!r})",
+                "record_path.write_text(",
+                "    json.dumps({'argv': sys.argv[1:], 'prompt': sys.stdin.read()}),",
+                "    encoding='utf-8',",
+                ")",
+                "print('YES')",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    judge_path.chmod(0o755)
+    config.update_section(
+        repo, config.JUDGE_KEY, {config.JUDGE_BIN_KEY: str(judge_path)}
+    )
+    monkeypatch.chdir(repo)
+
+    maxim = "Prefer explicit contracts."
+    statement = "I will publish the executable contract."
+    code = cli_entry.main(["maxim", "agree", maxim, statement, "--quiet"])
+    call = json.loads(record_path.read_text(encoding="utf-8"))
+
+    assert code == maximcli.CONDITION_MET_EXIT_CODE
+    assert call["argv"] == []
+    assert '"Prefer explicit contracts"' in call["prompt"]
+    assert '"I will publish the executable contract"' in call["prompt"]
 
 
 def test_repo_config_declares_new_maxim_bag_for_scan_and_watchdog(
