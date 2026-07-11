@@ -15,6 +15,14 @@ def configure_dev_parser(subparsers: Any) -> None:
         "init",
         help="Set up this repo: install hooks, materialize skill, exclude state.",
     )
+    init.add_argument(
+        "--gates",
+        action="store_true",
+        help=(
+            "Install constitution gates only; do not materialize the agent skill "
+            "or fleet-specific reference guard."
+        ),
+    )
     init.set_defaults(func=handle_init)
 
     parser = subparsers.add_parser(
@@ -88,10 +96,11 @@ def configure_dev_parser(subparsers: Any) -> None:
 
 
 def handle_init(args: argparse.Namespace) -> int:
-    from spice.hooks.install import init_repo
+    from spice.hooks.install import init_gates_repo, init_repo
 
     repo_root = init_repo_root()
-    for row in init_repo(repo_root):
+    initialize = init_gates_repo if bool(args.gates) else init_repo
+    for row in initialize(repo_root):
         print(row)
     return 0
 

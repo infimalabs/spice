@@ -45,7 +45,8 @@ See [docs/overview.md](docs/overview.md) for the operating model and
 
 | Surface | Command |
 | --- | --- |
-| Prepare a repo | `spice init` / `spice doctor` |
+| Prepare a full fleet repo | `spice init` / `spice doctor` |
+| Install constitution gates only | `spice init --gates` |
 | Run through the agent wrapper | `spice agent run -- <cmd>` |
 | Maintain a worktree-bound agent | `spice agent ensure` / `spice agent supervise` |
 | Pull allocator work | `spice task next` |
@@ -69,6 +70,19 @@ cd /path/to/your/repo
 spice init
 spice doctor
 ```
+
+For repository hygiene without the task plane, shell wrapper, or agent skill,
+install the standalone constitution tier instead:
+
+```sh
+spice init --gates
+```
+
+This installs the `pre-commit` constitution (including sticky-flex limits,
+regression-only magic-number ratchets, taste policy, and configured extensions)
+plus commit-message hygiene. It does not install the fleet-specific reference
+guard or materialize agent files. Commit normally to run the gates, or invoke
+the staged gate directly with `spice dev pre-commit`.
 
 The default install is a uv tool. Operators who deploy from a main tree should
 use the editable form so the installed `spice` command resolves to that tree;

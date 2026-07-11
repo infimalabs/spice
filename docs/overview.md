@@ -64,6 +64,17 @@ commit-message rules all bind this repository first. A harness that exempts its
 own tree from its standards cannot credibly ask target repositories to accept
 them.
 
+## Standalone Gates
+
+Teams that only need the constitution can run `spice init --gates`. This installs
+the pre-commit and commit-message gates without materializing the agent skill,
+task plane, shell wrapper, or fleet-specific reference guard. The pre-commit
+hook includes sticky-flex hysteresis limits, regression-only magic-number
+ratchets against `HEAD`, taste policy, and configured policy extensions.
+
+After installation, commit normally or run `spice dev pre-commit` against the
+staged tree. Full fleet repositories continue to use `spice init`.
+
 ## Honest Feedback
 
 One principle runs through the design: do not let a thing fail silently in
