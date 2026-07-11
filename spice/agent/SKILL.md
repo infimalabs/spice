@@ -27,7 +27,7 @@ Before sending any assistant prose, run these commands in this order using the
 runtime resolution and steering delivery; agents should not switch entrypoints
 inside the spice repo.
 
-1. `spice agent activation`
+1. `spice agent activation` (requires RTK >= 0.42.4 and validates its rewrite protocol)
 2. `spice session briefing`
 3. `spice task status`
 

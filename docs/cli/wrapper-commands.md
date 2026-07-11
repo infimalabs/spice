@@ -58,6 +58,10 @@ integration error; exit `0` is not accepted by the current protocol. Missing,
 older, or protocol-invalid RTK stops the agent path with the official install
 guidance instead of silently selecting a native-command path.
 
+Upstream RTK assigns exit `0` to an auto-allowed rewrite. Spice deliberately
+rejects that outcome: rewriting may optimize the command, but it must not cross
+the agent permission boundary by auto-allowing it.
+
 RTK is the sole owner of rewrite selection. Spice sets `RTK_DB_PATH` to the
 current agent thread's `.git/spice/agents/<thread>/rtk/history.db` and owns only
 that history location plus the finite command-shape transformations below.

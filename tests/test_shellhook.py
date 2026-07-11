@@ -15,11 +15,97 @@ import pytest
 from spice.agent import driver as agent_driver
 from spice.agent import lifecycle, shellhook, wrap
 from spice.agent.driver import CLAUDE_DRIVER, DRIVER
+from spice.errors import SpiceError
 
 SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
 UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND = "spice agent " + "shell-hook"
 UNSUPPORTED_AGENT_STEER_COMMAND = "spice agent " + "steer"
+
+
+def test_rtk_rewrite_protocol_accepts_current_result_pairs():
+    responses = iter(
+        [
+            subprocess.CompletedProcess([], 3, stdout="rtk git status\n", stderr=""),
+            subprocess.CompletedProcess([], 1, stdout="", stderr=""),
+        ]
+    )
+
+    def run(*_args, **_kwargs):
+        return next(responses)
+
+    assert wrap.rtk_rewrite_command_text("git", "status", run=run) == "rtk git status"
+    assert wrap.rtk_rewrite_command_text("true", run=run) is None
+
+
+@pytest.mark.parametrize(
+    "completed",
+    [
+        subprocess.CompletedProcess([], 0, stdout="rtk git status\n", stderr=""),
+        subprocess.CompletedProcess([], 3, stdout="", stderr=""),
+        subprocess.CompletedProcess([], 1, stdout="unexpected\n", stderr=""),
+    ],
+)
+def test_rtk_rewrite_protocol_reports_invalid_result_with_install_path(completed):
+    with pytest.raises(SpiceError) as exc_info:
+        wrap.rtk_rewrite_command_text(
+            "git", "status", run=lambda *_args, **_kwargs: completed
+        )
+
+    error = str(exc_info.value)
+    assert "invalid RTK rewrite protocol result" in error
+    assert wrap.RTK_UPSTREAM in error
+
+
+def test_rtk_companion_validation_checks_version_and_rewrite_probe():
+    calls: list[list[str]] = []
+
+    def run(args, **_kwargs):
+        calls.append(args)
+        if args == ["rtk", "--version"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout="rtk 0.42.4\n", stderr=""
+            )
+        return subprocess.CompletedProcess(
+            args, 3, stdout="rtk git status\n", stderr=""
+        )
+
+    assert wrap.validate_rtk_companion(run=run) == "0.42.4"
+    assert calls == [
+        ["rtk", "--version"],
+        ["rtk", "rewrite", "--", "git", "status"],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("version_output", "expected"),
+    [
+        ("rtk 0.42.3\n", "is obsolete"),
+        ("unknown\n", "could not validate RTK version"),
+    ],
+)
+def test_rtk_companion_validation_reports_version_failure(version_output, expected):
+    completed = subprocess.CompletedProcess(
+        ["rtk", "--version"], 0, stdout=version_output, stderr=""
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        wrap.validate_rtk_companion(run=lambda *_args, **_kwargs: completed)
+
+    error = str(exc_info.value)
+    assert expected in error
+    assert wrap.RTK_UPSTREAM in error
+
+
+def test_rtk_companion_validation_reports_missing_binary():
+    def missing(*_args, **_kwargs):
+        raise FileNotFoundError("rtk")
+
+    with pytest.raises(SpiceError) as exc_info:
+        wrap.validate_rtk_companion(run=missing)
+
+    assert "RTK unavailable" in str(exc_info.value)
+    assert wrap.RTK_UPSTREAM in str(exc_info.value)
 
 
 def test_wrapper_git_route_inherits_ambient_supervisor_environment(tmp_path):

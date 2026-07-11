@@ -53,6 +53,11 @@ def activation_browser_validation_lines() -> list[str]:
 def activation_command_surface_lines() -> list[str]:
     return [
         (
+            "rtk_contract=RTK >= 0.42.4 is required; activation validates the "
+            "rewrite protocol before binding the agent, and missing or invalid "
+            "RTK stops command execution with official install guidance"
+        ),
+        (
             "command_surface=run shell commands normally; spice shell startup "
             "hooks reexec the first zsh/bash command shell through spice agent "
             "run so inbox steering and keep-working guidance arrive before the "

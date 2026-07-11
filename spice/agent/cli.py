@@ -302,7 +302,9 @@ def render_activation_packet(repo_root: Path) -> str:
     from spice.hooks.install import install_hooks_for_repo
     from spice.mail.steeringkey import steering_token
     from spice.tasks import claimstate, gitsync
+    from spice.agent.wrap import validate_rtk_companion
 
+    validate_rtk_companion()
     status = bind_ambient_agent_activation(repo_root)
     hook_rows = install_hooks_for_repo(repo_root)
     skill = materialize_worktree_skill(repo_root)
