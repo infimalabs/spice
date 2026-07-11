@@ -68,6 +68,10 @@ uv tool install -e /path/to/spice-main
 # or, for the released package:
 uv tool install spice-harness
 
+# RTK is required for the agent shell (version 0.42.4 or newer):
+brew install rtk
+# or: cargo install --git https://github.com/rtk-ai/rtk
+
 cd /path/to/your/repo
 spice init
 spice doctor
@@ -93,10 +97,13 @@ operated trees and do not supply their own runtime.
 
 ### Graceful degradation
 
-RTK, the local judge, and speech synthesis are optional companions. When they
-are unavailable, spice keeps the transcript, steering, task board, and
-constitution working; only compaction, maxim feedback, or audio narration
-degrade. Runtime and configuration details are in [CONFIG.md](CONFIG.md).
+[RTK](https://github.com/rtk-ai/rtk) is a required companion for the agent
+shell: `spice agent run` delegates command selection to `rtk rewrite`, and
+`spice doctor` verifies the supported protocol before agents work. The local
+judge and speech synthesis are degradable companions; when either is
+unavailable, transcript capture, steering, tasks, and the constitution keep
+working while maxim feedback or audio narration is skipped. Runtime,
+verification, and protocol details are in [CONFIG.md](CONFIG.md).
 
 ## Release
 

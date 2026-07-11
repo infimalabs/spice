@@ -17,6 +17,46 @@ server deployment. Worker worktrees are operated trees: config can shape agent
 defaults and policy in those trees, but it does not choose a different spice
 source checkout, import path, or virtualenv for the running code.
 
+## RTK Rewrite Companion
+
+The agent shell requires [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or
+newer. Install the published binary before starting agents:
+
+```sh
+brew install rtk
+# or
+cargo install --git https://github.com/rtk-ai/rtk
+
+rtk --version
+rtk rewrite -- git status
+```
+
+`spice doctor` and agent activation verify the executable, minimum version, and
+rewrite protocol. Missing, older, or protocol-invalid RTK stops the agent path
+with an installation error; Spice does not silently run the raw command.
+
+`spice agent run` passes the complete command to `rtk rewrite` after a literal
+`--`. The current protocol has exactly two valid outcomes:
+
+- Exit `3` with non-empty stdout: stdout is the replacement shell command;
+- Exit `1` with empty stdout: the command is unmatched and remains unchanged.
+
+Every other exit/stdout combination is a protocol error. Exit `0` is not a
+rewrite result in the current contract.
+
+RTK owns command-selection policy. Spice owns the surrounding agent-shell
+contract and a finite post-selection command-shape layer: built-in `common`
+routes rg-only grep flags to `rg`, native find predicates to `find`, and
+diagnostic git flags to `git`; this repository additionally gives selected
+`rtk grep` calls BSD grep's extended-expression mode. These transformations
+preserve command semantics and do not select additional commands for RTK.
+
+For each agent thread, Spice sets `RTK_DB_PATH` to
+`.git/spice/agents/<thread>/rtk/history.db`. RTK owns that SQLite history file;
+Spice owns only its agent-scoped location. The full shell handoff and wrapper
+contract is in
+[docs/cli/wrapper-commands.md](docs/cli/wrapper-commands.md).
+
 ## Maxim Judge Binary
 
 The maxim judge is a worktree-local executable configured with:
@@ -78,9 +118,9 @@ Reference: [agent table](docs/config/reference.md#toolspiceagent).
 ## `[tool.spice.wrappers.<group>]`
 
 Wrapper groups define shell functions for agent-owned commands. Select groups
-with `[tool.spice.agent] wrappers = [...]`. The built-in `common` group is
-intentionally empty; RTK rewrite routing happens inside `spice agent run`, not
-through a per-command wrapper.
+with `[tool.spice.agent] wrappers = [...]`. The built-in `common` group contains
+the finite RTK command-shape transformations described above; `rtk rewrite`
+inside `spice agent run` remains the sole command selector.
 
 Reference: [wrapper groups](docs/config/reference.md#toolspicewrappersgroup).
 

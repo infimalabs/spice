@@ -13,6 +13,11 @@ server deployment. Worker worktrees are operated trees: config can shape agent
 defaults and policy in those trees, but it does not choose a different spice
 source checkout, import path, or virtualenv for the running code.
 
+The agent shell also requires
+[RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer. Install and protocol
+details live in [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion); this is a
+runtime companion requirement, not a tracked project setting.
+
 ## `[tool.spice.agent]`
 
 | Key | Default | Meaning |
@@ -35,9 +40,11 @@ with `[tool.spice.agent] wrappers = [...]`.
 | `wrapper = ["cmd1", "cmd2"]` | Create wrapper function `wrapper` and route each listed command selector through it. |
 | `selector = { argv = ["tool", "subcommand"] }` | Create a direct wrapper function named `selector` that runs the configured argv plus caller arguments. |
 
-The built-in `common` group is intentionally empty. RTK rewrite routing happens
-inside `spice agent run` - it is not a per-command wrapper. Repo groups should
-wrap stable repo-owned tools (see `docs/cli/wrapper-commands.md`).
+RTK rewrite selection happens inside `spice agent run`. The built-in `common`
+group supplies only the finite post-selection command-shape transformations
+for rg-only grep flags, native find predicates, and diagnostic git flags. Repo
+groups may replace or extend `common` and should otherwise wrap stable
+repo-owned tools (see [wrapper commands](../cli/wrapper-commands.md)).
 
 ## `[tool.spice.commands]`
 
