@@ -485,21 +485,69 @@ def test_design_phase_show_injects_artifact_boundary_guidance(task_repo):
     assert f'spice task done {handle} --validation "..."' in shown
 
 
-def test_plan_phase_done_requires_parent_or_child_acceptance(task_repo):
+def test_plan_only_done_requires_accepted_child_despite_parent_acceptance(task_repo):
     handle = create.add(
-        "Plan needs acceptance",
+        "Plan-only task needs child",
         project="task.unit",
         origin="ack:20260101T000000000000Z",
-        flow=["plan", "todo", "review"],
+        flow=["plan"],
+        acceptance=["parent acceptance is insufficient for plan-only flow"],
     )
     ops.claim(handle)
 
-    with pytest.raises(SpiceError, match="current task or connect at least one"):
-        ops.done(handle, validation=["plan attempted without acceptance"])
+    with pytest.raises(SpiceError, match="cannot complete plan-only flow"):
+        ops.done(handle, validation=["plan-only task attempted without child"])
 
     row = identity.resolve(handle)
     assert row["phase"] == "plan"
     assert not str(row.get("validation") or "")
+
+
+def test_plan_only_show_requires_accepted_child(task_repo):
+    handle = create.add(
+        "Show plan-only task guidance",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        flow=["plan"],
+        acceptance=["parent acceptance remains descriptive"],
+    )
+
+    shown = render.render_show(handle)
+
+    assert "phase:plan is this task's entire flow" in shown
+    assert "must decompose into at least one dependency-connected child" in shown
+    assert "At least one connected child needs acceptance" in shown
+
+
+def test_plan_only_done_completes_with_one_accepted_child(task_repo):
+    handle = create.add(
+        "Plan-only task has children",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        flow=["plan"],
+        acceptance=["parent acceptance does not replace child acceptance"],
+    )
+    accepted_child = create.add(
+        "Accepted child for plan-only task",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        acceptance=["child node has acceptance"],
+    )
+    planning_child = create.add(
+        "Planning sibling for plan-only task",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        flow=["plan", "todo", "review"],
+    )
+    ops.depends(handle, [accepted_child, planning_child])
+    ops.claim(handle)
+
+    output = ops.done(handle, validation=["accepted child terminates plan-only task"])
+    row = identity.resolve(handle)
+
+    assert output.startswith(f"completed {handle}")
+    assert row["status"] == "completed"
+    assert identity.resolve(planning_child)["phase"] == "plan"
 
 
 def test_plan_phase_done_advances_with_parent_acceptance_and_no_child(task_repo):
