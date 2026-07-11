@@ -296,6 +296,35 @@ def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatc
     assert completed_row["review_note"] == "review passed"
 
 
+def test_task_done_surfaces_git_sync_note(task_repo, monkeypatch):
+    handle = create.add(
+        "Report tree-same integration",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="medium",
+        acceptance=["tree-same completion is named"],
+    )
+    ops.claim(handle)
+    original_integrate = gitsync.integrate_and_publish
+
+    def integrate_with_note(*args, **kwargs):
+        result = original_integrate(*args, **kwargs)
+        result.notes.append(
+            "task tree already integrated on baseline; preserved divergent "
+            "commits in a tree-same merge"
+        )
+        return result
+
+    monkeypatch.setattr(gitsync, "integrate_and_publish", integrate_with_note)
+
+    output = ops.done(handle, validation=["tree-same diagnostic checked"])
+
+    assert (
+        "task tree already integrated on baseline; preserved divergent commits "
+        "in a tree-same merge"
+    ) in output
+
+
 def test_task_next_takes_over_stale_peer_claim(task_repo, monkeypatch):
     handle = create.add(
         "Stale takeover",

@@ -479,7 +479,7 @@ def done(
     next_line = next_task_drain_line()
     if result.endswith(" -> review"):
         next_line = next_task_drain_line(review_assignment=True)
-    return f"{result}\n{learning_line}\n{next_line}"
+    return "\n".join([result, *sync.notes, learning_line, next_line])
 
 
 def _distill_task_done_learnings(

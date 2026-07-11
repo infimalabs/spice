@@ -6,9 +6,10 @@ places, both owned by the task control plane:
 * **claim** (`prepare_for_claim`): fast-forward the local tree to the current
   baseline so new work starts from the latest shared state, then the claim
   records that point-in-time commit.
-* **phase completion** (`integrate_and_publish`): merge the completing
-  agent's work with the baseline and publish a baseline-first merge, then
-  record the agent commit and the always-present merge commit. A real content
+* **phase completion** (`integrate_and_publish`): integrate the completing
+  agent's work with the baseline, preserving divergent histories in a
+  baseline-first merge and fast-forwarding when the baseline already descends
+  from the local line. A real content
   conflict is the one and only thing surfaced to the agent — framed as an
   overlap with the baseline, never as a sync with an upstream.
 
@@ -269,9 +270,11 @@ def integrate_and_publish(
 ) -> SyncResult:
     """Integrate the completing agent's work with the baseline and publish it.
 
-    Always lands a merge commit with the baseline as first parent and the
-    agent's last commit as second parent (``--no-ff`` semantics), captures
-    both for review, and pushes. The merge commit message is composed from
+    Divergent histories land a merge commit with the baseline as first parent
+    and the agent's last commit as second parent (``--no-ff`` semantics).
+    Tree-equal descendant baselines fast-forward without minting an empty
+    merge. The integrated and agent commits are captured for review and pushed.
+    A merge commit message is composed from
     harvested task and git facts. A real content conflict raises
     :class:`MergeConflict` with the tree left mid-merge for the agent to
     resolve and commit. A resolution that still contains conflict markers is
@@ -304,6 +307,17 @@ def integrate_and_publish(
         upstream_head=upstream_head,
         message=message,
     )
+    tree_already_integrated = _tree_of(root, merge_head) == _tree_of(
+        root, upstream_head
+    )
+    tree_same_note = ""
+    if tree_already_integrated:
+        tree_same_note = (
+            "task tree already integrated on baseline; advanced without rewriting refs"
+            if merge_head == upstream_head
+            else "task tree already integrated on baseline; preserved divergent "
+            "commits in a tree-same merge"
+        )
     merge_head, upstream_head = _publish_integrated_task(
         root,
         remote=remote,
@@ -315,7 +329,8 @@ def integrate_and_publish(
         message=message,
     )
     return SyncResult(
-        uda_args=_capture(agent_head, merge_head, baseline, upstream_head)
+        notes=[tree_same_note] if tree_same_note else [],
+        uda_args=_capture(agent_head, merge_head, baseline, upstream_head),
     )
 
 
@@ -544,16 +559,7 @@ def _tree_of(repo_root: Path, ref: str) -> str:
 
 
 def _collapse_to_first_parent(repo_root: Path, first_parent: str, *, label: str) -> str:
-    """Advance the branch to ``first_parent`` without minting an empty merge.
-
-    The caller has established that the phase result tree equals
-    ``first_parent``'s, so no 2-parent merge is warranted. A fast-forward
-    covers the common case where the baseline is simply ahead; when the branch
-    has diverged (neither side an ancestor) it is reset onto ``first_parent``
-    instead. That reset loses no committed work, because the caller's
-    tree-equality check proved this phase adds nothing the baseline lacks, and
-    it normalizes the worktree up to the baseline commit.
-    """
+    """Fast-forward the branch to a tree-equivalent descendant baseline."""
     expected_head = _read(repo_root, "rev-parse", "HEAD")
     ff = _run(repo_root, "merge", "--ff-only", first_parent)
     if ff.returncode == 0:
@@ -567,10 +573,7 @@ def _collapse_to_first_parent(repo_root: Path, first_parent: str, *, label: str)
                 completed=ff,
             )
         )
-    reset = _run(repo_root, "reset", "--hard", first_parent)
-    if reset.returncode != 0:
-        raise SpiceError(_fail("collapse no-op phase onto baseline", reset))
-    return first_parent
+    raise SpiceError(_fail("fast-forward tree-same phase onto baseline", ff))
 
 
 def _synthesize_and_fast_forward(
@@ -582,12 +585,14 @@ def _synthesize_and_fast_forward(
     *,
     label: str,
 ) -> str:
-    # A phase whose result tree is identical to the first parent changed nothing
-    # against the baseline: minting a --no-ff merge would leave an empty 2-parent
-    # commit, and under a completion storm every no-edit review would pile one
-    # onto the shared baseline. Collapse the no-op onto the first parent instead
-    # so it stays a git no-op; only a differing tree earns a merge commit.
-    if _tree_of(repo_root, treeish) == _tree_of(repo_root, first_parent):
+    # A tree-equal descendant baseline already contains the phase commits, so a
+    # fast-forward avoids an empty merge. Divergent tree-equal histories are
+    # different: resetting would abandon the local commit line (and can be
+    # blocked by the reference guard), so preserve both lines in an ancestry
+    # merge even though the resulting tree itself is unchanged.
+    if _tree_of(repo_root, treeish) == _tree_of(
+        repo_root, first_parent
+    ) and _is_ancestor(repo_root, "HEAD", first_parent):
         return _collapse_to_first_parent(repo_root, first_parent, label=label)
     merge_head = _synthesize_merge(
         repo_root, treeish, first_parent, second_parent, message
