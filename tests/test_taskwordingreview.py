@@ -96,6 +96,27 @@ def test_explicitly_negated_wording_starts_in_todo(task_repo, acceptance):
     assert claimstate.phases_of(row) == ["todo", "review"]
 
 
+@pytest.mark.parametrize(
+    "acceptance",
+    [
+        "Avoid failure by adding a fallback path",
+        "Prevent delay with polling",
+    ],
+)
+def test_prohibition_means_clause_starts_in_plan(task_repo, acceptance):
+    handle = create.add(
+        "Concrete wording task",
+        project="task.unit",
+        acceptance=[acceptance],
+        origin="ack:20260101T000000000000Z",
+    )
+
+    row = identity.resolve(handle)
+    assert row["phase"] == "plan"
+    assert claimstate.phases_of(row) == ["plan", "todo", "review"]
+    assert row[config.TASK_WORDING_REVIEW_UDA] == "required"
+
+
 def test_review_followup_suspect_wording_routes_without_claiming(task_repo):
     reviewed = create.add(
         "Review target for suspect follow-up",

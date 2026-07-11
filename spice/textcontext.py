@@ -7,42 +7,14 @@ CONTEXT_WORD_EXTRA_CHARS = frozenset({"'", "-"})
 CONTEXT_WINDOW = 6
 NEGATION_WORDS = frozenset(
     {
-        "avoid",
-        "avoided",
-        "avoiding",
-        "avoids",
-        "ban",
-        "banned",
-        "banning",
-        "bans",
         "can't",
         "cannot",
         "cant",
-        "delete",
-        "deleted",
-        "deletes",
-        "deleting",
-        "eliminate",
-        "eliminated",
-        "eliminates",
-        "eliminating",
-        "forbid",
-        "forbids",
-        "forbidden",
-        "forbidding",
         "not",
-        "prevent",
-        "prevented",
-        "preventing",
-        "prevents",
         "refuse",
         "refused",
         "refuses",
         "refusing",
-        "remove",
-        "removed",
-        "removes",
-        "removing",
         "will-not",
         "won't",
         "wont",
@@ -56,6 +28,39 @@ NEGATION_PHRASES = (
     ("refuses", "to"),
     ("refusing", "to"),
 )
+PROHIBITION_WORDS = frozenset(
+    {
+        "avoid",
+        "avoided",
+        "avoiding",
+        "avoids",
+        "ban",
+        "banned",
+        "banning",
+        "bans",
+        "delete",
+        "deleted",
+        "deletes",
+        "deleting",
+        "eliminate",
+        "eliminated",
+        "eliminates",
+        "eliminating",
+        "forbid",
+        "forbids",
+        "forbidden",
+        "forbidding",
+        "prevent",
+        "prevented",
+        "preventing",
+        "prevents",
+        "remove",
+        "removed",
+        "removes",
+        "removing",
+    }
+)
+PROHIBITION_RELATION_BREAK_WORDS = frozenset({"by", "through", "using", "via", "with"})
 TURNING_WORDS = frozenset({"but", "hence", "so", "therefore", "thus"})
 
 
@@ -63,9 +68,19 @@ def has_explicit_negation_before(text: str, token_pos: int) -> bool:
     """Return whether the token is explicitly negated in its recent clause."""
     words = clause_prefix_words(text, token_pos)
     recent = words_after_last_turn(words)[-CONTEXT_WINDOW:]
-    return bool(NEGATION_WORDS & set(recent)) or contains_phrase(
-        recent, NEGATION_PHRASES
+    return (
+        bool(NEGATION_WORDS & set(recent))
+        or contains_phrase(recent, NEGATION_PHRASES)
+        or _has_direct_prohibition(recent)
     )
+
+
+def _has_direct_prohibition(words: tuple[str, ...]) -> bool:
+    for index in range(len(words) - 1, -1, -1):
+        if words[index] not in PROHIBITION_WORDS:
+            continue
+        return not bool(PROHIBITION_RELATION_BREAK_WORDS & set(words[index + 1 :]))
+    return False
 
 
 def clause_prefix_words(text: str, token_pos: int) -> tuple[str, ...]:
