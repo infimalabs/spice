@@ -215,8 +215,8 @@ reported as retained with reasons such as
 
 Policy constants enforced by default: files `1000` LOC / `80000` bytes with
 `1.5x` flex, routines CCN `20` / length `80`, commit text wrap `100`,
-repo-root markdown `5000` chars plus `5000` per nested directory until
-`15000`, magic-number threshold `10`, and magic baselines against `HEAD`.
+repo-root markdown `10000` chars plus `10000` per nested directory until
+`30000`, magic-number threshold `10`, and magic baselines against `HEAD`.
 
 ### `[tool.spice.policy.limits]`
 
@@ -243,9 +243,9 @@ remove or rephrase. Configured words merge over built-ins.
 ### `[tool.spice.policy.markdown_depth_budget]`
 
 Generated `repo_truth_doc_chars` scopes for tracked markdown: repo root gets
-`5000` chars, one nested directory `10000`, two nested directories `15000`, and
-deeper docs are unlimited. `extensions` defaults to `[".md"]`; set it to `[]`
-to replace generated scopes with explicit `[tool.spice.policy.scopes]`.
+`10000` chars, one nested directory `20000`, two nested directories `30000`,
+and deeper docs are unlimited. `extensions` defaults to `[".md"]`; set it to
+`[]` to replace generated scopes with explicit `[tool.spice.policy.scopes]`.
 `stem_pattern` optionally full-matches file stems; binary files are skipped.
 
 ### `[tool.spice.policy.debt]`

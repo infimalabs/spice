@@ -56,11 +56,11 @@ TASTE_WORD_SUGGESTIONS: dict[str, str] = {
 # --- repo-truth docs ------------------------------------------------------------
 # Doctrine documents ride in every agent's context, so they are capped hard.
 # A repo widens the set in tracked `[tool.spice.policy] repo_truth_docs`.
-REPO_TRUTH_DOC_LIMIT = 5000
+REPO_TRUTH_DOC_LIMIT = 10_000
 REPO_TRUTH_DOCS = ("AGENTS.md",)
 MARKDOWN_DEPTH_DOC_EXTENSIONS = (".md",)
-MARKDOWN_DEPTH_BASE_CHAR_BUDGET = 5000
-MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET = 15000
+MARKDOWN_DEPTH_BASE_CHAR_BUDGET = 10_000
+MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET = 30_000
 
 # --- package shape -------------------------------------------------------------
 # Namespace packages only: no __init__.py anywhere under a declared package
