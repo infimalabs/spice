@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 
 from spice.mail.acks import archive_ackd_inbox_items
 from spice.mail.ackstate import (
@@ -50,6 +51,13 @@ from spice.serve.markdown import render_message_html
 IMAGE_DATA_URL = "data:image/png;base64,aW1hZ2UtYnl0ZXM="
 _ONE_DAY_SECONDS = 24 * 60 * 60
 _STORE_FRESH_MAX_SECONDS = 60
+# Deep enough that an O(backlog) per-submit scan would read many bodies.
+_SUBMIT_BACKLOG_DEPTH = 40
+_SUBMIT_DUPLICATE_INDEX = 20
+
+
+def _dated_inbox_name(index: int) -> str:
+    return f"20260101T{index:012d}Z.txt"
 
 
 def test_write_then_collect_round_trip(tmp_path):
@@ -115,6 +123,75 @@ def test_write_inbox_item_does_not_dedupe_attachment_messages_by_text_only(tmp_p
         "20260101T000000000002Z.txt",
     ]
     assert pending_inbox_count(tmp_path) == 2
+
+
+def test_submit_body_reads_stay_flat_as_unacknowledged_backlog_grows(
+    tmp_path, monkeypatch
+):
+    """Steering submit must not read every queued body as the backlog grows.
+
+    The reported cliff: submit was fast onto an empty inbox and then slowed,
+    progressively, as unacknowledged messages piled up, because both the dedup
+    pre-check and the pending-identity payload read the full text of every
+    pending item on each submit. Identity now derives from stat metadata alone
+    and dedup only reads size-collision candidates, so the per-submit body-read
+    count is flat regardless of backlog depth.
+    """
+    from spice.serve.pending import pending_inbox_identity_payload
+
+    inbox = inbox_dir(tmp_path)
+    body_reads: list[str] = []
+    real_open = Path.open
+
+    # Instrument at the open layer only: Path.read_text opens through Path.open,
+    # so this counts every queued-body read exactly once, whether it arrives via
+    # read_text (dedup) or a direct open (snapshot).
+    def counting_open(self, *args, **kwargs):
+        if self.suffix == ".txt" and self.parent == inbox:
+            body_reads.append(self.name)
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counting_open)
+
+    def _submit(index):
+        # Each queued message is a distinct on-disk size, so no size collision
+        # ever forces a body read during dedup.
+        composed = compose_inbox_text(
+            body="steer " + "x" * index, priority=None, stop=False
+        )
+        body_reads.clear()
+        write_inbox_item(
+            tmp_path, _dated_inbox_name(index), composed, dedupe_pending_text=True
+        )
+        pending_inbox_identity_payload(str(tmp_path))
+        return list(body_reads)
+
+    total = _SUBMIT_BACKLOG_DEPTH + 1
+    first = _submit(1)
+    for index in range(2, total):
+        _submit(index)
+    deep = _submit(total)
+
+    # Zero queued bodies read whether the inbox holds one item or the full
+    # backlog: the fast-first-then-progressive-cliff is gone.
+    assert first == []
+    assert deep == []
+    assert pending_inbox_count(str(tmp_path)) == total
+
+    # The dedup gate still collapses an identical still-pending submission, and
+    # it does so by reading only the single size-matching candidate, not the
+    # whole backlog.
+    duplicate = compose_inbox_text(
+        body="steer " + "x" * _SUBMIT_DUPLICATE_INDEX, priority=None, stop=False
+    )
+    body_reads.clear()
+    landed = write_inbox_item(
+        tmp_path, "20260101T000000009999Z.txt", duplicate, dedupe_pending_text=True
+    )
+    duplicate_reads = list(body_reads)
+    assert landed == inbox / _dated_inbox_name(_SUBMIT_DUPLICATE_INDEX)
+    assert duplicate_reads == [_dated_inbox_name(_SUBMIT_DUPLICATE_INDEX)]
+    assert pending_inbox_count(str(tmp_path)) == total
 
 
 def test_compose_parse_round_trip_with_priority_and_stop():

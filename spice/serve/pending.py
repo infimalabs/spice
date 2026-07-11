@@ -6,41 +6,46 @@ from hashlib import blake2s
 from pathlib import Path
 from typing import Any
 
-from spice.mail.inbox import InboxItem, collect_inbox_items, inbox_dir, inbox_item_key
+from spice.mail.inbox import (
+    PendingInboxEntry,
+    collect_pending_inbox_entries,
+    inbox_dir,
+    inbox_item_key,
+)
 
 _NANOSECONDS_PER_MICROSECOND = 1000
 
 
 def pending_inbox_identity_payload(repo_root: str | Path | None) -> dict[str, Any]:
-    items = collect_inbox_items(repo_root)
-    keys = [inbox_item_key(item.name) for item in items]
+    # Identity is derived from names plus stat metadata only: reading each queued
+    # body here is what made steering submit slow as the unacknowledged backlog
+    # grew.
+    entries = collect_pending_inbox_entries(repo_root)
+    keys = [inbox_item_key(entry.name) for entry in entries]
     return {
         "pendingInboxCount": len(keys),
         "pendingInboxLabel": str(len(keys)),
         "pendingInboxKeys": keys,
-        "pendingInboxRevision": pending_inbox_revision(items),
-        "pendingInboxVersion": pending_inbox_version(repo_root, items),
+        "pendingInboxRevision": pending_inbox_revision(entries),
+        "pendingInboxVersion": pending_inbox_version(repo_root, entries),
     }
 
 
-def pending_inbox_revision(items: list[InboxItem]) -> str:
+def pending_inbox_revision(entries: list[PendingInboxEntry]) -> str:
     digest = blake2s(digest_size=16)
-    for item in items:
-        digest.update(inbox_item_key(item.name).encode("utf-8"))
+    for entry in entries:
+        digest.update(inbox_item_key(entry.name).encode("utf-8"))
         digest.update(b"\0")
-        try:
-            stat = item.source_path.stat()
-        except OSError:
-            digest.update(b"missing")
-        else:
-            digest.update(str(stat.st_mtime_ns).encode("ascii"))
-            digest.update(b":")
-            digest.update(str(stat.st_size).encode("ascii"))
+        digest.update(str(entry.mtime_ns).encode("ascii"))
+        digest.update(b":")
+        digest.update(str(entry.size).encode("ascii"))
         digest.update(b"\0")
     return digest.hexdigest()
 
 
-def pending_inbox_version(repo_root: str | Path | None, items: list[InboxItem]) -> int:
+def pending_inbox_version(
+    repo_root: str | Path | None, entries: list[PendingInboxEntry]
+) -> int:
     """Comparable inbox snapshot version safe for JavaScript Number ordering.
 
     Never 0 for a real worktree: the UI treats an identity payload without a
@@ -50,8 +55,8 @@ def pending_inbox_version(repo_root: str | Path | None, items: list[InboxItem]) 
     if not repo_root:
         return 0
     version_ns = _path_mtime_ns(inbox_dir(repo_root))
-    for item in items:
-        version_ns = max(version_ns, _path_mtime_ns(item.source_path))
+    for entry in entries:
+        version_ns = max(version_ns, entry.mtime_ns)
     return max(1, version_ns // _NANOSECONDS_PER_MICROSECOND)
 
 
