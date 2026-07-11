@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
+import sys
+import wave
 from pathlib import Path
 
 import pytest
 
 from spice import config
+from spice.cli.parser import build_parser
+from spice.configcli import handle_config
 from spice.serve import audio
+
+ESPEAK_TEST_SAMPLE_RATE = 8000
 
 
 def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
@@ -91,3 +98,77 @@ def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
         match="external speech backend exited 7: bad model",
     ):
         audio.render_speech_audio("hello", repo_root=tmp_path)
+
+
+def test_espeak_ng_stdout_recipe_runs_end_to_end(tmp_path, monkeypatch, capsys):
+    executable_dir = tmp_path / "bin"
+    executable_dir.mkdir()
+    executable = executable_dir / "espeak-ng"
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "import wave\n"
+        "from pathlib import Path\n"
+        "text = sys.stdin.buffer.read()\n"
+        "Path('espeak-ng.stdin').write_bytes(text)\n"
+        "with wave.open(sys.stdout.buffer, 'wb') as output:\n"
+        "    output.setnchannels(1)\n"
+        "    output.setsampwidth(2)\n"
+        f"    output.setframerate({ESPEAK_TEST_SAMPLE_RATE})\n"
+        "    output.writeframes(b'\\x00\\x00')\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(executable_dir))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+
+    result = handle_config(
+        build_parser().parse_args(
+            [
+                "config",
+                "say",
+                "--backend",
+                "external",
+                "--command",
+                "espeak-ng --stdout",
+                "--content-type",
+                "audio/wav",
+            ]
+        )
+    )
+    rendered = audio.render_speech_audio(
+        "see [Linux docs](https://example.test)/today",
+        repo_root=tmp_path,
+    )
+
+    assert result == 0
+    assert capsys.readouterr().out == (
+        "say backend=external command=espeak-ng --stdout content_type=audio/wav\n"
+    )
+    assert (tmp_path / "espeak-ng.stdin").read_bytes() == b"see Linux docs today"
+    assert rendered.content_type == "audio/wav"
+    with wave.open(io.BytesIO(rendered.data), "rb") as wav_file:
+        assert wav_file.getnchannels() == 1
+        assert wav_file.getsampwidth() == 2
+        assert wav_file.getframerate() == ESPEAK_TEST_SAMPLE_RATE
+        assert wav_file.getnframes() == 1
+        assert wav_file.getcomptype() == "NONE"
+
+
+def test_espeak_ng_linux_preset_is_documented():
+    overview = Path("CONFIG.md").read_text(encoding="utf-8")
+    reference = Path("docs/config/reference.md").read_text(encoding="utf-8")
+
+    assert (
+        "[`espeak-ng` preset](docs/config/reference.md#linux-speech-with-espeak-ng)"
+        in overview
+    )
+    assert "sudo apt-get install espeak-ng" in reference
+    assert "command -v espeak-ng" in reference
+    assert "espeak-ng --version" in reference
+    assert (
+        'spice config say --backend external --command "espeak-ng --stdout" '
+        "--content-type audio/wav" in reference
+    )
+    assert "returned on stdout as `audio/wav`" in reference

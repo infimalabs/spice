@@ -13,6 +13,35 @@ server deployment. Worker worktrees are operated trees: config can shape agent
 defaults and policy in those trees, but it does not choose a different spice
 source checkout, import path, or virtualenv for the running code.
 
+## Linux Speech with `espeak-ng`
+
+Speech configuration is worktree-local. On Debian or Ubuntu, install the
+`espeak-ng` package and verify the executable before configuring spice:
+
+```sh
+sudo apt-get update
+sudo apt-get install espeak-ng
+command -v espeak-ng
+espeak-ng --version
+```
+
+Other Linux distributions should install the package named `espeak-ng` with
+their system package manager. Configure its stdout WAV mode and matching audio
+content type exactly as follows:
+
+```sh
+spice config say --backend external --command "espeak-ng --stdout" --content-type audio/wav
+```
+
+`spice serve` sends prepared speech text to the command on stdin and serves the
+WAV bytes returned on stdout as `audio/wav`. Verify the same executable path
+independently with:
+
+```sh
+printf 'spice speech check' | espeak-ng --stdout > /tmp/spice-speech-check.wav
+file /tmp/spice-speech-check.wav
+```
+
 ## `[tool.spice.agent]`
 
 | Key | Default | Meaning |
