@@ -162,10 +162,15 @@ def run_agent_command(
     initial_inbox_signature = emit_initial_side_channel_payload(
         repo_root, stderr=stderr
     )
-    command = build_agent_run_command(raw_args, repo_root=repo_root, rewrite_rtk=True)
     environment = build_agent_run_environment(
         raw_args,
         repo_root=repo_root,
+    )
+    command = build_agent_run_command(
+        raw_args,
+        repo_root=repo_root,
+        rewrite_rtk=True,
+        rtk_environment=environment,
     )
     try:
         if environment is None:
@@ -214,19 +219,36 @@ def emit_initial_side_channel_payload(
 
 
 def build_agent_run_command(
-    raw_args: Sequence[str], *, repo_root: Path | None = None, rewrite_rtk: bool = False
+    raw_args: Sequence[str],
+    *,
+    repo_root: Path | None = None,
+    rewrite_rtk: bool = False,
+    rtk_environment: Mapping[str, str] | None = None,
 ) -> list[str]:
     args = normalize_agent_run_args(raw_args)
     if rewrite_rtk:
-        args = rtk_rewrite_agent_run_args(args, repo_root=repo_root)
+        args = rtk_rewrite_agent_run_args(
+            args,
+            repo_root=repo_root,
+            rtk_environment=rtk_environment,
+        )
     routed_args = worktree_route_command(args, repo_root=repo_root)
     if rewrite_rtk and args == routed_args:
-        return rtk_rewrite_direct_args(routed_args) or routed_args
+        return (
+            rtk_rewrite_direct_args(
+                routed_args,
+                rtk_environment=rtk_environment,
+            )
+            or routed_args
+        )
     return routed_args
 
 
 def rtk_rewrite_agent_run_args(
-    args: Sequence[str], *, repo_root: Path | None = None
+    args: Sequence[str],
+    *,
+    repo_root: Path | None = None,
+    rtk_environment: Mapping[str, str] | None = None,
 ) -> list[str]:
     shell_command_index = shell_execution_command_index(args)
     if shell_command_index is None:
@@ -234,6 +256,7 @@ def rtk_rewrite_agent_run_args(
     rewritten = rtk_rewrite_shell_execution_text(
         args[shell_command_index],
         repo_root=repo_root,
+        rtk_environment=rtk_environment,
     )
     if rewritten is None:
         return list(args)
@@ -243,20 +266,37 @@ def rtk_rewrite_agent_run_args(
 
 
 def rtk_rewrite_shell_execution_text(
-    command_text: str, *, repo_root: Path | None = None
+    command_text: str,
+    *,
+    repo_root: Path | None = None,
+    rtk_environment: Mapping[str, str] | None = None,
 ) -> str | None:
-    rewritten = rtk_rewrite_command_text(command_text)
+    rewritten = _rtk_rewrite_with_environment(
+        command_text,
+        rtk_environment=rtk_environment,
+    )
     if rewritten is not None:
         return rewritten
-    trailing = rtk_rewrite_trailing_exec_shell_command(command_text)
+    trailing = rtk_rewrite_trailing_exec_shell_command(
+        command_text,
+        rtk_environment=rtk_environment,
+    )
     if trailing is not None:
         return trailing
     return driver_for(repo_root).rewrite_tool_command(
-        command_text, rtk_rewrite_command_text
+        command_text,
+        lambda *args: _rtk_rewrite_with_environment(
+            *args,
+            rtk_environment=rtk_environment,
+        ),
     )
 
 
-def rtk_rewrite_trailing_exec_shell_command(command_text: str) -> str | None:
+def rtk_rewrite_trailing_exec_shell_command(
+    command_text: str,
+    *,
+    rtk_environment: Mapping[str, str] | None = None,
+) -> str | None:
     stripped = command_text.rstrip()
     trailing = command_text[len(stripped) :]
     line_start = stripped.rfind("\n") + 1
@@ -274,7 +314,10 @@ def rtk_rewrite_trailing_exec_shell_command(command_text: str) -> str | None:
         or flag not in SHELL_EXECUTION_FLAGS
     ):
         return None
-    rewritten = rtk_rewrite_command_text(nested_command)
+    rewritten = _rtk_rewrite_with_environment(
+        nested_command,
+        rtk_environment=rtk_environment,
+    )
     if rewritten is None:
         return None
     return (
@@ -282,34 +325,61 @@ def rtk_rewrite_trailing_exec_shell_command(command_text: str) -> str | None:
     )
 
 
-def rtk_rewrite_direct_args(args: Sequence[str]) -> list[str] | None:
+def rtk_rewrite_direct_args(
+    args: Sequence[str],
+    *,
+    rtk_environment: Mapping[str, str] | None = None,
+) -> list[str] | None:
     if (
         not args
         or args[:1] == ["rtk"]
         or shell_execution_command_index(args) is not None
     ):
         return None
-    rewritten = rtk_rewrite_command_text(*args)
+    rewritten = _rtk_rewrite_with_environment(
+        *args,
+        rtk_environment=rtk_environment,
+    )
     if rewritten is None:
         return None
     try:
         return shlex.split(rewritten)
-    except ValueError:
-        return None
+    except ValueError as exc:
+        raise SpiceError(
+            "invalid RTK direct rewrite argv: "
+            f"command={shlex.join(args)!r} output={rewritten!r}; "
+            "matched RTK output must be shell-parseable"
+        ) from exc
+
+
+def _rtk_rewrite_with_environment(
+    *args: str,
+    rtk_environment: Mapping[str, str] | None,
+) -> str | None:
+    if rtk_environment is None:
+        return rtk_rewrite_command_text(*args)
+    return rtk_rewrite_command_text(*args, env=rtk_environment)
 
 
 def rtk_rewrite_command_text(
-    *args: str, run: Callable[..., subprocess.CompletedProcess[str]] | None = None
+    *args: str,
+    env: Mapping[str, str] | None = None,
+    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> str | None:
     runner = run or subprocess.run
+    run_kwargs: dict[str, Any] = {
+        "capture_output": True,
+        "text": True,
+        "check": False,
+    }
+    if env is not None:
+        run_kwargs["env"] = dict(env)
     try:
         completed = runner(
             # `--` stops rtk option parsing so a flag-leading command (e.g.
             # `--help`) is rewritten as a command, not read as rtk's own option.
             [*RTK_REWRITE_COMMAND, "--", *args],
-            capture_output=True,
-            text=True,
-            check=False,
+            **run_kwargs,
         )
     except OSError as exc:
         raise SpiceError(

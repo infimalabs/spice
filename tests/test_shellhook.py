@@ -21,6 +21,7 @@ SHELL_TRACE_ENV = "SPICE_TEST_TRACE"  # env-policy: allow
 SHELL_HOOK_FAILURE_EXIT_CODE = 127
 UNSUPPORTED_AGENT_SHELL_HOOK_COMMAND = "spice agent " + "shell-hook"
 UNSUPPORTED_AGENT_STEER_COMMAND = "spice agent " + "steer"
+SCOPED_REWRITE_PROCESS_PID = 4242
 
 
 def test_rtk_rewrite_protocol_accepts_current_result_pairs():
@@ -155,7 +156,7 @@ def test_wrapper_does_not_reroute_spice_commands_under_single_install(
 def test_wrapper_rewrites_stage_one_shell_command_before_stage_two(monkeypatch):
     calls: list[tuple[str, ...]] = []
 
-    def fake_rewrite(*args: str) -> str | None:
+    def fake_rewrite(*args: str, **_kwargs) -> str | None:
         calls.append(args)
         return "rtk git status --short"
 
@@ -172,7 +173,7 @@ def test_wrapper_rewrites_stage_one_shell_command_before_stage_two(monkeypatch):
 def test_wrapper_rewrites_codex_snapshot_trailing_shell_exec(monkeypatch):
     calls: list[tuple[str, ...]] = []
 
-    def fake_rewrite(*args: str) -> str | None:
+    def fake_rewrite(*args: str, **_kwargs) -> str | None:
         calls.append(args)
         if args == ("git status --short",):
             return "rtk git status --short"
@@ -207,7 +208,7 @@ def test_wrapper_rewrites_codex_snapshot_trailing_shell_exec(monkeypatch):
 def test_wrapper_rewrites_direct_agent_command_with_rtk_source_of_truth(monkeypatch):
     calls: list[tuple[str, ...]] = []
 
-    def fake_rewrite(*args: str) -> str | None:
+    def fake_rewrite(*args: str, **_kwargs) -> str | None:
         calls.append(args)
         return "rtk grep needle"
 
@@ -219,10 +220,33 @@ def test_wrapper_rewrites_direct_agent_command_with_rtk_source_of_truth(monkeypa
     assert calls == [("rg", "needle")]
 
 
+def test_wrapper_rejects_malformed_matched_direct_rewrite_before_execution(
+    monkeypatch,
+):
+    executed: list[list[str]] = []
+    monkeypatch.setattr(
+        wrap,
+        "rtk_rewrite_command_text",
+        lambda *_args, **_kwargs: "rtk 'unterminated",
+    )
+
+    with pytest.raises(SpiceError) as exc_info:
+        wrap.run_agent_command(
+            None,
+            ["rg", "needle"],
+            popen_factory=lambda command, **_kwargs: executed.append(command),
+            stderr=io.StringIO(),
+        )
+
+    assert executed == []
+    assert "invalid RTK direct rewrite argv" in str(exc_info.value)
+    assert "must be shell-parseable" in str(exc_info.value)
+
+
 def test_wrapper_does_not_special_case_proxy_argv(monkeypatch):
     calls: list[tuple[str, ...]] = []
 
-    def fake_rewrite(*args: str) -> str | None:
+    def fake_rewrite(*args: str, **_kwargs) -> str | None:
         calls.append(args)
         return None
 
@@ -349,6 +373,69 @@ def test_wrapper_exports_agent_scoped_rtk_db_for_ambient_agent_commands(
     assert Path(env[wrap.RTK_DB_PATH_ENV]).parent.is_dir()
 
 
+def test_rtk_selectors_and_children_share_distinct_thread_scoped_history(
+    tmp_path, monkeypatch
+):
+    _init_git_repo(tmp_path)
+    monkeypatch.setenv(wrap.RTK_DB_PATH_ENV, "/ambient/global-history.db")
+    monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
+    monkeypatch.setattr(wrap, "emit_initial_side_channel_payload", lambda *_a, **_k: ())
+    monkeypatch.setattr(wrap, "start_agent_side_channel_watch", lambda *_a, **_k: None)
+    monkeypatch.setattr(wrap, "join_agent_side_channel_watch", lambda *_a, **_k: None)
+    selector_environments: list[dict[str, str]] = []
+    child_environments: list[dict[str, str]] = []
+    native_run = subprocess.run
+
+    def rewrite_run(args, **kwargs):
+        if args[:2] != ["rtk", "rewrite"]:
+            return native_run(args, **kwargs)
+        selector_environments.append(kwargs["env"])
+        command = args[3:]
+        return subprocess.CompletedProcess(
+            args,
+            wrap.RTK_REWRITE_MATCH_EXIT_CODE,
+            stdout=shlex.join(["rtk", *command]),
+            stderr="",
+        )
+
+    class Process:
+        pid = SCOPED_REWRITE_PROCESS_PID
+
+        def wait(self):
+            return 0
+
+    def popen(_command, *, env):
+        child_environments.append(env)
+        return Process()
+
+    monkeypatch.setattr(wrap.subprocess, "run", rewrite_run)
+    for thread_id, command in (
+        ("thread-a", ["git", "status"]),
+        ("thread-b", ["zsh", "-c", "git status"]),
+    ):
+        monkeypatch.setenv(DRIVER.thread_id_env, thread_id)
+        assert (
+            wrap.run_agent_command(
+                tmp_path,
+                command,
+                popen_factory=popen,
+                stderr=io.StringIO(),
+            )
+            == 0
+        )
+
+    expected_paths = [
+        tmp_path / ".git" / "spice" / "agents" / thread / "rtk" / "history.db"
+        for thread in ("thread-a", "thread-b")
+    ]
+    assert [Path(env[wrap.RTK_DB_PATH_ENV]) for env in selector_environments] == (
+        expected_paths
+    )
+    assert [Path(env[wrap.RTK_DB_PATH_ENV]) for env in child_environments] == (
+        expected_paths
+    )
+
+
 def test_wrapper_route_environment_uses_static_hook_stage_for_shell_execution(
     tmp_path, monkeypatch
 ):
@@ -452,7 +539,7 @@ def test_agent_run_shell_command_loads_wrappers_from_ambient_hook_env(
         encoding="utf-8",
     )
     wrap_bin.chmod(0o755)
-    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args: None)
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", lambda *args, **_kwargs: None)
     fake_python = _fake_spice_python(tmp_path, run_agent_commands=True)
     base_env = dict(os.environ)  # env-policy: allow
     base_env["PATH"] = (
