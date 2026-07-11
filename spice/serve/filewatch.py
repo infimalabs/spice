@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from http.server import ThreadingHTTPServer
 from importlib import import_module
 from pathlib import Path
@@ -9,6 +9,8 @@ from threading import Event, Thread
 from typing import Any, Callable, cast
 
 from spice.errors import SpiceError
+
+WATCHFILES_NATIVE_READY_MS = 1000
 
 
 def start_exit_file_watch(
@@ -23,14 +25,35 @@ def start_exit_file_watch(
     path = Path(watched_path).expanduser()
     _validate_watch_path(_normalized_watch_path(path))
     print(f"spice serve: watching {path} for exit")
+    activated = Event()
+    startup_errors: list[Exception] = []
     thread = Thread(
-        target=_stop_when_file_changes,
-        args=(server, path, stop_event),
+        target=_run_file_watch,
+        args=(server, path, stop_event, activated, startup_errors),
         name="spice-serve-file-watch",
         daemon=True,
     )
     thread.start()
+    activated.wait()
+    if startup_errors:
+        thread.join()
+        error = startup_errors[0]
+        raise SpiceError(f"spice serve --until watch failed: {error}") from error
     return thread
+
+
+def _run_file_watch(
+    server: ThreadingHTTPServer,
+    path: Path,
+    stop_event: Event,
+    activated: Event,
+    startup_errors: list[Exception],
+) -> None:
+    try:
+        _stop_when_file_changes(server, path, stop_event, activated=activated)
+    except Exception as exc:
+        startup_errors.append(exc)
+        activated.set()
 
 
 def _validate_watch_path(target: Path) -> None:
@@ -54,12 +77,79 @@ def _stop_when_file_changes(
     server: ThreadingHTTPServer,
     path: Path,
     stop_event: Event,
+    *,
+    activated: Event,
 ) -> None:
-    watch = _import_watch()
     target = _normalized_watch_path(path)
-    # Anchor on the parent directory (validated to exist) so the watch also
-    # covers a not-yet-created file; the filter narrows to the exact target.
     baseline = _watch_file_bytes(target)
+    for _ in _watch_target_changes(target, stop_event, activated=activated):
+        # Events alone are not an exit request: watcher backends may replay
+        # writes from just before registration or report metadata-only churn.
+        # Only a real content change -- the file appearing, disappearing, or
+        # carrying different bytes -- stops the server.
+        if _watch_file_bytes(target) == baseline:
+            continue
+        print(f"spice serve: watched file changed; exiting ({path})")
+        server.shutdown()
+        return
+
+
+def _watch_target_changes(
+    target: Path,
+    stop_event: Event,
+    *,
+    activated: Event,
+) -> Iterator[None]:
+    if serve_until_uses_kqueue():
+        yield from _watch_target_changes_kqueue(
+            target,
+            stop_event,
+            activated=activated,
+        )
+        return
+    yield from _watch_target_changes_watchfiles(
+        target,
+        stop_event,
+        activated=activated,
+    )
+
+
+def serve_until_uses_kqueue() -> bool:
+    from spice.serve.livebus import _HAVE_KQUEUE
+
+    return _HAVE_KQUEUE
+
+
+def _watch_target_changes_kqueue(
+    target: Path,
+    stop_event: Event,
+    *,
+    activated: Event,
+) -> Iterator[None]:
+    from spice.serve.livebus import _KqueueWatch
+
+    watch = _KqueueWatch()
+    try:
+        while watch.wait(
+            (target, target.parent),
+            stop_event,
+            activated=activated,
+        ):
+            yield None
+    finally:
+        watch.close()
+
+
+def _watch_target_changes_watchfiles(
+    target: Path,
+    stop_event: Event,
+    *,
+    activated: Event,
+) -> Iterator[None]:
+    watch = _import_watch()
+    # Anchor on the parent directory so creation of a missing target is
+    # observable. A timeout yield proves native registration before serve
+    # readiness without periodically checking the target itself.
     for changes in watch(
         target.parent,
         watch_filter=lambda change, changed_path: _include_change(
@@ -71,19 +161,15 @@ def _stop_when_file_changes(
         debounce=50,
         stop_event=stop_event,
         recursive=False,
+        rust_timeout=WATCHFILES_NATIVE_READY_MS,
+        yield_on_timeout=True,
     ):
-        if not _changes_include_path(changes, target):
-            continue
-        # Events alone are not an exit request: macOS FSEvents replays
-        # writes from just before the watch started (a launcher writing the
-        # file moments before serve boots) and fires on metadata-only churn.
-        # Only a real content change -- the file appearing, disappearing, or
-        # carrying different bytes -- stops the server.
-        if _watch_file_bytes(target) == baseline:
-            continue
-        print(f"spice serve: watched file changed; exiting ({path})")
-        server.shutdown()
-        return
+        if not activated.is_set():
+            activated.set()
+        if _changes_include_path(changes, target):
+            yield None
+    if not activated.is_set():
+        raise RuntimeError("serve --until watcher stopped before native registration")
 
 
 def _watch_file_bytes(path: Path) -> bytes | None:
