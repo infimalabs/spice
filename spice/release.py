@@ -164,11 +164,16 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
         return 0
 
     if mode == "notes":
-        version = str(args.version or current_version())
-        release_commit = release_commit_for_target(
-            version, getattr(args, "release_commit", None)
-        )
-        output = release_notes_for_version(version, release_commit)
+        if args.version is None and args.release_commit is None:
+            version = "unreleased"
+            release_commit = git("rev-parse", "HEAD")
+            output = release_notes_for_unreleased(release_commit)
+        else:
+            version = str(args.version or current_version())
+            release_commit = release_commit_for_target(
+                version, getattr(args, "release_commit", None)
+            )
+            output = release_notes_for_version(version, release_commit)
         notes_output = getattr(args, "output", None)
         if notes_output:
             notes_output.write_text(output, encoding="utf-8")
@@ -358,6 +363,19 @@ def release_notes_for_version(version: str, release_commit: str) -> str:
         release_commit=release_commit,
         release_short=short_commit(release_commit),
         current_tag=current_tag,
+        previous_tag=previous_tag,
+        records=records,
+    )
+
+
+def release_notes_for_unreleased(release_commit: str) -> str:
+    previous_tag = latest_release_tag_merged_into(release_commit)
+    records = commit_records(previous_tag, release_commit)
+    return render_release_notes(
+        version="unreleased",
+        release_commit=release_commit,
+        release_short=short_commit(release_commit),
+        current_tag="unreleased",
         previous_tag=previous_tag,
         records=records,
     )
