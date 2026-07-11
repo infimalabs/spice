@@ -174,6 +174,81 @@ def test_task_edit_acceptance_rejects_completed_task(task_repo):
         ops.edit(handle, acceptance=["late criterion"])
 
 
+def _depends_annotations(row: dict) -> list[str]:
+    return [
+        str(item.get("description") or "")
+        for item in row.get("annotations") or []
+        if str(item.get("description") or "").startswith("depends:")
+    ]
+
+
+def test_task_undepends_drops_one_edge_and_leaves_the_other(task_repo):
+    handle = create.add(
+        "Plan with two dependency edges",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    keep = create.add(
+        "Edge that stays",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    drop = create.add(
+        "Edge that goes",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    ops.depends(handle, [keep, drop])
+    keep_uuid = identity.uuid_of(identity.resolve(keep))
+
+    result = ops.undepends(handle, [drop])
+
+    row = identity.resolve(handle)
+    assert result == handle
+    assert row["depends"] == [keep_uuid]
+    assert _depends_annotations(row) == [f"depends: {keep}"]
+
+
+def test_task_undepends_clears_dangling_edge_after_dependency_deleted(task_repo):
+    handle = create.add(
+        "Plan pointing at a doomed dependency",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    doomed = create.add(
+        "Dependency about to be deleted",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    ops.depends(handle, [doomed])
+    doomed_uuid = identity.uuid_of(identity.resolve(doomed))
+    ops.delete(doomed, "no longer needed")
+    assert identity.resolve(handle)["depends"] == [doomed_uuid]
+
+    result = ops.undepends(handle, [doomed])
+
+    row = identity.resolve(handle)
+    assert result == handle
+    assert row.get("depends", []) == []
+    assert _depends_annotations(row) == []
+
+
+def test_task_undepends_rejects_an_absent_edge(task_repo):
+    handle = create.add(
+        "Plan with no such edge",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+    other = create.add(
+        "Unrelated task",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+    )
+
+    with pytest.raises(SpiceError, match="does not depend on"):
+        ops.undepends(handle, [other])
+
+
 def test_task_delete_allows_unclaimed_task(task_repo):
     handle = create.add(
         "Delete unclaimed task",

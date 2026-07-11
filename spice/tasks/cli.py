@@ -285,6 +285,7 @@ def _configure_task_edit_parsers(actions: Any) -> None:
     _configure_note_parser(actions)
     _configure_resolve_wording_parser(actions)
     _configure_depends_parser(actions)
+    _configure_undepends_parser(actions)
     _configure_wake_parser(actions)
     _configure_claim_parser(actions)
     _configure_reclaim_parser(actions)
@@ -378,6 +379,34 @@ def _configure_depends_parser(actions: Any) -> None:
         help="Prerequisite task handle(s) that must complete first.",
     )
     depends.set_defaults(func=handle)
+
+
+def _configure_undepends_parser(actions: Any) -> None:
+    undepends = actions.add_parser(
+        "undepends",
+        help="Remove native dependency edges; the inverse of depends.",
+        usage=(
+            "spice task undepends [-h] <handle> --after <dependency> [<dependency> ...]"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=("Example:\n  spice task undepends CLI-1k4Q5gJw --after SERVE-1k4Q5gh8"),
+        recovery_examples=(
+            "spice task undepends TASK-1k4Q5gJw --after SERVE-1k4Q5gh8",
+        ),
+    )
+    undepends.add_argument(
+        "handle",
+        metavar="handle",
+        help="Task whose dependency edge(s) should be dropped.",
+    )
+    undepends.add_argument(
+        "--after",
+        nargs="+",
+        required=True,
+        metavar="dependency",
+        help="Prerequisite task handle(s) to stop waiting on.",
+    )
+    undepends.set_defaults(func=handle)
 
 
 def _configure_wake_parser(actions: Any) -> None:
@@ -851,6 +880,7 @@ _DISPATCH = {
         reason=a.reason,
     ),
     "depends": lambda a: ops.depends(a.handle, list(a.after)),
+    "undepends": lambda a: ops.undepends(a.handle, list(a.after)),
     "wake": lambda a: ops.wake(list(a.handles), into=a.into),
     "claim": lambda a: ops.claim(a.handle, steal=a.steal),
     "reclaim": lambda a: _reclaim(a),
