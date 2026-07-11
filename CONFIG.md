@@ -20,92 +20,42 @@ source checkout, import path, or virtualenv for the running code.
 ## RTK Rewrite Companion
 
 The agent shell requires [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or
-newer. Install the published binary before starting agents:
+newer. Install it before starting agents:
 
 ```sh
 brew install rtk
-# or
-cargo install --git https://github.com/rtk-ai/rtk
-
 rtk --version
 rtk rewrite -- git status
 ```
 
-`spice doctor` and agent activation verify the executable, minimum version, and
-rewrite protocol. Missing, older, or protocol-invalid RTK stops the agent path
-with an installation error; Spice does not silently run the raw command.
+`spice agent run` passes the command after `--`. Exit `3` with non-empty stdout
+rewrites; Exit `1` with empty stdout leaves it unmatched. Every other
+exit/stdout combination errors; Exit `0` is invalid. RTK owns
+command-selection policy. Spice owns the finite `common` command-shape layer and
+the agent-scoped
+`.git/spice/agents/<thread>/rtk/history.db` supplied through `RTK_DB_PATH`.
+Missing or protocol-invalid RTK stops the agent path. Cargo installation and
+the complete protocol live in the
+[wrapper contract](docs/cli/wrapper-commands.md#rtk-rewrite-protocol).
 
-`spice agent run` passes the complete command to `rtk rewrite` after a literal
-`--`. The current protocol has exactly two valid outcomes:
+## Worktree Speech
 
-- Exit `3` with non-empty stdout: stdout is the replacement shell command;
-- Exit `1` with empty stdout: the command is unmatched and remains unchanged.
-
-Every other exit/stdout combination is a protocol error. Exit `0` is not a
-rewrite result in the current contract.
-
-RTK owns command-selection policy. Spice owns the surrounding agent-shell
-contract and a finite post-selection command-shape layer: built-in `common`
-routes rg-only grep flags to `rg`, native find predicates to `find`, and
-diagnostic git flags to `git`; this repository additionally gives selected
-`rtk grep` calls BSD grep's extended-expression mode. These transformations
-preserve command semantics and do not select additional commands for RTK.
-
-For each agent thread, Spice sets `RTK_DB_PATH` to
-`.git/spice/agents/<thread>/rtk/history.db`. RTK owns that SQLite history file;
-Spice owns only its agent-scoped location. The full shell handoff and wrapper
-contract is in
-[docs/cli/wrapper-commands.md](docs/cli/wrapper-commands.md).
+Speech is operator-local through `spice config say`; macOS defaults to `say`.
+The Linux [`espeak-ng` preset](docs/config/reference.md#linux-speech-with-espeak-ng)
+reads text from stdin and returns browser-playable WAV on stdout.
 
 ## Maxim Judge Binary
 
-The maxim judge is a worktree-local executable configured with:
+The maxim judge is a worktree-local executable:
 
 ```console
 spice config judge --bin /path/to/judge
 ```
 
-This stores the logical `[judge].bin` value in `.spice/config/state.json`.
-`bin` is one executable path or `PATH` name, not a shell command or argv list.
-When it is unset, spice uses `afm-cli`.
-
-For each verdict, spice launches the exact argv `[configured_bin]`: there are no
-command-line arguments. The judge receives one prompt on stdin and must write
-its verdict to stdout. The default prompt contains these four lines in a random
-order on every attempt:
-
-```text
-IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".
-IFF "{maxim}" DISAGREES WITH "{statement}": ANSWER ONLY "NO".
-IFF "{statement}" AGREES WITH "{maxim}": ANSWER ONLY "YES".
-IFF "{statement}" DISAGREES WITH "{maxim}": ANSWER ONLY "NO".
-```
-
-Before interpolation, spice collapses whitespace in `maxim` and `statement`
-and strips trailing punctuation and whitespace. The `--prompt-file` option on
-`spice maxim agree` or `spice maxim disagree` replaces the default template;
-only `{maxim}` and `{statement}` fields are accepted.
-
-The output schema is plain text, not JSON. Spice uppercases stdout, removes
-characters other than `Y`, `E`, `S`, `N`, `O`, and spaces, and accepts the
-result only when its deduplicated token set is exactly `{"YES"}` or `{"NO"}`.
-`YES` means the statement agrees with the maxim; `NO` means it disagrees. An
-ambiguous reply is retried, with two attempts by default. If both replies are
-ambiguous, judging fails.
-
-The judge process must exit `0`. A launch failure or nonzero exit is an
-immediate error; stderr is included in the error detail for a nonzero exit.
-Spice does not currently impose a subprocess timeout, so a conforming wrapper
-should enforce its own deadline if its model can hang. Direct
-`spice maxim agree` and `spice maxim disagree` calls return `0` when their
-requested condition is met, `1` when it is unmet, and `2` for judge or prompt
-errors.
-
-During supervised agent operation, judge errors are caught at the conscience
-boundary and logged as `spice maxim supervisor error`; transcript capture,
-steering, tasks, and other supervision continue, but that maxim feedback is
-skipped. Learning distillation likewise records a judge failure as a skipped
-candidate instead of stopping the session.
+Spice launches it without arguments, sends a prompt on stdin, and requires an
+exit-`0` plain-text `YES` or `NO` on stdout. The default is `afm-cli`; prompt
+schema, retries, exits, and supervisor degradation are specified in the
+[judge reference](docs/config/reference.md#maxim-judge-binary).
 
 ## `[tool.spice.agent]`
 

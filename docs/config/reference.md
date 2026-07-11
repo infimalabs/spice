@@ -18,6 +18,75 @@ The agent shell also requires
 details live in [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion); this is a
 runtime companion requirement, not a tracked project setting.
 
+## Linux Speech with `espeak-ng`
+
+Speech configuration is worktree-local. On Debian or Ubuntu, install the
+`espeak-ng` package and verify the executable before configuring spice:
+
+```sh
+sudo apt-get update
+sudo apt-get install espeak-ng
+command -v espeak-ng
+espeak-ng --version
+```
+
+Other Linux distributions should install the package named `espeak-ng` with
+their system package manager. Configure its stdout WAV mode and matching audio
+content type exactly as follows:
+
+```sh
+spice config say --backend external --command "espeak-ng --stdout" --content-type audio/wav
+```
+
+`spice serve` sends prepared speech text to the command on stdin and serves the
+WAV bytes returned on stdout as `audio/wav`. Verify the same executable path
+independently with:
+
+```sh
+printf 'spice speech check' | espeak-ng --stdout > /tmp/spice-speech-check.wav
+file /tmp/spice-speech-check.wav
+```
+
+## Maxim Judge Binary
+
+Configure the worktree-local judge with:
+
+```console
+spice config judge --bin /path/to/judge
+```
+
+This stores `[judge].bin` in `.spice/config/state.json`. The value is one
+executable path or `PATH` name, not a shell command or argv list. When unset,
+Spice uses `afm-cli` and launches the exact argv `[configured_bin]`.
+
+The judge receives one prompt on stdin and writes its verdict to stdout. The
+default prompt contains these four lines in a random order on every attempt:
+
+```text
+IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".
+IFF "{maxim}" DISAGREES WITH "{statement}": ANSWER ONLY "NO".
+IFF "{statement}" AGREES WITH "{maxim}": ANSWER ONLY "YES".
+IFF "{statement}" DISAGREES WITH "{maxim}": ANSWER ONLY "NO".
+```
+
+Before interpolation, Spice collapses whitespace in `maxim` and `statement`
+and strips trailing punctuation and whitespace. `--prompt-file` on
+`spice maxim agree` or `spice maxim disagree` replaces the default template;
+only `{maxim}` and `{statement}` fields are accepted.
+
+The output schema is plain text, not JSON. Spice uppercases stdout, removes
+characters other than `Y`, `E`, `S`, `N`, `O`, and spaces, and accepts the
+result only when its deduplicated token set is exactly `{"YES"}` or `{"NO"}`.
+An ambiguous reply is retried, with two attempts by default.
+
+The process must exit `0`. Launch failure or nonzero exit is immediate; stderr
+is included for nonzero exits. Spice imposes no subprocess timeout, so wrappers
+for models that can hang must enforce one. Direct maxim checks return `0` when
+their requested condition is met, `1` when unmet, and `2` for judge or prompt
+errors. During supervision, judge errors are logged and skip that maxim
+feedback without stopping transcript capture, steering, or tasks. Learning
+distillation likewise skips candidates whose judge call fails.
+
 ## `[tool.spice.agent]`
 
 | Key | Default | Meaning |

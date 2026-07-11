@@ -46,9 +46,9 @@ def test_rtk_current_rewrite_protocol_is_explicit():
 
 
 def test_rtk_command_shape_ownership_matches_the_default_group():
-    config = _read("CONFIG.md")
-    reference = _read("docs/config/reference.md")
-    wrapper_contract = _read("docs/cli/wrapper-commands.md")
+    config = _collapsed("CONFIG.md")
+    reference = _collapsed("docs/config/reference.md")
+    wrapper_contract = _collapsed("docs/cli/wrapper-commands.md")
 
     assert "RTK owns command-selection policy" in config
     assert "The built-in `common` group contains" in config
