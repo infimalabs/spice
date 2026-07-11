@@ -31,6 +31,7 @@ const context = {
   targets: [],
   targetById: new Map(),
   laneStates: new Map(),
+  observerModeEnabled: false,
   teamSnapshotRevision: 0,
   targetsLoaded: false,
   targetsLoading: false,
