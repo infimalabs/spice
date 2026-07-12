@@ -146,7 +146,9 @@ class Parser:
         if self.acceptance_capture is not None and stripped:
             item = _LIST_RE.match(line)
             is_criterion = (
-                item is not None and indent_width(item.group(1)) < self.code_threshold()
+                item is not None
+                and indent_width(item.group(1)) < self.code_threshold()
+                and not _HR_RE.match(stripped)
             )
             if not is_criterion:
                 self.close_acceptance_capture()
@@ -654,7 +656,7 @@ def _after_targets(value: str) -> list[str] | None:
         if _SLUG_RE.fullmatch(target):
             normalized.append(target)
             continue
-        if re.search(r"[.!?;:]", target):
+        if re.search(r"[.!?;:]", target) and not target[0].isupper():
             return None
         slug = _simple_slug(target)
         if not slug:
