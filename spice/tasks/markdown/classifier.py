@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
 from spice.tasks.config import APPROVED_PHASES
 from spice.tasks.markdown.dialect import (
     CODE_INDENT_COLS,
@@ -94,6 +95,20 @@ class Parser:
     def warn(self, line: int, code: str, message: str) -> None:
         self.warnings.append((line, code, message))
 
+    def warn_title(self, node: Node) -> None:
+        if _INLINE_LINK_RE.search(node.title):
+            self.warn(
+                node.line,
+                "url-title",
+                "title contains a URL; slug uses visible link text only",
+            )
+        if len(node.title) > COMMIT_MESSAGE_WRAP_LIMIT:
+            self.warn(
+                node.line,
+                "long-title",
+                f"title is {len(node.title)} characters; consider decomposing it",
+            )
+
     def target_node(self) -> Node:
         return self.current if self.current is not None else self.preamble
 
@@ -119,6 +134,7 @@ class Parser:
             node.parent = parent.idx
             parent.children.append(node.idx)
         self.nodes.append(node)
+        self.warn_title(node)
         self.current = node
         self.last_attach = node
         return node
@@ -185,6 +201,13 @@ class Parser:
             if self._annotation(line, stripped):
                 annotation_continues = True
                 return
+            fieldish = _fieldish_label(stripped)
+            if fieldish is not None:
+                self.warn(
+                    line_number,
+                    "fieldish-prose",
+                    f"{fieldish} is not a task-document field; kept as prose",
+                )
             self.attach_description(line)
             self.prev_blank = False
         finally:
@@ -925,6 +948,18 @@ def _field_parts(text: str) -> tuple[str, str] | None:
         value = plain.group(2).strip()
     canonical = FIELD_LABELS.get(label)
     return (canonical, value) if canonical is not None else None
+
+
+def _fieldish_label(text: str) -> str | None:
+    emphasized = _EMPHASIS_FIELD_RE.match(text)
+    if emphasized and (emphasized.group(3) or emphasized.group(4)):
+        label = emphasized.group(2).strip()
+    else:
+        plain = _PLAIN_FIELD_RE.match(text)
+        if plain is None:
+            return None
+        label = plain.group(1).strip()
+    return None if label.lower() in FIELD_LABELS else label
 
 
 def _simple_slug(title: str) -> str:
