@@ -240,9 +240,13 @@ def _document_from_rows(rows: list[dict[str, Any]]) -> Doc:
     index_by_slug = {node.slug: node.idx for node in nodes}
     for node, row in zip(nodes, rows, strict=True):
         parent_slug = str(row.get(config.TASKDOC_PARENT_UDA) or "")
-        parent_idx = index_by_slug.get(parent_slug)
-        if parent_idx is None or parent_idx == node.idx:
+        if not parent_slug:
             continue
+        parent_idx = index_by_slug.get(parent_slug)
+        if parent_idx is None:
+            raise SpiceError(f"{node.slug} has unknown taskdoc_parent: {parent_slug}")
+        if parent_idx == node.idx:
+            raise SpiceError(f"{node.slug} cannot be its own taskdoc_parent")
         node.parent = parent_idx
         nodes[parent_idx].children.append(node.idx)
     edges = _family_edges(nodes, rows)
