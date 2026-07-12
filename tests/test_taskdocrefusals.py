@@ -1,13 +1,11 @@
 """Every documented refusal fires its exact sentence before any board write.
 
-The Refusals table in ``docs/design/experimental/task-documents.md`` promises
+The Refusals table in ``docs/design/accepted/task-documents.md`` promises
 that everything that can fail fails loudly, completely, and before any write: a
 single ``spice: <sentence>`` on stderr, exit code 2, zero writes. This suite is
 the messages mirror of that table -- each row gets a positive test asserting the
-exact sentence and proving the board is byte-identical afterward (the
-fire-before-write guarantee). The ``spice: <sentence>`` / exit-2 rendering is a
-uniform ``SpiceError`` contract, pinned once at the real CLI boundary; every row
-then asserts its own sentence, which that boundary prefixes and exits on.
+exact CLI stderr sentence, exit code 2, and a byte-identical board afterward
+(the fire-before-write guarantee).
 
 The boarding note counted thirteen rows; the table now carries fourteen, and
 the coverage matrix below covers all fourteen.
@@ -21,10 +19,7 @@ from dataclasses import dataclass
 import pytest
 
 from spice.cli import entry
-from spice.errors import SpiceError
-from spice.tasks import create, tw
-from spice.tasks.markdown import apply
-from spice.tasks.markdown.classifier import parse
+from spice.tasks import config, create, tw
 
 from tests.test_ingest import _family_task
 from tests.test_tasks import task_repo
@@ -108,66 +103,73 @@ DOCUMENTED_REFUSAL_CODES = frozenset(
 )
 
 
-def _apply(source: str) -> None:
-    apply.apply_document(parse(source), project="task.unit", origin=f"ack:{ACK_KEY}")
+def _run_ingest(source: str, monkeypatch, *args: str) -> int:
+    monkeypatch.setattr("sys.stdin", io.StringIO(source))
+    return entry.main(
+        ["task", "--backend", str(config.backend_root()), "ingest", "-", *args]
+    )
 
 
 @pytest.mark.parametrize("case", DOCUMENT_REFUSALS, ids=lambda case: case.code)
-def test_document_refusal_fires_exact_sentence_before_any_write(task_repo, case):
-    with pytest.raises(SpiceError) as error:
-        _apply(case.source)
+def test_document_refusal_fires_exact_sentence_before_any_write(
+    task_repo, case, monkeypatch, capsys
+):
+    code = _run_ingest(
+        case.source,
+        monkeypatch,
+        "--project",
+        "task.unit",
+        "--origin",
+        f"ack:{ACK_KEY}",
+    )
 
-    assert str(error.value) == case.message
+    assert code == 2
+    assert capsys.readouterr().err == f"spice: {case.message}\n"
     assert tw.export(["status:pending"]) == []
 
 
-def test_missing_project_refuses_before_any_write(task_repo):
-    # Origin is supplied so resolution reaches -- and refuses on -- the project.
-    with pytest.raises(SpiceError) as error:
-        apply.ingest_path("never-read.md", project=None, origin=f"ack:{ACK_KEY}")
+def test_missing_project_refuses_before_any_write(task_repo, monkeypatch, capsys):
+    code = _run_ingest("# Root\n", monkeypatch, "--origin", f"ack:{ACK_KEY}")
 
-    assert str(error.value) == apply.INGEST_PROJECT_REQUIRED_ERROR
+    assert code == 2
+    assert capsys.readouterr().err == (
+        "spice: task ingest requires a project: pass --project <stem.child>, "
+        "or run while holding an active claim to inherit its project\n"
+    )
     assert tw.export(["status:pending"]) == []
 
 
-def test_missing_origin_refuses_before_any_write(task_repo):
-    with pytest.raises(SpiceError) as error:
-        apply.ingest_path("never-read.md", project="task.unit", origin=None)
+def test_missing_origin_refuses_before_any_write(task_repo, monkeypatch, capsys):
+    code = _run_ingest("# Root\n", monkeypatch, "--project", "task.unit")
 
-    assert str(error.value) == create.TASK_ORIGIN_REQUIRED_ERROR
+    assert code == 2
+    assert capsys.readouterr().err == f"spice: {create.TASK_ORIGIN_REQUIRED_ERROR}\n"
     assert tw.export(["status:pending"]) == []
 
 
-def test_family_ambiguity_names_the_colliding_handles_before_any_write(task_repo):
+def test_family_ambiguity_names_the_colliding_handles_before_any_write(
+    task_repo, monkeypatch, capsys
+):
     first = _family_task("First duplicate", slug="duplicate")
     second = _family_task("Second duplicate", slug="duplicate")
     before = tw.export(["status:pending"])
 
-    with pytest.raises(SpiceError) as error:
-        _apply("# Duplicate\n")
+    code = _run_ingest(
+        "# Duplicate\n",
+        monkeypatch,
+        "--project",
+        "task.unit",
+        "--origin",
+        f"ack:{ACK_KEY}",
+    )
 
-    assert str(error.value) == (
-        "duplicate is ambiguous in family: " + ", ".join(sorted((first, second)))
+    assert code == 2
+    assert capsys.readouterr().err == (
+        "spice: duplicate is ambiguous in family: "
+        + ", ".join(sorted((first, second)))
+        + "\n"
     )
     assert tw.export(["status:pending"]) == before
-
-
-def test_refusal_renders_spice_prefixed_stderr_and_exit_two(
-    task_repo, monkeypatch, capsys
-):
-    # The exact-sentence assertions above lean on SpiceError uniformly becoming
-    # `spice: <sentence>` on stderr with exit code 2; pin that contract once at
-    # the real CLI boundary, with the same zero-write guarantee.
-    monkeypatch.setattr("sys.stdin", io.StringIO("# Root\nPriority: bogus\n"))
-
-    code = entry.main(
-        ["task", "ingest", "-", "--project", "task.unit", "--origin", f"ack:{ACK_KEY}"]
-    )
-
-    captured = capsys.readouterr()
-    assert code == 2
-    assert captured.err == "spice: invalid priority: bogus\n"
-    assert tw.export(["status:pending"]) == []
 
 
 def test_refusal_matrix_covers_the_documented_rows(task_repo):
