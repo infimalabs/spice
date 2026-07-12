@@ -11,6 +11,8 @@ from spice.tasks.markdown.dialect import Doc, graph_signature
 def export_document(document: Doc) -> Never:
     """Render a task-document graph in ledger normal form."""
     graph_signature(document)
+    for node in document.nodes:
+        node.escaped_description_lines()
     raise SpiceError("task-document ledger export is not implemented")
 
 

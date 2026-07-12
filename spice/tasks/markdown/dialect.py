@@ -2,7 +2,40 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+
+LINK_RESIDUE_CHARS = 12
+CODE_INDENT_COLS = 4
+
+_HEADING_RE = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*$")
+_LIST_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])(\s+)(.+?)\s*$")
+_INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]*)\)")
+_HR_RE = re.compile(r"^ {0,3}((?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$")
+_SETEXT_RE = re.compile(r"^ {0,3}(=+|-{2,})\s*$")
+_BOLD_SPAN_RE = re.compile(r"^([*_]{2,3})([^*_]+)\1$")
+_LINKDEF_RE = re.compile(r"^\[[^\]]+\]:\s+\S")
+_EMPHASIS_LABEL_RE = re.compile(r"^([*_]{1,3})([^*_:]+?)(:?)\1(:?)\s*(.*)$")
+_ESCAPABLE = set("-*+#>|`=~_[<")
+
+FIELD_LABELS = {
+    "acceptance": "acceptance",
+    "acceptance criteria": "acceptance",
+    "success criteria": "acceptance",
+    "done when": "acceptance",
+    "definition of done": "acceptance",
+    "ac": "acceptance",
+    "after": "after",
+    "depends on": "after",
+    "blocked by": "after",
+    "prerequisites": "after",
+    "priority": "priority",
+    "flow": "flow",
+    "due": "due",
+    "deadline": "due",
+    "tags": "tags",
+    "labels": "tags",
+}
 
 
 @dataclass
@@ -28,10 +61,18 @@ class Node:
 
     def store_description_line(self, line: str) -> None:
         """Store one line relative to this node's content column."""
-        self.desc.append(dedent_content(line, self.content_col))
+        stored = dedent_content(line, self.content_col)
+        self.desc.append(unescape_prose(stored))
 
     def description(self) -> str:
         return "\n".join(collapse_blank_runs(self.desc))
+
+    def escaped_description_lines(self) -> list[str]:
+        """Description lines escaped for normal-form ledger output."""
+        return [
+            escape_description_line(line, self.content_col)
+            for line in collapse_blank_runs(self.desc)
+        ]
 
 
 @dataclass
@@ -112,3 +153,62 @@ def collapse_blank_runs(lines: list[str]) -> list[str]:
     while collapsed and collapsed[-1] == "":
         collapsed.pop()
     return collapsed
+
+
+def unescape_prose(text: str) -> str:
+    """Drop one CommonMark escape that forces a structural line to prose."""
+    stripped = text.lstrip()
+    pad = text[: len(text) - len(stripped)]
+    if len(stripped) >= 2 and stripped[0] == "\\" and stripped[1] in _ESCAPABLE:
+        return pad + stripped[1:]
+    if re.match(r"^\d+\\[.)]", stripped) or re.match(
+        r"^([A-Za-z][A-Za-z ]{0,30}?)\\:", stripped
+    ):
+        return pad + stripped.replace("\\", "", 1)
+    return text
+
+
+def escape_description_line(line: str, content_col: int) -> str:
+    """Escape stored prose that would otherwise reclassify on parse."""
+    stripped = line.lstrip()
+    if not stripped:
+        return line
+    pad = line[: len(line) - len(stripped)]
+    if len(pad) >= CODE_INDENT_COLS:
+        return line
+    ordered = re.match(r"^\d+(?=[.)]\s)", stripped)
+    if ordered:
+        return f"{pad}{ordered.group(0)}\\{stripped[ordered.end() :]}"
+    emphasized = _EMPHASIS_LABEL_RE.match(stripped)
+    structural = (
+        stripped[:3] in ("```", "~~~")
+        or stripped[0] in ">|"
+        or stripped.startswith(("---", "<!--"))
+        or _HR_RE.match(stripped)
+        or _SETEXT_RE.match(stripped)
+        or _LINKDEF_RE.match(stripped)
+        or _LIST_RE.match(stripped)
+        or _BOLD_SPAN_RE.match(stripped)
+        or (content_col <= 3 and _HEADING_RE.match(stripped))
+        or (
+            emphasized
+            and (emphasized.group(3) or emphasized.group(4))
+            and emphasized.group(2).strip().lower() in FIELD_LABELS
+        )
+        or (
+            _INLINE_LINK_RE.search(stripped)
+            and len(_link_residue(stripped)) <= LINK_RESIDUE_CHARS
+        )
+    )
+    if structural:
+        return pad + "\\" + stripped
+    label = re.match(r"^([A-Za-z][A-Za-z ]{0,30}?)\s*:", stripped)
+    if label and label.group(1).strip().lower() in FIELD_LABELS:
+        index = stripped.index(":")
+        return pad + stripped[:index] + "\\" + stripped[index:]
+    return line
+
+
+def _link_residue(stripped: str) -> str:
+    residue = _INLINE_LINK_RE.sub("", stripped)
+    return re.sub(r"[\s\W]+", " ", residue).strip()
