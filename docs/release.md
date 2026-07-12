@@ -37,6 +37,10 @@ generated details section intact. Task-level commit SHAs are deliberately left
 bare so the GitHub release page renders them as repository commit links. A
 release that still shows the draft banner was shipped uncurated.
 
+Bare `spice release notes` is state-aware: before `prepare` it labels the draft
+`unreleased`; after the bump commit it recognizes the untagged current version
+and writes versioned package and release-tag markers.
+
 When release history is unusual, pass `--release-commit <rev>` to choose the
 commit used for `spice release range`, `spice release notes`, or
 `spice release github`. Use it for tag repair, delayed publication, or a
