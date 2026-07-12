@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from spice.errors import SpiceError
 from spice.tasks.markdown.classifier import parse
 from spice.tasks.markdown.dialect import graph_signature
-from spice.tasks.markdown.ledger import export_document, export_ledger
+from spice.tasks.markdown.ledger import export_document
 
 # Documents spanning the dialect ladder: an empty page, bare and named lists,
 # ordered sequences, cross edges, the full field set in every synonym, deep
@@ -187,10 +186,3 @@ def test_nested_leaf_heading_prose_survives_the_flatten_to_a_shallow_bullet() ->
     reparsed = parse(export_document(parse(source)))
 
     assert graph_signature(reparsed) == graph_signature(parse(source))
-
-
-def test_export_ledger_reports_the_unimplemented_family_loader() -> None:
-    with pytest.raises(SpiceError) as caught:
-        export_ledger("TASK-1k4Q5gJw")
-
-    assert str(caught.value) == "task-family loading is not implemented"

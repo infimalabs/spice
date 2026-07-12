@@ -127,7 +127,9 @@ def _configure_task_read_parsers(actions: Any) -> None:
 
     ledger = actions.add_parser(
         "ledger",
-        help="Export a task dependency closure as canonical markdown.",
+        help="Export a task-document family as normal-form markdown.",
+        description="Export a task-document family as normal-form markdown.",
+        epilog="Example: spice task ledger TASK-1k4Q5gJw",
         recovery_examples=("spice task ledger TASK-1k4Q5gJw",),
     )
     ledger.add_argument("handle")
@@ -299,30 +301,31 @@ def _configure_task_edit_parsers(actions: Any) -> None:
 def _configure_ingest_parser(actions: Any) -> None:
     ingest = actions.add_parser(
         "ingest",
-        help=(
-            "Import canonical or freeform markdown into task DAG rows; reuses "
-            "complete existing markdown-id DAGs and refuses partial duplicates."
+        help="Apply a markdown task document to its project and origin family.",
+        description=(
+            "Apply a markdown task document to its project and origin family."
         ),
-        recovery_examples=("spice task ingest backlog.md --project task.plan",),
+        epilog=(
+            "Example: spice task ingest plan.md --project task.plan "
+            "--origin task:TASK-1k4Q5gJw"
+        ),
+        recovery_examples=(
+            "spice task ingest plan.md --project task.plan --origin task:TASK-1k4Q5gJw",
+        ),
     )
-    ingest.add_argument("path")
+    ingest.add_argument("path", help="Markdown path, or - to read standard input.")
     ingest.add_argument(
         "--project",
         help=(
-            "Default assignable project for nodes without project fields; "
-            "required for freeform markdown."
+            "Project for the task-document family; defaults to the active "
+            "claim's project."
         ),
-    )
-    ingest.add_argument(
-        "--priority",
-        default=config.DEFAULT_PRIORITY,
-        help="Default priority for nodes without priority fields.",
     )
     ingest.add_argument(
         "--origin",
         help=(
-            "Origin for the ingested DAG: ack:<inbox-key> or task:<handle> "
-            "(root provenance for every created node)."
+            "Family provenance as ack:<inbox-key> or task:<handle>; defaults "
+            "to the active claim."
         ),
     )
     ingest.add_argument(
@@ -869,14 +872,12 @@ _DISPATCH = {
     ),
     "list": _list,
     "show": lambda a: render.render_show(a.handle),
-    "ledger": lambda a: export_ledger(a.handle),
+    "ledger": lambda a: export_ledger(a.handle).removesuffix("\n"),
     "artifact": lambda a: _artifact(a),
     "ingest": lambda a: ingest_path(
         a.path,
         project=a.project,
-        priority=a.priority,
         origin=a.origin,
-        creation_surface=config.TASK_CREATION_SURFACE_CLI,
         dry_run=a.dry_run,
     ),
     "done": lambda a: ops.done(

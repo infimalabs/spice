@@ -70,6 +70,25 @@ def test_task_list_parse_error_points_to_limit_example(capsys):
     assert "spice task list --limit 20" in error
 
 
+def test_task_document_cli_help_names_apply_stdin_dry_run_and_family_export(capsys):
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["task", "ingest", "--help"])
+    ingest_help = capsys.readouterr().out
+    assert "Apply a markdown task document" in ingest_help
+    assert "Markdown path, or - to read standard input." in ingest_help
+    assert "--dry-run" in ingest_help
+    assert "--origin ORIGIN" in ingest_help
+    assert "spice task ingest plan.md --project task.plan" in ingest_help
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["task", "ledger", "--help"])
+    ledger_help = capsys.readouterr().out
+    assert "Export a task-document family as normal-form markdown." in ledger_help
+    assert "spice task ledger TASK-1k4Q5gJw" in ledger_help
+
+
 def test_task_add_after_accepts_space_separated_dependencies():
     args = build_parser().parse_args(
         [

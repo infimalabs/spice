@@ -1021,9 +1021,7 @@ def ingest_path(
     path: str | PathLike[str],
     *,
     project: str | None,
-    priority: str | None = None,
     origin: str | None = None,
-    creation_surface: str | None = None,
     dry_run: bool = False,
 ) -> str:
     """Read, parse, and apply one task document."""

@@ -7,12 +7,18 @@ reference refuses instead of half-applying a document.
 
 from __future__ import annotations
 
+import io
+
 import pytest
 
+from spice.cli.parser import build_parser
 from spice.errors import SpiceError
+from spice.tasks import cli as task_cli
 from spice.tasks import config, create, identity, ops, tw
 from spice.tasks.markdown import apply
 from spice.tasks.markdown.classifier import parse
+from spice.tasks.markdown.dialect import graph_signature
+from spice.tasks.markdown.ledger import export_document, export_ledger
 
 from tests.test_tasks import task_repo
 from tests.test_taskorigin import ACK_KEY, _seed_task
@@ -497,3 +503,110 @@ def test_acceptance_pipe_refuses_apply_before_creating_rows(task_repo):
         )
 
     assert tw.export(["status:pending"]) == []
+
+
+def test_ledger_reconstructs_applied_family_without_board_owned_edges(task_repo):
+    assert task_repo.is_dir()
+    document = parse(
+        "# Root\n"
+        "Root body\n"
+        "Acceptance: root complete\n"
+        "Priority: high\n"
+        "Flow: todo\n"
+        "Tags: importer, perf\n"
+        "> document note\n"
+        "## Child\n"
+        "Acceptance: child complete\n"
+        "Flow: todo\n"
+    )
+    apply.apply_document(
+        document,
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+    )
+    rows = apply.load_family_rows("task.unit", f"ack:{ACK_KEY}")
+    root = next(
+        identity.render_handle(row)
+        for row in rows
+        if row[config.TASKDOC_ID_UDA] == "root"
+    )
+    external = create.add(
+        "Board-owned prerequisite",
+        project="task.unit",
+        priority="none",
+        flow=["todo"],
+        acceptance=["outside family"],
+        origin=f"ack:{ACK_KEY}",
+    )
+    ops.depends(root, [external])
+    ops.note(root, "ack 20260101T000000000000Z: runtime steering handled")
+
+    rendered = export_ledger(root)
+    reparsed = parse(rendered)
+
+    assert graph_signature(reparsed) == graph_signature(document)
+    assert export_document(reparsed) == rendered
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "# Document root\nAcceptance: a real reserved-title task\nFlow: todo\n",
+        (
+            "- First leaf\n"
+            "  Acceptance: first complete\n"
+            "  Flow: todo\n"
+            "- Second leaf\n"
+            "  Acceptance: second complete\n"
+            "  Flow: todo\n"
+        ),
+    ),
+    ids=("real-document-root", "synthetic-document-root"),
+)
+def test_ledger_distinguishes_real_and_synthetic_document_roots(task_repo, source):
+    assert task_repo.is_dir()
+    document = parse(source)
+    report = apply.apply_document(
+        document,
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+    )
+    root = report.splitlines()[0].removeprefix("root ")
+    if document.nodes[document.root].kind == "document":
+        document.nodes[document.root].flow = ["plan", "todo", "review"]
+
+    rendered = export_ledger(root)
+
+    assert graph_signature(parse(rendered)) == graph_signature(document)
+
+
+def test_cli_ingest_dash_and_ledger_run_the_task_document_dialect(
+    task_repo, monkeypatch, capsys
+):
+    assert task_repo.is_dir()
+    source = "# Root\nAcceptance: complete\nFlow: todo\n"
+    monkeypatch.setattr("sys.stdin", io.StringIO(source))
+    ingest_args = build_parser().parse_args(
+        [
+            "task",
+            "ingest",
+            "-",
+            "--project",
+            "task.unit",
+            "--origin",
+            f"ack:{ACK_KEY}",
+        ]
+    )
+
+    assert task_cli.handle(ingest_args) == 0
+    ingest_report = capsys.readouterr().out
+    family = apply.load_family_rows("task.unit", f"ack:{ACK_KEY}")
+    root = identity.render_handle(family[0])
+    assert ingest_report.splitlines() == [
+        f"root {root}",
+        f"created root {root}",
+    ]
+
+    ledger_args = build_parser().parse_args(["task", "ledger", root])
+    assert task_cli.handle(ledger_args) == 0
+    assert capsys.readouterr().out == export_ledger(root)
