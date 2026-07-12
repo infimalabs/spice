@@ -55,4 +55,4 @@ def test_node_stores_escaped_author_lines_as_prose(authored: str, stored: str) -
     node.store_description_line(authored)
 
     assert node.description() == stored
-    assert node.escaped_description_lines() == [authored]
+    assert node.escaped_description_lines(node.content_col) == [authored]

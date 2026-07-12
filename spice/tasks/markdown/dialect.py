@@ -81,10 +81,17 @@ class Node:
     def description(self) -> str:
         return "\n".join(collapse_blank_runs(self.desc))
 
-    def escaped_description_lines(self) -> list[str]:
-        """Description lines escaped for normal-form ledger output."""
+    def escaped_description_lines(self, output_col: int) -> list[str]:
+        """Description lines escaped for re-emission at ``output_col``.
+
+        ``output_col`` is the column the ledger re-emits these lines at, which
+        differs from ``content_col`` when a node is reparented on the way out
+        (a deeply nested leaf flattens to a shallow bullet). Escaping keys on
+        the destination column so a ``#`` line that reads as prose where it was
+        authored still reads as prose where it lands.
+        """
         return [
-            escape_description_line(line, self.content_col)
+            escape_description_line(line, output_col)
             for line in collapse_blank_runs(self.desc)
         ]
 
