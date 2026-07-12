@@ -1,7 +1,13 @@
 """Task-document graph model and storage normal forms."""
 
 from spice.tasks import config
-from spice.tasks.markdown.dialect import Doc, Node, graph_signature
+from spice.tasks.markdown.dialect import (
+    QUALIFIER_SEPARATOR,
+    Doc,
+    Node,
+    graph_signature,
+    slugify,
+)
 
 
 def test_graph_signature_covers_node_fields_parenthood_and_cross_edges() -> None:
@@ -68,6 +74,38 @@ def test_description_storage_normalizes_columns_tabs_and_blank_runs() -> None:
 
     assert node.desc == ["  Body", "", "", "  code", ""]
     assert node.description() == "  Body\n\n  code"
+
+
+def test_slugify_joins_lowercased_ascii_words_with_single_hyphens() -> None:
+    assert slugify("Deploy 2.0 Now") == "deploy-2-0-now"
+
+
+def test_slugify_uses_inline_link_text() -> None:
+    assert slugify("Read [the guide](https://example.com/v2)") == "read-the-guide"
+
+
+def test_slugify_link_url_does_not_contribute_so_variant_urls_share_a_slug() -> None:
+    # Two titles differing only in link URL slug identically, proving the URL is
+    # dropped and only the link text reaches the slug.
+    assert slugify("See [docs](http://v1)") == slugify("See [docs](http://v2)")
+    assert slugify("See [docs](http://v1)") == "see-docs"
+
+
+def test_slugify_returns_empty_when_title_has_no_ascii_words() -> None:
+    assert slugify("日本語") == ""
+
+
+def test_repeated_separators_collapse_so_a_natural_slug_holds_no_double_hyphen() -> (
+    None
+):
+    # Runs of non-word characters collapse to single hyphens, so the result is
+    # exactly the words joined singly; that is why QUALIFIER_SEPARATOR "--" can
+    # never occur inside a natural slug.
+    assert slugify("A  ---  B  ==  C") == "a-b-c"
+
+
+def test_qualifier_separator_is_reserved_double_hyphen() -> None:
+    assert QUALIFIER_SEPARATOR == "--"
 
 
 def test_task_document_identity_udas_are_system_owned_strings() -> None:

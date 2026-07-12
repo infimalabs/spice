@@ -8,6 +8,12 @@ from dataclasses import dataclass, field
 LINK_RESIDUE_CHARS = 12
 CODE_INDENT_COLS = 4
 
+# The natural slug of a title joins its non-empty ASCII words with single
+# hyphens, so two hyphens can never appear inside one. Reserving ``--`` as the
+# qualifier separator keeps a qualified slug collision-free against every
+# natural slug.
+QUALIFIER_SEPARATOR = "--"
+
 _HEADING_RE = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*$")
 _LIST_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])(\s+)(.+?)\s*$")
 _INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]*)\)")
@@ -16,6 +22,7 @@ _SETEXT_RE = re.compile(r"^ {0,3}(=+|-{2,})\s*$")
 _BOLD_SPAN_RE = re.compile(r"^([*_]{2,3})([^*_]+)\1$")
 _LINKDEF_RE = re.compile(r"^\[[^\]]+\]:\s+\S")
 _EMPHASIS_LABEL_RE = re.compile(r"^([*_]{1,3})([^*_:]+?)(:?)\1(:?)\s*(.*)$")
+_SLUG_WORD_RE = re.compile(r"[a-z0-9]+")
 _ESCAPABLE = set("-*+#>|`=~_[<")
 
 FIELD_LABELS = {
@@ -128,6 +135,19 @@ def graph_signature(document: Doc) -> GraphSignature:
         if kind != "containment"
     )
     return tuple(sorted(nodes)), cross_edges
+
+
+def slugify(title: str) -> str:
+    """Reduce a task-document ``title`` to its identity slug.
+
+    An inline link contributes its visible text; the link URL is dropped first so
+    it can never leak into the slug. The remaining text is lowercased and its
+    ASCII words are joined with single hyphens. A title with no ASCII word slugs
+    to the empty string, which lets ``parse`` refuse it with the
+    title-has-no-ASCII-words message.
+    """
+    text = _INLINE_LINK_RE.sub(r"\1", title)
+    return "-".join(_SLUG_WORD_RE.findall(text.lower()))
 
 
 def indent_width(line: str) -> int:
