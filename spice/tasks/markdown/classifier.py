@@ -12,6 +12,7 @@ from spice.tasks.markdown.dialect import (
     Node,
     dedent_content,
     indent_width,
+    slugify,
     unescape_prose,
 )
 
@@ -669,8 +670,9 @@ def _field_parts(text: str) -> tuple[str, str] | None:
 
 
 def _simple_slug(title: str) -> str:
-    linked = _INLINE_LINK_RE.sub(lambda match: match.group(1), title)
-    return "-".join(re.findall(r"[a-z0-9]+", linked.lower()))
+    # Field-label and after-target normalization reuse the canonical title
+    # slugger so classification and identity never diverge on the slug rule.
+    return slugify(title)
 
 
 def _after_targets(value: str) -> list[str] | None:
