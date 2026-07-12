@@ -316,6 +316,7 @@ def _build_add_args(
         dep = identity.resolve(handle)
         args.append(f"depends:{identity.uuid_of(dep)}")
     args.extend(extra or [])
+    args.append("--")
     args.append(title)
     return args
 
