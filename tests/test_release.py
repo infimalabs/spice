@@ -90,6 +90,12 @@ def test_release_docs_show_lane_release_workflow():
         "choose the commit used for `spice release range`, `spice release "
         "notes`, or `spice release github`." in normalized_section
     )
+    assert (
+        "Bare `spice release notes` is state-aware: before `prepare` it labels "
+        "the draft `unreleased`; after the bump commit it recognizes the "
+        "untagged current version and writes versioned package and release-tag "
+        "markers." in normalized_section
+    )
     assert release_section.index("Use a minor release") < release_section.index(
         "Use a patch release"
     )
@@ -837,7 +843,7 @@ def test_unreleased_range_without_tags_renders_empty_head_span(monkeypatch):
     )
 
 
-def test_bare_release_notes_mode_uses_head_and_unreleased_renderer(
+def test_bare_release_notes_mode_uses_unreleased_renderer_for_tagged_version(
     tmp_path, monkeypatch, capsys
 ):
     parser = build_release_parser()
@@ -845,11 +851,17 @@ def test_bare_release_notes_mode_uses_head_and_unreleased_renderer(
     seen = []
 
     monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
-    monkeypatch.setattr(
-        release,
-        "git",
-        lambda *args: seen.append(("git", args)) or "head-commit",
-    )
+    monkeypatch.setattr(release, "current_version", lambda: "0.20.0")
+
+    def fake_git(*args):
+        seen.append(("git", args))
+        if args == ("rev-parse", "HEAD"):
+            return "head-commit"
+        if args == ("tag", "--list", "v0.20.0"):
+            return "v0.20.0"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release, "git", fake_git)
     monkeypatch.setattr(
         release,
         "release_notes_for_unreleased",
@@ -861,11 +873,52 @@ def test_bare_release_notes_mode_uses_head_and_unreleased_renderer(
     assert result == 0
     assert seen == [
         ("git", ("rev-parse", "HEAD")),
+        ("git", ("tag", "--list", "v0.20.0")),
         ("unreleased", "head-commit"),
     ]
     captured = capsys.readouterr()
     assert captured.out == "unreleased notes\n"
     assert "draft notes for unreleased" in captured.err
+
+
+def test_bare_release_notes_mode_uses_versioned_renderer_for_prepared_version(
+    tmp_path, monkeypatch, capsys
+):
+    parser = build_release_parser()
+    args = parser.parse_args(["notes"])
+    seen = []
+
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(release, "current_version", lambda: "0.21.0")
+
+    def fake_git(*args):
+        seen.append(("git", args))
+        if args == ("rev-parse", "HEAD"):
+            return "prepared-commit"
+        if args == ("tag", "--list", "v0.21.0"):
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(release, "git", fake_git)
+    monkeypatch.setattr(
+        release,
+        "release_notes_for_version",
+        lambda version, commit: (
+            seen.append(("versioned", version, commit)) or "prepared notes\n"
+        ),
+    )
+
+    result = release.handle_release(args)
+
+    assert result == 0
+    assert seen == [
+        ("git", ("rev-parse", "HEAD")),
+        ("git", ("tag", "--list", "v0.21.0")),
+        ("versioned", "0.21.0", "prepared-commit"),
+    ]
+    captured = capsys.readouterr()
+    assert captured.out == "prepared notes\n"
+    assert "draft notes for 0.21.0" in captured.err
 
 
 def test_unreleased_notes_preview_markers_differ_from_versioned_notes(monkeypatch):

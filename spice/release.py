@@ -165,9 +165,13 @@ def _handle_release_from_root(args: argparse.Namespace, root: Path) -> int:
 
     if mode == "notes":
         if args.version is None and args.release_commit is None:
-            version = "unreleased"
+            version = current_version()
             release_commit = git("rev-parse", "HEAD")
-            output = release_notes_for_unreleased(release_commit)
+            if git("tag", "--list", f"v{version}"):
+                version = "unreleased"
+                output = release_notes_for_unreleased(release_commit)
+            else:
+                output = release_notes_for_version(version, release_commit)
         else:
             version = str(args.version or current_version())
             release_commit = release_commit_for_target(
