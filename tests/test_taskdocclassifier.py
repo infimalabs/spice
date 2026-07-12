@@ -41,6 +41,51 @@ def test_attachment_uses_content_columns_and_lazy_continuation() -> None:
     assert root.description() == "root body"
 
 
+def test_description_storage_preserves_paragraphs_and_expands_tabs() -> None:
+    parser = Parser()
+
+    parser.feed(
+        "# Root\n- Child\n  first paragraph\n\n\n\tsecond paragraph\n\nroot paragraph\n"
+    )
+
+    root, child = parser.nodes
+    assert child.description() == "first paragraph\n\n  second paragraph"
+    assert root.description() == "root paragraph"
+
+
+def test_annotation_lines_coalesce_by_contiguous_shape() -> None:
+    parser = Parser()
+
+    parser.feed(
+        "# Root\n"
+        "- Child\n"
+        "  > first decision\n"
+        "  > second decision\n"
+        "  | Name | Value |\n"
+        "  | --- | --- |\n"
+        "  [first]: https://example.com/first\n"
+        "  [second]: https://example.com/second\n"
+        "  [Docs](https://example.com/docs)\n"
+        "  [API](https://example.com/api)\n"
+        "\n"
+        "  [Guide](https://example.com/guide)\n"
+        "  A sentence merely containing a [link](https://example.com) stays prose.\n"
+    )
+
+    root, child = parser.nodes
+    assert child.parent == root.idx
+    assert child.annotations == [
+        "> first decision\n> second decision",
+        "| Name | Value |\n| --- | --- |",
+        "[first]: https://example.com/first\n[second]: https://example.com/second",
+        "[Docs](https://example.com/docs)\n[API](https://example.com/api)",
+        "[Guide](https://example.com/guide)",
+    ]
+    assert child.description() == (
+        "A sentence merely containing a [link](https://example.com) stays prose."
+    )
+
+
 def test_indented_code_stays_content_instead_of_minting_structure() -> None:
     parser = Parser()
 

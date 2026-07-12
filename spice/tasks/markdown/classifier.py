@@ -82,6 +82,7 @@ class Parser:
         self.frontmatter_lines: list[tuple[str, int]] = []
         self.last_desc: tuple[Node, str] | None = None
         self.last_attach: Node | None = None
+        self.annotation_run: tuple[Node, str, int] | None = None
         self.prev_blank = True
 
     def warn(self, line: int, code: str, message: str) -> None:
@@ -143,38 +144,45 @@ class Parser:
     def handle_line(self, line: str, index: int) -> None:
         stripped = line.strip()
         line_number = index + 1
-        if self.acceptance_capture is not None and stripped:
-            item = _LIST_RE.match(line)
-            is_criterion = (
-                item is not None and indent_width(item.group(1)) < self.code_threshold()
-            )
-            if not is_criterion:
-                self.close_acceptance_capture()
-        if self._span_interior(line, stripped, index):
-            return
-        if self._span_opener(line, stripped, index):
-            return
-        if self._blank(stripped):
-            return
-        if self._setext(line, stripped, line_number):
-            return
-        self.last_desc = None
-        if self._thematic_break(line):
-            return
-        if self._escaped_prose(line, stripped, line_number):
-            return
-        if self._heading(line, line_number):
-            return
-        if self._list_item(line, line_number):
-            return
-        if self._field_line(line, stripped, line_number):
-            return
-        if self._bold_heading(line, stripped, line_number):
-            return
-        if self._annotation(line, stripped):
-            return
-        self.attach_description(line)
-        self.prev_blank = False
+        annotation_continues = False
+        try:
+            if self.acceptance_capture is not None and stripped:
+                item = _LIST_RE.match(line)
+                is_criterion = (
+                    item is not None
+                    and indent_width(item.group(1)) < self.code_threshold()
+                )
+                if not is_criterion:
+                    self.close_acceptance_capture()
+            if self._span_interior(line, stripped, index):
+                return
+            if self._span_opener(line, stripped, index):
+                return
+            if self._blank(stripped):
+                return
+            if self._setext(line, stripped, line_number):
+                return
+            self.last_desc = None
+            if self._thematic_break(line):
+                return
+            if self._escaped_prose(line, stripped, line_number):
+                return
+            if self._heading(line, line_number):
+                return
+            if self._list_item(line, line_number):
+                return
+            if self._field_line(line, stripped, line_number):
+                return
+            if self._bold_heading(line, stripped, line_number):
+                return
+            if self._annotation(line, stripped):
+                annotation_continues = True
+                return
+            self.attach_description(line)
+            self.prev_blank = False
+        finally:
+            if not annotation_continues:
+                self.annotation_run = None
 
     def close_fence(self) -> None:
         node = self.fence_node or self.target_node()
@@ -356,18 +364,22 @@ class Parser:
     def _annotation(self, line: str, stripped: str) -> bool:
         if self.code_indented(line):
             return False
-        annotation = (
-            stripped.startswith((">", "|"))
-            or _LINKDEF_RE.match(stripped)
-            or (
-                _INLINE_LINK_RE.search(stripped)
-                and len(_link_residue(stripped)) <= _LINK_RESIDUE_CHARS
-            )
-        )
-        if not annotation:
+        shape = _annotation_shape(stripped)
+        if shape is None:
             return False
         target = self.attach_target_for(line)
-        target.annotations.append(dedent_content(line, target.content_col))
+        stored = dedent_content(line, target.content_col)
+        if (
+            self.annotation_run is not None
+            and self.annotation_run[0] is target
+            and self.annotation_run[1] == shape
+        ):
+            annotation_index = self.annotation_run[2]
+            target.annotations[annotation_index] += "\n" + stored
+        else:
+            target.annotations.append(stored)
+            annotation_index = len(target.annotations) - 1
+        self.annotation_run = (target, shape, annotation_index)
         self.last_attach = target
         self.prev_blank = False
         return True
@@ -623,6 +635,21 @@ def parse(text: str) -> Doc:
 def _link_residue(stripped: str) -> str:
     residue = _INLINE_LINK_RE.sub("", stripped)
     return re.sub(r"[\s\W]+", " ", residue).strip()
+
+
+def _annotation_shape(stripped: str) -> str | None:
+    if stripped.startswith(">"):
+        return "blockquote"
+    if stripped.startswith("|"):
+        return "table"
+    if _LINKDEF_RE.match(stripped):
+        return "link-definition"
+    if (
+        _INLINE_LINK_RE.search(stripped)
+        and len(_link_residue(stripped)) <= _LINK_RESIDUE_CHARS
+    ):
+        return "link-dominated"
+    return None
 
 
 def _field_parts(text: str) -> tuple[str, str] | None:
