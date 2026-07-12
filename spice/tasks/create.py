@@ -155,11 +155,12 @@ def _validated_origin_task_handle(handle: str) -> str:
         ) from exc
 
 
-def _resolved_task_origin(origin: str | None, actor: str) -> str:
+def resolved_task_origin(origin: str | None, actor: str) -> str:
     # Every single task carries an origin -- there is almost never truly no
     # origination to point at. Derivation keeps the common cases hands-free
     # (explicit reference, else the actor's active claim); anything truly
-    # context-free names the acknowledgment or task that prompted it.
+    # context-free names the acknowledgment or task that prompted it. This is
+    # the creation-path resolver task-document ingest reuses verbatim.
     if origin:
         return validated_task_origin(origin)
     claim = claimstate.active_claim(actor)
@@ -349,7 +350,7 @@ def _add_result(
     resolved_wait = _resolved_wait(wait=wait, deferred=deferred, claim=claim)
     actor = tw.canonical_actor(actor_override or tw.current_actor())
     resolved_project = _resolve_add_project(actor, project, system_project)
-    resolved_origin = _resolved_task_origin(origin, actor)
+    resolved_origin = resolved_task_origin(origin, actor)
     if claim:
         claimstate._require_single_active_slot(actor, action="task add --claim")
         # Match a normal claim's baseline check before creating the task row.
