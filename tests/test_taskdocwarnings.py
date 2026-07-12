@@ -55,7 +55,7 @@ def _graph(*nodes: tuple[str, NodeSignature]) -> GraphSignature:
     return tuple(sorted(nodes)), frozenset()
 
 
-_LONG_TITLE = "A" * 101
+_LONG_TITLE = ("word " * 30).rstrip()
 WARNING_CASES = (
     WarningCase(
         "# Root\n\n**Child**\n",
@@ -137,18 +137,24 @@ WARNING_CASES = (
         _graph(_node("root", "Root")),
     ),
     WarningCase(
-        "# [Root](https://example.com/root)\n",
-        1,
+        "# A\n\n- see https://example.com/spec\n",
+        3,
         "url-title",
-        "title contains a URL; slug uses visible link text only",
-        _graph(_node("root", "[Root](https://example.com/root)")),
+        "title contains a URL; slug omits URL text",
+        _graph(
+            _node("a", "A"),
+            _node("see", "see https://example.com/spec", parent="a"),
+        ),
     ),
     WarningCase(
-        f"# {_LONG_TITLE}\n",
-        1,
+        f"# A\n\n- {_LONG_TITLE}\n",
+        3,
         "long-title",
-        "title is 101 characters; consider decomposing it",
-        _graph(_node(_LONG_TITLE.lower(), _LONG_TITLE)),
+        "title is 149 characters; consider decomposing it",
+        _graph(
+            _node("a", "A"),
+            _node("-".join(("word",) * 30), _LONG_TITLE, parent="a"),
+        ),
     ),
     WarningCase(
         "# Root\n```text\ncode\n",
