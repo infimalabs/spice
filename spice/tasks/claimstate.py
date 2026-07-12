@@ -61,11 +61,12 @@ def phase_index(row: dict[str, Any]) -> int:
     return int(row.get("phase_i") or 0)
 
 
+# ``claim_at`` deliberately survives release: it is the row-level fact that
+# work has begun, so document apply can never regain ownership of that row.
 CLAIM_CLEAR = [
     f"{name}:"
     for name in (
         "claim_by",
-        "claim_at",
         "claim_until",
         "claim_thread",
         "claim_worktree",

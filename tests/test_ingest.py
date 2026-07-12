@@ -159,3 +159,144 @@ def test_ambiguous_slug_names_family_handles(task_repo):
     assert str(error.value) == (
         "duplicate is ambiguous in family: " + ", ".join(sorted((first, second)))
     )
+
+
+def test_dry_run_reports_dependency_postorder_and_keeps_board_identical(task_repo):
+    assert task_repo.is_dir()
+    document = parse(
+        "# Root\n"
+        "Acceptance: root complete\n"
+        "Flow: todo\n"
+        "## Child\n"
+        "Acceptance: child complete\n"
+        "Flow: todo\n"
+    )
+    before = tw.export(["status:pending"])
+
+    report = apply.apply_document(
+        document,
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+        dry_run=True,
+    )
+
+    lines = report.splitlines()
+    root_handle = lines[0].removeprefix("root ")
+    assert lines[1].startswith("created child ")
+    assert lines[2] == f"created root {root_handle}"
+    assert tw.export(["status:pending"]) == before
+
+
+def test_plan_equalizes_fields_appends_annotations_and_orders_verbs(task_repo):
+    assert task_repo.is_dir()
+    root = _family_task("Root", slug="root")
+    child = _family_task("Child", slug="child", parent="root")
+    document = parse(
+        "# Root\n"
+        "Root body\n"
+        "Acceptance: rewritten criterion\n"
+        "Priority: high\n"
+        "Flow: todo\n"
+        "Due: 2026-08-01\n"
+        "Tags: Importer, perf\n"
+        "> source note\n"
+        "## Child\n"
+        "Acceptance: family matching fixture\n"
+        "Flow: todo\n"
+    )
+
+    plan = apply.plan_document(
+        document,
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+    )
+
+    root_plan = next(item for item in plan.nodes if item.node.slug == "root")
+    assert root_plan.handle == root
+    assert root_plan.annotations == ("> source note",)
+    assert {update.field: update.value for update in root_plan.updates} == {
+        "description": "Root body",
+        "acceptance": "rewritten criterion",
+        "priority": "H",
+        "due": "2026-08-01",
+        "tags": ("importer", "perf"),
+        "annotations": ("> source note",),
+    }
+    assert plan.edge_additions == (apply.EdgeChange("root", "child"),)
+    assert plan.report().splitlines() == [
+        f"root {root}",
+        f"reused child {child}",
+        f"updated root {root} description",
+        f"updated root {root} acceptance",
+        f"updated root {root} priority",
+        f"updated root {root} due",
+        f"updated root {root} tags",
+        f"updated root {root} annotations",
+        "edge-added root -> child",
+    ]
+
+
+def test_released_claim_stays_settled_while_new_annotations_append(task_repo):
+    assert task_repo.is_dir()
+    root = _family_task("Root", slug="root")
+    child = _family_task("Child", slug="child", parent="root")
+    ops.claim(root)
+    ops.unclaim(root)
+    released = identity.resolve(root)
+    document = parse(
+        "# Root\n"
+        "Board-owned rewrite\n"
+        "Acceptance: changed after work began\n"
+        "Flow: todo\n"
+        "> later evidence\n"
+        "## Child\n"
+        "Acceptance: family matching fixture\n"
+        "Flow: todo\n"
+    )
+
+    plan = apply.plan_document(
+        document,
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+    )
+
+    root_plan = next(item for item in plan.nodes if item.node.slug == "root")
+    assert released["claim_at"]
+    assert root_plan.settled is True
+    assert root_plan.updates == (
+        apply.FieldUpdate("annotations", ("> later evidence",)),
+    )
+    assert [verb.render() for verb in plan.verbs] == [
+        f"reused child {child}",
+        f"updated root {root} annotations",
+        f"drift root {root} description",
+        f"drift root {root} acceptance",
+        f"drift root {root} after",
+    ]
+
+
+def test_edge_diff_keeps_board_owned_dependencies_outside_the_family(task_repo):
+    assert task_repo.is_dir()
+    root = _family_task("Root", slug="root")
+    child = _family_task("Child", slug="child", parent="root")
+    external = create.add(
+        "External prerequisite",
+        project="task.unit",
+        priority="none",
+        flow=["todo"],
+        acceptance=["external fixture"],
+        origin=f"ack:{ACK_KEY}",
+    )
+    ops.depends(root, [child, external])
+
+    plan = apply.plan_document(
+        parse("# Root\nAcceptance: family matching fixture\nFlow: todo\n"),
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+    )
+
+    assert plan.edge_drops == (apply.EdgeChange("root", "child"),)
+    assert [verb.render() for verb in plan.verbs] == [
+        "edge-dropped root -> child",
+        f"loose child {child}",
+    ]
