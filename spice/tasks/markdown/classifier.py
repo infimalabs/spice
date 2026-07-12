@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from spice.tasks.config import APPROVED_PHASES
 from spice.tasks.markdown.dialect import (
     CODE_INDENT_COLS,
     FIELD_LABELS,
@@ -29,6 +30,8 @@ _ESCAPED_PROSE_RE = re.compile(
     r"^(?:\\[-*+#>|`=~_\[<]|\d+\\[.)]|[A-Za-z][A-Za-z ]{0,30}?\\:)"
 )
 _LINK_RESIDUE_CHARS = 12
+_PRIORITIES = frozenset(("high", "medium", "low", "none"))
+_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*(?:--[a-z0-9]+(?:-[a-z0-9]+)*)?$")
 
 _FIELD_SECTIONS = {
     "acceptance": "acceptance",
@@ -65,6 +68,9 @@ class Parser:
         self.sequence_edges: list[tuple[int, int, str]] = []
         self.field_section: tuple[str, Node] | None = None
         self.note_section_block: tuple[int, int] | None = None
+        self.acceptance_capture: tuple[Node, int] | None = None
+        self.acceptance_count = 0
+        self.seen_scalar_fields: set[tuple[int, str]] = set()
         self.warnings: list[tuple[int, str, str]] = []
         self.refusals: list[str] = []
         self.fence: list[str] | None = None
@@ -131,11 +137,19 @@ class Parser:
             char, width = self.fence_open
             self.fence.append(char * width)
             self.close_fence()
+        self.close_acceptance_capture()
         self.last_desc = None
 
     def handle_line(self, line: str, index: int) -> None:
         stripped = line.strip()
         line_number = index + 1
+        if self.acceptance_capture is not None and stripped:
+            item = _LIST_RE.match(line)
+            is_criterion = (
+                item is not None and indent_width(item.group(1)) < self.code_threshold()
+            )
+            if not is_criterion:
+                self.close_acceptance_capture()
         if self._span_interior(line, stripped, index):
             return
         if self._span_opener(line, stripped, index):
@@ -245,6 +259,11 @@ class Parser:
         if stripped:
             return False
         self.last_desc = None
+        if self.acceptance_capture is not None:
+            if self.acceptance_count:
+                self.close_acceptance_capture()
+            self.prev_blank = True
+            return True
         self.target_node().desc.append("")
         self.prev_blank = True
         return True
@@ -293,8 +312,14 @@ class Parser:
         field = _field_parts(stripped)
         if field is None:
             return False
-        self.store_field(self.attach_target_for(line), field, line_number)
-        self.last_desc = None
+        target = self.attach_target_for(line)
+        if self.store_field(target, field, line_number):
+            self.last_desc = None
+        else:
+            self.store_description(
+                target,
+                unescape_prose(dedent_content(line, target.content_col)),
+            )
         self.prev_blank = False
         return True
 
@@ -392,9 +417,17 @@ class Parser:
         )
         target = parent if parent is not None else self.preamble
         title, checked = self.strip_checkbox(item.group(4), line_number)
+        if self.acceptance_capture is not None:
+            target, _start_line = self.acceptance_capture
+            target.acceptance.append(title)
+            self.acceptance_count += 1
+            self.current = target
+            self.last_attach = target
+            return
         field = _field_parts(title)
         if field is not None:
-            self.store_field(target, field, line_number)
+            if not self.store_field(target, field, line_number):
+                self.store_description(target, title)
             self.current = target
             self.last_attach = target
             return
@@ -448,26 +481,51 @@ class Parser:
 
     def store_field(
         self, target: Node, field: tuple[str, str], line_number: int
-    ) -> None:
+    ) -> bool:
         name, value = field
+        if name in ("priority", "flow", "due"):
+            key = (target.idx, name)
+            if key in self.seen_scalar_fields:
+                self.warn(
+                    line_number,
+                    "field-repeat",
+                    f"{name.title()} repeated; last value won",
+                )
+            self.seen_scalar_fields.add(key)
         if name == "acceptance":
             if value:
                 target.acceptance.append(value)
+            else:
+                self.acceptance_capture = (target, line_number)
+                self.acceptance_count = 0
         elif name == "after":
-            target.after_raw.extend(
-                (part.strip(), line_number) for part in value.split(",") if part.strip()
-            )
+            targets = _after_targets(value)
+            if targets is None:
+                self.warn(
+                    line_number,
+                    "after-prose",
+                    "After-shaped line kept as prose because targets were not slug-shaped",
+                )
+                return False
+            target.after_raw.extend((slug, line_number) for slug in targets)
         elif name == "priority":
-            target.priority = value.lower()
+            normalized = value.lower()
+            if normalized not in _PRIORITIES:
+                self.refusals.append(f"invalid priority: {value}")
+            target.priority = normalized
         elif name == "flow":
-            target.flow = [
-                part.strip().lower() for part in value.split(",") if part.strip()
-            ]
+            phases = [part.strip().lower() for part in value.split(",") if part.strip()]
+            invalid = [phase for phase in phases if phase not in APPROVED_PHASES]
+            if not phases:
+                invalid.append("")
+            self.refusals.extend(f"invalid flow phase: {phase}" for phase in invalid)
+            target.flow = phases
         elif name == "due":
             target.due = value
         elif name == "tags":
             target.tags.extend(part for part in re.split(r"[\s,]+", value) if part)
         self.last_attach = target
+        return True
 
     def store_section_item(
         self, section: tuple[str, Node], title: str, line_number: int
@@ -476,7 +534,16 @@ class Parser:
         if kind == "acceptance":
             target.acceptance.append(title)
         elif kind == "after":
-            target.after_raw.append((title, line_number))
+            targets = _after_targets(title)
+            if targets is None:
+                self.warn(
+                    line_number,
+                    "after-prose",
+                    "dependency-section item kept as prose because it was not slug-shaped",
+                )
+                self.store_description(target, title)
+            else:
+                target.after_raw.extend((slug, line_number) for slug in targets)
         else:
             block = f"> {title}"
             if self.note_section_block == (target.idx, len(target.annotations) - 1):
@@ -486,6 +553,19 @@ class Parser:
                 self.note_section_block = (target.idx, len(target.annotations) - 1)
         self.current = target
         self.last_attach = target
+
+    def close_acceptance_capture(self) -> None:
+        if self.acceptance_capture is None:
+            return
+        _target, line_number = self.acceptance_capture
+        if not self.acceptance_count:
+            self.warn(
+                line_number,
+                "empty-acceptance",
+                "Acceptance intro captured no criteria",
+            )
+        self.acceptance_capture = None
+        self.acceptance_count = 0
 
     def code_threshold(self) -> int:
         if self.list_stack:
@@ -511,6 +591,9 @@ class Parser:
     def attach_description(self, line: str) -> None:
         target = self.attach_target_for(line)
         text = unescape_prose(dedent_content(line, target.content_col))
+        self.store_description(target, text)
+
+    def store_description(self, target: Node, text: str) -> None:
         target.desc.append(text)
         self.last_desc = (target, target.desc[-1])
         self.last_attach = target
@@ -560,6 +643,24 @@ def _field_parts(text: str) -> tuple[str, str] | None:
 def _simple_slug(title: str) -> str:
     linked = _INLINE_LINK_RE.sub(lambda match: match.group(1), title)
     return "-".join(re.findall(r"[a-z0-9]+", linked.lower()))
+
+
+def _after_targets(value: str) -> list[str] | None:
+    targets = [target.strip() for target in value.split(",")]
+    if not targets or any(not target for target in targets):
+        return None
+    normalized: list[str] = []
+    for target in targets:
+        if _SLUG_RE.fullmatch(target):
+            normalized.append(target)
+            continue
+        if re.search(r"[.!?;:]", target):
+            return None
+        slug = _simple_slug(target)
+        if not slug:
+            return None
+        normalized.append(slug)
+    return normalized
 
 
 def _list_prose(item: re.Match[str], title: str) -> str:
