@@ -15,12 +15,13 @@ from spice.tasks import (
     config,
     create,
     identity,
-    markdown,
     ops,
     render,
     sizing,
     wordingreview,
 )
+from spice.tasks.markdown.apply import ingest_path
+from spice.tasks.markdown.ledger import export_ledger
 
 _TASK_LIST_STATUSES = ("pending", "waiting", "completed", "deleted")
 _TASK_LIST_NEWEST_FIELDS = ("end", "modified", "entry", "incepted", "claim_at")
@@ -863,9 +864,9 @@ _DISPATCH = {
     ),
     "list": _list,
     "show": lambda a: render.render_show(a.handle),
-    "ledger": lambda a: markdown.render_ledger(a.handle),
+    "ledger": lambda a: export_ledger(a.handle),
     "artifact": lambda a: _artifact(a),
-    "ingest": lambda a: markdown.ingest_path(
+    "ingest": lambda a: ingest_path(
         a.path,
         project=a.project,
         priority=a.priority,
