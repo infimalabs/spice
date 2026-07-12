@@ -843,7 +843,6 @@ def _merge_conflict_marker_recovery(
         lines.extend(f"  {path}" for path in paths)
     else:
         lines.append("conflict-marker files: run `git status --short`")
-    add_paths = _shell_join(paths) if paths else "<files>"
     lines.extend(
         [
             "do not use plain `git commit`; no MERGE_HEAD exists to supply the "
@@ -851,11 +850,14 @@ def _merge_conflict_marker_recovery(
             "baseline-side hunks are peer work already landed on the shared "
             "branch; fold them into the resolution — never keep only this "
             "task's side",
+            "with no MERGE_HEAD the auto-merged peer changes were never staged, "
+            "so stage the whole merged tree — not only the conflict — or "
+            "`git write-tree` records only this task's side and drops them",
             "next commands:",
             "  git status --short",
             "  git rev-parse --verify MERGE_HEAD  # expected to fail here",
             "  edit the files above and remove every marker line",
-            f"  git add -- {add_paths}",
+            "  git add -A  # stage every merged path, peer changes included",
             "  merge_commit=$(git commit-tree $(git write-tree) "
             f'-p HEAD -p {baseline} -m "Resolve baseline overlap for {label}")',
             '  git update-ref refs/heads/$(git branch --show-current) "$merge_commit"',
