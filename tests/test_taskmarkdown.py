@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import shutil
 import subprocess
 from pathlib import Path
@@ -10,7 +11,7 @@ import pytest
 
 from spice.agent.driver import DRIVER
 from spice.cli.parser import build_parser
-from spice.tasks import claimstate, config, create, identity, markdown, ops, tw
+from spice.tasks import claimstate, config, create, identity, markdown, ops, taskdoc, tw
 
 pytestmark = pytest.mark.skipif(
     shutil.which("task") is None, reason="Taskwarrior binary is required"
@@ -136,6 +137,36 @@ def test_task_ingest_creates_tasks_edges_and_annotations(task_repo, tmp_path, ca
         ann.get("description") == "> child note"
         for ann in child.get("annotations") or []
     )
+
+
+def test_task_ingest_reads_bom_crlf_document_from_stdin(task_repo, monkeypatch, capsys):
+    monkeypatch.setattr(
+        taskdoc.sys,
+        "stdin",
+        io.StringIO("\ufeff# Piped task\r\nAcceptance: piped task accepted\r\n"),
+    )
+    args = build_parser().parse_args(
+        [
+            "task",
+            "ingest",
+            "-",
+            "--project",
+            "task.unit",
+            "--origin",
+            "ack:20260101T000000000000Z",
+        ]
+    )
+    args.backend = str(config.backend_root())
+
+    assert args.func(args) == 0
+    output = capsys.readouterr().out
+    root_handle = next(
+        line.split()[1] for line in output.splitlines() if line.startswith("root ")
+    )
+    row = identity.resolve(root_handle)
+
+    assert row["description"] == "Piped task"
+    assert row["acceptance"] == "piped task accepted"
 
 
 def test_task_ingest_missing_acceptance_routes_node_to_plan(
