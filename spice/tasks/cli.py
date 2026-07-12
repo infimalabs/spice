@@ -325,6 +325,11 @@ def _configure_ingest_parser(actions: Any) -> None:
             "(root provenance for every created node)."
         ),
     )
+    ingest.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the complete validated apply plan without writing tasks.",
+    )
     ingest.set_defaults(func=handle)
 
 
@@ -872,6 +877,7 @@ _DISPATCH = {
         priority=a.priority,
         origin=a.origin,
         creation_surface=config.TASK_CREATION_SURFACE_CLI,
+        dry_run=a.dry_run,
     ),
     "done": lambda a: ops.done(
         a.handle,

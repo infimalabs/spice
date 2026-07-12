@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from os import PathLike
-from typing import Any, Never
+from typing import Any
 
 from spice.errors import SpiceError
 from spice.tasks import claimstate, config, create, identity, tw
 from spice.tasks.markdown.classifier import parse
-from spice.tasks.markdown.dialect import Doc
+from spice.tasks.markdown.dialect import Doc, Node
 from spice.tasks.taskdoc import read_document
 
 INGEST_PROJECT_REQUIRED_ERROR = (
@@ -33,6 +35,79 @@ class FamilyMatch:
 
     rows: tuple[dict[str, Any], ...]
     by_slug: dict[str, dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class FieldUpdate:
+    """One matched-row field that execution must equalize."""
+
+    field: str
+    value: str | tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PlannedNode:
+    """A document node bound to either an existing or prospective row."""
+
+    node: Node
+    row: dict[str, Any] | None
+    handle: str
+    incepted: str
+    settled: bool
+    updates: tuple[FieldUpdate, ...]
+    annotations: tuple[str, ...]
+    dependency_slugs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EdgeChange:
+    """One family-edge mutation in document-slug coordinates."""
+
+    source: str
+    target: str
+
+
+@dataclass(frozen=True)
+class PlanVerb:
+    """One stable, human-readable fact in an apply report."""
+
+    kind: str
+    slug: str = ""
+    handle: str = ""
+    field: str = ""
+    target: str = ""
+    line: int = 0
+    code: str = ""
+    message: str = ""
+
+    def render(self) -> str:
+        if self.kind in {"created", "reused", "loose"}:
+            return f"{self.kind} {self.slug} {self.handle}"
+        if self.kind in {"updated", "drift"}:
+            return f"{self.kind} {self.slug} {self.handle} {self.field}"
+        if self.kind in {"edge-added", "edge-dropped"}:
+            return f"{self.kind} {self.slug} -> {self.target}"
+        if self.kind == "warn":
+            return f"warn {self.line} {self.code} {self.message}"
+        raise ValueError(f"unknown apply-plan verb: {self.kind}")
+
+
+@dataclass(frozen=True)
+class ApplyPlan:
+    """Complete, cycle-checked apply intent with no board writes performed."""
+
+    project: str
+    origin: str
+    root_handle: str
+    nodes: tuple[PlannedNode, ...]
+    edge_additions: tuple[EdgeChange, ...]
+    edge_drops: tuple[EdgeChange, ...]
+    verbs: tuple[PlanVerb, ...]
+
+    def report(self) -> str:
+        return "\n".join(
+            [f"root {self.root_handle}", *(verb.render() for verb in self.verbs)]
+        )
 
 
 def resolve_ingest_project(actor: str, project: str | None) -> str:
@@ -109,15 +184,600 @@ def match_family(document: Doc, *, project: str, origin: str) -> FamilyMatch:
     return FamilyMatch(rows=tuple(rows), by_slug=matched)
 
 
+_FIELD_ORDER = ("description", "acceptance", "priority", "due", "tags")
+_ALL_VISIBLE_STATUS_FILTER = [*_FAMILY_STATUS_FILTER]
+_TASKWARRIOR_UTC_TIMESTAMP_LENGTH = 16
+
+
+def _is_settled(row: dict[str, Any]) -> bool:
+    """Whether runtime state has permanently transferred ownership to board."""
+    return (
+        str(row.get("status") or "") != "pending"
+        or claimstate.phase_index(row) > 0
+        or bool(row.get("start"))
+        or bool(row.get("claim_at"))
+    )
+
+
+def _normalized_tag(tag: str) -> str:
+    return "".join(c if c.isalnum() else "_" for c in tag.strip().lower()).strip("_")
+
+
+def _normalized_tags(tags: Iterable[object]) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {normalized for tag in tags if (normalized := _normalized_tag(str(tag)))}
+        )
+    )
+
+
+def _desired_flow(node: Node, project: str) -> tuple[str, ...]:
+    if node.flow:
+        return tuple(config.resolve_flow(list(node.flow), project))
+    default = config.resolve_flow(None, project)
+    if node.acceptance or default[0] == "plan":
+        return tuple(default)
+    return ("plan", *(phase for phase in default if phase != "plan"))
+
+
+def _normalized_due(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) == _TASKWARRIOR_UTC_TIMESTAMP_LENGTH and value.endswith("Z"):
+        try:
+            return (
+                datetime.strptime(value, "%Y%m%dT%H%M%SZ")
+                .replace(tzinfo=UTC)
+                .strftime("%Y%m%dT%H%M%SZ")
+            )
+        except ValueError:
+            pass
+    result = tw.run(["calc", value])
+    try:
+        resolved = datetime.fromisoformat(result.stdout.strip()).astimezone(UTC)
+    except ValueError as exc:
+        raise SpiceError(f"invalid due date: {value}") from exc
+    return resolved.strftime("%Y%m%dT%H%M%SZ")
+
+
+def _node_fields(node: Node) -> dict[str, str | tuple[str, ...]]:
+    return {
+        "description": node.description(),
+        "acceptance": " | ".join(node.acceptance),
+        "priority": config.map_priority(node.priority or "none"),
+        "due": node.due or "",
+        "tags": _normalized_tags(node.tags),
+    }
+
+
+def _row_field(row: dict[str, Any], field: str) -> str | tuple[str, ...]:
+    if field == "description":
+        return str(row.get("task_description") or "").strip()
+    if field == "tags":
+        return _normalized_tags(row.get("tags") or ())
+    return str(row.get(field) or "")
+
+
+def _fields_differ(
+    field: str, desired: str | tuple[str, ...], current: str | tuple[str, ...]
+) -> bool:
+    if field == "due":
+        return _normalized_due(str(desired)) != _normalized_due(str(current))
+    return desired != current
+
+
+def _annotation_additions(node: Node, row: dict[str, Any] | None) -> tuple[str, ...]:
+    existing = {
+        str(annotation.get("description") or "").rstrip()
+        for annotation in ((row or {}).get("annotations") or ())
+        if isinstance(annotation, dict)
+    }
+    additions: list[str] = []
+    for block in node.annotations:
+        normalized = block.rstrip()
+        if normalized not in existing:
+            additions.append(normalized)
+            existing.add(normalized)
+    return tuple(additions)
+
+
+def _creation_order(document: Doc) -> tuple[int, ...]:
+    """Stable dependency post-order: prerequisites first and root last."""
+    adjacency: dict[int, list[int]] = {node.idx: [] for node in document.nodes}
+    for source, target, _kind in document.edges:
+        adjacency[source].append(target)
+    for targets in adjacency.values():
+        targets.sort()
+
+    visited: set[int] = set()
+    order: list[int] = []
+
+    def visit(start: int) -> None:
+        stack: list[tuple[int, bool]] = [(start, False)]
+        while stack:
+            node_idx, exiting = stack.pop()
+            if exiting:
+                order.append(node_idx)
+                continue
+            if node_idx in visited:
+                continue
+            visited.add(node_idx)
+            stack.append((node_idx, True))
+            stack.extend((target, False) for target in reversed(adjacency[node_idx]))
+
+    visit(document.root)
+    for node in document.nodes:
+        visit(node.idx)
+    return tuple(order)
+
+
+def _desired_edges(document: Doc) -> set[tuple[str, str]]:
+    return {
+        (document.nodes[source].slug, document.nodes[target].slug)
+        for source, target, _kind in document.edges
+    }
+
+
+def _depends(row: dict[str, Any]) -> set[str]:
+    raw = row.get("depends") or ()
+    if isinstance(raw, str):
+        return {raw} if raw else set()
+    return {str(value) for value in raw if value}
+
+
+def _post_state_adjacency(
+    *,
+    board_rows: Iterable[dict[str, Any]],
+    family: FamilyMatch,
+    row_ids: dict[str, str],
+    planned_additions: set[tuple[str, str]],
+    planned_drops: set[tuple[str, str]],
+) -> dict[str, set[str]]:
+    family_ids = {
+        str(row.get("uuid") or "") for row in family.rows if str(row.get("uuid") or "")
+    }
+    adjacency: dict[str, set[str]] = {}
+    for row in board_rows:
+        source = str(row.get("uuid") or "")
+        if source:
+            adjacency.setdefault(source, set()).update(_depends(row))
+
+    for source_slug, target_slug in planned_drops:
+        source = row_ids[source_slug]
+        target = row_ids[target_slug]
+        if source in family_ids and target in family_ids:
+            adjacency.setdefault(source, set()).discard(target)
+    for source_slug, target_slug in planned_additions:
+        adjacency.setdefault(row_ids[source_slug], set()).add(row_ids[target_slug])
+    for row_id in row_ids.values():
+        adjacency.setdefault(row_id, set())
+    return adjacency
+
+
+def _first_cycle(adjacency: dict[str, set[str]]) -> tuple[str, ...]:
+    vertices = set(adjacency)
+    vertices.update(target for targets in adjacency.values() for target in targets)
+    white, grey, black = 0, 1, 2
+    color = dict.fromkeys(vertices, white)
+    for start in sorted(vertices):
+        if color[start] != white:
+            continue
+        color[start] = grey
+        stack = [(start, iter(sorted(adjacency.get(start, ()))))]
+        while stack:
+            current, neighbors = stack[-1]
+            target = next(neighbors, None)
+            if target is None:
+                color[current] = black
+                stack.pop()
+            elif color.get(target, white) == grey:
+                path = tuple(item[0] for item in stack)
+                return path[path.index(target) :]
+            elif color.get(target, white) == white:
+                color[target] = grey
+                stack.append((target, iter(sorted(adjacency.get(target, ())))))
+    return ()
+
+
+def _cycle_document_slug(
+    cycle: tuple[str, ...], document: Doc, row_ids: dict[str, str]
+) -> str:
+    node_order = {node.slug: node.idx for node in document.nodes}
+    slug_by_id = {
+        row_id: slug for slug, row_id in row_ids.items() if slug in node_order
+    }
+    slugs = [slug_by_id[row_id] for row_id in cycle if row_id in slug_by_id]
+    return min(
+        slugs or [document.nodes[document.root].slug], key=node_order.__getitem__
+    )
+
+
+def _refuse_post_state_cycle(
+    *,
+    document: Doc,
+    board_rows: Iterable[dict[str, Any]],
+    family: FamilyMatch,
+    row_ids: dict[str, str],
+    planned_additions: set[tuple[str, str]],
+    planned_drops: set[tuple[str, str]],
+) -> None:
+    adjacency = _post_state_adjacency(
+        board_rows=board_rows,
+        family=family,
+        row_ids=row_ids,
+        planned_additions=planned_additions,
+        planned_drops=planned_drops,
+    )
+    cycle = _first_cycle(adjacency)
+    if cycle:
+        slug = _cycle_document_slug(cycle, document, row_ids)
+        raise SpiceError(f"dependency cycle at {slug}")
+
+
+@dataclass(frozen=True)
+class _PlanIdentities:
+    handles: dict[str, str]
+    incepted: dict[str, str]
+    creation_order: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _NodeDiff:
+    planned: PlannedNode
+    update_verbs: tuple[PlanVerb, ...]
+    drift_verbs: tuple[PlanVerb, ...]
+    additions: frozenset[tuple[str, str]]
+    drops: frozenset[tuple[str, str]]
+    edge_drift: bool
+
+
+def _validate_plan_input(document: Doc) -> None:
+    if document.refusals:
+        raise SpiceError(document.refusals[0])
+    for node in document.nodes:
+        if any("|" in criterion for criterion in node.acceptance):
+            raise SpiceError(f"acceptance criterion on {node.slug} contains '|'")
+
+
+def _desired_targets(document: Doc) -> dict[str, set[str]]:
+    desired_by_source: dict[str, set[str]] = {
+        node.slug: set() for node in document.nodes
+    }
+    for source, target in _desired_edges(document):
+        desired_by_source[source].add(target)
+    return desired_by_source
+
+
+def _plan_identities(
+    document: Doc,
+    family: FamilyMatch,
+    board_rows: Iterable[dict[str, Any]],
+    project: str,
+) -> _PlanIdentities:
+    existing_incepted = {
+        str(row.get("incepted") or "") for row in board_rows if row.get("incepted")
+    }
+    handles: dict[str, str] = {
+        slug: identity.render_handle(row) for slug, row in family.by_slug.items()
+    }
+    incepted: dict[str, str] = {
+        slug: str(row.get("incepted") or "") for slug, row in family.by_slug.items()
+    }
+    creation_order = _creation_order(document)
+    for node_idx in creation_order:
+        node = document.nodes[node_idx]
+        if node.slug in handles:
+            continue
+        stamp = identity.mint_incepted(existing_incepted)
+        existing_incepted.add(stamp)
+        incepted[node.slug] = stamp
+        handles[node.slug] = f"{identity.key_for(project, node.title)}-{stamp}"
+    return _PlanIdentities(handles, incepted, creation_order)
+
+
+def _family_row_ids(document: Doc, family: FamilyMatch) -> dict[str, str]:
+    row_ids: dict[str, str] = {
+        str(row.get(config.TASKDOC_ID_UDA) or ""): str(row.get("uuid") or "")
+        or f"existing:{row.get(config.TASKDOC_ID_UDA)}"
+        for row in family.rows
+    }
+    row_ids.update(
+        {
+            node.slug: f"new:{node.slug}"
+            for node in document.nodes
+            if node.slug not in family.by_slug
+        }
+    )
+    return row_ids
+
+
+def _family_slugs_by_uuid(family: FamilyMatch) -> dict[str, str]:
+    return {
+        str(row.get("uuid") or ""): str(row.get(config.TASKDOC_ID_UDA) or "")
+        for row in family.rows
+        if row.get("uuid")
+    }
+
+
+def _field_actions(
+    node: Node, row: dict[str, Any] | None, settled: bool, project: str
+) -> tuple[list[FieldUpdate], list[str]]:
+    updates: list[FieldUpdate] = []
+    drifts: list[str] = []
+    if row is None:
+        return updates, drifts
+    if str(row.get("description") or "") != node.title:
+        drifts.append("title")
+    for field, desired in _node_fields(node).items():
+        if not _fields_differ(field, desired, _row_field(row, field)):
+            continue
+        if settled:
+            drifts.append(field)
+        else:
+            updates.append(FieldUpdate(field, desired))
+    if tuple(claimstate.phases_of(row)) != _desired_flow(node, project):
+        drifts.append("flow")
+    return updates, drifts
+
+
+def _edge_actions(
+    node: Node,
+    row: dict[str, Any] | None,
+    settled: bool,
+    desired_targets: set[str],
+    family_slug_by_uuid: dict[str, str],
+) -> tuple[frozenset[tuple[str, str]], frozenset[tuple[str, str]], bool]:
+    current_targets = {
+        family_slug_by_uuid[target]
+        for target in _depends(row or {})
+        if target in family_slug_by_uuid
+    }
+    additions = frozenset(
+        (node.slug, target) for target in desired_targets - current_targets
+    )
+    drops = frozenset(
+        (node.slug, target) for target in current_targets - desired_targets
+    )
+    edge_drift = bool(row and settled and (additions or drops))
+    if edge_drift:
+        return frozenset(), frozenset(), True
+    return additions, drops, False
+
+
+def _plan_node(
+    node: Node,
+    *,
+    row: dict[str, Any] | None,
+    project: str,
+    identities: _PlanIdentities,
+    desired_targets: set[str],
+    family_slug_by_uuid: dict[str, str],
+    node_order: dict[str, int],
+) -> _NodeDiff:
+    settled = bool(row and _is_settled(row))
+    updates, drifts = _field_actions(node, row, settled, project)
+    annotations = _annotation_additions(node, row)
+    if annotations and row is not None:
+        updates.append(FieldUpdate("annotations", annotations))
+    additions, drops, edge_drift = _edge_actions(
+        node, row, settled, desired_targets, family_slug_by_uuid
+    )
+    handle = identities.handles[node.slug]
+    update_verbs = tuple(
+        PlanVerb("updated", node.slug, handle, field)
+        for field in (*_FIELD_ORDER, "annotations")
+        if any(update.field == field for update in updates)
+    )
+    drift_verbs = tuple(
+        PlanVerb("drift", node.slug, handle, field)
+        for field in ("title", *_FIELD_ORDER, "flow")
+        if field in drifts
+    )
+    planned = PlannedNode(
+        node=node,
+        row=row,
+        handle=handle,
+        incepted=identities.incepted[node.slug],
+        settled=settled,
+        updates=tuple(updates),
+        annotations=annotations,
+        dependency_slugs=tuple(sorted(desired_targets, key=node_order.__getitem__)),
+    )
+    return _NodeDiff(planned, update_verbs, drift_verbs, additions, drops, edge_drift)
+
+
+def _plan_node_diffs(
+    document: Doc,
+    *,
+    family: FamilyMatch,
+    project: str,
+    identities: _PlanIdentities,
+    desired_by_source: dict[str, set[str]],
+) -> tuple[_NodeDiff, ...]:
+    family_slug_by_uuid = _family_slugs_by_uuid(family)
+    node_order = {node.slug: node.idx for node in document.nodes}
+    return tuple(
+        _plan_node(
+            node,
+            row=family.by_slug.get(node.slug),
+            project=project,
+            identities=identities,
+            desired_targets=desired_by_source[node.slug],
+            family_slug_by_uuid=family_slug_by_uuid,
+            node_order=node_order,
+        )
+        for node in document.nodes
+    )
+
+
+def _edge_sort_key(
+    edge: tuple[str, str], node_order: dict[str, int]
+) -> tuple[int, int, str]:
+    source, target = edge
+    return node_order[source], node_order.get(target, len(node_order)), target
+
+
+def _node_report_verbs(
+    document: Doc,
+    family: FamilyMatch,
+    identities: _PlanIdentities,
+    diffs: tuple[_NodeDiff, ...],
+    edge_additions: set[tuple[str, str]],
+    edge_drops: set[tuple[str, str]],
+) -> tuple[tuple[PlanVerb, ...], tuple[PlanVerb, ...], tuple[PlanVerb, ...]]:
+    created_slugs = {
+        node.slug for node in document.nodes if node.slug not in family.by_slug
+    }
+    changed_slugs = {verb.slug for diff in diffs for verb in diff.update_verbs} | {
+        source for source, _target in edge_additions | edge_drops
+    }
+    created = tuple(
+        PlanVerb(
+            "created",
+            document.nodes[idx].slug,
+            identities.handles[document.nodes[idx].slug],
+        )
+        for idx in identities.creation_order
+        if document.nodes[idx].slug in created_slugs
+    )
+    reused = tuple(
+        PlanVerb("reused", node.slug, identities.handles[node.slug])
+        for node in document.nodes
+        if node.slug in family.by_slug and node.slug not in changed_slugs
+    )
+    updated = tuple(verb for diff in diffs for verb in diff.update_verbs)
+    return created, reused, updated
+
+
+def _edge_report_verbs(
+    document: Doc,
+    family: FamilyMatch,
+    edge_additions: set[tuple[str, str]],
+    edge_drops: set[tuple[str, str]],
+) -> tuple[tuple[PlanVerb, ...], tuple[PlanVerb, ...]]:
+    created_slugs = {
+        node.slug for node in document.nodes if node.slug not in family.by_slug
+    }
+    node_order = {node.slug: node.idx for node in document.nodes}
+    edge_added = tuple(
+        PlanVerb("edge-added", source, target=target)
+        for source, target in sorted(
+            edge_additions, key=lambda edge: _edge_sort_key(edge, node_order)
+        )
+        if not ({source, target} <= created_slugs)
+    )
+    edge_dropped = tuple(
+        PlanVerb("edge-dropped", source, target=target)
+        for source, target in sorted(
+            edge_drops, key=lambda edge: _edge_sort_key(edge, node_order)
+        )
+    )
+    return edge_added, edge_dropped
+
+
+def _standing_fact_verbs(
+    document: Doc, family: FamilyMatch, diffs: tuple[_NodeDiff, ...]
+) -> tuple[tuple[PlanVerb, ...], tuple[PlanVerb, ...], tuple[PlanVerb, ...]]:
+    node_order = {node.slug: node.idx for node in document.nodes}
+    listed_slugs = set(node_order)
+    loose = tuple(
+        PlanVerb(
+            "loose",
+            str(row.get(config.TASKDOC_ID_UDA) or ""),
+            identity.render_handle(row),
+        )
+        for row in family.rows
+        if str(row.get(config.TASKDOC_ID_UDA) or "") not in listed_slugs
+    )
+    drift = tuple(verb for diff in diffs for verb in diff.drift_verbs) + tuple(
+        PlanVerb("drift", diff.planned.node.slug, diff.planned.handle, "after")
+        for diff in diffs
+        if diff.edge_drift
+    )
+    warnings = tuple(
+        PlanVerb("warn", line=line, code=code, message=message)
+        for line, code, message in document.warnings
+    )
+    return loose, drift, warnings
+
+
+def _report_verbs(
+    document: Doc,
+    family: FamilyMatch,
+    identities: _PlanIdentities,
+    diffs: tuple[_NodeDiff, ...],
+    edge_additions: set[tuple[str, str]],
+    edge_drops: set[tuple[str, str]],
+) -> tuple[PlanVerb, ...]:
+    created, reused, updated = _node_report_verbs(
+        document, family, identities, diffs, edge_additions, edge_drops
+    )
+    edge_added, edge_dropped = _edge_report_verbs(
+        document, family, edge_additions, edge_drops
+    )
+    loose, drift, warnings = _standing_fact_verbs(document, family, diffs)
+    return (
+        *created,
+        *reused,
+        *updated,
+        *edge_added,
+        *edge_dropped,
+        *loose,
+        *drift,
+        *warnings,
+    )
+
+
+def plan_document(document: Doc, *, project: str, origin: str) -> ApplyPlan:
+    """Compute and validate the complete apply plan without writing the board."""
+    _validate_plan_input(document)
+    family = match_family(document, project=project, origin=origin)
+    board_rows = tw.export(_ALL_VISIBLE_STATUS_FILTER)
+    desired_by_source = _desired_targets(document)
+    identities = _plan_identities(document, family, board_rows, project)
+    row_ids = _family_row_ids(document, family)
+    diffs = _plan_node_diffs(
+        document,
+        family=family,
+        project=project,
+        identities=identities,
+        desired_by_source=desired_by_source,
+    )
+    edge_additions = {edge for diff in diffs for edge in diff.additions}
+    edge_drops = {edge for diff in diffs for edge in diff.drops}
+    _refuse_post_state_cycle(
+        document=document,
+        board_rows=board_rows,
+        family=family,
+        row_ids=row_ids,
+        planned_additions=edge_additions,
+        planned_drops=edge_drops,
+    )
+    verbs = _report_verbs(
+        document, family, identities, diffs, edge_additions, edge_drops
+    )
+    return ApplyPlan(
+        project=project,
+        origin=origin,
+        root_handle=identities.handles[document.nodes[document.root].slug],
+        nodes=tuple(diff.planned for diff in diffs),
+        edge_additions=tuple(EdgeChange(*edge) for edge in sorted(edge_additions)),
+        edge_drops=tuple(EdgeChange(*edge) for edge in sorted(edge_drops)),
+        verbs=verbs,
+    )
+
+
 def apply_document(
     document: Doc,
     *,
     project: str,
     origin: str,
     dry_run: bool = False,
-) -> Never:
+) -> str:
     """Plan and apply a parsed task document to its board family."""
-    match_family(document, project=project, origin=origin)
+    plan = plan_document(document, project=project, origin=origin)
+    if dry_run:
+        return plan.report()
     raise SpiceError("task-document apply is not implemented")
 
 
@@ -129,7 +789,7 @@ def ingest_path(
     origin: str | None = None,
     creation_surface: str | None = None,
     dry_run: bool = False,
-) -> Never:
+) -> str:
     """Read, parse, and apply one task document."""
     actor = tw.canonical_actor(tw.current_actor())
     resolved_project, resolved_origin = resolve_ingest_target(
