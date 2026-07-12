@@ -1,7 +1,6 @@
 # Task Documents
 
-Status: recommendation, 2026-07-12.
-Replaces `docs/design/accepted/task-markdown-dag.md` when accepted.
+Status: implemented contract, 2026-07-12.
 
 A **task document** is a markdown file that projects a goal onto the task
 board as a fully connected dependency graph. Agents write task documents the
