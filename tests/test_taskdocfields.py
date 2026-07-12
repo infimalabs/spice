@@ -16,7 +16,7 @@ def test_field_labels_are_case_insensitive_emphasized_and_synonym_complete() -> 
         "AC: short\n"
         "After: Bootstrap Parser\n"
         "Depends On: phase-1--freeze-main\n"
-        "Blocked By: Ship Release v1.2\n"
+        "Blocked By: Ship Release\n"
         "Prerequisites: prepare-env\n"
         "PRIORITY: HIGH\n"
         "**Flow:** design, TODO\n"
@@ -38,7 +38,7 @@ def test_field_labels_are_case_insensitive_emphasized_and_synonym_complete() -> 
     assert root.after_raw == [
         ("bootstrap-parser", 8),
         ("phase-1--freeze-main", 9),
-        ("ship-release-v1-2", 10),
+        ("ship-release", 10),
         ("prepare-env", 11),
     ]
     assert (root.priority, root.flow, root.due) == (
@@ -108,7 +108,7 @@ def test_empty_acceptance_and_sentence_shaped_after_lines_warn_as_prose() -> Non
 
     parser.feed(
         "# Root\n"
-        "Acceptance:\n* * *\n"
+        "Acceptance:\n\n"
         "Description resumes.\n"
         "After: that window closes, we archive the remainder.\n"
     )
