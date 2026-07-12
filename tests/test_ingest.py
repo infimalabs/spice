@@ -538,7 +538,16 @@ def test_ledger_reconstructs_applied_family_without_board_owned_edges(task_repo)
         acceptance=["outside family"],
         origin=f"ack:{ACK_KEY}",
     )
-    ops.depends(root, [external])
+    deleted_external = create.add(
+        "Deleted board-owned prerequisite",
+        project="task.unit",
+        priority="none",
+        flow=["todo"],
+        acceptance=["deleted outside family"],
+        origin=f"ack:{ACK_KEY}",
+    )
+    ops.depends(root, [external, deleted_external])
+    ops.delete(deleted_external, "deleted external ledger fixture")
     ops.note(root, "ack 20260101T000000000000Z: runtime steering handled")
 
     rendered = export_ledger(root)
@@ -546,6 +555,33 @@ def test_ledger_reconstructs_applied_family_without_board_owned_edges(task_repo)
 
     assert graph_signature(reparsed) == graph_signature(document)
     assert export_document(reparsed) == rendered
+
+
+@pytest.mark.parametrize(
+    ("parent", "message"),
+    (
+        ("missing-parent", "child has unknown taskdoc_parent: missing-parent"),
+        ("child", "child cannot be its own taskdoc_parent"),
+    ),
+    ids=("missing", "self"),
+)
+def test_ledger_refuses_invalid_containment_metadata(task_repo, parent, message):
+    assert task_repo.is_dir()
+    root = _family_task("Root", slug="root")
+    child = _family_task("Child", slug="child", parent="root")
+    child_row = identity.resolve(child)
+    tw.run(
+        [
+            identity.uuid_of(child_row),
+            "modify",
+            f"{config.TASKDOC_PARENT_UDA}:{parent}",
+        ]
+    )
+
+    with pytest.raises(SpiceError) as error:
+        export_ledger(root)
+
+    assert str(error.value) == message
 
 
 @pytest.mark.parametrize(
