@@ -6,6 +6,7 @@ import re
 
 from spice.tasks.markdown.dialect import (
     CODE_INDENT_COLS,
+    FIELD_LABELS,
     Doc,
     Node,
     dedent_content,
@@ -20,10 +21,34 @@ _SETEXT_RE = re.compile(r"^ {0,3}(=+|-{2,})\s*$")
 _FENCE_RE = re.compile(r"^(`{3,}|~{3,})(.*)$")
 _LINKDEF_RE = re.compile(r"^\[[^\]]+\]:\s+\S")
 _INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]*)\)")
+_BOLD_SPAN_RE = re.compile(r"^([*_]{2,3})([^*_]+)\1$")
+_CHECKBOX_RE = re.compile(r"^\[([ xX])\]\s+(.+)$")
+_PLAIN_FIELD_RE = re.compile(r"^([A-Za-z][A-Za-z ]{0,30}?)\s*:\s*(.*)$")
+_EMPHASIS_FIELD_RE = re.compile(r"^([*_]{1,3})([^*_:]+?)(:?)\1(:?)\s*(.*)$")
 _ESCAPED_PROSE_RE = re.compile(
     r"^(?:\\[-*+#>|`=~_\[<]|\d+\\[.)]|[A-Za-z][A-Za-z ]{0,30}?\\:)"
 )
 _LINK_RESIDUE_CHARS = 12
+
+_FIELD_SECTIONS = {
+    "acceptance": "acceptance",
+    "acceptance-criteria": "acceptance",
+    "ac": "acceptance",
+    "done-when": "acceptance",
+    "definition-of-done": "acceptance",
+    "success-criteria": "acceptance",
+    "dependencies": "after",
+    "depends-on": "after",
+    "prerequisites": "after",
+    "blocked-by": "after",
+    "notes": "notes",
+    "context": "notes",
+    "background": "notes",
+    "references": "notes",
+    "links": "notes",
+    "open-questions": "notes",
+    "risks": "notes",
+}
 
 
 class Parser:
@@ -34,7 +59,12 @@ class Parser:
         self.preamble = Node(idx=-1, kind="preamble", title="", line=0)
         self.current: Node | None = None
         self.heading_stack: list[tuple[int, Node]] = []
+        self.real_heading_stack: list[tuple[int, Node]] = []
         self.list_stack: list[tuple[int, int, Node, bool]] = []
+        self.ordered_runs: dict[tuple[int, int], Node] = {}
+        self.sequence_edges: list[tuple[int, int, str]] = []
+        self.field_section: tuple[str, Node] | None = None
+        self.note_section_block: tuple[int, int] | None = None
         self.warnings: list[tuple[int, str, str]] = []
         self.refusals: list[str] = []
         self.fence: list[str] | None = None
@@ -122,6 +152,10 @@ class Parser:
         if self._heading(line, line_number):
             return
         if self._list_item(line, line_number):
+            return
+        if self._field_line(line, stripped, line_number):
+            return
+        if self._bold_heading(line, stripped, line_number):
             return
         if self._annotation(line, stripped):
             return
@@ -253,6 +287,34 @@ class Parser:
         self.prev_blank = False
         return True
 
+    def _field_line(self, line: str, stripped: str, line_number: int) -> bool:
+        if self.code_indented(line):
+            return False
+        field = _field_parts(stripped)
+        if field is None:
+            return False
+        self.store_field(self.attach_target_for(line), field, line_number)
+        self.last_desc = None
+        self.prev_blank = False
+        return True
+
+    def _bold_heading(self, line: str, stripped: str, line_number: int) -> bool:
+        if self.code_indented(line) or not self.prev_blank:
+            return False
+        bold = _BOLD_SPAN_RE.match(stripped)
+        if bold is None:
+            return False
+        base_level = self.real_heading_stack[-1][0] if self.real_heading_stack else 0
+        level = base_level + 1
+        self.handle_heading(level, bold.group(2).strip(), line_number, real=False)
+        self.warn(
+            line_number,
+            "bold-heading",
+            f"sole bold span promoted to level {level} section",
+        )
+        self.prev_blank = False
+        return True
+
     def _list_item(self, line: str, line_number: int) -> bool:
         item = _LIST_RE.match(line)
         if not item:
@@ -285,18 +347,42 @@ class Parser:
         self.prev_blank = False
         return True
 
-    def handle_heading(self, level: int, title: str, line_number: int) -> None:
+    def handle_heading(
+        self, level: int, title: str, line_number: int, *, real: bool = True
+    ) -> None:
+        self.field_section = None
+        self.note_section_block = None
         while self.heading_stack and self.heading_stack[-1][0] >= level:
             self.heading_stack.pop()
+        if real:
+            while self.real_heading_stack and self.real_heading_stack[-1][0] >= level:
+                self.real_heading_stack.pop()
         parent = self.heading_stack[-1][1] if self.heading_stack else None
+        section_kind = _FIELD_SECTIONS.get(_simple_slug(title))
+        if section_kind is not None:
+            target = parent if parent is not None else self.preamble
+            self.field_section = (section_kind, target)
+            self.current = target
+            self.last_attach = target
+            self.list_stack.clear()
+            self.ordered_runs.clear()
+            self.warn(
+                line_number,
+                "field-section",
+                f"{title} heading feeds {target.title or 'document root'}",
+            )
+            return
         node = self.mint("heading", title, line_number, level, parent)
         self.heading_stack.append((level, node))
         self.list_stack.clear()
+        self.ordered_runs.clear()
+        if real:
+            self.real_heading_stack.append((level, node))
 
     def handle_list_item(self, item: re.Match[str], line_number: int) -> None:
         indent = indent_width(item.group(1))
         marker = item.group(2)
-        content_col = indent + len(marker) + len(item.group(3))
+        content_col = indent + len(marker) + indent_width(item.group(3))
         while self.list_stack and self.list_stack[-1][0] >= indent:
             self.list_stack.pop()
         parent = (
@@ -304,15 +390,102 @@ class Parser:
             if self.list_stack
             else (self.heading_stack[-1][1] if self.heading_stack else None)
         )
+        target = parent if parent is not None else self.preamble
+        title, checked = self.strip_checkbox(item.group(4), line_number)
+        field = _field_parts(title)
+        if field is not None:
+            self.store_field(target, field, line_number)
+            self.current = target
+            self.last_attach = target
+            return
+        if self.field_section is not None:
+            self.store_section_item(self.field_section, title, line_number)
+            return
+
+        ordered = marker[0].isdigit()
+        predecessor: Node | None = None
+        run_key = (target.idx, indent)
+        if ordered:
+            number = int(marker[:-1])
+            predecessor = None if number == 1 else self.ordered_runs.get(run_key)
+            if number != 1 and predecessor is None:
+                self.warn(
+                    line_number,
+                    "ordered-start",
+                    "numbered line did not start at 1 or continue an ordered run; kept as prose",
+                )
+                self.attach_description(_list_prose(item, title))
+                return
+        else:
+            self.ordered_runs.pop(run_key, None)
         node = self.mint(
             "item",
-            item.group(4),
+            title,
             line_number,
             indent,
             parent,
             content_col=content_col,
         )
-        self.list_stack.append((indent, content_col, node, marker[0].isdigit()))
+        node.checked = checked
+        self.list_stack.append((indent, content_col, node, ordered))
+        if ordered:
+            if predecessor is not None:
+                self.sequence_edges.append((node.idx, predecessor.idx, "after"))
+            self.ordered_runs[run_key] = node
+
+    def strip_checkbox(self, title: str, line_number: int) -> tuple[str, bool | None]:
+        checkbox = _CHECKBOX_RE.match(title)
+        if checkbox is None:
+            return title, None
+        checked = checkbox.group(1).lower() == "x"
+        if checked:
+            self.warn(
+                line_number,
+                "checked-discarded",
+                "checked marker stripped; the board owns status",
+            )
+        return checkbox.group(2), checked
+
+    def store_field(
+        self, target: Node, field: tuple[str, str], line_number: int
+    ) -> None:
+        name, value = field
+        if name == "acceptance":
+            if value:
+                target.acceptance.append(value)
+        elif name == "after":
+            target.after_raw.extend(
+                (part.strip(), line_number) for part in value.split(",") if part.strip()
+            )
+        elif name == "priority":
+            target.priority = value.lower()
+        elif name == "flow":
+            target.flow = [
+                part.strip().lower() for part in value.split(",") if part.strip()
+            ]
+        elif name == "due":
+            target.due = value
+        elif name == "tags":
+            target.tags.extend(part for part in re.split(r"[\s,]+", value) if part)
+        self.last_attach = target
+
+    def store_section_item(
+        self, section: tuple[str, Node], title: str, line_number: int
+    ) -> None:
+        kind, target = section
+        if kind == "acceptance":
+            target.acceptance.append(title)
+        elif kind == "after":
+            target.after_raw.append((title, line_number))
+        else:
+            block = f"> {title}"
+            if self.note_section_block == (target.idx, len(target.annotations) - 1):
+                target.annotations[-1] += "\n" + block
+            else:
+                target.annotations.append(block)
+                self.note_section_block = (target.idx, len(target.annotations) - 1)
+        self.current = target
+        self.last_attach = target
 
     def code_threshold(self) -> int:
         if self.list_stack:
@@ -323,6 +496,8 @@ class Parser:
         return indent_width(line) >= self.code_threshold()
 
     def attach_target_for(self, line: str) -> Node:
+        if self.field_section is not None:
+            return self.field_section[1]
         if self.current is None:
             return self.preamble
         if not self.prev_blank:
@@ -346,6 +521,7 @@ class Parser:
             for node in self.nodes
             for child in node.children
         ]
+        edges.extend(self.sequence_edges)
         return Doc(
             nodes=self.nodes,
             root=0 if self.nodes else -1,
@@ -364,3 +540,27 @@ def parse(text: str) -> Doc:
 def _link_residue(stripped: str) -> str:
     residue = _INLINE_LINK_RE.sub("", stripped)
     return re.sub(r"[\s\W]+", " ", residue).strip()
+
+
+def _field_parts(text: str) -> tuple[str, str] | None:
+    emphasized = _EMPHASIS_FIELD_RE.match(text)
+    if emphasized and (emphasized.group(3) or emphasized.group(4)):
+        label = emphasized.group(2).strip().lower()
+        value = emphasized.group(5).strip()
+    else:
+        plain = _PLAIN_FIELD_RE.match(text)
+        if plain is None:
+            return None
+        label = plain.group(1).strip().lower()
+        value = plain.group(2).strip()
+    canonical = FIELD_LABELS.get(label)
+    return (canonical, value) if canonical is not None else None
+
+
+def _simple_slug(title: str) -> str:
+    linked = _INLINE_LINK_RE.sub(lambda match: match.group(1), title)
+    return "-".join(re.findall(r"[a-z0-9]+", linked.lower()))
+
+
+def _list_prose(item: re.Match[str], title: str) -> str:
+    return "".join((item.group(1), item.group(2), item.group(3), title))
