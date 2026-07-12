@@ -14,6 +14,13 @@ CODE_INDENT_COLS = 4
 # natural slug.
 QUALIFIER_SEPARATOR = "--"
 
+# When several nodes are parentless the graph grows one synthetic root that
+# depends on each of them; it carries this reserved title and slug. A parsed
+# node whose own title slugs to ``document-root`` therefore collides with the
+# synthetic root and must qualify away from it (or, parentless, refuse).
+DOCUMENT_ROOT_TITLE = "Document root"
+DOCUMENT_ROOT_SLUG = "document-root"
+
 _HEADING_RE = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*$")
 _LIST_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])(\s+)(.+?)\s*$")
 _INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]*)\)")
@@ -148,6 +155,18 @@ def slugify(title: str) -> str:
     """
     text = _INLINE_LINK_RE.sub(r"\1", title)
     return "-".join(_SLUG_WORD_RE.findall(text.lower()))
+
+
+def title_words(title: str) -> list[str]:
+    """Every ASCII slug-word a title carries, links and URLs included.
+
+    Unlike :func:`slugify`, which drops a link's URL and keeps only its visible
+    text, this preserves every ASCII word in the raw title -- URL words too --
+    in reading order. Duplicate qualification uses it to find the words one
+    occurrence carries that its rivals do not, so titles that share a base slug
+    but differ inside a link still earn distinct qualified slugs.
+    """
+    return _SLUG_WORD_RE.findall(title.lower())
 
 
 def indent_width(line: str) -> int:

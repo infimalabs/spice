@@ -7,12 +7,17 @@ import re
 from spice.tasks.config import APPROVED_PHASES
 from spice.tasks.markdown.dialect import (
     CODE_INDENT_COLS,
+    DOCUMENT_ROOT_SLUG,
+    DOCUMENT_ROOT_TITLE,
     FIELD_LABELS,
+    QUALIFIER_SEPARATOR,
     Doc,
     Node,
+    collapse_blank_runs,
     dedent_content,
     indent_width,
     slugify,
+    title_words,
     unescape_prose,
 )
 
@@ -613,19 +618,272 @@ class Parser:
         self.last_attach = target
 
     def document(self) -> Doc:
-        edges = [
-            (node.idx, child, "containment")
-            for node in self.nodes
-            for child in node.children
-        ]
-        edges.extend(self.sequence_edges)
+        """Finalize slugs, resolve the root, build edges, and refuse cycles."""
+        if not self.nodes:
+            self.refusals.append(
+                "task document has no nodes (content but no structure)"
+                if self._preamble_has_content()
+                else "task document is empty"
+            )
+            return Doc(
+                nodes=self.nodes,
+                root=-1,
+                edges=[],
+                refusals=self.refusals,
+                warnings=self.warnings,
+            )
+        parentless = [node for node in self.nodes if node.parent is None]
+        needs_synthetic = len(parentless) != 1
+        self._assign_slugs(needs_synthetic)
+        root = self._resolve_root(parentless, needs_synthetic)
+        edges = self._build_edges(root, parentless, needs_synthetic)
+        self._refuse_cycles(edges)
         return Doc(
             nodes=self.nodes,
-            root=0 if self.nodes else -1,
+            root=root.idx,
             edges=edges,
             refusals=self.refusals,
             warnings=self.warnings,
         )
+
+    def _preamble_has_content(self) -> bool:
+        preamble = self.preamble
+        return bool(
+            collapse_blank_runs(preamble.desc)
+            or preamble.annotations
+            or preamble.acceptance
+            or preamble.after_raw
+            or preamble.tags
+            or preamble.priority
+            or preamble.flow
+            or preamble.due
+        )
+
+    def _assign_slugs(self, needs_synthetic: bool) -> None:
+        """Assign every node its identity slug, qualifying duplicates.
+
+        The base slug is the title's :func:`slugify`. Titles with no ASCII word
+        refuse. A base slug shared by several nodes -- or one that lands on the
+        reserved ``document-root`` while a synthetic root needs it -- qualifies:
+        structure first (``parent--slug``), then distinguishing words
+        (``slug--words``), else the document refuses. Nodes finalize in index
+        order so a parent's slug is settled before it qualifies a child.
+        """
+        base: dict[int, str] = {}
+        groups: dict[str, list[Node]] = {}
+        for node in self.nodes:
+            slug = slugify(node.title)
+            base[node.idx] = slug
+            if slug:
+                groups.setdefault(slug, []).append(node)
+            else:
+                self.refusals.append(
+                    f"title has no ASCII words: {node.title} (line {node.line})"
+                )
+        refused: set[str] = set()
+        for node in self.nodes:
+            slug = base[node.idx]
+            if not slug:
+                continue
+            members = groups[slug]
+            reserved = needs_synthetic and slug == DOCUMENT_ROOT_SLUG
+            if len(members) == 1 and not reserved:
+                node.slug = slug
+            else:
+                node.slug = self._qualify(node, slug, members, reserved, refused)
+
+    def _qualify(
+        self,
+        node: Node,
+        base: str,
+        members: list[Node],
+        reserved: bool,
+        refused: set[str],
+    ) -> str:
+        rivals = [member for member in members if member is not node]
+        if node.parent is None:
+            if reserved:
+                self.refusals.append(
+                    f"title collides with the synthetic root: {node.title} "
+                    f"(line {node.line}); rename or nest it"
+                )
+                return base
+            # Parentless occurrences share one structural slot -- root position --
+            # so they qualify each other by wording; a lone one keeps the bare slug.
+            cohort = [rival for rival in rivals if rival.parent is None]
+            if not cohort:
+                return base
+        else:
+            # A parent that no sibling shares distinguishes structurally; only
+            # occurrences under the same parent fall through to wording.
+            cohort = [rival for rival in rivals if rival.parent == node.parent]
+            if not cohort:
+                parent_slug = self.nodes[node.parent].slug
+                return self._qualified(
+                    node, f"{parent_slug}{QUALIFIER_SEPARATOR}{base}"
+                )
+        words = self._distinguishing_words(node, cohort)
+        if words:
+            return self._qualified(node, f"{base}{QUALIFIER_SEPARATOR}{words}")
+        if base not in refused:
+            refused.add(base)
+            lines = sorted({node.line, *(rival.line for rival in cohort)})
+            self.refusals.append(
+                f"duplicate title in document: {base} "
+                f"(lines {lines[0]} and {lines[-1]}; nothing distinguishes them)"
+            )
+        return base
+
+    def _qualified(self, node: Node, slug: str) -> str:
+        self.warn(
+            node.line, "dup-qualified", f"duplicated title took qualified slug {slug}"
+        )
+        return slug
+
+    def _distinguishing_words(self, node: Node, rivals: list[Node]) -> str:
+        rival_words: set[str] = set()
+        for rival in rivals:
+            rival_words.update(title_words(rival.title))
+        distinguishers: list[str] = []
+        seen: set[str] = set()
+        for word in title_words(node.title):
+            if word not in rival_words and word not in seen:
+                seen.add(word)
+                distinguishers.append(word)
+        return "-".join(distinguishers)
+
+    def _resolve_root(self, parentless: list[Node], needs_synthetic: bool) -> Node:
+        if needs_synthetic:
+            root = Node(
+                idx=len(self.nodes),
+                kind="document",
+                title=DOCUMENT_ROOT_TITLE,
+                line=0,
+                slug=DOCUMENT_ROOT_SLUG,
+            )
+            self.nodes.append(root)
+        else:
+            root = parentless[0]
+        self._merge_preamble(root)
+        return root
+
+    def _merge_preamble(self, root: Node) -> None:
+        preamble = self.preamble
+        body = collapse_blank_runs(preamble.desc)
+        if body:
+            separator = [""] if root.desc else []
+            root.desc = [*body, *separator, *root.desc]
+        root.acceptance = [*preamble.acceptance, *root.acceptance]
+        root.annotations = [*preamble.annotations, *root.annotations]
+        root.after_raw = [*preamble.after_raw, *root.after_raw]
+        root.tags = [*preamble.tags, *root.tags]
+        if root.priority is None:
+            root.priority = preamble.priority
+        if root.flow is None:
+            root.flow = preamble.flow
+        if root.due is None:
+            root.due = preamble.due
+
+    def _build_edges(
+        self, root: Node, parentless: list[Node], needs_synthetic: bool
+    ) -> list[tuple[int, int, str]]:
+        """Combine containment, ordered chains, and resolved ``After`` edges.
+
+        Containment comes from parenthood; the synthetic root depends on each
+        parentless node; ordered runs and every node's ``After:`` targets (the
+        root now also carrying the preamble's) add dependency edges. An
+        ``After`` edge that merely restates containment is dropped, so the
+        preamble depending on its own section never doubles the tree edge.
+        """
+        edges: list[tuple[int, int, str]] = []
+        containment: set[tuple[int, int]] = set()
+        for node in self.nodes:
+            for child in node.children:
+                edges.append((node.idx, child, "containment"))
+                containment.add((node.idx, child))
+        after_seen: set[tuple[int, int]] = set()
+
+        def add_after(source: int, target: int) -> None:
+            if (source, target) in containment or (source, target) in after_seen:
+                return
+            after_seen.add((source, target))
+            edges.append((source, target, "after"))
+
+        if needs_synthetic:
+            for node in parentless:
+                add_after(root.idx, node.idx)
+        for source, target, _kind in self.sequence_edges:
+            add_after(source, target)
+        by_slug = {node.slug: node.idx for node in self.nodes if node.slug}
+        by_base: dict[str, list[int]] = {}
+        for node in self.nodes:
+            by_base.setdefault(slugify(node.title), []).append(node.idx)
+        for node in self.nodes:
+            for slug, line in node.after_raw:
+                target = self._resolve_after(slug, line, by_slug, by_base)
+                if target is not None:
+                    add_after(node.idx, target)
+        return edges
+
+    def _resolve_after(
+        self,
+        slug: str,
+        line: int,
+        by_slug: dict[str, int],
+        by_base: dict[str, list[int]],
+    ) -> int | None:
+        if slug in by_slug:
+            return by_slug[slug]
+        matches = by_base.get(slug, [])
+        if len(matches) > 1:
+            self.refusals.append(
+                f"ambiguous After target: {slug} "
+                "(title is duplicated; use a qualified slug)"
+            )
+            return None
+        if matches:
+            return matches[0]
+        self.refusals.append(f"unknown After target: {slug} (line {line})")
+        return None
+
+    def _refuse_cycles(self, edges: list[tuple[int, int, str]]) -> None:
+        """Refuse once at the first node a directed edge closes a cycle onto.
+
+        Containment and dependency edges share one directed graph. An iterative
+        depth-first search -- so deep documents never exhaust the call stack --
+        marks each node grey while on the stack; an edge back to a grey node is
+        a cycle, reported by that node's slug. Roots and neighbors are walked in
+        index order so the named slug is deterministic.
+        """
+        adjacency: dict[int, list[int]] = {node.idx: [] for node in self.nodes}
+        for source, target, _kind in edges:
+            adjacency[source].append(target)
+        for neighbors in adjacency.values():
+            neighbors.sort()
+        white, grey, black = 0, 1, 2
+        color = dict.fromkeys(adjacency, white)
+        for start in sorted(adjacency):
+            if color[start] != white:
+                continue
+            color[start] = grey
+            stack = [(start, iter(adjacency[start]))]
+            while stack:
+                node_idx, neighbors = stack[-1]
+                advanced = False
+                for nxt in neighbors:
+                    if color[nxt] == grey:
+                        self.refusals.append(
+                            f"dependency cycle at {self.nodes[nxt].slug}"
+                        )
+                        return
+                    if color[nxt] == white:
+                        color[nxt] = grey
+                        stack.append((nxt, iter(adjacency[nxt])))
+                        advanced = True
+                        break
+                if not advanced:
+                    color[node_idx] = black
+                    stack.pop()
 
 
 def parse(text: str) -> Doc:
