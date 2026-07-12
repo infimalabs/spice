@@ -1012,6 +1012,129 @@ def test_integrate_and_publish_hook_aborted_marker_state_guides_retry(
     assert _git(repo, "status", "--porcelain") == ""
 
 
+def test_hook_aborted_marker_recovery_preserves_clean_peer_file(tmp_path, monkeypatch):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+
+    (repo / "README.md").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "README.md")
+    _run(repo, "git", "commit", "-m", "agent work")
+    agent_head = _git(repo, "rev-parse", "HEAD")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "README.md").write_text("baseline work\n", encoding="utf-8")
+    (peer / "peer.txt").write_text("peer feature\n", encoding="utf-8")
+    _run(peer, "git", "add", "README.md", "peer.txt")
+    _run(peer, "git", "commit", "-m", "baseline work with peer feature")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    real_run = gitsync._run
+    merge_attempts = 0
+
+    def hook_aborted_run(
+        repo_root: Path, *args: str
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal merge_attempts
+        if (
+            repo_root == repo
+            and args[:3] == ("merge", "--no-ff", "--no-commit")
+            and merge_attempts == 0
+        ):
+            merge_attempts += 1
+            # A reference-transaction hook aborted the merge after it wrote the
+            # working tree but before MERGE_HEAD: the conflicted file carries
+            # markers and the clean peer file rides along untracked, so nothing
+            # is staged and the index still equals HEAD.
+            (repo / "README.md").write_text(
+                "<<<<<<< HEAD\n"
+                "agent work\n"
+                "=======\n"
+                "baseline work\n"
+                ">>>>>>> origin/main\n",
+                encoding="utf-8",
+            )
+            (repo / "peer.txt").write_text("peer feature\n", encoding="utf-8")
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(repo), *args],
+                1,
+                stdout="",
+                stderr="reference-transaction hook failed before MERGE_HEAD\n",
+            )
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", hook_aborted_run)
+
+    with pytest.raises(gitsync.MergeConflict) as exc_info:
+        gitsync.integrate_and_publish("TASK-20260101T000000000009Z", repo_root=repo)
+
+    message = str(exc_info.value)
+    assert merge_attempts == 1
+    assert "git add -A" in message  # the recipe stages every merged path
+    assert _merge_head_missing(repo)
+
+    # Follow the printed recipe. Staging only the conflict writes one tree;
+    # staging the whole merged tree writes another that also carries the
+    # untracked peer file. The two trees differ by exactly that peer file, so
+    # the fixed recipe is what keeps peer work the old `git add -- <file>`
+    # would have dropped.
+    (repo / "README.md").write_text("resolved work\n", encoding="utf-8")
+    _run(repo, "git", "add", "--", "README.md")
+    conflict_only_tree = _git(repo, "write-tree")
+    _run(repo, "git", "add", "-A")
+    merged_tree = _git(repo, "write-tree")
+
+    merged_names = set(_git(repo, "ls-tree", "--name-only", merged_tree).split())
+    conflict_only_names = set(
+        _git(repo, "ls-tree", "--name-only", conflict_only_tree).split()
+    )
+    assert "peer.txt" in merged_names  # the fixed recipe keeps the peer file
+    assert merged_names - conflict_only_names == {"peer.txt"}
+    cached_names = set(_git(repo, "diff", "--cached", "--name-only").split())
+    assert "peer.txt" in cached_names  # git diff --cached now shows the peer change
+
+    rescue_merge = _git(
+        repo,
+        "commit-tree",
+        merged_tree,
+        "-p",
+        "HEAD",
+        "-p",
+        "origin/main",
+        "-m",
+        "Resolve baseline overlap for TASK-20260101T000000000009Z",
+    )
+    _run(
+        repo,
+        "git",
+        "update-ref",
+        f"refs/heads/{_git(repo, 'branch', '--show-current')}",
+        rescue_merge,
+    )
+    assert _git(repo, "status", "--porcelain") == ""
+
+    result = gitsync.integrate_and_publish(
+        "TASK-20260101T000000000009Z", repo_root=repo
+    )
+    captured = _uda_map(result.uda_args)
+    merge_head = captured["done_merge_head"]
+
+    assert captured["done_head"] == rescue_merge
+    assert _merge_parents(repo, merge_head) == [upstream_head, rescue_merge]
+    published = _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0]
+    assert published == merge_head
+    published_names = set(_git(repo, "ls-tree", "--name-only", merge_head).split())
+    assert "peer.txt" in published_names  # peer work survives to the published merge
+    assert _git(repo, "show", f"{merge_head}:peer.txt") == "peer feature"
+    assert agent_head in _merge_parents(repo, rescue_merge)
+
+
 def test_gitsync_network_commands_are_noninteractive_and_bounded(tmp_path, monkeypatch):
     seen: dict[str, object] = {}
 
