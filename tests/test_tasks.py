@@ -557,6 +557,23 @@ def test_task_add_stores_description_and_caps_title(task_repo):
     assert f"description {body}" in shown
 
 
+@pytest.mark.parametrize(
+    "title",
+    ["Keep due:eom in the title", "Ordinary title remains unchanged"],
+)
+def test_task_add_treats_title_as_literal_text(task_repo, title):
+    handle = create.add(
+        title,
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        priority="none",
+    )
+    row = identity.resolve(handle)
+
+    assert row["description"] == title
+    assert row.get("due", "") == ""
+
+
 def test_task_add_preserves_shared_attachment_refs(task_repo):
     shared = shared_attachment_root(task_repo) / "digest" / "01-image.png"
     shared.parent.mkdir(parents=True, exist_ok=True)
