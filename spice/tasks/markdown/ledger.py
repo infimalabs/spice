@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import re
 
 from spice.errors import SpiceError
 from spice.tasks.markdown.classifier import parse
 from spice.tasks.markdown.dialect import Doc, Node, graph_signature
 
 _MAX_ATX_LEVEL = 6
-_ROLLUP_CONTENT_COL = 0
-_LEAF_CONTENT_COL = 2
+_HEADING_CONTENT_COL = 0
+_ITEM_INDENT_STEP = 2
+_LIST_ITEM_RE = re.compile(r"^ *- ")
 
 
 def export_document(document: Doc) -> str:
@@ -40,7 +41,16 @@ def export_document(document: Doc) -> str:
 
 
 class _Renderer:
-    """Normal-form writer for one parsed task document."""
+    """Normal-form writer for one parsed task document.
+
+    Heading-kind containers spell as ATX headings (a bold span past level
+    six); list items spell as dash bullets indented one step per containment
+    level, so nesting survives to any depth the parser accepts rather than
+    running out of heading levels. Node content sits at the owning column --
+    fields in canonical order, then description, then annotation blocks --
+    and a blank-run collapse keeps structural spacing in normal form while
+    leaving annotation interiors (a fenced blank is content) verbatim.
+    """
 
     def __init__(self, document: Doc) -> None:
         self.doc = document
@@ -64,123 +74,133 @@ class _Renderer:
             self.after.setdefault(source, []).append(document.nodes[target].slug)
         for targets in self.after.values():
             targets.sort()
+        self.rows: list[tuple[str, bool]] = []
 
     def render(self) -> str:
-        frontmatter = [
-            block for block in self.root.annotations if block.startswith("---")
-        ]
-        blocks: list[tuple[list[str], bool]] = []
+        for block in self.root.annotations:
+            if block.startswith("---"):
+                for line in block.split("\n"):
+                    self._emit(line, verbatim=True)
+        # Pre-order walk with an explicit stack so arbitrarily deep containment
+        # never overflows the Python stack. Each frame is (idx, heading_level,
+        # item_indent): a heading deepens its children one level, an item
+        # indents them one step.
+        stack: list[tuple[int, int, int]] = []
         if self.synthetic:
-            preamble = self._content_lines(self.root, _ROLLUP_CONTENT_COL)
-            if preamble:
-                blocks.append((preamble, False))
-            blocks.extend(
-                self._render_node(node, 1) for node in self._order(self._top_level())
+            self._emit("")
+            self._emit_content(self.root, _HEADING_CONTENT_COL)
+            stack.extend(
+                (idx, 1, 0) for idx in reversed(self._ordered_children(self.root))
             )
         else:
-            blocks.append(self._render_node(self.root, 1))
-        lines: list[str] = []
-        for block in frontmatter:
-            lines.extend(block.split("\n"))
-        body = self._join(blocks)
-        if lines and body:
-            lines.append("")
-        lines.extend(body)
-        text = "\n".join(lines).strip("\n")
-        return text + "\n" if text else ""
+            stack.append((self.root.idx, 1, 0))
+        while stack:
+            idx, heading_level, item_indent = stack.pop()
+            node = self.doc.nodes[idx]
+            self._emit_node(node, heading_level, item_indent)
+            if node.kind == "item":
+                child_level, child_indent = (
+                    heading_level,
+                    item_indent + _ITEM_INDENT_STEP,
+                )
+            else:
+                child_level, child_indent = heading_level + 1, 0
+            stack.extend(
+                (child, child_level, child_indent)
+                for child in reversed(self._ordered_children(node))
+            )
+        return self._collapse()
 
-    def _top_level(self) -> list[Node]:
-        return [
-            node
-            for node in self.doc.nodes
-            if node.parent is None and node.idx != self.root.idx
-        ]
+    def _emit(self, text: str, verbatim: bool = False) -> None:
+        self.rows.append((text, verbatim))
 
-    def _order(self, nodes: list[Node]) -> list[Node]:
-        # Leaves precede rollups so a column-0 bullet never binds to a heading
-        # that a preceding sibling opened; sibling order carries no graph
-        # meaning, so this reordering is graph-preserving.
-        leaves = [node for node in nodes if not node.children]
-        rollups = [node for node in nodes if node.children]
-        return leaves + rollups
+    def _emit_node(self, node: Node, heading_level: int, item_indent: int) -> None:
+        if node.kind == "item":
+            # A bare bullet right after another bullet stays tight, the way a
+            # human writes a plain list; anything else opens a fresh block.
+            if not (self._is_bare(node) and self._after_list_item()):
+                self._emit("")
+            self._emit(f"{' ' * item_indent}- {node.title}")
+            self._emit_content(node, item_indent + _ITEM_INDENT_STEP)
+            return
+        self._emit("")
+        if heading_level <= _MAX_ATX_LEVEL:
+            self._emit(f"{'#' * heading_level} {node.title}")
+        else:
+            self._emit(f"**{node.title}**")
+        self._emit("")
+        self._emit_content(node, _HEADING_CONTENT_COL)
 
-    def _render_node(self, node: Node, depth: int) -> tuple[list[str], bool]:
-        if node.children:
-            lines = [self._heading(node.title, depth)]
-            for group in (
-                self._content_lines(node, _ROLLUP_CONTENT_COL),
-                self._join(
-                    self._render_node(self.doc.nodes[child], depth + 1)
-                    for child in self._ordered_children(node)
-                ),
-            ):
-                if group:
-                    lines.append("")
-                    lines.extend(group)
-            return lines, False
-        content = self._content_lines(node, _LEAF_CONTENT_COL)
-        bullet = f"- {node.title}"
-        if not content:
-            return [bullet], True
-        return [bullet, *content], False
-
-    def _ordered_children(self, node: Node) -> list[int]:
-        children = [self.doc.nodes[child] for child in node.children]
-        return [child.idx for child in self._order(children)]
-
-    def _heading(self, title: str, depth: int) -> str:
-        if depth <= _MAX_ATX_LEVEL:
-            return f"{'#' * depth} {title}"
-        return f"**{title}**"
-
-    def _content_lines(self, node: Node, col: int) -> list[str]:
+    def _emit_content(self, node: Node, col: int) -> None:
         pad = " " * col
-        fields: list[str] = [f"{pad}Acceptance: {item}" for item in node.acceptance]
+        for item in node.acceptance:
+            self._emit(f"{pad}Acceptance: {item}")
         targets = self.after.get(node.idx)
         if targets:
-            fields.append(f"{pad}After: {', '.join(targets)}")
+            self._emit(f"{pad}After: {', '.join(targets)}")
         if node.priority:
-            fields.append(f"{pad}Priority: {node.priority}")
+            self._emit(f"{pad}Priority: {node.priority}")
         if node.flow:
-            fields.append(f"{pad}Flow: {', '.join(node.flow)}")
+            self._emit(f"{pad}Flow: {', '.join(node.flow)}")
         if node.due:
-            fields.append(f"{pad}Due: {node.due}")
+            self._emit(f"{pad}Due: {node.due}")
         if node.tags:
-            fields.append(f"{pad}Tags: {', '.join(node.tags)}")
-        description = [
-            f"{pad}{line}" if line else ""
-            for line in node.escaped_description_lines(col)
-        ]
-        annotations = [
-            self._annotation(block, col)
-            for block in node.annotations
-            if not block.startswith("---")
-        ]
-        return self._stack([fields, description, *annotations])
-
-    def _annotation(self, block: str, col: int) -> list[str]:
-        pad = " " * col
-        return [f"{pad}{line}" if line.strip() else "" for line in block.split("\n")]
-
-    def _stack(self, groups: list[list[str]]) -> list[str]:
-        out: list[str] = []
-        for group in groups:
-            if not group:
+            self._emit(f"{pad}Tags: {', '.join(node.tags)}")
+        description = node.escaped_description_lines(col)
+        if description:
+            self._emit("")
+            for line in description:
+                self._emit(f"{pad}{line}" if line else "")
+        for block in node.annotations:
+            if block.startswith("---"):
                 continue
-            if out:
-                out.append("")
-            out.extend(group)
-        return out
+            self._emit("")
+            for line in block.split("\n"):
+                self._emit(f"{pad}{line}" if line.strip() else "", verbatim=True)
 
-    def _join(self, blocks: Iterable[tuple[list[str], bool]]) -> list[str]:
+    def _is_bare(self, node: Node) -> bool:
+        return not (
+            node.acceptance
+            or node.description()
+            or node.priority
+            or node.flow
+            or node.due
+            or node.tags
+            or self.after.get(node.idx)
+            or any(not block.startswith("---") for block in node.annotations)
+        )
+
+    def _after_list_item(self) -> bool:
+        return bool(self.rows) and bool(_LIST_ITEM_RE.match(self.rows[-1][0]))
+
+    def _ordered_children(self, node: Node) -> list[int]:
+        # Items (dash bullets) precede headings so a bullet never binds to a
+        # heading a preceding sibling opened; sibling order carries no graph
+        # meaning, so this reordering is graph-preserving. The synthetic root
+        # owns the parentless nodes, which reach it by edge rather than by the
+        # ``children`` list, so they are gathered by their missing parent.
+        if self.synthetic and node.idx == self.root.idx:
+            children = [
+                other
+                for other in self.doc.nodes
+                if other.parent is None and other.idx != self.root.idx
+            ]
+        else:
+            children = [self.doc.nodes[child] for child in node.children]
+        items = [child.idx for child in children if child.kind == "item"]
+        headings = [child.idx for child in children if child.kind != "item"]
+        return items + headings
+
+    def _collapse(self) -> str:
         out: list[str] = []
-        prev_tight = False
-        for lines, tight in blocks:
-            if out and not (prev_tight and tight):
-                out.append("")
-            out.extend(lines)
-            prev_tight = tight
-        return out
+        for text, verbatim in self.rows:
+            if not verbatim and not text and (not out or not out[-1]):
+                continue
+            out.append(text)
+        while out and not out[-1]:
+            out.pop()
+        body = "\n".join(out)
+        return body + "\n" if body else ""
 
 
 def export_ledger(handle: str) -> str:
