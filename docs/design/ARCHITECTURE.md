@@ -72,6 +72,24 @@ baseline-first completion merges over that board. Git sync belongs to task
 boundaries; normal development is building, validating, committing, and
 advancing phases.
 
+Task creation has a deliberately cheap wording gate. It scans title,
+description, and acceptance prose for configured taste words and maxim
+triggers, but it does not invoke the conscience judge. A soft hit prepends a
+plan phase and records a review marker. Keeping this path local and
+deterministic avoids adding judge startup and inference latency to every task
+creation, at the cost of lower semantic accuracy.
+
+False positives are handled with clause-local context rather than a judge
+call. Explicit negation and direct prohibitions suppress the trigger they
+govern, while relation words such as `by`, `through`, `using`, `via`, and
+`with` distinguish a prohibited means from the outcome being requested. Thus
+`Delete the preserveLaneHints option threading` is a removal directive and
+does not trip the gate, while `Avoid failure by adding a fallback path` still
+does. If this bounded context model stops being adequate, the alternative is
+to invoke the actual judge only after a soft hit; that would improve semantic
+accuracy, but would make task creation slower and dependent on judge
+availability.
+
 `spice serve` projects this into lanes. A lane is an operator-owned container
 over a concrete worktree target. Agents are occupants, so renewal changes the
 occupant while the lane's message stream survives. Lanes can fuse into teams,
