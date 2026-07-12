@@ -2,11 +2,14 @@
 
 from spice.tasks import config
 from spice.tasks.markdown.dialect import (
+    DOCUMENT_ROOT_SLUG,
+    DOCUMENT_ROOT_TITLE,
     QUALIFIER_SEPARATOR,
     Doc,
     Node,
     graph_signature,
     slugify,
+    title_words,
 )
 
 
@@ -106,6 +109,23 @@ def test_repeated_separators_collapse_so_a_natural_slug_holds_no_double_hyphen()
 
 def test_qualifier_separator_is_reserved_double_hyphen() -> None:
     assert QUALIFIER_SEPARATOR == "--"
+
+
+def test_document_root_title_slugs_to_the_reserved_slug() -> None:
+    # The synthetic root's title must slug to the reserved slug, so a parsed node
+    # sharing that title genuinely collides with it.
+    assert slugify(DOCUMENT_ROOT_TITLE) == DOCUMENT_ROOT_SLUG
+    assert DOCUMENT_ROOT_SLUG == "document-root"
+
+
+def test_title_words_keep_link_url_words_that_slugify_drops() -> None:
+    # slugify keeps only the link text; title_words additionally keeps the URL
+    # words in reading order, which is how sibling duplicates find a
+    # distinguisher when they differ only inside a link.
+    title = "Update [the guide](http://x/v2)"
+    assert title_words(title) == ["update", "the", "guide", "http", "x", "v2"]
+    assert slugify(title) == "update-the-guide"
+    assert title_words(title) != slugify(title).split("-")
 
 
 def test_task_document_identity_udas_are_system_owned_strings() -> None:
