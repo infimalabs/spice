@@ -254,6 +254,14 @@ def _require_steer_lifetime(actor: str, *, action: str) -> None:
         )
 
 
+def _due_args(due: str | None, mapped_priority: str, *, auto_due: bool) -> list[str]:
+    if due:
+        return [f"due:{due}"]
+    if auto_due and mapped_priority in config.SLA_DUE_SECONDS:
+        return [f"due:{tw.future_iso(config.SLA_DUE_SECONDS[mapped_priority])}"]
+    return []
+
+
 def _build_add_args(
     *,
     title: str,
@@ -273,6 +281,7 @@ def _build_add_args(
     extra: list[str] | None,
     creation_surface: str | None,
     origin: str = "",
+    auto_due: bool = True,
 ) -> list[str]:
     mapped_priority = config.map_priority(priority)
     args = [
@@ -283,10 +292,7 @@ def _build_add_args(
     ]
     if mapped_priority:
         args.append(f"priority:{mapped_priority}")
-    if due:
-        args.append(f"due:{due}")
-    elif mapped_priority and mapped_priority in config.SLA_DUE_SECONDS:
-        args.append(f"due:{tw.future_iso(config.SLA_DUE_SECONDS[mapped_priority])}")
+    args.extend(_due_args(due, mapped_priority, auto_due=auto_due))
     if wait:
         args.append(f"wait:{wait}")
     if scheduled:
