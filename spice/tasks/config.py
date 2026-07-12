@@ -58,6 +58,11 @@ PER_STEM_FLOWS: dict[str, tuple[str, ...]] = {}
 TASK_CREATION_SURFACE_UDA = "creation_surface"
 TASK_CREATION_SURFACE_CLI = "cli"
 TASK_WORDING_REVIEW_UDA = "wording_review"
+# Task-document identity is system-owned: authoring surfaces never write or
+# edit these fields; apply writes them atomically when it creates a row.
+TASKDOC_ID_UDA = "taskdoc_id"
+TASKDOC_PARENT_UDA = "taskdoc_parent"
+TASKDOC_SYSTEM_UDAS = frozenset({TASKDOC_ID_UDA, TASKDOC_PARENT_UDA})
 
 SENTINEL_ACTOR = "00000000-0000-0000-0000-000000000000"
 OOPS_WAIT = "2099-01-01T00:00:00"
@@ -302,6 +307,7 @@ _CLAIM = [
     "claim_context_turn",
 ]
 _REVIEW = ["review_author", "review_by", "review_at", "review_finding", "review_note"]
+_TASK_DOCUMENT = [TASKDOC_ID_UDA, TASKDOC_PARENT_UDA]
 _EVIDENCE = [
     "acceptance",
     "task_description",
@@ -445,7 +451,7 @@ def uda_schema() -> dict[str, dict[str, str]]:
     schema["phase_i"] = {"type": "numeric", "label": "PhaseIndex"}
     for i in range(PHASE_SLOT_COUNT):
         schema[f"phase_{i}"] = {"type": _STRING, "label": f"Phase{i}", "values": enum}
-    for name in (*_CLAIM, *_REVIEW, *_EVIDENCE):
+    for name in (*_CLAIM, *_REVIEW, *_TASK_DOCUMENT, *_EVIDENCE):
         schema[name] = {"type": _STRING, "label": name}
     return schema
 

@@ -7,12 +7,12 @@ from typing import Never
 
 from spice.errors import SpiceError
 from spice.tasks.markdown.classifier import parse
-from spice.tasks.markdown.dialect import TaskDocument
+from spice.tasks.markdown.dialect import Doc
 from spice.tasks.taskdoc import read_document
 
 
 def apply_document(
-    document: TaskDocument,
+    document: Doc,
     *,
     project: str | None,
     origin: str | None,
