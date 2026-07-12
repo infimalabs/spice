@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import re
 
-from spice.policy import COMMIT_MESSAGE_WRAP_LIMIT
 from spice.tasks.config import APPROVED_PHASES
 from spice.tasks.markdown.dialect import (
     CODE_INDENT_COLS,
     DOCUMENT_ROOT_SLUG,
     DOCUMENT_ROOT_TITLE,
     FIELD_LABELS,
+    LONG_TITLE_CHARS,
     QUALIFIER_SEPARATOR,
     Doc,
     Node,
@@ -18,6 +18,7 @@ from spice.tasks.markdown.dialect import (
     dedent_content,
     indent_width,
     slugify,
+    title_carries_url,
     title_words,
     unescape_prose,
 )
@@ -96,13 +97,13 @@ class Parser:
         self.warnings.append((line, code, message))
 
     def warn_title(self, node: Node) -> None:
-        if _INLINE_LINK_RE.search(node.title):
+        if title_carries_url(node.title):
             self.warn(
                 node.line,
                 "url-title",
-                "title contains a URL; slug uses visible link text only",
+                "title contains a URL; slug omits URL text",
             )
-        if len(node.title) > COMMIT_MESSAGE_WRAP_LIMIT:
+        if len(node.title) > LONG_TITLE_CHARS:
             self.warn(
                 node.line,
                 "long-title",

@@ -54,6 +54,8 @@ def test_wording_qualifier_is_exactly_the_slug_words_each_rival_lacks() -> None:
     )
     assert qualified == ["update-guide--blue-two", "update-guide--red-one"]
     assert [warning[1] for warning in document.warnings] == [
+        "url-title",
+        "url-title",
         "dup-qualified",
         "dup-qualified",
     ]

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 LINK_RESIDUE_CHARS = 12
 CODE_INDENT_COLS = 4
+LONG_TITLE_CHARS = 90
 
 # The natural slug of a title joins its non-empty ASCII words with single
 # hyphens, so two hyphens can never appear inside one. Reserving ``--`` as the
@@ -24,6 +25,7 @@ DOCUMENT_ROOT_SLUG = "document-root"
 _HEADING_RE = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*$")
 _LIST_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])(\s+)(.+?)\s*$")
 _INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]*)\)")
+_URL_RE = re.compile(r"https?://\S+")
 _HR_RE = re.compile(r"^ {0,3}((?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$")
 _SETEXT_RE = re.compile(r"^ {0,3}(=+|-{2,})\s*$")
 _BOLD_SPAN_RE = re.compile(r"^([*_]{2,3})([^*_]+)\1$")
@@ -147,20 +149,26 @@ def graph_signature(document: Doc) -> GraphSignature:
 def slugify(title: str) -> str:
     """Reduce a task-document ``title`` to its identity slug.
 
-    An inline link contributes its visible text; the link URL is dropped first so
-    it can never leak into the slug. The remaining text is lowercased and its
-    ASCII words are joined with single hyphens. A title with no ASCII word slugs
-    to the empty string, which lets ``parse`` refuse it with the
-    title-has-no-ASCII-words message.
+    An inline link contributes its visible text, while inline-link targets and
+    bare URLs are dropped so they can never leak into the slug. The remaining
+    text is lowercased and its ASCII words are joined with single hyphens. A
+    title with no ASCII word slugs to the empty string, which lets ``parse``
+    refuse it with the title-has-no-ASCII-words message.
     """
     text = _INLINE_LINK_RE.sub(r"\1", title)
+    text = _URL_RE.sub(" ", text)
     return "-".join(_SLUG_WORD_RE.findall(text.lower()))
+
+
+def title_carries_url(title: str) -> bool:
+    """Return whether title lint should flag a bare URL or inline link."""
+    return bool(_URL_RE.search(title) or _INLINE_LINK_RE.search(title))
 
 
 def title_words(title: str) -> list[str]:
     """Every ASCII slug-word a title carries, links and URLs included.
 
-    Unlike :func:`slugify`, which drops a link's URL and keeps only its visible
+    Unlike :func:`slugify`, which drops URLs and keeps an inline link's visible
     text, this preserves every ASCII word in the raw title -- URL words too --
     in reading order. Duplicate qualification uses it to find the words one
     occurrence carries that its rivals do not, so titles that share a base slug
