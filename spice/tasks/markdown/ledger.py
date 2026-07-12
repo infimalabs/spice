@@ -3,15 +3,36 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from spice.errors import SpiceError
+from spice.tasks import claimstate, config, identity
 from spice.tasks.markdown.classifier import parse
-from spice.tasks.markdown.dialect import Doc, Node, graph_signature
+from spice.tasks.markdown.dialect import (
+    DOCUMENT_ROOT_SLUG,
+    DOCUMENT_ROOT_TITLE,
+    Doc,
+    Node,
+    graph_signature,
+)
 
 _MAX_ATX_LEVEL = 6
 _HEADING_CONTENT_COL = 0
 _ITEM_INDENT_STEP = 2
 _LIST_ITEM_RE = re.compile(r"^ *- ")
+_PRIORITY_NAMES = {"H": "high", "M": "medium", "L": "low"}
+_RUNTIME_ANNOTATION_PREFIXES = (
+    "ack ",
+    "claim stolen:",
+    "suspect wording:",
+    "validation:",
+    "review:",
+    "review follow-up depends on ",
+    "depends:",
+    "forced delete of live claim:",
+    "deleted:",
+    "wording review resolved:",
+)
 
 
 def export_document(document: Doc) -> str:
@@ -209,4 +230,172 @@ def export_ledger(handle: str) -> str:
 
 
 def _load_family(handle: str) -> Doc:
-    raise SpiceError("task-family loading is not implemented")
+    from spice.tasks.markdown.apply import load_family_rows
+
+    target = identity.resolve(handle)
+    target_slug = str(target.get(config.TASKDOC_ID_UDA) or "")
+    if not target_slug:
+        raise SpiceError(f"{identity.render_handle(target)} is not in a task document")
+    project = str(target.get("project") or "")
+    origin = str(target.get("origin") or "")
+    rows = load_family_rows(project, origin)
+    if all(str(row.get("uuid") or "") != str(target.get("uuid") or "") for row in rows):
+        raise SpiceError(f"{identity.render_handle(target)} is not in a visible family")
+    return _document_from_rows(rows)
+
+
+def _document_from_rows(rows: list[dict[str, Any]]) -> Doc:
+    rows_by_slug: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        slug = str(row.get(config.TASKDOC_ID_UDA) or "")
+        if slug in rows_by_slug:
+            handles = sorted(
+                identity.render_handle(candidate)
+                for candidate in (rows_by_slug[slug], row)
+            )
+            raise SpiceError(f"{slug} is ambiguous in family: {', '.join(handles)}")
+        rows_by_slug[slug] = row
+
+    nodes = [_node_from_row(index, row) for index, row in enumerate(rows)]
+    index_by_slug = {node.slug: node.idx for node in nodes}
+    for node, row in zip(nodes, rows, strict=True):
+        parent_slug = str(row.get(config.TASKDOC_PARENT_UDA) or "")
+        if not parent_slug:
+            continue
+        parent_idx = index_by_slug.get(parent_slug)
+        if parent_idx is None:
+            raise SpiceError(f"{node.slug} has unknown taskdoc_parent: {parent_slug}")
+        if parent_idx == node.idx:
+            raise SpiceError(f"{node.slug} cannot be its own taskdoc_parent")
+        node.parent = parent_idx
+        nodes[parent_idx].children.append(node.idx)
+    edges = _family_edges(nodes, rows)
+    _mark_node_kinds(nodes, edges)
+    root = _family_root(nodes, edges)
+    return Doc(nodes=nodes, root=root, edges=edges, refusals=[], warnings=[])
+
+
+def _node_from_row(index: int, row: dict[str, Any]) -> Node:
+    slug = str(row.get(config.TASKDOC_ID_UDA) or "")
+    title = str(row.get("description") or "")
+    node = Node(
+        idx=index,
+        kind="item",
+        title=title,
+        line=index + 1,
+        acceptance=_acceptance(row),
+        annotations=_content_annotations(row),
+        priority=_PRIORITY_NAMES.get(str(row.get("priority") or "")),
+        flow=claimstate.phases_of(row),
+        due=str(row.get("due") or "") or None,
+        tags=sorted(str(tag) for tag in (row.get("tags") or ())),
+        slug=slug,
+    )
+    description = str(row.get("task_description") or "")
+    node.desc.extend(description.splitlines())
+    return node
+
+
+def _acceptance(row: dict[str, Any]) -> list[str]:
+    raw = str(row.get("acceptance") or "")
+    return raw.split(" | ") if raw else []
+
+
+def _content_annotations(row: dict[str, Any]) -> list[str]:
+    annotations: list[str] = []
+    for annotation in row.get("annotations") or ():
+        if not isinstance(annotation, dict):
+            continue
+        text = str(annotation.get("description") or "")
+        if text.startswith(_RUNTIME_ANNOTATION_PREFIXES):
+            continue
+        annotations.append(text)
+    return annotations
+
+
+def _family_edges(
+    nodes: list[Node], rows: list[dict[str, Any]]
+) -> list[tuple[int, int, str]]:
+    index_by_uuid = {
+        str(row.get("uuid") or ""): node.idx
+        for node, row in zip(nodes, rows, strict=True)
+        if row.get("uuid")
+    }
+    edges: list[tuple[int, int, str]] = []
+    seen: set[tuple[int, int]] = set()
+    for node in nodes:
+        if node.parent is not None:
+            _append_edge(edges, seen, node.parent, node.idx, "containment")
+    for node, row in zip(nodes, rows, strict=True):
+        for target_uuid in _depends(row):
+            target_idx = index_by_uuid.get(target_uuid)
+            if target_idx is not None:
+                _append_edge(edges, seen, node.idx, target_idx, "after")
+    return edges
+
+
+def _mark_node_kinds(nodes: list[Node], edges: list[tuple[int, int, str]]) -> None:
+    parentless = {node.idx for node in nodes if node.parent is None}
+    for node in nodes:
+        synthetic_target = any(
+            source == node.idx and target in parentless and target != node.idx
+            for source, target, _kind in edges
+        )
+        if (
+            node.slug == DOCUMENT_ROOT_SLUG
+            and node.title == DOCUMENT_ROOT_TITLE
+            and synthetic_target
+        ):
+            node.kind = "document"
+        else:
+            node.kind = "heading" if node.children else "item"
+
+
+def _depends(row: dict[str, Any]) -> tuple[str, ...]:
+    raw = row.get("depends") or ()
+    if isinstance(raw, str):
+        return (raw,) if raw else ()
+    return tuple(str(value) for value in raw if value)
+
+
+def _append_edge(
+    edges: list[tuple[int, int, str]],
+    seen: set[tuple[int, int]],
+    source: int,
+    target: int,
+    kind: str,
+) -> None:
+    if (source, target) in seen:
+        return
+    seen.add((source, target))
+    edges.append((source, target, kind))
+
+
+def _family_root(nodes: list[Node], edges: list[tuple[int, int, str]]) -> int:
+    synthetic = [node.idx for node in nodes if node.kind == "document"]
+    if len(synthetic) > 1:
+        raise SpiceError("task-document family has multiple synthetic roots")
+    parentless = [node.idx for node in nodes if node.parent is None]
+    if synthetic:
+        root = synthetic[0]
+    elif len(parentless) == 1:
+        return parentless[0]
+    elif parentless:
+        root = len(nodes)
+        nodes.append(
+            Node(
+                idx=root,
+                kind="document",
+                title=DOCUMENT_ROOT_TITLE,
+                line=0,
+                slug=DOCUMENT_ROOT_SLUG,
+            )
+        )
+    else:
+        raise SpiceError("task-document family has no root")
+
+    seen = {(source, target) for source, target, _kind in edges}
+    for target in parentless:
+        if target != root:
+            _append_edge(edges, seen, root, target, "after")
+    return root
