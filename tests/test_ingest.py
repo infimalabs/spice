@@ -294,9 +294,206 @@ def test_edge_diff_keeps_board_owned_dependencies_outside_the_family(task_repo):
         project="task.unit",
         origin=f"ack:{ACK_KEY}",
     )
+    report = apply.execute_plan(plan)
+    fresh = identity.resolve(root)
 
     assert plan.edge_drops == (apply.EdgeChange("root", "child"),)
-    assert [verb.render() for verb in plan.verbs] == [
+    assert fresh["depends"] == [identity.uuid_of(identity.resolve(external))]
+    assert report.splitlines()[1:] == [
         "edge-dropped root -> child",
         f"loose child {child}",
     ]
+
+
+def test_apply_creates_dependency_postorder_with_atomic_identity_and_no_auto_due(
+    task_repo,
+):
+    assert task_repo.is_dir()
+    document = parse(
+        "# Root\n"
+        "Acceptance: root complete\n"
+        "Priority: high\n"
+        "Flow: todo\n"
+        "## Child\n"
+        "Acceptance: child complete\n"
+        "Flow: todo\n"
+    )
+
+    report = apply.apply_document(
+        document,
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+    )
+
+    rows = apply.load_family_rows("task.unit", f"ack:{ACK_KEY}")
+    by_slug = {str(row[config.TASKDOC_ID_UDA]): row for row in rows}
+    root = by_slug["root"]
+    child = by_slug["child"]
+    root_handle = identity.render_handle(root)
+    child_handle = identity.render_handle(child)
+    assert str(child[config.TASKDOC_PARENT_UDA]) == "root"
+    assert str(root.get(config.TASKDOC_PARENT_UDA) or "") == ""
+    assert root["depends"] == [identity.uuid_of(child)]
+    assert root["priority"] == "H"
+    assert str(root.get("due") or "") == ""
+    assert child["incepted"] < root["incepted"]
+    assert report.splitlines() == [
+        f"root {root_handle}",
+        f"created child {child_handle}",
+        f"created root {root_handle}",
+    ]
+
+
+def test_second_apply_is_reused_and_keeps_the_board_byte_identical(task_repo):
+    assert task_repo.is_dir()
+    document = parse(
+        "# Root\n"
+        "Acceptance: root complete\n"
+        "Flow: todo\n"
+        "## Child\n"
+        "Acceptance: child complete\n"
+        "Flow: todo\n"
+    )
+    apply.apply_document(
+        document,
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+    )
+    before = apply.load_family_rows("task.unit", f"ack:{ACK_KEY}")
+    handles = {
+        str(row[config.TASKDOC_ID_UDA]): identity.render_handle(row) for row in before
+    }
+
+    report = apply.apply_document(
+        document,
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+    )
+
+    assert report.splitlines() == [
+        f"root {handles['root']}",
+        f"reused root {handles['root']}",
+        f"reused child {handles['child']}",
+    ]
+    assert apply.load_family_rows("task.unit", f"ack:{ACK_KEY}") == before
+
+
+def test_apply_lands_statement_fields_annotations_and_family_edges(task_repo):
+    assert task_repo.is_dir()
+    root = _family_task("Root", slug="root")
+    child = _family_task("Child", slug="child", parent="root")
+    tw.run(
+        [
+            identity.uuid_of(identity.resolve(root)),
+            "modify",
+            "+legacy",
+            "due:2026-09-01",
+        ]
+    )
+    document = parse(
+        "# Root\n"
+        "Landed body\n"
+        "Acceptance: landed criterion\n"
+        "Priority: high\n"
+        "Flow: todo\n"
+        "Tags: importer, perf\n"
+        "> landed note\n"
+        "## Child\n"
+        "Acceptance: family matching fixture\n"
+        "Flow: todo\n"
+    )
+
+    report = apply.apply_document(
+        document,
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+    )
+
+    fresh = identity.resolve(root)
+    annotations = [
+        str(annotation.get("description") or "")
+        for annotation in fresh.get("annotations") or ()
+    ]
+    assert fresh["task_description"] == "Landed body"
+    assert fresh["acceptance"] == "landed criterion"
+    assert fresh["priority"] == "H"
+    assert sorted(fresh["tags"]) == ["importer", "perf"]
+    assert str(fresh.get("due") or "") == ""
+    assert fresh["depends"] == [identity.uuid_of(identity.resolve(child))]
+    assert annotations == ["> landed note"]
+    assert report.splitlines() == [
+        f"root {root}",
+        f"reused child {child}",
+        f"updated root {root} description",
+        f"updated root {root} acceptance",
+        f"updated root {root} priority",
+        f"updated root {root} due",
+        f"updated root {root} tags",
+        f"updated root {root} annotations",
+        "edge-added root -> child",
+    ]
+
+
+def test_write_time_settlement_demotes_field_and_edge_writes_to_drift(
+    task_repo, monkeypatch
+):
+    assert task_repo.is_dir()
+    root = _family_task("Root", slug="root")
+    child = _family_task("Child", slug="child", parent="root")
+    original_fresh_row = apply._fresh_row
+    settled: set[str] = set()
+
+    def settle_root(row):
+        slug = str(row.get(config.TASKDOC_ID_UDA) or "")
+        if slug == "root" and slug not in settled:
+            settled.add(slug)
+            tw.run(
+                [
+                    identity.uuid_of(row),
+                    "modify",
+                    "start:now",
+                    f"claim_at:{tw.now_iso()}",
+                ]
+            )
+        return original_fresh_row(row)
+
+    monkeypatch.setattr(apply, "_fresh_row", settle_root)
+    document = parse(
+        "# Root\n"
+        "Document rewrite after planning\n"
+        "Acceptance: family matching fixture\n"
+        "Flow: todo\n"
+        "## Child\n"
+        "Acceptance: family matching fixture\n"
+        "Flow: todo\n"
+    )
+
+    report = apply.apply_document(
+        document,
+        project="task.unit",
+        origin=f"ack:{ACK_KEY}",
+    )
+
+    fresh = identity.resolve(root)
+    assert settled == {"root"}
+    assert str(fresh.get("task_description") or "") == ""
+    assert list(fresh.get("depends") or ()) == []
+    assert report.splitlines() == [
+        f"root {root}",
+        f"reused child {child}",
+        f"drift root {root} description",
+        f"drift root {root} after",
+    ]
+
+
+def test_acceptance_pipe_refuses_apply_before_creating_rows(task_repo):
+    assert task_repo.is_dir()
+
+    with pytest.raises(SpiceError, match=r"acceptance criterion on root contains '\|'"):
+        apply.apply_document(
+            parse("# Root\nAcceptance: first | second\nFlow: todo\n"),
+            project="task.unit",
+            origin=f"ack:{ACK_KEY}",
+        )
+
+    assert tw.export(["status:pending"]) == []

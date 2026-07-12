@@ -437,6 +437,8 @@ def _validate_plan_input(document: Doc) -> None:
     for node in document.nodes:
         if any("|" in criterion for criterion in node.acceptance):
             raise SpiceError(f"acceptance criterion on {node.slug} contains '|'")
+        if node.due:
+            _normalized_due(node.due)
 
 
 def _desired_targets(document: Doc) -> dict[str, set[str]]:
@@ -767,6 +769,240 @@ def plan_document(document: Doc, *, project: str, origin: str) -> ApplyPlan:
     )
 
 
+def _created_slugs(plan: ApplyPlan) -> tuple[str, ...]:
+    return tuple(verb.slug for verb in plan.verbs if verb.kind == "created")
+
+
+def _row_by_incepted(incepted: str) -> dict[str, Any]:
+    rows = tw.export([f"incepted.is:{incepted}"])
+    if len(rows) != 1:
+        raise SpiceError(f"created task identity is ambiguous: {incepted}")
+    return rows[0]
+
+
+def _create_plan_rows(plan: ApplyPlan) -> dict[str, dict[str, Any]]:
+    planned_by_slug = {planned.node.slug: planned for planned in plan.nodes}
+    rows_by_slug = {
+        planned.node.slug: planned.row
+        for planned in plan.nodes
+        if planned.row is not None
+    }
+    actor = tw.canonical_actor(tw.current_actor())
+    for slug in _created_slugs(plan):
+        planned = planned_by_slug[slug]
+        node = planned.node
+        dependency_handles = [
+            identity.render_handle(rows_by_slug[target])
+            for target in planned.dependency_slugs
+        ]
+        parent = plan.nodes[node.parent].node.slug if node.parent is not None else ""
+        args = create._build_add_args(
+            title=node.title,
+            body=node.description() or None,
+            actor=actor,
+            incepted=planned.incepted,
+            resolved_project=plan.project,
+            phases=list(_desired_flow(node, plan.project)),
+            priority=node.priority or "none",
+            tags=list(node.tags),
+            after=dependency_handles,
+            acceptance=list(node.acceptance),
+            wait=None,
+            scheduled=None,
+            until=None,
+            due=node.due,
+            extra=[
+                f"{config.TASKDOC_ID_UDA}:{node.slug}",
+                f"{config.TASKDOC_PARENT_UDA}:{parent}",
+            ],
+            creation_surface=None,
+            origin=plan.origin,
+            auto_due=False,
+        )
+        tw.run(args)
+        rows_by_slug[slug] = _row_by_incepted(planned.incepted)
+    return rows_by_slug
+
+
+def _fresh_row(row: dict[str, Any]) -> dict[str, Any]:
+    uuid = identity.uuid_of(row)
+    rows = tw.export([uuid])
+    if len(rows) != 1:
+        raise SpiceError(
+            f"task disappeared during apply: {identity.render_handle(row)}"
+        )
+    return rows[0]
+
+
+def _field_modifications(
+    updates: Iterable[FieldUpdate], fresh: dict[str, Any]
+) -> list[str]:
+    modifications: list[str] = []
+    for update in updates:
+        if update.field == "annotations":
+            continue
+        if update.field == "description":
+            modifications.append(f"task_description:{update.value}")
+        elif update.field == "tags":
+            desired = set(update.value)
+            current = set(_normalized_tags(fresh.get("tags") or ()))
+            modifications.extend(f"-{tag}" for tag in sorted(current - desired))
+            modifications.extend(f"+{tag}" for tag in sorted(desired - current))
+        else:
+            modifications.append(f"{update.field}:{update.value}")
+    return modifications
+
+
+def _append_annotations(planned: PlannedNode, row: dict[str, Any]) -> None:
+    uuid = identity.uuid_of(row)
+    for block in planned.annotations:
+        claimstate.annotate(uuid, block)
+
+
+def _execute_field_updates(
+    plan: ApplyPlan, rows_by_slug: dict[str, dict[str, Any]]
+) -> set[tuple[str, str]]:
+    demoted: set[tuple[str, str]] = set()
+    for planned in plan.nodes:
+        row = rows_by_slug[planned.node.slug]
+        statement_updates = tuple(
+            update for update in planned.updates if update.field != "annotations"
+        )
+        if planned.row is not None and statement_updates:
+            fresh = _fresh_row(row)
+            rows_by_slug[planned.node.slug] = fresh
+            if _is_settled(fresh):
+                demoted.update(
+                    (planned.node.slug, update.field) for update in statement_updates
+                )
+            else:
+                modifications = _field_modifications(statement_updates, fresh)
+                if modifications:
+                    tw.run([identity.uuid_of(fresh), "modify", *modifications])
+        _append_annotations(planned, rows_by_slug[planned.node.slug])
+    return demoted
+
+
+def _family_execution_rows(
+    plan: ApplyPlan, listed_rows: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    rows = {
+        str(row.get(config.TASKDOC_ID_UDA) or ""): row
+        for row in load_family_rows(plan.project, plan.origin)
+    }
+    rows.update(listed_rows)
+    return rows
+
+
+def _execute_edge_change(
+    change: EdgeChange,
+    *,
+    drop: bool,
+    planned_by_slug: dict[str, PlannedNode],
+    rows_by_slug: dict[str, dict[str, Any]],
+) -> bool:
+    planned = planned_by_slug[change.source]
+    if planned.row is None:
+        return True
+    fresh = _fresh_row(rows_by_slug[change.source])
+    rows_by_slug[change.source] = fresh
+    if _is_settled(fresh):
+        return False
+    target_uuid = identity.uuid_of(rows_by_slug[change.target])
+    modifier = f"depends:-{target_uuid}" if drop else f"depends:{target_uuid}"
+    tw.run([identity.uuid_of(fresh), "modify", modifier])
+    return True
+
+
+def _execute_edge_updates(
+    plan: ApplyPlan, listed_rows: dict[str, dict[str, Any]]
+) -> set[tuple[str, str, str]]:
+    rows_by_slug = _family_execution_rows(plan, listed_rows)
+    planned_by_slug = {planned.node.slug: planned for planned in plan.nodes}
+    demoted: set[tuple[str, str, str]] = set()
+    for kind, changes, drop in (
+        ("edge-added", plan.edge_additions, False),
+        ("edge-dropped", plan.edge_drops, True),
+    ):
+        for change in changes:
+            landed = _execute_edge_change(
+                change,
+                drop=drop,
+                planned_by_slug=planned_by_slug,
+                rows_by_slug=rows_by_slug,
+            )
+            if not landed:
+                demoted.add((kind, change.source, change.target))
+    return demoted
+
+
+def _execution_verbs(
+    plan: ApplyPlan,
+    demoted_fields: set[tuple[str, str]],
+    demoted_edges: set[tuple[str, str, str]],
+) -> tuple[PlanVerb, ...]:
+    buckets: dict[str, list[PlanVerb]] = {
+        kind: []
+        for kind in (
+            "created",
+            "reused",
+            "updated",
+            "edge-added",
+            "edge-dropped",
+            "loose",
+            "drift",
+            "warn",
+        )
+    }
+    planned_by_slug = {planned.node.slug: planned for planned in plan.nodes}
+    for verb in plan.verbs:
+        if verb.kind == "updated" and (verb.slug, verb.field) in demoted_fields:
+            buckets["drift"].append(
+                PlanVerb("drift", verb.slug, verb.handle, verb.field)
+            )
+        elif (verb.kind, verb.slug, verb.target) in demoted_edges:
+            handle = planned_by_slug[verb.slug].handle
+            buckets["drift"].append(PlanVerb("drift", verb.slug, handle, "after"))
+        else:
+            buckets[verb.kind].append(verb)
+
+    node_order = {planned.node.slug: planned.node.idx for planned in plan.nodes}
+    drift_field_order = {
+        field: index
+        for index, field in enumerate(("title", *_FIELD_ORDER, "flow", "after"))
+    }
+    deduped_drift = {
+        (verb.slug, verb.field): verb for verb in buckets["drift"]
+    }.values()
+    buckets["drift"] = sorted(
+        deduped_drift,
+        key=lambda verb: (node_order[verb.slug], drift_field_order[verb.field]),
+    )
+    return tuple(
+        verb
+        for kind in (
+            "created",
+            "reused",
+            "updated",
+            "edge-added",
+            "edge-dropped",
+            "loose",
+            "drift",
+            "warn",
+        )
+        for verb in buckets[kind]
+    )
+
+
+def execute_plan(plan: ApplyPlan) -> str:
+    """Land a validated plan, rechecking settled ownership before each write."""
+    rows_by_slug = _create_plan_rows(plan)
+    demoted_fields = _execute_field_updates(plan, rows_by_slug)
+    demoted_edges = _execute_edge_updates(plan, rows_by_slug)
+    verbs = _execution_verbs(plan, demoted_fields, demoted_edges)
+    return "\n".join([f"root {plan.root_handle}", *(verb.render() for verb in verbs)])
+
+
 def apply_document(
     document: Doc,
     *,
@@ -778,7 +1014,7 @@ def apply_document(
     plan = plan_document(document, project=project, origin=origin)
     if dry_run:
         return plan.report()
-    raise SpiceError("task-document apply is not implemented")
+    return execute_plan(plan)
 
 
 def ingest_path(
