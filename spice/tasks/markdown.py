@@ -10,6 +10,7 @@ from typing import Any
 
 from spice.errors import SpiceError
 from spice.tasks import claimstate, config, create, identity, ops, tw
+from spice.tasks.taskdoc import read_document
 
 CANONICAL_FENCE = "spice.task-dag.v1"
 MARKDOWN_ID_PREFIX = "markdown-id:"
@@ -109,7 +110,7 @@ def ingest_path(
     origin: str | None = None,
     creation_surface: str | None = None,
 ) -> str:
-    text = Path(path).read_text(encoding="utf-8")
+    text = read_document(path)
     dag = parse_markdown(text, default_project=project, default_priority=priority)
     return create_task_dag(dag, origin=origin, creation_surface=creation_surface)
 
