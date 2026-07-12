@@ -158,7 +158,7 @@ def test_field_sections_feed_the_nearest_shallower_node() -> None:
 
     root, child = parser.nodes
     assert root.acceptance == ["parses headings", "preserves nesting"]
-    assert root.after_raw == [("Bootstrap parser", 8)]
+    assert root.after_raw == [("bootstrap-parser", 8)]
     assert root.description() == "Keep the classifier deterministic."
     assert root.annotations == [
         "> Review unusual indentation\n> Preserve warning lines"
