@@ -228,19 +228,28 @@ def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str
 
 
 def project_depth_bounds() -> tuple[int, int]:
-    table = _tasks_config_table()
-    min_depth = _configured_project_depth(
-        table, "project_min_depth", DEFAULT_PROJECT_MIN_DEPTH
-    )
-    max_depth = _configured_project_depth(
-        table, "project_max_depth", DEFAULT_PROJECT_MAX_DEPTH
-    )
-    if max_depth < min_depth:
-        raise SpiceError(
-            "[tool.spice.tasks].project_max_depth must be greater than or equal to "
-            "project_min_depth"
+    from spice.configlayer import contextualize_config_error
+    from spice.paths import repo_root_from_cwd
+
+    root = repo_root_from_cwd()
+    try:
+        table = _tasks_config_table(root)
+        min_depth = _configured_project_depth(
+            table, "project_min_depth", DEFAULT_PROJECT_MIN_DEPTH
         )
-    return min_depth, max_depth
+        max_depth = _configured_project_depth(
+            table, "project_max_depth", DEFAULT_PROJECT_MAX_DEPTH
+        )
+        if max_depth < min_depth:
+            raise SpiceError(
+                "[tool.spice.tasks].project_max_depth must be greater than or equal "
+                "to project_min_depth"
+            )
+        return min_depth, max_depth
+    except SpiceError as exc:
+        if root is None:
+            raise
+        raise contextualize_config_error(root, exc, "tasks") from exc
 
 
 def _configured_project_depth(table: dict[str, object], key: str, default: int) -> int:

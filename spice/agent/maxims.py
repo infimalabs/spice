@@ -30,7 +30,11 @@ from spice.flexstate import load_sticky_items, save_sticky_items
 from spice.mail.ackstate import AckStateRecord, ack_state_records
 from spice.mail.inbox import parse_inbox_payload
 from spice.paths import repo_root_from_cwd
-from spice.configlayer import config_string_list, effective_table
+from spice.configlayer import (
+    config_string_list,
+    contextualize_config_error,
+    effective_table,
+)
 
 DEFAULT_MAX_ATTEMPTS = defaults.integer("maxim", "max_attempts")
 PARALLEL_MAXIM_JUDGES = defaults.integer("maxim", "parallel_judges")
@@ -675,6 +679,15 @@ def set_maxim_bag_disabled(
 
 
 def _configured_maxim_bags(root: Path | None) -> dict[str, MaximBag]:
+    try:
+        return _load_configured_maxim_bags(root)
+    except SpiceError as exc:
+        if root is None:
+            raise
+        raise contextualize_config_error(root, exc, "maxims") from exc
+
+
+def _load_configured_maxim_bags(root: Path | None) -> dict[str, MaximBag]:
     bags: dict[str, MaximBag] = {}
     for raw_name, raw_config in effective_table(root, "maxims").items():
         name = _normalize_bag_name(raw_name)
