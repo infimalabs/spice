@@ -39,7 +39,7 @@ from spice.extensions import (
     SpiceExtensionEntryPoint,
     merge_builtin_and_extension_entry_points,
 )
-from spice.paths import atomic_write_json, state_dir
+from spice.paths import atomic_write_json
 
 CommandTextRewriter = Callable[[str], str | None]
 DRIVER_ENTRY_POINT_GROUP = SPICE_DRIVER_ENTRY_POINT_GROUP
@@ -199,7 +199,9 @@ POST_TOOL_HOOK_STATUS_MESSAGE = "Checking spice steering"
 
 
 def post_tool_hook_config_path(repo_root: Path, driver: AgentDriver) -> Path:
-    return state_dir(repo_root) / "agent" / f"{driver.name}-post-tool-hook.json"
+    from spice.agent.paths import agent_worktree_state_dir
+
+    return agent_worktree_state_dir(repo_root) / f"{driver.name}-post-tool-hook.json"
 
 
 def post_tool_hook_command(repo_root: Path) -> str:
@@ -1027,9 +1029,11 @@ def playwright_mcp_args(repo_root: Path) -> list[str]:
 
 
 def write_playwright_mcp_config(repo_root: Path) -> Path:
+    from spice.agent.paths import agent_worktree_state_dir
+
     color_scheme = operator_color_scheme()
     return atomic_write_json(
-        state_dir(repo_root) / "agent" / "playwright-mcp.json",
+        agent_worktree_state_dir(repo_root) / "playwright-mcp.json",
         {"browser": {"contextOptions": {"colorScheme": color_scheme}}},
     )
 

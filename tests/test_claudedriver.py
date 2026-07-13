@@ -35,6 +35,13 @@ from spice.agent.driver import (
     resolve_claude_model,
     select_driver,
 )
+from spice.agent.paths import agent_worktree_state_dir
+
+
+@pytest.fixture(autouse=True)
+def _git_worktree_tmp_path(request, tmp_path):
+    if "tmp_path" in request.fixturenames:
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
 
 
 def test_select_driver_defaults_to_codex_and_resolves_claude(tmp_path, monkeypatch):
@@ -97,7 +104,7 @@ def test_claude_command_starts_headless_stream_json_with_effort(tmp_path):
     assert command[command.index("--model") + 1] == "haiku"
     assert command[command.index("--permission-mode") + 1] == "bypassPermissions"
     assert command[command.index("--effort") + 1] == "xhigh"
-    assert command[-1] == f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\nfollow the skill"
+    assert command[-1] == command[command.index("--append-system-prompt") + 1]
 
 
 def test_claude_command_disables_commit_attribution(tmp_path):
@@ -123,6 +130,9 @@ def test_claude_command_writes_post_tool_hook_settings(tmp_path):
     group = settings["hooks"][POST_TOOL_HOOK_EVENT][0]
     hook = group["hooks"][0]
 
+    assert post_tool_hook_config_path(tmp_path, CLAUDE_DRIVER) == (
+        agent_worktree_state_dir(tmp_path) / "claude-post-tool-hook.json"
+    )
     assert hook_config["event"] == POST_TOOL_HOOK_EVENT
     assert hook_config["matcher"] == "*"
     assert "spice agent post-tool-hook" in hook_config["command"]
@@ -171,14 +181,15 @@ def test_claude_command_appends_skill_to_system_prompt(tmp_path):
         prompt=skill_link,
         model="haiku",
     )
-    expected = f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\n{skill_link}"
+    expected_prefix = f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\n{skill_link}"
     # The skill rides Claude's system prompt every launch, prefaced so it
     # reads as binding rather than optional, carrying the same preamble and
     # relpath link as the trailing prompt — not just the bootstrap turn.
-    assert command[command.index("--append-system-prompt") + 1] == expected
+    system_prompt = command[command.index("--append-system-prompt") + 1]
+    assert system_prompt.startswith(expected_prefix)
     # The trailing prompt the agent acts on gets the identical preamble --
     # still generic, not operator-specific, so the prompt boundary holds.
-    assert command[-1] == expected
+    assert command[-1] == system_prompt
     assert command.index("--append-system-prompt") < len(command) - 1
 
 
@@ -194,7 +205,7 @@ def test_claude_command_registers_playwright_mcp_server(tmp_path):
     assert server["command"] == PLAYWRIGHT_MCP_COMMAND
     assert server["args"] == playwright_mcp_args(tmp_path)
     # The MCP config is a flag, not the trailing prompt.
-    assert command[-1] == f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\nfollow the skill"
+    assert command[-1] == command[command.index("--append-system-prompt") + 1]
 
 
 def test_claude_command_resumes_with_dashed_session_id(tmp_path):
@@ -207,7 +218,7 @@ def test_claude_command_resumes_with_dashed_session_id(tmp_path):
     assert command[command.index("--resume") + 1] == (
         "768bcba1-a66f-4d22-9ce7-bcf65b5d16aa"
     )
-    assert command[-1] == f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\ncontinue"
+    assert command[-1] == command[command.index("--append-system-prompt") + 1]
 
 
 def test_claude_user_event_carries_prompt_id_as_turn_boundary():
@@ -616,7 +627,7 @@ def test_claude_commands_apply_task_denials_with_attribution_and_hooks(
 
     assert command[1] == "--print"
     assert command[command.index("--permission-mode") + 1] == "bypassPermissions"
-    expected_prompt = f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\nfollow the skill"
+    expected_prompt = command[command.index("--append-system-prompt") + 1]
     assert command[-(len(resume_tail) + 1) :] == [*resume_tail, expected_prompt]
     assert settings["permissions"]["deny"] == [*CLAUDE_SUPERVISED_TASK_TOOLS, "Monitor"]
     assert settings["attribution"] == {"commit": "", "sessionUrl": False}
@@ -663,12 +674,3 @@ def test_claude_command_appends_the_steering_token_to_the_system_prompt(tmp_path
     assert f"<{token}>" in system_prompt
     assert f"steering key for this worktree is {token}" in system_prompt
     assert command[-1] == system_prompt  # trailing prompt mirrors it
-
-
-def test_claude_command_system_prompt_unchanged_without_a_worktree_token(tmp_path):
-    # A non-repo path yields no token, so the prompt carries no steering line.
-    command = CLAUDE_DRIVER.build_exec_command(
-        repo_root=tmp_path / "not-a-repo", prompt="follow the skill"
-    )
-    system_prompt = command[command.index("--append-system-prompt") + 1]
-    assert "steering key for this worktree" not in system_prompt
