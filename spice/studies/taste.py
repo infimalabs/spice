@@ -14,16 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
+from spice import policy
 from spice.studies.walk import is_excluded_path
-
-# Fallback map when no config is passed; keys match case-insensitively. A
-# trailing ``*`` is a stem covering every inflection. Repos add their own words
-# via [tool.spice.policy.taste]; this stays minimal.
-DEFAULT_TASTE_WORDS: dict[str, str] = {
-    "hallucinat*": "confabulate",
-    "adopt*": "capture",
-    "orphan*": "loose",
-}
 
 TEXT_SUFFIXES = frozenset({".md", ".txt", ".rst"})
 
@@ -87,7 +79,7 @@ def scan_taste(
     root: Path,
     words: dict[str, str] | None = None,
 ) -> list[TasteFinding]:
-    source = words or DEFAULT_TASTE_WORDS
+    source = policy.TASTE_WORD_SUGGESTIONS if words is None else words
     if not source:
         return []
     pattern, rules = _compile_words(source)
@@ -121,7 +113,7 @@ def scan_taste_texts(
     words: dict[str, str] | None = None,
     match_filter: Callable[[str, int], bool] | None = None,
 ) -> list[TasteTextFinding]:
-    source = words or DEFAULT_TASTE_WORDS
+    source = policy.TASTE_WORD_SUGGESTIONS if words is None else words
     if not source:
         return []
     pattern, rules = _compile_words(source)

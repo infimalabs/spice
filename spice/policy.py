@@ -51,6 +51,14 @@ TASTE_WORD_SUGGESTIONS: dict[str, str] = {
     "master": "main, primary, or leader",
     "adopt*": "capture",
     "orphan*": "loose",
+    "whitelist": "allowlist",
+    "whitelists": "allowlists",
+    "whitelisted": "allowlisted",
+    "whitelisting": "allowlisting",
+    "blacklist": "blocklist",
+    "blacklists": "blocklists",
+    "blacklisted": "blocklisted",
+    "blacklisting": "blocklisting",
 }
 
 # --- repo-truth docs ------------------------------------------------------------

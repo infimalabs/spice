@@ -2,7 +2,20 @@
 
 from pathlib import Path
 
+import pytest
+
 from spice.studies import taste
+
+INCLUSIVE_TASTE_SUGGESTIONS = (
+    ("whitelist", "allowlist"),
+    ("whitelists", "allowlists"),
+    ("whitelisted", "allowlisted"),
+    ("whitelisting", "allowlisting"),
+    ("blacklist", "blocklist"),
+    ("blacklists", "blocklists"),
+    ("blacklisted", "blocklisted"),
+    ("blacklisting", "blocklisting"),
+)
 
 
 def test_scan_matches_whole_word_case_insensitively(tmp_path):
@@ -88,6 +101,20 @@ def test_default_hallucinate_stem_catches_variations(tmp_path):
         "hallucinating",
     }
     assert all(finding.suggestion == "confabulate" for finding in findings)
+
+
+@pytest.mark.parametrize(("word", "suggestion"), INCLUSIVE_TASTE_SUGGESTIONS)
+def test_default_inclusive_terms_match_case_insensitively_with_exact_suggestion(
+    tmp_path, word, suggestion
+):
+    doc = tmp_path / "notes.md"
+    doc.write_text(f"The term {word.upper()} appears here.\n", encoding="utf-8")
+
+    findings = taste.scan_taste([Path("notes.md")], root=tmp_path)
+
+    assert [(finding.word, finding.suggestion) for finding in findings] == [
+        (word, suggestion)
+    ]
 
 
 def test_custom_word_map_overrides_default(tmp_path):

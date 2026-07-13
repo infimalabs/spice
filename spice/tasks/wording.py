@@ -48,7 +48,7 @@ def detect_task_creation_wording(
     words = (
         dict(resolve_policy(root).taste.words)
         if root is not None
-        else dict(policy.TASTE_WORD_SUGGESTIONS)
+        else policy.TASTE_WORD_SUGGESTIONS
     )
     for finding in taste.scan_taste_texts(
         items,
