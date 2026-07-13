@@ -150,6 +150,16 @@ class LiveBusSession:
         self._metrics_worker: Thread | None = None
         self._send_followup_queue: Queue[tuple[Any, dict[str, Any]] | None] = Queue()
         self._send_followup_worker: Thread | None = None
+        # A subscribe's blocking completion -- waiting out watcher activation and
+        # reading the initial batch payload -- drains here off the dispatch
+        # thread. Only the cheap bookkeeping (replacement, baseline signature,
+        # watcher arm) stays inline, so a lane.send arriving right behind a
+        # subscribe is dispatched and acked immediately instead of waiting out
+        # the whole batch read on the single per-connection dispatch thread.
+        self._subscribe_queue: Queue[
+            tuple[dict[str, Any], list[_LaneSubscription]] | None
+        ] = Queue()
+        self._subscribe_worker: Thread | None = None
         # Batched subscribes fan their payload computes out here so N lanes
         # arrive together in one reply frame instead of trickling in serially.
         self._payload_pool: ThreadPoolExecutor | None = None
@@ -194,12 +204,21 @@ class LiveBusSession:
             self._send_followup_queue.put(None)
             self._send_followup_worker.join(timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
             self._send_followup_worker = None
+        if self._subscribe_worker is not None:
+            # Stopping the subscriptions above set every watcher_activated, so a
+            # parked completion unblocks; drain it before the pool it computes on
+            # is torn down. The reply lands (or the peer is gone and the send is
+            # swallowed) and the initial-payload gate releases within the join.
+            self._subscribe_queue.put(None)
+            self._subscribe_worker.join(timeout=LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
+            self._subscribe_worker = None
         if self._payload_pool is not None:
-            # Batch subscribes await their results inline, but single read chains
-            # run detached — one may be mid-compute at close. Drop the queued-but-
-            # unstarted jobs, then wait out the running chains within the same
-            # bounded budget the watcher joins use, so a slow transcript parse
-            # cannot hang teardown. cancel_futures reaps anything still queued.
+            # The subscribe worker drained just above, so only detached single
+            # read chains remain — one may be mid-compute at close. Drop the
+            # queued-but-unstarted jobs, then wait out the running chains within
+            # the same bounded budget the watcher joins use, so a slow transcript
+            # parse cannot hang teardown. cancel_futures reaps anything still
+            # queued.
             with self._read_lock:
                 self._read_queues.clear()
             self._await_pending_reads(LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
@@ -339,29 +358,71 @@ class LiveBusSession:
         ]
         for subscription in subscriptions:
             self._start_watcher(subscription)
-        for subscription in subscriptions:
-            subscription.watcher_activated.wait()
-        futures: list[tuple[_LaneSubscription, Future[dict[str, Any]]]] = [
-            (
-                subscription,
-                self._payload_executor().submit(
-                    self._subscription_payload, subscription
-                ),
+        self._enqueue_subscribe_completion(message, subscriptions)
+
+    def _enqueue_subscribe_completion(
+        self, message: dict[str, Any], subscriptions: list[_LaneSubscription]
+    ) -> None:
+        if self._subscribe_worker is None:
+            self._subscribe_worker = Thread(
+                target=self._subscribe_completion_loop,
+                name="spice-live-bus-subscribe",
+                daemon=True,
             )
-            for subscription in subscriptions
-        ]
-        lanes = [
-            {
-                "targetId": subscription.target.id,
-                "payload": future.result(),
-                "subscriptionGeneration": subscription.generation,
-                "watcherActive": subscription.watcher_error is None,
-                "watcherError": subscription.watcher_error or "",
-            }
-            for subscription, future in futures
-        ]
+            self._subscribe_worker.start()
+        self._subscribe_queue.put((message, subscriptions))
+
+    def _subscribe_completion_loop(self) -> None:
+        while True:
+            item = self._subscribe_queue.get()
+            if item is None:
+                return
+            message, subscriptions = item
+            self._complete_lanes_subscribe(message, subscriptions)
+
+    def _complete_lanes_subscribe(
+        self, message: dict[str, Any], subscriptions: list[_LaneSubscription]
+    ) -> None:
+        """Wait out watcher activation, read the batch payload, reply, release.
+
+        Runs off the dispatch thread so a lane.send behind this subscribe is not
+        head-of-line-blocked. The watcher armed inline before this ran, so the
+        baseline signature and the initial read straddle registration and a
+        setup-racing edit is delivered by exactly one of them. Payload computes
+        still fan out across the pool so a batch overlaps its lanes; this waiter
+        is a dedicated thread, not a pool worker, so those nested submits cannot
+        starve it. initial_payload_sent releases the watcher only after the reply
+        so a watch push can never overtake the initial frame.
+        """
         try:
-            self._reply(message, {"type": "lanes.payload", "lanes": lanes})
+            for subscription in subscriptions:
+                subscription.watcher_activated.wait()
+            futures: list[tuple[_LaneSubscription, Future[dict[str, Any]]]] = [
+                (
+                    subscription,
+                    self._payload_executor().submit(
+                        self._subscription_payload, subscription
+                    ),
+                )
+                for subscription in subscriptions
+            ]
+            lanes = [
+                {
+                    "targetId": subscription.target.id,
+                    "payload": future.result(),
+                    "subscriptionGeneration": subscription.generation,
+                    "watcherActive": subscription.watcher_error is None,
+                    "watcherError": subscription.watcher_error or "",
+                }
+                for subscription, future in futures
+            ]
+            frame: dict[str, Any] = {"type": "lanes.payload", "lanes": lanes}
+        except Exception as exc:  # mirror _dispatch: surface, never wedge the loop
+            frame = {"type": "bus.error", "error": str(exc)}
+        try:
+            self._reply(message, frame)
+        except (OSError, WebSocketProtocolError, WebSocketDisconnect):
+            pass  # peer vanished mid-subscribe; the gate below still releases
         finally:
             for subscription in subscriptions:
                 subscription.initial_payload_sent.set()
