@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import tempfile
 import time
 from contextlib import contextmanager
@@ -19,7 +18,8 @@ from pathlib import Path
 
 from spice import defaults
 from spice.errors import SpiceError
-from spice.locking import lock_fd_exclusive, unlock_fd
+from spice.gitprocess import run_git_command
+from spice.locking import bounded_exclusive_lock
 
 TASK_BACKEND_ENV = "SPICE_TASK_BACKEND"  # env-policy: allow
 # All spice git-dir state lives under the `spice/` namespace, so a repo can host
@@ -228,19 +228,28 @@ def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str
 
 
 def project_depth_bounds() -> tuple[int, int]:
-    table = _tasks_config_table()
-    min_depth = _configured_project_depth(
-        table, "project_min_depth", DEFAULT_PROJECT_MIN_DEPTH
-    )
-    max_depth = _configured_project_depth(
-        table, "project_max_depth", DEFAULT_PROJECT_MAX_DEPTH
-    )
-    if max_depth < min_depth:
-        raise SpiceError(
-            "[tool.spice.tasks].project_max_depth must be greater than or equal to "
-            "project_min_depth"
+    from spice.configlayer import contextualize_config_error
+    from spice.paths import repo_root_from_cwd
+
+    root = repo_root_from_cwd()
+    try:
+        table = _tasks_config_table(root)
+        min_depth = _configured_project_depth(
+            table, "project_min_depth", DEFAULT_PROJECT_MIN_DEPTH
         )
-    return min_depth, max_depth
+        max_depth = _configured_project_depth(
+            table, "project_max_depth", DEFAULT_PROJECT_MAX_DEPTH
+        )
+        if max_depth < min_depth:
+            raise SpiceError(
+                "[tool.spice.tasks].project_max_depth must be greater than or equal "
+                "to project_min_depth"
+            )
+        return min_depth, max_depth
+    except SpiceError as exc:
+        if root is None:
+            raise
+        raise contextualize_config_error(root, exc, "tasks") from exc
 
 
 def _configured_project_depth(table: dict[str, object], key: str, default: int) -> int:
@@ -320,6 +329,7 @@ _EVIDENCE = [
 ]
 
 _backend_override: str | None = None
+TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS = 30.0
 
 
 def set_backend(selector: str | None) -> None:
@@ -334,7 +344,7 @@ def _selector() -> str:
 
 
 def repo_root() -> Path:
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
         check=False,
@@ -346,7 +356,7 @@ def repo_root() -> Path:
 
 
 def git_common_dir(root: Path) -> Path:
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "-C", str(root), "rev-parse", "--git-common-dir"],
         capture_output=True,
         check=False,
@@ -387,12 +397,12 @@ def bootstrap_lock_path() -> Path:
 @contextmanager
 def _bootstrap_lock():
     backend_root().mkdir(parents=True, exist_ok=True)
-    with bootstrap_lock_path().open("a", encoding="utf-8") as handle:
-        lock_fd_exclusive(handle.fileno(), blocking=True)
-        try:
-            yield
-        finally:
-            unlock_fd(handle.fileno())
+    with bounded_exclusive_lock(
+        bootstrap_lock_path(),
+        timeout_seconds=TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS,
+        action="bootstrap task backend",
+    ):
+        yield
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
