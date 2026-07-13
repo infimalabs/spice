@@ -2,8 +2,8 @@
 
 A file may grow to the flex limit (base ×1.5), but a file that ever breached
 flex stays held to the base limit until it shrinks back under it. Breach
-state persists in the git dir (`spice/file-loc-sticky.json`,
-`spice/file-byte-sticky.json`), follows staged renames, and is re-evaluated
+state persists in the git dir (`.spice/file-loc-sticky.json`,
+`.spice/file-byte-sticky.json`), follows staged renames, and is re-evaluated
 (and pruned) on every gate scan: a latch retires the moment any scan sees the
 file back at or under its base limit, so a latch first recorded in one
 (now-idle) worktree heals as soon as the fix lands on the shared baseline.
@@ -38,8 +38,8 @@ from spice.policy import (
 from spice.studies.walk import is_excluded_path, staged_renames
 
 FILE_LOC_VERSION = 1
-FILE_LOC_STICKY_STATE_GIT_PATH = "spice/file-loc-sticky.json"
-FILE_BYTE_STICKY_STATE_GIT_PATH = "spice/file-byte-sticky.json"
+FILE_LOC_STICKY_STATE_GIT_PATH = "file-loc-sticky.json"
+FILE_BYTE_STICKY_STATE_GIT_PATH = "file-byte-sticky.json"
 
 
 @dataclass(frozen=True)

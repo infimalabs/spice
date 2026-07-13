@@ -14,7 +14,7 @@ from typing import Any
 from spice.gitprocess import run_git_command
 
 STATE_DIRNAME = ".spice"
-SHARED_ATTACHMENT_DIR = Path("spice") / "attachments"
+SHARED_ATTACHMENT_DIR = Path("attachments")
 
 
 def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
@@ -73,8 +73,26 @@ def git_dir(root: Path) -> Path:
     return (raw if raw.is_absolute() else root / raw).resolve()
 
 
+def shared_state_root(repo_root: Path) -> Path:
+    """Canonical repository-shared managed-state root."""
+    return git_common_dir(repo_root) / STATE_DIRNAME
+
+
+def worktree_state_root(repo_root: Path) -> Path:
+    """Canonical lane-local managed-state root for one worktree."""
+    return git_dir(repo_root) / STATE_DIRNAME
+
+
+def shared_state_path(repo_root: Path, relative: str | Path) -> Path:
+    return _managed_state_path(shared_state_root(repo_root), relative)
+
+
+def worktree_state_path(repo_root: Path, relative: str | Path) -> Path:
+    return _managed_state_path(worktree_state_root(repo_root), relative)
+
+
 def shared_attachment_root(repo_root: Path) -> Path:
-    return git_common_dir(repo_root) / SHARED_ATTACHMENT_DIR
+    return shared_state_path(repo_root, SHARED_ATTACHMENT_DIR)
 
 
 def state_dir(repo_root: Path) -> Path:
@@ -135,3 +153,12 @@ def fsync_directory(directory: Path) -> None:
             os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _managed_state_path(root: Path, relative: str | Path) -> Path:
+    from spice.errors import SpiceError
+
+    path = Path(relative)
+    if path.is_absolute() or ".." in path.parts:
+        raise SpiceError(f"managed state path must be relative: {path}")
+    return root / path

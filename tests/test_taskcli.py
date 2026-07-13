@@ -793,7 +793,7 @@ def test_task_artifact_cli_stores_text_and_binary_sidecars(task_repo, capsys):
     add_image_out = capsys.readouterr().out
 
     root = artifacts.artifact_root()
-    assert root == task_repo / ".git" / "spice" / "artifacts" / "tasks"
+    assert root == task_repo / ".git" / ".spice" / "artifacts" / "tasks"
     assert (root / handle / artifacts.MANIFEST_NAME).is_file()
     assert "added A1 research-notes.md text/markdown" in add_notes_out
     assert "retention prunable" in add_notes_out

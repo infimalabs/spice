@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
-from spice.paths import atomic_write_json, fsync_directory
+from spice.paths import atomic_write_json, fsync_directory, shared_state_path
 from spice.tasks import config, identity
 
-TASK_ARTIFACT_DIR = Path(config.SHARED_DIR) / "artifacts" / "tasks"
+TASK_ARTIFACT_DIR = Path("artifacts") / "tasks"
 MANIFEST_NAME = "manifest.json"
 OBJECTS_DIR = "objects"
 PAYLOAD_NAME = "payload"
@@ -192,7 +192,7 @@ def prune_artifacts(*, older_than: str | None = None, apply: bool = False) -> st
 
 
 def artifact_root() -> Path:
-    return config.git_common_dir(config.repo_root()) / TASK_ARTIFACT_DIR
+    return shared_state_path(config.repo_root(), TASK_ARTIFACT_DIR)
 
 
 def _resolve_rendered_handle(handle: str) -> tuple[str, dict[str, Any]]:
