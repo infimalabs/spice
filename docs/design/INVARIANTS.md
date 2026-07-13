@@ -58,6 +58,17 @@ checklist.
   deferred by a far-future wait date.
 - Priority classes derive SLA due dates.
 - Git sync happens only at task boundaries.
+- The measured historical sequences distinguish an early hook rejection from
+  the two corrupt terminal states. A rejecting `reference-transaction` hook
+  receives `prepared ORIG_HEAD` and `aborted ORIG_HEAD`; porcelain merge exits
+  before it writes markers or `MERGE_HEAD`, so that hook is not the cause of a
+  marker-bearing checkout. The marker-first state instead follows a successful
+  conflict materialization (markers and `MERGE_HEAD`) plus later cleanup that
+  removes the merge parent without restoring the checkout. The ref-first state
+  follows a generated merge becoming `HEAD` before its tree reaches the index
+  and worktree, exposing merge parents while `git write-tree` and the checkout
+  still describe the agent parent. Deterministic Git fixtures freeze all three
+  checkpoints rather than depending on process timing.
 - Task completion computes each baseline merge with `merge-tree` before it
   mutates the checked-out repository. A conflict is installed in this order:
   marker-bearing tree, complete higher-stage index, merge message and original

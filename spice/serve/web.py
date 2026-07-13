@@ -15,7 +15,7 @@ from typing import Any
 
 from spice import defaults
 from spice.configlayer import (
-    PACKAGED_SOURCE,
+    SYSTEM_SOURCE,
     contextualize_config_error,
     load_config,
 )
@@ -133,7 +133,7 @@ def serve_branding(repo_root: Path | None = None) -> ServeBranding:
     name = (
         project_brand
         if brand_source is not None
-        and brand_source.name == PACKAGED_SOURCE
+        and brand_source.name == SYSTEM_SOURCE
         and project_brand
         else configured_brand or DEFAULT_BRAND
     )

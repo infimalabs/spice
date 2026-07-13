@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from spice.gitprocess import run_git_command
 from spice.tasks import claimstate, config, identity, tw
 
 MINUTE_SECONDS = 60
@@ -255,7 +255,7 @@ def _commit_signal_from(
 
 
 def _git_rev_count(before: str, after: str) -> int | None:
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "rev-list", "--count", f"{before}..{after}"],
         capture_output=True,
         check=False,

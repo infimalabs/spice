@@ -13,12 +13,18 @@ from typing import Any
 from spice import paths
 from spice.errors import SpiceError
 
-PACKAGED_SOURCE = "packaged"
+SYSTEM_SOURCE = "system"
 PYPROJECT_SOURCE = "pyproject"
 REPOSITORY_SOURCE = "repository"
 WORKTREE_SOURCE = "worktree"
 _CONFIG_ERROR_KEY_RE = re.compile(
     r"^\[tool\.spice(?:\.([^\]]+))?\](?:[ .]([A-Za-z0-9_-]+))?"
+)
+CONFIG_SCOPE_NAMES = (
+    SYSTEM_SOURCE,
+    PYPROJECT_SOURCE,
+    REPOSITORY_SOURCE,
+    WORKTREE_SOURCE,
 )
 
 
@@ -99,7 +105,7 @@ def load_packaged_config() -> ConfigLayer:
     if not present:
         raise SpiceError(f"packaged configuration is missing: {path}")
     return ConfigLayer(
-        name=PACKAGED_SOURCE,
+        name=SYSTEM_SOURCE,
         path=path,
         values=_freeze_mapping(values),
         present=True,

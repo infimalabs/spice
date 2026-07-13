@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -14,13 +15,19 @@ from typing import Any
 from spice import defaults
 from spice.configlayer import ConfigLayer as ConfigLayer
 from spice.configlayer import LayeredConfig as LayeredConfig
+from spice.configlayer import CONFIG_SCOPE_NAMES
 from spice.configlayer import PYPROJECT_SOURCE
-from spice.configlayer import effective_mapping, effective_table, layer_table
+from spice.configlayer import REPOSITORY_SOURCE
+from spice.configlayer import SYSTEM_SOURCE
+from spice.configlayer import WORKTREE_SOURCE
+from spice.configlayer import effective_mapping, effective_table
+from spice.configlayer import layer_table as layer_table
 from spice.configlayer import load_config as load_config
 from spice.errors import SpiceError
 from spice.paths import (
     atomic_write_text,
     repo_root_from_cwd,
+    runtime_spice_source,
     state_dir,
 )
 
@@ -39,6 +46,13 @@ DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = defaults.string("say", "external_content_typ
 SAY_VOICE_KEY = "voice"
 SAY_WORDS_PER_MINUTE_KEY = "words_per_minute"
 DEFAULT_SAY_WORDS_PER_MINUTE = defaults.integer("say", "words_per_minute")
+SAY_MUTABLE_KEYS = (
+    SAY_BACKEND_KEY,
+    SAY_COMMAND_KEY,
+    SAY_CONTENT_TYPE_KEY,
+    SAY_VOICE_KEY,
+    SAY_WORDS_PER_MINUTE_KEY,
+)
 
 AGENT_KEY = "agent"
 AGENT_PERSONALITY_KEY = "personality"
@@ -53,7 +67,6 @@ JUDGE_KEY = "judge"
 JUDGE_BIN_KEY = "bin"
 DEFAULT_JUDGE_BIN = defaults.string("judge", "bin")
 PORTABLE_JUDGE_BIN = defaults.string("judge", "portable_bin")
-PROJECT_AGENT_TABLE = "tool.spice.agent"
 _TOML_TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
 _TOML_ASSIGN_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
 
@@ -91,25 +104,80 @@ def _section(repo_root: Path, key: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def set_worktree_section(repo_root: Path, key: str, values: Mapping[str, Any]) -> Path:
-    """Merge `values` into the worktree TOML `[key]` table, preserving the rest.
+def config_scope_path(repo_root: Path, scope: str) -> Path:
+    """Return the canonical TOML path for one explicit mutable scope."""
+    if scope == SYSTEM_SOURCE:
+        return runtime_spice_source() / "spice.toml"
+    if scope == PYPROJECT_SOURCE:
+        return repo_root / "pyproject.toml"
+    if scope == REPOSITORY_SOURCE:
+        return repo_root / "spice.toml"
+    if scope == WORKTREE_SOURCE:
+        return worktree_config_path(repo_root)
+    raise SpiceError(
+        f"unknown configuration scope {scope!r}; expected "
+        + ", ".join(CONFIG_SCOPE_NAMES)
+    )
 
-    Unrelated tables, comments, key ordering, and scalar types outside the
-    touched keys survive the round trip; a structured line edit rewrites only
-    the `[key]` table's assignments.
-    """
-    _ensure_worktree_config_migrated(repo_root)
-    lines = _read_worktree_config_lines(repo_root)
-    _apply_worktree_table(lines, key, dict(values))
-    return _write_worktree_config_lines(repo_root, lines)
+
+def set_scope_section(
+    repo_root: Path, scope: str, key: str, values: Mapping[str, Any]
+) -> Path:
+    """Merge values into one scoped table through the shared TOML mutation seam."""
+    return _mutate_scope_section(repo_root, scope, key, values=dict(values))
 
 
-def clear_worktree_section(repo_root: Path, key: str) -> Path:
-    """Remove the worktree TOML `[key]` table, preserving unrelated content."""
-    _ensure_worktree_config_migrated(repo_root)
-    lines = _read_worktree_config_lines(repo_root)
-    _remove_worktree_table(lines, key)
-    return _write_worktree_config_lines(repo_root, lines)
+def clear_scope_section(
+    repo_root: Path,
+    scope: str,
+    key: str,
+    *,
+    keys: tuple[str, ...] | None = None,
+) -> Path:
+    """Remove one scoped table or selected values without touching other layers."""
+    return _mutate_scope_section(repo_root, scope, key, clear_keys=keys)
+
+
+def _mutate_scope_section(
+    repo_root: Path,
+    scope: str,
+    key: str,
+    *,
+    values: Mapping[str, Any] | None = None,
+    clear_keys: tuple[str, ...] | None = (),
+) -> Path:
+    if scope == WORKTREE_SOURCE:
+        _ensure_worktree_config_migrated(repo_root)
+    path = config_scope_path(repo_root, scope)
+    if scope == SYSTEM_SOURCE and (not path.is_file() or not os.access(path, os.W_OK)):
+        raise SpiceError(f"configuration scope=system path={path} is not writable")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    except OSError as exc:
+        raise SpiceError(
+            f"cannot read configuration scope={scope} path={path}: {exc}"
+        ) from exc
+    table = f"tool.spice.{key}" if scope == PYPROJECT_SOURCE else key
+    if values:
+        _apply_worktree_table(lines, table, values)
+    elif clear_keys is None:
+        _remove_worktree_table(lines, table)
+    else:
+        _remove_table_keys(lines, table, set(clear_keys))
+    text = "\n".join(lines) + "\n" if lines else ""
+    try:
+        tomllib.loads(text)
+        return atomic_write_text(path, text)
+    except tomllib.TOMLDecodeError as exc:
+        raise SpiceError(
+            f"invalid TOML for configuration scope={scope} path={path}: {exc}"
+        ) from exc
+    except OSError as exc:
+        raise SpiceError(
+            f"cannot write configuration scope={scope} path={path}: {exc}"
+        ) from exc
 
 
 def _ensure_worktree_config_migrated(repo_root: Path) -> None:
@@ -208,6 +276,17 @@ def _remove_worktree_table(lines: list[str], table: str) -> None:
         del lines[start:end]
 
 
+def _remove_table_keys(lines: list[str], table: str, keys: set[str]) -> None:
+    start, end = _toml_table_bounds(lines, table)
+    if start is None:
+        return
+    lines[start + 1 : end] = [
+        line
+        for line in lines[start + 1 : end]
+        if _toml_assignment_key(line) not in keys
+    ]
+
+
 def _toml_inline_comment(line: str) -> str:
     """Return a TOML comment outside quoted strings, including its ``#``."""
     basic = False
@@ -236,11 +315,43 @@ def _toml_inline_comment(line: str) -> str:
 
 
 def config_overview(repo_root: Path) -> dict[str, Any]:
+    loaded = load_config(repo_root)
     return {
-        "project": {AGENT_KEY: project_agent_config(repo_root)},
-        "worktree": read_worktree_config(repo_root),
-        "effective": {AGENT_KEY: effective_agent_config(repo_root)},
+        "layers": {
+            layer.name: {
+                "path": str(layer.path),
+                "present": layer.present,
+                "values": _json_value(layer.values),
+            }
+            for layer in loaded.layers
+        },
+        "effective": _json_value(loaded.effective),
+        "provenance": {
+            ".".join(path): {"scope": layer.name, "path": str(layer.path)}
+            for path, layer in sorted(loaded.sources.items())
+        },
     }
+
+
+def agent_config_overview(repo_root: Path) -> dict[str, Any]:
+    overview = config_overview(repo_root)
+    provenance = overview["provenance"]
+    return {
+        "effective": effective_agent_config(repo_root),
+        "provenance": {
+            key: value
+            for key, value in provenance.items()
+            if key.startswith(f"{AGENT_KEY}.")
+        },
+    }
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_json_value(item) for item in value]
+    return value
 
 
 def default_classifications() -> dict[str, str]:
@@ -332,22 +443,6 @@ def configured_agent_driver(repo_root: Path | None = None) -> str:
     return _agent_effective_value(root, AGENT_DRIVER_KEY)
 
 
-def worktree_agent_config(repo_root: Path) -> dict[str, str]:
-    return {
-        key: value
-        for key in AGENT_LAUNCH_KEYS
-        if (value := _agent_worktree_value(repo_root, key))
-    }
-
-
-def project_agent_config(repo_root: Path) -> dict[str, str]:
-    return {
-        key: value
-        for key in AGENT_LAUNCH_KEYS
-        if (value := _agent_project_value(repo_root, key))
-    }
-
-
 def effective_agent_config(repo_root: Path) -> dict[str, str]:
     from spice.agent.driver import driver_for
 
@@ -361,72 +456,8 @@ def effective_agent_config(repo_root: Path) -> dict[str, str]:
     }
 
 
-def _agent_worktree_value(repo_root: Path, key: str) -> str:
-    return str(_section(repo_root, AGENT_KEY).get(key) or "").strip()
-
-
-def _agent_project_value(repo_root: Path, key: str) -> str:
-    return str(layer_table(repo_root, PYPROJECT_SOURCE, "agent").get(key) or "").strip()
-
-
 def _agent_effective_value(repo_root: Path, key: str) -> str:
     return str(effective_table(repo_root, "agent").get(key) or "").strip()
-
-
-def update_project_agent_config(repo_root: Path, values: Mapping[str, str]) -> Path:
-    project_values = {
-        key: value.strip()
-        for key, value in values.items()
-        if key in AGENT_LAUNCH_KEYS and value.strip()
-    }
-    if not project_values:
-        return repo_root / "pyproject.toml"
-    return _rewrite_project_agent_table(repo_root, project_values, clear=False)
-
-
-def clear_project_agent_config(repo_root: Path) -> Path:
-    return _rewrite_project_agent_table(
-        repo_root,
-        dict.fromkeys(AGENT_LAUNCH_KEYS, ""),
-        clear=True,
-    )
-
-
-def _rewrite_project_agent_table(
-    repo_root: Path, values: Mapping[str, str], *, clear: bool
-) -> Path:
-    pyproject = repo_root / "pyproject.toml"
-    try:
-        original = pyproject.read_text(encoding="utf-8")
-    except OSError:
-        original = ""
-    lines = original.splitlines()
-    start, end = _toml_table_bounds(lines, PROJECT_AGENT_TABLE)
-    if start is None:
-        if clear:
-            return pyproject
-        if lines and lines[-1].strip():
-            lines.append("")
-        lines.append(f"[{PROJECT_AGENT_TABLE}]")
-        lines.extend(_toml_assignments(values).values())
-        return atomic_write_text(pyproject, "\n".join(lines) + "\n")
-
-    rewritten: list[str] = []
-    seen: set[str] = set()
-    for line in lines[start + 1 : end]:
-        key = _toml_assignment_key(line)
-        if key is not None and key in values:
-            seen.add(key)
-            if not clear:
-                rewritten.append(_toml_assignment(key, values[key]))
-            continue
-        rewritten.append(line)
-    if not clear:
-        for key, line in _toml_assignments(values).items():
-            if key not in seen:
-                rewritten.append(line)
-    lines[start + 1 : end] = rewritten
-    return atomic_write_text(pyproject, "\n".join(lines) + "\n")
 
 
 def _toml_table_bounds(lines: list[str], table: str) -> tuple[int | None, int | None]:
@@ -449,10 +480,6 @@ def _toml_table_name(line: str) -> str | None:
 def _toml_assignment_key(line: str) -> str | None:
     match = _TOML_ASSIGN_RE.match(line)
     return match.group(1) if match else None
-
-
-def _toml_assignments(values: Mapping[str, str]) -> dict[str, str]:
-    return {key: _toml_assignment(key, value) for key, value in values.items()}
 
 
 def _toml_assignment(key: str, value: Any) -> str:

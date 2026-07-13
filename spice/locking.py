@@ -22,15 +22,21 @@ from __future__ import annotations
 import errno
 import importlib
 import os
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 WINDOWS_LOCK_BYTES = 1
+LOCK_RETRY_INTERVAL_SECONDS = 0.05
 
 
 class FileLockUnavailable(RuntimeError):
+    pass
+
+
+class FileLockTimeout(TimeoutError):
     pass
 
 
@@ -67,6 +73,35 @@ def exclusive_lock(path: Path, *, blocking: bool = True) -> Iterator[None]:
             unlock_fd(handle.fileno())
     finally:
         handle.close()
+
+
+@contextmanager
+def bounded_exclusive_lock(
+    path: Path, *, timeout_seconds: float, action: str
+) -> Iterator[None]:
+    """Acquire ``path`` through bounded nonblocking retries for ``action``."""
+    if timeout_seconds <= 0:
+        raise ValueError("lock timeout must be positive")
+    deadline = time.monotonic() + timeout_seconds
+    held_lock = None
+    try:
+        while True:
+            try:
+                held_lock = exclusive_lock(path, blocking=False)
+                held_lock.__enter__()
+                break
+            except FileLockUnavailable as exc:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise FileLockTimeout(
+                        f"{action} timed out after {timeout_seconds:g}s waiting for "
+                        f"lock {path}"
+                    ) from exc
+                time.sleep(min(LOCK_RETRY_INTERVAL_SECONDS, remaining))
+        yield
+    finally:
+        if held_lock is not None:
+            held_lock.__exit__(None, None, None)
 
 
 def _lock_fd_posix(fd: int, *, blocking: bool) -> None:
