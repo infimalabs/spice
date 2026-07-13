@@ -43,7 +43,7 @@ def test_rtk_truth_surfaces_publish_one_configurable_native_fallback_contract():
         "canonical `rtk` frontend",
         "built-in `common` wrapper",
         "RTK_DB_PATH",
-        ".git/spice/agents/<thread>/rtk/history.db",
+        "<worktree-git-dir>/.spice/agents/<thread>/rtk/history.db",
         "health telemetry",
     )
 

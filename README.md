@@ -145,8 +145,8 @@ are diagnosed, discarded, and the original native command runs unchanged.
 RTK owns selection and its canonical `rtk` frontend; Spice remaps that frontend
 to the configured identity, supplies only the built-in `common` wrapper's
 finite post-selection routes and thread-scoped `RTK_DB_PATH` at
-`.git/spice/agents/<thread>/rtk/history.db`, and reports health telemetry through
-activation, Doctor, and bounded stderr diagnostics.
+`<worktree-git-dir>/.spice/agents/<thread>/rtk/history.db`, and reports health
+telemetry through activation, Doctor, and bounded stderr diagnostics.
 
 ## Release
 

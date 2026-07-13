@@ -68,11 +68,11 @@ frontend to the configured identity before applying any finite post-selection
 route below.
 
 Spice sets `RTK_DB_PATH` to the current agent thread's
-`.git/spice/agents/<thread>/rtk/history.db` and owns that location, while RTK
-owns its history contents. Activation `rtk_status`, Doctor, and bounded,
-repeat-suppressed stderr diagnostics are health telemetry, not rewrite
-selectors. The built-in `common` wrapper owns only the finite command-shape
-transformations below.
+`<worktree-git-dir>/.spice/agents/<thread>/rtk/history.db` and owns that
+location, while RTK owns its history contents. Activation `rtk_status`, Doctor,
+and bounded, repeat-suppressed stderr diagnostics are health telemetry, not
+rewrite selectors. The built-in `common` wrapper owns only the finite
+command-shape transformations below.
 The complete install, verification, and ownership contract is in
 [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion).
 
