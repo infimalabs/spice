@@ -2,7 +2,7 @@
 
 A *backend* is one shared Taskwarrior database. Its root holds the generated
 ``taskrc`` and the single ``data/`` directory every agent in the backend
-shares. The default root is the git common dir's ``spice/`` state namespace.
+shares. The default root is the git common dir's ``.spice/`` state namespace.
 Every worktree of a repository sees one board; there are no per-worktree
 replicas and no sync server.
 """
@@ -20,11 +20,9 @@ from spice import defaults
 from spice.errors import SpiceError
 from spice.gitprocess import run_git_command
 from spice.locking import bounded_exclusive_lock
+from spice.paths import shared_state_root
 
 TASK_BACKEND_ENV = "SPICE_TASK_BACKEND"  # env-policy: allow
-# All spice git-dir state lives under the `spice/` namespace, so a repo can host
-# other tooling without collisions.
-SHARED_DIR = "spice"
 PROJECT_SEGMENT_PATTERN = "[0-9a-z_]+"
 PROJECT_SEGMENT_RULE_LABEL = "lowercase letters, digits, and underscores"
 PROJECT_DELIMITER = "."
@@ -355,19 +353,6 @@ def repo_root() -> Path:
     return Path(result.stdout.strip()).resolve()
 
 
-def git_common_dir(root: Path) -> Path:
-    result = run_git_command(
-        ["git", "-C", str(root), "rev-parse", "--git-common-dir"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise SpiceError("not inside a git worktree")
-    raw = Path(result.stdout.strip())
-    return (raw if raw.is_absolute() else root / raw).resolve()
-
-
 def backend_root() -> Path:
     selector = _selector()
     if selector:
@@ -375,7 +360,7 @@ def backend_root() -> Path:
         if expanded.is_absolute():
             return expanded.resolve()
         raise SpiceError(f"{TASK_BACKEND_ENV} requires an absolute path")
-    return git_common_dir(repo_root()) / SHARED_DIR
+    return shared_state_root(repo_root())
 
 
 def data_dir() -> Path:

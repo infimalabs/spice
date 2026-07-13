@@ -419,7 +419,7 @@ def test_wrapper_exports_agent_scoped_rtk_db_for_ambient_agent_commands(
 
     assert env is not None
     assert Path(env[wrap.RTK_DB_PATH_ENV]) == (
-        tmp_path / ".git" / "spice" / "agents" / "thread-a" / "rtk" / "history.db"
+        tmp_path / ".git" / ".spice" / "agents" / "thread-a" / "rtk" / "history.db"
     )
     assert Path(env[wrap.RTK_DB_PATH_ENV]).parent.is_dir()
 
@@ -486,7 +486,7 @@ def test_rtk_selectors_and_children_share_distinct_thread_scoped_history(
         )
 
     expected_paths = [
-        tmp_path / ".git" / "spice" / "agents" / thread / "rtk" / "history.db"
+        tmp_path / ".git" / ".spice" / "agents" / thread / "rtk" / "history.db"
         for thread in ("thread-a", "thread-b")
     ]
     assert [Path(env[wrap.RTK_DB_PATH_ENV]) for env in selector_environments] == (

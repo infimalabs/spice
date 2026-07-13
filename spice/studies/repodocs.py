@@ -6,6 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from spice.errors import SpiceError
 from spice.flexstate import (
     FlexSliceClaim,
     claim_flex_slice_paths,
@@ -21,7 +22,7 @@ from spice.configlayer import config_string_list, effective_table
 from spice.studies.walk import staged_renames, tracked_paths
 
 REPO_DOC_CHAR_STICKY_VERSION = 1
-REPO_DOC_CHAR_STICKY_STATE_GIT_PATH = "spice/repo-doc-chars-sticky.json"
+REPO_DOC_CHAR_STICKY_STATE_GIT_PATH = "repo-doc-chars-sticky.json"
 
 
 @dataclass(frozen=True)
@@ -129,7 +130,7 @@ def render_repo_truth_doc_guard_error(findings: list[RepoTruthDocFinding]) -> st
 def repo_doc_char_sticky_state_path(repo_root: Path) -> Path | None:
     try:
         return git_state_path(REPO_DOC_CHAR_STICKY_STATE_GIT_PATH, root=repo_root)
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, SpiceError):
         return None
 
 
@@ -179,7 +180,7 @@ def _load_repo_doc_char_sticky(repo_root: Path) -> set[Path]:
             decode=lambda raw: Path(raw) if isinstance(raw, str) else None,
             version=REPO_DOC_CHAR_STICKY_VERSION,
         )
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, SpiceError):
         return set()
 
 
@@ -200,7 +201,7 @@ def _save_repo_doc_char_sticky(paths: set[Path], repo_root: Path) -> None:
             encode=lambda path: path.as_posix(),
             version=REPO_DOC_CHAR_STICKY_VERSION,
         )
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, SpiceError):
         return
 
 

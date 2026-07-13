@@ -5,23 +5,23 @@ from __future__ import annotations
 from pathlib import Path
 
 from spice.agent.identity import canonical_thread_id
-from spice.paths import atomic_write_text, git_dir
+from spice.paths import atomic_write_text, worktree_state_path
 
 # One agent per worktree, driver-agnostic: lifecycle state (the thread pointer,
 # per-thread state, logs) is NOT namespaced by driver, so switching driver
 # (Codex<->Claude) renews the single running slot instead of stranding a
 # parallel per-driver pointer. The driver is recorded in the agent state record.
-AGENT_STATE_GIT_ROOT = Path("spice") / "agents"
+AGENT_STATE_GIT_ROOT = Path("agents")
 THREAD_ID_FILENAME = "thread-id"
 
 
 def agent_worktree_state_dir(repo_root: Path) -> Path:
-    return git_dir(repo_root) / AGENT_STATE_GIT_ROOT
+    return worktree_state_path(repo_root, AGENT_STATE_GIT_ROOT)
 
 
 def agent_thread_state_dir(repo_root: Path, thread_id: str) -> Path:
     canonical = canonical_thread_id(thread_id)
-    return git_dir(repo_root) / AGENT_STATE_GIT_ROOT / canonical
+    return worktree_state_path(repo_root, AGENT_STATE_GIT_ROOT / canonical)
 
 
 def agent_thread_pointer_path(repo_root: Path) -> Path:

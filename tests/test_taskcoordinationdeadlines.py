@@ -15,6 +15,7 @@ from spice.cli import entry
 from spice.errors import SpiceError
 from spice.locking import FileLockTimeout, exclusive_lock
 from spice.mail import inbox
+from spice.paths import git_common_dir
 from spice.procs import ProcessDeadlineExceeded
 from spice.tasks import config, tw
 
@@ -112,7 +113,7 @@ def test_task_local_git_helpers_timeout_with_identity_and_recover(
     elif helper == "common-dir":
 
         def common_dir_operation():
-            return config.git_common_dir(tmp_path)
+            return git_common_dir(tmp_path)
 
         operation = common_dir_operation
         expected = (tmp_path / ".git").resolve()

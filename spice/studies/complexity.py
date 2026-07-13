@@ -39,8 +39,8 @@ from spice.studies.walk import is_excluded_path, staged_renames
 
 COMPLEXITY_VERSION = 1
 COMPLEXITY_PROCESS_TIMEOUT_SECONDS = 30.0
-COMPLEXITY_CCN_STICKY_GIT_PATH = "spice/complexity-ccn-sticky.json"
-COMPLEXITY_LENGTH_STICKY_GIT_PATH = "spice/complexity-length-sticky.json"
+COMPLEXITY_CCN_STICKY_GIT_PATH = "complexity-ccn-sticky.json"
+COMPLEXITY_LENGTH_STICKY_GIT_PATH = "complexity-length-sticky.json"
 
 # lizard --csv columns: nloc, ccn, token_count, param_count, length,
 # location, path, function_name, ...

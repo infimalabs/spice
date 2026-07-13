@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from spice.errors import SpiceError
+from spice.paths import git_common_dir
 from spice.serve.team.store import team_database_path
 from spice.serve.team.schema import TEAM_DATABASE_FILENAME
 from spice.tasks import config, render
@@ -40,17 +41,17 @@ def test_ensure_task_event_file_preserves_existing_event(tmp_path):
     assert ensured.read_text(encoding="utf-8") == event_text
 
 
-def test_default_backend_root_is_shared_spice_dir(tmp_path, monkeypatch):
+def test_default_backend_root_is_shared_hidden_spice_dir(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
     monkeypatch.chdir(repo)
     monkeypatch.delenv(config.TASK_BACKEND_ENV, raising=False)
     config.set_backend(None)
-    common = config.git_common_dir(repo)
+    common = git_common_dir(repo)
 
-    assert config.backend_root() == common / "spice"
-    assert config.data_dir() == common / "spice" / "data"
-    assert config.taskrc_path() == common / "spice" / "taskrc"
-    assert team_database_path() == common / "spice" / "data" / TEAM_DATABASE_FILENAME
+    assert config.backend_root() == common / ".spice"
+    assert config.data_dir() == common / ".spice" / "data"
+    assert config.taskrc_path() == common / ".spice" / "taskrc"
+    assert team_database_path() == common / ".spice" / "data" / TEAM_DATABASE_FILENAME
 
 
 def test_task_backend_override_requires_absolute_path(tmp_path, monkeypatch):

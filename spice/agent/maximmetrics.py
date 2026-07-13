@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 from spice.errors import SpiceError
-from spice.paths import git_common_dir
-from spice.tasks.config import SHARED_DIR
+from spice.paths import shared_state_path
 
 MAXIM_METRICS_DATABASE_FILENAME = "spicemaxims.sqlite3"
 MAXIM_METRICS_DATA_SUBDIR = "data"
@@ -117,12 +116,9 @@ class MaximRecurrenceInput:
 
 
 def maxim_metrics_database_path(repo_root: str | Path) -> Path:
-    common = git_common_dir(Path(repo_root))
-    return (
-        common
-        / SHARED_DIR
-        / MAXIM_METRICS_DATA_SUBDIR
-        / MAXIM_METRICS_DATABASE_FILENAME
+    return shared_state_path(
+        Path(repo_root),
+        Path(MAXIM_METRICS_DATA_SUBDIR) / MAXIM_METRICS_DATABASE_FILENAME,
     )
 
 

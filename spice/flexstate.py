@@ -16,15 +16,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
-from spice.paths import git_common_dir
+from spice.paths import shared_state_path, worktree_state_path
 from spice.policy import flex_limit as flex_limit  # single source of the ratio
-from spice.gitprocess import run_git_command
 
 StickyKey = TypeVar("StickyKey")
 Item = TypeVar("Item")
 FLEX_SLICE_CLAIM_TTL_SECONDS = 6 * 60 * 60
 FLEX_SLICE_CLAIMS_VERSION = 1
-FLEX_SLICE_CLAIMS_GIT_PATH = "spice/flex-slice-claims.json"
+FLEX_SLICE_CLAIMS_GIT_PATH = "flex-slice-claims.json"
 FLEX_SLICE_CLAIMED = "claimed"
 FLEX_SLICE_OWNED = "owned"
 FLEX_SLICE_PEER_HELD = "peer-held"
@@ -51,21 +50,13 @@ class FlexSliceClaimDecision:
 
 
 def git_state_path(git_path: str, *, root: Path) -> Path:
-    completed = run_git_command(
-        ["git", "rev-parse", "--git-path", git_path],
-        capture_output=True,
-        cwd=root,
-        check=True,
-        text=True,
-    )
-    raw_path = Path(completed.stdout.strip())
-    return raw_path if raw_path.is_absolute() else root / raw_path
+    return worktree_state_path(root, git_path)
 
 
 def flex_slice_claims_state_path(
     *, root: Path, git_path: str = FLEX_SLICE_CLAIMS_GIT_PATH
 ) -> Path:
-    return git_common_dir(root) / git_path
+    return shared_state_path(root, git_path)
 
 
 def load_sticky_items(
