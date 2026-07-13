@@ -45,9 +45,9 @@ and `agent run` invoke the exact winning identity. RTK owns rewrite selection
 and emits the canonical `rtk` frontend; Spice remaps that frontend to the
 configured executable and owns only the built-in `common` wrapper's finite
 post-selection routes. Spice chooses the thread-scoped `RTK_DB_PATH` location
-at `.git/spice/agents/<thread>/rtk/history.db`, RTK owns its history contents,
-and activation `rtk_status`, Doctor, plus bounded stderr diagnostics provide
-health telemetry without selecting commands.
+at `<worktree-git-dir>/.spice/agents/<thread>/rtk/history.db`, RTK owns its
+history contents, and activation `rtk_status`, Doctor, plus bounded stderr
+diagnostics provide health telemetry without selecting commands.
 
 ## Shells
 

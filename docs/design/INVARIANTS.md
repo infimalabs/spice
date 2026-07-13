@@ -35,9 +35,9 @@ checklist.
 - Spice remaps the canonical frontend to the configured executable, owns only
   the built-in `common` wrapper's finite post-selection routes and the
   thread-scoped `RTK_DB_PATH` location at
-  `.git/spice/agents/<thread>/rtk/history.db`, and publishes health telemetry
-  through activation `rtk_status`, Doctor, and bounded stderr diagnostics. RTK
-  owns the history contents.
+  `<worktree-git-dir>/.spice/agents/<thread>/rtk/history.db`, and publishes
+  health telemetry through activation `rtk_status`, Doctor, and bounded stderr
+  diagnostics. RTK owns the history contents.
 
 ## Lifecycle
 

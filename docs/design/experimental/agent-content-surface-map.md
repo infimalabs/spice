@@ -20,7 +20,7 @@ event in this transcript, it is marked "inspected, not observed firing."
 | 3 | `spice session briefing` output | Explicit command | Command lifetime only | Bash stdout |
 | 4 | `spice task status` / `spice task next` output | Explicit command | Command lifetime only (task record is authoritative until claim window expires) | Bash stdout |
 | 5 | Shell "Working state" banner (`🌶️ Working state: ...`) | Every `spice agent run`-wrapped shell command | Once per command, prepended to that command's output | stderr, injected by the shell reexec wrapper, captured into the same Bash tool result |
-| 6 | PostToolUse hook `additionalContext` ("Inbox Steering") | Every native tool call (`matcher: "*"` in `.spice/agent/claude-post-tool-hook.json`, running `spice agent post-tool-hook`) | Until the pending key is ACKed/NACKed (redisplays after 15s if untouched); bare reads never clear it | harness `<system-reminder>` attached after the tool result, not stdout |
+| 6 | PostToolUse hook `additionalContext` ("Inbox Steering") | Every native tool call (`matcher: "*"` in `<worktree-git-dir>/.spice/agents/claude-post-tool-hook.json`, running `spice agent post-tool-hook`) | Until the pending key is ACKed/NACKed (redisplays after 15s if untouched); bare reads never clear it | harness `<system-reminder>` attached after the tool result, not stdout |
 | 7 | Harness deferred-tool-list reminder | Session start, and again whenever a new deferred tool/MCP server becomes available (observed: `mcp__playwright__*` appeared mid-session once the playwright MCP server finished connecting) | Persists until the tools are fetched via ToolSearch; reappears on new arrivals | harness `<system-reminder>` |
 | 8 | Harness "available agent types" / "available skills" reminders | Session start | Static for the session (not seen to change) | harness `<system-reminder>` |
 | 9 | `claudeMd` context block (global `CLAUDE.md` protocols + `MEMORY.md` index + `userEmail`/`currentDate`) | Attached to a user turn | Observed once this session; likely re-sent after compaction (not directly confirmed this session) | harness `<system-reminder>` |
@@ -84,13 +84,13 @@ stretches"):
 - **PostToolUse hook `additionalContext`** ("Inbox Steering" block, with
   `control=`/`note=`/RENEW lines, ACK/NACK format instructions, and
   persistence rules): fires on `matcher: "*"` in
-  `.spice/agent/claude-post-tool-hook.json`, i.e. after *every* native tool
-  call. Confirmed directly this session: it appeared attached after a
-  **Read** tool call (reading `SKILL.md`), not only after Bash calls — so the
-  "every Bash result" framing in the seeding task description is measurably
-  wrong, or at minimum incomplete. This is the channel that carries live
-  operator steering (pending keys) and is the one the ACK/NACK protocol in
-  the skill file targets.
+  `<worktree-git-dir>/.spice/agents/claude-post-tool-hook.json`, i.e. after
+  *every* native tool call. Confirmed directly this session: it appeared
+  attached after a **Read** tool call (reading `SKILL.md`), not only after Bash
+  calls — so the "every Bash result" framing in the seeding task description
+  is measurably wrong, or at minimum incomplete. This is the channel that
+  carries live operator steering (pending keys) and is the one the ACK/NACK
+  protocol in the skill file targets.
 
 ### 7-10. Harness system-reminders
 

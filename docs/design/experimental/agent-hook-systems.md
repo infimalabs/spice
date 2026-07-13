@@ -3,16 +3,16 @@
 Status: investigative map, 2026-07-06. Deliverable for WIRING-1kBMc8BV. Grounded
 in this checkout's code (paths/line refs verified in-tree), not recalled.
 
-The operator's question was: "we write hooks... but it's to `.spice/agent/` (?) vs.
-the worktree git config dir, and I'm not sure they're actually being used either
-way." Answer: there are **two independent hook systems**, they live in different
-places, fire at different times, and **both are live**. They are easy to conflate
-because both are "spice hooks," but they share no machinery.
+The operator's question was: "we write hooks... but is the agent hook under the
+worktree Git dir, and is it actually being used?" Answer: there are **two
+independent hook systems**, they live in different places, fire at different
+times, and **both are live**. They are easy to conflate because both are "spice
+hooks," but they share no machinery.
 
 | | Git gate-hooks | Agent driver PostToolUse hook |
 |---|---|---|
 | Purpose | Quality gates at git operations | Deliver inbox steering + keep-working guidance to the agent |
-| Files | `.spice/hooks/{pre-commit, commit-msg, reference-transaction}` (shims) | `.spice/agent/<driver>-post-tool-hook.json` (a **descriptor/record**) |
+| Files | `.spice/hooks/{pre-commit, commit-msg, reference-transaction}` (shims) | `<worktree-git-dir>/.spice/agents/<driver>-post-tool-hook.json` (a **descriptor/record**) |
 | Wired by | `install_hooks_for_repo` sets worktree `core.hooksPath=.spice/hooks` | `claude_settings_json` embeds `post_tool_hook_settings` in the agent's **launch settings** |
 | Fires | On `git commit` (pre-commit, commit-msg) and ref updates (reference-transaction) | After **every** native tool call (`matcher: "*"`) |
 | Runs | The shim → `spice dev pre-commit` etc. | `spice agent post-tool-hook --repo-root ...` |
@@ -39,11 +39,12 @@ commit is attempted or when `spice agent activation` enumerates it.
 This is the channel that carries live operator steering, and the one the operator
 was unsure about. Two artifacts, and only one of them is authoritative:
 
-- **The descriptor** `.spice/agent/<driver>-post-tool-hook.json` is *written* by
-  `write_post_tool_hook_config` (`spice/agent/driver.py:276-292`) as a record of
-  the hook's shape (driver, event, matcher, command, timeout, capability). It is an
-  inspection/record artifact — reading it tells you what the hook does, but the
-  running agent is **not** driven by this file.
+- **The descriptor**
+  `<worktree-git-dir>/.spice/agents/<driver>-post-tool-hook.json` is *written*
+  by `write_post_tool_hook_config` (`spice/agent/driver.py:276-292`) as a record
+  of the hook's shape (driver, event, matcher, command, timeout, capability). It
+  is an inspection/record artifact — reading it tells you what the hook does,
+  but the running agent is **not** driven by this file.
 - **The live registration** is `post_tool_hook_settings`
   (`driver.py:236-252`), which builds the Claude `hooks.PostToolUse` group (matcher
   `*`, `command = spice agent post-tool-hook --repo-root <root>`) and is embedded in
@@ -63,7 +64,7 @@ block — so it is genuinely "every tool call," not "every Bash result."
 ## The one sentence that removes the ambiguity
 
 `.spice/hooks/` is git's hook dir (commit-time gates, wired by `core.hooksPath`);
-`.spice/agent/<driver>-post-tool-hook.json` is a **record** of the PostToolUse hook
-whose live copy rides the agent's launch settings (every-tool-call steering
-delivery). Neither is dead: the first gates your commits, the second is how operator
-steering reaches you.
+`<worktree-git-dir>/.spice/agents/<driver>-post-tool-hook.json` is a **record**
+of the PostToolUse hook whose live copy rides the agent's launch settings
+(every-tool-call steering delivery). Neither is dead: the first gates your
+commits, the second is how operator steering reaches you.

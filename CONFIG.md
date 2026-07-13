@@ -49,7 +49,8 @@ Launch failure, malformed output, and every other exit/stdout combination emit
 a bounded diagnostic and preserve the original native command. RTK owns
 command-selection policy, not command permission. Spice owns the finite
 `common` command-shape layer and the agent-scoped
-`.git/spice/agents/<thread>/rtk/history.db` supplied through `RTK_DB_PATH`.
+`<worktree-git-dir>/.spice/agents/<thread>/rtk/history.db` supplied through
+`RTK_DB_PATH`.
 Activation and Doctor report missing, obsolete, or protocol-invalid RTK as
 native-command mode without blocking agent setup. Cargo installation and the
 complete protocol live in the

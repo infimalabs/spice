@@ -9,6 +9,21 @@ Spice configuration has exactly four scopes, in increasing precedence order:
 | `repository` | `<repository>/spice.toml` | Tracked plain Spice tables such as `[agent]` |
 | `worktree` | `<repository>/.spice/config/spice.toml` | Local plain Spice tables for one worktree |
 
+Managed runtime state has three ownership namespaces. Here,
+`<worktree-git-dir>` is the path reported by `git rev-parse --git-dir` for the
+current worktree, while `<git-common>` is the path reported by
+`git rev-parse --git-common-dir`:
+
+| Namespace | Ownership | Examples |
+| --- | --- | --- |
+| `<repository>/.spice` | Worktree-visible configuration and generated integration surfaces | Worktree `spice.toml`, Git hook shims, inbox files |
+| `<git-common>/.spice` | Managed state shared by every worktree of the repository | Task backend by default, team state, ACKs, maxim metrics, attachments, task artifacts, flex claims |
+| `<worktree-git-dir>/.spice` | Managed state owned by one worktree/lane | Agent runtime, sticky constitution state, disabled-maxim state |
+
+An explicit absolute `SPICE_TASK_BACKEND` redirects task configuration,
+TaskChampion storage, and team state. It does not redirect repository-owned ACK
+or maxim state, nor does it change either canonical Git-internal namespace.
+
 Tables merge recursively from `system` through `worktree`. A scalar or list at
 a later scope replaces the earlier leaf completely; lists never concatenate,
 and `key = []` explicitly clears an inherited list. A later scalar can replace
@@ -86,9 +101,9 @@ discarded, and the original native command runs unchanged. RTK owns rewrite
 selection and the canonical `rtk` frontend; Spice remaps that frontend to the
 configured identity, owns only the built-in `common` wrapper's finite
 post-selection routes and the thread-scoped `RTK_DB_PATH` location at
-`.git/spice/agents/<thread>/rtk/history.db`, and emits health telemetry through
-activation `rtk_status`, Doctor, and bounded stderr diagnostics. RTK owns the
-history database contents.
+`<worktree-git-dir>/.spice/agents/<thread>/rtk/history.db`, and emits health
+telemetry through activation `rtk_status`, Doctor, and bounded stderr
+diagnostics. RTK owns the history database contents.
 
 Task-boundary and worktree-discovery git commands have a 120-second default
 deadline; network fetch and push default to 30 seconds. Set
