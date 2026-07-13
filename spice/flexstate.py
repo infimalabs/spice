@@ -1,9 +1,11 @@
 """Sticky study state: once a file breaches a flex limit it stays watched.
 
 Shape guards allow headroom (`flex_limit`) over a base limit, but a file that
-ever breached keeps its base limit until it shrinks back under it. The breach
-set persists in the git dir so it survives checkouts and rebases without
-touching the working tree.
+ever breached keeps its base limit until it shrinks back under it. Sticky
+latches persist in the current worktree's git dir so lane-local decisions
+survive checkouts and rebases without touching the working tree. Live flex
+claims instead persist in the shared git common dir so peer worktrees can
+coordinate ownership of the same slice.
 """
 
 from __future__ import annotations
