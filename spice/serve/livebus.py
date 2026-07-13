@@ -82,6 +82,8 @@ if _HAVE_KQUEUE:
 # filesystem poll.
 LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S = 1.0
 LIVE_BUS_WATCHER_JOIN_TIMEOUT_S = LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S + 0.5
+LIVE_BUS_WATCHER_ACTIVATION_TIMEOUT_S = 5.0
+LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S = 15.0
 
 # A connected client sends `bus.ping` heartbeats well inside this window; a
 # whole interval with no frame means the peer is gone and the blocking read
@@ -509,7 +511,15 @@ class LiveBusSession:
         """
         try:
             for subscription in subscriptions:
-                subscription.watcher_activated.wait()
+                if not subscription.watcher_activated.wait(
+                    timeout=LIVE_BUS_WATCHER_ACTIVATION_TIMEOUT_S
+                ):
+                    subscription.stop.set()
+                    raise TimeoutError(
+                        "lane watcher activation deadline exceeded "
+                        f"target={subscription.target.id} "
+                        f"budget={LIVE_BUS_WATCHER_ACTIVATION_TIMEOUT_S:g}s"
+                    )
             futures: list[tuple[_LaneSubscription, Future[dict[str, Any]]]] = [
                 (
                     subscription,
@@ -522,7 +532,9 @@ class LiveBusSession:
             lanes = [
                 {
                     "targetId": subscription.target.id,
-                    "payload": future.result(),
+                    "payload": future.result(
+                        timeout=LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S
+                    ),
                     "subscriptionGeneration": subscription.generation,
                     "watcherActive": subscription.watcher_error is None,
                     "watcherError": subscription.watcher_error or "",
@@ -880,7 +892,14 @@ class LiveBusSession:
                 return
             if not changed:
                 continue
-            subscription.initial_payload_sent.wait()
+            if not subscription.initial_payload_sent.wait(
+                timeout=LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S
+            ):
+                raise TimeoutError(
+                    "lane initial payload deadline exceeded "
+                    f"target={target.id} "
+                    f"budget={LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S:g}s"
+                )
             if subscription.stop.is_set():
                 return
             signature = self.callbacks.lane_signature(target, thread_id, transcript)
