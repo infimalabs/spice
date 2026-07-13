@@ -221,6 +221,12 @@ def _configure_task_phase_parsers(actions: Any) -> None:
     done.add_argument("--validation", action="append", default=[])
     done.add_argument("--judgment")
     done.add_argument("--note", action="append", default=[], dest="notes")
+    done.add_argument(
+        "--next",
+        action="store_true",
+        dest="chain_next",
+        help="Select and claim the next allocator task after completion succeeds.",
+    )
     done.set_defaults(func=handle)
 
     review = actions.add_parser(
@@ -885,6 +891,7 @@ _DISPATCH = {
         validation=list(a.validation),
         judgment=a.judgment,
         notes=list(a.notes),
+        chain_next=a.chain_next,
     ),
     "review": lambda a: ops.review(
         a.handle,

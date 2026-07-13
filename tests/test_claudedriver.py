@@ -22,6 +22,7 @@ from spice.agent.driver import (
     CLAUDE_NATIVE_TASK_TOOLS,
     CLAUDE_NO_SUBAGENT_TOOLS,
     CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE,
+    CLAUDE_SUPERVISED_TASK_TOOLS,
     CODEX_DRIVER,
     POST_TOOL_HOOK_EVENT,
     PLAYWRIGHT_MCP_COMMAND,
@@ -576,22 +577,7 @@ def test_claude_tool_inventory_keeps_the_no_subagent_boundary_distinct():
         "TaskOutput",
         "TaskStop",
     )
-    assert CLAUDE_DENIED_TOOLS == (
-        *CLAUDE_NO_SUBAGENT_TOOLS,
-        *CLAUDE_NATIVE_TASK_TOOLS,
-        "Monitor",
-    )
-
-
-def test_claude_supervised_command_denies_complete_lifecycle_inventory(tmp_path):
-    command = CLAUDE_DRIVER.build_exec_command(
-        repo_root=tmp_path,
-        prompt="follow the skill",
-    )
-    settings = json.loads(command[command.index("--settings") + 1])
-
-    assert command[1] == "--print"
-    assert settings["permissions"]["deny"] == [
+    assert CLAUDE_SUPERVISED_TASK_TOOLS == (
         "Task",
         "Agent",
         "TaskCreate",
@@ -600,8 +586,43 @@ def test_claude_supervised_command_denies_complete_lifecycle_inventory(tmp_path)
         "TaskUpdate",
         "TaskOutput",
         "TaskStop",
+    )
+    assert CLAUDE_DENIED_TOOLS == (
+        *CLAUDE_SUPERVISED_TASK_TOOLS,
         "Monitor",
-    ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("thread_id", "resume_tail"),
+    [
+        ("", []),
+        (
+            "768bcba1a66f4d229ce7bcf65b5d16aa",
+            ["--resume", "768bcba1-a66f-4d22-9ce7-bcf65b5d16aa"],
+        ),
+    ],
+    ids=("initial", "resumed"),
+)
+def test_claude_commands_apply_task_denials_with_attribution_and_hooks(
+    tmp_path, thread_id, resume_tail
+):
+    command = CLAUDE_DRIVER.build_exec_command(
+        repo_root=tmp_path,
+        prompt="follow the skill",
+        thread_id=thread_id,
+    )
+    settings = json.loads(command[command.index("--settings") + 1])
+
+    assert command[1] == "--print"
+    assert command[command.index("--permission-mode") + 1] == "bypassPermissions"
+    expected_prompt = f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\nfollow the skill"
+    assert command[-(len(resume_tail) + 1) :] == [*resume_tail, expected_prompt]
+    assert settings["permissions"]["deny"] == [*CLAUDE_SUPERVISED_TASK_TOOLS, "Monitor"]
+    assert settings["attribution"] == {"commit": "", "sessionUrl": False}
+    hook_group = settings["hooks"][POST_TOOL_HOOK_EVENT][0]
+    assert hook_group["matcher"] == "*"
+    assert hook_group["hooks"][0]["statusMessage"] == "Checking spice steering"
 
 
 def test_claude_auto_compact_environment_sets_a_default_window(tmp_path, monkeypatch):

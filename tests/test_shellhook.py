@@ -928,6 +928,7 @@ def _toml_key(value: str) -> str:
 
 def _expected_project_common_with_pytest_wrapper_lines() -> list[str]:
     return [
+        *_builtin_rtk_wrapper_lines(),
         *_expected_wrapper_lines("wrap", ["run", "grep", "find", "git"]),
         *_expected_active_python_module_wrapper_lines(["pytest"]),
     ]
@@ -969,6 +970,11 @@ def _builtin_rtk_wrapper_lines() -> list[str]:
         "          ;;",
         "      esac",
         "    done",
+        "  fi",
+        '  if [ "${1-}" = grep ]; then',
+        "    shift",
+        '    command rtk grep -E "$@"',
+        "    return",
         "  fi",
         '  command rtk "$@"',
         "}",

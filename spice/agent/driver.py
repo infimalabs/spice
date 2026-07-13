@@ -506,13 +506,16 @@ CLAUDE_NATIVE_TASK_TOOLS = (
     "TaskOutput",
     "TaskStop",
 )
+CLAUDE_SUPERVISED_TASK_TOOLS = (
+    *CLAUDE_NO_SUBAGENT_TOOLS,
+    *CLAUDE_NATIVE_TASK_TOOLS,
+)
 # Monitor is Claude Code's canonical background-task tool as of 2.1.98. It is
 # intentionally outside the native task inventory because its lifecycle
 # contract is distinct. Cron, Workflow, SendMessage, and future Spice task-tool
 # emulation are separate concerns too.
 CLAUDE_DENIED_TOOLS = (
-    *CLAUDE_NO_SUBAGENT_TOOLS,
-    *CLAUDE_NATIVE_TASK_TOOLS,
+    *CLAUDE_SUPERVISED_TASK_TOOLS,
     "Monitor",
 )
 # Claude Code reads this at launch and takes it as the token count at which it
@@ -576,6 +579,10 @@ def claude_settings_json(
         key: value.copy() if isinstance(value, dict) else value
         for key, value in CLAUDE_ATTRIBUTION_DISABLED_SETTINGS.items()
     }
+    # Claude applies exact bare-name denials before bypassPermissions and
+    # removes the matching built-ins from model context. Keep this in the same
+    # inline document as attribution and hooks so every launch path has one
+    # authoritative settings payload.
     settings["permissions"] = {"deny": list(CLAUDE_DENIED_TOOLS)}
     if repo_root is not None and driver is not None:
         settings["hooks"] = post_tool_hook_settings(repo_root, driver)

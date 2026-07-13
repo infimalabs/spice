@@ -28,9 +28,10 @@ def test_agent_wrapper_lines_adds_ordered_agent_wrapper_functions(tmp_path):
         groups={"common": {"wrap": ["grep", "find", "git"]}},
     )
 
-    assert shellhook.render_agent_wrapper_lines(tmp_path) == _expected_wrapper_lines(
-        "wrap", ["grep", "find", "git"]
-    )
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
+        *_builtin_rtk_wrapper_lines(),
+        *_expected_wrapper_lines("wrap", ["grep", "find", "git"]),
+    ]
 
 
 def test_agent_wrapper_lines_uses_builtin_common_default(tmp_path):
@@ -51,16 +52,19 @@ def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_
     )
 
 
-def test_agent_wrapper_lines_project_common_group_overrides_builtin_default(tmp_path):
+def test_agent_wrapper_lines_project_common_group_merges_with_packaged_default(
+    tmp_path,
+):
     _write_agent_wrapper_config(
         tmp_path,
         order=None,
         groups={"common": {"wrap": ["grep"]}},
     )
 
-    assert shellhook.render_agent_wrapper_lines(tmp_path) == _expected_wrapper_lines(
-        "wrap", ["grep"]
-    )
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
+        *_builtin_rtk_wrapper_lines(),
+        *_expected_wrapper_lines("wrap", ["grep"]),
+    ]
 
 
 def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
@@ -257,6 +261,8 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
             *shellhook.render_agent_wrapper_lines(tmp_path),
             "rtk grep --files src",
             "rtk grep needle src",
+            "rtk grep -F 'a|b' src",
+            "rtk grep -G 'a\\|b' src",
             "rtk find src -name '*.py' -print",
             "rtk find src \\( -name '*.py' -o -name '*.md' \\)",
             "rtk git log --first-parent v1..HEAD",
@@ -284,7 +290,9 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
     lines = _trace_lines(trace, expected_prefix="rg:")
     assert lines == [
         "rg:--files src",
-        "rtk:grep needle src",
+        "rtk:grep -E needle src",
+        "rtk:grep -E -F a|b src",
+        "rtk:grep -E -G a\\|b src",
         "find:src -name *.py -print",
         "find:src ( -name *.py -o -name *.md )",
         "git:log --first-parent v1..HEAD",

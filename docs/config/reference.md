@@ -121,6 +121,35 @@ distillation likewise skips candidates whose judge call fails.
 Agent personality is a worktree-local `spice config personality` setting
 (`pragmatic` by default), not a tracked `[tool.spice.agent]` key.
 
+### Supervised Claude tool boundary
+
+Spice is the sole task control plane in supervised Claude lanes. Every
+`claude --print` launch therefore places these exact bare names in
+`permissions.deny`:
+
+```text
+Task, Agent, TaskCreate, TaskGet, TaskList, TaskUpdate, TaskOutput, TaskStop
+```
+
+Bare denies remove the tool definitions from Claude's model context before the
+launch's `bypassPermissions` mode is evaluated; this is a model-context
+boundary, not merely a rejected-call policy. `Task` is retained as the accepted
+older name for `Agent`. Spice deliberately inventories every name instead of
+making a generic built-in-name wildcard part of its contract, so any new
+Task-prefixed Claude built-in requires an explicit inventory and test update.
+Future Claude-tool emulation must be built on top of Spice tasks and is outside
+this boundary.
+
+The inventory was last checked on 2026-07-12 with installed Claude Code
+2.1.201 against Anthropic's [tools
+reference](https://code.claude.com/docs/en/tools-reference), [TypeScript SDK
+reference](https://code.claude.com/docs/en/agent-sdk/typescript#agent), and
+[permission evaluation
+reference](https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions-are-evaluated).
+`Monitor` has a separate process-lifecycle rationale under the [Lifecycle
+Plane](../design/ARCHITECTURE.md#lifecycle-plane), tracked by
+`FOUNDAT-1kCyNZT3`.
+
 ## `[tool.spice.wrappers.<group>]`
 
 Wrapper groups define shell functions for agent-owned commands. Select groups
@@ -132,10 +161,16 @@ with `[tool.spice.agent] wrappers = [...]`.
 | `selector = { argv = ["tool", "subcommand"] }` | Create a direct wrapper function named `selector` that runs the configured argv plus caller arguments. |
 
 RTK rewrite selection happens inside `spice agent run`. The built-in `common`
-group supplies only the finite post-selection command-shape transformations
-for rg-only grep flags, native find predicates, and diagnostic git flags. Repo
-groups may replace or extend `common` and should otherwise wrap stable
-repo-owned tools (see [wrapper commands](../cli/wrapper-commands.md)).
+group supplies only the finite post-selection command-shape transformations:
+rg-only grep flags to `rg`, native find predicates to `find`, diagnostic git
+flags to `git`, and a final head-only route that injects `-E` so `rtk grep`
+defaults to extended regular expressions (an explicit `-F` or `-G` later in
+argv still wins because grep honors the last matcher flag). Naming `common` in
+a repo `[tool.spice.wrappers.common]` table replaces the whole group atomically
+— routes do not concatenate, so an override must re-list every route it keeps —
+while omitting the table inherits this default and `wrappers = []` disables
+generation. Repo groups should otherwise wrap stable repo-owned tools (see
+[wrapper commands](../cli/wrapper-commands.md)).
 
 ## `[tool.spice.commands]`
 
@@ -305,9 +340,21 @@ flex makes the item sticky until it shrinks under the base cap.
 
 ### `[tool.spice.policy.taste.words]`
 
-Gate-only prose suggestions for tracked `.md`, `.txt`, and `.rst` files. Keys
-are whole-word triggers; values are replacements, and an empty value means
-remove or rephrase. Configured words merge over built-ins.
+The authoritative built-in map is `policy.TASTE_WORD_SUGGESTIONS`. It feeds
+`spice study taste`, the staged pre-commit taste gate, and task-creation wording;
+file scans cover tracked `.md`, `.txt`, and `.rst` prose. The defaults include
+explicit singular, plural, past-participle, and gerund suggestions for
+`allowlist`, `allowlists`, `allowlisted`, and `allowlisting`, plus `blocklist`,
+`blocklists`, `blocklisted`, and `blocklisting`.
+
+A bare key matches one whole word case-insensitively. Only a trailing `*` opts
+into stem matching and covers every word-character suffix. Values are the exact
+suggestions shown to the user; an empty value means remove or rephrase.
+
+The resolver starts from the built-in map, then normalizes repository keys to
+lowercase and assigns repository entries in TOML order. A matching normalized
+key replaces only that suggestion; new keys extend the map, and every other
+built-in entry remains active.
 
 ### `[tool.spice.policy.markdown_depth_budget]`
 
