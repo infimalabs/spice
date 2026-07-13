@@ -723,6 +723,9 @@ def test_static_send_latency_probe_records_submit_timing_buckets():
     assert 'message.type !== "lane.sendTiming"' in app_live_bus
     assert "sample.serverTiming = message.serverTiming || {};" in app_live_bus
     assert "pendingLaneSendServerTimings.has(probe.requestId)" in app_stream
+    assert '"lanes.dirty", handleBackgroundLanesDirtyPush' in app_live_bus
+    assert "focused: liveBusLaneIsFocused(lane)" in app_live_bus
+    assert "function installLiveBusLaneFocusTracking()" in app_live_bus
     assert "function startLaneSubmitLatencyProbe(lane, payload)" in app_static
     assert "function finishLaneSubmitLatencyProbe(probe, status)" in app_static
     assert "function laneSubmitLatencyDurations(marks)" in app_static

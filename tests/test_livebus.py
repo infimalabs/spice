@@ -131,6 +131,55 @@ def test_session_diagnostics_measure_frame_bytes_and_send_lock_timing(
     assert diagnostics["totals"] == {"count": 1, "bytes": expected_bytes}
 
 
+@pytest.mark.parametrize("background_count", (1, 100))
+def test_background_lane_burst_coalesces_before_focused_delivery(
+    tmp_path, monkeypatch, background_count
+):
+    callbacks: list[Any] = []
+
+    class DeferredTimer:
+        def __init__(self, _seconds, callback):
+            self.callback = callback
+            self.daemon = False
+
+        def start(self):
+            callbacks.append(self.callback)
+
+        def cancel(self):
+            return None
+
+    monkeypatch.setattr(livebus, "Timer", DeferredTimer)
+    target = _Target(id="focused", repo_root=tmp_path)
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    connection = _Connection()
+    session = LiveBusSession(
+        connection, _callbacks(target=target, transcript=transcript)
+    )
+    for index in range(background_count):
+        subscription = livebus._LaneSubscription(
+            target=_Target(id=f"background-{index}", repo_root=tmp_path),
+            query={"focused": False},
+            generation=f"generation-{index}",
+        )
+        for _change in range(10):
+            assert session.coalesce_background_update(subscription) is True
+
+    session._send({"type": "lane.payload", "targetId": target.id})
+    assert [frame["type"] for frame in connection.sent] == ["lane.payload"]
+    assert len(callbacks) == 1
+
+    callbacks[0]()
+    assert [frame["type"] for frame in connection.sent] == [
+        "lane.payload",
+        "lanes.dirty",
+    ]
+    assert len(connection.sent[1]["lanes"]) == background_count
+    diagnostics = session.diagnostics()["frames"]
+    assert diagnostics["lane.payload"]["count"] == 1
+    assert diagnostics["lanes.dirty"]["count"] == 1
+
+
 def test_two_refreshes_for_one_target_reply_in_request_order(tmp_path):
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text("", encoding="utf-8")

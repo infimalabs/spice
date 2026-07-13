@@ -212,6 +212,7 @@ function applyGlobalSettingsPayload(settings) {
 }
 
 async function init() {
+  installLiveBusLaneFocusTracking();
   await connectLiveBus();
   await refreshServerTopology();
   setInterval(updateLiveRelativeTimes, relativeTimeTickMs);

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
 from queue import Queue
-from threading import Event, Lock, Thread
+from threading import Event, Lock, Thread, Timer
 from typing import Any, Callable, cast
 
 from spice.serve.messages import TranscriptResolution
@@ -87,6 +87,7 @@ LIVE_BUS_WATCHER_JOIN_TIMEOUT_S = LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S + 0.5
 # whole interval with no frame means the peer is gone and the blocking read
 # is unblocked so the session and its watchers are reaped.
 LIVE_BUS_READ_TIMEOUT_S = 45.0
+BACKGROUND_LANE_COALESCE_SECONDS = 0.25
 _MS_PER_SECOND = 1000
 
 
@@ -171,6 +172,7 @@ class _LaneSubscription:
     lock: Lock = field(default_factory=Lock)
     last_signature: Any = None
     watcher_error: str | None = None
+    background_dirty: bool = False
 
 
 class LiveBusSession:
@@ -187,6 +189,10 @@ class LiveBusSession:
         self.send_lock = Lock()
         self._telemetry_lock = Lock()
         self._frame_telemetry: dict[str, _FrameTelemetry] = {}
+        self._background_dirty_lock = Lock()
+        self._background_dirty_lanes: dict[str, str] = {}
+        self._background_dirty_timer: Timer | None = None
+        self._closed = False
         # Metrics are read-only display data whose queries can be heavy; running
         # them inline would block interactive frames (lane.send, acks) on this
         # one socket. A dedicated worker drains them so the dispatch loop stays
@@ -236,6 +242,13 @@ class LiveBusSession:
             self._teardown()
 
     def _teardown(self) -> None:
+        with self._background_dirty_lock:
+            self._closed = True
+            timer = self._background_dirty_timer
+            self._background_dirty_timer = None
+            self._background_dirty_lanes.clear()
+        if timer is not None:
+            timer.cancel()
         for subscription in list(self.subscriptions.values()):
             self._stop_subscription(subscription)
         self.subscriptions.clear()
@@ -635,6 +648,53 @@ class LiveBusSession:
                 subscription.query = dict(message.get("query") or {})
         self._reply(message, {"type": "lane.configured"})
 
+    def coalesce_background_update(self, subscription: _LaneSubscription) -> bool:
+        """Defer one background lane change into the aggregate dirty frame."""
+        with subscription.lock:
+            focused = subscription.query.get("focused") is not False
+            if focused:
+                subscription.background_dirty = False
+                return False
+            if subscription.background_dirty:
+                return True
+            subscription.background_dirty = True
+        self._mark_background_lane_dirty(subscription)
+        return True
+
+    def _mark_background_lane_dirty(self, subscription: _LaneSubscription) -> None:
+        with self._background_dirty_lock:
+            if self._closed:
+                return
+            self._background_dirty_lanes[subscription.target.id] = (
+                subscription.generation
+            )
+            if self._background_dirty_timer is not None:
+                return
+            timer = Timer(
+                BACKGROUND_LANE_COALESCE_SECONDS,
+                self._flush_background_lane_dirties,
+            )
+            timer.daemon = True
+            self._background_dirty_timer = timer
+            timer.start()
+
+    def _flush_background_lane_dirties(self) -> None:
+        with self._background_dirty_lock:
+            self._background_dirty_timer = None
+            if self._closed or not self._background_dirty_lanes:
+                return
+            lanes = [
+                {"targetId": target_id, "subscriptionGeneration": generation}
+                for target_id, generation in sorted(
+                    self._background_dirty_lanes.items()
+                )
+            ]
+            self._background_dirty_lanes.clear()
+        try:
+            self._send({"type": "lanes.dirty", "lanes": lanes})
+        except (OSError, WebSocketProtocolError, WebSocketDisconnect):
+            return
+
     def _handle_lane_unsubscribe(self, message: dict[str, Any]) -> None:
         target_id = str(message.get("targetId") or "")
         subscription = self.subscriptions.pop(target_id, None)
@@ -828,6 +888,8 @@ class LiveBusSession:
             if signature == previous_signature:
                 continue
             subscription.last_signature = signature
+            if self.coalesce_background_update(subscription):
+                continue
             if pending_only_signature_change(previous_signature, signature):
                 payload = _pending_lane_payload(target)
                 try:
