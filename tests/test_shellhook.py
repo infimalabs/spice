@@ -1141,6 +1141,9 @@ def _fake_spice_python(tmp_path: Path, *, run_agent_commands: bool = False) -> P
     static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
     agent_run_exec = (
         (
+            'if [ "$1" = "-P" ]; then\n'
+            "  shift\n"
+            "fi\n"
             'if [ "$1" = "-m" ] && [ "$2" = "spice" ] '
             '&& [ "$3" = "agent" ] && [ "$4" = "run" ] '
             '&& [ "$5" = "--" ]; then\n'

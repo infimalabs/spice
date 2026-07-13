@@ -124,7 +124,7 @@ def test_zsh_login_hook_reexec_restores_across_startup_files(tmp_path):
     subprocess.run([zsh, "-lc", ":"], check=True, env=env)
 
     lines = _trace_lines(trace, expected_prefix="real:")
-    assert lines[0].startswith("fake:unset:unset:-m spice agent run --")
+    assert lines[0].startswith("fake:unset:unset:-P -m spice agent run --")
     assert lines[1:] == ["real:.zshenv", "real:.zprofile", "real:.zlogin"]
 
 
