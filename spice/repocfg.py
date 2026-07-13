@@ -1,11 +1,7 @@
-"""Effective repository configuration from the canonical layered view.
+"""Generic repository metadata outside Spice's layered configuration.
 
-Two kinds of configuration, two homes. Constitution parameters and task
-vocabulary are *project truth* — they belong in tracked history, so every clone
-and every agent sees the same opinions. Operator-local state (speech voice,
-judge binary, personality, worktree agent overrides) is *worktree truth* and
-lives in `.spice/config/`.
-
+Spice settings use :mod:`spice.configlayer`; this module reads the remaining
+packaging and test metadata from the repository's ``pyproject.toml``.
 """
 
 from __future__ import annotations

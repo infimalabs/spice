@@ -17,9 +17,8 @@ SYSTEM_SOURCE = "system"
 PYPROJECT_SOURCE = "pyproject"
 REPOSITORY_SOURCE = "repository"
 WORKTREE_SOURCE = "worktree"
-_CONFIG_ERROR_KEY_RE = re.compile(
-    r"^\[tool\.spice(?:\.([^\]]+))?\](?:[ .]([A-Za-z0-9_-]+))?"
-)
+_CONFIG_ERROR_TABLE_RE = re.compile(r"^\[tool\.spice(?:\.([^\]]+))?\]")
+_CONFIG_ERROR_CANDIDATE_RE = re.compile(r"^[ .]([A-Za-z0-9_-]+)")
 CONFIG_SCOPE_NAMES = (
     SYSTEM_SOURCE,
     PYPROJECT_SOURCE,
@@ -74,7 +73,7 @@ def load_config(repo_root: Path) -> LayeredConfig:
     parsed: list[dict[str, Any]] = [dict(packaged.values)]
     layers: list[ConfigLayer] = [packaged]
     for name, path, pyproject in specifications:
-        values, present = _read_toml(path)
+        values, present = _read_toml(path, name)
         if pyproject:
             values = _pyproject_spice_table(values)
         parsed.append(values)
@@ -101,7 +100,7 @@ def load_config(repo_root: Path) -> LayeredConfig:
 def load_packaged_config() -> ConfigLayer:
     """Load the required installed default layer from its canonical path."""
     path = paths.runtime_spice_source() / "spice.toml"
-    values, present = _read_toml(path)
+    values, present = _read_toml(path, SYSTEM_SOURCE)
     if not present:
         raise SpiceError(f"packaged configuration is missing: {path}")
     return ConfigLayer(
@@ -176,34 +175,44 @@ def contextualize_config_error(
     """Attach the effective key and winning layer to a consumer validation error."""
     message = str(exc)
     if "source=" in message and " path=" in message:
-        return exc
+        return SpiceError(message)
     path = fallback_path
     detail = message
-    match = _CONFIG_ERROR_KEY_RE.match(message)
-    if match is not None:
-        table, candidate = match.groups()
+    table_match = _CONFIG_ERROR_TABLE_RE.match(message)
+    if table_match is not None:
+        table = table_match.group(1)
         parsed = tuple(part for part in (table or "").split(".") if part)
-        candidate_path = (*parsed, candidate) if candidate else parsed
+        remainder = message[table_match.end() :]
+        candidate_match = _CONFIG_ERROR_CANDIDATE_RE.match(remainder)
+        candidate = candidate_match.group(1) if candidate_match is not None else ""
+        candidate_path = (*parsed, candidate) if candidate else ()
         loaded = load_config(repo_root)
-        path = (
-            candidate_path
-            if loaded.source_for(candidate_path) is not None
-            else parsed or fallback_path
-        )
-        detail = message[match.end() :].lstrip(" .:") or message
+        if (
+            candidate_match is not None
+            and loaded.source_for(candidate_path) is not None
+        ):
+            path = candidate_path
+            detail = remainder[candidate_match.end() :].lstrip(" .:") or message
+        else:
+            path = parsed or fallback_path
+            detail = remainder.lstrip(" .:") or message
     return SpiceError(f"{effective_context(repo_root, *path)}: {detail}")
 
 
-def _read_toml(path: Path) -> tuple[dict[str, Any], bool]:
+def _read_toml(path: Path, source_name: str) -> tuple[dict[str, Any], bool]:
     try:
         with path.open("rb") as handle:
             loaded = tomllib.load(handle)
     except FileNotFoundError:
         return {}, False
     except tomllib.TOMLDecodeError as exc:
-        raise SpiceError(f"invalid TOML in {path}: {exc}") from exc
+        raise SpiceError(
+            f"invalid TOML for configuration source={source_name} path={path}: {exc}"
+        ) from exc
     except OSError as exc:
-        raise SpiceError(f"cannot read configuration {path}: {exc}") from exc
+        raise SpiceError(
+            f"cannot read configuration source={source_name} path={path}: {exc}"
+        ) from exc
     return loaded, True
 
 

@@ -248,8 +248,8 @@ def ensure_agent(
         service_tier = driver.default_service_tier if fast_mode else ""
         phase_launch = _claimed_task_phase_launch(resolved_root, driver.name, status)
         # Resolution order: explicit argument > the claimed task's phase
-        # mapping for this driver > worktree-local config > tracked project
-        # config > the driver's shipped default.
+        # mapping for this driver > the effective four-layer configuration >
+        # the driver's shipped default.
         phase_model = phase_launch.get("model", "")
         model = driver.resolve_model(
             model or phase_model or configured_agent_model(resolved_root)

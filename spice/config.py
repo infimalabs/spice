@@ -1,4 +1,4 @@
-"""Harness configuration from project truth and worktree-local state."""
+"""Layered harness configuration and scoped TOML editing."""
 
 from __future__ import annotations
 
@@ -32,9 +32,6 @@ from spice.paths import (
 )
 
 WORKTREE_CONFIG_RELATIVE_PATH = Path("config") / "spice.toml"
-LEGACY_CONFIG_STATE_RELATIVE_PATH = Path("config") / "state.json"
-LEGACY_CONFIG_SCHEMA = 1
-WORKTREE_CONFIG_SECTIONS = ("say", "judge", "agent")
 
 SAY_KEY = "say"
 SAY_BACKEND_KEY = "backend"
@@ -83,34 +80,6 @@ def worktree_config_path(repo_root: Path) -> Path:
     return state_dir(repo_root) / WORKTREE_CONFIG_RELATIVE_PATH
 
 
-def _legacy_config_state_path(repo_root: Path) -> Path:
-    return state_dir(repo_root) / LEGACY_CONFIG_STATE_RELATIVE_PATH
-
-
-def read_worktree_config(repo_root: Path) -> dict[str, Any]:
-    """Return the worktree TOML config, migrating legacy JSON state first."""
-    _ensure_worktree_config_migrated(repo_root)
-    return _load_worktree_toml(repo_root)
-
-
-def _load_worktree_toml(repo_root: Path) -> dict[str, Any]:
-    path = worktree_config_path(repo_root)
-    try:
-        with path.open("rb") as handle:
-            return tomllib.load(handle)
-    except FileNotFoundError:
-        return {}
-    except tomllib.TOMLDecodeError as exc:
-        raise SpiceError(f"invalid TOML in {path}: {exc}") from exc
-    except OSError as exc:
-        raise SpiceError(f"cannot read configuration {path}: {exc}") from exc
-
-
-def _section(repo_root: Path, key: str) -> dict[str, Any]:
-    value = read_worktree_config(repo_root).get(key)
-    return value if isinstance(value, dict) else {}
-
-
 def config_scope_path(repo_root: Path, scope: str) -> Path:
     """Return the canonical TOML path for one explicit mutable scope."""
     if scope == SYSTEM_SOURCE:
@@ -153,8 +122,6 @@ def _mutate_scope_section(
     values: Mapping[str, Any] | None = None,
     clear_keys: tuple[str, ...] | None = (),
 ) -> Path:
-    if scope == WORKTREE_SOURCE:
-        _ensure_worktree_config_migrated(repo_root)
     path = config_scope_path(repo_root, scope)
     if scope == SYSTEM_SOURCE and (not path.is_file() or not os.access(path, os.W_OK)):
         raise SpiceError(f"configuration scope=system path={path} is not writable")
@@ -185,67 +152,6 @@ def _mutate_scope_section(
         raise SpiceError(
             f"cannot write configuration scope={scope} path={path}: {exc}"
         ) from exc
-
-
-def _ensure_worktree_config_migrated(repo_root: Path) -> None:
-    """Migrate a schema-1 ``state.json`` into the worktree TOML exactly once.
-
-    The TOML write lands durably before the JSON source is deleted, so a failed
-    migration leaves ``state.json`` intact and raises an actionable error; once
-    the JSON file is gone no caller reads it again.
-    """
-    legacy = _legacy_config_state_path(repo_root)
-    if not legacy.exists():
-        return
-    try:
-        raw = json.loads(legacy.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise SpiceError(f"cannot migrate legacy config state {legacy}: {exc}") from exc
-    if not isinstance(raw, Mapping) or raw.get("schema") != LEGACY_CONFIG_SCHEMA:
-        raise SpiceError(
-            f"cannot migrate legacy config state {legacy}: expected schema "
-            f"{LEGACY_CONFIG_SCHEMA}"
-        )
-    sections = {
-        key: dict(value)
-        for key in WORKTREE_CONFIG_SECTIONS
-        if isinstance(value := raw.get(key), Mapping) and value
-    }
-    try:
-        _load_worktree_toml(repo_root)
-        if sections:
-            lines = _read_worktree_config_lines(repo_root)
-            for table, values in sections.items():
-                _apply_worktree_table(lines, table, values)
-            _write_worktree_config_lines(repo_root, lines)
-        legacy.unlink()
-    except SpiceError:
-        raise
-    except OSError as exc:
-        raise SpiceError(
-            "cannot migrate legacy config state to "
-            f"{worktree_config_path(repo_root)}: {exc}"
-        ) from exc
-
-
-def _read_worktree_config_lines(repo_root: Path) -> list[str]:
-    path = worktree_config_path(repo_root)
-    try:
-        return path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return []
-    except OSError as exc:
-        raise SpiceError(f"cannot read configuration {path}: {exc}") from exc
-
-
-def _write_worktree_config_lines(repo_root: Path, lines: list[str]) -> Path:
-    text = "\n".join(lines) + "\n" if lines else ""
-    path = worktree_config_path(repo_root)
-    try:
-        tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
-        raise SpiceError(f"invalid TOML in {path}: {exc}") from exc
-    return atomic_write_text(path, text)
 
 
 def _apply_worktree_table(
@@ -376,8 +282,7 @@ def _effective_section(root: Path | None, key: str) -> dict[str, Any]:
 
 
 def _configured_value(root: Path | None, section: str, key: str) -> Any:
-    local = _section(root, section).get(key) if root is not None else None
-    return local if local is not None else _effective_section(root, section).get(key)
+    return _effective_section(root, section).get(key)
 
 
 def configured_say_voice(repo_root: Path | None = None) -> str | None:

@@ -3,6 +3,8 @@
 import argparse
 import json
 import tomllib
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import pytest
 
@@ -12,9 +14,22 @@ from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.configcli import handle_config
 
-SAMPLE_WORDS_PER_MINUTE = 190
 SAY_TIMEOUT_MINUTE_FLOOR_SECONDS = 60.0
 SAY_TIMEOUT_OVERRIDE_SECONDS = 12.5
+
+
+@dataclass(frozen=True)
+class ConfigMutationOutcome:
+    state: str
+    message: str
+
+
+def _config_mutation_outcome(operation: Callable[[], object]) -> ConfigMutationOutcome:
+    try:
+        operation()
+    except SpiceError as exc:
+        return ConfigMutationOutcome("rejected", str(exc))
+    return ConfigMutationOutcome("applied", "configuration applied")
 
 
 def _redirect_system_config(tmp_path, monkeypatch):
@@ -367,8 +382,8 @@ def test_invalid_value_reports_selected_source_before_mutation(tmp_path, monkeyp
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
     before = config.config_overview(tmp_path)["layers"]["repository"]
 
-    with pytest.raises(SpiceError) as raised:
-        handle_config(
+    outcome = _config_mutation_outcome(
+        lambda: handle_config(
             build_parser().parse_args(
                 [
                     "config",
@@ -380,9 +395,11 @@ def test_invalid_value_reports_selected_source_before_mutation(tmp_path, monkeyp
                 ]
             )
         )
+    )
 
-    assert "scope=repository" in str(raised.value)
-    assert f"path={tmp_path / 'spice.toml'}" in str(raised.value)
+    assert outcome.state == "rejected"
+    assert "scope=repository" in outcome.message
+    assert f"path={tmp_path / 'spice.toml'}" in outcome.message
     assert config.config_overview(tmp_path)["layers"]["repository"] == before
 
 
@@ -391,16 +408,17 @@ def test_unwritable_system_scope_reports_source_before_mutation(tmp_path, monkey
     monkeypatch.setattr(config.os, "access", lambda _path, _mode: False)
     before = system_path.read_bytes()
 
-    with pytest.raises(SpiceError) as raised:
-        config.set_scope_section(
+    outcome = _config_mutation_outcome(
+        lambda: config.set_scope_section(
             tmp_path,
             config.SYSTEM_SOURCE,
             config.AGENT_KEY,
             {config.AGENT_MODEL_KEY: "blocked-model"},
         )
+    )
 
-    assert str(raised.value) == (
-        f"configuration scope=system path={system_path} is not writable"
+    assert outcome == ConfigMutationOutcome(
+        "rejected", f"configuration scope=system path={system_path} is not writable"
     )
     assert system_path.read_bytes() == before
 
@@ -503,6 +521,106 @@ def test_config_say_rejects_external_backend_without_command(tmp_path, monkeypat
         )
 
 
+def test_repository_say_validation_rejects_command_borrowed_from_worktree(
+    tmp_path, monkeypatch
+):
+    _redirect_system_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    repository_path = tmp_path / "spice.toml"
+    repository_path.write_text("# repository settings\n", encoding="utf-8")
+    config.set_scope_section(
+        tmp_path,
+        config.WORKTREE_SOURCE,
+        config.SAY_KEY,
+        {config.SAY_COMMAND_KEY: "later-worktree-command"},
+    )
+    original = repository_path.read_bytes()
+    parser = build_parser()
+
+    outcome = _config_mutation_outcome(
+        lambda: handle_config(
+            parser.parse_args(
+                [
+                    "config",
+                    "say",
+                    "--scope",
+                    "repository",
+                    "--backend",
+                    "external",
+                ]
+            )
+        )
+    )
+
+    assert outcome.state == "rejected"
+    assert "requires --command" in outcome.message
+    assert f"scope=repository path={repository_path}" in outcome.message
+    assert repository_path.read_bytes() == original
+
+
+def test_repository_say_validation_accepts_command_from_earlier_scope(
+    tmp_path, monkeypatch
+):
+    _redirect_system_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    config.set_scope_section(
+        tmp_path,
+        config.PYPROJECT_SOURCE,
+        config.SAY_KEY,
+        {config.SAY_COMMAND_KEY: "earlier-project-command"},
+    )
+    parser = build_parser()
+
+    outcome = _config_mutation_outcome(
+        lambda: handle_config(
+            parser.parse_args(
+                [
+                    "config",
+                    "say",
+                    "--scope",
+                    "repository",
+                    "--backend",
+                    "external",
+                ]
+            )
+        )
+    )
+
+    assert outcome.state == "applied"
+    assert config.configured_say_backend(tmp_path) == "external"
+    assert config.configured_say_command(tmp_path) == "earlier-project-command"
+
+
+def test_clearing_worktree_say_rejects_invalid_revealed_stack_without_writing(
+    tmp_path, monkeypatch
+):
+    _redirect_system_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    (tmp_path / "spice.toml").write_text(
+        '[say]\nbackend = "external"\n', encoding="utf-8"
+    )
+    config.set_scope_section(
+        tmp_path,
+        config.WORKTREE_SOURCE,
+        config.SAY_KEY,
+        {config.SAY_COMMAND_KEY: "later-worktree-command"},
+    )
+    worktree_path = config.worktree_config_path(tmp_path)
+    original = worktree_path.read_bytes()
+    parser = build_parser()
+
+    outcome = _config_mutation_outcome(
+        lambda: handle_config(
+            parser.parse_args(["config", "say", "--scope", "worktree", "--clear"])
+        )
+    )
+
+    assert outcome.state == "rejected"
+    assert "requires --command" in outcome.message
+    assert f"scope=worktree path={worktree_path}" in outcome.message
+    assert worktree_path.read_bytes() == original
+
+
 def test_configured_judge_bin_defaults_to_platform_adapter(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.platform", "darwin")
     assert config.configured_judge_bin(tmp_path) == config.DEFAULT_JUDGE_BIN
@@ -557,87 +675,6 @@ def test_say_timeout_falls_back_when_non_positive_or_invalid(tmp_path):
         {config.SAY_TIMEOUT_SECONDS_KEY: "nonsense"},
     )
     assert config.configured_say_timeout(tmp_path) == config.DEFAULT_SAY_TIMEOUT_SECONDS
-
-
-def _write_legacy_state(repo_root, payload):
-    legacy = repo_root / ".spice" / "config" / "state.json"
-    legacy.parent.mkdir(parents=True, exist_ok=True)
-    legacy.write_text(json.dumps(payload), encoding="utf-8")
-    return legacy
-
-
-def test_worktree_config_migrates_legacy_state_json_exactly_once(tmp_path, monkeypatch):
-    fsync_calls: list[int] = []
-    monkeypatch.setattr(
-        "spice.paths.os.fsync", lambda descriptor: fsync_calls.append(descriptor)
-    )
-    legacy = _write_legacy_state(
-        tmp_path,
-        {
-            "schema": 1,
-            "agent": {"driver": "claude", "model": "sonnet"},
-            "say": {"voice": "Samantha", "words_per_minute": SAMPLE_WORDS_PER_MINUTE},
-            "judge": {"bin": "/opt/my-judge"},
-        },
-    )
-
-    migrated = config.read_worktree_config(tmp_path)
-
-    assert migrated == {
-        "agent": {"driver": "claude", "model": "sonnet"},
-        "say": {"voice": "Samantha", "words_per_minute": SAMPLE_WORDS_PER_MINUTE},
-        "judge": {"bin": "/opt/my-judge"},
-    }
-    assert not legacy.exists()
-    assert config.worktree_config_path(tmp_path).exists()
-    assert len(fsync_calls) >= 2
-    # words_per_minute keeps its integer type across the migration round trip.
-    assert config.configured_say_words_per_minute(tmp_path) == SAMPLE_WORDS_PER_MINUTE
-
-    # Idempotent: a second read finds no JSON and leaves the TOML byte-identical.
-    before = config.worktree_config_path(tmp_path).read_text(encoding="utf-8")
-    assert config.read_worktree_config(tmp_path) == migrated
-    assert config.worktree_config_path(tmp_path).read_text(encoding="utf-8") == before
-
-
-def test_worktree_config_migration_preserves_unrelated_toml(tmp_path):
-    config_path = config.worktree_config_path(tmp_path)
-    config_path.parent.mkdir(parents=True)
-    config_path.write_text(
-        '# operator notes\n[custom]\nkeep = "me"\n',
-        encoding="utf-8",
-    )
-    legacy = _write_legacy_state(tmp_path, {"schema": 1, "agent": {"driver": "claude"}})
-
-    config.read_worktree_config(tmp_path)
-
-    text = config_path.read_text(encoding="utf-8")
-    assert "# operator notes" in text
-    assert "[custom]" in text
-    assert 'keep = "me"' in text
-    assert config.configured_agent_driver(tmp_path) == "claude"
-    assert not legacy.exists()
-
-
-def test_worktree_config_migration_failure_leaves_json_intact(tmp_path):
-    legacy = _write_legacy_state(tmp_path, {"schema": 1})
-    legacy.write_text("{ not valid json", encoding="utf-8")
-
-    with pytest.raises(SpiceError, match="migrate legacy config state"):
-        config.read_worktree_config(tmp_path)
-
-    assert legacy.exists()
-    assert not config.worktree_config_path(tmp_path).exists()
-
-    valid_legacy = json.dumps({"schema": 1, "agent": {"driver": "claude"}})
-    legacy.write_text(valid_legacy, encoding="utf-8")
-    config_path = config.worktree_config_path(tmp_path)
-    config_path.write_text("broken = [\n", encoding="utf-8")
-
-    with pytest.raises(SpiceError, match="invalid TOML"):
-        config.read_worktree_config(tmp_path)
-
-    assert legacy.read_text(encoding="utf-8") == valid_legacy
 
 
 def test_set_scope_section_preserves_comments_and_scalar_types(tmp_path):
