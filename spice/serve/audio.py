@@ -5,13 +5,13 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from spice import config
-from spice.procs import run_bounded_process_group
 
 SAY_AUDIO_CONTENT_TYPE = "audio/mp4"
 SAY_AUDIO_SUFFIX = ".m4a"
@@ -30,7 +30,6 @@ _SAY_UTC_DATETIME_RE = re.compile(
 _SAY_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")
 _SAY_MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)\s]+\)")
 _SAY_IDENTIFIER_SPOKEN_LENGTH = 8
-SPEECH_PROCESS_TIMEOUT_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -83,12 +82,12 @@ class ExternalCommandSpeechBackend:
     ) -> SpeechAudio:
         if not self.command:
             raise RuntimeError("external speech backend requires a command")
-        result = run_bounded_process_group(
+        result = subprocess.run(
             list(self.command),
-            input_data=prepare_say_text(text).encode("utf-8"),
-            timeout_seconds=SPEECH_PROCESS_TIMEOUT_SECONDS,
-            phase="serve-speech-external",
-            input_label=f"characters={len(text)}",
+            input=prepare_say_text(text).encode("utf-8"),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         if result.returncode != 0:
             detail = result.stderr.decode("utf-8", "replace").strip()
@@ -204,7 +203,7 @@ def _render_macos_say_audio(
     audio_path = Path(raw_path)
     try:
         os.close(handle)
-        result = run_bounded_process_group(
+        subprocess.run(
             [
                 *config.say_command_args(
                     repo_root,
@@ -217,18 +216,12 @@ def _render_macos_say_audio(
                 "-f",
                 "-",
             ],
-            input_data=prepare_say_text(text),
+            input=prepare_say_text(text),
             text=True,
-            timeout_seconds=SPEECH_PROCESS_TIMEOUT_SECONDS,
-            phase="serve-speech-macos",
-            input_label=f"characters={len(text)}",
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
-        if result.returncode != 0:
-            detail = str(result.stderr or "").strip()
-            suffix = f": {detail}" if detail else ""
-            raise RuntimeError(
-                f"macOS speech backend exited {result.returncode}{suffix}"
-            )
         return audio_path.read_bytes()
     finally:
         audio_path.unlink(missing_ok=True)

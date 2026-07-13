@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import subprocess
 import sys
-import time
 import wave
 from pathlib import Path
 
@@ -14,7 +13,6 @@ import pytest
 from spice import config
 from spice.cli.parser import build_parser
 from spice.configcli import handle_config
-from spice.procs import ProcessDeadlineExceeded
 from spice.serve import audio
 
 ESPEAK_TEST_SAMPLE_RATE = 8000
@@ -34,13 +32,12 @@ def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
 
     def fake_run(args, **kwargs):
         seen["args"] = args
-        seen["input"] = kwargs["input_data"]
-        seen["timeout"] = kwargs["timeout_seconds"]
+        seen["input"] = kwargs["input"]
         output_path = Path(args[args.index("-o") + 1])
         output_path.write_bytes(b"m4a-bytes")
         return subprocess.CompletedProcess(args, 0)
 
-    monkeypatch.setattr(audio, "run_bounded_process_group", fake_run)
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
 
     rendered = audio.render_speech_audio(
         "hello/world",
@@ -51,7 +48,6 @@ def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
     assert rendered == audio.SpeechAudio(b"m4a-bytes", "audio/mp4")
     assert seen["args"][:5] == ["say", "-v", "Samantha", "-r", "300"]
     assert seen["input"] == "hello world"
-    assert seen["timeout"] == audio.SPEECH_PROCESS_TIMEOUT_SECONDS
 
 
 def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
@@ -69,11 +65,10 @@ def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
 
     def fake_run(args, **kwargs):
         seen["args"] = args
-        seen["input"] = kwargs["input_data"]
-        seen["phase"] = kwargs["phase"]
+        seen["input"] = kwargs["input"]
         return subprocess.CompletedProcess(args, 0, stdout=b"wav-bytes", stderr=b"")
 
-    monkeypatch.setattr(audio, "run_bounded_process_group", fake_run)
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
 
     rendered = audio.render_speech_audio(
         "see [docs](https://example.test)",
@@ -83,7 +78,6 @@ def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
     assert rendered == audio.SpeechAudio(b"wav-bytes", "audio/wav")
     assert seen["args"] == ["tts-engine", "--wav"]
     assert seen["input"] == b"see docs"
-    assert seen["phase"] == "serve-speech-external"
 
 
 def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
@@ -100,38 +94,13 @@ def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
     def fake_run(args, **kwargs):
         return subprocess.CompletedProcess(args, 7, stdout=b"", stderr=b"bad model")
 
-    monkeypatch.setattr(audio, "run_bounded_process_group", fake_run)
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
 
     with pytest.raises(
         RuntimeError,
         match="external speech backend exited 7: bad model",
     ):
         audio.render_speech_audio("hello", repo_root=tmp_path)
-
-
-def test_stalled_external_speech_releases_worker_with_named_deadline(
-    tmp_path, monkeypatch
-):
-    config.set_scope_section(
-        tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
-        {
-            config.SAY_BACKEND_KEY: "external",
-            config.SAY_COMMAND_KEY: (
-                f'{sys.executable} -c "import time; time.sleep(60)"'
-            ),
-        },
-    )
-    monkeypatch.setattr(audio, "SPEECH_PROCESS_TIMEOUT_SECONDS", 0.1)
-    started = time.monotonic()
-
-    with pytest.raises(ProcessDeadlineExceeded) as raised:
-        audio.render_speech_audio("hello", repo_root=tmp_path)
-
-    assert time.monotonic() - started < 1.0
-    assert raised.value.phase == "serve-speech-external"
-    assert raised.value.input_label == "characters=5"
 
 
 def test_espeak_ng_stdout_recipe_runs_end_to_end(tmp_path, monkeypatch, capsys):

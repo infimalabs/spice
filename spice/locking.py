@@ -28,8 +28,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from spice.errors import SpiceError
-
 WINDOWS_LOCK_BYTES = 1
 LOCK_RETRY_INTERVAL_SECONDS = 0.05
 
@@ -38,7 +36,7 @@ class FileLockUnavailable(RuntimeError):
     pass
 
 
-class FileLockTimeout(TimeoutError, SpiceError):
+class FileLockTimeout(TimeoutError):
     pass
 
 
