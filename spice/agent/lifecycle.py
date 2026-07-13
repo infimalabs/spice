@@ -508,13 +508,23 @@ LANE_UNCAPTURED_NUDGE = (
 CLAIM_RENEWAL_QUIET_REASONS = frozenset({"no_active_claim"})
 
 
+# Supervisor-side git probes run on the lane-watch loop; a wedged git binary must
+# not stall progress, so each carries this budget and reports the safe "no signal"
+# answer on expiry (tree treated as clean; path treated as untracked).
+GIT_PROBE_TIMEOUT_SECONDS = 10.0
+
+
 def _worktree_dirty(repo_root: Path) -> bool:
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), "status", "--porcelain"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=GIT_PROBE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return False
     return result.returncode == 0 and result.stdout.strip() != ""
 
 
@@ -929,8 +939,9 @@ def git_tracks_relative_path(repo_root: Path, relative_path: Path) -> bool:
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            timeout=GIT_PROBE_TIMEOUT_SECONDS,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0
 

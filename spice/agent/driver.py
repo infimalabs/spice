@@ -1031,6 +1031,12 @@ def write_playwright_mcp_config(repo_root: Path) -> Path:
     )
 
 
+# The macOS appearance probe runs during MCP config writes on agent activation;
+# a wedged `defaults` must not stall the launch, so it degrades to the light
+# default once this budget expires.
+OPERATOR_APPEARANCE_TIMEOUT_SECONDS = 5.0
+
+
 def operator_color_scheme() -> str:
     if sys.platform != "darwin":
         return "light"
@@ -1040,8 +1046,9 @@ def operator_color_scheme() -> str:
             capture_output=True,
             check=False,
             text=True,
+            timeout=OPERATOR_APPEARANCE_TIMEOUT_SECONDS,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return "light"
     return "dark" if result.stdout.strip().lower() == "dark" else "light"
 

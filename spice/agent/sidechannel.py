@@ -35,6 +35,12 @@ from spice.agent.wrap import (
 
 SOCKET_READ_BYTES = 8192
 LISTENER_ACCEPT_TIMEOUT_S = 0.1
+# An accepted peer must complete its newline-terminated hello within this budget;
+# a peer that connects and then goes silent is reaped instead of retaining its
+# daemon handler thread indefinitely. The established payload stream resets to
+# blocking after the hello, so its lifetime stays bound to parent exit, peer
+# close, or the server stop event -- not this handshake deadline.
+SIDE_CHANNEL_HELLO_TIMEOUT_S = 5.0
 
 
 class AgentSideChannelServer:
@@ -110,6 +116,9 @@ class AgentSideChannelServer:
 
     def _handle_connection(self, connection: socket.socket) -> None:
         with connection:
+            # Bound the hello read: a silent peer raises socket timeout (an
+            # OSError subclass) here rather than parking this handler forever.
+            connection.settimeout(SIDE_CHANNEL_HELLO_TIMEOUT_S)
             try:
                 line = _read_line(connection)
             except OSError:
@@ -144,6 +153,10 @@ class AgentSideChannelServer:
         *,
         initial_inbox_signature: InboxSignature | None = None,
     ) -> None:
+        # The handshake deadline does not govern the established stream: it stays
+        # open until parent exit, peer close, or the server stop event, so clear
+        # the hello timeout before selecting on it.
+        connection.settimeout(None)
         try:
             wake_reader, wake_writer = socket.socketpair()
         except OSError:
