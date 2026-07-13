@@ -340,9 +340,21 @@ flex makes the item sticky until it shrinks under the base cap.
 
 ### `[tool.spice.policy.taste.words]`
 
-Gate-only prose suggestions for tracked `.md`, `.txt`, and `.rst` files. Keys
-are whole-word triggers; values are replacements, and an empty value means
-remove or rephrase. Configured words merge over built-ins.
+The authoritative built-in map is `policy.TASTE_WORD_SUGGESTIONS`. It feeds
+`spice study taste`, the staged pre-commit taste gate, and task-creation wording;
+file scans cover tracked `.md`, `.txt`, and `.rst` prose. The defaults include
+explicit singular, plural, past-participle, and gerund suggestions for
+`allowlist`, `allowlists`, `allowlisted`, and `allowlisting`, plus `blocklist`,
+`blocklists`, `blocklisted`, and `blocklisting`.
+
+A bare key matches one whole word case-insensitively. Only a trailing `*` opts
+into stem matching and covers every word-character suffix. Values are the exact
+suggestions shown to the user; an empty value means remove or rephrase.
+
+The resolver starts from the built-in map, then normalizes repository keys to
+lowercase and assigns repository entries in TOML order. A matching normalized
+key replaces only that suggestion; new keys extend the map, and every other
+built-in entry remains active.
 
 ### `[tool.spice.policy.markdown_depth_budget]`
 
