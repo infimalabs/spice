@@ -86,14 +86,20 @@ addopts = ["-n", "auto", "--dist=loadfile"]
 [tool.spice.agent]
 wrappers = ["common", "spice-dev"]
 
-[tool.spice.wrappers.spice-dev]
-pre-commit = { argv = ["spice", "dev", "pre-commit"] }
+[tool.spice.wrappers.spice-dev.pre-commit]
+argv = ["spice", "dev", "pre-commit"]
+
+[tool.spice.wrappers.spice-dev.grep]
+argv = ["grep", "-E"]
+match = [
+  { flags = ["-E", "-F", "-P", "-G"], argv = ["grep"] },
+]
 
 # The "common" group is inherited from the layered global default, which now
 # supplies the rg/find/git native-fidelity reroutes and the final head-only
-# grep -E route (extended regular expressions by default). No repository-local
-# override is needed; agent.wrappers lists "common" only to pair it with the
-# repository-specific "spice-dev" group below.
+# grep -E route (extended regular expressions by default). The repository-local
+# spice-dev group also wraps a bare grep that RTK did not select, while explicit
+# matcher modes pass through unchanged.
 
 [tool.spice.tasks]
 stems = ["session", "mail", "hooks", "studies", "cli", "lifecycle", "tests"]
