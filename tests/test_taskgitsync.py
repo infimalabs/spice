@@ -11,6 +11,7 @@ import pytest
 
 from spice import gitprocess
 from spice.errors import SpiceError
+from spice.procs import ProcessDeadlineExceeded
 from spice.tasks import gitsync
 
 ACTOR_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -703,10 +704,10 @@ def test_gitsync_commands_are_noninteractive_and_bounded(
     def fake_run(command: list[str], **kwargs):
         seen["command"] = command
         seen["env"] = kwargs["env"]
-        seen["timeout"] = kwargs.get("timeout")
+        seen["timeout"] = kwargs["timeout_seconds"]
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(gitprocess.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitprocess, "run_bounded_process_group", fake_run)
 
     gitsync._run(tmp_path, *args)
 
@@ -719,11 +720,14 @@ def test_gitsync_commands_are_noninteractive_and_bounded(
 
 def test_gitsync_timeout_names_the_bounded_command(tmp_path, monkeypatch):
     def fake_run(command: list[str], **kwargs):
-        raise subprocess.TimeoutExpired(
-            command, kwargs["timeout"], output="partial", stderr="stalled"
+        raise ProcessDeadlineExceeded(
+            phase=kwargs["phase"],
+            input_label=kwargs["input_label"],
+            timeout_seconds=kwargs["timeout_seconds"],
+            command=command,
         )
 
-    monkeypatch.setattr(gitprocess.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitprocess, "run_bounded_process_group", fake_run)
 
     with pytest.raises(SpiceError) as exc_info:
         gitsync._run(tmp_path, "fetch", "origin")

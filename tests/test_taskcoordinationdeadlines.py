@@ -15,6 +15,7 @@ from spice.cli import entry
 from spice.errors import SpiceError
 from spice.locking import FileLockTimeout, exclusive_lock
 from spice.mail import inbox
+from spice.procs import ProcessDeadlineExceeded
 from spice.tasks import config, tw
 
 LOCK_TEST_TIMEOUT_SECONDS = 0.02
@@ -94,12 +95,17 @@ def test_task_local_git_helpers_timeout_with_identity_and_recover(
     def git_process(command, **kwargs):
         attempts.append(tuple(command))
         if len(attempts) == 1:
-            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+            raise ProcessDeadlineExceeded(
+                phase=kwargs["phase"],
+                input_label=kwargs["input_label"],
+                timeout_seconds=kwargs["timeout_seconds"],
+                command=command,
+            )
         return subprocess.CompletedProcess(
             command, 0, stdout=f"{outputs[helper]}\n", stderr=""
         )
 
-    monkeypatch.setattr("spice.gitprocess.subprocess.run", git_process)
+    monkeypatch.setattr("spice.gitprocess.run_bounded_process_group", git_process)
     if helper == "repo-root":
         operation = config.repo_root
         expected = tmp_path.resolve()

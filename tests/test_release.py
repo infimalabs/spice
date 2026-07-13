@@ -1,6 +1,7 @@
 """Release command parsing and release-note highlights."""
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -287,6 +288,31 @@ def test_release_constitution_runs_executable_browser_gate(monkeypatch):
         ["uv", "run", "ruff", "check", "."],
         ["node", "tests/browser/run_release_smokes.js"],
     ]
+
+
+def test_release_runner_streams_or_captures_output_as_declared(capfd):
+    streamed = release.run(
+        [sys.executable, "-c", "print('streamed release progress', flush=True)"],
+        capture=False,
+    )
+    visible = capfd.readouterr()
+    captured = release.run(
+        [sys.executable, "-c", "print('captured release result', flush=True)"],
+        capture=True,
+    )
+    after_capture = capfd.readouterr()
+
+    assert {
+        "streamed_stdout": streamed.stdout,
+        "visible_stdout": visible.out,
+        "captured_stdout": captured.stdout,
+        "post_capture_stdout": after_capture.out,
+    } == {
+        "streamed_stdout": None,
+        "visible_stdout": "streamed release progress\n",
+        "captured_stdout": "captured release result\n",
+        "post_capture_stdout": "",
+    }
 
 
 def test_release_browser_manifest_completeness_is_fast_and_executable():

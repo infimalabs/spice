@@ -463,6 +463,7 @@ def _is_ancestor(candidate: str, commit: str) -> bool:
         ["git", "merge-base", "--is-ancestor", candidate, commit],
         policy="release",
         operation="check release ancestry",
+        capture_output=True,
         text=True,
     )
     return result.returncode == 0
@@ -780,6 +781,7 @@ def github_release_url(tag: str) -> str:
         ["gh", "release", "view", tag, "--json", "url", "--jq", ".url"],
         policy="release",
         operation="read GitHub release URL",
+        capture_output=True,
         text=True,
     )
     output = result.stdout.strip()
@@ -840,6 +842,7 @@ def run(
         command,
         policy="release",
         operation="run release command",
+        capture_output=capture,
         check=True,
         text=True,
         env=env,
