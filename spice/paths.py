@@ -95,11 +95,23 @@ def find_tool(name: str) -> str | None:
 
 
 def atomic_write_text(path: Path, text: str) -> Path:
-    """Write `text` to `path` through a same-directory tmp + rename."""
+    """Durably write `text` through a same-directory fsync + rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        with tmp.open("w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            tmp.unlink()
     return path
 
 
