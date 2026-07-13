@@ -57,6 +57,10 @@ def _raise_permission_error(*_args: object, **_kwargs: object):
     raise PermissionError
 
 
+def _raise_git_launch_error(*_args: object, **_kwargs: object):
+    raise FileNotFoundError("git unavailable")
+
+
 # --- Subprocess probe seams: macOS appearance lookup -----------------------
 
 
@@ -144,6 +148,16 @@ def test_worktree_dirty_bounds_probe_and_resolves_clean_status_on_stall(
     assert box["timeout"] == lifecycle.GIT_PROBE_TIMEOUT_SECONDS
     monkeypatch.setattr(lifecycle.subprocess, "run", _stalling_run)
     status = "dirty" if lifecycle._worktree_dirty(tmp_path) else "clean"
+    assert status == "clean"
+
+
+def test_worktree_dirty_resolves_clean_status_when_git_cannot_launch(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(lifecycle.subprocess, "run", _raise_git_launch_error)
+
+    status = "dirty" if lifecycle._worktree_dirty(tmp_path) else "clean"
+
     assert status == "clean"
 
 
