@@ -162,6 +162,7 @@ def _assert_shared_loader_shadow(group: str, distribution, shadow_name: str) -> 
 def test_doctor_namespace_guard_fails_when_second_checkout_is_on_sys_path(
     tmp_path, monkeypatch
 ):
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
     extra_checkout = tmp_path / "second-checkout"
     (extra_checkout / "spice").mkdir(parents=True)
     monkeypatch.syspath_prepend(str(extra_checkout))

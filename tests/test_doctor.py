@@ -9,8 +9,29 @@ from spice import config
 from spice.agent.rtkhealth import RtkHealth
 from spice.hooks import doctor
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
+from spice.paths import shared_state_root, state_dir, worktree_state_root
 from spice.studies.walk import staged_paths, tracked_paths
 import pytest
+
+
+def test_doctor_renders_supported_state_roots_for_linked_worktrees(tmp_path):
+    repo = _repo(tmp_path)
+    linked = tmp_path / "linked"
+    _run(repo, "git", "worktree", "add", "-q", "-b", "linked", str(linked))
+
+    primary = doctor.DoctorReport(repo_root=repo, checks=[], fixes=[]).render()
+    peer = doctor.DoctorReport(repo_root=linked, checks=[], fixes=[]).render()
+
+    assert _state_root_lines(primary) == [
+        f"worktree_config_state_root={state_dir(repo)}",
+        f"shared_state_root={shared_state_root(repo)}",
+        f"worktree_state_root={worktree_state_root(repo)}",
+    ]
+    assert _state_root_lines(peer) == [
+        f"worktree_config_state_root={state_dir(linked)}",
+        f"shared_state_root={shared_state_root(linked)}",
+        f"worktree_state_root={worktree_state_root(linked)}",
+    ]
 
 
 def test_doctor_reports_missing_hooks_and_fix_installs_them(tmp_path, monkeypatch):
@@ -453,6 +474,10 @@ def test_doctor_judge_optional_by_default_and_required_when_opted_in(
 
 def _binary_check(repo: Path, name: str) -> doctor.DoctorCheck:
     return next(check for check in doctor._binary_checks(repo) if check.name == name)
+
+
+def _state_root_lines(rendered: str) -> list[str]:
+    return [line.strip() for line in rendered.splitlines() if "state_root=" in line]
 
 
 def _repo(tmp_path: Path) -> Path:
