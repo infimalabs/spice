@@ -909,6 +909,8 @@ class LiveBusSession:
                 return
             if not changed:
                 continue
+            change_detected_perf = time.perf_counter()
+            change_detected_wall = time.time()
             if not subscription.initial_payload_sent.wait(
                 timeout=LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S
             ):
@@ -919,7 +921,9 @@ class LiveBusSession:
                 )
             if subscription.stop.is_set():
                 return
+            signature_started_perf = time.perf_counter()
             signature = self.callbacks.lane_signature(target, thread_id, transcript)
+            signature_done_perf = time.perf_counter()
             previous_signature = subscription.last_signature
             if signature == previous_signature:
                 continue
@@ -957,10 +961,23 @@ class LiveBusSession:
             after = str(query.get("after") or "")
             if after:
                 kwargs["after"] = after
+            payload_started_perf = time.perf_counter()
             try:
                 payload = self.callbacks.messages_payload(target, **kwargs)
             except Exception as exc:
                 payload = {"error": str(exc), "messages": [], "statusLine": {}}
+            payload_done_perf = time.perf_counter()
+            # Emit-to-card trace: wall marks bridge the server clock to the
+            # browser's Date.now() (same host) so a load harness can decompose
+            # watcher detection and socket delivery from static inference; the
+            # perf deltas time the CPU-bound signature and payload compute.
+            watch_timing = {
+                "changeDetectedWallMs": change_detected_wall * 1000.0,
+                "preSendWallMs": time.time() * 1000.0,
+                "detectToSendMs": _elapsed_ms(change_detected_perf, payload_done_perf),
+                "signatureMs": _elapsed_ms(signature_started_perf, signature_done_perf),
+                "payloadMs": _elapsed_ms(payload_started_perf, payload_done_perf),
+            }
             try:
                 self._send(
                     {
@@ -969,6 +986,7 @@ class LiveBusSession:
                         "source": "watch",
                         "subscriptionGeneration": subscription.generation,
                         "payload": payload,
+                        "watchTiming": watch_timing,
                     }
                 )
                 self._push_submission_updates(
