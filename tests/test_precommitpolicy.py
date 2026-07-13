@@ -11,6 +11,7 @@ import pytest
 from spice.errors import SpiceError
 from spice.flexstate import FLEX_SLICE_CLAIM_TTL_SECONDS, FlexSliceClaim
 from spice.hooks import precommit
+from spice.studies import taste
 from spice.studies.fileloc import LocFinding
 from spice.studies.repodocs import (
     render_repo_truth_doc_lines,
@@ -120,6 +121,18 @@ def test_taste_pre_commit_guard_reports_exact_inclusive_inflection(tmp_path):
             "  FAIL  notes.md:1  'blacklisting' -> consider 'blocklisting'",
         ]
     )
+
+
+def test_tracked_taste_policy_accepts_precise_timeout_threshold_prose(tmp_path):
+    doc = tmp_path / "threshold.md"
+    doc.write_text(
+        "The peer sends bytes just under the timeout threshold.\n",
+        encoding="utf-8",
+    )
+    configured_words = dict(resolve_policy(PROJECT_ROOT).taste.words)
+    findings = taste.scan_taste([doc], root=tmp_path, words=configured_words)
+
+    assert taste.render_taste_board(findings) == "taste: ok"
 
 
 def test_private_internal_coupling_allowlist_is_exact_for_this_repo():
