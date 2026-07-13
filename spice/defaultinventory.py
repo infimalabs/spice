@@ -20,6 +20,7 @@ TOML_STATIC_EXPORT_PATHS = {
     "spice.config.DEFAULT_AGENT_PERSONALITY": "agent.personality",
     "spice.config.DEFAULT_JUDGE_BIN": "judge.bin",
     "spice.config.PORTABLE_JUDGE_BIN": "judge.portable_bin",
+    "spice.config.DEFAULT_RTK_EXECUTABLE": "rtk.executable",
     "spice.policy.FILE_LOC_LIMIT": "policy.limits.file_loc",
     "spice.policy.FILE_BYTE_LIMIT": "policy.limits.file_bytes",
     "spice.policy.COMPLEXITY_MAX_CCN": "policy.limits.routine_ccn",

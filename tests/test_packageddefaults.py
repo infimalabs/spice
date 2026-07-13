@@ -55,6 +55,7 @@ def test_every_declared_static_family_exists_in_packaged_configuration():
         "maxim",
         "maxims",
         "policy",
+        "rtk",
         "say",
         "serve",
         "tasks",
