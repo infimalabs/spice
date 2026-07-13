@@ -37,6 +37,7 @@ from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_DRIVER_ENTRY_POINT_GROUP,
     SpiceExtensionEntryPoint,
+    extension_entry_points,
     merge_builtin_and_extension_entry_points,
 )
 from spice.paths import atomic_write_json
@@ -1154,6 +1155,20 @@ def all_drivers() -> tuple[AgentDriver, ...]:
 
 def driver_choices() -> tuple[str, ...]:
     return tuple(sorted(driver_entry_point_registry()))
+
+
+def driver_scope_choices() -> tuple[str, ...]:
+    """Known names for declarative scopes, without loading driver entries.
+
+    Scope consumers may run while another extension domain is being inspected.
+    Reading names only keeps those consumers independent of unrelated driver
+    implementation validation; actual driver selection remains strict.
+    """
+    names = set(_DRIVERS)
+    names.update(
+        entry.name for entry in extension_entry_points(DRIVER_ENTRY_POINT_GROUP)
+    )
+    return tuple(sorted(names))
 
 
 def select_driver(name: str = "") -> AgentDriver:

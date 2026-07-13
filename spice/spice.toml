@@ -37,7 +37,14 @@ match = [
   { head = "grep", flags = ["--files", "--type", "--type=*", "--no-heading"], argv = ["rg"] },
   { head = "find", flags = ["-print", "-print0", "-prune", "-exec", "-execdir", "-delete", "(", ")", "!", "-o", "-a"], argv = ["find"] },
   { head = "git", flags = ["--first-parent", "--check", "--name-status", "--name-only"], argv = ["git"] },
-  { head = "grep", argv = ["rtk", "grep", "-E"] },
+  { head = "grep", drivers = ["codex"], argv = ["rtk", "grep", "-E"] },
+]
+
+[wrappers.common.grep]
+drivers = ["codex"]
+argv = ["grep", "-E"]
+match = [
+  { flags = ["-E", "-F", "-P", "-G"], argv = ["grep"] },
 ]
 
 [policy.limits]

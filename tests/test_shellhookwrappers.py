@@ -7,11 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from spice.agent import driver as agent_driver
 from spice.agent import shellhook
 from spice.errors import SpiceError
 from tests.test_shellhook import (
     SHELL_TRACE_ENV,
-    _builtin_rtk_wrapper_lines,
+    _builtin_common_wrapper_lines,
     _completed_process_detail,
     _expected_project_common_with_pytest_wrapper_lines,
     _expected_python_module_wrapper_lines,
@@ -34,10 +35,15 @@ def test_agent_wrapper_lines_adds_ordered_agent_wrapper_functions(tmp_path):
     )
 
 
-def test_agent_wrapper_lines_uses_builtin_common_default(tmp_path):
-    assert (
-        shellhook.render_agent_wrapper_lines(tmp_path) == _builtin_rtk_wrapper_lines()
-    )
+@pytest.mark.parametrize("driver_name", ["codex", "claude"])
+def test_agent_wrapper_lines_scopes_builtin_common_default_by_driver(
+    tmp_path, monkeypatch, driver_name
+):
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, driver_name)
+
+    assert shellhook.render_agent_wrapper_lines(
+        tmp_path
+    ) == _builtin_common_wrapper_lines(driver_name=driver_name)
 
 
 def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_path):
@@ -48,7 +54,8 @@ def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_
     )
 
     assert (
-        shellhook.render_agent_wrapper_lines(tmp_path) == _builtin_rtk_wrapper_lines()
+        shellhook.render_agent_wrapper_lines(tmp_path)
+        == _builtin_common_wrapper_lines()
     )
 
 
@@ -273,7 +280,7 @@ def test_rtk_wrapper_dispatches_configured_identity_in_live_zsh(
         )
         tool.chmod(0o755)
     wrapper_lines = shellhook.render_agent_wrapper_lines(tmp_path)
-    assert wrapper_lines == _builtin_rtk_wrapper_lines(executable)
+    assert wrapper_lines == _builtin_common_wrapper_lines(executable)
     script = "\n".join(
         [
             "set -u",
@@ -382,6 +389,70 @@ def test_spice_checkout_maps_bare_pre_commit_to_dev_gate():
         '  spice dev pre-commit "$@"',
         "}",
     ]
+
+
+@pytest.mark.parametrize(
+    ("driver_name", "pattern", "expected_trace"),
+    [
+        (
+            "codex",
+            "alpha|beta",
+            [
+                "grep:-E alpha|beta source.txt",
+                "rtk:grep -E alpha|beta source.txt",
+            ],
+        ),
+        (
+            "claude",
+            "alpha\\|beta",
+            [
+                "grep:alpha\\|beta source.txt",
+                "rtk:grep alpha\\|beta source.txt",
+            ],
+        ),
+    ],
+)
+def test_global_grep_defaults_follow_active_driver_in_live_zsh(
+    tmp_path, monkeypatch, driver_name, pattern, expected_trace
+):
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        pytest.skip("zsh is not installed")
+    trace = tmp_path / "trace.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("grep", "rtk"):
+        tool = bin_dir / name
+        tool.write_text(
+            f'#!/bin/sh\nprintf \'{name}:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+            encoding="utf-8",
+        )
+        tool.chmod(0o755)
+    monkeypatch.setenv(agent_driver.SPICE_AGENT_DRIVER_ENV, driver_name)
+    script = "\n".join(
+        [
+            "set -u",
+            *shellhook.render_agent_wrapper_lines(tmp_path),
+            f"grep '{pattern}' source.txt",
+            f"rtk grep '{pattern}' source.txt",
+        ]
+    )
+
+    completed = subprocess.run(
+        [zsh, "-c", script],
+        check=False,
+        env={
+            "PATH": str(bin_dir)
+            + os.pathsep
+            + os.environ.get("PATH", ""),  # env-policy: allow
+            SHELL_TRACE_ENV: str(trace),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, _completed_process_detail(completed, trace)
+    assert _trace_lines(trace, expected_prefix="grep:") == expected_trace
 
 
 @pytest.mark.parametrize("shell_name", ["zsh", "bash"])
