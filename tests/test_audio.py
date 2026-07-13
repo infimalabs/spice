@@ -7,6 +7,8 @@ import subprocess
 import sys
 import time
 import wave
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,32 @@ from spice.procs import ProcessDeadlineExceeded
 from spice.serve import audio
 
 ESPEAK_TEST_SAMPLE_RATE = 8000
+
+
+@dataclass(frozen=True)
+class SpeechDeadlineOutcome:
+    state: str
+    phase: str
+    input_label: str
+    elapsed_seconds: float
+
+
+def _speech_deadline_outcome(
+    operation: Callable[[], object],
+) -> SpeechDeadlineOutcome:
+    started = time.monotonic()
+    try:
+        operation()
+    except ProcessDeadlineExceeded as exc:
+        return SpeechDeadlineOutcome(
+            "timed-out",
+            exc.phase,
+            exc.input_label,
+            time.monotonic() - started,
+        )
+    return SpeechDeadlineOutcome(
+        "completed", "completed", "completed", time.monotonic() - started
+    )
 
 
 def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
@@ -124,14 +152,15 @@ def test_stalled_external_speech_releases_worker_with_named_deadline(
         },
     )
     monkeypatch.setattr(audio, "SPEECH_PROCESS_TIMEOUT_SECONDS", 0.1)
-    started = time.monotonic()
 
-    with pytest.raises(ProcessDeadlineExceeded) as raised:
-        audio.render_speech_audio("hello", repo_root=tmp_path)
+    outcome = _speech_deadline_outcome(
+        lambda: audio.render_speech_audio("hello", repo_root=tmp_path)
+    )
 
-    assert time.monotonic() - started < 1.0
-    assert raised.value.phase == "serve-speech-external"
-    assert raised.value.input_label == "characters=5"
+    assert outcome.state == "timed-out"
+    assert outcome.elapsed_seconds < 1.0
+    assert outcome.phase == "serve-speech-external"
+    assert outcome.input_label == "characters=5"
 
 
 def test_espeak_ng_stdout_recipe_runs_end_to_end(tmp_path, monkeypatch, capsys):

@@ -381,8 +381,8 @@ def test_invalid_value_reports_selected_source_before_mutation(tmp_path, monkeyp
     monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
     before = config.config_overview(tmp_path)["layers"]["repository"]
 
-    with pytest.raises(SpiceError) as raised:
-        handle_config(
+    outcome = _config_mutation_outcome(
+        lambda: handle_config(
             build_parser().parse_args(
                 [
                     "config",
@@ -394,9 +394,11 @@ def test_invalid_value_reports_selected_source_before_mutation(tmp_path, monkeyp
                 ]
             )
         )
+    )
 
-    assert "scope=repository" in str(raised.value)
-    assert f"path={tmp_path / 'spice.toml'}" in str(raised.value)
+    assert outcome.state == "rejected"
+    assert "scope=repository" in outcome.message
+    assert f"path={tmp_path / 'spice.toml'}" in outcome.message
     assert config.config_overview(tmp_path)["layers"]["repository"] == before
 
 
@@ -405,16 +407,17 @@ def test_unwritable_system_scope_reports_source_before_mutation(tmp_path, monkey
     monkeypatch.setattr(config.os, "access", lambda _path, _mode: False)
     before = system_path.read_bytes()
 
-    with pytest.raises(SpiceError) as raised:
-        config.set_scope_section(
+    outcome = _config_mutation_outcome(
+        lambda: config.set_scope_section(
             tmp_path,
             config.SYSTEM_SOURCE,
             config.AGENT_KEY,
             {config.AGENT_MODEL_KEY: "blocked-model"},
         )
+    )
 
-    assert str(raised.value) == (
-        f"configuration scope=system path={system_path} is not writable"
+    assert outcome == ConfigMutationOutcome(
+        "rejected", f"configuration scope=system path={system_path} is not writable"
     )
     assert system_path.read_bytes() == before
 
