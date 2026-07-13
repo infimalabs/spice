@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spice.errors import SpiceError
+from spice.toolprocess import run_tool_command
 
 BUMP_CHOICES = ("minor", "patch")
 PYPI_POLL_ATTEMPTS = 20
@@ -458,9 +459,10 @@ REVERT_TARGET_RE = re.compile(r"This reverts commit ([0-9a-f]{7,40})\b")
 
 def _is_ancestor(candidate: str, commit: str) -> bool:
     """True iff `candidate` is an ancestor of (or equal to) `commit`."""
-    result = subprocess.run(
+    result = run_tool_command(
         ["git", "merge-base", "--is-ancestor", candidate, commit],
-        capture_output=True,
+        policy="release",
+        operation="check release ancestry",
         text=True,
     )
     return result.returncode == 0
@@ -774,11 +776,11 @@ def publish_github_release(
 
 
 def github_release_url(tag: str) -> str:
-    result = subprocess.run(
+    result = run_tool_command(
         ["gh", "release", "view", tag, "--json", "url", "--jq", ".url"],
-        capture_output=True,
+        policy="release",
+        operation="read GitHub release URL",
         text=True,
-        check=False,
     )
     output = result.stdout.strip()
     return output if result.returncode == 0 and output.startswith("https://") else ""
@@ -834,11 +836,12 @@ def run(
     capture: bool = False,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return run_tool_command(
         command,
+        policy="release",
+        operation="run release command",
         check=True,
         text=True,
-        capture_output=capture,
         env=env,
     )
 

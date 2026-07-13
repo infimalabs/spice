@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
+from spice.gitprocess import run_git_command
 from spice.studies.walk import (
     is_excluded_path,
     policy_path_exclusions,
@@ -114,7 +115,7 @@ def _commit_candidate_tracked_paths(
 
 def _staged_deletes(repo_root: Path) -> set[Path]:
     exclusions = policy_path_exclusions(repo_root)
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=D"],
         capture_output=True,
         text=True,

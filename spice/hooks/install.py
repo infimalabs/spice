@@ -13,6 +13,7 @@ import stat
 from pathlib import Path
 
 from spice.config import git_worktree_config_get, git_worktree_config_set
+from spice.gitprocess import run_git_command
 from spice.paths import STATE_DIRNAME
 
 HOOKS_DIRNAME = "hooks"
@@ -112,11 +113,9 @@ def enable_worktree_config(repo_root: Path) -> None:
 
 
 def _run_git_config(repo_root: Path, args: list[str], action: str) -> None:
-    import subprocess
-
     from spice.errors import SpiceError
 
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "-C", str(repo_root), *args],
         capture_output=True,
         check=False,

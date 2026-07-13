@@ -9,6 +9,7 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
+from spice.toolprocess import run_parent_lifetime_command
 from spice.worktrees import resolve_worktree_target
 
 SIGINT_EXIT_CODE = 130
@@ -125,7 +126,7 @@ def _reexec_dev_command_for_worktree_checkout(argv: list[str]) -> int | None:
         return None
     env = dict(os.environ)  # env-policy: allow
     env[SELFEXEC_ENV] = str(repo_root)
-    result = subprocess.run(
+    result = run_parent_lifetime_command(
         [str(python), "-m", "spice", *argv], cwd=repo_root, env=env, check=False
     )
     return result.returncode

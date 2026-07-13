@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
 from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.paths import find_tool
+from spice.toolprocess import run_tool_command
 
 SERVE_WEB_JS_PATHS = (
     "spice/serve/static/app.types.js",
@@ -94,9 +94,10 @@ def run_serve_web_typecheck(repo_root: Path) -> None:
 
 
 def _run_serve_web_typecheck_argv(repo_root: Path, argv: tuple[str, ...]) -> None:
-    result = subprocess.run(
+    result = run_tool_command(
         list(argv),
-        capture_output=True,
+        policy="typecheck",
+        operation="run serve web typecheck",
         text=True,
         cwd=repo_root,
         check=False,

@@ -22,6 +22,7 @@ from spice.config import (
     git_worktree_config_get,
 )
 from spice.errors import SpiceError
+from spice.gitprocess import run_git_command
 from spice.hooks.install import HOOK_ARGS, hook_shim_content, hooks_dir
 from spice.paths import (
     find_tool,
@@ -30,6 +31,7 @@ from spice.paths import (
     state_dir,
 )
 from spice.policyconfig import resolve_policy
+from spice.toolprocess import run_tool_command
 from spice.studies import complexity, envpolicy, fileloc, magicnums, repodocs, shape
 from spice.studies.walk import staged_paths as staged_gate_paths
 from spice.studies.walk import tracked_paths
@@ -283,7 +285,7 @@ def _installed_spice_runtime() -> InstalledSpiceRuntime | None:
 
 
 def _spice_package_source_for_python(python: Path) -> Path | None:
-    result = subprocess.run(
+    result = run_tool_command(
         [
             str(python),
             "-c",
@@ -293,7 +295,8 @@ def _spice_package_source_for_python(python: Path) -> Path | None:
                 "print(Path(entry.__file__).resolve().parents[1])"
             ),
         ],
-        capture_output=True,
+        policy="extension",
+        operation="inspect installed spice runtime",
         check=False,
         cwd=Path("/"),
         text=True,
@@ -457,7 +460,7 @@ def _shadowed_configured_hooks(repo_root: Path, expected: str) -> list[str]:
 
 def _git_local_config_values(repo_root: Path, key: str) -> list[str]:
     try:
-        result = subprocess.run(
+        result = run_git_command(
             ["git", "-C", str(repo_root), "config", "--local", "--get-all", key],
             capture_output=True,
             check=False,
@@ -735,7 +738,7 @@ def _fail(name: str, detail: str, command: str) -> DoctorCheck:
 
 
 def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return run_git_command(
         ["git", "-C", str(repo_root), *args],
         capture_output=True,
         check=False,
