@@ -35,7 +35,14 @@ def test_briefing_snapshot_exports_once_and_marks_route_visibility(monkeypatch):
         _row("oops pending", uuid="oops-pending", project=".oops"),
     ]
     calls: list[list[str]] = []
+    filter_calls: list[dict[str, object] | None] = []
     monkeypatch.setattr(alloc.lanes, "team_route_for_actor", lambda selected: route)
+
+    def effective_filter_terms(selected):
+        filter_calls.append(selected)
+        return ["project:session"]
+
+    monkeypatch.setattr(alloc.lanes, "effective_filter_terms", effective_filter_terms)
 
     def export(filters):
         calls.append(filters)
@@ -50,6 +57,7 @@ def test_briefing_snapshot_exports_once_and_marks_route_visibility(monkeypatch):
         {"route-project", "private-project", "actor-origin"}
     )
     assert calls == [["status.any:"]]
+    assert filter_calls == [route]
 
 
 def test_task_plane_snapshot_classifies_taskwarrior_state_fields():
