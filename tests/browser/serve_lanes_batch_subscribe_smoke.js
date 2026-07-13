@@ -10,6 +10,7 @@ const BATCH_MEMBER_IDS = ["bsub-a", "bsub-b"];
 const BATCH_MESSAGES_PER_MEMBER = 3;
 const BATCH_SNAPSHOT_REVISION = 50;
 const BATCH_SETTLE_MS = 80;
+const BATCH_DEFERRED_SUBSCRIBE_ATTEMPTS = 50;
 
 function batchTargetPayload(id, threadId) {
   return {
@@ -131,6 +132,13 @@ function batchInstallStubs(state, config) {
   liveBusRequest = async (type, fields = {}) => {
     state.frames.push({ type, ...fields });
     if (type !== "lanes.subscribe") return { type: "bus.ok", payload: {} };
+    if (state.deferNextSubscribe) {
+      state.deferNextSubscribe = false;
+      await new Promise((resolve) => {
+        state.releaseDeferredSubscribe = resolve;
+      });
+      state.releaseDeferredSubscribe = null;
+    }
     return {
       type: "lanes.payload",
       lanes: (fields.entries || []).map((entry) => {
@@ -204,7 +212,54 @@ async function batchPhaseInitial(state, config) {
   };
 }
 
-// Phase B: reconnect resync -- one frame covering every open lane.
+// Phase B: focus moves while the replacement batch is awaiting its response.
+// Pending lanes are intentionally skipped by setFocusedLiveBusLane; subscribe
+// completion must therefore reconcile both server queries immediately.
+async function batchPhaseFocusWhilePending(state, config) {
+  state.frames.length = 0;
+  state.deferNextSubscribe = true;
+  resubscribeLiveBusLanes();
+  for (
+    let attempt = 0;
+    attempt < config.deferredSubscribeAttempts &&
+    typeof state.releaseDeferredSubscribe !== "function";
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  if (typeof state.releaseDeferredSubscribe !== "function") {
+    throw new Error("deferred lanes.subscribe did not reach the transport");
+  }
+  const priorId = config.memberIds[0];
+  const selectedId = config.memberIds[1];
+  setFocusedLiveBusLane(laneStates.get(selectedId));
+  const subscribeFrame = state.frames.find(
+    (frame) => frame.type === "lanes.subscribe",
+  );
+  const requestedFocus = Object.fromEntries(
+    (subscribeFrame?.entries || []).map((entry) => [
+      entry.targetId,
+      entry.query.focused,
+    ]),
+  );
+  state.releaseDeferredSubscribe();
+  await window.__batchSettle(config);
+  const configureFrames = state.frames.filter(
+    (frame) => frame.type === "lane.configure",
+  );
+  const reconciledFocus = Object.fromEntries(
+    configureFrames.map((frame) => [frame.targetId, frame.query.focused]),
+  );
+  return {
+    pendingPriorFocus: requestedFocus[priorId],
+    pendingSelectedFocus: requestedFocus[selectedId],
+    focusConfigureCount: configureFrames.length,
+    reconciledPriorFocus: reconciledFocus[priorId],
+    reconciledSelectedFocus: reconciledFocus[selectedId],
+  };
+}
+
+// Phase C: reconnect resync -- one frame covering every open lane.
 async function batchPhaseResync(state, config) {
   state.frames.length = 0;
   resubscribeLiveBusLanes();
@@ -216,7 +271,7 @@ async function batchPhaseResync(state, config) {
   };
 }
 
-// Phase C: a thread change (bus payload with a renewed bound thread) and a
+// Phase D: a thread change (bus payload with a renewed bound thread) and a
 // config-revision advance in the same tick coalesce into one batch flush.
 // Both triggers stay in one synchronous block -- applyLaneBusPayload is not
 // awaited -- so their marks land before the microtask flush fires.
@@ -248,7 +303,7 @@ async function batchPhaseCoalesce(state, config) {
   };
 }
 
-// Phase D: a failed lane inside the batch surfaces its transient status while
+// Phase E: a failed lane inside the batch surfaces its transient status while
 // the sibling's fresh message still renders.
 async function batchPhaseFailedLane(state, config, hostTargetId) {
   state.frames.length = 0;
@@ -276,9 +331,16 @@ async function batchPhaseFailedLane(state, config, hostTargetId) {
 }
 
 async function batchMeasure(config) {
-  const state = { frames: [], mosaicRenders: [], payloadOverrides: {} };
+  const state = {
+    frames: [],
+    mosaicRenders: [],
+    payloadOverrides: {},
+    deferNextSubscribe: false,
+    releaseDeferredSubscribe: null,
+  };
   window.__batchInstallStubs(state, config);
   const initial = await window.__batchPhaseInitial(state, config);
+  const focus = await window.__batchPhaseFocusWhilePending(state, config);
   const resync = await window.__batchPhaseResync(state, config);
   const coalesced = await window.__batchPhaseCoalesce(state, config);
   const failed = await window.__batchPhaseFailedLane(
@@ -288,7 +350,7 @@ async function batchMeasure(config) {
   );
   // eslint-disable-next-line no-global-assign
   mosaicRenderMessageStream = state.originalMosaicRender;
-  return { ...initial, ...resync, ...coalesced, ...failed };
+  return { ...initial, ...focus, ...resync, ...coalesced, ...failed };
 }
 
 const BATCH_PAGE_HELPERS = {
@@ -302,6 +364,7 @@ const BATCH_PAGE_HELPERS = {
   __batchEntryIds: batchEntryIds,
   __batchInstallStubs: batchInstallStubs,
   __batchPhaseInitial: batchPhaseInitial,
+  __batchPhaseFocusWhilePending: batchPhaseFocusWhilePending,
   __batchPhaseResync: batchPhaseResync,
   __batchPhaseCoalesce: batchPhaseCoalesce,
   __batchPhaseFailedLane: batchPhaseFailedLane,
@@ -323,6 +386,16 @@ function assertBatchResult(result) {
       result.initialHostRenderCount !== 1,
     "single host render did not cover every member's initial messages":
       result.initialHostRenderKeys.join(",") !== result.expectedKeys.join(","),
+    "pending subscribe did not capture the prior lane as focused":
+      result.pendingPriorFocus !== true,
+    "pending subscribe did not capture the selected lane as background":
+      result.pendingSelectedFocus !== false,
+    "subscribe completion did not reconcile both changed focus queries":
+      result.focusConfigureCount !== 2,
+    "prior lane did not reconcile to focused:false":
+      result.reconciledPriorFocus !== false,
+    "selected lane did not reconcile to focused:true":
+      result.reconciledSelectedFocus !== true,
     "reconnect resync did not issue exactly one lanes.subscribe frame":
       result.resyncFrameCount !== 1,
     "resync frame did not cover every open lane":
@@ -362,6 +435,7 @@ async function run() {
         perMember: BATCH_MESSAGES_PER_MEMBER,
         snapshotRevision: BATCH_SNAPSHOT_REVISION,
         settleMs: BATCH_SETTLE_MS,
+        deferredSubscribeAttempts: BATCH_DEFERRED_SUBSCRIBE_ATTEMPTS,
       });
       assertBatchResult(result);
       return result;
