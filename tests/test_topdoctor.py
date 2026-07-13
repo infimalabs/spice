@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 
 from spice import doctor as topdoctor
 from spice.cli.parser import build_parser
@@ -19,6 +20,7 @@ def _env_report(repo_root, *, failed):
 
 
 def _patch(monkeypatch, tmp_path, *, env_failed, task_problems, fix_seen=None):
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
     monkeypatch.setattr(topdoctor, "require_repo_root", lambda: tmp_path)
 
     def fake_env(repo_root, *, fix=False):
