@@ -162,6 +162,34 @@ def test_external_speech_timeout_is_configurable(tmp_path, monkeypatch):
     assert seen["timeout"] == 0.25
 
 
+def test_infinite_layered_speech_timeout_renders_with_finite_default(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "spice.toml").write_text(
+        '[say]\nbackend = "external"\ncommand = "tts-engine"\ntimeout_seconds = inf\n',
+        encoding="utf-8",
+    )
+    seen: dict[str, object] = {}
+
+    def fake_run(args, **kwargs):
+        seen["timeout"] = kwargs["timeout_seconds"]
+        return subprocess.CompletedProcess(args, 0, stdout=b"wav-bytes", stderr=b"")
+
+    monkeypatch.setattr(audio, "run_bounded_process_group", fake_run)
+
+    rendered = audio.render_speech_audio("hello", repo_root=tmp_path)
+
+    assert {
+        "rendered": rendered,
+        "timeout": seen["timeout"],
+        "finite": seen["timeout"] < float("inf"),
+    } == {
+        "rendered": audio.SpeechAudio(b"wav-bytes", "audio/wav"),
+        "timeout": config.DEFAULT_SAY_TIMEOUT_SECONDS,
+        "finite": True,
+    }
+
+
 def test_long_message_renders_within_the_generous_default_bound(tmp_path, monkeypatch):
     long_message = "word " * 200
     seen: dict[str, object] = {}
