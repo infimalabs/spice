@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
+from spice.config import configured_rtk_executable
 from spice.errors import SpiceError
 from spice.hooks import install as hook_install
 from spice.hooks import precommit
@@ -109,8 +110,9 @@ def rtk_usage_nudge() -> str | None:
     if repo_root is None:
         return None
     try:
+        rtk_executable = configured_rtk_executable(repo_root)
         completed = subprocess.run(
-            ["rtk", "gain", "--project", "-f", "json"],
+            [rtk_executable, "gain", "--project", "-f", "json"],
             cwd=repo_root,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -118,7 +120,7 @@ def rtk_usage_nudge() -> str | None:
             check=False,
             timeout=5,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, SpiceError, subprocess.SubprocessError):
         return None
     if completed.returncode != 0:
         return None

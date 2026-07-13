@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
+from spice.config import configured_rtk_executable
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_WRAPPER_ENTRY_POINT_GROUP,
@@ -50,6 +51,7 @@ SHELL_HOOK_SURFACE_FILES = {
 SHELL_HOOK_SURFACES = tuple(SHELL_HOOK_SURFACE_FILES)
 CONFIG_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 SHELL_FUNCTION_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
+RTK_CANONICAL_EXECUTABLE = "rtk"
 
 
 def apply_shell_steering_environment(
@@ -208,6 +210,7 @@ def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
 
 def _render_agent_wrapper_lines(repo_root: Path) -> list[str]:
     agent_settings = effective_table(repo_root, "agent")
+    rtk_executable = configured_rtk_executable(repo_root)
     definitions, configured_sources = configured_agent_wrapper_definitions(repo_root)
     extension_entries = entry_point_agent_wrapper_entries(
         configured_sources=configured_sources
@@ -247,6 +250,7 @@ def _render_agent_wrapper_lines(repo_root: Path) -> list[str]:
                 group_name=group_name,
                 group=raw_group,
                 seen_selectors=seen_selectors,
+                rtk_executable=rtk_executable,
             )
         )
     return lines
@@ -311,6 +315,7 @@ def render_agent_wrapper_group_lines(
     group_name: str,
     group: Mapping[str, object],
     seen_selectors: dict[str, str],
+    rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
 ) -> list[str]:
     lines: list[str] = []
     for raw_wrapper, raw_entry in group.items():
@@ -324,6 +329,7 @@ def render_agent_wrapper_group_lines(
                     selector=wrapper,
                     entry=raw_entry,
                     seen_selectors=seen_selectors,
+                    rtk_executable=rtk_executable,
                 )
             )
             continue
@@ -363,6 +369,7 @@ def render_agent_direct_wrapper_lines(
     selector: str,
     entry: Mapping[str, object],
     seen_selectors: dict[str, str],
+    rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
 ) -> list[str]:
     config_path = f"tool.spice.wrappers.{group_name}.{selector}"
     require_shell_function_name(selector, label=f"{config_path} command")
@@ -376,6 +383,14 @@ def render_agent_direct_wrapper_lines(
         label=f"{config_path}.argv",
     )
     routes = agent_wrapper_match_routes(entry.get("match"), config_path=config_path)
+    if selector == RTK_CANONICAL_EXECUTABLE:
+        command_words = resolved_rtk_command_words(command_words, rtk_executable)
+        routes = tuple(
+            route._replace(
+                argv=tuple(resolved_rtk_command_words(route.argv, rtk_executable))
+            )
+            for route in routes
+        )
     if not routes and selector == command_words[0]:
         raise SpiceError(
             "spice shell hook: wrapper "
@@ -395,6 +410,15 @@ def render_agent_direct_wrapper_lines(
         f'  {command} "$@"',
         "}",
     ]
+
+
+def resolved_rtk_command_words(
+    command_words: Sequence[str], rtk_executable: str
+) -> list[str]:
+    words = list(command_words)
+    if words[:1] == [RTK_CANONICAL_EXECUTABLE]:
+        words[0] = rtk_executable
+    return words
 
 
 class WrapperMatchRoute(NamedTuple):

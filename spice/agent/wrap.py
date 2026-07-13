@@ -51,6 +51,7 @@ from spice.agent.shellhook import (
     ZDOTDIR_ENV,
     packaged_shell_steering_static_hook_dir,
 )
+from spice.config import configured_rtk_executable
 from spice.errors import SpiceError
 from spice.paths import STATE_DIRNAME
 from spice.sessions.meter import (
@@ -68,7 +69,7 @@ from spice.sessions.meter import (
 PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
 SHELL_EXECUTION_COMMANDS = frozenset(("bash", "dash", "sh", "zsh"))
 SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
-RTK_REWRITE_COMMAND = ("rtk", "rewrite")
+RTK_CANONICAL_EXECUTABLE = "rtk"
 RTK_MINIMUM_VERSION = (0, 42, 4)
 RTK_MINIMUM_VERSION_TEXT = ".".join(str(part) for part in RTK_MINIMUM_VERSION)
 RTK_UPSTREAM = "https://github.com/rtk-ai/rtk"
@@ -231,10 +232,16 @@ def build_agent_run_command(
     rtk_environment: Mapping[str, str] | None = None,
 ) -> list[str]:
     args = normalize_agent_run_args(raw_args)
+    rtk_executable = (
+        configured_rtk_executable(repo_root)
+        if rewrite_rtk
+        else RTK_CANONICAL_EXECUTABLE
+    )
     if rewrite_rtk:
         args = rtk_rewrite_agent_run_args(
             args,
             repo_root=repo_root,
+            rtk_executable=rtk_executable,
             rtk_environment=rtk_environment,
         )
     routed_args = worktree_route_command(args, repo_root=repo_root)
@@ -242,6 +249,7 @@ def build_agent_run_command(
         return (
             rtk_rewrite_direct_args(
                 routed_args,
+                rtk_executable=rtk_executable,
                 rtk_environment=rtk_environment,
             )
             or routed_args
@@ -253,6 +261,7 @@ def rtk_rewrite_agent_run_args(
     args: Sequence[str],
     *,
     repo_root: Path | None = None,
+    rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
     rtk_environment: Mapping[str, str] | None = None,
 ) -> list[str]:
     shell_command_index = shell_execution_command_index(args)
@@ -261,6 +270,7 @@ def rtk_rewrite_agent_run_args(
     rewritten = rtk_rewrite_shell_execution_text(
         args[shell_command_index],
         repo_root=repo_root,
+        rtk_executable=rtk_executable,
         rtk_environment=rtk_environment,
     )
     if rewritten is None:
@@ -274,24 +284,28 @@ def rtk_rewrite_shell_execution_text(
     command_text: str,
     *,
     repo_root: Path | None = None,
+    rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
     rtk_environment: Mapping[str, str] | None = None,
 ) -> str | None:
-    rewritten = _rtk_rewrite_with_environment(
+    rewritten = _rtk_rewrite_frontend_with_environment(
         command_text,
+        rtk_executable=rtk_executable,
         rtk_environment=rtk_environment,
     )
     if rewritten is not None:
         return rewritten
     trailing = rtk_rewrite_trailing_exec_shell_command(
         command_text,
+        rtk_executable=rtk_executable,
         rtk_environment=rtk_environment,
     )
     if trailing is not None:
         return trailing
     return driver_for(repo_root).rewrite_tool_command(
         command_text,
-        lambda *args: _rtk_rewrite_with_environment(
+        lambda *args: _rtk_rewrite_frontend_with_environment(
             *args,
+            rtk_executable=rtk_executable,
             rtk_environment=rtk_environment,
         ),
     )
@@ -300,6 +314,7 @@ def rtk_rewrite_shell_execution_text(
 def rtk_rewrite_trailing_exec_shell_command(
     command_text: str,
     *,
+    rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
     rtk_environment: Mapping[str, str] | None = None,
 ) -> str | None:
     stripped = command_text.rstrip()
@@ -319,8 +334,9 @@ def rtk_rewrite_trailing_exec_shell_command(
         or flag not in SHELL_EXECUTION_FLAGS
     ):
         return None
-    rewritten = _rtk_rewrite_with_environment(
+    rewritten = _rtk_rewrite_frontend_with_environment(
         nested_command,
+        rtk_executable=rtk_executable,
         rtk_environment=rtk_environment,
     )
     if rewritten is None:
@@ -333,41 +349,78 @@ def rtk_rewrite_trailing_exec_shell_command(
 def rtk_rewrite_direct_args(
     args: Sequence[str],
     *,
+    rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
     rtk_environment: Mapping[str, str] | None = None,
 ) -> list[str] | None:
     if (
         not args
-        or args[:1] == ["rtk"]
+        or args[0] in {RTK_CANONICAL_EXECUTABLE, rtk_executable}
         or shell_execution_command_index(args) is not None
     ):
         return None
-    rewritten = _rtk_rewrite_with_environment(
+    rewritten = _rtk_rewrite_frontend_with_environment(
         *args,
+        rtk_executable=rtk_executable,
         rtk_environment=rtk_environment,
     )
     if rewritten is None:
         return None
     try:
-        return shlex.split(rewritten)
+        rewritten_args = shlex.split(rewritten)
     except ValueError as exc:
         raise SpiceError(
             "invalid RTK direct rewrite argv: "
             f"command={shlex.join(args)!r} output={rewritten!r}; "
             "matched RTK output must be shell-parseable"
         ) from exc
+    return rewritten_args
+
+
+def remap_rtk_rewrite_frontend(command_text: str, rtk_executable: str) -> str:
+    """Route a canonical RTK rewrite through its configured executable."""
+    if rtk_executable == RTK_CANONICAL_EXECUTABLE:
+        return command_text
+    configured_word = shlex.quote(rtk_executable)
+    if command_text == RTK_CANONICAL_EXECUTABLE:
+        return configured_word
+    canonical_prefix = f"{RTK_CANONICAL_EXECUTABLE} "
+    if command_text.startswith(canonical_prefix):
+        return configured_word + command_text[len(RTK_CANONICAL_EXECUTABLE) :]
+    return command_text
+
+
+def _rtk_rewrite_frontend_with_environment(
+    *args: str,
+    rtk_executable: str,
+    rtk_environment: Mapping[str, str] | None,
+) -> str | None:
+    rewritten = _rtk_rewrite_with_environment(
+        *args,
+        rtk_executable=rtk_executable,
+        rtk_environment=rtk_environment,
+    )
+    if rewritten is None:
+        return None
+    return remap_rtk_rewrite_frontend(rewritten, rtk_executable)
 
 
 def _rtk_rewrite_with_environment(
     *args: str,
+    rtk_executable: str,
     rtk_environment: Mapping[str, str] | None,
 ) -> str | None:
     if rtk_environment is None:
-        return rtk_rewrite_command_text(*args)
-    return rtk_rewrite_command_text(*args, env=rtk_environment)
+        return rtk_rewrite_command_text(*args, rtk_executable=rtk_executable)
+    return rtk_rewrite_command_text(
+        *args,
+        rtk_executable=rtk_executable,
+        env=rtk_environment,
+    )
 
 
 def rtk_rewrite_command_text(
     *args: str,
+    rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
     env: Mapping[str, str] | None = None,
     run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> str | None:
@@ -383,7 +436,7 @@ def rtk_rewrite_command_text(
         completed = runner(
             # `--` stops rtk option parsing so a flag-leading command (e.g.
             # `--help`) is rewritten as a command, not read as rtk's own option.
-            [*RTK_REWRITE_COMMAND, "--", *args],
+            [rtk_executable, "rewrite", "--", *args],
             **run_kwargs,
         )
     except OSError as exc:
