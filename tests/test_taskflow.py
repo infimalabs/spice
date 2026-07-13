@@ -245,6 +245,89 @@ def test_task_capture_parser_accepts_done_with_validation():
     assert args.validation == ["tests passed"]
 
 
+def test_task_done_parser_forwards_next_with_all_evidence(monkeypatch, capsys):
+    calls: list[dict[str, object]] = []
+
+    def fake_done(handle, *, validation, judgment, notes, chain_next):
+        calls.append(
+            {
+                "handle": handle,
+                "validation": validation,
+                "judgment": judgment,
+                "notes": notes,
+                "chain_next": chain_next,
+            }
+        )
+        return "done chained"
+
+    monkeypatch.setattr(ops, "done", fake_done)
+    args = build_parser().parse_args(
+        [
+            "task",
+            "done",
+            "--next",
+            "--validation",
+            "tests passed",
+            "--judgment",
+            "sound",
+            "--note",
+            "kept context",
+        ]
+    )
+
+    assert args.func(args) == 0
+    assert capsys.readouterr().out == "done chained\n"
+    assert calls == [
+        {
+            "handle": None,
+            "validation": ["tests passed"],
+            "judgment": "sound",
+            "notes": ["kept context"],
+            "chain_next": True,
+        }
+    ]
+
+
+@pytest.mark.parametrize("explicit_handle", [True, False], ids=("explicit", "sole"))
+def test_task_done_next_selects_and_claims_follow_on_task(
+    task_repo, monkeypatch, explicit_handle
+):
+    monkeypatch.setattr(
+        "spice.tasks.lanes.team_route_for_actor",
+        lambda _actor: {"filter": ["project:task.unit"], "lifetime": "Drive"},
+    )
+    current = create.add(
+        "Complete before chaining",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        flow=["todo"],
+        acceptance=["successful completion chains through the allocator"],
+    )
+    follow_on = create.add(
+        "Claim after chained completion",
+        project="task.unit",
+        origin="ack:20260101T000000000000Z",
+        flow=["todo"],
+        acceptance=["the allocator surfaces and claims this follow-on task"],
+    )
+    ops.claim(current)
+
+    output = ops.done(
+        current if explicit_handle else None,
+        validation=["chained completion validated"],
+        chain_next=True,
+    )
+    completed = identity.resolve(current)
+    claimed = identity.resolve(follow_on)
+
+    assert f"completed {current}" in output
+    assert "next task:" in output
+    assert follow_on in output
+    assert completed["status"] == "completed"
+    assert claimed["claim_by"] == ACTOR_A
+    assert bool(claimed["start"])
+
+
 def test_task_done_review_flow_and_author_claim_separation(task_repo, monkeypatch):
     handle = create.add(
         "Exercise task phase flow",
