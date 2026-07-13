@@ -57,7 +57,7 @@ from spice.config import (
     configured_agent_personality,
 )
 from spice.errors import SpiceError
-from spice.locking import lock_fd_exclusive, unlock_fd
+from spice.locking import bounded_exclusive_lock
 from spice.procs import (
     popen_new_process_group_kwargs,
     process_group_is_running,
@@ -512,6 +512,7 @@ CLAIM_RENEWAL_QUIET_REASONS = frozenset({"no_active_claim"})
 # not stall progress, so each carries this budget and reports the safe "no signal"
 # answer on expiry (tree treated as clean; path treated as untracked).
 GIT_PROBE_TIMEOUT_SECONDS = 10.0
+AGENT_ENSURE_LOCK_TIMEOUT_SECONDS = 10.0
 
 
 def _worktree_dirty(repo_root: Path) -> bool:
@@ -829,14 +830,12 @@ def parse_agent_session_id(text: str, repo_root: Path) -> str:
 @contextmanager
 def agent_ensure_lock(repo_root: Path) -> Iterator[None]:
     lock_path = agent_worktree_state_dir(repo_root) / AGENT_LOCK_FILE
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    handle = lock_path.open("a+")
-    try:
-        lock_fd_exclusive(handle.fileno(), blocking=True)
+    with bounded_exclusive_lock(
+        lock_path,
+        timeout_seconds=AGENT_ENSURE_LOCK_TIMEOUT_SECONDS,
+        action="ensure agent lifecycle",
+    ):
         yield
-    finally:
-        unlock_fd(handle.fileno())
-        handle.close()
 
 
 def skill_invocation_prompt(repo_root: Path, skill_path: Path) -> str:

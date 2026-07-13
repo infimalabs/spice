@@ -7,6 +7,7 @@ authoritative the instant Taskwarrior's per-command lock releases.
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -15,9 +16,11 @@ from typing import Any
 
 from spice.agent.identity import ambient_thread_id
 from spice.errors import SpiceError
+from spice.gitprocess import run_git_command
 from spice.tasks import config
 
 _MUTATING_COMMANDS = frozenset({"add", "annotate", "delete", "done", "modify"})
+TASK_COMMAND_TIMEOUT_SECONDS = 120.0
 
 
 def require_task_binary() -> None:
@@ -43,9 +46,21 @@ def run(
         *(overrides or []),
         *args,
     ]
-    result = subprocess.run(
-        command, cwd=config.repo_root(), capture_output=True, check=False, text=True
-    )
+    action = _task_action(args)
+    try:
+        result = subprocess.run(
+            command,
+            cwd=config.repo_root(),
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=TASK_COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SpiceError(
+            f"Taskwarrior {action} timed out after {TASK_COMMAND_TIMEOUT_SECONDS:g}s: "
+            f"{shlex.join(command)}"
+        ) from exc
     if check and result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise SpiceError(f"task command failed: {' '.join(args)}\n{detail}")
@@ -76,6 +91,14 @@ def _mutation_reason(args: list[str]) -> str:
     return ""
 
 
+def _task_action(args: list[str]) -> str:
+    mutation = _mutation_reason(args)
+    if mutation:
+        return f"{mutation} mutation"
+    command = next((arg for arg in reversed(args) if not arg.startswith("rc.")), "run")
+    return f"{command} operation"
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
@@ -100,7 +123,7 @@ def current_actor() -> str:
 
 
 def _git(*args: str) -> str:
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "-C", str(config.repo_root()), *args],
         capture_output=True,
         check=False,
