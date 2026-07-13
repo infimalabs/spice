@@ -17,7 +17,7 @@ import socket
 import subprocess
 import time
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 
 import pytest
 
@@ -180,6 +180,48 @@ def test_side_channel_reaps_peer_that_never_sends_hello(git_worktree, monkeypatc
         finally:
             client.close()
     assert observed == b""
+
+
+def test_side_channel_reaps_trickling_peer_within_total_hello_budget(
+    git_worktree, monkeypatch
+):
+    hello_budget_s = 0.3
+    monkeypatch.setattr(sidechannel, "SIDE_CHANNEL_HELLO_TIMEOUT_S", hello_budget_s)
+    with sidechannel.AgentSideChannelServer(git_worktree):
+        socket_path = active_agent_side_channel_socket_path(git_worktree)
+        assert isinstance(socket_path, Path)
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.connect(str(socket_path))
+        client.settimeout(2.0)
+        stop_trickling = Event()
+        bytes_sent = Event()
+        handler_closed = Event()
+
+        def trickle_without_newline() -> None:
+            for _attempt in range(20):
+                if stop_trickling.wait(hello_budget_s / 4):
+                    return
+                try:
+                    client.sendall(b"x")
+                    bytes_sent.set()
+                except OSError:
+                    return
+
+        trickler = Thread(target=trickle_without_newline)
+        started_at = time.monotonic()
+        trickler.start()
+        try:
+            observed = client.recv(1)
+            if observed == b"":
+                handler_closed.set()
+            elapsed_s = time.monotonic() - started_at
+        finally:
+            stop_trickling.set()
+            trickler.join(timeout=2.0)
+            client.close()
+    assert bytes_sent.wait(0)
+    assert handler_closed.wait(0)
+    assert elapsed_s < hello_budget_s * 2
 
 
 def test_side_channel_stream_stays_open_past_hello_deadline(git_worktree, monkeypatch):

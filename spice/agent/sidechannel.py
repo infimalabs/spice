@@ -107,20 +107,20 @@ class AgentSideChannelServer:
                 continue
             except OSError:
                 return
+            hello_deadline = time.monotonic() + SIDE_CHANNEL_HELLO_TIMEOUT_S
             Thread(
                 target=self._handle_connection,
-                args=(connection,),
+                args=(connection, hello_deadline),
                 name=f"spice-agent-side-channel-client-{os.getpid()}",
                 daemon=True,
             ).start()
 
-    def _handle_connection(self, connection: socket.socket) -> None:
+    def _handle_connection(
+        self, connection: socket.socket, hello_deadline: float
+    ) -> None:
         with connection:
-            # Bound the hello read: a silent peer raises socket timeout (an
-            # OSError subclass) here rather than parking this handler forever.
-            connection.settimeout(SIDE_CHANNEL_HELLO_TIMEOUT_S)
             try:
-                line = _read_line(connection)
+                line = _read_line(connection, deadline=hello_deadline)
             except OSError:
                 return
             payload = parse_side_channel_hello(line)
@@ -346,9 +346,13 @@ def _drain_wakeup(wake_reader: socket.socket) -> None:
         wake_reader.recv(SOCKET_READ_BYTES)
 
 
-def _read_line(connection: socket.socket) -> bytes:
+def _read_line(connection: socket.socket, *, deadline: float) -> bytes:
     raw = b""
     while not raw.endswith(b"\n"):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("side-channel hello deadline elapsed")
+        connection.settimeout(remaining)
         chunk = connection.recv(1)
         if not chunk:
             break
