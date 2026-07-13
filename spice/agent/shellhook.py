@@ -250,7 +250,7 @@ def configured_agent_wrapper_definitions(
 ) -> tuple[dict[str, object], dict[str, str]]:
     definitions: dict[str, object] = dict(effective_table(repo_root, "wrappers"))
     sources: dict[str, str] = {
-        name: f"effective tool.spice.wrappers.{name}" for name in definitions
+        name: f"tool.spice.wrappers.{name}" for name in definitions
     }
     return definitions, sources
 

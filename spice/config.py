@@ -26,6 +26,7 @@ from spice.paths import (
 
 WORKTREE_CONFIG_RELATIVE_PATH = Path("config") / "spice.toml"
 LEGACY_CONFIG_STATE_RELATIVE_PATH = Path("config") / "state.json"
+LEGACY_CONFIG_SCHEMA = 1
 WORKTREE_CONFIG_SECTIONS = ("say", "judge", "agent")
 
 SAY_KEY = "say"
@@ -125,25 +126,31 @@ def _ensure_worktree_config_migrated(repo_root: Path) -> None:
         raw = json.loads(legacy.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise SpiceError(f"cannot migrate legacy config state {legacy}: {exc}") from exc
+    if not isinstance(raw, Mapping) or raw.get("schema") != LEGACY_CONFIG_SCHEMA:
+        raise SpiceError(
+            f"cannot migrate legacy config state {legacy}: expected schema "
+            f"{LEGACY_CONFIG_SCHEMA}"
+        )
     sections = {
         key: dict(value)
         for key in WORKTREE_CONFIG_SECTIONS
-        if isinstance(raw, Mapping)
-        and isinstance(value := raw.get(key), Mapping)
-        and value
+        if isinstance(value := raw.get(key), Mapping) and value
     }
-    if sections:
-        try:
+    try:
+        _load_worktree_toml(repo_root)
+        if sections:
             lines = _read_worktree_config_lines(repo_root)
             for table, values in sections.items():
                 _apply_worktree_table(lines, table, values)
             _write_worktree_config_lines(repo_root, lines)
-        except OSError as exc:
-            raise SpiceError(
-                "cannot migrate legacy config state to "
-                f"{worktree_config_path(repo_root)}: {exc}"
-            ) from exc
-    legacy.unlink()
+        legacy.unlink()
+    except SpiceError:
+        raise
+    except OSError as exc:
+        raise SpiceError(
+            "cannot migrate legacy config state to "
+            f"{worktree_config_path(repo_root)}: {exc}"
+        ) from exc
 
 
 def _read_worktree_config_lines(repo_root: Path) -> list[str]:
@@ -158,7 +165,12 @@ def _read_worktree_config_lines(repo_root: Path) -> list[str]:
 
 def _write_worktree_config_lines(repo_root: Path, lines: list[str]) -> Path:
     text = "\n".join(lines) + "\n" if lines else ""
-    return atomic_write_text(worktree_config_path(repo_root), text)
+    path = worktree_config_path(repo_root)
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise SpiceError(f"invalid TOML in {path}: {exc}") from exc
+    return atomic_write_text(path, text)
 
 
 def _apply_worktree_table(
@@ -179,7 +191,9 @@ def _apply_worktree_table(
         key = _toml_assignment_key(line)
         if key is not None and key in values:
             seen.add(key)
-            rewritten.append(_toml_assignment(key, values[key]))
+            assignment = _toml_assignment(key, values[key])
+            comment = _toml_inline_comment(line)
+            rewritten.append(f"{assignment} {comment}" if comment else assignment)
             continue
         rewritten.append(line)
     rewritten.extend(
@@ -192,6 +206,33 @@ def _remove_worktree_table(lines: list[str], table: str) -> None:
     start, end = _toml_table_bounds(lines, table)
     if start is not None:
         del lines[start:end]
+
+
+def _toml_inline_comment(line: str) -> str:
+    """Return a TOML comment outside quoted strings, including its ``#``."""
+    basic = False
+    literal = False
+    escaped = False
+    for index, character in enumerate(line):
+        if basic:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                basic = False
+            continue
+        if literal:
+            if character == "'":
+                literal = False
+            continue
+        if character == '"':
+            basic = True
+        elif character == "'":
+            literal = True
+        elif character == "#":
+            return line[index:]
+    return ""
 
 
 def config_overview(repo_root: Path) -> dict[str, Any]:

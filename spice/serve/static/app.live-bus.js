@@ -18,6 +18,7 @@ const laneSubmitLatencySamples = [];
 const laneSubmitLatencySampleLimit = 25;
 const pendingLaneSendServerTimings = new Map();
 const liveBusDiagnostics = { session: null, lastLaneSend: null };
+let focusedLiveBusLaneTargetId = "";
 if (typeof window !== "undefined")
   /** @type {any} */ (window).__spiceSubmitLatencySamples =
     laneSubmitLatencySamples;
@@ -202,6 +203,7 @@ const liveBusPushHandlers = new Map([
   ["lane.pending", handleLanePendingPush],
   ["lane.submission", handleLaneSubmissionPush],
   ["lane.append", handleLaneAppendPush],
+  ["lanes.dirty", handleBackgroundLanesDirtyPush],
   ["bus.error", handleLiveBusErrorPush],
 ]);
 
@@ -250,6 +252,16 @@ function handleLiveBusErrorPush(message) {
   setGlobalTransientError(message.error || "live bus error");
 }
 
+function handleBackgroundLanesDirtyPush(message) {
+  for (const frame of message.lanes || []) {
+    const lane = laneStates.get(frame.targetId);
+    if (!lane || !isLaneOpen(lane)) continue;
+    if (!liveBusPushMatchesSubscription(lane, frame)) continue;
+    lane.liveBusDirty = true;
+    if (liveBusLaneIsFocused(lane)) subscribeLaneToLiveBus(lane);
+  }
+}
+
 function matchingLiveBusLane(message) {
   const lane = laneStates.get(message.targetId);
   if (!lane || !isLaneOpen(lane)) return null;
@@ -277,7 +289,40 @@ function laneMessageQuery(lane) {
     limit: lane.newestMessageKey ? lane.retainedMessageLimit : initialRequestLimit,
     after: lane.newestMessageKey || "",
     threadId: lane.targetThreadId || "",
+    focused: liveBusLaneIsFocused(lane),
   };
+}
+
+function liveBusLaneIsFocused(lane) {
+  return lane.targetId === focusedLiveBusLaneTargetId;
+}
+
+function installLiveBusLaneFocusTracking() {
+  const focusFromEvent = (event) => {
+    const element = event.target?.closest?.(".lane[data-target-id]");
+    const lane = element
+      ? laneStates.get(element.dataset.targetId || "")
+      : null;
+    if (lane && isLaneOpen(lane)) setFocusedLiveBusLane(lane);
+  };
+  lanesEl.addEventListener("pointerdown", focusFromEvent, true);
+  lanesEl.addEventListener("focusin", focusFromEvent, true);
+}
+
+function setFocusedLiveBusLane(focusedLane) {
+  if (!focusedLane || focusedLiveBusLaneTargetId === focusedLane.targetId) return;
+  focusedLiveBusLaneTargetId = focusedLane.targetId;
+  for (const lane of laneStates.values()) {
+    if (!isLaneOpen(lane) || !lane.liveBusSubscribed || !liveBusIsOpen()) continue;
+    if (lane === focusedLane && lane.liveBusDirty) {
+      subscribeLaneToLiveBus(lane);
+      continue;
+    }
+    liveBusRequest("lane.configure", {
+      targetId: lane.targetId,
+      query: laneMessageQuery(lane),
+    }).catch(() => {});
+  }
 }
 
 // Every subscribe path — snapshot mount, reconnect resync, thread change,
@@ -290,6 +335,7 @@ let subscribeFlushQueued = false;
 function subscribeLaneToLiveBus(lane) {
   if (!isLaneOpen(lane)) return;
   if (lane.emptyTeam) return;
+  if (!focusedLiveBusLaneTargetId) focusedLiveBusLaneTargetId = lane.targetId;
   lane.liveBusSubscribed = false;
   lane.liveBusSubscribePending = true;
   lane.liveBusWatcherActive = false;
@@ -395,6 +441,13 @@ function unsubscribeLaneFromLiveBus(lane) {
   liveBusRequest("lane.unsubscribe", { targetId: lane.targetId }).catch(
     () => {},
   );
+  if (focusedLiveBusLaneTargetId === lane.targetId) {
+    focusedLiveBusLaneTargetId = "";
+    const replacement = [...laneStates.values()].find(
+      (candidate) => candidate !== lane && isLaneOpen(candidate),
+    );
+    if (replacement) setFocusedLiveBusLane(replacement);
+  }
 }
 
 // ---- payload application ------------------------------------------------------
@@ -408,6 +461,7 @@ async function applyLaneBusPayload(lane, payload, source) {
 // lane, then render each fused host once so the merged stream paints its
 // final interleaving in a single lattice insertion sequence.
 function applyLaneBusPayloadState(lane, payload, source) {
+  lane.liveBusDirty = false;
   const wasSpeechPrimed = lane.speechPrimed;
   const knownBefore = new Set(lane.knownMessageKeys);
   // Auto-narration is gated in queueSpeechForMessages against the lane's UI

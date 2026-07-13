@@ -114,7 +114,7 @@ def test_declared_extension_fixture_wheel_runs_driver_study_and_wrapper(
             {"spice-dev", "toy-wrapper"},
             "wrapper",
             "spice-dev",
-            "configured by both effective tool.spice.wrappers.spice-dev "
+            "configured by both tool.spice.wrappers.spice-dev "
             "and spice.wrappers entry point spice-dev",
         ),
     ],

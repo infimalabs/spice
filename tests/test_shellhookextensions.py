@@ -26,17 +26,13 @@ def test_agent_wrapper_lines_keep_builtin_and_configured_groups_compatible(tmp_p
         },
     )
 
-    lines = shellhook.render_agent_wrapper_lines(tmp_path)
-    grep_lines = _expected_wrapper_lines("wrap", ["grep"])
-    grep_start = lines.index("grep() {") - 1
-    assert lines[grep_start : grep_start + len(grep_lines)] == grep_lines
-    pre_commit_lines = ["", "pre-commit() {", '  spice dev pre-commit "$@"', "}"]
-    pre_commit_start = lines.index("pre-commit() {") - 1
-    assert (
-        lines[pre_commit_start : pre_commit_start + len(pre_commit_lines)]
-        == pre_commit_lines
-    )
-    assert "rtk() {" in lines
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
+        *_expected_wrapper_lines("wrap", ["grep"]),
+        "",
+        "pre-commit() {",
+        '  spice dev pre-commit "$@"',
+        "}",
+    ]
 
 
 def test_agent_wrapper_lines_loads_selected_entry_point_wrapper_from_fixture_wheel(
@@ -104,8 +100,7 @@ def test_agent_wrapper_lines_rejects_entry_point_shadowing_configured_group(
 
     assert str(exc_info.value) == (
         "spice shell hook: wrapper group 'spice-dev' is configured by both "
-        "effective tool.spice.wrappers.spice-dev and spice.wrappers entry point "
-        "spice-dev"
+        "tool.spice.wrappers.spice-dev and spice.wrappers entry point spice-dev"
     )
 
 

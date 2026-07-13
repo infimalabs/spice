@@ -39,6 +39,7 @@ def test_static_initial_bootstrap_waits_for_server_topology():
 
     assert (
         "async function init() {\n"
+        "  installLiveBusLaneFocusTracking();\n"
         "  await connectLiveBus();\n"
         "  await refreshServerTopology();\n"
         "  setInterval(updateLiveRelativeTimes, relativeTimeTickMs);\n"

@@ -15,6 +15,12 @@ WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WINDOWS_STILL_ACTIVE = 259
 WINDOWS_ERROR_INVALID_PARAMETER = 87
 PROCESS_POLL_INTERVAL_SECONDS = 0.1
+# Liveness and forced-termination helpers shell out to `ps`/`taskkill`. A wedged
+# invocation must not stall the supervisor's cleanup or liveness decisions, so
+# every probe carries this named budget and degrades deterministically on expiry
+# (liveness assumes the process is still alive; termination falls through to the
+# caller's forceful escalation).
+PROCESS_PROBE_TIMEOUT_SECONDS = 5.0
 
 
 def popen_new_process_group_kwargs() -> dict[str, Any]:
@@ -131,8 +137,9 @@ def _force_windows_process_tree(pid: int) -> None:
             check=False,
             capture_output=True,
             text=True,
+            timeout=PROCESS_PROBE_TIMEOUT_SECONDS,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         pass
 
 
@@ -143,8 +150,9 @@ def _posix_process_group_has_live_member(process_group_id: int) -> bool:
             check=False,
             capture_output=True,
             text=True,
+            timeout=PROCESS_PROBE_TIMEOUT_SECONDS,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return True
     if completed.returncode != 0:
         return True
@@ -161,8 +169,9 @@ def _posix_pid_has_live_state(pid: int) -> bool:
             check=False,
             capture_output=True,
             text=True,
+            timeout=PROCESS_PROBE_TIMEOUT_SECONDS,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return True
     if completed.returncode != 0:
         return True
