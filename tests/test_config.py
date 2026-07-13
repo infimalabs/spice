@@ -771,3 +771,56 @@ def test_maxim_adjudication_off_by_default_and_opt_in_toggles_it(tmp_path):
     )
 
     assert modes == ["judge-free", "adjudicated", "judge-free"]
+
+
+def test_maxim_adjudication_reads_only_the_worktree_layer(tmp_path, monkeypatch):
+    _redirect_system_config(tmp_path, monkeypatch)
+    inherited_scopes = (
+        config.SYSTEM_SOURCE,
+        config.PYPROJECT_SOURCE,
+        config.REPOSITORY_SOURCE,
+    )
+    for scope in inherited_scopes:
+        config.set_scope_section(
+            tmp_path,
+            scope,
+            config.JUDGE_KEY,
+            {config.JUDGE_ENABLED_KEY: True},
+        )
+
+    inherited_outcome = {
+        "mode": (
+            "adjudicated"
+            if config.maxim_adjudication_enabled(tmp_path)
+            else "judge-free"
+        ),
+        "enabled_layers": tuple(
+            scope
+            for scope in inherited_scopes
+            if config.layer_table(tmp_path, scope, config.JUDGE_KEY).get(
+                config.JUDGE_ENABLED_KEY
+            )
+            is True
+        ),
+    }
+    config.set_scope_section(
+        tmp_path,
+        config.WORKTREE_SOURCE,
+        config.JUDGE_KEY,
+        {config.JUDGE_ENABLED_KEY: True},
+    )
+
+    assert {
+        "inherited": inherited_outcome,
+        "worktree_mode": (
+            "adjudicated"
+            if config.maxim_adjudication_enabled(tmp_path)
+            else "judge-free"
+        ),
+    } == {
+        "inherited": {
+            "mode": "judge-free",
+            "enabled_layers": inherited_scopes,
+        },
+        "worktree_mode": "adjudicated",
+    }
