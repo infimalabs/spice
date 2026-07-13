@@ -365,14 +365,17 @@ def test_serve_lanes_batch_subscribe_smoke_asserts_coalesced_single_render() -> 
     assert "result.initialFrameCount !== 1" in smoke
     assert "result.initialHostRenderCount !== 1" in smoke
     assert "single host render did not cover every member's initial messages" in smoke
-    # A focus move while the batch response is deferred configures both server
-    # queries before the held response can release their watcher gates.
+    # Every member of a visible fused host stays live without click focus; a
+    # same-group selection emits no redundant configuration, while a dirty
+    # member batches one concrete resubscribe.
     assert "batchPhaseFocusWhilePending" in smoke
     assert "state.releaseDeferredSubscribe" in smoke
-    assert "result.preReleaseFocusConfigureCount !== 2" in smoke
-    assert "result.preReleasePriorFocus !== false" in smoke
-    assert "result.preReleaseSelectedFocus !== true" in smoke
-    assert "result.focusConfigureCount !== 2" in smoke
+    assert "result.visibleHostLiveWithoutFocus !== true" in smoke
+    assert "result.pendingSelectedFocus !== true" in smoke
+    assert "result.preReleaseFocusConfigureCount !== 0" in smoke
+    assert "result.focusConfigureCount !== 0" in smoke
+    assert "result.dirtyMemberFrameCount !== 1" in smoke
+    assert "result.dirtyMemberCleared !== true" in smoke
     # Reconnect resync covers every open lane in exactly one frame.
     assert "resubscribeLiveBusLanes();" in smoke
     assert "result.resyncFrameCount !== 1" in smoke

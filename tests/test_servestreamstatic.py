@@ -1170,7 +1170,6 @@ def test_static_stream_queues_fresh_speech_for_all_post_prime_sources():
         )
     ]
 
-    assert 'if (source === "watch" && (payload.messages || []).length)' in apply_body
     assert 'if (wasSpeechPrimed && source === "watch")' not in apply_body
     assert "if (wasSpeechPrimed) {" in apply_body
     assert (

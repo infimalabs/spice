@@ -189,6 +189,10 @@ async function batchPhaseInitial(state, config) {
   );
   await window.__batchSettle(config);
   const host = laneGroupHost(laneStates.get(config.memberIds[0]));
+  const savedFocusedTargetId = focusedLiveBusLaneTargetId;
+  focusedLiveBusLaneTargetId = "different-lane-group";
+  const visibleHostLiveWithoutFocus = liveBusLaneIsFocused(host);
+  focusedLiveBusLaneTargetId = savedFocusedTargetId;
   const frames = window.__batchSubscribeFrames(state);
   const hostRenders = state.mosaicRenders.filter((render) => {
     return render.targetId === host.targetId && render.keys.length > 0;
@@ -202,6 +206,7 @@ async function batchPhaseInitial(state, config) {
     .sort();
   return {
     hostTargetId: host.targetId,
+    visibleHostLiveWithoutFocus,
     initialFrameCount: frames.length,
     initialFrameEntryIds: frames.length ? window.__batchEntryIds(frames[0]) : [],
     initialHostRenderCount: hostRenders.length,
@@ -266,7 +271,35 @@ async function batchPhaseFocusWhilePending(state, config) {
   };
 }
 
-// Phase C: reconnect resync -- one frame covering every open lane.
+// Phase C: a dirty notification for a member of the focused fused host must
+// refresh that concrete member immediately. The server may still coalesce the
+// member's burst into one lanes.dirty frame, but the browser cannot leave a
+// visible part of the merged stream stale until a later composer submit.
+async function batchPhaseFocusedMemberDirty(state, config) {
+  state.frames.length = 0;
+  const member = laneStates.get(config.memberIds[1]);
+  handleBackgroundLanesDirtyPush({
+    type: "lanes.dirty",
+    lanes: [
+      {
+        targetId: member.targetId,
+        subscriptionGeneration: member.liveBusSubscriptionGeneration,
+      },
+    ],
+  });
+  await window.__batchSettle(config);
+  const frames = window.__batchSubscribeFrames(state);
+  return {
+    dirtyMemberFocused: liveBusLaneIsFocused(member),
+    dirtyMemberFrameCount: frames.length,
+    dirtyMemberFrameEntryIds: frames.length
+      ? window.__batchEntryIds(frames[0])
+      : [],
+    dirtyMemberCleared: member.liveBusDirty === false,
+  };
+}
+
+// Phase D: reconnect resync -- one frame covering every open lane.
 async function batchPhaseResync(state, config) {
   state.frames.length = 0;
   resubscribeLiveBusLanes();
@@ -278,7 +311,7 @@ async function batchPhaseResync(state, config) {
   };
 }
 
-// Phase D: a thread change (bus payload with a renewed bound thread) and a
+// Phase E: a thread change (bus payload with a renewed bound thread) and a
 // config-revision advance in the same tick coalesce into one batch flush.
 // Both triggers stay in one synchronous block -- applyLaneBusPayload is not
 // awaited -- so their marks land before the microtask flush fires.
@@ -310,7 +343,7 @@ async function batchPhaseCoalesce(state, config) {
   };
 }
 
-// Phase E: a failed lane inside the batch surfaces its transient status while
+// Phase F: a failed lane inside the batch surfaces its transient status while
 // the sibling's fresh message still renders.
 async function batchPhaseFailedLane(state, config, hostTargetId) {
   state.frames.length = 0;
@@ -347,6 +380,7 @@ async function batchMeasure(config) {
   };
   window.__batchInstallStubs(state, config);
   const initial = await window.__batchPhaseInitial(state, config);
+  const dirty = await window.__batchPhaseFocusedMemberDirty(state, config);
   const focus = await window.__batchPhaseFocusWhilePending(state, config);
   const resync = await window.__batchPhaseResync(state, config);
   const coalesced = await window.__batchPhaseCoalesce(state, config);
@@ -357,7 +391,7 @@ async function batchMeasure(config) {
   );
   // eslint-disable-next-line no-global-assign
   mosaicRenderMessageStream = state.originalMosaicRender;
-  return { ...initial, ...focus, ...resync, ...coalesced, ...failed };
+  return { ...initial, ...focus, ...dirty, ...resync, ...coalesced, ...failed };
 }
 
 const BATCH_PAGE_HELPERS = {
@@ -372,6 +406,7 @@ const BATCH_PAGE_HELPERS = {
   __batchInstallStubs: batchInstallStubs,
   __batchPhaseInitial: batchPhaseInitial,
   __batchPhaseFocusWhilePending: batchPhaseFocusWhilePending,
+  __batchPhaseFocusedMemberDirty: batchPhaseFocusedMemberDirty,
   __batchPhaseResync: batchPhaseResync,
   __batchPhaseCoalesce: batchPhaseCoalesce,
   __batchPhaseFailedLane: batchPhaseFailedLane,
@@ -393,18 +428,23 @@ function assertBatchResult(result) {
       result.initialHostRenderCount !== 1,
     "single host render did not cover every member's initial messages":
       result.initialHostRenderKeys.join(",") !== result.expectedKeys.join(","),
+    "visible lane group required click focus for live delivery":
+      result.visibleHostLiveWithoutFocus !== true,
     "pending subscribe did not capture the prior lane as focused":
       result.pendingPriorFocus !== true,
-    "pending subscribe did not capture the selected lane as background":
-      result.pendingSelectedFocus !== false,
-    "pending focus change did not configure both lanes before response release":
-      result.preReleaseFocusConfigureCount !== 2,
-    "prior lane was not configured focused:false before response release":
-      result.preReleasePriorFocus !== false,
-    "selected lane was not configured focused:true before response release":
-      result.preReleaseSelectedFocus !== true,
-    "pending focus change emitted duplicate post-response configuration":
-      result.focusConfigureCount !== 2,
+    "focused fused host did not keep its selected member live":
+      result.pendingSelectedFocus !== true,
+    "selecting a member of the focused fused host reconfigured the same group":
+      result.preReleaseFocusConfigureCount !== 0 ||
+      result.focusConfigureCount !== 0,
+    "focused fused member did not use the live-push path":
+      result.dirtyMemberFocused !== true,
+    "dirty focused member did not batch exactly one resubscribe":
+      result.dirtyMemberFrameCount !== 1,
+    "dirty focused member resubscribe addressed the wrong lane":
+      result.dirtyMemberFrameEntryIds.join(",") !== BATCH_MEMBER_IDS[1],
+    "dirty focused member stayed stale after its payload applied":
+      result.dirtyMemberCleared !== true,
     "reconnect resync did not issue exactly one lanes.subscribe frame":
       result.resyncFrameCount !== 1,
     "resync frame did not cover every open lane":

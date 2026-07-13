@@ -7,6 +7,10 @@ const liveTaskCardSmokeOrigin = "ack:20260101T000000000000Z";
 // Later bound scratch targets avoid unrelated historical image fixtures.
 const liveTaskCardTargetOffset = 2;
 const liveTaskCardStageTimeoutMs = 10000;
+const liveTaskCardAcceptanceCriteria = [
+  "Live task card appears without page reload",
+  "Each acceptance criterion renders on its own row",
+];
 
 async function run() {
   return withServePage(
@@ -14,92 +18,232 @@ async function run() {
       path: "/?smoke=serve-task-card-live-" + Date.now(),
       contextOptions: { viewport: { width: 1280, height: 720 } },
     },
-    async ({ page, server }) => {
-      await waitForTaskCardStage(
-        page,
-        "server-lane",
-        () => Boolean(document.querySelector(".lane")),
-      );
-      await waitForTaskCardStage(
-        page,
-        "targets-ready",
-        () =>
-          typeof targets !== "undefined" &&
-          Array.isArray(targets) &&
-          targets.length > 0 &&
-          typeof addLane === "function" &&
-          typeof laneStates !== "undefined",
-      );
-      const lane = await ensureLiveTaskCardLane(page);
-      await waitForTaskCardStage(
-        page,
-        "bound-lane-selected",
-        ({ targetId, threadId }) => {
-          const selected = laneStates.get(targetId);
-          return Boolean(
-            selected &&
-              selected.targetId === targetId &&
-              (selected.targetThreadId || selected.activeThreadId || "") ===
-                threadId,
-          );
-        },
-        lane,
-        lane.targetId,
-      );
-      const subscription = await waitForLiveTaskCardSubscription(page, lane);
-      const title = "Live task card smoke " + Date.now();
-      const acceptanceCriteria = [
-        "Live task card appears without page reload",
-        "Each acceptance criterion renders on its own row",
-      ];
-      let navigationsAfterCreate = 0;
-      page.on("framenavigated", (frame) => {
-        if (frame === page.mainFrame()) navigationsAfterCreate += 1;
-      });
-      await createTaskForLane(
-        server.backendDir,
-        lane.threadId,
-        title,
-        acceptanceCriteria,
-      );
-      await waitForTaskCardStage(
-        page,
-        "watch-delivery",
-        ({ targetId, title, generation }) => {
-          const selected = laneStates.get(targetId);
-          return Boolean(
-            selected &&
-              selected.liveBusSubscriptionGeneration === generation &&
-              selected.knownMessages.some((item) =>
-                String(item.display_text || item.text || "").includes(title),
-              ),
-          );
-        },
-        {
-          targetId: lane.targetId,
-          title,
-          generation: subscription.generation,
-        },
-        lane.targetId,
-      );
-      await waitForTaskCardVisible(
-        page,
-        lane.targetId,
-        title,
-        acceptanceCriteria,
-      );
-      if (navigationsAfterCreate !== 0)
-        throw new Error("task card appeared after page navigation/reload");
-      return {
-        requestSequence: subscription.requestSequence,
-        subscriptionGeneration: subscription.generation,
-        targetId: lane.targetId,
-        threadId: lane.threadId,
-        title,
-        url: server.url,
-      };
-    },
+    runTaskCardScenario,
   );
+}
+
+async function runTaskCardScenario({ page, server }) {
+  const { lane, subscription } = await prepareLiveTaskCardLane(page);
+  await installTaskCardTimingProbe(page);
+  let navigationsAfterCreate = 0;
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) navigationsAfterCreate += 1;
+  });
+  const first = await createAndObserveTaskCard(
+    page,
+    server,
+    lane,
+    subscription,
+    "Live task card smoke " + Date.now(),
+    "watch-delivery",
+  );
+  const followup = await createAndObserveTaskCard(
+    page,
+    server,
+    lane,
+    subscription,
+    "Live task card follow-up " + Date.now(),
+    "follow-up-watch-delivery",
+  );
+  if (navigationsAfterCreate !== 0)
+    throw new Error("task card appeared after page navigation/reload");
+  return {
+    requestSequence: subscription.requestSequence,
+    subscriptionGeneration: subscription.generation,
+    targetId: lane.targetId,
+    threadId: lane.threadId,
+    title: first.title,
+    followupTitle: followup.title,
+    timing: first.timing,
+    followupTiming: followup.timing,
+    url: server.url,
+  };
+}
+
+async function prepareLiveTaskCardLane(page) {
+  await waitForTaskCardStage(
+    page,
+    "server-lane",
+    () => Boolean(document.querySelector(".lane")),
+  );
+  await waitForTaskCardStage(
+    page,
+    "targets-ready",
+    () =>
+      typeof targets !== "undefined" &&
+      Array.isArray(targets) &&
+      targets.length > 0 &&
+      typeof addLane === "function" &&
+      typeof laneStates !== "undefined",
+  );
+  const lane = await ensureLiveTaskCardLane(page);
+  await focusLiveTaskCardLane(page, lane);
+  await waitForTaskCardStage(
+    page,
+    "bound-lane-selected",
+    ({ targetId, threadId }) => {
+      const selected = laneStates.get(targetId);
+      return Boolean(
+        selected &&
+          selected.targetId === targetId &&
+          (selected.targetThreadId || selected.activeThreadId || "") === threadId,
+      );
+    },
+    lane,
+    lane.targetId,
+  );
+  const subscription = await waitForLiveTaskCardSubscription(page, lane);
+  return { lane, subscription };
+}
+
+async function createAndObserveTaskCard(
+  page,
+  server,
+  lane,
+  subscription,
+  title,
+  stage,
+) {
+  const createTiming = await createTaskForLane(
+    server.backendDir,
+    lane.threadId,
+    title,
+    liveTaskCardAcceptanceCriteria,
+  );
+  await waitForTaskCardStage(
+    page,
+    stage,
+    taskCardReachedLane,
+    { targetId: lane.targetId, title, generation: subscription.generation },
+    lane.targetId,
+  );
+  await waitForTaskCardVisible(
+    page,
+    lane.targetId,
+    title,
+    liveTaskCardAcceptanceCriteria,
+  );
+  const timing = await taskCardDeliveryTiming(
+    page,
+    lane.targetId,
+    title,
+    createTiming,
+  );
+  return { title, timing };
+}
+
+function taskCardReachedLane({ targetId, title, generation }) {
+  const selected = laneStates.get(targetId);
+  return Boolean(
+    selected &&
+      selected.liveBusSubscriptionGeneration === generation &&
+      selected.knownMessages.some((item) =>
+        String(item.display_text || item.text || "").includes(title),
+      ),
+  );
+}
+
+async function focusLiveTaskCardLane(page, lane) {
+  await page.evaluate((targetId) => {
+    const selected = laneStates.get(targetId);
+    if (!selected) throw new Error("task-card focus lane disappeared");
+    setFocusedLiveBusLane(selected);
+  }, lane.targetId);
+  await waitForTaskCardStage(
+    page,
+    "focused-lane",
+    (targetId) => {
+      const selected = laneStates.get(targetId);
+      return Boolean(selected && liveBusLaneIsFocused(selected));
+    },
+    lane.targetId,
+    lane.targetId,
+  );
+  await page.evaluate(async (targetId) => {
+    const selected = laneStates.get(targetId);
+    if (!selected) throw new Error("task-card focus lane disappeared");
+    await liveBusRequest("lane.configure", {
+      targetId,
+      query: laneMessageQuery(selected),
+    });
+  }, lane.targetId);
+}
+
+async function installTaskCardTimingProbe(page) {
+  await page.evaluate(() => {
+    window.__spiceTaskCardTimingFrames = [];
+    const originalHandle = handleLiveBusMessage;
+    // eslint-disable-next-line no-global-assign
+    handleLiveBusMessage = async function (data) {
+      const receivedAt = Date.now();
+      let timingFrame = null;
+      try {
+        const message = JSON.parse(data || "{}");
+        if (
+          message.type === "lane.payload" &&
+          message.source === "watch" &&
+          message.watchTiming
+        ) {
+          timingFrame = {
+            receivedAt,
+            targetId: message.targetId || "",
+            texts: ((message.payload || {}).messages || []).map((item) =>
+              String(item.display_text || item.text || ""),
+            ),
+            watchTiming: message.watchTiming,
+          };
+        }
+      } catch (error) {
+        timingFrame = null;
+      }
+      const result = await originalHandle(data);
+      if (timingFrame) {
+        timingFrame.renderedAt = Date.now();
+        window.__spiceTaskCardTimingFrames.push(timingFrame);
+      }
+      return result;
+    };
+  });
+}
+
+async function taskCardDeliveryTiming(
+  page,
+  targetId,
+  title,
+  createTiming,
+) {
+  const frame = await page.evaluate(
+    ({ id, expectedTitle }) => {
+      const match = (window.__spiceTaskCardTimingFrames || []).find(
+        (candidate) =>
+          candidate.targetId === id &&
+          candidate.texts.some((text) => text.includes(expectedTitle)),
+      );
+      return match || null;
+    },
+    { id: targetId, expectedTitle: title },
+  );
+  if (!frame)
+    throw new Error("task-card timing frame missing for " + JSON.stringify(title));
+  const watch = frame.watchTiming || {};
+  return {
+    taskAddStartedWallMs: createTiming.startedAt,
+    taskAddReturnedWallMs: createTiming.returnedAt,
+    changeDetectedWallMs: watch.changeDetectedWallMs,
+    preSendWallMs: watch.preSendWallMs,
+    browserReceivedWallMs: frame.receivedAt,
+    browserRenderedWallMs: frame.renderedAt,
+    stagesMs: {
+      taskAdd: createTiming.returnedAt - createTiming.startedAt,
+      detectionAfterAddReturn:
+        watch.changeDetectedWallMs - createTiming.returnedAt,
+      signature: watch.signatureMs,
+      payload: watch.payloadMs,
+      socket: frame.receivedAt - watch.preSendWallMs,
+      browserApplyAndRender: frame.renderedAt - frame.receivedAt,
+      totalAfterAddReturn: frame.renderedAt - createTiming.returnedAt,
+    },
+  };
 }
 
 async function waitForLiveTaskCardSubscription(page, lane) {
@@ -296,6 +440,7 @@ async function createTaskForLane(
     "--acceptance",
     criterion,
   ]);
+  const startedAt = Date.now();
   const { stdout, stderr } = await execFileAsync(
     command,
     [
@@ -320,6 +465,7 @@ async function createTaskForLane(
   );
   if (!stdout.includes("created "))
     throw new Error("task add did not report creation:\n" + stdout + stderr);
+  return { startedAt, returnedAt: Date.now() };
 }
 
 if (require.main === module) {
