@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
+from spice import config
 from spice.agent import watchdog
 from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
 from spice.agent.identity import ambient_thread_id
@@ -43,6 +44,15 @@ words = ["{name}"]
 message = "{name.upper()} reminder."
 """.lstrip(),
         encoding="utf-8",
+    )
+
+
+def _enable_maxim_adjudication(repo) -> None:
+    config.set_scope_section(
+        repo,
+        config.WORKTREE_SOURCE,
+        config.JUDGE_KEY,
+        {config.JUDGE_ENABLED_KEY: True},
     )
 
 
@@ -473,6 +483,7 @@ def test_maxim_report_parser_wires_report_action():
 def test_watchdog_records_published_violation_metrics(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
     _write_maxim_config(repo)
+    _enable_maxim_adjudication(repo)
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr(
         watchdog,
@@ -502,6 +513,7 @@ def test_watchdog_records_published_violation_metrics(tmp_path, monkeypatch):
 def test_watchdog_records_judged_rejection_metrics(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
     _write_maxim_config(repo)
+    _enable_maxim_adjudication(repo)
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr(
         watchdog,
@@ -531,6 +543,7 @@ def test_watchdog_records_judged_rejection_metrics(tmp_path, monkeypatch):
 def test_watchdog_records_gate_suppressed_metrics(tmp_path, monkeypatch):
     repo = _init_repo(tmp_path / "repo")
     _write_maxim_config(repo)
+    _enable_maxim_adjudication(repo)
     gate = watchdog.MaximReminderGate()
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
     monkeypatch.setattr(

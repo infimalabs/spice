@@ -244,6 +244,7 @@ def test_repo_config_declares_new_maxim_bag_for_scan_and_watchdog(
     tmp_path, monkeypatch
 ):
     repo = _init_repo(tmp_path / "repo")
+    _enable_maxim_adjudication(repo)
     _write_pyproject(
         repo,
         """
@@ -266,7 +267,13 @@ message = "DO NOT take shortcuts; keep the direct route."
             attempts=("NO", "NO"),
         )
 
+    events: list[str] = []
     monkeypatch.setattr(watchdog, "evaluate_maxim_any_violation", judge_violation)
+    monkeypatch.setattr(
+        watchdog,
+        "_record_maxim_metrics",
+        lambda *args, event_type, **kwargs: events.append(event_type),
+    )
 
     paths = watchdog.publish_maxim_hits_as_inbox(
         repo, "Taking shortcuts here.", reminder_gate=watchdog.MaximReminderGate()
@@ -276,6 +283,108 @@ message = "DO NOT take shortcuts; keep the direct route."
     assert len(paths) == 1
     assert paths[0].is_file()
     assert item.text == "[MAXIM] DO NOT take shortcuts; keep the direct route.\n"
+    assert events == [
+        watchdog.MAXIM_EVENT_FIRE,
+        watchdog.MAXIM_EVENT_JUDGED_CONFIRMED,
+        watchdog.MAXIM_EVENT_PUBLISHED,
+    ]
+
+
+def test_judge_free_default_publishes_once_without_consulting_judge(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_dual_maxim_config(repo)
+    events: list[str] = []
+    monkeypatch.setattr(
+        watchdog,
+        "_record_maxim_metrics",
+        lambda *args, event_type, **kwargs: events.append(event_type),
+    )
+
+    def judge_must_not_run(maxim: str, statement: str) -> MaximVerdict:
+        raise AssertionError("judge-free default must not consult the judge")
+
+    monkeypatch.setattr(watchdog, "evaluate_maxim_any_violation", judge_must_not_run)
+
+    gate = watchdog.MaximReminderGate()
+    first_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta", reminder_gate=gate
+    )
+    duplicate_paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha beta again", reminder_gate=gate
+    )
+    outcome = {
+        "state": (
+            "published-once"
+            if len(first_paths) == 1 and len(duplicate_paths) == 0
+            else "unexpected"
+        ),
+        "first_count": len(first_paths),
+        "duplicate_count": len(duplicate_paths),
+        "inbox_count": len(collect_inbox_items(repo)),
+    }
+
+    assert outcome == {
+        "state": "published-once",
+        "first_count": 1,
+        "duplicate_count": 0,
+        "inbox_count": 1,
+    }
+    assert [item.text for item in collect_inbox_items(repo)] == [
+        "[MAXIM] FIRST reminder. SECOND reminder.\n"
+    ]
+    assert events == [
+        watchdog.MAXIM_EVENT_FIRE,
+        watchdog.MAXIM_EVENT_PUBLISHED,
+        watchdog.MAXIM_EVENT_FIRE,
+        watchdog.MAXIM_EVENT_GATE_SUPPRESSED,
+    ]
+
+
+def test_opt_in_judge_records_rejection_and_suppresses_agreeing_statement(
+    tmp_path, monkeypatch
+):
+    repo = _init_repo(tmp_path / "repo")
+    _write_dual_maxim_config(repo)
+    _enable_maxim_adjudication(repo)
+    events: list[str] = []
+    monkeypatch.setattr(
+        watchdog,
+        "_record_maxim_metrics",
+        lambda *args, event_type, **kwargs: events.append(event_type),
+    )
+
+    def judge_agrees(maxim: str, statement: str) -> MaximVerdict:
+        return MaximVerdict(
+            maxim=maxim,
+            statement=statement,
+            prompt="",
+            answer="YES",
+            attempts=("YES",),
+        )
+
+    monkeypatch.setattr(watchdog, "evaluate_maxim_any_violation", judge_agrees)
+
+    paths = watchdog.publish_maxim_hits_as_inbox(
+        repo, "alpha", reminder_gate=watchdog.MaximReminderGate()
+    )
+    outcome = {
+        "state": "suppressed" if len(paths) == 0 else "published",
+        "published_count": len(paths),
+        "inbox_count": len(collect_inbox_items(repo)),
+        "events": events,
+    }
+
+    assert outcome == {
+        "state": "suppressed",
+        "published_count": 0,
+        "inbox_count": 0,
+        "events": [
+            watchdog.MAXIM_EVENT_FIRE,
+            watchdog.MAXIM_EVENT_JUDGED_REJECTED,
+        ],
+    }
 
 
 def test_maxim_reminder_gate_suppresses_same_combined_body_until_compaction(
@@ -283,6 +392,7 @@ def test_maxim_reminder_gate_suppresses_same_combined_body_until_compaction(
 ):
     repo = _init_repo(tmp_path / "repo")
     _write_dual_maxim_config(repo)
+    _enable_maxim_adjudication(repo)
     gate = watchdog.MaximReminderGate()
     judged: list[tuple[str, str]] = []
 
@@ -345,6 +455,7 @@ def test_maxim_reminder_gate_agreeing_first_pass_does_not_poison_later_violation
 ):
     repo = _init_repo(tmp_path / "repo")
     _write_dual_maxim_config(repo)
+    _enable_maxim_adjudication(repo)
     gate = watchdog.MaximReminderGate()
     answers = ["YES", "NO"]
     judged: list[tuple[str, str]] = []
@@ -955,6 +1066,15 @@ def _make_every_maxim_violate(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(watchdog, "evaluate_maxim_any_violation", judge_violation)
+
+
+def _enable_maxim_adjudication(repo: Path) -> None:
+    config.set_scope_section(
+        repo,
+        config.WORKTREE_SOURCE,
+        config.JUDGE_KEY,
+        {config.JUDGE_ENABLED_KEY: True},
+    )
 
 
 def _score_labeled_maxim_corpus(

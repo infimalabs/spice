@@ -358,6 +358,25 @@ def test_personality_and_judge_setters_write_each_named_scope(
     assert config.layer_table(tmp_path, scope, "judge")["bin"] == f"judge-{scope}"
 
 
+def test_judge_cli_toggles_worktree_adjudication_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr("spice.configcli.require_repo_root", lambda: tmp_path)
+    parser = build_parser()
+    modes: list[str] = []
+
+    for flag in ("--enable", "--disable"):
+        handle_config(parser.parse_args(["config", "judge", flag]))
+        modes.append(
+            "adjudicated"
+            if config.maxim_adjudication_enabled(tmp_path)
+            else "judge-free"
+        )
+
+    assert modes == ["adjudicated", "judge-free"]
+    assert config.layer_table(tmp_path, config.WORKTREE_SOURCE, "judge") == {
+        "enabled": False
+    }
+
+
 def test_config_help_names_exact_scope_vocabulary():
     parser = build_parser()
     root_actions = next(
@@ -692,3 +711,29 @@ def test_clear_scope_section_preserves_unrelated_tables(tmp_path):
     )
     assert "judge" not in parsed
     assert parsed["agent"] == {"driver": "claude"}
+
+
+def test_maxim_adjudication_off_by_default_and_opt_in_toggles_it(tmp_path):
+    modes = [
+        "adjudicated" if config.maxim_adjudication_enabled(tmp_path) else "judge-free"
+    ]
+    config.set_scope_section(
+        tmp_path,
+        config.WORKTREE_SOURCE,
+        config.JUDGE_KEY,
+        {config.JUDGE_ENABLED_KEY: True},
+    )
+    modes.append(
+        "adjudicated" if config.maxim_adjudication_enabled(tmp_path) else "judge-free"
+    )
+    config.set_scope_section(
+        tmp_path,
+        config.WORKTREE_SOURCE,
+        config.JUDGE_KEY,
+        {config.JUDGE_ENABLED_KEY: False},
+    )
+    modes.append(
+        "adjudicated" if config.maxim_adjudication_enabled(tmp_path) else "judge-free"
+    )
+
+    assert modes == ["judge-free", "adjudicated", "judge-free"]

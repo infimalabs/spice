@@ -102,7 +102,26 @@ file /tmp/spice-speech-check.wav
 
 ## Maxim Judge Binary
 
-Configure the judge in the default worktree scope with:
+Maxim adjudication is off by default. When a trigger bag matches sampled prose,
+Spice publishes its `[MAXIM]` reminder directly, launching no judge subprocess
+and taking no verdict as assumed — the trade is more false positives for a
+deterministic, portable default that needs no local model. Opt into adjudication
+per worktree with:
+
+```console
+spice config judge --enable
+spice config judge --disable
+```
+
+`--enable` stores `[judge].enabled = true` in `.spice/config/spice.toml`;
+`--disable` restores the judge-free default. Any value other than a true flag
+(`true`, `1`, `yes`, `on`) — including an absent one — resolves to judge-free.
+When adjudication is enabled, each matched bag is sampled against its maxim: a
+`YES` verdict means the sampled text agrees with the maxim and is therefore not
+a violation, so its reminder is suppressed; a `NO` verdict is a violation and
+publishes. The judge is consulted only on this opt-in path.
+
+Configure the judge binary in the default worktree scope with:
 
 ```console
 spice config judge --bin /path/to/judge
@@ -114,7 +133,11 @@ the default is keyed to the platform: macOS uses the Apple Foundation Models
 `afm-cli` binary; every other platform, where `afm-cli` does not exist, uses the
 portable `spice-judge` adapter that ships with Spice. An explicit `bin`
 overrides this default on every platform. For each verdict Spice launches the
-exact argv `[configured_bin]`.
+exact argv `[configured_bin]`. `bin` selects which executable the enabled
+adjudication path launches; it does not by itself enable adjudication. The
+binary participates in the normal four-layer configuration precedence and
+accepts `--scope`; the `enabled` flag is intentionally worktree-local, so
+`--enable` and `--disable` require the default `--scope worktree`.
 
 ### Portable judge with `spice-judge`
 
@@ -478,7 +501,7 @@ Maxim bags extend or replace the live prose conscience.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `words` | required for new bags; inherited for built-ins | Alphabetic trigger words or phrases. |
-| `message` | required for new bags; inherited for built-ins | The maxim text sent to the judge and, on violation, back to the agent as steering. |
+| `message` | required for new bags; inherited for built-ins | The maxim text published to the agent as steering on a match; when adjudication is enabled it is sent to the judge first and published only on a violation verdict. |
 | `drivers` | all shipped drivers | Driver allowlist; cite `spice maxim report` evidence before narrowing. |
 
 Bag names are case-folded. Trigger phrases are normalized to lowercase words.

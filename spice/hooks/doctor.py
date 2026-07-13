@@ -20,6 +20,7 @@ from spice.config import (
     configured_say_backend,
     configured_say_command,
     git_worktree_config_get,
+    maxim_adjudication_enabled,
 )
 from spice.errors import SpiceError
 from spice.gitprocess import run_git_command
@@ -126,11 +127,17 @@ def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
         else "optional; this repo has no serve web checkJs sources"
     )
     tts_binary, tts_note = _tts_binary_check_config(repo_root)
+    judge_opted_in = maxim_adjudication_enabled(repo_root)
+    judge_note = (
+        "maxim adjudication opted in ([judge] enabled)"
+        if judge_opted_in
+        else "optional; maxims publish judge-free by default"
+    )
     for label, binary, required, note in (
         ("tool.git", "git", True, "required for repository checks"),
         ("tool.agent-driver", DRIVER.binary(), True, f"driver={DRIVER.name}"),
         ("tool.taskwarrior", "task", True, "required for the task control plane"),
-        ("tool.judge", configured_judge_bin(repo_root), True, "maxim judging"),
+        ("tool.judge", configured_judge_bin(repo_root), judge_opted_in, judge_note),
         ("tool.tts", tts_binary, False, tts_note),
         ("tool.ruff", "ruff", True, "pre-commit formatter/linter"),
         ("tool.lizard", "lizard", True, "complexity scan backend"),
