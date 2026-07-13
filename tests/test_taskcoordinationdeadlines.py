@@ -3,18 +3,35 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from spice.agent import lifecycle
 from spice.agent.paths import agent_worktree_state_dir
+from spice.cli import entry
 from spice.errors import SpiceError
 from spice.locking import FileLockTimeout, exclusive_lock
 from spice.mail import inbox
 from spice.tasks import config, tw
 
 LOCK_TEST_TIMEOUT_SECONDS = 0.02
+
+
+@dataclass(frozen=True)
+class DeadlineOutcome:
+    state: str
+    message: str
+
+
+def _deadline_outcome(operation: Callable[[], object]) -> DeadlineOutcome:
+    try:
+        operation()
+    except SpiceError as exc:
+        return DeadlineOutcome("timed-out", str(exc))
+    return DeadlineOutcome("completed", "operation completed")
 
 
 def test_taskwarrior_mutation_timeout_keeps_state_and_next_operation_recovers(
@@ -41,12 +58,14 @@ def test_taskwarrior_mutation_timeout_keeps_state_and_next_operation_recovers(
         lambda reason, **_kwargs: backend_events.append(reason),
     )
 
-    with pytest.raises(SpiceError) as exc_info:
-        tw.run(["task-uuid", "modify", "phase:review", "claim_by:"])
+    timeout = _deadline_outcome(
+        lambda: tw.run(["task-uuid", "modify", "phase:review", "claim_by:"])
+    )
     timed_out_state = dict(state)
     tw.run(["task-uuid", "modify", "phase:review", "claim_by:"])
 
-    assert str(exc_info.value) == (
+    assert timeout.state == "timed-out"
+    assert timeout.message == (
         f"Taskwarrior modify mutation timed out after "
         f"{tw.TASK_COMMAND_TIMEOUT_SECONDS:g}s: task rc:{tmp_path / 'taskrc'} "
         "rc.confirmation=no rc.bulk=0 rc.verbose=nothing task-uuid modify "
@@ -96,12 +115,12 @@ def test_task_local_git_helpers_timeout_with_identity_and_recover(
         operation = tw.current_branch
         expected = "main"
 
-    with pytest.raises(SpiceError) as exc_info:
-        operation()
+    timeout = _deadline_outcome(operation)
     recovered = operation()
 
-    assert "git command timed out after" in str(exc_info.value)
-    assert "git " in str(exc_info.value)
+    assert timeout.state == "timed-out"
+    assert "git command timed out after" in timeout.message
+    assert "git " in timeout.message
     assert recovered == expected
     assert len(attempts) == 2
 
@@ -117,13 +136,13 @@ def test_task_bootstrap_lock_timeout_names_action_and_recovers(tmp_path, monkeyp
     lock_path = config.bootstrap_lock_path()
     try:
         with exclusive_lock(lock_path, blocking=True):
-            with pytest.raises(FileLockTimeout) as exc_info:
-                config.write_taskrc()
+            timeout = _deadline_outcome(config.write_taskrc)
         config.write_taskrc()
     finally:
         config.set_backend(None)
 
-    assert str(exc_info.value) == (
+    assert timeout.state == "timed-out"
+    assert timeout.message == (
         f"bootstrap task backend timed out after {LOCK_TEST_TIMEOUT_SECONDS:g}s "
         f"waiting for lock {lock_path}"
     )
@@ -138,14 +157,17 @@ def test_agent_ensure_lock_timeout_names_action_and_recovers(tmp_path, monkeypat
     lock_path = agent_worktree_state_dir(repo) / lifecycle.AGENT_LOCK_FILE
     events: list[str] = []
 
+    def acquire_agent_lock() -> None:
+        with lifecycle.agent_ensure_lock(repo):
+            events.append("contended-acquire")
+
     with exclusive_lock(lock_path, blocking=True):
-        with pytest.raises(FileLockTimeout) as exc_info:
-            with lifecycle.agent_ensure_lock(repo):
-                events.append("contended-acquire")
+        timeout = _deadline_outcome(acquire_agent_lock)
     with lifecycle.agent_ensure_lock(repo):
         events.append("recovered-acquire")
 
-    assert str(exc_info.value) == (
+    assert timeout.state == "timed-out"
+    assert timeout.message == (
         f"ensure agent lifecycle timed out after {LOCK_TEST_TIMEOUT_SECONDS:g}s "
         f"waiting for lock {lock_path}"
     )
@@ -161,11 +183,13 @@ def test_inbox_publish_lock_timeout_cleans_temp_and_recovers(tmp_path, monkeypat
     )
 
     with exclusive_lock(lock_path, blocking=True):
-        with pytest.raises(FileLockTimeout) as exc_info:
-            inbox.write_inbox_item(repo, "deadline.txt", "steering")
+        timeout = _deadline_outcome(
+            lambda: inbox.write_inbox_item(repo, "deadline.txt", "steering")
+        )
     written = inbox.write_inbox_item(repo, "deadline.txt", "steering")
 
-    assert str(exc_info.value) == (
+    assert timeout.state == "timed-out"
+    assert timeout.message == (
         f"publish inbox item timed out after {LOCK_TEST_TIMEOUT_SECONDS:g}s "
         f"waiting for lock {lock_path}"
     )
@@ -174,6 +198,20 @@ def test_inbox_publish_lock_timeout_cleans_temp_and_recovers(tmp_path, monkeypat
         inbox.INBOX_PUBLISH_LOCK_NAME,
         "deadline.txt",
     ]
+
+
+def test_file_lock_timeout_renders_through_cli_error_boundary(monkeypatch, capsys):
+    message = "publish inbox item timed out waiting for lock /tmp/inbox.lock"
+
+    def timeout_dispatch(_argv: list[str]) -> int:
+        raise FileLockTimeout(message)
+
+    monkeypatch.setattr(entry, "_dispatch", timeout_dispatch)
+
+    exit_code = entry.main(["task", "status"])
+
+    assert exit_code == 2
+    assert capsys.readouterr().err == f"spice: {message}\n"
 
 
 def _init_repo(path: Path) -> Path:
