@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import shlex
 import subprocess
@@ -23,9 +24,9 @@ def git_timeout_seconds(default: float = DEFAULT_GIT_TIMEOUT_SECONDS) -> float:
     try:
         timeout = float(raw)
     except ValueError as exc:
-        raise SpiceError(f"{GIT_TIMEOUT_ENV} must be a positive number") from exc
-    if timeout <= 0:
-        raise SpiceError(f"{GIT_TIMEOUT_ENV} must be a positive number")
+        raise SpiceError(f"{GIT_TIMEOUT_ENV} must be a positive finite number") from exc
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise SpiceError(f"{GIT_TIMEOUT_ENV} must be a positive finite number")
     return timeout
 
 
