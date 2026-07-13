@@ -133,6 +133,13 @@ def _merge_mapping(
     for key, value in incoming.items():
         path = (*prefix, key)
         previous = destination.get(key)
+        if isinstance(value, Mapping) and prefix == ("wrappers",):
+            _forget_sources(sources, path)
+            replacement: dict[str, Any] = {}
+            destination[key] = replacement
+            sources[path] = layer
+            _merge_mapping(replacement, value, layer, sources, path)
+            continue
         if isinstance(value, Mapping):
             sources[path] = layer
             if not isinstance(previous, dict):
