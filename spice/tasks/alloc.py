@@ -183,27 +183,34 @@ def visible_pending_rows(actor: str) -> list[dict[str, Any]]:
 def briefing_snapshot(actor: str) -> BriefingTaskSnapshot:
     """Export one board snapshot and mark rows visible through the actor's route."""
     route = lanes.team_route_for_actor(actor)
+    filter_terms = tuple(lanes.effective_filter_terms(route))
     rows = tuple(tw.export(["status.any:"]))
     visible_uuids = frozenset(
         str(row.get("uuid") or "")
         for row in rows
-        if _briefing_scope_matches(row, actor=actor, route=route)
+        if _briefing_scope_matches(
+            row,
+            actor=actor,
+            route=route,
+            filter_terms=filter_terms,
+        )
     )
     return BriefingTaskSnapshot(rows=rows, visible_uuids=visible_uuids)
 
 
 def _briefing_scope_matches(
-    row: dict[str, Any], *, actor: str, route: dict[str, Any] | None
+    row: dict[str, Any],
+    *,
+    actor: str,
+    route: dict[str, Any] | None,
+    filter_terms: tuple[str, ...],
 ) -> bool:
     project = str(row.get("project") or "")
     if _project_filter_matches(project, config.private_project(actor)):
         return True
     if _route_includes_origin(route) and str(row.get("origin_thread") or "") == actor:
         return True
-    return any(
-        _briefing_filter_term_matches(row, term)
-        for term in lanes.effective_filter_terms(route)
-    )
+    return any(_briefing_filter_term_matches(row, term) for term in filter_terms)
 
 
 def _briefing_filter_term_matches(row: dict[str, Any], term: str) -> bool:
