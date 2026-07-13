@@ -30,6 +30,13 @@ from typing import TextIO
 from spice.paths import atomic_write_text
 
 AGENT_GITCONFIG_NAME = "agent.gitconfig"
+# Every shadow git read funnels through `_git`; a wedged git binary must not stall
+# activation, so the runner carries this budget and reports a non-zero result on
+# expiry. All callers already treat a non-zero return as "no data" (empty branch,
+# no git dir, shadow inactive, native config in effect), so the degradation is
+# deterministic without any caller change.
+SHADOW_GIT_TIMEOUT_SECONDS = 10.0
+SHADOW_GIT_TIMEOUT_RETURNCODE = 124
 
 
 def shadow_environment(
@@ -214,10 +221,20 @@ def current_git_dir(repo_root: Path | None) -> Path | None:
 def _git(repo_root: Path, *args: str, env: Mapping[str, str] | None = None):
     import subprocess
 
-    return subprocess.run(
-        ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        check=False,
-        text=True,
-        env=dict(env) if env is not None else None,
-    )
+    command = ["git", "-C", str(repo_root), *args]
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=SHADOW_GIT_TIMEOUT_SECONDS,
+            env=dict(env) if env is not None else None,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            command,
+            returncode=SHADOW_GIT_TIMEOUT_RETURNCODE,
+            stdout="",
+            stderr="",
+        )
