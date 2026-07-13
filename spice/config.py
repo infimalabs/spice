@@ -40,7 +40,11 @@ SAY_VOICE_KEY = "voice"
 SAY_WORDS_PER_MINUTE_KEY = "words_per_minute"
 DEFAULT_SAY_WORDS_PER_MINUTE = defaults.integer("say", "words_per_minute")
 SAY_TIMEOUT_SECONDS_KEY = "timeout_seconds"
-DEFAULT_SAY_TIMEOUT_SECONDS = defaults.number("say", "timeout_seconds")
+# Generous ceiling: comfortably covers well over a minute of spoken content
+# (plus render overhead) so legitimately-long messages are never clipped, while
+# still bounding a wedged speech process instead of blocking forever. A repo or
+# worktree ``say.timeout_seconds`` override tunes it through the accessor below.
+DEFAULT_SAY_TIMEOUT_SECONDS = 300.0
 
 AGENT_KEY = "agent"
 AGENT_PERSONALITY_KEY = "personality"

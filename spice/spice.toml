@@ -6,10 +6,6 @@ backend = "say"
 backend_choices = ["say", "external"]
 external_content_type = "audio/wav"
 words_per_minute = 175
-# Generous ceiling: comfortably covers well over a minute of spoken content
-# (plus render overhead) so legitimately-long messages are never clipped,
-# while still bounding a wedged speech process instead of blocking forever.
-timeout_seconds = 300.0
 
 [agent]
 personality = "pragmatic"

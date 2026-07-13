@@ -16,7 +16,6 @@ TOML_STATIC_EXPORT_PATHS = {
     "spice.config.DEFAULT_SAY_BACKEND": "say.backend",
     "spice.config.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE": "say.external_content_type",
     "spice.config.DEFAULT_SAY_WORDS_PER_MINUTE": "say.words_per_minute",
-    "spice.config.DEFAULT_SAY_TIMEOUT_SECONDS": "say.timeout_seconds",
     "spice.config.AGENT_PERSONALITY_CHOICES": "agent.personality_choices",
     "spice.config.DEFAULT_AGENT_PERSONALITY": "agent.personality",
     "spice.config.DEFAULT_JUDGE_BIN": "judge.bin",
