@@ -28,6 +28,9 @@ model = "llama3.2"
 model_command = ["ollama", "run", "llama3.2"]
 timeout_seconds = 60.0
 
+[rtk]
+executable = "rtk"
+
 [wrappers.common.rtk]
 argv = ["rtk"]
 match = [
@@ -258,7 +261,7 @@ host = "127.0.0.1"
 port = 8765
 
 [inventory]
-toml_static = ["agent", "commands", "judge", "locks", "maxim", "maxims", "policy", "say", "serve", "tasks", "wrappers"]
+toml_static = ["agent", "commands", "judge", "locks", "maxim", "maxims", "policy", "rtk", "say", "serve", "tasks", "wrappers"]
 platform_derived = ["spice.config.PORTABLE_JUDGE_BIN", "spice.paths.runtime_spice_source"]
 driver_derived = ["spice.agent.driver.BUILTIN_DRIVERS", "spice.agent.driver.DRIVER"]
 protocol_invariant = ["spice.cli.parser.BUILTIN_COMMANDS", "spice.tasks.config.SENTINEL_ACTOR", "spice.resourcelocks.MAX_EXIT_CODE"]

@@ -19,6 +19,7 @@ from spice.configlayer import PYPROJECT_SOURCE
 from spice.configlayer import REPOSITORY_SOURCE
 from spice.configlayer import SYSTEM_SOURCE
 from spice.configlayer import WORKTREE_SOURCE
+from spice.configlayer import contextualize_config_error
 from spice.configlayer import effective_mapping, effective_table
 from spice.configlayer import layer_table as layer_table
 from spice.configlayer import load_config as load_config
@@ -72,6 +73,9 @@ JUDGE_BIN_KEY = "bin"
 JUDGE_ENABLED_KEY = "enabled"
 DEFAULT_JUDGE_BIN = defaults.string("judge", "bin")
 PORTABLE_JUDGE_BIN = defaults.string("judge", "portable_bin")
+RTK_KEY = "rtk"
+RTK_EXECUTABLE_KEY = "executable"
+DEFAULT_RTK_EXECUTABLE = defaults.string(RTK_KEY, RTK_EXECUTABLE_KEY)
 _CONFIG_FLAG_TRUE = frozenset({"true", "1", "yes", "on"})
 _TOML_TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
 _TOML_ASSIGN_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
@@ -231,6 +235,7 @@ def _toml_inline_comment(line: str) -> str:
 
 def config_overview(repo_root: Path) -> dict[str, Any]:
     loaded = load_config(repo_root)
+    configured_rtk_executable(repo_root)
     return {
         "layers": {
             layer.name: {
@@ -448,6 +453,47 @@ def configured_judge_bin(repo_root: Path | None = None) -> str:
     return raw or default_judge_bin()
 
 
+def configured_rtk_executable(repo_root: Path | None = None) -> str:
+    """Return the exact layered RTK executable identity without probing it."""
+    root = _root_or_current(repo_root)
+    section = effective_mapping(root).get(RTK_KEY)
+    if not isinstance(section, Mapping):
+        raise _rtk_config_error(
+            root,
+            SpiceError("[tool.spice.rtk] must be a table"),
+            RTK_KEY,
+        )
+    raw = section.get(RTK_EXECUTABLE_KEY)
+    if not isinstance(raw, str) or not _is_rtk_executable_identity(raw):
+        raise _rtk_config_error(
+            root,
+            SpiceError(
+                "[tool.spice.rtk] executable must be one non-empty executable "
+                "basename or absolute path"
+            ),
+            RTK_KEY,
+            RTK_EXECUTABLE_KEY,
+        )
+    return raw
+
+
+def _is_rtk_executable_identity(value: str) -> bool:
+    if not value or "\0" in value:
+        return False
+    path = Path(value)
+    if path.is_absolute():
+        return True
+    return path.name == value and not any(character.isspace() for character in value)
+
+
+def _rtk_config_error(
+    repo_root: Path | None, error: SpiceError, *path: str
+) -> SpiceError:
+    if repo_root is None:
+        return error
+    return contextualize_config_error(repo_root, error, *path)
+
+
 def maxim_adjudication_enabled(repo_root: Path | None = None) -> bool:
     """Return whether the opt-in maxim judge adjudicates trigger hits.
 
@@ -460,7 +506,8 @@ def maxim_adjudication_enabled(repo_root: Path | None = None) -> bool:
     root = _root_or_current(repo_root)
     if root is None:
         return False
-    return _config_flag(_section(root, JUDGE_KEY).get(JUDGE_ENABLED_KEY))
+    worktree_judge = layer_table(root, WORKTREE_SOURCE, JUDGE_KEY)
+    return _config_flag(worktree_judge.get(JUDGE_ENABLED_KEY))
 
 
 def _config_flag(value: Any) -> bool:
