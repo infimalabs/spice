@@ -17,7 +17,10 @@ import pytest
 from spice.agent.driver import (
     CLAUDE_AUTO_COMPACT_WINDOW_ENV,
     CLAUDE_AUTO_COMPACT_WINDOW_TOKENS,
+    CLAUDE_DENIED_TOOLS,
     CLAUDE_DRIVER,
+    CLAUDE_NATIVE_TASK_TOOLS,
+    CLAUDE_NO_SUBAGENT_TOOLS,
     CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE,
     CODEX_DRIVER,
     POST_TOOL_HOOK_EVENT,
@@ -563,7 +566,24 @@ def test_claude_context_window_stays_at_standard_tier_when_overflowing():
     assert fields["model_context_window"] == CLAUDE_DRIVER.default_context_window
 
 
-def test_claude_supervised_command_denies_unsupervised_lifecycle_tools(tmp_path):
+def test_claude_tool_inventory_keeps_the_no_subagent_boundary_distinct():
+    assert CLAUDE_NO_SUBAGENT_TOOLS == ("Task", "Agent")
+    assert CLAUDE_NATIVE_TASK_TOOLS == (
+        "TaskCreate",
+        "TaskGet",
+        "TaskList",
+        "TaskUpdate",
+        "TaskOutput",
+        "TaskStop",
+    )
+    assert CLAUDE_DENIED_TOOLS == (
+        *CLAUDE_NO_SUBAGENT_TOOLS,
+        *CLAUDE_NATIVE_TASK_TOOLS,
+        "Monitor",
+    )
+
+
+def test_claude_supervised_command_denies_complete_lifecycle_inventory(tmp_path):
     command = CLAUDE_DRIVER.build_exec_command(
         repo_root=tmp_path,
         prompt="follow the skill",
@@ -571,7 +591,17 @@ def test_claude_supervised_command_denies_unsupervised_lifecycle_tools(tmp_path)
     settings = json.loads(command[command.index("--settings") + 1])
 
     assert command[1] == "--print"
-    assert settings["permissions"]["deny"] == ["Task", "Agent", "Monitor"]
+    assert settings["permissions"]["deny"] == [
+        "Task",
+        "Agent",
+        "TaskCreate",
+        "TaskGet",
+        "TaskList",
+        "TaskUpdate",
+        "TaskOutput",
+        "TaskStop",
+        "Monitor",
+    ]
 
 
 def test_claude_auto_compact_environment_sets_a_default_window(tmp_path, monkeypatch):

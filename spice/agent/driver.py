@@ -485,11 +485,35 @@ def steering_key_prompt_line(repo_root: Path) -> str:
 CLAUDE_ATTRIBUTION_DISABLED_SETTINGS = {
     "attribution": {"commit": "", "sessionUrl": False},
 }
-# One agent inhabits one worktree: sub-agent spawning and unsupervised
-# background work are refused mechanically at the settings layer, not left to
-# skill prose. Task is Claude Code's sub-agent tool; Agent covers the alternate
-# label. Monitor is Claude Code's canonical background-task tool as of 2.1.98.
-CLAUDE_DENIED_TOOLS = ("Task", "Agent", "Monitor")
+# One agent inhabits one worktree: a sub-agent spawn is refused mechanically at
+# the settings layer, not left to the skill's "do not spawn sub-agents" prose.
+# Task is Claude Code's sub-agent tool; Agent covers the alternate label. Keep
+# this boundary distinct from Claude's native task-list lifecycle below so the
+# Agent no-subagent rule remains explicit.
+CLAUDE_NO_SUBAGENT_TOOLS = ("Task", "Agent")
+# Spice's task allocator is the canonical task state in supervised lanes. Name
+# every current Claude native task tool exactly: permission rules remove bare
+# built-in names from model context and do not document a Task* wildcard. The
+# order mirrors Anthropic's documented inventory for stable, human audit. Keep
+# deprecated TaskOutput while Claude still exposes it, and include TaskStop for
+# background task lifecycle control.
+CLAUDE_NATIVE_TASK_TOOLS = (
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+    "TaskOutput",
+    "TaskStop",
+)
+# Monitor is Claude Code's canonical background-task tool as of 2.1.98. It is
+# intentionally outside the native task inventory because its lifecycle
+# contract is distinct. Cron, Workflow, SendMessage, and future Spice task-tool
+# emulation are separate concerns too.
+CLAUDE_DENIED_TOOLS = (
+    *CLAUDE_NO_SUBAGENT_TOOLS,
+    *CLAUDE_NATIVE_TASK_TOOLS,
+    "Monitor",
+)
 # Claude Code reads this at launch and takes it as the token count at which it
 # reactively summarizes the conversation, taking precedence over its own
 # `/config` auto-compact setting. Left unset, a session can run toward its
