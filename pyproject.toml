@@ -86,6 +86,12 @@ addopts = ["-n", "auto", "--dist=loadfile"]
 [tool.spice.agent]
 wrappers = ["common", "spice-dev"]
 
+# Opt this repository (only) into local maxim adjudication: the judge drops
+# heuristic false positives before a reminder publishes. The packaged default
+# stays judge-free, so other installs are unaffected.
+[tool.spice.judge]
+enabled = true
+
 [tool.spice.wrappers.spice-dev.pre-commit]
 argv = ["spice", "dev", "pre-commit"]
 

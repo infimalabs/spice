@@ -773,54 +773,52 @@ def test_maxim_adjudication_off_by_default_and_opt_in_toggles_it(tmp_path):
     assert modes == ["judge-free", "adjudicated", "judge-free"]
 
 
-def test_maxim_adjudication_reads_only_the_worktree_layer(tmp_path, monkeypatch):
+def test_maxim_adjudication_honors_committed_config_layers(tmp_path, monkeypatch):
     _redirect_system_config(tmp_path, monkeypatch)
-    inherited_scopes = (
-        config.SYSTEM_SOURCE,
-        config.PYPROJECT_SOURCE,
-        config.REPOSITORY_SOURCE,
-    )
-    for scope in inherited_scopes:
+    # A committed pyproject or spice.toml layer turns adjudication on for the
+    # whole repository, so an install (like spice itself) can enable the judge
+    # without editing an uncommitted worktree-local config.
+    committed_modes = {}
+    for scope in (config.PYPROJECT_SOURCE, config.REPOSITORY_SOURCE):
         config.set_scope_section(
             tmp_path,
             scope,
             config.JUDGE_KEY,
             {config.JUDGE_ENABLED_KEY: True},
         )
-
-    inherited_outcome = {
-        "mode": (
+        committed_modes[scope] = (
             "adjudicated"
             if config.maxim_adjudication_enabled(tmp_path)
             else "judge-free"
-        ),
-        "enabled_layers": tuple(
-            scope
-            for scope in inherited_scopes
-            if config.layer_table(tmp_path, scope, config.JUDGE_KEY).get(
-                config.JUDGE_ENABLED_KEY
-            )
-            is True
-        ),
-    }
+        )
+        config.clear_scope_section(tmp_path, scope, config.JUDGE_KEY)
+
+    # The highest-precedence worktree layer still wins, so a local override can
+    # switch adjudication back off even when a committed layer enabled it.
+    config.set_scope_section(
+        tmp_path,
+        config.PYPROJECT_SOURCE,
+        config.JUDGE_KEY,
+        {config.JUDGE_ENABLED_KEY: True},
+    )
     config.set_scope_section(
         tmp_path,
         config.WORKTREE_SOURCE,
         config.JUDGE_KEY,
-        {config.JUDGE_ENABLED_KEY: True},
+        {config.JUDGE_ENABLED_KEY: False},
     )
 
     assert {
-        "inherited": inherited_outcome,
-        "worktree_mode": (
+        "committed": committed_modes,
+        "worktree_override": (
             "adjudicated"
             if config.maxim_adjudication_enabled(tmp_path)
             else "judge-free"
         ),
     } == {
-        "inherited": {
-            "mode": "judge-free",
-            "enabled_layers": inherited_scopes,
+        "committed": {
+            config.PYPROJECT_SOURCE: "adjudicated",
+            config.REPOSITORY_SOURCE: "adjudicated",
         },
-        "worktree_mode": "adjudicated",
+        "worktree_override": "judge-free",
     }
