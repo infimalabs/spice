@@ -1,325 +1,150 @@
 {
   "meta": {
     "source": "tests/browser/serve_livebus_latency_probe.js",
-    "probeLanes": 8,
-    "probeRounds": 2,
-    "host": "localhost/macOS-kqueue",
-    "note": "passA=amplifier stubbed(8 focused); passC=realistic single-focus amplifier-live; passB=8-focus stress amplifier-live"
+    "commit": "0d95ce1b2de2adb793e6a4f347aaecd3f21e278a",
+    "commitShort": "0d95ce1b",
+    "treeDirty": true,
+    "host": "darwin 25.5.0 arm64",
+    "node": "v26.3.1",
+    "requestedLanes": 8,
+    "boundLanes": 8,
+    "seededLanes": 8,
+    "rounds": 5,
+    "submits": 5,
+    "frameBudgetMs": 20000,
+    "submitBudgetMs": 20000,
+    "isolation": "ephemeral scratch fixture: an init-fresh git repo with one worktree per lane, a private CLAUDE_CONFIG_DIR driver home (canned pid-0 transcripts), and a scratch task backend, all under a throwaway temp root. serve discovers ONLY these worktrees, so every task-add, watch push, and the Pass S lane.send stays inside the fixture; no real worktree or agent is touched.",
+    "conditions": {
+      "passA": "all bound lanes focused; concurrent per-round fan-out (baseline)",
+      "passC": "single focused lane; remaining lanes background-coalesced (realistic)",
+      "passB": "all lanes focused again after atomic task-event replacements (rearm stress)",
+      "submit": "one real scratch-backed lane.send per submit while all lanes stay active"
+    },
+    "baselineNote": "current live-bus baseline: per-card refreshServerTopology amplifier removed; livebus.py _send encodes each frame before taking send_lock. Passes A/B/C differ only by focus configuration; the send_lock is not artificially stubbed or amplified."
   },
-  "subscribeToActivateMs": 4126,
+  "url": "http://127.0.0.1:53762",
+  "laneCount": 8,
+  "requestedLaneCount": 8,
+  "rounds": 5,
+  "submits": 5,
+  "subscribeToActivateMs": 2422,
   "passA": {
-    "renderRate": 0.75,
-    "renderedCount": 12,
-    "sampleCount": 16,
-    "reconcileFrames": {
-      "targets.payload": 0,
-      "teams.payload": 0,
-      "lanes.dirty": 1,
-      "lane.unsubscribed": 0,
-      "lane.configured": 0
-    },
-    "sendLock": {
-      "totals": {
-        "count": 42,
-        "waitTotalMs": 0.09,
-        "waitMeanMs": 0,
-        "holdTotalMs": 19.72,
-        "holdMeanMs": 0.47
-      },
-      "perKind": {
-        "bus.pong": {
-          "count": 3,
-          "waitTotalMs": 0.04,
-          "waitMeanMs": 0.01,
-          "waitMaxMs": 0.02,
-          "holdTotalMs": 0.78,
-          "holdMeanMs": 0.26,
-          "holdMaxMs": 0.37
-        },
-        "lane.payload": {
-          "count": 37,
-          "waitTotalMs": 0.04,
-          "waitMeanMs": 0,
-          "waitMaxMs": 0.02,
-          "holdTotalMs": 18.65,
-          "holdMeanMs": 0.5,
-          "holdMaxMs": 6.42
-        },
-        "lane.pending": {
-          "count": 1,
-          "waitTotalMs": 0,
-          "waitMeanMs": 0,
-          "waitMaxMs": 0,
-          "holdTotalMs": 0.11,
-          "holdMeanMs": 0.11,
-          "holdMaxMs": 0.11
-        },
-        "lanes.dirty": {
-          "count": 1,
-          "waitTotalMs": 0,
-          "waitMeanMs": 0,
-          "waitMaxMs": 0,
-          "holdTotalMs": 0.18,
-          "holdMeanMs": 0.18,
-          "holdMaxMs": 0.18
-        }
-      }
-    },
-    "stages": {
-      "addDurationMs": {
-        "n": 16,
-        "min": 856,
-        "p50": 1100,
-        "p90": 1214,
-        "max": 1240,
-        "mean": 1075.88
-      },
-      "detectionFromReturnMs": {
-        "n": 12,
-        "min": -296.77,
-        "p50": 38.51,
-        "p90": 2483.16,
-        "max": 7584.18,
-        "mean": 928.34
-      },
-      "detectionFromStartMs": {
-        "n": 12,
-        "min": 823.4,
-        "p50": 1101.51,
-        "p90": 3604.16,
-        "max": 8753.18,
-        "mean": 1974.34
-      },
-      "signatureMs": {
-        "n": 12,
-        "min": 40.59,
-        "p50": 105.84,
-        "p90": 128.31,
-        "max": 129.02,
-        "mean": 93.35
-      },
-      "payloadMs": {
-        "n": 12,
-        "min": 704.24,
-        "p50": 1983.64,
-        "p90": 3278.55,
-        "max": 3507.16,
-        "mean": 1814.73
-      },
-      "detectToSendMs": {
-        "n": 12,
-        "min": 744.88,
-        "p50": 2081.57,
-        "p90": 3370.13,
-        "max": 3635.53,
-        "mean": 1908.17
-      },
-      "socketMs": {
-        "n": 12,
-        "min": -0.62,
-        "p50": -0.01,
-        "p90": 2.22,
-        "max": 2.23,
-        "mean": 0.21
-      },
-      "renderMs": {
-        "n": 12,
-        "min": 3,
-        "p50": 4,
-        "p90": 42,
-        "max": 43,
-        "mean": 9.92
-      },
-      "totalFromReturnMs": {
-        "n": 12,
-        "min": 787,
-        "p50": 2369,
-        "p90": 3491,
-        "max": 8605,
-        "mean": 2846.5
-      },
-      "totalFromStartMs": {
-        "n": 12,
-        "min": 1850,
-        "p50": 3413,
-        "p90": 4510,
-        "max": 9774,
-        "mean": 3892.5
-      }
-    }
-  },
-  "passC": {
+    "sampleCount": 40,
+    "renderedCount": 40,
     "renderRate": 1,
-    "renderedCount": 2,
-    "sampleCount": 2,
-    "reconcileFrames": {
-      "targets.payload": 1,
-      "teams.payload": 4,
-      "lanes.dirty": 3,
-      "lane.unsubscribed": 8,
-      "lane.configured": 7
-    },
-    "sendLock": {
-      "totals": {
-        "count": 30,
-        "waitTotalMs": 0.06,
-        "waitMeanMs": 0,
-        "holdTotalMs": 3.49,
-        "holdMeanMs": 0.12
-      },
-      "perKind": {
-        "bus.pong": {
-          "count": 2,
-          "waitTotalMs": 0,
-          "waitMeanMs": 0,
-          "waitMaxMs": 0.02,
-          "holdTotalMs": 0.19,
-          "holdMeanMs": 0.09,
-          "holdMaxMs": 0.37
-        },
-        "lane.configured": {
-          "count": 7,
-          "waitTotalMs": 0,
-          "waitMeanMs": 0,
-          "waitMaxMs": 0.01,
-          "holdTotalMs": 0.06,
-          "holdMeanMs": 0.01,
-          "holdMaxMs": 0.24
-        },
-        "lane.payload": {
-          "count": 5,
-          "waitTotalMs": 0,
-          "waitMeanMs": 0,
-          "waitMaxMs": 0.02,
-          "holdTotalMs": 1.2,
-          "holdMeanMs": 0.24,
-          "holdMaxMs": 6.42
-        },
-        "lanes.dirty": {
-          "count": 3,
-          "waitTotalMs": 0.04,
-          "waitMeanMs": 0.01,
-          "waitMaxMs": 0.03,
-          "holdTotalMs": 0.6,
-          "holdMeanMs": 0.2,
-          "holdMaxMs": 0.3
-        },
-        "targets.payload": {
-          "count": 1,
-          "waitTotalMs": 0,
-          "waitMeanMs": 0,
-          "waitMaxMs": 0,
-          "holdTotalMs": 0.39,
-          "holdMeanMs": 0.39,
-          "holdMaxMs": 0.39
-        },
-        "teams.payload": {
-          "count": 4,
-          "waitTotalMs": 0.01,
-          "waitMeanMs": 0,
-          "waitMaxMs": 0,
-          "holdTotalMs": 0.55,
-          "holdMeanMs": 0.14,
-          "holdMaxMs": 0.28
-        },
-        "lane.unsubscribed": {
-          "count": 8,
-          "waitTotalMs": 0.01,
-          "waitMeanMs": 0,
-          "waitMaxMs": 0,
-          "holdTotalMs": 0.5,
-          "holdMeanMs": 0.06,
-          "holdMaxMs": 0.09
-        }
-      }
-    },
     "stages": {
       "addDurationMs": {
-        "n": 2,
-        "min": 1320,
-        "p50": 1782,
-        "p90": 1782,
-        "max": 1782,
-        "mean": 1551
+        "n": 40,
+        "min": 532,
+        "p50": 941,
+        "p90": 1503,
+        "max": 1856,
+        "mean": 981.85
       },
       "detectionFromReturnMs": {
-        "n": 2,
-        "min": 2133.69,
-        "p50": 2790.94,
-        "p90": 2790.94,
-        "max": 2790.94,
-        "mean": 2462.31
+        "n": 40,
+        "min": -975.43,
+        "p50": -25.42,
+        "p90": 1203.51,
+        "max": 1953.06,
+        "mean": 205.39
       },
       "detectionFromStartMs": {
-        "n": 2,
-        "min": 3915.69,
-        "p50": 4110.94,
-        "p90": 4110.94,
-        "max": 4110.94,
-        "mean": 4013.31
+        "n": 40,
+        "min": 506.22,
+        "p50": 630.66,
+        "p90": 2540.3,
+        "max": 2951.14,
+        "mean": 1187.24
       },
       "signatureMs": {
-        "n": 2,
-        "min": 74.95,
-        "p50": 82.98,
-        "p90": 82.98,
-        "max": 82.98,
-        "mean": 78.97
+        "n": 40,
+        "min": 26.58,
+        "p50": 48.13,
+        "p90": 59.14,
+        "max": 63.39,
+        "mean": 45.5
       },
       "payloadMs": {
-        "n": 2,
-        "min": 1799.24,
-        "p50": 1988.91,
-        "p90": 1988.91,
-        "max": 1988.91,
-        "mean": 1894.07
+        "n": 40,
+        "min": 767.75,
+        "p50": 1245.15,
+        "p90": 2189.05,
+        "max": 2977.35,
+        "mean": 1427.12
       },
       "detectToSendMs": {
-        "n": 2,
-        "min": 1874.29,
-        "p50": 2072,
-        "p90": 2072,
-        "max": 2072,
-        "mean": 1973.15
+        "n": 40,
+        "min": 797.96,
+        "p50": 1276.26,
+        "p90": 2247.88,
+        "max": 3034.74,
+        "mean": 1472.66
       },
       "socketMs": {
-        "n": 2,
-        "min": 0.04,
-        "p50": 0.09,
-        "p90": 0.09,
-        "max": 0.09,
-        "mean": 0.07
+        "n": 40,
+        "min": -0.68,
+        "p50": -0.12,
+        "p90": 0.19,
+        "max": 1.1,
+        "mean": -0.17
       },
       "renderMs": {
-        "n": 2,
-        "min": 0,
+        "n": 40,
+        "min": 2,
         "p50": 3,
         "p90": 3,
-        "max": 3,
-        "mean": 1.5
+        "max": 5,
+        "mean": 2.7
       },
       "totalFromReturnMs": {
-        "n": 2,
-        "min": 4008,
-        "p50": 4866,
-        "p90": 4866,
-        "max": 4866,
-        "mean": 4437
+        "n": 40,
+        "min": 836,
+        "p50": 1712,
+        "p90": 2446,
+        "max": 3008,
+        "mean": 1680.6
       },
       "totalFromStartMs": {
-        "n": 2,
-        "min": 5790,
-        "p50": 6186,
-        "p90": 6186,
-        "max": 6186,
-        "mean": 5988
+        "n": 40,
+        "min": 1424,
+        "p50": 2729,
+        "p90": 3597,
+        "max": 3865,
+        "mean": 2662.45
       }
-    }
-  },
-  "passB": {
-    "renderRate": 0,
-    "renderedCount": 0,
-    "sampleCount": 16,
+    },
+    "sendLock": {
+      "totals": {
+        "count": 77,
+        "waitTotalMs": 0.15,
+        "waitMeanMs": 0,
+        "waitMaxMs": 0.02,
+        "holdTotalMs": 12.39,
+        "holdMeanMs": 0.16,
+        "holdMaxMs": 1.65
+      },
+      "perKind": {
+        "bus.pong": {
+          "count": 1,
+          "waitTotalMs": 0,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.02,
+          "holdMeanMs": 0.02,
+          "holdMaxMs": 0.02
+        },
+        "lane.payload": {
+          "count": 76,
+          "waitTotalMs": 0.15,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0.02,
+          "holdTotalMs": 12.37,
+          "holdMeanMs": 0.16,
+          "holdMaxMs": 1.65
+        }
+      }
+    },
     "reconcileFrames": {
       "targets.payload": 0,
       "teams.payload": 0,
@@ -327,62 +152,513 @@
       "lane.unsubscribed": 0,
       "lane.configured": 0
     },
+    "samples": [
+      {"tag":"A","round":0,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":633,"detectionFromReturnMs":-72.38916015625,"detectionFromStartMs":560.61083984375,"signatureMs":58.76958277076483,"payloadMs":2189.0489999204874,"detectToSendMs":2247.8840416297317,"socketMs":-0.508056640625,"renderMs":3,"totalFromReturnMs":2178,"totalFromStartMs":2811},
+      {"tag":"A","round":0,"laneIndex":1,"targetId":"lane-2-2d5cef3b","rendered":true,"addDurationMs":792,"detectionFromReturnMs":-231.050048828125,"detectionFromStartMs":560.949951171875,"signatureMs":55.08595798164606,"payloadMs":1006.678625009954,"detectToSendMs":1061.805040575564,"socketMs":0.219970703125,"renderMs":5,"totalFromReturnMs":836,"totalFromStartMs":1628},
+      {"tag":"A","round":0,"laneIndex":2,"targetId":"lane-3-59b01d76","rendered":true,"addDurationMs":719,"detectionFromReturnMs":-158.865966796875,"detectionFromStartMs":560.134033203125,"signatureMs":60.392375104129314,"payloadMs":1926.2046674266458,"detectToSendMs":1986.6682505235076,"socketMs":0.176025390625,"renderMs":3,"totalFromReturnMs":1831,"totalFromStartMs":2550},
+      {"tag":"A","round":0,"laneIndex":3,"targetId":"lane-4-d7c7746a","rendered":true,"addDurationMs":968,"detectionFromReturnMs":1203.507080078125,"detectionFromStartMs":2171.507080078125,"signatureMs":58.23299940675497,"payloadMs":1039.2927080392838,"detectToSendMs":1097.596333362162,"socketMs":-0.1240234375,"renderMs":3,"totalFromReturnMs":2304,"totalFromStartMs":3272},
+      {"tag":"A","round":0,"laneIndex":4,"targetId":"lane-5-9506dce6","rendered":true,"addDurationMs":1463,"detectionFromReturnMs":308.2099609375,"detectionFromStartMs":1771.2099609375,"signatureMs":33.46391674131155,"payloadMs":1368.1266251951456,"detectToSendMs":1401.6389586031437,"socketMs":0.138916015625,"renderMs":2,"totalFromReturnMs":1712,"totalFromStartMs":3175},
+      {"tag":"A","round":0,"laneIndex":5,"targetId":"lane-6-e2a63bbf","rendered":true,"addDurationMs":1161,"detectionFromReturnMs":968.463134765625,"detectionFromStartMs":2129.463134765625,"signatureMs":59.139374643564224,"payloadMs":945.316500030458,"detectToSendMs":1004.4896248728037,"socketMs":0.0400390625,"renderMs":2,"totalFromReturnMs":1975,"totalFromStartMs":3136},
+      {"tag":"A","round":0,"laneIndex":6,"targetId":"lane-7-d6cffb46","rendered":true,"addDurationMs":582,"detectionFromReturnMs":-25.4228515625,"detectionFromStartMs":556.5771484375,"signatureMs":55.13716582208872,"payloadMs":1073.2595827430487,"detectToSendMs":1128.4243753179908,"socketMs":-0.008056640625,"renderMs":3,"totalFromReturnMs":1106,"totalFromStartMs":1688},
+      {"tag":"A","round":0,"laneIndex":7,"targetId":"repo-fb043951","rendered":true,"addDurationMs":759,"detectionFromReturnMs":-203.3427734375,"detectionFromStartMs":555.6572265625,"signatureMs":53.079916164278984,"payloadMs":1953.2820414751768,"detectToSendMs":2006.3878754153848,"socketMs":-0.05712890625,"renderMs":3,"totalFromReturnMs":1806,"totalFromStartMs":2565},
+      {"tag":"A","round":1,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":1856,"detectionFromReturnMs":-975.425048828125,"detectionFromStartMs":880.574951171875,"signatureMs":37.709333933889866,"payloadMs":2603.7132097408175,"detectToSendMs":2641.4791252464056,"socketMs":-0.070068359375,"renderMs":2,"totalFromReturnMs":1668,"totalFromStartMs":3524},
+      {"tag":"A","round":1,"laneIndex":1,"targetId":"lane-2-2d5cef3b","rendered":true,"addDurationMs":1163,"detectionFromReturnMs":523.0341796875,"detectionFromStartMs":1686.0341796875,"signatureMs":26.583249680697918,"payloadMs":1201.362875290215,"detectToSendMs":1227.9916256666183,"socketMs":-0.033935546875,"renderMs":2,"totalFromReturnMs":1753,"totalFromStartMs":2916},
+      {"tag":"A","round":1,"laneIndex":2,"targetId":"lane-3-59b01d76","rendered":true,"addDurationMs":1061,"detectionFromReturnMs":1890.13916015625,"detectionFromStartMs":2951.13916015625,"signatureMs":34.912167116999626,"payloadMs":876.742709428072,"detectToSendMs":911.7028340697289,"socketMs":0.14892578125,"renderMs":2,"totalFromReturnMs":2804,"totalFromStartMs":3865},
+      {"tag":"A","round":1,"laneIndex":3,"targetId":"lane-4-d7c7746a","rendered":true,"addDurationMs":627,"detectionFromReturnMs":-56.823974609375,"detectionFromStartMs":570.176025390625,"signatureMs":49.064124934375286,"payloadMs":2069.3720001727343,"detectToSendMs":2118.454915471375,"socketMs":-0.64404296875,"renderMs":3,"totalFromReturnMs":2064,"totalFromStartMs":2691},
+      {"tag":"A","round":1,"laneIndex":4,"targetId":"lane-5-9506dce6","rendered":true,"addDurationMs":1503,"detectionFromReturnMs":27.990966796875,"detectionFromStartMs":1530.990966796875,"signatureMs":28.068416751921177,"payloadMs":1207.7229591086507,"detectToSendMs":1235.817833803594,"socketMs":0.173095703125,"renderMs":3,"totalFromReturnMs":1267,"totalFromStartMs":2770},
+      {"tag":"A","round":1,"laneIndex":5,"targetId":"lane-6-e2a63bbf","rendered":true,"addDurationMs":661,"detectionFromReturnMs":-91.851806640625,"detectionFromStartMs":569.148193359375,"signatureMs":43.230291455984116,"payloadMs":1413.1003338843584,"detectToSendMs":1456.3609585165977,"socketMs":-0.51806640625,"renderMs":3,"totalFromReturnMs":1367,"totalFromStartMs":2028},
+      {"tag":"A","round":1,"laneIndex":6,"targetId":"lane-7-d6cffb46","rendered":true,"addDurationMs":592,"detectionFromReturnMs":-23.961181640625,"detectionFromStartMs":568.038818359375,"signatureMs":43.6403751373291,"payloadMs":1211.8450421839952,"detectToSendMs":1255.4947920143604,"socketMs":-0.5419921875,"renderMs":3,"totalFromReturnMs":1234,"totalFromStartMs":1826},
+      {"tag":"A","round":1,"laneIndex":7,"targetId":"repo-fb043951","rendered":true,"addDurationMs":1666,"detectionFromReturnMs":528.912109375,"detectionFromStartMs":2194.912109375,"signatureMs":32.00200013816357,"payloadMs":882.2051249444485,"detectToSendMs":914.2225831747055,"socketMs":-0.14013671875,"renderMs":2,"totalFromReturnMs":1445,"totalFromStartMs":3111},
+      {"tag":"A","round":2,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":734,"detectionFromReturnMs":1192.47021484375,"detectionFromStartMs":1926.47021484375,"signatureMs":29.866250231862068,"payloadMs":957.542291842401,"detectToSendMs":987.4395420774817,"socketMs":0.0849609375,"renderMs":2,"totalFromReturnMs":2182,"totalFromStartMs":2916},
+      {"tag":"A","round":2,"laneIndex":1,"targetId":"lane-2-2d5cef3b","rendered":true,"addDurationMs":1079,"detectionFromReturnMs":944.922119140625,"detectionFromStartMs":2023.922119140625,"signatureMs":28.923334553837776,"payloadMs":1469.4699998944998,"detectToSendMs":1498.4419997781515,"socketMs":-0.3818359375,"renderMs":3,"totalFromReturnMs":2446,"totalFromStartMs":3525},
+      {"tag":"A","round":2,"laneIndex":2,"targetId":"lane-3-59b01d76","rendered":true,"addDurationMs":1137,"detectionFromReturnMs":-505.276123046875,"detectionFromStartMs":631.723876953125,"signatureMs":46.92770913243294,"payloadMs":1745.6413749605417,"detectToSendMs":1792.6325406879187,"socketMs":-0.368896484375,"renderMs":3,"totalFromReturnMs":1290,"totalFromStartMs":2427},
+      {"tag":"A","round":2,"laneIndex":3,"targetId":"lane-4-d7c7746a","rendered":true,"addDurationMs":821,"detectionFromReturnMs":-189.161865234375,"detectionFromStartMs":631.838134765625,"signatureMs":48.62516652792692,"payloadMs":1797.7240001782775,"detectToSendMs":1846.4085822924972,"socketMs":-0.259033203125,"renderMs":3,"totalFromReturnMs":1660,"totalFromStartMs":2481},
+      {"tag":"A","round":2,"laneIndex":4,"targetId":"lane-5-9506dce6","rendered":true,"addDurationMs":655,"detectionFromReturnMs":-24.341796875,"detectionFromStartMs":630.658203125,"signatureMs":52.13254038244486,"payloadMs":1567.1159578487277,"detectToSendMs":1619.3010415881872,"socketMs":0.030029296875,"renderMs":2,"totalFromReturnMs":1597,"totalFromStartMs":2252},
+      {"tag":"A","round":2,"laneIndex":5,"targetId":"lane-6-e2a63bbf","rendered":true,"addDurationMs":1010,"detectionFromReturnMs":-379.212158203125,"detectionFromStartMs":630.787841796875,"signatureMs":42.82987490296364,"payloadMs":1407.647667452693,"detectToSendMs":1450.5367502570152,"socketMs":-0.343017578125,"renderMs":3,"totalFromReturnMs":1074,"totalFromStartMs":2084},
+      {"tag":"A","round":2,"laneIndex":6,"targetId":"lane-7-d6cffb46","rendered":true,"addDurationMs":844,"detectionFromReturnMs":-214.41796875,"detectionFromStartMs":629.58203125,"signatureMs":52.376458421349525,"payloadMs":1022.6401248946786,"detectToSendMs":1075.0307086855173,"socketMs":-0.632080078125,"renderMs":3,"totalFromReturnMs":863,"totalFromStartMs":1707},
+      {"tag":"A","round":2,"laneIndex":7,"targetId":"repo-fb043951","rendered":true,"addDurationMs":686,"detectionFromReturnMs":-56.18798828125,"detectionFromStartMs":629.81201171875,"signatureMs":44.56462524831295,"payloadMs":1064.6766256541014,"detectToSendMs":1109.2981658875942,"socketMs":-0.117919921875,"renderMs":2,"totalFromReturnMs":1055,"totalFromStartMs":1741},
+      {"tag":"A","round":3,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":593,"detectionFromReturnMs":-46.113037109375,"detectionFromStartMs":546.886962890625,"signatureMs":55.029707960784435,"payloadMs":940.7285824418068,"detectToSendMs":995.7812493667006,"socketMs":-0.676025390625,"renderMs":3,"totalFromReturnMs":952,"totalFromStartMs":1545},
+      {"tag":"A","round":3,"laneIndex":1,"targetId":"lane-2-2d5cef3b","rendered":true,"addDurationMs":811,"detectionFromReturnMs":1729.301025390625,"detectionFromStartMs":2540.301025390625,"signatureMs":31.08470793813467,"payloadMs":1245.1467085629702,"detectToSendMs":1276.2607503682375,"socketMs":-0.583984375,"renderMs":3,"totalFromReturnMs":3008,"totalFromStartMs":3819},
+      {"tag":"A","round":3,"laneIndex":2,"targetId":"lane-3-59b01d76","rendered":true,"addDurationMs":1493,"detectionFromReturnMs":984.762939453125,"detectionFromStartMs":2477.762939453125,"signatureMs":29.475209303200245,"payloadMs":1087.532291188836,"detectToSendMs":1117.0398751273751,"socketMs":0.18896484375,"renderMs":2,"totalFromReturnMs":2104,"totalFromStartMs":3597},
+      {"tag":"A","round":3,"laneIndex":3,"targetId":"lane-4-d7c7746a","rendered":true,"addDurationMs":569,"detectionFromReturnMs":-24.587158203125,"detectionFromStartMs":544.412841796875,"signatureMs":55.343291722238064,"payloadMs":1302.8156254440546,"detectToSendMs":1358.17841719836,"socketMs":-0.60009765625,"renderMs":3,"totalFromReturnMs":1336,"totalFromStartMs":1905},
+      {"tag":"A","round":3,"laneIndex":4,"targetId":"lane-5-9506dce6","rendered":true,"addDurationMs":1136,"detectionFromReturnMs":1170.9970703125,"detectionFromStartMs":2306.9970703125,"signatureMs":30.493957921862602,"payloadMs":1085.8915001153946,"detectToSendMs":1116.4426673203707,"socketMs":-0.444091796875,"renderMs":3,"totalFromReturnMs":2290,"totalFromStartMs":3426},
+      {"tag":"A","round":3,"laneIndex":5,"targetId":"lane-6-e2a63bbf","rendered":true,"addDurationMs":941,"detectionFromReturnMs":-397.26611328125,"detectionFromStartMs":543.73388671875,"signatureMs":50.896499305963516,"payloadMs":1185.7304582372308,"detectToSendMs":1236.641375347972,"socketMs":-0.383056640625,"renderMs":3,"totalFromReturnMs":842,"totalFromStartMs":1783},
+      {"tag":"A","round":3,"laneIndex":6,"targetId":"lane-7-d6cffb46","rendered":true,"addDurationMs":970,"detectionFromReturnMs":1953.05810546875,"detectionFromStartMs":2923.05810546875,"signatureMs":41.15166608244181,"payloadMs":773.9876257255673,"detectToSendMs":815.1808334514499,"socketMs":-0.243896484375,"renderMs":3,"totalFromReturnMs":2771,"totalFromStartMs":3741},
+      {"tag":"A","round":3,"laneIndex":7,"targetId":"repo-fb043951","rendered":true,"addDurationMs":1260,"detectionFromReturnMs":-718.35693359375,"detectionFromStartMs":541.64306640625,"signatureMs":59.55324973911047,"payloadMs":2124.8406674712896,"detectToSendMs":2184.438416734338,"socketMs":-0.09375,"renderMs":3,"totalFromReturnMs":1469,"totalFromStartMs":2729},
+      {"tag":"A","round":4,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":532,"detectionFromReturnMs":-23.9150390625,"detectionFromStartMs":508.0849609375,"signatureMs":44.881874695420265,"payloadMs":867.962583899498,"detectToSendMs":912.8707498311996,"socketMs":0.0380859375,"renderMs":3,"totalFromReturnMs":892,"totalFromStartMs":1424},
+      {"tag":"A","round":4,"laneIndex":1,"targetId":"lane-2-2d5cef3b","rendered":true,"addDurationMs":926,"detectionFromReturnMs":-418.693115234375,"detectionFromStartMs":507.306884765625,"signatureMs":55.47558329999447,"payloadMs":1840.5332081019878,"detectToSendMs":1896.0550827905536,"socketMs":-0.3818359375,"renderMs":3,"totalFromReturnMs":1480,"totalFromStartMs":2406},
+      {"tag":"A","round":4,"laneIndex":2,"targetId":"lane-3-59b01d76","rendered":true,"addDurationMs":771,"detectionFromReturnMs":-263.739013671875,"detectionFromStartMs":507.260986328125,"signatureMs":48.43224957585335,"payloadMs":2095.8983348682523,"detectToSendMs":2144.3428341299295,"socketMs":-0.616943359375,"renderMs":3,"totalFromReturnMs":1883,"totalFromStartMs":2654},
+      {"tag":"A","round":4,"laneIndex":3,"targetId":"lane-4-d7c7746a","rendered":true,"addDurationMs":1440,"detectionFromReturnMs":-933.215087890625,"detectionFromStartMs":506.784912109375,"signatureMs":57.33291618525982,"payloadMs":2977.348417043686,"detectToSendMs":3034.7442077472806,"socketMs":-0.548095703125,"renderMs":3,"totalFromReturnMs":2104,"totalFromStartMs":3544},
+      {"tag":"A","round":4,"laneIndex":4,"targetId":"lane-5-9506dce6","rendered":true,"addDurationMs":668,"detectionFromReturnMs":-161.6640625,"detectionFromStartMs":506.3359375,"signatureMs":48.131292685866356,"payloadMs":961.6342093795538,"detectToSendMs":1009.809291921556,"socketMs":-0.15185546875,"renderMs":2,"totalFromReturnMs":850,"totalFromStartMs":1518},
+      {"tag":"A","round":4,"laneIndex":5,"targetId":"lane-6-e2a63bbf","rendered":true,"addDurationMs":1101,"detectionFromReturnMs":-594.778076171875,"detectionFromStartMs":506.221923828125,"signatureMs":44.54333335161209,"payloadMs":2446.0434578359127,"detectToSendMs":2490.6586660072207,"socketMs":1.104248046875,"renderMs":2,"totalFromReturnMs":1899,"totalFromStartMs":3000},
+      {"tag":"A","round":4,"laneIndex":6,"targetId":"lane-7-d6cffb46","rendered":true,"addDurationMs":1328,"detectionFromReturnMs":481.196044921875,"detectionFromStartMs":1809.196044921875,"signatureMs":63.3942075073719,"payloadMs":1381.2174163758755,"detectToSendMs":1444.6304589509964,"socketMs":0.15478515625,"renderMs":2,"totalFromReturnMs":1928,"totalFromStartMs":3256},
+      {"tag":"A","round":4,"laneIndex":7,"targetId":"repo-fb043951","rendered":true,"addDurationMs":1563,"detectionFromReturnMs":1098.81591796875,"detectionFromStartMs":2661.81591796875,"signatureMs":30.159249901771545,"payloadMs":767.7472094073892,"detectToSendMs":797.9554999619722,"socketMs":0.223876953125,"renderMs":2,"totalFromReturnMs":1899,"totalFromStartMs":3462}
+    ]
+  },
+  "passB": {
+    "sampleCount": 40,
+    "renderedCount": 40,
+    "renderRate": 1,
+    "stages": {
+      "addDurationMs": {
+        "n": 40,
+        "min": 523,
+        "p50": 984,
+        "p90": 1609,
+        "max": 2244,
+        "mean": 1071.9
+      },
+      "detectionFromReturnMs": {
+        "n": 40,
+        "min": -1507.52,
+        "p50": -24.5,
+        "p90": 1421.28,
+        "max": 2264.98,
+        "mean": 216.85
+      },
+      "detectionFromStartMs": {
+        "n": 40,
+        "min": 499.48,
+        "p50": 620.79,
+        "p90": 2787.28,
+        "max": 3799.98,
+        "mean": 1288.75
+      },
+      "signatureMs": {
+        "n": 40,
+        "min": 27.7,
+        "p50": 51.54,
+        "p90": 59.61,
+        "max": 63.91,
+        "mean": 48.87
+      },
+      "payloadMs": {
+        "n": 40,
+        "min": 459.25,
+        "p50": 1434.9,
+        "p90": 2306.45,
+        "max": 3412.99,
+        "mean": 1522.14
+      },
+      "detectToSendMs": {
+        "n": 40,
+        "min": 486.98,
+        "p50": 1484.48,
+        "p90": 2360.19,
+        "max": 3457.2,
+        "mean": 1571.05
+      },
+      "socketMs": {
+        "n": 40,
+        "min": -0.64,
+        "p50": -0.13,
+        "p90": 0.35,
+        "max": 0.64,
+        "mean": -0.11
+      },
+      "renderMs": {
+        "n": 40,
+        "min": 2,
+        "p50": 3,
+        "p90": 3,
+        "max": 4,
+        "mean": 2.73
+      },
+      "totalFromReturnMs": {
+        "n": 40,
+        "min": 704,
+        "p50": 1688,
+        "p90": 2729,
+        "max": 2782,
+        "mean": 1790.53
+      },
+      "totalFromStartMs": {
+        "n": 40,
+        "min": 1611,
+        "p50": 2641,
+        "p90": 4162,
+        "max": 4478,
+        "mean": 2862.43
+      }
+    },
     "sendLock": {
       "totals": {
-        "count": 4,
-        "waitTotalMs": 0,
+        "count": 127,
+        "waitTotalMs": 0.21,
         "waitMeanMs": 0,
-        "holdTotalMs": 0.43,
-        "holdMeanMs": 0.11
+        "waitMaxMs": 0.01,
+        "holdTotalMs": 17.39,
+        "holdMeanMs": 0.14,
+        "holdMaxMs": 1.48
       },
       "perKind": {
         "bus.pong": {
-          "count": 4,
+          "count": 2,
           "waitTotalMs": 0,
           "waitMeanMs": 0,
-          "waitMaxMs": 0.02,
-          "holdTotalMs": 0.43,
-          "holdMeanMs": 0.11,
-          "holdMaxMs": 0.37
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.08,
+          "holdMeanMs": 0.04,
+          "holdMaxMs": 0.05
+        },
+        "lane.configured": {
+          "count": 40,
+          "waitTotalMs": 0.02,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0.01,
+          "holdTotalMs": 0.94,
+          "holdMeanMs": 0.02,
+          "holdMaxMs": 0.18
+        },
+        "lane.payload": {
+          "count": 85,
+          "waitTotalMs": 0.18,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0.01,
+          "holdTotalMs": 16.36,
+          "holdMeanMs": 0.19,
+          "holdMaxMs": 1.48
         }
       }
     },
+    "reconcileFrames": {
+      "targets.payload": 0,
+      "teams.payload": 0,
+      "lanes.dirty": 0,
+      "lane.unsubscribed": 0,
+      "lane.configured": 40
+    },
+    "samples": [
+      {"tag":"B","round":0,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":1609,"detectionFromReturnMs":663.697998046875,"detectionFromStartMs":2272.697998046875,"signatureMs":34.4715416431427,"payloadMs":974.5706664398313,"detectToSendMs":1009.0774577111006,"socketMs":0.218994140625,"renderMs":2,"totalFromReturnMs":1675,"totalFromStartMs":3284},
+      {"tag":"B","round":0,"laneIndex":1,"targetId":"lane-2-2d5cef3b","rendered":true,"addDurationMs":1394,"detectionFromReturnMs":-773.300048828125,"detectionFromStartMs":620.699951171875,"signatureMs":53.678167052567005,"payloadMs":2835.237791761756,"detectToSendMs":2888.928333297372,"socketMs":0.35498046875,"renderMs":2,"totalFromReturnMs":2118,"totalFromStartMs":3512},
+      {"tag":"B","round":0,"laneIndex":2,"targetId":"lane-3-59b01d76","rendered":true,"addDurationMs":838,"detectionFromReturnMs":-217.06201171875,"detectionFromStartMs":620.93798828125,"signatureMs":53.73141635209322,"payloadMs":2306.454749777913,"detectToSendMs":2360.191541723907,"socketMs":-0.14404296875,"renderMs":3,"totalFromReturnMs":2146,"totalFromStartMs":2984},
+      {"tag":"B","round":0,"laneIndex":3,"targetId":"lane-4-d7c7746a","rendered":true,"addDurationMs":815,"detectionFromReturnMs":-194.212158203125,"detectionFromStartMs":620.787841796875,"signatureMs":58.54395776987076,"payloadMs":928.5643333569169,"detectToSendMs":987.1385004371405,"socketMs":0.06591796875,"renderMs":3,"totalFromReturnMs":796,"totalFromStartMs":1611},
+      {"tag":"B","round":0,"laneIndex":4,"targetId":"lane-5-9506dce6","rendered":true,"addDurationMs":1275,"detectionFromReturnMs":-655.02685546875,"detectionFromStartMs":619.97314453125,"signatureMs":53.182125091552734,"payloadMs":1302.9702492058277,"detectToSendMs":1356.213290244341,"socketMs":-0.197998046875,"renderMs":3,"totalFromReturnMs":704,"totalFromStartMs":1979},
+      {"tag":"B","round":0,"laneIndex":5,"targetId":"lane-6-e2a63bbf","rendered":true,"addDurationMs":2244,"detectionFromReturnMs":1287.80810546875,"detectionFromStartMs":3531.80810546875,"signatureMs":32.50287473201752,"payloadMs":910.9897492453456,"detectToSendMs":943.5119163244963,"socketMs":-0.326171875,"renderMs":3,"totalFromReturnMs":2234,"totalFromStartMs":4478},
+      {"tag":"B","round":0,"laneIndex":6,"targetId":"lane-7-d6cffb46","rendered":true,"addDurationMs":984,"detectionFromReturnMs":-364.887939453125,"detectionFromStartMs":619.112060546875,"signatureMs":47.90595918893814,"payloadMs":2282.2719998657703,"detectToSendMs":2330.2264576777816,"socketMs":-0.35302734375,"renderMs":3,"totalFromReturnMs":1968,"totalFromStartMs":2952},
+      {"tag":"B","round":0,"laneIndex":7,"targetId":"repo-fb043951","rendered":true,"addDurationMs":641,"detectionFromReturnMs":-22.94921875,"detectionFromStartMs":618.05078125,"signatureMs":48.307583667337894,"payloadMs":1972.6659581065178,"detectToSendMs":2020.9924168884754,"socketMs":-0.069091796875,"renderMs":2,"totalFromReturnMs":2000,"totalFromStartMs":2641},
+      {"tag":"B","round":1,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":767,"detectionFromReturnMs":-265.385986328125,"detectionFromStartMs":501.614013671875,"signatureMs":53.512999787926674,"payloadMs":1929.4825000688434,"detectToSendMs":1983.0105425789952,"socketMs":0.36279296875,"renderMs":3,"totalFromReturnMs":1721,"totalFromStartMs":2488},
+      {"tag":"B","round":1,"laneIndex":1,"targetId":"lane-2-2d5cef3b","rendered":true,"addDurationMs":523,"detectionFromReturnMs":-22.991943359375,"detectionFromStartMs":500.008056640625,"signatureMs":44.387541711330414,"payloadMs":1308.4457907825708,"detectToSendMs":1352.9093749821186,"socketMs":0.075927734375,"renderMs":3,"totalFromReturnMs":1333,"totalFromStartMs":1856},
+      {"tag":"B","round":1,"laneIndex":2,"targetId":"lane-3-59b01d76","rendered":true,"addDurationMs":1428,"detectionFromReturnMs":1030.662109375,"detectionFromStartMs":2458.662109375,"signatureMs":59.5878753811121,"payloadMs":1669.8923343792558,"detectToSendMs":1729.5199166983366,"socketMs":-0.192138671875,"renderMs":3,"totalFromReturnMs":2763,"totalFromStartMs":4191},
+      {"tag":"B","round":1,"laneIndex":3,"targetId":"lane-4-d7c7746a","rendered":true,"addDurationMs":1599,"detectionFromReturnMs":-1098.596923828125,"detectionFromStartMs":500.403076171875,"signatureMs":44.187833555042744,"payloadMs":3412.994584068656,"detectToSendMs":3457.203875295818,"socketMs":0.37109375,"renderMs":2,"totalFromReturnMs":2361,"totalFromStartMs":3960},
+      {"tag":"B","round":1,"laneIndex":4,"targetId":"lane-5-9506dce6","rendered":true,"addDurationMs":1201,"detectionFromReturnMs":1321.25,"detectionFromStartMs":2522.25,"signatureMs":59.60529111325741,"payloadMs":1281.9587904959917,"detectToSendMs":1341.642415151,"socketMs":0.10205078125,"renderMs":2,"totalFromReturnMs":2665,"totalFromStartMs":3866},
+      {"tag":"B","round":1,"laneIndex":5,"targetId":"lane-6-e2a63bbf","rendered":true,"addDurationMs":2007,"detectionFromReturnMs":-1507.52099609375,"detectionFromStartMs":499.47900390625,"signatureMs":47.73420933634043,"payloadMs":2643.38400028646,"detectToSendMs":2691.143332980573,"socketMs":-0.637939453125,"renderMs":3,"totalFromReturnMs":1186,"totalFromStartMs":3193},
+      {"tag":"B","round":1,"laneIndex":6,"targetId":"lane-7-d6cffb46","rendered":true,"addDurationMs":1774,"detectionFromReturnMs":845.3212890625,"detectionFromStartMs":2619.3212890625,"signatureMs":51.90508347004652,"payloadMs":1164.5504171028733,"detectToSendMs":1216.4754578843713,"socketMs":0.197021484375,"renderMs":2,"totalFromReturnMs":2064,"totalFromStartMs":3838},
+      {"tag":"B","round":1,"laneIndex":7,"targetId":"repo-fb043951","rendered":true,"addDurationMs":1380,"detectionFromReturnMs":1769.789794921875,"detectionFromStartMs":3149.789794921875,"signatureMs":56.65037501603365,"payloadMs":953.2412504777312,"detectToSendMs":1009.9726254120469,"socketMs":0.233154296875,"renderMs":2,"totalFromReturnMs":2782,"totalFromStartMs":4162},
+      {"tag":"B","round":2,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":740,"detectionFromReturnMs":-92.125,"detectionFromStartMs":647.875,"signatureMs":44.458791613578796,"payloadMs":1308.116958476603,"detectToSendMs":1352.6347493752837,"socketMs":-0.51904296875,"renderMs":3,"totalFromReturnMs":1263,"totalFromStartMs":2003},
+      {"tag":"B","round":2,"laneIndex":1,"targetId":"lane-2-2d5cef3b","rendered":true,"addDurationMs":1087,"detectionFromReturnMs":1568.156005859375,"detectionFromStartMs":2655.156005859375,"signatureMs":33.28245785087347,"payloadMs":1123.877875506878,"detectToSendMs":1157.2014596313238,"socketMs":0.635986328125,"renderMs":3,"totalFromReturnMs":2729,"totalFromStartMs":3816},
+      {"tag":"B","round":2,"laneIndex":2,"targetId":"lane-3-59b01d76","rendered":true,"addDurationMs":1156,"detectionFromReturnMs":1259.39208984375,"detectionFromStartMs":2415.39208984375,"signatureMs":41.65962524712086,"payloadMs":1180.4771246388555,"detectToSendMs":1222.196999937296,"socketMs":-0.59716796875,"renderMs":3,"totalFromReturnMs":2484,"totalFromStartMs":3640},
+      {"tag":"B","round":2,"laneIndex":3,"targetId":"lane-4-d7c7746a","rendered":true,"addDurationMs":691,"detectionFromReturnMs":278.39404296875,"detectionFromStartMs":969.39404296875,"signatureMs":34.267124719917774,"payloadMs":1222.688709385693,"detectToSendMs":1257.007417269051,"socketMs":-0.406982421875,"renderMs":3,"totalFromReturnMs":1538,"totalFromStartMs":2229},
+      {"tag":"B","round":2,"laneIndex":4,"targetId":"lane-5-9506dce6","rendered":true,"addDurationMs":670,"detectionFromReturnMs":-24.49609375,"detectionFromStartMs":645.50390625,"signatureMs":55.06495758891106,"payloadMs":1644.558041356504,"detectToSendMs":1699.6828755363822,"socketMs":-0.197998046875,"renderMs":3,"totalFromReturnMs":1678,"totalFromStartMs":2348},
+      {"tag":"B","round":2,"laneIndex":5,"targetId":"lane-6-e2a63bbf","rendered":true,"addDurationMs":1366,"detectionFromReturnMs":1421.27880859375,"detectionFromStartMs":2787.27880859375,"signatureMs":47.28129133582115,"payloadMs":1061.7565410211682,"detectToSendMs":1109.057916328311,"socketMs":-0.34326171875,"renderMs":3,"totalFromReturnMs":2533,"totalFromStartMs":3899},
+      {"tag":"B","round":2,"laneIndex":6,"targetId":"lane-7-d6cffb46","rendered":true,"addDurationMs":777,"detectionFromReturnMs":-134.15478515625,"detectionFromStartMs":642.84521484375,"signatureMs":48.55695739388466,"payloadMs":1100.6539165973663,"detectToSendMs":1149.223916232586,"socketMs":-0.093017578125,"renderMs":3,"totalFromReturnMs":1018,"totalFromStartMs":1795},
+      {"tag":"B","round":2,"laneIndex":7,"targetId":"repo-fb043951","rendered":true,"addDurationMs":1288,"detectionFromReturnMs":742.195068359375,"detectionFromStartMs":2030.195068359375,"signatureMs":30.047000385820866,"payloadMs":1908.6514161899686,"detectToSendMs":1938.7323325499892,"socketMs":0.0458984375,"renderMs":2,"totalFromReturnMs":2683,"totalFromStartMs":3971},
+      {"tag":"B","round":3,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":847,"detectionFromReturnMs":-278.173095703125,"detectionFromStartMs":568.826904296875,"signatureMs":47.043582424521446,"payloadMs":1269.324166700244,"detectToSendMs":1316.4303749799728,"socketMs":-0.26611328125,"renderMs":3,"totalFromReturnMs":1041,"totalFromStartMs":1888},
+      {"tag":"B","round":3,"laneIndex":1,"targetId":"lane-2-2d5cef3b","rendered":true,"addDurationMs":931,"detectionFromReturnMs":834.97412109375,"detectionFromStartMs":1765.97412109375,"signatureMs":28.50320842117071,"payloadMs":960.4411674663424,"detectToSendMs":989.0026673674583,"socketMs":0.01611328125,"renderMs":2,"totalFromReturnMs":1826,"totalFromStartMs":2757},
+      {"tag":"B","round":3,"laneIndex":2,"targetId":"lane-3-59b01d76","rendered":true,"addDurationMs":640,"detectionFromReturnMs":-72.156005859375,"detectionFromStartMs":567.843994140625,"signatureMs":49.472915939986706,"payloadMs":1434.9039578810334,"detectToSendMs":1484.477249905467,"socketMs":-0.330810546875,"renderMs":3,"totalFromReturnMs":1415,"totalFromStartMs":2055},
+      {"tag":"B","round":3,"laneIndex":3,"targetId":"lane-4-d7c7746a","rendered":true,"addDurationMs":776,"detectionFromReturnMs":-208.18798828125,"detectionFromStartMs":567.81201171875,"signatureMs":59.343249537050724,"payloadMs":1595.8507908508182,"detectToSendMs":1655.256500467658,"socketMs":-0.092041015625,"renderMs":3,"totalFromReturnMs":1450,"totalFromStartMs":2226},
+      {"tag":"B","round":3,"laneIndex":4,"targetId":"lane-5-9506dce6","rendered":true,"addDurationMs":798,"detectionFromReturnMs":-230.667724609375,"detectionFromStartMs":567.332275390625,"signatureMs":62.23041657358408,"payloadMs":1662.2566664591432,"detectToSendMs":1724.5586663484573,"socketMs":0.097900390625,"renderMs":2,"totalFromReturnMs":1496,"totalFromStartMs":2294},
+      {"tag":"B","round":3,"laneIndex":5,"targetId":"lane-6-e2a63bbf","rendered":true,"addDurationMs":591,"detectionFromReturnMs":-24.35400390625,"detectionFromStartMs":566.64599609375,"signatureMs":55.94204179942608,"payloadMs":1488.476749509573,"detectToSendMs":1544.4762082770467,"socketMs":-0.132080078125,"renderMs":3,"totalFromReturnMs":1523,"totalFromStartMs":2114},
+      {"tag":"B","round":3,"laneIndex":6,"targetId":"lane-7-d6cffb46","rendered":true,"addDurationMs":743,"detectionFromReturnMs":-176.260009765625,"detectionFromStartMs":566.739990234375,"signatureMs":63.91095835715532,"payloadMs":1464.837333187461,"detectToSendMs":1528.8317082449794,"socketMs":-0.5810546875,"renderMs":3,"totalFromReturnMs":1355,"totalFromStartMs":2098},
+      {"tag":"B","round":3,"laneIndex":7,"targetId":"repo-fb043951","rendered":true,"addDurationMs":1400,"detectionFromReturnMs":1224.234130859375,"detectionFromStartMs":2624.234130859375,"signatureMs":55.189709179103374,"payloadMs":965.8547909930348,"detectToSendMs":1021.0602907463908,"socketMs":-0.312744140625,"renderMs":3,"totalFromReturnMs":2248,"totalFromStartMs":3648},
+      {"tag":"B","round":4,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":1174,"detectionFromReturnMs":-597.966064453125,"detectionFromStartMs":576.033935546875,"signatureMs":53.41012496501207,"payloadMs":1545.9280833601952,"detectToSendMs":1599.3961663916707,"socketMs":-0.44091796875,"renderMs":4,"totalFromReturnMs":1005,"totalFromStartMs":2179},
+      {"tag":"B","round":4,"laneIndex":1,"targetId":"lane-2-2d5cef3b","rendered":true,"addDurationMs":625,"detectionFromReturnMs":-49.14111328125,"detectionFromStartMs":575.85888671875,"signatureMs":57.54270777106285,"payloadMs":1576.78799983114,"detectToSendMs":1634.3516251072288,"socketMs":-0.220947265625,"renderMs":3,"totalFromReturnMs":1588,"totalFromStartMs":2213},
+      {"tag":"B","round":4,"laneIndex":2,"targetId":"lane-3-59b01d76","rendered":true,"addDurationMs":1448,"detectionFromReturnMs":-873.08203125,"detectionFromStartMs":574.91796875,"signatureMs":57.71037470549345,"payloadMs":1837.5831255689263,"detectToSendMs":1895.3045420348644,"socketMs":-0.23388671875,"renderMs":3,"totalFromReturnMs":1025,"totalFromStartMs":2473},
+      {"tag":"B","round":4,"laneIndex":3,"targetId":"lane-4-d7c7746a","rendered":true,"addDurationMs":746,"detectionFromReturnMs":-171.25,"detectionFromStartMs":574.75,"signatureMs":62.93333228677511,"payloadMs":1911.0388327389956,"detectToSendMs":1974.0146659314632,"socketMs":0.22412109375,"renderMs":2,"totalFromReturnMs":1805,"totalFromStartMs":2551},
+      {"tag":"B","round":4,"laneIndex":4,"targetId":"lane-5-9506dce6","rendered":true,"addDurationMs":598,"detectionFromReturnMs":-23.94189453125,"detectionFromStartMs":574.05810546875,"signatureMs":48.02383296191692,"payloadMs":1388.5813746601343,"detectToSendMs":1436.6733329370618,"socketMs":0.260009765625,"renderMs":3,"totalFromReturnMs":1416,"totalFromStartMs":2014},
+      {"tag":"B","round":4,"laneIndex":5,"targetId":"lane-6-e2a63bbf","rendered":true,"addDurationMs":1535,"detectionFromReturnMs":2264.97998046875,"detectionFromStartMs":3799.97998046875,"signatureMs":27.69808378070593,"payloadMs":459.24845803529024,"detectToSendMs":486.9848331436515,"socketMs":0.031982421875,"renderMs":2,"totalFromReturnMs":2754,"totalFromStartMs":4289},
+      {"tag":"B","round":4,"laneIndex":6,"targetId":"lane-7-d6cffb46","rendered":true,"addDurationMs":772,"detectionFromReturnMs":-199.026123046875,"detectionFromStartMs":572.973876953125,"signatureMs":51.538375206291676,"payloadMs":1688.7458330020308,"detectToSendMs":1740.3474999591708,"socketMs":-0.330810546875,"renderMs":3,"totalFromReturnMs":1544,"totalFromStartMs":2316},
+      {"tag":"B","round":4,"laneIndex":7,"targetId":"repo-fb043951","rendered":true,"addDurationMs":998,"detectionFromReturnMs":438.633056640625,"detectionFromStartMs":1436.633056640625,"signatureMs":39.667291566729546,"payloadMs":1207.3016250506043,"detectToSendMs":1246.9968749210238,"socketMs":-0.637939453125,"renderMs":3,"totalFromReturnMs":1688,"totalFromStartMs":2686}
+    ]
+  },
+  "passC": {
+    "sampleCount": 5,
+    "renderedCount": 5,
+    "renderRate": 1,
     "stages": {
       "addDurationMs": {
-        "n": 16,
-        "min": 1668,
-        "p50": 2001,
-        "p90": 2204,
-        "max": 2267,
-        "mean": 1980.94
+        "n": 5,
+        "min": 413,
+        "p50": 431,
+        "p90": 498,
+        "max": 498,
+        "mean": 441.6
       },
       "detectionFromReturnMs": {
-        "n": 0
+        "n": 5,
+        "min": -24.15,
+        "p50": -22.65,
+        "p90": 257.57,
+        "max": 257.57,
+        "mean": 32.96
       },
       "detectionFromStartMs": {
-        "n": 0
+        "n": 5,
+        "min": 388.85,
+        "p50": 408.35,
+        "p90": 710.57,
+        "max": 710.57,
+        "mean": 474.56
       },
       "signatureMs": {
-        "n": 0
+        "n": 5,
+        "min": 26,
+        "p50": 51.39,
+        "p90": 54.88,
+        "max": 54.88,
+        "mean": 47.03
       },
       "payloadMs": {
-        "n": 0
+        "n": 5,
+        "min": 396.96,
+        "p50": 650.77,
+        "p90": 939.78,
+        "max": 939.78,
+        "mean": 670.68
       },
       "detectToSendMs": {
-        "n": 0
+        "n": 5,
+        "min": 422.99,
+        "p50": 700.6,
+        "p90": 994.68,
+        "max": 994.68,
+        "mean": 717.74
       },
       "socketMs": {
-        "n": 0
+        "n": 5,
+        "min": -0.56,
+        "p50": -0.03,
+        "p90": 0.3,
+        "max": 0.3,
+        "mean": -0.1
       },
       "renderMs": {
-        "n": 0
+        "n": 5,
+        "min": 2,
+        "p50": 3,
+        "p90": 3,
+        "max": 3,
+        "mean": 2.6
       },
       "totalFromReturnMs": {
-        "n": 0
+        "n": 5,
+        "min": 621,
+        "p50": 683,
+        "p90": 974,
+        "max": 974,
+        "mean": 753.2
       },
       "totalFromStartMs": {
-        "n": 0
+        "n": 5,
+        "min": 1034,
+        "p50": 1179,
+        "p90": 1405,
+        "max": 1405,
+        "mean": 1194.8
       }
-    }
+    },
+    "sendLock": {
+      "totals": {
+        "count": 17,
+        "waitTotalMs": 0.05,
+        "waitMeanMs": 0,
+        "waitMaxMs": 0.02,
+        "holdTotalMs": 2.35,
+        "holdMeanMs": 0.14,
+        "holdMaxMs": 1.05
+      },
+      "perKind": {
+        "lane.payload": {
+          "count": 14,
+          "waitTotalMs": 0.04,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0.02,
+          "holdTotalMs": 2.11,
+          "holdMeanMs": 0.15,
+          "holdMaxMs": 1.05
+        },
+        "lanes.dirty": {
+          "count": 2,
+          "waitTotalMs": 0,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.2,
+          "holdMeanMs": 0.1,
+          "holdMaxMs": 0.16
+        },
+        "lanes.payload": {
+          "count": 1,
+          "waitTotalMs": 0,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.03,
+          "holdMeanMs": 0.03,
+          "holdMaxMs": 0.03
+        }
+      }
+    },
+    "reconcileFrames": {
+      "targets.payload": 0,
+      "teams.payload": 0,
+      "lanes.dirty": 2,
+      "lane.unsubscribed": 0,
+      "lane.configured": 0
+    },
+    "samples": [
+      {"tag":"C","round":0,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":453,"detectionFromReturnMs":257.5712890625,"detectionFromStartMs":710.5712890625,"signatureMs":25.999125093221664,"payloadMs":396.96120750159025,"detectToSendMs":422.9853330180049,"socketMs":-0.55908203125,"renderMs":3,"totalFromReturnMs":683,"totalFromStartMs":1136},
+      {"tag":"C","round":1,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":413,"detectionFromReturnMs":-24.153076171875,"detectionFromStartMs":388.846923828125,"signatureMs":51.39049980789423,"payloadMs":590.6020412221551,"detectToSendMs":642.0597499236465,"socketMs":0.085205078125,"renderMs":3,"totalFromReturnMs":621,"totalFromStartMs":1034},
+      {"tag":"C","round":2,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":498,"detectionFromReturnMs":-22.303955078125,"detectionFromStartMs":475.696044921875,"signatureMs":49.8198326677084,"payloadMs":650.7674576714635,"detectToSendMs":700.6049156188965,"socketMs":-0.305908203125,"renderMs":3,"totalFromReturnMs":681,"totalFromStartMs":1179},
+      {"tag":"C","round":3,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":431,"detectionFromReturnMs":-22.650146484375,"detectionFromStartMs":408.349853515625,"signatureMs":54.880041629076004,"payloadMs":939.7800825536251,"detectToSendMs":994.6766663342714,"socketMs":-0.0341796875,"renderMs":2,"totalFromReturnMs":974,"totalFromStartMs":1405},
+      {"tag":"C","round":4,"laneIndex":0,"targetId":"lane-1-a70364b7","rendered":true,"addDurationMs":413,"detectionFromReturnMs":-23.680908203125,"detectionFromStartMs":389.319091796875,"signatureMs":53.06008365005255,"payloadMs":775.2863755449653,"detectToSendMs":828.3640006557107,"socketMs":0.302978515625,"renderMs":2,"totalFromReturnMs":807,"totalFromStartMs":1220}
+    ]
+  },
+  "submit": {
+    "sampleCount": 5,
+    "acceptedCount": 5,
+    "acceptRate": 1,
+    "stages": {
+      "browserOptimisticRenderMs": {
+        "n": 5,
+        "min": 0.2,
+        "p50": 0.3,
+        "p90": 0.3,
+        "max": 0.3,
+        "mean": 0.28
+      },
+      "browserSendResultWaitMs": {
+        "n": 5,
+        "min": 53.9,
+        "p50": 57.5,
+        "p90": 62.1,
+        "max": 62.1,
+        "mean": 57.66
+      },
+      "browserResponseHandlingMs": {
+        "n": 5,
+        "min": 1.2,
+        "p50": 1.3,
+        "p90": 1.6,
+        "max": 1.6,
+        "mean": 1.34
+      },
+      "browserTotalMs": {
+        "n": 5,
+        "min": 55.5,
+        "p50": 59.1,
+        "p90": 63.7,
+        "max": 63.7,
+        "mean": 59.34
+      },
+      "serverTargetResolveMs": {
+        "n": 5,
+        "min": 0,
+        "p50": 0.02,
+        "p90": 0.03,
+        "max": 0.03,
+        "mean": 0.02
+      },
+      "serverSendPayloadMs": {
+        "n": 5,
+        "min": 53.3,
+        "p50": 56.84,
+        "p90": 61.48,
+        "max": 61.48,
+        "mean": 57.07
+      },
+      "serverTotalBeforeReplyMs": {
+        "n": 5,
+        "min": 53.32,
+        "p50": 56.88,
+        "p90": 61.5,
+        "max": 61.5,
+        "mean": 57.09
+      },
+      "serverReplyLockWaitMs": {
+        "n": 5,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "serverReplyLockHoldMs": {
+        "n": 5,
+        "min": 0.04,
+        "p50": 0.04,
+        "p90": 0.08,
+        "max": 0.08,
+        "mean": 0.05
+      },
+      "serverReplyWriteMs": {
+        "n": 5,
+        "min": 0.04,
+        "p50": 0.04,
+        "p90": 0.08,
+        "max": 0.08,
+        "mean": 0.05
+      },
+      "serverTotalMs": {
+        "n": 5,
+        "min": 53.48,
+        "p50": 57.09,
+        "p90": 61.66,
+        "max": 61.66,
+        "mean": 57.29
+      }
+    },
+    "sendLock": {
+      "totals": {
+        "count": 15,
+        "waitTotalMs": 0.01,
+        "waitMeanMs": 0,
+        "waitMaxMs": 0,
+        "holdTotalMs": 0.45,
+        "holdMeanMs": 0.03,
+        "holdMaxMs": 0.08
+      },
+      "perKind": {
+        "lane.pending": {
+          "count": 5,
+          "waitTotalMs": 0.01,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.19,
+          "holdMeanMs": 0.04,
+          "holdMaxMs": 0.04
+        },
+        "lane.sendResult": {
+          "count": 5,
+          "waitTotalMs": 0.01,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.24,
+          "holdMeanMs": 0.05,
+          "holdMaxMs": 0.08
+        },
+        "lane.sendTiming": {
+          "count": 5,
+          "waitTotalMs": 0,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.02,
+          "holdMeanMs": 0,
+          "holdMaxMs": 0
+        }
+      }
+    },
+    "reconcileFrames": {
+      "targets.payload": 0,
+      "teams.payload": 0,
+      "lanes.dirty": 0,
+      "lane.unsubscribed": 0,
+      "lane.configured": 0
+    },
+    "samples": [
+      {"index":0,"status":"accepted","accepted":true,"textLength":39,"browserOptimisticRenderMs":0.2,"browserSendResultWaitMs":56.7,"browserResponseHandlingMs":1.6,"browserTotalMs":58.7,"serverTargetResolveMs":0,"serverSendPayloadMs":56.14,"serverTotalBeforeReplyMs":56.14,"serverReplyLockWaitMs":0,"serverReplyLockHoldMs":0.08,"serverReplyWriteMs":0.08,"serverTotalMs":56.46},
+      {"index":1,"status":"accepted","accepted":true,"textLength":39,"browserOptimisticRenderMs":0.3,"browserSendResultWaitMs":57.5,"browserResponseHandlingMs":1.2,"browserTotalMs":59.1,"serverTargetResolveMs":0.03,"serverSendPayloadMs":56.84,"serverTotalBeforeReplyMs":56.88,"serverReplyLockWaitMs":0,"serverReplyLockHoldMs":0.05,"serverReplyWriteMs":0.05,"serverTotalMs":57.09},
+      {"index":2,"status":"accepted","accepted":true,"textLength":39,"browserOptimisticRenderMs":0.3,"browserSendResultWaitMs":62.1,"browserResponseHandlingMs":1.3,"browserTotalMs":63.7,"serverTargetResolveMs":0.02,"serverSendPayloadMs":61.48,"serverTotalBeforeReplyMs":61.5,"serverReplyLockWaitMs":0,"serverReplyLockHoldMs":0.04,"serverReplyWriteMs":0.04,"serverTotalMs":61.66},
+      {"index":3,"status":"accepted","accepted":true,"textLength":39,"browserOptimisticRenderMs":0.3,"browserSendResultWaitMs":58.1,"browserResponseHandlingMs":1.3,"browserTotalMs":59.7,"serverTargetResolveMs":0.02,"serverSendPayloadMs":57.59,"serverTotalBeforeReplyMs":57.6,"serverReplyLockWaitMs":0,"serverReplyLockHoldMs":0.04,"serverReplyWriteMs":0.04,"serverTotalMs":57.74},
+      {"index":4,"status":"accepted","accepted":true,"textLength":39,"browserOptimisticRenderMs":0.3,"browserSendResultWaitMs":53.9,"browserResponseHandlingMs":1.3,"browserTotalMs":55.5,"serverTargetResolveMs":0.02,"serverSendPayloadMs":53.3,"serverTotalBeforeReplyMs":53.32,"serverReplyLockWaitMs":0,"serverReplyLockHoldMs":0.04,"serverReplyWriteMs":0.04,"serverTotalMs":53.48}
+    ]
   }
 }

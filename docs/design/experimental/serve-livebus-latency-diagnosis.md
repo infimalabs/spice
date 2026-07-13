@@ -1,16 +1,20 @@
 # Serve Live-Bus Latency Diagnosis
 
-Status: validated with runtime traces, 2026-07-13.
+Status: re-measured against the current implementation with an isolated
+runtime trace, 2026-07-13.
 
 ## Task-card follow-up: replaced inodes and fused focus broke live delivery
 
 A same-day follow-up audit traced the operator's newer symptom: task cards and
 assistant messages could remain absent for minutes, refreshing the page made
 them appear, and submitting a composer message caused a backlog of already-old
-cards to arrive at once. The original load diagnosis below remains the record
-of the measured payload and topology-refresh costs, but it did not cover the
-atomic-replace watcher invalidation or the fused-lane focus classification that
-caused this indefinite correctness delay.
+cards to arrive at once. That follow-up removed the per-card topology-refresh
+amplifier and repaired the atomic-replace watcher invalidation and the
+fused-lane focus classification behind this correctness delay. The load
+diagnosis below has since been **re-measured against the resulting current
+implementation** — encode-before-lock `_send`, amplifier removed — so the
+numbers and bottleneck attribution here describe today's code, not the pre-fix
+build the first static pass reasoned about.
 
 ### Causal chain
 
@@ -96,8 +100,11 @@ One browser holds one `LiveBusSession` (`livebus.py:133`). That session has:
   `livebus.py:659`). Each arms a kqueue vnode watch on the lane transcript and,
   on change, reads an append-only payload and pushes a frame.
 - **One `send_lock`** — every outbound frame, push or reply, funnels through
-  `_send()` under a single per-connection lock (`livebus.py:228`). The JSON
-  encode happens *inside* the lock (`connection.send_json` under the `with`).
+  `_send()` under a single per-connection lock (`livebus.py:307`). The frame is
+  **encoded to bytes before the lock is taken** (`livebus.py:320-321`); the
+  critical section (`send_lock.acquire()` → `send_frame` → `release`) covers only
+  the socket write, so a small `lane.sendResult` ack no longer queues behind a
+  bulk lane payload's encode.
 - **A payload worker pool** — `LIVE_BUS_PAYLOAD_WORKERS = 8` (`livebus.py:44`)
   builds subscription payloads off the dispatch thread; subscribe completion is
   offloaded via `_complete_lanes_subscribe` (`livebus.py:496`).
@@ -106,138 +113,192 @@ One browser holds one `LiveBusSession` (`livebus.py:133`). That session has:
 
 The numbers below come from `tests/browser/serve_livebus_latency_probe.js`, a
 repeatable diagnostic that drives a real Chromium client against a short-lived
-scratch `spice serve` (own `--task-backend`, so no real inbox is touched).
+`spice serve` running over a **fully isolated scratch fixture**. A real
+`lane.send` delivers a steer to the target worktree's agent inbox, so the probe
+never runs against real worktrees: `tests/browser/test_livebusseed.py`
+builds an init-fresh git repo with one worktree per lane, a private
+`CLAUDE_CONFIG_DIR` driver home holding a canned pid-0 transcript per lane, and a
+scratch task backend, all under one throwaway temp root. `spice serve` launched
+with its cwd at that repo discovers **only** these worktrees, so every task-add,
+every watch push, and the Pass S `lane.send` stay inside the fixture. No real
+worktree or agent is touched (`meta.isolation` records this in the trace).
 
 Reproduction:
 
 ```
-PROBE_LANES=8 PROBE_ROUNDS=2 node tests/browser/serve_livebus_latency_probe.js
+PROBE_LANES=8 PROBE_ROUNDS=5 PROBE_SUBMITS=5 \
+  node tests/browser/serve_livebus_latency_probe.js > traces.json
+node tests/browser/serve_livebus_latency_summary.js traces.json
 ```
 
-- **Fixture.** 8 bound targets, subscribed as 8 live lanes, on localhost
+- **Fixture.** 8 seeded worktrees, subscribed as 8 live lanes, on localhost
   (macOS, kqueue detection). Emits are real `spice task add` writes into the
-  scratch backend, one per lane per round.
-- **Clock model.** Server `time.time()` and browser `Date.now()` are both
+  scratch backend, one per lane per round; submits are real `lane.send` frames.
+  The seeded transcripts are near-empty, so the absolute payload-compute numbers
+  reflect assembly and concurrency cost, not large-transcript reads.
+- **Clock model.** Server `time.time()` and browser/node `Date.now()` are both
   epoch-ms on the same host, so cross-process stage deltas are directly
   comparable; `time.perf_counter()` deltas time the CPU-bound compute stages.
-  Instrumentation lives in `_run_watch_loop` (`livebus.py:928-960`), which
-  embeds a `watchTiming` block in each full `lane.payload` push, plus the frame
-  telemetry surfaced through `bus.ping`/`bus.pong` `.diagnostics`.
-- **Stages recorded per card:** emit return -> watcher detection -> signature
-  compute -> payload compute -> socket delivery -> browser render, plus per-kind
+  Instrumentation lives in `_run_watch_loop`, which embeds a `watchTiming` block
+  in each full `lane.payload` push; the submit path is timed by the
+  `serverTiming` block on the `lane.send` reply and `lane.sendTiming` follow-up,
+  plus the per-kind frame telemetry surfaced through `bus.ping`/`bus.pong`.
+- **Emit stages recorded per card:** emit return → watcher detection → signature
+  compute → payload compute → socket delivery → browser render, plus per-kind
   `send_lock` wait/hold and the client-side reconcile frames that follow a card.
-- **Three controlled passes** isolate the amplifier described below:
-  - **Pass A — control.** All 8 lanes focused; the per-card
-    `refreshServerTopology()` amplifier is **stubbed out**. Measures the raw
-    server push cost with no client-driven reconcile.
-  - **Pass C — realistic.** One focused lane, amplifier **live** (production
-    behaviour for a single watched pane).
-  - **Pass B — stress.** All 8 lanes focused, amplifier **live**.
+- **Submit stages recorded per send (Pass S):** browser optimistic render →
+  send-result wait → response handling, and server target-resolve → send-payload
+  (inbox delivery) → reply lock wait/hold → reply write.
+- **Per-pass telemetry isolation.** The server frame counters are zeroed
+  (`bus.ping {reset:true}`, `livebus.py:399-401`) at each pass boundary, so every
+  pass owns its own `send_lock` totals **and maxima** rather than inheriting a
+  cumulative high-water mark.
+- **Four controlled passes**, differing only by focus configuration and by
+  whether they emit or submit — the amplifier is gone from the code, so no pass
+  stubs or re-enables it:
+  - **Pass A — concurrent baseline.** All 8 lanes focused; per-round concurrent
+    task-add fan-out.
+  - **Pass C — realistic single focus.** One focused lane at operator cadence;
+    the remaining 7 lanes coalesce into `lanes.dirty` without delaying the card.
+  - **Pass B — rearm stress.** All 8 lanes focused again after atomic
+    task-event replacements, proving every persistent kqueue watcher rearmed.
+  - **Pass S — real submit.** One real scratch-backed `lane.send` per submit
+    while all 8 lanes stay active; no stubbed transport.
 
-Raw metrics are archived in `serve-livebus-latency-traces.json` beside this doc.
+Raw metrics are archived verbatim in `serve-livebus-latency-traces.json` beside
+this doc. Every table value below is re-derived from that JSON by
+`serve_livebus_latency_summary.js`, which also asserts each `send_lock` total is
+the sum/maximum of its kinds; a value that the summarizer does not print did not
+come from the measurement.
 
 ## Measured results
 
-### Per-stage timing (ms)
+Captured at commit `0d95ce1b` (with this commit's working-tree changes applied;
+`meta.treeDirty=true`), 8 seeded lanes, 5 rounds, 5 submits, macOS/arm64.
 
-Pass A (control — amplifier stubbed, 8 focused), 12 of 16 cards rendered:
+### Emit path — per-stage timing (ms) [MEASURED]
+
+Pass A (8 focused, concurrent fan-out), 40/40 cards rendered:
 
 | Stage | p50 | p90 | max |
 | --- | --- | --- | --- |
-| detection (from emit return) | 39 | 2483 | 7584 |
-| signature | 106 | 128 | 129 |
-| **payload (`messages_payload`)** | **1984** | **3279** | **3507** |
-| socket delivery | ~0 | 2.2 | 2.2 |
-| browser render | 4 | 42 | 43 |
-| **total (emit return -> render)** | **2369** | **3491** | **8605** |
+| `spice task add` return (emit) | 941 | 1503 | 1856 |
+| signature compute | 48 | 59 | 63 |
+| **payload compute** | **1245** | **2189** | **2977** |
+| socket delivery | ~0 | 0.19 | 1.1 |
+| browser render | 3 | 3 | 5 |
+| **total (emit start → render)** | **2729** | **3597** | **3865** |
 
-Pass C (realistic — single focus, amplifier live), 2 of 2 cards rendered:
+Pass C (single focus, 7 lanes coalesced), 5/5 cards rendered:
 
-| Stage | p50 |
-| --- | --- |
-| detection | 2791 |
-| signature | 83 |
-| payload | 1989 |
-| socket delivery | ~0 |
-| browser render | 3 |
-| **total** | **4866** |
+| Stage | p50 | max |
+| --- | --- | --- |
+| `spice task add` return | 431 | 498 |
+| signature compute | 51 | 55 |
+| payload compute | 651 | 940 |
+| **total (emit start → render)** | **1179** | **1405** |
 
-Pass C additionally emitted, for **2 rendered cards**, a client-driven reconcile
-storm: `lane.unsubscribed` ×8, `lane.configured` ×7, `teams.payload` ×4,
-`targets.payload` ×1, `lanes.dirty` ×3.
+Pass B (8 focused after atomic replacements), 40/40 cards rendered:
 
-Pass B (stress — 8 focused, amplifier live): **0 of 16 cards rendered** within
-the 20s per-round budget (a prior run rendered 0.19). Multi-lane delivery
-collapses under the live amplifier.
+| Stage | p50 | p90 | max |
+| --- | --- | --- | --- |
+| `spice task add` return | 984 | 1609 | 2244 |
+| payload compute | 1435 | 2306 | 3413 |
+| **total (emit start → render)** | **2641** | **4162** | **4478** |
 
-### `send_lock` contention (cumulative)
+Every kqueue watcher rearmed after the atomic replacements (Pass B rendered
+40/40, versus the 2/4 the pre-fix build managed), and no per-card reconcile
+storm reappeared: reconcile-frame counts were `targets.payload`/`teams.payload`
+= 0 in every pass; the only `lane.configured` frames (40 in Pass B) come from
+the deliberate focus re-force, not from a card render.
 
-| Pass | frames | wait total | hold total | hold max |
+### Submit path — Pass S, real `lane.send` (ms) [MEASURED]
+
+5/5 sends accepted into the scratch inbox. Browser and server marks:
+
+| Stage | p50 | p90 | max |
+| --- | --- | --- | --- |
+| browser optimistic render | 0.3 | 0.3 | 0.3 |
+| browser send-result wait | 57.5 | 62.1 | 62.1 |
+| browser total | 59.1 | 63.7 | 63.7 |
+| server target resolve | 0.02 | 0.03 | 0.03 |
+| **server send-payload (inbox delivery)** | **56.8** | **61.5** | **61.5** |
+| server reply lock **wait** | 0 | 0 | 0 |
+| server reply lock hold | 0.04 | 0.08 | 0.08 |
+| server reply write | 0.04 | 0.08 | 0.08 |
+| server total | 57.1 | 61.7 | 61.7 |
+
+The whole ~57 ms submit cost is the server's `send_payload` — resolving the
+target and writing the steer into the inbox — not the reply's trip through
+`send_lock`, whose wait is 0 and whose hold is ~0.05 ms.
+
+### `send_lock` contention — isolated per pass [MEASURED]
+
+Each pass owns its counters (reset at the boundary). Totals are the fan-out of
+their kinds; maxima are the maximum across kinds, not a cumulative high-water
+mark:
+
+| Pass | frames | wait max | hold mean | hold max |
 | --- | --- | --- | --- | --- |
-| A | 42 | **0.09 ms** | 19.7 ms | 6.4 ms |
-| C | 30 | **0.06 ms** | 3.5 ms | 6.4 ms |
+| A | 77 | **0.02 ms** | 0.16 ms | 1.65 ms |
+| C | 17 | **0.02 ms** | 0.14 ms | 1.05 ms |
+| B | 127 | **0.01 ms** | 0.14 ms | 1.48 ms |
+| S | 15 | **0 ms** | 0.03 ms | 0.08 ms |
 
-Across every pass and every run, total `send_lock` **wait** never exceeded
-~0.1 ms. The lock is essentially uncontended.
+Across every pass, total `send_lock` **wait** stayed ≤0.02 ms and hold ≤1.65 ms.
+With the encode moved outside the lock, the critical section is a bare socket
+write; the lock is essentially uncontended.
 
-### Subscribe activation
+### Subscribe activation [MEASURED]
 
 `subscribeToActivateMs` (all 8 watchers armed and reporting active) measured
-**4126 ms** against a near-empty scratch backend; separate runs recorded
-**8022 ms** and **>60000 ms** as transcript size / concurrent-append contention
-grew. Activation is a single serialized cost, not per-lane parallel.
+**2422 ms** against the near-empty seeded backend. This is a single serialized
+cost — the eight initial payload builds complete before every lane reports
+active — not a per-lane parallel one, so it grows with lane count and with real
+transcript size [INFERRED for real transcripts].
 
-## Revised diagnosis
+## Diagnosis against the current implementation
 
-**Root cause [MEASURED].** The dominant per-card cost is the `messages_payload`
-compute — p50 ~2.0 s, up to ~3.5 s (and ~4.0 s p50 under heavier concurrent
-append contention in a separate run). Every other server stage is negligible:
-signature ~0.1 s, socket ~0 ms, render ~4 ms. This single stage accounts for
-~80% of the emit->render total in the control pass.
+**Emit root cost is payload compute + the task-add write, not the send path
+[MEASURED].** In the 8-lane concurrent passes the dominant per-card server stage
+is payload compute — p50 1245 ms (Pass A), 1435 ms (Pass B), against p50 651 ms
+for the single-focus Pass C. Signature is ~48 ms, socket ~0 ms, browser render
+~3 ms. The `spice task add` emit itself costs p50 ~0.9 s under concurrency. The
+seeded transcripts are near-empty, so this payload figure is assembly and
+concurrency cost, not large-transcript reads; it is the floor, and grows with
+real transcript size [INFERRED for real transcripts].
 
-**The 8-60s activation is the same cost, ×8 [MEASURED + INFERRED].** Subscribe
-completion (`_complete_lanes_subscribe` -> `_subscription_payload`) builds the
-*same* payload for each lane. Because the compute is GIL-bound Python, the
-`LIVE_BUS_PAYLOAD_WORKERS = 8` pool cannot run them in parallel; the eight
-~2 s builds serialize. Measured 4.1 s against an empty backend **[MEASURED]**;
-this ×8 serialization is what turns into the operator's field-observed 8-60s as
-real transcripts grow **[INFERRED]**. This activation cost is reported here as a
-headline finding, not absorbed into a wider timeout.
+**Concurrent lanes serialize on the GIL [MEASURED + INFERRED].** Payload compute
+is GIL-bound Python, so `LIVE_BUS_PAYLOAD_WORKERS = 8` cannot run the eight
+builds in parallel. The single-focus Pass C (p50 651 ms) versus the 8-focused
+Pass A (p50 1245 ms) on the same fixture is that serialization made visible
+[MEASURED]. The 2422 ms subscribe activation is the same effect at subscribe
+time: the eight initial payload builds complete serially before every lane
+reports active.
 
-**The dominant amplifier is client-driven, not the send path [MEASURED].** Each
-watch-origin card render fires `refreshServerTopology()`
-(`app.live-bus.js:486-487`) = `refreshTargets` + `refreshTeamSnapshot({force:true})`,
-which reconciles **all** lanes. The reconcile-frame counts prove it: 2 rendered
-cards in Pass C produced 8 `lane.unsubscribed` + 7 `lane.configured` + 4
-`teams.payload`. With 8 focused lanes live (Pass B) this becomes an O(n²)
-unsubscribe/reconfigure storm that starves the payload workers and collapses
-render to ~0 **[MEASURED render collapse; O(n²) mechanism INFERRED from the
-reconcile counts + code path]**.
+**`send_lock` serialization is NOT the bottleneck [MEASURED].** With the encode
+moved outside the lock, the critical section is a bare socket write. Total lock
+**wait** stayed ≤0.02 ms across all four passes and hold ≤1.65 ms (§`send_lock`
+above). The pre-fix concern that a bulk lane payload's encode holds the lock
+while a small `lane.sendResult` ack queues behind it no longer applies: the ack
+kinds (`lane.sendResult`, `lane.sendTiming`) show 0 wait in Pass S. There is no
+remaining send-lock latency to remove.
 
-**`send_lock` serialization is NOT the bottleneck [MEASURED].** Total lock wait
-≤0.1 ms across all passes refutes the original claim that cards and the ack
-queue behind each other's encode+write under the one lock. Moving the JSON
-encode outside the lock would save sub-millisecond time and is not worth doing
-for latency.
+**Submit latency is the inbox delivery, not the lock [MEASURED].** Pass S fires a
+real `lane.send` while all eight lanes stay active; 5/5 were accepted. The whole
+~57 ms cost is the server's `send_payload` (resolve target + write the steer to
+the inbox), with reply lock wait 0 and reply hold/write ~0.05 ms each. The reply
+does not queue behind the watcher pushes — the lane.send path is not send-lock
+bound. On localhost this is a ~60 ms round trip end to end; the causal claim the
+trace supports is delivery-write cost, not lock contention.
 
-**True off-focus fan-out is NOT saturating the line [MEASURED + INFERRED].**
+**Off-focus fan-out is coalesced, not saturating the line [MEASURED + INFERRED].**
 Background (unfocused-group) lanes do **not** full-push; they route through
-`coalesce_background_update` (`livebus.py:651`) into a coalesced `lanes.dirty`
-signal with no card render. In the harness, unfocused lanes produced no
-`lane.payload` frames at all — which is exactly why Pass A/B had to *force*
-focus to observe pushes. The "crap on the line when I'm not looking" is
-therefore **not** background lane pushes; it is the client's own per-card
-`refreshServerTopology` reconcile traffic. The follow-up audit above adds the
-critical qualification: members of a visible fused host—and any other lane
-group intersecting the board viewport—are not background and must use the live
-delivery path without requiring a click.
-
-**Submit lag follows from the same CPU contention, not the lock
-[MEASURED + INFERRED].** Since `send_lock` wait is ~0, the ack does not
-meaningfully queue behind watcher pushes. The residual submit lag is the
-dispatch thread (which handles `lane.send` inline) competing for the GIL against
-in-flight ~2 s payload builds and the reconcile storm — the same root cost, seen
-from the submit side.
+`coalesce_background_update` into a coalesced `lanes.dirty` signal with no card
+render (Pass C shows this: 7 background lanes produced 2 `lanes.dirty` frames and
+zero background `lane.payload`). Members of a visible fused host — and any lane
+group intersecting the board viewport — are not background and use the live
+delivery path without a click, per the correctness follow-up above.
 
 ## What is NOT the cause
 
@@ -250,59 +311,60 @@ frame types appeared in `__frameLog`):
 - **Relative timers are display-only** (`updateLiveRelativeTimes`, `app.js:217`),
   so a card reading "5s" is genuine delivery lag, not a timer artifact.
 
-## Original fix proposal
+## Remaining levers
 
-Targets follow directly from the numbers: the emit->render total is
-payload-compute (~2 s) + amplifier (roughly doubles it in the realistic pass);
-kill both and the residual is signature (~0.1 s) + socket (~0) + render
-(~0.004 s) < 300 ms.
+Two of the original proposals are already in the code the trace measured — the
+per-card topology-refresh amplifier is removed, and `_send` encodes outside the
+lock — so they are recorded under [Historical counterfactual](#historical-counterfactual-pre-fix-build)
+below, not proposed again. What the current numbers still point at:
 
-1. **Remove the per-card topology-refresh amplifier
-   (`app.live-bus.js:486-487`) — completed in the task-card follow-up.** A card
-   render must not trigger a full
-   `refreshTargets` + forced `refreshTeamSnapshot`. Topology reconciliation
-   should be event-driven (react to an actual targets/teams change frame) or at
-   most debounced, not fired once per delivered message. **[Biggest single win:
-   removes the Pass-C reconcile storm and the Pass-B render collapse.]**
-2. **Memoize / incrementalize `messages_payload`.** The append-only reads are
-   already incremental per byte-cursor, but the payload *assembly* still costs
-   ~2 s per fire. Cache the built payload and extend it by new bytes only, so a
-   per-card push drops from ~2 s to <100 ms. **Target: sub-second card**
-   (300 ms budget above assumes this).
-3. **Decouple subscribe-activation from the 8× initial payload.** Report a lane
-   `active` as soon as its watcher is armed and stream the first payload when
-   ready, instead of blocking activation on eight serialized ~2 s builds. With
-   (2) in place each build is <100 ms, so even serial 8× activation is <1 s;
-   with streamed activation it is near-instant regardless of transcript size.
-   **Target: near-instant activation, not 8-60s.**
-4. **Do not change `send_lock`, and do not add watcher threads.** Lock wait is
-   measured at ~0; encode-outside-lock saves sub-millisecond and is not worth
-   the churn. More Python threads add no parallelism for the GIL-bound payload
-   compute — reducing the per-fire work (item 2) is the only lever that scales.
-   With the payload cheap and the amplifier gone, the dispatch thread is idle
-   when a submit lands, so the ack is near-instant with no send-path change.
-   **Target: near-instant submit.**
+1. **Payload compute is the emit floor.** Per-card payload assembly is p50
+   ~1.2 s under 8 concurrent lanes (~0.65 s single-lane), and it is GIL-bound so
+   concurrent lanes serialize. Memoizing/incrementalizing the assembly — caching
+   the built payload and extending it by new bytes only — is the lever that
+   scales the emit path and the subscribe activation together. **[MEASURED cost;
+   fix INFERRED.]**
+2. **Subscribe activation is the 8× of that floor.** The 2422 ms activation is
+   the eight initial payload builds serialized before every lane reports active.
+   With (1) in place each build is cheap and even serial activation is sub-second;
+   streaming the first payload after arming the watcher makes it near-instant
+   regardless of transcript size.
+3. **Submit latency is inbox-delivery cost, not the lock.** The ~57 ms Pass S
+   cost is entirely `send_payload` (target resolve + inbox write). If localhost
+   submit latency needs lowering, the lever is the delivery write, not
+   `send_lock` (wait 0) and not more threads (GIL-bound). **[MEASURED.]**
+4. **Do not touch `send_lock` or add watcher threads.** Lock wait is ≤0.02 ms
+   across every pass and the encode already sits outside the lock; there is no
+   latency there to recover, and more Python threads add no parallelism for the
+   GIL-bound payload compute.
 
 ## What the measurements changed
 
 Delta from the original static diagnosis, for the record:
 
-- **Refuted:** "all output serializes through one `send_lock`" and "move JSON
-  encode out of the lock." Measured lock wait ≤0.1 ms — not the bottleneck.
+- **Refuted:** "all output serializes through one `send_lock`." Measured lock
+  wait ≤0.02 ms across all four passes — not the bottleneck. The follow-on
+  "move JSON encode out of the lock" is now done in `_send` (encode-before-lock),
+  so the Pass S ack kinds show 0 wait.
 - **Refuted:** "fan-out is unconditional of focus / off-screen lanes push as
   hard as the focused one." Background lanes coalesce to `lanes.dirty` and do
-  not full-push.
-- **Refined:** "the per-fire CPU work is GIL-serialized" was directionally
-  right, but the specific dominant cost is `messages_payload` *assembly*
-  (~2 s), and its most painful expression is the ×8 subscribe-activation, not
-  steady-state push contention.
-- **New:** the per-card `refreshServerTopology()` amplifier
-  (`app.live-bus.js:486-487`) is the dominant *client-driven* cause of the
-  multi-lane collapse — absent from the original code-only reading.
+  not full-push (Pass C: 7 background lanes, 0 background `lane.payload`).
+- **Confirmed and quantified:** "the per-fire CPU work is GIL-serialized." The
+  single-focus vs 8-focused payload gap (651 ms → 1245 ms p50) and the 2422 ms
+  activation are that serialization measured directly.
 
-## Remaining follow-ups
+## Historical counterfactual (pre-fix build)
 
-The per-card topology refresh is now removed and fused-group focus is corrected.
-The existing dependent work to memoize `messages_payload` and decouple subscribe
-activation from the initial payload compute remains separate. The `send_lock` /
-encode-outside-lock work originally proposed is dropped as measured-unnecessary.
+Recorded so the deltas above are legible; **none of this describes the current
+code.** The first load audit ran against a build that (a) encoded each frame
+*inside* `send_lock`, and (b) fired `refreshServerTopology()` on every watch-origin
+card render (`refreshTargets` + forced `refreshTeamSnapshot`, reconciling all
+lanes). On that build the probe measured a per-card client reconcile storm (a
+single-focus pass produced 8 `lane.unsubscribed` + 7 `lane.configured` + 4
+`teams.payload` for 2 cards) that became an O(n²) unsubscribe/reconfigure storm
+under 8 focused lanes and **collapsed multi-lane render to ~0/16**. The task-card
+correctness follow-up removed that amplifier and rearmed the kqueue watcher on
+atomic replace; the current 8-lane trace renders 40/40 in the same stress pass
+with `targets.payload`/`teams.payload` reconcile counts of 0, and `_send` now
+encodes before the lock. The pre-fix numbers are retained only as the baseline
+those two fixes were measured against.
