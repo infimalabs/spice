@@ -33,8 +33,13 @@ class _Connection:
     def __init__(self) -> None:
         self.sent: list[dict[str, Any]] = []
 
-    def send_json(self, payload: dict[str, Any]) -> None:
-        self.sent.append(payload)
+    def encode_text_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # The session encodes to a frame before taking its send lock; the fake
+        # keeps the payload dict as its "frame" so assertions read it directly.
+        return payload
+
+    def send_frame(self, frame: dict[str, Any]) -> None:
+        self.sent.append(frame)
 
 
 class _StaticHandler:

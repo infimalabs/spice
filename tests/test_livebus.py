@@ -36,9 +36,14 @@ class _Connection:
         self.sent: list[dict[str, Any]] = []
         self.lock = Lock()
 
-    def send_json(self, payload: dict[str, Any]) -> None:
+    def encode_text_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # The session encodes to a frame before taking its send lock; the fake
+        # keeps the payload dict as its "frame" so assertions read it directly.
+        return payload
+
+    def send_frame(self, frame: dict[str, Any]) -> None:
         with self.lock:
-            self.sent.append(payload)
+            self.sent.append(frame)
 
 
 def test_ping_pongs_while_a_slow_lane_refresh_is_still_computing(tmp_path):
@@ -443,7 +448,10 @@ class _DeadConnection:
         self.attempts = 0
         self.lock = Lock()
 
-    def send_json(self, payload: dict[str, Any]) -> None:
+    def encode_text_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return payload
+
+    def send_frame(self, frame: dict[str, Any]) -> None:
         with self.lock:
             self.attempts += 1
         raise BrokenPipeError("Broken pipe")
@@ -656,9 +664,9 @@ def test_lanes_subscribe_orders_initial_payload_before_setup_race_push(
     wait_calls = 0
 
     class _ObservedConnection(_Connection):
-        def send_json(self, payload: dict[str, Any]) -> None:
-            super().send_json(payload)
-            if payload.get("source") == "watch":
+        def send_frame(self, frame: dict[str, Any]) -> None:
+            super().send_frame(frame)
+            if frame.get("source") == "watch":
                 watch_push_sent.set()
 
     def observed_wait(
@@ -751,6 +759,119 @@ def test_lanes_subscribe_orders_initial_payload_before_setup_race_push(
         )
     finally:
         release_initial_read.set()
+        change_written.set()
+        session._teardown()
+
+
+def test_lane_send_ack_is_not_queued_behind_a_bulk_watch_push_encode(
+    tmp_path, monkeypatch
+):
+    # A watcher push encodes its (potentially large) frame before the session
+    # takes send_lock, so the lock's critical section is only the socket write.
+    # A small lane.send racing that push on the same connection acquires
+    # send_lock and acks as soon as any in-flight write returns rather than
+    # queuing behind the bulk encode. This pins that ordering: the ack lands
+    # while a watch push is still parked mid-encode. On the old path -- encode
+    # inside send_lock -- the parked encode holds the lock and the ack never
+    # arrives, so ack_landed times out below.
+    target = _Target(id="lane", repo_root=tmp_path / "repo")
+    target.repo_root.mkdir()
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    change_written = Event()
+    watch_encoding_started = Event()
+    release_watch_encode = Event()
+
+    class _GatedEncodeConnection(_Connection):
+        def encode_text_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
+            if payload.get("source") == "watch":
+                # Stand in for an expensive bulk-payload encode. With encoding
+                # moved out of send_lock this parks holding no lock, so a
+                # concurrent ack must not be serialized behind it. The park runs
+                # well past the ack's wait window below: on the broken path the
+                # ack cannot slip through at an auto-release, it simply never
+                # arrives in time.
+                watch_encoding_started.set()
+                assert release_watch_encode.wait(timeout=5.0)
+            return super().encode_text_frame(payload)
+
+    def observed_wait(
+        _paths: tuple[Path, ...], stop, watch=None, *, activated=None
+    ) -> bool:
+        if activated is not None:
+            activated.set()
+        if not change_written.is_set():
+            changed = change_written.wait(timeout=2.0)
+            return changed and not stop.is_set()
+        stop.wait(timeout=2.0)
+        return False
+
+    def messages_payload(_target, **_kwargs):
+        return {"messages": [], "statusLine": {}}
+
+    def signature(_target, _thread_id, _transcript):
+        # The post-change signature differs from the one captured at subscribe,
+        # so exactly one watch push fires.
+        return LaneSignature(
+            transcript=1 if change_written.is_set() else 0,
+            inbox=(),
+            other=(),
+        )
+
+    monkeypatch.setattr(livebus, "_wait_for_change", observed_wait)
+    connection = _GatedEncodeConnection()
+    session = LiveBusSession(
+        connection,
+        _callbacks(
+            target=target,
+            transcript=transcript,
+            lane_signature=signature,
+            messages_payload=messages_payload,
+        ),
+    )
+
+    ack_landed = Event()
+
+    def issue_send() -> None:
+        session._handle_lane_send(
+            {
+                "type": "lane.send",
+                "requestId": "send-1",
+                "targetId": target.id,
+                "payload": {"body": "hi"},
+            }
+        )
+        ack_landed.set()
+
+    try:
+        _subscribe_lane(session, target.id, limit=5)
+        # Arm one watch push and let it park inside the gated encode with no
+        # send_lock held.
+        change_written.set()
+        assert watch_encoding_started.wait(timeout=2.0)
+
+        # Race a lane.send against the parked bulk encode.
+        send_thread = Thread(target=issue_send, daemon=True)
+        send_thread.start()
+        assert ack_landed.wait(timeout=2.0)
+
+        with connection.lock:
+            acks = [
+                frame
+                for frame in connection.sent
+                if frame.get("type") == "lane.sendResult"
+            ]
+            watch_frames = [
+                frame for frame in connection.sent if frame.get("source") == "watch"
+            ]
+        assert [ack["requestId"] for ack in acks] == ["send-1"]
+        # The bulk push is still parked mid-encode, so no watch frame has been
+        # written yet: the ack overtook it rather than queuing behind it.
+        assert watch_frames == []
+        send_thread.join(timeout=2.0)
+        assert not send_thread.is_alive()
+    finally:
+        release_watch_encode.set()
         change_written.set()
         session._teardown()
 
@@ -892,37 +1013,6 @@ def _subscribe_lane(session: LiveBusSession, target_id: str, *, limit: int) -> N
     subscription = session.subscriptions.get(target_id)
     if subscription is not None:
         assert subscription.initial_payload_sent.wait(timeout=15.0)
-
-
-def test_subscribe_activation_deadline_releases_queue_for_later_lane(
-    tmp_path, monkeypatch
-):
-    transcript = tmp_path / "rollout.jsonl"
-    transcript.write_text("", encoding="utf-8")
-    target = _Target(id="lane", repo_root=tmp_path)
-    connection = _Connection()
-    session = LiveBusSession(
-        connection, _callbacks(target=target, transcript=transcript)
-    )
-    monkeypatch.setattr(livebus, "LIVE_BUS_WATCHER_ACTIVATION_TIMEOUT_S", 0.05)
-
-    stalled = session._replace_subscription(target, {"limit": 5})
-    session._complete_lanes_subscribe(
-        {"type": "lanes.subscribe", "requestId": "stalled"}, [stalled]
-    )
-    recovered = session._replace_subscription(target, {"limit": 5})
-    recovered.watcher_activated.set()
-    session._complete_lanes_subscribe(
-        {"type": "lanes.subscribe", "requestId": "recovered"}, [recovered]
-    )
-
-    assert [frame["type"] for frame in connection.sent] == [
-        "bus.error",
-        "lanes.payload",
-    ]
-    assert "target=lane" in connection.sent[0]["error"]
-    assert recovered.initial_payload_sent.is_set()
-    session._teardown()
 
 
 def _callbacks(

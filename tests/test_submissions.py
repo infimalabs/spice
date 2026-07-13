@@ -220,9 +220,14 @@ class _FrameConnection:
         self.sent: list[dict[str, Any]] = []
         self.lock = Condition()
 
-    def send_json(self, payload: dict[str, Any]) -> None:
+    def encode_text_frame(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # The session encodes to a frame before taking its send lock; the fake
+        # keeps the payload dict as its "frame" so assertions read it directly.
+        return payload
+
+    def send_frame(self, frame: dict[str, Any]) -> None:
         with self.lock:
-            self.sent.append(payload)
+            self.sent.append(frame)
             self.lock.notify_all()
 
 
