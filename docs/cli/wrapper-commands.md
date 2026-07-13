@@ -70,10 +70,18 @@ The complete install, verification, and ownership contract is in
 
 ## Wrapper Groups
 
-Wrapper functions are generated from `[tool.spice.wrappers.<group>]` tables.
-The selected groups come from `[tool.spice.agent] wrappers = [...]`. When no
-list is configured, spice selects the built-in `common` group. An explicit empty
-list disables wrapper generation.
+Wrapper functions are generated from the effective `wrappers.<group>` tables.
+The selected groups come from the effective `agent.wrappers` list. In
+`pyproject.toml` those names are `[tool.spice.wrappers.<group>]` and
+`[tool.spice.agent]`; system, repository, and worktree `spice.toml` files use
+`[wrappers.<group>]` and `[agent]`. When no list is configured, spice selects
+the built-in `common` group. An explicit empty list disables wrapper generation.
+
+The ordinary recursive layer merge applies until the named group boundary. A
+later `[wrappers.common]` replaces the complete inherited `common` group rather
+than merging individual routes. Other scalar and list leaves replace earlier
+values, so `wrappers = []` is the deterministic way to clear an inherited
+selection.
 
 The built-in `common` group contains one `rtk` wrapper. It does not choose
 commands for RTK; it preserves native semantics after RTK selection by routing:
@@ -93,13 +101,13 @@ fail natively rather than selecting an alternate path. Any new transformation
 belongs in the published contract and its executable tests; it is not an
 alternate rewrite selector.
 
-Selecting `common` inherits this global default in full. A repository-local
-`[tool.spice.wrappers.common]` table replaces the whole group atomically at the
-named-group boundary — its routes do not concatenate with the default's — so a
-partial override must re-list every route it still wants. Omitting the table
-inherits the default; `wrappers = []` disables wrapper generation; and a
-`false` group or entry disables that inherited name explicitly. A malformed
-replacement fails through the same named validation path.
+Selecting `common` inherits this global default in full. A later-scope
+`wrappers.common` table replaces the whole group atomically at the named-group
+boundary—its routes do not concatenate with the default's—so a partial override
+must re-list every route it still wants. Omitting the table inherits the
+default; `wrappers = []` disables wrapper generation; and a `false` group or
+entry disables that inherited name explicitly. A malformed replacement fails
+with the winning scope and source path.
 
 Repos that need exact shell-function control can override or extend groups
 (replacing the whole `common` group, so the native reroutes and the `grep -E`
@@ -143,12 +151,18 @@ pre-commit = { argv = ["spice", "dev", "pre-commit"] }
 
 ## Mounted Commands
 
-Repositories declare mounted commands in tracked `pyproject.toml`:
+Mounted commands come from the effective `commands` table. Repositories usually
+declare them in tracked `pyproject.toml`:
 
 ```toml
 [tool.spice.commands]
 release = ["uv", "run", "python", "-m", "spice.release"]
 ```
+
+System, repository, or worktree TOML uses the plain `[commands]` table. Command
+entries merge by dotted command name across scopes; a later leaf replaces the
+earlier argv exactly. `spice config show` reports the winning scope and path for
+each effective command leaf.
 
 `spice release notes` runs the mounted command from the repository root with
 `notes` passed through verbatim. String mounts are shell-split once; list mounts

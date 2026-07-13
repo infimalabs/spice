@@ -73,7 +73,7 @@ def load_config(repo_root: Path) -> LayeredConfig:
     parsed: list[dict[str, Any]] = [dict(packaged.values)]
     layers: list[ConfigLayer] = [packaged]
     for name, path, pyproject in specifications:
-        values, present = _read_toml(path)
+        values, present = _read_toml(path, name)
         if pyproject:
             values = _pyproject_spice_table(values)
         parsed.append(values)
@@ -100,7 +100,7 @@ def load_config(repo_root: Path) -> LayeredConfig:
 def load_packaged_config() -> ConfigLayer:
     """Load the required installed default layer from its canonical path."""
     path = paths.runtime_spice_source() / "spice.toml"
-    values, present = _read_toml(path)
+    values, present = _read_toml(path, SYSTEM_SOURCE)
     if not present:
         raise SpiceError(f"packaged configuration is missing: {path}")
     return ConfigLayer(
@@ -199,16 +199,20 @@ def contextualize_config_error(
     return SpiceError(f"{effective_context(repo_root, *path)}: {detail}")
 
 
-def _read_toml(path: Path) -> tuple[dict[str, Any], bool]:
+def _read_toml(path: Path, source_name: str) -> tuple[dict[str, Any], bool]:
     try:
         with path.open("rb") as handle:
             loaded = tomllib.load(handle)
     except FileNotFoundError:
         return {}, False
     except tomllib.TOMLDecodeError as exc:
-        raise SpiceError(f"invalid TOML in {path}: {exc}") from exc
+        raise SpiceError(
+            f"invalid TOML for configuration source={source_name} path={path}: {exc}"
+        ) from exc
     except OSError as exc:
-        raise SpiceError(f"cannot read configuration {path}: {exc}") from exc
+        raise SpiceError(
+            f"cannot read configuration source={source_name} path={path}: {exc}"
+        ) from exc
     return loaded, True
 
 
