@@ -579,18 +579,19 @@ def test_claude_tool_inventory_keeps_the_no_subagent_boundary_distinct():
     assert CLAUDE_DENIED_TOOLS == (
         *CLAUDE_NO_SUBAGENT_TOOLS,
         *CLAUDE_NATIVE_TASK_TOOLS,
+        "Monitor",
     )
 
 
-def test_claude_command_denies_the_complete_task_tool_inventory(tmp_path):
+def test_claude_supervised_command_denies_complete_lifecycle_inventory(tmp_path):
     command = CLAUDE_DRIVER.build_exec_command(
         repo_root=tmp_path,
         prompt="follow the skill",
     )
     settings = json.loads(command[command.index("--settings") + 1])
 
-    deny = settings["permissions"]["deny"]
-    assert deny == [
+    assert command[1] == "--print"
+    assert settings["permissions"]["deny"] == [
         "Task",
         "Agent",
         "TaskCreate",
@@ -599,6 +600,7 @@ def test_claude_command_denies_the_complete_task_tool_inventory(tmp_path):
         "TaskUpdate",
         "TaskOutput",
         "TaskStop",
+        "Monitor",
     ]
 
 

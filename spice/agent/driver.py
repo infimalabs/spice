@@ -505,10 +505,15 @@ CLAUDE_NATIVE_TASK_TOOLS = (
     "TaskOutput",
     "TaskStop",
 )
-# Monitor is intentionally outside this inventory; its background-lifecycle
-# contract belongs to sibling task FOUNDAT-1kCyNZT3. Cron, Workflow,
-# SendMessage, and future Spice task-tool emulation are separate concerns too.
-CLAUDE_DENIED_TOOLS = (*CLAUDE_NO_SUBAGENT_TOOLS, *CLAUDE_NATIVE_TASK_TOOLS)
+# Monitor is Claude Code's canonical background-task tool as of 2.1.98. It is
+# intentionally outside the native task inventory because its lifecycle
+# contract is distinct. Cron, Workflow, SendMessage, and future Spice task-tool
+# emulation are separate concerns too.
+CLAUDE_DENIED_TOOLS = (
+    *CLAUDE_NO_SUBAGENT_TOOLS,
+    *CLAUDE_NATIVE_TASK_TOOLS,
+    "Monitor",
+)
 # Claude Code reads this at launch and takes it as the token count at which it
 # reactively summarizes the conversation, taking precedence over its own
 # `/config` auto-compact setting. Left unset, a session can run toward its
