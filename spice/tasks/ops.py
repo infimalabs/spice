@@ -437,6 +437,7 @@ def done(
     validation: list[str],
     judgment: str | None = None,
     notes: list[str] | None = None,
+    chain_next: bool = False,
 ) -> str:
     if not validation:
         raise SpiceError("task done requires --validation")
@@ -479,7 +480,13 @@ def done(
     next_line = next_task_drain_line()
     if result.endswith(" -> review"):
         next_line = next_task_drain_line(review_assignment=True)
-    return "\n".join([result, *sync.notes, learning_line, next_line])
+    if not chain_next:
+        return "\n".join([result, *sync.notes, learning_line, next_line])
+    # Deferred to keep the read-side render -> ops dependency acyclic at import
+    # time while reusing exactly the allocator continuation behind `task next`.
+    from spice.tasks import render
+
+    return "\n".join([result, *sync.notes, learning_line, render.render_next()])
 
 
 def _distill_task_done_learnings(
