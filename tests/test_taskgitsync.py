@@ -313,6 +313,74 @@ def test_integrate_and_publish_converges_after_consecutive_publish_races(
     assert _git(repo, "status", "--porcelain") == ""
 
 
+def test_publish_storm_hook_failure_recovers_then_keeps_every_peer_path(
+    tmp_path, monkeypatch
+):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    real_run = gitsync._run
+    push_attempts = 0
+    update_attempts = 0
+    successful_local_heads: list[str] = []
+
+    def storm_then_reject(repo_root: Path, *args: str):
+        nonlocal push_attempts, update_attempts
+        if repo_root == repo and args and args[0] == "push":
+            push_attempts += 1
+            if push_attempts <= 2:
+                name = f"peer-{push_attempts}.txt"
+                (peer / name).write_text(
+                    f"peer landed first {push_attempts}\n", encoding="utf-8"
+                )
+                _run(peer, "git", "add", name)
+                _run(peer, "git", "commit", "-m", f"peer work {push_attempts}")
+                _run(peer, "git", "push", "origin", "main")
+        if repo_root == repo and args[:2] == ("update-ref", "refs/heads/main"):
+            update_attempts += 1
+            if update_attempts == 3:
+                return subprocess.CompletedProcess(
+                    ["git", "-C", str(repo), *args],
+                    1,
+                    stdout="",
+                    stderr="reference-transaction hook rejected storm retry\n",
+                )
+            successful_local_heads.append(args[2])
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", storm_then_reject)
+
+    with pytest.raises(SpiceError, match="hook rejected storm retry"):
+        gitsync.integrate_and_publish("TASK-1kCzStorm", repo_root=repo)
+
+    assert push_attempts == 2
+    assert update_attempts == 3
+    assert _git(repo, "rev-parse", "HEAD") == successful_local_heads[-1]
+    assert _git(repo, "status", "--porcelain") == ""
+    assert _git(repo, "show", "HEAD:peer-1.txt") == "peer landed first 1"
+
+    result = gitsync.integrate_and_publish("TASK-1kCzStorm", repo_root=repo)
+    merge_head = _uda_map(result.uda_args)["done_merge_head"]
+    published = _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0]
+
+    assert published == merge_head
+    assert _git(repo, "show", f"{merge_head}:agent.txt") == "agent work"
+    assert _git(repo, "show", f"{merge_head}:peer-1.txt") == "peer landed first 1"
+    assert _git(repo, "show", f"{merge_head}:peer-2.txt") == "peer landed first 2"
+    assert _git(repo, "status", "--porcelain") == ""
+
+
 def test_integrate_and_publish_surfaces_recovery_when_races_never_stop(
     tmp_path, monkeypatch
 ):
@@ -376,17 +444,30 @@ def test_integrate_and_publish_reports_local_head_ref_lock_race(tmp_path, monkey
     _run(repo, "git", "commit", "-m", "agent work")
     agent_head = _git(repo, "rev-parse", "HEAD")
     real_run = gitsync._run
-    ff_attempts = 0
+    update_attempts = 0
     raced_head = ""
 
     def racing_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-        nonlocal ff_attempts, raced_head
-        if repo_root == repo and args[:2] == ("merge", "--ff-only"):
-            ff_attempts += 1
-            (repo / "raced.txt").write_text("local race\n", encoding="utf-8")
-            _run(repo, "git", "add", "raced.txt")
-            _run(repo, "git", "commit", "-m", "local race")
-            raced_head = _git(repo, "rev-parse", "HEAD")
+        nonlocal update_attempts, raced_head
+        if repo_root == repo and args[:2] == ("update-ref", "refs/heads/main"):
+            update_attempts += 1
+            raced_head = _git(
+                repo,
+                "commit-tree",
+                _git(repo, "rev-parse", f"{agent_head}^{{tree}}"),
+                "-p",
+                agent_head,
+                "-m",
+                "local race",
+            )
+            _run(
+                repo,
+                "git",
+                "update-ref",
+                "refs/heads/main",
+                raced_head,
+                agent_head,
+            )
             return subprocess.CompletedProcess(
                 ["git", "-C", str(repo), *args],
                 128,
@@ -413,7 +494,7 @@ def test_integrate_and_publish_reports_local_head_ref_lock_race(tmp_path, monkey
         )
 
     message = str(exc_info.value)
-    assert ff_attempts == 1
+    assert update_attempts == 1
     assert "HEAD moved while spice was advancing the generated task commit" in message
     assert "task state was not advanced" in message
     assert "git status --short" in message
@@ -837,7 +918,7 @@ def test_publish_race_retry_enforces_out_of_scope_guard(tmp_path, monkeypatch):
     )
 
 
-def test_integrate_and_publish_treats_missing_merge_head_abort_as_cleared(
+def test_integrate_and_publish_computes_merge_before_materializing_tree(
     tmp_path, monkeypatch
 ):
     remote = tmp_path / "remote.git"
@@ -861,27 +942,22 @@ def test_integrate_and_publish_treats_missing_merge_head_abort_as_cleared(
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
     real_run = gitsync._run
-    abort_attempts = 0
-    reset_attempts = 0
+    observed: dict[str, str] = {}
 
-    def missing_merge_head_abort(
-        repo_root: Path, *args: str
-    ) -> subprocess.CompletedProcess[str]:
-        nonlocal abort_attempts, reset_attempts
-        if repo_root == repo and args == ("merge", "--abort"):
-            abort_attempts += 1
-            (repo / ".git" / "MERGE_HEAD").unlink(missing_ok=True)
-            return subprocess.CompletedProcess(
-                ["git", "-C", str(repo), *args],
-                128,
-                stdout="",
-                stderr="fatal: There is no merge to abort (MERGE_HEAD missing).\n",
+    def observe_atomic_update(repo_root: Path, *args: str):
+        if repo_root == repo and args[:2] == ("update-ref", "refs/heads/main"):
+            candidate = args[2]
+            observed["head_before_update"] = _git(repo, "rev-parse", "HEAD")
+            observed["index_tree_before_update"] = _git(repo, "write-tree")
+            observed["candidate_tree"] = _git(
+                repo, "rev-parse", f"{candidate}^{{tree}}"
             )
-        if repo_root == repo and args == ("reset", "--hard", "HEAD"):
-            reset_attempts += 1
+            observed["baseline_content"] = (repo / "baseline.txt").read_text(
+                encoding="utf-8"
+            )
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", missing_merge_head_abort)
+    monkeypatch.setattr(gitsync, "_run", observe_atomic_update)
 
     result = gitsync.integrate_and_publish(
         "TASK-20260101T000000000007Z",
@@ -896,8 +972,12 @@ def test_integrate_and_publish_treats_missing_merge_head_abort_as_cleared(
     captured = _uda_map(result.uda_args)
     merge_head = captured["done_merge_head"]
 
-    assert abort_attempts == 1
-    assert reset_attempts == 1
+    assert observed == {
+        "head_before_update": agent_head,
+        "index_tree_before_update": observed["candidate_tree"],
+        "candidate_tree": observed["candidate_tree"],
+        "baseline_content": "baseline work\n",
+    }
     assert captured["done_head"] == agent_head
     assert captured["done_upstream_head"] == upstream_head
     assert _merge_parents(repo, merge_head) == [upstream_head, agent_head]
@@ -905,7 +985,68 @@ def test_integrate_and_publish_treats_missing_merge_head_abort_as_cleared(
     assert _git(repo, "status", "--porcelain") == ""
 
 
-def test_integrate_and_publish_hook_aborted_marker_state_guides_retry(
+def test_reference_hook_failure_restores_clean_pre_merge_state(tmp_path, monkeypatch):
+    remote = tmp_path / "remote.git"
+    _run(tmp_path, "git", "init", "--bare", "-b", "main", str(remote))
+    repo = _init_repo(tmp_path / "agent")
+    _run(repo, "git", "remote", "add", "origin", str(remote))
+    _run(repo, "git", "push", "-u", "origin", "main")
+    _run(repo, "git", "remote", "set-head", "origin", "--auto")
+
+    (repo / "agent.txt").write_text("agent work\n", encoding="utf-8")
+    _run(repo, "git", "add", "agent.txt")
+    _run(repo, "git", "commit", "-m", "agent work")
+    agent_head = _git(repo, "rev-parse", "HEAD")
+    agent_tree = _git(repo, "rev-parse", "HEAD^{tree}")
+
+    peer = tmp_path / "peer"
+    _run(tmp_path, "git", "clone", str(remote), str(peer))
+    _configure_git_identity(peer)
+    (peer / "baseline.txt").write_text("baseline work\n", encoding="utf-8")
+    _run(peer, "git", "add", "baseline.txt")
+    _run(peer, "git", "commit", "-m", "baseline work")
+    _run(peer, "git", "push", "origin", "main")
+    upstream_head = _git(peer, "rev-parse", "HEAD")
+
+    real_run = gitsync._run
+    observed: dict[str, str] = {}
+
+    def reject_ref_transaction(repo_root: Path, *args: str):
+        if repo_root == repo and args[:2] == ("update-ref", "refs/heads/main"):
+            candidate = args[2]
+            observed["head"] = _git(repo, "rev-parse", "HEAD")
+            observed["materialized_tree"] = _git(repo, "write-tree")
+            observed["candidate_tree"] = _git(
+                repo, "rev-parse", f"{candidate}^{{tree}}"
+            )
+            return subprocess.CompletedProcess(
+                ["git", "-C", str(repo), *args],
+                1,
+                stdout="",
+                stderr="reference-transaction hook rejected prepared update\n",
+            )
+        return real_run(repo_root, *args)
+
+    monkeypatch.setattr(gitsync, "_run", reject_ref_transaction)
+
+    with pytest.raises(SpiceError, match="reference-transaction hook rejected"):
+        gitsync.integrate_and_publish("TASK-1kCzAtomic", repo_root=repo)
+
+    assert observed == {
+        "head": agent_head,
+        "materialized_tree": observed["candidate_tree"],
+        "candidate_tree": observed["candidate_tree"],
+    }
+    assert _git(repo, "rev-parse", "HEAD") == agent_head
+    assert _git(repo, "write-tree") == agent_tree
+    assert _git(repo, "status", "--porcelain") == ""
+    assert _git(repo, "ls-files") == "README.md\nagent.txt"
+    assert _git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == (
+        upstream_head
+    )
+
+
+def test_integrate_and_publish_builds_recoverable_conflict_without_ref_hook(
     tmp_path, monkeypatch
 ):
     remote = tmp_path / "remote.git"
@@ -928,75 +1069,39 @@ def test_integrate_and_publish_hook_aborted_marker_state_guides_retry(
     _run(peer, "git", "push", "origin", "main")
     upstream_head = _git(peer, "rev-parse", "HEAD")
     real_run = gitsync._run
-    merge_attempts = 0
+    merge_tree_attempts = 0
 
-    def hook_aborted_run(
+    def observe_merge_tree(
         repo_root: Path, *args: str
     ) -> subprocess.CompletedProcess[str]:
-        nonlocal merge_attempts
-        if (
-            repo_root == repo
-            and args[:3] == ("merge", "--no-ff", "--no-commit")
-            and merge_attempts == 0
-        ):
-            merge_attempts += 1
-            (repo / "README.md").write_text(
-                "<<<<<<< HEAD\n"
-                "agent work\n"
-                "=======\n"
-                "baseline work\n"
-                ">>>>>>> origin/main\n",
-                encoding="utf-8",
-            )
-            return subprocess.CompletedProcess(
-                ["git", "-C", str(repo), *args],
-                1,
-                stdout="",
-                stderr="reference-transaction hook failed before MERGE_HEAD\n",
-            )
+        nonlocal merge_tree_attempts
+        if repo_root == repo and args[:2] == ("merge-tree", "--write-tree"):
+            merge_tree_attempts += 1
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", hook_aborted_run)
+    monkeypatch.setattr(gitsync, "_run", observe_merge_tree)
 
     with pytest.raises(gitsync.MergeConflict) as exc_info:
         gitsync.integrate_and_publish("TASK-20260101T000000000005Z", repo_root=repo)
 
     message = str(exc_info.value)
-    assert merge_attempts == 1
-    assert "without an open MERGE_HEAD" in message
+    assert merge_tree_attempts == 1
+    assert "git is paused in a merge state" in message
     assert "README.md" in message
-    assert "do not use plain `git commit`" in message
-    assert "commit while MERGE_HEAD exists" not in message
-    assert (
-        "git commit-tree $(git write-tree) -p HEAD -p origin/main "
-        '-m "Resolve baseline overlap for TASK-20260101T000000000005Z"'
-    ) in message
-    assert (
-        'git update-ref refs/heads/$(git branch --show-current) "$merge_commit"'
-        in message
-    )
-    assert _merge_head_missing(repo)
+    assert "commit while MERGE_HEAD exists" in message
+    assert _git(repo, "rev-parse", "--verify", "MERGE_HEAD") == upstream_head
+    assert _git(repo, "status", "--porcelain") == "UU README.md"
 
-    (repo / "README.md").write_text("resolved hook-aborted work\n", encoding="utf-8")
+    (repo / "README.md").write_text("resolved merge-tree work\n", encoding="utf-8")
     _run(repo, "git", "add", "README.md")
-    rescue_merge = _git(
-        repo,
-        "commit-tree",
-        _git(repo, "write-tree"),
-        "-p",
-        "HEAD",
-        "-p",
-        "origin/main",
-        "-m",
-        "Resolve baseline overlap for TASK-20260101T000000000005Z",
-    )
     _run(
         repo,
         "git",
-        "update-ref",
-        f"refs/heads/{_git(repo, 'branch', '--show-current')}",
-        rescue_merge,
+        "commit",
+        "-m",
+        "Resolve baseline overlap for TASK-20260101T000000000005Z",
     )
+    rescue_merge = _git(repo, "rev-parse", "HEAD")
     assert _git(repo, "status", "--porcelain") == ""
 
     result = gitsync.integrate_and_publish(
@@ -1037,101 +1142,56 @@ def _hook_aborted_merge_repositories(tmp_path):
     return repo, agent_head, upstream_head
 
 
-def _install_hook_aborted_merge(repo, monkeypatch):
+def _observe_merge_tree(repo, monkeypatch):
     attempts = [0]
 
     real_run = gitsync._run
 
-    def hook_aborted_run(
-        repo_root: Path, *args: str
-    ) -> subprocess.CompletedProcess[str]:
-        if (
-            repo_root == repo
-            and args[:3] == ("merge", "--no-ff", "--no-commit")
-            and attempts[0] == 0
-        ):
+    def observing_run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        if repo_root == repo and args[:2] == ("merge-tree", "--write-tree"):
             attempts[0] += 1
-            # A reference-transaction hook aborted the merge after it wrote the
-            # working tree but before MERGE_HEAD: the conflicted file carries
-            # markers and the clean peer file rides along untracked, so nothing
-            # is staged and the index still equals HEAD.
-            (repo / "README.md").write_text(
-                "<<<<<<< HEAD\n"
-                "agent work\n"
-                "=======\n"
-                "baseline work\n"
-                ">>>>>>> origin/main\n",
-                encoding="utf-8",
-            )
-            (repo / "peer.txt").write_text("peer feature\n", encoding="utf-8")
-            return subprocess.CompletedProcess(
-                ["git", "-C", str(repo), *args],
-                1,
-                stdout="",
-                stderr="reference-transaction hook failed before MERGE_HEAD\n",
-            )
         return real_run(repo_root, *args)
 
-    monkeypatch.setattr(gitsync, "_run", hook_aborted_run)
+    monkeypatch.setattr(gitsync, "_run", observing_run)
     return attempts
 
 
-def _stage_hook_aborted_resolution(repo):
+def _stage_merge_tree_resolution(repo):
     (repo / "README.md").write_text("resolved work\n", encoding="utf-8")
     _run(repo, "git", "add", "--", "README.md")
-    conflict_only_tree = _git(repo, "write-tree")
-    _run(repo, "git", "add", "-A")
     merged_tree = _git(repo, "write-tree")
     merged_names = set(_git(repo, "ls-tree", "--name-only", merged_tree).split())
-    conflict_only_names = set(
-        _git(repo, "ls-tree", "--name-only", conflict_only_tree).split()
-    )
     cached_names = set(_git(repo, "diff", "--cached", "--name-only").split())
-    return merged_tree, merged_names, conflict_only_names, cached_names
+    return merged_tree, merged_names, cached_names
 
 
-def test_hook_aborted_marker_recovery_preserves_clean_peer_file(tmp_path, monkeypatch):
+def test_merge_tree_conflict_state_preserves_clean_peer_file(tmp_path, monkeypatch):
     repo, agent_head, upstream_head = _hook_aborted_merge_repositories(tmp_path)
-    merge_attempts = _install_hook_aborted_merge(repo, monkeypatch)
+    merge_attempts = _observe_merge_tree(repo, monkeypatch)
 
     with pytest.raises(gitsync.MergeConflict) as exc_info:
         gitsync.integrate_and_publish("TASK-20260101T000000000009Z", repo_root=repo)
 
     message = str(exc_info.value)
     assert merge_attempts == [1]
-    assert "git add -A" in message  # the recipe stages every merged path
-    assert _merge_head_missing(repo)
+    assert "commit while MERGE_HEAD exists" in message
+    assert _git(repo, "rev-parse", "--verify", "MERGE_HEAD") == upstream_head
 
-    # Follow the printed recipe. Staging only the conflict writes one tree;
-    # staging the whole merged tree writes another that also carries the
-    # untracked peer file. The two trees differ by exactly that peer file, so
-    # the fixed recipe is what keeps peer work the old `git add -- <file>`
-    # would have dropped.
-    merged_tree, merged_names, conflict_only_names, cached_names = (
-        _stage_hook_aborted_resolution(repo)
-    )
-    assert "peer.txt" in merged_names  # the fixed recipe keeps the peer file
-    assert merged_names - conflict_only_names == {"peer.txt"}
-    assert "peer.txt" in cached_names  # git diff --cached now shows the peer change
+    # The clean peer file is already in the index before the agent resolves the
+    # overlap, so staging only the conflicted path still writes the whole merge.
+    merged_tree, merged_names, cached_names = _stage_merge_tree_resolution(repo)
+    assert "peer.txt" in merged_names
+    assert "peer.txt" in cached_names
 
-    rescue_merge = _git(
-        repo,
-        "commit-tree",
-        merged_tree,
-        "-p",
-        "HEAD",
-        "-p",
-        "origin/main",
-        "-m",
-        "Resolve baseline overlap for TASK-20260101T000000000009Z",
-    )
     _run(
         repo,
         "git",
-        "update-ref",
-        f"refs/heads/{_git(repo, 'branch', '--show-current')}",
-        rescue_merge,
+        "commit",
+        "-m",
+        "Resolve baseline overlap for TASK-20260101T000000000009Z",
     )
+    rescue_merge = _git(repo, "rev-parse", "HEAD")
+    assert _git(repo, "rev-parse", f"{rescue_merge}^{{tree}}") == merged_tree
     assert _git(repo, "status", "--porcelain") == ""
 
     result = gitsync.integrate_and_publish(

@@ -58,6 +58,18 @@ checklist.
   deferred by a far-future wait date.
 - Priority classes derive SLA due dates.
 - Git sync happens only at task boundaries.
+- Task completion computes each baseline merge with `merge-tree` before it
+  mutates the checked-out repository. A conflict is installed in this order:
+  marker-bearing tree, complete higher-stage index, merge message and original
+  head, then `MERGE_HEAD`. Therefore the visible terminal state is either the
+  untouched pre-merge tree or a recoverable merge carrying the baseline parent;
+  a reference hook cannot strand loose markers between those states.
+- A clean task merge is synthesized with the baseline as first parent and the
+  task line as second parent. Its complete tree reaches the index and worktree
+  before one compare-and-swap update of the checked-out branch. A rejected or
+  raced ref transaction restores the actual current head with `read-tree`,
+  which does not invoke another ref hook. A publish race repeats this sequence
+  against the newly fetched baseline, preserving every peer path before retry.
 
 ## Serve
 
