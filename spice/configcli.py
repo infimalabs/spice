@@ -25,6 +25,12 @@ def configure_config_parser(subparsers: Any) -> None:
     )
     system.set_defaults(func=handle_config)
 
+    defaults_action = actions.add_parser(
+        "defaults",
+        help="Print the classification inventory for exported defaults.",
+    )
+    defaults_action.set_defaults(func=handle_config)
+
     say = actions.add_parser("say", help="Configure speech playback.")
     say.add_argument(
         "--backend",
@@ -102,9 +108,15 @@ def _handle_system(args: argparse.Namespace, repo_root: Path) -> int:
     return 0
 
 
+def _handle_defaults(args: argparse.Namespace, repo_root: Path) -> int:
+    _ = repo_root
+    print(json.dumps(config.default_classifications(), indent=2, sort_keys=True))
+    return 0
+
+
 def _handle_say(args: argparse.Namespace, repo_root: Path) -> int:
     if args.clear:
-        config.clear_section(repo_root, config.SAY_KEY)
+        config.clear_worktree_section(repo_root, config.SAY_KEY)
         print("say config cleared")
         return 0
     values: dict[str, Any] = {}
@@ -123,19 +135,19 @@ def _handle_say(args: argparse.Namespace, repo_root: Path) -> int:
         print(_say_config_summary(repo_root))
         return 0
     _validate_say_config(repo_root, values)
-    config.update_section(repo_root, config.SAY_KEY, values)
+    config.set_worktree_section(repo_root, config.SAY_KEY, values)
     print(_say_config_summary(repo_root))
     return 0
 
 
 def _handle_judge(args: argparse.Namespace, repo_root: Path) -> int:
     if args.clear:
-        config.clear_section(repo_root, config.JUDGE_KEY)
+        config.clear_worktree_section(repo_root, config.JUDGE_KEY)
         print("judge config cleared")
         return 0
     if not args.judge_bin or not args.judge_bin.strip():
         raise SpiceError("config judge requires --bin")
-    config.update_section(
+    config.set_worktree_section(
         repo_root, config.JUDGE_KEY, {config.JUDGE_BIN_KEY: args.judge_bin.strip()}
     )
     print(f"judge_bin={config.configured_judge_bin(repo_root)}")
@@ -148,7 +160,7 @@ def _handle_agent(args: argparse.Namespace, repo_root: Path) -> int:
         if scope == "project":
             config.clear_project_agent_config(repo_root)
         else:
-            config.clear_section(repo_root, config.AGENT_KEY)
+            config.clear_worktree_section(repo_root, config.AGENT_KEY)
         print(f"agent {scope} config cleared")
         return 0
     values: dict[str, str] = {}
@@ -164,20 +176,20 @@ def _handle_agent(args: argparse.Namespace, repo_root: Path) -> int:
     if scope == "project":
         config.update_project_agent_config(repo_root, values)
     else:
-        config.update_section(repo_root, config.AGENT_KEY, values)
+        config.set_worktree_section(repo_root, config.AGENT_KEY, values)
     print(_agent_config_summary(repo_root))
     return 0
 
 
 def _handle_personality(args: argparse.Namespace, repo_root: Path) -> int:
     if args.clear:
-        config.clear_section(repo_root, config.AGENT_KEY)
+        config.clear_worktree_section(repo_root, config.AGENT_KEY)
         print("personality config cleared")
         return 0
     if not args.value:
         print(f"personality={config.configured_agent_personality(repo_root)}")
         return 0
-    config.update_section(
+    config.set_worktree_section(
         repo_root, config.AGENT_KEY, {config.AGENT_PERSONALITY_KEY: args.value}
     )
     print(f"personality={args.value}")
@@ -187,6 +199,7 @@ def _handle_personality(args: argparse.Namespace, repo_root: Path) -> int:
 _CONFIG_ACTIONS = {
     "show": _handle_show,
     "system": _handle_system,
+    "defaults": _handle_defaults,
     "say": _handle_say,
     "judge": _handle_judge,
     "agent": _handle_agent,
@@ -208,7 +221,7 @@ def _agent_config_summary(repo_root: Path) -> str:
 
 
 def _validate_say_config(repo_root: Path, values: dict[str, Any]) -> None:
-    state = config.read_config_state(repo_root)
+    state = config.read_worktree_config(repo_root)
     section = state.get(config.SAY_KEY)
     candidate = dict(section) if isinstance(section, dict) else {}
     candidate.update(values)

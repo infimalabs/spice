@@ -429,7 +429,7 @@ def test_maxim_proposals_cli_prints_raw_candidates_with_config_state_unchanged(
         'message = "Avoid fallback branches. Use one deterministic path."',
     ]
     assert pyproject.read_text(encoding="utf-8") == "[tool.spice]\n"
-    assert maxims.resolved_maxim_bags(repo) == maxims.BUILTIN_MAXIM_BAGS
+    assert maxims.resolved_maxim_bags(repo) == maxims.packaged_maxim_bags()
 
 
 def test_maxim_propose_help_names_candidate_contract(capsys):
@@ -501,7 +501,7 @@ def test_maxim_propose_cli_files_and_reports_inspectable_hidden_task(
     assert "project .maxim_proposal" in show_output
     assert "[tool.spice.maxims.fallbacks]" in show_output
     assert "Fallback branches hide the deterministic path." in show_output
-    assert maxims.resolved_maxim_bags(maxim_task_repo) == maxims.BUILTIN_MAXIM_BAGS
+    assert maxims.resolved_maxim_bags(maxim_task_repo) == maxims.packaged_maxim_bags()
 
 
 def test_maxim_propose_cli_reports_no_candidate_history_without_install(
@@ -599,7 +599,7 @@ def test_maxim_file_proposals_cli_creates_deferred_hidden_triage_task(
     assert capsys.readouterr().out.strip() == "no tasks"
     assert hidden_list.func(hidden_list) == 0
     assert "Triage maxim proposal: fallbacks" in capsys.readouterr().out
-    assert maxims.resolved_maxim_bags(maxim_task_repo) == maxims.BUILTIN_MAXIM_BAGS
+    assert maxims.resolved_maxim_bags(maxim_task_repo) == maxims.packaged_maxim_bags()
 
 
 def _record_ack_source(

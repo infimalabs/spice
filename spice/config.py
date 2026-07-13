@@ -6,40 +6,42 @@ import json
 import re
 import subprocess
 import sys
+import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from spice import defaults
 from spice.configlayer import ConfigLayer as ConfigLayer
 from spice.configlayer import LayeredConfig as LayeredConfig
 from spice.configlayer import load_config as load_config
+from spice.errors import SpiceError
 from spice.paths import (
-    atomic_write_json,
     atomic_write_text,
-    read_json,
     repo_root_from_cwd,
     state_dir,
 )
-from spice.repocfg import agent_table
+from spice.repocfg import agent_table, read_tool_table
 
-CONFIG_RELATIVE_PATH = Path("config") / "state.json"
-CONFIG_SCHEMA_VERSION = 1
+WORKTREE_CONFIG_RELATIVE_PATH = Path("config") / "spice.toml"
+LEGACY_CONFIG_STATE_RELATIVE_PATH = Path("config") / "state.json"
+WORKTREE_CONFIG_SECTIONS = ("say", "judge", "agent")
 
 SAY_KEY = "say"
 SAY_BACKEND_KEY = "backend"
-SAY_BACKEND_CHOICES = ("say", "external")
-DEFAULT_SAY_BACKEND = "say"
+SAY_BACKEND_CHOICES = defaults.strings("say", "backend_choices")
+DEFAULT_SAY_BACKEND = defaults.string("say", "backend")
 SAY_COMMAND_KEY = "command"
 SAY_CONTENT_TYPE_KEY = "content_type"
-DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = "audio/wav"
+DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = defaults.string("say", "external_content_type")
 SAY_VOICE_KEY = "voice"
 SAY_WORDS_PER_MINUTE_KEY = "words_per_minute"
-DEFAULT_SAY_WORDS_PER_MINUTE = 175
+DEFAULT_SAY_WORDS_PER_MINUTE = defaults.integer("say", "words_per_minute")
 
 AGENT_KEY = "agent"
 AGENT_PERSONALITY_KEY = "personality"
-AGENT_PERSONALITY_CHOICES = ("none", "friendly", "pragmatic")
-DEFAULT_AGENT_PERSONALITY = "pragmatic"
+AGENT_PERSONALITY_CHOICES = defaults.strings("agent", "personality_choices")
+DEFAULT_AGENT_PERSONALITY = defaults.string("agent", "personality")
 AGENT_MODEL_KEY = "model"
 AGENT_EFFORT_KEY = "effort"
 AGENT_DRIVER_KEY = "driver"
@@ -47,95 +49,203 @@ AGENT_LAUNCH_KEYS = (AGENT_MODEL_KEY, AGENT_EFFORT_KEY, AGENT_DRIVER_KEY)
 
 JUDGE_KEY = "judge"
 JUDGE_BIN_KEY = "bin"
-DEFAULT_JUDGE_BIN = "afm-cli"
-PORTABLE_JUDGE_BIN = "spice-judge"
+DEFAULT_JUDGE_BIN = defaults.string("judge", "bin")
+PORTABLE_JUDGE_BIN = defaults.string("judge", "portable_bin")
 PROJECT_AGENT_TABLE = "tool.spice.agent"
 _TOML_TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
 _TOML_ASSIGN_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
 
 
-def config_state_path(repo_root: Path) -> Path:
-    return state_dir(repo_root) / CONFIG_RELATIVE_PATH
+def worktree_config_path(repo_root: Path) -> Path:
+    """Path to this worktree's local TOML configuration layer."""
+    return state_dir(repo_root) / WORKTREE_CONFIG_RELATIVE_PATH
 
 
-def read_config_state(repo_root: Path) -> dict[str, Any]:
-    data = read_json(config_state_path(repo_root))
-    data.setdefault("schema", CONFIG_SCHEMA_VERSION)
-    return data
+def _legacy_config_state_path(repo_root: Path) -> Path:
+    return state_dir(repo_root) / LEGACY_CONFIG_STATE_RELATIVE_PATH
 
 
-def write_config_state(repo_root: Path, state: dict[str, Any]) -> Path:
-    return atomic_write_json(config_state_path(repo_root), state)
+def read_worktree_config(repo_root: Path) -> dict[str, Any]:
+    """Return the worktree TOML config, migrating legacy JSON state first."""
+    _ensure_worktree_config_migrated(repo_root)
+    return _load_worktree_toml(repo_root)
+
+
+def _load_worktree_toml(repo_root: Path) -> dict[str, Any]:
+    path = worktree_config_path(repo_root)
+    try:
+        with path.open("rb") as handle:
+            return tomllib.load(handle)
+    except FileNotFoundError:
+        return {}
+    except tomllib.TOMLDecodeError as exc:
+        raise SpiceError(f"invalid TOML in {path}: {exc}") from exc
+    except OSError as exc:
+        raise SpiceError(f"cannot read configuration {path}: {exc}") from exc
 
 
 def _section(repo_root: Path, key: str) -> dict[str, Any]:
-    value = read_config_state(repo_root).get(key)
+    value = read_worktree_config(repo_root).get(key)
     return value if isinstance(value, dict) else {}
 
 
-def update_section(repo_root: Path, key: str, values: dict[str, Any]) -> Path:
-    state = read_config_state(repo_root)
-    section = dict(_section(repo_root, key))
-    section.update(values)
-    state[key] = section
-    return write_config_state(repo_root, state)
+def set_worktree_section(repo_root: Path, key: str, values: Mapping[str, Any]) -> Path:
+    """Merge `values` into the worktree TOML `[key]` table, preserving the rest.
+
+    Unrelated tables, comments, key ordering, and scalar types outside the
+    touched keys survive the round trip; a structured line edit rewrites only
+    the `[key]` table's assignments.
+    """
+    _ensure_worktree_config_migrated(repo_root)
+    lines = _read_worktree_config_lines(repo_root)
+    _apply_worktree_table(lines, key, dict(values))
+    return _write_worktree_config_lines(repo_root, lines)
 
 
-def clear_section(repo_root: Path, key: str) -> Path:
-    state = read_config_state(repo_root)
-    state.pop(key, None)
-    return write_config_state(repo_root, state)
+def clear_worktree_section(repo_root: Path, key: str) -> Path:
+    """Remove the worktree TOML `[key]` table, preserving unrelated content."""
+    _ensure_worktree_config_migrated(repo_root)
+    lines = _read_worktree_config_lines(repo_root)
+    _remove_worktree_table(lines, key)
+    return _write_worktree_config_lines(repo_root, lines)
+
+
+def _ensure_worktree_config_migrated(repo_root: Path) -> None:
+    """Migrate a schema-1 ``state.json`` into the worktree TOML exactly once.
+
+    The TOML write lands durably before the JSON source is deleted, so a failed
+    migration leaves ``state.json`` intact and raises an actionable error; once
+    the JSON file is gone no caller reads it again.
+    """
+    legacy = _legacy_config_state_path(repo_root)
+    if not legacy.exists():
+        return
+    try:
+        raw = json.loads(legacy.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SpiceError(f"cannot migrate legacy config state {legacy}: {exc}") from exc
+    sections = {
+        key: dict(value)
+        for key in WORKTREE_CONFIG_SECTIONS
+        if isinstance(raw, Mapping)
+        and isinstance(value := raw.get(key), Mapping)
+        and value
+    }
+    if sections:
+        try:
+            lines = _read_worktree_config_lines(repo_root)
+            for table, values in sections.items():
+                _apply_worktree_table(lines, table, values)
+            _write_worktree_config_lines(repo_root, lines)
+        except OSError as exc:
+            raise SpiceError(
+                "cannot migrate legacy config state to "
+                f"{worktree_config_path(repo_root)}: {exc}"
+            ) from exc
+    legacy.unlink()
+
+
+def _read_worktree_config_lines(repo_root: Path) -> list[str]:
+    path = worktree_config_path(repo_root)
+    try:
+        return path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise SpiceError(f"cannot read configuration {path}: {exc}") from exc
+
+
+def _write_worktree_config_lines(repo_root: Path, lines: list[str]) -> Path:
+    text = "\n".join(lines) + "\n" if lines else ""
+    return atomic_write_text(worktree_config_path(repo_root), text)
+
+
+def _apply_worktree_table(
+    lines: list[str], table: str, values: Mapping[str, Any]
+) -> None:
+    if not values:
+        return
+    start, end = _toml_table_bounds(lines, table)
+    if start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append(f"[{table}]")
+        lines.extend(_toml_assignment(key, value) for key, value in values.items())
+        return
+    rewritten: list[str] = []
+    seen: set[str] = set()
+    for line in lines[start + 1 : end]:
+        key = _toml_assignment_key(line)
+        if key is not None and key in values:
+            seen.add(key)
+            rewritten.append(_toml_assignment(key, values[key]))
+            continue
+        rewritten.append(line)
+    rewritten.extend(
+        _toml_assignment(key, value) for key, value in values.items() if key not in seen
+    )
+    lines[start + 1 : end] = rewritten
+
+
+def _remove_worktree_table(lines: list[str], table: str) -> None:
+    start, end = _toml_table_bounds(lines, table)
+    if start is not None:
+        del lines[start:end]
 
 
 def config_overview(repo_root: Path) -> dict[str, Any]:
     return {
-        "schema": CONFIG_SCHEMA_VERSION,
         "project": {AGENT_KEY: project_agent_config(repo_root)},
-        "worktree": read_config_state(repo_root),
+        "worktree": read_worktree_config(repo_root),
         "effective": {AGENT_KEY: effective_agent_config(repo_root)},
     }
+
+
+def default_classifications() -> dict[str, str]:
+    """Classify exported defaults for configuration diagnostics."""
+    return defaults.export_classifications()
 
 
 def _root_or_current(repo_root: Path | None) -> Path | None:
     return repo_root if repo_root is not None else repo_root_from_cwd()
 
 
+def _effective_section(root: Path | None, key: str) -> dict[str, Any]:
+    raw = read_tool_table(root).get(key)
+    return raw if isinstance(raw, dict) else {}
+
+
+def _configured_value(root: Path | None, section: str, key: str) -> Any:
+    local = _section(root, section).get(key) if root is not None else None
+    return local if local is not None else _effective_section(root, section).get(key)
+
+
 def configured_say_voice(repo_root: Path | None = None) -> str | None:
     root = _root_or_current(repo_root)
-    if root is None:
-        return None
-    raw = _section(root, SAY_KEY).get(SAY_VOICE_KEY)
+    raw = _configured_value(root, SAY_KEY, SAY_VOICE_KEY)
     return str(raw).strip() or None if raw else None
 
 
 def configured_say_backend(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
-    if root is None:
-        return DEFAULT_SAY_BACKEND
-    raw = str(_section(root, SAY_KEY).get(SAY_BACKEND_KEY) or "").strip()
+    raw = str(_configured_value(root, SAY_KEY, SAY_BACKEND_KEY) or "").strip()
     return raw if raw in SAY_BACKEND_CHOICES else DEFAULT_SAY_BACKEND
 
 
 def configured_say_command(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
-    if root is None:
-        return ""
-    return str(_section(root, SAY_KEY).get(SAY_COMMAND_KEY) or "").strip()
+    return str(_configured_value(root, SAY_KEY, SAY_COMMAND_KEY) or "").strip()
 
 
 def configured_say_content_type(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
-    if root is None:
-        return DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
-    raw = str(_section(root, SAY_KEY).get(SAY_CONTENT_TYPE_KEY) or "").strip()
+    raw = str(_configured_value(root, SAY_KEY, SAY_CONTENT_TYPE_KEY) or "").strip()
     return raw or DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
 
 
 def configured_say_words_per_minute(repo_root: Path | None = None) -> int | None:
     root = _root_or_current(repo_root)
-    if root is None:
-        return None
-    raw = _section(root, SAY_KEY).get(SAY_WORDS_PER_MINUTE_KEY)
+    raw = _configured_value(root, SAY_KEY, SAY_WORDS_PER_MINUTE_KEY)
     if raw is None:
         return None
     try:
@@ -147,9 +257,7 @@ def configured_say_words_per_minute(repo_root: Path | None = None) -> int | None
 
 def configured_agent_personality(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
-    if root is None:
-        return DEFAULT_AGENT_PERSONALITY
-    raw = str(_section(root, AGENT_KEY).get(AGENT_PERSONALITY_KEY) or "").strip()
+    raw = str(_configured_value(root, AGENT_KEY, AGENT_PERSONALITY_KEY) or "").strip()
     return raw if raw in AGENT_PERSONALITY_CHOICES else DEFAULT_AGENT_PERSONALITY
 
 
@@ -313,8 +421,19 @@ def _toml_assignments(values: Mapping[str, str]) -> dict[str, str]:
     return {key: _toml_assignment(key, value) for key, value in values.items()}
 
 
-def _toml_assignment(key: str, value: str) -> str:
-    return f"{key} = {json.dumps(value)}"
+def _toml_assignment(key: str, value: Any) -> str:
+    return f"{key} = {_toml_scalar(value)}"
+
+
+def _toml_scalar(value: Any) -> str:
+    """Render a scalar as valid TOML, preserving bool/int types across the trip."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    return json.dumps(str(value))
 
 
 def default_judge_bin() -> str:
@@ -329,9 +448,9 @@ def default_judge_bin() -> str:
 
 def configured_judge_bin(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
-    if root is None:
-        return default_judge_bin()
-    raw = str(_section(root, JUDGE_KEY).get(JUDGE_BIN_KEY) or "").strip()
+    raw = str(_configured_value(root, JUDGE_KEY, JUDGE_BIN_KEY) or "").strip()
+    if raw == DEFAULT_JUDGE_BIN and sys.platform != "darwin":
+        return PORTABLE_JUDGE_BIN
     return raw or default_judge_bin()
 
 

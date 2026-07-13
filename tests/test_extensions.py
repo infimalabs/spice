@@ -122,7 +122,7 @@ def test_agent_driver_registry_loads_toy_driver_from_fixture_wheel(
     monkeypatch.syspath_prepend(str(wheel))
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
 
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.AGENT_KEY,
         {config.AGENT_DRIVER_KEY: "toy"},

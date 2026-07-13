@@ -13,16 +13,23 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from spice import defaults
 from spice.errors import SpiceError
 from spice.locking import FileLockUnavailable, lock_fd_exclusive, unlock_fd
 from spice.paths import require_repo_root
 from spice.repocfg import locks_table
 
-DEFAULT_LOCK_CONTENTION_EXIT_CODE = 75
-DEFAULT_CHOSEN_SHARD_CONTENTION_EXIT_CODE = 76
-DEFAULT_POOL_EXHAUSTION_EXIT_CODE = 77
+DEFAULT_LOCK_CONTENTION_EXIT_CODE = defaults.integer(
+    "locks", "lock_contention_exit_code"
+)
+DEFAULT_CHOSEN_SHARD_CONTENTION_EXIT_CODE = defaults.integer(
+    "locks", "chosen_shard_contention_exit_code"
+)
+DEFAULT_POOL_EXHAUSTION_EXIT_CODE = defaults.integer(
+    "locks", "pool_exhaustion_exit_code"
+)
 MAX_EXIT_CODE = 255
-LOCK_STATE_ROOT = Path(".spice") / "locks"
+LOCK_STATE_ROOT = Path(defaults.string("locks", "state_root"))
 
 
 @dataclass(frozen=True)

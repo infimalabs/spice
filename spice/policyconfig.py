@@ -15,12 +15,12 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import cast
 
-from spice import policy
+from spice import defaults, policy
 from spice.errors import SpiceError
 from spice.repocfg import policy_table
 
 _COMMIT_TRAILER_KEY_RE = re.compile(r"^[A-Za-z0-9-]+$")
-FLEX_JITTER_PERCENT = 5
+FLEX_JITTER_PERCENT = defaults.integer("policy", "flex", "jitter_percent")
 FLEX_JITTER_BUCKETS = (FLEX_JITTER_PERCENT * 2) + 1
 
 
