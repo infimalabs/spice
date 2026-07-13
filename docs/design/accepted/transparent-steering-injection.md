@@ -33,11 +33,21 @@ The native harness or shell startup hook must hand the complete top-level shell
 command string to `spice agent run` exactly once. `agent run` owns RTK rewrite
 because it is the only layer that sees the full shell string before execution.
 [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer is an optional output
-optimization: exit `0` or `3` with non-empty stdout rewrites, exit `1` with
+optimization: Exit `0` or Exit `3` with non-empty stdout rewrites, Exit `1` with
 empty stdout leaves the command unmatched, and unusable results preserve the
 native command with a bounded diagnostic. The complete protocol and
 agent-scoped `RTK_DB_PATH` ownership are in
 [CONFIG.md](../../../CONFIG.md#rtk-rewrite-companion).
+
+The layered `rtk.executable` setting accepts one trusted executable basename or
+absolute path. Resolution performs no availability lookup: activation, Doctor,
+and `agent run` invoke the exact winning identity. RTK owns rewrite selection
+and emits the canonical `rtk` frontend; Spice remaps that frontend to the
+configured executable and owns only the built-in `common` wrapper's finite
+post-selection routes. Spice chooses the thread-scoped `RTK_DB_PATH` location
+at `.git/spice/agents/<thread>/rtk/history.db`, RTK owns its history contents,
+and activation `rtk_status`, Doctor, plus bounded stderr diagnostics provide
+health telemetry without selecting commands.
 
 ## Shells
 

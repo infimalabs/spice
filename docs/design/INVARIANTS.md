@@ -25,6 +25,19 @@ checklist.
 - Side-channel startup uses an explicit hello protocol.
 - Context-meter cache and repeat windows prevent noisy pressure spam while
   still surfacing rollover risk.
+- The layered `rtk.executable` setting is one trusted executable basename or
+  absolute path. Resolution does no availability lookup; every probe and
+  rewrite invokes the exact winning identity.
+- RTK owns rewrite selection and its canonical `rtk` frontend. Exit `0` or
+  Exit `3` with non-empty stdout rewrites, Exit `1` with empty stdout is a
+  no-match, and other or malformed outcomes are diagnosed and discarded so the
+  original native command runs unchanged.
+- Spice remaps the canonical frontend to the configured executable, owns only
+  the built-in `common` wrapper's finite post-selection routes and the
+  thread-scoped `RTK_DB_PATH` location at
+  `.git/spice/agents/<thread>/rtk/history.db`, and publishes health telemetry
+  through activation `rtk_status`, Doctor, and bounded stderr diagnostics. RTK
+  owns the history contents.
 
 ## Lifecycle
 

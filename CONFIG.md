@@ -28,6 +28,21 @@ rtk --version
 rtk rewrite -- git status
 ```
 
+The `rtk.executable` leaf participates in the standard four-layer precedence.
+Tracked pyproject configuration uses:
+
+```toml
+[tool.spice.rtk]
+executable = "rtk"
+```
+
+System, repository, and worktree `spice.toml` files use the plain `[rtk]`
+table. The value is one trusted executable basename or absolute path, not a
+shell command. Resolution performs no availability lookup; activation, Doctor,
+and `agent run` invoke the exact winning identity so missing executables become
+observable health or native-fallback outcomes rather than a different resolver
+silently winning.
+
 `spice agent run` passes the command after `--`. Exit `0` or Exit `3` with
 non-empty stdout rewrites; Exit `1` with empty stdout leaves it unmatched.
 Launch failure, malformed output, and every other exit/stdout combination emit
@@ -39,6 +54,14 @@ Activation and Doctor report missing, obsolete, or protocol-invalid RTK as
 native-command mode without blocking agent setup. Cargo installation and the
 complete protocol live in the
 [wrapper contract](docs/cli/wrapper-commands.md#rtk-rewrite-protocol).
+
+RTK owns rewrite selection and emits the canonical `rtk` frontend in matched
+output. Spice remaps only that frontend to the configured executable, then the
+built-in `common` wrapper may apply its finite semantic routes; neither layer is
+another selector. Spice also chooses the thread-scoped `RTK_DB_PATH` location,
+while RTK owns the history database contents. Activation `rtk_status`, the
+Doctor row, and bounded repeat-suppressed stderr diagnostics are health
+telemetry; they never authorize a rewrite or replace the native command.
 
 ## Worktree Speech
 

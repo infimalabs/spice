@@ -60,10 +60,35 @@ server deployment. Worker worktrees are operated trees: config can shape agent
 defaults and policy in those trees, but it does not choose a different spice
 source checkout, import path, or virtualenv for the running code.
 
-The agent shell also requires
-[RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer. Install and protocol
-details live in [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion); this is a
-runtime companion requirement, not a tracked project setting.
+The agent shell can optionally use
+[RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer as a command-output
+optimizer. Missing, obsolete, or invalid RTK selects reported native-command
+mode without blocking activation. Install and protocol details live in
+[CONFIG.md](../../CONFIG.md#rtk-rewrite-companion).
+
+## `[tool.spice.rtk]`
+
+RTK executable identity is a standard layered setting:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `executable` | `"rtk"` | One trusted executable basename or absolute path. Relative paths, whitespace-delimited command strings, and argv lists are invalid. |
+
+The tracked form is `[tool.spice.rtk]`; system, repository, and worktree
+`spice.toml` files use `[rtk]`. Later scopes replace `rtk.executable` normally,
+and `spice config show` reports its winning scope and path. Resolution retains
+the exact value and performs no `which`, existence, or executable probe.
+Activation, Doctor, and `spice agent run` then invoke that exact identity.
+
+Exit `0` or Exit `3` with non-empty stdout applies a rewrite. Exit `1` with
+empty stdout is a silent no-match. Other or malformed outcomes are diagnosed,
+discarded, and the original native command runs unchanged. RTK owns rewrite
+selection and the canonical `rtk` frontend; Spice remaps that frontend to the
+configured identity, owns only the built-in `common` wrapper's finite
+post-selection routes and the thread-scoped `RTK_DB_PATH` location at
+`.git/spice/agents/<thread>/rtk/history.db`, and emits health telemetry through
+activation `rtk_status`, Doctor, and bounded stderr diagnostics. RTK owns the
+history database contents.
 
 Task-boundary and worktree-discovery git commands have a 120-second default
 deadline; network fetch and push default to 30 seconds. Set

@@ -42,8 +42,9 @@ The wrapper does this before running the requested command:
 
 - prints pending operator steering and keep-working guidance on stderr;
 - preserves ACK semantics by leaving inbox retirement to transcript ACK lines;
-- asks optional [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer for a
-  rewritten shell command string or direct argv when its health is active;
+- asks optional [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer for each
+  eligible shell command string or direct argv, falling back to the native
+  command whenever that attempt is unusable;
 - routes git through the worktree shadow environment;
 - routes `spice` and `python` commands to the correct worktree source checkout
   or target repository virtual environment;
@@ -59,9 +60,19 @@ repeat-suppressed diagnostic and execute the original native command unchanged.
 Rewrite selection optimizes command output; it does not grant command
 permission.
 
-RTK is the sole owner of rewrite selection. Spice sets `RTK_DB_PATH` to the
-current agent thread's `.git/spice/agents/<thread>/rtk/history.db` and owns only
-that history location plus the finite command-shape transformations below.
+The layered `rtk.executable` setting accepts one trusted executable basename or
+absolute path. Spice performs no earlier availability lookup: health probes and
+rewrites invoke the exact winning identity. RTK remains the sole owner of
+rewrite selection and emits a canonical `rtk` frontend; Spice remaps only that
+frontend to the configured identity before applying any finite post-selection
+route below.
+
+Spice sets `RTK_DB_PATH` to the current agent thread's
+`.git/spice/agents/<thread>/rtk/history.db` and owns that location, while RTK
+owns its history contents. Activation `rtk_status`, Doctor, and bounded,
+repeat-suppressed stderr diagnostics are health telemetry, not rewrite
+selectors. The built-in `common` wrapper owns only the finite command-shape
+transformations below.
 The complete install, verification, and ownership contract is in
 [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion).
 
