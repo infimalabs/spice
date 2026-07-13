@@ -1,0 +1,388 @@
+{
+  "meta": {
+    "source": "tests/browser/serve_livebus_latency_probe.js",
+    "probeLanes": 8,
+    "probeRounds": 2,
+    "host": "localhost/macOS-kqueue",
+    "note": "passA=amplifier stubbed(8 focused); passC=realistic single-focus amplifier-live; passB=8-focus stress amplifier-live"
+  },
+  "subscribeToActivateMs": 4126,
+  "passA": {
+    "renderRate": 0.75,
+    "renderedCount": 12,
+    "sampleCount": 16,
+    "reconcileFrames": {
+      "targets.payload": 0,
+      "teams.payload": 0,
+      "lanes.dirty": 1,
+      "lane.unsubscribed": 0,
+      "lane.configured": 0
+    },
+    "sendLock": {
+      "totals": {
+        "count": 42,
+        "waitTotalMs": 0.09,
+        "waitMeanMs": 0,
+        "holdTotalMs": 19.72,
+        "holdMeanMs": 0.47
+      },
+      "perKind": {
+        "bus.pong": {
+          "count": 3,
+          "waitTotalMs": 0.04,
+          "waitMeanMs": 0.01,
+          "waitMaxMs": 0.02,
+          "holdTotalMs": 0.78,
+          "holdMeanMs": 0.26,
+          "holdMaxMs": 0.37
+        },
+        "lane.payload": {
+          "count": 37,
+          "waitTotalMs": 0.04,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0.02,
+          "holdTotalMs": 18.65,
+          "holdMeanMs": 0.5,
+          "holdMaxMs": 6.42
+        },
+        "lane.pending": {
+          "count": 1,
+          "waitTotalMs": 0,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.11,
+          "holdMeanMs": 0.11,
+          "holdMaxMs": 0.11
+        },
+        "lanes.dirty": {
+          "count": 1,
+          "waitTotalMs": 0,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.18,
+          "holdMeanMs": 0.18,
+          "holdMaxMs": 0.18
+        }
+      }
+    },
+    "stages": {
+      "addDurationMs": {
+        "n": 16,
+        "min": 856,
+        "p50": 1100,
+        "p90": 1214,
+        "max": 1240,
+        "mean": 1075.88
+      },
+      "detectionFromReturnMs": {
+        "n": 12,
+        "min": -296.77,
+        "p50": 38.51,
+        "p90": 2483.16,
+        "max": 7584.18,
+        "mean": 928.34
+      },
+      "detectionFromStartMs": {
+        "n": 12,
+        "min": 823.4,
+        "p50": 1101.51,
+        "p90": 3604.16,
+        "max": 8753.18,
+        "mean": 1974.34
+      },
+      "signatureMs": {
+        "n": 12,
+        "min": 40.59,
+        "p50": 105.84,
+        "p90": 128.31,
+        "max": 129.02,
+        "mean": 93.35
+      },
+      "payloadMs": {
+        "n": 12,
+        "min": 704.24,
+        "p50": 1983.64,
+        "p90": 3278.55,
+        "max": 3507.16,
+        "mean": 1814.73
+      },
+      "detectToSendMs": {
+        "n": 12,
+        "min": 744.88,
+        "p50": 2081.57,
+        "p90": 3370.13,
+        "max": 3635.53,
+        "mean": 1908.17
+      },
+      "socketMs": {
+        "n": 12,
+        "min": -0.62,
+        "p50": -0.01,
+        "p90": 2.22,
+        "max": 2.23,
+        "mean": 0.21
+      },
+      "renderMs": {
+        "n": 12,
+        "min": 3,
+        "p50": 4,
+        "p90": 42,
+        "max": 43,
+        "mean": 9.92
+      },
+      "totalFromReturnMs": {
+        "n": 12,
+        "min": 787,
+        "p50": 2369,
+        "p90": 3491,
+        "max": 8605,
+        "mean": 2846.5
+      },
+      "totalFromStartMs": {
+        "n": 12,
+        "min": 1850,
+        "p50": 3413,
+        "p90": 4510,
+        "max": 9774,
+        "mean": 3892.5
+      }
+    }
+  },
+  "passC": {
+    "renderRate": 1,
+    "renderedCount": 2,
+    "sampleCount": 2,
+    "reconcileFrames": {
+      "targets.payload": 1,
+      "teams.payload": 4,
+      "lanes.dirty": 3,
+      "lane.unsubscribed": 8,
+      "lane.configured": 7
+    },
+    "sendLock": {
+      "totals": {
+        "count": 30,
+        "waitTotalMs": 0.06,
+        "waitMeanMs": 0,
+        "holdTotalMs": 3.49,
+        "holdMeanMs": 0.12
+      },
+      "perKind": {
+        "bus.pong": {
+          "count": 2,
+          "waitTotalMs": 0,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0.02,
+          "holdTotalMs": 0.19,
+          "holdMeanMs": 0.09,
+          "holdMaxMs": 0.37
+        },
+        "lane.configured": {
+          "count": 7,
+          "waitTotalMs": 0,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0.01,
+          "holdTotalMs": 0.06,
+          "holdMeanMs": 0.01,
+          "holdMaxMs": 0.24
+        },
+        "lane.payload": {
+          "count": 5,
+          "waitTotalMs": 0,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0.02,
+          "holdTotalMs": 1.2,
+          "holdMeanMs": 0.24,
+          "holdMaxMs": 6.42
+        },
+        "lanes.dirty": {
+          "count": 3,
+          "waitTotalMs": 0.04,
+          "waitMeanMs": 0.01,
+          "waitMaxMs": 0.03,
+          "holdTotalMs": 0.6,
+          "holdMeanMs": 0.2,
+          "holdMaxMs": 0.3
+        },
+        "targets.payload": {
+          "count": 1,
+          "waitTotalMs": 0,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.39,
+          "holdMeanMs": 0.39,
+          "holdMaxMs": 0.39
+        },
+        "teams.payload": {
+          "count": 4,
+          "waitTotalMs": 0.01,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.55,
+          "holdMeanMs": 0.14,
+          "holdMaxMs": 0.28
+        },
+        "lane.unsubscribed": {
+          "count": 8,
+          "waitTotalMs": 0.01,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0,
+          "holdTotalMs": 0.5,
+          "holdMeanMs": 0.06,
+          "holdMaxMs": 0.09
+        }
+      }
+    },
+    "stages": {
+      "addDurationMs": {
+        "n": 2,
+        "min": 1320,
+        "p50": 1782,
+        "p90": 1782,
+        "max": 1782,
+        "mean": 1551
+      },
+      "detectionFromReturnMs": {
+        "n": 2,
+        "min": 2133.69,
+        "p50": 2790.94,
+        "p90": 2790.94,
+        "max": 2790.94,
+        "mean": 2462.31
+      },
+      "detectionFromStartMs": {
+        "n": 2,
+        "min": 3915.69,
+        "p50": 4110.94,
+        "p90": 4110.94,
+        "max": 4110.94,
+        "mean": 4013.31
+      },
+      "signatureMs": {
+        "n": 2,
+        "min": 74.95,
+        "p50": 82.98,
+        "p90": 82.98,
+        "max": 82.98,
+        "mean": 78.97
+      },
+      "payloadMs": {
+        "n": 2,
+        "min": 1799.24,
+        "p50": 1988.91,
+        "p90": 1988.91,
+        "max": 1988.91,
+        "mean": 1894.07
+      },
+      "detectToSendMs": {
+        "n": 2,
+        "min": 1874.29,
+        "p50": 2072,
+        "p90": 2072,
+        "max": 2072,
+        "mean": 1973.15
+      },
+      "socketMs": {
+        "n": 2,
+        "min": 0.04,
+        "p50": 0.09,
+        "p90": 0.09,
+        "max": 0.09,
+        "mean": 0.07
+      },
+      "renderMs": {
+        "n": 2,
+        "min": 0,
+        "p50": 3,
+        "p90": 3,
+        "max": 3,
+        "mean": 1.5
+      },
+      "totalFromReturnMs": {
+        "n": 2,
+        "min": 4008,
+        "p50": 4866,
+        "p90": 4866,
+        "max": 4866,
+        "mean": 4437
+      },
+      "totalFromStartMs": {
+        "n": 2,
+        "min": 5790,
+        "p50": 6186,
+        "p90": 6186,
+        "max": 6186,
+        "mean": 5988
+      }
+    }
+  },
+  "passB": {
+    "renderRate": 0,
+    "renderedCount": 0,
+    "sampleCount": 16,
+    "reconcileFrames": {
+      "targets.payload": 0,
+      "teams.payload": 0,
+      "lanes.dirty": 0,
+      "lane.unsubscribed": 0,
+      "lane.configured": 0
+    },
+    "sendLock": {
+      "totals": {
+        "count": 4,
+        "waitTotalMs": 0,
+        "waitMeanMs": 0,
+        "holdTotalMs": 0.43,
+        "holdMeanMs": 0.11
+      },
+      "perKind": {
+        "bus.pong": {
+          "count": 4,
+          "waitTotalMs": 0,
+          "waitMeanMs": 0,
+          "waitMaxMs": 0.02,
+          "holdTotalMs": 0.43,
+          "holdMeanMs": 0.11,
+          "holdMaxMs": 0.37
+        }
+      }
+    },
+    "stages": {
+      "addDurationMs": {
+        "n": 16,
+        "min": 1668,
+        "p50": 2001,
+        "p90": 2204,
+        "max": 2267,
+        "mean": 1980.94
+      },
+      "detectionFromReturnMs": {
+        "n": 0
+      },
+      "detectionFromStartMs": {
+        "n": 0
+      },
+      "signatureMs": {
+        "n": 0
+      },
+      "payloadMs": {
+        "n": 0
+      },
+      "detectToSendMs": {
+        "n": 0
+      },
+      "socketMs": {
+        "n": 0
+      },
+      "renderMs": {
+        "n": 0
+      },
+      "totalFromReturnMs": {
+        "n": 0
+      },
+      "totalFromStartMs": {
+        "n": 0
+      }
+    }
+  }
+}
