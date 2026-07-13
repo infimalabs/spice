@@ -371,6 +371,10 @@ def test_serve_lanes_batch_subscribe_smoke_asserts_coalesced_single_render() -> 
     assert "batchPhaseFocusWhilePending" in smoke
     assert "state.releaseDeferredSubscribe" in smoke
     assert "result.visibleHostLiveWithoutFocus !== true" in smoke
+    assert "batchPhaseTopologyActivity" in smoke
+    assert "result.topologyDirectChildMutationCount !== 0" in smoke
+    assert "result.splitMemberFocused !== false" in smoke
+    assert "result.fusedMemberFocused !== true" in smoke
     assert "result.pendingSelectedFocus !== true" in smoke
     assert "result.preReleaseFocusConfigureCount !== 0" in smoke
     assert "result.focusConfigureCount !== 0" in smoke
