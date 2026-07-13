@@ -56,6 +56,14 @@ RTK_GIT_REROUTE_FLAGS = (
     "--name-status",
     "--name-only",
 )
+# rtk grep delegates to the platform grep, whose default BASIC dialect reads
+# rg-authored | + ? ( ) as literals. Injecting -E ahead of the caller's
+# arguments makes extended regular expressions the default so supervised agents
+# do not silently reinterpret intended ERE patterns as BRE. A caller's explicit
+# -F or -G, later in argv, still wins because grep honors the last matcher flag;
+# repeated -E is harmless; and unsupported or conflicting backend flags pass
+# through unchanged to fail natively rather than selecting an alternate path.
+RTK_GREP_ERE_ARGV = ("rtk", "grep", "-E")
 BUILTIN_AGENT_WRAPPER_GROUPS = {
     DEFAULT_AGENT_WRAPPER_GROUP: {
         "rtk": {
@@ -75,6 +83,10 @@ BUILTIN_AGENT_WRAPPER_GROUPS = {
                     "head": "git",
                     "flags": list(RTK_GIT_REROUTE_FLAGS),
                     "argv": ["git"],
+                },
+                {
+                    "head": "grep",
+                    "argv": list(RTK_GREP_ERE_ARGV),
                 },
             ],
         },
