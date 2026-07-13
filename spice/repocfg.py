@@ -15,12 +15,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from spice.configlayer import (
-    PYPROJECT_SOURCE,
-    REPOSITORY_SOURCE,
-    load_config,
-    load_packaged_config,
-)
+from spice.configlayer import load_config, load_packaged_config
 
 
 def read_pyproject(repo_root: Path) -> dict[str, Any]:
@@ -62,17 +57,6 @@ def tasks_table(repo_root: Path | None) -> dict[str, Any]:
 def agent_table(repo_root: Path | None) -> dict[str, Any]:
     value = read_tool_table(repo_root).get("agent")
     return value if isinstance(value, dict) else {}
-
-
-def project_agent_table(repo_root: Path) -> dict[str, Any]:
-    """Tracked agent values only: pyproject, then repository overrides."""
-    layered = load_config(repo_root)
-    merged: dict[str, Any] = {}
-    for source in (PYPROJECT_SOURCE, REPOSITORY_SOURCE):
-        value = layered.layer(source).values.get("agent")
-        if isinstance(value, Mapping):
-            merged.update(_thaw_mapping(value))
-    return merged
 
 
 def agent_wrapper_definitions_table(repo_root: Path | None) -> dict[str, Any]:

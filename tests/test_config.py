@@ -347,7 +347,11 @@ def _write_legacy_state(repo_root, payload):
     return legacy
 
 
-def test_worktree_config_migrates_legacy_state_json_exactly_once(tmp_path):
+def test_worktree_config_migrates_legacy_state_json_exactly_once(tmp_path, monkeypatch):
+    fsync_calls: list[int] = []
+    monkeypatch.setattr(
+        "spice.paths.os.fsync", lambda descriptor: fsync_calls.append(descriptor)
+    )
     legacy = _write_legacy_state(
         tmp_path,
         {
@@ -367,6 +371,7 @@ def test_worktree_config_migrates_legacy_state_json_exactly_once(tmp_path):
     }
     assert not legacy.exists()
     assert config.worktree_config_path(tmp_path).exists()
+    assert len(fsync_calls) >= 2
     # words_per_minute keeps its integer type across the migration round trip.
     assert config.configured_say_words_per_minute(tmp_path) == SAMPLE_WORDS_PER_MINUTE
 
@@ -405,6 +410,16 @@ def test_worktree_config_migration_failure_leaves_json_intact(tmp_path):
     assert legacy.exists()
     assert not config.worktree_config_path(tmp_path).exists()
 
+    valid_legacy = json.dumps({"schema": 1, "agent": {"driver": "claude"}})
+    legacy.write_text(valid_legacy, encoding="utf-8")
+    config_path = config.worktree_config_path(tmp_path)
+    config_path.write_text("broken = [\n", encoding="utf-8")
+
+    with pytest.raises(SpiceError, match="invalid TOML"):
+        config.read_worktree_config(tmp_path)
+
+    assert legacy.read_text(encoding="utf-8") == valid_legacy
+
 
 def test_set_worktree_section_preserves_comments_and_scalar_types(tmp_path):
     config_path = config.worktree_config_path(tmp_path)
@@ -415,7 +430,7 @@ def test_set_worktree_section_preserves_comments_and_scalar_types(tmp_path):
         "flag = true\n\n"
         "[say]\n"
         'voice = "Alex"\n'
-        "words_per_minute = 150\n",
+        "words_per_minute = 150 # operator rate\n",
         encoding="utf-8",
     )
 
@@ -425,7 +440,7 @@ def test_set_worktree_section_preserves_comments_and_scalar_types(tmp_path):
 
     text = config_path.read_text(encoding="utf-8")
     assert "# keep this header" in text
-    assert "words_per_minute = 200" in text  # int rendered unquoted
+    assert "words_per_minute = 200 # operator rate" in text
     parsed = tomllib.loads(text)
     assert parsed["say"] == {"voice": "Alex", "words_per_minute": 200}
     assert parsed["custom"] == {"flag": True}

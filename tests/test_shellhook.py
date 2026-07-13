@@ -640,7 +640,6 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
     )
     assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
         [
-            *_builtin_rtk_wrapper_lines(),
             *_expected_wrapper_lines("wrap", ["grep", "git"]),
             *_expected_active_python_module_wrapper_lines(["pytest"]),
         ]
@@ -928,7 +927,6 @@ def _toml_key(value: str) -> str:
 
 def _expected_project_common_with_pytest_wrapper_lines() -> list[str]:
     return [
-        *_builtin_rtk_wrapper_lines(),
         *_expected_wrapper_lines("wrap", ["run", "grep", "find", "git"]),
         *_expected_active_python_module_wrapper_lines(["pytest"]),
     ]

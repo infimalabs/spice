@@ -175,7 +175,8 @@ argv still wins because grep honors the last matcher flag). Naming `common` in
 a repo `[tool.spice.wrappers.common]` table replaces the whole group atomically
 — routes do not concatenate, so an override must re-list every route it keeps —
 while omitting the table inherits this default and `wrappers = []` disables
-generation. Repo groups should otherwise wrap stable repo-owned tools (see
+generation. A `false` group or entry disables that inherited name explicitly.
+Repo groups should otherwise wrap stable repo-owned tools (see
 [wrapper commands](../cli/wrapper-commands.md)).
 
 ## `[tool.spice.commands]`
