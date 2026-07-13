@@ -1,6 +1,7 @@
 """Agent wrapper routing and shell steering contracts."""
 
 import io
+import json
 import os
 import shlex
 import shutil
@@ -220,6 +221,68 @@ def test_wrapper_rewrites_direct_agent_command_with_rtk_source_of_truth(monkeypa
     assert calls == [("rg", "needle")]
 
 
+@pytest.mark.parametrize("identity_kind", ["basename", "absolute"])
+def test_configured_rtk_routes_canonical_shell_and_direct_rewrites(
+    tmp_path, monkeypatch, identity_kind
+):
+    executable = (
+        "alternate-rtk"
+        if identity_kind == "basename"
+        else str(tmp_path / "Spice Tools" / "rtk companion")
+    )
+    _write_rtk_config(tmp_path, executable)
+    calls: list[tuple[tuple[str, ...], str]] = []
+
+    def fake_rewrite(*args: str, **kwargs) -> str:
+        calls.append((args, kwargs["rtk_executable"]))
+        if args == ("rg", "needle"):
+            return "rtk grep needle"
+        return "rtk git status"
+
+    monkeypatch.setattr(wrap, "rtk_rewrite_command_text", fake_rewrite)
+
+    direct = wrap.build_agent_run_command(
+        ["rg", "needle"], repo_root=tmp_path, rewrite_rtk=True
+    )
+    shell = wrap.build_agent_run_command(
+        ["zsh", "-c", "git status"], repo_root=tmp_path, rewrite_rtk=True
+    )
+
+    assert direct == [executable, "grep", "needle"]
+    assert shell == ["zsh", "-c", f"{shlex.quote(executable)} git status"]
+    assert calls == [
+        (("rg", "needle"), executable),
+        (("git status",), executable),
+    ]
+
+
+def test_canonical_and_resolved_rtk_direct_inputs_preserve_their_identity(
+    tmp_path, monkeypatch
+):
+    executable = str(tmp_path / "Spice Tools" / "rtk companion")
+    _write_rtk_config(tmp_path, executable)
+    monkeypatch.setattr(
+        wrap,
+        "rtk_rewrite_command_text",
+        lambda *_args, **_kwargs: "rtk unexpected-rewrite",
+    )
+    inputs = [
+        ["rtk", "grep", "needle"],
+        [executable, "grep", "needle"],
+    ]
+
+    outputs = [
+        wrap.build_agent_run_command(
+            command,
+            repo_root=tmp_path,
+            rewrite_rtk=True,
+        )
+        for command in inputs
+    ]
+
+    assert outputs == inputs
+
+
 def test_wrapper_rejects_malformed_matched_direct_rewrite_before_execution(
     monkeypatch,
 ):
@@ -373,10 +436,17 @@ def test_wrapper_exports_agent_scoped_rtk_db_for_ambient_agent_commands(
     assert Path(env[wrap.RTK_DB_PATH_ENV]).parent.is_dir()
 
 
+@pytest.mark.parametrize("identity_kind", ["builtin", "basename", "absolute"])
 def test_rtk_selectors_and_children_share_distinct_thread_scoped_history(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, identity_kind
 ):
     _init_git_repo(tmp_path)
+    executable = {
+        "builtin": "rtk",
+        "basename": "alternate-rtk",
+        "absolute": str(tmp_path / "Spice Tools" / "rtk companion"),
+    }[identity_kind]
+    _write_rtk_config(tmp_path, executable)
     monkeypatch.setenv(wrap.RTK_DB_PATH_ENV, "/ambient/global-history.db")
     monkeypatch.delenv(CLAUDE_DRIVER.thread_id_env, raising=False)
     monkeypatch.setattr(wrap, "emit_initial_side_channel_payload", lambda *_a, **_k: ())
@@ -384,17 +454,19 @@ def test_rtk_selectors_and_children_share_distinct_thread_scoped_history(
     monkeypatch.setattr(wrap, "join_agent_side_channel_watch", lambda *_a, **_k: None)
     selector_environments: list[dict[str, str]] = []
     child_environments: list[dict[str, str]] = []
+    selector_commands: list[list[str]] = []
+    child_commands: list[list[str]] = []
     native_run = subprocess.run
 
     def rewrite_run(args, **kwargs):
-        if args[:2] != ["rtk", "rewrite"]:
+        if args[:2] != [executable, "rewrite"]:
             return native_run(args, **kwargs)
+        selector_commands.append(args)
         selector_environments.append(kwargs["env"])
-        command = args[3:]
         return subprocess.CompletedProcess(
             args,
             wrap.RTK_REWRITE_MATCH_EXIT_CODE,
-            stdout=shlex.join(["rtk", *command]),
+            stdout="rtk git status",
             stderr="",
         )
 
@@ -404,7 +476,8 @@ def test_rtk_selectors_and_children_share_distinct_thread_scoped_history(
         def wait(self):
             return 0
 
-    def popen(_command, *, env):
+    def popen(command, *, env):
+        child_commands.append(command)
         child_environments.append(env)
         return Process()
 
@@ -434,6 +507,14 @@ def test_rtk_selectors_and_children_share_distinct_thread_scoped_history(
     assert [Path(env[wrap.RTK_DB_PATH_ENV]) for env in child_environments] == (
         expected_paths
     )
+    assert selector_commands == [
+        [executable, "rewrite", "--", "git", "status"],
+        [executable, "rewrite", "--", "git status"],
+    ]
+    assert child_commands == [
+        [executable, "git", "status"],
+        ["zsh", "-c", f"{shlex.quote(executable)} git status"],
+    ]
 
 
 def test_wrapper_route_environment_uses_static_hook_stage_for_shell_execution(
@@ -875,6 +956,13 @@ def _init_git_repo(repo: Path) -> None:
     )
 
 
+def _write_rtk_config(repo: Path, executable: str) -> None:
+    (repo / "spice.toml").write_text(
+        f"[rtk]\nexecutable = {json.dumps(executable)}\n",
+        encoding="utf-8",
+    )
+
+
 def _write_agent_wrapper_config(
     repo: Path,
     *,
@@ -932,7 +1020,8 @@ def _expected_project_common_with_pytest_wrapper_lines() -> list[str]:
     ]
 
 
-def _builtin_rtk_wrapper_lines() -> list[str]:
+def _builtin_rtk_wrapper_lines(rtk_executable: str = "rtk") -> list[str]:
+    command_word = shellhook.shell_command_word(rtk_executable)
     return [
         "",
         "rtk() {",
@@ -971,10 +1060,10 @@ def _builtin_rtk_wrapper_lines() -> list[str]:
         "  fi",
         '  if [ "${1-}" = grep ]; then',
         "    shift",
-        '    command rtk grep -E "$@"',
+        f'    command {command_word} grep -E "$@"',
         "    return",
         "  fi",
-        '  command rtk "$@"',
+        f'  command {command_word} "$@"',
         "}",
     ]
 
