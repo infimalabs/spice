@@ -501,14 +501,16 @@ def maxim_adjudication_enabled(repo_root: Path | None = None) -> bool:
     Judge-free is the deterministic default: a matched trigger bag publishes
     its ``[MAXIM]`` reminder directly, with no judge subprocess. An
     installation opts into local YES/NO adjudication by setting
-    ``[judge] enabled = true`` in its worktree-local config; any other value
+    ``[judge] enabled = true`` in any effective configuration layer -- a
+    committed ``pyproject.toml`` / ``spice.toml`` or the worktree-local config
+    -- so a repository can turn adjudication on for itself without changing the
+    packaged default that every other install inherits; any other value
     (including an absent one) resolves to the judge-free default.
     """
     root = _root_or_current(repo_root)
     if root is None:
         return False
-    worktree_judge = layer_table(root, WORKTREE_SOURCE, JUDGE_KEY)
-    return _config_flag(worktree_judge.get(JUDGE_ENABLED_KEY))
+    return _config_flag(_configured_value(root, JUDGE_KEY, JUDGE_ENABLED_KEY))
 
 
 def _config_flag(value: Any) -> bool:
