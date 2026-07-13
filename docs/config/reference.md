@@ -18,6 +18,12 @@ The agent shell also requires
 details live in [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion); this is a
 runtime companion requirement, not a tracked project setting.
 
+Task-boundary and worktree-discovery git commands have a 120-second default
+deadline; network fetch and push default to 30 seconds. Set
+`SPICE_GIT_TIMEOUT_SECONDS` to one positive number of seconds to override both
+deadlines for unusually slow repositories. Expiry fails loudly with the exact
+git argv instead of retaining the task boundary indefinitely.
+
 ## Linux Speech with `espeak-ng`
 
 Speech configuration is worktree-local. On Debian or Ubuntu, install the
