@@ -14,8 +14,7 @@ from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.configcli import handle_config
 
-SAY_TIMEOUT_MINUTE_FLOOR_SECONDS = 60.0
-SAY_TIMEOUT_OVERRIDE_SECONDS = 12.5
+SAMPLE_WORDS_PER_MINUTE = 190
 
 
 @dataclass(frozen=True)
@@ -661,39 +660,6 @@ def test_explicit_judge_bin_overrides_platform_default(tmp_path, monkeypatch):
 
     monkeypatch.setattr("sys.platform", "darwin")
     assert config.configured_judge_bin(tmp_path) == "/opt/my-judge"
-
-
-def test_say_timeout_defaults_generously_above_a_minute(tmp_path):
-    assert config.configured_say_timeout(tmp_path) == config.DEFAULT_SAY_TIMEOUT_SECONDS
-    assert config.configured_say_timeout(tmp_path) > SAY_TIMEOUT_MINUTE_FLOOR_SECONDS
-
-
-def test_say_timeout_honors_positive_override(tmp_path):
-    config.set_scope_section(
-        tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
-        {config.SAY_TIMEOUT_SECONDS_KEY: SAY_TIMEOUT_OVERRIDE_SECONDS},
-    )
-    assert config.configured_say_timeout(tmp_path) == SAY_TIMEOUT_OVERRIDE_SECONDS
-
-
-def test_say_timeout_falls_back_when_non_positive_or_invalid(tmp_path):
-    config.set_scope_section(
-        tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
-        {config.SAY_TIMEOUT_SECONDS_KEY: 0},
-    )
-    assert config.configured_say_timeout(tmp_path) == config.DEFAULT_SAY_TIMEOUT_SECONDS
-
-    config.set_scope_section(
-        tmp_path,
-        config.WORKTREE_SOURCE,
-        config.SAY_KEY,
-        {config.SAY_TIMEOUT_SECONDS_KEY: "nonsense"},
-    )
-    assert config.configured_say_timeout(tmp_path) == config.DEFAULT_SAY_TIMEOUT_SECONDS
 
 
 def test_set_scope_section_preserves_comments_and_scalar_types(tmp_path):

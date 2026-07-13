@@ -30,6 +30,7 @@ _SAY_UTC_DATETIME_RE = re.compile(
 _SAY_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")
 _SAY_MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)\s]+\)")
 _SAY_IDENTIFIER_SPOKEN_LENGTH = 8
+SPEECH_PROCESS_TIMEOUT_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -73,7 +74,6 @@ class MacOSSayBackend:
 class ExternalCommandSpeechBackend:
     command: tuple[str, ...]
     content_type: str = config.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
-    timeout: float = config.DEFAULT_SAY_TIMEOUT_SECONDS
 
     def render(
         self,
@@ -86,7 +86,7 @@ class ExternalCommandSpeechBackend:
         result = run_bounded_process_group(
             list(self.command),
             input_data=prepare_say_text(text).encode("utf-8"),
-            timeout_seconds=self.timeout,
+            timeout_seconds=SPEECH_PROCESS_TIMEOUT_SECONDS,
             phase="serve-speech-external",
             input_label=f"characters={len(text)}",
         )
@@ -176,7 +176,6 @@ def speech_backend(repo_root: Path | None = None) -> SpeechBackend:
         return ExternalCommandSpeechBackend(
             command=command,
             content_type=config.configured_say_content_type(repo_root),
-            timeout=config.configured_say_timeout(repo_root),
         )
     return MacOSSayBackend(repo_root)
 
@@ -201,7 +200,6 @@ def _render_macos_say_audio(
     rate_multiplier: float = DEFAULT_SAY_RATE_MULTIPLIER,
 ) -> bytes:
     """Render macOS `say` output into browser-playable M4A bytes."""
-    timeout = config.configured_say_timeout(repo_root)
     handle, raw_path = tempfile.mkstemp(prefix="spice-say-", suffix=SAY_AUDIO_SUFFIX)
     audio_path = Path(raw_path)
     try:
@@ -221,7 +219,7 @@ def _render_macos_say_audio(
             ],
             input_data=prepare_say_text(text),
             text=True,
-            timeout_seconds=timeout,
+            timeout_seconds=SPEECH_PROCESS_TIMEOUT_SECONDS,
             phase="serve-speech-macos",
             input_label=f"characters={len(text)}",
         )
