@@ -54,6 +54,12 @@ function reconcileLaneGroups(groupRuns) {
     syncFusedLaneChrome(lane);
     renderMessagesIfChanged(lane);
   }
+  // Fusion and splitting can change only lane classes: when the members are
+  // already adjacent, no child-list mutation reaches the board observer.
+  // Reconcile activity at the topology boundary so every concrete member's
+  // server query immediately reflects its newly visible (or offscreen) group.
+  if (typeof scheduleLiveBusLaneActivitySync === "function")
+    scheduleLiveBusLaneActivitySync();
 }
 
 function currentLaneGroupHostByMemberTargetId() {

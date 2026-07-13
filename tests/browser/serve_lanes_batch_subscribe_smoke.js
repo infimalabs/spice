@@ -217,7 +217,68 @@ async function batchPhaseInitial(state, config) {
   };
 }
 
-// Phase B: focus moves while the replacement batch is awaiting its response.
+// Phase B: topology-only class changes must reconcile server activity even
+// when the fused members are already adjacent and lanesEl has no child-list
+// mutation. A split makes the second member genuinely offscreen; fusing it
+// back into the visible host makes that same concrete subscription live again.
+async function batchPhaseTopologyActivity(state, config) {
+  const host = laneGroupHost(laneStates.get(config.memberIds[0]));
+  const member = laneStates.get(config.memberIds[1]);
+  const originalMemberRect = member.element.getBoundingClientRect;
+  let directChildMutationCount = 0;
+  const observer = new MutationObserver((records) => {
+    directChildMutationCount += records.length;
+  });
+  observer.observe(lanesEl, { childList: true });
+  member.element.getBoundingClientRect = () => ({
+    bottom: 600,
+    height: 600,
+    left: window.innerWidth + 100,
+    right: window.innerWidth + 420,
+    top: 0,
+    width: 320,
+  });
+
+  state.frames.length = 0;
+  reconcileLaneGroups([]);
+  await window.__batchSettle(config);
+  const splitConfigureFrames = state.frames.filter(
+    (frame) => frame.type === "lane.configure",
+  );
+  const splitFocusByTargetId = Object.fromEntries(
+    splitConfigureFrames.map((frame) => [
+      frame.targetId,
+      frame.query.focused,
+    ]),
+  );
+
+  state.frames.length = 0;
+  reconcileLaneGroups([config.memberIds]);
+  await window.__batchSettle(config);
+  const fusedConfigureFrames = state.frames.filter(
+    (frame) => frame.type === "lane.configure",
+  );
+  const fusedFocusByTargetId = Object.fromEntries(
+    fusedConfigureFrames.map((frame) => [
+      frame.targetId,
+      frame.query.focused,
+    ]),
+  );
+
+  observer.disconnect();
+  member.element.getBoundingClientRect = originalMemberRect;
+  return {
+    topologyDirectChildMutationCount: directChildMutationCount,
+    splitConfigureCount: splitConfigureFrames.length,
+    splitHostFocused: splitFocusByTargetId[host.targetId],
+    splitMemberFocused: splitFocusByTargetId[member.targetId],
+    fusedConfigureCount: fusedConfigureFrames.length,
+    fusedHostFocused: fusedFocusByTargetId[host.targetId],
+    fusedMemberFocused: fusedFocusByTargetId[member.targetId],
+  };
+}
+
+// Phase C: focus moves while the replacement batch is awaiting its response.
 // The pending lanes must configure immediately, before the held subscribe
 // response can release server watchers under their stale focus queries.
 async function batchPhaseFocusWhilePending(state, config) {
@@ -271,7 +332,7 @@ async function batchPhaseFocusWhilePending(state, config) {
   };
 }
 
-// Phase C: a dirty notification for a member of the focused fused host must
+// Phase D: a dirty notification for a member of the focused fused host must
 // refresh that concrete member immediately. The server may still coalesce the
 // member's burst into one lanes.dirty frame, but the browser cannot leave a
 // visible part of the merged stream stale until a later composer submit.
@@ -299,7 +360,7 @@ async function batchPhaseFocusedMemberDirty(state, config) {
   };
 }
 
-// Phase D: reconnect resync -- one frame covering every open lane.
+// Phase E: reconnect resync -- one frame covering every open lane.
 async function batchPhaseResync(state, config) {
   state.frames.length = 0;
   resubscribeLiveBusLanes();
@@ -311,7 +372,7 @@ async function batchPhaseResync(state, config) {
   };
 }
 
-// Phase E: a thread change (bus payload with a renewed bound thread) and a
+// Phase F: a thread change (bus payload with a renewed bound thread) and a
 // config-revision advance in the same tick coalesce into one batch flush.
 // Both triggers stay in one synchronous block -- applyLaneBusPayload is not
 // awaited -- so their marks land before the microtask flush fires.
@@ -343,7 +404,7 @@ async function batchPhaseCoalesce(state, config) {
   };
 }
 
-// Phase F: a failed lane inside the batch surfaces its transient status while
+// Phase G: a failed lane inside the batch surfaces its transient status while
 // the sibling's fresh message still renders.
 async function batchPhaseFailedLane(state, config, hostTargetId) {
   state.frames.length = 0;
@@ -380,6 +441,7 @@ async function batchMeasure(config) {
   };
   window.__batchInstallStubs(state, config);
   const initial = await window.__batchPhaseInitial(state, config);
+  const topology = await window.__batchPhaseTopologyActivity(state, config);
   const dirty = await window.__batchPhaseFocusedMemberDirty(state, config);
   const focus = await window.__batchPhaseFocusWhilePending(state, config);
   const resync = await window.__batchPhaseResync(state, config);
@@ -391,7 +453,15 @@ async function batchMeasure(config) {
   );
   // eslint-disable-next-line no-global-assign
   mosaicRenderMessageStream = state.originalMosaicRender;
-  return { ...initial, ...focus, ...dirty, ...resync, ...coalesced, ...failed };
+  return {
+    ...initial,
+    ...topology,
+    ...focus,
+    ...dirty,
+    ...resync,
+    ...coalesced,
+    ...failed,
+  };
 }
 
 const BATCH_PAGE_HELPERS = {
@@ -405,6 +475,7 @@ const BATCH_PAGE_HELPERS = {
   __batchEntryIds: batchEntryIds,
   __batchInstallStubs: batchInstallStubs,
   __batchPhaseInitial: batchPhaseInitial,
+  __batchPhaseTopologyActivity: batchPhaseTopologyActivity,
   __batchPhaseFocusWhilePending: batchPhaseFocusWhilePending,
   __batchPhaseFocusedMemberDirty: batchPhaseFocusedMemberDirty,
   __batchPhaseResync: batchPhaseResync,
@@ -430,6 +501,20 @@ function assertBatchResult(result) {
       result.initialHostRenderKeys.join(",") !== result.expectedKeys.join(","),
     "visible lane group required click focus for live delivery":
       result.visibleHostLiveWithoutFocus !== true,
+    "topology fixture accidentally relied on a direct child-list mutation":
+      result.topologyDirectChildMutationCount !== 0,
+    "split topology did not configure every concrete lane exactly once":
+      result.splitConfigureCount !== BATCH_MEMBER_IDS.length,
+    "visible split host was configured as background":
+      result.splitHostFocused !== true,
+    "offscreen split member retained live-push delivery":
+      result.splitMemberFocused !== false,
+    "fused topology did not configure every concrete lane exactly once":
+      result.fusedConfigureCount !== BATCH_MEMBER_IDS.length,
+    "visible fused host was configured as background":
+      result.fusedHostFocused !== true,
+    "newly visible fused member retained dirty-only delivery":
+      result.fusedMemberFocused !== true,
     "pending subscribe did not capture the prior lane as focused":
       result.pendingPriorFocus !== true,
     "focused fused host did not keep its selected member live":
