@@ -121,6 +121,35 @@ distillation likewise skips candidates whose judge call fails.
 Agent personality is a worktree-local `spice config personality` setting
 (`pragmatic` by default), not a tracked `[tool.spice.agent]` key.
 
+### Supervised Claude tool boundary
+
+Spice is the sole task control plane in supervised Claude lanes. Every
+`claude --print` launch therefore places these exact bare names in
+`permissions.deny`:
+
+```text
+Task, Agent, TaskCreate, TaskGet, TaskList, TaskUpdate, TaskOutput, TaskStop
+```
+
+Bare denies remove the tool definitions from Claude's model context before the
+launch's `bypassPermissions` mode is evaluated; this is a model-context
+boundary, not merely a rejected-call policy. `Task` is retained as the accepted
+older name for `Agent`. Spice deliberately inventories every name instead of
+making a generic built-in-name wildcard part of its contract, so any new
+Task-prefixed Claude built-in requires an explicit inventory and test update.
+Future Claude-tool emulation must be built on top of Spice tasks and is outside
+this boundary.
+
+The inventory was last checked on 2026-07-12 with installed Claude Code
+2.1.201 against Anthropic's [tools
+reference](https://code.claude.com/docs/en/tools-reference), [TypeScript SDK
+reference](https://code.claude.com/docs/en/agent-sdk/typescript#agent), and
+[permission evaluation
+reference](https://code.claude.com/docs/en/agent-sdk/permissions#how-permissions-are-evaluated).
+`Monitor` has a separate process-lifecycle rationale under the [Lifecycle
+Plane](../design/ARCHITECTURE.md#lifecycle-plane), tracked by
+`FOUNDAT-1kCyNZT3`.
+
 ## `[tool.spice.wrappers.<group>]`
 
 Wrapper groups define shell functions for agent-owned commands. Select groups
