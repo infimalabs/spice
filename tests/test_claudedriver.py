@@ -563,16 +563,15 @@ def test_claude_context_window_stays_at_standard_tier_when_overflowing():
     assert fields["model_context_window"] == CLAUDE_DRIVER.default_context_window
 
 
-def test_claude_command_denies_the_sub_agent_tool(tmp_path):
+def test_claude_supervised_command_denies_unsupervised_lifecycle_tools(tmp_path):
     command = CLAUDE_DRIVER.build_exec_command(
         repo_root=tmp_path,
         prompt="follow the skill",
     )
     settings = json.loads(command[command.index("--settings") + 1])
 
-    deny = settings["permissions"]["deny"]
-    assert "Task" in deny  # Claude Code's sub-agent tool
-    assert "Agent" in deny  # alternate label
+    assert command[1] == "--print"
+    assert settings["permissions"]["deny"] == ["Task", "Agent", "Monitor"]
 
 
 def test_claude_auto_compact_environment_sets_a_default_window(tmp_path, monkeypatch):

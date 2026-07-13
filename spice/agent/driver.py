@@ -485,10 +485,11 @@ def steering_key_prompt_line(repo_root: Path) -> str:
 CLAUDE_ATTRIBUTION_DISABLED_SETTINGS = {
     "attribution": {"commit": "", "sessionUrl": False},
 }
-# One agent inhabits one worktree: a sub-agent spawn is refused mechanically at
-# the settings layer, not left to the skill's "do not spawn sub-agents" prose.
-# Task is Claude Code's sub-agent tool; Agent covers the alternate label.
-CLAUDE_DENIED_TOOLS = ("Task", "Agent")
+# One agent inhabits one worktree: sub-agent spawning and unsupervised
+# background work are refused mechanically at the settings layer, not left to
+# skill prose. Task is Claude Code's sub-agent tool; Agent covers the alternate
+# label. Monitor is Claude Code's canonical background-task tool as of 2.1.98.
+CLAUDE_DENIED_TOOLS = ("Task", "Agent", "Monitor")
 # Claude Code reads this at launch and takes it as the token count at which it
 # reactively summarizes the conversation, taking precedence over its own
 # `/config` auto-compact setting. Left unset, a session can run toward its
