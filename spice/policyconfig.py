@@ -17,7 +17,7 @@ from typing import cast
 
 from spice import defaults, policy
 from spice.errors import SpiceError
-from spice.configlayer import effective_table
+from spice.configlayer import contextualize_config_error, effective_table
 
 _COMMIT_TRAILER_KEY_RE = re.compile(r"^[A-Za-z0-9-]+$")
 FLEX_JITTER_PERCENT = defaults.integer("policy", "flex", "jitter_percent")
@@ -325,6 +325,13 @@ class ResolvedPolicy:
 
 
 def resolve_policy(repo_root: Path) -> ResolvedPolicy:
+    try:
+        return _resolve_policy(repo_root)
+    except SpiceError as exc:
+        raise contextualize_config_error(repo_root, exc, "policy") from exc
+
+
+def _resolve_policy(repo_root: Path) -> ResolvedPolicy:
     raw_policy = effective_table(repo_root, "policy")
     limits_table = _subtable(raw_policy, "limits")
     limits = PolicyLimits(

@@ -121,6 +121,7 @@ def _handle_defaults(args: argparse.Namespace, repo_root: Path) -> int:
 def _handle_say(args: argparse.Namespace, repo_root: Path) -> int:
     scope = str(args.scope)
     if args.clear:
+        _validate_say_clear(repo_root, scope)
         config.clear_scope_section(
             repo_root, scope, config.SAY_KEY, keys=config.SAY_MUTABLE_KEYS
         )
@@ -247,13 +248,48 @@ def _agent_config_summary(repo_root: Path) -> str:
 
 
 def _validate_say_config(repo_root: Path, scope: str, values: dict[str, Any]) -> None:
-    candidate = config.layer_table(repo_root, scope, config.SAY_KEY)
-    candidate.update(values)
+    candidate = _prospective_say_config(repo_root, scope, values=values)
+    _validate_say_candidate(repo_root, scope, candidate)
+
+
+def _validate_say_clear(repo_root: Path, scope: str) -> None:
+    candidate = _prospective_say_config(
+        repo_root,
+        scope,
+        clear_keys=config.SAY_MUTABLE_KEYS,
+        include_later=True,
+    )
+    _validate_say_candidate(repo_root, scope, candidate)
+
+
+def _prospective_say_config(
+    repo_root: Path,
+    scope: str,
+    *,
+    values: dict[str, Any] | None = None,
+    clear_keys: tuple[str, ...] = (),
+    include_later: bool = False,
+) -> dict[str, Any]:
+    scopes = config.CONFIG_SCOPE_NAMES
+    stop = len(scopes) if include_later else scopes.index(scope) + 1
+    effective: dict[str, Any] = {}
+    for current_scope in scopes[:stop]:
+        layer = config.layer_table(repo_root, current_scope, config.SAY_KEY)
+        if current_scope == scope:
+            layer.update(values or {})
+            for key in clear_keys:
+                layer.pop(key, None)
+        effective.update(layer)
+    return effective
+
+
+def _validate_say_candidate(
+    repo_root: Path, scope: str, candidate: dict[str, Any]
+) -> None:
     backend = str(
         candidate.get(config.SAY_BACKEND_KEY) or config.DEFAULT_SAY_BACKEND
     ).strip()
     command = str(candidate.get(config.SAY_COMMAND_KEY) or "").strip()
-    command = command or config.configured_say_command(repo_root)
     if backend == "external" and not command:
         raise SpiceError(
             _scope_error(

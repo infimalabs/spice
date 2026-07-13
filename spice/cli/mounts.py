@@ -17,7 +17,7 @@ from spice.cli.parser import (
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
 from spice.toolprocess import run_parent_lifetime_command
-from spice.configlayer import effective_commands
+from spice.configlayer import contextualize_config_error, effective_commands
 
 MOUNT_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 MOUNTED_COMMAND_ENV = "SPICE_MOUNTED_COMMAND"  # env-policy: allow
@@ -41,6 +41,13 @@ class MountedCommand:
 
 def mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]:
     """The validated mount table; any malformed entry fails the whole read."""
+    try:
+        return _mounted_commands(repo_root)
+    except SpiceError as exc:
+        raise contextualize_config_error(repo_root, exc, "commands") from exc
+
+
+def _mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]:
     mounts: dict[tuple[str, ...], tuple[str, ...]] = {}
     command_paths = command_path_registry()
     for raw_name, raw_argv in effective_commands(repo_root).items():

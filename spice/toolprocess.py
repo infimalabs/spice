@@ -45,7 +45,7 @@ def run_tool_command(
     cwd: Path | None = None,
     text: bool = False,
     env: dict[str, str] | None = None,
-    input: str | bytes | None = None,
+    input_data: str | bytes | None = None,
     check: bool = False,
 ) -> subprocess.CompletedProcess[Any]:
     """Run a synchronous tool under its policy deadline and process-group cleanup."""
@@ -57,7 +57,7 @@ def run_tool_command(
         cwd=cwd,
         text=text,
         env=env,
-        input=input,
+        input_data=input_data,
         check=check,
     )
 

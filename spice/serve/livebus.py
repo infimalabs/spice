@@ -304,6 +304,15 @@ class LiveBusSession:
         *,
         before_send: Callable[[float], None] | None = None,
     ) -> FrameSendTiming:
+        # Encode the frame to bytes before taking send_lock so the lock's
+        # critical section -- and the lock-hold/write timing below -- covers only
+        # the socket write. A watcher thread encoding a bulk lane payload no
+        # longer holds the lock through that encode, so a small lane.sendResult
+        # ack acquires it and writes as soon as any in-flight write returns
+        # rather than queuing behind the encode. byte_count is the JSON payload
+        # length (matching the wire text), also computed outside the lock.
+        frame = self.connection.encode_text_frame(payload)
+        byte_count = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
         wait_started_at = time.perf_counter()
         self.send_lock.acquire()
         acquired_at = time.perf_counter()
@@ -312,7 +321,7 @@ class LiveBusSession:
             if before_send is not None:
                 before_send(lock_wait_ms)
             write_started_at = time.perf_counter()
-            byte_count = self.connection.send_json(payload)
+            self.connection.send_frame(frame)
             finished_at = time.perf_counter()
             timing = FrameSendTiming(
                 lock_wait_ms=lock_wait_ms,
@@ -320,10 +329,6 @@ class LiveBusSession:
                 write_ms=_elapsed_ms(write_started_at, finished_at),
                 finished_at=finished_at,
             )
-            if not isinstance(byte_count, int):
-                byte_count = len(
-                    json.dumps(payload, separators=(",", ":")).encode("utf-8")
-                )
             kind = str(payload.get("type") or "unknown")
             with self._telemetry_lock:
                 self._frame_telemetry.setdefault(kind, _FrameTelemetry()).record(
