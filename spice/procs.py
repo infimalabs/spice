@@ -10,6 +10,8 @@ import subprocess
 import time
 from typing import Any
 
+from spice.errors import SpiceError
+
 WINDOWS_CREATE_NEW_PROCESS_GROUP = 0x00000200
 WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WINDOWS_STILL_ACTIVE = 259
@@ -201,6 +203,71 @@ def _windows_pid_is_running(pid: int) -> bool:
         return exit_code.value == WINDOWS_STILL_ACTIVE
     finally:
         kernel32.CloseHandle(handle)
+
+
+PROCESS_GROUP_TERMINATION_GRACE_SECONDS = 0.25
+
+
+class ProcessDeadlineExceeded(SpiceError):
+    """A named external provider exhausted its process-group deadline."""
+
+    def __init__(
+        self,
+        *,
+        phase: str,
+        input_label: str,
+        timeout_seconds: float,
+        command: list[str],
+    ) -> None:
+        self.phase = phase
+        self.input_label = input_label
+        self.timeout_seconds = timeout_seconds
+        self.command = tuple(command)
+        super().__init__(
+            f"process deadline exceeded phase={phase} input={input_label} "
+            f"budget={timeout_seconds:g}s command={' '.join(command)}"
+        )
+
+
+def run_bounded_process_group(
+    command: list[str],
+    *,
+    timeout_seconds: float,
+    phase: str,
+    input_label: str,
+    cwd: Any = None,
+    text: bool = False,
+) -> subprocess.CompletedProcess[Any]:
+    """Capture a child under a deadline and terminate its whole group on expiry."""
+    if timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be positive")
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=text,
+        **popen_new_process_group_kwargs(),
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        terminate_process_group(
+            process,
+            timeout_seconds=PROCESS_GROUP_TERMINATION_GRACE_SECONDS,
+        )
+        try:
+            process.communicate(timeout=PROCESS_GROUP_TERMINATION_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+        raise ProcessDeadlineExceeded(
+            phase=phase,
+            input_label=input_label,
+            timeout_seconds=timeout_seconds,
+            command=command,
+        ) from exc
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def _is_windows() -> bool:
