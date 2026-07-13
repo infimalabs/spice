@@ -359,6 +359,9 @@ async function flushPendingLaneSubscribes() {
   const entries = lanes.map((lane) => {
     return { targetId: lane.targetId, query: laneMessageQuery(lane) };
   });
+  const requestedFocusByTargetId = new Map(
+    entries.map((entry) => [entry.targetId, entry.query.focused === true]),
+  );
   let response;
   try {
     response = await liveBusRequest("lanes.subscribe", { entries });
@@ -372,6 +375,19 @@ async function flushPendingLaneSubscribes() {
     return;
   }
   applyLanesSubscribePayloads(lanes, (response && response.lanes) || []);
+  reconcileLiveBusLaneFocus(lanes, requestedFocusByTargetId);
+}
+
+function reconcileLiveBusLaneFocus(lanes, requestedFocusByTargetId) {
+  for (const lane of lanes) {
+    if (!isLaneOpen(lane) || !lane.liveBusSubscribed) continue;
+    const focused = liveBusLaneIsFocused(lane);
+    if (requestedFocusByTargetId.get(lane.targetId) === focused) continue;
+    liveBusRequest("lane.configure", {
+      targetId: lane.targetId,
+      query: laneMessageQuery(lane),
+    }).catch(() => {});
+  }
 }
 
 function applyLanesSubscribePayloads(lanes, laneFrames) {

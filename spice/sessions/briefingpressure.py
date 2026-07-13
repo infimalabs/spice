@@ -10,7 +10,6 @@ from typing import Callable, TypedDict
 
 from spice.errors import SpiceError
 from spice.mail.inbox import format_relative_seconds
-from spice.paths import repo_root_from_cwd
 from spice.policy import MAGIC_BASELINE_REF
 from spice.policyconfig import ComplexityPolicy, resolve_policy
 from spice.procs import run_bounded_process_group
@@ -61,7 +60,7 @@ def _clip(text: str | None, limit: int = PREVIEW_CHARS) -> str:
 
 
 def dirty_path_count() -> int:
-    repo_root = repo_root_from_cwd()
+    repo_root = _briefing_repo_root_from_cwd()
     if repo_root is None:
         return 0
     pressure = _build_dirty_worktree_pressure(repo_root=repo_root)
@@ -69,7 +68,7 @@ def dirty_path_count() -> int:
 
 
 def git_posture_lines() -> list[str]:
-    repo_root = repo_root_from_cwd()
+    repo_root = _briefing_repo_root_from_cwd()
     if repo_root is None:
         return ["Git", "  repo=-"]
     branch = _git_read(repo_root, "branch", "--show-current") or "-"
@@ -599,6 +598,21 @@ def _git_read(repo_root: Path, *args: str) -> str:
         text=True,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _briefing_repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
+    base = (cwd or Path.cwd()).resolve()
+    result = run_bounded_process_group(
+        ["git", "-C", str(base), "rev-parse", "--show-toplevel"],
+        timeout_seconds=BRIEFING_PROVIDER_TIMEOUT_SECONDS,
+        phase="briefing-repo-root",
+        input_label=f"cwd={base}",
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    raw = result.stdout.strip()
+    return Path(raw) if raw else None
 
 
 def _git_read_z(repo_root: Path, *args: str) -> list[str]:
