@@ -86,18 +86,31 @@ def test_start_exit_file_watch_reports_activation_deadline(
     monkeypatch.setattr(
         serve_filewatch, "SERVE_FILE_WATCH_ACTIVATION_TIMEOUT_SECONDS", 0.05
     )
-    monkeypatch.setattr(
-        serve_filewatch,
-        "_run_file_watch",
-        lambda *_args, **_kwargs: None,
-    )
+    registration_started = threading.Event()
+    watcher_stopped = threading.Event()
 
-    with pytest.raises(SpiceError, match="watcher activation deadline exceeded"):
+    def stalled_registration(
+        _server, _path, worker_stop_event, _activated, _startup_errors
+    ) -> None:
+        registration_started.set()
+        worker_stop_event.wait(timeout=1.0)
+        watcher_stopped.set()
+
+    monkeypatch.setattr(serve_filewatch, "_run_file_watch", stalled_registration)
+    try:
         start_exit_file_watch(
             FakeServer(), Namespace(until=watched_path), stop_event=stop_event
         )
+    except SpiceError as exc:
+        outcome = {"state": "timed-out", "message": str(exc)}
+    else:
+        outcome = {"state": "started", "message": "watcher started"}
 
-    assert stop_event.is_set()
+    assert outcome["state"] == "timed-out"
+    assert "watcher activation deadline exceeded" in outcome["message"]
+    assert registration_started.wait(timeout=1.0) is True
+    assert watcher_stopped.wait(timeout=1.0) is True
+    assert stop_event.is_set() is True
 
 
 def test_start_exit_file_watch_exits_on_content_change(
