@@ -137,6 +137,17 @@ capture, steering, tasks, and the constitution keep working while optional
 feedback or narration is skipped. Runtime, verification, and protocol details
 are in [CONFIG.md](CONFIG.md).
 
+The layered `rtk.executable` setting accepts one trusted executable basename or
+absolute path; activation and Doctor probe that exact identity without a prior
+lookup. Exit `0` or Exit `3` with non-empty stdout applies a rewrite, while
+Exit `1` with empty stdout is a silent no-match. Other or malformed outcomes
+are diagnosed, discarded, and the original native command runs unchanged.
+RTK owns selection and its canonical `rtk` frontend; Spice remaps that frontend
+to the configured identity, supplies only the built-in `common` wrapper's
+finite post-selection routes and thread-scoped `RTK_DB_PATH` at
+`.git/spice/agents/<thread>/rtk/history.db`, and reports health telemetry through
+activation, Doctor, and bounded stderr diagnostics.
+
 ## Release
 
 Release workflow is documented in [docs/release.md](docs/release.md). Most
