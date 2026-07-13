@@ -51,9 +51,24 @@ def configure_config_parser(subparsers: Any) -> None:
     say.add_argument("--clear", action="store_true")
     say.set_defaults(func=handle_config)
 
-    judge = actions.add_parser("judge", help="Configure the maxim judge binary.")
+    judge = actions.add_parser("judge", help="Configure the maxim judge.")
     judge.add_argument("--bin", dest="judge_bin", help="Local LLM judge binary.")
     _add_scope_argument(judge)
+    adjudicate = judge.add_mutually_exclusive_group()
+    adjudicate.add_argument(
+        "--enable",
+        dest="judge_enabled",
+        action="store_true",
+        default=None,
+        help="Opt into judge adjudication of maxim trigger hits.",
+    )
+    adjudicate.add_argument(
+        "--disable",
+        dest="judge_enabled",
+        action="store_false",
+        default=None,
+        help="Publish maxim trigger hits judge-free (the default).",
+    )
     judge.add_argument("--clear", action="store_true")
     judge.set_defaults(func=handle_config)
 
@@ -157,20 +172,36 @@ def _handle_say(args: argparse.Namespace, repo_root: Path) -> int:
 def _handle_judge(args: argparse.Namespace, repo_root: Path) -> int:
     scope = str(args.scope)
     if args.clear:
-        config.clear_scope_section(
-            repo_root, scope, config.JUDGE_KEY, keys=(config.JUDGE_BIN_KEY,)
-        )
+        keys = (config.JUDGE_BIN_KEY,)
+        if scope == config.WORKTREE_SOURCE:
+            keys = (config.JUDGE_BIN_KEY, config.JUDGE_ENABLED_KEY)
+        config.clear_scope_section(repo_root, scope, config.JUDGE_KEY, keys=keys)
         print(f"judge {scope} config cleared")
         return 0
-    if not args.judge_bin or not args.judge_bin.strip():
-        raise SpiceError(_scope_error(repo_root, scope, "config judge requires --bin"))
-    config.set_scope_section(
-        repo_root,
-        scope,
-        config.JUDGE_KEY,
-        {config.JUDGE_BIN_KEY: args.judge_bin.strip()},
-    )
+    values: dict[str, Any] = {}
+    if args.judge_bin and args.judge_bin.strip():
+        values[config.JUDGE_BIN_KEY] = args.judge_bin.strip()
+    if args.judge_enabled is not None:
+        if scope != config.WORKTREE_SOURCE:
+            raise SpiceError(
+                _scope_error(
+                    repo_root,
+                    scope,
+                    "config judge --enable and --disable are worktree-local",
+                )
+            )
+        values[config.JUDGE_ENABLED_KEY] = args.judge_enabled
+    if not values:
+        raise SpiceError(
+            _scope_error(
+                repo_root,
+                scope,
+                "config judge requires --bin, --enable, or --disable",
+            )
+        )
+    config.set_scope_section(repo_root, scope, config.JUDGE_KEY, values)
     print(f"judge_bin={config.configured_judge_bin(repo_root)}")
+    print(f"judge_enabled={config.maxim_adjudication_enabled(repo_root)}")
     return 0
 
 

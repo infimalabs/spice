@@ -7,10 +7,14 @@ Every message gets two treatments:
 * ACK'd inbox keys are archived immediately (the operator sees inbox items retire
   the moment the agent acknowledges it);
 * the assistant-authored prose (clipped at generated tool-output boundaries)
-  is trigger-scanned against the configured maxims and, on a hit, adjudicated
-  by the local judge — violations are published back into the agent's inbox
-  as `[MAXIM]` reminders, at most once per content-derived reminder key per
-  compaction epoch, with self-echo suppressed.
+  is trigger-scanned against the configured maxims and, on a hit, published
+  back into the agent's inbox as `[MAXIM]` reminders, at most once per
+  content-derived reminder key per compaction epoch, with self-echo suppressed.
+
+By default the publish is judge-free: a matched trigger bag publishes directly,
+accepting more false positives and needing no local judge. An installation that
+wants fewer false positives opts into adjudication (`[judge] enabled`), which
+gates each hit through the local two-judge verdict before publishing.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from typing import Any, Callable, Protocol, TextIO, cast
 
 from spice.agent.driver import AgentDriver, driver_for
 from spice.agent.identity import ambient_thread_id
+from spice.config import maxim_adjudication_enabled
 from spice.agent.maxims import (
     MaximBag,
     evaluate_maxim_any_violation,
@@ -658,6 +663,41 @@ def publish_maxim_hits_as_inbox(
             reminder_body=_maxim_inbox_body(hits),
         )
         return []
+    violations = _publishable_maxim_hits(repo_root, hits, statement_text)
+    if not violations:
+        return []
+    body = _maxim_inbox_body(violations)
+    path = write_inbox_item(repo_root, None, body)
+    reminder_gate.mark_sent(reminder_key, path, body)
+    _record_maxim_metrics(
+        repo_root,
+        violations,
+        event_type=MAXIM_EVENT_PUBLISHED,
+        reminder_key=path.stem,
+        reminder_body=body,
+    )
+    paths = [path]
+    return paths
+
+
+def _publishable_maxim_hits(
+    repo_root: Path, hits: list[MaximBag], statement_text: str
+) -> list[MaximBag]:
+    """Return the triggered hits that should publish as reminders.
+
+    Judge-free is the deterministic default: every gated trigger hit publishes
+    directly, accepting more false positives and needing no judge subprocess.
+    The request's shorthand that a default judge "always answers YES" is
+    inverted against the protocol — YES means the statement AGREES with the
+    maxim and is therefore not a violation (suppressed) — so direct publishing
+    is modeled as no adjudication at all, never as an assumed YES verdict that
+    would suppress every reminder. When an install opts into adjudication
+    (``[judge] enabled``), each hit is confirmed by the local two-judge gate
+    first: a YES verdict agrees and is dropped, a NO verdict disagrees and
+    publishes.
+    """
+    if not maxim_adjudication_enabled(repo_root):
+        return list(hits)
     violations: list[MaximBag] = []
     for hit in hits:
         verdict = evaluate_maxim_any_violation(hit.message, statement_text)
@@ -676,20 +716,7 @@ def publish_maxim_hits_as_inbox(
             statement=statement_text,
         )
         violations.append(hit)
-    if not violations:
-        return []
-    body = _maxim_inbox_body(violations)
-    path = write_inbox_item(repo_root, None, body)
-    reminder_gate.mark_sent(reminder_key, path, body)
-    _record_maxim_metrics(
-        repo_root,
-        violations,
-        event_type=MAXIM_EVENT_PUBLISHED,
-        reminder_key=path.stem,
-        reminder_body=body,
-    )
-    paths = [path]
-    return paths
+    return violations
 
 
 def _record_maxim_metrics(

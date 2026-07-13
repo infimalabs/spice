@@ -65,8 +65,10 @@ AGENT_LAUNCH_KEYS = (AGENT_MODEL_KEY, AGENT_EFFORT_KEY, AGENT_DRIVER_KEY)
 
 JUDGE_KEY = "judge"
 JUDGE_BIN_KEY = "bin"
+JUDGE_ENABLED_KEY = "enabled"
 DEFAULT_JUDGE_BIN = defaults.string("judge", "bin")
 PORTABLE_JUDGE_BIN = defaults.string("judge", "portable_bin")
+_CONFIG_FLAG_TRUE = frozenset({"true", "1", "yes", "on"})
 _TOML_TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
 _TOML_ASSIGN_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
 
@@ -513,6 +515,27 @@ def configured_judge_bin(repo_root: Path | None = None) -> str:
     if raw == DEFAULT_JUDGE_BIN and sys.platform != "darwin":
         return PORTABLE_JUDGE_BIN
     return raw or default_judge_bin()
+
+
+def maxim_adjudication_enabled(repo_root: Path | None = None) -> bool:
+    """Return whether the opt-in maxim judge adjudicates trigger hits.
+
+    Judge-free is the deterministic default: a matched trigger bag publishes
+    its ``[MAXIM]`` reminder directly, with no judge subprocess. An
+    installation opts into local YES/NO adjudication by setting
+    ``[judge] enabled = true`` in its worktree-local config; any other value
+    (including an absent one) resolves to the judge-free default.
+    """
+    root = _root_or_current(repo_root)
+    if root is None:
+        return False
+    return _config_flag(_section(root, JUDGE_KEY).get(JUDGE_ENABLED_KEY))
+
+
+def _config_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().casefold() in _CONFIG_FLAG_TRUE
 
 
 def say_command_args(
