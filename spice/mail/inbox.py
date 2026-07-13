@@ -37,7 +37,7 @@ from spice.mail.attachments import (
     shared_attachment_display_path,
     write_inbox_attachments,
 )
-from spice.locking import exclusive_lock
+from spice.locking import bounded_exclusive_lock
 from spice.paths import STATE_DIRNAME, fsync_directory
 
 INBOX_DIRNAME = "inbox"
@@ -48,6 +48,7 @@ INBOX_ARCHIVE_PREVIEW_LIMIT = 120
 INBOX_ARCHIVE_DEFAULT_LIMIT = 6
 INBOX_COLLISION_MAX = 1000
 INBOX_PUBLISH_LOCK_NAME = ".publish.lock"
+INBOX_PUBLISH_LOCK_TIMEOUT_SECONDS = 10.0
 _PREVIEW_ELLIPSIS_CHARS = 3
 SECONDS_PER_MINUTE = 60
 MINUTES_PER_HOUR = 60
@@ -753,7 +754,11 @@ def write_inbox_item(
     directory.mkdir(parents=True, exist_ok=True)
     tmp_path = directory / f"{target_name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
     try:
-        with exclusive_lock(directory / INBOX_PUBLISH_LOCK_NAME):
+        with bounded_exclusive_lock(
+            directory / INBOX_PUBLISH_LOCK_NAME,
+            timeout_seconds=INBOX_PUBLISH_LOCK_TIMEOUT_SECONDS,
+            action="publish inbox item",
+        ):
             if dedupe_pending_text and not attachments:
                 existing_path = _pending_inbox_path_with_text(directory, text)
                 if existing_path is not None:
@@ -845,7 +850,11 @@ def replace_inbox_item_text(repo_root: Path, name: str, text: str) -> Path:
     target_path = directory / name
     tmp_path = directory / f"{name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
     try:
-        with exclusive_lock(directory / INBOX_PUBLISH_LOCK_NAME):
+        with bounded_exclusive_lock(
+            directory / INBOX_PUBLISH_LOCK_NAME,
+            timeout_seconds=INBOX_PUBLISH_LOCK_TIMEOUT_SECONDS,
+            action="replace inbox item",
+        ):
             with tmp_path.open("w", encoding="utf-8") as handle:
                 handle.write(text)
                 handle.flush()

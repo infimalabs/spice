@@ -5,13 +5,13 @@ from __future__ import annotations
 import os
 import re
 import shlex
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from spice import config
+from spice.procs import run_bounded_process_group
 
 SAY_AUDIO_CONTENT_TYPE = "audio/mp4"
 SAY_AUDIO_SUFFIX = ".m4a"
@@ -30,13 +30,6 @@ _SAY_UTC_DATETIME_RE = re.compile(
 _SAY_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")
 _SAY_MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)\s]+\)")
 _SAY_IDENTIFIER_SPOKEN_LENGTH = 8
-
-
-def _speech_timeout_message(label: str, timeout: float) -> str:
-    return (
-        f"{label} timed out after {timeout:g}s; raise the say timeout_seconds "
-        "setting if legitimately-long messages are being clipped"
-    )
 
 
 @dataclass(frozen=True)
@@ -90,19 +83,13 @@ class ExternalCommandSpeechBackend:
     ) -> SpeechAudio:
         if not self.command:
             raise RuntimeError("external speech backend requires a command")
-        try:
-            result = subprocess.run(
-                list(self.command),
-                input=prepare_say_text(text).encode("utf-8"),
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=self.timeout,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                _speech_timeout_message("external speech backend", self.timeout)
-            ) from exc
+        result = run_bounded_process_group(
+            list(self.command),
+            input_data=prepare_say_text(text).encode("utf-8"),
+            timeout_seconds=self.timeout,
+            phase="serve-speech-external",
+            input_label=f"characters={len(text)}",
+        )
         if result.returncode != 0:
             detail = result.stderr.decode("utf-8", "replace").strip()
             suffix = f": {detail}" if detail else ""
@@ -219,29 +206,31 @@ def _render_macos_say_audio(
     audio_path = Path(raw_path)
     try:
         os.close(handle)
-        try:
-            subprocess.run(
-                [
-                    *config.say_command_args(
-                        repo_root,
-                        rate_multiplier=normalize_say_rate_multiplier(rate_multiplier),
-                    ),
-                    "-o",
-                    str(audio_path),
-                    "--file-format=m4af",
-                    "--data-format=aac",
-                    "-f",
-                    "-",
-                ],
-                input=prepare_say_text(text),
-                text=True,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=timeout,
+        result = run_bounded_process_group(
+            [
+                *config.say_command_args(
+                    repo_root,
+                    rate_multiplier=normalize_say_rate_multiplier(rate_multiplier),
+                ),
+                "-o",
+                str(audio_path),
+                "--file-format=m4af",
+                "--data-format=aac",
+                "-f",
+                "-",
+            ],
+            input_data=prepare_say_text(text),
+            text=True,
+            timeout_seconds=timeout,
+            phase="serve-speech-macos",
+            input_label=f"characters={len(text)}",
+        )
+        if result.returncode != 0:
+            detail = str(result.stderr or "").strip()
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(
+                f"macOS speech backend exited {result.returncode}{suffix}"
             )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(_speech_timeout_message("macOS say", timeout)) from exc
         return audio_path.read_bytes()
     finally:
         audio_path.unlink(missing_ok=True)

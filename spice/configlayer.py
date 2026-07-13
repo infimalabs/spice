@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -12,10 +13,19 @@ from typing import Any
 from spice import paths
 from spice.errors import SpiceError
 
-PACKAGED_SOURCE = "packaged"
+SYSTEM_SOURCE = "system"
 PYPROJECT_SOURCE = "pyproject"
 REPOSITORY_SOURCE = "repository"
 WORKTREE_SOURCE = "worktree"
+_CONFIG_ERROR_KEY_RE = re.compile(
+    r"^\[tool\.spice(?:\.([^\]]+))?\](?:[ .]([A-Za-z0-9_-]+))?"
+)
+CONFIG_SCOPE_NAMES = (
+    SYSTEM_SOURCE,
+    PYPROJECT_SOURCE,
+    REPOSITORY_SOURCE,
+    WORKTREE_SOURCE,
+)
 
 
 @dataclass(frozen=True)
@@ -95,7 +105,7 @@ def load_packaged_config() -> ConfigLayer:
     if not present:
         raise SpiceError(f"packaged configuration is missing: {path}")
     return ConfigLayer(
-        name=PACKAGED_SOURCE,
+        name=SYSTEM_SOURCE,
         path=path,
         values=_freeze_mapping(values),
         present=True,
@@ -158,6 +168,30 @@ def effective_context(repo_root: Path, *path: str) -> str:
     if source is None:
         return dotted
     return f"{dotted} (source={source.name} path={source.path})"
+
+
+def contextualize_config_error(
+    repo_root: Path, exc: SpiceError, *fallback_path: str
+) -> SpiceError:
+    """Attach the effective key and winning layer to a consumer validation error."""
+    message = str(exc)
+    if "source=" in message and " path=" in message:
+        return exc
+    path = fallback_path
+    detail = message
+    match = _CONFIG_ERROR_KEY_RE.match(message)
+    if match is not None:
+        table, candidate = match.groups()
+        parsed = tuple(part for part in (table or "").split(".") if part)
+        candidate_path = (*parsed, candidate) if candidate else parsed
+        loaded = load_config(repo_root)
+        path = (
+            candidate_path
+            if loaded.source_for(candidate_path) is not None
+            else parsed or fallback_path
+        )
+        detail = message[match.end() :].lstrip(" .:") or message
+    return SpiceError(f"{effective_context(repo_root, *path)}: {detail}")
 
 
 def _read_toml(path: Path) -> tuple[dict[str, Any], bool]:

@@ -669,10 +669,10 @@ def test_layered_wrapper_false_disables_inherited_entry_and_group(tmp_path):
 def test_configured_agent_environment_installs_driver_shell_steering_hooks(
     tmp_path, monkeypatch
 ):
-    from spice.config import set_worktree_section
+    from spice.config import WORKTREE_SOURCE, set_scope_section
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    set_worktree_section(tmp_path, "agent", {"driver": "claude"})
+    set_scope_section(tmp_path, WORKTREE_SOURCE, "agent", {"driver": "claude"})
     real_zdotdir = tmp_path / "real-zdotdir"
     real_zdotdir.mkdir()
     real_bash_env = tmp_path / "real-bash-env"

@@ -894,6 +894,37 @@ def _subscribe_lane(session: LiveBusSession, target_id: str, *, limit: int) -> N
         assert subscription.initial_payload_sent.wait(timeout=15.0)
 
 
+def test_subscribe_activation_deadline_releases_queue_for_later_lane(
+    tmp_path, monkeypatch
+):
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=tmp_path)
+    connection = _Connection()
+    session = LiveBusSession(
+        connection, _callbacks(target=target, transcript=transcript)
+    )
+    monkeypatch.setattr(livebus, "LIVE_BUS_WATCHER_ACTIVATION_TIMEOUT_S", 0.05)
+
+    stalled = session._replace_subscription(target, {"limit": 5})
+    session._complete_lanes_subscribe(
+        {"type": "lanes.subscribe", "requestId": "stalled"}, [stalled]
+    )
+    recovered = session._replace_subscription(target, {"limit": 5})
+    recovered.watcher_activated.set()
+    session._complete_lanes_subscribe(
+        {"type": "lanes.subscribe", "requestId": "recovered"}, [recovered]
+    )
+
+    assert [frame["type"] for frame in connection.sent] == [
+        "bus.error",
+        "lanes.payload",
+    ]
+    assert "target=lane" in connection.sent[0]["error"]
+    assert recovered.initial_payload_sent.is_set()
+    session._teardown()
+
+
 def _callbacks(
     *,
     target: _Target,

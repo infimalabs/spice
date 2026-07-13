@@ -12,7 +12,7 @@ from spice.agent.driver import (
     SPICE_AGENT_DRIVER_ENV,
     dashed_uuid,
 )
-from spice.config import set_worktree_section
+from spice.config import WORKTREE_SOURCE, set_scope_section
 from spice.serve import messages as message_reader
 from spice.serve.messages import (
     RolloutCursor,
@@ -41,7 +41,7 @@ def test_assistant_messages_use_claude_owner_when_configured_driver_misses(
     tmp_path, monkeypatch
 ):
     repo = _repo(tmp_path / "repo")
-    set_worktree_section(repo, "agent", {"driver": "codex"})
+    set_scope_section(repo, WORKTREE_SOURCE, "agent", {"driver": "codex"})
     _write_claude_transcript(tmp_path, monkeypatch, "hello claude")
 
     read = assistant_messages_for_thread_id(THREAD, repo_root=repo)
@@ -54,7 +54,7 @@ def test_assistant_messages_use_claude_owner_when_configured_driver_misses(
 
 def test_resolve_thread_transcript_returns_claude_owner(tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
-    set_worktree_section(repo, "agent", {"driver": "claude"})
+    set_scope_section(repo, WORKTREE_SOURCE, "agent", {"driver": "claude"})
     transcript = _write_claude_transcript(tmp_path, monkeypatch, "native claude")
 
     resolved = resolve_thread_transcript(THREAD, repo)

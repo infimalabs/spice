@@ -264,28 +264,28 @@ def test_policy_resolver_uses_ratio_fallback_for_unset_flex(tmp_path):
             [tool.spice.policy.limits]
             file_loc = "large"
             """,
-            r"\[tool\.spice\.policy\.limits\] file_loc",
+            r"policy\.limits\.file_loc \(source=pyproject path=.*pyproject\.toml\)",
         ),
         (
             """
             [tool.spice.policy.magic]
             examine_threshold = 0
             """,
-            r"\[tool\.spice\.policy\.magic\] examine_threshold",
+            r"policy\.magic\.examine_threshold \(source=pyproject path=.*pyproject\.toml\)",
         ),
         (
             """
             [tool.spice.policy.magic]
             baseline_ref = ""
             """,
-            r"\[tool\.spice\.policy\.magic\] baseline_ref",
+            r"policy\.magic\.baseline_ref \(source=pyproject path=.*pyproject\.toml\)",
         ),
         (
             """
             [tool.spice.policy.complexity]
             hotspot_limit = 0
             """,
-            r"\[tool\.spice\.policy\.complexity\] hotspot_limit",
+            r"policy\.complexity\.hotspot_limit \(source=pyproject path=.*pyproject\.toml\)",
         ),
     ],
 )
@@ -310,7 +310,7 @@ def test_policy_resolver_names_invalid_debt_key(tmp_path):
 
     with pytest.raises(
         SpiceError,
-        match=r"\[tool\.spice\.policy\.debt\] reachability_test_only",
+        match=r"policy\.debt\.reachability_test_only \(source=pyproject path=.*pyproject\.toml\)",
     ):
         resolve_policy(tmp_path)
 
