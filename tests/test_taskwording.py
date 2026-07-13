@@ -7,6 +7,18 @@ import pytest
 
 from spice.tasks import create
 
+INCLUSIVE_TASTE_SUGGESTIONS = (
+    ("whitelist", "allowlist"),
+    ("whitelists", "allowlists"),
+    ("whitelisted", "allowlisted"),
+    ("whitelisting", "allowlisting"),
+    ("blacklist", "blocklist"),
+    ("blacklists", "blocklists"),
+    ("blacklisted", "blocklisted"),
+    ("blacklisting", "blocklisting"),
+)
+TASK_TEXT_SOURCES = ("title", "description", "acceptance")
+
 
 @pytest.fixture
 def repo(tmp_path):
@@ -25,6 +37,31 @@ def test_taste_word_match_records_source_word_and_reason(repo):
             matched="adopting",
             trigger_family="taste",
             reason="consider 'capture'",
+        ),
+    )
+
+
+@pytest.mark.parametrize(("word", "suggestion"), INCLUSIVE_TASTE_SUGGESTIONS)
+@pytest.mark.parametrize("source", TASK_TEXT_SOURCES)
+def test_default_inclusive_terms_match_every_task_text_source_outside_repo(
+    tmp_path, monkeypatch, word, suggestion, source
+):
+    monkeypatch.chdir(tmp_path)
+    values = {
+        "title": "Clear task",
+        "description": None,
+        "acceptance": (),
+    }
+    values[source] = [word.upper()] if source == "acceptance" else word.upper()
+
+    matches = create.detect_suspect_wording(**values)
+
+    assert matches == (
+        create.TaskWordingMatch(
+            source=source,
+            matched=word,
+            trigger_family="taste",
+            reason=f"consider {suggestion!r}",
         ),
     )
 
