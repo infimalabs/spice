@@ -10,6 +10,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from spice.configlayer import ConfigLayer as ConfigLayer
+from spice.configlayer import LayeredConfig as LayeredConfig
+from spice.configlayer import load_config as load_config
 from spice.paths import (
     atomic_write_json,
     atomic_write_text,
