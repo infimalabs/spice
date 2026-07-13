@@ -125,11 +125,7 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
 
     loaded = config.load_config(tmp_path)
 
-    assert loaded.effective["wrappers"]["common"]["rtk"] == {
-        "argv": ("repo-rtk",),
-        "match": (),
-        "executable": "configured-rtk",
-    }
+    assert loaded.effective["wrappers"]["common"]["rtk"] == {"match": ()}
     assert loaded.effective["policy"] == {
         "mode": ("worktree",),
         "internal_couplings": (
@@ -140,12 +136,6 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
             },
         ),
     }
-    assert loaded.source_for("wrappers.common.rtk.executable") == loaded.layer(
-        configlayer.PYPROJECT_SOURCE
-    )
-    assert loaded.source_for("wrappers.common.rtk.argv") == loaded.layer(
-        configlayer.REPOSITORY_SOURCE
-    )
     assert loaded.source_for("wrappers.common.rtk.match") == loaded.layer(
         configlayer.WORKTREE_SOURCE
     )

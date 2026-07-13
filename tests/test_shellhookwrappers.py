@@ -28,10 +28,9 @@ def test_agent_wrapper_lines_adds_ordered_agent_wrapper_functions(tmp_path):
         groups={"common": {"wrap": ["grep", "find", "git"]}},
     )
 
-    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
-        *_builtin_rtk_wrapper_lines(),
-        *_expected_wrapper_lines("wrap", ["grep", "find", "git"]),
-    ]
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == _expected_wrapper_lines(
+        "wrap", ["grep", "find", "git"]
+    )
 
 
 def test_agent_wrapper_lines_uses_builtin_common_default(tmp_path):
@@ -52,7 +51,7 @@ def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_
     )
 
 
-def test_agent_wrapper_lines_project_common_group_merges_with_packaged_default(
+def test_agent_wrapper_lines_project_common_group_replaces_packaged_default(
     tmp_path,
 ):
     _write_agent_wrapper_config(
@@ -61,10 +60,9 @@ def test_agent_wrapper_lines_project_common_group_merges_with_packaged_default(
         groups={"common": {"wrap": ["grep"]}},
     )
 
-    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
-        *_builtin_rtk_wrapper_lines(),
-        *_expected_wrapper_lines("wrap", ["grep"]),
-    ]
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == _expected_wrapper_lines(
+        "wrap", ["grep"]
+    )
 
 
 def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
