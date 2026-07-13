@@ -1,7 +1,7 @@
 # Configuration Reference
 
 Tracked project configuration lives under `[tool.spice.*]` in `pyproject.toml`.
-Worktree-local operator preferences live in `.spice/config/state.json` through
+Worktree-local operator preferences live in `.spice/config/spice.toml` through
 `spice config`.
 
 ## Runtime Model
@@ -55,7 +55,7 @@ Configure the worktree-local judge with:
 spice config judge --bin /path/to/judge
 ```
 
-This stores `[judge].bin` in `.spice/config/state.json`. The value is one
+This stores `[judge].bin` in `.spice/config/spice.toml`. The value is one
 executable path or `PATH` name, not a shell command or argv list. When unset,
 the default is keyed to the platform: macOS uses the Apple Foundation Models
 `afm-cli` binary; every other platform, where `afm-cli` does not exist, uses the

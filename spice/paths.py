@@ -111,15 +111,6 @@ def atomic_write_json(path: Path, payload: Any, *, compact: bool = False) -> Pat
     return atomic_write_text(path, text)
 
 
-def read_json(path: Path) -> dict[str, Any]:
-    """Read a JSON object from `path`; missing or malformed reads as {}."""
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
 def fsync_directory(directory: Path) -> None:
     try:
         descriptor = os.open(directory, os.O_RDONLY)

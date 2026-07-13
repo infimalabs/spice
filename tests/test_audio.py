@@ -19,7 +19,7 @@ ESPEAK_TEST_SAMPLE_RATE = 8000
 
 
 def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.SAY_KEY,
         {
@@ -50,7 +50,7 @@ def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
 
 
 def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.SAY_KEY,
         {
@@ -79,7 +79,7 @@ def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
 
 
 def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.SAY_KEY,
         {
