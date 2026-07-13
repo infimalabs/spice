@@ -1,7 +1,7 @@
 # Configuration Reference
 
 Tracked project configuration lives under `[tool.spice.*]` in `pyproject.toml`.
-Worktree-local operator preferences live in `.spice/config/state.json` through
+Worktree-local operator preferences live in `.spice/config/spice.toml` through
 `spice config`.
 
 ## Runtime Model
@@ -17,6 +17,12 @@ The agent shell also requires
 [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer. Install and protocol
 details live in [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion); this is a
 runtime companion requirement, not a tracked project setting.
+
+Task-boundary and worktree-discovery git commands have a 120-second default
+deadline; network fetch and push default to 30 seconds. Set
+`SPICE_GIT_TIMEOUT_SECONDS` to one positive number of seconds to override both
+deadlines for unusually slow repositories. Expiry fails loudly with the exact
+git argv instead of retaining the task boundary indefinitely.
 
 ## Linux Speech with `espeak-ng`
 
@@ -55,7 +61,7 @@ Configure the worktree-local judge with:
 spice config judge --bin /path/to/judge
 ```
 
-This stores `[judge].bin` in `.spice/config/state.json`. The value is one
+This stores `[judge].bin` in `.spice/config/spice.toml`. The value is one
 executable path or `PATH` name, not a shell command or argv list. When unset,
 the default is keyed to the platform: macOS uses the Apple Foundation Models
 `afm-cli` binary; every other platform, where `afm-cli` does not exist, uses the
@@ -169,7 +175,8 @@ argv still wins because grep honors the last matcher flag). Naming `common` in
 a repo `[tool.spice.wrappers.common]` table replaces the whole group atomically
 — routes do not concatenate, so an override must re-list every route it keeps —
 while omitting the table inherits this default and `wrappers = []` disables
-generation. Repo groups should otherwise wrap stable repo-owned tools (see
+generation. A `false` group or entry disables that inherited name explicitly.
+Repo groups should otherwise wrap stable repo-owned tools (see
 [wrapper commands](../cli/wrapper-commands.md)).
 
 ## `[tool.spice.commands]`

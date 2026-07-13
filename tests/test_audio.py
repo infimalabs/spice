@@ -20,7 +20,7 @@ LONG_MESSAGE_FLOOR_SECONDS = 60.0
 
 
 def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.SAY_KEY,
         {
@@ -51,7 +51,7 @@ def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
 
 
 def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.SAY_KEY,
         {
@@ -80,7 +80,7 @@ def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
 
 
 def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.SAY_KEY,
         {
@@ -102,7 +102,7 @@ def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
 
 
 def test_external_speech_backend_bounds_a_hung_process(tmp_path, monkeypatch):
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.SAY_KEY,
         {
@@ -115,7 +115,7 @@ def test_external_speech_backend_bounds_a_hung_process(tmp_path, monkeypatch):
 
     def fake_run(args, **kwargs):
         seen["timeout"] = kwargs["timeout"]
-        raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs["timeout"])
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
     monkeypatch.setattr(audio.subprocess, "run", fake_run)
 
@@ -128,7 +128,7 @@ def test_external_speech_backend_bounds_a_hung_process(tmp_path, monkeypatch):
 
 
 def test_macos_say_bounds_a_hung_process(tmp_path, monkeypatch):
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.SAY_KEY,
         {config.SAY_TIMEOUT_SECONDS_KEY: 0.5},
@@ -137,36 +137,33 @@ def test_macos_say_bounds_a_hung_process(tmp_path, monkeypatch):
 
     def fake_run(args, **kwargs):
         seen["timeout"] = kwargs["timeout"]
-        raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs["timeout"])
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
     monkeypatch.setattr(audio.subprocess, "run", fake_run)
 
-    with pytest.raises(RuntimeError, match="macOS say timed out after 0.5s"):
+    with pytest.raises(
+        RuntimeError,
+        match="macOS say timed out after 0.5s",
+    ):
         audio.render_speech_audio("hello", repo_root=tmp_path)
     assert seen["timeout"] == 0.5
 
 
 def test_long_message_renders_within_the_generous_default_bound(tmp_path, monkeypatch):
-    config.update_section(
-        tmp_path,
-        config.SAY_KEY,
-        {
-            config.SAY_BACKEND_KEY: "external",
-            config.SAY_COMMAND_KEY: "tts-engine",
-        },
-    )
-    long_message = "word " * 200  # well over a minute of spoken content
+    long_message = "word " * 200
     seen: dict[str, object] = {}
 
     def fake_run(args, **kwargs):
         seen["timeout"] = kwargs["timeout"]
-        return subprocess.CompletedProcess(args, 0, stdout=b"wav-bytes", stderr=b"")
+        output_path = Path(args[args.index("-o") + 1])
+        output_path.write_bytes(b"m4a-bytes")
+        return subprocess.CompletedProcess(args, 0)
 
     monkeypatch.setattr(audio.subprocess, "run", fake_run)
 
     rendered = audio.render_speech_audio(long_message, repo_root=tmp_path)
 
-    assert rendered.data == b"wav-bytes"
+    assert rendered == audio.SpeechAudio(b"m4a-bytes", "audio/mp4")
     assert seen["timeout"] == config.DEFAULT_SAY_TIMEOUT_SECONDS
     assert seen["timeout"] > LONG_MESSAGE_FLOOR_SECONDS
 

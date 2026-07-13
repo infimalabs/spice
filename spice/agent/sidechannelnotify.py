@@ -16,6 +16,11 @@ from spice.mail.feedback import supervisor_feedback_line
 SIDE_CHANNEL_NOTIFY_EVENT = "notify"
 SIDE_CHANNEL_INBOX_EVENT = "inbox"
 SIDE_CHANNEL_NOTICE_EVENT = "notice"
+# Inbox publication fires this notify while holding the publish file lock. A
+# wedged supervisor socket must not hold that lock, so the connect+send carry
+# this budget and degrade to a dropped notification (an OSError subclass caught
+# below) rather than blocking the publisher.
+SIDE_CHANNEL_NOTIFY_TIMEOUT_S = 5.0
 
 _NOTICE_LOCK = Lock()
 _NOTICES_BY_REPO_ROOT: dict[str, list[str]] = {}
@@ -50,6 +55,7 @@ def notify_agent_side_channel(
     if socket_path is None:
         return
     side_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    side_socket.settimeout(SIDE_CHANNEL_NOTIFY_TIMEOUT_S)
     try:
         side_socket.connect(str(socket_path))
         side_socket.sendall(

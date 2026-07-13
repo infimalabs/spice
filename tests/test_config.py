@@ -1,6 +1,8 @@
 """Harness configuration: project defaults and worktree overrides."""
 
 import argparse
+import json
+import tomllib
 
 import pytest
 
@@ -10,6 +12,7 @@ from spice.cli.parser import build_parser
 from spice.errors import SpiceError
 from spice.configcli import handle_config
 
+SAMPLE_WORDS_PER_MINUTE = 190
 SAY_TIMEOUT_MINUTE_FLOOR_SECONDS = 60.0
 SAY_TIMEOUT_OVERRIDE_SECONDS = 12.5
 
@@ -34,7 +37,7 @@ def test_worktree_agent_config_overrides_project_defaults(tmp_path, monkeypatch)
         '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.AGENT_KEY,
         {
@@ -60,14 +63,13 @@ def test_config_overview_shows_project_worktree_and_effective_agent_config(
         '[tool.spice.agent]\nmodel = "gpt-project"\neffort = "low"\n',
         encoding="utf-8",
     )
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.AGENT_KEY,
         {config.AGENT_EFFORT_KEY: "medium"},
     )
 
     assert config.config_overview(tmp_path) == {
-        "schema": config.CONFIG_SCHEMA_VERSION,
         "project": {
             "agent": {
                 "model": "gpt-project",
@@ -75,7 +77,6 @@ def test_config_overview_shows_project_worktree_and_effective_agent_config(
             }
         },
         "worktree": {
-            "schema": config.CONFIG_SCHEMA_VERSION,
             "agent": {"effort": "medium"},
         },
         "effective": {
@@ -230,7 +231,7 @@ def test_config_agent_writes_driver_scope(tmp_path, monkeypatch, capsys):
 
 def test_effective_agent_config_keeps_claude_sonnet_family(tmp_path, monkeypatch):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.AGENT_KEY,
         {"driver": "claude", "model": "sonnet"},
@@ -246,7 +247,7 @@ def test_effective_agent_config_keeps_claude_sonnet_family(tmp_path, monkeypatch
 
 def test_effective_agent_config_preserves_explicit_claude_model(tmp_path, monkeypatch):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.AGENT_KEY,
         {"driver": "claude", "model": "claude-sonnet-4-6"},
@@ -330,7 +331,7 @@ def test_configured_judge_bin_defaults_to_platform_adapter(tmp_path, monkeypatch
 
 
 def test_explicit_judge_bin_overrides_platform_default(tmp_path, monkeypatch):
-    config.update_section(
+    config.set_worktree_section(
         tmp_path, config.JUDGE_KEY, {config.JUDGE_BIN_KEY: "/opt/my-judge"}
     )
 
@@ -347,7 +348,7 @@ def test_say_timeout_defaults_generously_above_a_minute(tmp_path):
 
 
 def test_say_timeout_honors_positive_override(tmp_path):
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.SAY_KEY,
         {config.SAY_TIMEOUT_SECONDS_KEY: SAY_TIMEOUT_OVERRIDE_SECONDS},
@@ -356,10 +357,133 @@ def test_say_timeout_honors_positive_override(tmp_path):
 
 
 def test_say_timeout_falls_back_when_non_positive_or_invalid(tmp_path):
-    config.update_section(tmp_path, config.SAY_KEY, {config.SAY_TIMEOUT_SECONDS_KEY: 0})
+    config.set_worktree_section(
+        tmp_path, config.SAY_KEY, {config.SAY_TIMEOUT_SECONDS_KEY: 0}
+    )
     assert config.configured_say_timeout(tmp_path) == config.DEFAULT_SAY_TIMEOUT_SECONDS
 
-    config.update_section(
+    config.set_worktree_section(
         tmp_path, config.SAY_KEY, {config.SAY_TIMEOUT_SECONDS_KEY: "nonsense"}
     )
     assert config.configured_say_timeout(tmp_path) == config.DEFAULT_SAY_TIMEOUT_SECONDS
+
+
+def _write_legacy_state(repo_root, payload):
+    legacy = repo_root / ".spice" / "config" / "state.json"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(json.dumps(payload), encoding="utf-8")
+    return legacy
+
+
+def test_worktree_config_migrates_legacy_state_json_exactly_once(tmp_path, monkeypatch):
+    fsync_calls: list[int] = []
+    monkeypatch.setattr(
+        "spice.paths.os.fsync", lambda descriptor: fsync_calls.append(descriptor)
+    )
+    legacy = _write_legacy_state(
+        tmp_path,
+        {
+            "schema": 1,
+            "agent": {"driver": "claude", "model": "sonnet"},
+            "say": {"voice": "Samantha", "words_per_minute": SAMPLE_WORDS_PER_MINUTE},
+            "judge": {"bin": "/opt/my-judge"},
+        },
+    )
+
+    migrated = config.read_worktree_config(tmp_path)
+
+    assert migrated == {
+        "agent": {"driver": "claude", "model": "sonnet"},
+        "say": {"voice": "Samantha", "words_per_minute": SAMPLE_WORDS_PER_MINUTE},
+        "judge": {"bin": "/opt/my-judge"},
+    }
+    assert not legacy.exists()
+    assert config.worktree_config_path(tmp_path).exists()
+    assert len(fsync_calls) >= 2
+    # words_per_minute keeps its integer type across the migration round trip.
+    assert config.configured_say_words_per_minute(tmp_path) == SAMPLE_WORDS_PER_MINUTE
+
+    # Idempotent: a second read finds no JSON and leaves the TOML byte-identical.
+    before = config.worktree_config_path(tmp_path).read_text(encoding="utf-8")
+    assert config.read_worktree_config(tmp_path) == migrated
+    assert config.worktree_config_path(tmp_path).read_text(encoding="utf-8") == before
+
+
+def test_worktree_config_migration_preserves_unrelated_toml(tmp_path):
+    config_path = config.worktree_config_path(tmp_path)
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        '# operator notes\n[custom]\nkeep = "me"\n',
+        encoding="utf-8",
+    )
+    legacy = _write_legacy_state(tmp_path, {"schema": 1, "agent": {"driver": "claude"}})
+
+    config.read_worktree_config(tmp_path)
+
+    text = config_path.read_text(encoding="utf-8")
+    assert "# operator notes" in text
+    assert "[custom]" in text
+    assert 'keep = "me"' in text
+    assert config.configured_agent_driver(tmp_path) == "claude"
+    assert not legacy.exists()
+
+
+def test_worktree_config_migration_failure_leaves_json_intact(tmp_path):
+    legacy = _write_legacy_state(tmp_path, {"schema": 1})
+    legacy.write_text("{ not valid json", encoding="utf-8")
+
+    with pytest.raises(SpiceError, match="migrate legacy config state"):
+        config.read_worktree_config(tmp_path)
+
+    assert legacy.exists()
+    assert not config.worktree_config_path(tmp_path).exists()
+
+    valid_legacy = json.dumps({"schema": 1, "agent": {"driver": "claude"}})
+    legacy.write_text(valid_legacy, encoding="utf-8")
+    config_path = config.worktree_config_path(tmp_path)
+    config_path.write_text("broken = [\n", encoding="utf-8")
+
+    with pytest.raises(SpiceError, match="invalid TOML"):
+        config.read_worktree_config(tmp_path)
+
+    assert legacy.read_text(encoding="utf-8") == valid_legacy
+
+
+def test_set_worktree_section_preserves_comments_and_scalar_types(tmp_path):
+    config_path = config.worktree_config_path(tmp_path)
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        "# keep this header\n"
+        "[custom]\n"
+        "flag = true\n\n"
+        "[say]\n"
+        'voice = "Alex"\n'
+        "words_per_minute = 150 # operator rate\n",
+        encoding="utf-8",
+    )
+
+    config.set_worktree_section(
+        tmp_path, config.SAY_KEY, {config.SAY_WORDS_PER_MINUTE_KEY: 200}
+    )
+
+    text = config_path.read_text(encoding="utf-8")
+    assert "# keep this header" in text
+    assert "words_per_minute = 200 # operator rate" in text
+    parsed = tomllib.loads(text)
+    assert parsed["say"] == {"voice": "Alex", "words_per_minute": 200}
+    assert parsed["custom"] == {"flag": True}
+
+
+def test_clear_worktree_section_preserves_unrelated_tables(tmp_path):
+    config.set_worktree_section(tmp_path, config.JUDGE_KEY, {config.JUDGE_BIN_KEY: "j"})
+    config.set_worktree_section(
+        tmp_path, config.AGENT_KEY, {config.AGENT_DRIVER_KEY: "claude"}
+    )
+
+    config.clear_worktree_section(tmp_path, config.JUDGE_KEY)
+
+    parsed = tomllib.loads(
+        config.worktree_config_path(tmp_path).read_text(encoding="utf-8")
+    )
+    assert "judge" not in parsed
+    assert parsed["agent"] == {"driver": "claude"}

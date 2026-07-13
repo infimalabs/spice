@@ -90,6 +90,11 @@ AGENT_RUN_WORKING_STATE_REPEAT_SECONDS = math.inf
 AGENT_RUN_CONTEXT_METER_CACHE_SECONDS = 15.0
 AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS = 15.0 * 60.0
 AGENT_RUN_SIDE_CHANNEL_READ_BYTES = 8192
+# The watcher's connect+hello to the supervisor socket carries this budget so a
+# wedged or half-open socket cannot park the watch thread at startup. Once the
+# hello is sent, the socket resets to blocking: the established stream is bound to
+# parent exit, peer close, or server wake/stop, not this connect deadline.
+AGENT_RUN_SIDE_CHANNEL_CONNECT_TIMEOUT_S = 5.0
 INTERRUPTED_EXIT_CODE = 130
 COMMAND_NOT_FOUND_EXIT_CODE = 127
 
@@ -553,6 +558,7 @@ def watch_agent_side_channel(
     if socket_path is None:
         return
     side_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    side_socket.settimeout(AGENT_RUN_SIDE_CHANNEL_CONNECT_TIMEOUT_S)
     parent_exit = _parent_exit_watcher(parent_pid)
     try:
         if parent_pid > 0 and parent_exit is None and not _process_exists(parent_pid):
@@ -570,6 +576,10 @@ def watch_agent_side_channel(
             ).encode("utf-8")
             + b"\n"
         )
+        # Connect+hello are bounded above; the established stream is lifetime-bound
+        # (parent exit / peer close / server wake), so clear the connect deadline
+        # before the blocking select loop below.
+        side_socket.settimeout(None)
         read_targets: list[socket.socket | _ParentExitWatcher] = [side_socket]
         if parent_exit is not None:
             read_targets.append(parent_exit)
