@@ -573,6 +573,10 @@ def claude_settings_json(
         key: value.copy() if isinstance(value, dict) else value
         for key, value in CLAUDE_ATTRIBUTION_DISABLED_SETTINGS.items()
     }
+    # Claude applies exact bare-name denials before bypassPermissions and
+    # removes the matching built-ins from model context. Keep this in the same
+    # inline document as attribution and hooks so every launch path has one
+    # authoritative settings payload.
     settings["permissions"] = {"deny": list(CLAUDE_DENIED_TOOLS)}
     if repo_root is not None and driver is not None:
         settings["hooks"] = post_tool_hook_settings(repo_root, driver)
