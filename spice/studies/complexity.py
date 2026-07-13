@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import csv
 import io
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
 from spice.errors import SpiceError
 from spice.paths import find_tool
+from spice.procs import run_bounded_process_group
 from spice.flexstate import (
     FlexSliceClaim,
     claim_flex_slice_paths,
@@ -38,6 +38,7 @@ from spice.policy import (
 from spice.studies.walk import is_excluded_path, staged_renames
 
 COMPLEXITY_VERSION = 1
+COMPLEXITY_PROCESS_TIMEOUT_SECONDS = 30.0
 COMPLEXITY_CCN_STICKY_GIT_PATH = "spice/complexity-ccn-sticky.json"
 COMPLEXITY_LENGTH_STICKY_GIT_PATH = "spice/complexity-length-sticky.json"
 
@@ -150,7 +151,13 @@ def require_lizard() -> str:
 
 
 def collect_complexity_records(
-    paths: list[Path], *, root: Path, suffixes: tuple[str, ...] = COMPLEXITY_SUFFIXES
+    paths: list[Path],
+    *,
+    root: Path,
+    suffixes: tuple[str, ...] = COMPLEXITY_SUFFIXES,
+    timeout_seconds: float = COMPLEXITY_PROCESS_TIMEOUT_SECONDS,
+    phase: str = "complexity-collection",
+    input_label: str | None = None,
 ) -> list[ComplexityRecord]:
     targets = [
         path
@@ -162,12 +169,13 @@ def collect_complexity_records(
     if not targets:
         return []
     lizard = require_lizard()
-    result = subprocess.run(
+    result = run_bounded_process_group(
         [lizard, "--csv", *[str(root / path) for path in targets]],
-        capture_output=True,
+        timeout_seconds=timeout_seconds,
+        phase=phase,
+        input_label=input_label or _complexity_input_label(root, targets),
         text=True,
         cwd=root,
-        check=False,
     )
     records: list[ComplexityRecord] = []
     for row in csv.reader(io.StringIO(result.stdout)):
@@ -198,6 +206,11 @@ def collect_complexity_records(
             )
         )
     return records
+
+
+def _complexity_input_label(root: Path, paths: list[Path]) -> str:
+    rendered_paths = ",".join(path.as_posix() for path in paths)
+    return f"repository={root} paths={rendered_paths}"
 
 
 def _load_sticky(root: Path, git_path: str) -> set[tuple[str, str]]:
