@@ -27,71 +27,7 @@ ZSH_HOOK_NAMES = (".zshenv", ".zprofile", ".zshrc", ".zlogin")
 SHELL_HOOK_DIR_NAME = "shellhooks"
 STATIC_SHELL_HOOK_DIR_NAME = "staticshellhooks"
 AGENT_WRAPPERS_KEY = "wrappers"
-DEFAULT_AGENT_WRAPPER_GROUP = "common"
 WRAPPER_ENTRY_POINT_GROUP = SPICE_WRAPPER_ENTRY_POINT_GROUP
-# Reroute command shapes whose native semantics or diagnostics rtk's frontends
-# cannot preserve before rtk compacts or mangles them.
-RTK_GREP_REROUTE_FLAGS = (
-    "--files",
-    "--type",
-    "--type=*",
-    "--no-heading",
-)
-RTK_FIND_REROUTE_WORDS = (
-    "-print",
-    "-print0",
-    "-prune",
-    "-exec",
-    "-execdir",
-    "-delete",
-    "(",
-    ")",
-    "!",
-    "-o",
-    "-a",
-)
-RTK_GIT_REROUTE_FLAGS = (
-    "--first-parent",
-    "--check",
-    "--name-status",
-    "--name-only",
-)
-# rtk grep delegates to the platform grep, whose default BASIC dialect reads
-# rg-authored | + ? ( ) as literals. Injecting -E ahead of the caller's
-# arguments makes extended regular expressions the default so supervised agents
-# do not silently reinterpret intended ERE patterns as BRE. A caller's explicit
-# -F or -G, later in argv, still wins because grep honors the last matcher flag;
-# repeated -E is harmless; and unsupported or conflicting backend flags pass
-# through unchanged to fail natively rather than selecting an alternate path.
-RTK_GREP_ERE_ARGV = ("rtk", "grep", "-E")
-BUILTIN_AGENT_WRAPPER_GROUPS = {
-    DEFAULT_AGENT_WRAPPER_GROUP: {
-        "rtk": {
-            "argv": ["rtk"],
-            "match": [
-                {
-                    "head": "grep",
-                    "flags": list(RTK_GREP_REROUTE_FLAGS),
-                    "argv": ["rg"],
-                },
-                {
-                    "head": "find",
-                    "flags": list(RTK_FIND_REROUTE_WORDS),
-                    "argv": ["find"],
-                },
-                {
-                    "head": "git",
-                    "flags": list(RTK_GIT_REROUTE_FLAGS),
-                    "argv": ["git"],
-                },
-                {
-                    "head": "grep",
-                    "argv": list(RTK_GREP_ERE_ARGV),
-                },
-            ],
-        },
-    },
-}
 SHELL_HOOK_PYTHON_ENV = "SPICE_SHELL_HOOK_PYTHON"  # env-policy: allow
 SHELL_HOOK_REPO_ROOT_ENV = "SPICE_SHELL_HOOK_REPO_ROOT"  # env-policy: allow
 SHELL_HOOK_WRAPPERS_ENV = "SPICE_SHELL_HOOK_WRAPPERS"  # env-policy: allow
@@ -275,7 +211,10 @@ def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
             label=f"tool.spice.agent.{AGENT_WRAPPERS_KEY}",
         )
     else:
-        ordered_groups = [DEFAULT_AGENT_WRAPPER_GROUP]
+        raise SpiceError(
+            f"spice shell hook: effective agent configuration requires "
+            f"{AGENT_WRAPPERS_KEY}"
+        )
     if not ordered_groups:
         return []
     lines: list[str] = []
@@ -290,6 +229,8 @@ def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
             raw_group = entry_point_wrapper_group_from_entry(
                 extension_entries[group_name]
             )
+        if raw_group is False:
+            continue
         if not isinstance(raw_group, dict):
             raise SpiceError(
                 f"spice shell hook: missing tool.spice.wrappers.{group_name}"
@@ -307,13 +248,10 @@ def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
 def configured_agent_wrapper_definitions(
     repo_root: Path,
 ) -> tuple[dict[str, object], dict[str, str]]:
-    definitions: dict[str, object] = dict(BUILTIN_AGENT_WRAPPER_GROUPS)
+    definitions: dict[str, object] = dict(agent_wrapper_definitions_table(repo_root))
     sources: dict[str, str] = {
-        name: f"built-in wrapper group {name}" for name in definitions
+        name: f"effective tool.spice.wrappers.{name}" for name in definitions
     }
-    for name, group in agent_wrapper_definitions_table(repo_root).items():
-        definitions[name] = group
-        sources[name] = f"tool.spice.wrappers.{name}"
     return definitions, sources
 
 
@@ -370,6 +308,8 @@ def render_agent_wrapper_group_lines(
     lines: list[str] = []
     for raw_wrapper, raw_entry in group.items():
         wrapper = str(raw_wrapper).strip()
+        if raw_entry is False:
+            continue
         if isinstance(raw_entry, Mapping):
             lines.extend(
                 render_agent_direct_wrapper_lines(

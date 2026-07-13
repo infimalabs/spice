@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, overload
 
+from spice import defaults
 from spice.errors import SpiceError
 from spice.extensions import (
     SPICE_DRIVER_ENTRY_POINT_GROUP,
@@ -189,9 +190,9 @@ class AgentDriver:
         )
 
 
-PLAYWRIGHT_MCP_SERVER_NAME = "playwright"
-PLAYWRIGHT_MCP_COMMAND = "npx"
-PLAYWRIGHT_MCP_ARGS = ("--yes", "@playwright/mcp@latest", "--headless")
+PLAYWRIGHT_MCP_SERVER_NAME = defaults.string("agent", "playwright_mcp", "server_name")
+PLAYWRIGHT_MCP_COMMAND = defaults.string("agent", "playwright_mcp", "command")
+PLAYWRIGHT_MCP_ARGS = defaults.strings("agent", "playwright_mcp", "args")
 POST_TOOL_HOOK_EVENT = "PostToolUse"
 POST_TOOL_HOOK_TIMEOUT_SECONDS = 30
 POST_TOOL_HOOK_STATUS_MESSAGE = "Checking spice steering"
@@ -448,7 +449,7 @@ class CodexDriver(AgentDriver):
 # Claude Code's `--effort` vocabulary. The configured spice effort value is
 # Codex-shaped; Claude uses the same set, except for `max`, which we ignore.
 CLAUDE_EFFORT_CHOICES = frozenset({"low", "medium", "high", "xhigh"})
-CLAUDE_DEFAULT_MODEL = "claude-opus-4-8"
+CLAUDE_DEFAULT_MODEL = defaults.string("agent", "claude", "default_model")
 # Claude reads CLAUDE.md but not skill files on its own (see
 # build_exec_command's --append-system-prompt use). This preamble is generic
 # — every launch gets the same text regardless of what the operator actually
@@ -529,7 +530,9 @@ CLAUDE_DENIED_TOOLS = (
 # a long-running lane compacts at the tier ceiling without operator
 # intervention.
 CLAUDE_AUTO_COMPACT_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"  # env-policy: allow
-CLAUDE_AUTO_COMPACT_WINDOW_TOKENS = 200_000
+CLAUDE_AUTO_COMPACT_WINDOW_TOKENS = defaults.integer(
+    "agent", "claude", "auto_compact_window_tokens"
+)
 OUT_OF_CREDITS_PATTERNS = (
     re.compile(r"\busage limit\b", re.IGNORECASE),
     re.compile(r"\b(?:out of|insufficient)\s+credits?\b", re.IGNORECASE),

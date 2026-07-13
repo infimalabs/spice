@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from spice import defaults
 from spice.configlayer import ConfigLayer as ConfigLayer
 from spice.configlayer import LayeredConfig as LayeredConfig
 from spice.configlayer import load_config as load_config
@@ -20,7 +21,7 @@ from spice.paths import (
     repo_root_from_cwd,
     state_dir,
 )
-from spice.repocfg import agent_table
+from spice.repocfg import agent_table, read_tool_table
 
 WORKTREE_CONFIG_RELATIVE_PATH = Path("config") / "spice.toml"
 LEGACY_CONFIG_STATE_RELATIVE_PATH = Path("config") / "state.json"
@@ -28,19 +29,19 @@ WORKTREE_CONFIG_SECTIONS = ("say", "judge", "agent")
 
 SAY_KEY = "say"
 SAY_BACKEND_KEY = "backend"
-SAY_BACKEND_CHOICES = ("say", "external")
-DEFAULT_SAY_BACKEND = "say"
+SAY_BACKEND_CHOICES = defaults.strings("say", "backend_choices")
+DEFAULT_SAY_BACKEND = defaults.string("say", "backend")
 SAY_COMMAND_KEY = "command"
 SAY_CONTENT_TYPE_KEY = "content_type"
-DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = "audio/wav"
+DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = defaults.string("say", "external_content_type")
 SAY_VOICE_KEY = "voice"
 SAY_WORDS_PER_MINUTE_KEY = "words_per_minute"
-DEFAULT_SAY_WORDS_PER_MINUTE = 175
+DEFAULT_SAY_WORDS_PER_MINUTE = defaults.integer("say", "words_per_minute")
 
 AGENT_KEY = "agent"
 AGENT_PERSONALITY_KEY = "personality"
-AGENT_PERSONALITY_CHOICES = ("none", "friendly", "pragmatic")
-DEFAULT_AGENT_PERSONALITY = "pragmatic"
+AGENT_PERSONALITY_CHOICES = defaults.strings("agent", "personality_choices")
+DEFAULT_AGENT_PERSONALITY = defaults.string("agent", "personality")
 AGENT_MODEL_KEY = "model"
 AGENT_EFFORT_KEY = "effort"
 AGENT_DRIVER_KEY = "driver"
@@ -48,8 +49,8 @@ AGENT_LAUNCH_KEYS = (AGENT_MODEL_KEY, AGENT_EFFORT_KEY, AGENT_DRIVER_KEY)
 
 JUDGE_KEY = "judge"
 JUDGE_BIN_KEY = "bin"
-DEFAULT_JUDGE_BIN = "afm-cli"
-PORTABLE_JUDGE_BIN = "spice-judge"
+DEFAULT_JUDGE_BIN = defaults.string("judge", "bin")
+PORTABLE_JUDGE_BIN = defaults.string("judge", "portable_bin")
 PROJECT_AGENT_TABLE = "tool.spice.agent"
 _TOML_TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
 _TOML_ASSIGN_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
@@ -200,46 +201,51 @@ def config_overview(repo_root: Path) -> dict[str, Any]:
     }
 
 
+def default_classifications() -> dict[str, str]:
+    """Classify exported defaults for configuration diagnostics."""
+    return defaults.export_classifications()
+
+
 def _root_or_current(repo_root: Path | None) -> Path | None:
     return repo_root if repo_root is not None else repo_root_from_cwd()
 
 
+def _effective_section(root: Path | None, key: str) -> dict[str, Any]:
+    raw = read_tool_table(root).get(key)
+    return raw if isinstance(raw, dict) else {}
+
+
+def _configured_value(root: Path | None, section: str, key: str) -> Any:
+    local = _section(root, section).get(key) if root is not None else None
+    return local if local is not None else _effective_section(root, section).get(key)
+
+
 def configured_say_voice(repo_root: Path | None = None) -> str | None:
     root = _root_or_current(repo_root)
-    if root is None:
-        return None
-    raw = _section(root, SAY_KEY).get(SAY_VOICE_KEY)
+    raw = _configured_value(root, SAY_KEY, SAY_VOICE_KEY)
     return str(raw).strip() or None if raw else None
 
 
 def configured_say_backend(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
-    if root is None:
-        return DEFAULT_SAY_BACKEND
-    raw = str(_section(root, SAY_KEY).get(SAY_BACKEND_KEY) or "").strip()
+    raw = str(_configured_value(root, SAY_KEY, SAY_BACKEND_KEY) or "").strip()
     return raw if raw in SAY_BACKEND_CHOICES else DEFAULT_SAY_BACKEND
 
 
 def configured_say_command(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
-    if root is None:
-        return ""
-    return str(_section(root, SAY_KEY).get(SAY_COMMAND_KEY) or "").strip()
+    return str(_configured_value(root, SAY_KEY, SAY_COMMAND_KEY) or "").strip()
 
 
 def configured_say_content_type(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
-    if root is None:
-        return DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
-    raw = str(_section(root, SAY_KEY).get(SAY_CONTENT_TYPE_KEY) or "").strip()
+    raw = str(_configured_value(root, SAY_KEY, SAY_CONTENT_TYPE_KEY) or "").strip()
     return raw or DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
 
 
 def configured_say_words_per_minute(repo_root: Path | None = None) -> int | None:
     root = _root_or_current(repo_root)
-    if root is None:
-        return None
-    raw = _section(root, SAY_KEY).get(SAY_WORDS_PER_MINUTE_KEY)
+    raw = _configured_value(root, SAY_KEY, SAY_WORDS_PER_MINUTE_KEY)
     if raw is None:
         return None
     try:
@@ -251,9 +257,7 @@ def configured_say_words_per_minute(repo_root: Path | None = None) -> int | None
 
 def configured_agent_personality(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
-    if root is None:
-        return DEFAULT_AGENT_PERSONALITY
-    raw = str(_section(root, AGENT_KEY).get(AGENT_PERSONALITY_KEY) or "").strip()
+    raw = str(_configured_value(root, AGENT_KEY, AGENT_PERSONALITY_KEY) or "").strip()
     return raw if raw in AGENT_PERSONALITY_CHOICES else DEFAULT_AGENT_PERSONALITY
 
 
@@ -444,9 +448,9 @@ def default_judge_bin() -> str:
 
 def configured_judge_bin(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
-    if root is None:
-        return default_judge_bin()
-    raw = str(_section(root, JUDGE_KEY).get(JUDGE_BIN_KEY) or "").strip()
+    raw = str(_configured_value(root, JUDGE_KEY, JUDGE_BIN_KEY) or "").strip()
+    if raw == DEFAULT_JUDGE_BIN and sys.platform != "darwin":
+        return PORTABLE_JUDGE_BIN
     return raw or default_judge_bin()
 
 

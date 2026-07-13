@@ -9,37 +9,42 @@ the commit gates intentionally run the defaults here.
 
 from __future__ import annotations
 
+from fractions import Fraction
+
+from spice import defaults
+
 # --- file shape pressure -----------------------------------------------------
 # A file may grow to the flex limit, but one that ever breached it stays held
 # to the base limit (sticky, rename-following) until it shrinks back under.
-FILE_LOC_LIMIT = 1000
-FILE_BYTE_LIMIT = 80_000
-FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES = (".lock",)
-FILE_SHAPE_GENERATED_LOCKFILE_NAMES = (
-    "bun.lockb",
-    "package-lock.json",
-    "pnpm-lock.yaml",
+FILE_LOC_LIMIT = defaults.integer("policy", "limits", "file_loc")
+FILE_BYTE_LIMIT = defaults.integer("policy", "limits", "file_bytes")
+FILE_SHAPE_GENERATED_LOCKFILE_SUFFIXES = defaults.strings(
+    "policy", "lockfiles", "suffixes"
 )
+FILE_SHAPE_GENERATED_LOCKFILE_NAMES = defaults.strings("policy", "lockfiles", "names")
 
 # --- routine complexity ------------------------------------------------------
-COMPLEXITY_MAX_CCN = 20
-COMPLEXITY_MAX_LENGTH = 80
-COMPLEXITY_HOTSPOT_LIMIT = 20
+COMPLEXITY_MAX_CCN = defaults.integer("policy", "limits", "routine_ccn")
+COMPLEXITY_MAX_LENGTH = defaults.integer("policy", "limits", "routine_length")
+COMPLEXITY_HOTSPOT_LIMIT = defaults.integer("policy", "complexity", "hotspot_limit")
 
 # --- flex --------------------------------------------------------------------
 # flex limit = base * FLEX_NUMERATOR // FLEX_DENOMINATOR (1000 -> 1500).
-FLEX_NUMERATOR = 3
-FLEX_DENOMINATOR = 2
+_FLEX_RATIO = Fraction(defaults.number("policy", "flex", "ratio"))
+FLEX_NUMERATOR = _FLEX_RATIO.numerator
+FLEX_DENOMINATOR = _FLEX_RATIO.denominator
 
 # --- commit messages ----------------------------------------------------------
 # Subject must fit; body prose is auto-folded; URLs and allowed trailers are
 # exempt. ``None`` keeps the legacy policy: any Git trailer is allowed except
 # Co-Authored-By. Repos may configure a finite allowed-trailer set.
-COMMIT_MESSAGE_WRAP_LIMIT = 100
+COMMIT_MESSAGE_WRAP_LIMIT = defaults.integer("policy", "limits", "commit_message_wrap")
 COMMIT_MESSAGE_ALLOWED_TRAILER_KEYS: tuple[str, ...] | None = None
 # Blocked trailers are configurable rather than baked in; the default keeps
 # Co-Authored-By rejected so commits never add co-authors.
-COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = ("Co-Authored-By",)
+COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = defaults.strings(
+    "policy", "commit_message", "blocked_trailers"
+)
 
 # --- taste ----------------------------------------------------------------------
 # Low-value or poor-taste words mapped to a suggestion (empty = rephrase). A
@@ -47,28 +52,24 @@ COMMIT_MESSAGE_BLOCKED_TRAILER_KEYS: tuple[str, ...] | None = ("Co-Authored-By",
 # adopt/adopted/adoption); a bare key is whole-word. Repos merge their own words
 # over these defaults under [tool.spice.policy.taste].
 TASTE_WORD_SUGGESTIONS: dict[str, str] = {
-    "hallucinat*": "confabulate",
-    "master": "main, primary, or leader",
-    "adopt*": "capture",
-    "orphan*": "loose",
-    "whitelist": "allowlist",
-    "whitelists": "allowlists",
-    "whitelisted": "allowlisted",
-    "whitelisting": "allowlisting",
-    "blacklist": "blocklist",
-    "blacklists": "blocklists",
-    "blacklisted": "blocklisted",
-    "blacklisting": "blocklisting",
+    str(key): str(value)
+    for key, value in defaults.table("policy", "taste", "words").items()
 }
 
 # --- repo-truth docs ------------------------------------------------------------
 # Doctrine documents ride in every agent's context, so they are capped hard.
 # A repo widens the set in tracked `[tool.spice.policy] repo_truth_docs`.
-REPO_TRUTH_DOC_LIMIT = 10_000
-REPO_TRUTH_DOCS = ("AGENTS.md",)
-MARKDOWN_DEPTH_DOC_EXTENSIONS = (".md",)
-MARKDOWN_DEPTH_BASE_CHAR_BUDGET = 10_000
-MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET = 30_000
+REPO_TRUTH_DOC_LIMIT = defaults.integer("policy", "limits", "repo_truth_doc_chars")
+REPO_TRUTH_DOCS = defaults.strings("policy", "repo_truth", "docs")
+MARKDOWN_DEPTH_DOC_EXTENSIONS = defaults.strings(
+    "policy", "markdown_depth_budget", "extensions"
+)
+MARKDOWN_DEPTH_BASE_CHAR_BUDGET = defaults.integer(
+    "policy", "markdown_depth", "base_chars"
+)
+MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET = defaults.integer(
+    "policy", "markdown_depth", "max_bounded_chars"
+)
 
 # --- package shape -------------------------------------------------------------
 # Namespace packages only: no __init__.py anywhere under a declared package
@@ -77,7 +78,9 @@ MARKDOWN_DEPTH_MAX_BOUNDED_CHAR_BUDGET = 30_000
 # A target repo declares its roots in tracked `pyproject.toml` under
 # `[tool.spice.policy] package_roots`; repos without a declaration skip the
 # Python package guards (the rest of the constitution still applies).
-BOUNDARY_UNDERSCORE_PATTERN = r"^_*[0-9a-z]+_*$"
+BOUNDARY_UNDERSCORE_PATTERN = defaults.string(
+    "policy", "package", "boundary_underscore_pattern"
+)
 
 # --- test-quality gates --------------------------------------------------------
 # Zero means the codebase is clean and any finding fails. Non-zero limits are
@@ -87,11 +90,13 @@ BOUNDARY_UNDERSCORE_PATTERN = r"^_*[0-9a-z]+_*$"
 # Test-only findings: code reachable from tests but not from production roots.
 # Held at zero: every test-only finding must be wired into production or deleted
 # with its tests; `spice study reachability --create-tasks` files that decision.
-REACHABILITY_TEST_ONLY_LIMIT = 0
+REACHABILITY_TEST_ONLY_LIMIT = defaults.integer(
+    "policy", "debt", "reachability_test_only"
+)
 
 # Assertion-free tests: test functions that do not appear to constrain behavior
 # with an assert, pytest.raises/pytest.warns, pytest.fail, or assert* helper.
-ASSERTION_FREE_TEST_LIMIT = 0
+ASSERTION_FREE_TEST_LIMIT = defaults.integer("policy", "debt", "assertion_free_tests")
 
 # Product-shipped private-internals exceptions. Repo-specific exceptions belong
 # in tracked `[tool.spice.policy].internal_couplings`, where they are visible to
@@ -100,21 +105,19 @@ LEGITIMATE_INTERNAL_COUPLINGS: frozenset[tuple[str, str, str]] = frozenset()
 
 # --- magic numbers -------------------------------------------------------------
 # Staged scans diff against this ref; only regressions fail.
-MAGIC_BASELINE_REF = "HEAD"
+MAGIC_BASELINE_REF = defaults.string("policy", "magic", "baseline_ref")
 # Below this magnitude a literal explains itself (0/1/2, small counts, axis
 # indices); at or above it a comparison pivot deserves a name.
-MAGIC_EXAMINE_VALUE_THRESHOLD = 10
+MAGIC_EXAMINE_VALUE_THRESHOLD = defaults.integer("policy", "magic", "examine_threshold")
 
 # --- environment literals ------------------------------------------------------
 # Harness-owned env names may appear in source only on lines carrying this
 # waiver. The scanner self-waives the module that defines the policy pattern.
-ENV_POLICY_ALLOW_MARKER = "env-policy: allow"
-ENV_POLICY_DEFAULT_NAME_PATTERNS = (  # env-policy: allow
-    r"SPICE_[A-Z0-9_]+",
-    r"CODEX_THREAD_ID",  # env-policy: allow
-    r"CLAUDE_CODE_SESSION_ID",  # env-policy: allow
+ENV_POLICY_ALLOW_MARKER = defaults.string("policy", "env", "allow_marker")
+ENV_POLICY_DEFAULT_NAME_PATTERNS = defaults.strings(
+    "policy", "env", "default_name_patterns"
 )
-ENV_POLICY_SELF_PATH_SUFFIX = "studies/envpolicy.py"
+ENV_POLICY_SELF_PATH_SUFFIX = defaults.string("policy", "env", "self_path_suffix")
 
 # Access gate language families. The gate audits env *access sites* (not just
 # literal names), and the access idiom differs per language, so
@@ -125,33 +128,17 @@ ENV_POLICY_SELF_PATH_SUFFIX = "studies/envpolicy.py"
 # `[tool.spice.policy.env_access.family_suffixes]`, never having to fork the
 # study.
 ENV_ACCESS_FAMILY_SUFFIXES = {
-    "python": (".py",),
-    "csharp": (".cs",),
-    "lua": (".lua",),
-    "shell": (".bash", ".sh", ".zsh"),
-    "javascript": (".js", ".ts"),
+    str(key): tuple(str(item) for item in value)
+    for key, value in defaults.table("policy", "env_access", "family_suffixes").items()
 }
 SHELL_ENV_ACCESS_NAME_PATTERN = r"(?:[A-Za-z][A-Za-z0-9_]*|_[A-Za-z0-9_]+)"
 ENV_ACCESS_DEFAULT_PATTERNS = {
-    "python": (r"\bos\.(?:environ|getenv|putenv|unsetenv)\b",),  # env-policy: allow
-    "csharp": (
-        r"\b(?:System\.)?Environment\.(?:GetEnvironmentVariable|SetEnvironmentVariable)\b",
-    ),
-    "lua": (r"\bos\.getenv\b",),  # env-policy: allow
-    "shell": (
-        rf"(?<!\\)\$(?:{SHELL_ENV_ACCESS_NAME_PATTERN}|\{{{SHELL_ENV_ACCESS_NAME_PATTERN}\}})",
-        rf"\bexport\s+{SHELL_ENV_ACCESS_NAME_PATTERN}=",
-    ),
-    # `\bprocess\.env\b` covers dot-access, bracket-access, bare reads, and
-    # destructuring (`const {X} = process.env`) in one idiom.
-    "javascript": (r"\bprocess\.env\b",),
+    str(key): tuple(str(item) for item in value)
+    for key, value in defaults.table("policy", "env_access", "default_patterns").items()
 }
 ENV_ACCESS_FINDING_NAMES = {
-    "python": "os env access",
-    "csharp": "environment env access",
-    "lua": "lua env access",
-    "shell": "shell env access",
-    "javascript": "process.env access",
+    str(key): str(value)
+    for key, value in defaults.table("policy", "env_access", "finding_names").items()
 }
 
 # --- language scope ------------------------------------------------------------
@@ -162,65 +149,13 @@ ENV_ACCESS_FINDING_NAMES = {
 # the regex-backed magic-number scan holds across it (Python rides its own ast
 # scan). Complexity covers every language lizard parses here. Env-literal
 # inventory adds the shell family.
-C_GRAMMAR_SUFFIXES = (
-    ".c",
-    ".cc",
-    ".cpp",
-    ".cs",
-    ".go",
-    ".h",
-    ".hpp",
-    ".java",
-    ".js",
-    ".kt",
-    ".m",
-    ".mm",
-    ".rs",
-    ".scala",
-    ".swift",
-    ".ts",
-)
-COMPLEXITY_SUFFIXES = (*C_GRAMMAR_SUFFIXES, ".lua", ".php", ".py", ".rb")
-MAGIC_SUFFIXES = (".py", *C_GRAMMAR_SUFFIXES)
-ENV_SUFFIXES = (*COMPLEXITY_SUFFIXES, ".bash", ".sh", ".zsh")
-FILE_SHAPE_SOURCE_SUFFIXES = (
-    *ENV_SUFFIXES,
-    ".astro",
-    ".cjs",
-    ".cts",
-    ".css",
-    ".html",
-    ".json",
-    ".jsx",
-    ".less",
-    ".md",
-    ".mjs",
-    ".mts",
-    ".pyi",
-    ".rst",
-    ".sass",
-    ".scss",
-    ".sql",
-    ".svelte",
-    ".toml",
-    ".tsx",
-    ".txt",
-    ".vue",
-    ".xml",
-    ".yaml",
-    ".yml",
-)
-FILE_SHAPE_GENERATED_SOURCE_PATTERNS = (
-    "**/*.generated.*",
-    "**/*_generated.*",
-    "**/*.g.*",
-    "**/*_pb2.py",
-    "**/*_pb2_grpc.py",
-    "**/*.min.css",
-    "**/*.min.js",
-    "build/**",
-    "coverage/**",
-    "dist/**",
+C_GRAMMAR_SUFFIXES = defaults.strings("policy", "languages", "c_grammar")
+COMPLEXITY_SUFFIXES = defaults.strings("policy", "languages", "complexity")
+MAGIC_SUFFIXES = defaults.strings("policy", "languages", "magic")
+ENV_SUFFIXES = defaults.strings("policy", "languages", "env")
+FILE_SHAPE_SOURCE_SUFFIXES = defaults.strings("policy", "file_shape", "source_suffixes")
+FILE_SHAPE_GENERATED_SOURCE_PATTERNS = defaults.strings(
+    "policy", "file_shape", "generated_patterns"
 )
 
 
