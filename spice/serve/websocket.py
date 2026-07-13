@@ -74,9 +74,10 @@ class WebSocketConnection:
                 continue
             raise WebSocketProtocolError(f"unsupported WebSocket opcode {opcode}")
 
-    def send_json(self, payload: dict[str, Any]) -> None:
+    def send_json(self, payload: dict[str, Any]) -> int:
         text = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         self._write_frame(WEBSOCKET_TEXT_OPCODE, text)
+        return len(text)
 
     def ping(self, payload: bytes = b"") -> None:
         self._write_frame(WEBSOCKET_PING_OPCODE, payload)
