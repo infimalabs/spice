@@ -12,10 +12,13 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
+from spice import defaults
+from spice.configlayer import PACKAGED_SOURCE, load_config
+
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
-DEFAULT_BRAND = "spice"
-DEFAULT_LIFETIME = "Drive"
-VALID_LIFETIMES = ("Steer", "Drive", "Drain")
+DEFAULT_BRAND = defaults.string("serve", "brand")
+DEFAULT_LIFETIME = defaults.string("serve", "default_lifetime")
+VALID_LIFETIMES = defaults.strings("serve", "valid_lifetimes")
 
 
 @dataclass(frozen=True)
@@ -99,11 +102,24 @@ def spice_runtime_version() -> str:
 
 
 def serve_branding(repo_root: Path | None = None) -> ServeBranding:
-    data = _read_pyproject(repo_root) if repo_root else {}
-    tool_spice = _table(data, "tool", "spice")
-    serve = _table(tool_spice, "serve")
+    loaded = load_config(repo_root) if repo_root is not None else None
+    serve = (
+        dict(loaded.effective.get("serve", {}))
+        if loaded is not None
+        else dict(defaults.table("serve"))
+    )
+    data = _read_pyproject(repo_root)
     project = _table(data, "project")
-    name = _string(serve.get("brand")) or _string(project.get("name")) or DEFAULT_BRAND
+    brand_source = loaded.source_for("serve.brand") if loaded is not None else None
+    configured_brand = _string(serve.get("brand"))
+    project_brand = _string(project.get("name"))
+    name = (
+        project_brand
+        if brand_source is not None
+        and brand_source.name == PACKAGED_SOURCE
+        and project_brand
+        else configured_brand or DEFAULT_BRAND
+    )
     raw_lifetime = _string(serve.get("default_lifetime"))
     default_lifetime = (
         raw_lifetime if raw_lifetime in VALID_LIFETIMES else DEFAULT_LIFETIME

@@ -88,9 +88,10 @@ from spice.serve.worktree.target import (
     discover_serve_worktrees,
 )
 from spice.tasks import config as task_config
+from spice import defaults
 
-DEFAULT_SERVE_HOST = "127.0.0.1"
-DEFAULT_SERVE_PORT = 8765
+DEFAULT_SERVE_HOST = defaults.string("serve", "host")
+DEFAULT_SERVE_PORT = defaults.integer("serve", "port")
 SERVE_UNTIL_WATCHER_JOIN_SECONDS = 1.0
 SERVE_AUTH_COOKIE_NAME = "spice_serve_auth"
 MAX_HTTP_REQUEST_LINE_BYTES = 65536

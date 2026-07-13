@@ -51,8 +51,8 @@ class LayeredConfig:
 
 def load_config(repo_root: Path) -> LayeredConfig:
     """Load the four Spice TOML layers in increasing precedence order."""
+    packaged = load_packaged_config()
     specifications = (
-        (PACKAGED_SOURCE, paths.runtime_spice_source() / "spice.toml", False),
         (PYPROJECT_SOURCE, repo_root / "pyproject.toml", True),
         (REPOSITORY_SOURCE, repo_root / "spice.toml", False),
         (
@@ -61,8 +61,8 @@ def load_config(repo_root: Path) -> LayeredConfig:
             False,
         ),
     )
-    parsed: list[dict[str, Any]] = []
-    layers: list[ConfigLayer] = []
+    parsed: list[dict[str, Any]] = [dict(packaged.values)]
+    layers: list[ConfigLayer] = [packaged]
     for name, path, pyproject in specifications:
         values, present = _read_toml(path)
         if pyproject:
@@ -85,6 +85,20 @@ def load_config(repo_root: Path) -> LayeredConfig:
         layers=tuple(layers),
         effective=_freeze_mapping(effective),
         sources=MappingProxyType(dict(sources)),
+    )
+
+
+def load_packaged_config() -> ConfigLayer:
+    """Load the required installed default layer from its canonical path."""
+    path = paths.runtime_spice_source() / "spice.toml"
+    values, present = _read_toml(path)
+    if not present:
+        raise SpiceError(f"packaged configuration is missing: {path}")
+    return ConfigLayer(
+        name=PACKAGED_SOURCE,
+        path=path,
+        values=_freeze_mapping(values),
+        present=True,
     )
 
 

@@ -24,12 +24,14 @@ import subprocess
 import sys
 from collections.abc import Sequence
 
+from spice import defaults
+
 JUDGE_MODEL_COMMAND_ENV = "SPICE_JUDGE_MODEL_CMD"  # env-policy: allow
 JUDGE_TIMEOUT_ENV = "SPICE_JUDGE_TIMEOUT"  # env-policy: allow
 
-DEFAULT_JUDGE_MODEL = "llama3.2"
-DEFAULT_MODEL_COMMAND: tuple[str, ...] = ("ollama", "run", DEFAULT_JUDGE_MODEL)
-DEFAULT_TIMEOUT_SECONDS = 60.0
+DEFAULT_JUDGE_MODEL = defaults.string("judge", "model")
+DEFAULT_MODEL_COMMAND = defaults.strings("judge", "model_command")
+DEFAULT_TIMEOUT_SECONDS = defaults.number("judge", "timeout_seconds")
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 2
