@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -206,8 +207,15 @@ def test_rtk_usage_nudge_fires_when_savings_are_poor(monkeypatch):
     assert "discretely" in nudge
 
 
-def test_rtk_usage_nudge_reads_current_project_gain(monkeypatch):
-    repo_root = Path("/repo/root")
+@pytest.mark.parametrize(
+    "executable", ["rtk", "alternate-rtk", "/opt/Spice Tools/rtk companion"]
+)
+def test_rtk_usage_nudge_reads_current_project_gain(tmp_path, monkeypatch, executable):
+    repo_root = tmp_path
+    (repo_root / "spice.toml").write_text(
+        f"[rtk]\nexecutable = {json.dumps(executable)}\n",
+        encoding="utf-8",
+    )
     calls: list[tuple[list[str], Path | None]] = []
     monkeypatch.setattr(ops, "repo_root_from_cwd", lambda: repo_root)
     monkeypatch.setattr(
@@ -218,7 +226,7 @@ def test_rtk_usage_nudge_reads_current_project_gain(monkeypatch):
 
     ops.rtk_usage_nudge()
 
-    assert calls == [(["rtk", "gain", "--project", "-f", "json"], repo_root)]
+    assert calls == [([executable, "gain", "--project", "-f", "json"], repo_root)]
 
 
 def test_rtk_usage_nudge_stays_silent_when_feeding_rtk_well(monkeypatch):

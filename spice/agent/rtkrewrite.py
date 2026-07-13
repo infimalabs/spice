@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
@@ -18,6 +19,7 @@ from spice.agent.paths import agent_thread_state_dir
 from spice.errors import SpiceError
 
 RTK_REWRITE_SUBCOMMAND = "rewrite"
+RTK_CANONICAL_EXECUTABLE = "rtk"
 RTK_REWRITE_MATCH_EXIT_CODE = 3
 RTK_REWRITE_NO_MATCH_EXIT_CODE = 1
 RTK_REWRITE_SUCCESS_EXIT_CODES = frozenset((0, RTK_REWRITE_MATCH_EXIT_CODE))
@@ -34,15 +36,33 @@ class RtkRewriteDecision:
     failure_signature: str = ""
 
 
+def remap_rewrite_frontend(command_text: str, rtk_executable: str) -> str:
+    """Route a canonical RTK rewrite through its configured executable."""
+    if rtk_executable == RTK_CANONICAL_EXECUTABLE:
+        return command_text
+    configured_word = shlex.quote(rtk_executable)
+    if command_text == RTK_CANONICAL_EXECUTABLE:
+        return configured_word
+    canonical_prefix = f"{RTK_CANONICAL_EXECUTABLE} "
+    if command_text.startswith(canonical_prefix):
+        return configured_word + command_text[len(RTK_CANONICAL_EXECUTABLE) :]
+    return command_text
+
+
 def rewrite_command_text(
     *args: str,
     repo_root: Path | None = None,
+    rtk_executable: str | None = None,
     env: Mapping[str, str] | None = None,
     stderr: TextIO | None = None,
     run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> str | None:
     """Return a usable RTK rewrite or select native execution with one warning."""
-    executable = config.configured_rtk_executable(repo_root)
+    executable = (
+        config.configured_rtk_executable(repo_root)
+        if rtk_executable is None
+        else rtk_executable
+    )
     runner = run or subprocess.run
     run_kwargs: dict[str, Any] = {
         "capture_output": True,

@@ -442,6 +442,59 @@ def test_zshenv_hook_loads_wrapper_functions_after_agent_run_reexec(tmp_path):
     assert "wrap:grep needle /dev/null" in lines
 
 
+@pytest.mark.parametrize("shell_name", ["zsh", "bash"])
+def test_agent_shell_targets_worktree_python_without_shadowing_global_spice(
+    tmp_path, shell_name
+):
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    home = tmp_path / "home"
+    home.mkdir()
+    operator_bin = tmp_path / "operator-bin"
+    operator_bin.mkdir()
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    executables = {
+        venv_bin / "python": "worktree-python",
+        venv_bin / "spice": "worktree-spice",
+        operator_bin / "spice": "global-spice",
+    }
+    for path, label in executables.items():
+        path.write_text(
+            f"#!/bin/sh\nprintf '{label}:%s\\n' \"$*\"\n",
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+    base_env = {
+        "HOME": str(home),
+        "PATH": str(operator_bin)
+        + os.pathsep
+        + os.environ.get("PATH", ""),  # env-policy: allow
+    }
+    env = shellhook.apply_shell_steering_environment(tmp_path, base_env=base_env)
+    static_hook_dir = shellhook.packaged_shell_steering_static_hook_dir()
+    if shell_name == "zsh":
+        env[shellhook.ZDOTDIR_ENV] = str(static_hook_dir)
+    else:
+        env[shellhook.BASH_ENV_ENV] = str(static_hook_dir / shellhook.BASH_HOOK_NAME)
+
+    completed = subprocess.run(
+        [shell, "-c", "python one; python3 two; spice three"],
+        text=True,
+        capture_output=True,
+        check=True,
+        env=env,
+    )
+
+    assert env["PATH"] == base_env["PATH"]
+    assert completed.stdout.splitlines() == [
+        "worktree-python:one",
+        "worktree-python:two",
+        "global-spice:three",
+    ]
+
+
 def test_bash_env_hook_execs_noninteractive_command_under_agent_run_once(tmp_path):
     bash = shutil.which("bash")
     if bash is None:

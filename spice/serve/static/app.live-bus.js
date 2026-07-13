@@ -313,8 +313,18 @@ function setFocusedLiveBusLane(focusedLane) {
   if (!focusedLane || focusedLiveBusLaneTargetId === focusedLane.targetId) return;
   focusedLiveBusLaneTargetId = focusedLane.targetId;
   for (const lane of laneStates.values()) {
-    if (!isLaneOpen(lane) || !lane.liveBusSubscribed || !liveBusIsOpen()) continue;
-    if (lane === focusedLane && lane.liveBusDirty) {
+    if (
+      !isLaneOpen(lane) ||
+      (!lane.liveBusSubscribed && !lane.liveBusSubscribePending) ||
+      !liveBusIsOpen()
+    )
+      continue;
+    if (
+      lane === focusedLane &&
+      lane.liveBusDirty &&
+      lane.liveBusSubscribed &&
+      !lane.liveBusSubscribePending
+    ) {
       subscribeLaneToLiveBus(lane);
       continue;
     }
@@ -359,9 +369,6 @@ async function flushPendingLaneSubscribes() {
   const entries = lanes.map((lane) => {
     return { targetId: lane.targetId, query: laneMessageQuery(lane) };
   });
-  const requestedFocusByTargetId = new Map(
-    entries.map((entry) => [entry.targetId, entry.query.focused === true]),
-  );
   let response;
   try {
     response = await liveBusRequest("lanes.subscribe", { entries });
@@ -375,19 +382,6 @@ async function flushPendingLaneSubscribes() {
     return;
   }
   applyLanesSubscribePayloads(lanes, (response && response.lanes) || []);
-  reconcileLiveBusLaneFocus(lanes, requestedFocusByTargetId);
-}
-
-function reconcileLiveBusLaneFocus(lanes, requestedFocusByTargetId) {
-  for (const lane of lanes) {
-    if (!isLaneOpen(lane) || !lane.liveBusSubscribed) continue;
-    const focused = liveBusLaneIsFocused(lane);
-    if (requestedFocusByTargetId.get(lane.targetId) === focused) continue;
-    liveBusRequest("lane.configure", {
-      targetId: lane.targetId,
-      query: laneMessageQuery(lane),
-    }).catch(() => {});
-  }
 }
 
 function applyLanesSubscribePayloads(lanes, laneFrames) {

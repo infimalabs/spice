@@ -18,6 +18,7 @@ from tests.test_shellhook import (
     _expected_wrapper_lines,
     _trace_lines,
     _write_agent_wrapper_config,
+    _write_rtk_config,
 )
 
 
@@ -239,24 +240,44 @@ def test_agent_wrapper_lines_rejects_empty_direct_wrapper_argv(tmp_path):
         shellhook.render_agent_wrapper_lines(tmp_path)
 
 
-def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
+@pytest.mark.parametrize("identity_kind", ["builtin", "basename", "absolute"])
+def test_rtk_wrapper_dispatches_configured_identity_in_live_zsh(
+    tmp_path, identity_kind
+):
     zsh = shutil.which("zsh")
     if zsh is None:
         pytest.skip("zsh is not installed")
     trace = tmp_path / "trace.log"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("rtk", "rg", "find", "git"):
+    executable = {
+        "builtin": "rtk",
+        "basename": "alternate-rtk",
+        "absolute": str(tmp_path / "Spice Tools" / "rtk companion"),
+    }[identity_kind]
+    _write_rtk_config(tmp_path, executable)
+    resolved_tool = (
+        bin_dir / executable if identity_kind != "absolute" else Path(executable)
+    )
+    resolved_tool.parent.mkdir(parents=True, exist_ok=True)
+    resolved_tool.write_text(
+        f'#!/bin/sh\nprintf \'resolved:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+        encoding="utf-8",
+    )
+    resolved_tool.chmod(0o755)
+    for name in ("rg", "find", "git"):
         tool = bin_dir / name
         tool.write_text(
             f'#!/bin/sh\nprintf \'{name}:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
             encoding="utf-8",
         )
         tool.chmod(0o755)
+    wrapper_lines = shellhook.render_agent_wrapper_lines(tmp_path)
+    assert wrapper_lines == _builtin_rtk_wrapper_lines(executable)
     script = "\n".join(
         [
             "set -u",
-            *shellhook.render_agent_wrapper_lines(tmp_path),
+            *wrapper_lines,
             "rtk grep --files src",
             "rtk grep needle src",
             "rtk grep -F 'a|b' src",
@@ -288,16 +309,16 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
     lines = _trace_lines(trace, expected_prefix="rg:")
     assert lines == [
         "rg:--files src",
-        "rtk:grep -E needle src",
-        "rtk:grep -E -F a|b src",
-        "rtk:grep -E -G a\\|b src",
+        "resolved:grep -E needle src",
+        "resolved:grep -E -F a|b src",
+        "resolved:grep -E -G a\\|b src",
         "find:src -name *.py -print",
         "find:src ( -name *.py -o -name *.md )",
         "git:log --first-parent v1..HEAD",
         "git:show --name-status HEAD",
         "git:diff --check",
         "git:diff --name-only HEAD~1 HEAD",
-        "rtk:",
+        "resolved:",
     ]
     assert lines[0] != lines[1]
 
@@ -360,6 +381,57 @@ def test_spice_checkout_maps_bare_pre_commit_to_dev_gate():
         "pre-commit() {",
         '  spice dev pre-commit "$@"',
         "}",
+    ]
+
+
+@pytest.mark.parametrize("shell_name", ["zsh", "bash"])
+def test_spice_checkout_bare_grep_defaults_to_ere_and_preserves_explicit_mode(
+    tmp_path, shell_name
+):
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    trace = tmp_path / "trace.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    tool = bin_dir / "grep"
+    tool.write_text(
+        f'#!/bin/sh\nprintf \'grep:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+        encoding="utf-8",
+    )
+    tool.chmod(0o755)
+    script = "\n".join(
+        [
+            "set -u",
+            *shellhook.render_agent_wrapper_lines(Path.cwd()),
+            "grep 'alpha|beta' source.txt",
+            "grep -E 'alpha|beta' source.txt",
+            "grep -F 'alpha|beta' source.txt",
+            "grep -P 'alpha|beta' source.txt",
+            "grep -G 'alpha\\|beta' source.txt",
+        ]
+    )
+
+    completed = subprocess.run(
+        [shell, "-c", script],
+        check=False,
+        env={
+            "PATH": str(bin_dir)
+            + os.pathsep
+            + os.environ.get("PATH", ""),  # env-policy: allow
+            SHELL_TRACE_ENV: str(trace),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, _completed_process_detail(completed, trace)
+    assert _trace_lines(trace, expected_prefix="grep:") == [
+        "grep:-E alpha|beta source.txt",
+        "grep:-E alpha|beta source.txt",
+        "grep:-F alpha|beta source.txt",
+        "grep:-P alpha|beta source.txt",
+        "grep:-G alpha\\|beta source.txt",
     ]
 
 
