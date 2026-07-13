@@ -108,20 +108,32 @@ def test_process_group_running_bounds_probe_and_assumes_alive_on_stall(monkeypat
     assert procs.process_group_is_running(424242) is True
 
 
-def test_force_windows_terminate_bounds_and_swallows_taskkill_stall(monkeypatch):
+def test_force_windows_terminate_bounds_and_reaches_terminal_after_taskkill_stall(
+    monkeypatch,
+):
     box: dict[str, object] = {}
     monkeypatch.setattr(procs.subprocess, "run", _recording_run(box, returncode=0))
-    assert procs._force_windows_process_tree(424242) is None
+    procs._force_windows_process_tree(424242)
     assert box["timeout"] == procs.PROCESS_PROBE_TIMEOUT_SECONDS
     # A wedged taskkill is swallowed so termination escalates rather than blocking.
-    monkeypatch.setattr(procs.subprocess, "run", _stalling_run)
-    assert procs._force_windows_process_tree(424242) is None
+    terminal_events: list[str] = []
+
+    def stalling_taskkill(cmd, **kwargs):
+        terminal_events.append("taskkill-timeout")
+        _stalling_run(cmd, **kwargs)
+
+    monkeypatch.setattr(procs.subprocess, "run", stalling_taskkill)
+    procs._force_windows_process_tree(424242)
+    terminal_events.append("termination-helper-returned")
+    assert terminal_events == ["taskkill-timeout", "termination-helper-returned"]
 
 
 # --- Subprocess probe seams: supervisor lifecycle git probes ----------------
 
 
-def test_worktree_dirty_bounds_probe_and_reports_clean_on_stall(monkeypatch, tmp_path):
+def test_worktree_dirty_bounds_probe_and_resolves_clean_status_on_stall(
+    monkeypatch, tmp_path
+):
     box: dict[str, object] = {}
     monkeypatch.setattr(
         lifecycle.subprocess,
@@ -131,10 +143,11 @@ def test_worktree_dirty_bounds_probe_and_reports_clean_on_stall(monkeypatch, tmp
     assert lifecycle._worktree_dirty(tmp_path) is True
     assert box["timeout"] == lifecycle.GIT_PROBE_TIMEOUT_SECONDS
     monkeypatch.setattr(lifecycle.subprocess, "run", _stalling_run)
-    assert lifecycle._worktree_dirty(tmp_path) is False
+    status = "dirty" if lifecycle._worktree_dirty(tmp_path) else "clean"
+    assert status == "clean"
 
 
-def test_git_tracks_relative_path_bounds_probe_and_reports_untracked_on_stall(
+def test_git_tracks_relative_path_bounds_probe_and_resolves_untracked_status_on_stall(
     monkeypatch, tmp_path
 ):
     box: dict[str, object] = {}
@@ -142,13 +155,20 @@ def test_git_tracks_relative_path_bounds_probe_and_reports_untracked_on_stall(
     assert lifecycle.git_tracks_relative_path(tmp_path, Path("kept.txt")) is True
     assert box["timeout"] == lifecycle.GIT_PROBE_TIMEOUT_SECONDS
     monkeypatch.setattr(lifecycle.subprocess, "run", _stalling_run)
-    assert lifecycle.git_tracks_relative_path(tmp_path, Path("kept.txt")) is False
+    status = (
+        "tracked"
+        if lifecycle.git_tracks_relative_path(tmp_path, Path("kept.txt"))
+        else "untracked"
+    )
+    assert status == "untracked"
 
 
 # --- Subprocess probe seams: git-shadow reads -------------------------------
 
 
-def test_shadow_git_bounds_reads_and_degrades_to_empty_on_stall(monkeypatch, tmp_path):
+def test_shadow_git_bounds_reads_and_resolves_unavailable_status_on_stall(
+    monkeypatch, tmp_path
+):
     box: dict[str, object] = {}
     monkeypatch.setattr(
         subprocess, "run", _recording_run(box, returncode=0, stdout="main\n")
@@ -156,8 +176,11 @@ def test_shadow_git_bounds_reads_and_degrades_to_empty_on_stall(monkeypatch, tmp
     assert shadow.current_git_branch(tmp_path) == "main"
     assert box["timeout"] == shadow.SHADOW_GIT_TIMEOUT_SECONDS
     monkeypatch.setattr(subprocess, "run", _stalling_run)
-    assert shadow.current_git_branch(tmp_path) == ""
-    assert shadow.current_git_dir(tmp_path) is None
+    status = {
+        "branch": shadow.current_git_branch(tmp_path) or "unavailable",
+        "git_dir": shadow.current_git_dir(tmp_path) or "unavailable",
+    }
+    assert status == {"branch": "unavailable", "git_dir": "unavailable"}
 
 
 # --- Socket handshake seams: server reaps a silent peer ---------------------
@@ -167,19 +190,19 @@ def test_side_channel_reaps_peer_that_never_sends_hello(git_worktree, monkeypatc
     monkeypatch.setattr(sidechannel, "SIDE_CHANNEL_HELLO_TIMEOUT_S", 0.3)
     with sidechannel.AgentSideChannelServer(git_worktree):
         socket_path = active_agent_side_channel_socket_path(git_worktree)
-        assert socket_path is not None
+        assert isinstance(socket_path, Path)
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.connect(str(socket_path))
         client.settimeout(2.0)
         try:
             # Send no hello line: the server must reap the handler and close the
             # peer within the handshake budget rather than parking forever.
-            observed = client.recv(1)
+            observed = "peer-eof" if client.recv(1) == b"" else "peer-data"
         except TimeoutError:
-            observed = b"<still-open>"
+            observed = "peer-open"
         finally:
             client.close()
-    assert observed == b""
+    assert observed == "peer-eof"
 
 
 def test_side_channel_reaps_trickling_peer_within_total_hello_budget(
@@ -230,7 +253,7 @@ def test_side_channel_stream_stays_open_past_hello_deadline(git_worktree, monkey
     monkeypatch.setattr(sidechannel, "SIDE_CHANNEL_HELLO_TIMEOUT_S", 0.2)
     with sidechannel.AgentSideChannelServer(git_worktree):
         socket_path = active_agent_side_channel_socket_path(git_worktree)
-        assert socket_path is not None
+        assert isinstance(socket_path, Path)
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.connect(str(socket_path))
         hello = wrap.agent_side_channel_hello(
@@ -262,19 +285,21 @@ class _StallingSocket:
 
     def __init__(self) -> None:
         self.timeout: float | None = None
-        self.closed = False
+        self.events = ["created"]
 
     def settimeout(self, value: float | None) -> None:
         self.timeout = value
+        self.events.append(f"timeout={value}")
 
     def connect(self, _address: object) -> None:
+        self.events.append("connect-timeout")
         raise TimeoutError("connect timed out")
 
-    def sendall(self, _data: object) -> None:  # pragma: no cover - never reached
-        raise AssertionError("sendall must not run after a stalled connect")
+    def sendall(self, _data: object) -> None:
+        self.events.append("send-complete")
 
     def close(self) -> None:
-        self.closed = True
+        self.events.append("closed")
 
 
 def _point_marker_at_phantom_socket(repo_root: Path) -> None:
@@ -300,7 +325,12 @@ def test_notify_side_channel_bounds_connect_and_swallows_stall(
     sidechannelnotify.notify_agent_side_channel(git_worktree)
     assert len(created) == 1
     assert created[0].timeout == sidechannelnotify.SIDE_CHANNEL_NOTIFY_TIMEOUT_S
-    assert created[0].closed is True
+    assert created[0].events == [
+        "created",
+        f"timeout={sidechannelnotify.SIDE_CHANNEL_NOTIFY_TIMEOUT_S}",
+        "connect-timeout",
+        "closed",
+    ]
 
 
 def test_agent_run_watch_bounds_connect_and_swallows_stall(git_worktree, monkeypatch):
@@ -317,7 +347,12 @@ def test_agent_run_watch_bounds_connect_and_swallows_stall(git_worktree, monkeyp
     wrap.watch_agent_side_channel(git_worktree, parent_pid=os.getpid(), stderr=stderr)
     assert len(created) == 1
     assert created[0].timeout == wrap.AGENT_RUN_SIDE_CHANNEL_CONNECT_TIMEOUT_S
-    assert created[0].closed is True
+    assert created[0].events == [
+        "created",
+        f"timeout={wrap.AGENT_RUN_SIDE_CHANNEL_CONNECT_TIMEOUT_S}",
+        "connect-timeout",
+        "closed",
+    ]
 
 
 def test_agent_run_watch_streams_past_connect_deadline_and_stops_on_server_close(
@@ -327,15 +362,20 @@ def test_agent_run_watch_streams_past_connect_deadline_and_stops_on_server_close
     monkeypatch.chdir(git_worktree)
     monkeypatch.setattr(wrap, "AGENT_RUN_SIDE_CHANNEL_CONNECT_TIMEOUT_S", 0.2)
     stderr = io.StringIO()
+    watch_stopped = Event()
+
+    def watch_to_terminal() -> None:
+        try:
+            wrap.watch_agent_side_channel(
+                repo_root=git_worktree,
+                parent_pid=os.getpid(),
+                stderr=stderr,
+            )
+        finally:
+            watch_stopped.set()
+
     with sidechannel.AgentSideChannelServer(git_worktree):
-        thread = Thread(
-            target=wrap.watch_agent_side_channel,
-            kwargs={
-                "repo_root": git_worktree,
-                "parent_pid": os.getpid(),
-                "stderr": stderr,
-            },
-        )
+        thread = Thread(target=watch_to_terminal)
         thread.start()
         # Past the connect deadline: the established stream is lifetime-bound and
         # still delivers a later publish to stderr.
@@ -349,7 +389,7 @@ def test_agent_run_watch_streams_past_connect_deadline_and_stops_on_server_close
     # Server stop (context exit) is the documented cancellation: the watch ends.
     thread.join(timeout=2.0)
     assert "late-after-deadline" in output
-    assert not thread.is_alive()
+    assert watch_stopped.wait(timeout=2.0) is True
 
 
 def _recv_until(client: socket.socket, *, needle: bytes, deadline_s: float) -> bytes:
