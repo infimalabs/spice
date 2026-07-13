@@ -153,6 +153,82 @@ def test_two_refreshes_for_one_target_reply_in_request_order(tmp_path):
         session._teardown()
 
 
+def test_lane_send_is_not_blocked_by_an_inflight_subscribe(tmp_path, monkeypatch):
+    # The single serial dispatch thread used to run lanes.subscribe inline: it
+    # parked on watcher activation and the full initial payload read, so a
+    # lane.send arriving right behind it on that one thread waited out the whole
+    # subscribe before the composer could clear -- the operator's several-second,
+    # timing-dependent submit latency. The subscribe now completes off the
+    # dispatch thread, so the send is dispatched and acked without waiting for it.
+    monkeypatch.setattr(livebus, "_wait_for_change", _idle_wait)
+    target = _Target(id="lane", repo_root=tmp_path)
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    connection = _Connection()
+    initial_read_started = Event()
+    release_initial_read = Event()
+
+    def slow_initial_payload(_target, **kwargs):
+        # Only the subscribe's initial full read blocks; append-only watch reads
+        # stay fast so the watcher never wedges behind the gate.
+        if kwargs.get("append_only"):
+            return {"messages": [], "statusLine": {}}
+        initial_read_started.set()
+        # Parks well past the send ack's wait window: on the broken path the send
+        # cannot slip through at an auto-release, it simply never arrives in time.
+        release_initial_read.wait(timeout=5.0)
+        return {"messages": [], "statusLine": {}}
+
+    session = LiveBusSession(
+        connection,
+        _callbacks(
+            target=target,
+            transcript=transcript,
+            messages_payload=slow_initial_payload,
+        ),
+    )
+
+    def serial_dispatch() -> None:
+        # Model the one per-connection dispatch thread: read+dispatch the
+        # subscribe, then the send that follows it in the socket, strictly serial.
+        session._dispatch(
+            {
+                "type": "lanes.subscribe",
+                "requestId": "sub-1",
+                "entries": [{"targetId": target.id, "query": {"limit": 5}}],
+            }
+        )
+        session._dispatch(
+            {
+                "type": "lane.send",
+                "requestId": "send-1",
+                "targetId": target.id,
+                "payload": {"text": "hello"},
+            }
+        )
+
+    dispatcher = Thread(target=serial_dispatch, name="test-dispatch", daemon=True)
+    try:
+        dispatcher.start()
+        # The subscribe's initial read is parked mid-flight; the send behind it
+        # must still be dispatched and acked instead of waiting out the batch.
+        assert initial_read_started.wait(timeout=1.0)
+        send_result = _wait_for_reply(
+            connection, request_id="send-1", timeout_seconds=1.5
+        )
+        assert send_result["type"] == "lane.sendResult"
+        # And the ack landed while the subscribe was still parked -- proof it did
+        # not queue behind the initial batch read on the dispatch thread.
+        with connection.lock:
+            assert not any(
+                frame.get("requestId") == "sub-1" for frame in connection.sent
+            )
+    finally:
+        release_initial_read.set()
+        dispatcher.join(timeout=2.0)
+        session._teardown()
+
+
 def test_teardown_drains_an_inflight_read_before_shutting_the_pool(tmp_path):
     transcript = tmp_path / "rollout.jsonl"
     transcript.write_text("", encoding="utf-8")
@@ -361,9 +437,10 @@ def test_lanes_subscribe_replies_once_with_activation_per_lane(tmp_path, monkeyp
                 ],
             }
         )
+        frame = _wait_for_reply(batch_connection, request_id="batch-1")
         with batch_connection.lock:
-            assert len(batch_connection.sent) == 1
-            frame = batch_connection.sent[0]
+            replies = [f for f in batch_connection.sent if f.get("source") is None]
+        assert len(replies) == 1
         assert frame["type"] == "lanes.payload"
         assert frame["requestId"] == "batch-1"
         lane_ids = [lane_entry["targetId"] for lane_entry in frame["lanes"]]
@@ -411,7 +488,8 @@ def test_lanes_subscribe_reports_watcher_activation_per_lane(tmp_path, monkeypat
                 ],
             }
         )
-        entries = {entry["targetId"]: entry for entry in connection.sent[0]["lanes"]}
+        frame = _wait_for_reply(connection, request_id="batch-errors")
+        entries = {entry["targetId"]: entry for entry in frame["lanes"]}
         assert [entries[target_id]["watcherActive"] for target_id in entries] == [
             False,
             True,
@@ -447,13 +525,16 @@ def test_lanes_subscribe_generations_change_on_replacement_and_reconnect(
     try:
         first_session._handle_lanes_subscribe({**message, "requestId": "first"})
         first_subscription = first_session.subscriptions["lane-a"]
+        first_reply = _wait_for_reply(first_connection, request_id="first")
         first_session._handle_lanes_subscribe({**message, "requestId": "replacement"})
+        replacement_reply = _wait_for_reply(first_connection, request_id="replacement")
         second_session._handle_lanes_subscribe({**message, "requestId": "reconnect"})
+        reconnect_reply = _wait_for_reply(second_connection, request_id="reconnect")
 
         generations = [
-            first_connection.sent[0]["lanes"][0]["subscriptionGeneration"],
-            first_connection.sent[1]["lanes"][0]["subscriptionGeneration"],
-            second_connection.sent[0]["lanes"][0]["subscriptionGeneration"],
+            first_reply["lanes"][0]["subscriptionGeneration"],
+            replacement_reply["lanes"][0]["subscriptionGeneration"],
+            reconnect_reply["lanes"][0]["subscriptionGeneration"],
         ]
         assert generations == [
             f"{first_session.client_id}:1",
@@ -668,10 +749,8 @@ def test_lanes_subscribe_computes_payloads_concurrently(tmp_path, monkeypatch):
                 ],
             }
         )
+        frame = _wait_for_reply(connection, request_id="batch-1")
         elapsed = time.perf_counter() - started
-        with connection.lock:
-            assert len(connection.sent) == 1
-            frame = connection.sent[0]
         assert [entry["payload"] for entry in frame["lanes"]] == [
             {"messages": [], "statusLine": {"targetId": "lane-a"}},
             {"messages": [], "statusLine": {"targetId": "lane-b"}},
@@ -716,6 +795,14 @@ def _subscribe_lane(session: LiveBusSession, target_id: str, *, limit: int) -> N
             "entries": [{"targetId": target_id, "query": {"limit": limit}}],
         }
     )
+    # The blocking completion now runs off the dispatch thread; callers here rely
+    # on the initial payload being read and the watcher armed before they write a
+    # change and await its push, so block until the subscribe has settled. The
+    # old inline handler blocked here unbounded; this generous cap is a hang guard
+    # under xdist load, not an expected wait -- the gate is set in milliseconds.
+    subscription = session.subscriptions.get(target_id)
+    if subscription is not None:
+        assert subscription.initial_payload_sent.wait(timeout=15.0)
 
 
 def _callbacks(
