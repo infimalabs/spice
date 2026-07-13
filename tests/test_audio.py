@@ -16,6 +16,7 @@ from spice.configcli import handle_config
 from spice.serve import audio
 
 ESPEAK_TEST_SAMPLE_RATE = 8000
+LONG_MESSAGE_FLOOR_SECONDS = 60.0
 
 
 def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
@@ -98,6 +99,73 @@ def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
         match="external speech backend exited 7: bad model",
     ):
         audio.render_speech_audio("hello", repo_root=tmp_path)
+
+
+def test_external_speech_backend_bounds_a_hung_process(tmp_path, monkeypatch):
+    config.set_worktree_section(
+        tmp_path,
+        config.SAY_KEY,
+        {
+            config.SAY_BACKEND_KEY: "external",
+            config.SAY_COMMAND_KEY: "tts-engine",
+            config.SAY_TIMEOUT_SECONDS_KEY: 0.25,
+        },
+    )
+    seen: dict[str, object] = {}
+
+    def fake_run(args, **kwargs):
+        seen["timeout"] = kwargs["timeout"]
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+
+    with pytest.raises(
+        RuntimeError,
+        match="external speech backend timed out after 0.25s",
+    ):
+        audio.render_speech_audio("hello", repo_root=tmp_path)
+    assert seen["timeout"] == 0.25
+
+
+def test_macos_say_bounds_a_hung_process(tmp_path, monkeypatch):
+    config.set_worktree_section(
+        tmp_path,
+        config.SAY_KEY,
+        {config.SAY_TIMEOUT_SECONDS_KEY: 0.5},
+    )
+    seen: dict[str, object] = {}
+
+    def fake_run(args, **kwargs):
+        seen["timeout"] = kwargs["timeout"]
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+
+    with pytest.raises(
+        RuntimeError,
+        match="macOS say timed out after 0.5s",
+    ):
+        audio.render_speech_audio("hello", repo_root=tmp_path)
+    assert seen["timeout"] == 0.5
+
+
+def test_long_message_renders_within_the_generous_default_bound(tmp_path, monkeypatch):
+    long_message = "word " * 200
+    seen: dict[str, object] = {}
+
+    def fake_run(args, **kwargs):
+        seen["timeout"] = kwargs["timeout"]
+        output_path = Path(args[args.index("-o") + 1])
+        output_path.write_bytes(b"m4a-bytes")
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+
+    rendered = audio.render_speech_audio(long_message, repo_root=tmp_path)
+
+    assert rendered == audio.SpeechAudio(b"m4a-bytes", "audio/mp4")
+    assert seen["timeout"] == config.DEFAULT_SAY_TIMEOUT_SECONDS
+    assert seen["timeout"] > LONG_MESSAGE_FLOOR_SECONDS
 
 
 def test_espeak_ng_stdout_recipe_runs_end_to_end(tmp_path, monkeypatch, capsys):
