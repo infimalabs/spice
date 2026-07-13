@@ -275,6 +275,7 @@ def _collect_test_nodeids(root: Path, test_paths: list[Path]) -> set[str]:
         cwd=root,
         policy="study",
         operation="collect mutation test nodeids",
+        capture_output=True,
         check=False,
         text=True,
     )

@@ -98,6 +98,7 @@ def _run_serve_web_typecheck_argv(repo_root: Path, argv: tuple[str, ...]) -> Non
         list(argv),
         policy="typecheck",
         operation="run serve web typecheck",
+        capture_output=True,
         text=True,
         cwd=repo_root,
         check=False,

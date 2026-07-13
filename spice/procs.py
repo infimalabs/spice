@@ -43,8 +43,8 @@ def terminate_process_group(
     signum: int | None = None,
     timeout_seconds: float = 2.0,
 ) -> None:
-    if process.poll() is not None:
-        return
+    # The leader may exit while descendants keep inherited pipes open, so
+    # cleanup always targets the complete group/tree regardless of leader state.
     if _is_windows():
         _terminate_windows_process_tree(process, timeout_seconds=timeout_seconds)
         return
@@ -100,16 +100,17 @@ def process_id_is_running(pid: int | None) -> bool:
 def _terminate_posix_process_group(
     process: subprocess.Popen[Any], *, signum: int, timeout_seconds: float
 ) -> None:
+    process_group_id = process.pid
     try:
-        os.killpg(process.pid, signum)
+        os.killpg(process_group_id, signum)
     except ProcessLookupError:
         return
     deadline = time.monotonic() + timeout_seconds
-    while process.poll() is None and time.monotonic() < deadline:
+    while process_group_is_running(process_group_id) and time.monotonic() < deadline:
         time.sleep(PROCESS_POLL_INTERVAL_SECONDS)
-    if process.poll() is None:
+    if process_group_is_running(process_group_id):
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            os.killpg(process_group_id, signal.SIGKILL)
         except ProcessLookupError:
             return
 
@@ -117,13 +118,6 @@ def _terminate_posix_process_group(
 def _terminate_windows_process_tree(
     process: subprocess.Popen[Any], *, timeout_seconds: float
 ) -> None:
-    try:
-        process.terminate()
-        process.wait(timeout=timeout_seconds)
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    if process.poll() is not None:
-        return
     _force_windows_process_tree(process.pid)
     try:
         process.wait(timeout=timeout_seconds)
@@ -248,16 +242,17 @@ def run_bounded_process_group(
     text: bool = False,
     env: dict[str, str] | None = None,
     input_data: Any = None,
+    capture_output: bool = True,
     check: bool = False,
 ) -> subprocess.CompletedProcess[Any]:
-    """Capture a child under a deadline and terminate its whole group on expiry."""
+    """Run a child under a deadline and terminate its whole group on expiry."""
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
     process = subprocess.Popen(
         command,
         cwd=cwd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE if capture_output else None,
+        stderr=subprocess.PIPE if capture_output else None,
         text=text,
         env=env,
         stdin=subprocess.PIPE if input_data is not None else None,
