@@ -27,6 +27,7 @@ SCOPED_REWRITE_PROCESS_PID = 4242
 def test_rtk_rewrite_protocol_accepts_current_result_pairs():
     responses = iter(
         [
+            subprocess.CompletedProcess([], 0, stdout="rtk git log\n", stderr=""),
             subprocess.CompletedProcess([], 3, stdout="rtk git status\n", stderr=""),
             subprocess.CompletedProcess([], 1, stdout="", stderr=""),
         ]
@@ -35,27 +36,47 @@ def test_rtk_rewrite_protocol_accepts_current_result_pairs():
     def run(*_args, **_kwargs):
         return next(responses)
 
+    assert wrap.rtk_rewrite_command_text("git", "log", run=run) == "rtk git log"
     assert wrap.rtk_rewrite_command_text("git", "status", run=run) == "rtk git status"
     assert wrap.rtk_rewrite_command_text("true", run=run) is None
 
 
 @pytest.mark.parametrize(
-    "completed",
+    ("completed", "failure_class"),
     [
-        subprocess.CompletedProcess([], 0, stdout="rtk git status\n", stderr=""),
-        subprocess.CompletedProcess([], 3, stdout="", stderr=""),
-        subprocess.CompletedProcess([], 1, stdout="unexpected\n", stderr=""),
+        (
+            subprocess.CompletedProcess([], 3, stdout="", stderr=""),
+            "invalid-result-pair",
+        ),
+        (
+            subprocess.CompletedProcess([], 1, stdout="unexpected\n", stderr=""),
+            "invalid-result-pair",
+        ),
+        (
+            subprocess.CompletedProcess([], 9, stdout="unexpected\n", stderr=""),
+            "unexpected-exit",
+        ),
     ],
 )
-def test_rtk_rewrite_protocol_reports_invalid_result_with_install_path(completed):
-    with pytest.raises(SpiceError) as exc_info:
-        wrap.rtk_rewrite_command_text(
-            "git", "status", run=lambda *_args, **_kwargs: completed
-        )
+def test_rtk_rewrite_protocol_degrades_invalid_results_to_native(
+    completed, failure_class
+):
+    stderr = io.StringIO()
 
-    error = str(exc_info.value)
-    assert "invalid RTK rewrite protocol result" in error
-    assert wrap.RTK_UPSTREAM in error
+    rewritten = wrap.rtk_rewrite_command_text(
+        "git", "status", stderr=stderr, run=lambda *_args, **_kwargs: completed
+    )
+
+    assert {
+        "state": "native" if rewritten is None else "rewritten",
+        "warning": stderr.getvalue(),
+    } == {
+        "state": "native",
+        "warning": (
+            "spice agent run: RTK rewrite degraded to native "
+            f"executable='rtk' failure={failure_class}\n"
+        ),
+    }
 
 
 def test_rtk_companion_validation_checks_version_and_rewrite_probe():
@@ -220,7 +241,7 @@ def test_wrapper_rewrites_direct_agent_command_with_rtk_source_of_truth(monkeypa
     assert calls == [("rg", "needle")]
 
 
-def test_wrapper_rejects_malformed_matched_direct_rewrite_before_execution(
+def test_wrapper_degrades_malformed_direct_rewrite_to_original_execution(
     monkeypatch,
 ):
     executed: list[list[str]] = []
@@ -230,17 +251,36 @@ def test_wrapper_rejects_malformed_matched_direct_rewrite_before_execution(
         lambda *_args, **_kwargs: "rtk 'unterminated",
     )
 
-    with pytest.raises(SpiceError) as exc_info:
-        wrap.run_agent_command(
-            None,
-            ["rg", "needle"],
-            popen_factory=lambda command, **_kwargs: executed.append(command),
-            stderr=io.StringIO(),
-        )
+    class FakeProcess:
+        pid = 0
 
-    assert executed == []
-    assert "invalid RTK direct rewrite argv" in str(exc_info.value)
-    assert "must be shell-parseable" in str(exc_info.value)
+        def wait(self) -> int:
+            return 0
+
+    def record_process(command, **_kwargs):
+        executed.append(command)
+        return FakeProcess()
+
+    stderr = io.StringIO()
+    exit_code = wrap.run_agent_command(
+        None,
+        ["rg", "needle"],
+        popen_factory=record_process,
+        stderr=stderr,
+    )
+
+    assert {
+        "exit_code": exit_code,
+        "executed": executed,
+        "warning": stderr.getvalue(),
+    } == {
+        "exit_code": 0,
+        "executed": [["rg", "needle"]],
+        "warning": (
+            "spice agent run: RTK rewrite degraded to native "
+            "executable='rtk' failure=malformed-direct-argv\n"
+        ),
+    }
 
 
 def test_wrapper_does_not_special_case_proxy_argv(monkeypatch):
