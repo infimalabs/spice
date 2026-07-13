@@ -42,8 +42,8 @@ The wrapper does this before running the requested command:
 
 - prints pending operator steering and keep-working guidance on stderr;
 - preserves ACK semantics by leaving inbox retirement to transcript ACK lines;
-- requires [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer and asks
-  `rtk rewrite` for the rewritten shell command string or direct argv;
+- asks optional [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer for a
+  rewritten shell command string or direct argv when its health is active;
 - routes git through the worktree shadow environment;
 - routes `spice` and `python` commands to the correct worktree source checkout
   or target repository virtual environment;
@@ -51,16 +51,13 @@ The wrapper does this before running the requested command:
 
 ### RTK Rewrite Protocol
 
-Spice invokes `rtk rewrite -- <command...>`. Exit `3` with non-empty stdout
-replaces the command with stdout. Exit `1` with empty stdout means the command
-is unmatched and runs unchanged. Every other exit/stdout combination is an
-integration error; exit `0` is not accepted by the current protocol. Missing,
-older, or protocol-invalid RTK stops the agent path with the official install
-guidance instead of silently selecting a native-command path.
-
-Upstream RTK assigns exit `0` to an auto-allowed rewrite. Spice deliberately
-rejects that outcome: rewriting may optimize the command, but it must not cross
-the agent permission boundary by auto-allowing it.
+Spice invokes `rtk rewrite -- <command...>`. Exit `0` or Exit `3` with
+non-empty stdout replaces the command with stdout. Exit `1` with empty stdout
+means the command is unmatched and runs unchanged. Launch failures, malformed
+direct argv, and every other exit/stdout combination emit one bounded,
+repeat-suppressed diagnostic and execute the original native command unchanged.
+Rewrite selection optimizes command output; it does not grant command
+permission.
 
 RTK is the sole owner of rewrite selection. Spice sets `RTK_DB_PATH` to the
 current agent thread's `.git/spice/agents/<thread>/rtk/history.db` and owns only

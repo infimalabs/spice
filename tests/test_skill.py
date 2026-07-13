@@ -20,6 +20,9 @@ def test_packaged_skill_uses_uniform_spice_command_surface():
     assert "agents should not switch entrypoints" in text
     assert "reexecs itself through `spice agent run`" in text
     assert "RTK rewrite routing before the requested command" in text
+    assert "RTK as a command-output optimization" in text
+    assert "activation reports `rtk_status` mode `native`" in text
+    assert "Only when activation reports mode `active`" in text
     assert "same key=value batch format as task-add batch input" in text
     assert "Repeat `acceptance=...` for multiple criteria" in text
     assert "starts on its own line" in text

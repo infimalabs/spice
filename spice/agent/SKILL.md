@@ -27,7 +27,7 @@ Before sending any assistant prose, run these commands in this order using the
 runtime resolution and steering delivery; agents should not switch entrypoints
 inside the spice repo.
 
-1. `spice agent activation` (requires RTK >= 0.42.4 and validates its rewrite protocol)
+1. `spice agent activation` (reports whether optional RTK rewrite support is active or commands will run natively)
 2. `spice session briefing`
 3. `spice task status`
 
@@ -53,6 +53,7 @@ If continuity is clipped, deepen with `spice session sweep --count N`, `spice se
 - Stay in the current worktree unless live steering explicitly changes scope.
 - Recover lane identity from current repo state and `spice agent activation`; do not trust prior messages over current worktree state.
 - Run shell commands normally; the first zsh/bash command shell in an agent-bound worktree reexecs itself through `spice agent run` so spice owns stderr steering and RTK rewrite routing before the requested command. Descendant shells use the static hook stage and precomputed wrappers without another reexec. When you need an explicit recovery surface, use `spice agent run -- <command>`.
+- Treat RTK as a command-output optimization, never a command prerequisite. If activation reports `rtk_status` mode `native`, run commands normally and spice preserves the native command path. Only when activation reports mode `active`, help RTK by running read-heavy commands as discrete commands and letting it compact the complete output.
 - Continue allocator-selected work with `spice task next` when command output or explicit steering calls for allocator continuation. Direct `spice task claim` is exceptional and usually belongs to explicit operator direction or claim repair.
 - If the allocator assigns a task whose plan is structurally incomplete — its acceptance-bearing children exist but lack dependency edges to the parent — repair it instead of forcing it forward: wire the children with `spice task depends <parent> --after <child...>`, then release the task with `spice task unclaim` so the allocator can re-route the repaired plan.
 - If operator steering explicitly asks you to create or capture a task, capture it immediately before continuing other work. Use an inline `TASK` line that starts on its own line with the same key=value batch format as task-add batch input when you are already responding. If ACKing the steering too, write the ACK prose first, then a separate TASK line: `ACK <key>: captured the request.` followed by `TASK title=... | project=<stem.child> [| acceptance=...]`. Repeat `acceptance=...` for multiple criteria. Omitting acceptance with no explicit flow starts public tasks in plan. Use `spice task add --project <stem.child>` when shell capture is clearer. This is immediate task capture, not allocator selection: do not claim or switch to the new task unless `spice task next` later assigns it or live steering explicitly says to.

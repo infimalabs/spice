@@ -38,9 +38,11 @@ def test_rtk_current_rewrite_protocol_is_explicit():
     for text in (config, wrapper_contract):
         assert "`0.42.4` or newer" in text
         assert "`rtk rewrite" in text
+        assert "Exit `0` or Exit `3` with non-empty stdout" in text
         assert "Exit `3` with non-empty stdout" in text
         assert "Exit `1` with empty stdout" in text
-        assert "Every other exit/stdout combination" in text
+        assert "every other exit/stdout combination" in text
+        assert "original native command" in text
         assert "RTK_DB_PATH" in text
         assert ".git/spice/agents/<thread>/rtk/history.db" in text
 

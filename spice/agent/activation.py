@@ -50,12 +50,12 @@ def activation_browser_validation_lines() -> list[str]:
     ]
 
 
-def activation_command_surface_lines() -> list[str]:
-    return [
+def activation_command_surface_lines(*, rtk_active: bool) -> list[str]:
+    lines = [
         (
-            "rtk_contract=RTK >= 0.42.4 is required; activation validates the "
-            "rewrite protocol before binding the agent, and missing or invalid "
-            "RTK stops command execution with official install guidance"
+            "rtk_contract=RTK is an optional command-output optimization; "
+            "activation reports its health, and spice agent run preserves native "
+            "command execution when RTK is missing, obsolete, or protocol-invalid"
         ),
         (
             "command_surface=run shell commands normally; spice shell startup "
@@ -65,15 +65,6 @@ def activation_command_surface_lines() -> list[str]:
             "precomputed wrappers without another reexec; agent-run child "
             "shells enter the static hook stage before exported "
             "snapshot/descendant state is captured"
-        ),
-        (
-            "rtk_contract=the agent-run wrapper already routes your shell "
-            "commands through rtk rewrite, which compacts verbose tool output "
-            "to save context tokens; you only capture that by feeding it well "
-            "-- run read-heavy commands (git, grep, ls, cat, find, diff, log, "
-            "tree) as discrete commands, not buried in heredocs, for-loops, or "
-            "$(...) subshells that rtk cannot rewrite, and let rtk compact full "
-            "output instead of pre-tersing with --oneline/-s/--stat/|head/|tail"
         ),
         (
             "interaction_contract=spice is a live shell loop, not a batch job: "
@@ -145,3 +136,15 @@ def activation_command_surface_lines() -> list[str]:
         "side_channel=operator steering arrives through the supervisor socket",
         "initial_prompt_policy=skill_invocation_only",
     ]
+    if rtk_active:
+        lines.insert(
+            2,
+            (
+                "rtk_guidance=RTK rewrite support is active and can compact "
+                "verbose tool output; run read-heavy commands (git, grep, ls, "
+                "cat, find, diff, log, tree) as discrete commands, not buried "
+                "in heredocs, for-loops, or $(...) subshells, and let RTK "
+                "compact full output instead of pre-tersing it"
+            ),
+        )
+    return lines

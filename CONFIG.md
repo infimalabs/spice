@@ -19,8 +19,8 @@ source checkout, import path, or virtualenv for the running code.
 
 ## RTK Rewrite Companion
 
-The agent shell requires [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or
-newer. Install it before starting agents:
+The agent shell can use [RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer
+to compact command output. Install it to enable that optimization:
 
 ```sh
 brew install rtk
@@ -28,15 +28,16 @@ rtk --version
 rtk rewrite -- git status
 ```
 
-`spice agent run` passes the command after `--`. Exit `3` with non-empty stdout
-rewrites; Exit `1` with empty stdout leaves it unmatched. Every other
-exit/stdout combination errors. Upstream RTK uses Exit `0` for an auto-allowed
-rewrite; Spice deliberately rejects it to preserve the agent permission
-boundary. RTK owns command-selection policy. Spice owns the finite `common`
-command-shape layer and the agent-scoped
+`spice agent run` passes the command after `--`. Exit `0` or Exit `3` with
+non-empty stdout rewrites; Exit `1` with empty stdout leaves it unmatched.
+Launch failure, malformed output, and every other exit/stdout combination emit
+a bounded diagnostic and preserve the original native command. RTK owns
+command-selection policy, not command permission. Spice owns the finite
+`common` command-shape layer and the agent-scoped
 `.git/spice/agents/<thread>/rtk/history.db` supplied through `RTK_DB_PATH`.
-Missing or protocol-invalid RTK stops the agent path. Cargo installation and
-the complete protocol live in the
+Activation and Doctor report missing, obsolete, or protocol-invalid RTK as
+native-command mode without blocking agent setup. Cargo installation and the
+complete protocol live in the
 [wrapper contract](docs/cli/wrapper-commands.md#rtk-rewrite-protocol).
 
 ## Worktree Speech

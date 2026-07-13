@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable
 
 from spice.agent.driver import DRIVER
-from spice.agent.wrap import RTK_INSTALL_GUIDANCE, validate_rtk_companion
+from spice.agent.rtkhealth import probe_rtk_health
 from spice.agent.lifecycle import packaged_skill_path
 from spice.config import (
     configured_judge_bin,
@@ -119,7 +119,7 @@ def _apply_safe_fixes(repo_root: Path) -> list[str]:
 def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
     from spice.serve.typecheck import serve_web_typecheck_targets
 
-    checks: list[DoctorCheck] = [_rtk_check()]
+    checks: list[DoctorCheck] = [_rtk_check(repo_root)]
     serve_web_present = bool(serve_web_typecheck_targets(repo_root))
     npm_note = (
         "serve web TypeScript checkJs backend"
@@ -155,16 +155,19 @@ def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
     return checks
 
 
-def _rtk_check() -> DoctorCheck:
-    try:
-        version = validate_rtk_companion()
-    except SpiceError as exc:
-        return _fail("tool.rtk", str(exc), RTK_INSTALL_GUIDANCE)
-    return _ok(
-        "tool.rtk",
-        f"rtk {version}; rewrite protocol valid",
-        "rtk --version && rtk rewrite -- git status",
+def _rtk_check(repo_root: Path) -> DoctorCheck:
+    health = probe_rtk_health(repo_root)
+    detail = (
+        f"executable={health.executable!r}; mode={health.mode}; "
+        f"state={health.state}; {health.detail}"
     )
+    if health.active:
+        return _ok(
+            "tool.rtk",
+            f"{detail}; version={health.version}",
+            health.verification_command(),
+        )
+    return _warn("tool.rtk", detail, health.verification_command())
 
 
 def _tts_binary_check_config(repo_root: Path) -> tuple[str, str]:

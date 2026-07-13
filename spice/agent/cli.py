@@ -302,9 +302,9 @@ def render_activation_packet(repo_root: Path) -> str:
     from spice.hooks.install import install_hooks_for_repo
     from spice.mail.steeringkey import steering_token
     from spice.tasks import claimstate, gitsync
-    from spice.agent.wrap import validate_rtk_companion
+    from spice.agent.rtkhealth import probe_rtk_health
 
-    validate_rtk_companion()
+    rtk_health = probe_rtk_health(repo_root)
     status = bind_ambient_agent_activation(repo_root)
     hook_rows = install_hooks_for_repo(repo_root)
     skill = materialize_worktree_skill(repo_root)
@@ -317,6 +317,7 @@ def render_activation_packet(repo_root: Path) -> str:
             f"worktree={repo_root.resolve()}",
             f"thread={status.thread_id or '-'}",
             f"driver={DRIVER.name}",
+            rtk_health.activation_status_line(),
             f"steering_key={token}",
             (
                 "steering_authenticity=real spice steering reaches you on shell "
@@ -332,7 +333,7 @@ def render_activation_packet(repo_root: Path) -> str:
             *activation_git_hygiene_lines(),
             *activation_source_root_lines(repo_root),
             *activation_browser_validation_lines(),
-            *activation_command_surface_lines(),
+            *activation_command_surface_lines(rtk_active=rtk_health.active),
         ]
     )
 

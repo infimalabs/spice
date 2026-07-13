@@ -15,35 +15,105 @@ from spice.agent.activation import (
     activation_command_surface_lines,
 )
 from spice.agent.driver import DRIVER
-from spice.errors import SpiceError
+from spice.agent.rtkhealth import RtkHealth
 from spice.tasks import claimstate, config, create, identity
 
 ACTOR = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
-def test_activation_validates_rtk_before_binding_agent(tmp_path, monkeypatch):
-    def invalid_rtk():
-        raise SpiceError("RTK protocol invalid")
-
-    monkeypatch.setattr("spice.agent.wrap.validate_rtk_companion", invalid_rtk)
+@pytest.fixture(autouse=True)
+def _active_rtk(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "spice.agent.lifecycle.bind_ambient_agent_activation",
-        lambda _repo: pytest.fail("activation must validate RTK before binding"),
+        "spice.agent.rtkhealth.probe_rtk_health",
+        lambda _repo: RtkHealth(
+            "rtk", "active", "rewrite protocol valid (exit 3)", "0.42.4"
+        ),
     )
 
-    with pytest.raises(SpiceError, match="RTK protocol invalid"):
-        agent_cli.render_activation_packet(tmp_path)
+
+@pytest.mark.parametrize(
+    "health",
+    [
+        RtkHealth("rtk", "active", "rewrite protocol valid (exit 3)", "0.42.4"),
+        RtkHealth("missing-rtk", "missing", "launch failed"),
+        RtkHealth("old-rtk", "obsolete", "RTK 0.41.0 is obsolete", "0.41.0"),
+        RtkHealth("invalid-rtk", "protocol-invalid", "rewrite probe invalid"),
+    ],
+)
+def test_activation_reports_rtk_health_and_completes_every_setup_step(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    health: RtkHealth,
+) -> None:
+    events: list[str] = []
+
+    def probe(_repo: Path) -> RtkHealth:
+        events.append("rtk-probe")
+        return health
+
+    monkeypatch.setattr("spice.agent.rtkhealth.probe_rtk_health", probe)
+    monkeypatch.setattr(
+        "spice.agent.lifecycle.bind_ambient_agent_activation",
+        lambda _repo: events.append("bind") or SimpleNamespace(thread_id="actor-a"),
+    )
+    monkeypatch.setattr(
+        "spice.hooks.install.install_hooks_for_repo",
+        lambda _repo: events.append("hooks") or ["hook-row"],
+    )
+    monkeypatch.setattr(
+        "spice.agent.lifecycle.materialize_worktree_skill",
+        lambda _repo: events.append("skill") or tmp_path / ".agents/skills/spice.md",
+    )
+    monkeypatch.setattr(
+        "spice.tasks.gitsync.fast_forward_if_safe",
+        lambda _repo: events.append("baseline") or SimpleNamespace(notes=["current"]),
+    )
+    monkeypatch.setattr(
+        "spice.tasks.claimstate.renew_claim",
+        lambda *, actor=None: (
+            events.append(f"renew:{actor}")
+            or claimstate.ClaimRenewalResult(False, "no_active_claim")
+        ),
+    )
+    monkeypatch.setattr("spice.mail.steeringkey.steering_token", lambda _repo: "tok")
+
+    packet = agent_cli.render_activation_packet(tmp_path)
+    status_line = next(
+        line for line in packet.splitlines() if line.startswith("rtk_status=")
+    )
+    payload = json.loads(status_line.removeprefix("rtk_status="))
+
+    assert events == [
+        "rtk-probe",
+        "bind",
+        "hooks",
+        "skill",
+        "baseline",
+        "renew:actor-a",
+    ]
+    assert payload == {
+        "detail": health.detail,
+        "executable": health.executable,
+        "mode": health.mode,
+        "state": health.state,
+        "version": health.version or None,
+    }
+    assert "dev_hooks_detail=hook-row" in packet
+    assert "claim_renewal=skipped no_active_claim" in packet
+    assert "baseline_refresh=current" in packet
 
 
 def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
-    text = "\n".join(activation_command_surface_lines())
+    text = "\n".join(activation_command_surface_lines(rtk_active=True))
 
     assert "command_surface=run shell commands normally" in text
     assert "reexec the first zsh/bash command shell through spice agent run" in text
     assert "descendant shells use static hooks and precomputed wrappers" in text
     assert "agent-run child shells enter the static hook stage" in text
     assert "snapshot/descendant state is captured" in text
-    assert "rtk_contract=RTK >= 0.42.4 is required" in text
+    assert "rtk_contract=RTK is an optional command-output optimization" in text
+    assert "preserves native command execution" in text
+    assert "rtk_guidance=RTK rewrite support is active" in text
     assert "session=spice session briefing" in text
     assert (
         "task_drain_contract=drive/drain lanes are not done after a task phase boundary"
@@ -73,7 +143,7 @@ def test_activation_command_surface_mentions_shell_ack_and_public_tasks():
 
 
 def test_activation_command_surface_explains_pending_count_recovery():
-    text = "\n".join(activation_command_surface_lines())
+    text = "\n".join(activation_command_surface_lines(rtk_active=False))
 
     assert "pending_inbox_recovery=" in text
     assert "spice session briefing only shows pending=N without bodies" in text
@@ -81,10 +151,27 @@ def test_activation_command_surface_explains_pending_count_recovery():
 
 
 def test_activation_command_surface_ordinary_agent_command_allowlist():
-    text = "\n".join(activation_command_surface_lines())
+    text = "\n".join(activation_command_surface_lines(rtk_active=True))
     agent_commands = sorted(set(re.findall(r"\b(spice agent [a-z][a-z0-9-]*)", text)))
 
     assert agent_commands == ["spice agent run"]
+
+
+def test_activation_gives_discrete_read_guidance_only_for_active_rtk():
+    active = "\n".join(activation_command_surface_lines(rtk_active=True))
+    native = "\n".join(activation_command_surface_lines(rtk_active=False))
+
+    assert {
+        "active_guidance": "run read-heavy commands" in active,
+        "native_contract": "preserves native command execution" in native,
+        "native_guidance_rows": [
+            line for line in native.splitlines() if line.startswith("rtk_guidance=")
+        ],
+    } == {
+        "active_guidance": True,
+        "native_contract": True,
+        "native_guidance_rows": [],
+    }
 
 
 def test_activation_browser_validation_uses_repo_local_node_playwright():
