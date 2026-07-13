@@ -47,7 +47,17 @@ reads text from stdin and returns browser-playable WAV on stdout.
 
 ## Maxim Judge Binary
 
-The maxim judge is a worktree-local executable:
+Maxim adjudication is off by default: a matched trigger bag publishes its
+`[MAXIM]` reminder judge-free, accepting more false positives and consulting no
+judge subprocess. Opt into local YES/NO adjudication per worktree with:
+
+```console
+spice config judge --enable
+spice config judge --disable
+```
+
+When adjudication is enabled, configure the maxim judge executable in the
+default worktree scope (or select another configuration layer with `--scope`):
 
 ```console
 spice config judge --bin /path/to/judge
@@ -55,9 +65,12 @@ spice config judge --bin /path/to/judge
 
 Spice launches it without arguments, sends a prompt on stdin, and requires an
 exit-`0` plain-text `YES` or `NO` on stdout. The default is platform-keyed:
-`afm-cli` on macOS and the portable `spice-judge` adapter elsewhere. The prompt
-schema, portable adapter, retries, exits, and supervisor degradation are
-specified in the [judge reference](docs/config/reference.md#maxim-judge-binary).
+`afm-cli` on macOS and the portable `spice-judge` adapter elsewhere. The judge
+is consulted only when adjudication is enabled; `--bin` configures which
+executable that opt-in path launches, while `--enable` and `--disable` remain
+intentionally worktree-local. The prompt schema, portable adapter, retries,
+exits, and supervisor degradation are specified in the
+[judge reference](docs/config/reference.md#maxim-judge-binary).
 
 ## `[tool.spice.agent]`
 
@@ -107,8 +120,10 @@ Reference:
 ## `[tool.spice.maxims.<bag>]`
 
 Maxim bags extend or replace the live prose conscience. Trigger words are
-normalized lowercase alphabetic phrases; messages are sent to the judge and, on
-violation, back to the agent as steering.
+normalized lowercase alphabetic phrases; a match publishes the bag's message
+back to the agent as steering. By default that publish is judge-free; when
+adjudication is enabled the judge first decides whether the sampled text
+violates the maxim.
 
 Reference: [maxim bags](docs/config/reference.md#toolspicemaximsbag).
 

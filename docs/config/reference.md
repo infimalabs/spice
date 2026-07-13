@@ -1,8 +1,55 @@
 # Configuration Reference
 
-Tracked project configuration lives under `[tool.spice.*]` in `pyproject.toml`.
-Worktree-local operator preferences live in `.spice/config/spice.toml` through
-`spice config`.
+Spice configuration has exactly four scopes, in increasing precedence order:
+
+| Scope | Path | Behavior |
+| --- | --- | --- |
+| `system` | `<installed spice package>/spice.toml` | Installed defaults; writable only when that existing file is writable |
+| `pyproject` | `<repository>/pyproject.toml` | Tracked `[tool.spice.*]` tables |
+| `repository` | `<repository>/spice.toml` | Tracked plain Spice tables such as `[agent]` |
+| `worktree` | `<repository>/.spice/config/spice.toml` | Local plain Spice tables for one worktree |
+
+Tables merge recursively from `system` through `worktree`. A scalar or list at
+a later scope replaces the earlier leaf completely; lists never concatenate,
+and `key = []` explicitly clears an inherited list. A later scalar can replace
+an earlier table and a later table can replace an earlier scalar. Named wrapper
+groups are the one table-level atomic boundary: defining
+`[wrappers.<group>]` in a later scope replaces that whole inherited group.
+
+The `pyproject` scope alone uses the `tool.spice` prefix:
+
+```toml
+[tool.spice.agent]
+model = "gpt-5.5"
+```
+
+The same value in `system`, `repository`, or `worktree` TOML uses its plain
+shape:
+
+```toml
+[agent]
+model = "gpt-5.5"
+```
+
+`spice config show` prints all four parsed layers, their source paths, the
+effective mapping, and the winning source for every key as deterministic JSON.
+`spice config system` prints effective agent values and their provenance from
+the same layered view. Mutable commands default to `--scope worktree`; agent,
+personality, say, and judge settings also accept `system`, `pyproject`, and
+`repository`. `--clear` removes only that command's values from the selected
+scope, revealing the next earlier layer without changing it.
+
+All mutable commands use one structured TOML editor. It preserves unrelated
+tables, comments, ordering, and scalar types, validates the resulting document,
+and atomically replaces the selected file. A system write requires the installed
+`spice.toml` to exist and be writable; the other three scopes are created on
+demand. Invalid or unwritable mutations report `scope=<name> path=<path>` before
+changing bytes.
+
+The configuration migration is complete. Runtime code does not read or import
+`.spice/config/state.json`; an old file is ignored. Move any values that still
+matter into `.spice/config/spice.toml` using the plain tables above, then delete
+the JSON file. There is no compatibility scope name or JSON adapter.
 
 ## Runtime Model
 
@@ -26,8 +73,8 @@ git argv instead of retaining the task boundary indefinitely.
 
 ## Linux Speech with `espeak-ng`
 
-Speech configuration is worktree-local. On Debian or Ubuntu, install the
-`espeak-ng` package and verify the executable before configuring spice:
+Speech configuration is worktree-local by default. On Debian or Ubuntu, install
+the `espeak-ng` package and verify the executable before configuring spice:
 
 ```sh
 sudo apt-get update
@@ -55,7 +102,26 @@ file /tmp/spice-speech-check.wav
 
 ## Maxim Judge Binary
 
-Configure the worktree-local judge with:
+Maxim adjudication is off by default. When a trigger bag matches sampled prose,
+Spice publishes its `[MAXIM]` reminder directly, launching no judge subprocess
+and taking no verdict as assumed — the trade is more false positives for a
+deterministic, portable default that needs no local model. Opt into adjudication
+per worktree with:
+
+```console
+spice config judge --enable
+spice config judge --disable
+```
+
+`--enable` stores `[judge].enabled = true` in `.spice/config/spice.toml`;
+`--disable` restores the judge-free default. Any value other than a true flag
+(`true`, `1`, `yes`, `on`) — including an absent one — resolves to judge-free.
+When adjudication is enabled, each matched bag is sampled against its maxim: a
+`YES` verdict means the sampled text agrees with the maxim and is therefore not
+a violation, so its reminder is suppressed; a `NO` verdict is a violation and
+publishes. The judge is consulted only on this opt-in path.
+
+Configure the judge binary in the default worktree scope with:
 
 ```console
 spice config judge --bin /path/to/judge
@@ -67,7 +133,11 @@ the default is keyed to the platform: macOS uses the Apple Foundation Models
 `afm-cli` binary; every other platform, where `afm-cli` does not exist, uses the
 portable `spice-judge` adapter that ships with Spice. An explicit `bin`
 overrides this default on every platform. For each verdict Spice launches the
-exact argv `[configured_bin]`.
+exact argv `[configured_bin]`. `bin` selects which executable the enabled
+adjudication path launches; it does not by itself enable adjudication. The
+binary participates in the normal four-layer configuration precedence and
+accepts `--scope`; the `enabled` flag is intentionally worktree-local, so
+`--enable` and `--disable` require the default `--scope worktree`.
 
 ### Portable judge with `spice-judge`
 
@@ -124,8 +194,9 @@ distillation likewise skips candidates whose judge call fails.
 | `driver` | `codex` | Project-wide agent driver, currently `codex` or `claude`. `SPICE_AGENT_DRIVER` and worktree config can override it. |
 | `wrappers` | `["common"]` | Ordered wrapper groups loaded into agent shells. Use `[]` to disable configured wrapper functions. |
 
-Agent personality is a worktree-local `spice config personality` setting
-(`pragmatic` by default), not a tracked `[tool.spice.agent]` key.
+Agent personality defaults to the worktree scope through `spice config
+personality`; pass `--scope system`, `--scope pyproject`, or `--scope
+repository` to set it in another layer. The effective default is `pragmatic`.
 
 ### Supervised Claude tool boundary
 
@@ -430,7 +501,7 @@ Maxim bags extend or replace the live prose conscience.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `words` | required for new bags; inherited for built-ins | Alphabetic trigger words or phrases. |
-| `message` | required for new bags; inherited for built-ins | The maxim text sent to the judge and, on violation, back to the agent as steering. |
+| `message` | required for new bags; inherited for built-ins | The maxim text published to the agent as steering on a match; when adjudication is enabled it is sent to the judge first and published only on a violation verdict. |
 | `drivers` | all shipped drivers | Driver allowlist; cite `spice maxim report` evidence before narrowing. |
 
 Bag names are case-folded. Trigger phrases are normalized to lowercase words.
@@ -479,8 +550,9 @@ model = "claude-sonnet-5"
 `spice agent ensure` reads the phase of the worktree's currently claimed task
 and looks it up in this table for the active driver. A phase with no entry
 (or no claimed task) falls back to the ordinary resolution order: an explicit
-`--model`/`--effort` flag, then worktree-local config, then `[tool.spice.agent]`,
-then the driver's shipped default.
+`--model`/`--effort` flag, then the effective `agent` table in `worktree`,
+`repository`, `pyproject`, and `system` precedence order, then the driver's
+shipped default.
 
 ## `[tool.spice.serve]`
 

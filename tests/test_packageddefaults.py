@@ -9,14 +9,14 @@ import zipfile
 from pathlib import Path
 
 from spice import config, defaultinventory, defaults, paths
-from spice.configlayer import PACKAGED_SOURCE, load_packaged_config
+from spice.configlayer import SYSTEM_SOURCE, load_packaged_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_installed_and_layered_loaders_use_the_same_packaged_path(tmp_path):
     packaged = load_packaged_config()
-    layered = config.load_config(tmp_path).layer(PACKAGED_SOURCE)
+    layered = config.load_config(tmp_path).layer(SYSTEM_SOURCE)
 
     assert packaged.path == paths.runtime_spice_source() / "spice.toml"
     assert layered.path == packaged.path

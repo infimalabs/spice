@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import tempfile
 import time
 from contextlib import contextmanager
@@ -19,7 +18,8 @@ from pathlib import Path
 
 from spice import defaults
 from spice.errors import SpiceError
-from spice.locking import lock_fd_exclusive, unlock_fd
+from spice.gitprocess import run_git_command
+from spice.locking import bounded_exclusive_lock
 
 TASK_BACKEND_ENV = "SPICE_TASK_BACKEND"  # env-policy: allow
 # All spice git-dir state lives under the `spice/` namespace, so a repo can host
@@ -36,9 +36,9 @@ PHASE_MODELS_KEY = "phase_models"
 # Durable vocabulary. `task` and `serve` ship with the harness; `agent` is
 # reserved for automatic private task creation. Hidden system stems such as
 # `.oops` are addressable but excluded from normal boards. A repo adds its own
-# public stems, hidden stems, and per-stem default flows through tracked
-# `pyproject.toml` (`[tool.spice.tasks]`), edited by a human — never invented by
-# an agent.
+# public stems, hidden stems, and per-stem default flows through the effective
+# layered ``tasks`` table. These are operator-authored values, never invented
+# by an agent.
 BASE_APPROVED_STEMS = defaults.strings("tasks", "base_stems")
 INTERNAL_STEMS = defaults.strings("tasks", "internal_stems")
 MAXIM_PROPOSAL_HIDDEN_STEM = defaults.string("tasks", "maxim_proposal_hidden_stem")
@@ -128,21 +128,23 @@ def assignable_stems() -> tuple[str, ...]:
 
 
 def _configured_extra_stems() -> tuple[str, ...]:
-    from spice.repocfg import string_list
+    from spice.configlayer import config_string_list
 
     table = _tasks_config_table()
     return tuple(
-        stem for stem in string_list(table.get("stems")) if SEGMENT_RE.match(stem)
+        stem
+        for stem in config_string_list(table.get("stems"))
+        if SEGMENT_RE.match(stem)
     )
 
 
 def _configured_hidden_stems() -> tuple[str, ...]:
-    from spice.repocfg import string_list
+    from spice.configlayer import config_string_list
 
     table = _tasks_config_table()
     configured: list[str] = []
     approved = set(approved_stems())
-    for stem in string_list(table.get("hidden_stems")):
+    for stem in config_string_list(table.get("hidden_stems")):
         if stem.startswith(HIDDEN_PROJECT_PREFIX):
             raise SpiceError(
                 "[tool.spice.tasks].hidden_stems values omit the leading '.'; "
@@ -168,7 +170,7 @@ def per_stem_flows() -> dict[str, tuple[str, ...]]:
 
 
 def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
-    from spice.repocfg import string_list
+    from spice.configlayer import config_string_list
 
     raw_flows = _tasks_config_table().get("flows")
     if not isinstance(raw_flows, dict):
@@ -186,18 +188,18 @@ def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
             raise SpiceError(
                 f"flow stem {stem!r} is not approved (approved: {', '.join(approved)})"
             )
-        flows[stem] = tuple(_validate_flow_phases(string_list(raw_flow)))
+        flows[stem] = tuple(_validate_flow_phases(config_string_list(raw_flow)))
     return flows
 
 
 def _tasks_config_table(repo_root: Path | None = None) -> dict[str, object]:
     from spice.paths import repo_root_from_cwd
-    from spice.repocfg import tasks_table
+    from spice.configlayer import effective_table
 
     root = repo_root or repo_root_from_cwd()
     if root is None:
         return {}
-    return tasks_table(root)
+    return effective_table(root, "tasks")
 
 
 def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str, str]:
@@ -226,19 +228,28 @@ def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str
 
 
 def project_depth_bounds() -> tuple[int, int]:
-    table = _tasks_config_table()
-    min_depth = _configured_project_depth(
-        table, "project_min_depth", DEFAULT_PROJECT_MIN_DEPTH
-    )
-    max_depth = _configured_project_depth(
-        table, "project_max_depth", DEFAULT_PROJECT_MAX_DEPTH
-    )
-    if max_depth < min_depth:
-        raise SpiceError(
-            "[tool.spice.tasks].project_max_depth must be greater than or equal to "
-            "project_min_depth"
+    from spice.configlayer import contextualize_config_error
+    from spice.paths import repo_root_from_cwd
+
+    root = repo_root_from_cwd()
+    try:
+        table = _tasks_config_table(root)
+        min_depth = _configured_project_depth(
+            table, "project_min_depth", DEFAULT_PROJECT_MIN_DEPTH
         )
-    return min_depth, max_depth
+        max_depth = _configured_project_depth(
+            table, "project_max_depth", DEFAULT_PROJECT_MAX_DEPTH
+        )
+        if max_depth < min_depth:
+            raise SpiceError(
+                "[tool.spice.tasks].project_max_depth must be greater than or equal "
+                "to project_min_depth"
+            )
+        return min_depth, max_depth
+    except SpiceError as exc:
+        if root is None:
+            raise
+        raise contextualize_config_error(root, exc, "tasks") from exc
 
 
 def _configured_project_depth(table: dict[str, object], key: str, default: int) -> int:
@@ -318,6 +329,7 @@ _EVIDENCE = [
 ]
 
 _backend_override: str | None = None
+TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS = 30.0
 
 
 def set_backend(selector: str | None) -> None:
@@ -332,7 +344,7 @@ def _selector() -> str:
 
 
 def repo_root() -> Path:
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
         check=False,
@@ -344,7 +356,7 @@ def repo_root() -> Path:
 
 
 def git_common_dir(root: Path) -> Path:
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "-C", str(root), "rev-parse", "--git-common-dir"],
         capture_output=True,
         check=False,
@@ -385,12 +397,12 @@ def bootstrap_lock_path() -> Path:
 @contextmanager
 def _bootstrap_lock():
     backend_root().mkdir(parents=True, exist_ok=True)
-    with bootstrap_lock_path().open("a", encoding="utf-8") as handle:
-        lock_fd_exclusive(handle.fileno(), blocking=True)
-        try:
-            yield
-        finally:
-            unlock_fd(handle.fileno())
+    with bounded_exclusive_lock(
+        bootstrap_lock_path(),
+        timeout_seconds=TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS,
+        action="bootstrap task backend",
+    ):
+        yield
 
 
 def _atomic_write_text(path: Path, text: str) -> None:

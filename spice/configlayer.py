@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -12,10 +13,18 @@ from typing import Any
 from spice import paths
 from spice.errors import SpiceError
 
-PACKAGED_SOURCE = "packaged"
+SYSTEM_SOURCE = "system"
 PYPROJECT_SOURCE = "pyproject"
 REPOSITORY_SOURCE = "repository"
 WORKTREE_SOURCE = "worktree"
+_CONFIG_ERROR_TABLE_RE = re.compile(r"^\[tool\.spice(?:\.([^\]]+))?\]")
+_CONFIG_ERROR_CANDIDATE_RE = re.compile(r"^[ .]([A-Za-z0-9_-]+)")
+CONFIG_SCOPE_NAMES = (
+    SYSTEM_SOURCE,
+    PYPROJECT_SOURCE,
+    REPOSITORY_SOURCE,
+    WORKTREE_SOURCE,
+)
 
 
 @dataclass(frozen=True)
@@ -64,7 +73,7 @@ def load_config(repo_root: Path) -> LayeredConfig:
     parsed: list[dict[str, Any]] = [dict(packaged.values)]
     layers: list[ConfigLayer] = [packaged]
     for name, path, pyproject in specifications:
-        values, present = _read_toml(path)
+        values, present = _read_toml(path, name)
         if pyproject:
             values = _pyproject_spice_table(values)
         parsed.append(values)
@@ -91,27 +100,119 @@ def load_config(repo_root: Path) -> LayeredConfig:
 def load_packaged_config() -> ConfigLayer:
     """Load the required installed default layer from its canonical path."""
     path = paths.runtime_spice_source() / "spice.toml"
-    values, present = _read_toml(path)
+    values, present = _read_toml(path, SYSTEM_SOURCE)
     if not present:
         raise SpiceError(f"packaged configuration is missing: {path}")
     return ConfigLayer(
-        name=PACKAGED_SOURCE,
+        name=SYSTEM_SOURCE,
         path=path,
         values=_freeze_mapping(values),
         present=True,
     )
 
 
-def _read_toml(path: Path) -> tuple[dict[str, Any], bool]:
+def effective_mapping(repo_root: Path | None) -> dict[str, Any]:
+    """Return a mutable consumer view of the canonical effective mapping."""
+    values = (
+        load_config(repo_root).effective
+        if repo_root is not None
+        else load_packaged_config().values
+    )
+    return _thaw_mapping(values)
+
+
+def effective_table(repo_root: Path | None, *path: str) -> dict[str, Any]:
+    """Return one mutable effective table, or an empty table for a non-table."""
+    value: Any = effective_mapping(repo_root)
+    for part in path:
+        if not isinstance(value, Mapping):
+            return {}
+        value = value.get(part)
+    return value if isinstance(value, dict) else {}
+
+
+def layer_table(repo_root: Path, layer_name: str, *path: str) -> dict[str, Any]:
+    """Return one mutable table from a specific named configuration layer."""
+    value: Any = load_config(repo_root).layer(layer_name).values
+    for part in path:
+        if not isinstance(value, Mapping):
+            return {}
+        value = value.get(part)
+    return _thaw_mapping(value) if isinstance(value, Mapping) else {}
+
+
+def effective_commands(repo_root: Path | None) -> dict[str, Any]:
+    """Return effective mounted commands flattened to dotted command names."""
+    flattened: dict[str, Any] = {}
+    _flatten_mapping(effective_table(repo_root, "commands"), flattened)
+    return flattened
+
+
+def config_string_list(raw: Any) -> list[str]:
+    """Normalize one effective TOML list to unique non-empty strings."""
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return []
+    values: list[str] = []
+    for item in raw:
+        value = str(item or "").strip()
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def effective_context(repo_root: Path, *path: str) -> str:
+    """Identify an effective dotted key and its winning source for diagnostics."""
+    dotted = ".".join(path)
+    source = load_config(repo_root).source_for(path)
+    if source is None:
+        return dotted
+    return f"{dotted} (source={source.name} path={source.path})"
+
+
+def contextualize_config_error(
+    repo_root: Path, exc: SpiceError, *fallback_path: str
+) -> SpiceError:
+    """Attach the effective key and winning layer to a consumer validation error."""
+    message = str(exc)
+    if "source=" in message and " path=" in message:
+        return SpiceError(message)
+    path = fallback_path
+    detail = message
+    table_match = _CONFIG_ERROR_TABLE_RE.match(message)
+    if table_match is not None:
+        table = table_match.group(1)
+        parsed = tuple(part for part in (table or "").split(".") if part)
+        remainder = message[table_match.end() :]
+        candidate_match = _CONFIG_ERROR_CANDIDATE_RE.match(remainder)
+        candidate = candidate_match.group(1) if candidate_match is not None else ""
+        candidate_path = (*parsed, candidate) if candidate else ()
+        loaded = load_config(repo_root)
+        if (
+            candidate_match is not None
+            and loaded.source_for(candidate_path) is not None
+        ):
+            path = candidate_path
+            detail = remainder[candidate_match.end() :].lstrip(" .:") or message
+        else:
+            path = parsed or fallback_path
+            detail = remainder.lstrip(" .:") or message
+    return SpiceError(f"{effective_context(repo_root, *path)}: {detail}")
+
+
+def _read_toml(path: Path, source_name: str) -> tuple[dict[str, Any], bool]:
     try:
         with path.open("rb") as handle:
             loaded = tomllib.load(handle)
     except FileNotFoundError:
         return {}, False
     except tomllib.TOMLDecodeError as exc:
-        raise SpiceError(f"invalid TOML in {path}: {exc}") from exc
+        raise SpiceError(
+            f"invalid TOML for configuration source={source_name} path={path}: {exc}"
+        ) from exc
     except OSError as exc:
-        raise SpiceError(f"cannot read configuration {path}: {exc}") from exc
+        raise SpiceError(
+            f"cannot read configuration source={source_name} path={path}: {exc}"
+        ) from exc
     return loaded, True
 
 
@@ -172,3 +273,26 @@ def _freeze(value: Any) -> Any:
     if isinstance(value, list):
         return tuple(_freeze(item) for item in value)
     return value
+
+
+def _thaw_mapping(raw: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): _thaw(value) for key, value in raw.items()}
+
+
+def _thaw(raw: Any) -> Any:
+    if isinstance(raw, Mapping):
+        return _thaw_mapping(raw)
+    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+        return [_thaw(item) for item in raw]
+    return raw
+
+
+def _flatten_mapping(
+    source: Mapping[str, Any], destination: dict[str, Any], *, prefix: str = ""
+) -> None:
+    for key, value in source.items():
+        name = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, Mapping):
+            _flatten_mapping(value, destination, prefix=name)
+        else:
+            destination[name] = value

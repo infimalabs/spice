@@ -1,10 +1,10 @@
-"""Harness configuration from project truth and worktree-local state."""
+"""Layered harness configuration and scoped TOML editing."""
 
 from __future__ import annotations
 
 import json
+import os
 import re
-import subprocess
 import sys
 import tomllib
 from collections.abc import Mapping
@@ -14,20 +14,24 @@ from typing import Any
 from spice import defaults
 from spice.configlayer import ConfigLayer as ConfigLayer
 from spice.configlayer import LayeredConfig as LayeredConfig
+from spice.configlayer import CONFIG_SCOPE_NAMES
 from spice.configlayer import PYPROJECT_SOURCE
+from spice.configlayer import REPOSITORY_SOURCE
+from spice.configlayer import SYSTEM_SOURCE
+from spice.configlayer import WORKTREE_SOURCE
+from spice.configlayer import effective_mapping, effective_table
+from spice.configlayer import layer_table as layer_table
 from spice.configlayer import load_config as load_config
 from spice.errors import SpiceError
+from spice.gitprocess import run_git_command
 from spice.paths import (
     atomic_write_text,
     repo_root_from_cwd,
+    runtime_spice_source,
     state_dir,
 )
-from spice.repocfg import read_tool_table
 
 WORKTREE_CONFIG_RELATIVE_PATH = Path("config") / "spice.toml"
-LEGACY_CONFIG_STATE_RELATIVE_PATH = Path("config") / "state.json"
-LEGACY_CONFIG_SCHEMA = 1
-WORKTREE_CONFIG_SECTIONS = ("say", "judge", "agent")
 
 SAY_KEY = "say"
 SAY_BACKEND_KEY = "backend"
@@ -39,6 +43,13 @@ DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = defaults.string("say", "external_content_typ
 SAY_VOICE_KEY = "voice"
 SAY_WORDS_PER_MINUTE_KEY = "words_per_minute"
 DEFAULT_SAY_WORDS_PER_MINUTE = defaults.integer("say", "words_per_minute")
+SAY_MUTABLE_KEYS = (
+    SAY_BACKEND_KEY,
+    SAY_COMMAND_KEY,
+    SAY_CONTENT_TYPE_KEY,
+    SAY_VOICE_KEY,
+    SAY_WORDS_PER_MINUTE_KEY,
+)
 
 AGENT_KEY = "agent"
 AGENT_PERSONALITY_KEY = "personality"
@@ -51,9 +62,10 @@ AGENT_LAUNCH_KEYS = (AGENT_MODEL_KEY, AGENT_EFFORT_KEY, AGENT_DRIVER_KEY)
 
 JUDGE_KEY = "judge"
 JUDGE_BIN_KEY = "bin"
+JUDGE_ENABLED_KEY = "enabled"
 DEFAULT_JUDGE_BIN = defaults.string("judge", "bin")
 PORTABLE_JUDGE_BIN = defaults.string("judge", "portable_bin")
-PROJECT_AGENT_TABLE = "tool.spice.agent"
+_CONFIG_FLAG_TRUE = frozenset({"true", "1", "yes", "on"})
 _TOML_TABLE_RE = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
 _TOML_ASSIGN_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
 
@@ -63,114 +75,78 @@ def worktree_config_path(repo_root: Path) -> Path:
     return state_dir(repo_root) / WORKTREE_CONFIG_RELATIVE_PATH
 
 
-def _legacy_config_state_path(repo_root: Path) -> Path:
-    return state_dir(repo_root) / LEGACY_CONFIG_STATE_RELATIVE_PATH
+def config_scope_path(repo_root: Path, scope: str) -> Path:
+    """Return the canonical TOML path for one explicit mutable scope."""
+    if scope == SYSTEM_SOURCE:
+        return runtime_spice_source() / "spice.toml"
+    if scope == PYPROJECT_SOURCE:
+        return repo_root / "pyproject.toml"
+    if scope == REPOSITORY_SOURCE:
+        return repo_root / "spice.toml"
+    if scope == WORKTREE_SOURCE:
+        return worktree_config_path(repo_root)
+    raise SpiceError(
+        f"unknown configuration scope {scope!r}; expected "
+        + ", ".join(CONFIG_SCOPE_NAMES)
+    )
 
 
-def read_worktree_config(repo_root: Path) -> dict[str, Any]:
-    """Return the worktree TOML config, migrating legacy JSON state first."""
-    _ensure_worktree_config_migrated(repo_root)
-    return _load_worktree_toml(repo_root)
+def set_scope_section(
+    repo_root: Path, scope: str, key: str, values: Mapping[str, Any]
+) -> Path:
+    """Merge values into one scoped table through the shared TOML mutation seam."""
+    return _mutate_scope_section(repo_root, scope, key, values=dict(values))
 
 
-def _load_worktree_toml(repo_root: Path) -> dict[str, Any]:
-    path = worktree_config_path(repo_root)
+def clear_scope_section(
+    repo_root: Path,
+    scope: str,
+    key: str,
+    *,
+    keys: tuple[str, ...] | None = None,
+) -> Path:
+    """Remove one scoped table or selected values without touching other layers."""
+    return _mutate_scope_section(repo_root, scope, key, clear_keys=keys)
+
+
+def _mutate_scope_section(
+    repo_root: Path,
+    scope: str,
+    key: str,
+    *,
+    values: Mapping[str, Any] | None = None,
+    clear_keys: tuple[str, ...] | None = (),
+) -> Path:
+    path = config_scope_path(repo_root, scope)
+    if scope == SYSTEM_SOURCE and (not path.is_file() or not os.access(path, os.W_OK)):
+        raise SpiceError(f"configuration scope=system path={path} is not writable")
     try:
-        with path.open("rb") as handle:
-            return tomllib.load(handle)
+        lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
-        return {}
-    except tomllib.TOMLDecodeError as exc:
-        raise SpiceError(f"invalid TOML in {path}: {exc}") from exc
-    except OSError as exc:
-        raise SpiceError(f"cannot read configuration {path}: {exc}") from exc
-
-
-def _section(repo_root: Path, key: str) -> dict[str, Any]:
-    value = read_worktree_config(repo_root).get(key)
-    return value if isinstance(value, dict) else {}
-
-
-def set_worktree_section(repo_root: Path, key: str, values: Mapping[str, Any]) -> Path:
-    """Merge `values` into the worktree TOML `[key]` table, preserving the rest.
-
-    Unrelated tables, comments, key ordering, and scalar types outside the
-    touched keys survive the round trip; a structured line edit rewrites only
-    the `[key]` table's assignments.
-    """
-    _ensure_worktree_config_migrated(repo_root)
-    lines = _read_worktree_config_lines(repo_root)
-    _apply_worktree_table(lines, key, dict(values))
-    return _write_worktree_config_lines(repo_root, lines)
-
-
-def clear_worktree_section(repo_root: Path, key: str) -> Path:
-    """Remove the worktree TOML `[key]` table, preserving unrelated content."""
-    _ensure_worktree_config_migrated(repo_root)
-    lines = _read_worktree_config_lines(repo_root)
-    _remove_worktree_table(lines, key)
-    return _write_worktree_config_lines(repo_root, lines)
-
-
-def _ensure_worktree_config_migrated(repo_root: Path) -> None:
-    """Migrate a schema-1 ``state.json`` into the worktree TOML exactly once.
-
-    The TOML write lands durably before the JSON source is deleted, so a failed
-    migration leaves ``state.json`` intact and raises an actionable error; once
-    the JSON file is gone no caller reads it again.
-    """
-    legacy = _legacy_config_state_path(repo_root)
-    if not legacy.exists():
-        return
-    try:
-        raw = json.loads(legacy.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise SpiceError(f"cannot migrate legacy config state {legacy}: {exc}") from exc
-    if not isinstance(raw, Mapping) or raw.get("schema") != LEGACY_CONFIG_SCHEMA:
-        raise SpiceError(
-            f"cannot migrate legacy config state {legacy}: expected schema "
-            f"{LEGACY_CONFIG_SCHEMA}"
-        )
-    sections = {
-        key: dict(value)
-        for key in WORKTREE_CONFIG_SECTIONS
-        if isinstance(value := raw.get(key), Mapping) and value
-    }
-    try:
-        _load_worktree_toml(repo_root)
-        if sections:
-            lines = _read_worktree_config_lines(repo_root)
-            for table, values in sections.items():
-                _apply_worktree_table(lines, table, values)
-            _write_worktree_config_lines(repo_root, lines)
-        legacy.unlink()
-    except SpiceError:
-        raise
+        lines = []
     except OSError as exc:
         raise SpiceError(
-            "cannot migrate legacy config state to "
-            f"{worktree_config_path(repo_root)}: {exc}"
+            f"cannot read configuration scope={scope} path={path}: {exc}"
         ) from exc
-
-
-def _read_worktree_config_lines(repo_root: Path) -> list[str]:
-    path = worktree_config_path(repo_root)
-    try:
-        return path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return []
-    except OSError as exc:
-        raise SpiceError(f"cannot read configuration {path}: {exc}") from exc
-
-
-def _write_worktree_config_lines(repo_root: Path, lines: list[str]) -> Path:
+    table = f"tool.spice.{key}" if scope == PYPROJECT_SOURCE else key
+    if values:
+        _apply_worktree_table(lines, table, values)
+    elif clear_keys is None:
+        _remove_worktree_table(lines, table)
+    else:
+        _remove_table_keys(lines, table, set(clear_keys))
     text = "\n".join(lines) + "\n" if lines else ""
-    path = worktree_config_path(repo_root)
     try:
         tomllib.loads(text)
+        return atomic_write_text(path, text)
     except tomllib.TOMLDecodeError as exc:
-        raise SpiceError(f"invalid TOML in {path}: {exc}") from exc
-    return atomic_write_text(path, text)
+        raise SpiceError(
+            f"invalid TOML for configuration scope={scope} path={path}: {exc}"
+        ) from exc
+    except OSError as exc:
+        raise SpiceError(
+            f"cannot write configuration scope={scope} path={path}: {exc}"
+        ) from exc
 
 
 def _apply_worktree_table(
@@ -208,6 +184,17 @@ def _remove_worktree_table(lines: list[str], table: str) -> None:
         del lines[start:end]
 
 
+def _remove_table_keys(lines: list[str], table: str, keys: set[str]) -> None:
+    start, end = _toml_table_bounds(lines, table)
+    if start is None:
+        return
+    lines[start + 1 : end] = [
+        line
+        for line in lines[start + 1 : end]
+        if _toml_assignment_key(line) not in keys
+    ]
+
+
 def _toml_inline_comment(line: str) -> str:
     """Return a TOML comment outside quoted strings, including its ``#``."""
     basic = False
@@ -236,11 +223,43 @@ def _toml_inline_comment(line: str) -> str:
 
 
 def config_overview(repo_root: Path) -> dict[str, Any]:
+    loaded = load_config(repo_root)
     return {
-        "project": {AGENT_KEY: project_agent_config(repo_root)},
-        "worktree": read_worktree_config(repo_root),
-        "effective": {AGENT_KEY: effective_agent_config(repo_root)},
+        "layers": {
+            layer.name: {
+                "path": str(layer.path),
+                "present": layer.present,
+                "values": _json_value(layer.values),
+            }
+            for layer in loaded.layers
+        },
+        "effective": _json_value(loaded.effective),
+        "provenance": {
+            ".".join(path): {"scope": layer.name, "path": str(layer.path)}
+            for path, layer in sorted(loaded.sources.items())
+        },
     }
+
+
+def agent_config_overview(repo_root: Path) -> dict[str, Any]:
+    overview = config_overview(repo_root)
+    provenance = overview["provenance"]
+    return {
+        "effective": effective_agent_config(repo_root),
+        "provenance": {
+            key: value
+            for key, value in provenance.items()
+            if key.startswith(f"{AGENT_KEY}.")
+        },
+    }
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_json_value(item) for item in value]
+    return value
 
 
 def default_classifications() -> dict[str, str]:
@@ -253,13 +272,12 @@ def _root_or_current(repo_root: Path | None) -> Path | None:
 
 
 def _effective_section(root: Path | None, key: str) -> dict[str, Any]:
-    raw = read_tool_table(root).get(key)
+    raw = effective_mapping(root).get(key)
     return raw if isinstance(raw, dict) else {}
 
 
 def _configured_value(root: Path | None, section: str, key: str) -> Any:
-    local = _section(root, section).get(key) if root is not None else None
-    return local if local is not None else _effective_section(root, section).get(key)
+    return _effective_section(root, section).get(key)
 
 
 def configured_say_voice(repo_root: Path | None = None) -> str | None:
@@ -304,15 +322,11 @@ def configured_agent_personality(repo_root: Path | None = None) -> str:
 
 
 def configured_agent_model(repo_root: Path | None = None) -> str:
-    """Agent launch model override: worktree first, then tracked project."""
+    """Agent launch model from the canonical layered configuration."""
     root = _root_or_current(repo_root)
     if root is None:
         return ""
-    return (
-        _agent_worktree_value(root, AGENT_MODEL_KEY)
-        or _agent_project_value(root, AGENT_MODEL_KEY)
-        or ""
-    )
+    return _agent_effective_value(root, AGENT_MODEL_KEY)
 
 
 def configured_agent_effort(repo_root: Path | None = None) -> str:
@@ -320,11 +334,7 @@ def configured_agent_effort(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
     if root is None:
         return ""
-    return (
-        _agent_worktree_value(root, AGENT_EFFORT_KEY)
-        or _agent_project_value(root, AGENT_EFFORT_KEY)
-        or ""
-    )
+    return _agent_effective_value(root, AGENT_EFFORT_KEY)
 
 
 def configured_agent_driver(repo_root: Path | None = None) -> str:
@@ -337,27 +347,7 @@ def configured_agent_driver(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
     if root is None:
         return ""
-    return (
-        _agent_worktree_value(root, AGENT_DRIVER_KEY)
-        or _agent_project_value(root, AGENT_DRIVER_KEY)
-        or ""
-    )
-
-
-def worktree_agent_config(repo_root: Path) -> dict[str, str]:
-    return {
-        key: value
-        for key in AGENT_LAUNCH_KEYS
-        if (value := _agent_worktree_value(repo_root, key))
-    }
-
-
-def project_agent_config(repo_root: Path) -> dict[str, str]:
-    return {
-        key: value
-        for key in AGENT_LAUNCH_KEYS
-        if (value := _agent_project_value(repo_root, key))
-    }
+    return _agent_effective_value(root, AGENT_DRIVER_KEY)
 
 
 def effective_agent_config(repo_root: Path) -> dict[str, str]:
@@ -373,70 +363,8 @@ def effective_agent_config(repo_root: Path) -> dict[str, str]:
     }
 
 
-def _agent_worktree_value(repo_root: Path, key: str) -> str:
-    return str(_section(repo_root, AGENT_KEY).get(key) or "").strip()
-
-
-def _agent_project_value(repo_root: Path, key: str) -> str:
-    raw = load_config(repo_root).layer(PYPROJECT_SOURCE).values.get(AGENT_KEY)
-    table = raw if isinstance(raw, Mapping) else {}
-    return str(table.get(key) or "").strip()
-
-
-def update_project_agent_config(repo_root: Path, values: Mapping[str, str]) -> Path:
-    project_values = {
-        key: value.strip()
-        for key, value in values.items()
-        if key in AGENT_LAUNCH_KEYS and value.strip()
-    }
-    if not project_values:
-        return repo_root / "pyproject.toml"
-    return _rewrite_project_agent_table(repo_root, project_values, clear=False)
-
-
-def clear_project_agent_config(repo_root: Path) -> Path:
-    return _rewrite_project_agent_table(
-        repo_root,
-        dict.fromkeys(AGENT_LAUNCH_KEYS, ""),
-        clear=True,
-    )
-
-
-def _rewrite_project_agent_table(
-    repo_root: Path, values: Mapping[str, str], *, clear: bool
-) -> Path:
-    pyproject = repo_root / "pyproject.toml"
-    try:
-        original = pyproject.read_text(encoding="utf-8")
-    except OSError:
-        original = ""
-    lines = original.splitlines()
-    start, end = _toml_table_bounds(lines, PROJECT_AGENT_TABLE)
-    if start is None:
-        if clear:
-            return pyproject
-        if lines and lines[-1].strip():
-            lines.append("")
-        lines.append(f"[{PROJECT_AGENT_TABLE}]")
-        lines.extend(_toml_assignments(values).values())
-        return atomic_write_text(pyproject, "\n".join(lines) + "\n")
-
-    rewritten: list[str] = []
-    seen: set[str] = set()
-    for line in lines[start + 1 : end]:
-        key = _toml_assignment_key(line)
-        if key is not None and key in values:
-            seen.add(key)
-            if not clear:
-                rewritten.append(_toml_assignment(key, values[key]))
-            continue
-        rewritten.append(line)
-    if not clear:
-        for key, line in _toml_assignments(values).items():
-            if key not in seen:
-                rewritten.append(line)
-    lines[start + 1 : end] = rewritten
-    return atomic_write_text(pyproject, "\n".join(lines) + "\n")
+def _agent_effective_value(repo_root: Path, key: str) -> str:
+    return str(effective_table(repo_root, "agent").get(key) or "").strip()
 
 
 def _toml_table_bounds(lines: list[str], table: str) -> tuple[int | None, int | None]:
@@ -459,10 +387,6 @@ def _toml_table_name(line: str) -> str | None:
 def _toml_assignment_key(line: str) -> str | None:
     match = _TOML_ASSIGN_RE.match(line)
     return match.group(1) if match else None
-
-
-def _toml_assignments(values: Mapping[str, str]) -> dict[str, str]:
-    return {key: _toml_assignment(key, value) for key, value in values.items()}
 
 
 def _toml_assignment(key: str, value: Any) -> str:
@@ -498,6 +422,27 @@ def configured_judge_bin(repo_root: Path | None = None) -> str:
     return raw or default_judge_bin()
 
 
+def maxim_adjudication_enabled(repo_root: Path | None = None) -> bool:
+    """Return whether the opt-in maxim judge adjudicates trigger hits.
+
+    Judge-free is the deterministic default: a matched trigger bag publishes
+    its ``[MAXIM]`` reminder directly, with no judge subprocess. An
+    installation opts into local YES/NO adjudication by setting
+    ``[judge] enabled = true`` in its worktree-local config; any other value
+    (including an absent one) resolves to the judge-free default.
+    """
+    root = _root_or_current(repo_root)
+    if root is None:
+        return False
+    return _config_flag(_section(root, JUDGE_KEY).get(JUDGE_ENABLED_KEY))
+
+
+def _config_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().casefold() in _CONFIG_FLAG_TRUE
+
+
 def say_command_args(
     repo_root: Path | None = None, *, rate_multiplier: float = 1.0
 ) -> list[str]:
@@ -519,15 +464,12 @@ def say_command_args(
 
 
 def git_worktree_config_get(repo_root: Path, key: str) -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo_root), "config", "--worktree", "--get", key],
-            capture_output=True,
-            check=False,
-            text=True,
-        )
-    except OSError:
-        return None
+    result = run_git_command(
+        ["git", "-C", str(repo_root), "config", "--worktree", "--get", key],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
@@ -535,9 +477,8 @@ def git_worktree_config_get(repo_root: Path, key: str) -> str | None:
 
 def git_worktree_config_set(repo_root: Path, key: str, value: str) -> None:
     """Set a real Git worktree config value (settings Git itself owns)."""
-    subprocess.run(
+    run_git_command(
         ["git", "-C", str(repo_root), "config", "--worktree", key, value],
         check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        capture_output=True,
     )

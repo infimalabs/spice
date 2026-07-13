@@ -57,7 +57,7 @@ from spice.config import (
     configured_agent_personality,
 )
 from spice.errors import SpiceError
-from spice.locking import lock_fd_exclusive, unlock_fd
+from spice.locking import bounded_exclusive_lock
 from spice.procs import (
     popen_new_process_group_kwargs,
     process_group_is_running,
@@ -248,8 +248,8 @@ def ensure_agent(
         service_tier = driver.default_service_tier if fast_mode else ""
         phase_launch = _claimed_task_phase_launch(resolved_root, driver.name, status)
         # Resolution order: explicit argument > the claimed task's phase
-        # mapping for this driver > worktree-local config > tracked project
-        # config > the driver's shipped default.
+        # mapping for this driver > the effective four-layer configuration >
+        # the driver's shipped default.
         phase_model = phase_launch.get("model", "")
         model = driver.resolve_model(
             model or phase_model or configured_agent_model(resolved_root)
@@ -512,6 +512,7 @@ CLAIM_RENEWAL_QUIET_REASONS = frozenset({"no_active_claim"})
 # not stall progress, so each carries this budget and reports the safe "no signal"
 # answer on expiry (tree treated as clean; path treated as untracked).
 GIT_PROBE_TIMEOUT_SECONDS = 10.0
+AGENT_ENSURE_LOCK_TIMEOUT_SECONDS = 10.0
 
 
 def _worktree_dirty(repo_root: Path) -> bool:
@@ -523,7 +524,7 @@ def _worktree_dirty(repo_root: Path) -> bool:
             check=False,
             timeout=GIT_PROBE_TIMEOUT_SECONDS,
         )
-    except subprocess.TimeoutExpired:
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0 and result.stdout.strip() != ""
 
@@ -829,14 +830,12 @@ def parse_agent_session_id(text: str, repo_root: Path) -> str:
 @contextmanager
 def agent_ensure_lock(repo_root: Path) -> Iterator[None]:
     lock_path = agent_worktree_state_dir(repo_root) / AGENT_LOCK_FILE
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    handle = lock_path.open("a+")
-    try:
-        lock_fd_exclusive(handle.fileno(), blocking=True)
+    with bounded_exclusive_lock(
+        lock_path,
+        timeout_seconds=AGENT_ENSURE_LOCK_TIMEOUT_SECONDS,
+        action="ensure agent lifecycle",
+    ):
         yield
-    finally:
-        unlock_fd(handle.fileno())
-        handle.close()
 
 
 def skill_invocation_prompt(repo_root: Path, skill_path: Path) -> str:

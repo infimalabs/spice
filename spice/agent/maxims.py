@@ -30,7 +30,11 @@ from spice.flexstate import load_sticky_items, save_sticky_items
 from spice.mail.ackstate import AckStateRecord, ack_state_records
 from spice.mail.inbox import parse_inbox_payload
 from spice.paths import repo_root_from_cwd
-from spice.repocfg import maxims_table, string_list
+from spice.configlayer import (
+    config_string_list,
+    contextualize_config_error,
+    effective_table,
+)
 
 DEFAULT_MAX_ATTEMPTS = defaults.integer("maxim", "max_attempts")
 PARALLEL_MAXIM_JUDGES = defaults.integer("maxim", "parallel_judges")
@@ -675,8 +679,17 @@ def set_maxim_bag_disabled(
 
 
 def _configured_maxim_bags(root: Path | None) -> dict[str, MaximBag]:
+    try:
+        return _load_configured_maxim_bags(root)
+    except SpiceError as exc:
+        if root is None:
+            raise
+        raise contextualize_config_error(root, exc, "maxims") from exc
+
+
+def _load_configured_maxim_bags(root: Path | None) -> dict[str, MaximBag]:
     bags: dict[str, MaximBag] = {}
-    for raw_name, raw_config in maxims_table(root).items():
+    for raw_name, raw_config in effective_table(root, "maxims").items():
         name = _normalize_bag_name(raw_name)
         if not isinstance(raw_config, dict):
             raise SpiceError(f"[tool.spice.maxims.{name}] must be a table")
@@ -753,7 +766,7 @@ def _configured_words(
             raise SpiceError(f"[tool.spice.maxims.{name}] requires words")
         return base.words
     words = []
-    for word in string_list(raw_config.get("words")):
+    for word in config_string_list(raw_config.get("words")):
         normalized = _normalize_trigger_key(word)
         if not _MAXIM_KEY_RE.fullmatch(normalized):
             raise SpiceError(
@@ -795,7 +808,7 @@ def _configured_drivers(raw_config: Mapping[str, Any], name: str) -> frozenset[s
         return _known_driver_names()
     known = _known_driver_names()
     configured: list[str] = []
-    for raw_driver in string_list(raw_config.get("drivers")):
+    for raw_driver in config_string_list(raw_config.get("drivers")):
         driver = raw_driver.casefold()
         if driver not in known:
             expected = ", ".join(sorted(known))

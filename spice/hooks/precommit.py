@@ -41,9 +41,11 @@ from spice.cli.mounts import (
 from spice.errors import SpiceError
 from spice.flexstate import FlexSliceClaim
 from spice.paths import find_tool
+from spice.gitprocess import run_git_command
+from spice.toolprocess import run_tool_command
 from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
 from spice.policyconfig import resolve_policy
-from spice.repocfg import policy_table
+from spice.configlayer import contextualize_config_error, effective_table
 from spice.studies import (
     complexity,
     envpolicy,
@@ -137,6 +139,15 @@ def _run_step(
 
 def pre_commit_steps(repo_root: Path, paths: list[Path]) -> list[PreCommitStep]:
     """The ordered pre-commit gate after tracked repo policy is applied."""
+    try:
+        return _pre_commit_steps(repo_root, paths)
+    except SpiceError as exc:
+        raise contextualize_config_error(
+            repo_root, exc, "policy", "pre_commit"
+        ) from exc
+
+
+def _pre_commit_steps(repo_root: Path, paths: list[Path]) -> list[PreCommitStep]:
     steps = _configured_builtin_steps(
         repo_root, _builtin_pre_commit_steps(repo_root, paths)
     )
@@ -263,7 +274,7 @@ def _run_plan_phase_mutation_guard(repo_root: Path) -> None:
 def _configured_builtin_steps(
     repo_root: Path, builtin_steps: list[PreCommitStep]
 ) -> list[PreCommitStep]:
-    policy = policy_table(repo_root)
+    policy = effective_table(repo_root, "policy")
     raw_overrides = policy.get("pre_commit_builtins")
     if raw_overrides is None:
         return builtin_steps
@@ -343,7 +354,7 @@ def _configured_command_steps(
     config_key: str,
     key_prefix: str,
 ) -> list[PreCommitStep]:
-    raw_steps = policy_table(repo_root).get(config_key)
+    raw_steps = effective_table(repo_root, "policy").get(config_key)
     if raw_steps is None:
         return []
     if not isinstance(raw_steps, list):
@@ -471,9 +482,10 @@ def _run_policy_command_step(command: CommandStep) -> None:
         # carries the same mount environment `spice <name>` exports.
         env[MOUNTED_COMMAND_ENV] = "1"
         env[VISIBLE_PROG_ENV] = command.visible_prog
-    result = subprocess.run(
+    result = run_tool_command(
         list(command.argv),
-        capture_output=True,
+        policy="extension",
+        operation=command.label,
         env=env,
         text=True,
         cwd=command.repo_root,
@@ -495,7 +507,7 @@ def _run_policy_command_step(command: CommandStep) -> None:
 def _restage_command_paths(command: CommandStep) -> None:
     if not command.staged_paths:
         return
-    subprocess.run(
+    run_git_command(
         ["git", "add", "--", *(path.as_posix() for path in command.staged_paths)],
         capture_output=True,
         cwd=command.repo_root,
@@ -593,26 +605,29 @@ def _run_python_format_guard(repo_root: Path, paths: list[Path]) -> None:
     targets = [str(path) for path in python_paths if (repo_root / path).exists()]
     if not targets:
         return
-    subprocess.run(
+    run_tool_command(
         [ruff, "format", *targets],
-        capture_output=True,
+        policy="hook",
+        operation="format staged Python",
         text=True,
         cwd=repo_root,
         check=True,
     )
-    subprocess.run(
+    run_tool_command(
         [ruff, "check", "--fix", *targets],
-        capture_output=True,
+        policy="hook",
+        operation="fix staged Python lint",
         text=True,
         cwd=repo_root,
         check=False,
     )
-    subprocess.run(
+    run_git_command(
         ["git", "add", "--", *targets], capture_output=True, cwd=repo_root, check=True
     )
-    lint = subprocess.run(
+    lint = run_tool_command(
         [ruff, "check", *targets],
-        capture_output=True,
+        policy="hook",
+        operation="check staged Python lint",
         text=True,
         cwd=repo_root,
         check=False,

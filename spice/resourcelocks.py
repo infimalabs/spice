@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,7 +16,8 @@ from spice import defaults
 from spice.errors import SpiceError
 from spice.locking import FileLockUnavailable, lock_fd_exclusive, unlock_fd
 from spice.paths import require_repo_root
-from spice.repocfg import locks_table
+from spice.toolprocess import run_parent_lifetime_command
+from spice.configlayer import effective_context, effective_table
 
 DEFAULT_LOCK_CONTENTION_EXIT_CODE = defaults.integer(
     "locks", "lock_contention_exit_code"
@@ -138,22 +138,22 @@ def handle_lock(args: argparse.Namespace) -> int:
 
 
 def configured_lock_settings(repo_root: Path) -> LockSettings:
-    table = locks_table(repo_root)
+    table = effective_table(repo_root, "locks")
     defaults = LockExitCodes(
         lock_contention=_exit_code(
             table.get("lock_contention_exit_code"),
             DEFAULT_LOCK_CONTENTION_EXIT_CODE,
-            "[tool.spice.locks].lock_contention_exit_code",
+            effective_context(repo_root, "locks", "lock_contention_exit_code"),
         ),
         chosen_shard_contention=_exit_code(
             table.get("chosen_shard_contention_exit_code"),
             DEFAULT_CHOSEN_SHARD_CONTENTION_EXIT_CODE,
-            "[tool.spice.locks].chosen_shard_contention_exit_code",
+            effective_context(repo_root, "locks", "chosen_shard_contention_exit_code"),
         ),
         pool_exhaustion=_exit_code(
             table.get("pool_exhaustion_exit_code"),
             DEFAULT_POOL_EXHAUSTION_EXIT_CODE,
-            "[tool.spice.locks].pool_exhaustion_exit_code",
+            effective_context(repo_root, "locks", "pool_exhaustion_exit_code"),
         ),
     )
     return LockSettings(
@@ -498,7 +498,7 @@ def _child_argv(raw: list[str]) -> list[str]:
 
 def _run_child(child: list[str]) -> int:
     try:
-        result = subprocess.run(child, check=False)
+        result = run_parent_lifetime_command(child, check=False)
     except FileNotFoundError as exc:
         raise SpiceError(f"child command not found: {child[0]}") from exc
     except OSError as exc:

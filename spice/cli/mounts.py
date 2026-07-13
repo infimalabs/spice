@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import shlex
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,7 +16,8 @@ from spice.cli.parser import (
 )
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
-from spice.repocfg import commands_table
+from spice.toolprocess import run_parent_lifetime_command
+from spice.configlayer import contextualize_config_error, effective_commands
 
 MOUNT_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 MOUNTED_COMMAND_ENV = "SPICE_MOUNTED_COMMAND"  # env-policy: allow
@@ -41,9 +41,16 @@ class MountedCommand:
 
 def mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]:
     """The validated mount table; any malformed entry fails the whole read."""
+    try:
+        return _mounted_commands(repo_root)
+    except SpiceError as exc:
+        raise contextualize_config_error(repo_root, exc, "commands") from exc
+
+
+def _mounted_commands(repo_root: Path) -> dict[tuple[str, ...], tuple[str, ...]]:
     mounts: dict[tuple[str, ...], tuple[str, ...]] = {}
     command_paths = command_path_registry()
-    for raw_name, raw_argv in commands_table(repo_root).items():
+    for raw_name, raw_argv in effective_commands(repo_root).items():
         path = mount_command_path(str(raw_name))
         if len(path) == 1 and path[0] in BUILTIN_COMMANDS:
             raise SpiceError(
@@ -122,7 +129,7 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
     env = dict(os.environ)  # env-policy: allow
     env[MOUNTED_COMMAND_ENV] = "1"
     env[VISIBLE_PROG_ENV] = mount.visible_prog
-    result = subprocess.run(
+    result = run_parent_lifetime_command(
         [*mount.argv, *args], cwd=mount.repo_root, env=env, check=False
     )
     return result.returncode

@@ -681,7 +681,7 @@ def test_serve_web_typecheck_invokes_typescript_checkjs(tmp_path, monkeypatch):
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(typecheck.subprocess, "run", fake_run)
+    monkeypatch.setattr(typecheck, "run_tool_command", fake_run)
 
     typecheck.run_serve_web_typecheck(tmp_path)
 

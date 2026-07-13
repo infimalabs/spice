@@ -20,8 +20,10 @@ from spice.config import (
     configured_say_backend,
     configured_say_command,
     git_worktree_config_get,
+    maxim_adjudication_enabled,
 )
 from spice.errors import SpiceError
+from spice.gitprocess import run_git_command
 from spice.hooks.install import HOOK_ARGS, hook_shim_content, hooks_dir
 from spice.paths import (
     find_tool,
@@ -30,6 +32,7 @@ from spice.paths import (
     state_dir,
 )
 from spice.policyconfig import resolve_policy
+from spice.toolprocess import run_tool_command
 from spice.studies import complexity, envpolicy, fileloc, magicnums, repodocs, shape
 from spice.studies.walk import staged_paths as staged_gate_paths
 from spice.studies.walk import tracked_paths
@@ -124,11 +127,17 @@ def _binary_checks(repo_root: Path) -> list[DoctorCheck]:
         else "optional; this repo has no serve web checkJs sources"
     )
     tts_binary, tts_note = _tts_binary_check_config(repo_root)
+    judge_opted_in = maxim_adjudication_enabled(repo_root)
+    judge_note = (
+        "maxim adjudication opted in ([judge] enabled)"
+        if judge_opted_in
+        else "optional; maxims publish judge-free by default"
+    )
     for label, binary, required, note in (
         ("tool.git", "git", True, "required for repository checks"),
         ("tool.agent-driver", DRIVER.binary(), True, f"driver={DRIVER.name}"),
         ("tool.taskwarrior", "task", True, "required for the task control plane"),
-        ("tool.judge", configured_judge_bin(repo_root), True, "maxim judging"),
+        ("tool.judge", configured_judge_bin(repo_root), judge_opted_in, judge_note),
         ("tool.tts", tts_binary, False, tts_note),
         ("tool.ruff", "ruff", True, "pre-commit formatter/linter"),
         ("tool.lizard", "lizard", True, "complexity scan backend"),
@@ -283,7 +292,7 @@ def _installed_spice_runtime() -> InstalledSpiceRuntime | None:
 
 
 def _spice_package_source_for_python(python: Path) -> Path | None:
-    result = subprocess.run(
+    result = run_tool_command(
         [
             str(python),
             "-c",
@@ -293,7 +302,8 @@ def _spice_package_source_for_python(python: Path) -> Path | None:
                 "print(Path(entry.__file__).resolve().parents[1])"
             ),
         ],
-        capture_output=True,
+        policy="extension",
+        operation="inspect installed spice runtime",
         check=False,
         cwd=Path("/"),
         text=True,
@@ -457,7 +467,7 @@ def _shadowed_configured_hooks(repo_root: Path, expected: str) -> list[str]:
 
 def _git_local_config_values(repo_root: Path, key: str) -> list[str]:
     try:
-        result = subprocess.run(
+        result = run_git_command(
             ["git", "-C", str(repo_root), "config", "--local", "--get-all", key],
             capture_output=True,
             check=False,
@@ -735,7 +745,7 @@ def _fail(name: str, detail: str, command: str) -> DoctorCheck:
 
 
 def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return run_git_command(
         ["git", "-C", str(repo_root), *args],
         capture_output=True,
         check=False,

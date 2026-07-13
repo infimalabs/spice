@@ -3,7 +3,64 @@
 from pathlib import Path
 from types import MappingProxyType
 
+import pytest
+
 from spice import config, configlayer
+from spice.errors import SpiceError
+
+
+@pytest.mark.parametrize("scope", configlayer.CONFIG_SCOPE_NAMES)
+def test_each_configuration_layer_can_win_independently(tmp_path, monkeypatch, scope):
+    system_root = tmp_path / "runtime"
+    system_root.mkdir()
+    monkeypatch.setattr(configlayer.paths, "runtime_spice_source", lambda: system_root)
+    _write(
+        system_root / "spice.toml",
+        f'[agent]\nmodel = "{"system-only" if scope == "system" else "system-base"}"\n',
+    )
+    expected_model = "system-only"
+    if scope == configlayer.PYPROJECT_SOURCE:
+        expected_model = "pyproject-only"
+        _write(
+            tmp_path / "pyproject.toml",
+            f'[tool.spice.agent]\nmodel = "{expected_model}"\n',
+        )
+    elif scope == configlayer.REPOSITORY_SOURCE:
+        expected_model = "repository-only"
+        _write(tmp_path / "spice.toml", f'agent.model = "{expected_model}"\n')
+    elif scope == configlayer.WORKTREE_SOURCE:
+        expected_model = "worktree-only"
+        _write(
+            tmp_path / ".spice" / "config" / "spice.toml",
+            f'agent.model = "{expected_model}"\n',
+        )
+
+    loaded = configlayer.load_config(tmp_path)
+
+    assert loaded.effective["agent"]["model"] == expected_model
+    assert loaded.source_for("agent.model") == loaded.layer(scope)
+
+
+@pytest.mark.parametrize("scope", configlayer.CONFIG_SCOPE_NAMES)
+def test_parse_error_names_the_exact_layer_and_path(tmp_path, monkeypatch, scope):
+    system_root = tmp_path / "runtime"
+    system_root.mkdir()
+    monkeypatch.setattr(configlayer.paths, "runtime_spice_source", lambda: system_root)
+    paths = {
+        configlayer.SYSTEM_SOURCE: system_root / "spice.toml",
+        configlayer.PYPROJECT_SOURCE: tmp_path / "pyproject.toml",
+        configlayer.REPOSITORY_SOURCE: tmp_path / "spice.toml",
+        configlayer.WORKTREE_SOURCE: tmp_path / ".spice" / "config" / "spice.toml",
+    }
+    _write(system_root / "spice.toml", '[agent]\nmodel = "system"\n')
+    _write(paths[scope], "broken = [\n")
+
+    outcome = _load_outcome(tmp_path)
+
+    assert outcome["state"] == "rejected"
+    assert outcome["message"].startswith(
+        f"invalid TOML for configuration source={scope} path={paths[scope]}:"
+    )
 
 
 def test_loader_exposes_four_immutable_layers_and_leaf_provenance(
@@ -42,7 +99,7 @@ def test_loader_exposes_four_immutable_layers_and_leaf_provenance(
     loaded = config.load_config(tmp_path)
 
     assert tuple(layer.name for layer in loaded.layers) == (
-        configlayer.PACKAGED_SOURCE,
+        configlayer.SYSTEM_SOURCE,
         configlayer.PYPROJECT_SOURCE,
         configlayer.REPOSITORY_SOURCE,
         configlayer.WORKTREE_SOURCE,
@@ -57,7 +114,7 @@ def test_loader_exposes_four_immutable_layers_and_leaf_provenance(
     }
     assert loaded.layer(configlayer.WORKTREE_SOURCE).values == {}
     assert loaded.layer(configlayer.WORKTREE_SOURCE).present is False
-    assert loaded.source_for("agent.model") == loaded.layer(configlayer.PACKAGED_SOURCE)
+    assert loaded.source_for("agent.model") == loaded.layer(configlayer.SYSTEM_SOURCE)
     assert loaded.source_for(("agent", "wrappers")) == loaded.layer(
         configlayer.REPOSITORY_SOURCE
     )
@@ -142,6 +199,57 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
     assert loaded.source_for("policy.mode") == loaded.layer(configlayer.WORKTREE_SOURCE)
 
 
+def test_contextualization_preserves_table_grammar_and_repository_source(tmp_path):
+    _write(tmp_path / "spice.toml", 'serve = "invalid"\n')
+
+    contextual = configlayer.contextualize_config_error(
+        tmp_path,
+        SpiceError("[tool.spice.serve] must be a table"),
+        "serve",
+    )
+
+    assert str(contextual) == (
+        f"serve (source=repository path={tmp_path / 'spice.toml'}): must be a table"
+    )
+
+
+def test_contextualization_identifies_leaf_key_and_worktree_source(tmp_path):
+    worktree = tmp_path / ".spice" / "config" / "spice.toml"
+    _write(worktree, '[serve]\nbrand = ""\n')
+
+    contextual = configlayer.contextualize_config_error(
+        tmp_path,
+        SpiceError("[tool.spice.serve] brand must be a non-empty string"),
+        "serve",
+        "brand",
+    )
+
+    assert str(contextual) == (
+        f"serve.brand (source=worktree path={worktree}): must be a non-empty string"
+    )
+
+
+def test_already_contextualized_error_keeps_detail_with_distinct_cause(tmp_path):
+    original = SpiceError(
+        f"serve (source=repository path={tmp_path / 'spice.toml'}): must be a table"
+    )
+    contextual = configlayer.contextualize_config_error(tmp_path, original, "serve")
+    try:
+        raise contextual from original
+    except SpiceError as raised:
+        outcome = (str(raised), raised.__cause__)
+
+    assert outcome == (str(original), original)
+
+
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _load_outcome(repo_root: Path) -> dict[str, str]:
+    try:
+        configlayer.load_config(repo_root)
+    except SpiceError as exc:
+        return {"state": "rejected", "message": str(exc)}
+    return {"state": "accepted", "message": "configuration loaded"}

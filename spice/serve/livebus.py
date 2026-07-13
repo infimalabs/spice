@@ -82,6 +82,8 @@ if _HAVE_KQUEUE:
 # filesystem poll.
 LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S = 1.0
 LIVE_BUS_WATCHER_JOIN_TIMEOUT_S = LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S + 0.5
+LIVE_BUS_WATCHER_ACTIVATION_TIMEOUT_S = 5.0
+LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S = 15.0
 
 # A connected client sends `bus.ping` heartbeats well inside this window; a
 # whole interval with no frame means the peer is gone and the blocking read
@@ -304,6 +306,15 @@ class LiveBusSession:
         *,
         before_send: Callable[[float], None] | None = None,
     ) -> FrameSendTiming:
+        # Encode the frame to bytes before taking send_lock so the lock's
+        # critical section -- and the lock-hold/write timing below -- covers only
+        # the socket write. A watcher thread encoding a bulk lane payload no
+        # longer holds the lock through that encode, so a small lane.sendResult
+        # ack acquires it and writes as soon as any in-flight write returns
+        # rather than queuing behind the encode. byte_count is the JSON payload
+        # length (matching the wire text), also computed outside the lock.
+        frame = self.connection.encode_text_frame(payload)
+        byte_count = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
         wait_started_at = time.perf_counter()
         self.send_lock.acquire()
         acquired_at = time.perf_counter()
@@ -312,7 +323,7 @@ class LiveBusSession:
             if before_send is not None:
                 before_send(lock_wait_ms)
             write_started_at = time.perf_counter()
-            byte_count = self.connection.send_json(payload)
+            self.connection.send_frame(frame)
             finished_at = time.perf_counter()
             timing = FrameSendTiming(
                 lock_wait_ms=lock_wait_ms,
@@ -320,10 +331,6 @@ class LiveBusSession:
                 write_ms=_elapsed_ms(write_started_at, finished_at),
                 finished_at=finished_at,
             )
-            if not isinstance(byte_count, int):
-                byte_count = len(
-                    json.dumps(payload, separators=(",", ":")).encode("utf-8")
-                )
             kind = str(payload.get("type") or "unknown")
             with self._telemetry_lock:
                 self._frame_telemetry.setdefault(kind, _FrameTelemetry()).record(
@@ -509,7 +516,15 @@ class LiveBusSession:
         """
         try:
             for subscription in subscriptions:
-                subscription.watcher_activated.wait()
+                if not subscription.watcher_activated.wait(
+                    timeout=LIVE_BUS_WATCHER_ACTIVATION_TIMEOUT_S
+                ):
+                    subscription.stop.set()
+                    raise TimeoutError(
+                        "lane watcher activation deadline exceeded "
+                        f"target={subscription.target.id} "
+                        f"budget={LIVE_BUS_WATCHER_ACTIVATION_TIMEOUT_S:g}s"
+                    )
             futures: list[tuple[_LaneSubscription, Future[dict[str, Any]]]] = [
                 (
                     subscription,
@@ -522,7 +537,7 @@ class LiveBusSession:
             lanes = [
                 {
                     "targetId": subscription.target.id,
-                    "payload": future.result(),
+                    "payload": self._initial_payload_result(subscription, future),
                     "subscriptionGeneration": subscription.generation,
                     "watcherActive": subscription.watcher_error is None,
                     "watcherError": subscription.watcher_error or "",
@@ -539,6 +554,20 @@ class LiveBusSession:
         finally:
             for subscription in subscriptions:
                 subscription.initial_payload_sent.set()
+
+    def _initial_payload_result(
+        self,
+        subscription: _LaneSubscription,
+        future: Future[dict[str, Any]],
+    ) -> dict[str, Any]:
+        try:
+            return future.result(timeout=LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S)
+        except TimeoutError as exc:
+            raise TimeoutError(
+                "lane initial payload deadline exceeded "
+                f"target={subscription.target.id} "
+                f"budget={LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S:g}s"
+            ) from exc
 
     def _replace_subscription(
         self, target: Any, query: dict[str, Any]
@@ -882,7 +911,14 @@ class LiveBusSession:
                 continue
             change_detected_perf = time.perf_counter()
             change_detected_wall = time.time()
-            subscription.initial_payload_sent.wait()
+            if not subscription.initial_payload_sent.wait(
+                timeout=LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S
+            ):
+                raise TimeoutError(
+                    "lane initial payload deadline exceeded "
+                    f"target={target.id} "
+                    f"budget={LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S:g}s"
+                )
             if subscription.stop.is_set():
                 return
             signature_started_perf = time.perf_counter()

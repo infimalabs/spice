@@ -14,7 +14,6 @@ import argparse
 import json
 import os
 import shlex
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,8 +21,9 @@ from typing import Any
 
 from spice.agent.driver import dashed_uuid
 from spice.agent.lifecycle import write_agent_state
-from spice.config import set_worktree_section
+from spice.config import WORKTREE_SOURCE, set_scope_section
 from spice.errors import SpiceError
+from spice.gitprocess import run_git_command
 from spice.serve.app import DEFAULT_SERVE_HOST, DEFAULT_SERVE_PORT, run_serve
 
 # A fixed, obviously-synthetic thread id keeps the seeded transcript path and
@@ -154,7 +154,7 @@ def seed_demo_environment(root: Path | None = None) -> DemoEnvironment:
     demo_root = _prepare_demo_root(root)
     repo_root = demo_root
     _git_init_demo_repo(repo_root)
-    set_worktree_section(repo_root, "agent", {"driver": "claude"})
+    set_scope_section(repo_root, WORKTREE_SOURCE, "agent", {"driver": "claude"})
     driver_home = demo_root / "driver-home"
     transcript_path = _write_canned_transcript(driver_home)
     task_backend = demo_root / "task-backend"
@@ -208,8 +208,8 @@ def _prepare_demo_root(root: Path | None) -> Path:
 
 
 def _git_init_demo_repo(repo_root: Path) -> None:
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo_root, check=True)
-    subprocess.run(
+    run_git_command(["git", "init", "-q", "-b", "main"], cwd=repo_root, check=True)
+    run_git_command(
         [
             "git",
             "-c",

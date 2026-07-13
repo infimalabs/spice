@@ -11,6 +11,7 @@ from typing import Any, Callable, cast
 from spice.errors import SpiceError
 
 WATCHFILES_NATIVE_READY_MS = 1000
+SERVE_FILE_WATCH_ACTIVATION_TIMEOUT_SECONDS = 5.0
 
 
 def start_exit_file_watch(
@@ -34,7 +35,12 @@ def start_exit_file_watch(
         daemon=True,
     )
     thread.start()
-    activated.wait()
+    if not activated.wait(timeout=SERVE_FILE_WATCH_ACTIVATION_TIMEOUT_SECONDS):
+        stop_event.set()
+        raise SpiceError(
+            "spice serve --until watcher activation deadline exceeded "
+            f"path={path} budget={SERVE_FILE_WATCH_ACTIVATION_TIMEOUT_SECONDS:g}s"
+        )
     if startup_errors:
         thread.join()
         error = startup_errors[0]

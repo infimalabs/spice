@@ -1,8 +1,8 @@
-"""Resolved tracked policy overlay.
+"""Resolved layered policy overlay.
 
-`spice.policy` remains the built-in constitution. This module is the single
-project-config seam: tracked `[tool.spice.policy]` values override defaults,
-and malformed configuration fails loudly with the offending key.
+``spice.policy`` remains the built-in constitution. Effective ``policy``
+values come from the canonical four-layer configuration, and malformed
+configuration fails loudly with the offending key and source.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import cast
 
 from spice import defaults, policy
 from spice.errors import SpiceError
-from spice.repocfg import policy_table
+from spice.configlayer import contextualize_config_error, effective_table
 
 _COMMIT_TRAILER_KEY_RE = re.compile(r"^[A-Za-z0-9-]+$")
 FLEX_JITTER_PERCENT = defaults.integer("policy", "flex", "jitter_percent")
@@ -325,7 +325,14 @@ class ResolvedPolicy:
 
 
 def resolve_policy(repo_root: Path) -> ResolvedPolicy:
-    raw_policy = policy_table(repo_root)
+    try:
+        return _resolve_policy(repo_root)
+    except SpiceError as exc:
+        raise contextualize_config_error(repo_root, exc, "policy") from exc
+
+
+def _resolve_policy(repo_root: Path) -> ResolvedPolicy:
+    raw_policy = effective_table(repo_root, "policy")
     limits_table = _subtable(raw_policy, "limits")
     limits = PolicyLimits(
         file_loc=_positive_int(

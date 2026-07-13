@@ -77,7 +77,7 @@ def test_task_sizing_command_signal_uses_done_upstream_range(monkeypatch):
             return SimpleNamespace(returncode=0, stdout="0\n")
         return SimpleNamespace(returncode=1, stdout="")
 
-    monkeypatch.setattr(sizing.subprocess, "run", fake_run)
+    monkeypatch.setattr(sizing, "run_git_command", fake_run)
     row = _completed_row(
         title="Review claim overwrote implementation range",
         uuid="task-commands",
@@ -103,7 +103,7 @@ def test_task_sizing_command_signal_suppresses_review_claim_zero(monkeypatch):
         calls.append(args[-1])
         return SimpleNamespace(returncode=0, stdout="0\n")
 
-    monkeypatch.setattr(sizing.subprocess, "run", fake_run)
+    monkeypatch.setattr(sizing, "run_git_command", fake_run)
     row = _completed_row(
         title="Ambiguous reviewed task",
         uuid="task-review-zero",

@@ -77,6 +77,42 @@ def test_real_until_watch_is_armed_before_start_returns(
     assert fake_server.shutdown_count == 1
 
 
+def test_start_exit_file_watch_reports_activation_deadline(
+    monkeypatch, tmp_path: Path
+) -> None:
+    watched_path = tmp_path / "serve.stop"
+    watched_path.write_text("initial\n", encoding="utf-8")
+    stop_event = threading.Event()
+    monkeypatch.setattr(
+        serve_filewatch, "SERVE_FILE_WATCH_ACTIVATION_TIMEOUT_SECONDS", 0.05
+    )
+    registration_started = threading.Event()
+    watcher_stopped = threading.Event()
+
+    def stalled_registration(
+        _server, _path, worker_stop_event, _activated, _startup_errors
+    ) -> None:
+        registration_started.set()
+        worker_stop_event.wait(timeout=1.0)
+        watcher_stopped.set()
+
+    monkeypatch.setattr(serve_filewatch, "_run_file_watch", stalled_registration)
+    try:
+        start_exit_file_watch(
+            FakeServer(), Namespace(until=watched_path), stop_event=stop_event
+        )
+    except SpiceError as exc:
+        outcome = {"state": "timed-out", "message": str(exc)}
+    else:
+        outcome = {"state": "started", "message": "watcher started"}
+
+    assert outcome["state"] == "timed-out"
+    assert "watcher activation deadline exceeded" in outcome["message"]
+    assert registration_started.wait(timeout=1.0) is True
+    assert watcher_stopped.wait(timeout=1.0) is True
+    assert stop_event.is_set() is True
+
+
 def test_start_exit_file_watch_exits_on_content_change(
     monkeypatch, tmp_path: Path
 ) -> None:

@@ -16,7 +16,7 @@ from spice.extensions import (
     SpiceExtensionEntryPoint,
     extension_entry_points,
 )
-from spice.repocfg import agent_table, agent_wrapper_definitions_table
+from spice.configlayer import contextualize_config_error, effective_table
 
 ZDOTDIR_ENV = "ZDOTDIR"
 BASH_ENV_ENV = "BASH_ENV"
@@ -200,7 +200,14 @@ def single_python_executable(command: Sequence[str]) -> str:
 
 
 def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
-    agent_settings = agent_table(repo_root)
+    try:
+        return _render_agent_wrapper_lines(repo_root)
+    except SpiceError as exc:
+        raise contextualize_config_error(repo_root, exc, "wrappers") from exc
+
+
+def _render_agent_wrapper_lines(repo_root: Path) -> list[str]:
+    agent_settings = effective_table(repo_root, "agent")
     definitions, configured_sources = configured_agent_wrapper_definitions(repo_root)
     extension_entries = entry_point_agent_wrapper_entries(
         configured_sources=configured_sources
@@ -248,7 +255,7 @@ def render_agent_wrapper_lines(repo_root: Path) -> list[str]:
 def configured_agent_wrapper_definitions(
     repo_root: Path,
 ) -> tuple[dict[str, object], dict[str, str]]:
-    definitions: dict[str, object] = dict(agent_wrapper_definitions_table(repo_root))
+    definitions: dict[str, object] = dict(effective_table(repo_root, "wrappers"))
     sources: dict[str, str] = {
         name: f"tool.spice.wrappers.{name}" for name in definitions
     }

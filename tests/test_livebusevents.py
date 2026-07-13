@@ -262,6 +262,11 @@ def test_lane_subscription_pushes_when_external_inbox_write_changes_pending_coun
 def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
     tmp_path, monkeypatch
 ):
+    # Initial lane payloads include task filter/review metadata. Give this
+    # integration its own backend so xdist workers never serialize here on the
+    # operator board's bootstrap lock while the subscription deadline runs.
+    isolated_task_backend = tmp_path / "task-backend"
+    task_config.set_backend(str(isolated_task_backend))
     monkeypatch.setattr(livebus, "LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S", 0.05)
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -368,6 +373,9 @@ def test_lane_subscription_pushes_pending_frame_for_stopped_agent_inbox_write(
     finally:
         change_written.set()
         session._teardown()
+        task_config.set_backend(None)
+
+    assert isolated_task_backend.is_dir()
 
 
 def test_lane_send_replies_before_send_followup_payload_completes(tmp_path):

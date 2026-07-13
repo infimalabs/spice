@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
@@ -14,11 +13,13 @@ from spice.mail.inbox import format_relative_seconds
 from spice.paths import repo_root_from_cwd
 from spice.policy import MAGIC_BASELINE_REF
 from spice.policyconfig import ComplexityPolicy, resolve_policy
+from spice.procs import run_bounded_process_group
 from spice.studies import complexity, fileloc, magicnums, repodocs, shape
 from spice.studies.walk import is_excluded_path
 
 DIRTY_PRESSURE_PREVIEW_LIMIT = 6
 PREVIEW_CHARS = 200
+BRIEFING_PROVIDER_TIMEOUT_SECONDS = 15.0
 
 
 @dataclass(frozen=True)
@@ -255,7 +256,12 @@ def _scan_dirty_complexity_pressure(
     if not current_paths:
         return []
     current_records = complexity.collect_complexity_records(
-        current_paths, root=repo_root, suffixes=suffixes
+        current_paths,
+        root=repo_root,
+        suffixes=suffixes,
+        timeout_seconds=BRIEFING_PROVIDER_TIMEOUT_SECONDS,
+        phase="briefing-complexity-current",
+        input_label=_provider_input_label(repo_root, current_paths),
     )
     with tempfile.TemporaryDirectory(prefix="spice-complexity-baseline-") as temp_dir:
         temp_root = Path(temp_dir)
@@ -268,6 +274,9 @@ def _scan_dirty_complexity_pressure(
             baseline_paths,
             root=temp_root,
             suffixes=suffixes,
+            timeout_seconds=BRIEFING_PROVIDER_TIMEOUT_SECONDS,
+            phase="briefing-complexity-baseline",
+            input_label=_provider_input_label(repo_root, baseline_paths),
         )
     return _detect_dirty_complexity_regressions(
         current_records,
@@ -283,7 +292,7 @@ def _materialize_complexity_baseline_paths(
 ) -> list[Path]:
     materialized: list[Path] = []
     for path in paths:
-        result = subprocess.run(
+        result = run_bounded_process_group(
             [
                 "git",
                 "-C",
@@ -291,8 +300,9 @@ def _materialize_complexity_baseline_paths(
                 "show",
                 f"{MAGIC_BASELINE_REF}:{path.as_posix()}",
             ],
-            capture_output=True,
-            check=False,
+            timeout_seconds=BRIEFING_PROVIDER_TIMEOUT_SECONDS,
+            phase="briefing-complexity-baseline-git",
+            input_label=_provider_input_label(repo_root, [path]),
         )
         if result.returncode != 0:
             continue
@@ -581,22 +591,31 @@ def _magic_literal_abs(literal: str) -> float:
 
 
 def _git_read(repo_root: Path, *args: str) -> str:
-    result = subprocess.run(
+    result = run_bounded_process_group(
         ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        check=False,
+        timeout_seconds=BRIEFING_PROVIDER_TIMEOUT_SECONDS,
+        phase="briefing-git-posture",
+        input_label=_provider_input_label(repo_root),
         text=True,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def _git_read_z(repo_root: Path, *args: str) -> list[str]:
-    result = subprocess.run(
+    result = run_bounded_process_group(
         ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        check=False,
+        timeout_seconds=BRIEFING_PROVIDER_TIMEOUT_SECONDS,
+        phase="briefing-dirty-paths",
+        input_label=_provider_input_label(repo_root),
     )
     if result.returncode != 0:
         return []
     raw = result.stdout.decode("utf-8", errors="surrogateescape")
     return [part for part in raw.split("\0") if part]
+
+
+def _provider_input_label(repo_root: Path, paths: list[Path] | None = None) -> str:
+    label = f"repository={repo_root}"
+    if paths:
+        label += " paths=" + ",".join(path.as_posix() for path in paths)
+    return label

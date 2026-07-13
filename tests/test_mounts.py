@@ -74,7 +74,8 @@ def test_study_mount_shadowing_builtin_action_fails_loudly(tmp_path):
         mounted_commands(repo)
 
     message = str(exc_info.value)
-    assert "[tool.spice.commands] entry 'study.csharp-members'" in message
+    assert f"commands (source=pyproject path={repo / 'pyproject.toml'})" in message
+    assert "'study.csharp-members' shadows" in message
     assert "spice action 'spice study csharp-members'" in message
 
 
@@ -84,7 +85,8 @@ def test_dev_mount_shadowing_builtin_action_fails_loudly(tmp_path):
         mounted_commands(repo)
 
     message = str(exc_info.value)
-    assert "[tool.spice.commands] entry 'dev.pre-commit'" in message
+    assert f"commands (source=pyproject path={repo / 'pyproject.toml'})" in message
+    assert "'dev.pre-commit' shadows" in message
     assert "spice action 'spice dev pre-commit'" in message
 
 
@@ -106,7 +108,8 @@ def test_mount_shadowing_extension_study_action_fails_loudly(tmp_path, monkeypat
         mounted_commands(repo)
 
     message = str(exc_info.value)
-    assert "[tool.spice.commands] entry 'study.toy-study'" in message
+    assert f"commands (source=pyproject path={repo / 'pyproject.toml'})" in message
+    assert "'study.toy-study' shadows" in message
     assert "extension-provided spice action 'spice study toy-study'" in message
     assert "spice-extension-fixture" in message
 
@@ -173,7 +176,7 @@ def test_run_mounted_command_exports_visible_spice_identity(
         captured["check"] = check
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr("spice.cli.mounts.subprocess.run", fake_run)
+    monkeypatch.setattr("spice.cli.mounts.run_parent_lifetime_command", fake_run)
     mount = MountedCommand(
         path=("report", "inspect"),
         argv=("project-tool", "report", "inspect"),

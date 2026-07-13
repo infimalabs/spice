@@ -38,14 +38,14 @@ import ast
 import json
 import os
 import shlex
-import subprocess
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from spice.errors import SpiceError
-from spice.repocfg import policy_table
+from spice.toolprocess import run_tool_command
+from spice.configlayer import effective_table
 from spice.studies.walk import configured_test_roots
 
 
@@ -223,7 +223,7 @@ def _scan_python_reachability(
 def _configured_reachability_providers(
     repo_root: Path, *, staged_paths: Sequence[Path] | None
 ) -> list[ReachabilityProvider]:
-    raw_providers = policy_table(repo_root).get(REACHABILITY_PROVIDERS_KEY)
+    raw_providers = effective_table(repo_root, "policy").get(REACHABILITY_PROVIDERS_KEY)
     if raw_providers is None:
         return []
     if not isinstance(raw_providers, list):
@@ -349,9 +349,10 @@ def _scan_command_reachability_provider(
 ) -> list[ReachabilityFinding]:
     env = os.environ.copy()  # env-policy: allow
     env[STAGED_PATHS_ENV] = "\n".join(path.as_posix() for path in provider.staged_paths)
-    result = subprocess.run(
+    result = run_tool_command(
         list(provider.argv),
-        capture_output=True,
+        policy="extension",
+        operation=f"reachability provider {provider.name}",
         env=env,
         text=True,
         cwd=request.repo_root,

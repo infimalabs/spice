@@ -374,6 +374,31 @@ def _patch_non_hook_checks(monkeypatch) -> None:
         )
 
 
+def test_doctor_judge_optional_by_default_and_required_when_opted_in(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path)
+    monkeypatch.setattr(doctor, "find_tool", lambda _binary: None)
+
+    default_check = _binary_check(repo, "tool.judge")
+    config.set_scope_section(
+        repo,
+        config.WORKTREE_SOURCE,
+        config.JUDGE_KEY,
+        {config.JUDGE_ENABLED_KEY: True},
+    )
+    opted_in_check = _binary_check(repo, "tool.judge")
+
+    assert [
+        (default_check.status, "judge-free" in default_check.detail),
+        (opted_in_check.status, "opted in" in opted_in_check.detail),
+    ] == [("warn", True), ("fail", True)]
+
+
+def _binary_check(repo: Path, name: str) -> doctor.DoctorCheck:
+    return next(check for check in doctor._binary_checks(repo) if check.name == name)
+
+
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -426,8 +451,9 @@ def test_doctor_treats_npm_as_optional_without_serve_web_sources(tmp_path, monke
 
 
 def test_doctor_uses_configured_external_speech_backend(tmp_path, monkeypatch):
-    config.set_worktree_section(
+    config.set_scope_section(
         tmp_path,
+        config.WORKTREE_SOURCE,
         config.SAY_KEY,
         {
             config.SAY_BACKEND_KEY: "external",
