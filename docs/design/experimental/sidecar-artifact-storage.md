@@ -34,11 +34,11 @@ digest second.
 
 ## Storage Layout
 
-Store artifacts under the shared git common dir so all worktrees for one
-repository see the same sidecars:
+Store artifacts under the canonical hidden managed-state root in the shared
+git common dir so all worktrees for one repository see the same sidecars:
 
 ```text
-<git-common-dir>/spice/artifacts/tasks/<TASK-HANDLE>/
+<git-common-dir>/.spice/artifacts/tasks/<TASK-HANDLE>/
   manifest.json
   objects/
     <sha256>/
@@ -69,8 +69,10 @@ repository see the same sidecars:
 
 Objects are content-addressed by SHA-256 to deduplicate repeated files and make
 integrity checks cheap. The task manifest owns display order, names, summaries,
-and review-facing ids. Never store artifacts under `.spice/` in the worktree;
-that would make sidecars disappear or conflict across worktrees.
+and review-facing ids. The `.spice` segment above is inside the Git common dir,
+not the checked-out worktree. Never store artifacts under
+`<checked-out-worktree>/.spice`; that worktree-specific namespace would make
+sidecars disappear or conflict across worktrees.
 
 ## Task Show / Render Integration
 
