@@ -17,9 +17,8 @@ SYSTEM_SOURCE = "system"
 PYPROJECT_SOURCE = "pyproject"
 REPOSITORY_SOURCE = "repository"
 WORKTREE_SOURCE = "worktree"
-_CONFIG_ERROR_KEY_RE = re.compile(
-    r"^\[tool\.spice(?:\.([^\]]+))?\](?:[ .]([A-Za-z0-9_-]+))?"
-)
+_CONFIG_ERROR_TABLE_RE = re.compile(r"^\[tool\.spice(?:\.([^\]]+))?\]")
+_CONFIG_ERROR_CANDIDATE_RE = re.compile(r"^[ .]([A-Za-z0-9_-]+)")
 CONFIG_SCOPE_NAMES = (
     SYSTEM_SOURCE,
     PYPROJECT_SOURCE,
@@ -176,21 +175,27 @@ def contextualize_config_error(
     """Attach the effective key and winning layer to a consumer validation error."""
     message = str(exc)
     if "source=" in message and " path=" in message:
-        return exc
+        return SpiceError(message)
     path = fallback_path
     detail = message
-    match = _CONFIG_ERROR_KEY_RE.match(message)
-    if match is not None:
-        table, candidate = match.groups()
+    table_match = _CONFIG_ERROR_TABLE_RE.match(message)
+    if table_match is not None:
+        table = table_match.group(1)
         parsed = tuple(part for part in (table or "").split(".") if part)
-        candidate_path = (*parsed, candidate) if candidate else parsed
+        remainder = message[table_match.end() :]
+        candidate_match = _CONFIG_ERROR_CANDIDATE_RE.match(remainder)
+        candidate = candidate_match.group(1) if candidate_match is not None else ""
+        candidate_path = (*parsed, candidate) if candidate else ()
         loaded = load_config(repo_root)
-        path = (
-            candidate_path
-            if loaded.source_for(candidate_path) is not None
-            else parsed or fallback_path
-        )
-        detail = message[match.end() :].lstrip(" .:") or message
+        if (
+            candidate_match is not None
+            and loaded.source_for(candidate_path) is not None
+        ):
+            path = candidate_path
+            detail = remainder[candidate_match.end() :].lstrip(" .:") or message
+        else:
+            path = parsed or fallback_path
+            detail = remainder.lstrip(" .:") or message
     return SpiceError(f"{effective_context(repo_root, *path)}: {detail}")
 
 

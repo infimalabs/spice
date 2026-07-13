@@ -4,6 +4,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from spice import config, configlayer
+from spice.errors import SpiceError
 
 
 def test_loader_exposes_four_immutable_layers_and_leaf_provenance(
@@ -140,6 +141,49 @@ def test_loader_recursively_merges_tables_and_replaces_every_leaf_kind(
         configlayer.WORKTREE_SOURCE
     )
     assert loaded.source_for("policy.mode") == loaded.layer(configlayer.WORKTREE_SOURCE)
+
+
+def test_contextualization_preserves_table_grammar_and_repository_source(tmp_path):
+    _write(tmp_path / "spice.toml", 'serve = "invalid"\n')
+
+    contextual = configlayer.contextualize_config_error(
+        tmp_path,
+        SpiceError("[tool.spice.serve] must be a table"),
+        "serve",
+    )
+
+    assert str(contextual) == (
+        f"serve (source=repository path={tmp_path / 'spice.toml'}): must be a table"
+    )
+
+
+def test_contextualization_identifies_leaf_key_and_worktree_source(tmp_path):
+    worktree = tmp_path / ".spice" / "config" / "spice.toml"
+    _write(worktree, '[serve]\nbrand = ""\n')
+
+    contextual = configlayer.contextualize_config_error(
+        tmp_path,
+        SpiceError("[tool.spice.serve] brand must be a non-empty string"),
+        "serve",
+        "brand",
+    )
+
+    assert str(contextual) == (
+        f"serve.brand (source=worktree path={worktree}): must be a non-empty string"
+    )
+
+
+def test_already_contextualized_error_keeps_detail_with_distinct_cause(tmp_path):
+    original = SpiceError(
+        f"serve (source=repository path={tmp_path / 'spice.toml'}): must be a table"
+    )
+    contextual = configlayer.contextualize_config_error(tmp_path, original, "serve")
+    try:
+        raise contextual from original
+    except SpiceError as raised:
+        outcome = (str(raised), raised.__cause__)
+
+    assert outcome == (str(original), original)
 
 
 def _write(path: Path, content: str) -> None:
