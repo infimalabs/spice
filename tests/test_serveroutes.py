@@ -684,15 +684,29 @@ def test_livebus_routes_send_task_drain_team_command_and_history_requests():
     session._await_pending_reads(LIVE_BUS_WATCHER_JOIN_TIMEOUT_S)
     send_timing = connection.sent[0]["result"].pop("serverTiming")
     submission = connection.sent[0]["result"].pop("submission")
+    completed_send_timing = connection.sent.pop(1)
     assert list(send_timing) == [
         "targetResolveMs",
         "sendPayloadMs",
         "totalBeforeReplyMs",
+        "replyLockWaitMs",
     ]
     assert all(isinstance(value, float) for value in send_timing.values())
     assert all(value >= 0.0 for value in send_timing.values())
     assert submission["stage"] == "accepted"
     assert submission["stages"]["accepted"]["source"] == "inbox-write"
+    assert completed_send_timing["type"] == "lane.sendTiming"
+    assert completed_send_timing["requestId"] == "send-1"
+    assert set(completed_send_timing["serverTiming"]) == {
+        "targetResolveMs",
+        "sendPayloadMs",
+        "totalBeforeReplyMs",
+        "replyLockWaitMs",
+        "replyLockHoldMs",
+        "replyWriteMs",
+        "totalMs",
+    }
+    assert all(value >= 0.0 for value in completed_send_timing["serverTiming"].values())
     assert connection.sent == [
         {
             "type": "lane.sendResult",

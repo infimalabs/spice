@@ -16,9 +16,13 @@ let liveBusLastInboundAt = 0;
 let liveBusHasConnected = false;
 const laneSubmitLatencySamples = [];
 const laneSubmitLatencySampleLimit = 25;
+const pendingLaneSendServerTimings = new Map();
+const liveBusDiagnostics = { session: null, lastLaneSend: null };
 if (typeof window !== "undefined")
   /** @type {any} */ (window).__spiceSubmitLatencySamples =
     laneSubmitLatencySamples;
+if (typeof window !== "undefined")
+  /** @type {any} */ (window).__spiceLiveBusDiagnostics = liveBusDiagnostics;
 
 function liveBusUrl() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -159,49 +163,97 @@ async function liveBusRequest(type, fields = {}, timing = null) {
 
 async function handleLiveBusMessage(data) {
   const message = JSON.parse(data || "{}");
+  recordLiveBusDiagnostics(message);
+  recordLaneSendTiming(message);
+  if (resolveLiveBusPendingRequest(message)) return;
+  await dispatchLiveBusPush(message);
+}
+
+function resolveLiveBusPendingRequest(message) {
   const pending = message.requestId
     ? liveBusPendingRequests.get(message.requestId)
     : null;
-  if (pending) {
-    liveBusPendingRequests.delete(message.requestId);
-    markLaneSubmitLatency(pending.timing, "liveBusResponseReceivedAt");
-    if (message.type === "bus.error") pending.reject(new Error(message.error));
-    else pending.resolve(message);
-    return;
-  }
-  if (message.type === "targets.payload") {
-    applyTargetsPayload(message.payload || {});
-  } else if (message.type === "teams.payload") {
-    applyTeamSnapshotPayload(message.payload || {});
-  } else if (message.type === "lane.payload") {
-    const lane = laneStates.get(message.targetId);
-    if (lane && isLaneOpen(lane) && liveBusPushMatchesSubscription(lane, message))
-      await applyLaneBusPayload(
-        lane,
-        message.payload || {},
-        message.source || "bus",
-      );
-  } else if (message.type === "lane.pending") {
-    const lane = laneStates.get(message.targetId);
-    if (lane && isLaneOpen(lane) && liveBusPushMatchesSubscription(lane, message))
-      applyLanePendingBusPayload(lane, message.payload || {});
-  } else if (message.type === "lane.submission") {
-    const lane = laneStates.get(message.targetId);
-    if (
-      lane &&
-      isLaneOpen(lane) &&
-      liveBusPushMatchesSubscription(lane, message)
-    ) {
-      applyLaneSubmissionLifecycle(lane, message.submission);
-      syncLaneSubmissionLifecycleUi(lane);
-    }
-  } else if (message.type === "lane.append") {
-    const lane = laneStates.get(message.targetId);
-    if (lane && isLaneOpen(lane))
-      await applyLaneAppendBusPayload(lane, message.payload || {});
-  } else if (message.type === "bus.error") {
-    setGlobalTransientError(message.error || "live bus error");
-  }
+  if (!pending) return false;
+  liveBusPendingRequests.delete(message.requestId);
+  markLaneSubmitLatency(pending.timing, "liveBusResponseReceivedAt");
+  if (message.type === "bus.error") pending.reject(new Error(message.error));
+  else pending.resolve(message);
+  return true;
+}
+
+function recordLiveBusDiagnostics(message) {
+  if (message.diagnostics) liveBusDiagnostics.session = message.diagnostics;
+}
+
+function recordLaneSendTiming(message) {
+  if (message.type !== "lane.sendTiming") return;
+  liveBusDiagnostics.lastLaneSend = message;
+  const sample = [...laneSubmitLatencySamples]
+    .reverse()
+    .find((item) => item.requestId === message.requestId);
+  if (sample) sample.serverTiming = message.serverTiming || {};
+  else pendingLaneSendServerTimings.set(message.requestId, message.serverTiming || {});
+}
+
+const liveBusPushHandlers = new Map([
+  ["targets.payload", handleTargetsPush],
+  ["teams.payload", handleTeamsPush],
+  ["lane.payload", handleLanePayloadPush],
+  ["lane.pending", handleLanePendingPush],
+  ["lane.submission", handleLaneSubmissionPush],
+  ["lane.append", handleLaneAppendPush],
+  ["bus.error", handleLiveBusErrorPush],
+]);
+
+async function dispatchLiveBusPush(message) {
+  const handler = liveBusPushHandlers.get(message.type);
+  if (handler) await handler(message);
+}
+
+function handleTargetsPush(message) {
+  applyTargetsPayload(message.payload || {});
+}
+
+function handleTeamsPush(message) {
+  applyTeamSnapshotPayload(message.payload || {});
+}
+
+async function handleLanePayloadPush(message) {
+  const lane = matchingLiveBusLane(message);
+  if (!lane) return;
+  await applyLaneBusPayload(
+    lane,
+    message.payload || {},
+    message.source || "bus",
+  );
+}
+
+function handleLanePendingPush(message) {
+  const lane = matchingLiveBusLane(message);
+  if (lane) applyLanePendingBusPayload(lane, message.payload || {});
+}
+
+function handleLaneSubmissionPush(message) {
+  const lane = matchingLiveBusLane(message);
+  if (!lane) return;
+  applyLaneSubmissionLifecycle(lane, message.submission);
+  syncLaneSubmissionLifecycleUi(lane);
+}
+
+async function handleLaneAppendPush(message) {
+  const lane = laneStates.get(message.targetId);
+  if (lane && isLaneOpen(lane))
+    await applyLaneAppendBusPayload(lane, message.payload || {});
+}
+
+function handleLiveBusErrorPush(message) {
+  setGlobalTransientError(message.error || "live bus error");
+}
+
+function matchingLiveBusLane(message) {
+  const lane = laneStates.get(message.targetId);
+  if (!lane || !isLaneOpen(lane)) return null;
+  return liveBusPushMatchesSubscription(lane, message) ? lane : null;
 }
 
 function isLaneOpen(lane) {

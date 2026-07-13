@@ -718,6 +718,11 @@ def test_static_send_latency_probe_records_submit_timing_buckets():
 
     assert ").__spiceSubmitLatencySamples =" in app_live_bus
     assert "laneSubmitLatencySamples;" in app_live_bus
+    assert ").__spiceLiveBusDiagnostics = liveBusDiagnostics;" in app_live_bus
+    assert "function recordLaneSendTiming(message)" in app_live_bus
+    assert 'message.type !== "lane.sendTiming"' in app_live_bus
+    assert "sample.serverTiming = message.serverTiming || {};" in app_live_bus
+    assert "pendingLaneSendServerTimings.has(probe.requestId)" in app_stream
     assert "function startLaneSubmitLatencyProbe(lane, payload)" in app_static
     assert "function finishLaneSubmitLatencyProbe(probe, status)" in app_static
     assert "function laneSubmitLatencyDurations(marks)" in app_static
