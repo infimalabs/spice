@@ -157,7 +157,6 @@ env_names = [
 # (hallucinate). Empty value = "consider rephrasing".
 [tool.spice.policy.taste.words]
 smell = ""
-just = ""
 
 # The agent-run fast path deliberately bypasses the full CLI dispatcher so it
 # never imports the parser/inbox stack; asserting the bypass is inherently about
