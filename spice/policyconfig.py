@@ -1,8 +1,8 @@
-"""Resolved tracked policy overlay.
+"""Resolved layered policy overlay.
 
-`spice.policy` remains the built-in constitution. This module is the single
-project-config seam: tracked `[tool.spice.policy]` values override defaults,
-and malformed configuration fails loudly with the offending key.
+``spice.policy`` remains the built-in constitution. Effective ``policy``
+values come from the canonical four-layer configuration, and malformed
+configuration fails loudly with the offending key and source.
 """
 
 from __future__ import annotations

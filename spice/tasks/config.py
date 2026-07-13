@@ -36,9 +36,9 @@ PHASE_MODELS_KEY = "phase_models"
 # Durable vocabulary. `task` and `serve` ship with the harness; `agent` is
 # reserved for automatic private task creation. Hidden system stems such as
 # `.oops` are addressable but excluded from normal boards. A repo adds its own
-# public stems, hidden stems, and per-stem default flows through tracked
-# `pyproject.toml` (`[tool.spice.tasks]`), edited by a human — never invented by
-# an agent.
+# public stems, hidden stems, and per-stem default flows through the effective
+# layered ``tasks`` table. These are operator-authored values, never invented
+# by an agent.
 BASE_APPROVED_STEMS = defaults.strings("tasks", "base_stems")
 INTERNAL_STEMS = defaults.strings("tasks", "internal_stems")
 MAXIM_PROPOSAL_HIDDEN_STEM = defaults.string("tasks", "maxim_proposal_hidden_stem")

@@ -1,13 +1,35 @@
 # Configuration Reference
 
-Spice configuration has four scopes, in increasing precedence order:
+Spice configuration has exactly four scopes, in increasing precedence order:
 
-| Scope | Source |
-| --- | --- |
-| `system` | The installed `spice/spice.toml` |
-| `pyproject` | `[tool.spice.*]` in the worktree's `pyproject.toml` |
-| `repository` | `spice.toml` at the repository root |
-| `worktree` | `.spice/config/spice.toml` for one worktree |
+| Scope | Path | Behavior |
+| --- | --- | --- |
+| `system` | `<installed spice package>/spice.toml` | Installed defaults; writable only when that existing file is writable |
+| `pyproject` | `<repository>/pyproject.toml` | Tracked `[tool.spice.*]` tables |
+| `repository` | `<repository>/spice.toml` | Tracked plain Spice tables such as `[agent]` |
+| `worktree` | `<repository>/.spice/config/spice.toml` | Local plain Spice tables for one worktree |
+
+Tables merge recursively from `system` through `worktree`. A scalar or list at
+a later scope replaces the earlier leaf completely; lists never concatenate,
+and `key = []` explicitly clears an inherited list. A later scalar can replace
+an earlier table and a later table can replace an earlier scalar. Named wrapper
+groups are the one table-level atomic boundary: defining
+`[wrappers.<group>]` in a later scope replaces that whole inherited group.
+
+The `pyproject` scope alone uses the `tool.spice` prefix:
+
+```toml
+[tool.spice.agent]
+model = "gpt-5.5"
+```
+
+The same value in `system`, `repository`, or `worktree` TOML uses its plain
+shape:
+
+```toml
+[agent]
+model = "gpt-5.5"
+```
 
 `spice config show` prints all four parsed layers, their source paths, the
 effective mapping, and the winning source for every key as deterministic JSON.
@@ -16,6 +38,18 @@ the same layered view. Mutable commands default to `--scope worktree`; agent,
 personality, say, and judge settings also accept `system`, `pyproject`, and
 `repository`. `--clear` removes only that command's values from the selected
 scope, revealing the next earlier layer without changing it.
+
+All mutable commands use one structured TOML editor. It preserves unrelated
+tables, comments, ordering, and scalar types, validates the resulting document,
+and atomically replaces the selected file. A system write requires the installed
+`spice.toml` to exist and be writable; the other three scopes are created on
+demand. Invalid or unwritable mutations report `scope=<name> path=<path>` before
+changing bytes.
+
+The configuration migration is complete. Runtime code does not read or import
+`.spice/config/state.json`; an old file is ignored. Move any values that still
+matter into `.spice/config/spice.toml` using the plain tables above, then delete
+the JSON file. There is no compatibility scope name or JSON adapter.
 
 ## Runtime Model
 
@@ -39,8 +73,8 @@ git argv instead of retaining the task boundary indefinitely.
 
 ## Linux Speech with `espeak-ng`
 
-Speech configuration is worktree-local by default. On Debian or Ubuntu, install the
-`espeak-ng` package and verify the executable before configuring spice:
+Speech configuration is worktree-local by default. On Debian or Ubuntu, install
+the `espeak-ng` package and verify the executable before configuring spice:
 
 ```sh
 sudo apt-get update
@@ -493,8 +527,9 @@ model = "claude-sonnet-5"
 `spice agent ensure` reads the phase of the worktree's currently claimed task
 and looks it up in this table for the active driver. A phase with no entry
 (or no claimed task) falls back to the ordinary resolution order: an explicit
-`--model`/`--effort` flag, then worktree-local config, then `[tool.spice.agent]`,
-then the driver's shipped default.
+`--model`/`--effort` flag, then the effective `agent` table in `worktree`,
+`repository`, `pyproject`, and `system` precedence order, then the driver's
+shipped default.
 
 ## `[tool.spice.serve]`
 
