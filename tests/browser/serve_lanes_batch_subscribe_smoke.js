@@ -213,8 +213,8 @@ async function batchPhaseInitial(state, config) {
 }
 
 // Phase B: focus moves while the replacement batch is awaiting its response.
-// Pending lanes are intentionally skipped by setFocusedLiveBusLane; subscribe
-// completion must therefore reconcile both server queries immediately.
+// The pending lanes must configure immediately, before the held subscribe
+// response can release server watchers under their stale focus queries.
 async function batchPhaseFocusWhilePending(state, config) {
   state.frames.length = 0;
   state.deferNextSubscribe = true;
@@ -242,20 +242,27 @@ async function batchPhaseFocusWhilePending(state, config) {
       entry.query.focused,
     ]),
   );
+  const configureFramesBeforeRelease = state.frames.filter(
+    (frame) => frame.type === "lane.configure",
+  );
+  const configuredFocusBeforeRelease = Object.fromEntries(
+    configureFramesBeforeRelease.map((frame) => [
+      frame.targetId,
+      frame.query.focused,
+    ]),
+  );
   state.releaseDeferredSubscribe();
   await window.__batchSettle(config);
   const configureFrames = state.frames.filter(
     (frame) => frame.type === "lane.configure",
   );
-  const reconciledFocus = Object.fromEntries(
-    configureFrames.map((frame) => [frame.targetId, frame.query.focused]),
-  );
   return {
     pendingPriorFocus: requestedFocus[priorId],
     pendingSelectedFocus: requestedFocus[selectedId],
+    preReleaseFocusConfigureCount: configureFramesBeforeRelease.length,
+    preReleasePriorFocus: configuredFocusBeforeRelease[priorId],
+    preReleaseSelectedFocus: configuredFocusBeforeRelease[selectedId],
     focusConfigureCount: configureFrames.length,
-    reconciledPriorFocus: reconciledFocus[priorId],
-    reconciledSelectedFocus: reconciledFocus[selectedId],
   };
 }
 
@@ -390,12 +397,14 @@ function assertBatchResult(result) {
       result.pendingPriorFocus !== true,
     "pending subscribe did not capture the selected lane as background":
       result.pendingSelectedFocus !== false,
-    "subscribe completion did not reconcile both changed focus queries":
+    "pending focus change did not configure both lanes before response release":
+      result.preReleaseFocusConfigureCount !== 2,
+    "prior lane was not configured focused:false before response release":
+      result.preReleasePriorFocus !== false,
+    "selected lane was not configured focused:true before response release":
+      result.preReleaseSelectedFocus !== true,
+    "pending focus change emitted duplicate post-response configuration":
       result.focusConfigureCount !== 2,
-    "prior lane did not reconcile to focused:false":
-      result.reconciledPriorFocus !== false,
-    "selected lane did not reconcile to focused:true":
-      result.reconciledSelectedFocus !== true,
     "reconnect resync did not issue exactly one lanes.subscribe frame":
       result.resyncFrameCount !== 1,
     "resync frame did not cover every open lane":
