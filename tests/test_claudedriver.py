@@ -579,6 +579,7 @@ def test_claude_tool_inventory_keeps_the_no_subagent_boundary_distinct():
     assert CLAUDE_DENIED_TOOLS == (
         *CLAUDE_NO_SUBAGENT_TOOLS,
         *CLAUDE_NATIVE_TASK_TOOLS,
+        "Monitor",
     )
 
 
@@ -603,6 +604,7 @@ def test_claude_commands_apply_task_denials_with_attribution_and_hooks(
     )
     settings = json.loads(command[command.index("--settings") + 1])
 
+    assert command[1] == "--print"
     assert command[command.index("--permission-mode") + 1] == "bypassPermissions"
     expected_prompt = f"{CLAUDE_SKILL_SYSTEM_PROMPT_PREAMBLE}\n\nfollow the skill"
     assert command[-(len(resume_tail) + 1) :] == [*resume_tail, expected_prompt]
@@ -615,6 +617,7 @@ def test_claude_commands_apply_task_denials_with_attribution_and_hooks(
         "TaskUpdate",
         "TaskOutput",
         "TaskStop",
+        "Monitor",
     ]
     assert settings["attribution"] == {"commit": "", "sessionUrl": False}
     hook_group = settings["hooks"][POST_TOOL_HOOK_EVENT][0]

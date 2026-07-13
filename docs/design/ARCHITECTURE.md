@@ -51,6 +51,16 @@ rehydration pointers to the ancestor thread. Git state is similarly bounded:
 agent processes receive a command-scope git shadow so their branch upstream
 view is stable, while operator shells still see native git config.
 
+Supervised Claude lanes support Claude Code 2.1.98 or newer and deny its
+canonical `Monitor` tool through the same launch settings that deny `Task` and
+`Agent`. Spice supervises `claude --print` without the Claude Agent SDK, so it
+cannot preserve background work managed by `Monitor` across the process
+lifecycle. Plugin-declared monitors, introduced in Claude Code 2.1.105, are a
+distinct auto-start mechanism and are not disabled by the `Monitor` permission
+rule. They currently run only in interactive CLI sessions, so print-mode lanes
+skip them; any future interactive or SDK-backed Claude driver must resolve that
+lifecycle explicitly before removing the denial.
+
 ## Conscience
 
 The supervisor tees assistant stdout, extracts assistant prose, and scans for
