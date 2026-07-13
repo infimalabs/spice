@@ -6,10 +6,11 @@ import subprocess
 from pathlib import Path
 
 from spice import config
+from spice.agent.rtkhealth import RtkHealth
 from spice.hooks import doctor
 from spice.hooks.install import hooks_dir, install_hooks_for_repo
 from spice.studies.walk import staged_paths, tracked_paths
-from spice.errors import SpiceError
+import pytest
 
 
 def test_doctor_reports_missing_hooks_and_fix_installs_them(tmp_path, monkeypatch):
@@ -103,26 +104,81 @@ def test_dev_doctor_parser_exposes_fix_flag():
     assert args.fix
 
 
-def test_doctor_rtk_check_uses_the_runtime_protocol_validator(monkeypatch):
-    monkeypatch.setattr(doctor, "validate_rtk_companion", lambda: "0.42.4")
+@pytest.mark.parametrize(
+    ("health", "expected_status"),
+    [
+        (
+            RtkHealth(
+                "alternate-rtk",
+                "active",
+                "rewrite protocol valid (exit 3)",
+                "0.42.4",
+            ),
+            "ok",
+        ),
+        (RtkHealth("missing-rtk", "missing", "launch failed"), "warn"),
+        (
+            RtkHealth("/opt/old-rtk", "obsolete", "RTK 0.41.0 is obsolete", "0.41.0"),
+            "warn",
+        ),
+        (
+            RtkHealth("broken-rtk", "protocol-invalid", "rewrite probe invalid"),
+            "warn",
+        ),
+    ],
+)
+def test_doctor_rtk_check_reports_health_without_failing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    health: RtkHealth,
+    expected_status: str,
+) -> None:
+    monkeypatch.setattr(doctor, "probe_rtk_health", lambda _repo: health)
 
-    check = doctor._rtk_check()
+    check = doctor._rtk_check(tmp_path)
 
-    assert check.status == "ok"
-    assert check.detail == "rtk 0.42.4; rewrite protocol valid"
+    assert {
+        "status": check.status,
+        "detail_has_executable": f"executable={health.executable!r}" in check.detail,
+        "detail_has_mode": f"mode={health.mode}" in check.detail,
+        "command": check.command,
+    } == {
+        "status": expected_status,
+        "detail_has_executable": True,
+        "detail_has_mode": True,
+        "command": health.verification_command(),
+    }
 
 
-def test_doctor_rtk_check_returns_actionable_protocol_failure(monkeypatch):
-    def invalid():
-        raise SpiceError(f"invalid RTK protocol; {doctor.RTK_INSTALL_GUIDANCE}")
+@pytest.mark.parametrize(
+    "health",
+    [
+        RtkHealth("rtk", "active", "valid", "0.42.4"),
+        RtkHealth("missing-rtk", "missing", "launch failed"),
+        RtkHealth("old-rtk", "obsolete", "obsolete", "0.41.0"),
+        RtkHealth("broken-rtk", "protocol-invalid", "invalid"),
+    ],
+)
+def test_doctor_runs_remaining_checks_for_every_rtk_health_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    health: RtkHealth,
+) -> None:
+    repo = _repo(tmp_path)
+    monkeypatch.setattr(doctor, "probe_rtk_health", lambda _repo: health)
 
-    monkeypatch.setattr(doctor, "validate_rtk_companion", invalid)
+    report = doctor.run_doctor(repo)
+    names = [check.name for check in report.checks]
 
-    check = doctor._rtk_check()
-
-    assert check.status == "fail"
-    assert "invalid RTK protocol" in check.detail
-    assert "github.com/rtk-ai/rtk" in check.command
+    assert {
+        "rtk": _check(report, "tool.rtk").status,
+        "remaining_check": names[-1],
+        "check_count": len(names),
+    } == {
+        "rtk": "ok" if health.active else "warn",
+        "remaining_check": "env-name-ledger",
+        "check_count": 23,
+    }
 
 
 def test_doctor_reports_installed_runtime_for_spice_checkout(tmp_path, monkeypatch):

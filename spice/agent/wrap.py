@@ -23,7 +23,6 @@ import datetime
 import json
 import math
 import os
-import re
 import shlex
 import socket as socket
 import subprocess
@@ -91,15 +90,6 @@ from spice.sessions.meter import (
 PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
 SHELL_EXECUTION_COMMANDS = frozenset(("bash", "dash", "sh", "zsh"))
 SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
-RTK_MINIMUM_VERSION = (0, 42, 4)
-RTK_MINIMUM_VERSION_TEXT = ".".join(str(part) for part in RTK_MINIMUM_VERSION)
-RTK_UPSTREAM = "https://github.com/rtk-ai/rtk"
-RTK_INSTALL_GUIDANCE = (
-    f"install RTK >= {RTK_MINIMUM_VERSION_TEXT} from {RTK_UPSTREAM} "
-    "(`brew install rtk` or `cargo install --git https://github.com/rtk-ai/rtk`)"
-)
-RTK_VERSION_PATTERN = re.compile(r"\brtk\s+(\d+)\.(\d+)\.(\d+)\b", re.IGNORECASE)
-RTK_PROTOCOL_PROBE = ("git", "status")
 RTK_DB_PATH_ENV = "RTK_DB_PATH"  # env-policy: allow
 
 # The working-state banner is a change notification, not a periodic meter: once a
@@ -437,38 +427,6 @@ def rtk_rewrite_command_text(
         stderr=stderr,
         run=run,
     )
-
-
-def validate_rtk_companion(
-    *, run: Callable[..., subprocess.CompletedProcess[str]] | None = None
-) -> str:
-    runner = run or subprocess.run
-    try:
-        completed = runner(
-            ["rtk", "--version"], capture_output=True, text=True, check=False
-        )
-    except OSError as exc:
-        raise SpiceError(f"RTK unavailable: {exc}; {RTK_INSTALL_GUIDANCE}") from exc
-    version_output = (completed.stdout or completed.stderr or "").strip()
-    match = RTK_VERSION_PATTERN.search(version_output)
-    if completed.returncode != 0 or match is None:
-        raise SpiceError(
-            f"could not validate RTK version from {version_output!r}; "
-            f"{RTK_INSTALL_GUIDANCE}"
-        )
-    version = tuple(int(part) for part in match.groups())
-    if version < RTK_MINIMUM_VERSION:
-        raise SpiceError(
-            f"RTK {'.'.join(str(part) for part in version)} is obsolete; "
-            f"{RTK_INSTALL_GUIDANCE}"
-        )
-    rewritten = rtk_rewrite_command_text(*RTK_PROTOCOL_PROBE, run=runner)
-    if rewritten is None:
-        raise SpiceError(
-            f"RTK rewrite probe did not rewrite {' '.join(RTK_PROTOCOL_PROBE)!r}; "
-            f"{RTK_INSTALL_GUIDANCE}"
-        )
-    return ".".join(str(part) for part in version)
 
 
 def shell_execution_command_index(args: Sequence[str]) -> int | None:

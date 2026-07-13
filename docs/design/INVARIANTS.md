@@ -124,9 +124,9 @@ checklist.
 ## Dependency Contract
 
 Runtime dependencies are intentionally small: `watchfiles`, `ruff`, and
-`lizard`. The agent shell requires
-[RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer and stops before command
-execution when its rewrite protocol is unavailable or invalid. Other external
-binaries degrade loudly rather than silently changing semantics: Taskwarrior,
-the maxim judge, speech backends, and the agent CLI. Development depends on
-`pytest`, `ruff`, and `lizard`.
+`lizard`. The agent shell optionally uses
+[RTK](https://github.com/rtk-ai/rtk) `0.42.4` or newer to optimize command
+output; unavailable or invalid RTK is reported and preserves native command
+execution. Other external binaries degrade loudly rather than silently
+changing semantics: Taskwarrior, the maxim judge, speech backends, and the
+agent CLI. Development depends on `pytest`, `ruff`, and `lizard`.
