@@ -224,22 +224,13 @@ test = "test_worktree_local_python_none_without_venv"
 target = "_worktree_local_python"
 
 # _worktree_dirty is a lifecycle git probe reached only by the private
-# uncaptured-lane nudge; its stall contract (report clean, so a wedged
+# uncaptured-lane nudge; its stall contract (resolve to clean, so a wedged
 # `git status` never fabricates a dirty-tree nudge) has no public observable,
 # so the bound-deadline test pins it white-box.
 [[tool.spice.policy.internal_couplings]]
 path = "tests/test_boundedwaits.py"
-test = "test_worktree_dirty_bounds_probe_and_reports_clean_on_stall"
+test = "test_worktree_dirty_bounds_probe_and_resolves_clean_status_on_stall"
 target = "_worktree_dirty"
-
-# _force_windows_process_tree is the taskkill process-liveness helper; its only
-# in-repo callers (terminate_process_group[_id]) are not currently wired to a
-# caller, so its stall-swallow contract has no reachable public seam and the
-# bound-deadline test pins it white-box.
-[[tool.spice.policy.internal_couplings]]
-path = "tests/test_boundedwaits.py"
-test = "test_force_windows_terminate_bounds_and_swallows_taskkill_stall"
-target = "_force_windows_process_tree"
 
 [tool.spice.serve]
 brand = "spice"

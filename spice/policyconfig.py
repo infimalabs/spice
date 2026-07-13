@@ -17,7 +17,7 @@ from typing import cast
 
 from spice import defaults, policy
 from spice.errors import SpiceError
-from spice.repocfg import policy_table
+from spice.configlayer import effective_table
 
 _COMMIT_TRAILER_KEY_RE = re.compile(r"^[A-Za-z0-9-]+$")
 FLEX_JITTER_PERCENT = defaults.integer("policy", "flex", "jitter_percent")
@@ -325,7 +325,7 @@ class ResolvedPolicy:
 
 
 def resolve_policy(repo_root: Path) -> ResolvedPolicy:
-    raw_policy = policy_table(repo_root)
+    raw_policy = effective_table(repo_root, "policy")
     limits_table = _subtable(raw_policy, "limits")
     limits = PolicyLimits(
         file_loc=_positive_int(

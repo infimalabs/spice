@@ -15,6 +15,7 @@ from spice import defaults
 from spice.configlayer import ConfigLayer as ConfigLayer
 from spice.configlayer import LayeredConfig as LayeredConfig
 from spice.configlayer import PYPROJECT_SOURCE
+from spice.configlayer import effective_mapping, effective_table, layer_table
 from spice.configlayer import load_config as load_config
 from spice.errors import SpiceError
 from spice.paths import (
@@ -22,7 +23,6 @@ from spice.paths import (
     repo_root_from_cwd,
     state_dir,
 )
-from spice.repocfg import read_tool_table
 
 WORKTREE_CONFIG_RELATIVE_PATH = Path("config") / "spice.toml"
 LEGACY_CONFIG_STATE_RELATIVE_PATH = Path("config") / "state.json"
@@ -255,7 +255,7 @@ def _root_or_current(repo_root: Path | None) -> Path | None:
 
 
 def _effective_section(root: Path | None, key: str) -> dict[str, Any]:
-    raw = read_tool_table(root).get(key)
+    raw = effective_mapping(root).get(key)
     return raw if isinstance(raw, dict) else {}
 
 
@@ -325,15 +325,11 @@ def configured_agent_personality(repo_root: Path | None = None) -> str:
 
 
 def configured_agent_model(repo_root: Path | None = None) -> str:
-    """Agent launch model override: worktree first, then tracked project."""
+    """Agent launch model from the canonical layered configuration."""
     root = _root_or_current(repo_root)
     if root is None:
         return ""
-    return (
-        _agent_worktree_value(root, AGENT_MODEL_KEY)
-        or _agent_project_value(root, AGENT_MODEL_KEY)
-        or ""
-    )
+    return _agent_effective_value(root, AGENT_MODEL_KEY)
 
 
 def configured_agent_effort(repo_root: Path | None = None) -> str:
@@ -341,11 +337,7 @@ def configured_agent_effort(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
     if root is None:
         return ""
-    return (
-        _agent_worktree_value(root, AGENT_EFFORT_KEY)
-        or _agent_project_value(root, AGENT_EFFORT_KEY)
-        or ""
-    )
+    return _agent_effective_value(root, AGENT_EFFORT_KEY)
 
 
 def configured_agent_driver(repo_root: Path | None = None) -> str:
@@ -358,11 +350,7 @@ def configured_agent_driver(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
     if root is None:
         return ""
-    return (
-        _agent_worktree_value(root, AGENT_DRIVER_KEY)
-        or _agent_project_value(root, AGENT_DRIVER_KEY)
-        or ""
-    )
+    return _agent_effective_value(root, AGENT_DRIVER_KEY)
 
 
 def worktree_agent_config(repo_root: Path) -> dict[str, str]:
@@ -399,9 +387,11 @@ def _agent_worktree_value(repo_root: Path, key: str) -> str:
 
 
 def _agent_project_value(repo_root: Path, key: str) -> str:
-    raw = load_config(repo_root).layer(PYPROJECT_SOURCE).values.get(AGENT_KEY)
-    table = raw if isinstance(raw, Mapping) else {}
-    return str(table.get(key) or "").strip()
+    return str(layer_table(repo_root, PYPROJECT_SOURCE, "agent").get(key) or "").strip()
+
+
+def _agent_effective_value(repo_root: Path, key: str) -> str:
+    return str(effective_table(repo_root, "agent").get(key) or "").strip()
 
 
 def update_project_agent_config(repo_root: Path, values: Mapping[str, str]) -> Path:
