@@ -392,6 +392,13 @@ class LiveBusSession:
             message,
             {"type": "bus.pong", "diagnostics": self.diagnostics()},
         )
+        # A diagnostic client (the latency probe) can zero the per-frame
+        # telemetry after reading it so each measurement window owns its own
+        # counters -- totals AND maxima. Resetting after the reply drops the
+        # pong just recorded too, so the next window starts genuinely empty.
+        if message.get("reset") is True:
+            with self._telemetry_lock:
+                self._frame_telemetry.clear()
 
     def _handle_targets_refresh(self, message: dict[str, Any]) -> None:
         self._reply(

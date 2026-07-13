@@ -136,6 +136,46 @@ def test_session_diagnostics_measure_frame_bytes_and_send_lock_timing(
     assert diagnostics["totals"] == {"count": 1, "bytes": expected_bytes}
 
 
+def test_ping_reset_clears_frame_telemetry_between_windows(tmp_path):
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=tmp_path)
+    connection = _Connection()
+    session = LiveBusSession(
+        connection,
+        _callbacks(target=target, transcript=transcript),
+    )
+    try:
+        # First measurement window: one frame lands in the counters.
+        session._send({"type": "lane.payload", "payload": {"messages": []}})
+        assert session.diagnostics()["totals"]["count"] == 1
+
+        # A diagnostic client (the latency probe) resets telemetry with the same
+        # ping it reads the pong from. The pong still reports the window it just
+        # measured...
+        session._handle_ping(
+            {"type": "bus.ping", "requestId": "ping-reset", "reset": True}
+        )
+        pong = _wait_for_reply(connection, request_id="ping-reset")
+        assert pong["type"] == "bus.pong"
+        assert pong["diagnostics"]["totals"]["count"] == 1
+
+        # ...and the reset lands after the reply, so the next window starts
+        # genuinely empty -- totals AND per-frame maxima both gone.
+        assert session.diagnostics() == {
+            "clientId": session.client_id,
+            "frames": {},
+            "totals": {"count": 0, "bytes": 0},
+        }
+
+        # A frame sent in the fresh window counts from one, proving the window
+        # owns its counters rather than inheriting the prior run's high-water.
+        session._send({"type": "lane.payload", "payload": {"messages": []}})
+        assert session.diagnostics()["totals"]["count"] == 1
+    finally:
+        session._teardown()
+
+
 @pytest.mark.parametrize("background_count", (1, 100))
 def test_background_lane_burst_coalesces_before_focused_delivery(
     tmp_path, monkeypatch, background_count
