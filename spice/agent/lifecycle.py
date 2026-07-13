@@ -523,7 +523,7 @@ def _worktree_dirty(repo_root: Path) -> bool:
             check=False,
             timeout=GIT_PROBE_TIMEOUT_SECONDS,
         )
-    except subprocess.TimeoutExpired:
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0 and result.stdout.strip() != ""
 
