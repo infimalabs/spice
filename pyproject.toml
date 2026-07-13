@@ -95,17 +95,10 @@ enabled = true
 [tool.spice.wrappers.spice-dev.pre-commit]
 argv = ["spice", "dev", "pre-commit"]
 
-[tool.spice.wrappers.spice-dev.grep]
-argv = ["grep", "-E"]
-match = [
-  { flags = ["-E", "-F", "-P", "-G"], argv = ["grep"] },
-]
-
-# The "common" group is inherited from the layered global default, which now
-# supplies the rg/find/git native-fidelity reroutes and the final head-only
-# grep -E route (extended regular expressions by default). The repository-local
-# spice-dev group also wraps a bare grep that RTK did not select, while explicit
-# matcher modes pass through unchanged.
+# The "common" group is inherited from the layered global default. It owns all
+# grep and RTK behavior, including driver-scoped extended-regexp defaults. The
+# repository-local spice-dev group contains only this checkout's development
+# commands.
 
 [tool.spice.tasks]
 stems = ["session", "mail", "hooks", "studies", "cli", "lifecycle", "tests"]

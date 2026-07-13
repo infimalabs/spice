@@ -91,23 +91,28 @@ than merging individual routes. Other scalar and list leaves replace earlier
 values, so `wrappers = []` is the deterministic way to clear an inherited
 selection.
 
-The built-in `common` group contains one `rtk` wrapper. It does not choose
-commands for RTK; it preserves native semantics after RTK selection by routing:
+The built-in `common` group contains the global `rtk` and plain `grep`
+wrappers. It does not choose commands for RTK; it preserves native semantics
+after RTK selection by routing:
 
 - rg-only grep flags (`--files`, `--type`, `--type=*`, `--no-heading`) to `rg`;
 - native find predicates and actions to `find`;
 - diagnostic git flags such as `--check` and `--name-status` to `git`;
-- every remaining `rtk grep` through a final head-only `rtk grep -E` route.
+- every remaining Codex-authored `rtk grep` through a final head-only
+  `rtk grep -E` route.
 
-That last route makes extended regular expressions the default: `rtk grep`
-delegates to the platform grep, whose BASIC dialect would read rg-authored
-`| + ? ( )` as literals, so `-E` is injected ahead of the caller's arguments.
-Matcher selection stays deterministic — an explicit `-F` or `-G`, later in
+The Codex driver also receives the global plain `grep` wrapper. Those two
+driver-scoped routes make extended regular expressions the Codex default:
+`rtk grep` delegates to the platform grep, whose BASIC dialect would read
+Codex-authored `| + ? ( )` as literals, so `-E` is injected ahead of the
+caller's arguments. Claude authors BASIC alternation as `\|`, so its generated
+wrapper set omits both injections and preserves the native dialect. Matcher
+selection stays deterministic for Codex — an explicit `-F` or `-G`, later in
 argv, still wins because grep honors the last matcher flag; a repeated `-E` is
-harmless; and unsupported or conflicting backend flags pass through unchanged to
-fail natively rather than selecting an alternate path. Any new transformation
-belongs in the published contract and its executable tests; it is not an
-alternate rewrite selector.
+harmless; and unsupported or conflicting backend flags pass through unchanged
+to fail natively rather than selecting an alternate path. Any new
+transformation belongs in the published contract and its executable tests; it
+is not an alternate rewrite selector.
 
 Selecting `common` inherits this global default in full. A later-scope
 `wrappers.common` table replaces the whole group atomically at the named-group
@@ -132,10 +137,13 @@ duplicate selectors fail during wrapper generation.
 
 Wrapper entries may also be direct argv wrappers with an `argv = [...]` list;
 spice shell-quotes each argv word while building
-`SPICE_SHELL_HOOK_WRAPPERS`. Prefer stable repository-owned commands over
-hook-private environment variables. For example, a repository can opt into a
-local code-generation wrapper by selecting its own extension group alongside
-`common`, without implying that `codegen` belongs to the generic default:
+`SPICE_SHELL_HOOK_WRAPPERS`. A direct wrapper or an individual `match` route
+may set `drivers = ["codex", "claude"]`; spice validates those names against
+the known driver names and renders only entries matching the active worktree
+driver. Prefer stable repository-owned commands over hook-private environment
+variables. For example, a repository can opt into a local code-generation
+wrapper by selecting its own extension group alongside `common`, without
+implying that `codegen` belongs to the generic default:
 
 ```toml
 [tool.spice.agent]

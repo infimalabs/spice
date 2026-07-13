@@ -669,7 +669,7 @@ def test_agent_environment_installs_shell_steering_hooks_for_default_driver(
         shellhook.render_agent_wrapper_lines(tmp_path)
     )
     assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
-        _builtin_rtk_wrapper_lines()
+        _builtin_common_wrapper_lines()
     )
     assert env[shellhook.SHELL_HOOK_ORIGINAL_ZDOTDIR_ENV] == ""
     assert env[shellhook.SHELL_HOOK_ORIGINAL_BASH_ENV_ENV] == ""
@@ -1022,9 +1022,11 @@ def _expected_project_common_with_pytest_wrapper_lines() -> list[str]:
     ]
 
 
-def _builtin_rtk_wrapper_lines(rtk_executable: str = "rtk") -> list[str]:
+def _builtin_common_wrapper_lines(
+    rtk_executable: str = "rtk", *, driver_name: str = "codex"
+) -> list[str]:
     command_word = shellhook.shell_command_word(rtk_executable)
-    return [
+    lines = [
         "",
         "rtk() {",
         '  if [ "${1-}" = grep ]; then',
@@ -1060,14 +1062,36 @@ def _builtin_rtk_wrapper_lines(rtk_executable: str = "rtk") -> list[str]:
         "      esac",
         "    done",
         "  fi",
-        '  if [ "${1-}" = grep ]; then',
-        "    shift",
-        f'    command {command_word} grep -E "$@"',
-        "    return",
-        "  fi",
-        f'  command {command_word} "$@"',
-        "}",
     ]
+    if driver_name == "codex":
+        lines.extend(
+            [
+                '  if [ "${1-}" = grep ]; then',
+                "    shift",
+                f'    command {command_word} grep -E "$@"',
+                "    return",
+                "  fi",
+            ]
+        )
+    lines.extend([f'  command {command_word} "$@"', "}"])
+    if driver_name == "codex":
+        lines.extend(
+            [
+                "",
+                "grep() {",
+                '  for _spice_word in "$@"; do',
+                '    case "$_spice_word" in',
+                "      -E|-F|-P|-G)",
+                '        command grep "$@"',
+                "        return",
+                "        ;;",
+                "    esac",
+                "  done",
+                '  command grep -E "$@"',
+                "}",
+            ]
+        )
+    return lines
 
 
 def _expected_wrapper_lines(wrapper: str, selectors: list[str]) -> list[str]:

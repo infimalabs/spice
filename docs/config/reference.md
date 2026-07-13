@@ -276,19 +276,21 @@ with `[tool.spice.agent] wrappers = [...]`.
 | --- | --- |
 | `wrapper = ["cmd1", "cmd2"]` | Create wrapper function `wrapper` and route each listed command selector through it. |
 | `selector = { argv = ["tool", "subcommand"] }` | Create a direct wrapper function named `selector` that runs the configured argv plus caller arguments. |
+| `selector = { drivers = ["codex"], argv = [...] }` | Render a direct wrapper only for the listed, validated active drivers. Individual `match` routes accept the same `drivers` scope. |
 
 RTK rewrite selection happens inside `spice agent run`. The built-in `common`
 group supplies only the finite post-selection command-shape transformations:
 rg-only grep flags to `rg`, native find predicates to `find`, diagnostic git
-flags to `git`, and a final head-only route that injects `-E` so `rtk grep`
-defaults to extended regular expressions (an explicit `-F` or `-G` later in
-argv still wins because grep honors the last matcher flag). Naming `common` in
-a repo `[tool.spice.wrappers.common]` table replaces the whole group atomically
-— routes do not concatenate, so an override must re-list every route it keeps —
-while omitting the table inherits this default and `wrappers = []` disables
-generation. A `false` group or entry disables that inherited name explicitly.
-Repo groups should otherwise wrap stable repo-owned tools (see
-[wrapper commands](../cli/wrapper-commands.md)).
+flags to `git`, a Codex-scoped head-only route that injects `-E` into
+`rtk grep`, and a Codex-scoped plain `grep -E` wrapper. Claude receives the
+native forms because its BASIC-regexp authoring uses `\|`; Codex receives
+extended matching by default, with later explicit matcher flags still winning.
+Naming `common` in a repo `[tool.spice.wrappers.common]` table replaces the whole
+group atomically — routes do not concatenate, so an override must re-list every
+route it keeps — while omitting the table inherits this default and
+`wrappers = []` disables generation. A `false` group or entry disables that
+inherited name explicitly. Repo groups should otherwise wrap stable repo-owned
+tools (see [wrapper commands](../cli/wrapper-commands.md)).
 
 ## `[tool.spice.commands]`
 
