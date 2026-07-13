@@ -41,6 +41,8 @@ from spice.cli.mounts import (
 from spice.errors import SpiceError
 from spice.flexstate import FlexSliceClaim
 from spice.paths import find_tool
+from spice.gitprocess import run_git_command
+from spice.toolprocess import run_tool_command
 from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
 from spice.policyconfig import resolve_policy
 from spice.configlayer import effective_table
@@ -471,9 +473,10 @@ def _run_policy_command_step(command: CommandStep) -> None:
         # carries the same mount environment `spice <name>` exports.
         env[MOUNTED_COMMAND_ENV] = "1"
         env[VISIBLE_PROG_ENV] = command.visible_prog
-    result = subprocess.run(
+    result = run_tool_command(
         list(command.argv),
-        capture_output=True,
+        policy="extension",
+        operation=command.label,
         env=env,
         text=True,
         cwd=command.repo_root,
@@ -495,7 +498,7 @@ def _run_policy_command_step(command: CommandStep) -> None:
 def _restage_command_paths(command: CommandStep) -> None:
     if not command.staged_paths:
         return
-    subprocess.run(
+    run_git_command(
         ["git", "add", "--", *(path.as_posix() for path in command.staged_paths)],
         capture_output=True,
         cwd=command.repo_root,
@@ -593,26 +596,29 @@ def _run_python_format_guard(repo_root: Path, paths: list[Path]) -> None:
     targets = [str(path) for path in python_paths if (repo_root / path).exists()]
     if not targets:
         return
-    subprocess.run(
+    run_tool_command(
         [ruff, "format", *targets],
-        capture_output=True,
+        policy="hook",
+        operation="format staged Python",
         text=True,
         cwd=repo_root,
         check=True,
     )
-    subprocess.run(
+    run_tool_command(
         [ruff, "check", "--fix", *targets],
-        capture_output=True,
+        policy="hook",
+        operation="fix staged Python lint",
         text=True,
         cwd=repo_root,
         check=False,
     )
-    subprocess.run(
+    run_git_command(
         ["git", "add", "--", *targets], capture_output=True, cwd=repo_root, check=True
     )
-    lint = subprocess.run(
+    lint = run_tool_command(
         [ruff, "check", *targets],
-        capture_output=True,
+        policy="hook",
+        operation="check staged Python lint",
         text=True,
         cwd=repo_root,
         check=False,

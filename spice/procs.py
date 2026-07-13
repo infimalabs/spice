@@ -246,6 +246,9 @@ def run_bounded_process_group(
     input_label: str,
     cwd: Any = None,
     text: bool = False,
+    env: dict[str, str] | None = None,
+    input: Any = None,
+    check: bool = False,
 ) -> subprocess.CompletedProcess[Any]:
     """Capture a child under a deadline and terminate its whole group on expiry."""
     if timeout_seconds <= 0:
@@ -256,10 +259,12 @@ def run_bounded_process_group(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=text,
+        env=env,
+        stdin=subprocess.PIPE if input is not None else None,
         **popen_new_process_group_kwargs(),
     )
     try:
-        stdout, stderr = process.communicate(timeout=timeout_seconds)
+        stdout, stderr = process.communicate(input=input, timeout=timeout_seconds)
     except subprocess.TimeoutExpired as exc:
         terminate_process_group(
             process,
@@ -276,7 +281,15 @@ def run_bounded_process_group(
             timeout_seconds=timeout_seconds,
             command=command,
         ) from exc
-    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+    completed = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+    if check and completed.returncode != 0:
+        raise subprocess.CalledProcessError(
+            completed.returncode,
+            command,
+            output=stdout,
+            stderr=stderr,
+        )
+    return completed
 
 
 def _is_windows() -> bool:

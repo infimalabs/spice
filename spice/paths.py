@@ -6,10 +6,12 @@ import contextlib
 import json
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
+from subprocess import CalledProcessError
 from typing import Any
+
+from spice.gitprocess import run_git_command
 
 STATE_DIRNAME = ".spice"
 SHARED_ATTACHMENT_DIR = Path("spice") / "attachments"
@@ -18,13 +20,13 @@ SHARED_ATTACHMENT_DIR = Path("spice") / "attachments"
 def repo_root_from_cwd(cwd: Path | None = None) -> Path | None:
     """Resolve the enclosing git worktree root, or None outside git."""
     try:
-        result = subprocess.run(
+        result = run_git_command(
             ["git", "-C", str(cwd or Path.cwd()), "rev-parse", "--show-toplevel"],
             capture_output=True,
             check=True,
             text=True,
         )
-    except (OSError, subprocess.CalledProcessError):
+    except (OSError, CalledProcessError):
         return None
     raw = result.stdout.strip()
     return Path(raw) if raw else None
@@ -43,7 +45,7 @@ def git_common_dir(root: Path) -> Path:
     """The shared git dir for every worktree of one repository."""
     from spice.errors import SpiceError
 
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "-C", str(root), "rev-parse", "--git-common-dir"],
         capture_output=True,
         check=False,
@@ -59,7 +61,7 @@ def git_dir(root: Path) -> Path:
     """The git dir for this specific worktree."""
     from spice.errors import SpiceError
 
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "-C", str(root), "rev-parse", "--git-dir"],
         capture_output=True,
         check=False,

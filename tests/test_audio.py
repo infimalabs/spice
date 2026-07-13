@@ -37,7 +37,7 @@ def test_default_speech_backend_uses_macos_say_config(tmp_path, monkeypatch):
         output_path.write_bytes(b"m4a-bytes")
         return subprocess.CompletedProcess(args, 0)
 
-    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+    monkeypatch.setattr(audio, "run_tool_command", fake_run)
 
     rendered = audio.render_speech_audio(
         "hello/world",
@@ -68,7 +68,7 @@ def test_external_speech_backend_uses_configured_command(tmp_path, monkeypatch):
         seen["input"] = kwargs["input"]
         return subprocess.CompletedProcess(args, 0, stdout=b"wav-bytes", stderr=b"")
 
-    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+    monkeypatch.setattr(audio, "run_tool_command", fake_run)
 
     rendered = audio.render_speech_audio(
         "see [docs](https://example.test)",
@@ -94,7 +94,7 @@ def test_external_speech_backend_reports_command_failure(tmp_path, monkeypatch):
     def fake_run(args, **kwargs):
         return subprocess.CompletedProcess(args, 7, stdout=b"", stderr=b"bad model")
 
-    monkeypatch.setattr(audio.subprocess, "run", fake_run)
+    monkeypatch.setattr(audio, "run_tool_command", fake_run)
 
     with pytest.raises(
         RuntimeError,

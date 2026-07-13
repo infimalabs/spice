@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 import tomllib
 from collections.abc import Mapping
@@ -24,6 +23,7 @@ from spice.configlayer import effective_mapping, effective_table
 from spice.configlayer import layer_table as layer_table
 from spice.configlayer import load_config as load_config
 from spice.errors import SpiceError
+from spice.gitprocess import run_git_command
 from spice.paths import (
     atomic_write_text,
     repo_root_from_cwd,
@@ -536,15 +536,12 @@ def say_command_args(
 
 
 def git_worktree_config_get(repo_root: Path, key: str) -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo_root), "config", "--worktree", "--get", key],
-            capture_output=True,
-            check=False,
-            text=True,
-        )
-    except OSError:
-        return None
+    result = run_git_command(
+        ["git", "-C", str(repo_root), "config", "--worktree", "--get", key],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
@@ -552,9 +549,8 @@ def git_worktree_config_get(repo_root: Path, key: str) -> str | None:
 
 def git_worktree_config_set(repo_root: Path, key: str, value: str) -> None:
     """Set a real Git worktree config value (settings Git itself owns)."""
-    subprocess.run(
+    run_git_command(
         ["git", "-C", str(repo_root), "config", "--worktree", key, value],
         check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        capture_output=True,
     )

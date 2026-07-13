@@ -9,7 +9,6 @@ touching the working tree.
 from __future__ import annotations
 
 import json
-import subprocess
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -19,6 +18,7 @@ from typing import Any, TypeVar
 
 from spice.paths import git_common_dir
 from spice.policy import flex_limit as flex_limit  # single source of the ratio
+from spice.gitprocess import run_git_command
 
 StickyKey = TypeVar("StickyKey")
 Item = TypeVar("Item")
@@ -51,7 +51,7 @@ class FlexSliceClaimDecision:
 
 
 def git_state_path(git_path: str, *, root: Path) -> Path:
-    completed = subprocess.run(
+    completed = run_git_command(
         ["git", "rev-parse", "--git-path", git_path],
         capture_output=True,
         cwd=root,

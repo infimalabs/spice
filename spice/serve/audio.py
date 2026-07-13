@@ -5,13 +5,13 @@ from __future__ import annotations
 import os
 import re
 import shlex
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from spice import config
+from spice.toolprocess import run_tool_command
 
 SAY_AUDIO_CONTENT_TYPE = "audio/mp4"
 SAY_AUDIO_SUFFIX = ".m4a"
@@ -82,12 +82,12 @@ class ExternalCommandSpeechBackend:
     ) -> SpeechAudio:
         if not self.command:
             raise RuntimeError("external speech backend requires a command")
-        result = subprocess.run(
+        result = run_tool_command(
             list(self.command),
+            policy="speech",
+            operation="render external speech audio",
             input=prepare_say_text(text).encode("utf-8"),
             check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
         )
         if result.returncode != 0:
             detail = result.stderr.decode("utf-8", "replace").strip()
@@ -203,7 +203,7 @@ def _render_macos_say_audio(
     audio_path = Path(raw_path)
     try:
         os.close(handle)
-        subprocess.run(
+        run_tool_command(
             [
                 *config.say_command_args(
                     repo_root,
@@ -216,11 +216,11 @@ def _render_macos_say_audio(
                 "-f",
                 "-",
             ],
+            policy="speech",
+            operation="render macOS speech audio",
             input=prepare_say_text(text),
             text=True,
             check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
         )
         return audio_path.read_bytes()
     finally:

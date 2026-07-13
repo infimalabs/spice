@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,6 +16,7 @@ from spice import defaults
 from spice.errors import SpiceError
 from spice.locking import FileLockUnavailable, lock_fd_exclusive, unlock_fd
 from spice.paths import require_repo_root
+from spice.toolprocess import run_parent_lifetime_command
 from spice.configlayer import effective_context, effective_table
 
 DEFAULT_LOCK_CONTENTION_EXIT_CODE = defaults.integer(
@@ -498,7 +498,7 @@ def _child_argv(raw: list[str]) -> list[str]:
 
 def _run_child(child: list[str]) -> int:
     try:
-        result = subprocess.run(child, check=False)
+        result = run_parent_lifetime_command(child, check=False)
     except FileNotFoundError as exc:
         raise SpiceError(f"child command not found: {child[0]}") from exc
     except OSError as exc:

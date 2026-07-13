@@ -14,7 +14,6 @@ import argparse
 import json
 import os
 import shlex
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +23,7 @@ from spice.agent.driver import dashed_uuid
 from spice.agent.lifecycle import write_agent_state
 from spice.config import WORKTREE_SOURCE, set_scope_section
 from spice.errors import SpiceError
+from spice.gitprocess import run_git_command
 from spice.serve.app import DEFAULT_SERVE_HOST, DEFAULT_SERVE_PORT, run_serve
 
 # A fixed, obviously-synthetic thread id keeps the seeded transcript path and
@@ -208,8 +208,8 @@ def _prepare_demo_root(root: Path | None) -> Path:
 
 
 def _git_init_demo_repo(repo_root: Path) -> None:
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo_root, check=True)
-    subprocess.run(
+    run_git_command(["git", "init", "-q", "-b", "main"], cwd=repo_root, check=True)
+    run_git_command(
         [
             "git",
             "-c",

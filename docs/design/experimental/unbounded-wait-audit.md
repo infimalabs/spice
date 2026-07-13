@@ -28,18 +28,18 @@ sites are inventoried below.
 | `spice/agent/judgeadapter.py:101` | Judge execution has a configured timeout and reports expiry. | Bounded |
 | `spice/studies/mutations.py:249` | The mutation command receives its configured timeout. | Bounded |
 | `spice/tasks/ops.py:112` | Optional RTK gain measurement has a short timeout and degrades to no gain data. | Bounded |
-| `spice/gitprocess.py:41`; wrapper at `spice/tasks/gitsync.py:65` | The shared git runner applies a configurable 120-second default; task `fetch` and `push` retain their tighter 30-second limit plus noninteractive SSH connect timeout. | Bounded, implemented under `GITSYNC-1kCzJQCl`; task-lock coordination remains in `RELIABI-1kCzJljJ` |
+| `spice/gitprocess.py:41`; wrapper at `spice/tasks/gitsync.py:65` | The shared git runner applies a configurable 120-second default; task `fetch` and `push` retain their tighter 30-second limit plus noninteractive SSH connect timeout. | Bounded, implemented under `GITSYNC-1kCzJQCl` and `RELIABI-1kCzJljJ` |
 | `spice/agent/lifecycle.py:431,701`; `spice/agent/watchdog.py:112` | These `Popen` calls create the supervisor, agent, or watchdog process whose unbounded runtime is the product. Startup publication is separately deadline-bound; shutdown uses process groups. | Lifetime-bound |
-| `spice/cli/entry.py:128`; `spice/cli/mounts.py:125`; `spice/resourcelocks.py:501` | Self-exec, mounted commands, and `lock run` children are foreground commands. They inherit terminal/parent cancellation and intentionally run until the selected command exits. | Lifetime-bound; policy documentation and representative cancellation coverage in `RELIABI-1kCzJtSj` |
-| `spice/agent/cli.py:196`; `spice/agent/judgeadapter.py:85`; `spice/hooks/refguard.py:37`; `spice/tasks/cli.py:848,1018`; `spice/tasks/taskdoc.py:12,14` | Foreground CLI, hook, and document reads intentionally wait for the invoking pipe or terminal to deliver EOF; the operator or parent process owns cancellation. | Lifetime-bound foreground input |
+| `spice/toolprocess.py:73`; callers in `spice/cli/entry.py`, `spice/cli/mounts.py`, and `spice/resourcelocks.py` | Self-exec, mounted commands, and `lock run` children use the explicit parent-lifetime runner. They inherit terminal/parent cancellation and intentionally run until the selected command exits. | Lifetime-bound foreground child |
+| `spice/agent/cli.py:196`; `spice/agent/judgeadapter.py:85`; `spice/hooks/refguard.py:38`; `spice/tasks/cli.py:848,1018`; `spice/tasks/taskdoc.py:12,14` | Foreground CLI, hook, and document reads intentionally wait for the invoking pipe or terminal to deliver EOF; the operator or parent process owns cancellation. | Lifetime-bound foreground input |
 | `spice/agent/driver.py:1047`; `spice/agent/lifecycle.py:520,928`; `spice/procs.py:137,150,169`; `spice/agent/shadow.py:226` | Appearance lookup, supervisor git probes, process-liveness helpers, and git-shadow reads now carry explicit deadlines and return their documented conservative fallbacks on expiry. | Bounded, implemented under `RELIABI-1kCzJcnr` |
-| `spice/config.py:513,528`; `spice/flexstate.py:54`; `spice/paths.py:21,46,62` | General configuration and repository discovery calls still sit on CLI paths where a hung binary can retain the command. | Actionable shared runner work: `RELIABI-1kCzJtSj` |
+| Configuration, flex-state, and repository-discovery Git calls route through `spice/gitprocess.py:41` | General configuration and repository discovery calls use the configured Git deadline and preserve full command identity on timeout. | Bounded, implemented under `RELIABI-1kCzJtSj` |
 | `spice/tasks/tw.py:51`; task-local Git callers in `spice/tasks/config.py`, `tw.py`, and `sizing.py` route through `spice/gitprocess.py:41` | Taskwarrior commands have a named 120-second deadline; all task-local Git network and local operations share the configured Git deadline while fetch and push retain their tighter limit. | Bounded, implemented under `RELIABI-1kCzJljJ` |
 | `spice/sessions/briefingpressure.py:258-279,295-306,594-610`; `spice/studies/complexity.py:172-179`; command guard at `spice/sessions/cli.py:310-339` | Briefing Git and complexity providers run in dedicated process groups with named 15-second phase deadlines; standalone complexity collection has a 30-second deadline. Briefing and sweep additionally have a configurable 30-second end-to-end render deadline whose typed diagnostic names the action and transcript inputs. | Bounded, implemented under `RELIABI-1kCzJgmj` |
-| `spice/serve/audio.py:85,206`; `spice/serve/typecheck.py:97` | Configurable speech, macOS `say`, and serve typechecking occupy request or worker capacity until their child exits. | Actionable: `AUDIO-1kCzJRGj` for duration-aware audio bounds, `RELIABI-1kCzJpcb` for serve worker coordination, and shared runner policy in `RELIABI-1kCzJtSj` |
-| `spice/hooks/doctor.py:286,460,738`; `spice/hooks/install.py:119`; `spice/hooks/precommit.py:474,498,596,603,610,613`; `spice/hooks/refguard.py:125` | Hook and gate subprocesses inherit the invoking commit or diagnostic command. They are synchronously interruptible but have no declared per-tool deadline, so CI can remain retained by a stuck child. | Actionable policy: `RELIABI-1kCzJtSj` |
-| `spice/release.py:461,777,837`; `spice/serve/demo.py:211,212` | Release, GitHub CLI, packaging, and demo git commands are foreground work with parent cancellation but no per-operation subprocess deadline. | Actionable policy: `RELIABI-1kCzJtSj` |
-| `spice/studies/links.py:117`; `spice/studies/mutations.py:78,262`; `spice/studies/reachability.py:352`; `spice/studies/typecheck.py:84,152`; `spice/studies/walk.py:226,254,267,296,314,326` | Study providers and git walks are foreground analysis. Their input size can legitimately vary widely, but a wedged tool is indistinguishable from useful work and has no named cancellation policy. | Actionable policy: `RELIABI-1kCzJtSj` |
+| Speech and serve-typecheck callers route through `spice/toolprocess.py` | Configurable speech, macOS `say`, and serve typechecking use named speech or typecheck deadlines with process-group cleanup. Worker coordination remains separately actionable. | Bounded child execution under `RELIABI-1kCzJtSj`; worker coordination: `RELIABI-1kCzJpcb` |
+| Hook, extension, Ruff, and typecheck callers route through `spice/toolprocess.py`; Git hook operations route through `spice/gitprocess.py:41` | Gate subprocesses use named hook, extension, or typecheck deadlines and whole-process-group cleanup. | Bounded, implemented under `RELIABI-1kCzJtSj` |
+| Release and demo callers route through `spice/toolprocess.py` or `spice/gitprocess.py:41` | Release, GitHub CLI, packaging, and demo Git commands use named release or Git deadlines with command identity diagnostics. | Bounded, implemented under `RELIABI-1kCzJtSj` |
+| Study providers route through `spice/toolprocess.py`; study Git walks route through `spice/gitprocess.py:41` | Typecheck, mutation, reachability, and repository-walk providers use named study/typecheck or Git deadlines with command identity and process-group cleanup. | Bounded, implemented under `RELIABI-1kCzJtSj` |
 
 ## Locks, threads, process waits, watchers, and sockets
 
@@ -72,7 +72,7 @@ sites are inventoried below.
 
 | Call sites | Caller impact and current cancellation contract | Classification |
 | --- | --- | --- |
-| `spice/release.py:802` | PyPI lookup passes a 20-second URL timeout. | Bounded |
+| `spice/release.py:804` | PyPI lookup passes a 20-second URL timeout. | Bounded |
 | `spice/tasks/gitsync.py:65` | Git fetch/push use a 30-second subprocess timeout, disable terminal prompts, and configure a five-second SSH connect timeout. | Bounded for network operations |
 | `spice/agent/sidechannel.py`, `sidechannelnotify.py`, `wrap.py` | Unix-domain connect and hello operations have explicit deadlines; established streams intentionally retain stop/parent/peer lifetime cancellation. | Mixed: Bounded handshake and lifetime-bound stream |
 | `spice/agent/driver.py:367`; `spice/agent/maximmetrics.py:141,164,181,228`; `spice/mail/ackstate.py:104,131`; `spice/serve/team/store.py:136,168`; `spice/studies/subsumption.py:50`; team/directive/filter/metric store `connect()` callers | SQLite connect and lock waits use Python's finite default timeout; the team store also sets an explicit busy timeout. They can delay callers but are not indefinite. | Bounded |
@@ -84,14 +84,12 @@ foreground child command, supervised agent, server, ACK watcher, socket stream,
 or sentinel-driven worker. They already have an external cancellation owner and
 should not receive arbitrary wall-clock caps.
 
-Every remaining surface without such an owner is assigned to one of two concrete tasks. Agent side-channel handshakes and helper probes, session rehydration providers, and task backend coordination were bounded under `RELIABI-1kCzJcnr`, `RELIABI-1kCzJgmj`, and `RELIABI-1kCzJljJ`:
+The remaining surface without such an owner is assigned to one concrete task. Agent side-channel handshakes and helper probes, session rehydration providers, task backend coordination, and synchronous tool runners were bounded under `RELIABI-1kCzJcnr`, `RELIABI-1kCzJgmj`, `RELIABI-1kCzJljJ`, and `RELIABI-1kCzJtSj`:
 
 - `RELIABI-1kCzJpcb` — serve watcher activation and speech workers;
-- `RELIABI-1kCzJtSj` — shared deadlines for synchronous tool runners.
 
-Those remaining tasks require deterministic stalled-process and
-watcher-activation coverage for the serve and synchronous-tool paths named by
-this audit.
+That remaining task requires deterministic stalled-process and
+watcher-activation coverage for the serve worker paths named by this audit.
 
 `tests/test_waitsurfaceaudit.py` AST-scans the production tree and requires every
 direct subprocess, process wait, thread join, event/future wait, queue wait,

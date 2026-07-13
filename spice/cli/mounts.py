@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import shlex
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,6 +16,7 @@ from spice.cli.parser import (
 )
 from spice.errors import SpiceError
 from spice.paths import repo_root_from_cwd
+from spice.toolprocess import run_parent_lifetime_command
 from spice.configlayer import effective_commands
 
 MOUNT_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -122,7 +122,7 @@ def run_mounted_command(mount: MountedCommand, args: list[str]) -> int:
     env = dict(os.environ)  # env-policy: allow
     env[MOUNTED_COMMAND_ENV] = "1"
     env[VISIBLE_PROG_ENV] = mount.visible_prog
-    result = subprocess.run(
+    result = run_parent_lifetime_command(
         [*mount.argv, *args], cwd=mount.repo_root, env=env, check=False
     )
     return result.returncode
