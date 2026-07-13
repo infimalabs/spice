@@ -43,12 +43,19 @@ DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = defaults.string("say", "external_content_typ
 SAY_VOICE_KEY = "voice"
 SAY_WORDS_PER_MINUTE_KEY = "words_per_minute"
 DEFAULT_SAY_WORDS_PER_MINUTE = defaults.integer("say", "words_per_minute")
+SAY_TIMEOUT_SECONDS_KEY = "timeout_seconds"
+# Generous ceiling: comfortably covers well over a minute of spoken content
+# (plus render overhead) so legitimately-long messages are never clipped, while
+# still bounding a wedged speech process instead of blocking forever. A repo or
+# worktree ``say.timeout_seconds`` override tunes it through the accessor below.
+DEFAULT_SAY_TIMEOUT_SECONDS = 300.0
 SAY_MUTABLE_KEYS = (
     SAY_BACKEND_KEY,
     SAY_COMMAND_KEY,
     SAY_CONTENT_TYPE_KEY,
     SAY_VOICE_KEY,
     SAY_WORDS_PER_MINUTE_KEY,
+    SAY_TIMEOUT_SECONDS_KEY,
 )
 
 AGENT_KEY = "agent"
@@ -315,6 +322,25 @@ def configured_say_words_per_minute(repo_root: Path | None = None) -> int | None
     return value if value > 0 else None
 
 
+def configured_say_timeout(repo_root: Path | None = None) -> float:
+    """Seconds a speech subprocess may run before it is bounded and reported.
+
+    Falls back to the generous default when unset or non-positive so a valid
+    long message is never clipped; a positive override lets operators tune it.
+    """
+    root = _root_or_current(repo_root)
+    raw = _configured_value(root, SAY_KEY, SAY_TIMEOUT_SECONDS_KEY)
+    if raw is None:
+        return DEFAULT_SAY_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_SAY_TIMEOUT_SECONDS
+    if value != value:  # NaN
+        return DEFAULT_SAY_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_SAY_TIMEOUT_SECONDS
+
+
 def configured_agent_personality(repo_root: Path | None = None) -> str:
     root = _root_or_current(repo_root)
     raw = str(_configured_value(root, AGENT_KEY, AGENT_PERSONALITY_KEY) or "").strip()
@@ -434,9 +460,7 @@ def maxim_adjudication_enabled(repo_root: Path | None = None) -> bool:
     root = _root_or_current(repo_root)
     if root is None:
         return False
-    return _config_flag(
-        layer_table(root, WORKTREE_SOURCE, JUDGE_KEY).get(JUDGE_ENABLED_KEY)
-    )
+    return _config_flag(_effective_section(root, JUDGE_KEY).get(JUDGE_ENABLED_KEY))
 
 
 def _config_flag(value: Any) -> bool:
