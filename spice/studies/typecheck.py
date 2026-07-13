@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import os
 import shlex
-import subprocess
 from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.paths import find_tool
+from spice.toolprocess import run_tool_command
 from spice.configlayer import effective_table
 from spice.repocfg import read_pyproject
 from spice.studies.shape import configured_package_roots
@@ -81,9 +81,10 @@ def run_python_typecheck(repo_root: Path) -> None:
         # derives none has nothing in this lane.
         return
     argv = python_typecheck_argv(repo_root, targets)
-    result = subprocess.run(
+    result = run_tool_command(
         list(argv),
-        capture_output=True,
+        policy="typecheck",
+        operation="run Python typecheck",
         text=True,
         cwd=repo_root,
         check=False,
@@ -149,7 +150,7 @@ def _uv_project_interpreter(repo_root: Path) -> Path | None:
         raise SpiceError(
             "python-typecheck detected a uv-managed project but uv is not installed"
         )
-    result = subprocess.run(
+    result = run_tool_command(
         [
             uv,
             "run",
@@ -162,7 +163,8 @@ def _uv_project_interpreter(repo_root: Path) -> Path | None:
             "-c",
             "import sys; print(sys.executable)",
         ],
-        capture_output=True,
+        policy="typecheck",
+        operation="resolve uv project interpreter",
         text=True,
         cwd=repo_root,
         check=False,

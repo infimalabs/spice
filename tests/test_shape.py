@@ -255,7 +255,7 @@ def test_python_typecheck_interpreter_resolves_uv_project(tmp_path, monkeypatch)
         assert kwargs["cwd"] == tmp_path
         return subprocess.CompletedProcess(argv, 0, stdout=f"{python}\n", stderr="")
 
-    monkeypatch.setattr(typecheck.subprocess, "run", fake_run)
+    monkeypatch.setattr(typecheck, "run_tool_command", fake_run)
 
     assert python_typecheck_interpreter(tmp_path) == python
 

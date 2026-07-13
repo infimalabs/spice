@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spice.errors import SpiceError
+from spice.gitprocess import run_git_command
 
 ZERO_OID_CHARS = {"0"}
 PROTECTED_COMMIT_LIMIT = 5
@@ -122,7 +123,7 @@ def _git_lines(repo_root: Path, *args: str) -> list[str]:
 
 
 def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return run_git_command(
         ["git", "-C", str(repo_root), *args],
         capture_output=True,
         check=False,

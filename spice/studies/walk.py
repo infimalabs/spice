@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import subprocess
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Iterable, Iterator
 
 from spice.configlayer import config_string_list, effective_table
+from spice.gitprocess import run_git_command
 from spice.repocfg import read_pyproject
 
 _RENAME_STATUS_FIELDS = 3
@@ -223,7 +223,7 @@ def staged_paths(
     ]
     if pattern:
         command.extend(["--", pattern])
-    result = subprocess.run(
+    result = run_git_command(
         command, capture_output=True, text=True, cwd=repo_root, check=True
     )
     return [
@@ -251,7 +251,7 @@ def changed_paths(
     ]
     if pattern:
         command.extend(["--", pattern])
-    result = subprocess.run(
+    result = run_git_command(
         command, capture_output=True, text=True, cwd=repo_root, check=True
     )
     return [
@@ -264,7 +264,7 @@ def changed_paths(
 
 def staged_renames(repo_root: Path) -> dict[Path, Path]:
     exclusions = policy_path_exclusions(repo_root)
-    result = subprocess.run(
+    result = run_git_command(
         [
             "git",
             "diff",
@@ -293,7 +293,7 @@ def staged_renames(repo_root: Path) -> dict[Path, Path]:
 
 def tracked_paths(repo_root: Path) -> list[Path]:
     exclusions = policy_path_exclusions(repo_root)
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "ls-files"],
         capture_output=True,
         text=True,
@@ -311,7 +311,7 @@ def tracked_paths(repo_root: Path) -> list[Path]:
 def partially_staged_paths(repo_root: Path) -> list[Path]:
     """Files staged AND modified again in the worktree (the fully-staged rule)."""
     staged = {path.as_posix() for path in staged_paths(repo_root, honor_policy=False)}
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "diff", "--name-only"],
         capture_output=True,
         text=True,
@@ -323,7 +323,7 @@ def partially_staged_paths(repo_root: Path) -> list[Path]:
 
 
 def git_blob_text(repo_root: Path, ref: str, path: Path) -> str | None:
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "show", f"{ref}:{path.as_posix()}"],
         capture_output=True,
         text=True,

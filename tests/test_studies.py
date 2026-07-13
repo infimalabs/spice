@@ -924,7 +924,7 @@ def test_changed_python_paths_skips_configured_test_roots(tmp_path, monkeypatch)
             stderr="",
         )
 
-    monkeypatch.setattr(mutations.subprocess, "run", fake_run)
+    monkeypatch.setattr(mutations, "run_git_command", fake_run)
 
     assert mutations.changed_python_paths(tmp_path) == [Path("pkg/sample.py")]
 
@@ -954,7 +954,8 @@ def test_mutation_study_scores_module_and_records_killing_tests(tmp_path, monkey
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
         raise AssertionError(f"unexpected command: {command}")
 
-    monkeypatch.setattr(mutations.subprocess, "run", fake_run)
+    monkeypatch.setattr(mutations, "run_bounded_process_group", fake_run)
+    monkeypatch.setattr(mutations, "run_tool_command", fake_run)
 
     study = mutations.run_mutation_study(
         [Path("pkg/sample.py")],

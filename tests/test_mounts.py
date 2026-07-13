@@ -176,7 +176,7 @@ def test_run_mounted_command_exports_visible_spice_identity(
         captured["check"] = check
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr("spice.cli.mounts.subprocess.run", fake_run)
+    monkeypatch.setattr("spice.cli.mounts.run_parent_lifetime_command", fake_run)
     mount = MountedCommand(
         path=("report", "inspect"),
         argv=("project-tool", "report", "inspect"),

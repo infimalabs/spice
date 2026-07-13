@@ -16,7 +16,10 @@ from pathlib import Path
 from typing import Any
 
 from spice.errors import SpiceError
+from spice.gitprocess import run_git_command
+from spice.procs import ProcessDeadlineExceeded, run_bounded_process_group
 from spice.studies.walk import is_excluded_path, is_test_path
+from spice.toolprocess import run_tool_command
 
 MUTATION_RATCHET_VERSION = 1
 DEFAULT_MAX_MUTANTS_PER_MODULE = 20
@@ -75,7 +78,7 @@ def changed_python_paths(root: Path, *, baseline_ref: str = "HEAD") -> list[Path
         ["git", "diff", "--name-only", "--diff-filter=ACMR", baseline_ref],
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR", baseline_ref],
     ):
-        result = subprocess.run(
+        result = run_git_command(
             command, cwd=root, capture_output=True, check=True, text=True
         )
         for raw in result.stdout.splitlines():
@@ -246,20 +249,21 @@ def _run_pytest(
 ) -> subprocess.CompletedProcess[str] | None:
     command = ["uv", "run", "pytest", "-q", *[path.as_posix() for path in test_paths]]
     try:
-        return subprocess.run(
+        return run_bounded_process_group(
             command,
+            timeout_seconds=timeout_seconds,
+            phase="tool.study",
+            input_label="mutation baseline pytest",
             cwd=root,
-            capture_output=True,
             check=False,
             text=True,
-            timeout=timeout_seconds,
         )
-    except subprocess.TimeoutExpired:
+    except ProcessDeadlineExceeded:
         return None
 
 
 def _collect_test_nodeids(root: Path, test_paths: list[Path]) -> set[str]:
-    result = subprocess.run(
+    result = run_tool_command(
         [
             "uv",
             "run",
@@ -269,7 +273,8 @@ def _collect_test_nodeids(root: Path, test_paths: list[Path]) -> set[str]:
             *[path.as_posix() for path in test_paths],
         ],
         cwd=root,
-        capture_output=True,
+        policy="study",
+        operation="collect mutation test nodeids",
         check=False,
         text=True,
     )
