@@ -226,8 +226,14 @@ class LiveBusSession:
             self._payload_pool = None
 
     def _send(self, payload: dict[str, Any]) -> None:
+        # Serialize the frame to bytes before taking send_lock so the lock's
+        # critical section is only the socket write. A watcher thread busy
+        # encoding a bulk lane payload no longer holds the lock through that
+        # encode, so a small lane.sendResult ack acquires it and writes as soon
+        # as any in-flight write returns rather than queuing behind the encode.
+        frame = self.connection.encode_text_frame(payload)
         with self.send_lock:
-            self.connection.send_json(payload)
+            self.connection.send_frame(frame)
 
     def _reply(self, message: dict[str, Any], payload: dict[str, Any]) -> None:
         request_id = message.get("requestId")
