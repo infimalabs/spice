@@ -74,10 +74,22 @@ class WebSocketConnection:
                 continue
             raise WebSocketProtocolError(f"unsupported WebSocket opcode {opcode}")
 
-    def send_json(self, payload: dict[str, Any]) -> int:
+    def encode_text_frame(self, payload: dict[str, Any]) -> bytes:
+        """Serialize a JSON text frame to bytes without touching the socket.
+
+        Encoding is the expensive part of a large lane push. Callers encode
+        outside their send lock so the lock's critical section is only the
+        socket write, and a bulk push cannot stall a small ack that is waiting
+        to write on the same connection.
+        """
         text = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        self._write_frame(WEBSOCKET_TEXT_OPCODE, text)
-        return len(text)
+        return self._build_frame(WEBSOCKET_TEXT_OPCODE, text)
+
+    def send_frame(self, frame: bytes) -> None:
+        """Write a pre-encoded frame; the writer lock guards only this write."""
+        with self.writer_lock:
+            self.handler.wfile.write(frame)
+            self.handler.wfile.flush()
 
     def ping(self, payload: bytes = b"") -> None:
         self._write_frame(WEBSOCKET_PING_OPCODE, payload)
@@ -125,6 +137,9 @@ class WebSocketConnection:
         )
 
     def _write_frame(self, opcode: int, payload: bytes) -> None:
+        self.send_frame(self._build_frame(opcode, payload))
+
+    def _build_frame(self, opcode: int, payload: bytes) -> bytes:
         if len(payload) > MAX_TEXT_FRAME_BYTES:
             raise WebSocketProtocolError("WebSocket frame is too large")
         first = WEBSOCKET_FIN_BIT | opcode
@@ -145,9 +160,7 @@ class WebSocketConnection:
                 WEBSOCKET_PAYLOAD_64BIT_LENGTH,
                 length,
             )
-        with self.writer_lock:
-            self.handler.wfile.write(header + payload)
-            self.handler.wfile.flush()
+        return header + payload
 
 
 def is_websocket_request(handler: Any) -> bool:
