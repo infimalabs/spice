@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -74,6 +75,11 @@ def test_ping_pongs_while_a_slow_lane_refresh_is_still_computing(tmp_path):
         session._handle_ping({"type": "bus.ping", "requestId": "ping-1"})
         pong = _wait_for_reply(connection, request_id="ping-1")
         assert pong["type"] == "bus.pong"
+        assert pong["diagnostics"] == {
+            "clientId": session.client_id,
+            "frames": {},
+            "totals": {"count": 0, "bytes": 0},
+        }
 
         refresh_release.set()
         refresh_reply = _wait_for_reply(connection, request_id="refresh-1")
@@ -89,6 +95,40 @@ def test_ping_pongs_while_a_slow_lane_refresh_is_still_computing(tmp_path):
     finally:
         refresh_release.set()
         session._teardown()
+
+
+def test_session_diagnostics_measure_frame_bytes_and_send_lock_timing(
+    tmp_path, monkeypatch
+):
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=tmp_path)
+    connection = _Connection()
+    session = LiveBusSession(
+        connection,
+        _callbacks(target=target, transcript=transcript),
+    )
+    ticks = iter((1.0, 1.004, 1.005, 1.011))
+    monkeypatch.setattr(livebus.time, "perf_counter", lambda: next(ticks))
+    payload = {"type": "lane.payload", "payload": {"messages": []}}
+
+    timing = session._send(payload)
+    diagnostics = session.diagnostics()
+
+    expected_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    frame = diagnostics["frames"]["lane.payload"]
+    assert timing.lock_wait_ms == pytest.approx(4.0)
+    assert timing.lock_hold_ms == pytest.approx(7.0)
+    assert timing.write_ms == pytest.approx(6.0)
+    assert frame["count"] == 1
+    assert frame["bytes"] == expected_bytes
+    assert frame["sendLockWaitMsTotal"] == pytest.approx(4.0)
+    assert frame["sendLockWaitMsLast"] == pytest.approx(4.0)
+    assert frame["sendLockWaitMsMax"] == pytest.approx(4.0)
+    assert frame["sendLockHoldMsTotal"] == pytest.approx(7.0)
+    assert frame["sendLockHoldMsLast"] == pytest.approx(7.0)
+    assert frame["sendLockHoldMsMax"] == pytest.approx(7.0)
+    assert diagnostics["totals"] == {"count": 1, "bytes": expected_bytes}
 
 
 def test_two_refreshes_for_one_target_reply_in_request_order(tmp_path):

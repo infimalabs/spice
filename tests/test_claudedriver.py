@@ -50,16 +50,16 @@ def test_select_driver_defaults_to_codex_and_resolves_claude(tmp_path, monkeypat
 def test_select_driver_reads_worktree_config(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    from spice.config import update_section
+    from spice.config import set_worktree_section
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    update_section(tmp_path, "agent", {"driver": "claude"})
+    set_worktree_section(tmp_path, "agent", {"driver": "claude"})
     assert select_driver().name == "claude"
 
 
 def test_driver_for_reads_each_worktree_config(tmp_path, monkeypatch):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    from spice.config import update_section
+    from spice.config import set_worktree_section
 
     codex_repo = tmp_path / "codex-repo"
     claude_repo = tmp_path / "claude-repo"
@@ -67,7 +67,7 @@ def test_driver_for_reads_each_worktree_config(tmp_path, monkeypatch):
     claude_repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=codex_repo, check=True)
     subprocess.run(["git", "init", "-q"], cwd=claude_repo, check=True)
-    update_section(claude_repo, "agent", {"driver": "claude"})
+    set_worktree_section(claude_repo, "agent", {"driver": "claude"})
 
     assert driver_for(codex_repo).name == "codex"
     assert driver_for(claude_repo).name == "claude"
@@ -75,10 +75,10 @@ def test_driver_for_reads_each_worktree_config(tmp_path, monkeypatch):
 
 def test_driver_for_rejects_unknown_configured_driver(tmp_path, monkeypatch):
     monkeypatch.delenv(SPICE_AGENT_DRIVER_ENV, raising=False)
-    from spice.config import update_section
+    from spice.config import set_worktree_section
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    update_section(tmp_path, "agent", {"driver": "cloude"})
+    set_worktree_section(tmp_path, "agent", {"driver": "cloude"})
 
     with pytest.raises(RuntimeError, match="unknown agent driver 'cloude'"):
         driver_for(tmp_path)

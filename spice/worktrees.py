@@ -6,6 +6,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from spice.gitprocess import run_git_command
+
 
 @dataclass(frozen=True)
 class WorktreeRecord:
@@ -51,7 +53,7 @@ def non_bare_worktree_records(*, cwd: Path | None = None) -> list[WorktreeRecord
 
 def list_worktrees(*, cwd: Path | None = None) -> list[WorktreeRecord]:
     try:
-        completed = subprocess.run(
+        completed = run_git_command(
             ["git", "worktree", "list", "--porcelain"],
             cwd=cwd,
             capture_output=True,
@@ -97,7 +99,7 @@ def list_worktrees(*, cwd: Path | None = None) -> list[WorktreeRecord]:
 def _is_bare_record(path: Path, bare_marker: bool) -> bool:
     if bare_marker:
         return True
-    completed = subprocess.run(
+    completed = run_git_command(
         [
             "git",
             "-C",
@@ -120,7 +122,7 @@ def _is_bare_record(path: Path, bare_marker: bool) -> bool:
 
 def _resolve_existing_worktree_path(path: Path) -> Path:
     try:
-        completed = subprocess.run(
+        completed = run_git_command(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
             capture_output=True,
             check=True,

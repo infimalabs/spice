@@ -640,19 +640,40 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
     )
     assert env[shellhook.SHELL_HOOK_WRAPPERS_ENV] == "\n".join(
         [
+            *_builtin_rtk_wrapper_lines(),
             *_expected_wrapper_lines("wrap", ["grep", "git"]),
             *_expected_active_python_module_wrapper_lines(["pytest"]),
         ]
     )
 
 
+def test_layered_wrapper_false_disables_inherited_entry_and_group(tmp_path):
+    _write_agent_wrapper_config(
+        tmp_path,
+        order=["common", "disabled", "active"],
+        groups={
+            "common": {
+                "rtk": False,
+                "wrap": ["grep"],
+            },
+            "disabled": False,
+            "active": {"pytest": {"argv": ["python", "-m", "pytest"]}},
+        },
+    )
+
+    assert shellhook.render_agent_wrapper_lines(tmp_path) == [
+        *_expected_wrapper_lines("wrap", ["grep"]),
+        *_expected_python_module_wrapper_lines(["pytest"]),
+    ]
+
+
 def test_configured_agent_environment_installs_driver_shell_steering_hooks(
     tmp_path, monkeypatch
 ):
-    from spice.config import update_section
+    from spice.config import set_worktree_section
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    update_section(tmp_path, "agent", {"driver": "claude"})
+    set_worktree_section(tmp_path, "agent", {"driver": "claude"})
     real_zdotdir = tmp_path / "real-zdotdir"
     real_zdotdir.mkdir()
     real_bash_env = tmp_path / "real-bash-env"
@@ -856,7 +877,10 @@ def _init_git_repo(repo: Path) -> None:
 
 
 def _write_agent_wrapper_config(
-    repo: Path, *, order: list[str] | None, groups: dict[str, dict[str, object]]
+    repo: Path,
+    *,
+    order: list[str] | None,
+    groups: dict[str, dict[str, object] | bool],
 ) -> None:
     lines: list[str] = []
     if order is not None:
@@ -867,9 +891,19 @@ def _write_agent_wrapper_config(
                 f"wrappers = {wrappers_value}",
             ]
         )
+    disabled_groups = [name for name, entries in groups.items() if entries is False]
+    if disabled_groups:
+        lines.extend(["", "[tool.spice.wrappers]"])
+        lines.extend(f"{_toml_key(name)} = false" for name in disabled_groups)
     for group_name, entries in groups.items():
+        if entries is False:
+            continue
+        assert isinstance(entries, dict)
         lines.extend(["", f"[tool.spice.wrappers.{group_name}]"])
         for wrapper, value in entries.items():
+            if value is False:
+                lines.append(f"{_toml_key(wrapper)} = false")
+                continue
             if isinstance(value, dict):
                 command = value["argv"]
                 lines.append(
@@ -894,6 +928,7 @@ def _toml_key(value: str) -> str:
 
 def _expected_project_common_with_pytest_wrapper_lines() -> list[str]:
     return [
+        *_builtin_rtk_wrapper_lines(),
         *_expected_wrapper_lines("wrap", ["run", "grep", "find", "git"]),
         *_expected_active_python_module_wrapper_lines(["pytest"]),
     ]

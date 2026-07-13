@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from spice import defaults
 from spice.agent.driver import driver_choices
 from spice.config import configured_judge_bin
 from spice.errors import SpiceError
@@ -31,8 +32,8 @@ from spice.mail.inbox import parse_inbox_payload
 from spice.paths import repo_root_from_cwd
 from spice.repocfg import maxims_table, string_list
 
-DEFAULT_MAX_ATTEMPTS = 2
-PARALLEL_MAXIM_JUDGES = 2
+DEFAULT_MAX_ATTEMPTS = defaults.integer("maxim", "max_attempts")
+PARALLEL_MAXIM_JUDGES = defaults.integer("maxim", "parallel_judges")
 ANSWER_CHARACTERS = frozenset("YESNO ")
 TRAILING_NOISE = string.punctuation + string.whitespace
 ALL_MAXIM = "all"
@@ -40,16 +41,11 @@ ANY_MAXIM = "any"
 META_MAXIMS = frozenset({ALL_MAXIM, ANY_MAXIM})
 DISABLED_MAXIM_BAGS_GIT_PATH = "spice/disabled-maxim-bags.json"
 DISABLED_MAXIM_BAGS_KEY = "disabled_bags"
-MAXIM_PROPOSAL_MIN_RECURRENCE = 2
-MAXIM_PROPOSAL_DRAFT_MAX_WORDS = 8
+MAXIM_PROPOSAL_MIN_RECURRENCE = defaults.integer("maxim", "proposal_min_recurrence")
+MAXIM_PROPOSAL_DRAFT_MAX_WORDS = defaults.integer("maxim", "proposal_draft_max_words")
 MAXIM_PROPOSAL_TASK_CREATION_SURFACE = "maxim_proposal"
 _TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-DEFAULT_PROMPT_LINES = (
-    'IFF "{maxim}" AGREES WITH "{statement}": ANSWER ONLY "YES".',
-    'IFF "{maxim}" DISAGREES WITH "{statement}": ANSWER ONLY "NO".',
-    'IFF "{statement}" AGREES WITH "{maxim}": ANSWER ONLY "YES".',
-    'IFF "{statement}" DISAGREES WITH "{maxim}": ANSWER ONLY "NO".',
-)
+DEFAULT_PROMPT_LINES = defaults.strings("maxim", "prompt_lines")
 DEFAULT_PROMPT_TEMPLATE = "\n".join(DEFAULT_PROMPT_LINES) + "\n"
 
 JudgeBackend = Callable[[str], str]
@@ -179,7 +175,7 @@ def maxim_proposal_drafts(
     existing_bags: Mapping[str, MaximBag] | None = None,
 ) -> tuple[MaximProposalDraft, ...]:
     """Return mergeable TOML draft data for human-reviewed maxim proposals."""
-    trigger_owners = _flatten_bag_keys(existing_bags or BUILTIN_MAXIM_BAGS)
+    trigger_owners = _flatten_bag_keys(existing_bags or packaged_maxim_bags())
     drafts: list[MaximProposalDraft] = []
     for theme in themes:
         candidate_words = _maxim_proposal_draft_words(theme.recurring_terms)
@@ -619,107 +615,6 @@ def _maxim_proposal_theme(
     )
 
 
-# Built-in maxims keyed by a stable bag name. Bags declare every supported
-# spelling explicitly; the hot path tokenizes prose and matches whole trigger
-# keys. Each message is fed verbatim into a verdict, e.g. ``spice maxim agree
-# "$(spice maxim show fallback)" "<text>"``.
-BUILTIN_MAXIM_BAGS: dict[str, MaximBag] = {
-    "polling": MaximBag(
-        name="polling",
-        words=frozenset(
-            {
-                "delay",
-                "delayed",
-                "delaying",
-                "delays",
-                "poll",
-                "polled",
-                "polling",
-                "polls",
-                "sleep",
-                "sleeping",
-                "sleeps",
-                "slept",
-            }
-        ),
-        message=(
-            "😊 Respond to the real event, signal, or completion "
-            "notification through a blocking call, watcher, or callback, "
-            "or else restructure the flow so nothing remains to be "
-            "awaited at all!"
-        ),
-    ),
-    "fallbacks": MaximBag(
-        name="fallbacks",
-        words=frozenset(
-            {
-                "fall back",
-                "fall backs",
-                "fallback",
-                "fallbacks",
-                "falls back",
-                "option",
-                "optional",
-                "options",
-            }
-        ),
-        message=(
-            "😊 Commit to a single deterministic path and let violated "
-            "assumptions fail loudly and immediately, reserving an "
-            "explicit default or documented resolver order strictly for "
-            "what the contract names outright!"
-        ),
-    ),
-    "backwards-compat": MaximBag(
-        name="backwards-compat",
-        words=frozenset({"compatibilities", "compatibility", "compatible"}),
-        message=(
-            "😊 Migrate every caller directly to the current shape, "
-            "delete the prior one outright, and hold every new addition "
-            "to that same shape going forward!"
-        ),
-    ),
-    "shims": MaximBag(
-        name="shims",
-        words=frozenset(
-            {
-                "shim",
-                "shimmed",
-                "shimming",
-                "shims",
-            }
-        ),
-        message=(
-            "😊 Replace the old shape outright, delete it completely, "
-            "and route every caller straight to the new shape's real "
-            "interface!"
-        ),
-    ),
-    "aliases": MaximBag(
-        name="aliases",
-        words=frozenset({"alias", "aliased", "aliases", "aliasing"}),
-        message=(
-            "😊 Rename in place, update every reference immediately, and "
-            "let the changeover happen in one clean move so exactly one "
-            "name survives!"
-        ),
-    ),
-    "legacy": MaximBag(
-        name="legacy",
-        words=frozenset({"legacy", "legacies"}),
-        message=(
-            "😊 Delete superseded code, dead branches, and commented-out "
-            "history outright, trust the current thinking as the "
-            "complete record, and bring everything forward to match it!"
-        ),
-    ),
-}
-
-BUILTIN_MAXIMS: dict[frozenset[str], str] = {
-    bag.words: bag.message for bag in BUILTIN_MAXIM_BAGS.values()
-}
-
-
 def _flatten_bag_keys(bags: Mapping[str, MaximBag]) -> dict[str, str]:
     lookup: dict[str, str] = {}
     for name, bag in bags.items():
@@ -745,6 +640,11 @@ def resolved_maxim_bags(repo_root: Path | None = None) -> dict[str, MaximBag]:
     disabled = _load_disabled_maxim_bag_names(root)
     _validate_disabled_maxim_bag_names(disabled, bags)
     return {name: bag for name, bag in bags.items() if name not in disabled}
+
+
+def packaged_maxim_bags() -> dict[str, MaximBag]:
+    """Return the maxim bags defined by the installed configuration layer."""
+    return _configured_maxim_bags(None)
 
 
 def disabled_maxim_bag_names(repo_root: Path | None = None) -> frozenset[str]:
@@ -775,18 +675,15 @@ def set_maxim_bag_disabled(
 
 
 def _configured_maxim_bags(root: Path | None) -> dict[str, MaximBag]:
-    bags = dict(BUILTIN_MAXIM_BAGS)
-    if root is None:
-        return bags
+    bags: dict[str, MaximBag] = {}
     for raw_name, raw_config in maxims_table(root).items():
         name = _normalize_bag_name(raw_name)
         if not isinstance(raw_config, dict):
             raise SpiceError(f"[tool.spice.maxims.{name}] must be a table")
-        base = bags.get(name)
         bags[name] = MaximBag(
             name=name,
-            words=_configured_words(raw_config, base, name),
-            message=_configured_message(raw_config, base, name),
+            words=_configured_words(raw_config, None, name),
+            message=_configured_message(raw_config, None, name),
             drivers=_configured_drivers(raw_config, name),
         )
     _flatten_bag_keys(bags)

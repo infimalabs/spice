@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from spice.errors import SpiceError
+from spice.gitprocess import DEFAULT_GIT_TIMEOUT_SECONDS, run_git_command
 from spice.tasks import config, identity, wordingreview
 
 GIT_NETWORK_TIMEOUT_SECONDS = 30
@@ -59,20 +60,14 @@ def _run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         "env": env,
         "text": True,
     }
-    if args and args[0] in _NETWORK_COMMANDS:
-        kwargs["timeout"] = GIT_NETWORK_TIMEOUT_SECONDS
-    try:
-        return subprocess.run(command, **kwargs)
-    except subprocess.TimeoutExpired as exc:
-        return subprocess.CompletedProcess(
-            command,
-            124,
-            stdout=_timeout_text(exc.stdout),
-            stderr=(
-                _timeout_text(exc.stderr)
-                + f"git {args[0]} timed out after {GIT_NETWORK_TIMEOUT_SECONDS}s\n"
-            ),
-        )
+    timeout = (
+        GIT_NETWORK_TIMEOUT_SECONDS if args and args[0] in _NETWORK_COMMANDS else None
+    )
+    return run_git_command(
+        command,
+        default_timeout_seconds=timeout or DEFAULT_GIT_TIMEOUT_SECONDS,
+        **kwargs,
+    )
 
 
 def _control_plane_git_env() -> dict[str, str]:
@@ -80,14 +75,6 @@ def _control_plane_git_env() -> dict[str, str]:
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_SSH_COMMAND"] = TASK_GIT_SSH_COMMAND
     return env
-
-
-def _timeout_text(value: str | bytes | None) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return value
 
 
 def _read(repo_root: Path, *args: str) -> str:

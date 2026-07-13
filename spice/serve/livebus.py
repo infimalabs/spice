@@ -12,6 +12,7 @@ appends through a held-open handle), watchfiles covers Linux/Windows.
 
 from __future__ import annotations
 
+import json
 import os
 import select
 import time
@@ -116,6 +117,48 @@ class LaneSignature:
     other: Any
 
 
+@dataclass(frozen=True)
+class FrameSendTiming:
+    lock_wait_ms: float
+    lock_hold_ms: float
+    write_ms: float
+    finished_at: float
+
+
+@dataclass
+class _FrameTelemetry:
+    count: int = 0
+    bytes: int = 0
+    lock_wait_total_ms: float = 0.0
+    lock_wait_last_ms: float = 0.0
+    lock_wait_max_ms: float = 0.0
+    lock_hold_total_ms: float = 0.0
+    lock_hold_last_ms: float = 0.0
+    lock_hold_max_ms: float = 0.0
+
+    def record(self, byte_count: int, timing: FrameSendTiming) -> None:
+        self.count += 1
+        self.bytes += byte_count
+        self.lock_wait_total_ms += timing.lock_wait_ms
+        self.lock_wait_last_ms = timing.lock_wait_ms
+        self.lock_wait_max_ms = max(self.lock_wait_max_ms, timing.lock_wait_ms)
+        self.lock_hold_total_ms += timing.lock_hold_ms
+        self.lock_hold_last_ms = timing.lock_hold_ms
+        self.lock_hold_max_ms = max(self.lock_hold_max_ms, timing.lock_hold_ms)
+
+    def payload(self) -> dict[str, int | float]:
+        return {
+            "count": self.count,
+            "bytes": self.bytes,
+            "sendLockWaitMsTotal": self.lock_wait_total_ms,
+            "sendLockWaitMsLast": self.lock_wait_last_ms,
+            "sendLockWaitMsMax": self.lock_wait_max_ms,
+            "sendLockHoldMsTotal": self.lock_hold_total_ms,
+            "sendLockHoldMsLast": self.lock_hold_last_ms,
+            "sendLockHoldMsMax": self.lock_hold_max_ms,
+        }
+
+
 @dataclass
 class _LaneSubscription:
     target: Any
@@ -142,6 +185,8 @@ class LiveBusSession:
         self._subscription_sequence = 0
         self.subscriptions: dict[str, _LaneSubscription] = {}
         self.send_lock = Lock()
+        self._telemetry_lock = Lock()
+        self._frame_telemetry: dict[str, _FrameTelemetry] = {}
         # Metrics are read-only display data whose queries can be heavy; running
         # them inline would block interactive frames (lane.send, acks) on this
         # one socket. A dedicated worker drains them so the dispatch loop stays
@@ -225,15 +270,67 @@ class LiveBusSession:
             self._payload_pool.shutdown(wait=False, cancel_futures=True)
             self._payload_pool = None
 
-    def _send(self, payload: dict[str, Any]) -> None:
-        with self.send_lock:
-            self.connection.send_json(payload)
+    def diagnostics(self) -> dict[str, Any]:
+        with self._telemetry_lock:
+            frames = {
+                kind: telemetry.payload()
+                for kind, telemetry in sorted(self._frame_telemetry.items())
+            }
+        return {
+            "clientId": self.client_id,
+            "frames": frames,
+            "totals": {
+                "count": sum(int(frame["count"]) for frame in frames.values()),
+                "bytes": sum(int(frame["bytes"]) for frame in frames.values()),
+            },
+        }
 
-    def _reply(self, message: dict[str, Any], payload: dict[str, Any]) -> None:
+    def _send(
+        self,
+        payload: dict[str, Any],
+        *,
+        before_send: Callable[[float], None] | None = None,
+    ) -> FrameSendTiming:
+        wait_started_at = time.perf_counter()
+        self.send_lock.acquire()
+        acquired_at = time.perf_counter()
+        lock_wait_ms = _elapsed_ms(wait_started_at, acquired_at)
+        try:
+            if before_send is not None:
+                before_send(lock_wait_ms)
+            write_started_at = time.perf_counter()
+            byte_count = self.connection.send_json(payload)
+            finished_at = time.perf_counter()
+            timing = FrameSendTiming(
+                lock_wait_ms=lock_wait_ms,
+                lock_hold_ms=_elapsed_ms(acquired_at, finished_at),
+                write_ms=_elapsed_ms(write_started_at, finished_at),
+                finished_at=finished_at,
+            )
+            if not isinstance(byte_count, int):
+                byte_count = len(
+                    json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                )
+            kind = str(payload.get("type") or "unknown")
+            with self._telemetry_lock:
+                self._frame_telemetry.setdefault(kind, _FrameTelemetry()).record(
+                    byte_count, timing
+                )
+        finally:
+            self.send_lock.release()
+        return timing
+
+    def _reply(
+        self,
+        message: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        before_send: Callable[[float], None] | None = None,
+    ) -> FrameSendTiming:
         request_id = message.get("requestId")
         if isinstance(request_id, str) and request_id:
             payload = {**payload, "requestId": request_id}
-        self._send(payload)
+        return self._send(payload, before_send=before_send)
 
     def _dispatch(self, message: dict[str, Any]) -> None:
         kind = str(message.get("type") or "")
@@ -267,7 +364,10 @@ class LiveBusSession:
     # ---- handlers ------------------------------------------------------
 
     def _handle_ping(self, message: dict[str, Any]) -> None:
-        self._reply(message, {"type": "bus.pong"})
+        self._reply(
+            message,
+            {"type": "bus.pong", "diagnostics": self.diagnostics()},
+        )
 
     def _handle_targets_refresh(self, message: dict[str, Any]) -> None:
         self._reply(
@@ -561,14 +661,15 @@ class LiveBusSession:
         send_payload_started_at = time.perf_counter()
         result, _status = self.callbacks.send_payload(target, payload)
         send_payload_finished_at = time.perf_counter()
+        server_timing = _lane_send_server_timing(
+            received_at=received_at,
+            target_resolved_at=target_resolved_at,
+            send_payload_started_at=send_payload_started_at,
+            send_payload_finished_at=send_payload_finished_at,
+        )
         result = {
             **result,
-            "serverTiming": _lane_send_server_timing(
-                received_at=received_at,
-                target_resolved_at=target_resolved_at,
-                send_payload_started_at=send_payload_started_at,
-                send_payload_finished_at=send_payload_finished_at,
-            ),
+            "serverTiming": server_timing,
         }
         submission_key = str(result.get("key") or "")
         if result.get("ok") is True and submission_key:
@@ -577,7 +678,27 @@ class LiveBusSession:
                 key=submission_key,
                 evidence=str(result.get("path") or submission_key),
             )
-        self._reply(message, {"type": "lane.sendResult", "result": result})
+        reply_timing = self._reply(
+            message,
+            {"type": "lane.sendResult", "result": result},
+            before_send=lambda wait_ms: server_timing.update(
+                {"replyLockWaitMs": wait_ms}
+            ),
+        )
+        request_id = message.get("requestId")
+        if isinstance(request_id, str) and request_id:
+            self._send(
+                {
+                    "type": "lane.sendTiming",
+                    "requestId": request_id,
+                    "serverTiming": {
+                        **server_timing,
+                        "replyLockHoldMs": reply_timing.lock_hold_ms,
+                        "replyWriteMs": reply_timing.write_ms,
+                        "totalMs": _elapsed_ms(received_at, reply_timing.finished_at),
+                    },
+                }
+            )
         if result.get("ok") is True:
             self._queue_lane_send_followup(target, payload)
 

@@ -39,7 +39,7 @@ include = ["spice*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"spice" = ["py.typed"]
+"spice" = ["py.typed", "spice.toml"]
 "spice.agent" = [
     "*.md",
     "shellhooks/.zshenv",
@@ -125,6 +125,7 @@ env_names = [
     "RTK_DB_PATH",
     "SPICE_AGENT_BIN",
     "SPICE_AGENT_DRIVER",
+    "SPICE_GIT_TIMEOUT_SECONDS",
     "SPICE_JUDGE_MODEL_CMD",
     "SPICE_JUDGE_TIMEOUT",
     "SPICE_METRIC_HISTORY_RETENTION_DAYS",

@@ -706,6 +706,10 @@ function markLaneSubmitLatency(probe, name) {
 
 function finishLaneSubmitLatencyProbe(probe, status) {
   if (!probe || probe.completed) return;
+  if (probe.requestId && pendingLaneSendServerTimings.has(probe.requestId)) {
+    probe.serverTiming = pendingLaneSendServerTimings.get(probe.requestId) || {};
+    pendingLaneSendServerTimings.delete(probe.requestId);
+  }
   probe.completed = true;
   probe.status = status;
   markLaneSubmitLatency(probe, "completedAt");
