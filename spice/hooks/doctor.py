@@ -304,6 +304,7 @@ def _spice_package_source_for_python(python: Path) -> Path | None:
         ],
         policy="extension",
         operation="inspect installed spice runtime",
+        capture_output=True,
         check=False,
         cwd=Path("/"),
         text=True,
