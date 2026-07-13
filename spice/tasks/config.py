@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import tempfile
 import time
 from contextlib import contextmanager
@@ -19,7 +18,8 @@ from pathlib import Path
 
 from spice import defaults
 from spice.errors import SpiceError
-from spice.locking import lock_fd_exclusive, unlock_fd
+from spice.gitprocess import run_git_command
+from spice.locking import bounded_exclusive_lock
 
 TASK_BACKEND_ENV = "SPICE_TASK_BACKEND"  # env-policy: allow
 # All spice git-dir state lives under the `spice/` namespace, so a repo can host
@@ -320,6 +320,7 @@ _EVIDENCE = [
 ]
 
 _backend_override: str | None = None
+TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS = 30.0
 
 
 def set_backend(selector: str | None) -> None:
@@ -334,7 +335,7 @@ def _selector() -> str:
 
 
 def repo_root() -> Path:
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
         check=False,
@@ -346,7 +347,7 @@ def repo_root() -> Path:
 
 
 def git_common_dir(root: Path) -> Path:
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "-C", str(root), "rev-parse", "--git-common-dir"],
         capture_output=True,
         check=False,
@@ -387,12 +388,12 @@ def bootstrap_lock_path() -> Path:
 @contextmanager
 def _bootstrap_lock():
     backend_root().mkdir(parents=True, exist_ok=True)
-    with bootstrap_lock_path().open("a", encoding="utf-8") as handle:
-        lock_fd_exclusive(handle.fileno(), blocking=True)
-        try:
-            yield
-        finally:
-            unlock_fd(handle.fileno())
+    with bounded_exclusive_lock(
+        bootstrap_lock_path(),
+        timeout_seconds=TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS,
+        action="bootstrap task backend",
+    ):
+        yield
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
