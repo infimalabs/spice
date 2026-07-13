@@ -264,6 +264,54 @@ def test_inline_task_directive_renders_quote_like_block_in_message(tmp_path):
     )
 
 
+def test_inline_task_directive_without_acceptance_renders_card(tmp_path):
+    # UI-1kD6hDJ6 regression: the supervisor converts a directive that carries
+    # only title+project (acceptance omitted -> plan phase), so the UI must
+    # render it as a capture card exactly like an acceptance-bearing one --
+    # matching the attached example, which stayed raw with an ACK badge.
+    latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
+    transcript = tmp_path / "rollout.jsonl"
+    _write_response_item(
+        transcript,
+        latest,
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": (
+                        "Captured as a separate planning task.\n"
+                        "TASK title=Enable and verify the default AFM judge for Spice "
+                        "| project=hooks.maxims\n"
+                        "Continuing."
+                    ),
+                }
+            ],
+        },
+    )
+
+    items = message_reader.read_assistant_messages(transcript, limit=5)
+
+    assert len(items) == 1
+    item = items[0]
+    assert item.task_card_count == 1
+    assert item.to_payload()["task_card_count"] == 1
+    assert item.display_text == (
+        "Captured as a separate planning task.\n"
+        "Task capture: Enable and verify the default AFM judge for Spice "
+        "(hooks.maxims)\n"
+        "Continuing."
+    )
+    assert '<blockquote class="task-directive-quote">' in item.display_html
+    assert '<div class="task-directive-kicker">Task capture</div>' in item.display_html
+    assert (
+        "<dt>title</dt><dd>Enable and verify the default AFM judge for Spice</dd>"
+        in item.display_html
+    )
+    assert "<dt>project</dt><dd>hooks.maxims</dd>" in item.display_html
+
+
 def test_malformed_task_like_progress_update_remains_plain_message(tmp_path):
     latest = _stamp(datetime(2026, 6, 10, 11, 59, tzinfo=UTC))
     transcript = tmp_path / "rollout.jsonl"
