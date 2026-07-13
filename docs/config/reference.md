@@ -132,10 +132,16 @@ with `[tool.spice.agent] wrappers = [...]`.
 | `selector = { argv = ["tool", "subcommand"] }` | Create a direct wrapper function named `selector` that runs the configured argv plus caller arguments. |
 
 RTK rewrite selection happens inside `spice agent run`. The built-in `common`
-group supplies only the finite post-selection command-shape transformations
-for rg-only grep flags, native find predicates, and diagnostic git flags. Repo
-groups may replace or extend `common` and should otherwise wrap stable
-repo-owned tools (see [wrapper commands](../cli/wrapper-commands.md)).
+group supplies only the finite post-selection command-shape transformations:
+rg-only grep flags to `rg`, native find predicates to `find`, diagnostic git
+flags to `git`, and a final head-only route that injects `-E` so `rtk grep`
+defaults to extended regular expressions (an explicit `-F` or `-G` later in
+argv still wins because grep honors the last matcher flag). Naming `common` in
+a repo `[tool.spice.wrappers.common]` table replaces the whole group atomically
+— routes do not concatenate, so an override must re-list every route it keeps —
+while omitting the table inherits this default and `wrappers = []` disables
+generation. Repo groups should otherwise wrap stable repo-owned tools (see
+[wrapper commands](../cli/wrapper-commands.md)).
 
 ## `[tool.spice.commands]`
 

@@ -257,6 +257,8 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
             *shellhook.render_agent_wrapper_lines(tmp_path),
             "rtk grep --files src",
             "rtk grep needle src",
+            "rtk grep -F 'a|b' src",
+            "rtk grep -G 'a\\|b' src",
             "rtk find src -name '*.py' -print",
             "rtk find src \\( -name '*.py' -o -name '*.md' \\)",
             "rtk git log --first-parent v1..HEAD",
@@ -284,7 +286,9 @@ def test_builtin_rtk_wrapper_dispatches_in_live_zsh(tmp_path):
     lines = _trace_lines(trace, expected_prefix="rg:")
     assert lines == [
         "rg:--files src",
-        "rtk:grep needle src",
+        "rtk:grep -E needle src",
+        "rtk:grep -E -F a|b src",
+        "rtk:grep -E -G a\\|b src",
         "find:src -name *.py -print",
         "find:src ( -name *.py -o -name *.md )",
         "git:log --first-parent v1..HEAD",

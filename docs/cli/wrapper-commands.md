@@ -80,14 +80,29 @@ commands for RTK; it preserves native semantics after RTK selection by routing:
 
 - rg-only grep flags (`--files`, `--type`, `--type=*`, `--no-heading`) to `rg`;
 - native find predicates and actions to `find`;
-- diagnostic git flags such as `--check` and `--name-status` to `git`.
+- diagnostic git flags such as `--check` and `--name-status` to `git`;
+- every remaining `rtk grep` through a final head-only `rtk grep -E` route.
 
-This repository replaces `common` with the same three transformations plus one
-head-only `rtk grep -E` route for BSD grep's extended-expression mode. Any new
-transformation belongs in the published contract and its executable tests; it
-is not an alternate rewrite selector.
+That last route makes extended regular expressions the default: `rtk grep`
+delegates to the platform grep, whose BASIC dialect would read rg-authored
+`| + ? ( )` as literals, so `-E` is injected ahead of the caller's arguments.
+Matcher selection stays deterministic — an explicit `-F` or `-G`, later in
+argv, still wins because grep honors the last matcher flag; a repeated `-E` is
+harmless; and unsupported or conflicting backend flags pass through unchanged to
+fail natively rather than selecting an alternate path. Any new transformation
+belongs in the published contract and its executable tests; it is not an
+alternate rewrite selector.
 
-Repos that need exact shell-function control can override or extend groups:
+Selecting `common` inherits this global default in full. A repository-local
+`[tool.spice.wrappers.common]` table replaces the whole group atomically at the
+named-group boundary — its routes do not concatenate with the default's — so a
+partial override must re-list every route it still wants. Omitting the table
+inherits the default; `wrappers = []` disables wrapper generation; and a
+malformed replacement fails through the same named validation path.
+
+Repos that need exact shell-function control can override or extend groups
+(replacing the whole `common` group, so the native reroutes and the `grep -E`
+default only ride along if re-listed):
 
 ```toml
 [tool.spice.wrappers.common]

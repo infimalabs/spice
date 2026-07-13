@@ -936,6 +936,11 @@ def _builtin_rtk_wrapper_lines() -> list[str]:
         "      esac",
         "    done",
         "  fi",
+        '  if [ "${1-}" = grep ]; then',
+        "    shift",
+        '    command rtk grep -E "$@"',
+        "    return",
+        "  fi",
         '  command rtk "$@"',
         "}",
     ]
