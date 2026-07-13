@@ -73,7 +73,7 @@ def test_agent_wrapper_lines_project_common_can_add_pytest_wrapper(tmp_path):
         groups={
             "common": {
                 "wrap": ["run", "grep", "find", "git"],
-                "pytest": {"argv": ["$SPICE_SHELL_HOOK_PYTHON", "-m", "pytest"]},
+                "pytest": {"argv": ["python", "-m", "pytest"]},
             }
         },
     )

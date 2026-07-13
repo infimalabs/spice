@@ -1,6 +1,4 @@
 # Packaged by spice; do not edit.
-: "${SPICE_SHELL_HOOK_PYTHON:?spice shell hook: missing SPICE_SHELL_HOOK_PYTHON}"
-
 _spice_shell_hook_name=".zshrc"
 _spice_shell_hook_dir="${ZDOTDIR:?spice shell hook: missing ZDOTDIR}"
 _spice_shell_hook_self="${_spice_shell_hook_dir}/${_spice_shell_hook_name}"
