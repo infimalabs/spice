@@ -120,6 +120,8 @@ env_names = [
     "FAKEENV_OK",
     "PATH",
     "FAKEENV_PORT",
+    "PROBE_LANES",
+    "PROBE_ROUNDS",
     "PYTHONPATH",
     "PYTEST_XDIST_WORKER",
     "RTK_DB_PATH",
