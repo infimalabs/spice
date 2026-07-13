@@ -1,0 +1,107 @@
+{
+  "meta": {
+    "date": "2026-07-13",
+    "source": "tests/browser/serve_task_card_live_smoke.js",
+    "scenario": "real task mutation through watcher, WebSocket, browser apply, and DOM render"
+  },
+  "fixedStandaloneSample": {
+    "taskAddStartedWallMs": 1783921771744,
+    "taskAddReturnedWallMs": 1783921772220,
+    "changeDetectedWallMs": 1783921772198.688,
+    "preSendWallMs": 1783921772670.772,
+    "browserReceivedWallMs": 1783921772671,
+    "browserRenderedWallMs": 1783921772675,
+    "stagesMs": {
+      "taskAdd": 476,
+      "detectionAfterAddReturn": -21.31201171875,
+      "signature": 31.837541610002518,
+      "payload": 440.22300001233816,
+      "socket": 0.22802734375,
+      "browserApplyAndRender": 4,
+      "totalAfterAddReturn": 455
+    }
+  },
+  "fixedConsecutiveReplacementSamples": [
+    {
+      "taskAddStartedWallMs": 1783922126577,
+      "taskAddReturnedWallMs": 1783922127014,
+      "changeDetectedWallMs": 1783922126993.531,
+      "preSendWallMs": 1783922127417.254,
+      "browserReceivedWallMs": 1783922127417,
+      "browserRenderedWallMs": 1783922127422,
+      "stagesMs": {
+        "taskAdd": 437,
+        "detectionAfterAddReturn": -20.468994140625,
+        "signature": 30.18637467175722,
+        "payload": 393.5121661052108,
+        "socket": -0.25390625,
+        "browserApplyAndRender": 5,
+        "totalAfterAddReturn": 408
+      }
+    },
+    {
+      "taskAddStartedWallMs": 1783922127436,
+      "taskAddReturnedWallMs": 1783922127880,
+      "changeDetectedWallMs": 1783922127860.564,
+      "preSendWallMs": 1783922128285.5881,
+      "browserReceivedWallMs": 1783922128285,
+      "browserRenderedWallMs": 1783922128289,
+      "stagesMs": {
+        "taskAdd": 444,
+        "detectionAfterAddReturn": -19.43603515625,
+        "signature": 30.17583303153515,
+        "payload": 394.8076656088233,
+        "socket": -0.588134765625,
+        "browserApplyAndRender": 4,
+        "totalAfterAddReturn": 409
+      }
+    }
+  ],
+  "kqueueReplacementRegression": {
+    "beforeFixFourLaneRenderRates": {
+      "baselineFocused": 1,
+      "singleFocusedAfterReplacement": 0,
+      "allFocusedAfterReplacement": 0.5
+    },
+    "afterFixFourLaneRenderRates": {
+      "baselineFocused": 1,
+      "singleFocusedAfterReplacement": 1,
+      "allFocusedAfterReplacement": 1
+    },
+    "afterFixFourLaneTimingMs": {
+      "subscribeToActivate": 2035,
+      "baselineTotalAfterAddReturnP50": 853,
+      "baselineTotalAfterAddReturnMax": 911,
+      "singleFocusedTotalAfterAddReturn": 678,
+      "repeatedFocusedTotalAfterAddReturnP50": 1347,
+      "repeatedFocusedTotalAfterAddReturnMax": 1960
+    },
+    "afterFixReconcileFrames": {
+      "targets.payload": 0,
+      "teams.payload": 0,
+      "lane.unsubscribed": 0
+    }
+  },
+  "fusedMemberRegression": {
+    "beforeFixMeasured": {
+      "hostTargetId": "bsub-a",
+      "hostFocused": true,
+      "visibleMemberTargetId": "bsub-b",
+      "visibleMemberFocused": false,
+      "focusConfigureCountAfterSelectingMember": 2
+    },
+    "afterFixMeasured": {
+      "hostTargetId": "bsub-a",
+      "hostFocused": true,
+      "visibleMemberTargetId": "bsub-b",
+      "visibleMemberFocused": true,
+      "visibleHostLiveWithoutClickFocus": true,
+      "focusConfigureCountAfterSelectingMember": 0,
+      "dirtyMemberResubscribeFrameCount": 1,
+      "dirtyMemberResubscribeTargetIds": [
+        "bsub-b"
+      ],
+      "dirtyStateClearedAfterPayload": true
+    }
+  }
+}

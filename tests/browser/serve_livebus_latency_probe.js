@@ -15,25 +15,13 @@
 // same host, so cross-process deltas are meaningful; the perf-counter deltas in
 // watchTiming time the CPU-bound compute independent of clock choice.
 //
-// Three passes isolate the client-driven post-card `refreshServerTopology()`
-// amplifier (app.live-bus.js: source==="watch" path) as the single controlled
-// variable. They run A -> C -> B so the realistic pass starts from Pass A's
-// healthy, un-churned watchers rather than Pass B's post-storm teardown:
-//   * Pass A "isolated"  -- all eight lanes focused, that refresh stubbed to a
-//     no-op, so eight concurrent full-push cards render without a reconcile
-//     reverting focus. The control: clean per-stage timings and send-lock
-//     contention for the pure fan-out path.
-//   * Pass C "realistic" -- one focused lane, real refresh, tasks emitted to the
-//     focused lane one at a time (operator cadence). The "eight lanes open,
-//     watching one" path; its per-card refresh still reconciles all lanes, so
-//     the reconcile frame volume shows whether the amplifier degrades even
-//     normal single-lane use.
-//   * Pass B "amplified" -- all eight lanes focused with the real refresh, so
-//     every card render fires a targets.refresh + teams.refresh that reconciles
-//     all lanes. The delta in send-lock wait, reconcile frame volume, and render
-//     rate against Pass A quantifies the topology-refresh amplifier -- the "bulk
-//     per-connection live-bus activity" a submit reply would also serialize
-//     behind.
+// Three passes verify current delivery and coalescing behaviour:
+//   * Pass A -- all lanes focused, concurrent full-push baseline.
+//   * Pass C -- one focused lane at operator cadence; the remaining lanes
+//     coalesce into lanes.dirty without delaying the focused card.
+//   * Pass B -- all lanes focused again after prior atomic task-event
+//     replacements, proving every persistent kqueue watcher rearmed and the
+//     removed per-card topology refresh did not reappear as reconcile traffic.
 //
 // The submit-to-ack reply shares ONE send_lock with every watch-push frame
 // (livebus.py `_send`, whose json write runs INSIDE the lock). A real
@@ -90,8 +78,7 @@ async function run() {
           typeof addLane === "function" &&
           typeof laneStates !== "undefined" &&
           typeof handleLiveBusMessage === "function" &&
-          typeof liveBusRequest === "function" &&
-          typeof refreshServerTopology === "function",
+          typeof liveBusRequest === "function",
         { timeout: probeReadyTimeoutMs },
       );
       // Subscribe→activate is measured across the whole set: node and the page
@@ -106,9 +93,7 @@ async function run() {
       const activateMs = Date.now() - subscribeStartMs;
       await installProbeHook(page);
 
-      // Pass A -- isolated fan-out: suppress the post-card topology refresh so
-      // eight concurrent full-push cards render without reconcile interference.
-      await setTopologyRefreshStubbed(page, true);
+      // Pass A -- concurrent focused fan-out baseline.
       await forceLanesFocused(page, lanes);
       const beforeA = await snapshotTelemetry(page);
       await resetFrameLog(page);
@@ -116,14 +101,7 @@ async function run() {
       const afterA = await snapshotTelemetry(page);
       const passAReconcile = await reconcileFrameCounts(page);
 
-      // Pass C -- realistic single-focus operator: one focused lane (the rest
-      // background), real refresh, tasks emitted to the focused lane one at a
-      // time (operator cadence). This is the "eight lanes open, watching one"
-      // path; its own post-card refresh still reconciles all lanes, so it shows
-      // whether the amplifier degrades even normal single-lane use. It runs
-      // before the Pass B stress so it starts from Pass A's healthy, un-churned
-      // watchers; the guard below re-settles activation if A hiccupped a lane.
-      await setTopologyRefreshStubbed(page, false);
+      // Pass C -- one focused lane, with true background lanes coalesced.
       await waitAllWatchersActive(page, lanes);
       const focusLane = lanes[0];
       await setLaneFocus(page, lanes, [focusLane.targetId]);
@@ -133,10 +111,7 @@ async function run() {
       const afterC = await snapshotTelemetry(page);
       const passCReconcile = await reconcileFrameCounts(page);
 
-      // Pass B -- amplified stress: restore the real refresh so every card
-      // render fires targets.refresh + teams.refresh, reconciling all lanes.
-      // Focus is re-forced each round; the amplifier then degrades it in-flight.
-      // Runs last because its reconcile churn leaves watchers torn down.
+      // Pass B -- repeat concurrent fan-out after atomic task replacements.
       const beforeB = await snapshotTelemetry(page);
       await resetFrameLog(page);
       const passBSamples = await runPass(page, server, lanes, "B", {
@@ -193,37 +168,43 @@ async function bindLanes(page, count) {
 // mirrors the proven diagnostic path and settles on the slowest lane.
 async function waitAllWatchersActive(page, lanes) {
   const targetIds = lanes.map((lane) => lane.targetId);
-  await page.waitForFunction(
-    (targetIds) =>
-      targetIds.every((targetId) => {
+  try {
+    await page.waitForFunction(
+      (targetIds) =>
+        targetIds.every((targetId) => {
+          const lane = laneStates.get(targetId);
+          return Boolean(
+            lane &&
+              lane.liveBusSubscribed &&
+              lane.liveBusWatcherActive &&
+              lane.liveBusSubscriptionGeneration,
+          );
+        }),
+      targetIds,
+      { timeout: probeActivateTimeoutMs },
+    );
+  } catch (error) {
+    const states = await page.evaluate((ids) => {
+      return ids.map((targetId) => {
         const lane = laneStates.get(targetId);
-        return Boolean(
-          lane &&
-            lane.liveBusSubscribed &&
-            lane.liveBusWatcherActive &&
-            lane.liveBusSubscriptionGeneration,
-        );
-      }),
-    targetIds,
-    { timeout: probeActivateTimeoutMs },
-  );
-}
-
-// Swap the client's post-card refreshServerTopology for a no-op (or restore it).
-// Stubbing removes the reconcile that otherwise reverts forced focus mid-round,
-// isolating the pure send path; the original is kept for restoration.
-async function setTopologyRefreshStubbed(page, stubbed) {
-  await page.evaluate((stubbed) => {
-    if (stubbed) {
-      if (!window.__origRefreshTopology)
-        window.__origRefreshTopology = refreshServerTopology;
-      // eslint-disable-next-line no-global-assign
-      refreshServerTopology = async function () {};
-    } else if (window.__origRefreshTopology) {
-      // eslint-disable-next-line no-global-assign
-      refreshServerTopology = window.__origRefreshTopology;
-    }
-  }, stubbed);
+        return {
+          targetId,
+          exists: Boolean(lane),
+          closed: Boolean(lane && lane.closed),
+          subscribed: Boolean(lane && lane.liveBusSubscribed),
+          subscribePending: Boolean(lane && lane.liveBusSubscribePending),
+          watcherActive: Boolean(lane && lane.liveBusWatcherActive),
+          generation: lane ? lane.liveBusSubscriptionGeneration || "" : "",
+          dirty: Boolean(lane && lane.liveBusDirty),
+          transientError: lane?.statusErrorEl?.textContent || "",
+        };
+      });
+    }, targetIds);
+    throw new Error(
+      "live-bus watcher activation timed out: " + JSON.stringify(states) +
+        "\n" + (error.stack || error.message),
+    );
+  }
 }
 
 // Configure lane focus explicitly: each id in `focusedTargetIds` takes the

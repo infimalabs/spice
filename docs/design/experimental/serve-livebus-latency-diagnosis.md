@@ -2,6 +2,68 @@
 
 Status: validated with runtime traces, 2026-07-13.
 
+## Task-card follow-up: replaced inodes and fused focus broke live delivery
+
+A same-day follow-up audit traced the operator's newer symptom: task cards and
+assistant messages could remain absent for minutes, refreshing the page made
+them appear, and submitting a composer message caused a backlog of already-old
+cards to arrive at once. The original load diagnosis below remains the record
+of the measured payload and topology-refresh costs, but it did not cover the
+atomic-replace watcher invalidation or the fused-lane focus classification that
+caused this indefinite correctness delay.
+
+### Causal chain
+
+| Layer | Observation | Evidence |
+| --- | --- | --- |
+| L0 | A visible fused stream stopped updating; a later submit exposed the accumulated cards. | Operator runtime report. |
+| L1 | Source data, payload merge, and rendering remained healthy. | `lane.send`'s follow-up full payload made the missing content appear without repairing or recreating it. |
+| L2 | Passive watcher delivery took a different path from the submit follow-up. | `_run_watch_loop` waits on filesystem events; `_send_followup_loop` sends `lane.payload` directly after a composer request. |
+| L3 | Every task mutation atomically replaces one shared event marker. | `tw.run` calls `mark_task_backend_changed`; `_atomic_write_text` finishes with `os.replace`. |
+| L4 | The persistent kqueue reported the first rename, then kept the descriptor for the unlinked old inode because the watched pathname tuple had not changed. | `_KqueueWatch._arm` returned early for identical path strings; the pre-fix probe then missed a single-focus card and half of an all-focused four-card pass without emitting `lane.payload`. |
+| Terminal — root cause A | After the first task-event replacement, subsequent task mutations occurred on new inodes the watcher no longer observed. | Two consecutive real task mutations reproduce the critical edge; rearming on rename/delete makes both deliver in ~0.4 s. |
+| Branch — root cause B | Shadow members of the focused fused host were also misclassified as background. Their changes collapsed to payload-free `lanes.dirty` and waited for a concrete-target focus/resubscribe the fused DOM could not naturally produce. | Before-fix browser fixture: host `bsub-a` subscribed with `focused:true`, visible member `bsub-b` with `focused:false`. |
+
+The apparent age was genuine: synthetic task-card timestamps come from task
+inception. Deferral changed when the task first entered the browser, not its
+timestamp, so a card was already minutes old when a submit or reload finally
+caused a full payload.
+
+### Fix and measured result
+
+Invalidating kqueue vnode events now rebuild the registration on the replacement
+inode before watcher control returns to payload work; ordinary same-inode writes
+keep the persistent registration. Live activity now belongs to rendered lane
+groups that intersect the board viewport, not to one last-clicked concrete
+target. `liveBusLaneIsFocused` resolves `laneGroupHost(lane)`, so every member of
+a visible fused host is live; scroll, resize, document-visibility, and lane-list
+callbacks batch activity reconciliation, and a dirty group refreshes as soon as
+it enters view. Genuinely offscreen lane groups retain the existing
+`lanes.dirty` burst coalescing. The per-watch-message
+`refreshServerTopology()` call was also
+removed; the older stress trace below measured that call as an O(n²)
+reconciliation amplifier, and restoring live pushes for all focused group
+members would otherwise reintroduce it.
+
+The fixed fused fixture measured:
+
+- both `bsub-a` and `bsub-b` subscribe with `focused:true`;
+- the visible host remains live when the stored click-focus points to another
+  lane group;
+- selecting `bsub-b` canonicalizes to the already-focused host and emits zero
+  redundant configure frames;
+- one dirty notification for `bsub-b` emits one batched resubscribe containing
+  only `bsub-b`, then clears its dirty state.
+
+The real task-card smoke now records the full source-to-DOM timeline for two
+consecutive atomic replacements on one persistent watcher. A fixed run rendered
+the first card 408 ms after task creation returned and the second card 409 ms
+after return; both used ~30 ms signature computation, ~394 ms payload compute,
+near-zero socket transit, and 4–5 ms browser apply/render. A four-lane follow-up
+probe rendered 4/4 baseline cards, 1/1 single-focus card, and 4/4 cards after
+repeated replacements, versus 4/4, 0/1, and 2/4 before the kqueue fix. The
+machine-readable samples are in `serve-task-card-latency-trace.json`.
+
 This note began as a static, structure-only diagnosis. It has now been exercised
 under a deterministic load harness with per-stage instrumentation, and the
 measured numbers **revise** the original root-cause claim. Where a statement is
@@ -158,14 +220,17 @@ queue behind each other's encode+write under the one lock. Moving the JSON
 encode outside the lock would save sub-millisecond time and is not worth doing
 for latency.
 
-**Off-focus fan-out is NOT saturating the line [MEASURED + INFERRED].**
-Background (unfocused) lanes do **not** full-push; they route through
+**True off-focus fan-out is NOT saturating the line [MEASURED + INFERRED].**
+Background (unfocused-group) lanes do **not** full-push; they route through
 `coalesce_background_update` (`livebus.py:651`) into a coalesced `lanes.dirty`
 signal with no card render. In the harness, unfocused lanes produced no
 `lane.payload` frames at all — which is exactly why Pass A/B had to *force*
 focus to observe pushes. The "crap on the line when I'm not looking" is
 therefore **not** background lane pushes; it is the client's own per-card
-`refreshServerTopology` reconcile traffic.
+`refreshServerTopology` reconcile traffic. The follow-up audit above adds the
+critical qualification: members of a visible fused host—and any other lane
+group intersecting the board viewport—are not background and must use the live
+delivery path without requiring a click.
 
 **Submit lag follows from the same CPU contention, not the lock
 [MEASURED + INFERRED].** Since `send_lock` wait is ~0, the ack does not
@@ -185,7 +250,7 @@ frame types appeared in `__frameLog`):
 - **Relative timers are display-only** (`updateLiveRelativeTimes`, `app.js:217`),
   so a card reading "5s" is genuine delivery lag, not a timer artifact.
 
-## Fix proposal
+## Original fix proposal
 
 Targets follow directly from the numbers: the emit->render total is
 payload-compute (~2 s) + amplifier (roughly doubles it in the realistic pass);
@@ -193,7 +258,8 @@ kill both and the residual is signature (~0.1 s) + socket (~0) + render
 (~0.004 s) < 300 ms.
 
 1. **Remove the per-card topology-refresh amplifier
-   (`app.live-bus.js:486-487`).** A card render must not trigger a full
+   (`app.live-bus.js:486-487`) — completed in the task-card follow-up.** A card
+   render must not trigger a full
    `refreshTargets` + forced `refreshTeamSnapshot`. Topology reconciliation
    should be event-driven (react to an actual targets/teams change frame) or at
    most debounced, not fired once per delivered message. **[Biggest single win:
@@ -234,9 +300,9 @@ Delta from the original static diagnosis, for the record:
   (`app.live-bus.js:486-487`) is the dominant *client-driven* cause of the
   multi-lane collapse — absent from the original code-only reading.
 
-## Follow-ups
+## Remaining follow-ups
 
-Filed as dependent tasks under `serve.livebus`: (1) remove/debounce the per-card
-topology refresh, (2) memoize `messages_payload`, (3) decouple subscribe
-activation from the initial payload compute. The `send_lock` / encode-outside-
-lock work originally proposed is dropped as measured-unnecessary.
+The per-card topology refresh is now removed and fused-group focus is corrected.
+The existing dependent work to memoize `messages_payload` and decouple subscribe
+activation from the initial payload compute remains separate. The `send_lock` /
+encode-outside-lock work originally proposed is dropped as measured-unnecessary.

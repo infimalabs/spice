@@ -70,12 +70,16 @@ _HAVE_KQUEUE = _select_has_attrs(
     "KQ_NOTE_RENAME",
 )
 _KQUEUE_VNODE_FFLAGS: Any = 0
+_KQUEUE_INVALIDATING_FFLAGS: Any = 0
 if _HAVE_KQUEUE:
     _KQUEUE_VNODE_FFLAGS = (
         _select_attr("KQ_NOTE_WRITE")
         | _select_attr("KQ_NOTE_EXTEND")
         | _select_attr("KQ_NOTE_DELETE")
         | _select_attr("KQ_NOTE_RENAME")
+    )
+    _KQUEUE_INVALIDATING_FFLAGS = _select_attr("KQ_NOTE_DELETE") | _select_attr(
+        "KQ_NOTE_RENAME"
     )
 # kqueue blocks until a vnode event arrives; this bounds how long a cancelled
 # watcher waits before noticing its stop flag. It is a wakeup interval, not a
@@ -1130,6 +1134,20 @@ class _KqueueWatch:
                 [], len(self._events), LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S
             )
             if triggered:
+                if any(
+                    getattr(event, "fflags", 0) & _KQUEUE_INVALIDATING_FFLAGS
+                    for event in triggered
+                ):
+                    # Atomic replace reports rename/delete on the descriptor
+                    # for the unlinked old inode. Rebuild immediately on the
+                    # same path names so the replacement inode is observable
+                    # while the caller computes and pushes this change.
+                    self.close()
+                    self._arm(paths)
+                    if not self._events:
+                        raise RuntimeError(
+                            "lane watcher could not rearm invalidated paths"
+                        )
                 return True
         return False
 

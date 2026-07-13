@@ -14,6 +14,7 @@ let liveBusReconnectTimer = null;
 let liveBusReconnectAttempt = 0;
 let liveBusLastInboundAt = 0;
 let liveBusHasConnected = false;
+let liveBusLaneActivitySyncQueued = false;
 const laneSubmitLatencySamples = [];
 const laneSubmitLatencySampleLimit = 25;
 const pendingLaneSendServerTimings = new Map();
@@ -294,7 +295,36 @@ function laneMessageQuery(lane) {
 }
 
 function liveBusLaneIsFocused(lane) {
-  return lane.targetId === focusedLiveBusLaneTargetId;
+  const host = laneGroupHost(lane);
+  return (
+    host.targetId === focusedLiveBusLaneTargetId ||
+    liveBusLaneGroupIsVisible(host)
+  );
+}
+
+function liveBusLaneGroupIsVisible(lane) {
+  const host = laneGroupHost(lane);
+  const element = host.element;
+  if (
+    document.visibilityState === "hidden" ||
+    !element ||
+    !element.isConnected
+  )
+    return false;
+  const laneRect = element.getBoundingClientRect();
+  const boardRect = lanesEl.getBoundingClientRect();
+  const visibleTop = Math.max(0, boardRect.top);
+  const visibleRight = Math.min(window.innerWidth, boardRect.right);
+  const visibleBottom = Math.min(window.innerHeight, boardRect.bottom);
+  const visibleLeft = Math.max(0, boardRect.left);
+  return (
+    laneRect.width > 0 &&
+    laneRect.height > 0 &&
+    laneRect.bottom > visibleTop &&
+    laneRect.top < visibleBottom &&
+    laneRect.right > visibleLeft &&
+    laneRect.left < visibleRight
+  );
 }
 
 function installLiveBusLaneFocusTracking() {
@@ -307,32 +337,34 @@ function installLiveBusLaneFocusTracking() {
   };
   lanesEl.addEventListener("pointerdown", focusFromEvent, true);
   lanesEl.addEventListener("focusin", focusFromEvent, true);
+  lanesEl.addEventListener("scroll", scheduleLiveBusLaneActivitySync, {
+    passive: true,
+  });
+  window.addEventListener("resize", scheduleLiveBusLaneActivitySync);
+  document.addEventListener(
+    "visibilitychange",
+    scheduleLiveBusLaneActivitySync,
+  );
+  new MutationObserver(scheduleLiveBusLaneActivitySync).observe(lanesEl, {
+    childList: true,
+  });
+  scheduleLiveBusLaneActivitySync();
+}
+
+function scheduleLiveBusLaneActivitySync() {
+  if (liveBusLaneActivitySyncQueued) return;
+  liveBusLaneActivitySyncQueued = true;
+  queueMicrotask(() => {
+    liveBusLaneActivitySyncQueued = false;
+    configureLiveBusLanes();
+  });
 }
 
 function setFocusedLiveBusLane(focusedLane) {
+  focusedLane = focusedLane ? laneGroupHost(focusedLane) : null;
   if (!focusedLane || focusedLiveBusLaneTargetId === focusedLane.targetId) return;
   focusedLiveBusLaneTargetId = focusedLane.targetId;
-  for (const lane of laneStates.values()) {
-    if (
-      !isLaneOpen(lane) ||
-      (!lane.liveBusSubscribed && !lane.liveBusSubscribePending) ||
-      !liveBusIsOpen()
-    )
-      continue;
-    if (
-      lane === focusedLane &&
-      lane.liveBusDirty &&
-      lane.liveBusSubscribed &&
-      !lane.liveBusSubscribePending
-    ) {
-      subscribeLaneToLiveBus(lane);
-      continue;
-    }
-    liveBusRequest("lane.configure", {
-      targetId: lane.targetId,
-      query: laneMessageQuery(lane),
-    }).catch(() => {});
-  }
+  configureLiveBusLanes();
 }
 
 // Every subscribe path — snapshot mount, reconnect resync, thread change,
@@ -345,7 +377,8 @@ let subscribeFlushQueued = false;
 function subscribeLaneToLiveBus(lane) {
   if (!isLaneOpen(lane)) return;
   if (lane.emptyTeam) return;
-  if (!focusedLiveBusLaneTargetId) focusedLiveBusLaneTargetId = lane.targetId;
+  if (!focusedLiveBusLaneTargetId)
+    focusedLiveBusLaneTargetId = laneGroupHost(lane).targetId;
   lane.liveBusSubscribed = false;
   lane.liveBusSubscribePending = true;
   lane.liveBusWatcherActive = false;
@@ -432,10 +465,19 @@ function configureLiveBusLanes() {
     if (
       lane.emptyTeam ||
       !isLaneOpen(lane) ||
-      !lane.liveBusSubscribed ||
+      (!lane.liveBusSubscribed && !lane.liveBusSubscribePending) ||
       !liveBusIsOpen()
     )
       continue;
+    if (
+      liveBusLaneIsFocused(lane) &&
+      lane.liveBusDirty &&
+      lane.liveBusSubscribed &&
+      !lane.liveBusSubscribePending
+    ) {
+      subscribeLaneToLiveBus(lane);
+      continue;
+    }
     liveBusRequest("lane.configure", {
       targetId: lane.targetId,
       query: laneMessageQuery(lane),
@@ -493,8 +535,6 @@ function applyLaneBusPayloadState(lane, payload, source) {
   reconcileLaneSubmissionMessages(lane, lane.knownMessages);
   renderLaneChrome(lane, payload);
   cacheLaneLatestPayload(lane, payload);
-  if (source === "watch" && (payload.messages || []).length)
-    refreshServerTopology().catch(() => {});
   if (!lane.speechPrimed) {
     queueSpeechForMessages(lane, initialSpeechMessages);
     primeSpeechBoundary(lane);

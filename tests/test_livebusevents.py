@@ -679,6 +679,59 @@ def test_kqueue_watch_rearms_only_when_watched_paths_change(tmp_path, monkeypatc
     assert watch._kqueue is None
 
 
+def test_kqueue_watch_rearms_atomic_replacement_before_return(tmp_path, monkeypatch):
+    watched = tmp_path / "task-event"
+    watched.write_text("first", encoding="utf-8")
+    queues = []
+
+    class InvalidatingEvent:
+        fflags = 8
+
+    class RecordingKqueue:
+        def __init__(self, ordinal):
+            self.ordinal = ordinal
+            self.calls = []
+            self.closed = False
+
+        def control(self, changelist, max_events, timeout):
+            self.calls.append((list(changelist), max_events, timeout))
+            if self.ordinal == 0 and max_events:
+                return [InvalidatingEvent()]
+            return []
+
+        def close(self):
+            self.closed = True
+
+    constants = {
+        "KQ_NOTE_WRITE": 1,
+        "KQ_NOTE_EXTEND": 2,
+        "KQ_NOTE_DELETE": 4,
+        "KQ_NOTE_RENAME": 8,
+        "KQ_FILTER_VNODE": 16,
+        "KQ_EV_ADD": 32,
+        "KQ_EV_CLEAR": 64,
+    }
+
+    def select_attr(name):
+        if name == "kqueue":
+            return lambda: queues.append(RecordingKqueue(len(queues))) or queues[-1]
+        if name == "kevent":
+            return lambda descriptor, **_kwargs: ("watch", descriptor)
+        return constants[name]
+
+    monkeypatch.setattr(livebus, "_select_attr", select_attr)
+    monkeypatch.setattr(livebus, "_KQUEUE_VNODE_FFLAGS", 15)
+    monkeypatch.setattr(livebus, "_KQUEUE_INVALIDATING_FFLAGS", 12)
+    watch = livebus._KqueueWatch()
+    try:
+        assert watch.wait((watched,), Event()) is True
+        assert len(queues) == 2
+        assert queues[0].closed is True
+        assert queues[1].calls[0][1] == 0
+    finally:
+        watch.close()
+
+
 def test_watchfiles_activation_follows_native_ready_yield(tmp_path, monkeypatch):
     watched = tmp_path / "watched"
     watched.mkdir()
