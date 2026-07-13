@@ -925,6 +925,60 @@ def test_subscribe_activation_deadline_releases_queue_for_later_lane(
     session._teardown()
 
 
+def test_subscribe_payload_deadline_releases_queue_for_later_lane(
+    tmp_path, monkeypatch
+):
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    target = _Target(id="lane", repo_root=tmp_path)
+    connection = _Connection()
+    release_stalled_payload = Event()
+    stalled_payload_finished = Event()
+    payload_calls: list[str] = []
+
+    def messages_payload(bus_target, **_kwargs):
+        payload_calls.append(bus_target.id)
+        if len(payload_calls) == 1:
+            release_stalled_payload.wait(timeout=2.0)
+            stalled_payload_finished.set()
+        return {"messages": [], "statusLine": {"targetId": bus_target.id}}
+
+    session = LiveBusSession(
+        connection,
+        _callbacks(
+            target=target,
+            transcript=transcript,
+            messages_payload=messages_payload,
+        ),
+    )
+    monkeypatch.setattr(livebus, "LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S", 0.05)
+
+    stalled = session._replace_subscription(target, {"limit": 5})
+    stalled.watcher_activated.set()
+    session._complete_lanes_subscribe(
+        {"type": "lanes.subscribe", "requestId": "stalled"}, [stalled]
+    )
+    recovered = session._replace_subscription(target, {"limit": 5})
+    recovered.watcher_activated.set()
+    session._complete_lanes_subscribe(
+        {"type": "lanes.subscribe", "requestId": "recovered"}, [recovered]
+    )
+    release_stalled_payload.set()
+
+    assert [frame["type"] for frame in connection.sent] == [
+        "bus.error",
+        "lanes.payload",
+    ]
+    assert (
+        "lane initial payload deadline exceeded target=lane"
+        in connection.sent[0]["error"]
+    )
+    assert payload_calls == ["lane", "lane"]
+    assert recovered.initial_payload_sent.is_set() is True
+    assert stalled_payload_finished.wait(timeout=1.0) is True
+    session._teardown()
+
+
 def _callbacks(
     *,
     target: _Target,

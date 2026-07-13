@@ -532,9 +532,7 @@ class LiveBusSession:
             lanes = [
                 {
                     "targetId": subscription.target.id,
-                    "payload": future.result(
-                        timeout=LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S
-                    ),
+                    "payload": self._initial_payload_result(subscription, future),
                     "subscriptionGeneration": subscription.generation,
                     "watcherActive": subscription.watcher_error is None,
                     "watcherError": subscription.watcher_error or "",
@@ -551,6 +549,20 @@ class LiveBusSession:
         finally:
             for subscription in subscriptions:
                 subscription.initial_payload_sent.set()
+
+    def _initial_payload_result(
+        self,
+        subscription: _LaneSubscription,
+        future: Future[dict[str, Any]],
+    ) -> dict[str, Any]:
+        try:
+            return future.result(timeout=LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S)
+        except TimeoutError as exc:
+            raise TimeoutError(
+                "lane initial payload deadline exceeded "
+                f"target={subscription.target.id} "
+                f"budget={LIVE_BUS_INITIAL_PAYLOAD_TIMEOUT_S:g}s"
+            ) from exc
 
     def _replace_subscription(
         self, target: Any, query: dict[str, Any]
