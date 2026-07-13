@@ -98,6 +98,28 @@ def test_config_reference_documents_pre_commit_keys_and_taste_contract():
     assert documented == EXPECTED_BUILTIN_PRE_COMMIT_KEYS
     assert "### `[tool.spice.policy.taste.words]`" in text
     assert "gate-only pre-commit built-in" in text
+    assert "`policy.TASTE_WORD_SUGGESTIONS`" in text
+    assert "whole word" in text
+    assert "trailing `*`" in text
+    assert "starts from the built-in map" in text
+    assert "assigns repository entries in TOML order" in text
+    assert "`allowlist`" in text
+    assert "`blocklist`" in text
+
+
+def test_taste_pre_commit_guard_reports_exact_inclusive_inflection(tmp_path):
+    doc = tmp_path / "notes.md"
+    doc.write_text("Replace BLACKLISTING in this guide.\n", encoding="utf-8")
+
+    with pytest.raises(SpiceError) as exc_info:
+        precommit._run_taste_guard(tmp_path, [Path("notes.md")])
+
+    assert str(exc_info.value) == "\n".join(
+        [
+            "taste: 1 low-value or poor-taste word(s); rephrase for better taste",
+            "  FAIL  notes.md:1  'blacklisting' -> consider 'blocklisting'",
+        ]
+    )
 
 
 def test_private_internal_coupling_allowlist_is_exact_for_this_repo():

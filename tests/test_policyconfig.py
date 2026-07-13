@@ -119,14 +119,21 @@ def test_policy_resolver_merges_taste_words_over_defaults(tmp_path):
         [tool.spice.policy.taste.words]
         Smell = ""
         just = "reword"
+        Whitelisting = "permission-listing"
         """,
     )
 
     resolved = resolve_policy(tmp_path)
 
-    assert resolved.taste.words["hallucinat*"] == "confabulate"  # default kept
-    assert resolved.taste.words["smell"] == ""  # merged, lowercased
-    assert resolved.taste.words["just"] == "reword"
+    expected = dict(policy.TASTE_WORD_SUGGESTIONS)
+    expected.update(
+        {
+            "smell": "",
+            "just": "reword",
+            "whitelisting": "permission-listing",
+        }
+    )
+    assert resolved.taste.words == expected
 
 
 def test_policy_resolver_applies_each_bound_override(tmp_path):

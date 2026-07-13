@@ -38,6 +38,7 @@ from spice.studies import (
     repodocs,
     shape,
     subsumption,
+    taste,
     testquality,
 )
 from spice.studies.walk import changed_paths, staged_paths, tracked_paths
@@ -56,6 +57,7 @@ def configure_study_parser(subparsers: Any) -> None:
     _configure_markdown_links_parser(actions)
     _configure_mutation_parser(actions)
     _configure_env_parser(actions)
+    _add_study_action(actions, "taste", "Configured prose wording suggestions.")
     _add_study_action(actions, "shape", "Namespace-package and path-shape policy.")
     _configure_reachability_parser(actions)
     _configure_symbol_reachability_parser(actions)
@@ -730,6 +732,20 @@ def _study_env_name_ledger(args: argparse.Namespace, root: Path) -> int:
     return 1 if findings else 0
 
 
+def _study_taste(args: argparse.Namespace, root: Path) -> int:
+    resolved = resolve_policy(root)
+    findings = taste.scan_taste(
+        _target_paths(args, root),
+        root=root,
+        words=dict(resolved.taste.words),
+    )
+    if args.emit_json:
+        _print_study_json(args.study_action, findings=findings)
+        return 1 if findings else 0
+    print(taste.render_taste_board(findings))
+    return 1 if findings else 0
+
+
 def _study_reachability(args: argparse.Namespace, root: Path) -> int:
     findings = reachability.scan_reachability(root, allowlist=args.allowlist)
     created_tasks: list[str] = []
@@ -1040,6 +1056,7 @@ _STUDY_ACTIONS: dict[str, StudyHandler] = {
     "mutations": _study_mutations,
     "env-policy": _study_env_policy,
     "env-name-ledger": _study_env_name_ledger,
+    "taste": _study_taste,
     "reachability": _study_reachability,
     "symbol-reachability": _study_symbol_reachability,
     "assertion-free-tests": _study_assertion_free_tests,

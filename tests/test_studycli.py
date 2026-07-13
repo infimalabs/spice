@@ -41,6 +41,7 @@ def test_general_purpose_study_flags_cover_reference_surface():
         ["study", "mutations", "--json", "--staged", "--baseline-ref", "HEAD"],
         ["study", "env-policy", "--json", "--staged"],
         ["study", "env-name-ledger", "--json", "--staged"],
+        ["study", "taste", "--json", "--staged"],
         ["study", "shape", "--json"],
         ["study", "markdown-links", "--json"],
         ["study", "subsumption", "coverage.db", "--json"],
@@ -52,6 +53,28 @@ def test_general_purpose_study_flags_cover_reference_surface():
     assert parsed[1].baseline_ref == "HEAD"
     assert parsed[7].allow_symbols == ["Keep"]
     assert parsed[10].create_tasks is True
+
+
+def test_taste_cli_renders_exact_inclusive_inflection_suggestions(
+    tmp_path, monkeypatch, capsys
+):
+    doc = tmp_path / "notes.md"
+    doc.write_text(
+        "Review the WHITELISTS.\nRemove BLACKLISTED records.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(studies_cli, "require_repo_root", lambda: tmp_path)
+    args = build_parser().parse_args(["study", "taste", "notes.md"])
+
+    assert args.func(args) == 1
+    assert capsys.readouterr().out == "\n".join(
+        [
+            "taste: 2 low-value or poor-taste word(s); rephrase for better taste",
+            "  FAIL  notes.md:1  'whitelists' -> consider 'allowlists'",
+            "  FAIL  notes.md:2  'blacklisted' -> consider 'blocklisted'",
+            "",
+        ]
+    )
 
 
 def test_study_extension_command_from_fixture_wheel_runs_json_success(

@@ -235,6 +235,30 @@ def test_config_overrides_taste_words_and_maxim_triggers(repo):
     )
 
 
+def test_repo_task_wording_retains_exact_builtin_inflection(repo):
+    _write_pyproject(
+        repo,
+        """
+        [tool.spice.policy.taste.words]
+        bespoke = "specific"
+        """,
+    )
+
+    matches = create.detect_suspect_wording(
+        title="Refresh WHITELISTED accounts",
+        repo_root=repo,
+    )
+
+    assert matches == (
+        create.TaskWordingMatch(
+            source="title",
+            matched="whitelisted",
+            trigger_family="taste",
+            reason="consider 'allowlisted'",
+        ),
+    )
+
+
 def _write_pyproject(path: Path, text: str) -> None:
     path.joinpath("pyproject.toml").write_text(text, encoding="utf-8")
 
