@@ -1169,12 +1169,14 @@ def _contains(value, needle: str) -> bool:
     return any(needle in item for item in value)
 
 
-def test_runtime_environment_puts_worktree_venv_first_on_path(tmp_path):
+def test_runtime_environment_preserves_operator_path_with_worktree_venv(tmp_path):
     (tmp_path / ".venv" / "bin").mkdir(parents=True)
-    env = shellhook.shell_steering_runtime_environment(
-        base_env={"PATH": "/usr/bin"}, repo_root=tmp_path
+    base_env = {"PATH": "/operator/bin:/usr/bin"}
+    runtime_env = shellhook.shell_steering_runtime_environment(
+        base_env=base_env, repo_root=tmp_path
     )
-    assert env["PATH"].split(os.pathsep)[0] == str(tmp_path / ".venv" / "bin")
+    env = {**base_env, **runtime_env}
+    assert env["PATH"] == "/operator/bin:/usr/bin"
 
 
 def test_runtime_environment_leaves_path_untouched_without_a_venv(tmp_path):
@@ -1184,12 +1186,18 @@ def test_runtime_environment_leaves_path_untouched_without_a_venv(tmp_path):
     assert "PATH" not in env
 
 
-def test_runtime_environment_does_not_duplicate_venv_on_path(tmp_path):
-    (tmp_path / ".venv" / "bin").mkdir(parents=True)
-    first = shellhook.shell_steering_runtime_environment(
-        base_env={"PATH": "/usr/bin"}, repo_root=tmp_path
-    )["PATH"]
-    again = shellhook.shell_steering_runtime_environment(
-        base_env={"PATH": first}, repo_root=tmp_path
-    )
-    assert "PATH" not in again
+def test_worktree_python_wrapper_targets_venv_interpreter(tmp_path):
+    python = tmp_path / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    assert shellhook.render_worktree_python_wrapper_lines(tmp_path) == [
+        "",
+        "python() {",
+        f'  command {shlex.quote(str(python))} "$@"',
+        "}",
+        "",
+        "python3() {",
+        f'  command {shlex.quote(str(python))} "$@"',
+        "}",
+    ]
