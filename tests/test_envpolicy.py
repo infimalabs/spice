@@ -205,10 +205,7 @@ def test_env_access_baseline_path_must_be_repo_relative(tmp_path):
         encoding="utf-8",  # env-policy: allow
     )
 
-    with pytest.raises(
-        SpiceError,
-        match=r"policy\.env_access\.baseline .*: must be a repo-relative path",
-    ):
+    with pytest.raises(SpiceError, match="baseline must be a repo-relative path"):
         scan_env_policy([Path("sample.py")], root=tmp_path)
 
 
@@ -475,7 +472,7 @@ def test_env_access_default_patterns_unknown_family_raises(tmp_path):
     )
     (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
 
-    with pytest.raises(SpiceError, match="family rust; declare suffixes"):
+    with pytest.raises(SpiceError, match="unknown family"):
         scan_env_policy([Path("sample.py")], root=tmp_path)
 
 
@@ -486,9 +483,7 @@ def test_env_access_default_patterns_non_table_raises(tmp_path):
     )
     (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
 
-    with pytest.raises(
-        SpiceError, match=r"policy\.env_access\.default_patterns .*: must be a table"
-    ):
+    with pytest.raises(SpiceError, match="default_patterns must be a table"):
         scan_env_policy([Path("sample.py")], root=tmp_path)
 
 

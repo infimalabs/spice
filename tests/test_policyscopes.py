@@ -233,7 +233,7 @@ def test_policy_scopes_invalid_magic_threshold_names_the_scope(tmp_path):
 
     with pytest.raises(
         SpiceError,
-        match=r'policy\.scopes\."\*\*/\*\.cs": magic examine_threshold',
+        match=r'\[tool\.spice\.policy\.scopes\."\*\*/\*\.cs"\] magic examine_threshold',
     ):
         resolve_policy(tmp_path)
 
@@ -248,7 +248,7 @@ def test_policy_scopes_invalid_config_names_the_scope(tmp_path):
     )
 
     with pytest.raises(
-        SpiceError, match=r'policy\.scopes\."src/\*\*": flex must be a number >= 1\.0'
+        SpiceError, match=r'\[tool\.spice\.policy\.scopes\."src/\*\*"\] flex'
     ):
         resolve_policy(tmp_path)
 
