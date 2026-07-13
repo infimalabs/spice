@@ -363,6 +363,57 @@ def test_spice_checkout_maps_bare_pre_commit_to_dev_gate():
     ]
 
 
+@pytest.mark.parametrize("shell_name", ["zsh", "bash"])
+def test_spice_checkout_bare_grep_defaults_to_ere_and_preserves_explicit_mode(
+    tmp_path, shell_name
+):
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} is not installed")
+    trace = tmp_path / "trace.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    tool = bin_dir / "grep"
+    tool.write_text(
+        f'#!/bin/sh\nprintf \'grep:%s\\n\' "$*" >> "${{{SHELL_TRACE_ENV}}}"\n',
+        encoding="utf-8",
+    )
+    tool.chmod(0o755)
+    script = "\n".join(
+        [
+            "set -u",
+            *shellhook.render_agent_wrapper_lines(Path.cwd()),
+            "grep 'alpha|beta' source.txt",
+            "grep -E 'alpha|beta' source.txt",
+            "grep -F 'alpha|beta' source.txt",
+            "grep -P 'alpha|beta' source.txt",
+            "grep -G 'alpha\\|beta' source.txt",
+        ]
+    )
+
+    completed = subprocess.run(
+        [shell, "-c", script],
+        check=False,
+        env={
+            "PATH": str(bin_dir)
+            + os.pathsep
+            + os.environ.get("PATH", ""),  # env-policy: allow
+            SHELL_TRACE_ENV: str(trace),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert completed.returncode == 0, _completed_process_detail(completed, trace)
+    assert _trace_lines(trace, expected_prefix="grep:") == [
+        "grep:-E alpha|beta source.txt",
+        "grep:-E alpha|beta source.txt",
+        "grep:-F alpha|beta source.txt",
+        "grep:-P alpha|beta source.txt",
+        "grep:-G alpha\\|beta source.txt",
+    ]
+
+
 def test_agent_wrapper_lines_honors_empty_agent_wrapper_list(tmp_path):
     _write_agent_wrapper_config(
         tmp_path,
