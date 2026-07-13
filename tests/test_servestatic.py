@@ -39,6 +39,7 @@ def test_static_initial_bootstrap_waits_for_server_topology():
 
     assert (
         "async function init() {\n"
+        "  installLiveBusLaneFocusTracking();\n"
         "  await connectLiveBus();\n"
         "  await refreshServerTopology();\n"
         "  setInterval(updateLiveRelativeTimes, relativeTimeTickMs);\n"
@@ -679,7 +680,7 @@ def test_static_submission_lifecycle_uses_current_keyed_event_shape():
     assert "function applyLaneSubmissionLifecycle(lane, rawSubmission)" in submissions
     assert "function reconcileLaneSubmissionMessages(lane, messages)" in submissions
     assert "function latestLaneSubmission(lane)" in submissions
-    assert 'message.type === "lane.submission"' in live_bus
+    assert '["lane.submission", handleLaneSubmissionPush]' in live_bus
     assert "applyLaneSubmissionLifecycle(lane, result.submission);" in stream
     before_menu_start = composer.index("function composerPrimaryHeaderBeforeMenu(")
     before_menu_end = (

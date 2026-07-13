@@ -30,7 +30,7 @@ from spice.policy import (
     ENV_POLICY_SELF_PATH_SUFFIX,
 )
 from spice.policyconfig import resolve_policy
-from spice.repocfg import policy_table, string_list
+from spice.configlayer import config_string_list, effective_table
 from spice.studies.walk import is_excluded_path
 
 # This module necessarily names the patterns it polices; it is self-waived.
@@ -522,7 +522,7 @@ def env_access_gate_enabled(repo_root: Path) -> bool:
     A repo opts *out* with `[tool.spice.policy] env_access_gate = false` if it
     is not ready to waive every `os.environ`/`os.getenv` access site.
     """
-    value = policy_table(repo_root).get("env_access_gate", True)
+    value = effective_table(repo_root, "policy").get("env_access_gate", True)
     if not isinstance(value, bool):
         raise SpiceError(
             "[tool.spice.policy] env_access_gate must be a boolean (true/false)"
@@ -531,14 +531,16 @@ def env_access_gate_enabled(repo_root: Path) -> bool:
 
 
 def env_name_patterns(repo_root: Path) -> list[str]:
-    declared = string_list(policy_table(repo_root).get("env_name_patterns"))
+    declared = config_string_list(
+        effective_table(repo_root, "policy").get("env_name_patterns")
+    )
     patterns: list[str] = list(ENV_POLICY_DEFAULT_NAME_PATTERNS)
     patterns.extend(pattern for pattern in declared if pattern not in patterns)
     return patterns
 
 
 def env_names(repo_root: Path) -> list[str]:
-    return string_list(policy_table(repo_root).get("env_names"))
+    return config_string_list(effective_table(repo_root, "policy").get("env_names"))
 
 
 def env_name_matchers(repo_root: Path) -> list[re.Pattern[str]]:

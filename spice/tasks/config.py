@@ -128,21 +128,23 @@ def assignable_stems() -> tuple[str, ...]:
 
 
 def _configured_extra_stems() -> tuple[str, ...]:
-    from spice.repocfg import string_list
+    from spice.configlayer import config_string_list
 
     table = _tasks_config_table()
     return tuple(
-        stem for stem in string_list(table.get("stems")) if SEGMENT_RE.match(stem)
+        stem
+        for stem in config_string_list(table.get("stems"))
+        if SEGMENT_RE.match(stem)
     )
 
 
 def _configured_hidden_stems() -> tuple[str, ...]:
-    from spice.repocfg import string_list
+    from spice.configlayer import config_string_list
 
     table = _tasks_config_table()
     configured: list[str] = []
     approved = set(approved_stems())
-    for stem in string_list(table.get("hidden_stems")):
+    for stem in config_string_list(table.get("hidden_stems")):
         if stem.startswith(HIDDEN_PROJECT_PREFIX):
             raise SpiceError(
                 "[tool.spice.tasks].hidden_stems values omit the leading '.'; "
@@ -168,7 +170,7 @@ def per_stem_flows() -> dict[str, tuple[str, ...]]:
 
 
 def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
-    from spice.repocfg import string_list
+    from spice.configlayer import config_string_list
 
     raw_flows = _tasks_config_table().get("flows")
     if not isinstance(raw_flows, dict):
@@ -186,18 +188,18 @@ def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
             raise SpiceError(
                 f"flow stem {stem!r} is not approved (approved: {', '.join(approved)})"
             )
-        flows[stem] = tuple(_validate_flow_phases(string_list(raw_flow)))
+        flows[stem] = tuple(_validate_flow_phases(config_string_list(raw_flow)))
     return flows
 
 
 def _tasks_config_table(repo_root: Path | None = None) -> dict[str, object]:
     from spice.paths import repo_root_from_cwd
-    from spice.repocfg import tasks_table
+    from spice.configlayer import effective_table
 
     root = repo_root or repo_root_from_cwd()
     if root is None:
         return {}
-    return tasks_table(root)
+    return effective_table(root, "tasks")
 
 
 def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str, str]:

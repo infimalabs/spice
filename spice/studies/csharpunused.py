@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from spice.errors import SpiceError
-from spice.repocfg import policy_table
+from spice.configlayer import effective_table
 from spice.studies.walk import is_excluded_path
 
 STATUS_CANDIDATE_UNUSED = "candidate-unused"
@@ -136,7 +136,7 @@ def render_csharp_unused_board(
 
 
 def csharp_retention_policy(repo_root: Path) -> CSharpRetentionPolicy:
-    raw = policy_table(repo_root).get(RETENTION_POLICY_KEY)
+    raw = effective_table(repo_root, "policy").get(RETENTION_POLICY_KEY)
     if raw is None:
         return CSharpRetentionPolicy()
     if not isinstance(raw, dict):
