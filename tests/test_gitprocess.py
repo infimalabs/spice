@@ -80,3 +80,33 @@ def test_git_timeout_environment_applies_to_local_commands(monkeypatch):
         "input": "git status",
         "capture_output": True,
     }
+
+
+def test_git_timeout_configuration_accepts_only_positive_finite_values(monkeypatch):
+    spawned: list[float] = []
+
+    def fake_run(command, **kwargs):
+        spawned.append(kwargs["timeout_seconds"])
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gitprocess, "run_bounded_process_group", fake_run)
+    outcomes: dict[str, dict[str, object]] = {}
+    for raw in ("37.5", "nan", "inf", "-inf"):
+        monkeypatch.setenv(gitprocess.GIT_TIMEOUT_ENV, raw)
+        try:
+            gitprocess.run_git_command(["git", "status"], capture_output=True)
+        except SpiceError as exc:
+            outcomes[raw] = {"state": "rejected", "message": str(exc)}
+        else:
+            outcomes[raw] = {"state": "accepted", "timeout": spawned[-1]}
+
+    invalid = f"{gitprocess.GIT_TIMEOUT_ENV} must be a positive finite number"
+    assert {"outcomes": outcomes, "spawned": spawned} == {
+        "outcomes": {
+            "37.5": {"state": "accepted", "timeout": 37.5},
+            "nan": {"state": "rejected", "message": invalid},
+            "inf": {"state": "rejected", "message": invalid},
+            "-inf": {"state": "rejected", "message": invalid},
+        },
+        "spawned": [37.5],
+    }
