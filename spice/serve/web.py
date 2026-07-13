@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from spice import defaults
-from spice.configlayer import PACKAGED_SOURCE, load_config
+from spice.configlayer import SYSTEM_SOURCE, load_config
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
 DEFAULT_BRAND = defaults.string("serve", "brand")
@@ -116,7 +116,7 @@ def serve_branding(repo_root: Path | None = None) -> ServeBranding:
     name = (
         project_brand
         if brand_source is not None
-        and brand_source.name == PACKAGED_SOURCE
+        and brand_source.name == SYSTEM_SOURCE
         and project_brand
         else configured_brand or DEFAULT_BRAND
     )

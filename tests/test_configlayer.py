@@ -42,7 +42,7 @@ def test_loader_exposes_four_immutable_layers_and_leaf_provenance(
     loaded = config.load_config(tmp_path)
 
     assert tuple(layer.name for layer in loaded.layers) == (
-        configlayer.PACKAGED_SOURCE,
+        configlayer.SYSTEM_SOURCE,
         configlayer.PYPROJECT_SOURCE,
         configlayer.REPOSITORY_SOURCE,
         configlayer.WORKTREE_SOURCE,
@@ -57,7 +57,7 @@ def test_loader_exposes_four_immutable_layers_and_leaf_provenance(
     }
     assert loaded.layer(configlayer.WORKTREE_SOURCE).values == {}
     assert loaded.layer(configlayer.WORKTREE_SOURCE).present is False
-    assert loaded.source_for("agent.model") == loaded.layer(configlayer.PACKAGED_SOURCE)
+    assert loaded.source_for("agent.model") == loaded.layer(configlayer.SYSTEM_SOURCE)
     assert loaded.source_for(("agent", "wrappers")) == loaded.layer(
         configlayer.REPOSITORY_SOURCE
     )
