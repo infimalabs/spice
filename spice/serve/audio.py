@@ -32,6 +32,13 @@ _SAY_MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)\s]+\)")
 _SAY_IDENTIFIER_SPOKEN_LENGTH = 8
 
 
+def _speech_timeout_message(label: str, timeout: float) -> str:
+    return (
+        f"{label} timed out after {timeout:g}s; raise the say timeout_seconds "
+        "setting if legitimately-long messages are being clipped"
+    )
+
+
 @dataclass(frozen=True)
 class SpeechAudio:
     data: bytes
@@ -73,6 +80,7 @@ class MacOSSayBackend:
 class ExternalCommandSpeechBackend:
     command: tuple[str, ...]
     content_type: str = config.DEFAULT_EXTERNAL_SAY_CONTENT_TYPE
+    timeout: float = config.DEFAULT_SAY_TIMEOUT_SECONDS
 
     def render(
         self,
@@ -82,13 +90,19 @@ class ExternalCommandSpeechBackend:
     ) -> SpeechAudio:
         if not self.command:
             raise RuntimeError("external speech backend requires a command")
-        result = subprocess.run(
-            list(self.command),
-            input=prepare_say_text(text).encode("utf-8"),
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        try:
+            result = subprocess.run(
+                list(self.command),
+                input=prepare_say_text(text).encode("utf-8"),
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=self.timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                _speech_timeout_message("external speech backend", self.timeout)
+            ) from exc
         if result.returncode != 0:
             detail = result.stderr.decode("utf-8", "replace").strip()
             suffix = f": {detail}" if detail else ""
@@ -175,6 +189,7 @@ def speech_backend(repo_root: Path | None = None) -> SpeechBackend:
         return ExternalCommandSpeechBackend(
             command=command,
             content_type=config.configured_say_content_type(repo_root),
+            timeout=config.configured_say_timeout(repo_root),
         )
     return MacOSSayBackend(repo_root)
 
@@ -199,29 +214,34 @@ def _render_macos_say_audio(
     rate_multiplier: float = DEFAULT_SAY_RATE_MULTIPLIER,
 ) -> bytes:
     """Render macOS `say` output into browser-playable M4A bytes."""
+    timeout = config.configured_say_timeout(repo_root)
     handle, raw_path = tempfile.mkstemp(prefix="spice-say-", suffix=SAY_AUDIO_SUFFIX)
     audio_path = Path(raw_path)
     try:
         os.close(handle)
-        subprocess.run(
-            [
-                *config.say_command_args(
-                    repo_root,
-                    rate_multiplier=normalize_say_rate_multiplier(rate_multiplier),
-                ),
-                "-o",
-                str(audio_path),
-                "--file-format=m4af",
-                "--data-format=aac",
-                "-f",
-                "-",
-            ],
-            input=prepare_say_text(text),
-            text=True,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        try:
+            subprocess.run(
+                [
+                    *config.say_command_args(
+                        repo_root,
+                        rate_multiplier=normalize_say_rate_multiplier(rate_multiplier),
+                    ),
+                    "-o",
+                    str(audio_path),
+                    "--file-format=m4af",
+                    "--data-format=aac",
+                    "-f",
+                    "-",
+                ],
+                input=prepare_say_text(text),
+                text=True,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(_speech_timeout_message("macOS say", timeout)) from exc
         return audio_path.read_bytes()
     finally:
         audio_path.unlink(missing_ok=True)

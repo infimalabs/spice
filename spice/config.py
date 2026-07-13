@@ -35,6 +35,11 @@ DEFAULT_EXTERNAL_SAY_CONTENT_TYPE = "audio/wav"
 SAY_VOICE_KEY = "voice"
 SAY_WORDS_PER_MINUTE_KEY = "words_per_minute"
 DEFAULT_SAY_WORDS_PER_MINUTE = 175
+SAY_TIMEOUT_SECONDS_KEY = "timeout_seconds"
+# Generous ceiling: comfortably covers well over a minute of spoken content
+# (plus render overhead) so legitimately-long messages are never clipped,
+# while still bounding a wedged speech process instead of blocking forever.
+DEFAULT_SAY_TIMEOUT_SECONDS = 300.0
 
 AGENT_KEY = "agent"
 AGENT_PERSONALITY_KEY = "personality"
@@ -143,6 +148,27 @@ def configured_say_words_per_minute(repo_root: Path | None = None) -> int | None
     except (TypeError, ValueError):
         return None
     return value if value > 0 else None
+
+
+def configured_say_timeout(repo_root: Path | None = None) -> float:
+    """Seconds a speech subprocess may run before it is bounded and reported.
+
+    Falls back to the generous default when unset or non-positive so a valid
+    long message is never clipped; a positive override lets operators tune it.
+    """
+    root = _root_or_current(repo_root)
+    if root is None:
+        return DEFAULT_SAY_TIMEOUT_SECONDS
+    raw = _section(root, SAY_KEY).get(SAY_TIMEOUT_SECONDS_KEY)
+    if raw is None:
+        return DEFAULT_SAY_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_SAY_TIMEOUT_SECONDS
+    if value != value:  # NaN
+        return DEFAULT_SAY_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_SAY_TIMEOUT_SECONDS
 
 
 def configured_agent_personality(repo_root: Path | None = None) -> str:
