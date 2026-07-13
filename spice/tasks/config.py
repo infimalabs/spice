@@ -11,14 +11,15 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from spice import defaults
 from spice.errors import SpiceError
-from spice.locking import lock_fd_exclusive, unlock_fd
+from spice.gitprocess import run_git_command
+from spice.locking import bounded_exclusive_lock
 
 TASK_BACKEND_ENV = "SPICE_TASK_BACKEND"  # env-policy: allow
 # All spice git-dir state lives under the `spice/` namespace, so a repo can host
@@ -28,8 +29,8 @@ PROJECT_SEGMENT_PATTERN = "[0-9a-z_]+"
 PROJECT_SEGMENT_RULE_LABEL = "lowercase letters, digits, and underscores"
 PROJECT_DELIMITER = "."
 SEGMENT_RE = re.compile(rf"^{PROJECT_SEGMENT_PATTERN}$")
-DEFAULT_PROJECT_MIN_DEPTH = 2
-DEFAULT_PROJECT_MAX_DEPTH = 3
+DEFAULT_PROJECT_MIN_DEPTH = defaults.integer("tasks", "project_min_depth")
+DEFAULT_PROJECT_MAX_DEPTH = defaults.integer("tasks", "project_max_depth")
 PHASE_MODELS_KEY = "phase_models"
 
 # Durable vocabulary. `task` and `serve` ship with the harness; `agent` is
@@ -38,23 +39,22 @@ PHASE_MODELS_KEY = "phase_models"
 # public stems, hidden stems, and per-stem default flows through tracked
 # `pyproject.toml` (`[tool.spice.tasks]`), edited by a human — never invented by
 # an agent.
-BASE_APPROVED_STEMS = ("task", "serve", "agent")
-INTERNAL_STEMS = ("agent",)
-MAXIM_PROPOSAL_HIDDEN_STEM = "maxim_proposal"
-BASE_HIDDEN_STEMS = ("oops", MAXIM_PROPOSAL_HIDDEN_STEM)
+BASE_APPROVED_STEMS = defaults.strings("tasks", "base_stems")
+INTERNAL_STEMS = defaults.strings("tasks", "internal_stems")
+MAXIM_PROPOSAL_HIDDEN_STEM = defaults.string("tasks", "maxim_proposal_hidden_stem")
+BASE_HIDDEN_STEMS = defaults.strings("tasks", "hidden_stems")
 HIDDEN_PROJECT_PREFIX = "."
-APPROVED_PHASES = ("design", "plan", "todo", "verify", "review")
-PHASE_SLOT_COUNT = 7  # phase_0 .. phase_6
+APPROVED_PHASES = defaults.strings("tasks", "approved_phases")
+PHASE_SLOT_COUNT = defaults.integer("tasks", "phase_slot_count")
 TASK_EVENT_FILENAME = "events"
-DEFAULT_FLOW = ("todo", "review")
-PRIVATE_DEFAULT_FLOW = ("todo",)
+DEFAULT_FLOW = defaults.strings("tasks", "default_flow")
+PRIVATE_DEFAULT_FLOW = defaults.strings("tasks", "private_default_flow")
 # The hidden .oops triage project defaults to a lone plan phase: an oops item is
 # a deferred speed bump a human triages by planning follow-up work, so it starts
 # in plan and decomposes into dependent tasks. Oops identity rides the .oops
 # project stem (.oops and its .oops.* descendants), never a tag or an
 # APPROVED_PHASES entry.
-OOPS_DEFAULT_FLOW = ("plan",)
-PER_STEM_FLOWS: dict[str, tuple[str, ...]] = {}
+OOPS_DEFAULT_FLOW = defaults.strings("tasks", "oops_default_flow")
 TASK_CREATION_SURFACE_UDA = "creation_surface"
 TASK_CREATION_SURFACE_CLI = "cli"
 TASK_WORDING_REVIEW_UDA = "wording_review"
@@ -65,31 +65,31 @@ TASKDOC_PARENT_UDA = "taskdoc_parent"
 TASKDOC_SYSTEM_UDAS = frozenset({TASKDOC_ID_UDA, TASKDOC_PARENT_UDA})
 
 SENTINEL_ACTOR = "00000000-0000-0000-0000-000000000000"
-OOPS_WAIT = "2099-01-01T00:00:00"
-OOPS_PROJECT = ".oops"
+OOPS_WAIT = defaults.string("tasks", "oops_wait")
+OOPS_PROJECT = f".{defaults.string('tasks', 'oops_hidden_stem')}"
 MAXIM_PROPOSAL_PROJECT = f".{MAXIM_PROPOSAL_HIDDEN_STEM}"
 
 # Native Taskwarrior priorities (H/M/L, or unset). Word aliases map to them.
-DEFAULT_PRIORITY = "medium"
+DEFAULT_PRIORITY = defaults.string("tasks", "default_priority")
 PRIORITY_MAP = {
-    "critical": "H",
-    "high": "H",
-    "medium": "M",
-    "low": "L",
-    "none": "",
-    "": "",
+    str(key): str(value) for key, value in defaults.table("tasks", "priority").items()
 }
-SEVERITY_PRIORITY = {"critical": "H", "high": "H", "medium": "M", "low": "L"}
-SEVERITIES = ("low", "medium", "high", "critical")
-SEVERITY_SHORTHANDS = {"h": "high", "m": "medium", "l": "low"}
+SEVERITY_PRIORITY = {
+    str(key): str(value)
+    for key, value in defaults.table("tasks", "severity_priority").items()
+}
+SEVERITIES = defaults.strings("tasks", "severities")
+SEVERITY_SHORTHANDS = {
+    str(key): str(value)
+    for key, value in defaults.table("tasks", "severity_shorthands").items()
+}
 SLA_DUE_SECONDS = {
-    "H": 86400,  # high/critical: tomorrow
-    "M": 604800,  # medium: one week
-    "L": 2592000,  # low: thirty days
+    str(key): int(value)
+    for key, value in defaults.table("tasks", "sla_due_seconds").items()
 }
 
-CLAIM_TTL_SECONDS = 3600  # a claim is stale once its deadline elapses
-CLAIM_CONTEXT_SECONDS = 300  # claim rehydration window: five minutes around claim
+CLAIM_TTL_SECONDS = defaults.integer("tasks", "claim_ttl_seconds")
+CLAIM_CONTEXT_SECONDS = defaults.integer("tasks", "claim_context_seconds")
 
 _DURATION_RE = re.compile(r"^(\d+)([smhdw])$")
 _DURATION_UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
@@ -97,22 +97,14 @@ _DURATION_UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 # Named reports so a maintainer can explain the allocator with raw
 # Taskwarrior. name -> (description, filter, sort).
 REPORTS = {
-    "oready": (
-        "spice ready queue",
-        f"status:pending +READY project.not:{OOPS_PROJECT}",
-        "urgency-",
-    ),
-    "oreview": ("spice review queue", "status:pending phase:review", "urgency-"),
-    "oactive": ("spice active claims", "status:pending +ACTIVE", "claim_at+"),
-    "oblocked": ("spice blocked", "status:pending +BLOCKED", "urgency-"),
-    "owaiting": ("spice waiting/deferred", "+WAITING", "wait+"),
-    "ooops": (
-        "spice oops triage",
-        f"project:{OOPS_PROJECT} -COMPLETED -DELETED",
-        "urgency-",
-    ),
+    str(name): (
+        str(raw["description"]),
+        str(raw["filter"]),
+        str(raw["sort"]),
+    )
+    for name, raw in defaults.table("tasks", "reports").items()
 }
-ANALYTICS_COMMANDS = ("history", "burndown.daily", "burndown.weekly")
+ANALYTICS_COMMANDS = defaults.strings("tasks", "analytics", "commands")
 _REPORT_COLUMNS = "id,project,phase,priority,urgency,claim_by,description"
 _REPORT_LABELS = "ID,Project,Phase,Pri,Urg,Claim,Description"
 
@@ -136,21 +128,23 @@ def assignable_stems() -> tuple[str, ...]:
 
 
 def _configured_extra_stems() -> tuple[str, ...]:
-    from spice.repocfg import string_list
+    from spice.configlayer import config_string_list
 
     table = _tasks_config_table()
     return tuple(
-        stem for stem in string_list(table.get("stems")) if SEGMENT_RE.match(stem)
+        stem
+        for stem in config_string_list(table.get("stems"))
+        if SEGMENT_RE.match(stem)
     )
 
 
 def _configured_hidden_stems() -> tuple[str, ...]:
-    from spice.repocfg import string_list
+    from spice.configlayer import config_string_list
 
     table = _tasks_config_table()
     configured: list[str] = []
     approved = set(approved_stems())
-    for stem in string_list(table.get("hidden_stems")):
+    for stem in config_string_list(table.get("hidden_stems")):
         if stem.startswith(HIDDEN_PROJECT_PREFIX):
             raise SpiceError(
                 "[tool.spice.tasks].hidden_stems values omit the leading '.'; "
@@ -172,13 +166,11 @@ def _configured_hidden_stems() -> tuple[str, ...]:
 
 
 def per_stem_flows() -> dict[str, tuple[str, ...]]:
-    flows = dict(PER_STEM_FLOWS)
-    flows.update(_configured_per_stem_flows())
-    return flows
+    return _configured_per_stem_flows()
 
 
 def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
-    from spice.repocfg import string_list
+    from spice.configlayer import config_string_list
 
     raw_flows = _tasks_config_table().get("flows")
     if not isinstance(raw_flows, dict):
@@ -196,18 +188,18 @@ def _configured_per_stem_flows() -> dict[str, tuple[str, ...]]:
             raise SpiceError(
                 f"flow stem {stem!r} is not approved (approved: {', '.join(approved)})"
             )
-        flows[stem] = tuple(_validate_flow_phases(string_list(raw_flow)))
+        flows[stem] = tuple(_validate_flow_phases(config_string_list(raw_flow)))
     return flows
 
 
 def _tasks_config_table(repo_root: Path | None = None) -> dict[str, object]:
     from spice.paths import repo_root_from_cwd
-    from spice.repocfg import tasks_table
+    from spice.configlayer import effective_table
 
     root = repo_root or repo_root_from_cwd()
     if root is None:
         return {}
-    return tasks_table(root)
+    return effective_table(root, "tasks")
 
 
 def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str, str]:
@@ -236,19 +228,28 @@ def phase_launch_overrides(repo_root: Path, driver: str, phase: str) -> dict[str
 
 
 def project_depth_bounds() -> tuple[int, int]:
-    table = _tasks_config_table()
-    min_depth = _configured_project_depth(
-        table, "project_min_depth", DEFAULT_PROJECT_MIN_DEPTH
-    )
-    max_depth = _configured_project_depth(
-        table, "project_max_depth", DEFAULT_PROJECT_MAX_DEPTH
-    )
-    if max_depth < min_depth:
-        raise SpiceError(
-            "[tool.spice.tasks].project_max_depth must be greater than or equal to "
-            "project_min_depth"
+    from spice.configlayer import contextualize_config_error
+    from spice.paths import repo_root_from_cwd
+
+    root = repo_root_from_cwd()
+    try:
+        table = _tasks_config_table(root)
+        min_depth = _configured_project_depth(
+            table, "project_min_depth", DEFAULT_PROJECT_MIN_DEPTH
         )
-    return min_depth, max_depth
+        max_depth = _configured_project_depth(
+            table, "project_max_depth", DEFAULT_PROJECT_MAX_DEPTH
+        )
+        if max_depth < min_depth:
+            raise SpiceError(
+                "[tool.spice.tasks].project_max_depth must be greater than or equal "
+                "to project_min_depth"
+            )
+        return min_depth, max_depth
+    except SpiceError as exc:
+        if root is None:
+            raise
+        raise contextualize_config_error(root, exc, "tasks") from exc
 
 
 def _configured_project_depth(table: dict[str, object], key: str, default: int) -> int:
@@ -328,6 +329,7 @@ _EVIDENCE = [
 ]
 
 _backend_override: str | None = None
+TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS = 30.0
 
 
 def set_backend(selector: str | None) -> None:
@@ -342,7 +344,7 @@ def _selector() -> str:
 
 
 def repo_root() -> Path:
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
         check=False,
@@ -354,7 +356,7 @@ def repo_root() -> Path:
 
 
 def git_common_dir(root: Path) -> Path:
-    result = subprocess.run(
+    result = run_git_command(
         ["git", "-C", str(root), "rev-parse", "--git-common-dir"],
         capture_output=True,
         check=False,
@@ -395,12 +397,12 @@ def bootstrap_lock_path() -> Path:
 @contextmanager
 def _bootstrap_lock():
     backend_root().mkdir(parents=True, exist_ok=True)
-    with bootstrap_lock_path().open("a", encoding="utf-8") as handle:
-        lock_fd_exclusive(handle.fileno(), blocking=True)
-        try:
-            yield
-        finally:
-            unlock_fd(handle.fileno())
+    with bounded_exclusive_lock(
+        bootstrap_lock_path(),
+        timeout_seconds=TASK_BOOTSTRAP_LOCK_TIMEOUT_SECONDS,
+        action="bootstrap task backend",
+    ):
+        yield
 
 
 def _atomic_write_text(path: Path, text: str) -> None:

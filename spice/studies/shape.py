@@ -22,7 +22,8 @@ from pathlib import Path
 
 from spice.errors import SpiceError
 from spice.policy import BOUNDARY_UNDERSCORE_PATTERN
-from spice.repocfg import policy_table, read_pyproject, string_list
+from spice.configlayer import config_string_list, effective_table
+from spice.repocfg import read_pyproject
 from spice.studies.walk import configured_test_roots, is_test_path
 
 BOUNDARY_UNDERSCORE_RE = re.compile(BOUNDARY_UNDERSCORE_PATTERN)
@@ -48,7 +49,9 @@ def configured_package_roots(repo_root: Path) -> list[Path]:
     # Explicit `[tool.spice.policy] package_roots` wins; otherwise derive the
     # roots from the project's own Python packaging config so a standard project
     # needs no spice-local declaration. Neither present -> no roots (skip).
-    names = string_list(policy_table(repo_root).get("package_roots"))
+    names = config_string_list(
+        effective_table(repo_root, "policy").get("package_roots")
+    )
     if not names:
         names = _derived_package_roots(repo_root)
     return [repo_root / name for name in names if (repo_root / name).is_dir()]
@@ -62,7 +65,11 @@ def generated_path_patterns(repo_root: Path) -> tuple[str, ...]:
     enforced. Unlike study ``exclude``, this exemption reaches the shape guards
     themselves, not just the study walk.
     """
-    return tuple(string_list(policy_table(repo_root).get(GENERATED_PATHS_KEY)))
+    return tuple(
+        config_string_list(
+            effective_table(repo_root, "policy").get(GENERATED_PATHS_KEY)
+        )
+    )
 
 
 def _has_glob_magic(pattern: str) -> bool:
@@ -90,7 +97,7 @@ def is_generated_path(rel_posix: str, patterns: tuple[str, ...]) -> bool:
 
 
 def name_cluster_threshold(repo_root: Path) -> int:
-    raw = policy_table(repo_root).get(NAME_CLUSTER_THRESHOLD_KEY)
+    raw = effective_table(repo_root, "policy").get(NAME_CLUSTER_THRESHOLD_KEY)
     if raw is None:
         return DEFAULT_NAME_CLUSTER_THRESHOLD
     if (
@@ -286,9 +293,9 @@ def _explicit_package_roots(packages: list[object]) -> list[str]:
 
 
 def _find_package_roots(repo_root: Path, find: dict[str, object]) -> list[str]:
-    where_dirs = string_list(find.get("where")) or ["."]
-    includes = string_list(find.get("include")) or ["*"]
-    excludes = string_list(find.get("exclude"))
+    where_dirs = config_string_list(find.get("where")) or ["."]
+    includes = config_string_list(find.get("include")) or ["*"]
+    excludes = config_string_list(find.get("exclude"))
     roots = []
     for base in where_dirs:
         base_dir = repo_root / base

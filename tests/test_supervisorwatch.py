@@ -51,3 +51,27 @@ def test_flag_uncaptured_lane_silent_when_tree_is_clean(tmp_path, monkeypatch):
     lifecycle._flag_uncaptured_lane(tmp_path, "thread-x", tmp_path / "log.txt")
 
     assert calls == []
+
+
+def test_flag_uncaptured_lane_completes_when_git_cannot_launch(tmp_path, monkeypatch):
+    events = []
+
+    def unavailable_git(_command, **kwargs):
+        events.append(f"probe-budget:{kwargs['timeout']:g}")
+        raise FileNotFoundError("git unavailable")
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", unavailable_git)
+    monkeypatch.setattr(claimstate, "active_claim", lambda _actor: None)
+    monkeypatch.setattr(
+        watchdog,
+        "publish_supervisor_feedback",
+        lambda *_args, **_kwargs: events.append("feedback-published"),
+    )
+
+    lifecycle._flag_uncaptured_lane(tmp_path, "thread-x", tmp_path / "log.txt")
+    events.append("supervisor-returned")
+
+    assert events == [
+        f"probe-budget:{lifecycle.GIT_PROBE_TIMEOUT_SECONDS:g}",
+        "supervisor-returned",
+    ]

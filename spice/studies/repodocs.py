@@ -17,7 +17,7 @@ from spice.flexstate import (
 )
 from spice.policy import REPO_TRUTH_DOCS
 from spice.policyconfig import ResolvedPolicy, resolve_policy
-from spice.repocfg import policy_table, string_list
+from spice.configlayer import config_string_list, effective_table
 from spice.studies.walk import staged_renames, tracked_paths
 
 REPO_DOC_CHAR_STICKY_VERSION = 1
@@ -33,7 +33,9 @@ class RepoTruthDocFinding:
 
 
 def repo_truth_docs(repo_root: Path) -> list[str]:
-    declared = string_list(policy_table(repo_root).get("repo_truth_docs"))
+    declared = config_string_list(
+        effective_table(repo_root, "policy").get("repo_truth_docs")
+    )
     return declared or list(REPO_TRUTH_DOCS)
 
 

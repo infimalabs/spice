@@ -145,8 +145,11 @@ def test_configured_stub_judge_drives_maxim_agree_end_to_end(tmp_path, monkeypat
         encoding="utf-8",
     )
     judge_path.chmod(0o755)
-    config.set_worktree_section(
-        repo, config.JUDGE_KEY, {config.JUDGE_BIN_KEY: str(judge_path)}
+    config.set_scope_section(
+        repo,
+        config.WORKTREE_SOURCE,
+        config.JUDGE_KEY,
+        {config.JUDGE_BIN_KEY: str(judge_path)},
     )
     monkeypatch.chdir(repo)
 
@@ -190,8 +193,11 @@ def _wire_portable_judge(repo: Path, verdict: str) -> None:
         encoding="utf-8",
     )
     adapter.chmod(0o755)
-    config.set_worktree_section(
-        repo, config.JUDGE_KEY, {config.JUDGE_BIN_KEY: str(adapter)}
+    config.set_scope_section(
+        repo,
+        config.WORKTREE_SOURCE,
+        config.JUDGE_KEY,
+        {config.JUDGE_BIN_KEY: str(adapter)},
     )
     return shlex.join([str(model)])
 

@@ -2,7 +2,7 @@
 
 Tracked project configuration lives under `[tool.spice.*]` in `pyproject.toml`.
 Worktree-local operator preferences, such as speech voice, judge binary, and
-local agent overrides, live in `.spice/config/state.json` through
+local agent overrides, live in `.spice/config/spice.toml` through
 `spice config`; they are not tracked project knobs.
 
 For the full key-by-key reference, see

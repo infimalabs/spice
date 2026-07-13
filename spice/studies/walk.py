@@ -7,7 +7,8 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Iterable, Iterator
 
-from spice.repocfg import policy_table, read_pyproject, string_list
+from spice.configlayer import config_string_list, effective_table
+from spice.repocfg import read_pyproject
 
 _RENAME_STATUS_FIELDS = 3
 TEST_PATHS_KEY = "test_paths"
@@ -26,12 +27,16 @@ EXCLUDED_PATH_PARTS = frozenset(
 
 
 def policy_path_exclusions(repo_root: Path) -> tuple[str, ...]:
-    return tuple(string_list(policy_table(repo_root).get("exclude")))
+    return tuple(
+        config_string_list(effective_table(repo_root, "policy").get("exclude"))
+    )
 
 
 def test_path_patterns(repo_root: Path) -> tuple[str, ...]:
     """Repo-relative test-root patterns, in configured derivation precedence."""
-    policy_patterns = string_list(policy_table(repo_root).get(TEST_PATHS_KEY))
+    policy_patterns = config_string_list(
+        effective_table(repo_root, "policy").get(TEST_PATHS_KEY)
+    )
     if policy_patterns:
         return _normalized_patterns(policy_patterns)
     pytest_patterns = _pytest_testpaths(repo_root)
@@ -75,7 +80,7 @@ def _pytest_testpaths(repo_root: Path) -> list[str]:
     raw = options.get("testpaths")
     if isinstance(raw, str):
         return _string_testpaths(raw)
-    return string_list(raw)
+    return config_string_list(raw)
 
 
 def _string_testpaths(raw: str) -> list[str]:

@@ -39,7 +39,7 @@ include = ["spice*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"spice" = ["py.typed"]
+"spice" = ["py.typed", "spice.toml"]
 "spice.agent" = [
     "*.md",
     "shellhooks/.zshenv",
@@ -125,6 +125,7 @@ env_names = [
     "RTK_DB_PATH",
     "SPICE_AGENT_BIN",
     "SPICE_AGENT_DRIVER",
+    "SPICE_GIT_TIMEOUT_SECONDS",
     "SPICE_JUDGE_MODEL_CMD",
     "SPICE_JUDGE_TIMEOUT",
     "SPICE_METRIC_HISTORY_RETENTION_DAYS",
@@ -156,7 +157,6 @@ env_names = [
 # (hallucinate). Empty value = "consider rephrasing".
 [tool.spice.policy.taste.words]
 smell = ""
-just = ""
 
 # The agent-run fast path deliberately bypasses the full CLI dispatcher so it
 # never imports the parser/inbox stack; asserting the bypass is inherently about
@@ -221,6 +221,15 @@ target = "_worktree_local_python"
 path = "tests/test_selfexec.py"
 test = "test_worktree_local_python_none_without_venv"
 target = "_worktree_local_python"
+
+# _worktree_dirty is a lifecycle git probe reached only by the private
+# uncaptured-lane nudge; its stall contract (resolve to clean, so a wedged
+# `git status` never fabricates a dirty-tree nudge) has no public observable,
+# so the bound-deadline test pins it white-box.
+[[tool.spice.policy.internal_couplings]]
+path = "tests/test_boundedwaits.py"
+test = "test_worktree_dirty_bounds_probe_and_resolves_clean_status_on_stall"
+target = "_worktree_dirty"
 
 [tool.spice.serve]
 brand = "spice"

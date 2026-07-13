@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from spice.errors import SpiceError
+from spice.gitprocess import DEFAULT_GIT_TIMEOUT_SECONDS, run_git_command
 from spice.tasks import config, identity, wordingreview
 
 GIT_NETWORK_TIMEOUT_SECONDS = 30
@@ -38,6 +39,7 @@ _NETWORK_COMMANDS = {"fetch", "push"}
 # N-agent completion storm to drain ahead of this push, small enough that a
 # genuinely wedged remote fails fast.
 PUBLISH_RACE_RETRY_LIMIT = 5
+MERGE_STATE_FILES = ("ORIG_HEAD", "MERGE_MODE", "MERGE_MSG", "MERGE_HEAD")
 
 
 class MergeConflict(SpiceError):
@@ -59,20 +61,30 @@ def _run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         "env": env,
         "text": True,
     }
-    if args and args[0] in _NETWORK_COMMANDS:
-        kwargs["timeout"] = GIT_NETWORK_TIMEOUT_SECONDS
-    try:
-        return subprocess.run(command, **kwargs)
-    except subprocess.TimeoutExpired as exc:
-        return subprocess.CompletedProcess(
-            command,
-            124,
-            stdout=_timeout_text(exc.stdout),
-            stderr=(
-                _timeout_text(exc.stderr)
-                + f"git {args[0]} timed out after {GIT_NETWORK_TIMEOUT_SECONDS}s\n"
-            ),
-        )
+    timeout = (
+        GIT_NETWORK_TIMEOUT_SECONDS if args and args[0] in _NETWORK_COMMANDS else None
+    )
+    return run_git_command(
+        command,
+        default_timeout_seconds=timeout or DEFAULT_GIT_TIMEOUT_SECONDS,
+        **kwargs,
+    )
+
+
+def _run_with_input(
+    repo_root: Path, *args: str, input_text: str
+) -> subprocess.CompletedProcess[str]:
+    env = _control_plane_git_env()
+    command = ["git", "-C", str(repo_root), *args]
+    return run_git_command(
+        command,
+        default_timeout_seconds=DEFAULT_GIT_TIMEOUT_SECONDS,
+        capture_output=True,
+        check=False,
+        env=env,
+        input=input_text,
+        text=True,
+    )
 
 
 def _control_plane_git_env() -> dict[str, str]:
@@ -80,14 +92,6 @@ def _control_plane_git_env() -> dict[str, str]:
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_SSH_COMMAND"] = TASK_GIT_SSH_COMMAND
     return env
-
-
-def _timeout_text(value: str | bytes | None) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return value
 
 
 def _read(repo_root: Path, *args: str) -> str:
@@ -357,7 +361,6 @@ def _integrate_task_work(
         )
     return _integrate_advanced_baseline(
         repo_root,
-        baseline=baseline,
         label=label,
         agent_head=agent_head,
         upstream_head=upstream_head,
@@ -380,23 +383,41 @@ def _integrate_already_contains_baseline(
 def _integrate_advanced_baseline(
     repo_root: Path,
     *,
-    baseline: str,
     label: str,
     agent_head: str,
     upstream_head: str,
     message: str,
 ) -> str:
-    # Merge into the index without committing, then synthesize the generated
-    # task merge with the baseline as mainline. A real conflict stays in the
-    # worktree for the agent to resolve; retrying wraps that resolution in the
-    # same generated merge shape.
-    merge = _run(repo_root, "merge", "--no-ff", "--no-commit", "-m", message, baseline)
-    if merge.returncode != 0:
+    # Compute first, without touching refs, the index, or the working tree.
+    # Porcelain `git merge` writes ORIG_HEAD through the reference-transaction
+    # hook and can materialize a conflict before MERGE_HEAD exists. A failed
+    # hook therefore used to strand loose markers with neither the complete
+    # merged index nor a baseline parent. merge-tree closes that failure
+    # window; conflicts are materialized below as a complete merge state.
+    if _read(repo_root, "rev-parse", "--verify", "MERGE_HEAD"):
         raise MergeConflict(_merge_conflict_recovery(label, repo_root))
-    merged_tree = _read(repo_root, "write-tree")
-    if not merged_tree:
-        raise SpiceError("could not write merged tree")
-    _clear_temporary_merge_state(repo_root, action="clear merge state")
+    merge = _run(
+        repo_root,
+        "merge-tree",
+        "--write-tree",
+        "-z",
+        "--no-messages",
+        agent_head,
+        upstream_head,
+    )
+    merged_tree, conflict_records = _parse_merge_tree_output(merge.stdout)
+    if merge.returncode == 1:
+        _materialize_merge_conflict(
+            repo_root,
+            merged_tree=merged_tree,
+            conflict_records=conflict_records,
+            agent_head=agent_head,
+            upstream_head=upstream_head,
+            message=message,
+        )
+        raise MergeConflict(_merge_conflict_recovery(label, repo_root))
+    if merge.returncode != 0 or not merged_tree:
+        raise SpiceError(_fail("compute task merge tree", merge))
     return _synthesize_and_fast_forward(
         repo_root, merged_tree, upstream_head, agent_head, message, label=label
     )
@@ -497,14 +518,27 @@ def _retry_publish_after_race(
             return merge_head, fresh_upstream_head
 
         merge = _run(
-            repo_root, "merge", "--no-ff", "--no-commit", "-m", message, baseline
+            repo_root,
+            "merge-tree",
+            "--write-tree",
+            "-z",
+            "--no-messages",
+            merge_head,
+            fresh_upstream_head,
         )
-        if merge.returncode != 0:
+        merged_tree, conflict_records = _parse_merge_tree_output(merge.stdout)
+        if merge.returncode == 1:
+            _materialize_merge_conflict(
+                repo_root,
+                merged_tree=merged_tree,
+                conflict_records=conflict_records,
+                agent_head=merge_head,
+                upstream_head=fresh_upstream_head,
+                message=message,
+            )
             raise MergeConflict(_merge_conflict_recovery(label, repo_root))
-        merged_tree = _read(repo_root, "write-tree")
-        if not merged_tree:
-            raise SpiceError("could not write publish-race merged tree")
-        _clear_temporary_merge_state(repo_root, action="clear publish-race merge state")
+        if merge.returncode != 0 or not merged_tree:
+            raise SpiceError(_fail("compute publish-race merge tree", merge))
         retry_head = _synthesize_and_fast_forward(
             repo_root,
             merged_tree,
@@ -543,15 +577,105 @@ def _is_non_fast_forward_push(completed: subprocess.CompletedProcess[str]) -> bo
     )
 
 
-def _clear_temporary_merge_state(repo_root: Path, *, action: str) -> None:
-    abort = _run(repo_root, "merge", "--abort")
-    if abort.returncode == 0:
-        return
-    if _read(repo_root, "rev-parse", "--verify", "MERGE_HEAD"):
-        raise SpiceError(_fail(action, abort))
-    reset = _run(repo_root, "reset", "--hard", "HEAD")
-    if reset.returncode != 0:
-        raise SpiceError(_fail(f"{action} after missing MERGE_HEAD", reset))
+def _parse_merge_tree_output(output: str) -> tuple[str, list[str]]:
+    fields = output.split("\0")
+    tree = fields[0].strip() if fields else ""
+    return tree, [field for field in fields[1:] if field]
+
+
+def _materialize_merge_conflict(
+    repo_root: Path,
+    *,
+    merged_tree: str,
+    conflict_records: list[str],
+    agent_head: str,
+    upstream_head: str,
+    message: str,
+) -> None:
+    """Install merge-tree's result as a complete, recoverable merge state.
+
+    MERGE_HEAD is written last. Until then every failure rolls the index and
+    working tree back to ``agent_head``; after it exists, the marker blobs,
+    higher index stages, and both parents are all present.
+    """
+    if not merged_tree or not conflict_records:
+        raise SpiceError("conflicted merge-tree result was incomplete")
+    parsed: list[tuple[str, str]] = []
+    for record in conflict_records:
+        metadata, separator, path = record.partition("\t")
+        if not separator or len(metadata.split()) != 3 or not path:
+            raise SpiceError("conflicted merge-tree index record was malformed")
+        parsed.append((metadata, path))
+
+    try:
+        previous_state = _snapshot_merge_state(repo_root)
+    except OSError as error:
+        raise SpiceError(f"could not snapshot pre-merge state: {error}") from error
+    try:
+        materialize = _run(repo_root, "read-tree", "--reset", "-u", merged_tree)
+        if materialize.returncode != 0:
+            raise SpiceError(_fail("materialize conflicted merge tree", materialize))
+        for path in sorted({path for _, path in parsed}):
+            removed = _run(repo_root, "update-index", "--force-remove", "--", path)
+            if removed.returncode != 0:
+                raise SpiceError(_fail(f"prepare conflict index for {path}", removed))
+        index_info = "".join(f"{metadata}\t{path}\0" for metadata, path in parsed)
+        staged = _run_with_input(
+            repo_root, "update-index", "-z", "--index-info", input_text=index_info
+        )
+        if staged.returncode != 0:
+            raise SpiceError(_fail("install conflict index stages", staged))
+
+        _write_git_state(repo_root, "ORIG_HEAD", f"{agent_head}\n")
+        _write_git_state(repo_root, "MERGE_MODE", "no-ff\n")
+        _write_git_state(repo_root, "MERGE_MSG", f"{message}\n")
+        _write_git_state(repo_root, "MERGE_HEAD", f"{upstream_head}\n")
+    except (OSError, SpiceError) as error:
+        state_error: OSError | None = None
+        try:
+            _restore_merge_state(previous_state)
+        except OSError as restore_error:
+            state_error = restore_error
+        restored = _run(repo_root, "read-tree", "--reset", "-u", agent_head)
+        if restored.returncode != 0:
+            raise SpiceError(_fail("restore pre-merge tree", restored))
+        if state_error is not None:
+            raise SpiceError(
+                f"could not restore pre-merge metadata: {state_error}"
+            ) from state_error
+        if isinstance(error, SpiceError):
+            raise
+        raise SpiceError(
+            f"could not install recoverable merge state: {error}"
+        ) from error
+
+
+def _git_state_path(repo_root: Path, name: str) -> Path:
+    value = _read(repo_root, "rev-parse", "--git-path", name)
+    if not value:
+        raise SpiceError(f"could not resolve git state path for {name}")
+    path = Path(value)
+    return path if path.is_absolute() else repo_root / path
+
+
+def _write_git_state(repo_root: Path, name: str, content: str) -> None:
+    _git_state_path(repo_root, name).write_text(content, encoding="utf-8")
+
+
+def _snapshot_merge_state(repo_root: Path) -> dict[Path, bytes | None]:
+    snapshot: dict[Path, bytes | None] = {}
+    for name in MERGE_STATE_FILES:
+        path = _git_state_path(repo_root, name)
+        snapshot[path] = path.read_bytes() if path.exists() else None
+    return snapshot
+
+
+def _restore_merge_state(snapshot: dict[Path, bytes | None]) -> None:
+    for path, content in snapshot.items():
+        if content is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(content)
 
 
 def _tree_of(repo_root: Path, ref: str) -> str:
@@ -561,19 +685,14 @@ def _tree_of(repo_root: Path, ref: str) -> str:
 def _collapse_to_first_parent(repo_root: Path, first_parent: str, *, label: str) -> str:
     """Fast-forward the branch to a tree-equivalent descendant baseline."""
     expected_head = _read(repo_root, "rev-parse", "HEAD")
-    ff = _run(repo_root, "merge", "--ff-only", first_parent)
-    if ff.returncode == 0:
-        return first_parent
-    if _is_head_ref_lock_race(ff):
-        raise SpiceError(
-            _head_ref_lock_race_recovery(
-                label,
-                expected_head=expected_head,
-                current_head=_read(repo_root, "rev-parse", "HEAD"),
-                completed=ff,
-            )
-        )
-    raise SpiceError(_fail("fast-forward tree-same phase onto baseline", ff))
+    _materialize_and_update_head(
+        repo_root,
+        new_head=first_parent,
+        expected_head=expected_head,
+        label=label,
+        action="fast-forward tree-same phase onto baseline",
+    )
+    return first_parent
 
 
 def _synthesize_and_fast_forward(
@@ -598,19 +717,61 @@ def _synthesize_and_fast_forward(
         repo_root, treeish, first_parent, second_parent, message
     )
     expected_head = _read(repo_root, "rev-parse", "HEAD")
-    ff = _run(repo_root, "merge", "--ff-only", merge_head)
-    if ff.returncode != 0:
-        if _is_head_ref_lock_race(ff):
-            raise SpiceError(
-                _head_ref_lock_race_recovery(
-                    label,
-                    expected_head=expected_head,
-                    current_head=_read(repo_root, "rev-parse", "HEAD"),
-                    completed=ff,
-                )
-            )
-        raise SpiceError(_fail("advance branch to merge commit", ff))
+    _materialize_and_update_head(
+        repo_root,
+        new_head=merge_head,
+        expected_head=expected_head,
+        label=label,
+        action="advance branch to merge commit",
+    )
     return merge_head
+
+
+def _materialize_and_update_head(
+    repo_root: Path,
+    *,
+    new_head: str,
+    expected_head: str,
+    label: str,
+    action: str,
+) -> None:
+    """Advance checked-out HEAD without exposing a half-applied ref update.
+
+    The complete target tree reaches the index and working tree before the
+    branch compare-and-swap. If that ref transaction fails, read-tree restores
+    the actual current HEAD without invoking another ref hook. Thus command
+    success has the target tree and parent record together, while every
+    handled failure returns to a clean pre-transaction commit.
+    """
+    current_ref = _read(repo_root, "symbolic-ref", "--quiet", "HEAD")
+    if not current_ref:
+        raise SpiceError(f"cannot {action}: HEAD is detached")
+    materialize = _run(repo_root, "read-tree", "--reset", "-u", new_head)
+    if materialize.returncode != 0:
+        restored = _run(repo_root, "read-tree", "--reset", "-u", expected_head)
+        if restored.returncode != 0:
+            raise SpiceError(_fail(f"restore tree after failed {action}", restored))
+        raise SpiceError(_fail(action, materialize))
+
+    update = _run(repo_root, "update-ref", current_ref, new_head, expected_head)
+    current_head = _read(repo_root, "rev-parse", "HEAD")
+    if update.returncode == 0 or current_head == new_head:
+        return
+
+    restore_head = current_head or expected_head
+    restored = _run(repo_root, "read-tree", "--reset", "-u", restore_head)
+    if restored.returncode != 0:
+        raise SpiceError(_fail(f"restore tree after failed {action}", restored))
+    if _is_head_ref_lock_race(update):
+        raise SpiceError(
+            _head_ref_lock_race_recovery(
+                label,
+                expected_head=expected_head,
+                current_head=current_head,
+                completed=update,
+            )
+        )
+    raise SpiceError(_fail(action, update))
 
 
 def _is_head_ref_lock_race(completed: subprocess.CompletedProcess[str]) -> bool:

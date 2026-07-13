@@ -43,7 +43,7 @@ from spice.flexstate import FlexSliceClaim
 from spice.paths import find_tool
 from spice.policy import LEGITIMATE_INTERNAL_COUPLINGS
 from spice.policyconfig import resolve_policy
-from spice.repocfg import policy_table
+from spice.configlayer import contextualize_config_error, effective_table
 from spice.studies import (
     complexity,
     envpolicy,
@@ -137,6 +137,15 @@ def _run_step(
 
 def pre_commit_steps(repo_root: Path, paths: list[Path]) -> list[PreCommitStep]:
     """The ordered pre-commit gate after tracked repo policy is applied."""
+    try:
+        return _pre_commit_steps(repo_root, paths)
+    except SpiceError as exc:
+        raise contextualize_config_error(
+            repo_root, exc, "policy", "pre_commit"
+        ) from exc
+
+
+def _pre_commit_steps(repo_root: Path, paths: list[Path]) -> list[PreCommitStep]:
     steps = _configured_builtin_steps(
         repo_root, _builtin_pre_commit_steps(repo_root, paths)
     )
@@ -263,7 +272,7 @@ def _run_plan_phase_mutation_guard(repo_root: Path) -> None:
 def _configured_builtin_steps(
     repo_root: Path, builtin_steps: list[PreCommitStep]
 ) -> list[PreCommitStep]:
-    policy = policy_table(repo_root)
+    policy = effective_table(repo_root, "policy")
     raw_overrides = policy.get("pre_commit_builtins")
     if raw_overrides is None:
         return builtin_steps
@@ -343,7 +352,7 @@ def _configured_command_steps(
     config_key: str,
     key_prefix: str,
 ) -> list[PreCommitStep]:
-    raw_steps = policy_table(repo_root).get(config_key)
+    raw_steps = effective_table(repo_root, "policy").get(config_key)
     if raw_steps is None:
         return []
     if not isinstance(raw_steps, list):

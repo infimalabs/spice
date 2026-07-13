@@ -12,6 +12,7 @@ appends through a held-open handle), watchfiles covers Linux/Windows.
 
 from __future__ import annotations
 
+import json
 import os
 import select
 import time
@@ -22,7 +23,7 @@ from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
 from queue import Queue
-from threading import Event, Lock, Thread
+from threading import Event, Lock, Thread, Timer
 from typing import Any, Callable, cast
 
 from spice.serve.messages import TranscriptResolution
@@ -86,6 +87,7 @@ LIVE_BUS_WATCHER_JOIN_TIMEOUT_S = LIVE_BUS_KQUEUE_CANCEL_TIMEOUT_S + 0.5
 # whole interval with no frame means the peer is gone and the blocking read
 # is unblocked so the session and its watchers are reaped.
 LIVE_BUS_READ_TIMEOUT_S = 45.0
+BACKGROUND_LANE_COALESCE_SECONDS = 0.25
 _MS_PER_SECOND = 1000
 
 
@@ -116,6 +118,48 @@ class LaneSignature:
     other: Any
 
 
+@dataclass(frozen=True)
+class FrameSendTiming:
+    lock_wait_ms: float
+    lock_hold_ms: float
+    write_ms: float
+    finished_at: float
+
+
+@dataclass
+class _FrameTelemetry:
+    count: int = 0
+    bytes: int = 0
+    lock_wait_total_ms: float = 0.0
+    lock_wait_last_ms: float = 0.0
+    lock_wait_max_ms: float = 0.0
+    lock_hold_total_ms: float = 0.0
+    lock_hold_last_ms: float = 0.0
+    lock_hold_max_ms: float = 0.0
+
+    def record(self, byte_count: int, timing: FrameSendTiming) -> None:
+        self.count += 1
+        self.bytes += byte_count
+        self.lock_wait_total_ms += timing.lock_wait_ms
+        self.lock_wait_last_ms = timing.lock_wait_ms
+        self.lock_wait_max_ms = max(self.lock_wait_max_ms, timing.lock_wait_ms)
+        self.lock_hold_total_ms += timing.lock_hold_ms
+        self.lock_hold_last_ms = timing.lock_hold_ms
+        self.lock_hold_max_ms = max(self.lock_hold_max_ms, timing.lock_hold_ms)
+
+    def payload(self) -> dict[str, int | float]:
+        return {
+            "count": self.count,
+            "bytes": self.bytes,
+            "sendLockWaitMsTotal": self.lock_wait_total_ms,
+            "sendLockWaitMsLast": self.lock_wait_last_ms,
+            "sendLockWaitMsMax": self.lock_wait_max_ms,
+            "sendLockHoldMsTotal": self.lock_hold_total_ms,
+            "sendLockHoldMsLast": self.lock_hold_last_ms,
+            "sendLockHoldMsMax": self.lock_hold_max_ms,
+        }
+
+
 @dataclass
 class _LaneSubscription:
     target: Any
@@ -128,6 +172,7 @@ class _LaneSubscription:
     lock: Lock = field(default_factory=Lock)
     last_signature: Any = None
     watcher_error: str | None = None
+    background_dirty: bool = False
 
 
 class LiveBusSession:
@@ -142,6 +187,12 @@ class LiveBusSession:
         self._subscription_sequence = 0
         self.subscriptions: dict[str, _LaneSubscription] = {}
         self.send_lock = Lock()
+        self._telemetry_lock = Lock()
+        self._frame_telemetry: dict[str, _FrameTelemetry] = {}
+        self._background_dirty_lock = Lock()
+        self._background_dirty_lanes: dict[str, str] = {}
+        self._background_dirty_timer: Timer | None = None
+        self._closed = False
         # Metrics are read-only display data whose queries can be heavy; running
         # them inline would block interactive frames (lane.send, acks) on this
         # one socket. A dedicated worker drains them so the dispatch loop stays
@@ -191,6 +242,13 @@ class LiveBusSession:
             self._teardown()
 
     def _teardown(self) -> None:
+        with self._background_dirty_lock:
+            self._closed = True
+            timer = self._background_dirty_timer
+            self._background_dirty_timer = None
+            self._background_dirty_lanes.clear()
+        if timer is not None:
+            timer.cancel()
         for subscription in list(self.subscriptions.values()):
             self._stop_subscription(subscription)
         self.subscriptions.clear()
@@ -225,21 +283,72 @@ class LiveBusSession:
             self._payload_pool.shutdown(wait=False, cancel_futures=True)
             self._payload_pool = None
 
-    def _send(self, payload: dict[str, Any]) -> None:
-        # Serialize the frame to bytes before taking send_lock so the lock's
-        # critical section is only the socket write. A watcher thread busy
-        # encoding a bulk lane payload no longer holds the lock through that
-        # encode, so a small lane.sendResult ack acquires it and writes as soon
-        # as any in-flight write returns rather than queuing behind the encode.
-        frame = self.connection.encode_text_frame(payload)
-        with self.send_lock:
-            self.connection.send_frame(frame)
+    def diagnostics(self) -> dict[str, Any]:
+        with self._telemetry_lock:
+            frames = {
+                kind: telemetry.payload()
+                for kind, telemetry in sorted(self._frame_telemetry.items())
+            }
+        return {
+            "clientId": self.client_id,
+            "frames": frames,
+            "totals": {
+                "count": sum(int(frame["count"]) for frame in frames.values()),
+                "bytes": sum(int(frame["bytes"]) for frame in frames.values()),
+            },
+        }
 
-    def _reply(self, message: dict[str, Any], payload: dict[str, Any]) -> None:
+    def _send(
+        self,
+        payload: dict[str, Any],
+        *,
+        before_send: Callable[[float], None] | None = None,
+    ) -> FrameSendTiming:
+        # Encode the frame to bytes before taking send_lock so the lock's
+        # critical section -- and the lock-hold/write timing below -- covers only
+        # the socket write. A watcher thread encoding a bulk lane payload no
+        # longer holds the lock through that encode, so a small lane.sendResult
+        # ack acquires it and writes as soon as any in-flight write returns
+        # rather than queuing behind the encode. byte_count is the JSON payload
+        # length (matching the wire text), also computed outside the lock.
+        frame = self.connection.encode_text_frame(payload)
+        byte_count = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        wait_started_at = time.perf_counter()
+        self.send_lock.acquire()
+        acquired_at = time.perf_counter()
+        lock_wait_ms = _elapsed_ms(wait_started_at, acquired_at)
+        try:
+            if before_send is not None:
+                before_send(lock_wait_ms)
+            write_started_at = time.perf_counter()
+            self.connection.send_frame(frame)
+            finished_at = time.perf_counter()
+            timing = FrameSendTiming(
+                lock_wait_ms=lock_wait_ms,
+                lock_hold_ms=_elapsed_ms(acquired_at, finished_at),
+                write_ms=_elapsed_ms(write_started_at, finished_at),
+                finished_at=finished_at,
+            )
+            kind = str(payload.get("type") or "unknown")
+            with self._telemetry_lock:
+                self._frame_telemetry.setdefault(kind, _FrameTelemetry()).record(
+                    byte_count, timing
+                )
+        finally:
+            self.send_lock.release()
+        return timing
+
+    def _reply(
+        self,
+        message: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        before_send: Callable[[float], None] | None = None,
+    ) -> FrameSendTiming:
         request_id = message.get("requestId")
         if isinstance(request_id, str) and request_id:
             payload = {**payload, "requestId": request_id}
-        self._send(payload)
+        return self._send(payload, before_send=before_send)
 
     def _dispatch(self, message: dict[str, Any]) -> None:
         kind = str(message.get("type") or "")
@@ -273,7 +382,10 @@ class LiveBusSession:
     # ---- handlers ------------------------------------------------------
 
     def _handle_ping(self, message: dict[str, Any]) -> None:
-        self._reply(message, {"type": "bus.pong"})
+        self._reply(
+            message,
+            {"type": "bus.pong", "diagnostics": self.diagnostics()},
+        )
 
     def _handle_targets_refresh(self, message: dict[str, Any]) -> None:
         self._reply(
@@ -541,6 +653,53 @@ class LiveBusSession:
                 subscription.query = dict(message.get("query") or {})
         self._reply(message, {"type": "lane.configured"})
 
+    def coalesce_background_update(self, subscription: _LaneSubscription) -> bool:
+        """Defer one background lane change into the aggregate dirty frame."""
+        with subscription.lock:
+            focused = subscription.query.get("focused") is not False
+            if focused:
+                subscription.background_dirty = False
+                return False
+            if subscription.background_dirty:
+                return True
+            subscription.background_dirty = True
+        self._mark_background_lane_dirty(subscription)
+        return True
+
+    def _mark_background_lane_dirty(self, subscription: _LaneSubscription) -> None:
+        with self._background_dirty_lock:
+            if self._closed:
+                return
+            self._background_dirty_lanes[subscription.target.id] = (
+                subscription.generation
+            )
+            if self._background_dirty_timer is not None:
+                return
+            timer = Timer(
+                BACKGROUND_LANE_COALESCE_SECONDS,
+                self._flush_background_lane_dirties,
+            )
+            timer.daemon = True
+            self._background_dirty_timer = timer
+            timer.start()
+
+    def _flush_background_lane_dirties(self) -> None:
+        with self._background_dirty_lock:
+            self._background_dirty_timer = None
+            if self._closed or not self._background_dirty_lanes:
+                return
+            lanes = [
+                {"targetId": target_id, "subscriptionGeneration": generation}
+                for target_id, generation in sorted(
+                    self._background_dirty_lanes.items()
+                )
+            ]
+            self._background_dirty_lanes.clear()
+        try:
+            self._send({"type": "lanes.dirty", "lanes": lanes})
+        except (OSError, WebSocketProtocolError, WebSocketDisconnect):
+            return
+
     def _handle_lane_unsubscribe(self, message: dict[str, Any]) -> None:
         target_id = str(message.get("targetId") or "")
         subscription = self.subscriptions.pop(target_id, None)
@@ -567,14 +726,15 @@ class LiveBusSession:
         send_payload_started_at = time.perf_counter()
         result, _status = self.callbacks.send_payload(target, payload)
         send_payload_finished_at = time.perf_counter()
+        server_timing = _lane_send_server_timing(
+            received_at=received_at,
+            target_resolved_at=target_resolved_at,
+            send_payload_started_at=send_payload_started_at,
+            send_payload_finished_at=send_payload_finished_at,
+        )
         result = {
             **result,
-            "serverTiming": _lane_send_server_timing(
-                received_at=received_at,
-                target_resolved_at=target_resolved_at,
-                send_payload_started_at=send_payload_started_at,
-                send_payload_finished_at=send_payload_finished_at,
-            ),
+            "serverTiming": server_timing,
         }
         submission_key = str(result.get("key") or "")
         if result.get("ok") is True and submission_key:
@@ -583,7 +743,27 @@ class LiveBusSession:
                 key=submission_key,
                 evidence=str(result.get("path") or submission_key),
             )
-        self._reply(message, {"type": "lane.sendResult", "result": result})
+        reply_timing = self._reply(
+            message,
+            {"type": "lane.sendResult", "result": result},
+            before_send=lambda wait_ms: server_timing.update(
+                {"replyLockWaitMs": wait_ms}
+            ),
+        )
+        request_id = message.get("requestId")
+        if isinstance(request_id, str) and request_id:
+            self._send(
+                {
+                    "type": "lane.sendTiming",
+                    "requestId": request_id,
+                    "serverTiming": {
+                        **server_timing,
+                        "replyLockHoldMs": reply_timing.lock_hold_ms,
+                        "replyWriteMs": reply_timing.write_ms,
+                        "totalMs": _elapsed_ms(received_at, reply_timing.finished_at),
+                    },
+                }
+            )
         if result.get("ok") is True:
             self._queue_lane_send_followup(target, payload)
 
@@ -713,6 +893,8 @@ class LiveBusSession:
             if signature == previous_signature:
                 continue
             subscription.last_signature = signature
+            if self.coalesce_background_update(subscription):
+                continue
             if pending_only_signature_change(previous_signature, signature):
                 payload = _pending_lane_payload(target)
                 try:

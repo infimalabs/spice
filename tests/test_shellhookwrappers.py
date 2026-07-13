@@ -51,7 +51,9 @@ def test_agent_wrapper_lines_explicit_common_group_inherits_builtin_default(tmp_
     )
 
 
-def test_agent_wrapper_lines_project_common_group_overrides_builtin_default(tmp_path):
+def test_agent_wrapper_lines_project_common_group_replaces_packaged_default(
+    tmp_path,
+):
     _write_agent_wrapper_config(
         tmp_path,
         order=None,

@@ -1,8 +1,21 @@
 # Configuration Reference
 
-Tracked project configuration lives under `[tool.spice.*]` in `pyproject.toml`.
-Worktree-local operator preferences live in `.spice/config/spice.toml` through
-`spice config`.
+Spice configuration has four scopes, in increasing precedence order:
+
+| Scope | Source |
+| --- | --- |
+| `system` | The installed `spice/spice.toml` |
+| `pyproject` | `[tool.spice.*]` in the worktree's `pyproject.toml` |
+| `repository` | `spice.toml` at the repository root |
+| `worktree` | `.spice/config/spice.toml` for one worktree |
+
+`spice config show` prints all four parsed layers, their source paths, the
+effective mapping, and the winning source for every key as deterministic JSON.
+`spice config system` prints effective agent values and their provenance from
+the same layered view. Mutable commands default to `--scope worktree`; agent,
+personality, say, and judge settings also accept `system`, `pyproject`, and
+`repository`. `--clear` removes only that command's values from the selected
+scope, revealing the next earlier layer without changing it.
 
 ## Runtime Model
 
@@ -18,9 +31,15 @@ The agent shell also requires
 details live in [CONFIG.md](../../CONFIG.md#rtk-rewrite-companion); this is a
 runtime companion requirement, not a tracked project setting.
 
+Task-boundary and worktree-discovery git commands have a 120-second default
+deadline; network fetch and push default to 30 seconds. Set
+`SPICE_GIT_TIMEOUT_SECONDS` to one positive number of seconds to override both
+deadlines for unusually slow repositories. Expiry fails loudly with the exact
+git argv instead of retaining the task boundary indefinitely.
+
 ## Linux Speech with `espeak-ng`
 
-Speech configuration is worktree-local. On Debian or Ubuntu, install the
+Speech configuration is worktree-local by default. On Debian or Ubuntu, install the
 `espeak-ng` package and verify the executable before configuring spice:
 
 ```sh
@@ -49,7 +68,7 @@ file /tmp/spice-speech-check.wav
 
 ## Maxim Judge Binary
 
-Configure the worktree-local judge with:
+Configure the judge in the default worktree scope with:
 
 ```console
 spice config judge --bin /path/to/judge
@@ -118,8 +137,9 @@ distillation likewise skips candidates whose judge call fails.
 | `driver` | `codex` | Project-wide agent driver, currently `codex` or `claude`. `SPICE_AGENT_DRIVER` and worktree config can override it. |
 | `wrappers` | `["common"]` | Ordered wrapper groups loaded into agent shells. Use `[]` to disable configured wrapper functions. |
 
-Agent personality is a worktree-local `spice config personality` setting
-(`pragmatic` by default), not a tracked `[tool.spice.agent]` key.
+Agent personality defaults to the worktree scope through `spice config
+personality`; pass `--scope system`, `--scope pyproject`, or `--scope
+repository` to set it in another layer. The effective default is `pragmatic`.
 
 ### Supervised Claude tool boundary
 
@@ -169,7 +189,8 @@ argv still wins because grep honors the last matcher flag). Naming `common` in
 a repo `[tool.spice.wrappers.common]` table replaces the whole group atomically
 — routes do not concatenate, so an override must re-list every route it keeps —
 while omitting the table inherits this default and `wrappers = []` disables
-generation. Repo groups should otherwise wrap stable repo-owned tools (see
+generation. A `false` group or entry disables that inherited name explicitly.
+Repo groups should otherwise wrap stable repo-owned tools (see
 [wrapper commands](../cli/wrapper-commands.md)).
 
 ## `[tool.spice.commands]`

@@ -98,7 +98,8 @@ Selecting `common` inherits this global default in full. A repository-local
 named-group boundary — its routes do not concatenate with the default's — so a
 partial override must re-list every route it still wants. Omitting the table
 inherits the default; `wrappers = []` disables wrapper generation; and a
-malformed replacement fails through the same named validation path.
+`false` group or entry disables that inherited name explicitly. A malformed
+replacement fails through the same named validation path.
 
 Repos that need exact shell-function control can override or extend groups
 (replacing the whole `common` group, so the native reroutes and the `grep -E`

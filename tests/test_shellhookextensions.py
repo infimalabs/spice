@@ -99,6 +99,7 @@ def test_agent_wrapper_lines_rejects_entry_point_shadowing_configured_group(
         shellhook.render_agent_wrapper_lines(tmp_path)
 
     assert str(exc_info.value) == (
+        f"wrappers (source=pyproject path={tmp_path / 'pyproject.toml'}): "
         "spice shell hook: wrapper group 'spice-dev' is configured by both "
         "tool.spice.wrappers.spice-dev and spice.wrappers entry point spice-dev"
     )

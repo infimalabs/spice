@@ -418,8 +418,9 @@ def test_lane_send_replies_before_send_followup_payload_completes(tmp_path):
 
         assert followup_entered.wait(timeout=1.0)
         with connection.lock:
-            assert len(connection.sent) == 1
+            assert len(connection.sent) == 2
             send_result = connection.sent[0]
+            send_timing = connection.sent[1]
         assert send_result["type"] == "lane.sendResult"
         assert send_result["requestId"] == "send-1"
         assert send_result["result"]["ok"] is True
@@ -428,10 +429,23 @@ def test_lane_send_replies_before_send_followup_payload_completes(tmp_path):
             "targetResolveMs",
             "sendPayloadMs",
             "totalBeforeReplyMs",
+            "replyLockWaitMs",
         }
         assert all(
             value >= 0.0 for value in send_result["result"]["serverTiming"].values()
         )
+        assert send_timing["type"] == "lane.sendTiming"
+        assert send_timing["requestId"] == "send-1"
+        assert set(send_timing["serverTiming"]) == {
+            "targetResolveMs",
+            "sendPayloadMs",
+            "totalBeforeReplyMs",
+            "replyLockWaitMs",
+            "replyLockHoldMs",
+            "replyWriteMs",
+            "totalMs",
+        }
+        assert all(value >= 0.0 for value in send_timing["serverTiming"].values())
         followup_continue.set()
         deadline = time.monotonic() + 1.0
         while time.monotonic() < deadline:

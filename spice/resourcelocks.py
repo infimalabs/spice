@@ -13,16 +13,23 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from spice import defaults
 from spice.errors import SpiceError
 from spice.locking import FileLockUnavailable, lock_fd_exclusive, unlock_fd
 from spice.paths import require_repo_root
-from spice.repocfg import locks_table
+from spice.configlayer import effective_context, effective_table
 
-DEFAULT_LOCK_CONTENTION_EXIT_CODE = 75
-DEFAULT_CHOSEN_SHARD_CONTENTION_EXIT_CODE = 76
-DEFAULT_POOL_EXHAUSTION_EXIT_CODE = 77
+DEFAULT_LOCK_CONTENTION_EXIT_CODE = defaults.integer(
+    "locks", "lock_contention_exit_code"
+)
+DEFAULT_CHOSEN_SHARD_CONTENTION_EXIT_CODE = defaults.integer(
+    "locks", "chosen_shard_contention_exit_code"
+)
+DEFAULT_POOL_EXHAUSTION_EXIT_CODE = defaults.integer(
+    "locks", "pool_exhaustion_exit_code"
+)
 MAX_EXIT_CODE = 255
-LOCK_STATE_ROOT = Path(".spice") / "locks"
+LOCK_STATE_ROOT = Path(defaults.string("locks", "state_root"))
 
 
 @dataclass(frozen=True)
@@ -131,22 +138,22 @@ def handle_lock(args: argparse.Namespace) -> int:
 
 
 def configured_lock_settings(repo_root: Path) -> LockSettings:
-    table = locks_table(repo_root)
+    table = effective_table(repo_root, "locks")
     defaults = LockExitCodes(
         lock_contention=_exit_code(
             table.get("lock_contention_exit_code"),
             DEFAULT_LOCK_CONTENTION_EXIT_CODE,
-            "[tool.spice.locks].lock_contention_exit_code",
+            effective_context(repo_root, "locks", "lock_contention_exit_code"),
         ),
         chosen_shard_contention=_exit_code(
             table.get("chosen_shard_contention_exit_code"),
             DEFAULT_CHOSEN_SHARD_CONTENTION_EXIT_CODE,
-            "[tool.spice.locks].chosen_shard_contention_exit_code",
+            effective_context(repo_root, "locks", "chosen_shard_contention_exit_code"),
         ),
         pool_exhaustion=_exit_code(
             table.get("pool_exhaustion_exit_code"),
             DEFAULT_POOL_EXHAUSTION_EXIT_CODE,
-            "[tool.spice.locks].pool_exhaustion_exit_code",
+            effective_context(repo_root, "locks", "pool_exhaustion_exit_code"),
         ),
     )
     return LockSettings(
