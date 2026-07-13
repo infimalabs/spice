@@ -35,6 +35,7 @@ from spice.agent.driver import (
     write_playwright_mcp_config,
 )
 from spice.errors import SpiceError
+from spice.paths import git_dir
 from spice.tasks import claimstate, ops
 
 DIRECT_AGENT_PID = 2222
@@ -142,6 +143,7 @@ def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_m
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(agent_driver, "operator_color_scheme", lambda: "dark")
+    agent_root = git_dir(tmp_path) / ".spice" / "agents"
     prompt = "[$spice](/tmp/skill.md)"
     command = DRIVER.build_exec_command(
         repo_root=tmp_path,
@@ -165,7 +167,7 @@ def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_m
     assert (
         f"mcp_servers.{PLAYWRIGHT_MCP_SERVER_NAME}.args="
         f'["--yes","@playwright/mcp@latest","--headless","--config",'
-        f'"{tmp_path / ".spice" / "agent" / "playwright-mcp.json"}"]'
+        f'"{agent_root / "playwright-mcp.json"}"]'
     ) in configs
     hook_config_path = post_tool_hook_config_path(tmp_path, DRIVER)
     hook_config = json.loads(hook_config_path.read_text(encoding="utf-8"))
@@ -173,6 +175,7 @@ def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_m
         config for config in configs if config.startswith("hooks.PostToolUse=")
     ]
     assert len(hook_overrides) == 1
+    assert hook_config_path == agent_root / "codex-post-tool-hook.json"
     assert hook_config["event"] == POST_TOOL_HOOK_EVENT
     assert hook_config["matcher"] == "^(Bash|apply_patch|Edit|Write|mcp__.*)$"
     assert "spice agent post-tool-hook" in hook_config["command"]
@@ -184,9 +187,7 @@ def test_codex_driver_command_honors_explicit_fast_service_tier_and_playwright_m
         "--headless",
     ]
     assert json.loads(
-        (tmp_path / ".spice" / "agent" / "playwright-mcp.json").read_text(
-            encoding="utf-8"
-        )
+        (agent_root / "playwright-mcp.json").read_text(encoding="utf-8")
     ) == {"browser": {"contextOptions": {"colorScheme": "dark"}}}
     assert 'personality="pragmatic"' in configs
     assert 'service_tier="fast"' in configs
@@ -215,7 +216,9 @@ def test_playwright_mcp_args_write_light_scheme_config(tmp_path, monkeypatch):
 
     config_path = write_playwright_mcp_config(tmp_path)
 
-    assert config_path == tmp_path / ".spice" / "agent" / "playwright-mcp.json"
+    assert config_path == (
+        git_dir(tmp_path) / ".spice" / "agents" / "playwright-mcp.json"
+    )
     assert json.loads(config_path.read_text(encoding="utf-8")) == {
         "browser": {"contextOptions": {"colorScheme": "light"}}
     }
@@ -435,6 +438,19 @@ def test_agent_state_uses_gitdirs_and_actual_thread_ids_for_linked_worktrees(
     )
     assert sidechannelnotify.side_channel_marker_path(linked) == (
         linked_worktree_dir / "stderr.sock"
+    )
+    assert post_tool_hook_config_path(repo, DRIVER) == (
+        primary_worktree_dir / "codex-post-tool-hook.json"
+    )
+    assert post_tool_hook_config_path(linked, DRIVER) == (
+        linked_worktree_dir / "codex-post-tool-hook.json"
+    )
+    monkeypatch.setattr(agent_driver, "operator_color_scheme", lambda: "light")
+    assert write_playwright_mcp_config(repo) == (
+        primary_worktree_dir / "playwright-mcp.json"
+    )
+    assert write_playwright_mcp_config(linked) == (
+        linked_worktree_dir / "playwright-mcp.json"
     )
     with lifecycle.agent_ensure_lock(repo):
         assert (primary_worktree_dir / "ensure.lock").exists()
