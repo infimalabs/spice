@@ -649,10 +649,10 @@ def test_agent_environment_precomputes_configured_shell_wrapper_block(
 def test_configured_agent_environment_installs_driver_shell_steering_hooks(
     tmp_path, monkeypatch
 ):
-    from spice.config import update_section
+    from spice.config import set_worktree_section
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    update_section(tmp_path, "agent", {"driver": "claude"})
+    set_worktree_section(tmp_path, "agent", {"driver": "claude"})
     real_zdotdir = tmp_path / "real-zdotdir"
     real_zdotdir.mkdir()
     real_bash_env = tmp_path / "real-bash-env"

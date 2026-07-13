@@ -187,12 +187,12 @@ def test_target_identity_payload_rejects_blank_bound_thread_id():
 
 def test_target_identity_payload_reports_configured_driver(tmp_path, monkeypatch):
     from spice.agent.driver import SPICE_AGENT_DRIVER_ENV
-    from spice.config import update_section
+    from spice.config import set_worktree_section
 
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_repo(repo)
-    update_section(
+    set_worktree_section(
         repo,
         "agent",
         {"driver": "claude", "model": "claude-sonnet-4-6", "effort": "medium"},

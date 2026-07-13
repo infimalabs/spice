@@ -322,7 +322,7 @@ def test_ensure_agent_uses_configured_claude_sonnet_family(tmp_path, monkeypatch
         lambda *_args, **_kwargs: _status(),
     )
     monkeypatch.setattr(lifecycle, "driver_for", lambda _repo_root: CLAUDE_DRIVER)
-    config.update_section(
+    config.set_worktree_section(
         tmp_path, config.AGENT_KEY, {config.AGENT_MODEL_KEY: "sonnet"}
     )
 

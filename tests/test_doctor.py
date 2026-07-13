@@ -426,7 +426,7 @@ def test_doctor_treats_npm_as_optional_without_serve_web_sources(tmp_path, monke
 
 
 def test_doctor_uses_configured_external_speech_backend(tmp_path, monkeypatch):
-    config.update_section(
+    config.set_worktree_section(
         tmp_path,
         config.SAY_KEY,
         {
