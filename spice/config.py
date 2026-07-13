@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -341,7 +342,7 @@ def configured_say_timeout(repo_root: Path | None = None) -> float:
         value = float(raw)
     except (TypeError, ValueError):
         return DEFAULT_SAY_TIMEOUT_SECONDS
-    if value != value:  # NaN
+    if not math.isfinite(value):
         return DEFAULT_SAY_TIMEOUT_SECONDS
     return value if value > 0 else DEFAULT_SAY_TIMEOUT_SECONDS
 
