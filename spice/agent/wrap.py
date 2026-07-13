@@ -19,41 +19,63 @@ runs is an opportunity for the operator to be heard.
 
 from __future__ import annotations
 
-import contextlib
 import datetime
 import json
 import math
 import os
 import re
-import select
 import shlex
-import socket
+import socket as socket
 import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Thread
-from typing import Any, Protocol, TextIO
+from typing import Any, TextIO
 
+from spice import config
 from spice.agent.driver import driver_for
+from spice.agent.runinbox import (
+    AGENT_RUN_INBOX_REPEAT_SECONDS as AGENT_RUN_INBOX_REPEAT_SECONDS,
+    AgentInboxInjector as AgentInboxInjector,
+    AgentSideChannelNoticeInjector as AgentSideChannelNoticeInjector,
+    InboxSignature as InboxSignature,
+    inbox_pending_signature,
+    inbox_signature_from_payload as inbox_signature_from_payload,
+    post_tool_hook_inbox_state_path as post_tool_hook_inbox_state_path,
+)
+from spice.agent.runwatch import (
+    AGENT_RUN_SIDE_CHANNEL_CONNECT_TIMEOUT_S as AGENT_RUN_SIDE_CHANNEL_CONNECT_TIMEOUT_S,
+    AGENT_RUN_SIDE_CHANNEL_READ_BYTES as AGENT_RUN_SIDE_CHANNEL_READ_BYTES,
+    _parent_exit_watcher as _parent_exit_watcher,
+    agent_side_channel_hello as agent_side_channel_hello,
+    join_agent_side_channel_watch,
+    start_agent_side_channel_watch,
+    watch_agent_side_channel as watch_agent_side_channel,
+    write_side_channel_chunk as write_side_channel_chunk,
+)
 from spice.agent.sidechannelnotify import (
-    active_agent_side_channel_socket_path,
-    consume_side_channel_notices,
     side_channel_marker_path as side_channel_marker_path,
 )
 from spice.agent.identity import ambient_thread_id
 from spice.agent.paths import agent_state_dir, agent_thread_state_dir
+from spice.agent.rtkrewrite import (
+    RTK_CANONICAL_EXECUTABLE as RTK_CANONICAL_EXECUTABLE,
+    RTK_REWRITE_MATCH_EXIT_CODE as RTK_REWRITE_MATCH_EXIT_CODE,
+    RTK_REWRITE_NO_MATCH_EXIT_CODE as RTK_REWRITE_NO_MATCH_EXIT_CODE,
+    _rtk_warned_keys as _rtk_warned_keys,
+    emit_rewrite_diagnostic as _emit_rtk_rewrite_diagnostic,
+    remap_rewrite_frontend,
+    rewrite_command_text as _rewrite_rtk_command_text,
+)
 from spice.agent.shellhook import (
     BASH_ENV_ENV,
     BASH_HOOK_NAME,
     ZDOTDIR_ENV,
     packaged_shell_steering_static_hook_dir,
 )
-from spice.config import configured_rtk_executable
 from spice.errors import SpiceError
-from spice.paths import STATE_DIRNAME
 from spice.sessions.meter import (
     ContextMeter,
     active_context_percent,
@@ -69,7 +91,6 @@ from spice.sessions.meter import (
 PYTHON_ROUTE_COMMANDS = frozenset(("python", "python3"))
 SHELL_EXECUTION_COMMANDS = frozenset(("bash", "dash", "sh", "zsh"))
 SHELL_EXECUTION_FLAGS = frozenset(("-c", "-lc"))
-RTK_CANONICAL_EXECUTABLE = "rtk"
 RTK_MINIMUM_VERSION = (0, 42, 4)
 RTK_MINIMUM_VERSION_TEXT = ".".join(str(part) for part in RTK_MINIMUM_VERSION)
 RTK_UPSTREAM = "https://github.com/rtk-ai/rtk"
@@ -77,29 +98,23 @@ RTK_INSTALL_GUIDANCE = (
     f"install RTK >= {RTK_MINIMUM_VERSION_TEXT} from {RTK_UPSTREAM} "
     "(`brew install rtk` or `cargo install --git https://github.com/rtk-ai/rtk`)"
 )
-RTK_REWRITE_MATCH_EXIT_CODE = 3
-RTK_REWRITE_NO_MATCH_EXIT_CODE = 1
 RTK_VERSION_PATTERN = re.compile(r"\brtk\s+(\d+)\.(\d+)\.(\d+)\b", re.IGNORECASE)
 RTK_PROTOCOL_PROBE = ("git", "status")
 RTK_DB_PATH_ENV = "RTK_DB_PATH"  # env-policy: allow
 
-AGENT_RUN_INBOX_REPEAT_SECONDS = 15.0
 # The working-state banner is a change notification, not a periodic meter: once a
 # given state has been shown it stays silent until the state itself changes, so
 # it never becomes repeated noise on each shell command.
 AGENT_RUN_WORKING_STATE_REPEAT_SECONDS = math.inf
 AGENT_RUN_CONTEXT_METER_CACHE_SECONDS = 15.0
 AGENT_RUN_CONTEXT_WARNING_REPEAT_SECONDS = 15.0 * 60.0
-AGENT_RUN_SIDE_CHANNEL_READ_BYTES = 8192
 # The watcher's connect+hello to the supervisor socket carries this budget so a
 # wedged or half-open socket cannot park the watch thread at startup. Once the
 # hello is sent, the socket resets to blocking: the established stream is bound to
 # parent exit, peer close, or server wake/stop, not this connect deadline.
-AGENT_RUN_SIDE_CHANNEL_CONNECT_TIMEOUT_S = 5.0
 INTERRUPTED_EXIT_CODE = 130
 COMMAND_NOT_FOUND_EXIT_CODE = 127
 
-InboxSignature = tuple[tuple[str, int, int], ...]
 ContextWarningSignature = tuple[str, str, int]
 ContextWarningKey = tuple[str]
 WorkingStateKey = tuple[int, str, str, str]
@@ -119,24 +134,6 @@ class WorkingStateSnapshot:
         )
 
 
-class _KqueueHandle(Protocol):
-    def fileno(self) -> int: ...
-
-    def close(self) -> None: ...
-
-    def control(
-        self, changelist: Any, max_events: int, timeout: float | None = None
-    ) -> Any: ...
-
-
-def _select_has_attrs(*names: str) -> bool:
-    return all(hasattr(select, name) for name in names)
-
-
-def _select_attr(name: str) -> Any:
-    return getattr(select, name)
-
-
 ProcessFactory = Callable[..., Any]
 TimeFactory = Callable[[], float]
 ContextMeterFactory = Callable[[Path | None], ContextMeter | None]
@@ -152,10 +149,6 @@ def context_warning_state_path(repo_root: Path) -> Path:
 
 def working_state_state_path(repo_root: Path) -> Path:
     return agent_state_dir(repo_root) / "working-state.json"
-
-
-def post_tool_hook_inbox_state_path(repo_root: Path) -> Path:
-    return agent_state_dir(repo_root) / "post-tool-hook-inbox.json"
 
 
 def run_agent_command(
@@ -177,6 +170,7 @@ def run_agent_command(
         repo_root=repo_root,
         rewrite_rtk=True,
         rtk_environment=environment,
+        rtk_stderr=stderr,
     )
     try:
         if environment is None:
@@ -230,10 +224,11 @@ def build_agent_run_command(
     repo_root: Path | None = None,
     rewrite_rtk: bool = False,
     rtk_environment: Mapping[str, str] | None = None,
+    rtk_stderr: TextIO | None = None,
 ) -> list[str]:
     args = normalize_agent_run_args(raw_args)
     rtk_executable = (
-        configured_rtk_executable(repo_root)
+        config.configured_rtk_executable(repo_root)
         if rewrite_rtk
         else RTK_CANONICAL_EXECUTABLE
     )
@@ -243,18 +238,20 @@ def build_agent_run_command(
             repo_root=repo_root,
             rtk_executable=rtk_executable,
             rtk_environment=rtk_environment,
+            rtk_stderr=rtk_stderr,
         )
-    routed_args = worktree_route_command(args, repo_root=repo_root)
-    if rewrite_rtk and args == routed_args:
-        return (
+    if rewrite_rtk:
+        args = (
             rtk_rewrite_direct_args(
-                routed_args,
+                args,
+                repo_root=repo_root,
                 rtk_executable=rtk_executable,
                 rtk_environment=rtk_environment,
+                rtk_stderr=rtk_stderr,
             )
-            or routed_args
+            or args
         )
-    return routed_args
+    return worktree_route_command(args, repo_root=repo_root)
 
 
 def rtk_rewrite_agent_run_args(
@@ -263,6 +260,7 @@ def rtk_rewrite_agent_run_args(
     repo_root: Path | None = None,
     rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
     rtk_environment: Mapping[str, str] | None = None,
+    rtk_stderr: TextIO | None = None,
 ) -> list[str]:
     shell_command_index = shell_execution_command_index(args)
     if shell_command_index is None:
@@ -272,6 +270,7 @@ def rtk_rewrite_agent_run_args(
         repo_root=repo_root,
         rtk_executable=rtk_executable,
         rtk_environment=rtk_environment,
+        rtk_stderr=rtk_stderr,
     )
     if rewritten is None:
         return list(args)
@@ -286,18 +285,23 @@ def rtk_rewrite_shell_execution_text(
     repo_root: Path | None = None,
     rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
     rtk_environment: Mapping[str, str] | None = None,
+    rtk_stderr: TextIO | None = None,
 ) -> str | None:
     rewritten = _rtk_rewrite_frontend_with_environment(
         command_text,
+        repo_root=repo_root,
         rtk_executable=rtk_executable,
         rtk_environment=rtk_environment,
+        rtk_stderr=rtk_stderr,
     )
     if rewritten is not None:
         return rewritten
     trailing = rtk_rewrite_trailing_exec_shell_command(
         command_text,
+        repo_root=repo_root,
         rtk_executable=rtk_executable,
         rtk_environment=rtk_environment,
+        rtk_stderr=rtk_stderr,
     )
     if trailing is not None:
         return trailing
@@ -305,8 +309,10 @@ def rtk_rewrite_shell_execution_text(
         command_text,
         lambda *args: _rtk_rewrite_frontend_with_environment(
             *args,
+            repo_root=repo_root,
             rtk_executable=rtk_executable,
             rtk_environment=rtk_environment,
+            rtk_stderr=rtk_stderr,
         ),
     )
 
@@ -314,8 +320,10 @@ def rtk_rewrite_shell_execution_text(
 def rtk_rewrite_trailing_exec_shell_command(
     command_text: str,
     *,
+    repo_root: Path | None = None,
     rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
     rtk_environment: Mapping[str, str] | None = None,
+    rtk_stderr: TextIO | None = None,
 ) -> str | None:
     stripped = command_text.rstrip()
     trailing = command_text[len(stripped) :]
@@ -336,8 +344,10 @@ def rtk_rewrite_trailing_exec_shell_command(
         return None
     rewritten = _rtk_rewrite_frontend_with_environment(
         nested_command,
+        repo_root=repo_root,
         rtk_executable=rtk_executable,
         rtk_environment=rtk_environment,
+        rtk_stderr=rtk_stderr,
     )
     if rewritten is None:
         return None
@@ -349,8 +359,10 @@ def rtk_rewrite_trailing_exec_shell_command(
 def rtk_rewrite_direct_args(
     args: Sequence[str],
     *,
+    repo_root: Path | None = None,
     rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
     rtk_environment: Mapping[str, str] | None = None,
+    rtk_stderr: TextIO | None = None,
 ) -> list[str] | None:
     if (
         not args
@@ -360,100 +372,70 @@ def rtk_rewrite_direct_args(
         return None
     rewritten = _rtk_rewrite_frontend_with_environment(
         *args,
+        repo_root=repo_root,
         rtk_executable=rtk_executable,
         rtk_environment=rtk_environment,
+        rtk_stderr=rtk_stderr,
     )
     if rewritten is None:
         return None
     try:
-        rewritten_args = shlex.split(rewritten)
+        parsed = shlex.split(rewritten)
     except ValueError as exc:
-        raise SpiceError(
-            "invalid RTK direct rewrite argv: "
-            f"command={shlex.join(args)!r} output={rewritten!r}; "
-            "matched RTK output must be shell-parseable"
-        ) from exc
-    return rewritten_args
-
-
-def remap_rtk_rewrite_frontend(command_text: str, rtk_executable: str) -> str:
-    """Route a canonical RTK rewrite through its configured executable."""
-    if rtk_executable == RTK_CANONICAL_EXECUTABLE:
-        return command_text
-    configured_word = shlex.quote(rtk_executable)
-    if command_text == RTK_CANONICAL_EXECUTABLE:
-        return configured_word
-    canonical_prefix = f"{RTK_CANONICAL_EXECUTABLE} "
-    if command_text.startswith(canonical_prefix):
-        return configured_word + command_text[len(RTK_CANONICAL_EXECUTABLE) :]
-    return command_text
+        _emit_rtk_rewrite_diagnostic(
+            repo_root,
+            rtk_stderr,
+            executable=rtk_executable,
+            failure_class="malformed-direct-argv",
+            failure_signature=f"parse={type(exc).__name__}",
+        )
+        return None
+    if parsed:
+        return parsed
+    _emit_rtk_rewrite_diagnostic(
+        repo_root,
+        rtk_stderr,
+        executable=rtk_executable,
+        failure_class="malformed-direct-argv",
+        failure_signature="parse=empty-argv",
+    )
+    return None
 
 
 def _rtk_rewrite_frontend_with_environment(
     *args: str,
+    repo_root: Path | None,
     rtk_executable: str,
     rtk_environment: Mapping[str, str] | None,
+    rtk_stderr: TextIO | None,
 ) -> str | None:
-    rewritten = _rtk_rewrite_with_environment(
+    rewritten = rtk_rewrite_command_text(
         *args,
+        repo_root=repo_root,
         rtk_executable=rtk_executable,
-        rtk_environment=rtk_environment,
+        env=rtk_environment,
+        stderr=rtk_stderr,
     )
     if rewritten is None:
         return None
-    return remap_rtk_rewrite_frontend(rewritten, rtk_executable)
-
-
-def _rtk_rewrite_with_environment(
-    *args: str,
-    rtk_executable: str,
-    rtk_environment: Mapping[str, str] | None,
-) -> str | None:
-    if rtk_environment is None:
-        return rtk_rewrite_command_text(*args, rtk_executable=rtk_executable)
-    return rtk_rewrite_command_text(
-        *args,
-        rtk_executable=rtk_executable,
-        env=rtk_environment,
-    )
+    return remap_rewrite_frontend(rewritten, rtk_executable)
 
 
 def rtk_rewrite_command_text(
     *args: str,
+    repo_root: Path | None = None,
     rtk_executable: str = RTK_CANONICAL_EXECUTABLE,
     env: Mapping[str, str] | None = None,
+    stderr: TextIO | None = None,
     run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> str | None:
-    runner = run or subprocess.run
-    run_kwargs: dict[str, Any] = {
-        "capture_output": True,
-        "text": True,
-        "check": False,
-    }
-    if env is not None:
-        run_kwargs["env"] = dict(env)
-    try:
-        completed = runner(
-            # `--` stops rtk option parsing so a flag-leading command (e.g.
-            # `--help`) is rewritten as a command, not read as rtk's own option.
-            [rtk_executable, "rewrite", "--", *args],
-            **run_kwargs,
-        )
-    except OSError as exc:
-        raise SpiceError(
-            f"RTK rewrite unavailable: {exc}; {RTK_INSTALL_GUIDANCE}"
-        ) from exc
-    rewritten = (completed.stdout or "").strip()
-    if completed.returncode == RTK_REWRITE_MATCH_EXIT_CODE and rewritten:
-        return rewritten
-    if completed.returncode == RTK_REWRITE_NO_MATCH_EXIT_CODE and not rewritten:
-        return None
-    detail = (completed.stderr or "").strip()
-    suffix = f"; stderr={detail}" if detail else ""
-    raise SpiceError(
-        "invalid RTK rewrite protocol result: "
-        f"exit={completed.returncode} stdout={rewritten!r}{suffix}; "
-        f"{RTK_INSTALL_GUIDANCE}"
+    return _rewrite_rtk_command_text(
+        *args,
+        repo_root=repo_root,
+        rtk_executable=rtk_executable,
+        env=env,
+        stderr=stderr,
+        run=run,
     )
 
 
@@ -572,372 +554,6 @@ def normalize_agent_run_args(raw_args: Sequence[str]) -> list[str]:
     return args
 
 
-def start_agent_side_channel_watch(
-    repo_root: Path | None,
-    *,
-    parent_pid: int,
-    stderr: TextIO,
-    initial_inbox_signature: InboxSignature | None = None,
-) -> Thread | None:
-    if parent_pid <= 0 or active_agent_side_channel_socket_path(repo_root) is None:
-        return None
-    thread = Thread(
-        target=watch_agent_side_channel,
-        kwargs={
-            "repo_root": repo_root,
-            "parent_pid": parent_pid,
-            "stderr": stderr,
-            "initial_inbox_signature": initial_inbox_signature,
-        },
-        daemon=True,
-    )
-    thread.start()
-    return thread
-
-
-def join_agent_side_channel_watch(thread: Thread | None) -> None:
-    if thread is not None:
-        thread.join(timeout=1.0)
-
-
-def watch_agent_side_channel(
-    repo_root: Path | None,
-    *,
-    parent_pid: int,
-    stderr: TextIO = sys.stderr,
-    initial_inbox_signature: InboxSignature | None = None,
-) -> None:
-    socket_path = active_agent_side_channel_socket_path(repo_root)
-    if socket_path is None:
-        return
-    side_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    side_socket.settimeout(AGENT_RUN_SIDE_CHANNEL_CONNECT_TIMEOUT_S)
-    parent_exit = _parent_exit_watcher(parent_pid)
-    try:
-        if parent_pid > 0 and parent_exit is None and not _process_exists(parent_pid):
-            return
-        side_socket.connect(str(socket_path))
-        side_socket.sendall(
-            json.dumps(
-                agent_side_channel_hello(
-                    repo_root,
-                    runner="agent.run.watch",
-                    stream_until_parent_exit=parent_pid,
-                    initial_inbox_signature=initial_inbox_signature,
-                ),
-                separators=(",", ":"),
-            ).encode("utf-8")
-            + b"\n"
-        )
-        # Connect+hello are bounded above; the established stream is lifetime-bound
-        # (parent exit / peer close / server wake), so clear the connect deadline
-        # before the blocking select loop below.
-        side_socket.settimeout(None)
-        read_targets: list[socket.socket | _ParentExitWatcher] = [side_socket]
-        if parent_exit is not None:
-            read_targets.append(parent_exit)
-        while True:
-            readable, _, _ = select.select(read_targets, [], [])
-            if parent_exit is not None and parent_exit in readable:
-                return
-            if side_socket not in readable:
-                continue
-            chunk = side_socket.recv(AGENT_RUN_SIDE_CHANNEL_READ_BYTES)
-            if not chunk:
-                return
-            write_side_channel_chunk(stderr, chunk)
-    except OSError:
-        return
-    finally:
-        with contextlib.suppress(OSError):
-            side_socket.close()
-        if parent_exit is not None:
-            parent_exit.close()
-
-
-def agent_side_channel_hello(
-    repo_root: Path | None,
-    *,
-    runner: str = "agent.run",
-    stream_until_parent_exit: int | None = None,
-    initial_inbox_signature: InboxSignature | None = None,
-) -> dict[str, object]:
-    hello: dict[str, object] = {
-        "type": "hello",
-        "pid": os.getpid(),
-        "ppid": os.getppid(),
-        "runner": runner,
-        "cwd": os.getcwd(),
-        "repoRoot": str(repo_root) if repo_root is not None else "",
-    }
-    if stream_until_parent_exit is not None:
-        hello["streamUntilParentExit"] = stream_until_parent_exit
-        if initial_inbox_signature is not None:
-            hello["initialInboxSignature"] = [
-                list(row) for row in initial_inbox_signature
-            ]
-    return hello
-
-
-def write_side_channel_chunk(stderr: TextIO, chunk: bytes) -> None:
-    buffer = getattr(stderr, "buffer", None)
-    if buffer is not None:
-        buffer.write(chunk)
-        buffer.flush()
-        return
-    stderr.write(chunk.decode("utf-8", errors="replace"))
-    stderr.flush()
-
-
-class _ParentExitWatcher:
-    def __init__(self, handle: int | _KqueueHandle):
-        self.handle = handle
-
-    def fileno(self) -> int:
-        if isinstance(self.handle, int):
-            return self.handle
-        return self.handle.fileno()
-
-    def close(self) -> None:
-        if isinstance(self.handle, int):
-            with contextlib.suppress(OSError):
-                os.close(self.handle)
-            return
-        self.handle.close()
-
-
-def _parent_exit_watcher(parent_pid: int) -> _ParentExitWatcher | None:
-    if parent_pid <= 0:
-        return None
-    pidfd_open = getattr(os, "pidfd_open", None)
-    if pidfd_open is not None:
-        try:
-            return _ParentExitWatcher(pidfd_open(parent_pid))
-        except OSError:
-            return None
-    if _select_has_attrs(
-        "kqueue",
-        "kevent",
-        "KQ_FILTER_PROC",
-        "KQ_EV_ADD",
-        "KQ_EV_ENABLE",
-        "KQ_EV_ONESHOT",
-        "KQ_NOTE_EXIT",
-    ):
-        try:
-            kqueue: _KqueueHandle = _select_attr("kqueue")()
-        except OSError:
-            return None
-        try:
-            event = _select_attr("kevent")(
-                parent_pid,
-                filter=_select_attr("KQ_FILTER_PROC"),
-                flags=(
-                    _select_attr("KQ_EV_ADD")
-                    | _select_attr("KQ_EV_ENABLE")
-                    | _select_attr("KQ_EV_ONESHOT")
-                ),
-                fflags=_select_attr("KQ_NOTE_EXIT"),
-            )
-            kqueue.control([event], 0, 0)
-            return _ParentExitWatcher(kqueue)
-        except OSError:
-            kqueue.close()
-            return None
-    return None
-
-
-def _process_exists(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-
-
-class AgentInboxInjector:
-    """Re-display pending inbox steering on the agent's stderr until it is ACK'd.
-
-    Each pending item re-displays every `repeat_interval_seconds`; an item
-    whose bytes changed (new signature) or that is brand new shows
-    immediately. Display state is per-injector unless `state_path` is supplied
-    for short-lived processes that need to share repeat-suppression state.
-    """
-
-    def __init__(
-        self,
-        repo_root: Path | None,
-        *,
-        stderr: TextIO,
-        repeat_interval_seconds: float = AGENT_RUN_INBOX_REPEAT_SECONDS,
-        time_factory: TimeFactory = time.monotonic,
-        state_path: Path | None = None,
-    ) -> None:
-        self.repo_root = repo_root
-        self.stderr = stderr
-        self.repeat_interval_seconds = max(0.0, repeat_interval_seconds)
-        self.time_factory = time_factory
-        self.state_path = state_path
-        self.displayed_at_by_key: dict[str, float] = {}
-        self.displayed_signature_by_key: dict[str, tuple[int, int]] = {}
-        self.signature: InboxSignature | None = None
-        self._load_display_state()
-
-    def _load_display_state(self) -> None:
-        if self.state_path is None:
-            return
-        (
-            self.displayed_at_by_key,
-            self.displayed_signature_by_key,
-            self.signature,
-        ) = read_inbox_display_state(self.state_path)
-
-    def inject(
-        self, *, force: bool, emit_suppressed_summary: bool = True
-    ) -> InboxSignature:
-        from spice.mail import inbox
-
-        snapshot = inbox.collect_inbox_snapshot(self.repo_root)
-        signature = snapshot.signature
-        now = self.time_factory()
-        suppressed_keys = self._suppressed_keys(signature, now=now)
-        pending_keys = {
-            inbox_key for inbox_key, _row_signature in _signature_rows(signature)
-        }
-        previous_pending_keys = {
-            inbox_key
-            for inbox_key, _row_signature in _signature_rows(self.signature or ())
-        }
-        new_pending_keys = pending_keys - previous_pending_keys
-        if (
-            not force
-            and not new_pending_keys
-            and signature == self.signature
-            and pending_keys <= suppressed_keys
-        ):
-            if emit_suppressed_summary:
-                self._emit_pending_summary(len(pending_keys))
-            return signature
-        # Always pass the recently-shown keys as the suppression filter, even
-        # when a new key forced this readout: the new key renders full (real
-        # time preserved) while keys still inside their window collapse to one
-        # compact line each instead of re-dumping every body on every new key.
-        display_filter = suppressed_keys
-        try:
-            from spice.mail.readout import print_inbox_readout
-
-            displayed_keys = print_inbox_readout(
-                self.repo_root,
-                quiet=True,
-                displayed_keys=display_filter,
-                file=self.stderr,
-                items=snapshot.items,
-            )
-        except Exception as exc:  # pragma: no cover - conflicted worktree recovery
-            self.stderr.write(f"Inbox Steering\n  unavailable={exc}\n")
-            self.stderr.flush()
-            displayed_keys = []
-        self.stderr.flush()
-        rendered_keys = set(displayed_keys)
-        rendered_signature = tuple(
-            row for row in signature if _inbox_item_key(row[0]) in rendered_keys
-        )
-        self.signature = signature
-        self._record_displayed_keys(signature, displayed_keys, now=now)
-        self._prune_display_state(pending_keys)
-        self._persist_display_state()
-        return rendered_signature
-
-    def prime_displayed_signature(self, signature: InboxSignature) -> None:
-        """Seed suppression with inbox rows rendered before stream registration."""
-        self.signature = signature
-        displayed_keys = [key for key, _row_signature in _signature_rows(signature)]
-        self._record_displayed_keys(signature, displayed_keys, now=self.time_factory())
-
-    def _emit_pending_summary(self, count: int) -> None:
-        # Every pending item is inside its repeat-suppression window, so the full
-        # readout is withheld — but emit a one-line count so a quick command never
-        # *looks* empty while steering waits. The full readout returns on the next
-        # repeat or via `spice session briefing`.
-        if count <= 0:
-            return
-        from spice.mail.steeringkey import steering_token
-
-        # Key this compact nudge exactly like the full readout, so the agent
-        # never sees an unwrapped "Inbox Steering" and can always tell real
-        # steering from a faked block.
-        token = steering_token(self.repo_root)
-        header = f"Inbox Steering  <{token}>" if token else "Inbox Steering"
-        footer = f"\n  </{token}>" if token else ""
-        self.stderr.write(
-            f"{header}\n  pending={count} "
-            "(recently shown; full readout on repeat or run "
-            f"`spice session briefing`){footer}\n"
-        )
-        self.stderr.flush()
-
-    def _suppressed_keys(self, signature: InboxSignature, *, now: float) -> set[str]:
-        suppressed: set[str] = set()
-        for key, row_signature in _signature_rows(signature):
-            if self.displayed_signature_by_key.get(key) != row_signature:
-                continue
-            last_displayed_at = self.displayed_at_by_key.get(key)
-            if last_displayed_at is None:
-                continue
-            age = now - last_displayed_at
-            if 0 <= age < self.repeat_interval_seconds:
-                suppressed.add(key)
-        return suppressed
-
-    def _record_displayed_keys(
-        self, signature: InboxSignature, displayed_keys: list[str], *, now: float
-    ) -> None:
-        signature_by_key = dict(_signature_rows(signature))
-        for key in displayed_keys:
-            row_signature = signature_by_key.get(key)
-            if row_signature is None:
-                continue
-            self.displayed_at_by_key[key] = now
-            self.displayed_signature_by_key[key] = row_signature
-
-    def _prune_display_state(self, pending_keys: set[str]) -> None:
-        for key in list(self.displayed_at_by_key):
-            if key not in pending_keys:
-                self.displayed_at_by_key.pop(key, None)
-                self.displayed_signature_by_key.pop(key, None)
-
-    def _persist_display_state(self) -> None:
-        if self.state_path is None:
-            return
-        write_inbox_display_state(
-            self.state_path,
-            displayed_at_by_key=self.displayed_at_by_key,
-            displayed_signature_by_key=self.displayed_signature_by_key,
-            signature=self.signature or (),
-        )
-
-
-class AgentSideChannelNoticeInjector:
-    """Write one-shot supervisor feedback to the same stderr side-channel."""
-
-    def __init__(self, repo_root: Path | None, *, stderr: TextIO) -> None:
-        self.repo_root = repo_root
-        self.stderr = stderr
-
-    def inject(self, *, force: bool) -> None:
-        del force
-        notices = consume_side_channel_notices(self.repo_root)
-        if not notices:
-            return
-        self.stderr.write("Supervisor Feedback\n")
-        for notice in notices:
-            for line in notice.splitlines():
-                self.stderr.write(f"  {line}\n")
-        self.stderr.flush()
-
-
 class AgentWorkingStateInjector:
     """Collect live working state for the one-line stderr meter."""
 
@@ -1005,121 +621,6 @@ class AgentWorkingStateInjector:
             return False
         age = now - displayed_at
         return 0 <= age < self.repeat_interval_seconds
-
-
-def inbox_pending_signature(repo_root: Path | None) -> InboxSignature:
-    if repo_root is None:
-        return ()
-    directory = Path(repo_root) / STATE_DIRNAME / "inbox"
-    rows: list[tuple[str, int, int]] = []
-    try:
-        with os.scandir(directory) as entries:
-            for entry in entries:
-                try:
-                    if not entry.is_file() or not entry.name.endswith(".txt"):
-                        continue
-                    stat_result = entry.stat()
-                except OSError:
-                    continue
-                rows.append((entry.name, stat_result.st_mtime_ns, stat_result.st_size))
-    except OSError:
-        return ()
-    return tuple(sorted(rows))
-
-
-def read_inbox_display_state(
-    path: Path,
-) -> tuple[dict[str, float], dict[str, tuple[int, int]], InboxSignature | None]:
-    payload = read_context_meter_cache_payload(path)
-    raw_displayed_at = payload.get("displayedAtByKey")
-    displayed_at_by_key: dict[str, float] = {}
-    if isinstance(raw_displayed_at, dict):
-        for key, value in raw_displayed_at.items():
-            displayed_at = _float_payload_value(value)
-            if isinstance(key, str) and displayed_at is not None:
-                displayed_at_by_key[key] = displayed_at
-
-    raw_displayed_signature = payload.get("displayedSignatureByKey")
-    displayed_signature_by_key: dict[str, tuple[int, int]] = {}
-    if isinstance(raw_displayed_signature, dict):
-        for key, value in raw_displayed_signature.items():
-            row_signature = _inbox_row_signature_payload(value)
-            if isinstance(key, str) and row_signature is not None:
-                displayed_signature_by_key[key] = row_signature
-
-    signature = _inbox_signature_payload(payload.get("signature"))
-    return displayed_at_by_key, displayed_signature_by_key, signature
-
-
-def write_inbox_display_state(
-    path: Path,
-    *,
-    displayed_at_by_key: dict[str, float],
-    displayed_signature_by_key: dict[str, tuple[int, int]],
-    signature: InboxSignature,
-) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(
-        json.dumps(
-            {
-                "displayedAtByKey": displayed_at_by_key,
-                "displayedSignatureByKey": {
-                    key: list(row_signature)
-                    for key, row_signature in displayed_signature_by_key.items()
-                },
-                "signature": [
-                    [name, mtime_ns, size] for name, mtime_ns, size in signature
-                ],
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    tmp.replace(path)
-
-
-def _inbox_signature_payload(value: Any) -> InboxSignature | None:
-    if not isinstance(value, list):
-        return None
-    rows: list[tuple[str, int, int]] = []
-    for row in value:
-        if not isinstance(row, list) or len(row) != 3:
-            return None
-        name, raw_mtime_ns, raw_size = row
-        mtime_ns = _int_payload_value(raw_mtime_ns)
-        size = _int_payload_value(raw_size)
-        if not isinstance(name, str) or mtime_ns is None or size is None:
-            return None
-        rows.append((name, mtime_ns, size))
-    return tuple(sorted(rows))
-
-
-def inbox_signature_from_payload(value: Any) -> InboxSignature | None:
-    return _inbox_signature_payload(value)
-
-
-def _inbox_row_signature_payload(value: Any) -> tuple[int, int] | None:
-    if not isinstance(value, list) or len(value) != 2:
-        return None
-    mtime_ns = _int_payload_value(value[0])
-    size = _int_payload_value(value[1])
-    if mtime_ns is None or size is None:
-        return None
-    return (mtime_ns, size)
-
-
-def _signature_rows(signature: InboxSignature) -> list[tuple[str, tuple[int, int]]]:
-    return [
-        (_inbox_item_key(name), (mtime_ns, size)) for name, mtime_ns, size in signature
-    ]
-
-
-def _inbox_item_key(name: str) -> str:
-    path = Path(name)
-    return path.stem or path.name
 
 
 def collect_working_state_snapshot(
